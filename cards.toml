@@ -1,0 +1,212 @@
+# Cards for v0.1, made up and loosely modelled on real ones. See DESIGN.md.
+#
+# stats = [attack, health]
+# keywords: taunt, divine_shield, windfury, venomous, reborn
+# battlecry: { buff = [attack, health], target = "chosen" | "others", tribe = ... }
+#   chosen: the player picks one other friendly minion
+#   others: every other friendly minion
+#   tribe limits the targets, leave it out for any minion
+# deathrattle: { summon = "<token name>", count = n }
+#
+# Golden: double stats, buffs doubled, summoned tokens golden.
+
+[[minion]]
+name = "Wolf Pup"
+tier = 1
+tribe = "beast"
+stats = [2, 2]
+
+[[minion]]
+name = "Rust Bot"
+tier = 1
+tribe = "mech"
+stats = [1, 2]
+keywords = ["divine_shield"]
+
+[[minion]]
+name = "Den Mother"
+tier = 1
+tribe = "beast"
+stats = [1, 1]
+deathrattle = { summon = "Pup", count = 1 }
+
+[[minion]]
+name = "Scrap Hound"
+tier = 1
+tribe = "neutral"
+stats = [2, 1]
+battlecry = { buff = [1, 1], target = "chosen" }
+
+[[minion]]
+name = "Ram"
+tier = 2
+tribe = "beast"
+stats = [2, 4]
+keywords = ["taunt"]
+
+[[minion]]
+name = "Shield Drone"
+tier = 2
+tribe = "mech"
+stats = [2, 3]
+keywords = ["divine_shield"]
+
+[[minion]]
+name = "Viper"
+tier = 2
+tribe = "beast"
+stats = [2, 1]
+keywords = ["venomous"]
+
+[[minion]]
+name = "Tinkerer"
+tier = 2
+tribe = "neutral"
+stats = [3, 3]
+battlecry = { buff = [2, 2], target = "chosen", tribe = "mech" }
+
+[[minion]]
+name = "Stag"
+tier = 3
+tribe = "beast"
+stats = [4, 4]
+battlecry = { buff = [1, 1], target = "others", tribe = "beast" }
+
+[[minion]]
+name = "Gear Golem"
+tier = 3
+tribe = "mech"
+stats = [3, 5]
+keywords = ["taunt"]
+deathrattle = { summon = "Gear", count = 1 }
+
+[[minion]]
+name = "Twinblade"
+tier = 3
+tribe = "neutral"
+stats = [3, 3]
+keywords = ["windfury"]
+
+[[minion]]
+name = "Ember Spirit"
+tier = 3
+tribe = "neutral"
+stats = [3, 2]
+keywords = ["reborn"]
+
+[[minion]]
+name = "Alpha"
+tier = 4
+tribe = "beast"
+stats = [5, 5]
+deathrattle = { summon = "Wolf", count = 2 }
+
+[[minion]]
+name = "Shredder"
+tier = 4
+tribe = "mech"
+stats = [4, 6]
+keywords = ["divine_shield"]
+
+[[minion]]
+name = "Warden"
+tier = 4
+tribe = "neutral"
+stats = [3, 7]
+keywords = ["taunt"]
+
+[[minion]]
+name = "Stalker"
+tier = 4
+tribe = "beast"
+stats = [5, 3]
+keywords = ["venomous"]
+
+[[minion]]
+name = "Great Bear"
+tier = 5
+tribe = "beast"
+stats = [7, 7]
+keywords = ["taunt"]
+battlecry = { buff = [2, 2], target = "others", tribe = "beast" }
+
+[[minion]]
+name = "War Engine"
+tier = 5
+tribe = "mech"
+stats = [6, 6]
+keywords = ["divine_shield", "windfury"]
+
+[[minion]]
+name = "Undying Knight"
+tier = 5
+tribe = "neutral"
+stats = [6, 4]
+keywords = ["taunt", "reborn"]
+
+[[minion]]
+name = "Brute"
+tier = 5
+tribe = "neutral"
+stats = [8, 8]
+
+[[minion]]
+name = "Ancient Beast"
+tier = 6
+tribe = "beast"
+stats = [9, 9]
+deathrattle = { summon = "Beast", count = 3 }
+
+[[minion]]
+name = "Titan Mech"
+tier = 6
+tribe = "mech"
+stats = [8, 8]
+keywords = ["divine_shield", "taunt"]
+deathrattle = { summon = "Mech", count = 1 }
+
+[[minion]]
+name = "Champion"
+tier = 6
+tribe = "neutral"
+stats = [10, 10]
+keywords = ["windfury"]
+
+[[minion]]
+name = "Plaguebringer"
+tier = 6
+tribe = "neutral"
+stats = [6, 6]
+keywords = ["venomous", "reborn"]
+
+# Tokens: summoned only, never in the pool or the shop.
+
+[[token]]
+name = "Pup"
+tier = 1
+tribe = "beast"
+stats = [1, 1]
+
+[[token]]
+name = "Gear"
+tier = 1
+tribe = "mech"
+stats = [2, 2]
+
+[[token]]
+name = "Wolf"
+tier = 1
+tribe = "beast"
+stats = [2, 2]
+
+[[token]]
+name = "Beast"
+tier = 1
+tribe = "beast"
+stats = [3, 3]
+
+[[token]]
+name = "Mech"
+tier = 1
+tribe = "mech"
+stats = [4, 4]

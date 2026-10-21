@@ -1,0 +1,9 @@
+[package]
+name = "bgcore"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arrayvec = "0.7"
+serde = { version = "1", features = ["derive"] }
+toml = "1"

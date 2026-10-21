@@ -1,0 +1,8 @@
+[package]
+name = "bgbench"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bgcore = { path = "../bgcore" }
+rayon = "1"
