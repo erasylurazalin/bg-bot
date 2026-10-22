@@ -69,7 +69,10 @@ def args():
     a.add_argument("--lam", type=float, default=0.95)
     a.add_argument("--action-cost", type=float, default=0.002,
                    help="reward taken off every action, like a turn timer, so it doesn't dither")
-    a.add_argument("--snapshot-every", type=int, default=10, help="updates")
+    a.add_argument("--snapshot-every", type=int, default=250, help="updates")
+    a.add_argument("--keep-every", type=float, default=30, help="minutes between weights-only copies in keep/")
+    a.add_argument("--stop-flat", type=float, default=0,
+                   help="stop after this many minutes without gains (0: never)")
     a.add_argument("--snapshot-pool", type=int, default=20)
     a.add_argument("--eval-every", type=int, default=20, help="updates")
     a.add_argument("--eval-games", type=int, default=512)
@@ -252,6 +255,8 @@ def main():
     last = np.full((N, P), -1, np.int64)
     games = 0
     start = time.time()
+    last_keep = t_total
+    history, flat_best, flat_since = [], 9.0, t_total
     stats = {}
 
     while True:
@@ -428,6 +433,22 @@ def main():
                 ck["best"] = best
                 torch.save(ck, out / "best.pt")
             torch.save(ck, out / "ckpt.pt")
+            if minutes - last_keep >= cfg.keep_every:
+                (out / "keep").mkdir(exist_ok=True)
+                torch.save({"net": net.state_dict(), "update": update}, out / "keep" / f"net_{update}.pt")
+                last_keep = minutes
+            # plateau: the rolling score hasn't improved for a while and it no
+            # longer beats its oldest snapshot
+            history.append((minutes, score, vs_snap))
+            recent = [h for h in history if h[0] > minutes - 30]
+            rolling = sum(h[1] for h in recent) / len(recent)
+            if rolling < flat_best - 0.03:
+                flat_best, flat_since = rolling, minutes
+            snap_recent = sum(h[2] for h in recent) / len(recent)
+            if cfg.stop_flat and minutes - flat_since >= cfg.stop_flat and snap_recent >= 4.35:
+                print(f"stopping: no gain for {minutes - flat_since:.0f} min and even with the "
+                      f"oldest snapshot ({snap_recent:.2f})", flush=True)
+                done = True
             print(
                 f"update {update:5d}  {minutes:5.1f} min  {games:7d} games  "
                 f"vs7(std {vs_std:.2f} rush {vs_rush:.2f})  "
