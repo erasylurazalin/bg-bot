@@ -10,7 +10,10 @@
 
 use arrayvec::ArrayVec;
 
-use crate::cards::{N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, Effect, OnSummonBeast, StartOfCombat, Tribe};
+use crate::cards::{
+    N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, Effect, OnSummonBeast, PermanentKeep,
+    SpellEffect, StartOfCombat, Tribe,
+};
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 use crate::{BOARD, HAND};
@@ -34,6 +37,10 @@ pub struct Counters {
     pub boon_of_beetles: u8,
     pub brood_of_nozdormu: u8,
     pub upper_hand: u8,
+    /// The player's Tavern spell bonus, for spells cast inside the fight
+    /// (Runic Arcanist, Crimson Vindicator).
+    pub spell_attack: i32,
+    pub spell_health: i32,
 }
 
 /// Side effects from a fight that carry over to one player after combat.
@@ -48,6 +55,15 @@ pub struct SideOutcome {
     pub beetle_health_gain: i32,
     /// Increase to the player's improve counts (Tasty Lobster).
     pub improve_gain: [u16; N_COUNTERS],
+    /// Stats kept permanently by the minion in each starting board slot
+    /// (Tarecgosa, Persistent Poet). The game adds them to the board after
+    /// the fight.
+    pub permanent_stats: [(i32, i32); BOARD],
+    /// Bonus Keywords kept permanently, by starting board slot.
+    pub permanent_keywords: [u8; BOARD],
+    /// Increase to the player's Tavern spell bonus this game (Blue Whelp,
+    /// and any spell bonus an effect grants in a fight).
+    pub spell_bonus_gain: (i32, i32),
     /// Increase to the player's Beast bonus until next turn (Goldrinn). Only
     /// a Tavern attack keeps it, a fight's is gone with its board.
     pub beast_bonus_gain: (i32, i32),
@@ -114,6 +130,8 @@ struct Fx {
     host: u16,
     /// uid of the minion that killed the host, for a Deathrattle.
     killer: Option<u16>,
+    /// uid of the minion that just attacked, for "give it +..." triggers.
+    attacker: Option<u16>,
     /// Summons made right of the attacker don't attack in the same round.
     skip_ptr: bool,
 }
@@ -131,13 +149,6 @@ struct Side {
     out: SideOutcome,
 }
 
-/// Give a minion stats, unless its card says it can't gain any.
-fn gain(db: &CardDb, f: &mut Fm, da: i32, dh: i32) {
-    if !db.get(f.m.card).fixed_stats {
-        f.m.attack += da;
-        f.m.health += dh;
-    }
-}
 
 fn has_taunt(db: &CardDb, m: &Minion) -> bool {
     m.keywords.has(Keywords::TAUNT)
@@ -169,6 +180,136 @@ impl Side {
 
     fn index_of(&self, uid: u16) -> Option<usize> {
         self.ms.iter().position(|f| f.uid == uid)
+    }
+
+    /// How much of a stat gain at board slot `i` is kept permanently: 1, 2
+    /// for a golden keeper, None when nothing keeps it. Tarecgosa keeps its
+    /// own gains; a Dragon keeps its when a living Persistent Poet sits next
+    /// to it, checked at the moment of the gain.
+    fn keep_mul(&self, db: &CardDb, i: usize) -> Option<i32> {
+        let m = &self.ms[i].m;
+        let mut mul = 0;
+        for (card, golden) in m.parts() {
+            if db.get(card).permanent_keep == Some(PermanentKeep::SelfKeep) {
+                mul = mul.max(if golden { 2 } else { 1 });
+            }
+        }
+        if db.get(m.card).tribes.has(Tribe::Dragon) {
+            for j in [i.checked_sub(1), Some(i + 1)].into_iter().flatten() {
+                if j >= self.ms.len() || self.ms[j].m.health <= 0 {
+                    continue;
+                }
+                for (card, golden) in self.ms[j].m.parts() {
+                    if db.get(card).permanent_keep == Some(PermanentKeep::AdjacentDragons) {
+                        mul = mul.max(if golden { 2 } else { 1 });
+                    }
+                }
+            }
+        }
+        (mul > 0).then_some(mul)
+    }
+
+    /// Give the minion in slot `i` stats. A keeper keeps them; Scarlet
+    /// Survivor gains its keyword when the gain takes it to its threshold.
+    fn gain_at(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
+        if db.get(self.ms[i].m.card).fixed_stats {
+            return;
+        }
+        let keep = self.keep_mul(db, i);
+        let mut threshold = 0u8;
+        let f = &mut self.ms[i];
+        f.m.attack = f.m.attack.saturating_add(da);
+        f.m.health = f.m.health.saturating_add(dh);
+        if let Some(t) = db.get(f.m.card).attack_threshold
+            && f.m.improvements == 0
+            && f.m.attack >= t.total as i32
+        {
+            f.m.keywords.set(t.keyword);
+            f.m.improvements = 1;
+            threshold = t.keyword;
+        }
+        let slot = f.start_slot;
+        if let Some(mul) = keep
+            && let Some(slot) = slot
+        {
+            let s = slot as usize;
+            if threshold != 0 {
+                self.out.permanent_keywords[s] |= threshold;
+            }
+            self.out.permanent_stats[s].0 =
+                self.out.permanent_stats[s].0.saturating_add(da.saturating_mul(mul));
+            self.out.permanent_stats[s].1 =
+                self.out.permanent_stats[s].1.saturating_add(dh.saturating_mul(mul));
+        }
+    }
+
+    /// "Give your minions +attack/+health" cast inside a fight, with the
+    /// player's spell bonus.
+    fn cast_board_buff(&mut self, db: &CardDb, attack: i32, health: i32) {
+        let (da, dh) = (attack + self.counters.spell_attack, health + self.counters.spell_health);
+        for i in 0..self.ms.len() {
+            if self.ms[i].m.health > 0 {
+                self.gain_at(db, i, da, dh);
+            }
+        }
+    }
+
+    /// Mighty Dragonbreath: all minions, again for Dragons, again for
+    /// minions with Divine Shield.
+    fn cast_mighty_dragonbreath(&mut self, db: &CardDb, attack: i32, health: i32) {
+        let (da, dh) = (attack + self.counters.spell_attack, health + self.counters.spell_health);
+        for pass in 0..3 {
+            for i in 0..self.ms.len() {
+                if self.ms[i].m.health <= 0 {
+                    continue;
+                }
+                let ok = match pass {
+                    0 => true,
+                    1 => db.get(self.ms[i].m.card).tribes.has(Tribe::Dragon),
+                    _ => self.ms[i].m.keywords.has(Keywords::DIVINE_SHIELD),
+                };
+                if ok {
+                    self.gain_at(db, i, da, dh);
+                }
+            }
+        }
+    }
+
+    /// The minion in slot `i` gains a keyword. A keeper keeps it.
+    fn gain_keyword_at(&mut self, db: &CardDb, i: usize, keyword: u8) {
+        self.ms[i].m.keywords.set(keyword);
+        if self.keep_mul(db, i).is_some()
+            && let Some(slot) = self.ms[i].start_slot
+        {
+            self.out.permanent_keywords[slot as usize] |= keyword;
+        }
+    }
+
+    /// A friendly minion just lost Divine Shield: every Hopebringer on this
+    /// side improves by one for the rest of the game. The count lives in its
+    /// `improvements` and is carried to the player's real board.
+    fn note_shield_lost(&mut self, db: &CardDb) {
+        for i in 0..self.ms.len() {
+            if self.ms[i].m.health <= 0 {
+                continue;
+            }
+            let n = self.ms[i]
+                .m
+                .parts()
+                .filter(|(c, _)| {
+                    matches!(db.get(*c).start_of_combat, Some(StartOfCombat::Hopebringer { .. }))
+                })
+                .count() as u16;
+            if n == 0 {
+                continue;
+            }
+            self.ms[i].m.improvements = self.ms[i].m.improvements.saturating_add(n);
+            if let Some(slot) = self.ms[i].start_slot {
+                let s = slot as usize;
+                self.out.permanent_improvements[s] =
+                    self.out.permanent_improvements[s].saturating_add(n);
+            }
+        }
     }
 
     fn next_attacker(&self) -> Option<usize> {
@@ -204,9 +345,9 @@ impl Side {
         self.counters.beetle_health += dh;
         self.out.beetle_attack_gain += da;
         self.out.beetle_health_gain += dh;
-        for f in &mut self.ms {
-            if f.m.health > 0 && db.get(f.m.card).is_beetle {
-                gain(db, f, da, dh);
+        for i in 0..self.ms.len() {
+            if self.ms[i].m.health > 0 && db.get(self.ms[i].m.card).is_beetle {
+                self.gain_at(db, i, da, dh);
             }
         }
     }
@@ -216,9 +357,9 @@ impl Side {
         self.beast_buff.1 += dh;
         self.out.beast_bonus_gain.0 += da;
         self.out.beast_bonus_gain.1 += dh;
-        for f in &mut self.ms {
-            if f.m.health > 0 && db.get(f.m.card).tribes.has(Tribe::Beast) {
-                gain(db, f, da, dh);
+        for i in 0..self.ms.len() {
+            if self.ms[i].m.health > 0 && db.get(self.ms[i].m.card).tribes.has(Tribe::Beast) {
+                self.gain_at(db, i, da, dh);
             }
         }
     }
@@ -226,15 +367,15 @@ impl Side {
     /// A Deathrattle of this side triggered.
     fn note_deathrattle(&mut self, db: &CardDb) {
         self.out.deathrattles_triggered = self.out.deathrattles_triggered.saturating_add(1);
-        for f in &mut self.ms {
-            if f.m.health <= 0 {
+        for i in 0..self.ms.len() {
+            if self.ms[i].m.health <= 0 {
                 continue;
             }
-            let m = f.m;
+            let m = self.ms[i].m;
             for (card, golden) in m.parts() {
                 if let Some((a, h)) = db.get(card).buff_per_deathrattle {
                     let mul = if golden { 2 } else { 1 };
-                    gain(db, f, a * mul, h * mul);
+                    self.gain_at(db, i, a * mul, h * mul);
                 }
             }
         }
@@ -297,7 +438,7 @@ impl Side {
                             self.out.permanent_improvements[s].saturating_add(imp_gain);
                     }
                 }
-                gain(db, &mut self.ms[pos], da_total, dh_total);
+                self.gain_at(db, pos, da_total, dh_total);
             }
             for j in 0..self.ms.len() {
                 if j == pos || self.ms[j].m.health <= 0 {
@@ -387,22 +528,25 @@ impl Side {
                 }
             }
             Effect::BuffOthers { tribe, attack, health, .. } => {
-                for f in &mut self.ms {
-                    if f.uid != fx.host && f.m.health > 0 && db.get(f.m.card).is(tribe) {
-                        gain(db, f, attack * mul, health * mul);
+                for i in 0..self.ms.len() {
+                    if self.ms[i].uid != fx.host
+                        && self.ms[i].m.health > 0
+                        && db.get(self.ms[i].m.card).is(tribe)
+                    {
+                        self.gain_at(db, i, attack * mul, health * mul);
                     }
                 }
             }
             Effect::BuffAll { tribe, attack, health } => {
-                for f in &mut self.ms {
-                    if f.m.health > 0 && db.get(f.m.card).is(tribe) {
-                        gain(db, f, attack * mul, health * mul);
+                for i in 0..self.ms.len() {
+                    if self.ms[i].m.health > 0 && db.get(self.ms[i].m.card).is(tribe) {
+                        self.gain_at(db, i, attack * mul, health * mul);
                     }
                 }
             }
             Effect::BuffSelf { attack, health } => {
                 if let Some(i) = self.index_of(fx.host) {
-                    gain(db, &mut self.ms[i], attack * mul, health * mul);
+                    self.gain_at(db, i, attack * mul, health * mul);
                 }
             }
             Effect::BuffRandomFriendly { tribe, attack, health, improve } => {
@@ -415,7 +559,7 @@ impl Side {
                 let scale = improve.map_or(1, |c| 1 + self.counters.improve[c.index()] as i32);
                 if !ok.is_empty() {
                     let i = ok[rng.below(ok.len() as u32) as usize];
-                    gain(db, &mut self.ms[i], attack * mul * scale, health * mul * scale);
+                    self.gain_at(db, i, attack * mul * scale, health * mul * scale);
                 }
                 if let Some(c) = improve {
                     let k = c.index();
@@ -430,7 +574,7 @@ impl Side {
             }
             Effect::GainKeyword { keyword } => {
                 if let Some(i) = self.index_of(fx.host) {
-                    self.ms[i].m.keywords.set(keyword);
+                    self.gain_keyword_at(db, i, keyword);
                 }
             }
             Effect::GetRandomMinion { tribe } => {
@@ -477,6 +621,64 @@ impl Side {
             Effect::GetCard { card, count } => {
                 for _ in 0..count as i32 * mul {
                     self.out.push_card(card);
+                }
+            }
+            Effect::SpellBonus { attack, health } => {
+                self.counters.spell_attack += attack * mul;
+                self.counters.spell_health += health * mul;
+                self.out.spell_bonus_gain.0 += attack * mul;
+                self.out.spell_bonus_gain.1 += health * mul;
+            }
+            Effect::RandomChromadrake => {
+                for _ in 0..mul {
+                    if let Some(c) = db.random_chromadrake(rng) {
+                        self.out.push_card(c);
+                    }
+                }
+            }
+            Effect::BuffAttacker { attack, health } => {
+                if let Some(a) = fx.attacker
+                    && let Some(i) = self.index_of(a)
+                    && self.ms[i].m.health > 0
+                {
+                    self.gain_at(db, i, attack * mul, health * mul);
+                }
+            }
+            Effect::BuffRandomOther { tribe, attack, health, keyword, count } => {
+                // A golden Amber Guardian picks two Dragons, not bigger buffs.
+                let n = count as u32 * mul as u32;
+                let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
+                for (i, f) in self.ms.iter().enumerate() {
+                    if f.uid != fx.host && f.m.health > 0 && db.get(f.m.card).is(tribe) {
+                        ok.push(i);
+                    }
+                }
+                for _ in 0..n {
+                    if ok.is_empty() {
+                        break;
+                    }
+                    let k = rng.below(ok.len() as u32) as usize;
+                    let i = ok.remove(k);
+                    self.gain_at(db, i, attack, health);
+                    if keyword != 0 {
+                        self.gain_keyword_at(db, i, keyword);
+                    }
+                }
+            }
+            Effect::CastSpell { card, times } => {
+                let Some(sp) = db.get(card).spell_effect else { return };
+                for _ in 0..times as i32 * mul {
+                    match sp {
+                        SpellEffect::BuffBoard { attack, health, times, .. } => {
+                            for _ in 0..times {
+                                self.cast_board_buff(db, attack, health);
+                            }
+                        }
+                        SpellEffect::MightyDragonbreath { attack, health } => {
+                            self.cast_mighty_dragonbreath(db, attack, health);
+                        }
+                        _ => break,
+                    }
                 }
             }
             // Parsing keeps every other effect out of fights.
@@ -549,7 +751,7 @@ impl Side {
                         }
                     }
                     Deathrattle::Effect(e) => {
-                        let fx = Fx { side, host, killer, skip_ptr: false };
+                        let fx = Fx { side, host, killer, attacker: None, skip_ptr: false };
                         self.run_effect(db, e, golden, fx, &mut pos, uid, rng, w);
                     }
                 }
@@ -577,7 +779,7 @@ impl Side {
         }
         for (host, e, golden) in fire {
             let Some(i) = self.index_of(host) else { continue };
-            let fx = Fx { side, host, killer: None, skip_ptr: false };
+            let fx = Fx { side, host, killer: None, attacker: None, skip_ptr: false };
             let mut at = i + 1;
             self.run_effect(db, e, golden, fx, &mut at, uid, rng, w);
         }
@@ -603,7 +805,7 @@ impl Side {
                 self.out.permanent_improvements[s] = self.out.permanent_improvements[s].saturating_add(n);
             }
             if before < ms.total && after >= ms.total {
-                let fx = Fx { side, host, killer: None, skip_ptr: false };
+                let fx = Fx { side, host, killer: None, attacker: None, skip_ptr: false };
                 let mut at = i + 1;
                 self.run_effect(db, ms.effect, golden, fx, &mut at, uid, rng, w);
             }
@@ -716,8 +918,9 @@ fn give_killer_buffs(sides: &mut [Side; 2], db: &CardDb) {
     for s in 0..2 {
         while let Some((killer, da, dh)) = sides[s].killer_buffs.pop() {
             for t in 0..2 {
-                if let Some(f) = sides[t].ms.iter_mut().find(|f| f.uid == killer && f.m.health > 0) {
-                    gain(db, f, da, dh);
+                if let Some(i) = sides[t].ms.iter().position(|f| f.uid == killer && f.m.health > 0)
+                {
+                    sides[t].gain_at(db, i, da, dh);
                 }
             }
         }
@@ -800,25 +1003,58 @@ fn run_start_of_combat(
             continue;
         };
         let m = sides[turn].ms[mi].m;
+        let mut shields_lost = [false; 2];
         for (card, golden) in m.parts() {
+            let mul = if golden { 2 } else { 1 };
             match db.get(card).start_of_combat {
                 Some(StartOfCombat::CombatBeastBuff { attack, health }) => {
-                    let mul = if golden { 2 } else { 1 };
                     sides[turn].add_combat_beast_buff(db, attack * mul, health * mul);
                 }
                 Some(StartOfCombat::DamageAllOthers(dmg)) => {
                     let waves = if golden { 2 } else { 1 };
                     for _ in 0..waves {
                         for s in [turn, turn ^ 1] {
-                            for f in &mut sides[s].ms {
-                                if f.uid != me {
-                                    deal_damage(&mut f.m, dmg);
+                            for i in 0..sides[s].ms.len() {
+                                if sides[s].ms[i].uid == me {
+                                    continue;
+                                }
+                                let had = sides[s].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD);
+                                deal_damage(&mut sides[s].ms[i].m, dmg);
+                                if had && !sides[s].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD)
+                                {
+                                    shields_lost[s] = true;
                                 }
                             }
                         }
                     }
                 }
+                Some(StartOfCombat::Effect(e)) => {
+                    let fx = Fx { side: turn, host: me, killer: None, attacker: None, skip_ptr: false };
+                    let mut at = mi + 1;
+                    sides[turn].run_effect(db, e, golden, fx, &mut at, uid, rng, w);
+                }
+                Some(StartOfCombat::AttackImmediately) => {
+                    for _ in 0..mul {
+                        attack_swings(sides, turn, me, db, uid, rng, w);
+                    }
+                }
+                Some(StartOfCombat::Hopebringer { attack, health, improve }) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let imp = sides[turn].ms[mi].m.improvements as i32;
+                    let da = attack * mul + imp * improve.0;
+                    let dh = health * mul + imp * improve.1;
+                    for i in 0..sides[turn].ms.len() {
+                        if sides[turn].ms[i].m.health > 0 {
+                            sides[turn].gain_at(db, i, da, dh);
+                        }
+                    }
+                }
                 None => {}
+            }
+        }
+        for s in 0..2 {
+            if shields_lost[s] {
+                sides[s].note_shield_lost(db);
             }
         }
         resolve_deaths(sides, turn, db, uid, rng, w);
@@ -854,7 +1090,9 @@ fn attack_triggers(
         let relevant = f.m.parts().any(|(c, _)| {
             let c = db.get(c);
             (!after && f.uid == me && c.rally.is_some())
-                || trigger(c).is_some_and(|t| filter_ok(db, t.filter, attacker))
+                || trigger(c).is_some_and(|t| {
+                    (!t.filter.exclude_self || f.uid != me) && filter_ok(db, t.filter, attacker)
+                })
         });
         if relevant {
             hosts.push(f.uid);
@@ -870,15 +1108,22 @@ fn attack_triggers(
                 && let Some(e) = c.rally
             {
                 let Some(hi) = sides[turn].index_of(host) else { break };
-                let fx = Fx { side: turn, host, killer: None, skip_ptr: true };
+                let fx = Fx { side: turn, host, killer: None, attacker: None, skip_ptr: true };
                 let mut at = hi + 1;
                 sides[turn].run_effect(db, e, golden, fx, &mut at, uid, rng, w);
             }
             if let Some(t) = trigger(c)
+                && (!t.filter.exclude_self || host != me)
                 && filter_ok(db, t.filter, attacker)
             {
                 let Some(hi) = sides[turn].index_of(host) else { break };
-                let fx = Fx { side: turn, host, killer: None, skip_ptr: false };
+                let fx = Fx {
+                    side: turn,
+                    host,
+                    killer: None,
+                    attacker: Some(me),
+                    skip_ptr: false,
+                };
                 let mut at = hi + 1;
                 sides[turn].run_effect(db, t.effect, golden, fx, &mut at, uid, rng, w);
             }
@@ -921,11 +1166,17 @@ fn attack_swings(
         let attacker = sides[turn].ms[ai].m;
         let (att, def) = pair(sides, turn);
         let (x_alive, y_alive) = (att.ms[ai].m.health > 0, def.ms[di].m.health > 0);
+        let (x_shielded, y_shielded) = (
+            att.ms[ai].m.keywords.has(Keywords::DIVINE_SHIELD),
+            def.ms[di].m.keywords.has(Keywords::DIVINE_SHIELD),
+        );
         w.attack(turn, &att.ms[ai].m, &def.ms[di].m);
         let (dx, dy) = (att.ms[ai].m.attack, def.ms[di].m.attack);
         let (xf, yf) = (&mut att.ms[ai], &mut def.ms[di]);
         let dealt_x = hit(&mut yf.m, dx, &mut xf.m);
         let dealt_y = hit(&mut xf.m, dy, &mut yf.m);
+        let x_lost = x_shielded && !xf.m.keywords.has(Keywords::DIVINE_SHIELD);
+        let y_lost = y_shielded && !yf.m.keywords.has(Keywords::DIVINE_SHIELD);
         if y_alive && yf.m.health <= 0 && dealt_x > 0 {
             yf.killer = Some(xf.uid);
         }
@@ -939,6 +1190,14 @@ fn attack_swings(
         // "After a friendly minion attacks" triggers (Ravaging Scorpid,
         // Deathstrider).
         attack_triggers(sides, turn, me, &attacker, true, db, uid, rng, w);
+
+        // Hopebringer improves when a friendly minion loses Divine Shield.
+        if x_lost {
+            sides[turn].note_shield_lost(db);
+        }
+        if y_lost {
+            sides[turn ^ 1].note_shield_lost(db);
+        }
 
         // The attacking side's dead are handled first.
         resolve_deaths(sides, turn, db, uid, rng, w);
@@ -1169,7 +1428,7 @@ mod tests {
         for seed in 0..8 {
             let mut rng = Rng::new(seed);
             let (mut s, mut uid) = side2(&db, &["Tasty Lobster", "Cage Gnawer"]);
-            let fx = Fx { side: 0, host: s.ms[1].uid, killer: None, skip_ptr: false };
+            let fx = Fx { side: 0, host: s.ms[1].uid, killer: None, attacker: None, skip_ptr: false };
             let mut at = 0;
             let e = Effect::TriggerDeathrattle { times: 1 };
             s.run_effect(&db, e, false, fx, &mut at, &mut uid, &mut rng, &mut ());

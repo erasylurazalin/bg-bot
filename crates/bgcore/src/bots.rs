@@ -4,7 +4,7 @@
 use crate::action::{Action, N_ACTIONS, N_KINDS};
 use crate::cards::Tribe;
 use crate::game::Game;
-use crate::minion::{Keywords, Minion};
+use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 
 /// A random legal action: first a random kind among the legal kinds (buy,
@@ -94,7 +94,7 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
     let pref = preferred_tribe(game, p);
     let legal = |a: Action| game.is_legal(a);
     let held =
-        |c: u8| pl.hand.iter().chain(&pl.board).filter(|m| m.card == c && !m.golden).count();
+        |c: CardId| pl.hand.iter().chain(&pl.board).filter(|m| m.card == c && !m.golden).count();
 
     if pl.pending_target.is_some() {
         let best = (0..pl.board.len() as u8)

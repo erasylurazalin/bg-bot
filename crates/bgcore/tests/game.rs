@@ -622,7 +622,7 @@ fn beetle_bonus_from_forest_rover_and_ravaging_scorpid() {
         db,
         &[vermin],
         &[enemy],
-        [g.players[0].counters(), Default::default()],
+        [g.players[0].counters(&g.data.cards), Default::default()],
         500,
         &mut Rng::new(1),
         &mut (),

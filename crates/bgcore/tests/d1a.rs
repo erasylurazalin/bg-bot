@@ -45,7 +45,7 @@ fn next_turn(g: &mut Game) {
     }
 }
 
-fn id(g: &Game, name: &str) -> u8 {
+fn id(g: &Game, name: &str) -> bgcore::CardId {
     g.data.cards.by_name(name).unwrap_or_else(|| panic!("no card {name}"))
 }
 
@@ -368,7 +368,7 @@ fn different_bonus_keywords_in_the_warband_are_counted_once_each() {
 #[derive(Default)]
 struct Log {
     /// (attacker card, attacker had Stealth, defender card, defender had Stealth)
-    attacks: Vec<(u8, bool, u8, bool)>,
+    attacks: Vec<(bgcore::CardId, bool, bgcore::CardId, bool)>,
 }
 
 impl Watch for Log {
@@ -488,7 +488,7 @@ fn consuming_a_random_tavern_minion_gains_its_stats_and_returns_the_copy() {
         set_shop(&mut g, 0, &["Test Beast", "Test Mech", "Test Dragon"]);
         g.players[0].shop[0].attack = 5;
         g.players[0].shop[1].health = 7;
-        let before: Vec<u8> = g.players[0].shop.iter().map(|m| m.card).collect();
+        let before: Vec<bgcore::CardId> = g.players[0].shop.iter().map(|m| m.card).collect();
         let pool_before = g.pool.clone();
         play(&mut g, 0, "Test Eater Random");
         assert_eq!(g.players[0].shop.len(), 2);

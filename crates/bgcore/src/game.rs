@@ -21,6 +21,10 @@ use crate::rng::Rng;
 use crate::rules::Rules;
 use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
 
+/// Upper bound on pool minions, for the fixed-size copy count in
+/// `check_invariants`. The card parser refuses a card list past it.
+pub const MAX_POOL_CARDS: usize = 256;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Opponent {
     Player(u8),
@@ -55,6 +59,9 @@ pub enum TargetKind {
         count: u8,
     },
     Spell(SpellTarget),
+    /// Trigger the Rally of the chosen minion in the shop (Sky-hatch
+    /// Runaway), `runs` times.
+    TriggerRally,
 }
 
 /// A targeted Battlecry, Choose One option, or Tavern spell waiting for the
@@ -381,7 +388,25 @@ impl Player {
         m
     }
 
-    pub fn counters(&self) -> Counters {
+    /// The player's Tavern spell stat bonus: permanent gains plus board
+    /// auras (Enchanted Sentinel, including when Magnetized into a host,
+    /// and Humon'gozz).
+    pub fn total_spell_bonus(&self, cards: &CardDb) -> (i32, i32) {
+        let (mut da, mut dh) = self.spell_bonus;
+        for m in &self.board {
+            for (card, golden) in m.parts() {
+                if let Some((a, h)) = cards.get(card).spell_buff {
+                    let mul = if golden { 2 } else { 1 };
+                    da += a * mul;
+                    dh += h * mul;
+                }
+            }
+        }
+        (da, dh)
+    }
+
+    pub fn counters(&self, cards: &CardDb) -> Counters {
+        let (spell_attack, spell_health) = self.total_spell_bonus(cards);
         Counters {
             beetle_attack: self.beetle_bonus.0,
             beetle_health: self.beetle_bonus.1,
@@ -392,6 +417,8 @@ impl Player {
             boon_of_beetles: self.boon_of_beetles,
             brood_of_nozdormu: self.brood_of_nozdormu,
             upper_hand: self.upper_hand,
+            spell_attack,
+            spell_health,
         }
     }
 }
@@ -576,7 +603,13 @@ impl Game {
             Action::Activate(s) => {
                 (s as usize) < pl.board.len()
                     && self.activate_of(p, s as usize).is_some_and(|(act, _)| {
-                        pl.gold >= act.cost && (!act.effect.needs_shop_slot() || !pl.shop.is_empty())
+                        pl.gold >= act.cost
+                            && (!act.effect.needs_shop_slot() || !pl.shop.is_empty())
+                            && (!act.effect.needs_rally_target()
+                                || pl.board.iter().enumerate().any(|(i, m)| {
+                                    i != s as usize
+                                        && m.parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
+                                }))
                     })
             }
             Action::Play { hand, pos } => {
@@ -679,6 +712,9 @@ impl Game {
                 self.data.cards.get(b[s].card).is(tribe)
             }
             TargetKind::Spell(st) => self.valid_spell_target(p, st, s),
+            TargetKind::TriggerRally => {
+                b[s].parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
+            }
         }
     }
 
@@ -689,6 +725,7 @@ impl Game {
         }
         let p = self.current_player().unwrap();
         self.apply(p, a);
+        self.check_attack_thresholds(p);
         let pl = &mut self.players[p];
         pl.actions += 1;
         if a == Action::EndTurn || pl.actions >= self.data.rules.max_actions_per_turn {
@@ -886,18 +923,7 @@ impl Game {
     /// permanent bonus with board auras (Enchanted Sentinel, including when
     /// Magnetized into a host, and Humon'gozz).
     pub fn total_spell_bonus(&self, p: usize) -> (i32, i32) {
-        let pl = &self.players[p];
-        let (mut da, mut dh) = pl.spell_bonus;
-        for m in &pl.board {
-            for (card, golden) in m.parts() {
-                if let Some((a, h)) = self.data.cards.get(card).spell_buff {
-                    let mul = if golden { 2 } else { 1 };
-                    da += a * mul;
-                    dh += h * mul;
-                }
-            }
-        }
-        (da, dh)
+        self.players[p].total_spell_bonus(&self.data.cards)
     }
 
     fn add_volumizer_bonus(&mut self, p: usize, da: i32, dh: i32) {
@@ -1022,15 +1048,25 @@ impl Game {
         for i in 0..len {
             let m = self.players[p].board[i];
             for (card, golden) in m.parts() {
-                if let Some(OnCastSpell::BuffDivineShield { attack, health }) =
-                    self.data.cards.get(card).on_cast_spell
-                {
-                    let mul = if golden { 2 } else { 1 };
-                    for o in &mut self.players[p].board {
-                        if o.keywords.has(Keywords::DIVINE_SHIELD) {
-                            buff(o, attack * mul, health * mul);
+                match self.data.cards.get(card).on_cast_spell {
+                    Some(OnCastSpell::BuffDivineShield { attack, health }) => {
+                        let mul = if golden { 2 } else { 1 };
+                        for o in &mut self.players[p].board {
+                            if o.keywords.has(Keywords::DIVINE_SHIELD) {
+                                buff(o, attack * mul, health * mul);
+                            }
                         }
                     }
+                    Some(OnCastSpell::BuffAll { attack, health }) => {
+                        // A golden one gives the same buff twice.
+                        let times = if golden { 2 } else { 1 };
+                        for _ in 0..times {
+                            for o in &mut self.players[p].board {
+                                buff(o, attack, health);
+                            }
+                        }
+                    }
+                    None => {}
                 }
             }
         }
@@ -1219,6 +1255,21 @@ impl Game {
                 };
                 let _ = self.players[p].discover_queue.try_push(req);
             }
+            SpellEffect::MightyDragonbreath { attack, health } => {
+                let cards = &self.data.cards;
+                for pass in 0..3 {
+                    for o in &mut self.players[p].board {
+                        let ok = match pass {
+                            0 => true,
+                            1 => cards.get(o.card).tribes.has(Tribe::Dragon),
+                            _ => o.keywords.has(Keywords::DIVINE_SHIELD),
+                        };
+                        if ok {
+                            buff(o, attack + da, health + dh);
+                        }
+                    }
+                }
+            }
             SpellEffect::BoonOfBeetles(n) => {
                 self.players[p].boon_of_beetles =
                     self.players[p].boon_of_beetles.saturating_add(n);
@@ -1236,9 +1287,11 @@ impl Game {
                     let k = self.rng.below(n) as usize;
                     let m = shop.iter_mut().filter(|m| ok(m)).nth(k).unwrap();
                     let base = cards.get(m.card);
+                    let (ga, gh) =
+                        base.golden_stats.unwrap_or((base.attack * 2, base.health * 2));
                     m.golden = true;
-                    m.attack += base.attack;
-                    m.health += base.health;
+                    m.attack += ga - base.attack;
+                    m.health += gh - base.health;
                 }
             }
             SpellEffect::UpperHand => {
@@ -1277,6 +1330,25 @@ impl Game {
         let Some(bc) = card.battlecry else { return };
         let runs = self.brann_mult(p);
         self.run_effect(p, &mut pos, bc, m.golden, runs);
+        self.fire_after_battlecry(p, runs);
+    }
+
+    /// "After you trigger a Battlecry" effects (Kalecgos). One trigger per
+    /// Battlecry run, so Brann's double Battlecry fires them twice.
+    fn fire_after_battlecry(&mut self, p: usize, times: u8) {
+        let len = self.players[p].board.len();
+        for i in 0..len {
+            if i >= self.players[p].board.len() {
+                break;
+            }
+            let m = self.players[p].board[i];
+            for (card, golden) in m.parts() {
+                if let Some(e) = self.data.cards.get(card).after_battlecry {
+                    let mut pos = i;
+                    self.run_effect(p, &mut pos, e, golden, times);
+                }
+            }
+        }
     }
 
     /// Run a generic effect for the minion in board slot `*pos`. `golden`
@@ -1453,9 +1525,60 @@ impl Game {
                     m.extra_magnetize = m.extra_magnetize.saturating_add(add);
                 }
             }
+            // A Rally triggered in the shop can summon (Sky-hatch Runaway
+            // triggering Flittering Bat): the copies go next to the minion.
+            Effect::Summon { card, count, golden_doubles_count } => {
+                let (n, g) = if golden_doubles_count {
+                    (count * mul as u8, false)
+                } else {
+                    (count, golden)
+                };
+                let mut at = *pos + 1;
+                for _ in 0..n {
+                    if self.players[p].board.is_full() || at > self.players[p].board.len() {
+                        break;
+                    }
+                    let mut m = self.players[p].make_card(&self.data.cards, card, g, 0);
+                    if self.data.cards.get(card).tribes.has(Tribe::Beast) {
+                        let (ba, bh) = self.players[p].beast_bonus;
+                        m.attack += ba;
+                        m.health += bh;
+                    }
+                    self.players[p].board.insert(at, m);
+                    at += 1;
+                }
+            }
+            Effect::SpellBonus { attack, health } => {
+                let n = mul * runs as i32;
+                let pl = &mut self.players[p];
+                pl.spell_bonus.0 += attack * n;
+                pl.spell_bonus.1 += health * n;
+            }
+            Effect::RandomChromadrake => {
+                for _ in 0..mul as u8 * runs {
+                    if let Some(c) = self.data.cards.random_chromadrake(&mut self.rng) {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
+            Effect::CastSpell { card, times } => {
+                let Some(se) = self.data.cards.get(card).spell_effect else { return };
+                for _ in 0..times as u32 * mul as u32 * runs as u32 {
+                    self.execute_spell_effect(p, se);
+                }
+            }
+            Effect::TriggerRally => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::TriggerRally,
+                    runs: (mul as u8).saturating_mul(runs),
+                };
+                self.offer_target(p, pt);
+            }
             // These only happen in fights.
-            Effect::Summon { .. }
-            | Effect::BuffKiller { .. }
+            Effect::BuffKiller { .. }
+            | Effect::BuffAttacker { .. }
+            | Effect::BuffRandomOther { .. }
             | Effect::SummonRandomDeathrattle { .. }
             | Effect::TriggerDeathrattle { .. } => {}
         }
@@ -1509,7 +1632,7 @@ impl Game {
             &pl.board,
             ai,
             pl.shop[slot],
-            pl.counters(),
+            pl.counters(&data.cards),
             rng,
         );
         pl.board.clear();
@@ -1521,6 +1644,24 @@ impl Game {
             }
         }
         self.apply_side_outcome(p, &out.side, false);
+    }
+
+    /// Scarlet Survivor: once its Attack reaches the threshold, it gains the
+    /// keyword (once; `improvements` records that it fired).
+    fn check_attack_thresholds(&mut self, p: usize) {
+        let cards = &self.data.cards;
+        for m in &mut self.players[p].board {
+            if m.improvements != 0 {
+                continue;
+            }
+            let t = m.parts().find_map(|(c, _)| cards.get(c).attack_threshold);
+            if let Some(t) = t
+                && m.attack >= t.total as i32
+            {
+                m.keywords.set(t.keyword);
+                m.improvements = 1;
+            }
+        }
     }
 
     /// Give the minion in board slot `pos` a random Bonus Keyword it doesn't
@@ -1677,6 +1818,16 @@ impl Game {
             TargetKind::Consume { pick, keywords, count, .. } => {
                 self.start_consume(p, s, pick, keywords, count);
             }
+            TargetKind::TriggerRally => {
+                for _ in 0..pt.runs {
+                    let Some(m) = self.players[p].board.get(s).copied() else { break };
+                    for (card, golden) in m.parts() {
+                        let Some(e) = self.data.cards.get(card).rally else { continue };
+                        let mut pos = s;
+                        self.run_effect(p, &mut pos, e, golden, 1);
+                    }
+                }
+            }
             TargetKind::Spell(st) => {
                 let mut target_pos = s;
                 for _ in 0..pt.runs {
@@ -1728,9 +1879,12 @@ impl Game {
                             let m = &mut self.players[p].board[target_pos];
                             if !m.golden {
                                 let base = self.data.cards.get(m.card);
+                                let (ga, gh) = base
+                                    .golden_stats
+                                    .unwrap_or((base.attack * 2, base.health * 2));
                                 m.golden = true;
-                                m.attack += base.attack;
-                                m.health += base.health;
+                                m.attack += ga - base.attack;
+                                m.health += gh - base.health;
                             }
                         }
                     }
@@ -1836,6 +1990,10 @@ impl Game {
                     self.trigger_on_cast_spell(p);
                     self.execute_spell_effect(p, se);
                 }
+            }
+            // A minion's Choose One is its Battlecry.
+            if pco.source.is_some() {
+                self.fire_after_battlecry(p, 1);
             }
             self.maybe_start_discover(p);
             return;
@@ -2119,6 +2277,11 @@ impl Game {
             let size = data.rules.shop_size(pl.tier);
             Self::fill_shop(pl, pool, &data.cards, size, rng);
         }
+        for p in 0..PLAYERS {
+            if self.players[p].alive {
+                self.check_attack_thresholds(p);
+            }
+        }
         self.pair();
         self.order = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
         self.rng.shuffle(&mut self.order);
@@ -2171,6 +2334,25 @@ impl Game {
                         self.players[p].board[slot].improvements.saturating_add(imp);
                 }
             }
+            // Tarecgosa and Persistent Poet: stats and Bonus Keywords kept
+            // from the fight.
+            for (slot, &(da, dh)) in so.permanent_stats.iter().enumerate() {
+                if (da != 0 || dh != 0) && slot < self.players[p].board.len() {
+                    let m = &mut self.players[p].board[slot];
+                    m.attack += da;
+                    m.health += dh;
+                }
+            }
+            for (slot, &kw) in so.permanent_keywords.iter().enumerate() {
+                if kw != 0 && slot < self.players[p].board.len() {
+                    self.players[p].board[slot].keywords.0 |= kw;
+                }
+            }
+        }
+        let (sa, sh) = so.spell_bonus_gain;
+        if sa != 0 || sh != 0 {
+            self.players[p].spell_bonus.0 += sa;
+            self.players[p].spell_bonus.1 += sh;
         }
         if so.beetle_attack_gain != 0 || so.beetle_health_gain != 0 {
             self.add_beetle_bonus_to(p, so.beetle_attack_gain, so.beetle_health_gain, after_fight);
@@ -2208,7 +2390,7 @@ impl Game {
             let (them, tier, their_counters) = match self.players[p].opponent {
                 Some(Opponent::Player(q)) if p < q as usize => {
                     let q = &self.players[q as usize];
-                    (q.board.clone(), q.tier, q.counters())
+                    (q.board.clone(), q.tier, q.counters(&self.data.cards))
                 }
                 Some(Opponent::Ghost(_)) => {
                     let g = self.ghost.as_ref().unwrap();
@@ -2217,7 +2399,7 @@ impl Game {
                 _ => continue,
             };
             let me = self.players[p].board.clone();
-            let my_counters = self.players[p].counters();
+            let my_counters = self.players[p].counters(&self.data.cards);
             let out = fight_with(
                 &self.data.cards,
                 &me,
@@ -2307,7 +2489,7 @@ impl Game {
                     player: p,
                     board: pl.board.clone(),
                     tier: pl.tier,
-                    counters: pl.counters(),
+                    counters: pl.counters(&data.cards),
                 });
             }
             pl.shop_spell = None;
@@ -2346,7 +2528,7 @@ impl Game {
     /// release too.
     pub fn check_invariants(&self) -> Result<(), String> {
         let cards = &self.data.cards;
-        let mut held = [0u32; 64];
+        let mut held = [0u32; MAX_POOL_CARDS];
         for (i, pl) in self.players.iter().enumerate() {
             for m in pl.shop.iter().chain(&pl.hand).chain(&pl.board) {
                 let c = cards.get(m.card);

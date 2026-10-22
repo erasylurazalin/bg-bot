@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bgcore::bots::{random_action, rush_action, standard_action};
-use bgcore::{Attached, BOARD, Counters, Data, Game, Keywords, Minion, Rng, fight, fight_with};
+use bgcore::{Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, Rng, fight, fight_with};
 use rayon::prelude::*;
 use serde::Deserialize;
 
@@ -19,7 +19,7 @@ fn random_board(data: &Data, rng: &mut Rng) -> Vec<Minion> {
     let n = 1 + rng.below(BOARD as u32) as usize;
     (0..n)
         .map(|_| {
-            let c = rng.below(data.cards.pool_cards as u32) as u8;
+            let c = rng.below(data.cards.pool_cards as u32) as CardId;
             let mut m = data.cards.make(c, rng.below(8) == 0);
             let bonus = rng.below(4) as i32;
             m.attack += bonus;

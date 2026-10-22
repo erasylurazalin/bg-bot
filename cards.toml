@@ -430,6 +430,164 @@ tribe = "neutral"
 stats = [6, 6]
 aura = "balinda"
 
+# --- Dragons ---
+
+[[minion]]
+name = "Glim Guardian"
+tier = 1
+tribe = "dragon"
+stats = [1, 4]
+rally = { buff = [2, 0], target = "self" }
+
+[[minion]]
+name = "Scarlet Survivor"
+tier = 1
+tribe = "dragon"
+stats = [3, 3]
+attack_threshold = { total = 6, keyword = "divine_shield" }
+
+[[minion]]
+name = "Bronze Warden"
+tier = 2
+tribe = "dragon"
+stats = [2, 1]
+keywords = ["divine_shield", "reborn"]
+
+[[minion]]
+name = "Electric Synthesizer"
+tier = 2
+tribe = "dragon"
+stats = [3, 4]
+battlecry = { buff = [1, 1], target = "others", tribe = "dragon" }
+start_of_combat = { effect = { buff = [1, 1], target = "others", tribe = "dragon" } }
+
+[[minion]]
+name = "Tarecgosa"
+tier = 2
+tribe = "dragon"
+stats = [4, 4]
+permanent_keep = "self"
+
+[[minion]]
+name = "Amber Guardian"
+tier = 3
+tribe = "dragon"
+stats = [3, 2]
+keywords = ["taunt"]
+start_of_combat = { effect = { buff_random_other = [2, 2], tribe = "dragon", keyword = "divine_shield", count = 1 } }
+
+[[minion]]
+name = "Blue Whelp"
+tier = 3
+tribe = "dragon"
+stats = [1, 5]
+rally = { spell_bonus = [0, 1] }
+
+[[minion]]
+name = "Hired Mount"
+tier = 3
+tribe = "dragon"
+stats = [3, 5]
+activate = { cost = 2, effect = { random_chromadrake = true } }
+
+[[minion]]
+name = "Roaring Recruiter"
+tier = 3
+tribe = "dragon"
+stats = [2, 8]
+whenever_friendly_attack = { attacker_tribe = "dragon", attacker_another = true, effect = { buff_attacker = [3, 1] } }
+
+[[minion]]
+name = "Timecap'n Hooktail"
+tier = 3
+tribe = "dragon"
+stats = [1, 4]
+on_cast_spell = { buff_all = [1, 0] }
+
+[[minion]]
+name = "Bronze Timewalker"
+tier = 4
+tribe = "dragon"
+stats = [4, 5]
+rally = { random_chromadrake = true }
+
+[[minion]]
+name = "Persistent Poet"
+tier = 4
+tribe = "dragon"
+stats = [2, 3]
+keywords = ["divine_shield"]
+permanent_keep = "adjacent_dragons"
+
+[[minion]]
+name = "Runic Arcanist"
+tier = 4
+tribe = "dragon"
+stats = [2, 4]
+start_of_combat = { effect = { cast = "Shiny Ring", count = 2 } }
+
+[[minion]]
+name = "Sky-hatch Runaway"
+tier = 4
+tribe = "dragon"
+stats = [4, 7]
+# the golden card in the JSON is 10/14, not double the printed 4/7
+golden_stats = [10, 14]
+activate = { cost = 1, effect = { trigger_rally = true } }
+
+[[minion]]
+name = "Felfire Conjurer"
+tier = 5
+tribes = ["demon", "dragon"]
+stats = [6, 5]
+end_of_turn = { effect = { spell_bonus = [1, 1] } }
+
+[[minion]]
+name = "Draconic Warden"
+tier = 5
+tribe = "dragon"
+stats = [7, 4]
+battlecry = { random_chromadrake = true }
+deathrattle = { effect = { random_chromadrake = true } }
+
+[[minion]]
+name = "Hopebringer"
+tier = 5
+tribe = "dragon"
+stats = [4, 3]
+start_of_combat = { hopebringer = { buff = [4, 3], improve = [1, 1] } }
+
+[[minion]]
+name = "Kalecgos, Arcane Aspect"
+tier = 5
+tribe = "dragon"
+stats = [4, 12]
+after_battlecry = { buff = [2, 2], target = "all", tribe = "dragon" }
+
+[[minion]]
+name = "Firescale Hoarder"
+tier = 5
+tribe = "dragon"
+stats = [5, 5]
+battlecry = { get = "Shiny Ring" }
+deathrattle = { get = "Shiny Ring" }
+
+[[minion]]
+name = "Crimson Vindicator"
+tier = 6
+tribe = "dragon"
+stats = [8, 9]
+keywords = ["divine_shield"]
+rally = { cast = "Mighty Dragonbreath" }
+
+[[minion]]
+name = "Heroic Broodmother"
+tier = 6
+tribe = "dragon"
+stats = [7, 7]
+rally = { gain_keyword = "divine_shield" }
+start_of_combat = { attack_immediately = true }
+
 # --- Tokens ---
 
 [[token]]
@@ -479,6 +637,48 @@ tier = 1
 tribe = "mech"
 stats = [2, 3]
 keywords = ["magnetic"]
+
+# The Chromadrakes: generated only, never in the pool.
+
+[[token]]
+name = "Black Chromadrake"
+tier = 3
+tribe = "dragon"
+stats = [4, 6]
+chromadrake = true
+battlecry = { spell_bonus = [0, 1] }
+
+[[token]]
+name = "Blue Chromadrake"
+tier = 3
+tribe = "dragon"
+stats = [4, 4]
+chromadrake = true
+battlecry = { random_spell_cost = 2 }
+
+[[token]]
+name = "Bronze Chromadrake"
+tier = 3
+tribe = "dragon"
+stats = [5, 3]
+chromadrake = true
+battlecry = { buff = [3, 1], target = "others", tribe = "dragon" }
+
+[[token]]
+name = "Green Chromadrake"
+tier = 3
+tribe = "dragon"
+stats = [3, 5]
+chromadrake = true
+battlecry = { buff = [1, 3], target = "others", tribe = "dragon" }
+
+[[token]]
+name = "Red Chromadrake"
+tier = 3
+tribe = "dragon"
+stats = [6, 4]
+chromadrake = true
+battlecry = { spell_bonus = [1, 0] }
 
 # --- Spells: Tier 1 ---
 
@@ -595,6 +795,12 @@ choose_one = [
 ]
 
 # --- Spells: Tier 4 ---
+
+[[spell]]
+name = "Mighty Dragonbreath"
+tier = 4
+cost = 2
+effect = { mighty_dragonbreath = [3, 2] }
 
 [[spell]]
 name = "Boon of Beetles"

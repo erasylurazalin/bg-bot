@@ -1,7 +1,7 @@
 use crate::CardDb;
 use crate::rng::Rng;
 
-pub type CardId = u8;
+pub type CardId = u16;
 
 /// Maximum number of effect-carrying Magnetic cards attached to a single host.
 /// Cards without persistent effects (such as Satellites and Volumizers) only

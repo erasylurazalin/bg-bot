@@ -161,6 +161,22 @@ pub enum Effect {
     SpellDiscount(u8),
     /// Get `count` copies of a generated card (`count * 2` when golden).
     GetCard { card: CardId, count: u8 },
+    /// Raise the player's Tavern spell bonus for the rest of the game.
+    SpellBonus { attack: i32, health: i32 },
+    /// Get a random Chromadrake (`2` when golden).
+    RandomChromadrake,
+    /// Cast a named Tavern spell `times` times for the minion's side.
+    /// Fights only run the spell effects the fight knows (Shiny Ring's
+    /// board buff and Mighty Dragonbreath).
+    CastSpell { card: CardId, times: u8 },
+    /// Activate only: trigger a friendly minion's Rally, chosen by the
+    /// player, in the shop.
+    TriggerRally,
+    /// Buff the minion that just attacked (Roaring Recruiter).
+    BuffAttacker { attack: i32, health: i32 },
+    /// Give `count` random other friendly minions of a tribe stats and a
+    /// keyword (Amber Guardian). A golden minion picks `count` twice as many.
+    BuffRandomOther { tribe: Option<Tribe>, attack: i32, health: i32, keyword: u8, count: u8 },
 }
 
 impl Effect {
@@ -173,7 +189,14 @@ impl Effect {
                 | Effect::ReplaceWithFishbait { .. }
                 | Effect::Consume { by: ConsumeBy::Chosen(_), .. }
                 | Effect::Consume { pick: ConsumePick::Chosen, .. }
+                | Effect::TriggerRally
         )
+    }
+
+    /// Whether the effect needs a friendly minion with a Rally to be legal
+    /// (Sky-hatch Runaway).
+    pub fn needs_rally_target(self) -> bool {
+        matches!(self, Effect::TriggerRally)
     }
 }
 
@@ -194,7 +217,12 @@ impl Effect {
             | Effect::TriggerDeathrattle { .. }
             | Effect::BeetleBuff { .. }
             | Effect::RandomVolumizer
-            | Effect::GetCard { .. } => true,
+            | Effect::GetCard { .. }
+            | Effect::SpellBonus { .. }
+            | Effect::RandomChromadrake
+            | Effect::CastSpell { .. }
+            | Effect::BuffAttacker { .. }
+            | Effect::BuffRandomOther { .. } => true,
             _ => false,
         }
     }
@@ -283,6 +311,9 @@ pub enum SpellEffect {
     RandomTierMinion(u8),
     Discover(DiscoverKind),
     BoonOfBeetles(u8),
+    /// Buff every friendly minion, again for Dragons, again for minions
+    /// with Divine Shield.
+    MightyDragonbreath { attack: i32, health: i32 },
     BroodOfNozdormu,
     UpperHand,
     /// Make a random minion in the Tavern golden.
@@ -352,6 +383,31 @@ pub enum EndOfTurn {
 pub enum StartOfCombat {
     CombatBeastBuff { attack: i32, health: i32 },
     DamageAllOthers(i32),
+    /// Any effect a fight can run (Electric Synthesizer, Amber Guardian,
+    /// Runic Arcanist).
+    Effect(Effect),
+    /// Attack at once, before the normal attack rotation (Heroic Broodmother).
+    AttackImmediately,
+    /// Give your minions stats, improved by a per-minion count that goes up
+    /// every time a friendly minion loses Divine Shield (Hopebringer).
+    Hopebringer { attack: i32, health: i32, improve: (i32, i32) },
+}
+
+/// "Once this reaches `total` Attack, gain `keyword`" (Scarlet Survivor).
+/// The minion's `improvements` doubles as the "already fired" flag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttackThreshold {
+    pub total: u16,
+    pub keyword: u8,
+}
+
+/// What a minion keeps from combat, permanently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermanentKeep {
+    /// This minion keeps its own stat and Bonus Keyword gains (Tarecgosa).
+    SelfKeep,
+    /// Adjacent Dragons keep theirs (Persistent Poet).
+    AdjacentDragons,
 }
 
 /// Which attacking minions an attack trigger reacts to.
@@ -361,6 +417,9 @@ pub struct AttackFilter {
     pub tribe: Option<Tribe>,
     /// Only attackers with a Rally effect.
     pub rally: bool,
+    /// Another minion: the minion with the trigger doesn't count (Roaring
+    /// Recruiter).
+    pub exclude_self: bool,
 }
 
 /// "Whenever" or "after a friendly minion attacks" (of a kind): run the
@@ -411,6 +470,9 @@ pub enum OnCastSpellOnMech {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnCastSpell {
     BuffDivineShield { attack: i32, health: i32 },
+    /// Buff every friendly minion. A golden minion does it twice rather
+    /// than twice as much (Timecap'n Hooktail).
+    BuffAll { attack: i32, health: i32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -438,6 +500,8 @@ pub struct Card {
     pub tribes: Tribes,
     pub attack: i32,
     pub health: i32,
+    /// Golden stats, when the data doesn't double the printed ones.
+    pub golden_stats: Option<(i32, i32)>,
     pub keywords: Keywords,
     pub token: bool,
     pub spell: bool,
@@ -473,6 +537,13 @@ pub struct Card {
     pub fixed_stats: bool,
     pub activate: Option<Activate>,
     pub on_event: Option<EventTrigger>,
+    /// What happens after you trigger a Battlecry (Kalecgos).
+    pub after_battlecry: Option<Effect>,
+    /// Keeps combat gains permanently (Tarecgosa, Persistent Poet).
+    pub permanent_keep: Option<PermanentKeep>,
+    /// Gains a keyword once its Attack reaches a threshold (Scarlet
+    /// Survivor).
+    pub attack_threshold: Option<AttackThreshold>,
     /// Effects that run in order after your hero takes damage.
     pub after_hero_damage: Vec<Effect>,
     /// Refreshes each turn that cost Health instead of Gold.
@@ -553,6 +624,8 @@ pub struct CardDb {
     pub volumizers: Vec<CardId>,
     pub spells: Vec<CardId>,
     pub beetle_token: Option<CardId>,
+    /// The five Chromadrakes "a random Chromadrake" picks from.
+    pub chromadrakes: Vec<CardId>,
 }
 
 #[derive(Deserialize)]
@@ -575,6 +648,9 @@ struct RawCard {
     /// Two or more tribes, for multi-tribe cards.
     tribes: Option<Vec<String>>,
     stats: [i32; 2],
+    /// Golden stats when they are not exactly double the printed ones (the
+    /// data has one such card).
+    golden_stats: Option<[i32; 2]>,
     #[serde(default)]
     keywords: Vec<String>,
     #[serde(default)]
@@ -602,11 +678,25 @@ struct RawCard {
     fixed_stats: bool,
     activate: Option<RawActivate>,
     on_event: Option<RawOnEvent>,
+    after_battlecry: Option<RawEffect>,
+    /// "self" or "adjacent_dragons".
+    permanent_keep: Option<String>,
+    attack_threshold: Option<RawAttackThreshold>,
+    /// One of the five generated Chromadrakes.
+    #[serde(default)]
+    chromadrake: bool,
     #[serde(default)]
     after_hero_damage: Vec<RawEffect>,
     health_refreshes: Option<u8>,
     on_sell: Option<RawOnSell>,
     aura: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAttackThreshold {
+    total: u16,
+    keyword: String,
 }
 
 #[derive(Deserialize)]
@@ -644,6 +734,9 @@ struct RawSpellEffect {
     boon_of_beetles: Option<u8>,
     start_of_combat: Option<String>,
     golden_touch: Option<bool>,
+    /// "Give your minions..., repeat for your Dragons, repeat for your
+    /// minions with Divine Shield."
+    mighty_dragonbreath: Option<[i32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -676,6 +769,18 @@ struct RawEffect {
     gold_next_turn: Option<u8>,
     random_volumizer: Option<bool>,
     spell_discount: Option<u8>,
+    /// Raise the player's Tavern spell bonus this game.
+    spell_bonus: Option<[i32; 2]>,
+    #[serde(default)]
+    random_chromadrake: bool,
+    /// Cast a named Tavern spell, `count` times.
+    cast: Option<String>,
+    #[serde(default)]
+    trigger_rally: bool,
+    buff_attacker: Option<[i32; 2]>,
+    /// Buff random other friendly minions of `tribe`, with `keyword`.
+    buff_random_other: Option<[i32; 2]>,
+    keyword: Option<String>,
     get: Option<String>,
     count: Option<u8>,
     /// Summon a card (token or pool minion) next to the minion.
@@ -751,6 +856,18 @@ struct RawEndOfTurn {
 struct RawStartOfCombat {
     combat_beast_buff: Option<[i32; 2]>,
     damage_all_others: Option<i32>,
+    /// Any effect a fight can run.
+    effect: Option<RawEffect>,
+    #[serde(default)]
+    attack_immediately: bool,
+    hopebringer: Option<RawHopebringer>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHopebringer {
+    buff: [i32; 2],
+    improve: [i32; 2],
 }
 
 #[derive(Deserialize)]
@@ -761,6 +878,9 @@ struct RawAttackTrigger {
     /// Only attackers with a Rally effect.
     #[serde(default)]
     attacker_rally: bool,
+    /// Another minion: the minion with the trigger isn't counted.
+    #[serde(default)]
+    attacker_another: bool,
     effect: RawEffect,
 }
 
@@ -803,7 +923,8 @@ struct RawOnCastSpellOnMech {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawOnCastSpell {
-    buff_divine_shield: [i32; 2],
+    buff_divine_shield: Option<[i32; 2]>,
+    buff_all: Option<[i32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -912,6 +1033,9 @@ fn parse_spell_effect(
         None => 0,
     };
     let times = e.times.unwrap_or(1);
+    if let Some([attack, health]) = e.mighty_dragonbreath {
+        return Ok((None, Some(SpellEffect::MightyDragonbreath { attack, health })));
+    }
     match e.target.as_deref() {
         Some("chosen") => {
             if let Some([attack, health]) = e.buff {
@@ -1013,6 +1137,13 @@ impl CardDb {
         if total_cards > CardId::MAX as usize {
             return Err("cards.toml: too many cards".into());
         }
+        if pool_cards > crate::game::MAX_POOL_CARDS {
+            return Err(format!(
+                "cards.toml: {} pool minions, the limit is {}",
+                pool_cards,
+                crate::game::MAX_POOL_CARDS
+            ));
+        }
         let mut names: Vec<String> = all_minions.iter().map(|(c, _)| c.name.clone()).collect();
         names.extend(raw.spell.iter().map(|sp| sp.name.clone()));
         for (i, n) in names.iter().enumerate() {
@@ -1053,11 +1184,24 @@ impl CardDb {
             Ok(id as CardId)
         };
 
+        // a Tavern spell, for "cast <spell>"
+        let spell_id = |name: &str| -> Result<CardId, String> {
+            let id = names
+                .iter()
+                .position(|n| n == name)
+                .ok_or_else(|| format!("unknown card {name:?}"))?;
+            if id < all_minions.len() {
+                return Err(format!("{name} is not a spell"));
+            }
+            Ok(id as CardId)
+        };
+
         let mut cards = Vec::with_capacity(total_cards);
         let mut volumizers = Vec::new();
         let mut spells = Vec::with_capacity(raw.spell.len());
         let mut first_volumizer_slot: Option<CardId> = None;
         let mut beetle_token: Option<CardId> = None;
+        let mut chromadrakes = Vec::new();
 
         let parse_effect = |b: &RawEffect| -> Result<Effect, String> {
             let t = b.tribe.as_deref().map(tribe).transpose()?;
@@ -1136,6 +1280,25 @@ impl CardDb {
                 Effect::RandomVolumizer
             } else if let Some(d) = b.spell_discount {
                 Effect::SpellDiscount(d)
+            } else if let Some([attack, health]) = b.spell_bonus {
+                Effect::SpellBonus { attack, health }
+            } else if b.random_chromadrake {
+                Effect::RandomChromadrake
+            } else if let Some(name) = &b.cast {
+                Effect::CastSpell { card: spell_id(name)?, times: b.count.unwrap_or(1) }
+            } else if b.trigger_rally {
+                Effect::TriggerRally
+            } else if let Some([attack, health]) = b.buff_attacker {
+                Effect::BuffAttacker { attack, health }
+            } else if let Some([attack, health]) = b.buff_random_other {
+                let keyword = b.keyword.as_deref().map(keyword_bit).transpose()?.unwrap_or(0);
+                Effect::BuffRandomOther {
+                    tribe: t,
+                    attack,
+                    health,
+                    keyword,
+                    count: b.count.unwrap_or(1),
+                }
             } else if let Some(name) = &b.get {
                 let card = generated_id(name)?;
                 Effect::GetCard { card, count: b.count.unwrap_or(1) }
@@ -1156,6 +1319,9 @@ impl CardDb {
             }
             if c.beetle && *token {
                 beetle_token = Some(id);
+            }
+            if c.chromadrake && *token {
+                chromadrakes.push(id);
             }
             let is_volumizer = c.volumizer_buff.is_some();
             let pool_slot = if is_volumizer {
@@ -1193,6 +1359,32 @@ impl CardDb {
                         effect,
                     })
                 }
+            };
+
+            let after_battlecry = match &c.after_battlecry {
+                None => None,
+                Some(e) => {
+                    let effect = parse_effect(e).map_err(&err)?;
+                    if effect.needs_choice() {
+                        return Err(err("an after_battlecry effect can't ask for a choice".into()));
+                    }
+                    Some(effect)
+                }
+            };
+
+            let permanent_keep = match c.permanent_keep.as_deref() {
+                None => None,
+                Some("self") => Some(PermanentKeep::SelfKeep),
+                Some("adjacent_dragons") => Some(PermanentKeep::AdjacentDragons),
+                Some(other) => return Err(err(format!("unknown permanent_keep {other:?}"))),
+            };
+
+            let attack_threshold = match &c.attack_threshold {
+                None => None,
+                Some(t) => Some(AttackThreshold {
+                    total: t.total,
+                    keyword: keyword_bit(&t.keyword).map_err(&err)?,
+                }),
             };
 
             let mut after_hero_damage = Vec::new();
@@ -1291,6 +1483,20 @@ impl CardDb {
                     StartOfCombat::CombatBeastBuff { attack, health }
                 } else if let Some(dmg) = s.damage_all_others {
                     StartOfCombat::DamageAllOthers(dmg)
+                } else if s.attack_immediately {
+                    StartOfCombat::AttackImmediately
+                } else if let Some(h) = &s.hopebringer {
+                    StartOfCombat::Hopebringer {
+                        attack: h.buff[0],
+                        health: h.buff[1],
+                        improve: (h.improve[0], h.improve[1]),
+                    }
+                } else if let Some(eff) = &s.effect {
+                    let effect = parse_effect(eff).map_err(&err)?;
+                    if !effect.runs_in_fights() {
+                        return Err(err("this start_of_combat effect can't run in a fight".into()));
+                    }
+                    StartOfCombat::Effect(effect)
                 } else {
                     return Err(err("invalid start_of_combat".into()));
                 }),
@@ -1311,6 +1517,7 @@ impl CardDb {
                     filter: AttackFilter {
                         tribe: t.attacker_tribe.as_deref().map(tribe).transpose().map_err(&err)?,
                         rally: t.attacker_rally,
+                        exclude_self: t.attacker_another,
                     },
                     effect: fight_effect(&t.effect, what)?,
                 })
@@ -1378,12 +1585,16 @@ impl CardDb {
                 }
             };
 
-            let on_cast_spell = c.on_cast_spell.as_ref().map(|cs| {
-                OnCastSpell::BuffDivineShield {
-                    attack: cs.buff_divine_shield[0],
-                    health: cs.buff_divine_shield[1],
-                }
-            });
+            let on_cast_spell = match &c.on_cast_spell {
+                None => None,
+                Some(cs) => Some(if let Some([attack, health]) = cs.buff_divine_shield {
+                    OnCastSpell::BuffDivineShield { attack, health }
+                } else if let Some([attack, health]) = cs.buff_all {
+                    OnCastSpell::BuffAll { attack, health }
+                } else {
+                    return Err(err("invalid on_cast_spell".into()));
+                }),
+            };
 
             let on_sell = match &c.on_sell {
                 None => None,
@@ -1417,6 +1628,7 @@ impl CardDb {
                 tribes: card_tribes(&c.tribe, &c.tribes).map_err(&err)?,
                 attack: c.stats[0],
                 health: c.stats[1],
+                golden_stats: c.golden_stats.map(|[a, h]| (a, h)),
                 keywords,
                 token: *token,
                 spell: false,
@@ -1446,6 +1658,9 @@ impl CardDb {
                 fixed_stats: c.fixed_stats,
                 activate,
                 on_event,
+                after_battlecry,
+                permanent_keep,
+                attack_threshold,
                 after_hero_damage,
                 health_refreshes: c.health_refreshes.unwrap_or(0),
                 on_sell,
@@ -1488,6 +1703,7 @@ impl CardDb {
                 tribes: Tribes::NONE,
                 attack: 0,
                 health: 0,
+                golden_stats: None,
                 keywords: Keywords::default(),
                 token: false,
                 spell: true,
@@ -1517,6 +1733,9 @@ impl CardDb {
                 fixed_stats: false,
                 activate: None,
                 on_event: None,
+                after_battlecry: None,
+                permanent_keep: None,
+                attack_threshold: None,
                 after_hero_damage: Vec::new(),
                 health_refreshes: 0,
                 on_sell: None,
@@ -1526,7 +1745,17 @@ impl CardDb {
             });
         }
 
-        Ok(CardDb { cards, pool_cards, volumizers, spells, beetle_token })
+        Ok(CardDb { cards, pool_cards, volumizers, spells, beetle_token, chromadrakes })
+    }
+
+    /// One of the five Chromadrakes, uniformly.
+    pub fn random_chromadrake(&self, rng: &mut Rng) -> Option<CardId> {
+        if self.chromadrakes.is_empty() {
+            None
+        } else {
+            let k = rng.below(self.chromadrakes.len() as u32) as usize;
+            Some(self.chromadrakes[k])
+        }
     }
 
     pub fn get(&self, id: CardId) -> &Card {
@@ -1658,10 +1887,15 @@ impl CardDb {
     pub fn make(&self, id: CardId, golden: bool) -> Minion {
         let c = self.get(id);
         let m = if golden { 2 } else { 1 };
+        let (attack, health) = if golden {
+            c.golden_stats.unwrap_or((c.attack * 2, c.health * 2))
+        } else {
+            (c.attack * m, c.health * m)
+        };
         Minion {
             card: id,
-            attack: c.attack * m,
-            health: c.health * m,
+            attack,
+            health,
             keywords: c.keywords,
             golden,
             pool_copies: 0,
