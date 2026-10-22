@@ -177,6 +177,29 @@ pub enum Effect {
     /// Give `count` random other friendly minions of a tribe stats and a
     /// keyword (Amber Guardian). A golden minion picks `count` twice as many.
     BuffRandomOther { tribe: Option<Tribe>, attack: i32, health: i32, keyword: u8, count: u8 },
+    /// Summon the `count` highest-Attack minions of a tribe from hand, for
+    /// this combat only (Expert Aviator, Diremuck Forager). The copies leave
+    /// the hand for the rest of the fight and are back in it afterwards.
+    SummonFromHand { tribe: Tribe, count: u8 },
+    /// Give a random minion in hand stats, permanently (Very Hungry
+    /// Winterfinner). Fights only.
+    BuffRandomHand { attack: i32, health: i32 },
+    /// Give the left-most minion in hand stats (Twilight Tidehunter).
+    BuffLeftmostHand { attack: i32, health: i32 },
+    /// Give the minions of a tribe on the board and in hand stats (Shamanic
+    /// Tidecaller).
+    BuffTribeBoardAndHand { tribe: Tribe, attack: i32, health: i32 },
+    /// Trigger a friendly minion's Battlecry, chosen by the player, in the
+    /// shop (Kelp Keeper).
+    TriggerBattlecry,
+    /// If you control another minion of a tribe, Discover `count` minions of
+    /// it (Primalfin Lookout).
+    DiscoverTribeIfAnother { tribe: Tribe, count: u8 },
+    /// Cast the Tavern spell this minion was taught (Magicfin Apprentice).
+    CastTaughtSpell,
+    /// Trigger the Battlecries of the adjacent minions this many times
+    /// (Young Murk-Eye).
+    TriggerAdjacentBattlecries(u8),
 }
 
 impl Effect {
@@ -190,6 +213,7 @@ impl Effect {
                 | Effect::Consume { by: ConsumeBy::Chosen(_), .. }
                 | Effect::Consume { pick: ConsumePick::Chosen, .. }
                 | Effect::TriggerRally
+                | Effect::TriggerBattlecry
         )
     }
 
@@ -197,6 +221,12 @@ impl Effect {
     /// (Sky-hatch Runaway).
     pub fn needs_rally_target(self) -> bool {
         matches!(self, Effect::TriggerRally)
+    }
+
+    /// Whether the effect needs another friendly minion with a Battlecry to
+    /// be legal (Kelp Keeper).
+    pub fn needs_battlecry_target(self) -> bool {
+        matches!(self, Effect::TriggerBattlecry)
     }
 }
 
@@ -222,7 +252,9 @@ impl Effect {
             | Effect::RandomChromadrake
             | Effect::CastSpell { .. }
             | Effect::BuffAttacker { .. }
-            | Effect::BuffRandomOther { .. } => true,
+            | Effect::BuffRandomOther { .. }
+            | Effect::SummonFromHand { .. }
+            | Effect::BuffRandomHand { .. } => true,
             _ => false,
         }
     }
@@ -294,6 +326,12 @@ pub enum SpellTarget {
     MakeGolden {
         max_tier: u8,
     },
+    /// Give the minion stats, once more for each different Bonus Keyword in
+    /// the warband (Seafood Stew).
+    BuffPerBonusKeyword {
+        attack: i32,
+        health: i32,
+    },
 }
 
 /// A Tavern spell (or Choose One spell option) that does not target a minion.
@@ -318,6 +356,8 @@ pub enum SpellEffect {
     UpperHand,
     /// Make a random minion in the Tavern golden.
     GoldenTouch,
+    /// Get a random Murloc and a copy of it (Cloning Conch).
+    CloningConch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -391,6 +431,24 @@ pub enum StartOfCombat {
     /// Give your minions stats, improved by a per-minion count that goes up
     /// every time a friendly minion loses Divine Shield (Hopebringer).
     Hopebringer { attack: i32, health: i32, improve: (i32, i32) },
+    /// If this minion is in your hand, summon a copy of it (Flighty Scout).
+    /// A golden one summons a golden copy, which has double its stats.
+    FlightyScout,
+    /// Gain the Attack of the highest-Attack minion in your hand, for this
+    /// combat (Costume Enthusiast). A golden one gains double.
+    GainHighestHandAttack,
+    /// Gain the stats of every minion in your hand, for this combat (Choral
+    /// Mrrrglr). A golden one counts the hand twice.
+    GainHandStats,
+}
+
+/// "While this is in your hand, after you play a minion of a tribe, ...".
+/// The buff is on the hand card itself and is permanent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WhileInHand {
+    pub tribe: Tribe,
+    pub attack: i32,
+    pub health: i32,
 }
 
 /// "Once this reaches `total` Attack, gain `keyword`" (Scarlet Survivor).
@@ -526,6 +584,24 @@ pub struct Card {
     pub on_play_or_magnetize_mech: Option<OnPlayOrMagnetizeMech>,
     pub on_cast_spell_on_mech: Option<OnCastSpellOnMech>,
     pub on_cast_spell: Option<OnCastSpell>,
+    /// Whenever the owner casts a spell on this minion (Twilight Tidehunter).
+    pub on_cast_spell_on_self: Option<Effect>,
+    /// Whenever the owner casts a spell on a minion of `tribe` (Shamanic
+    /// Tidecaller).
+    pub on_cast_spell_on_tribe: Option<(Tribe, Effect)>,
+    /// Whenever this minion takes damage in a fight (Very Hungry
+    /// Winterfinner).
+    pub when_damaged: Option<Effect>,
+    /// While this is in its owner's hand, after they play a minion of a
+    /// tribe (Bream Counter).
+    pub while_in_hand: Option<WhileInHand>,
+    /// After the owner buys a Tavern spell, get a taught 1/1 Murloc token
+    /// (Magicfin Mycologist).
+    pub teaches_spell: bool,
+    /// Tokens that can't be tripled (Magicfin Apprentice).
+    pub no_triple: bool,
+    /// The 1/1 Murloc token Magicfin Mycologist teaches a spell to.
+    pub taught_token: bool,
     pub whenever_friendly_attacks: Option<AttackTrigger>,
     pub after_friendly_attacks: Option<AttackTrigger>,
     pub avenge: Option<Avenge>,
@@ -566,7 +642,14 @@ impl Card {
 
     /// Whether this spell gives stats to minions (used by the rule bot).
     pub fn gives_stats(&self) -> bool {
-        matches!(self.spell_target, Some(SpellTarget::Buff { .. } | SpellTarget::BuffSameTribe { .. }))
+        matches!(
+            self.spell_target,
+            Some(
+                SpellTarget::Buff { .. }
+                    | SpellTarget::BuffSameTribe { .. }
+                    | SpellTarget::BuffPerBonusKeyword { .. }
+            )
+        )
             || matches!(
                 self.spell_effect,
                 Some(
@@ -587,6 +670,24 @@ impl Card {
             })
     }
 
+    /// Whether this card reads its owner's hand during a fight, so the
+    /// fight needs the hand passed in (Expert Aviator, Flighty Scout,
+    /// Diremuck Forager, Costume Enthusiast, Choral Mrrrglr, Very Hungry
+    /// Winterfinner).
+    pub fn reads_hand(&self) -> bool {
+        self.when_damaged.is_some()
+            || matches!(
+                self.start_of_combat,
+                Some(
+                    StartOfCombat::FlightyScout
+                        | StartOfCombat::GainHighestHandAttack
+                        | StartOfCombat::GainHandStats
+                        | StartOfCombat::Effect(Effect::SummonFromHand { .. })
+                )
+            )
+            || matches!(self.rally, Some(Effect::SummonFromHand { .. }))
+    }
+
     /// Whether a host Mech needs to store this card in `Minion::attached`
     /// when Magnetized. Satellites and Volumizers have no persistent board
     /// triggers after being Magnetized, so they take no slot.
@@ -601,6 +702,10 @@ impl Card {
             || self.on_play_or_magnetize_mech.is_some()
             || self.on_cast_spell_on_mech.is_some()
             || self.on_cast_spell.is_some()
+            || self.on_cast_spell_on_self.is_some()
+            || self.on_cast_spell_on_tribe.is_some()
+            || self.when_damaged.is_some()
+            || self.while_in_hand.is_some()
             || self.whenever_friendly_attacks.is_some()
             || self.after_friendly_attacks.is_some()
             || self.avenge.is_some()
@@ -626,6 +731,8 @@ pub struct CardDb {
     pub beetle_token: Option<CardId>,
     /// The five Chromadrakes "a random Chromadrake" picks from.
     pub chromadrakes: Vec<CardId>,
+    /// The 1/1 Murloc Magicfin Mycologist teaches a spell to.
+    pub taught_token: Option<CardId>,
 }
 
 #[derive(Deserialize)]
@@ -669,6 +776,16 @@ struct RawCard {
     on_play_or_magnetize_mech: Option<RawBuff>,
     on_cast_spell_on_mech: Option<RawOnCastSpellOnMech>,
     on_cast_spell: Option<RawOnCastSpell>,
+    on_cast_spell_on_self: Option<RawEffect>,
+    on_cast_spell_on_tribe: Option<RawOnCastSpellOnTribe>,
+    when_damaged: Option<RawEffect>,
+    while_in_hand: Option<RawWhileInHand>,
+    #[serde(default)]
+    teaches_spell: bool,
+    #[serde(default)]
+    no_triple: bool,
+    #[serde(default)]
+    taught_token: bool,
     whenever_friendly_attack: Option<RawAttackTrigger>,
     after_friendly_attack: Option<RawAttackTrigger>,
     avenge: Option<RawAvenge>,
@@ -737,6 +854,13 @@ struct RawSpellEffect {
     /// "Give your minions..., repeat for your Dragons, repeat for your
     /// minions with Divine Shield."
     mighty_dragonbreath: Option<[i32; 2]>,
+    /// "Give a minion stats, repeat for each different Bonus Keyword in your
+    /// warband."
+    #[serde(default)]
+    per_bonus_keyword: bool,
+    /// Get a random Murloc and a copy of it.
+    #[serde(default)]
+    cloning_conch: bool,
 }
 
 #[derive(Deserialize)]
@@ -785,6 +909,9 @@ struct RawEffect {
     count: Option<u8>,
     /// Summon a card (token or pool minion) next to the minion.
     summon: Option<String>,
+    /// Summon the highest-Attack minions of this tribe from hand, for this
+    /// combat only.
+    summon_from_hand: Option<String>,
     #[serde(default)]
     golden_doubles_count: bool,
     /// Get a random pool minion of this tribe.
@@ -806,6 +933,20 @@ struct RawEffect {
     /// attack.
     refresh_with: Option<String>,
     extra_magnetization: Option<u8>,
+    /// Give a random minion in hand stats (Winterfinner).
+    buff_random_hand: Option<[i32; 2]>,
+    /// Give the left-most minion in hand stats (Twilight Tidehunter).
+    buff_leftmost_hand: Option<[i32; 2]>,
+    /// Trigger a friendly minion's Battlecry, chosen by the player.
+    #[serde(default)]
+    trigger_battlecry: bool,
+    /// If you control another minion of this tribe, Discover `count` of them.
+    discover_tribe_if_another: Option<String>,
+    /// Cast the Tavern spell this minion was taught.
+    #[serde(default)]
+    cast_taught: bool,
+    /// Trigger the Battlecries of the adjacent minions, `count` times.
+    trigger_adjacent_battlecries: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -861,6 +1002,27 @@ struct RawStartOfCombat {
     #[serde(default)]
     attack_immediately: bool,
     hopebringer: Option<RawHopebringer>,
+    #[serde(default)]
+    flighty_scout: bool,
+    #[serde(default)]
+    gain_hand_attack: bool,
+    #[serde(default)]
+    gain_hand_stats: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOnCastSpellOnTribe {
+    tribe: String,
+    buff: [i32; 2],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawWhileInHand {
+    /// The tribe of the minion that has to be played.
+    after_play: String,
+    buff: [i32; 2],
 }
 
 #[derive(Deserialize)]
@@ -1039,6 +1201,9 @@ fn parse_spell_effect(
     match e.target.as_deref() {
         Some("chosen") => {
             if let Some([attack, health]) = e.buff {
+                if e.per_bonus_keyword {
+                    return Ok((Some(SpellTarget::BuffPerBonusKeyword { attack, health }), None));
+                }
                 let if_win = e.if_win_next_turn_buff.map(|[a, h]| (a, h));
                 return Ok((
                     Some(SpellTarget::Buff {
@@ -1107,6 +1272,8 @@ fn parse_spell_effect(
                 SpellEffect::Discover(parse_discover(d)?)
             } else if e.golden_touch == Some(true) {
                 SpellEffect::GoldenTouch
+            } else if e.cloning_conch {
+                SpellEffect::CloningConch
             } else if let Some(b) = e.boon_of_beetles {
                 SpellEffect::BoonOfBeetles(b)
             } else if let Some(soc) = &e.start_of_combat {
@@ -1202,6 +1369,7 @@ impl CardDb {
         let mut first_volumizer_slot: Option<CardId> = None;
         let mut beetle_token: Option<CardId> = None;
         let mut chromadrakes = Vec::new();
+        let mut taught_token: Option<CardId> = None;
 
         let parse_effect = |b: &RawEffect| -> Result<Effect, String> {
             let t = b.tribe.as_deref().map(tribe).transpose()?;
@@ -1232,6 +1400,23 @@ impl CardDb {
                     count: b.count.unwrap_or(1),
                     golden_doubles_count: b.golden_doubles_count,
                 }
+            } else if let Some(name) = &b.summon_from_hand {
+                Effect::SummonFromHand { tribe: tribe(name)?, count: b.count.unwrap_or(1) }
+            } else if let Some([attack, health]) = b.buff_random_hand {
+                Effect::BuffRandomHand { attack, health }
+            } else if let Some([attack, health]) = b.buff_leftmost_hand {
+                Effect::BuffLeftmostHand { attack, health }
+            } else if b.trigger_battlecry {
+                Effect::TriggerBattlecry
+            } else if let Some(name) = &b.discover_tribe_if_another {
+                Effect::DiscoverTribeIfAnother {
+                    tribe: tribe(name)?,
+                    count: b.count.unwrap_or(1),
+                }
+            } else if b.cast_taught {
+                Effect::CastTaughtSpell
+            } else if let Some(n) = b.trigger_adjacent_battlecries {
+                Effect::TriggerAdjacentBattlecries(n)
             } else if let Some(name) = &b.random_minion {
                 Effect::GetRandomMinion { tribe: tribe(name)? }
             } else if let Some(k) = &b.gain_keyword {
@@ -1322,6 +1507,9 @@ impl CardDb {
             }
             if c.chromadrake && *token {
                 chromadrakes.push(id);
+            }
+            if c.taught_token && *token {
+                taught_token = Some(id);
             }
             let is_volumizer = c.volumizer_buff.is_some();
             let pool_slot = if is_volumizer {
@@ -1491,6 +1679,12 @@ impl CardDb {
                         health: h.buff[1],
                         improve: (h.improve[0], h.improve[1]),
                     }
+                } else if s.flighty_scout {
+                    StartOfCombat::FlightyScout
+                } else if s.gain_hand_attack {
+                    StartOfCombat::GainHighestHandAttack
+                } else if s.gain_hand_stats {
+                    StartOfCombat::GainHandStats
                 } else if let Some(eff) = &s.effect {
                     let effect = parse_effect(eff).map_err(&err)?;
                     if !effect.runs_in_fights() {
@@ -1585,6 +1779,49 @@ impl CardDb {
                 }
             };
 
+            let on_cast_spell_on_self = match &c.on_cast_spell_on_self {
+                None => None,
+                Some(e) => {
+                    let effect = parse_effect(e).map_err(&err)?;
+                    if effect.needs_choice() {
+                        return Err(err("an on_cast_spell_on_self effect can't ask for a choice".into()));
+                    }
+                    Some(effect)
+                }
+            };
+
+            let on_cast_spell_on_tribe = match &c.on_cast_spell_on_tribe {
+                None => None,
+                Some(t) => Some((
+                    tribe(&t.tribe).map_err(&err)?,
+                    Effect::BuffTribeBoardAndHand {
+                        tribe: tribe(&t.tribe).map_err(&err)?,
+                        attack: t.buff[0],
+                        health: t.buff[1],
+                    },
+                )),
+            };
+
+            let when_damaged = match &c.when_damaged {
+                None => None,
+                Some(e) => {
+                    let effect = parse_effect(e).map_err(&err)?;
+                    if !effect.runs_in_fights() {
+                        return Err(err("this when_damaged effect can't run in a fight".into()));
+                    }
+                    Some(effect)
+                }
+            };
+
+            let while_in_hand = match &c.while_in_hand {
+                None => None,
+                Some(w) => Some(WhileInHand {
+                    tribe: tribe(&w.after_play).map_err(&err)?,
+                    attack: w.buff[0],
+                    health: w.buff[1],
+                }),
+            };
+
             let on_cast_spell = match &c.on_cast_spell {
                 None => None,
                 Some(cs) => Some(if let Some([attack, health]) = cs.buff_divine_shield {
@@ -1650,6 +1887,13 @@ impl CardDb {
                 on_play_or_magnetize_mech,
                 on_cast_spell_on_mech,
                 on_cast_spell,
+                on_cast_spell_on_self,
+                on_cast_spell_on_tribe,
+                when_damaged,
+                while_in_hand,
+                teaches_spell: c.teaches_spell,
+                no_triple: c.no_triple,
+                taught_token: c.taught_token,
                 whenever_friendly_attacks,
                 after_friendly_attacks,
                 avenge,
@@ -1725,6 +1969,13 @@ impl CardDb {
                 on_play_or_magnetize_mech: None,
                 on_cast_spell_on_mech: None,
                 on_cast_spell: None,
+                on_cast_spell_on_self: None,
+                on_cast_spell_on_tribe: None,
+                when_damaged: None,
+                while_in_hand: None,
+                teaches_spell: false,
+                no_triple: false,
+                taught_token: false,
                 whenever_friendly_attacks: None,
                 after_friendly_attacks: None,
                 avenge: None,
@@ -1745,7 +1996,15 @@ impl CardDb {
             });
         }
 
-        Ok(CardDb { cards, pool_cards, volumizers, spells, beetle_token, chromadrakes })
+        Ok(CardDb {
+            cards,
+            pool_cards,
+            volumizers,
+            spells,
+            beetle_token,
+            chromadrakes,
+            taught_token,
+        })
     }
 
     /// One of the five Chromadrakes, uniformly.
@@ -1904,6 +2163,7 @@ impl CardDb {
             volumizers: u16::from(c.is_volumizer),
             improvements: 0,
             extra_magnetize: 0,
+            taught_spell: None,
             attached: [Attached::default(); MAX_ATTACHED],
             n_attached: 0,
         }

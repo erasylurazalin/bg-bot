@@ -588,6 +588,153 @@ stats = [7, 7]
 rally = { gain_keyword = "divine_shield" }
 start_of_combat = { attack_immediately = true }
 
+# --- Murlocs ---
+
+[[minion]]
+name = "Bubble Gunner"
+tier = 1
+tribe = "murloc"
+stats = [2, 3]
+battlecry = { random_keyword = true }
+
+[[minion]]
+name = "Flighty Scout"
+tier = 1
+tribe = "murloc"
+stats = [3, 3]
+start_of_combat = { flighty_scout = true }
+
+[[minion]]
+name = "Expert Aviator"
+tier = 2
+tribe = "murloc"
+stats = [3, 5]
+rally = { summon_from_hand = "murloc" }
+
+[[minion]]
+name = "Tad"
+tier = 2
+tribe = "murloc"
+stats = [2, 2]
+on_sell = { effect = { random_minion = "murloc" } }
+
+[[minion]]
+name = "Very Hungry Winterfinner"
+tier = 2
+tribe = "murloc"
+stats = [2, 6]
+keywords = ["taunt"]
+when_damaged = { buff_random_hand = [2, 1] }
+
+[[minion]]
+name = "Diremuck Forager"
+tier = 3
+tribe = "murloc"
+stats = [4, 5]
+start_of_combat = { effect = { summon_from_hand = "murloc" } }
+
+[[minion]]
+name = "Shoalfin Mystic"
+tier = 3
+tribe = "murloc"
+stats = [4, 4]
+on_sell = { effect = { spell_bonus = [1, 1] } }
+
+[[minion]]
+name = "Bream Counter"
+tier = 4
+tribe = "murloc"
+stats = [6, 6]
+while_in_hand = { after_play = "murloc", buff = [6, 6] }
+
+[[minion]]
+name = "Gormling Gourmet"
+tier = 4
+tribe = "murloc"
+stats = [4, 3]
+keywords = ["taunt"]
+battlecry = { get = "Seafood Stew" }
+deathrattle = { get = "Seafood Stew" }
+
+[[minion]]
+name = "Kelp Keeper"
+tier = 4
+tribe = "murloc"
+stats = [5, 5]
+activate = { cost = 1, effect = { trigger_battlecry = true } }
+
+[[minion]]
+name = "Twilight Tidehunter"
+tier = 4
+tribe = "murloc"
+stats = [4, 6]
+on_cast_spell_on_self = { buff_leftmost_hand = [8, 8] }
+
+[[minion]]
+name = "Bile Spitter"
+tier = 5
+tribe = "murloc"
+stats = [1, 10]
+keywords = ["venomous"]
+rally = { buff_random_other = [0, 0], tribe = "murloc", keyword = "venomous" }
+
+[[minion]]
+name = "Costume Enthusiast"
+tier = 5
+tribe = "murloc"
+stats = [4, 5]
+keywords = ["divine_shield"]
+start_of_combat = { gain_hand_attack = true }
+
+[[minion]]
+name = "Hackerfin"
+tier = 5
+tribe = "murloc"
+stats = [5, 3]
+battlecry = { target = "others", buff = [3, 2], per_keyword = [1, 1] }
+
+[[minion]]
+name = "Primalfin Lookout"
+tier = 5
+tribe = "murloc"
+stats = [3, 2]
+battlecry = { discover_tribe_if_another = "murloc" }
+
+[[minion]]
+name = "Sewer Escapee"
+tier = 5
+tribe = "murloc"
+stats = [7, 7]
+activate = { cost = 1, effect = { target = "chosen", tribe = "murloc", buff = [7, 7], random_keyword = true } }
+
+[[minion]]
+name = "Shamanic Tidecaller"
+tier = 5
+tribe = "murloc"
+stats = [5, 7]
+on_cast_spell_on_tribe = { tribe = "murloc", buff = [3, 3] }
+
+[[minion]]
+name = "Choral Mrrrglr"
+tier = 6
+tribe = "murloc"
+stats = [6, 6]
+start_of_combat = { gain_hand_stats = true }
+
+[[minion]]
+name = "Magicfin Mycologist"
+tier = 6
+tribe = "murloc"
+stats = [4, 8]
+teaches_spell = true
+
+[[minion]]
+name = "Young Murk-Eye"
+tier = 6
+tribe = "murloc"
+stats = [8, 5]
+end_of_turn = { effect = { trigger_adjacent_battlecries = 1 } }
+
 # --- Tokens ---
 
 [[token]]
@@ -679,6 +826,15 @@ tribe = "dragon"
 stats = [6, 4]
 chromadrake = true
 battlecry = { spell_bonus = [1, 0] }
+
+[[token]]
+name = "Magicfin Apprentice"
+tier = 1
+tribe = "murloc"
+stats = [1, 1]
+no_triple = true
+taught_token = true
+battlecry = { cast_taught = true }
 
 # --- Spells: Tier 1 ---
 
@@ -828,6 +984,18 @@ choose_one = [
     { discover = "tier_minion" },
     { discover = "tier_spell" },
 ]
+
+[[spell]]
+name = "Seafood Stew"
+tier = 3
+cost = 2
+effect = { target = "chosen", buff = [1, 1], per_bonus_keyword = true }
+
+[[spell]]
+name = "Cloning Conch"
+tier = 4
+cost = 4
+effect = { cloning_conch = true }
 
 # --- Spells: Tier 5 ---
 

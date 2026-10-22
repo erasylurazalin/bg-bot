@@ -15,7 +15,7 @@ use crate::cards::{
     EventKind, OnCastSpell, OnCastSpellOnMech, OnPlayMech, OnPlayOrMagnetizeMech, OnSell,
     OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, Tribe,
 };
-use crate::fight::{Counters, SideOutcome, fight_with};
+use crate::fight::{Counters, SideOutcome, fight_with_hands};
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 use crate::rules::Rules;
@@ -62,6 +62,9 @@ pub enum TargetKind {
     /// Trigger the Rally of the chosen minion in the shop (Sky-hatch
     /// Runaway), `runs` times.
     TriggerRally,
+    /// Trigger the Battlecry of the chosen minion (Kelp Keeper), `runs`
+    /// times.
+    TriggerBattlecry,
 }
 
 /// A targeted Battlecry, Choose One option, or Tavern spell waiting for the
@@ -123,6 +126,7 @@ pub enum DiscoverRequest {
     SpellTier(u8),
     DeathrattleMinion(u8),
     BattlecryMinion(u8),
+    TribeMinion(Tribe),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -169,6 +173,8 @@ pub struct Player {
     pub deathrattles_triggered: u32,
     pub spell_bonus: (i32, i32),
     pub spell_discount: u8,
+    /// Magicfin Mycologist uses spent this turn. Resets every turn.
+    pub mycologist_uses: u8,
     pub last_spell: Option<CardId>,
     pub shop_spell: Option<CardId>,
     pub shop: ArrayVec<Minion, SHOP>,
@@ -222,6 +228,7 @@ impl Player {
             deathrattles_triggered: 0,
             spell_bonus: (0, 0),
             spell_discount: 0,
+            mycologist_uses: 0,
             last_spell: None,
             shop_spell: None,
             shop: ArrayVec::new(),
@@ -610,6 +617,14 @@ impl Game {
                                     i != s as usize
                                         && m.parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
                                 }))
+                            && (!act.effect.needs_battlecry_target()
+                                || pl.board.iter().enumerate().any(|(i, m)| {
+                                    i != s as usize
+                                        && m.parts().any(|(c, _)| {
+                                            let card = self.data.cards.get(c);
+                                            card.battlecry.is_some() || card.choose_one.is_some()
+                                        })
+                                }))
                     })
             }
             Action::Play { hand, pos } => {
@@ -667,7 +682,9 @@ impl Game {
         }
         let c = self.data.cards.get(b[s].card);
         match st {
-            SpellTarget::Buff { .. } | SpellTarget::SetStats { .. } => true,
+            SpellTarget::Buff { .. }
+            | SpellTarget::BuffPerBonusKeyword { .. }
+            | SpellTarget::SetStats { .. } => true,
             SpellTarget::BuffSameTribe { .. } | SpellTarget::SameTribeMinion => {
                 !c.tribes.is_neutral()
             }
@@ -715,6 +732,12 @@ impl Game {
             TargetKind::TriggerRally => {
                 b[s].parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
             }
+            TargetKind::TriggerBattlecry => b[s]
+                .parts()
+                .any(|(c, _)| {
+                    let card = self.data.cards.get(c);
+                    card.battlecry.is_some() || card.choose_one.is_some()
+                }),
         }
     }
 
@@ -759,6 +782,7 @@ impl Game {
                 pl.hand.push(m);
                 self.fire_event(p, EventKind::GoldSpent, cost as u32);
                 self.fire_event(p, EventKind::CardsBought, 1);
+                self.magicfin_teach(p, id);
             }
             Action::Sell(s) => {
                 let m = self.players[p].board.remove(s as usize);
@@ -840,6 +864,10 @@ impl Game {
                         self.trigger_mech_played_or_magnetized(p, pos, true, true);
                     }
                     self.battlecry_or_choose_one(p, pos);
+                    self.maybe_start_discover(p);
+                    if t.has(Tribe::Murloc) {
+                        self.trigger_in_hand_on_play(p, Tribe::Murloc);
+                    }
                 }
                 if m.golden {
                     let tier = (self.players[p].tier + 1).min(MAX_TIER);
@@ -1095,6 +1123,41 @@ impl Game {
         }
     }
 
+    /// A spell was cast on the board minion in `target_pos`: run the
+    /// "whenever you cast a spell on a Murloc" watchers (Shamanic
+    /// Tidecaller), then the target's own watcher (Twilight Tidehunter).
+    fn trigger_on_cast_spell_on_target(&mut self, p: usize, target_pos: usize) {
+        if target_pos >= self.players[p].board.len() {
+            return;
+        }
+        let target_tribes = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+        let len = self.players[p].board.len();
+        for i in 0..len {
+            if i >= self.players[p].board.len() {
+                break;
+            }
+            let m = self.players[p].board[i];
+            for (card, golden) in m.parts() {
+                let (on_tribe, on_self) = {
+                    let c = self.data.cards.get(card);
+                    (c.on_cast_spell_on_tribe, c.on_cast_spell_on_self)
+                };
+                if let Some((tribe, e)) = on_tribe
+                    && target_tribes.has(tribe)
+                {
+                    let mut pos = i;
+                    self.run_effect(p, &mut pos, e, golden, 1);
+                }
+                if i == target_pos
+                    && let Some(e) = on_self
+                {
+                    let mut pos = i;
+                    self.run_effect(p, &mut pos, e, golden, 1);
+                }
+            }
+        }
+    }
+
     fn trigger_summon_beast_in_shop(&mut self, p: usize, pos: usize) {
         let len = self.players[p].board.len();
         for i in 0..len {
@@ -1123,6 +1186,43 @@ impl Game {
                 self.players[p].board[i].improvements = imp.saturating_add(imp_gain);
             }
             buff(&mut self.players[p].board[pos], da, dh);
+        }
+    }
+
+    /// After buying a Tavern spell, a Magicfin Mycologist on the board
+    /// teaches a 1/1 Murloc token that spell, once per turn each.
+    fn magicfin_teach(&mut self, p: usize, spell: CardId) {
+        let Some(token) = self.data.cards.taught_token else { return };
+        let cards = &self.data.cards;
+        let mut limit = 0u8;
+        for m in &self.players[p].board {
+            for (card, golden) in m.parts() {
+                if cards.get(card).teaches_spell {
+                    limit = limit.saturating_add(if golden { 2 } else { 1 });
+                }
+            }
+        }
+        if self.players[p].mycologist_uses >= limit || self.players[p].hand.is_full() {
+            return;
+        }
+        self.players[p].mycologist_uses += 1;
+        let mut m = self.players[p].make_card(cards, token, false, 0);
+        m.taught_spell = Some(spell);
+        self.players[p].hand.push(m);
+    }
+
+    /// A minion of `tribe` was just played: hand cards that grow while in
+    /// hand (Bream Counter) gain their buff.
+    fn trigger_in_hand_on_play(&mut self, p: usize, tribe: Tribe) {
+        let cards = &self.data.cards;
+        let mul_of = |m: &Minion| if m.golden { 2 } else { 1 };
+        for m in &mut self.players[p].hand {
+            let Some(w) = cards.get(m.card).while_in_hand else { continue };
+            if w.tribe == tribe {
+                let mul = mul_of(m);
+                m.attack += w.attack * mul;
+                m.health += w.health * mul;
+            }
         }
     }
 
@@ -1277,6 +1377,12 @@ impl Game {
             SpellEffect::BroodOfNozdormu => {
                 self.players[p].brood_of_nozdormu =
                     self.players[p].brood_of_nozdormu.saturating_add(1);
+            }
+            SpellEffect::CloningConch => {
+                if let Some(c) = self.data.cards.random_pool_minion(Tribe::Murloc, &mut self.rng) {
+                    self.give_generated(p, c);
+                    self.give_generated(p, c);
+                }
             }
             SpellEffect::GoldenTouch => {
                 let cards = &self.data.cards;
@@ -1575,12 +1681,95 @@ impl Game {
                 };
                 self.offer_target(p, pt);
             }
+            Effect::TriggerBattlecry => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::TriggerBattlecry,
+                    runs: (mul as u8).saturating_mul(runs),
+                };
+                self.offer_target(p, pt);
+            }
+            Effect::BuffLeftmostHand { attack, health } => {
+                let n = mul * runs as i32;
+                let cards = &self.data.cards;
+                let slot = self.players[p].hand.iter().position(|m| !cards.get(m.card).is_spell());
+                if let Some(i) = slot {
+                    let m = &mut self.players[p].hand[i];
+                    m.attack += attack * n;
+                    m.health += health * n;
+                }
+            }
+            Effect::BuffTribeBoardAndHand { tribe, attack, health } => {
+                let n = mul * runs as i32;
+                let cards = &self.data.cards;
+                for o in &mut self.players[p].board {
+                    if cards.get(o.card).tribes.has(tribe) {
+                        buff(o, attack * n, health * n);
+                    }
+                }
+                for o in &mut self.players[p].hand {
+                    if cards.get(o.card).tribes.has(tribe) {
+                        buff(o, attack * n, health * n);
+                    }
+                }
+            }
+            Effect::DiscoverTribeIfAnother { tribe, count } => {
+                let n = count.saturating_mul(mul as u8).saturating_mul(runs);
+                let cards = &self.data.cards;
+                let another = self.players[p]
+                    .board
+                    .iter()
+                    .enumerate()
+                    .any(|(i, m)| i != *pos && cards.get(m.card).tribes.has(tribe));
+                if another {
+                    for _ in 0..n {
+                        let _ = self.players[p]
+                            .discover_queue
+                            .try_push(DiscoverRequest::TribeMinion(tribe));
+                    }
+                }
+            }
+            Effect::TriggerAdjacentBattlecries(count) => {
+                let times = count.saturating_mul(mul as u8).saturating_mul(runs);
+                let here = *pos;
+                for neighbour in [here.checked_sub(1), Some(here + 1)].into_iter().flatten() {
+                    for _ in 0..times {
+                        if neighbour >= self.players[p].board.len() {
+                            break;
+                        }
+                        self.battlecry_or_choose_one(p, neighbour);
+                        if self.players[p].pending_target.is_some()
+                            || self.players[p].pending_choose_one.is_some()
+                        {
+                            break;
+                        }
+                    }
+                }
+                self.maybe_start_discover(p);
+            }
+            Effect::CastTaughtSpell => {
+                let Some(sp) = self.players[p].board.get(*pos).and_then(|m| m.taught_spell)
+                else {
+                    return;
+                };
+                for _ in 0..mul as u8 * runs {
+                    self.cast_spell(p, sp);
+                    if self.players[p].pending_target.is_some()
+                        || self.players[p].pending_choose_one.is_some()
+                    {
+                        break;
+                    }
+                }
+                self.maybe_start_discover(p);
+            }
             // These only happen in fights.
             Effect::BuffKiller { .. }
             | Effect::BuffAttacker { .. }
             | Effect::BuffRandomOther { .. }
             | Effect::SummonRandomDeathrattle { .. }
-            | Effect::TriggerDeathrattle { .. } => {}
+            | Effect::TriggerDeathrattle { .. }
+            | Effect::SummonFromHand { .. }
+            | Effect::BuffRandomHand { .. } => {}
         }
     }
 
@@ -1828,6 +2017,22 @@ impl Game {
                     }
                 }
             }
+            TargetKind::TriggerBattlecry => {
+                for _ in 0..pt.runs {
+                    if s >= self.players[p].board.len() {
+                        break;
+                    }
+                    self.battlecry_or_choose_one(p, s);
+                    // A targeting Battlecry or a Choose One waits for its
+                    // own choice; don't run it again.
+                    if self.players[p].pending_target.is_some()
+                        || self.players[p].pending_choose_one.is_some()
+                    {
+                        break;
+                    }
+                }
+                self.maybe_start_discover(p);
+            }
             TargetKind::Spell(st) => {
                 let mut target_pos = s;
                 for _ in 0..pt.runs {
@@ -1854,6 +2059,15 @@ impl Game {
                             if let Some((wb_a, wb_h)) = if_win_next_turn_buff {
                                 m.winners_bread = m.winners_bread.saturating_add(1);
                                 self.players[p].winners_bread_buff = (wb_a, wb_h);
+                            }
+                        }
+                        SpellTarget::BuffPerBonusKeyword { attack, health } => {
+                            let k = self.players[p]
+                                .distinct_bonus_keywords(self.data.rules.bonus_mask)
+                                as i32;
+                            let m = &mut self.players[p].board[target_pos];
+                            for _ in 0..1 + k {
+                                buff(m, attack + da, health + dh);
                             }
                         }
                         SpellTarget::BuffSameTribe { attack, health } => {
@@ -1889,6 +2103,7 @@ impl Game {
                         }
                     }
                     self.trigger_on_cast_spell(p);
+                    self.trigger_on_cast_spell_on_target(p, target_pos);
                     let is_mech = self
                         .data
                         .cards
@@ -1948,6 +2163,11 @@ impl Game {
                         &pl.discover,
                         |c| c.battlecry.is_some(),
                     ),
+                    DiscoverRequest::TribeMinion(t) => {
+                        draw_filtered(pool, &data.cards, rng, 1, MAX_TIER, &pl.discover, |c| {
+                            c.tribes.has(t)
+                        })
+                    }
                 };
                 match next {
                     Some(c) => pl.discover.push(c),
@@ -2049,7 +2269,7 @@ impl Game {
 
     fn check_triple_tracking(&mut self, p: usize, card: CardId, tracked_pos: &mut usize) {
         let cards = &self.data.cards;
-        if cards.get(card).is_spell() {
+        if cards.get(card).is_spell() || cards.get(card).no_triple {
             return;
         }
         let pl = &mut self.players[p];
@@ -2266,6 +2486,7 @@ impl Game {
             pl.done = false;
             pl.actions = 0;
             pl.health_refreshes_used = 0;
+            pl.mycologist_uses = 0;
             if pl.frozen {
                 pl.frozen = false;
             } else {
@@ -2348,6 +2569,13 @@ impl Game {
                     self.players[p].board[slot].keywords.0 |= kw;
                 }
             }
+            // Very Hungry Winterfinner's hand buffs are permanent.
+            for (slot, &(da, dh)) in so.hand_stats.iter().enumerate() {
+                if (da != 0 || dh != 0) && slot < self.players[p].hand.len() {
+                    self.players[p].hand[slot].attack += da;
+                    self.players[p].hand[slot].health += dh;
+                }
+            }
         }
         let (sa, sh) = so.spell_bonus_gain;
         if sa != 0 || sh != 0 {
@@ -2387,23 +2615,45 @@ impl Game {
             if !self.players[p].alive {
                 continue;
             }
-            let (them, tier, their_counters) = match self.players[p].opponent {
+            // The hand only goes into the fight when something on the board
+            // or in it reads the hand, so most fights skip it entirely.
+            let cards = &self.data.cards;
+            let reads_board = |b: &[Minion]| {
+                b.iter().any(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()))
+            };
+            let reads_hand =
+                |h: &[Minion]| h.iter().any(|m| cards.get(m.card).reads_hand());
+            let (them, tier, their_counters, their_hand) = match self.players[p].opponent {
                 Some(Opponent::Player(q)) if p < q as usize => {
                     let q = &self.players[q as usize];
-                    (q.board.clone(), q.tier, q.counters(&self.data.cards))
+                    let hand: &[Minion] = if reads_board(&q.board) || reads_hand(&q.hand) {
+                        &q.hand
+                    } else {
+                        &[]
+                    };
+                    (q.board.clone(), q.tier, q.counters(cards), hand)
                 }
                 Some(Opponent::Ghost(_)) => {
                     let g = self.ghost.as_ref().unwrap();
-                    (g.board.clone(), g.tier, g.counters)
+                    (g.board.clone(), g.tier, g.counters, &[] as &[Minion])
                 }
                 _ => continue,
             };
+            let my_hand: &[Minion] = if reads_board(&self.players[p].board)
+                || reads_hand(&self.players[p].hand)
+            {
+                &self.players[p].hand
+            } else {
+                &[]
+            };
             let me = self.players[p].board.clone();
-            let my_counters = self.players[p].counters(&self.data.cards);
-            let out = fight_with(
+            let my_counters = self.players[p].counters(cards);
+            let hands: [&[Minion]; 2] = [my_hand, their_hand];
+            let out = fight_with_hands(
                 &self.data.cards,
                 &me,
                 &them,
+                hands,
                 [my_counters, their_counters],
                 max_attacks,
                 &mut self.rng,

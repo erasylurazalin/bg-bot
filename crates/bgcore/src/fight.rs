@@ -73,6 +73,10 @@ pub struct SideOutcome {
     /// (Headhunter Gryphon, Conveyor Construct, Rescue Bot).
     pub cards: [CardId; HAND],
     pub n_cards: u8,
+    /// Permanent stat gains for the minions in each starting hand slot
+    /// (Very Hungry Winterfinner). The game adds them to the hand after the
+    /// fight; combat changes to minions summoned from hand are not kept.
+    pub hand_stats: [(i32, i32); HAND],
     /// Number of Boon of Beetles Beetles summoned during this fight.
     pub boon_of_beetles_used: u8,
 }
@@ -136,8 +140,20 @@ struct Fx {
     skip_ptr: bool,
 }
 
-struct Side {
+struct Side<'a> {
     ms: ArrayVec<Fm, BOARD>,
+    /// The hand as of the start of the fight, borrowed: it is empty unless
+    /// something on the board (or in the hand) reads it. The fight never
+    /// writes to it; combat-time gains live in `hand_bonus` and permanent
+    /// ones in `SideOutcome::hand_stats`.
+    hand: &'a [Minion],
+    /// Combat-only stat gains on the hand, by hand slot.
+    hand_bonus: [(i32, i32); HAND],
+    /// Whether any minion on the board reacts to taking damage.
+    damage_trigger: bool,
+    /// Bit `i` marks the hand minion in slot `i` summoned for this combat
+    /// only: later hand checks no longer see it.
+    hand_taken: u16,
     /// Index of the next minion to attack.
     ptr: usize,
     counters: Counters,
@@ -161,20 +177,151 @@ fn filter_ok(db: &CardDb, f: AttackFilter, attacker: &Minion) -> bool {
         && (!f.rally || attacker.parts().any(|(c, _)| db.get(c).rally.is_some()))
 }
 
-impl Side {
-    fn new(board: &[Minion], counters: Counters, uid: &mut u16) -> Side {
+impl<'a> Side<'a> {
+    fn new(
+        db: &CardDb,
+        board: &[Minion],
+        hand: &'a [Minion],
+        counters: Counters,
+        uid: &mut u16,
+    ) -> Side<'a> {
         let mut ms = ArrayVec::new();
         for (slot, &m) in board.iter().take(BOARD).enumerate() {
             ms.push(Fm { m, uid: *uid, start_slot: Some(slot as u8), avenge: 0, killer: None });
             *uid += 1;
         }
+        let damage_trigger = ms
+            .iter()
+            .any(|f| f.m.parts().any(|(c, _)| db.get(c).when_damaged.is_some()));
         Side {
             ms,
+            hand: &hand[..hand.len().min(HAND)],
+            hand_bonus: [(0, 0); HAND],
+            damage_trigger,
+            hand_taken: 0,
             ptr: 0,
             counters,
             beast_buff: (counters.beast_attack, counters.beast_health),
             killer_buffs: ArrayVec::new(),
             out: SideOutcome::default(),
+        }
+    }
+
+    /// A hand minion as it stands now: its card copy plus this combat's
+    /// stat gains.
+    fn hand_at(&self, i: usize) -> Minion {
+        let mut m = self.hand[i];
+        m.attack += self.hand_bonus[i].0;
+        m.health += self.hand_bonus[i].1;
+        m
+    }
+
+    fn hand_taken(&self, i: usize) -> bool {
+        self.hand_taken & (1 << i) != 0
+    }
+
+    /// The hand minion with the highest Attack of a tribe that is still in
+    /// hand; ties go to the left-most. Spells are not minions.
+    fn best_in_hand(&self, db: &CardDb, tribe: Tribe) -> Option<usize> {
+        let mut best: Option<usize> = None;
+        for (i, m) in self.hand.iter().enumerate() {
+            if self.hand_taken(i)
+                || db.get(m.card).is_spell()
+                || !db.get(m.card).tribes.has(tribe)
+            {
+                continue;
+            }
+            let attack = m.attack + self.hand_bonus[i].0;
+            if best.is_none_or(|b| {
+                attack > self.hand[b].attack + self.hand_bonus[b].0
+            }) {
+                best = Some(i);
+            }
+        }
+        best
+    }
+
+    /// Summon the `n` highest-Attack minions of a tribe from hand for this
+    /// combat. A summoned copy leaves the hand; it is not put back.
+    #[allow(clippy::too_many_arguments)]
+    fn summon_from_hand(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        at: &mut usize,
+        n: u32,
+        tribe: Tribe,
+        skip_ptr: bool,
+        uid: &mut u16,
+        w: &mut impl Watch,
+    ) {
+        for _ in 0..n {
+            if self.ms.is_full() {
+                break;
+            }
+            let Some(i) = self.best_in_hand(db, tribe) else { break };
+            let m = self.hand_at(i);
+            self.hand_taken |= 1 << i;
+            if !self.summon(db, side, *at, m, uid, w) {
+                self.hand_taken &= !(1 << i);
+                break;
+            }
+            if skip_ptr && *at == self.ptr {
+                self.ptr += 1;
+            }
+            *at += 1;
+        }
+    }
+
+    /// Give the minion in hand slot `i` stats, permanently (the game adds
+    /// them to the real hand after the fight).
+    fn hand_buff(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
+        if db.get(self.hand[i].card).fixed_stats {
+            return;
+        }
+        self.hand_bonus[i].0 = self.hand_bonus[i].0.saturating_add(da);
+        self.hand_bonus[i].1 = self.hand_bonus[i].1.saturating_add(dh);
+        self.out.hand_stats[i].0 = self.out.hand_stats[i].0.saturating_add(da);
+        self.out.hand_stats[i].1 = self.out.hand_stats[i].1.saturating_add(dh);
+    }
+
+    /// Give a random minion still in hand stats (Very Hungry Winterfinner).
+    fn buff_random_hand(&mut self, db: &CardDb, da: i32, dh: i32, rng: &mut Rng) {
+        let mut ok: ArrayVec<usize, HAND> = ArrayVec::new();
+        for (i, m) in self.hand.iter().enumerate() {
+            if !self.hand_taken(i) && !db.get(m.card).is_spell() {
+                ok.push(i);
+            }
+        }
+        if ok.is_empty() {
+            return;
+        }
+        let i = ok[rng.below(ok.len() as u32) as usize];
+        self.hand_buff(db, i, da, dh);
+    }
+
+    /// A friendly minion took damage while in board slot `i`.
+    fn when_damaged(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        i: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        // Most minions have nothing to do here; check before copying.
+        if !self.ms[i].m.parts().any(|(c, _)| db.get(c).when_damaged.is_some()) {
+            return;
+        }
+        let m = self.ms[i].m;
+        let host = self.ms[i].uid;
+        for (card, golden) in m.parts() {
+            if let Some(e) = db.get(card).when_damaged {
+                let fx = Fx { side, host, killer: None, attacker: None, skip_ptr: false };
+                let mut at = i + 1;
+                self.run_effect(db, e, golden, fx, &mut at, uid, rng, w);
+            }
         }
     }
 
@@ -395,6 +542,9 @@ impl Side {
         }
         let pos = pos.min(self.ms.len());
         let c = db.get(m.card);
+        if c.when_damaged.is_some() {
+            self.damage_trigger = true;
+        }
         if c.is_beetle {
             m.attack += self.counters.beetle_attack;
             m.health += self.counters.beetle_health;
@@ -665,6 +815,13 @@ impl Side {
                     }
                 }
             }
+            Effect::SummonFromHand { tribe, count } => {
+                let n = count as u32 * mul as u32;
+                self.summon_from_hand(db, fx.side, at, n, tribe, fx.skip_ptr, uid, w);
+            }
+            Effect::BuffRandomHand { attack, health } => {
+                self.buff_random_hand(db, attack * mul, health * mul, rng);
+            }
             Effect::CastSpell { card, times } => {
                 let Some(sp) = db.get(card).spell_effect else { return };
                 for _ in 0..times as i32 * mul {
@@ -850,16 +1007,18 @@ impl Side {
     }
 }
 
-/// Deal `dmg` non-combat damage (e.g. Boom-in-a-Box) to `target`.
-fn deal_damage(target: &mut Minion, dmg: i32) {
+/// Deal `dmg` non-combat damage (e.g. Boom-in-a-Box) to `target`. Returns
+/// the damage its Health actually lost, 0 when a shield took it.
+fn deal_damage(target: &mut Minion, dmg: i32) -> i32 {
     if dmg <= 0 {
-        return;
+        return 0;
     }
     if target.keywords.has(Keywords::DIVINE_SHIELD) {
         target.keywords.clear(Keywords::DIVINE_SHIELD);
-        return;
+        return 0;
     }
     target.health -= dmg;
+    dmg
 }
 
 /// `source` deals `dmg` to `target`. Divine Shield takes any hit and keeps
@@ -908,13 +1067,16 @@ fn pick_defender(db: &CardDb, def: &Side, rng: &mut Rng) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-fn pair(sides: &mut [Side; 2], turn: usize) -> (&mut Side, &mut Side) {
+fn pair<'s, 'a>(
+    sides: &'s mut [Side<'a>; 2],
+    turn: usize,
+) -> (&'s mut Side<'a>, &'s mut Side<'a>) {
     let [a, b] = sides;
     if turn == 0 { (a, b) } else { (b, a) }
 }
 
 /// Hand out the buffs Fishbait Deathrattles gave to their killers.
-fn give_killer_buffs(sides: &mut [Side; 2], db: &CardDb) {
+fn give_killer_buffs(sides: &mut [Side<'_>; 2], db: &CardDb) {
     for s in 0..2 {
         while let Some((killer, da, dh)) = sides[s].killer_buffs.pop() {
             for t in 0..2 {
@@ -928,7 +1090,7 @@ fn give_killer_buffs(sides: &mut [Side; 2], db: &CardDb) {
 }
 
 fn resolve_deaths(
-    sides: &mut [Side; 2],
+    sides: &mut [Side<'_>; 2],
     first_side: usize,
     db: &CardDb,
     uid: &mut u16,
@@ -950,7 +1112,7 @@ fn resolve_deaths(
 }
 
 fn run_start_of_combat(
-    sides: &mut [Side; 2],
+    sides: &mut [Side<'_>; 2],
     db: &CardDb,
     uid: &mut u16,
     rng: &mut Rng,
@@ -958,6 +1120,24 @@ fn run_start_of_combat(
 ) {
     for s in 0..2 {
         sides[s].spawn_boon_of_beetles(db, s, uid, w);
+    }
+    // Flighty Scout triggers from the hand, so it comes before the board's
+    // Start of Combat effects. One copy each, in hand order, if there is
+    // board space; the card stays in hand.
+    for s in 0..2 {
+        for i in 0..sides[s].hand.len() {
+            if sides[s].hand_taken(i)
+                || !matches!(
+                    db.get(sides[s].hand[i].card).start_of_combat,
+                    Some(StartOfCombat::FlightyScout)
+                )
+            {
+                continue;
+            }
+            let m = sides[s].hand_at(i);
+            let at = sides[s].ms.len();
+            sides[s].summon(db, s, at, m, uid, w);
+        }
     }
     for s in 0..2 {
         for _ in 0..sides[s].counters.brood_of_nozdormu {
@@ -1019,10 +1199,13 @@ fn run_start_of_combat(
                                     continue;
                                 }
                                 let had = sides[s].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD);
-                                deal_damage(&mut sides[s].ms[i].m, dmg);
+                                let dealt = deal_damage(&mut sides[s].ms[i].m, dmg);
                                 if had && !sides[s].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD)
                                 {
                                     shields_lost[s] = true;
+                                }
+                                if dealt > 0 && sides[s].damage_trigger {
+                                    sides[s].when_damaged(db, s, i, uid, rng, w);
                                 }
                             }
                         }
@@ -1049,6 +1232,30 @@ fn run_start_of_combat(
                         }
                     }
                 }
+                Some(StartOfCombat::FlightyScout) => {
+                    // It triggers from the hand, handled before this loop.
+                }
+                Some(StartOfCombat::GainHighestHandAttack) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let mut best = 0;
+                    for (i, m) in sides[turn].hand.iter().enumerate() {
+                        if !sides[turn].hand_taken(i) && !db.get(m.card).is_spell() {
+                            best = best.max(m.attack + sides[turn].hand_bonus[i].0);
+                        }
+                    }
+                    sides[turn].gain_at(db, mi, best * mul, 0);
+                }
+                Some(StartOfCombat::GainHandStats) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let (mut da, mut dh) = (0, 0);
+                    for (i, m) in sides[turn].hand.iter().enumerate() {
+                        if !sides[turn].hand_taken(i) && !db.get(m.card).is_spell() {
+                            da += m.attack + sides[turn].hand_bonus[i].0;
+                            dh += m.health + sides[turn].hand_bonus[i].1;
+                        }
+                    }
+                    sides[turn].gain_at(db, mi, da * mul, dh * mul);
+                }
                 None => {}
             }
         }
@@ -1069,7 +1276,7 @@ fn run_start_of_combat(
 /// damage, or "after a friendly minion attacks" after it.
 #[allow(clippy::too_many_arguments)]
 fn attack_triggers(
-    sides: &mut [Side; 2],
+    sides: &mut [Side<'_>; 2],
     turn: usize,
     me: u16,
     attacker: &Minion,
@@ -1134,7 +1341,7 @@ fn attack_triggers(
 /// The minion `me` of side `turn` attacks: one swing, or two with Windfury,
 /// each ending in the deaths it causes.
 fn attack_swings(
-    sides: &mut [Side; 2],
+    sides: &mut [Side<'_>; 2],
     turn: usize,
     me: u16,
     db: &CardDb,
@@ -1186,6 +1393,17 @@ fn attack_swings(
         att.count_damage(db, turn, ai, dealt_x, uid, rng, w);
         let Some(di) = def.index_of(def_uid) else { continue };
         def.count_damage(db, turn ^ 1, di, dealt_y, uid, rng, w);
+        // "Whenever this takes damage" (Very Hungry Winterfinner). It fires
+        // even when the damage is lethal.
+        if dealt_x > 0 && sides[turn ^ 1].damage_trigger {
+            sides[turn ^ 1].when_damaged(db, turn ^ 1, di, uid, rng, w);
+        }
+        if dealt_y > 0
+            && sides[turn].damage_trigger
+            && let Some(ai) = sides[turn].index_of(me)
+        {
+            sides[turn].when_damaged(db, turn, ai, uid, rng, w);
+        }
 
         // "After a friendly minion attacks" triggers (Ravaging Scorpid,
         // Deathstrider).
@@ -1228,8 +1446,27 @@ pub fn fight_with(
     rng: &mut Rng,
     w: &mut impl Watch,
 ) -> Outcome {
+    fight_with_hands(db, a, b, [&[], &[]], counters, max_attacks, rng, w)
+}
+
+/// A fight where each side also brings a hand. Only hand-reading cards look
+/// at it; passing empty hands is the same as `fight_with`.
+#[allow(clippy::too_many_arguments)]
+pub fn fight_with_hands(
+    db: &CardDb,
+    a: &[Minion],
+    b: &[Minion],
+    hands: [&[Minion]; 2],
+    counters: [Counters; 2],
+    max_attacks: u32,
+    rng: &mut Rng,
+    w: &mut impl Watch,
+) -> Outcome {
     let mut uid = 0u16;
-    let mut sides = [Side::new(a, counters[0], &mut uid), Side::new(b, counters[1], &mut uid)];
+    let mut sides = [
+        Side::new(db, a, hands[0], counters[0], &mut uid),
+        Side::new(db, b, hands[1], counters[1], &mut uid),
+    ];
     let (na, nb) = (sides[0].ms.len(), sides[1].ms.len());
     let mut turn = if na > nb {
         0
@@ -1298,8 +1535,10 @@ pub fn tavern_attack(
 ) -> TavernAttack {
     let mut uid = 0u16;
     let counters = Counters { boon_of_beetles: 0, brood_of_nozdormu: 0, upper_hand: 0, ..counters };
-    let mut sides =
-        [Side::new(board, counters, &mut uid), Side::new(&[target], Counters::default(), &mut uid)];
+    let mut sides = [
+        Side::new(db, board, &[], counters, &mut uid),
+        Side::new(db, &[target], &[], Counters::default(), &mut uid),
+    ];
     let me = sides[0].ms[attacker].uid;
     attack_swings(&mut sides, 0, me, db, &mut uid, rng, &mut ());
     TavernAttack {
@@ -1317,11 +1556,11 @@ mod tests {
         CardDb::from_toml(include_str!("../tests/data/v01-cards.toml")).unwrap()
     }
 
-    fn side(db: &CardDb, names: &[&str]) -> (Side, u16) {
+    fn side(db: &CardDb, names: &[&str]) -> (Side<'static>, u16) {
         let mut uid = 0;
         let board: Vec<Minion> =
             names.iter().map(|n| db.make(db.by_name(n).unwrap(), false)).collect();
-        (Side::new(&board, Counters::default(), &mut uid), uid)
+        (Side::new(db, &board, &[], Counters::default(), &mut uid), uid)
     }
 
     fn names(db: &CardDb, s: &Side) -> Vec<String> {
@@ -1354,7 +1593,7 @@ mod tests {
         let mut uid = 0;
         let mut rng = Rng::new(1);
         let alpha = db.make(db.by_name("Alpha").unwrap(), true);
-        let mut s = Side::new(&[alpha], Counters::default(), &mut uid);
+        let mut s = Side::new(&db, &[alpha], &[], Counters::default(), &mut uid);
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         assert_eq!(s.ms.len(), 2);
@@ -1376,7 +1615,7 @@ mod tests {
         crate::Data::bundled().cards
     }
 
-    fn side2(db: &CardDb, names: &[&str]) -> (Side, u16) {
+    fn side2(db: &CardDb, names: &[&str]) -> (Side<'static>, u16) {
         side(db, names)
     }
 
@@ -1447,7 +1686,7 @@ mod tests {
         let counters = Counters { improve: [1], ..Counters::default() };
         let gold = db.make(db.by_name("Tasty Lobster").unwrap(), true);
         let gnawer = db.make(db.by_name("Cage Gnawer").unwrap(), false);
-        let mut s = Side::new(&[gold, gnawer], counters, &mut uid);
+        let mut s = Side::new(&db, &[gold, gnawer], &[], counters, &mut uid);
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (2 + 8, 7 + 4));
@@ -1499,7 +1738,7 @@ mod tests {
 
             let gold = db.make(db.by_name("Ghastcoiler").unwrap(), true);
             let mut uid = 0;
-            let mut s = Side::new(&[gold], Counters::default(), &mut uid);
+            let mut s = Side::new(&db, &[gold], &[], Counters::default(), &mut uid);
             s.ms[0].m.health = 0;
             s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
             assert_eq!(s.ms.len(), 4);
@@ -1510,7 +1749,7 @@ mod tests {
                 let mut uid = 0;
                 let gold = db.make(db.by_name("Ghastcoiler").unwrap(), true);
                 let counters = Counters { tier, ..Counters::default() };
-                let mut s = Side::new(&[gold], counters, &mut uid);
+                let mut s = Side::new(&db, &[gold], &[], counters, &mut uid);
                 s.ms[0].m.health = 0;
                 s.resolve(&db, 0, &mut uid, &mut Rng::new(seed), &mut ());
                 assert_eq!(s.ms.len(), 4);

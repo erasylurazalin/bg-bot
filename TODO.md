@@ -30,6 +30,19 @@ Beast, Mech, Dragon, Murloc and Demon, exactly as in the current patch
 6. Observation, bindings and bots for the full lobby, then a long training
    run
 
+## Numbers I don't know yet
+
+These cards improve by an amount the card text hides. The engine uses a
+guess for each until I check the real numbers.
+
+| Card | What's hidden | Guess in the engine |
+|---|---|---|
+| Lurking Leviathan | how much each summon improves it | +3 Attack more per summon (+3, +6, +9...) |
+| Spark Snapper | how much its Satellites improve | no improvement yet, Satellites stay 2/3 |
+| Hopebringer | how much each lost Divine Shield adds | +1/+1 per shield, golden the same |
+| Hackerfin | how much each different Bonus Keyword adds | +1/+1 per keyword (run 3) |
+| Sacrificial Wrathguard | how much Activate improves it | +1/+1 more on its Tavern buff per Activate (run 4) |
+
 ## Next
 
 - Check our fights against `~/projects/bg`, the tracker, which simulates

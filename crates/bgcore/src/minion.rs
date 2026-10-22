@@ -104,6 +104,9 @@ pub struct Minion {
     /// (Drone Duplicator). Used up by that Magnetization, cleared at the end
     /// of the turn.
     pub extra_magnetize: u8,
+    /// The Tavern spell a token in hand was taught (Magicfin Apprentice).
+    /// Its Battlecry casts that spell.
+    pub taught_spell: Option<CardId>,
     pub attached: [Attached; MAX_ATTACHED],
     pub n_attached: u8,
 }
