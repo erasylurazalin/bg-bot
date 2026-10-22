@@ -1,0 +1,14 @@
+[package]
+name = "bgpy"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "bgpy"
+crate-type = ["cdylib"]
+
+[dependencies]
+bgcore = { path = "../bgcore" }
+numpy = "0.30"
+pyo3 = { version = "0.30", features = ["extension-module"] }
+rayon = "1"

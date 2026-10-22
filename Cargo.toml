@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/bgcore", "crates/bgbench"]
+members = ["crates/bgcore", "crates/bgbench", "crates/bgpy"]
 
 [workspace.package]
 edition = "2024"
