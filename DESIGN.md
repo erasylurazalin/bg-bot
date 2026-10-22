@@ -1,8 +1,13 @@
 # bg-bot design
 
-Two parts. The first describes Hearthstone Battlegrounds as completely as I
+Three parts. The first describes Hearthstone Battlegrounds as completely as I
 can, as the reference for everything the engine will grow into. The second
-defines v0.1: the mini game the first bot learns on.
+defines v0.1, the mini game the first bot learned on; it's history now, kept
+because the v0.1 rule tests still run on it. The third is the game we build
+now: a lobby of five real tribes, exactly as in the current patch.
+
+`docs/ENGINE.md` maps the code, `docs/CONCEPT.md` explains the card pool
+choices.
 
 Facts marked **(check)** are from memory and may be stale or wrong. Settle
 them from Power.log (`~/projects/bg` reads it) or from playing before the
@@ -186,7 +191,11 @@ tie deals no damage.
 The bot must only get what a player sees, or it learns to cheat and the
 advisor won't work.
 
-# Part 2: v0.1, the mini game
+# Part 2: v0.1, the mini game (history)
+
+Superseded by Part 3. The engine still carries these rules in
+`crates/bgcore/tests/data/v01-*.toml` for the old tests.
+
 
 Goal: the smallest game that still has the real decisions (economy, leveling,
 rolling, triples, board order) and plays fast. Everything left out is listed
@@ -400,3 +409,88 @@ Combat, End of Turn effects, Cleave, Stealth, Poisonous, Mega-Windfury,
 trinkets, quests, Dark Gifts, the Deity, the other 8 types, type bans, the
 real card pool, the turn timer. They come back in later
 versions, roughly in the order in `CLAUDETODO.md`.
+
+# Part 3: the five-tribe lobby
+
+The game the bot learns now. Everything in Part 1 applies, with the
+choices below fixed. Where Part 1 says **(check)**, the engine uses the
+value in `rules.toml`.
+
+## The pool
+
+- Five tribes: Beast, Mech, Dragon, Murloc, Demon. Every real solo-pool
+  minion of those tribes, plus neutrals, tiers 1 to 6. A card with two
+  tribes is in if either is.
+- Spells: every solo-pool Tavern spell, minus the ones the card data ties
+  to a tribe outside the five (`battlegroundsAssociatedRaces`).
+- Out because they need systems this game doesn't have: Dark Paradox
+  (Dark Gifts), Armor Stash (armor), Energizing Chamber (the Deity),
+  Unmasked Identity (hero powers). No Duos-only cards.
+- That is 130 minions and 50 spells, about a real lobby's density. The
+  list is built from Blizzard's card data, see `docs/ENGINE.md`.
+- Generated cards that belong to these tribes are in too, though never in
+  the pool: Chromadrakes, Demon Fodder, Fishbait, Satellites, Beetles and
+  so on.
+- Spells have no limited pool. (Assumption; I haven't checked it.)
+- Some groups share one pool slot: the three Volumizers are one slot and a
+  drawn one gets a random color. (The Bounty spells do the same in the
+  real game; they're Pirate cards, not in this lobby.)
+
+## Rules beyond Part 1
+
+**Shop.** One spell slot on top of the minion slots, at every tier. It
+rolls and freezes with the minions. Spells go to hand and are cast from
+there; a spell with no legal target can't be cast.
+
+**Magnetic.** A Magnetic Mech played directly to the left of a Mech on the
+board merges into it: the host gets its stats, keywords and effects. That
+counts as playing a Mech. Effects that attach straight onto a Mech
+(Glambot's Satellite, Resourceful Robot) are a Magnetization but not a
+play. Nesting works all the way down: a Magnetic carrying Magnetics brings
+all of them, every effect keeps working, and the Magnetization count adds
+up for Utility Drone. A merged pool copy is consumed and doesn't return to
+the pool.
+
+**Activate.** A minion with `Activate (N)` can be used any number of times
+a turn for N gold each.
+
+**Consuming.** A minion that consumes a Tavern minion gains its stats
+(some also its Bonus Keywords). The consumed copy goes back to the pool.
+
+**Bonus Keywords** are Taunt, Divine Shield, Windfury, Venomous, Reborn
+and Stealth. "Gain a random Bonus Keyword" picks one the minion doesn't
+have yet.
+
+**Stealth** is never ignored. A Stealth minion can't be attacked until it
+attacks. A side facing only Stealth minions loses its turn and the other
+side attacks; if neither can attack, the fight is a tie. Only side damage
+(Cleave, Wildfire Elemental) reaches Stealth.
+
+**Hero health as a resource.**
+- Health costs (Malchezaar's Refreshes, spells bought with Health) can't
+  kill: they're only payable if the hero stays above 0, unless a rewind
+  (Soul Rewinder, Ashen Corruptor) is on the board.
+- Damage from effects (Wrath Weaver, Imposing Percussionist) can kill.
+  The hero finishes the turn and is knocked out after the fights.
+- Damage counts before a rewind gives it back, so "after your hero takes
+  damage" effects and counters like Eredar Escapist still fire.
+
+**Golden cards** follow their real golden card text.
+
+**Pairing, damage, ending** as in Part 2: shuffle and avoid the last
+opponent, ghost for an odd count, damage is tier plus surviving minions'
+tiers with the cap from `rules.toml`, game ends with one player left or at
+turn 40.
+
+## Actions
+
+Buy a minion or the spell, sell, play (minion to a position, or cast a
+spell), pick a target on the board, pick a Tavern minion, choose an option
+(Discover, Choose One), move, Activate, roll, freeze, level, end turn. One
+flat list with a legality mask from the engine; `crates/bgcore/src/action.rs`
+has the layout. A turn is capped at 60 actions.
+
+## Not in this game yet
+
+Hero choice and hero powers, armor, trinkets, quests, Dark Gifts, the
+Deity, the other five tribes, tribe bans per lobby, Duos.

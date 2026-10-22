@@ -279,7 +279,7 @@ fn start_of_combat_humming_bird_and_boom_in_a_box() {
     // Humming Bird gives friendly Beasts +1 Attack (golden +2) for the combat,
     // including Beasts summoned later.
     let a = board(&db, &["Buzzing Vermin", "Humming Bird"]);
-    let mut b = board(&db, &["Zoatroid"]);
+    let mut b = board(&db, &["Microbot"]);
     b[0].attack = 1;
     b[0].health = 20;
     let mut log = Log { db: Some(db.clone()), ..Default::default() };
@@ -304,7 +304,7 @@ fn start_of_combat_humming_bird_and_boom_in_a_box() {
 fn rally_flittering_bat_and_headhunter_gryphon() {
     let db = s2_db();
     let bat = db.make(db.by_name("Flittering Bat").unwrap(), true);
-    let mut dummy = db.make(db.by_name("Zoatroid").unwrap(), false);
+    let mut dummy = db.make(db.by_name("Microbot").unwrap(), false);
     dummy.attack = 0;
     dummy.health = 5;
     let mut log = Log { db: Some(db.clone()), ..Default::default() };
@@ -318,7 +318,7 @@ fn rally_flittering_bat_and_headhunter_gryphon() {
     // Headhunter Gryphon gives a random Beast on attack (golden gives 2)
     let gryphon = db.make(db.by_name("Headhunter Gryphon").unwrap(), false);
     let gold_gryphon = db.make(db.by_name("Headhunter Gryphon").unwrap(), true);
-    let mut target = db.make(db.by_name("Zoatroid").unwrap(), false);
+    let mut target = db.make(db.by_name("Microbot").unwrap(), false);
     target.attack = 100;
     target.health = 1;
     let out1 = fight(&db, &[gryphon], &[target], 500, &mut Rng::new(7));
@@ -328,44 +328,36 @@ fn rally_flittering_bat_and_headhunter_gryphon() {
 }
 
 #[test]
-fn beast_summon_scaling_pack_leader_mama_bear_banana_slamma() {
+fn beast_summon_scaling_leviathan_banana_slamma() {
     let db = s2_db();
     let vermin = db.make(db.by_name("Buzzing Vermin").unwrap(), false);
-    let pack = db.make(db.by_name("Pack Leader").unwrap(), false);
-    let mama = db.make(db.by_name("Mama Bear").unwrap(), false);
+    let leviathan = db.make(db.by_name("Lurking Leviathan").unwrap(), false);
     let slamma = db.make(db.by_name("Banana Slamma").unwrap(), false);
     let gold_slamma = db.make(db.by_name("Banana Slamma").unwrap(), true);
-    let mut wall = db.make(db.by_name("Zoatroid").unwrap(), false);
+    let mut wall = db.make(db.by_name("Microbot").unwrap(), false);
     wall.attack = 10;
     wall.health = 100;
 
-    // Beetle (2/2) + Pack Leader (+2/+0) + Mama Bear (+4/+4) = 8/6,
-    // then Banana Slamma doubles Attack to 16/6.
+    // Beetle (2/2) + Lurking Leviathan (+3 Attack) = 5/2, then Banana Slamma
+    // doubles Attack to 10/2.
     let mut log = Log { db: Some(db.clone()), ..Default::default() };
-    fight_watched(&db, &[vermin, pack, mama, slamma], &[wall], 500, &mut Rng::new(1), &mut log);
-    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (16, 6));
+    fight_watched(&db, &[vermin, leviathan, slamma], &[wall], 500, &mut Rng::new(1), &mut log);
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (10, 2));
 
-    // With golden Banana Slamma in place of plain, 8/6 triples Attack to 24/6.
+    // With golden Banana Slamma in place of plain, 5/2 triples Attack to 15/2.
     let mut log2 = Log { db: Some(db.clone()), ..Default::default() };
-    fight_watched(&db, &[vermin, pack, mama, gold_slamma], &[wall], 500, &mut Rng::new(1), &mut log2);
-    assert_eq!((log2.summons[0].2.attack, log2.summons[0].2.health), (24, 6));
+    fight_watched(&db, &[vermin, leviathan, gold_slamma], &[wall], 500, &mut Rng::new(1), &mut log2);
+    assert_eq!((log2.summons[0].2.attack, log2.summons[0].2.health), (15, 2));
 }
 
 #[test]
-fn rat_pack_sewer_lord_and_titus_rivendare() {
+fn titus_rivendare_and_sewer_lord() {
     let db = s2_db();
-    let mut rat_pack = db.make(db.by_name("Rat Pack").unwrap(), false);
-    rat_pack.attack = 4;
     let titus = db.make(db.by_name("Titus Rivendare").unwrap(), false);
     let gold_titus = db.make(db.by_name("Titus Rivendare").unwrap(), true);
-    let mut killer = db.make(db.by_name("Zoatroid").unwrap(), false);
+    let mut killer = db.make(db.by_name("Microbot").unwrap(), false);
     killer.attack = 10;
     killer.health = 100;
-
-    // Rat Pack with 4 Attack summons 4 Rats.
-    let mut log = Log { db: Some(db.clone()), ..Default::default() };
-    fight_watched(&db, &[rat_pack], &[killer], 500, &mut Rng::new(1), &mut log);
-    assert_eq!(log.summons.len(), 4);
 
     // Buzzing Vermin (1 Beetle) with plain Titus summons 2 Beetles; with golden Titus, 3 Beetles.
     let vermin = db.make(db.by_name("Buzzing Vermin").unwrap(), false);
@@ -377,13 +369,13 @@ fn rat_pack_sewer_lord_and_titus_rivendare() {
     fight_watched(&db, &[vermin, gold_titus], &[killer], 500, &mut Rng::new(1), &mut log_t2);
     assert_eq!(log_t2.summons.len(), 3);
 
-    // Sewer Lord summons 2 Sewer Rats, each of which summons a 2/3 Turtle with Taunt.
+    // Sewer Lord summons 2 Sewer Rats, each of which summons a 2/3 Half-Shell with Taunt.
     let sewer_lord = db.make(db.by_name("Sewer Lord").unwrap(), false);
     let mut log_sl = Log { db: Some(db.clone()), ..Default::default() };
     fight_watched(&db, &[sewer_lord], &[killer], 500, &mut Rng::new(1), &mut log_sl);
     let spawned: Vec<String> =
         log_sl.summons.iter().map(|s| db.get(s.2.card).name.clone()).collect();
-    assert_eq!(spawned, ["Sewer Rat", "Sewer Rat", "Turtle", "Turtle"]);
+    assert_eq!(spawned, ["Sewer Rat", "Sewer Rat", "Half-Shell", "Half-Shell"]);
 }
 
 #[test]
@@ -395,7 +387,7 @@ fn turquoise_skitterer_and_ravaging_scorpid_buff_beetles_in_combat() {
     let mut skitterer = db.make(db.by_name("Turquoise Skitterer").unwrap(), false);
     skitterer.keywords.set(Keywords::TAUNT);
     let beetle = db.make(db.by_name("Beetle").unwrap(), false);
-    let mut killer = db.make(db.by_name("Zoatroid").unwrap(), false);
+    let mut killer = db.make(db.by_name("Microbot").unwrap(), false);
     killer.attack = 5;
     killer.health = 5;
     let mut log = Log { db: Some(db.clone()), ..Default::default() };
@@ -421,7 +413,7 @@ fn rescue_bot_and_combat_spells_in_fight() {
     // Rescue Bot gives 1 Repair Job on death (golden gives 2).
     let rescue = db.make(db.by_name("Rescue Bot").unwrap(), false);
     let gold_rescue = db.make(db.by_name("Rescue Bot").unwrap(), true);
-    let mut killer = db.make(db.by_name("Zoatroid").unwrap(), false);
+    let mut killer = db.make(db.by_name("Microbot").unwrap(), false);
     killer.attack = 10;
     killer.health = 10;
     let out1 = fight(&db, &[rescue], &[killer], 500, &mut Rng::new(1));
@@ -430,9 +422,10 @@ fn rescue_bot_and_combat_spells_in_fight() {
     assert_eq!(out2.sides[0].cards_gained(), &[repair_job, repair_job]);
 
     // Brood of Nozdormu doubles left-most minion's Attack; Upper Hand sets enemy Health to 1.
-    let mut a = db.make(db.by_name("Zoatroid").unwrap(), false); // 3/2 -> 6/2 with Brood
+    let mut a = db.make(db.by_name("Microbot").unwrap(), false); // 3/10 -> 6/10 with Brood
+    a.attack = 3;
     a.health = 10;
-    let mut b = db.make(db.by_name("Zoatroid").unwrap(), false);
+    let mut b = db.make(db.by_name("Microbot").unwrap(), false);
     b.attack = 5;
     b.health = 100; // set to 1 by Upper Hand
     let c0 = Counters { brood_of_nozdormu: 1, upper_hand: 1, ..Default::default() };

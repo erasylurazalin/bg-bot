@@ -534,7 +534,7 @@ fn volumizer_bonus_reaches_hand_shop_and_host_with_volumizers() {
     assert_eq!(g.players[0].volumizer_bonus, (4, 4));
 
     // Put a Red Volumizer in the shop and a Blue Volumizer in hand, and another Green Volumizer to play.
-    set_shop(&mut g, 0, &["Red Volumizer", "Zoatroid", "Zoatroid"]);
+    set_shop(&mut g, 0, &["Red Volumizer", "Cord Puller", "Cord Puller"]);
     g.give(0, "Blue Volumizer").unwrap();
     g.give(0, "Green Volumizer").unwrap();
 
@@ -605,7 +605,7 @@ fn beetle_bonus_from_forest_rover_and_ravaging_scorpid() {
     // with the +2/+1 bonus, Vermin (1/1) + Beetle (4/3) kills a 2/4 minion and survives at 4/1.
     let db = &g.data.cards;
     let vermin = db.make(db.by_name("Buzzing Vermin").unwrap(), false);
-    let mut enemy = db.make(db.by_name("Zoatroid").unwrap(), false);
+    let mut enemy = db.make(db.by_name("Microbot").unwrap(), false);
     enemy.attack = 2;
     enemy.health = 4;
     let out_plain = bgcore::fight_with(
@@ -652,7 +652,7 @@ fn lurking_leviathan_improvement_survives_fight_and_goldrinn_buff_does_not() {
     // Give Goldrinn Taunt so the enemy kills both Vermin and Goldrinn.
     g.players[0].board[1].keywords.set(Keywords::TAUNT);
 
-    put_on_board(&mut g, q, "Mama Bear");
+    put_on_board(&mut g, q, "Turquoise Skitterer");
     g.players[q].board[0].attack = 10;
     g.players[q].board[0].health = 20;
 
@@ -676,9 +676,9 @@ fn lurking_leviathan_improvement_survives_fight_and_goldrinn_buff_does_not() {
 fn brann_and_drakkari_multiply_triggers_including_golden() {
     let mut g = s2_game(106);
     put_on_board(&mut g, 0, "Brann Bronzebeard");
-    g.give(0, "Southsea Busker").unwrap();
+    g.give(0, "Forest Rover").unwrap(); // +2/+1 for the Beetles, twice with Brann
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
-    assert_eq!(g.players[0].gold_next_turn, 2);
+    assert_eq!(g.players[0].beetle_bonus, (4, 2));
 
     // Golden Brann triggers Battlecries 3 times.
     // Take 2 more Branns from the pool so the golden Brann holds 3 pool copies.
@@ -689,7 +689,7 @@ fn brann_and_drakkari_multiply_triggers_including_golden() {
 
     g.give(0, "Forest Rover").unwrap(); // +2/+1 per trigger
     act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
-    assert_eq!(g.players[0].beetle_bonus, (6, 3));
+    assert_eq!(g.players[0].beetle_bonus, (4 + 6, 2 + 3));
 
     // Drakkari triggers end of turn twice, golden three times.
     put_on_board(&mut g, 0, "Lullabot"); // slot 3: 2/2, +1 HP at end of turn
@@ -738,16 +738,15 @@ fn sprightly_scarab_choose_one_and_patient_scout_discover() {
 }
 
 #[test]
-fn zoatroid_blue_shell_accord_o_tron_and_auto_reveille() {
+fn generated_token_blue_shell_accord_o_tron_and_auto_reveille() {
     let mut g = s2_game(108);
-    // Zoatroid gives a 0/2 Tentacle with Taunt when sold.
-    put_on_board(&mut g, 0, "Zoatroid");
-    act(&mut g, 0, Action::Sell(0));
-    assert_eq!(g.players[0].hand.len(), 1);
-    assert_eq!(name(&g, &g.players[0].hand[0]), "Tentacle");
+    // A generated token has no pool copy: selling it does not change the pool.
+    g.give(0, "Microbot").unwrap();
     assert_eq!(g.players[0].hand[0].pool_copies, 0);
+    let pool_before = g.pool.clone();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    act(&mut g, 0, Action::Sell(0)); // selling the generated Tentacle does not change the pool
+    act(&mut g, 0, Action::Sell(0));
+    assert_eq!(g.pool, pool_before);
 
     // Accord-o-Tron gives +1 Gold at start of turn (even when Magnetized into a host).
     put_on_board(&mut g, 0, "Cord Puller");
@@ -767,7 +766,7 @@ fn zoatroid_blue_shell_accord_o_tron_and_auto_reveille() {
     // Auto Reveille triggers after buying 3 cards.
     put_on_board(&mut g, 0, "Auto Reveille");
     g.players[0].gold = 20;
-    set_shop(&mut g, 0, &["Buzzing Vermin", "Flittering Bat", "Zoatroid"]);
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Flittering Bat", "Cord Puller"]);
     act(&mut g, 0, Action::Buy(0));
     act(&mut g, 0, Action::Buy(0));
     assert_eq!(g.players[0].board[1].magnetizations, 0);
@@ -800,7 +799,7 @@ fn pool_invariants_hold_through_merges_generated_cards_and_sells() {
 }
 
 #[test]
-fn spell_shop_slot_buy_hold_cast_freeze_roll_and_ominous_seer() {
+fn spell_shop_slot_buy_hold_cast_freeze_roll_and_discount() {
     let mut g = s2_game(200);
     // Every player starts with a Tier 1 spell in shop_spell.
     let sp0 = g.players[0].shop_spell.unwrap();
@@ -812,9 +811,8 @@ fn spell_shop_slot_buy_hold_cast_freeze_roll_and_ominous_seer() {
     g.players[0].shop_spell = Some(sprout);
     assert_eq!(g.players[0].spell_cost(&g.data.cards), Some(3));
 
-    // Play Ominous Seer: next Tavern spell costs 1 less (3 -> 2).
-    g.give(0, "Ominous Seer").unwrap();
-    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    // A discount makes the next Tavern spell cost 1 less (3 -> 2).
+    g.players[0].spell_discount = 1;
     assert_eq!(g.players[0].spell_cost(&g.data.cards), Some(2));
 
     // Buy the spell: costs 2 gold (3 -> 1), clears shop_spell and discount, puts spell in hand.
@@ -836,8 +834,7 @@ fn spell_shop_slot_buy_hold_cast_freeze_roll_and_ominous_seer() {
     next_turn(&mut g);
     assert_eq!(g.players[0].shop_spell, Some(frozen_spell));
 
-    // Sell Ominous Seer so the board is empty: a targeted spell in hand cannot be cast.
-    act(&mut g, 0, Action::Sell(0));
+    // With the board empty, a targeted spell in hand cannot be cast.
     assert!(g.players[0].board.is_empty());
     g.players[0].hand.clear();
     g.give(0, "Tavern Dish Banana").unwrap();
@@ -878,7 +875,7 @@ fn gold_spells_delayed_spells_and_strike_oil_cap() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
 
     // Overconfidence (+3 gold on win, +1 on tie) and Winner's Bread (+2/+3 now, +4/+6 next turn on win).
-    put_on_board(&mut g, 0, "Mama Bear"); // 5/5 at slot 0, guaranteed to win turn 1
+    put_on_board(&mut g, 0, "Turquoise Skitterer"); // 5/5 at slot 0, guaranteed to win turn 1
     let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
     g.players[q as usize].board.clear();
 
@@ -932,10 +929,10 @@ fn stat_spells_choose_one_and_discover_get_spells() {
     assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (12, 19));
 
     // Them Apples buffs shop minions (+1/+2).
-    set_shop(&mut g, 0, &["Zoatroid"]); // 3/2 in shop
+    set_shop(&mut g, 0, &["Cord Puller"]); // 1/1 in shop
     g.give(0, "Them Apples").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    assert_eq!((g.players[0].shop[0].attack, g.players[0].shop[0].health), (4, 4));
+    assert_eq!((g.players[0].shop[0].attack, g.players[0].shop[0].health), (2, 3));
 
     // Natural Blessing buffs all minions on board that share a tribe with the target (+2/+1).
     put_on_board(&mut g, 0, "Flittering Bat"); // Beast 1/4 at slot 2
@@ -1045,7 +1042,7 @@ fn boon_of_beetles_keeps_unused_charges_across_combats() {
     // Give player 0 six minions so there is room for only 1 Beetle at Start of Combat,
     // and the enemy has an empty board so none of player 0's minions die.
     for _ in 0..6 {
-        put_on_board(&mut g, 0, "Zoatroid");
+        put_on_board(&mut g, 0, "Cord Puller");
     }
     let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
     g.players[q as usize].board.clear();
@@ -1128,13 +1125,12 @@ fn spell_stat_bonuses_botanist_humongozz_and_magnetized_enchanted_sentinel() {
 }
 
 #[test]
-fn czarina_harbinger_banana_dispenser_groundskeeper_and_rescue_bot() {
+fn czarina_harbinger_groundskeeper_and_rescue_bot() {
     let mut g = s2_game(206);
     put_on_board(&mut g, 0, "Charging Czarina"); // slot 0: 4/1 Divine Shield
     put_on_board(&mut g, 0, "Cord Puller"); // slot 1: 1/1 Divine Shield
     put_on_board(&mut g, 0, "Balinda Stonehearth"); // slot 2: 6/6 (no Divine Shield)
     put_on_board(&mut g, 0, "Cataclysmic Harbinger"); // slot 3: copies last spell at end of turn
-    put_on_board(&mut g, 0, "Banana Dispenser"); // slot 4: gives 3 Bananas at end of turn
 
     // Cast Fortify on Balinda at slot 2:
     // - Balinda makes it cast twice.
@@ -1146,13 +1142,10 @@ fn czarina_harbinger_banana_dispenser_groundskeeper_and_rescue_bot() {
     assert_eq!(g.players[0].board[1].attack, 1 + 8);
     assert_eq!(g.players[0].board[2].attack, 6); // Balinda has no Divine Shield
 
-    // End player 0's turn: Harbinger gives 1 copy of Fortify, Banana Dispenser gives 3 Tavern Dish Bananas.
+    // End player 0's turn: Harbinger gives 1 copy of Fortify.
     act(&mut g, 0, Action::EndTurn);
     let hand_names: Vec<String> = g.players[0].hand.iter().map(|m| name(&g, m)).collect();
-    assert_eq!(
-        hand_names,
-        ["Fortify", "Tavern Dish Banana", "Tavern Dish Banana", "Tavern Dish Banana"]
-    );
+    assert_eq!(hand_names, ["Fortify"]);
 
     // Iron Groundskeeper gives 2 copies of Fortify when played; Rescue Bot gives a Repair Job when it dies in combat.
     let mut g2 = s2_game(207);
@@ -1163,7 +1156,7 @@ fn czarina_harbinger_banana_dispenser_groundskeeper_and_rescue_bot() {
     assert!(g2.players[0].hand.iter().all(|m| name(&g2, m) == "Fortify"));
 
     let Some(Opponent::Player(q)) = g2.players[0].opponent else { panic!() };
-    put_on_board(&mut g2, q as usize, "Mama Bear");
+    put_on_board(&mut g2, q as usize, "Turquoise Skitterer");
     next_turn(&mut g2);
     assert!(g2.players[0].hand.iter().any(|m| name(&g2, m) == "Repair Job"));
     g2.check_invariants().unwrap();
@@ -1198,10 +1191,10 @@ fn stage2_observation_spells_magnetizations_and_scalars() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     act(&mut g, 0, Action::Target(0));
 
-    // Give a spell (Repair Job, tier 3) and a generated token (Tentacle) to player 0's hand.
+    // Give a spell (Repair Job, tier 3) and a generated token (Microbot) to player 0's hand.
     let repair_id = g.data.cards.by_name("Repair Job").unwrap();
     g.give(0, "Repair Job").unwrap();
-    g.give(0, "Tentacle").unwrap();
+    g.give(0, "Microbot").unwrap();
 
     // Set some additional player state scalars.
     g.players[0].beetle_bonus = (4, 5);
@@ -1268,11 +1261,12 @@ fn stage2_observation_spells_magnetizations_and_scalars() {
         assert_eq!(hand0[idx], 0.0, "spell stat field {idx} should be 0");
     }
 
-    // Check generated token in hand (hand slot 1 is Tentacle: from_pool == 0, neutral == 1).
+    // Check generated token in hand (hand slot 1 is Microbot: from_pool == 0, a Mech).
     let hand1 = &out[HAND_START + SLOT_FEATURES..HAND_START + 2 * SLOT_FEATURES];
     assert_eq!(hand1[SLOT_PRESENT], 1.0);
     assert_eq!(hand1[SLOT_IS_SPELL], 0.0);
-    assert_eq!(hand1[SLOT_NEUTRAL], 1.0);
+    assert_eq!(hand1[SLOT_MECH], 1.0);
+    assert_eq!(hand1[SLOT_NEUTRAL], 0.0);
     assert_eq!(hand1[SLOT_FROM_POOL], 0.0);
 
     // Check board slot 0 (Cord Puller with Red Volumizer + Snapper Satellite + Winner's Bread).
@@ -1351,7 +1345,7 @@ fn standard_and_rush_bots_follow_curves_and_play_whole_games() {
         for pl in &g.players {
             assert!((1..=8).contains(&pl.placement));
             assert_eq!(pl.tier_turns[0], 1);
-            assert!(pl.final_tribes.iter().sum::<u8>() as usize <= bgcore::BOARD);
+            assert!(pl.final_tribes.iter().all(|&n| n as usize <= bgcore::BOARD));
         }
     }
 }

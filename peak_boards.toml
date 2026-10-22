@@ -4,14 +4,14 @@
 
 [[board]]
 name = "beast_summon"
-justification = "Turn 15 summon spam with golden Sewer Lord and golden Banana Slamma, backed by Lurking Leviathan (24 stacks from four combats of token waves), Pack Leader and Titus Rivendare."
+justification = "Turn 15 summon spam with golden Sewer Lord and golden Banana Slamma, backed by Lurking Leviathan (24 stacks from four combats of token waves), Wolf Pup and Titus Rivendare."
 beetle_bonus = [0, 0]
 volumizer_bonus = [0, 0]
 minions = [
     { name = "Sewer Lord", golden = true, buff = [12, 16], keywords = ["taunt", "reborn"] },
     { name = "Sewer Lord", buff = [8, 12], keywords = ["taunt", "reborn"] },
-    { name = "Rat Pack", buff = [14, 10], keywords = ["reborn"] },
-    { name = "Pack Leader", buff = [10, 14] },
+    { name = "Cage Gnawer", buff = [14, 10], keywords = ["reborn"] },
+    { name = "Wolf Pup", buff = [10, 14] },
     { name = "Lurking Leviathan", buff = [16, 22], improvements = 24 },
     { name = "Banana Slamma", golden = true, buff = [14, 20] },
     { name = "Titus Rivendare", buff = [14, 22] },
@@ -19,14 +19,14 @@ minions = [
 
 [[board]]
 name = "beast_beetles"
-justification = "Turn 15 Beetle board with +85/+85 accumulated Beetle bonus from early Rovers/Tenders plus four combats of golden Turquoise Skitterer, Ravaging Scorpid and Titus, with two Boon of Beetles charges."
+justification = "Turn 15 Beetle board with +85/+85 accumulated Beetle bonus from early Rovers/Hyenas plus four combats of golden Turquoise Skitterer, Ravaging Scorpid and Titus, with two Boon of Beetles charges."
 beetle_bonus = [85, 85]
 volumizer_bonus = [0, 0]
 boon_of_beetles = 4
 minions = [
     { name = "Turquoise Skitterer", golden = true, buff = [12, 16], keywords = ["taunt", "reborn"] },
     { name = "Turquoise Skitterer", buff = [8, 12], keywords = ["taunt", "reborn"] },
-    { name = "Scarab Tender", buff = [8, 10], keywords = ["reborn"] },
+    { name = "Hoarding Hyena", buff = [8, 10], keywords = ["reborn"] },
     { name = "Ravaging Scorpid", golden = true, buff = [18, 22], keywords = ["reborn"] },
     { name = "Ravaging Scorpid", buff = [12, 14] },
     { name = "Banana Slamma", buff = [12, 18] },
@@ -49,14 +49,14 @@ minions = [
 
 [[board]]
 name = "mech_satellite"
-justification = "Turn 15 Satellite spam board where Banana Dispenser, Balinda and golden Glambot attached 36 Satellites (4/4 each) over four turns while golden Utility Drone scaled each magnetized Mech at end of turn."
+justification = "Turn 15 Satellite spam board where Gearfin, Balinda and golden Glambot attached 36 Satellites (4/4 each) over four turns while golden Utility Drone scaled each magnetized Mech at end of turn."
 beetle_bonus = [0, 0]
 volumizer_bonus = [0, 0]
 minions = [
     { name = "Glambot", golden = true, buff = [210, 245], magnetizations = 14, keywords = ["divine_shield", "taunt", "windfury"], attached = [{ name = "Cord Puller" }] },
     { name = "Charging Czarina", buff = [185, 195], magnetizations = 11, keywords = ["divine_shield"] },
     { name = "Utility Drone", golden = true, buff = [135, 160], magnetizations = 8, keywords = ["divine_shield"] },
-    { name = "Banana Dispenser", buff = [95, 115], magnetizations = 6, keywords = ["divine_shield", "taunt"] },
+    { name = "Gearfin", buff = [95, 115], magnetizations = 6, keywords = ["divine_shield", "taunt"] },
     { name = "Enchanted Sentinel", buff = [65, 80], magnetizations = 4 },
     { name = "Balinda Stonehearth", buff = [24, 28] },
 ]

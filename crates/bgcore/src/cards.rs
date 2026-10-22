@@ -3,6 +3,28 @@ use serde::Deserialize;
 use crate::minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
 use crate::rng::Rng;
 
+/// A per-player count that an "improve your future ..." effect raises and
+/// scales by. Each variant is one slot in `Counters::improve`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Counter {
+    TastyLobster,
+}
+
+pub const N_COUNTERS: usize = 1;
+
+impl Counter {
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+fn counter(name: &str) -> Result<Counter, String> {
+    match name {
+        "tasty_lobster" => Ok(Counter::TastyLobster),
+        other => Err(format!("unknown counter {other:?}")),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tribe {
     Beast,
@@ -71,8 +93,10 @@ pub enum ConsumeBy {
 /// triggers, "after your hero takes damage" and some end of turn effects run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
-    /// Summon `count` copies of a token where the minion stood.
-    Summon { card: CardId, count: u8 },
+    /// Summon `count` copies of a card (a token or a pool minion) next to the
+    /// minion. A golden minion summons `count` golden copies, or, with
+    /// `golden_doubles_count`, twice as many plain ones. Fights only.
+    Summon { card: CardId, count: u8, golden_doubles_count: bool },
     /// Buff one other friendly minion the player picks. `per_keyword` is
     /// added once more for each different Bonus Keyword in the warband.
     BuffChosen {
@@ -84,8 +108,35 @@ pub enum Effect {
     },
     /// Buff every other friendly minion.
     BuffOthers { tribe: Option<Tribe>, attack: i32, health: i32, per_keyword: (i32, i32) },
+    /// Buff every friendly minion, the one with the effect included.
+    BuffAll { tribe: Option<Tribe>, attack: i32, health: i32 },
     /// Buff the minion itself.
     BuffSelf { attack: i32, health: i32 },
+    /// Buff a random friendly minion (of a tribe, if given). With `improve`
+    /// set the buff is multiplied by 1 plus the player's count for that
+    /// counter, and the count then goes up by one ("Improve your future ...").
+    BuffRandomFriendly { tribe: Option<Tribe>, attack: i32, health: i32, improve: Option<Counter> },
+    /// Buff the minion that killed the one with the effect (Fishbait).
+    BuffKiller { attack: i32, health: i32 },
+    /// The minion gains a keyword.
+    GainKeyword { keyword: u8 },
+    /// Get a random pool minion of a tribe.
+    GetRandomMinion { tribe: Tribe },
+    /// Get `count` random Tavern spells that cost `cost`.
+    GetRandomSpell { cost: u8, count: u8 },
+    /// Summon `count` random pool minions that have a Deathrattle. Fights only.
+    SummonRandomDeathrattle { count: u8 },
+    /// Trigger your left-most Deathrattle `times` times. Fights only.
+    TriggerDeathrattle { times: u8 },
+    /// Pick a Tavern card, replace it with a Fishbait and have your left-most
+    /// Beast attack it.
+    ReplaceWithFishbait { card: CardId },
+    /// Refresh the Tavern for free, put a Fishbait in the left-most slot of it and
+    /// have your left-most Beast attack it.
+    RefreshWithFishbait { card: CardId },
+    /// The next Magnetization to this minion this turn happens `n` extra
+    /// times.
+    ExtraMagnetization(u8),
     /// The minion gains a random Bonus Keyword it doesn't have.
     RandomKeyword,
     /// A minion consumes minions from the Tavern and gains their stats, and
@@ -119,9 +170,39 @@ impl Effect {
         matches!(
             self,
             Effect::BuffChosen { .. }
+                | Effect::ReplaceWithFishbait { .. }
                 | Effect::Consume { by: ConsumeBy::Chosen(_), .. }
                 | Effect::Consume { pick: ConsumePick::Chosen, .. }
         )
+    }
+}
+
+impl Effect {
+    /// Whether a fight can run this effect: Rally, "whenever a friendly minion
+    /// attacks", Deathrattle, Avenge and damage milestone effects must be.
+    pub fn runs_in_fights(self) -> bool {
+        match self {
+            Effect::BuffOthers { per_keyword, .. } => per_keyword == (0, 0),
+            Effect::Summon { .. }
+            | Effect::BuffAll { .. }
+            | Effect::BuffSelf { .. }
+            | Effect::BuffRandomFriendly { .. }
+            | Effect::BuffKiller { .. }
+            | Effect::GainKeyword { .. }
+            | Effect::GetRandomMinion { .. }
+            | Effect::SummonRandomDeathrattle { .. }
+            | Effect::TriggerDeathrattle { .. }
+            | Effect::BeetleBuff { .. }
+            | Effect::RandomVolumizer
+            | Effect::GetCard { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Whether the effect picks one of the player's Tavern cards, so it can
+    /// only be activated while there is one.
+    pub fn needs_shop_slot(self) -> bool {
+        matches!(self, Effect::ReplaceWithFishbait { .. })
     }
 }
 
@@ -204,6 +285,8 @@ pub enum SpellEffect {
     BoonOfBeetles(u8),
     BroodOfNozdormu,
     UpperHand,
+    /// Make a random minion in the Tavern golden.
+    GoldenTouch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -244,6 +327,8 @@ pub enum Deathrattle {
         card: CardId,
         count: u8,
     },
+    /// Any effect a fight can run.
+    Effect(Effect),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,10 +354,37 @@ pub enum StartOfCombat {
     DamageAllOthers(i32),
 }
 
+/// Which attacking minions an attack trigger reacts to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AttackFilter {
+    /// Only attackers of this tribe.
+    pub tribe: Option<Tribe>,
+    /// Only attackers with a Rally effect.
+    pub rally: bool,
+}
+
+/// "Whenever" or "after a friendly minion attacks" (of a kind): run the
+/// effect for the minion that has it. Any effect a fight can run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Rally {
-    Summon { card: CardId, count: u8, golden_doubles_count: bool },
-    RandomMinion(Tribe),
+pub struct AttackTrigger {
+    pub filter: AttackFilter,
+    pub effect: Effect,
+}
+
+/// "Avenge (N)": after every N friendly minions die in a fight, run the
+/// effect. The count starts at 0 in every fight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Avenge {
+    pub every: u8,
+    pub effect: Effect,
+}
+
+/// "Once this deals N damage, ...": the damage dealt so far lives in the
+/// minion's `improvements`, and the effect runs once, when it passes `total`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DamageMilestone {
+    pub total: u16,
+    pub effect: Effect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -302,13 +414,9 @@ pub enum OnCastSpell {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AfterFriendlyAttack {
-    BeetleBuff { attack: i32, health: i32 },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnSell {
     GetCard { card: CardId, count: u8 },
+    Effect(Effect),
     DiscoverByTier,
     GoldIfLost(u8),
 }
@@ -319,6 +427,8 @@ pub enum Aura {
     Titus,
     Drakkari,
     Balinda,
+    /// Has Taunt while it has Divine Shield.
+    TauntWhileShielded,
 }
 
 #[derive(Clone, Debug)]
@@ -346,13 +456,21 @@ pub struct Card {
     pub start_of_turn: Option<StartOfTurn>,
     pub end_of_turn: Option<EndOfTurn>,
     pub start_of_combat: Option<StartOfCombat>,
-    pub rally: Option<Rally>,
+    pub rally: Option<Effect>,
     pub on_summon_beast: Option<OnSummonBeast>,
     pub on_play_mech: Option<OnPlayMech>,
     pub on_play_or_magnetize_mech: Option<OnPlayOrMagnetizeMech>,
     pub on_cast_spell_on_mech: Option<OnCastSpellOnMech>,
     pub on_cast_spell: Option<OnCastSpell>,
-    pub after_friendly_attack: Option<AfterFriendlyAttack>,
+    pub whenever_friendly_attacks: Option<AttackTrigger>,
+    pub after_friendly_attacks: Option<AttackTrigger>,
+    pub avenge: Option<Avenge>,
+    pub damage_milestone: Option<DamageMilestone>,
+    /// Gets this much for every Deathrattle its owner has triggered this
+    /// game, wherever it is.
+    pub buff_per_deathrattle: Option<(i32, i32)>,
+    /// Tavern buffs don't change its stats.
+    pub fixed_stats: bool,
     pub activate: Option<Activate>,
     pub on_event: Option<EventTrigger>,
     /// Effects that run in order after your hero takes damage.
@@ -412,7 +530,10 @@ impl Card {
             || self.on_play_or_magnetize_mech.is_some()
             || self.on_cast_spell_on_mech.is_some()
             || self.on_cast_spell.is_some()
-            || self.after_friendly_attack.is_some()
+            || self.whenever_friendly_attacks.is_some()
+            || self.after_friendly_attacks.is_some()
+            || self.avenge.is_some()
+            || self.damage_milestone.is_some()
             || self.activate.is_some()
             || self.on_event.is_some()
             || !self.after_hero_damage.is_empty()
@@ -466,13 +587,19 @@ struct RawCard {
     start_of_turn: Option<RawStartOfTurn>,
     end_of_turn: Option<RawEndOfTurn>,
     start_of_combat: Option<RawStartOfCombat>,
-    rally: Option<RawRally>,
+    rally: Option<RawEffect>,
     on_summon_beast: Option<RawOnSummonBeast>,
     on_play_mech: Option<RawOnPlayMech>,
     on_play_or_magnetize_mech: Option<RawBuff>,
     on_cast_spell_on_mech: Option<RawOnCastSpellOnMech>,
     on_cast_spell: Option<RawOnCastSpell>,
-    after_friendly_attack: Option<RawBeetleBuff>,
+    whenever_friendly_attack: Option<RawAttackTrigger>,
+    after_friendly_attack: Option<RawAttackTrigger>,
+    avenge: Option<RawAvenge>,
+    damage_milestone: Option<RawMilestone>,
+    buff_per_deathrattle: Option<[i32; 2]>,
+    #[serde(default)]
+    fixed_stats: bool,
     activate: Option<RawActivate>,
     on_event: Option<RawOnEvent>,
     #[serde(default)]
@@ -516,6 +643,7 @@ struct RawSpellEffect {
     discover: Option<String>,
     boon_of_beetles: Option<u8>,
     start_of_combat: Option<String>,
+    golden_touch: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -550,6 +678,29 @@ struct RawEffect {
     spell_discount: Option<u8>,
     get: Option<String>,
     count: Option<u8>,
+    /// Summon a card (token or pool minion) next to the minion.
+    summon: Option<String>,
+    #[serde(default)]
+    golden_doubles_count: bool,
+    /// Get a random pool minion of this tribe.
+    random_minion: Option<String>,
+    /// Name of the counter this buff scales by and then improves.
+    improve_counter: Option<String>,
+    /// Buff the minion that killed this one.
+    buff_killer: Option<[i32; 2]>,
+    gain_keyword: Option<String>,
+    /// Get `count` random Tavern spells with this cost.
+    random_spell_cost: Option<u8>,
+    summon_random_deathrattle: Option<u8>,
+    #[serde(default)]
+    trigger_deathrattle: bool,
+    /// Pick a Tavern card to replace with this card, for the left-most Beast
+    /// to attack.
+    replace_with: Option<String>,
+    /// Refresh the Tavern with this card in it, for the left-most Beast to
+    /// attack.
+    refresh_with: Option<String>,
+    extra_magnetization: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -573,6 +724,7 @@ struct RawDeathrattle {
     combat_beast_buff: Option<[i32; 2]>,
     random_volumizer: Option<bool>,
     get: Option<String>,
+    effect: Option<RawEffect>,
 }
 
 #[derive(Deserialize)]
@@ -603,12 +755,27 @@ struct RawStartOfCombat {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawRally {
-    summon: Option<String>,
-    count: Option<u8>,
+struct RawAttackTrigger {
+    /// Only attackers of this tribe.
+    attacker_tribe: Option<String>,
+    /// Only attackers with a Rally effect.
     #[serde(default)]
-    golden_doubles_count: bool,
-    random_minion: Option<String>,
+    attacker_rally: bool,
+    effect: RawEffect,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAvenge {
+    every: u8,
+    effect: RawEffect,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMilestone {
+    total: u16,
+    effect: RawEffect,
 }
 
 #[derive(Deserialize)]
@@ -647,12 +814,6 @@ struct RawBuff {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawBeetleBuff {
-    beetle_buff: [i32; 2],
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawActivate {
     cost: u8,
     effect: RawEffect,
@@ -674,6 +835,7 @@ struct RawOnSell {
     count: Option<u8>,
     discover_by_tier: Option<bool>,
     gold_if_lost: Option<u8>,
+    effect: Option<RawEffect>,
 }
 
 fn tribe(s: &str) -> Result<Tribe, String> {
@@ -819,6 +981,8 @@ fn parse_spell_effect(
                 SpellEffect::RandomTierMinion(t)
             } else if let Some(d) = &e.discover {
                 SpellEffect::Discover(parse_discover(d)?)
+            } else if e.golden_touch == Some(true) {
+                SpellEffect::GoldenTouch
             } else if let Some(b) = e.boon_of_beetles {
                 SpellEffect::BoonOfBeetles(b)
             } else if let Some(soc) = &e.start_of_combat {
@@ -877,6 +1041,18 @@ impl CardDb {
             Ok(id as CardId)
         };
 
+        // any minion, pool card or token, to summon
+        let minion_id = |name: &str| -> Result<CardId, String> {
+            let id = names
+                .iter()
+                .position(|n| n == name)
+                .ok_or_else(|| format!("unknown card {name:?}"))?;
+            if id >= all_minions.len() {
+                return Err(format!("{name} is a spell, not a minion"));
+            }
+            Ok(id as CardId)
+        };
+
         let mut cards = Vec::with_capacity(total_cards);
         let mut volumizers = Vec::new();
         let mut spells = Vec::with_capacity(raw.spell.len());
@@ -897,8 +1073,37 @@ impl CardDb {
                     },
                     Some("others") => Effect::BuffOthers { tribe: t, attack, health, per_keyword },
                     Some("self") => Effect::BuffSelf { attack, health },
+                    Some("all") => Effect::BuffAll { tribe: t, attack, health },
+                    Some("random") => {
+                        let improve = b.improve_counter.as_deref().map(counter).transpose()?;
+                        Effect::BuffRandomFriendly { tribe: t, attack, health, improve }
+                    }
                     other => return Err(format!("battlecry target {other:?}")),
                 }
+            } else if let Some([attack, health]) = b.buff_killer {
+                Effect::BuffKiller { attack, health }
+            } else if let Some(name) = &b.summon {
+                Effect::Summon {
+                    card: minion_id(name)?,
+                    count: b.count.unwrap_or(1),
+                    golden_doubles_count: b.golden_doubles_count,
+                }
+            } else if let Some(name) = &b.random_minion {
+                Effect::GetRandomMinion { tribe: tribe(name)? }
+            } else if let Some(k) = &b.gain_keyword {
+                Effect::GainKeyword { keyword: keyword_bit(k)? }
+            } else if let Some(cost) = b.random_spell_cost {
+                Effect::GetRandomSpell { cost, count: b.count.unwrap_or(1) }
+            } else if let Some(n) = b.summon_random_deathrattle {
+                Effect::SummonRandomDeathrattle { count: n }
+            } else if b.trigger_deathrattle {
+                Effect::TriggerDeathrattle { times: b.count.unwrap_or(1) }
+            } else if let Some(name) = &b.replace_with {
+                Effect::ReplaceWithFishbait { card: token_id(name)? }
+            } else if let Some(name) = &b.refresh_with {
+                Effect::RefreshWithFishbait { card: token_id(name)? }
+            } else if let Some(n) = b.extra_magnetization {
+                Effect::ExtraMagnetization(n)
             } else if b.random_keyword {
                 Effect::RandomKeyword
             } else if let Some(how) = &b.consume {
@@ -1041,6 +1246,12 @@ impl CardDb {
                 } else if let Some(name) = &d.get {
                     let card = generated_id(name).map_err(&err)?;
                     Deathrattle::GetCard { card, count: d.count.unwrap_or(1) }
+                } else if let Some(e) = &d.effect {
+                    let effect = parse_effect(e).map_err(&err)?;
+                    if !effect.runs_in_fights() {
+                        return Err(err("this deathrattle effect can't run in a fight".into()));
+                    }
+                    Deathrattle::Effect(effect)
                 } else {
                     return Err(err("invalid deathrattle".into()));
                 }),
@@ -1085,19 +1296,45 @@ impl CardDb {
                 }),
             };
 
-            let rally = match &c.rally {
+            let fight_effect = |e: &RawEffect, what: &str| -> Result<Effect, String> {
+                let effect = parse_effect(e).map_err(&err)?;
+                if !effect.runs_in_fights() {
+                    return Err(err(format!("this {what} effect can't run in a fight")));
+                }
+                Ok(effect)
+            };
+
+            let rally = c.rally.as_ref().map(|e| fight_effect(e, "rally")).transpose()?;
+
+            let attack_trigger = |t: &RawAttackTrigger, what: &str| -> Result<AttackTrigger, String> {
+                Ok(AttackTrigger {
+                    filter: AttackFilter {
+                        tribe: t.attacker_tribe.as_deref().map(tribe).transpose().map_err(&err)?,
+                        rally: t.attacker_rally,
+                    },
+                    effect: fight_effect(&t.effect, what)?,
+                })
+            };
+            let whenever_friendly_attacks = c
+                .whenever_friendly_attack
+                .as_ref()
+                .map(|t| attack_trigger(t, "attack trigger"))
+                .transpose()?;
+            let after_friendly_attacks = c
+                .after_friendly_attack
+                .as_ref()
+                .map(|t| attack_trigger(t, "attack trigger"))
+                .transpose()?;
+            let avenge = match &c.avenge {
                 None => None,
-                Some(r) => Some(if let Some(name) = &r.summon {
-                    let card = token_id(name).map_err(&err)?;
-                    Rally::Summon {
-                        card,
-                        count: r.count.unwrap_or(1),
-                        golden_doubles_count: r.golden_doubles_count,
-                    }
-                } else if let Some(t) = &r.random_minion {
-                    Rally::RandomMinion(tribe(t).map_err(&err)?)
-                } else {
-                    return Err(err("invalid rally".into()));
+                Some(a) if a.every == 0 => return Err(err("avenge every must be at least 1".into())),
+                Some(a) => Some(Avenge { every: a.every, effect: fight_effect(&a.effect, "avenge")? }),
+            };
+            let damage_milestone = match &c.damage_milestone {
+                None => None,
+                Some(m) => Some(DamageMilestone {
+                    total: m.total,
+                    effect: fight_effect(&m.effect, "damage milestone")?,
                 }),
             };
 
@@ -1148,13 +1385,6 @@ impl CardDb {
                 }
             });
 
-            let after_friendly_attack = c.after_friendly_attack.as_ref().map(|b| {
-                AfterFriendlyAttack::BeetleBuff {
-                    attack: b.beetle_buff[0],
-                    health: b.beetle_buff[1],
-                }
-            });
-
             let on_sell = match &c.on_sell {
                 None => None,
                 Some(s) => Some(if let Some(name) = &s.get {
@@ -1164,6 +1394,8 @@ impl CardDb {
                     OnSell::DiscoverByTier
                 } else if let Some(g) = s.gold_if_lost {
                     OnSell::GoldIfLost(g)
+                } else if let Some(e) = &s.effect {
+                    OnSell::Effect(parse_effect(e).map_err(&err)?)
                 } else {
                     return Err(err("invalid on_sell".into()));
                 }),
@@ -1175,6 +1407,7 @@ impl CardDb {
                 Some("titus") => Some(Aura::Titus),
                 Some("drakkari") => Some(Aura::Drakkari),
                 Some("balinda") => Some(Aura::Balinda),
+                Some("taunt_while_shielded") => Some(Aura::TauntWhileShielded),
                 Some(other) => return Err(err(format!("unknown aura {other:?}"))),
             };
 
@@ -1205,7 +1438,12 @@ impl CardDb {
                 on_play_or_magnetize_mech,
                 on_cast_spell_on_mech,
                 on_cast_spell,
-                after_friendly_attack,
+                whenever_friendly_attacks,
+                after_friendly_attacks,
+                avenge,
+                damage_milestone,
+                buff_per_deathrattle: c.buff_per_deathrattle.map(|[a, h]| (a, h)),
+                fixed_stats: c.fixed_stats,
                 activate,
                 on_event,
                 after_hero_damage,
@@ -1271,7 +1509,12 @@ impl CardDb {
                 on_play_or_magnetize_mech: None,
                 on_cast_spell_on_mech: None,
                 on_cast_spell: None,
-                after_friendly_attack: None,
+                whenever_friendly_attacks: None,
+                after_friendly_attacks: None,
+                avenge: None,
+                damage_milestone: None,
+                buff_per_deathrattle: None,
+                fixed_stats: false,
                 activate: None,
                 on_event: None,
                 after_hero_damage: Vec::new(),
@@ -1295,11 +1538,8 @@ impl CardDb {
             return Some(i as CardId);
         }
         let alt = match name {
-            "Goldrinn, the Great Wolf" | "Goldrinn" => "Goldrinn the Great Wolf",
-            "Half-Shell" => "Turtle",
-            "Aberrant Tentacle" => "Tentacle",
+            "Goldrinn the Great Wolf" | "Goldrinn" => "Goldrinn, the Great Wolf",
             "Beast" => "Foraging Bat",
-            "Rats" => "Rat",
             _ => return None,
         };
         self.cards.iter().position(|c| c.name == alt).map(|i| i as CardId)
@@ -1326,6 +1566,30 @@ impl CardDb {
             .filter(|&c| self.cards[c].tribes.has(tribe))
             .nth(k)
             .map(|c| c as CardId)
+    }
+
+    /// A random pool minion that has a Deathrattle, of Tier `max_tier` or
+    /// lower (0 means any Tier).
+    pub fn random_deathrattle_minion(&self, max_tier: u8, rng: &mut Rng) -> Option<CardId> {
+        let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
+        let ok = |c: usize| self.cards[c].deathrattle.is_some() && self.cards[c].tier <= max_tier;
+        let count = (0..self.pool_cards).filter(|&c| ok(c)).count() as u32;
+        if count == 0 {
+            return None;
+        }
+        let k = rng.below(count) as usize;
+        (0..self.pool_cards).filter(|&c| ok(c)).nth(k).map(|c| c as CardId)
+    }
+
+    /// A random spell that costs `cost`, of any Tier.
+    pub fn random_spell_of_cost(&self, cost: u8, rng: &mut Rng) -> Option<CardId> {
+        let ok = |id: CardId| self.cards[id as usize].cost == cost;
+        let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
+        if count == 0 {
+            return None;
+        }
+        let k = rng.below(count) as usize;
+        self.spells.iter().copied().filter(|&id| ok(id)).nth(k)
     }
 
     /// A random pool minion sharing a tribe with `tribes`, other than `exclude`.
@@ -1405,6 +1669,7 @@ impl CardDb {
             magnetizations: 0,
             volumizers: u16::from(c.is_volumizer),
             improvements: 0,
+            extra_magnetize: 0,
             attached: [Attached::default(); MAX_ATTACHED],
             n_attached: 0,
         }

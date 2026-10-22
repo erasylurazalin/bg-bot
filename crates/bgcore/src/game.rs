@@ -10,6 +10,7 @@ use arrayvec::ArrayVec;
 
 use crate::action::{Action, N_ACTIONS};
 use crate::cards::{
+    N_COUNTERS,
     Aura, Card, CardDb, ChooseOption, ConsumeBy, ConsumePick, DiscoverKind, Effect, EndOfTurn,
     EventKind, OnCastSpell, OnCastSpellOnMech, OnPlayMech, OnPlayOrMagnetizeMech, OnSell,
     OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, Tribe,
@@ -69,11 +70,21 @@ pub struct PendingTarget {
 /// A chosen consume waiting for the player to pick the Tavern minion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PendingShopTarget {
-    /// Board slot of the minion that consumes.
+    /// Board slot of the minion whose effect it is.
     pub source: u8,
-    pub keywords: bool,
-    /// How many more Tavern minions it consumes.
-    pub remaining: u8,
+    pub kind: ShopTargetKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ShopTargetKind {
+    Consume {
+        keywords: bool,
+        /// How many more Tavern minions it consumes.
+        remaining: u8,
+    },
+    /// Replace the Tavern minion with this card (golden or not), then have the
+    /// left-most Beast attack it.
+    Fishbait { card: CardId, golden: bool },
 }
 
 /// A buff to Tavern minions that also reaches every minion that shows up in
@@ -140,6 +151,15 @@ pub struct Player {
     pub upper_hand: u8,
     pub volumizer_bonus: (i32, i32),
     pub beetle_bonus: (i32, i32),
+    /// How many times each "improve your future ..." effect has triggered
+    /// this game (Tasty Lobster).
+    pub improve: [u16; N_COUNTERS],
+    /// Beast bonus until next turn (Goldrinn triggered in the shop). Every
+    /// Beast on the board carries it in its stats and it comes off at the
+    /// start of the next turn.
+    pub beast_bonus: (i32, i32),
+    /// Deathrattles triggered this game, which Falling Sky Golem reads.
+    pub deathrattles_triggered: u32,
     pub spell_bonus: (i32, i32),
     pub spell_discount: u8,
     pub last_spell: Option<CardId>,
@@ -190,6 +210,9 @@ impl Player {
             upper_hand: 0,
             volumizer_bonus: (0, 0),
             beetle_bonus: (0, 0),
+            improve: [0; N_COUNTERS],
+            beast_bonus: (0, 0),
+            deathrattles_triggered: 0,
             spell_bonus: (0, 0),
             spell_discount: 0,
             last_spell: None,
@@ -345,9 +368,15 @@ impl Player {
             m.attack += self.volumizer_bonus.0 * m.volumizers as i32;
             m.health += self.volumizer_bonus.1 * m.volumizers as i32;
         }
-        if cards.get(id).is_beetle {
+        let c = cards.get(id);
+        if c.is_beetle {
             m.attack += self.beetle_bonus.0;
             m.health += self.beetle_bonus.1;
+        }
+        if let Some((a, h)) = c.buff_per_deathrattle {
+            let n = self.deathrattles_triggered as i32 * m.mul();
+            m.attack += a * n;
+            m.health += h * n;
         }
         m
     }
@@ -356,6 +385,10 @@ impl Player {
         Counters {
             beetle_attack: self.beetle_bonus.0,
             beetle_health: self.beetle_bonus.1,
+            improve: self.improve,
+            beast_attack: self.beast_bonus.0,
+            beast_health: self.beast_bonus.1,
+            tier: self.tier,
             boon_of_beetles: self.boon_of_beetles,
             brood_of_nozdormu: self.brood_of_nozdormu,
             upper_hand: self.upper_hand,
@@ -542,7 +575,9 @@ impl Game {
             Action::Sell(s) => (s as usize) < pl.board.len(),
             Action::Activate(s) => {
                 (s as usize) < pl.board.len()
-                    && self.activate_of(p, s as usize).is_some_and(|(act, _)| pl.gold >= act.cost)
+                    && self.activate_of(p, s as usize).is_some_and(|(act, _)| {
+                        pl.gold >= act.cost && (!act.effect.needs_shop_slot() || !pl.shop.is_empty())
+                    })
             }
             Action::Play { hand, pos } => {
                 let h = hand as usize;
@@ -719,6 +754,10 @@ impl Game {
                             }
                             self.maybe_start_discover(p);
                         }
+                        Some(OnSell::Effect(e)) => {
+                            let mut pos = 0;
+                            self.run_effect(p, &mut pos, e, golden, 1);
+                        }
                         Some(OnSell::GoldIfLost(_)) | None => {}
                     }
                 }
@@ -745,6 +784,12 @@ impl Game {
                 if is_merge {
                     self.magnetize_to(p, pos, m, true);
                 } else {
+                    let mut m = m;
+                    if self.data.cards.get(m.card).tribes.has(Tribe::Beast) {
+                        let (ba, bh) = self.players[p].beast_bonus;
+                        m.attack += ba;
+                        m.health += bh;
+                    }
                     self.players[p].board.insert(pos, m);
                     if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
                         let mul = if m.golden { 2 } else { 1 };
@@ -790,13 +835,7 @@ impl Game {
                     pl.gold -= rules.roll_cost;
                     gold_spent = rules.roll_cost;
                 }
-                pl.frozen = false;
-                let tier = pl.tier;
-                for m in pl.shop.drain(..) {
-                    give_back(pool, cards, &m);
-                }
-                pl.shop_spell = None;
-                Self::fill_shop(pl, pool, cards, rules.shop_size(tier), rng);
+                Self::refresh_shop(pl, pool, cards, rules, rng);
                 if health_paid > 0 {
                     self.take_hero_damage(p, health_paid);
                 }
@@ -815,6 +854,16 @@ impl Game {
             }
             Action::EndTurn => {}
         }
+    }
+
+    /// Throw the Tavern back and draw a new one. Unfreezes it.
+    fn refresh_shop(pl: &mut Player, pool: &mut [u8], cards: &CardDb, rules: &Rules, rng: &mut Rng) {
+        pl.frozen = false;
+        for m in pl.shop.drain(..) {
+            give_back(pool, cards, &m);
+        }
+        pl.shop_spell = None;
+        Self::fill_shop(pl, pool, cards, rules.shop_size(pl.tier), rng);
     }
 
     fn fill_shop(pl: &mut Player, pool: &mut [u8], cards: &CardDb, size: usize, rng: &mut Rng) {
@@ -865,14 +914,42 @@ impl Game {
     }
 
     fn add_beetle_bonus(&mut self, p: usize, da: i32, dh: i32) {
+        self.add_beetle_bonus_to(p, da, dh, true);
+    }
+
+    /// Give the player's Beetles +da/+dh this game; `board` says whether the
+    /// ones on the board get it too (a Tavern attack already gave it to them).
+    fn add_beetle_bonus_to(&mut self, p: usize, da: i32, dh: i32, board: bool) {
         let cards = &self.data.cards;
         let pl = &mut self.players[p];
         pl.beetle_bonus.0 += da;
         pl.beetle_bonus.1 += dh;
-        for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(&mut pl.board) {
+        let on_board = if board { &mut pl.board[..] } else { &mut [] };
+        for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(on_board) {
             if cards.get(m.card).is_beetle {
                 m.attack += da;
                 m.health += dh;
+            }
+        }
+    }
+
+    /// The player triggered `n` more Deathrattles: Falling Sky Golem and its
+    /// like grow, wherever they are.
+    fn add_deathrattles_triggered(&mut self, p: usize, n: u32, board: bool) {
+        if n == 0 {
+            return;
+        }
+        let cards = &self.data.cards;
+        let pl = &mut self.players[p];
+        pl.deathrattles_triggered = pl.deathrattles_triggered.saturating_add(n);
+        let on_board = if board { &mut pl.board[..] } else { &mut [] };
+        for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(on_board) {
+            for (card, golden) in m.parts().collect::<ArrayVec<_, { crate::MAX_ATTACHED + 1 }>>() {
+                if let Some((a, h)) = cards.get(card).buff_per_deathrattle {
+                    let k = n as i32 * if golden { 2 } else { 1 };
+                    m.attack += a * k;
+                    m.health += h * k;
+                }
             }
         }
     }
@@ -886,12 +963,22 @@ impl Game {
             let slot = cards.get(m.card).pool_slot as usize;
             self.consumed[slot] += m.pool_copies as u32;
         }
+        let extra = std::mem::take(&mut self.players[p].board[pos].extra_magnetize);
         self.players[p].board[pos].magnetize(cards, m);
         if let Some((da, dh)) = cards.get(m.card).volumizer_buff {
             let mul = if m.golden { 2 } else { 1 };
             self.add_volumizer_bonus(p, da * mul, dh * mul);
         }
         self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
+        // Drone Duplicator: the same Magnetization happens again, without
+        // taking another copy from the pool.
+        for _ in 0..extra {
+            if pos >= self.players[p].board.len() {
+                break;
+            }
+            self.players[p].board[pos].magnetize(&self.data.cards, m);
+            self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
+        }
     }
 
     fn trigger_mech_played_or_magnetized(
@@ -1140,6 +1227,20 @@ impl Game {
                 self.players[p].brood_of_nozdormu =
                     self.players[p].brood_of_nozdormu.saturating_add(1);
             }
+            SpellEffect::GoldenTouch => {
+                let cards = &self.data.cards;
+                let shop = &mut self.players[p].shop;
+                let ok = |m: &Minion| !m.golden && !cards.get(m.card).fixed_stats;
+                let n = shop.iter().filter(|m| ok(m)).count() as u32;
+                if n > 0 {
+                    let k = self.rng.below(n) as usize;
+                    let m = shop.iter_mut().filter(|m| ok(m)).nth(k).unwrap();
+                    let base = cards.get(m.card);
+                    m.golden = true;
+                    m.attack += base.attack;
+                    m.health += base.health;
+                }
+            }
             SpellEffect::UpperHand => {
                 self.players[p].upper_hand = self.players[p].upper_hand.saturating_add(1);
             }
@@ -1290,8 +1391,136 @@ impl Game {
                     self.give_generated_tracking(p, tok, pos);
                 }
             }
-            Effect::Summon { .. } => {}
+            Effect::BuffAll { tribe, attack, health } => {
+                let cards = &self.data.cards;
+                for _ in 0..runs {
+                    for o in &mut self.players[p].board {
+                        if cards.get(o.card).is(tribe) && !cards.get(o.card).fixed_stats {
+                            buff(o, attack * mul, health * mul);
+                        }
+                    }
+                }
+            }
+            Effect::BuffRandomFriendly { tribe, attack, health, improve } => {
+                for _ in 0..runs {
+                    let scale = improve.map_or(1, |c| 1 + self.players[p].improve[c.index()] as i32);
+                    let cards = &self.data.cards;
+                    let board = &mut self.players[p].board;
+                    let ok = |m: &Minion| cards.get(m.card).is(tribe) && !cards.get(m.card).fixed_stats;
+                    let n = board.iter().filter(|m| ok(m)).count() as u32;
+                    if n > 0 {
+                        let k = self.rng.below(n) as usize;
+                        let m = board.iter_mut().filter(|m| ok(m)).nth(k).unwrap();
+                        buff(m, attack * mul * scale, health * mul * scale);
+                    }
+                    if let Some(c) = improve {
+                        let n = &mut self.players[p].improve[c.index()];
+                        *n = n.saturating_add(1);
+                    }
+                }
+            }
+            Effect::GainKeyword { keyword } => {
+                if let Some(m) = self.players[p].board.get_mut(*pos) {
+                    m.keywords.set(keyword);
+                }
+            }
+            Effect::GetRandomMinion { tribe } => {
+                for _ in 0..mul * runs as i32 {
+                    if let Some(c) = self.data.cards.random_pool_minion(tribe, &mut self.rng) {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
+            Effect::GetRandomSpell { cost, count } => {
+                let total = count as i32 * mul * runs as i32;
+                for _ in 0..total {
+                    if let Some(c) = self.data.cards.random_spell_of_cost(cost, &mut self.rng) {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
+            Effect::ReplaceWithFishbait { card } => {
+                self.start_fishbait(p, *pos, card, golden);
+            }
+            Effect::RefreshWithFishbait { card } => {
+                for _ in 0..runs {
+                    self.refresh_with_fishbait(p, card, golden);
+                }
+            }
+            Effect::ExtraMagnetization(n) => {
+                if let Some(m) = self.players[p].board.get_mut(*pos) {
+                    let add = (n as i32 * mul) as u8 * runs;
+                    m.extra_magnetize = m.extra_magnetize.saturating_add(add);
+                }
+            }
+            // These only happen in fights.
+            Effect::Summon { .. }
+            | Effect::BuffKiller { .. }
+            | Effect::SummonRandomDeathrattle { .. }
+            | Effect::TriggerDeathrattle { .. } => {}
         }
+    }
+
+    /// Replace the Tavern card in `slot` with a Fishbait and have the
+    /// left-most Beast attack it.
+    fn put_fishbait(&mut self, p: usize, slot: usize, card: CardId, golden: bool) {
+        let Game { data, players, pool, .. } = self;
+        let pl = &mut players[p];
+        let old = std::mem::replace(&mut pl.shop[slot], data.cards.make(card, golden));
+        give_back(pool, &data.cards, &old);
+        self.tavern_attack(p, slot);
+    }
+
+    /// A Fishbait effect that picks the Tavern card: ask, unless there is
+    /// only one card.
+    fn start_fishbait(&mut self, p: usize, source: usize, card: CardId, golden: bool) {
+        match self.players[p].shop.len() {
+            0 => {}
+            1 => self.put_fishbait(p, 0, card, golden),
+            _ => {
+                self.players[p].pending_shop_target = Some(PendingShopTarget {
+                    source: source as u8,
+                    kind: ShopTargetKind::Fishbait { card, golden },
+                });
+            }
+        }
+    }
+
+    /// Refresh the Tavern for free with a Fishbait in its left-most slot.
+    fn refresh_with_fishbait(&mut self, p: usize, card: CardId, golden: bool) {
+        let Game { data, rng, players, pool, .. } = self;
+        Self::refresh_shop(&mut players[p], pool, &data.cards, &data.rules, rng);
+        if !players[p].shop.is_empty() {
+            self.put_fishbait(p, 0, card, golden);
+        }
+    }
+
+    /// The left-most Beast on the player's board attacks the Tavern minion in
+    /// `slot`. It dies, or stays if the Beast can't hurt it.
+    fn tavern_attack(&mut self, p: usize, slot: usize) {
+        let Game { data, rng, players, .. } = self;
+        let pl = &mut players[p];
+        let Some(ai) = pl.board.iter().position(|m| data.cards.get(m.card).tribes.has(Tribe::Beast))
+        else {
+            return;
+        };
+        let out = crate::fight::tavern_attack(
+            &data.cards,
+            &pl.board,
+            ai,
+            pl.shop[slot],
+            pl.counters(),
+            rng,
+        );
+        pl.board.clear();
+        pl.board.extend(out.board);
+        match out.target {
+            Some(t) => pl.shop[slot] = t,
+            None => {
+                pl.shop.remove(slot);
+            }
+        }
+        self.apply_side_outcome(p, &out.side, false);
     }
 
     /// Give the minion in board slot `pos` a random Bonus Keyword it doesn't
@@ -1324,8 +1553,7 @@ impl Game {
                 ConsumePick::Chosen => {
                     self.players[p].pending_shop_target = Some(PendingShopTarget {
                         source: pos as u8,
-                        keywords,
-                        remaining: left,
+                        kind: ShopTargetKind::Consume { keywords, remaining: left },
                     });
                     return;
                 }
@@ -1351,9 +1579,14 @@ impl Game {
 
     fn resolve_shop_target(&mut self, p: usize, slot: usize) {
         let pst = self.players[p].pending_shop_target.take().unwrap();
-        self.consume(p, pst.source as usize, slot, pst.keywords);
-        if pst.remaining > 1 {
-            self.start_consume(p, pst.source as usize, ConsumePick::Chosen, pst.keywords, pst.remaining - 1);
+        match pst.kind {
+            ShopTargetKind::Consume { keywords, remaining } => {
+                self.consume(p, pst.source as usize, slot, keywords);
+                if remaining > 1 {
+                    self.start_consume(p, pst.source as usize, ConsumePick::Chosen, keywords, remaining - 1);
+                }
+            }
+            ShopTargetKind::Fishbait { card, golden } => self.put_fishbait(p, slot, card, golden),
         }
         self.maybe_start_discover(p);
     }
@@ -1671,9 +1904,13 @@ impl Game {
         let base = pl.make_card(cards, card, false, 0);
         let mut gold = pl.make_card(cards, card, true, 0);
         let mut left = 3;
-        let mut take = |m: Minion| {
-            gold.attack += m.attack - base.attack;
-            gold.health += m.health - base.health;
+        // a Beast on the board carries the until-next-turn Beast bonus; the
+        // golden one in hand gets it when it is played, not twice
+        let board_bonus =
+            if cards.get(card).tribes.has(Tribe::Beast) { pl.beast_bonus } else { (0, 0) };
+        let mut take = |m: Minion, bonus: (i32, i32)| {
+            gold.attack += m.attack - bonus.0 - base.attack;
+            gold.health += m.health - bonus.1 - base.health;
             gold.keywords.0 |= m.keywords.0;
             gold.pool_copies = gold.pool_copies.saturating_add(m.pool_copies);
             gold.winners_bread = gold.winners_bread.saturating_add(m.winners_bread);
@@ -1687,13 +1924,13 @@ impl Game {
         };
         while left > 0 {
             if let Some(i) = pl.hand.iter().position(is_copy) {
-                take(pl.hand.remove(i));
+                take(pl.hand.remove(i), (0, 0));
             } else {
                 let i = pl.board.iter().position(is_copy).unwrap();
                 if i < *tracked_pos {
                     *tracked_pos -= 1;
                 }
-                take(pl.board.remove(i));
+                take(pl.board.remove(i), board_bonus);
             }
             left -= 1;
         }
@@ -1781,6 +2018,9 @@ impl Game {
             }
         }
         self.run_end_of_turn(p);
+        for m in &mut self.players[p].board {
+            m.extra_magnetize = 0;
+        }
         self.players[p].end_turn_tavern_buffs(&self.data.cards);
         self.players[p].done = true;
     }
@@ -1811,6 +2051,16 @@ impl Game {
             let (da, dh) = self.total_spell_bonus(p);
             let Game { data, rng, players, pool, .. } = self;
             let pl = &mut players[p];
+            // the Beast bonus lasts until now; it never kills a Beast
+            let (ba, bh) = std::mem::take(&mut pl.beast_bonus);
+            if (ba, bh) != (0, 0) {
+                for m in &mut pl.board {
+                    if data.cards.get(m.card).tribes.has(Tribe::Beast) {
+                        m.attack = (m.attack - ba).max(0);
+                        m.health = (m.health - bh).max(1);
+                    }
+                }
+            }
             if turn > 1 {
                 pl.upgrade_cost = pl.upgrade_cost.saturating_sub(1);
             }
@@ -1910,20 +2160,36 @@ impl Game {
         }
     }
 
-    fn apply_side_outcome(&mut self, p: usize, so: &SideOutcome) {
-        for (slot, &imp) in so.permanent_improvements.iter().enumerate() {
-            if imp > 0 && slot < self.players[p].board.len() {
-                self.players[p].board[slot].improvements =
-                    self.players[p].board[slot].improvements.saturating_add(imp);
+    /// Take what a fight (or a Tavern attack, with `after_fight` false)
+    /// leaves behind. After a Tavern attack the board is already up to date,
+    /// so only the hand and the Tavern take the bonuses.
+    fn apply_side_outcome(&mut self, p: usize, so: &SideOutcome, after_fight: bool) {
+        if after_fight {
+            for (slot, &imp) in so.permanent_improvements.iter().enumerate() {
+                if imp > 0 && slot < self.players[p].board.len() {
+                    self.players[p].board[slot].improvements =
+                        self.players[p].board[slot].improvements.saturating_add(imp);
+                }
             }
         }
         if so.beetle_attack_gain != 0 || so.beetle_health_gain != 0 {
-            self.add_beetle_bonus(p, so.beetle_attack_gain, so.beetle_health_gain);
+            self.add_beetle_bonus_to(p, so.beetle_attack_gain, so.beetle_health_gain, after_fight);
         }
-        self.players[p].boon_of_beetles =
-            self.players[p].boon_of_beetles.saturating_sub(so.boon_of_beetles_used);
-        self.players[p].brood_of_nozdormu = 0;
-        self.players[p].upper_hand = 0;
+        for (n, &g) in self.players[p].improve.iter_mut().zip(&so.improve_gain) {
+            *n = n.saturating_add(g);
+        }
+        if !after_fight {
+            let pl = &mut self.players[p];
+            pl.beast_bonus.0 += so.beast_bonus_gain.0;
+            pl.beast_bonus.1 += so.beast_bonus_gain.1;
+        }
+        self.add_deathrattles_triggered(p, so.deathrattles_triggered as u32, after_fight);
+        if after_fight {
+            self.players[p].boon_of_beetles =
+                self.players[p].boon_of_beetles.saturating_sub(so.boon_of_beetles_used);
+            self.players[p].brood_of_nozdormu = 0;
+            self.players[p].upper_hand = 0;
+        }
         for &c in so.cards_gained() {
             self.give_generated(p, c);
         }
@@ -1990,8 +2256,8 @@ impl Game {
                             self.players[q].won_last_combat = false;
                         }
                     }
-                    self.apply_side_outcome(p, &out.sides[0]);
-                    self.apply_side_outcome(q, &out.sides[1]);
+                    self.apply_side_outcome(p, &out.sides[0], true);
+                    self.apply_side_outcome(q, &out.sides[1], true);
                 }
                 Opponent::Ghost(g) => {
                     self.players[p].seen[g as usize] = Seen { board: them, tier, turn };
@@ -2010,7 +2276,7 @@ impl Game {
                             self.players[p].won_last_combat = false;
                         }
                     }
-                    self.apply_side_outcome(p, &out.sides[0]);
+                    self.apply_side_outcome(p, &out.sides[0], true);
                 }
             }
         }
@@ -2095,7 +2361,9 @@ impl Game {
                     held[slot] += 1;
                 }
             }
-            if pl.shop.iter().any(|m| m.golden || cards.get(m.card).tier > pl.tier) {
+            // generated cards (Fishbait) may be any Tier, a Golden Touch makes a
+            // minion in the Tavern golden
+            if pl.shop.iter().any(|m| !cards.get(m.card).token && cards.get(m.card).tier > pl.tier) {
                 return Err(format!("player {i}: shop has a card it shouldn't"));
             }
             if let Some(sp) = pl.shop_spell

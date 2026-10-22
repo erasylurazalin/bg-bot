@@ -583,7 +583,10 @@ fn consuming_twice_picks_twice() {
     play(&mut g, 0, "Test Eater Greedy");
     act(&mut g, 0, Action::TargetShop(0));
     assert!(g.players[0].pending_shop_target.is_some());
-    assert_eq!(g.players[0].pending_shop_target.unwrap().remaining, 1);
+    assert!(matches!(
+        g.players[0].pending_shop_target.unwrap().kind,
+        bgcore::game::ShopTargetKind::Consume { remaining: 1, .. }
+    ));
     act(&mut g, 0, Action::TargetShop(1));
     assert!(g.players[0].pending_shop_target.is_none());
     assert_eq!(stats(&g, 0, 0), (1 + 2 + 2, 1 + 2 + 2));

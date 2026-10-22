@@ -100,11 +100,20 @@ pub struct Minion {
     /// Snapper, Patient Scout tier offset, and the count of an event
     /// trigger, which `events_left` turns into the "(N left!)" number).
     pub improvements: u16,
+    /// Extra times the next Magnetization to this minion happens this turn
+    /// (Drone Duplicator). Used up by that Magnetization, cleared at the end
+    /// of the turn.
+    pub extra_magnetize: u8,
     pub attached: [Attached; MAX_ATTACHED],
     pub n_attached: u8,
 }
 
 impl Minion {
+    /// 2 for a golden minion, else 1: what its card's numbers are multiplied by.
+    pub fn mul(&self) -> i32 {
+        if self.golden { 2 } else { 1 }
+    }
+
     pub fn attached_slice(&self) -> &[Attached] {
         &self.attached[..self.n_attached as usize]
     }

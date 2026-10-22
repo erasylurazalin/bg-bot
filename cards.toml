@@ -1,4 +1,6 @@
-# Stage 2 minion and spell pool (see docs/CONCEPT.md).
+# The Beast and Mech minions of the 5-tribe lobby (ref/lobby5.tsv), the neutral
+# minions and the spells so far. Later runs add the other tribes and finish
+# the neutrals and spells.
 
 # --- Tier 1 ---
 
@@ -33,27 +35,6 @@ stats = [2, 2]
 keywords = ["magnetic"]
 end_of_turn = { buff_self = [0, 1] }
 
-[[minion]]
-name = "Zoatroid"
-tier = 1
-tribe = "neutral"
-stats = [3, 2]
-on_sell = { get = "Tentacle", count = 1 }
-
-[[minion]]
-name = "Southsea Busker"
-tier = 1
-tribe = "neutral"
-stats = [3, 1]
-battlecry = { gold_next_turn = 1 }
-
-[[minion]]
-name = "Ominous Seer"
-tier = 1
-tribe = "neutral"
-stats = [2, 1]
-battlecry = { spell_discount = 1 }
-
 # --- Tier 2 ---
 
 [[minion]]
@@ -70,6 +51,13 @@ tier = 2
 tribe = "beast"
 stats = [1, 4]
 start_of_combat = { combat_beast_buff = [1, 0] }
+
+[[minion]]
+name = "Lurking Lionfish"
+tier = 2
+tribe = "beast"
+stats = [3, 4]
+activate = { cost = 2, effect = { replace_with = "Fishbait" } }
 
 [[minion]]
 name = "Blue Volumizer"
@@ -133,19 +121,25 @@ choose_one = [
 ]
 
 [[minion]]
-name = "Rat Pack"
+name = "Tasty Lobster"
 tier = 3
 tribe = "beast"
-stats = [2, 2]
-deathrattle = { summon_by_attack = "Rat" }
+stats = [2, 1]
+deathrattle = { effect = { buff = [2, 1], target = "random", tribe = "beast", improve_counter = "tasty_lobster" } }
 
 [[minion]]
-name = "Scarab Tender"
+name = "Wolf Pup"
 tier = 3
 tribe = "beast"
-stats = [3, 3]
-battlecry = { beetle_buff = [1, 2] }
-deathrattle = { summon = "Beetle", count = 1, golden_doubles_count = true }
+stats = [3, 6]
+rally = { buff = [4, 1], target = "others" }
+
+[[minion]]
+name = "Treasure Parrot"
+tier = 3
+tribe = "beast"
+stats = [5, 5]
+damage_milestone = { total = 35, effect = { get = "Golden Touch" } }
 
 [[minion]]
 name = "Accord-o-Tron"
@@ -163,12 +157,34 @@ stats = [3, 3]
 battlecry = { random_volumizer = true }
 
 [[minion]]
+name = "Annoy-o-Module"
+tier = 3
+tribe = "mech"
+stats = [2, 4]
+keywords = ["magnetic", "divine_shield", "taunt"]
+
+[[minion]]
+name = "Relentless Deflector"
+tier = 3
+tribe = "mech"
+stats = [5, 4]
+aura = "taunt_while_shielded"
+avenge = { every = 3, effect = { gain_keyword = "divine_shield" } }
+
+[[minion]]
 name = "Rescue Bot"
 tier = 3
 tribe = "mech"
 stats = [2, 1]
 keywords = ["taunt"]
 deathrattle = { get = "Repair Job", count = 1 }
+
+[[minion]]
+name = "Prosthetic Hand"
+tier = 3
+tribe = "mech"
+stats = [3, 1]
+keywords = ["magnetic", "reborn"]
 
 [[minion]]
 name = "Deadly Spore"
@@ -194,6 +210,13 @@ stats = [3, 6]
 on_summon_beast = { multiply_attack_in_combat = true }
 
 [[minion]]
+name = "Cage Gnawer"
+tier = 4
+tribe = "beast"
+stats = [2, 7]
+whenever_friendly_attack = { attacker_tribe = "beast", effect = { buff = [2, 1], target = "all", tribe = "beast" } }
+
+[[minion]]
 name = "Headhunter Gryphon"
 tier = 4
 tribe = "beast"
@@ -201,11 +224,18 @@ stats = [3, 5]
 rally = { random_minion = "beast" }
 
 [[minion]]
-name = "Pack Leader"
+name = "Hoarding Hyena"
 tier = 4
 tribe = "beast"
-stats = [3, 3]
-on_summon_beast = { buff = [2, 0] }
+stats = [4, 6]
+rally = { summon = "Tasty Lobster" }
+
+[[minion]]
+name = "Snarky Shark"
+tier = 4
+tribe = "beast"
+stats = [4, 5]
+on_sell = { effect = { refresh_with = "Fishbait" } }
 
 [[minion]]
 name = "Conveyor Construct"
@@ -213,6 +243,14 @@ tier = 4
 tribe = "mech"
 stats = [5, 2]
 deathrattle = { random_volumizer = true }
+
+[[minion]]
+name = "Drone Duplicator"
+tier = 4
+tribe = "mech"
+stats = [5, 2]
+keywords = ["divine_shield"]
+activate = { cost = 1, effect = { extra_magnetization = 1 } }
 
 [[minion]]
 name = "Enchanted Sentinel"
@@ -228,6 +266,13 @@ tier = 4
 tribe = "mech"
 stats = [4, 4]
 on_cast_spell_on_mech = { magnetize_satellite = "Satellite", stats = [4, 4] }
+
+[[minion]]
+name = "Gearfin"
+tier = 4
+tribes = ["mech", "murloc"]
+stats = [6, 5]
+end_of_turn = { effect = { random_spell_cost = 1, count = 2 } }
 
 [[minion]]
 name = "Boom-in-a-Box"
@@ -255,6 +300,13 @@ on_sell = { gold_if_lost = 5 }
 # --- Tier 5 ---
 
 [[minion]]
+name = "Ghastcoiler"
+tier = 5
+tribe = "beast"
+stats = [7, 7]
+deathrattle = { effect = { summon_random_deathrattle = 2 } }
+
+[[minion]]
 name = "Lurking Leviathan"
 tier = 5
 tribe = "beast"
@@ -262,7 +314,7 @@ stats = [3, 9]
 on_summon_beast = { buff = [3, 0], improve_permanently = true }
 
 [[minion]]
-name = "Goldrinn the Great Wolf"
+name = "Goldrinn, the Great Wolf"
 tier = 5
 tribe = "beast"
 stats = [7, 7]
@@ -305,13 +357,6 @@ keywords = ["divine_shield"]
 on_cast_spell = { buff_divine_shield = [4, 0] }
 
 [[minion]]
-name = "Banana Dispenser"
-tier = 5
-tribe = "mech"
-stats = [4, 6]
-end_of_turn = { get = "Tavern Dish Banana", count = 3 }
-
-[[minion]]
 name = "Brann Bronzebeard"
 tier = 5
 tribe = "neutral"
@@ -346,15 +391,15 @@ name = "Ravaging Scorpid"
 tier = 6
 tribe = "beast"
 stats = [6, 7]
-after_friendly_attack = { beetle_buff = [4, 4] }
+after_friendly_attack = { effect = { beetle_buff = [4, 4] } }
 deathrattle = { summon = "Beetle", count = 1, golden_doubles_count = true }
 
 [[minion]]
-name = "Mama Bear"
+name = "Deathstrider"
 tier = 6
 tribe = "beast"
-stats = [5, 5]
-on_summon_beast = { buff = [4, 4] }
+stats = [10, 11]
+after_friendly_attack = { attacker_rally = true, effect = { trigger_deathrattle = true } }
 
 [[minion]]
 name = "Auto Reveille"
@@ -362,6 +407,14 @@ tier = 6
 tribe = "mech"
 stats = [4, 8]
 on_event = { event = "cards_bought", every = 3, effect = { magnetize_volumizer = true } }
+
+[[minion]]
+name = "Falling Sky Golem"
+tier = 6
+tribe = "mech"
+stats = [4, 2]
+keywords = ["divine_shield"]
+buff_per_deathrattle = [4, 2]
 
 [[minion]]
 name = "Utility Drone"
@@ -393,24 +446,26 @@ tribe = "beast"
 stats = [1, 1]
 
 [[token]]
-name = "Rat"
-tier = 1
-tribe = "beast"
-stats = [1, 1]
-
-[[token]]
 name = "Sewer Rat"
 tier = 2
 tribe = "beast"
 stats = [3, 2]
-deathrattle = { summon = "Turtle", count = 1 }
+deathrattle = { summon = "Half-Shell", count = 1 }
 
 [[token]]
-name = "Turtle"
+name = "Half-Shell"
 tier = 1
 tribe = "beast"
 stats = [2, 3]
 keywords = ["taunt"]
+
+[[token]]
+name = "Fishbait"
+tier = 2
+tribe = "beast"
+stats = [0, 1]
+fixed_stats = true
+deathrattle = { effect = { buff_killer = [5, 5] } }
 
 [[token]]
 name = "Microbot"
@@ -424,13 +479,6 @@ tier = 1
 tribe = "mech"
 stats = [2, 3]
 keywords = ["magnetic"]
-
-[[token]]
-name = "Tentacle"
-tier = 1
-tribe = "neutral"
-stats = [0, 2]
-keywords = ["taunt"]
 
 # --- Spells: Tier 1 ---
 
@@ -603,6 +651,12 @@ name = "Upper Hand"
 tier = 5
 cost = 3
 effect = { start_of_combat = "enemy_health_to_1" }
+
+[[spell]]
+name = "Golden Touch"
+tier = 5
+cost = 5
+effect = { golden_touch = true }
 
 [[spell]]
 name = "Contracted Corpse"

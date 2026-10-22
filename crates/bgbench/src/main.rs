@@ -242,6 +242,7 @@ fn load_peak_boards(data: &Data) -> Vec<PeakBoard> {
                 boon_of_beetles: b.boon_of_beetles,
                 brood_of_nozdormu: b.brood_of_nozdormu,
                 upper_hand: b.upper_hand,
+                ..Counters::default()
             };
             let minions = b
                 .minions
