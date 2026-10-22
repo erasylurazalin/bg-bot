@@ -51,8 +51,9 @@ impl Rules {
                 .ok_or_else(|| format!("rules.toml: unknown bonus keyword {name:?}"))?;
             r.bonus_mask |= bit;
         }
-        if r.shop_sizes.iter().any(|&n| n as usize > crate::SHOP || n == 0) {
-            return Err(format!("rules.toml: shop sizes must be 1 to {}", crate::SHOP));
+        // A tavern's minion slots plus its spell slot must fit in the shop.
+        if r.shop_sizes.iter().any(|&n| n as usize + 1 > crate::SHOP || n == 0) {
+            return Err(format!("rules.toml: shop sizes must be 1 to {}", crate::SHOP - 1));
         }
         if r.damage_caps.windows(2).any(|w| w[0].through_turn >= w[1].through_turn) {
             return Err("rules.toml: damage_caps must be in turn order".into());

@@ -33,8 +33,8 @@
 //!   27 won_last_combat (1 if won last fight)
 //!   28 lost_last_combat (1 if lost last fight)
 //!   29 pending_choose_one (1 if a Choose One choice is waiting)
-//! - Own card slots (OWN_SLOTS = 27, each SLOT_FEATURES = 21 values):
-//!   shop minions (SHOP = 6), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
+//! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES = 21 values):
+//!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
 //!   board (BOARD = 7), Discover/Choose options (DISCOVER = 3).
 //! - 7 opponents, in seat order starting after me (each OPP_BLOCK values):
 //!   OPP_SCALARS (6) values (alive, health, tier, seen, turns_since, next),

@@ -471,9 +471,24 @@ side attacks; if neither can attack, the fight is a tie. Only side damage
   kill: they're only payable if the hero stays above 0, unless a rewind
   (Soul Rewinder, Ashen Corruptor) is on the board.
 - Damage from effects (Wrath Weaver, Imposing Percussionist) can kill.
-  The hero finishes the turn and is knocked out after the fights.
+  A hero at 0 or below after the damage reactions dies on the spot, in
+  the middle of its turn, and isn't paired for that turn's fights.
+- Paying Health is the hero taking damage: every "after your hero takes
+  damage" card reacts to it.
 - Damage counts before a rewind gives it back, so "after your hero takes
-  damage" effects and counters like Eredar Escapist still fire.
+  damage" effects and counters like Eredar Escapist still fire, and
+  Devout Hellcaller still grows from a Demon's damage that gets rewound.
+
+**Two kinds of Refresh.** The Tavern roll at the start of a turn is not a
+Refresh for card purposes. Only an explicit Refresh is (the button, paid
+with Gold, Health or free, and effects that say "Refresh" like Snarky
+Shark's). Fodders queued for "your next Refreshes" only go into explicit
+ones.
+
+**Demon Fodder** feeds itself to a random friendly Demon on the Refresh it
+appears in, and its slot refills with a minion (the spell slot too). With
+no Demon on board then, it never feeds: it's a plain 2/2 Demon you can
+buy or consume.
 
 **Golden cards** follow their real golden card text.
 

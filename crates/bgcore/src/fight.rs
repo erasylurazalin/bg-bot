@@ -101,12 +101,14 @@ impl SideOutcome {
         }
     }
 
-    /// Queue `count` upcoming Refreshes that each get `per` Fodders.
+    /// Queue `count` upcoming Refreshes that each get `per` Fodders. It
+    /// stacks: Refreshes already queued get these on top.
     fn push_fodder_refreshes(&mut self, per: u8, count: u32) {
-        for _ in 0..count {
-            let n = self.n_fodder_refreshes as usize;
-            if n < self.fodder_refreshes.len() {
-                self.fodder_refreshes[n] = per;
+        for i in 0..count as usize {
+            if i < self.n_fodder_refreshes as usize {
+                self.fodder_refreshes[i] = self.fodder_refreshes[i].saturating_add(per);
+            } else if i < self.fodder_refreshes.len() {
+                self.fodder_refreshes[i] = per;
                 self.n_fodder_refreshes += 1;
             }
         }
@@ -688,18 +690,22 @@ impl<'a> Side<'a> {
         }
     }
 
-    fn titus_extra(&self, db: &CardDb) -> u32 {
-        let mut extra = 0;
+    /// How many times one Deathrattle fires for this side: once, plus one
+    /// for each Titus Rivendare and two for a golden one. Every path that
+    /// fires a Deathrattle asks here, so a new way to repeat them (trinkets,
+    /// quest rewards) is added in this one place.
+    fn deathrattle_fires(&self, db: &CardDb) -> u32 {
+        let mut fires = 1;
         for f in &self.ms {
             if f.m.health > 0 {
                 for (card, golden) in f.m.parts() {
                     if db.get(card).aura == Some(Aura::Titus) {
-                        extra += if golden { 2 } else { 1 };
+                        fires += if golden { 2 } else { 1 };
                     }
                 }
             }
         }
-        extra
+        fires
     }
 
     /// Run one effect for the minion `fx.host`. `at` is where summons go
@@ -811,7 +817,7 @@ impl<'a> Side<'a> {
                         break;
                     };
                     let (m, host) = (self.ms[idx].m, self.ms[idx].uid);
-                    let runs = 1 + self.titus_extra(db);
+                    let runs = self.deathrattle_fires(db);
                     let n = self.fire_deathrattles(db, fx.side, &m, host, None, idx + 1, runs, uid, rng, w);
                     if idx < *at {
                         *at += n;
@@ -1060,7 +1066,7 @@ impl<'a> Side<'a> {
             let fm = self.remove(i);
             let dead = fm.m;
             w.death(side, i, &dead);
-            let runs = 1 + self.titus_extra(db);
+            let runs = self.deathrattle_fires(db);
             i += self.fire_deathrattles(db, side, &dead, fm.uid, fm.killer, i, runs, uid, rng, w);
             self.avenge_tick(db, side, uid, rng, w);
             if dead.keywords.has(Keywords::REBORN) {

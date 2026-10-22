@@ -866,17 +866,15 @@ fn damage_from_an_effect_can_kill() {
     play(&mut g, 0, "Test Pain");
     assert_eq!(g.players[0].health, 25);
     put_on_board(&mut g, 0, "Test Damage Counter");
-    let before = g.players[0].board[1];
     g.players[0].health = 3;
     play(&mut g, 0, "Test Pain");
-    // nothing stops it: the hero goes below 0 and the damage counts
+    // nothing stops it: the hero goes below 0 and dies on the spot, in the
+    // middle of its turn, taking the worst place still open
     assert_eq!(g.players[0].health, -2);
     assert_eq!(g.players[0].last_damage, 5);
-    assert_ne!(g.players[0].board[1], before);
-    // still in its turn; knocked out once the fights ran
-    assert!(g.players[0].alive);
-    next_turn(&mut g);
     assert!(!g.players[0].alive);
+    assert_eq!(g.players[0].placement, 8);
+    assert_ne!(g.current_player(), Some(0));
     g.check_invariants().unwrap();
 }
 

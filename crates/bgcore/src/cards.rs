@@ -672,8 +672,9 @@ pub struct Card {
     /// Stats this minion gains permanently when another friendly Demon deals
     /// damage in a fight (Devout Hellcaller).
     pub after_demon_damage: Option<(i32, i32)>,
-    /// A Demon Fodder: while in the Tavern it feeds itself to a random
-    /// friendly Demon and its slot is refilled (Demon Fodder).
+    /// A Demon Fodder: on the Refresh it appears in, it feeds itself to a
+    /// random friendly Demon and its slot is refilled, if the player has a
+    /// Demon then. Otherwise it waits in the Tavern as a plain 2/2 Demon.
     pub is_fodder: bool,
     /// Refreshes each turn that cost Health instead of Gold.
     pub health_refreshes: u8,

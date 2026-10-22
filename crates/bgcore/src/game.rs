@@ -132,8 +132,20 @@ pub enum DiscoverRequest {
     BattlecryMinion(u8),
     TribeMinion(Tribe),
     /// A Demon of Tier `max_tier` or lower; the pick damages the hero by its
-    /// Tier (Imposing Percussionist).
-    DemonMinion(u8),
+    /// Tier, dealt by the friendly minion in board slot `source` (Imposing
+    /// Percussionist).
+    DemonMinion { max_tier: u8, source: u8 },
+}
+
+/// Why the Tavern is filled. Only the player's own Refresh action (paid with
+/// Gold, Health or free) is a Refresh for card purposes, so only it takes
+/// queued Fodders. The automatic roll at the start of a turn and a card
+/// effect that says "Refresh" (Snarky Shark) leave the queue alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RefreshKind {
+    TurnStart,
+    Explicit,
+    Effect,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -194,9 +206,9 @@ pub struct Player {
     pub discover: ArrayVec<CardId, DISCOVER>,
     /// Queued Discover requests to offer once pending choices finish.
     pub discover_queue: ArrayVec<DiscoverRequest, 8>,
-    /// Whether the Discover waiting in `discover` makes the hero take damage
-    /// equal to the chosen card's Tier (Imposing Percussionist).
-    pub discover_damage: bool,
+    /// The board slot of the Demon whose Discover makes the hero take damage
+    /// equal to the chosen card's Tier (Imposing Percussionist), if any.
+    pub discover_damage_from: Option<u8>,
     /// Upcoming Refreshes and how many Fodders each one gets, oldest first
     /// (Laboratory Assistant, Trapped Clapper, Twisted Wrathguard).
     pub fodder_refreshes: ArrayVec<u8, 64>,
@@ -252,7 +264,7 @@ impl Player {
             pending_shop_target: None,
             discover: ArrayVec::new(),
             discover_queue: ArrayVec::new(),
-            discover_damage: false,
+            discover_damage_from: None,
             fodder_refreshes: ArrayVec::new(),
             actions: 0,
             done: false,
@@ -312,6 +324,37 @@ impl Player {
     /// between them.
     pub fn distinct_bonus_keywords(&self, mask: u8) -> u32 {
         (self.board.iter().fold(0, |acc, m| acc | m.keywords.0) & mask).count_ones()
+    }
+
+    /// Queue `per` Fodders for each of the next `count` Refreshes. It stacks:
+    /// a Refresh that already gets Fodders gets these on top.
+    fn add_fodder_refreshes(&mut self, per: u8, count: u32) {
+        for i in 0..count as usize {
+            if !self.add_fodder_to_refresh(i, per) {
+                break;
+            }
+        }
+    }
+
+    /// Add `per` Fodders to the Refresh `index` queues from now (0 is the
+    /// next one), filling any gap with a Refresh that gets none. Returns
+    /// false when the queue is full.
+    fn add_fodder_to_refresh(&mut self, index: usize, per: u8) -> bool {
+        if per == 0 {
+            return true;
+        }
+        while self.fodder_refreshes.len() < index {
+            if self.fodder_refreshes.try_push(0).is_err() {
+                return false;
+            }
+        }
+        match self.fodder_refreshes.get_mut(index) {
+            Some(n) => {
+                *n = n.saturating_add(per);
+                true
+            }
+            None => self.fodder_refreshes.try_push(per).is_ok(),
+        }
     }
 
     /// Take the Fodders the next Refresh gets, if any are queued.
@@ -773,11 +816,24 @@ impl Game {
         }
         let p = self.current_player().unwrap();
         self.apply(p, a);
-        self.check_attack_thresholds(p);
-        let pl = &mut self.players[p];
-        pl.actions += 1;
-        if a == Action::EndTurn || pl.actions >= self.data.rules.max_actions_per_turn {
-            self.finish_shop(p);
+        // A hero knocked out mid-action may still collect cards from effects
+        // that were running when it died.
+        for q in 0..PLAYERS {
+            self.settle_dead(q);
+        }
+        if self.over {
+            #[cfg(debug_assertions)]
+            self.check_invariants().unwrap();
+            return Ok(());
+        }
+        // A hero knocked out by its own effect damage takes no more actions.
+        if self.players[p].alive {
+            self.check_attack_thresholds(p);
+            let pl = &mut self.players[p];
+            pl.actions += 1;
+            if a == Action::EndTurn || pl.actions >= self.data.rules.max_actions_per_turn {
+                self.finish_shop(p);
+            }
         }
         self.advance();
         #[cfg(debug_assertions)]
@@ -877,11 +933,11 @@ impl Game {
                         m.health += bh;
                     }
                     self.players[p].board.insert(pos, m);
+                    let t = self.data.cards.get(m.card).tribes;
                     if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
                         let mul = if m.golden { 2 } else { 1 };
                         self.add_volumizer_bonus(p, da * mul, dh * mul);
                     }
-                    let t = self.data.cards.get(m.card).tribes;
                     if t.has(Tribe::Beast) {
                         self.trigger_summon_beast_in_shop(p, pos);
                     }
@@ -894,10 +950,6 @@ impl Game {
                         self.trigger_in_hand_on_play(p, Tribe::Murloc);
                     }
                     self.fire_after_play_tribe(p, t);
-                    if t.has(Tribe::Demon) {
-                        let Game { data, rng, players, pool, .. } = self;
-                        Self::feed_fodders(&mut players[p], pool, &data.cards, rng);
-                    }
                 }
                 if m.golden {
                     let tier = (self.players[p].tier + 1).min(MAX_TIER);
@@ -930,9 +982,10 @@ impl Game {
                     pl.gold -= rules.roll_cost;
                     gold_spent = rules.roll_cost;
                 }
-                Self::refresh_shop(pl, pool, cards, rules, rng);
+                Self::refresh_shop(pl, pool, cards, rules, rng, RefreshKind::Explicit);
                 if health_paid > 0 {
-                    self.take_hero_damage(p, health_paid);
+                    // A Health cost is not a Demon dealing damage.
+                    self.take_hero_damage(p, health_paid, None);
                 }
                 self.fire_event(p, EventKind::GoldSpent, gold_spent as u32);
             }
@@ -951,30 +1004,47 @@ impl Game {
         }
     }
 
-    /// Throw the Tavern back and draw a new one. Unfreezes it. This is a
-    /// Refresh, so it takes any Fodders queued for upcoming Refreshes.
-    fn refresh_shop(pl: &mut Player, pool: &mut [u8], cards: &CardDb, rules: &Rules, rng: &mut Rng) {
+    /// Throw the Tavern back and draw a new one. Unfreezes it. `kind` says
+    /// whether this is the player's own Refresh (which takes queued
+    /// Fodders) or an effect that merely refreshes the Tavern.
+    fn refresh_shop(
+        pl: &mut Player,
+        pool: &mut [u8],
+        cards: &CardDb,
+        rules: &Rules,
+        rng: &mut Rng,
+        kind: RefreshKind,
+    ) {
         pl.frozen = false;
         for m in pl.shop.drain(..) {
             give_back(pool, cards, &m);
         }
         pl.shop_spell = None;
-        let fodders = pl.take_fodder_for_refresh();
-        Self::fill_shop(pl, pool, cards, rules.shop_size(pl.tier), rng, fodders);
-        Self::feed_fodders(pl, pool, cards, rng);
+        Self::fill_shop(pl, pool, cards, rules.shop_size(pl.tier), rng, kind);
     }
 
-    /// Fill the Tavern up to `size`, with the first `fodders` slots holding
-    /// Demon Fodders (they take a normal slot, they are not extra).
+    /// Fill the Tavern: `size` minion slots and the spell slot. Only the
+    /// player's own Refresh takes Fodders queued for upcoming Refreshes; the
+    /// automatic roll at the start of a turn and an effect that refreshes
+    /// the Tavern leave the queue alone. The first `fodders` slots hold
+    /// Demon Fodders (they are not extra slots). A Fodder can also take the
+    /// spell slot, which then has no spell this Refresh; Fodders beyond all
+    /// slots are lost.
     fn fill_shop(
         pl: &mut Player,
         pool: &mut [u8],
         cards: &CardDb,
         size: usize,
         rng: &mut Rng,
-        fodders: u8,
+        kind: RefreshKind,
     ) {
-        let normal = size.saturating_sub(fodders as usize);
+        let fodders = match kind {
+            RefreshKind::Explicit => pl.take_fodder_for_refresh(),
+            RefreshKind::TurnStart | RefreshKind::Effect => 0,
+        };
+        let slots = size + 1;
+        let fodders = (fodders as usize).min(slots);
+        let normal = size.saturating_sub(fodders);
         while pl.shop.len() < normal {
             match draw(pool, cards, rng, 1, pl.tier, &[]) {
                 Some(c) => {
@@ -988,7 +1058,7 @@ impl Game {
         if let Some(tok) = cards.fodder_token {
             let mut made: ArrayVec<Minion, SHOP> = ArrayVec::new();
             for _ in 0..fodders {
-                if pl.shop.len() + made.len() >= size {
+                if pl.shop.len() + made.len() >= slots {
                     break;
                 }
                 let mut m = pl.make_card(cards, tok, false, 0);
@@ -999,14 +1069,28 @@ impl Game {
                 pl.shop.insert(k, m);
             }
         }
-        if pl.shop_spell.is_none() {
-            pl.shop_spell = cards.random_spell(pl.tier, rng);
+        // The spell slot is free unless Fodders took it too; a frozen Tavern
+        // keeps the spell it already had.
+        if pl.shop.len() <= size {
+            if pl.shop_spell.is_none() {
+                pl.shop_spell = cards.random_spell(pl.tier, rng);
+            }
+        } else {
+            pl.shop_spell = None;
+        }
+        // Only an explicit Refresh feeds the Fodders it just made.
+        if kind == RefreshKind::Explicit {
+            Self::feed_fodders(pl, pool, cards, rng);
         }
     }
 
-    /// Every Fodder in the Tavern feeds itself to a random friendly Demon, if
-    /// the player has one: the Demon gains the Fodder's current stats, the
-    /// Fodder is gone and its slot gets a new card from the pool.
+    /// The Fodders that just appeared in a Refresh feed themselves if the
+    /// player has a Demon at that moment: each goes to a random friendly
+    /// Demon, which gains its current stats, and its slot gets a new card
+    /// from the pool. Call this only when the Tavern was just refreshed; a
+    /// Fodder that waits because there was no Demon never feeds later, even
+    /// when a Demon lands, and it is a plain 2/2 Demon until the shop is
+    /// refreshed again.
     fn feed_fodders(pl: &mut Player, pool: &mut [u8], cards: &CardDb, rng: &mut Rng) {
         let is_demon = |m: &Minion| cards.get(m.card).tribes.has(Tribe::Demon);
         if !pl.board.iter().any(is_demon) {
@@ -1688,9 +1772,7 @@ impl Game {
             Effect::AddFodderRefreshes(n) => {
                 let per = mul as u8;
                 let times = (n as u32).saturating_mul(runs as u32);
-                for _ in 0..times {
-                    let _ = self.players[p].fodder_refreshes.try_push(per);
-                }
+                self.players[p].add_fodder_refreshes(per, times);
             }
             Effect::AddFodderToNextRefresh(n) => {
                 let add = n.saturating_mul(mul as u8).saturating_mul(runs);
@@ -1724,14 +1806,15 @@ impl Game {
                 let times =
                     (n as u32).saturating_mul(mul as u32).saturating_mul(runs as u32);
                 let tier = self.players[p].tier;
+                let source = *pos as u8;
                 for _ in 0..times {
                     let _ = self.players[p]
                         .discover_queue
-                        .try_push(DiscoverRequest::DemonMinion(tier));
+                        .try_push(DiscoverRequest::DemonMinion { max_tier: tier, source });
                 }
             }
             Effect::DamageHero(n) => {
-                self.take_hero_damage(p, n * mul * runs as i32);
+                self.take_shop_damage(p, n * mul * runs as i32, Some(*pos));
             }
             Effect::RewindDamage => {
                 let pl = &mut self.players[p];
@@ -2011,9 +2094,18 @@ impl Game {
     }
 
     /// Refresh the Tavern for free with a Fishbait in its left-most slot.
+    /// An effect that says "Refresh" is not the player's own Refresh, so it
+    /// leaves Fodders queued for upcoming Refreshes alone.
     fn refresh_with_fishbait(&mut self, p: usize, card: CardId, golden: bool) {
         let Game { data, rng, players, pool, .. } = self;
-        Self::refresh_shop(&mut players[p], pool, &data.cards, &data.rules, rng);
+        Self::refresh_shop(
+            &mut players[p],
+            pool,
+            &data.cards,
+            &data.rules,
+            rng,
+            RefreshKind::Effect,
+        );
         if !players[p].shop.is_empty() {
             self.put_fishbait(p, 0, card, golden);
         }
@@ -2114,10 +2206,13 @@ impl Game {
 
     /// The minion in board slot `pos` takes the Tavern minion in `slot`: its
     /// stats (`stat_mul` times), and its Bonus Keywords if `keywords`. The
-    /// copy goes back to the pool.
+    /// copy goes back to the pool (a generated Fodder has no copy to return).
     fn consume(&mut self, p: usize, pos: usize, slot: usize, keywords: bool, stat_mul: u8) {
         let Game { data, players, pool, .. } = self;
         let pl = &mut players[p];
+        if slot >= pl.shop.len() {
+            return;
+        }
         let eaten = pl.shop.remove(slot);
         give_back(pool, &data.cards, &eaten);
         let m = &mut pl.board[pos];
@@ -2182,16 +2277,21 @@ impl Game {
 
     /// The hero takes `amount` damage, then the "after your hero takes
     /// damage" effects and the damage event triggers run. They fire even
-    /// when a rewind among them gives the Health back. Damage from a card
-    /// effect can kill (the hero is knocked out after the fights); Health
-    /// costs are checked by `can_pay_health` before they're paid.
-    fn take_hero_damage(&mut self, p: usize, amount: i32) {
+    /// when a rewind among them gives the Health back. Combat damage is
+    /// settled by `knockouts` after the fights; Health costs are checked by
+    /// `can_pay_health` before they're paid, so they can't kill.
+    ///
+    /// `source` is the board slot of the friendly Demon that dealt it, if
+    /// any: a Health cost (Malchezaar) or the combat damage to the hero is
+    /// not a Demon dealing damage, so they pass `None`.
+    fn take_hero_damage(&mut self, p: usize, amount: i32, source: Option<usize>) {
         let pl = &mut self.players[p];
         if amount <= 0 {
             return;
         }
         pl.health -= amount;
         pl.last_damage = amount;
+        self.note_shop_demon_damage(p, source);
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             let m = self.players[p].board[pos];
@@ -2207,6 +2307,121 @@ impl Game {
             pos += 1;
         }
         self.fire_event(p, EventKind::HeroDamage, amount as u32);
+    }
+
+    /// Damage to the hero in the shop phase (Wrath Weaver, Imposing
+    /// Percussionist). Once its reactions have run, a hero at 0 Health or
+    /// below is knocked out on the spot: a rewind on the board has already
+    /// had its chance to give the Health back.
+    fn take_shop_damage(&mut self, p: usize, amount: i32, source: Option<usize>) {
+        self.take_hero_damage(p, amount, source);
+        if self.players[p].alive && self.players[p].health <= 0 {
+            self.knock_out_mid_turn(p);
+        }
+    }
+
+    /// Knock `p` out in the middle of its turn. It takes the worst place
+    /// still open, gives its cards back and stops acting; its board becomes
+    /// the ghost, and the players still alive are paired again without it.
+    fn knock_out_mid_turn(&mut self, p: usize) {
+        let place = self.alive() as u8;
+        {
+            let Game { data, players, ghost, .. } = self;
+            let pl = &mut players[p];
+            pl.alive = false;
+            pl.placement = place;
+            pl.final_tribes = pl.board_tribes(&data.cards);
+            *ghost = Some(Ghost {
+                player: p as u8,
+                board: pl.board.clone(),
+                tier: pl.tier,
+                counters: pl.counters(&data.cards),
+            });
+            pl.opponent = None;
+            pl.done = true;
+        }
+        // The cards go back at the end of the action: effects that were
+        // already running may still touch this board.
+        let left: ArrayVec<u8, PLAYERS> =
+            (0..PLAYERS as u8).filter(|&q| self.players[q as usize].alive).collect();
+        if left.len() <= 1 {
+            for &q in &left {
+                let cards = &self.data.cards;
+                let pl = &mut self.players[q as usize];
+                pl.placement = 1;
+                pl.final_tribes = pl.board_tribes(cards);
+            }
+            self.over = true;
+            return;
+        }
+        self.pair();
+    }
+
+    /// A dead player holds no cards. Effects that were still running when
+    /// the hero died can give it some, so the end of every action gives
+    /// them back and clears anything waiting on a choice.
+    fn settle_dead(&mut self, p: usize) {
+        let Game { data, players, pool, .. } = self;
+        let pl = &mut players[p];
+        if pl.alive {
+            return;
+        }
+        let idle = pl.shop.is_empty()
+            && pl.hand.is_empty()
+            && pl.board.is_empty()
+            && pl.discover.is_empty()
+            && pl.shop_spell.is_none()
+            && pl.discover_queue.is_empty()
+            && pl.pending_target.is_none()
+            && pl.pending_shop_target.is_none()
+            && pl.pending_choose_one.is_none();
+        if idle {
+            return;
+        }
+        pl.shop_spell = None;
+        for m in pl.shop.drain(..).chain(pl.hand.drain(..)).chain(pl.board.drain(..)) {
+            give_back(pool, &data.cards, &m);
+        }
+        for c in pl.discover.drain(..) {
+            if !data.cards.get(c).is_spell() {
+                let slot = data.cards.get(c).pool_slot as usize;
+                pool[slot] += 1;
+            }
+        }
+        pl.pending_choose_one = None;
+        pl.pending_target = None;
+        pl.pending_shop_target = None;
+        pl.discover_damage_from = None;
+        pl.discover_queue.clear();
+        pl.tavern_buffs.clear();
+    }
+
+    /// A friendly Demon dealt damage in the shop phase: every other friendly
+    /// minion with "After another friendly Demon deals damage" gains its
+    /// stats for good right away (Devout Hellcaller). A damage source that
+    /// is no longer a friendly Demon does not count.
+    fn note_shop_demon_damage(&mut self, p: usize, source: Option<usize>) {
+        let Some(src) = source else { return };
+        let cards = &self.data.cards;
+        let Some(src_card) = self.players[p].board.get(src).map(|m| m.card) else { return };
+        if !cards.get(src_card).tribes.has(Tribe::Demon) {
+            return;
+        }
+        let mut hits: ArrayVec<(usize, i32, i32), BOARD> = ArrayVec::new();
+        for (i, m) in self.players[p].board.iter().enumerate() {
+            if i == src {
+                continue;
+            }
+            for (card, golden) in m.parts() {
+                if let Some((a, h)) = cards.get(card).after_demon_damage {
+                    let mul = if golden { 2 } else { 1 };
+                    let _ = hits.try_push((i, a * mul, h * mul));
+                }
+            }
+        }
+        for (i, da, dh) in hits {
+            buff(&mut self.players[p].board[i], da, dh);
+        }
     }
 
     fn offer_target(&mut self, p: usize, pt: PendingTarget) {
@@ -2366,10 +2581,13 @@ impl Game {
             && !self.players[p].discover_queue.is_empty()
         {
             let req = self.players[p].discover_queue.remove(0);
-            let damages = matches!(req, DiscoverRequest::DemonMinion(_));
+            let damage_from = match req {
+                DiscoverRequest::DemonMinion { source, .. } => Some(source),
+                _ => None,
+            };
             let Game { data, rng, players, pool, .. } = self;
             let pl = &mut players[p];
-            pl.discover_damage = damages;
+            pl.discover_damage_from = damage_from;
             while !pl.discover.is_full() {
                 let next = match req {
                     DiscoverRequest::MinionTier(t) => {
@@ -2402,7 +2620,7 @@ impl Game {
                             c.tribes.has(t)
                         })
                     }
-                    DiscoverRequest::DemonMinion(max_t) => draw_filtered(
+                    DiscoverRequest::DemonMinion { max_tier: max_t, .. } => draw_filtered(
                         pool,
                         &data.cards,
                         rng,
@@ -2473,12 +2691,10 @@ impl Game {
         pl.discover.clear();
         // Imposing Percussionist: the hero takes damage equal to the Tier of
         // the Demon chosen.
-        let damage = if pl.discover_damage {
-            pl.discover_damage = false;
-            Some(data.cards.get(c).tier as i32)
-        } else {
-            None
-        };
+        let damage = pl
+            .discover_damage_from
+            .take()
+            .map(|source| (source, data.cards.get(c).tier as i32));
         let is_spell = data.cards.get(c).is_spell();
         if !pl.hand.is_full() {
             let pool_copies = if is_spell { 0 } else { 1 };
@@ -2491,8 +2707,8 @@ impl Game {
             let slot = self.data.cards.get(c).pool_slot as usize;
             self.pool[slot] += 1;
         }
-        if let Some(d) = damage {
-            self.take_hero_damage(p, d);
+        if let Some((source, d)) = damage {
+            self.take_shop_damage(p, d, Some(source as usize));
         }
         self.maybe_start_discover(p);
     }
@@ -2658,6 +2874,9 @@ impl Game {
     }
 
     fn advance(&mut self) {
+        if self.over {
+            return;
+        }
         let n = self.order.len();
         for k in 1..=n {
             let c = (self.cursor + k) % n;
@@ -2741,7 +2960,6 @@ impl Game {
             pl.actions = 0;
             pl.health_refreshes_used = 0;
             pl.mycologist_uses = 0;
-            let mut fodders = 0;
             if pl.frozen {
                 pl.frozen = false;
             } else {
@@ -2749,12 +2967,11 @@ impl Game {
                     give_back(pool, &data.cards, &m);
                 }
                 pl.shop_spell = None;
-                // the turn's automatic Refresh counts as a Refresh
-                fodders = pl.take_fodder_for_refresh();
             }
             let size = data.rules.shop_size(pl.tier);
-            Self::fill_shop(pl, pool, &data.cards, size, rng, fodders);
-            Self::feed_fodders(pl, pool, &data.cards, rng);
+            // The automatic roll at the start of a turn is not a Refresh for
+            // card purposes, so it leaves queued Fodders for an explicit one.
+            Self::fill_shop(pl, pool, &data.cards, size, rng, RefreshKind::TurnStart);
         }
         for p in 0..PLAYERS {
             if self.players[p].alive {
@@ -2862,9 +3079,11 @@ impl Game {
             };
             self.players[p].add_tavern_buff(&self.data.cards, b);
         }
-        // Trapped Clapper's Deathrattle: Fodders for upcoming Refreshes.
+        // Trapped Clapper's Deathrattle: Fodders for upcoming Refreshes. A
+        // fight's list is one entry per upcoming Refresh, and they stack on
+        // any Refreshes the player already queued.
         for k in 0..so.n_fodder_refreshes as usize {
-            let _ = self.players[p].fodder_refreshes.try_push(so.fodder_refreshes[k]);
+            self.players[p].add_fodder_to_refresh(k, so.fodder_refreshes[k]);
         }
         if after_fight {
             self.players[p].boon_of_beetles =
@@ -2985,7 +3204,8 @@ impl Game {
             }
         }
         for (p, d) in damage.into_iter().enumerate() {
-            self.take_hero_damage(p, d);
+            // Combat damage to the hero is not a friendly Demon dealing it.
+            self.take_hero_damage(p, d, None);
             let pl = &mut self.players[p];
             pl.last_opponent = pl.opponent.take();
         }
@@ -3075,8 +3295,15 @@ impl Game {
             {
                 return Err(format!("player {i}: shop_spell invalid"));
             }
-            if pl.shop.len() > self.data.rules.shop_size(pl.tier) {
+            // The minion slots plus the spell slot, which a Fodder can take
+            // (and fill with a minion once it feeds).
+            if pl.shop.len() > self.data.rules.shop_size(pl.tier) + 1 {
                 return Err(format!("player {i}: shop too big"));
+            }
+            if pl.shop.len() == self.data.rules.shop_size(pl.tier) + 1
+                && pl.shop_spell.is_some()
+            {
+                return Err(format!("player {i}: shop spell in a taken slot"));
             }
             if let Some(pt) = pl.pending_target
                 && let Some(src) = pt.source

@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use bgcore::fight::{Counters, fight_with};
-use bgcore::{Action, CardDb, Data, Game, Keywords, Minion, Rng, Tribe};
+use bgcore::{Action, CardDb, Data, Game, Keywords, Minion, Opponent, Rng, Tribe};
 
 fn db() -> CardDb {
     Data::bundled().cards
@@ -123,55 +123,157 @@ fn hand_has(g: &Game, name: &str) -> bool {
         .any(|m| g.data.cards.get(m.card).name == name)
 }
 
+/// Take players out of the game as if they had died on an earlier turn,
+/// giving their cards back to the pool, to set up a small lobby.
+fn knock_out_players(g: &mut Game, dead: &[usize]) {
+    let mut place = 8u8;
+    for &q in dead {
+        let pl = &mut g.players[q];
+        let cards: Vec<Minion> =
+            pl.shop.drain(..).chain(pl.hand.drain(..)).chain(pl.board.drain(..)).collect();
+        let discovers: Vec<_> = pl.discover.drain(..).collect();
+        pl.shop_spell = None;
+        pl.pending_target = None;
+        pl.pending_shop_target = None;
+        pl.pending_choose_one = None;
+        pl.discover_queue.clear();
+        pl.discover_damage_from = None;
+        pl.alive = false;
+        pl.done = true;
+        pl.placement = place;
+        place -= 1;
+        for m in cards {
+            let c = g.data.cards.get(m.card);
+            if m.pool_copies > 0 && !c.token && !c.is_spell() {
+                g.pool[c.pool_slot as usize] += m.pool_copies;
+            }
+        }
+        for c in discovers {
+            if !g.data.cards.get(c).is_spell() {
+                g.pool[g.data.cards.get(c).pool_slot as usize] += 1;
+            }
+        }
+    }
+}
+
 // ---- Demon Fodder ----
 
 #[test]
 fn a_fodder_feeds_a_demon_and_its_slot_is_refilled() {
     let mut g = game(1);
-    clear_shop(&mut g, 0);
-    put_token_in_shop(&mut g, 0, "Demon Fodder", false);
-    g.give(0, "Wrath Weaver").unwrap();
-    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    // Wrath Weaver's own "after you play a Demon" (+2/+2) then the Fodder's
-    // +2/+2. The Fodder is gone and its slot drew a real card.
-    assert_eq!(stats(&g.players[0].board[0]), (1 + 2 + 2, 3 + 2 + 2));
-    assert_eq!(g.players[0].shop.len(), 1);
-    assert!(!g.data.cards.get(g.players[0].shop[0].card).is_fodder);
-    g.check_invariants().unwrap();
-}
-
-#[test]
-fn a_fodder_stays_buyable_with_no_demon_on_board() {
-    let mut g = game(2);
-    clear_shop(&mut g, 0);
-    put_token_in_shop(&mut g, 0, "Demon Fodder", false);
     g.players[0].gold = 3;
-    assert!(is_legal(&mut g, 0, Action::Buy(0)));
-    act(&mut g, 0, Action::Buy(0));
-    assert!(g.players[0].shop.is_empty());
-    assert_eq!(g.players[0].hand.len(), 1);
-    let m = g.players[0].hand[0];
-    assert!(g.data.cards.get(m.card).is_fodder);
-    assert_eq!(stats(&m), (2, 2));
-    // it never had a pool copy to return
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(1);
+    act(&mut g, 0, Action::Roll);
+    // The Fodder appeared in this Refresh and fed the only Demon at once:
+    // Wrath Weaver took its +2/+2 and the Fodder's slot drew a real card.
+    assert_eq!(stats(&g.players[0].board[0]), (1 + 2, 3 + 2));
+    assert_eq!(g.players[0].shop.len(), 3);
+    assert_eq!(fodder_count(&g, 0), 0);
+    assert!(g.players[0].shop.iter().all(|m| !g.data.cards.get(m.card).is_fodder));
+    // the generated Fodder never had a pool copy and the refill came from
+    // the pool, so the totals still balance
     g.check_invariants().unwrap();
 }
 
 #[test]
-fn a_fodder_from_a_refresh_stays_until_a_demon_turns_up() {
+fn a_waiting_fodder_can_be_bought_and_played() {
+    let mut g = game(2);
+    g.players[0].gold = 10;
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(1);
+    act(&mut g, 0, Action::Roll);
+    let slot = (0..g.players[0].shop.len())
+        .find(|&i| g.data.cards.get(g.players[0].shop[i].card).is_fodder)
+        .expect("the Refresh made a Fodder");
+    assert!(is_legal(&mut g, 0, Action::Buy(slot as u8)));
+    act(&mut g, 0, Action::Buy(slot as u8));
+    let hand = g.players[0]
+        .hand
+        .iter()
+        .position(|m| g.data.cards.get(m.card).is_fodder)
+        .expect("the bought Fodder is in hand");
+    assert_eq!(stats(&g.players[0].hand[hand]), (2, 2));
+    // a bought Fodder is an ordinary 2/2 Demon, and it never feeds
+    act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
+    assert_eq!(stats(&g.players[0].board[0]), (2, 2));
+    assert!(g.data.cards.get(g.players[0].board[0].card).is_fodder);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_fodder_feeds_on_the_refresh_it_appears_in() {
+    let mut g = game(31);
+    g.players[0].gold = 3;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(1);
+    act(&mut g, 0, Action::Roll);
+    // the Fodder appeared and fed the only Demon at once; its slot is a
+    // normal minion again
+    assert_eq!(fodder_count(&g, 0), 0);
+    assert_eq!(stats(&g.players[0].board[0]), (1 + 2, 3 + 2));
+    assert_eq!(g.players[0].shop.len(), 3);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_fodder_stays_after_a_demon_is_played_when_none_was_there_at_the_refresh() {
     let mut g = game(3);
-    clear_shop(&mut g, 0);
     g.players[0].gold = 10;
     g.players[0].fodder_refreshes.clear();
     g.players[0].fodder_refreshes.push(1);
     act(&mut g, 0, Action::Roll);
     assert_eq!(fodder_count(&g, 0), 1, "no Demon on board, so it waits");
     assert!(g.players[0].fodder_refreshes.is_empty());
-    // playing any Demon makes it feed at once
+    // a Demon landing later does NOT make it feed: it stays a plain 2/2
+    // Demon in the Tavern for the rest of this Refresh
     g.give(0, "Devout Hellcaller").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(fodder_count(&g, 0), 1);
+    assert_eq!(stats(&g.players[0].board[0]), (4, 4));
+    // the next Refresh clears it without it ever feeding
+    act(&mut g, 0, Action::Roll);
     assert_eq!(fodder_count(&g, 0), 0);
-    assert_eq!(stats(&g.players[0].board[0]), (4 + 2, 4 + 2));
+    assert_eq!(stats(&g.players[0].board[0]), (4, 4));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_start_of_turn_roll_is_not_a_refresh_for_fodders() {
+    let mut g = game(43);
+    g.players[0].gold = 10;
+    g.give(0, "Laboratory Assistant").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Sell(0));
+    assert_eq!(g.players[0].fodder_refreshes.as_slice(), [1, 1, 1]);
+    next_turn(&mut g);
+    // the automatic roll at the start of the turn left the queue alone and
+    // made no Fodder
+    assert_eq!(g.players[0].fodder_refreshes.as_slice(), [1, 1, 1]);
+    assert_eq!(fodder_count(&g, 0), 0);
+    // the next explicit Refresh is the one that takes one
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].fodder_refreshes.as_slice(), [1, 1]);
+    assert_eq!(fodder_count(&g, 0), 1);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn snarky_sharks_refresh_leaves_queued_fodders_alone() {
+    let mut g = game(44);
+    g.players[0].gold = 10;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    put_on_board(&mut g, 0, "Snarky Shark");
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(1);
+    act(&mut g, 0, Action::Sell(1));
+    // the sell's Refresh with a Fishbait is a card effect, not the player's
+    // own Refresh: the queued Fodder stays queued and nothing feeds
+    assert_eq!(g.players[0].fodder_refreshes.as_slice(), [1]);
+    assert_eq!(stats(&g.players[0].board[0]), (1, 3));
+    assert_eq!(g.players[0].shop[0].card, id(&g, "Fishbait"));
     g.check_invariants().unwrap();
 }
 
@@ -225,6 +327,80 @@ fn twisted_wrathguard_adds_to_the_very_next_refresh() {
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn two_laboratory_assistants_stack_fodders_per_refresh() {
+    let mut g = game(33);
+    g.players[0].gold = 10;
+    g.give(0, "Laboratory Assistant").unwrap();
+    g.give(0, "Laboratory Assistant").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(g.players[0].fodder_refreshes.as_slice(), [2, 2, 2]);
+    // no Demon on the board while the Fodders arrive, so they stay
+    act(&mut g, 0, Action::Sell(0));
+    act(&mut g, 0, Action::Sell(0));
+    for want in [2, 2, 2, 0] {
+        act(&mut g, 0, Action::Roll);
+        assert_eq!(fodder_count(&g, 0), want);
+    }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn queued_fodders_can_fill_the_spell_slot() {
+    let mut g = game(34);
+    g.players[0].tier = 6;
+    g.players[0].gold = 3;
+    put_on_board(&mut g, 0, "Ominous Seer");
+    g.players[0].fodder_refreshes.clear();
+    // all six minion slots plus the spell slot
+    g.players[0].fodder_refreshes.push(7);
+    act(&mut g, 0, Action::Roll);
+    // a Demon was on board when they appeared, so every Fodder fed it and
+    // its slot was refilled with a minion: the Tavern holds seven minions
+    // and no spell
+    assert_eq!(fodder_count(&g, 0), 0);
+    assert_eq!(g.players[0].shop.len(), 7);
+    assert!(g.players[0].shop_spell.is_none(), "the spell slot was taken");
+    // the only Demon ate all seven Fodders
+    assert_eq!(stats(&g.players[0].board[0]), (2 + 14, 1 + 14));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn urzul_can_consume_a_waiting_fodder() {
+    let mut g = game(35);
+    clear_shop(&mut g, 0);
+    put_token_in_shop(&mut g, 0, "Demon Fodder", false);
+    g.give(0, "Insatiable Ur'zul").unwrap();
+    let before_pool: u32 = g.pool.iter().map(|&n| n as u32).sum();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    // a Fodder in the Tavern is a normal Tavern minion: Ur'zul's after-play
+    // consume eats it for +2/+2, and the generated copy never touches the
+    // pool
+    assert_eq!(stats(&g.players[0].board[0]), (4 + 2, 6 + 2));
+    assert!(g.players[0].shop.is_empty());
+    assert_eq!(g.pool.iter().map(|&n| n as u32).sum::<u32>(), before_pool);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_fodder_can_be_consumed_like_any_tavern_minion() {
+    let mut g = game(36);
+    put_on_board(&mut g, 0, "Flaming Enforcer");
+    set_shop(&mut g, 0, &["Buzzing Vermin"]);
+    put_token_in_shop(&mut g, 0, "Demon Fodder", false);
+    let before_pool: u32 = g.pool.iter().map(|&n| n as u32).sum();
+    act(&mut g, 0, Action::EndTurn);
+    // the Fodder is 2/2 and wins "highest health", so the Enforcer eats it
+    // like any other Tavern minion; the 1/1 Buzzing Vermin stays
+    assert_eq!(stats(&g.players[0].board[0]), (4 + 2, 5 + 2));
+    assert_eq!(fodder_count(&g, 0), 0);
+    assert_eq!(g.players[0].shop.len(), 1);
+    assert_eq!(g.pool.iter().map(|&n| n as u32).sum::<u32>(), before_pool);
+    g.check_invariants().unwrap();
+}
+
 // ---- Hero health ----
 
 #[test]
@@ -275,7 +451,7 @@ fn a_later_rewind_gives_nothing_back_but_still_buffs_the_tavern() {
 }
 
 #[test]
-fn wrath_weaver_damage_can_kill_the_hero() {
+fn wrath_weaver_damage_kills_the_hero_on_the_spot() {
     let mut g = game(9);
     g.players[0].health = 1;
     put_on_board(&mut g, 0, "Wrath Weaver");
@@ -283,10 +459,59 @@ fn wrath_weaver_damage_can_kill_the_hero() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
     assert_eq!(g.players[0].health, 0);
     assert_eq!(g.players[0].last_damage, 1);
-    // the hero finishes the turn; the knockout comes after the fights
-    assert!(g.players[0].alive);
+    // the hero dies at once, in the middle of its turn: worst place still
+    // open, no more actions, no fight this turn
+    assert!(!g.players[0].alive);
+    assert_eq!(g.players[0].placement, 8);
+    assert_eq!(g.players[0].opponent, None);
+    assert_ne!(g.current_player(), Some(0));
+    assert!(g
+        .players
+        .iter()
+        .all(|p| p.opponent != Some(Opponent::Player(0))));
+    assert!(g.players[0].board.is_empty(), "its cards went back to the pool");
+    g.check_invariants().unwrap();
+    // the rest of the turn and the fights run without it
     next_turn(&mut g);
     assert!(!g.players[0].alive);
+    assert_eq!(g.players[0].placement, 8);
+    assert_eq!(g.alive(), 7);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_rewind_saves_a_hero_wrath_weaver_would_kill() {
+    let mut g = game(41);
+    g.players[0].health = 1;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    put_on_board(&mut g, 0, "Soul Rewinder");
+    g.give(0, "Ominous Seer").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+    // the damage took the hero to 0 and the rewind gave it straight back
+    assert_eq!(g.players[0].health, 1);
+    assert!(g.players[0].alive);
+    assert_eq!(g.players[0].placement, 0);
+    assert_eq!(stats(&g.players[0].board[1]), (4, 2 + 2));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_mid_turn_death_leaving_one_player_ends_the_game() {
+    let mut g = game(42);
+    knock_out_players(&mut g, &[2, 3, 4, 5, 6, 7]);
+    turn_of(&mut g, 0);
+    g.players[0].health = 1;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.give(0, "Ominous Seer").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(g.players[0].health, 0);
+    // 2 players were left, so the dying hero takes 2nd and the game ends
+    assert!(!g.players[0].alive);
+    assert_eq!(g.players[0].placement, 2);
+    assert_eq!(g.players[1].placement, 1);
+    assert_eq!(g.alive(), 1);
+    assert!(g.over);
+    assert_eq!(g.current_player(), None);
     g.check_invariants().unwrap();
 }
 
@@ -371,6 +596,30 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
         let c = g.data.cards.get(m.card);
         assert_eq!((m.attack, m.health), (c.attack + 4, c.health + 4));
     }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn deathstrider_triggers_the_wrathguard_in_the_shop_through_a_fishbait_attack() {
+    let mut g = game(45);
+    g.players[0].gold = 10;
+    put_on_board(&mut g, 0, "Wolf Pup");
+    put_on_board(&mut g, 0, "Deathstrider");
+    put_on_board(&mut g, 0, "Sacrificial Wrathguard");
+    g.players[0].board[2].improvements = 2;
+    put_on_board(&mut g, 0, "Snarky Shark");
+    // the Shark's sell refreshes with a Fishbait; the left-most Beast (the
+    // Rally Wolf Pup) attacks it, and Deathstrider's after-attack trigger
+    // runs the Wrathguard's Deathrattle in the shop
+    act(&mut g, 0, Action::Sell(3));
+    let buff = g
+        .players[0]
+        .tavern_buffs
+        .iter()
+        .find(|b| b.tribe.is_none() && !b.this_turn)
+        .copied()
+        .expect("the Deathrattle's Tavern buff was applied");
+    assert_eq!((buff.attack, buff.health), (4, 4));
     g.check_invariants().unwrap();
 }
 
@@ -580,12 +829,17 @@ fn trapper_clapper_queues_fodders_after_a_fight() {
     );
     assert_eq!(out.sides[0].fodder_refreshes[..3], [2, 2, 2]);
 
-    // in a game the queued Fodders arrive with the next Refresh, and the
-    // Clapper (still the only Demon) eats the first one
+    // in a game the queued Fodders wait for an explicit Refresh: the roll at
+    // the start of the turn leaves them, the next Roll takes one and the
+    // Clapper (still the only Demon) eats it
     let mut g = game(22);
     put_on_board(&mut g, 0, "Trapped Clapper");
     gang_up_on_player_0(&mut g);
     next_turn(&mut g);
+    assert_eq!(g.players[0].fodder_refreshes.as_slice(), [1, 1, 1]);
+    assert_eq!(stats(&g.players[0].board[0]), (2, 2));
+    assert_eq!(fodder_count(&g, 0), 0);
+    act(&mut g, 0, Action::Roll);
     assert_eq!(g.players[0].board[0].attack, 2 + 2);
     assert_eq!(g.players[0].board[0].health, 2 + 2);
     assert_eq!(g.players[0].fodder_refreshes.as_slice(), [1, 1]);
@@ -731,6 +985,67 @@ fn corrupted_cupcakes_consumes_three_for_stats_only() {
     assert_eq!(stats(&g.players[0].board[0]), (4 + 4, 4 + 4));
     assert!(!g.players[0].board[0].keywords.has(Keywords::TAUNT));
     assert!(g.players[0].shop.is_empty());
+    g.check_invariants().unwrap();
+}
+
+// ---- Devout Hellcaller in the shop ----
+
+#[test]
+fn hellcaller_grows_from_wrath_weavers_hero_damage() {
+    let mut g = game(37);
+    g.players[0].health = 30;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    put_on_board(&mut g, 0, "Devout Hellcaller");
+    g.give(0, "Ominous Seer").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+    // the Demon play made Wrath Weaver damage the hero, and the Hellcaller
+    // gained its +2/+2 for good right away
+    assert_eq!(g.players[0].health, 29);
+    assert_eq!(stats(&g.players[0].board[1]), (6, 6));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn hellcaller_grows_from_damage_a_rewind_gives_back() {
+    let mut g = game(40);
+    g.players[0].health = 30;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    put_on_board(&mut g, 0, "Soul Rewinder");
+    put_on_board(&mut g, 0, "Devout Hellcaller");
+    g.give(0, "Ominous Seer").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 3 });
+    // Wrath Weaver's damage counted for the Hellcaller before Soul Rewinder
+    // gave the Health back: the hero ends unchanged and the Hellcaller grew
+    assert_eq!(g.players[0].health, 30);
+    assert_eq!(stats(&g.players[0].board[2]), (6, 6));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn hellcaller_grows_from_imposing_percussionists_hero_damage() {
+    let mut g = game(38);
+    g.players[0].tier = 3;
+    g.players[0].health = 30;
+    put_on_board(&mut g, 0, "Devout Hellcaller");
+    g.give(0, "Imposing Percussionist").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    let tier = g.data.cards.get(g.players[0].discover[0]).tier as i32;
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].health, 30 - tier);
+    assert_eq!(stats(&g.players[0].board[0]), (6, 6));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_health_cost_is_not_a_demon_dealing_damage() {
+    let mut g = game(39);
+    g.players[0].gold = 0;
+    g.players[0].health = 30;
+    put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
+    put_on_board(&mut g, 0, "Devout Hellcaller");
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].health, 29);
+    assert_eq!(stats(&g.players[0].board[1]), (4, 4));
     g.check_invariants().unwrap();
 }
 

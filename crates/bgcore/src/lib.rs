@@ -25,7 +25,10 @@ pub use rules::Rules;
 pub const PLAYERS: usize = 8;
 pub const BOARD: usize = 7;
 pub const HAND: usize = 10;
-pub const SHOP: usize = 6;
+/// Tavern minion slots. A tavern has `shop_size(tier)` minion slots plus the
+/// spell slot; a Fodder can take the spell slot too, so the shop can hold one
+/// more minion than the tier's shop size.
+pub const SHOP: usize = 7;
 pub const DISCOVER: usize = 3;
 pub const MAX_TIER: u8 = 6;
 /// Slots in `Player::final_tribes`: Beast, Mech, neutral, Dragon, Murloc,
