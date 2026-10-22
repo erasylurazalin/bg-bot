@@ -408,7 +408,7 @@ Hero choice and hero powers, armor, spells, Magnetic, Avenge, Rally, Start of
 Combat, End of Turn effects, Cleave, Stealth, Poisonous, Mega-Windfury,
 trinkets, quests, Dark Gifts, the Deity, the other 8 types, type bans, the
 real card pool, the turn timer. They come back in later
-versions, roughly in the order in `CLAUDETODO.md`.
+versions, roughly in the order in `TODO.md`.
 
 # Part 3: the five-tribe lobby
 

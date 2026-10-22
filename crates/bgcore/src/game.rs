@@ -566,31 +566,44 @@ fn draw_filtered(
     exclude: &[CardId],
     pred: impl Fn(&Card) -> bool,
 ) -> Option<CardId> {
+    // A card with no copies left (or one that is not a pool slot, which never
+    // holds copies) adds nothing, so the cheap checks run first.
     let ok = |c: usize| {
-        let card = &cards.cards[c];
-        if card.pool_slot as usize != c {
+        if pool[c] == 0 {
             return false;
         }
-        let t = card.tier;
-        if !(lo <= t && t <= hi && pred(card)) {
+        let t = cards.tiers[c];
+        if !(lo <= t && t <= hi) {
+            return false;
+        }
+        let card = &cards.cards[c];
+        if card.pool_slot as usize != c || !pred(card) {
             return false;
         }
         if card.is_volumizer {
             cards.volumizers.iter().any(|v| !exclude.contains(v))
         } else {
-            !exclude.contains(&(c as CardId))
+            exclude.is_empty() || !exclude.contains(&(c as CardId))
         }
     };
-    let total: u32 = (0..pool.len()).filter(|&c| ok(c)).map(|c| pool[c] as u32).sum();
+    let mut eligible: ArrayVec<(u8, u8), MAX_POOL_CARDS> = ArrayVec::new();
+    let mut total = 0u32;
+    // Ids in ascending order, so the walk below sees cards in the same order
+    // as a scan of the whole pool; `ok` still checks everything.
+    for &c in &cards.ids_up_to_tier[(hi as usize).min(crate::MAX_TIER as usize)] {
+        let c = c as usize;
+        if ok(c) {
+            total += pool[c] as u32;
+            eligible.push((c as u8, pool[c]));
+        }
+    }
     if total == 0 {
         return None;
     }
     let mut r = rng.below(total);
-    for c in 0..pool.len() {
-        if !ok(c) {
-            continue;
-        }
-        let n = pool[c] as u32;
+    for &(c, n) in &eligible {
+        let c = c as usize;
+        let n = n as u32;
         if r < n {
             pool[c] -= 1;
             if cards.cards[c].is_volumizer {
@@ -792,9 +805,59 @@ impl Game {
         }
     }
 
+    /// Fills `mask` with `is_legal` for every action. Only the index ranges
+    /// that can be legal in the current state are asked (a slot past the end
+    /// of the board, hand or shop never is), which gives the same mask as
+    /// asking all of them.
     pub fn legal_mask(&self, mask: &mut [bool; N_ACTIONS]) {
-        for (i, m) in mask.iter_mut().enumerate() {
-            *m = self.is_legal(Action::from_index(i).unwrap());
+        mask.fill(false);
+        let Some(p) = self.current_player() else { return };
+        let pl = &self.players[p];
+        let mut ask = |a: Action| mask[a.index()] = self.is_legal(a);
+        if let Some(pt) = pl.pending_target {
+            for s in 0..BOARD as u8 {
+                ask(Action::Target(s));
+            }
+            if pt.kind.takes_shop() {
+                for s in 0..SHOP as u8 {
+                    ask(Action::TargetShop(s));
+                }
+            }
+        } else if pl.pending_shop_target.is_some() {
+            for s in 0..pl.shop.len() as u8 {
+                ask(Action::TargetShop(s));
+            }
+        } else if pl.pending_choose_one.is_some() {
+            for k in 0..2 {
+                ask(Action::Choose(k));
+            }
+        } else if !pl.discover.is_empty() {
+            for k in 0..pl.discover.len() as u8 {
+                ask(Action::Choose(k));
+            }
+        } else {
+            for s in 0..pl.shop.len() as u8 {
+                ask(Action::Buy(s));
+            }
+            ask(Action::BuySpell);
+            for s in 0..pl.board.len() as u8 {
+                ask(Action::Sell(s));
+                ask(Action::Activate(s));
+            }
+            for hand in 0..pl.hand.len() as u8 {
+                for pos in 0..=BOARD as u8 {
+                    ask(Action::Play { hand, pos });
+                }
+            }
+            for from in 0..pl.board.len() as u8 {
+                for to in 0..pl.board.len() as u8 {
+                    ask(Action::Move { from, to });
+                }
+            }
+            ask(Action::Roll);
+            ask(Action::Freeze);
+            ask(Action::Level);
+            ask(Action::EndTurn);
         }
     }
 

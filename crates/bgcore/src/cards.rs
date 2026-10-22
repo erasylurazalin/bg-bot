@@ -914,6 +914,10 @@ impl Card {
 pub struct CardDb {
     pub cards: Vec<Card>,
     pub pool_cards: usize,
+    /// Tier of every card by id, kept compact for the pool draws.
+    pub tiers: Vec<u8>,
+    /// Pool card ids (ascending) of tier at most the index, for the pool draws.
+    pub ids_up_to_tier: Vec<Vec<u8>>,
     pub volumizers: Vec<CardId>,
     pub spells: Vec<CardId>,
     pub beetle_token: Option<CardId>,
@@ -2392,8 +2396,14 @@ impl CardDb {
             });
         }
 
+        let tiers: Vec<u8> = cards.iter().map(|c| c.tier).collect();
+        let ids_up_to_tier = (0..=crate::MAX_TIER)
+            .map(|hi| (0..pool_cards).filter(|&c| tiers[c] <= hi).map(|c| c as u8).collect())
+            .collect();
         Ok(CardDb {
             cards,
+            tiers,
+            ids_up_to_tier,
             pool_cards,
             volumizers,
             spells,

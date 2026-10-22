@@ -1,7 +1,7 @@
 //! Simple players: the curve baselines a trained bot has to beat, and the
 //! random player the fuzzer and benchmarks use.
 
-use crate::action::{Action, N_ACTIONS, N_KINDS};
+use crate::action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 use crate::cards::Tribe;
 use crate::game::Game;
 use crate::minion::{CardId, Keywords, Minion};
@@ -12,22 +12,26 @@ use crate::rng::Rng;
 /// Picking uniformly over all actions would almost never end a turn, since
 /// most legal actions are plays and moves.
 pub fn random_action(game: &Game, rng: &mut Rng) -> Action {
-    let mut legal = [Action::EndTurn; N_ACTIONS];
-    let mut n = 0;
+    let mut mask = [false; N_ACTIONS];
+    game.legal_mask(&mut mask);
+    // The kinds are laid out in index order (a test in action.rs checks it),
+    // so each kind is one slice of the mask.
     let mut kinds = [0u8; N_KINDS];
-    for i in 0..N_ACTIONS {
-        let a = Action::from_index(i).unwrap();
-        if game.is_legal(a) {
-            legal[n] = a;
-            n += 1;
-            kinds[a.kind()] += 1;
-        }
+    let mut starts = [0usize; N_KINDS];
+    let mut at = 0;
+    for (k, &(_, size)) in ACTION_KINDS.iter().enumerate() {
+        starts[k] = at;
+        kinds[k] = mask[at..at + size].iter().filter(|&&m| m).count() as u8;
+        at += size;
     }
     let n_kinds = kinds.iter().filter(|&&c| c > 0).count() as u32;
     let pick = rng.below(n_kinds) as usize;
     let kind = (0..N_KINDS).filter(|&k| kinds[k] > 0).nth(pick).unwrap();
     let k = rng.below(kinds[kind] as u32) as usize;
-    *legal[..n].iter().filter(|a| a.kind() == kind).nth(k).unwrap()
+    let size = ACTION_KINDS[kind].1;
+    let slice = &mask[starts[kind]..starts[kind] + size];
+    let i = slice.iter().enumerate().filter(|&(_, &m)| m).nth(k).unwrap().0;
+    Action::from_index(starts[kind] + i).unwrap()
 }
 
 /// Standard curve from docs/CONCEPT.md: tier 2 on turn 2, tier 3 on turn 5,

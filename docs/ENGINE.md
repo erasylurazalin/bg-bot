@@ -20,7 +20,9 @@ crates/
     src/bots.rs       random, standard-curve and rush-curve bots
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
-    tests/            fight.rs, game.rs, d1a.rs; tests/data/ has test-only card files
+    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, neutrals),
+                      deathrattles.rs (a loop over every Deathrattle card), fight.rs,
+                      game.rs, d1a.rs; tests/data/ has test-only card files
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
   bgpy/               PyO3 bindings: a batch of games stepped together
 train/
@@ -28,7 +30,8 @@ train/
   ppo.py              PPO self-play, evals, checkpoints
   status.py           prints a run's metrics.csv as a table
 ref/                  (git-ignored) Blizzard card data snapshots, see below
-docs/                 concept, pool analysis, mechanics inventory, this file
+docs/                 concept, pool analysis, mechanics inventory (a snapshot from before
+                      the five-tribe runs), this file
 ```
 
 ## Principles the code keeps
@@ -48,6 +51,46 @@ docs/                 concept, pool analysis, mechanics inventory, this file
   held copies + consumed copies (Magnetized into a host) equal to the
   starting copies. Generated cards (`pool_copies = 0`) never touch the pool.
   The fuzzer runs this after every action.
+
+## Systems the five-tribe lobby added
+
+What exists, so the next card reuses it instead of rebuilding it. The
+rules behind each are in DESIGN.md Part 3.
+
+- **Choices the player makes mid-action.** `PendingTarget` (a minion on
+  the board or in the Tavern), `PendingShopTarget` (a Tavern slot),
+  `PendingChooseOne`, and Discover (`DiscoverRequest`). While one is open,
+  the only legal actions answer it.
+- **Activate (N).** Pays gold, any number of times a turn, with or without
+  a target.
+- **Triggering in the shop.** Rally (Sky-hatch Runaway), Battlecries
+  (Kelp Keeper, Young Murk-Eye; counted for Kalecgos, doubled by Brann),
+  Deathrattles (Deathstrider after a Fishbait attack).
+- **One count for Deathrattles.** `Side::deathrattle_fires` in fight.rs
+  decides how many times a Deathrattle fires (Titus, golden Titus). Every
+  path that fires one goes through it.
+- **Counters.** Per minion: `improvements` (Leviathan, Hopebringer,
+  Patient Scout, the "N left" cards); a triple keeps the highest of the
+  three. Per player: `Player.improve` with `Counters.improve` inside a
+  fight (Tasty Lobster), the Tavern spell bonus, the Beast bonus from a
+  shop Goldrinn, the Fodder queue. Gains made inside a fight come back
+  through `SideOutcome`.
+- **The hand in combat.** `fight_with_hands` passes a side's hand only when
+  something on that side reads it. Murlocs summoned from hand come back
+  unchanged; Winterfinner's hand buffs are kept.
+- **Refresh kinds.** `RefreshKind { TurnStart, Explicit, Effect }`: only an
+  explicit Refresh (the player's action) takes queued Fodders.
+- **Hero health.** `take_hero_damage` runs the "after your hero takes
+  damage" reactions (rewinds included); effect damage in the shop can
+  knock a hero out mid-turn; `can_pay_health` gates Health costs.
+- **Tavern buffs** "this game" and "this turn", consuming Tavern minions,
+  stealing them, Fishbait and Demon Fodder as generated Tavern cards.
+- **Generated cards** (`pool_copies = 0`): tokens, Chromadrakes, Fodder,
+  Fishbait. They never touch the pool.
+- **Golden stats** that aren't double the base use `golden_stats`.
+- **Legal actions.** `Game::legal_mask` only asks `is_legal` for slots that
+  can be legal (a test checks it against `is_legal` everywhere). Use it
+  rather than looping `is_legal` over every action.
 
 ## Adding a card
 
@@ -73,8 +116,9 @@ it in).
   (api.hearthstonejson.com/v1/latest/enUS/cards.json), fetched 2026-10-22.
   Has tokens and golden versions. Some retired cards are missing from it.
 - `ref/bg-pool.tsv`: the solo Battlegrounds pool from it.
-- `ref/lobby5.tsv`: our lobby, built from the JSON (see `CLAUDETODO.md` or
-  `docs/CONCEPT.md` for the exact rule).
+- `ref/lobby5.tsv`: our lobby, built from the JSON (the rule is in
+  DESIGN.md Part 3). The JSON's pool flags aren't perfect: Pointy Arrow is
+  a tier 1 pool spell though `isBattlegroundsPoolSpell` is false.
 - Useful flags in the JSON: `isBattlegroundsPoolMinion`,
   `isBattlegroundsPoolSpell`, `isBattlegroundsDuosExclusive` (drop these),
   `battlegroundsAssociatedRaces` (the tribe a spell or neutral minion
@@ -127,10 +171,10 @@ Deleting `.venv` undoes it.
 
 ## Known weak spots
 
-- `peak_boards.toml` holds made-up boards (a +85/+85 Beetle bonus beats
-  everything), so `bgbench peak` means nothing yet. Planned: boards taken
+- `peak_boards.toml` holds made-up boards, so `bgbench peak` means
+  nothing yet. Planned: boards taken
   from build-forcing bots playing real games.
 - The curve bots are simple yardsticks; beating them doesn't prove a curve
   is bad.
-- The observation doesn't show the new tribes, Stealth or event counters
-  yet; that is the D4 step.
+- The observation doesn't show the new tribes, Stealth, counters, pending
+  choices or Holy Vanguard's conditional +30/+30 yet; that is the D4 step.

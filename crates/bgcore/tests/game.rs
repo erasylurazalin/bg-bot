@@ -1412,3 +1412,19 @@ fn standard_and_rush_bots_follow_curves_and_play_whole_games() {
     }
 }
 
+
+#[test]
+fn legal_mask_matches_is_legal_everywhere() {
+    for seed in 0..20 {
+        let mut g = s2_game(seed);
+        let mut rng = Rng::new(seed + 99);
+        let mut mask = [false; N_ACTIONS];
+        while !g.over {
+            g.legal_mask(&mut mask);
+            for (i, &m) in mask.iter().enumerate() {
+                assert_eq!(m, g.is_legal(Action::from_index(i).unwrap()), "seed {seed}, action {i}");
+            }
+            g.step(random_action(&g, &mut rng)).unwrap();
+        }
+    }
+}
