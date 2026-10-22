@@ -14,7 +14,7 @@ pub mod obs;
 pub mod rng;
 pub mod rules;
 
-pub use action::{Action, N_ACTIONS};
+pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 pub use cards::{Card, CardDb, Effect, Tribe};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
 pub use game::{Game, IllegalAction, Opponent, Player};
@@ -28,6 +28,7 @@ pub const HAND: usize = 10;
 pub const SHOP: usize = 6;
 pub const DISCOVER: usize = 3;
 pub const MAX_TIER: u8 = 6;
+pub const TRIBES: usize = 3;
 
 /// Cards and rules together, shared by every game.
 #[derive(Debug, Clone)]

@@ -31,7 +31,20 @@ const LEVEL: usize = FREEZE + 1;
 const END_TURN: usize = LEVEL + 1;
 
 pub const N_ACTIONS: usize = END_TURN + 1;
-pub const N_KINDS: usize = 10;
+pub const N_KINDS: usize = 11;
+pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
+    ("buy", SHOP),
+    ("buy_spell", 1),
+    ("sell", BOARD),
+    ("play", HAND * (BOARD + 1)),
+    ("target", BOARD),
+    ("choose", DISCOVER),
+    ("move", BOARD * (BOARD - 1)),
+    ("roll", 1),
+    ("freeze", 1),
+    ("level", 1),
+    ("end", 1),
+];
 
 impl Action {
     pub fn index(self) -> usize {
@@ -79,19 +92,20 @@ impl Action {
         })
     }
 
-    /// Which of the 10 kinds of action this is, in declaration order.
+    /// Which of the 11 kinds of action this is, in declaration order.
     pub fn kind(self) -> usize {
         match self {
-            Action::Buy(_) | Action::BuySpell => 0,
-            Action::Sell(_) => 1,
-            Action::Play { .. } => 2,
-            Action::Target(_) => 3,
-            Action::Choose(_) => 4,
-            Action::Move { .. } => 5,
-            Action::Roll => 6,
-            Action::Freeze => 7,
-            Action::Level => 8,
-            Action::EndTurn => 9,
+            Action::Buy(_) => 0,
+            Action::BuySpell => 1,
+            Action::Sell(_) => 2,
+            Action::Play { .. } => 3,
+            Action::Target(_) => 4,
+            Action::Choose(_) => 5,
+            Action::Move { .. } => 6,
+            Action::Roll => 7,
+            Action::Freeze => 8,
+            Action::Level => 9,
+            Action::EndTurn => 10,
         }
     }
 }
@@ -107,5 +121,13 @@ mod tests {
             assert_eq!(a.index(), i, "{a:?}");
         }
         assert_eq!(Action::from_index(N_ACTIONS), None);
+        let mut i = 0;
+        for (kind, &(_, size)) in ACTION_KINDS.iter().enumerate() {
+            for _ in 0..size {
+                assert_eq!(Action::from_index(i).unwrap().kind(), kind);
+                i += 1;
+            }
+        }
+        assert_eq!(i, N_ACTIONS);
     }
 }

@@ -5,10 +5,20 @@ import sys
 
 COLS = [
     ("update", "update"), ("minutes", "min"), ("games", "games"),
-    ("place_vs_rule", "vs7rule"), ("place_4v4_rule", "4v4rule"), ("place_vs_snapshot", "vs_old"),
-    ("entropy", "entropy"), ("actions_per_turn", "act/trn"), ("tier_t6", "tier@6"), ("tier_t10", "tier@10"),
-    ("act_buy", "buy"), ("act_sell", "sell"), ("act_play", "play"), ("act_move", "move"),
-    ("act_roll", "roll"), ("act_freeze", "freeze"), ("act_level", "level"), ("act_end", "end"),
+    ("place_vs_std", "vs7std"), ("place_vs_rush", "vs7rush"),
+    ("place_4v4_std", "4v4std"), ("place_4v4_rush", "4v4rush"),
+    ("place_4v4_mix", "4v4mix"), ("place_vs_snapshot", "vs_old"),
+    ("turn_t3", "trn@t3"), ("turn_t4", "trn@t4"), ("turn_t5", "trn@t5"),
+    ("curve_econ_rush", "c_econ"), ("curve_rush", "c_rush"),
+    ("curve_standard", "c_std"), ("curve_slow", "c_slow"),
+    ("tribe_beast", "t_beast"), ("tribe_mech", "t_mech"), ("tribe_mixed", "t_mix"),
+    ("place_beast", "p_beast"), ("place_mech", "p_mech"), ("place_mixed", "p_mix"),
+    ("entropy", "entropy"), ("actions_per_turn", "act/trn"),
+    ("tier_t6", "tier@6"), ("tier_t10", "tier@10"),
+    ("act_buy", "buy"), ("act_buy_spell", "b_spl"), ("act_sell", "sell"),
+    ("act_play", "play"), ("act_target", "target"), ("act_choose", "choose"),
+    ("act_move", "move"), ("act_roll", "roll"), ("act_freeze", "freeze"),
+    ("act_level", "level"), ("act_end", "end"),
     ("explained_var", "expl_v"), ("approx_kl", "kl"),
 ]
 

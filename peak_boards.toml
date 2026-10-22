@@ -1,0 +1,62 @@
+# Peak late-game boards (around turn 14 to 16) for the four Stage 2 builds.
+# Each board has one or two golden core cards, counters at a level its engine
+# plausibly reaches by turn 15, and buffs from its typical shop-phase scaling.
+
+[[board]]
+name = "beast_summon"
+justification = "Turn 15 summon spam with golden Sewer Lord and golden Banana Slamma, backed by Lurking Leviathan (24 stacks from four combats of token waves), Pack Leader and Titus Rivendare."
+beetle_bonus = [0, 0]
+volumizer_bonus = [0, 0]
+minions = [
+    { name = "Sewer Lord", golden = true, buff = [12, 16], keywords = ["taunt", "reborn"] },
+    { name = "Sewer Lord", buff = [8, 12], keywords = ["taunt", "reborn"] },
+    { name = "Rat Pack", buff = [14, 10], keywords = ["reborn"] },
+    { name = "Pack Leader", buff = [10, 14] },
+    { name = "Lurking Leviathan", buff = [16, 22], improvements = 24 },
+    { name = "Banana Slamma", golden = true, buff = [14, 20] },
+    { name = "Titus Rivendare", buff = [14, 22] },
+]
+
+[[board]]
+name = "beast_beetles"
+justification = "Turn 15 Beetle board with +85/+85 accumulated Beetle bonus from early Rovers/Tenders plus four combats of golden Turquoise Skitterer, Ravaging Scorpid and Titus, with two Boon of Beetles charges."
+beetle_bonus = [85, 85]
+volumizer_bonus = [0, 0]
+boon_of_beetles = 4
+minions = [
+    { name = "Turquoise Skitterer", golden = true, buff = [12, 16], keywords = ["taunt", "reborn"] },
+    { name = "Turquoise Skitterer", buff = [8, 12], keywords = ["taunt", "reborn"] },
+    { name = "Scarab Tender", buff = [8, 10], keywords = ["reborn"] },
+    { name = "Ravaging Scorpid", golden = true, buff = [18, 22], keywords = ["reborn"] },
+    { name = "Ravaging Scorpid", buff = [12, 14] },
+    { name = "Banana Slamma", buff = [12, 18] },
+    { name = "Titus Rivendare", buff = [14, 22] },
+]
+
+[[board]]
+name = "mech_volumizer"
+justification = "Turn 15 self-buffing Magnetic board with +24/+24 Volumizer bonus across 22 attached Volumizers from Auto Reveille, golden Resourceful Robot and Conveyor Constructs, plus 10 Spark Snapper triggers (+110/+165 total Satellites)."
+beetle_bonus = [0, 0]
+volumizer_bonus = [24, 24]
+minions = [
+    { name = "Auto Reveille", buff = [58, 78], volumizers = 7, magnetizations = 11, keywords = ["divine_shield", "taunt", "windfury"], attached = [{ name = "Cord Puller" }] },
+    { name = "Resourceful Robot", golden = true, buff = [46, 62], volumizers = 6, magnetizations = 9, keywords = ["divine_shield"] },
+    { name = "Spark Snapper", golden = true, buff = [36, 48], volumizers = 5, magnetizations = 7, improvements = 10, keywords = ["divine_shield"] },
+    { name = "Conveyor Construct", buff = [24, 32], volumizers = 4, magnetizations = 5, keywords = ["divine_shield", "taunt"] },
+    { name = "Mechagnome Interpreter", buff = [18, 24] },
+    { name = "Drakkari Enchanter", buff = [12, 18] },
+]
+
+[[board]]
+name = "mech_satellite"
+justification = "Turn 15 Satellite spam board where Banana Dispenser, Balinda and golden Glambot attached 36 Satellites (4/4 each) over four turns while golden Utility Drone scaled each magnetized Mech at end of turn."
+beetle_bonus = [0, 0]
+volumizer_bonus = [0, 0]
+minions = [
+    { name = "Glambot", golden = true, buff = [210, 245], magnetizations = 14, keywords = ["divine_shield", "taunt", "windfury"], attached = [{ name = "Cord Puller" }] },
+    { name = "Charging Czarina", buff = [185, 195], magnetizations = 11, keywords = ["divine_shield"] },
+    { name = "Utility Drone", golden = true, buff = [135, 160], magnetizations = 8, keywords = ["divine_shield"] },
+    { name = "Banana Dispenser", buff = [95, 115], magnetizations = 6, keywords = ["divine_shield", "taunt"] },
+    { name = "Enchanted Sentinel", buff = [65, 80], magnetizations = 4 },
+    { name = "Balinda Stonehearth", buff = [24, 28] },
+]

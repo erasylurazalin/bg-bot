@@ -427,7 +427,10 @@ fn rule_bots_play_whole_games() {
 
 #[test]
 fn observation_shows_only_what_the_player_saw() {
-    use bgcore::obs::{OBS_SIZE, write};
+    use bgcore::obs::{
+        OBS_SIZE, OPP_BLOCK, OPP_NEXT, OPP_SCALARS, OPP_SEEN, OWN_END, SLOT_ATTACK, SLOT_PRESENT,
+        write,
+    };
     let mut g = game(22);
     let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
     let q = q as usize;
@@ -439,22 +442,20 @@ fn observation_shows_only_what_the_player_saw() {
     // q's board isn't visible before the fight...
     let opp = |out: &[f32]| {
         let k = q - 1; // seat q sits q places after seat 0
-        let start = bgcore::obs::SCALARS
-            + (bgcore::SHOP + bgcore::HAND + bgcore::BOARD + bgcore::DISCOVER) * bgcore::obs::MINION_FEATURES
-            + k * (bgcore::obs::OPP_SCALARS + bgcore::BOARD * bgcore::obs::MINION_FEATURES);
-        out[start..start + bgcore::obs::OPP_SCALARS + bgcore::BOARD * bgcore::obs::MINION_FEATURES].to_vec()
+        let start = OWN_END + k * OPP_BLOCK;
+        out[start..start + OPP_BLOCK].to_vec()
     };
     let o = opp(&before);
-    assert_eq!(o[5], 1.0); // next opponent
-    assert_eq!(o[3], 0.0); // never seen
-    assert_eq!(o[bgcore::obs::OPP_SCALARS], 0.0); // no minion shown
+    assert_eq!(o[OPP_NEXT], 1.0); // next opponent
+    assert_eq!(o[OPP_SEEN], 0.0); // never seen
+    assert_eq!(o[OPP_SCALARS + SLOT_PRESENT], 0.0); // no minion shown
     // ...and is after it
     next_turn(&mut g);
     write(&g, 0, &mut out);
     let o = opp(&out);
-    assert_eq!(o[3], 1.0);
-    assert_eq!(o[bgcore::obs::OPP_SCALARS], 1.0);
-    assert_eq!(o[bgcore::obs::OPP_SCALARS + 2], 8.0); // Brute's attack
+    assert_eq!(o[OPP_SEEN], 1.0);
+    assert_eq!(o[OPP_SCALARS + SLOT_PRESENT], 1.0);
+    assert_eq!(o[OPP_SCALARS + SLOT_ATTACK], 8.0); // Brute's attack
 }
 
 #[test]
@@ -1166,5 +1167,192 @@ fn czarina_harbinger_banana_dispenser_groundskeeper_and_rescue_bot() {
     next_turn(&mut g2);
     assert!(g2.players[0].hand.iter().any(|m| name(&g2, m) == "Repair Job"));
     g2.check_invariants().unwrap();
+}
+
+#[test]
+fn stage2_observation_spells_magnetizations_and_scalars() {
+    use bgcore::obs::*;
+    let mut g = s2_game(300);
+
+    // Check layout sizes and offsets.
+    assert_eq!(OWN_SLOTS, bgcore::SHOP + SHOP_SPELL + bgcore::HAND + bgcore::BOARD + bgcore::DISCOVER);
+    assert_eq!(OWN_END, SCALARS + OWN_SLOTS * SLOT_FEATURES);
+    assert_eq!(OPP_BLOCK, OPP_SCALARS + bgcore::BOARD * SLOT_FEATURES);
+    assert_eq!(OBS_SIZE, OWN_END + (bgcore::PLAYERS - 1) * OPP_BLOCK);
+
+    // Put Cord Puller (Mech, Divine Shield), Spark Snapper, and Patient Scout on board.
+    put_on_board(&mut g, 0, "Cord Puller");
+    put_on_board(&mut g, 0, "Spark Snapper");
+    put_on_board(&mut g, 0, "Patient Scout");
+
+    // Magnetize a Red Volumizer onto Cord Puller at slot 0:
+    // - Cord Puller gets +3/+1 and 1 Volumizer inside, plus a 2/3 Satellite from Spark Snapper (2 Magnetizations total).
+    // - Spark Snapper gets improvements = 1.
+    // - Player 0 gets volumizer_bonus = (3, 0).
+    g.give(0, "Red Volumizer").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+
+    // Cast Winner's Bread (+2/+3 and 1 winners_bread stack) on Cord Puller at slot 0.
+    let bread_id = g.data.cards.by_name("Winner's Bread").unwrap();
+    g.give(0, "Winner's Bread").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+
+    // Give a spell (Repair Job, tier 3) and a generated token (Tentacle) to player 0's hand.
+    let repair_id = g.data.cards.by_name("Repair Job").unwrap();
+    g.give(0, "Repair Job").unwrap();
+    g.give(0, "Tentacle").unwrap();
+
+    // Set some additional player state scalars.
+    g.players[0].beetle_bonus = (4, 5);
+    g.players[0].gold_next_turn = 2;
+    g.players[0].extra_max_gold = 1;
+    g.players[0].free_rolls = 3;
+    g.players[0].spell_discount = 1;
+    g.players[0].spell_bonus = (2, 1);
+    g.players[0].boon_of_beetles = 2;
+    g.players[0].brood_of_nozdormu = 1;
+    g.players[0].upper_hand = 1;
+    g.players[0].won_last_combat = true;
+    g.players[0].board[2].improvements = 3; // Patient Scout at tier 1 + 3 = 4
+
+    let mut out = vec![f32::NAN; OBS_SIZE];
+    write(&g, 0, &mut out);
+    assert!(out.iter().all(|x| x.is_finite()));
+
+    // Check own scalars.
+    assert_eq!(out[SCALAR_VOLUMIZER_ATTACK], 3.0);
+    assert_eq!(out[SCALAR_VOLUMIZER_HEALTH], 0.0);
+    assert_eq!(out[SCALAR_BEETLE_ATTACK], 4.0);
+    assert_eq!(out[SCALAR_BEETLE_HEALTH], 5.0);
+    assert_eq!(out[SCALAR_PATIENT_SCOUT_TIER], 4.0);
+    assert_eq!(out[SCALAR_GOLD_NEXT_TURN], 2.0);
+    assert_eq!(out[SCALAR_EXTRA_MAX_GOLD], 1.0);
+    assert_eq!(out[SCALAR_FREE_ROLLS], 3.0);
+    assert_eq!(out[SCALAR_SPELL_DISCOUNT], 1.0);
+    assert_eq!(out[SCALAR_SPELL_ATTACK], 2.0);
+    assert_eq!(out[SCALAR_SPELL_HEALTH], 1.0);
+    assert_eq!(out[SCALAR_BOON_OF_BEETLES], 2.0);
+    assert_eq!(out[SCALAR_BROOD_OF_NOZDORMU], 1.0);
+    assert_eq!(out[SCALAR_UPPER_HAND], 1.0);
+    assert_eq!(out[SCALAR_LAST_SPELL], bread_id as f32 + 1.0);
+    assert_eq!(out[SCALAR_WON_LAST_COMBAT], 1.0);
+    assert_eq!(out[SCALAR_LOST_LAST_COMBAT], 0.0);
+
+    // Check shop spell slot.
+    let shop_sp = &out[SHOP_SPELL_START..SHOP_SPELL_START + SLOT_FEATURES];
+    assert_eq!(shop_sp[SLOT_PRESENT], 1.0);
+    assert_eq!(shop_sp[SLOT_IS_SPELL], 1.0);
+    assert_eq!(shop_sp[SLOT_ATTACK], 0.0);
+    assert_eq!(shop_sp[SLOT_HEALTH], 0.0);
+
+    // Check spell in hand (hand slot 0 is Repair Job, tier 3): is_spell is 1, stats are 0.
+    let hand0 = &out[HAND_START..HAND_START + SLOT_FEATURES];
+    assert_eq!(hand0[SLOT_PRESENT], 1.0);
+    assert_eq!(hand0[SLOT_CARD_ID], repair_id as f32 + 1.0);
+    assert_eq!(hand0[SLOT_IS_SPELL], 1.0);
+    assert_eq!(hand0[SLOT_TIER], 3.0);
+    for &idx in &[
+        SLOT_ATTACK,
+        SLOT_HEALTH,
+        SLOT_GOLDEN,
+        SLOT_BEAST,
+        SLOT_MECH,
+        SLOT_NEUTRAL,
+        SLOT_MAGNETIZATIONS,
+        SLOT_VOLUMIZERS,
+        SLOT_IMPROVEMENTS,
+        SLOT_FROM_POOL,
+        SLOT_WINNERS_BREAD,
+    ] {
+        assert_eq!(hand0[idx], 0.0, "spell stat field {idx} should be 0");
+    }
+
+    // Check generated token in hand (hand slot 1 is Tentacle: from_pool == 0, neutral == 1).
+    let hand1 = &out[HAND_START + SLOT_FEATURES..HAND_START + 2 * SLOT_FEATURES];
+    assert_eq!(hand1[SLOT_PRESENT], 1.0);
+    assert_eq!(hand1[SLOT_IS_SPELL], 0.0);
+    assert_eq!(hand1[SLOT_NEUTRAL], 1.0);
+    assert_eq!(hand1[SLOT_FROM_POOL], 0.0);
+
+    // Check board slot 0 (Cord Puller with Red Volumizer + Snapper Satellite + Winner's Bread).
+    let b0 = &out[BOARD_START..BOARD_START + SLOT_FEATURES];
+    assert_eq!(b0[SLOT_PRESENT], 1.0);
+    assert_eq!(b0[SLOT_MECH], 1.0);
+    assert_eq!(b0[SLOT_KEYWORDS + 1], 1.0); // divine_shield
+    assert_eq!(b0[SLOT_KEYWORDS + 5], 1.0); // magnetic inherited from Red Volumizer
+    assert_eq!(b0[SLOT_MAGNETIZATIONS], 2.0);
+    assert_eq!(b0[SLOT_VOLUMIZERS], 1.0);
+    assert_eq!(b0[SLOT_FROM_POOL], 1.0);
+    assert_eq!(b0[SLOT_WINNERS_BREAD], 1.0);
+
+    // Check board slot 1 (Spark Snapper: improvements == 1).
+    let b1 = &out[BOARD_START + SLOT_FEATURES..BOARD_START + 2 * SLOT_FEATURES];
+    assert_eq!(b1[SLOT_IMPROVEMENTS], 1.0);
+}
+
+#[test]
+fn standard_and_rush_bots_follow_curves_and_play_whole_games() {
+    use bgcore::bots::{rush_action, standard_action};
+
+    // 1. Check standard_action reaches tier 2 on turn 2, tier 3 on turn 5,
+    //    tier 4 on turn 7, tier 5 on turn 11, tier 6 on turn 12 in a simple game.
+    let mut g_std = s2_game(301);
+    while g_std.turn <= 12 && !g_std.over {
+        for pl in &mut g_std.players {
+            pl.health = 30;
+        }
+        let p = g_std.current_player().unwrap();
+        let a = if p == 0 { standard_action(&g_std) } else { Action::EndTurn };
+        g_std.step(a).unwrap();
+    }
+    assert_eq!(g_std.players[0].tier_turns, [1, 2, 5, 7, 11, 12]);
+
+    // 2. Check rush_action reaches tier 2 on turn 2, tier 3 on turn 4 (spending leftover
+    //    gold on a 1-cost spell when offered), tier 4 on turn 5, tier 5 on turn 7, tier 6 on turn 8.
+    let mut g_rush = s2_game(302);
+    let banana = g_rush.data.cards.by_name("Tavern Dish Banana").unwrap();
+    let mut bought_spell_t4 = false;
+    while g_rush.turn <= 8 && !g_rush.over {
+        for pl in &mut g_rush.players {
+            pl.health = 30;
+        }
+        if g_rush.turn == 4 && g_rush.players[0].tier == 2 {
+            // Offer a 1-cost Tavern Dish Banana on turn 4 before player 0 levels.
+            g_rush.players[0].shop_spell = Some(banana);
+        }
+        let p = g_rush.current_player().unwrap();
+        let a = if p == 0 { rush_action(&g_rush) } else { Action::EndTurn };
+        if p == 0 && g_rush.turn == 4 && a == Action::BuySpell {
+            bought_spell_t4 = true;
+        }
+        g_rush.step(a).unwrap();
+    }
+    assert!(bought_spell_t4, "rush bot should spend its leftover gold on turn 4 on a 1-cost spell");
+    assert_eq!(g_rush.players[0].tier_turns, [1, 2, 4, 5, 7, 8]);
+
+    // 3. Check curve bots merge Magnetic minions left of a Mech on board.
+    let mut g_mag = s2_game(303);
+    put_on_board(&mut g_mag, 0, "Buzzing Vermin"); // Beast at slot 0
+    put_on_board(&mut g_mag, 0, "Cord Puller"); // Mech at slot 1
+    g_mag.give(0, "Lullabot").unwrap(); // Magnetic in hand slot 0
+    turn_of(&mut g_mag, 0);
+    assert_eq!(standard_action(&g_mag), Action::Play { hand: 0, pos: 1 });
+    assert_eq!(rush_action(&g_mag), Action::Play { hand: 0, pos: 1 });
+
+    // 4. Play whole games with both bots and verify no illegal actions and valid finish reports.
+    for seed in 0..20 {
+        let mut g = s2_game(seed + 400);
+        while let Some(p) = g.current_player() {
+            let a = if p % 2 == 0 { standard_action(&g) } else { rush_action(&g) };
+            g.step(a).unwrap();
+            g.check_invariants().unwrap();
+        }
+        for pl in &g.players {
+            assert!((1..=8).contains(&pl.placement));
+            assert_eq!(pl.tier_turns[0], 1);
+            assert!(pl.final_tribes.iter().sum::<u8>() as usize <= bgcore::BOARD);
+        }
+    }
 }
 

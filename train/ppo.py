@@ -1,15 +1,16 @@
-"""PPO self-play for the v0.1 mini Battlegrounds.
+"""PPO self-play for Stage 2 Battlegrounds.
 
-    .venv/bin/python train/ppo.py --name smoke --minutes 10
-    .venv/bin/python train/ppo.py --name run1 --resume runs/run1/ckpt.pt
+    .venv/bin/python train/ppo.py --name stage2-smoke --minutes 5
+    .venv/bin/python train/ppo.py --name run2 --resume runs/run2/ckpt.pt
 
 Each game seats learners (this network, trained), snapshots (older copies of
-it), and rule bots. Reward is placement only: +1 for 1st down to -1 for 8th,
-given when the seat is knocked out or the game ends, minus a tiny cost per
-action (--action-cost) so it doesn't shuffle its board for free.
+it), standard curve bots, rush curve bots, and random bots. Reward is placement
+only: +1 for 1st down to -1 for 8th, given when the seat is knocked out or the
+game ends, minus a tiny cost per action (--action-cost) so it doesn't shuffle
+its board for free.
 
 Everything lands in runs/<name>/: metrics.csv (one row per eval), a
-TensorBoard log, ckpt.pt (latest) and best.pt (best eval against rule bots).
+TensorBoard log, ckpt.pt (latest) and best.pt (best eval against curve bots).
 """
 
 import argparse
@@ -24,15 +25,28 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
-from model import KIND_SIZES, Net, masked
+from model import Net, masked
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
-KINDS = ["buy", "sell", "play", "target", "choose", "move", "roll", "freeze", "level", "end"]
-KIND_OF = torch.tensor(sum(([k] * n for k, n in enumerate(KIND_SIZES)), []))
-END_TURN = bgpy.N_ACTIONS - 1
-SHOP_START = bgpy.SCALARS  # shop slots come first after the scalars
-ACTIONS_LEFT = 9  # scalar index, see bgcore/src/obs.rs
+KINDS = [name for name, _ in bgpy.ACTION_KINDS]
+KIND_OF = torch.tensor([k for k, (_, n) in enumerate(bgpy.ACTION_KINDS) for _ in range(n)])
+END_TURN = bgpy.END_TURN
+SHOP_START = bgpy.SHOP_START
+ACTIONS_LEFT = bgpy.SCALAR_ACTIONS_LEFT
+
+EVAL_KEYS = [
+    "place_vs_std", "place_vs_rush", "place_4v4_std", "place_4v4_rush", "place_4v4_mix",
+    "place_vs_snapshot",
+    "turn_t3", "turn_t4", "turn_t5",
+    "curve_econ_rush", "curve_rush", "curve_standard", "curve_slow",
+    "tribe_beast", "tribe_mech", "tribe_mixed",
+    "place_beast", "place_mech", "place_mixed",
+]
+TRAIN_KEYS = [
+    "entropy", "approx_kl", "clipfrac", "value_loss", "explained_var", "steps_per_s",
+    "actions_per_turn", "tier_t6", "tier_t10", "health_end",
+]
 
 
 def args():
@@ -43,7 +57,8 @@ def args():
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--envs", type=int, default=1024)
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
-    a.add_argument("--lineup", default="4,2,2,0", help="learner,snapshot,rule,random seats")
+    a.add_argument("--lineup", default="4,2,1,1,0",
+                   help="learner,snapshot,standard,rush,random seats")
     a.add_argument("--lr", type=float, default=2.5e-4)
     a.add_argument("--epochs", type=int, default=3)
     a.add_argument("--minibatch", type=int, default=8192)
@@ -74,6 +89,8 @@ class Bufs:
         self.seat = np.zeros(n, np.int64)
         self.kind = np.zeros(n, np.int64)
         self.places = np.zeros((n, P), np.int8)
+        self.tier_turns = np.zeros((n, P, bgpy.MAX_TIER), np.int8)
+        self.tribes = np.zeros((n, P, bgpy.TRIBES), np.int8)
         self.reset = np.zeros(n, bool)
         self.kinds = np.zeros((n, P), np.int64)
 
@@ -87,17 +104,48 @@ def act(net, obs, mask, greedy=False):
 
 @torch.no_grad()
 def evaluate(net, n_games, lineup, dev, seed):
-    """Play n_games with `lineup` and return the learners' average place."""
+    """Play n_games with `lineup` and return (avg_place, learner_records)."""
     n = min(n_games, 1024)
     env = bgpy.VecEnv(n, seed, lineup)
+    b = Bufs(n)
+    env.kinds(b.kinds)
+    records, done = [], 0
+    while done < n_games:
+        env.observe(b.obs, b.mask, b.seat, b.kind)
+        a, _, _, _ = act(net, torch.from_numpy(b.obs).to(dev), torch.from_numpy(b.mask).to(dev))
+        kinds = b.kinds.copy()
+        env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
+        for e, s in zip(*np.nonzero(b.places)):
+            if kinds[e, s] == LEARNER:
+                records.append((
+                    int(b.places[e, s]),
+                    b.tier_turns[e, s].copy(),
+                    b.tribes[e, s].copy(),
+                ))
+        done += int(b.reset.sum())
+        if b.reset.any():
+            env.kinds(b.kinds)
+    avg_place = float(np.mean([r[0] for r in records]))
+    return avg_place, records
+
+
+@torch.no_grad()
+def evaluate_vs(net, other, n_games, dev, seed):
+    """4 learner seats against 4 seats of `other`. Learners' average place."""
+    n = min(n_games, 1024)
+    env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0])
     b = Bufs(n)
     env.kinds(b.kinds)
     places, done = [], 0
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
-        a, _, _, _ = act(net, torch.from_numpy(b.obs).to(dev), torch.from_numpy(b.mask).to(dev))
+        o, m = torch.from_numpy(b.obs).to(dev), torch.from_numpy(b.mask).to(dev)
+        a, _, _, _ = act(net, o, m)
+        sn = torch.from_numpy(b.kind == SNAPSHOT).to(dev)
+        if sn.any():
+            a[sn] = act(other, o[sn], m[sn])[0]
         kinds = b.kinds.copy()
-        env.step(a.cpu().numpy(), b.places, b.reset)
+        env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
         for e, s in zip(*np.nonzero(b.places)):
             if kinds[e, s] == LEARNER:
                 places.append(b.places[e, s])
@@ -105,6 +153,44 @@ def evaluate(net, n_games, lineup, dev, seed):
         if b.reset.any():
             env.kinds(b.kinds)
     return float(np.mean(places))
+
+
+def summarize_records(records):
+    """Compute curve and tribe reports from finished learner seat records."""
+    places = np.array([r[0] for r in records], dtype=np.float64)
+    tiers = np.array([r[1] for r in records], dtype=np.int32)
+    tribes = np.array([r[2] for r in records], dtype=np.int32)
+
+    t3, t4, t5 = tiers[:, 2], tiers[:, 3], tiers[:, 4]
+    turn_t3 = float(t3[t3 > 0].mean()) if (t3 > 0).any() else float("nan")
+    turn_t4 = float(t4[t4 > 0].mean()) if (t4 > 0).any() else float("nan")
+    turn_t5 = float(t5[t5 > 0].mean()) if (t5 > 0).any() else float("nan")
+
+    econ_rush = (t3 > 0) & (t3 <= 3)
+    rush = ~econ_rush & (t3 > 0) & (t3 <= 4) & (t4 > 0) & (t4 <= 5)
+    standard = ~econ_rush & ~rush & (t3 > 0) & (t3 <= 5) & (t4 > 0) & (t4 <= 7)
+    slow = ~(econ_rush | rush | standard)
+
+    beasts, mechs, neutrals = tribes[:, 0], tribes[:, 1], tribes[:, 2]
+    mostly_beast = beasts > (mechs + neutrals)
+    mostly_mech = mechs > (beasts + neutrals)
+    mixed = ~(mostly_beast | mostly_mech)
+
+    return {
+        "turn_t3": turn_t3,
+        "turn_t4": turn_t4,
+        "turn_t5": turn_t5,
+        "curve_econ_rush": float(econ_rush.mean()),
+        "curve_rush": float(rush.mean()),
+        "curve_standard": float(standard.mean()),
+        "curve_slow": float(slow.mean()),
+        "tribe_beast": float(mostly_beast.mean()),
+        "tribe_mech": float(mostly_mech.mean()),
+        "tribe_mixed": float(mixed.mean()),
+        "place_beast": float(places[mostly_beast].mean()) if mostly_beast.any() else float("nan"),
+        "place_mech": float(places[mostly_mech].mean()) if mostly_mech.any() else float("nan"),
+        "place_mixed": float(places[mixed].mean()) if mixed.any() else float("nan"),
+    }
 
 
 def main():
@@ -143,10 +229,13 @@ def main():
     csv_file = open(csv_path, "a", newline="")
     log = csv.writer(csv_file)
     if new_csv:
-        log.writerow(["update", "minutes", "games", "place_vs_rule", "place_4v4_rule", "place_vs_snapshot",
-                      "entropy", "approx_kl", "clipfrac", "value_loss", "explained_var", "steps_per_s",
-                      "actions_per_turn",
-                      "tier_t6", "tier_t10", "health_end", *[f"act_{k}" for k in KINDS], "top_buys"])
+        log.writerow([
+            "update", "minutes", "games",
+            *EVAL_KEYS,
+            *TRAIN_KEYS,
+            *[f"act_{k}" for k in KINDS],
+            "top_buys",
+        ])
 
     b = Bufs(N)
     env.kinds(b.kinds)
@@ -188,7 +277,7 @@ def main():
                 le = np.nonzero(b.kind == LEARNER)[0]
                 last[le, b.seat[le]] = t
                 kinds = b.kinds.copy()
-                env.step(a.cpu().numpy(), b.places, b.reset)
+                env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
                 for e, s in zip(*np.nonzero(b.places)):
                     if kinds[e, s] == LEARNER and last[e, s] >= 0:
                         rews[last[e, s], e] += reward(b.places[e, s])
@@ -264,10 +353,14 @@ def main():
         with torch.no_grad():
             k = kind_of[f_act]
             counts = torch.bincount(k, minlength=len(KINDS)).float()
-            turn, tier, health = f_obs[:, 4], f_obs[:, 1], f_obs[:, 3]
+            turn = f_obs[:, bgpy.SCALAR_TURN]
+            tier = f_obs[:, bgpy.SCALAR_TIER]
+            health = f_obs[:, bgpy.SCALAR_HEALTH]
             t6, t10 = tier[turn == 6], tier[turn == 10]
-            buys = f_act[k == 0]
-            card_ids = f_obs[k == 0, SHOP_START + buys * bgpy.MINION_FEATURES + 1].long() - 1
+            is_buy = (k == 0) | (k == 1)
+            buys = f_act[is_buy]
+            card_ids = f_obs[is_buy, SHOP_START + buys * bgpy.SLOT_FEATURES + bgpy.SLOT_CARD_ID].long() - 1
+            card_ids = card_ids[card_ids >= 0]
             buy_counts = torch.bincount(card_ids, minlength=len(names))
             ev = 1 - (f_ret - f_val).var() / (f_ret.var() + 1e-8)
             n_ends = ends.reshape(-1)[sel].sum().item()
@@ -296,62 +389,60 @@ def main():
         done = minutes >= cfg.minutes
         if update % cfg.eval_every == 0 or done:
             net.eval()
-            seed = 10_000 + update
-            vs_rule = evaluate(net, cfg.eval_games, [1, 0, 7, 0], dev, seed)
-            v4 = evaluate(net, cfg.eval_games // 2, [4, 0, 4, 0], dev, seed)
+            seed = 10_000 + update * 10
+            vs_std, rec_std = evaluate(net, cfg.eval_games, [1, 0, 7, 0, 0], dev, seed)
+            vs_rush, rec_rush = evaluate(net, cfg.eval_games, [1, 0, 0, 7, 0], dev, seed + 1)
+            v4_std, rec_4s = evaluate(net, cfg.eval_games // 2, [4, 0, 4, 0, 0], dev, seed + 2)
+            v4_rush, rec_4r = evaluate(net, cfg.eval_games // 2, [4, 0, 0, 4, 0], dev, seed + 3)
+            v4_mix, rec_4m = evaluate(net, cfg.eval_games // 2, [4, 0, 2, 2, 0], dev, seed + 4)
             snap.load_state_dict(pool[0])  # the oldest snapshot kept
-            vs_snap = evaluate_vs(net, snap, cfg.eval_games // 2, dev, seed)
+            vs_snap = evaluate_vs(net, snap, cfg.eval_games // 2, dev, seed + 5)
             net.train()
-            tb.add_scalar("eval/place_vs_rule", vs_rule, update)
-            tb.add_scalar("eval/place_4v4_rule", v4, update)
-            tb.add_scalar("eval/place_vs_oldest_snapshot", vs_snap, update)
-            log.writerow([update, f"{minutes:.1f}", games, f"{vs_rule:.3f}", f"{v4:.3f}", f"{vs_snap:.3f}",
-                          *[f"{stats[k]:.4g}" for k in ["entropy", "approx_kl", "clipfrac", "value_loss",
-                                                         "explained_var", "steps_per_s",
-                                                         "actions_per_turn", "tier_t6",
-                                                         "tier_t10", "health_end"]],
-                          *[f"{stats[f'act_{k}']:.3f}" for k in KINDS], top_buys])
+
+            rep = summarize_records(rec_std + rec_rush + rec_4s + rec_4r + rec_4m)
+            eval_vals = {
+                "place_vs_std": vs_std,
+                "place_vs_rush": vs_rush,
+                "place_4v4_std": v4_std,
+                "place_4v4_rush": v4_rush,
+                "place_4v4_mix": v4_mix,
+                "place_vs_snapshot": vs_snap,
+                **rep,
+            }
+            for key, val in eval_vals.items():
+                tb.add_scalar(f"eval/{key}", val, update)
+
+            log.writerow([
+                update, f"{minutes:.1f}", games,
+                *[f"{eval_vals[k]:.3f}" for k in EVAL_KEYS],
+                *[f"{stats[k]:.4g}" for k in TRAIN_KEYS],
+                *[f"{stats[f'act_{k}']:.3f}" for k in KINDS],
+                top_buys,
+            ])
             csv_file.flush()
+            score = 0.5 * (vs_std + vs_rush)
             ck = {"net": net.state_dict(), "opt": opt.state_dict(), "pool": pool, "update": update,
                   "best": best, "t_total": minutes, "cfg": vars(cfg)}
-            if vs_rule < best:
-                best = vs_rule
+            if score < best:
+                best = score
                 ck["best"] = best
                 torch.save(ck, out / "best.pt")
             torch.save(ck, out / "ckpt.pt")
-            print(f"update {update:5d}  {minutes:6.1f} min  {games:8d} games  "
-                  f"place vs 7 rule {vs_rule:.2f}  4v4 {v4:.2f}  vs oldest snap {vs_snap:.2f}  "
-                  f"ent {stats['entropy']:.2f}  {stats['actions_per_turn']:.1f} act/turn  "
-                  f"tier@6 {stats['tier_t6']:.1f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}",
-                  flush=True)
+            print(
+                f"update {update:5d}  {minutes:5.1f} min  {games:7d} games  "
+                f"vs7(std {vs_std:.2f} rush {vs_rush:.2f})  "
+                f"4v4(std {v4_std:.2f} rush {v4_rush:.2f} mix {v4_mix:.2f} snap {vs_snap:.2f})  "
+                f"t3/4/5 {rep['turn_t3']:.1f}/{rep['turn_t4']:.1f}/{rep['turn_t5']:.1f}  "
+                f"crv(std {rep['curve_standard']:.0%} rush {rep['curve_rush']:.0%} "
+                f"econ {rep['curve_econ_rush']:.0%} slow {rep['curve_slow']:.0%})  "
+                f"trb(B {rep['tribe_beast']:.0%}@{rep['place_beast']:.2f} "
+                f"M {rep['tribe_mech']:.0%}@{rep['place_mech']:.2f} "
+                f"X {rep['tribe_mixed']:.0%}@{rep['place_mixed']:.2f})  "
+                f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}",
+                flush=True,
+            )
         if done:
             break
-
-
-@torch.no_grad()
-def evaluate_vs(net, other, n_games, dev, seed):
-    """4 learner seats against 4 seats of `other`. Learners' average place."""
-    n = min(n_games, 1024)
-    env = bgpy.VecEnv(n, seed, [4, 4, 0, 0])
-    b = Bufs(n)
-    env.kinds(b.kinds)
-    places, done = [], 0
-    while done < n_games:
-        env.observe(b.obs, b.mask, b.seat, b.kind)
-        o, m = torch.from_numpy(b.obs).to(dev), torch.from_numpy(b.mask).to(dev)
-        a, _, _, _ = act(net, o, m)
-        sn = torch.from_numpy(b.kind == SNAPSHOT).to(dev)
-        if sn.any():
-            a[sn] = act(other, o[sn], m[sn])[0]
-        kinds = b.kinds.copy()
-        env.step(a.cpu().numpy(), b.places, b.reset)
-        for e, s in zip(*np.nonzero(b.places)):
-            if kinds[e, s] == LEARNER:
-                places.append(b.places[e, s])
-        done += int(b.reset.sum())
-        if b.reset.any():
-            env.kinds(b.kinds)
-    return float(np.mean(places))
 
 
 if __name__ == "__main__":

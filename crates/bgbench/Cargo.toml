@@ -6,3 +6,5 @@ edition.workspace = true
 [dependencies]
 bgcore = { path = "../bgcore" }
 rayon = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "1"

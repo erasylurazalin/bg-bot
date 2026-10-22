@@ -17,7 +17,7 @@ use crate::cards::{
 use crate::fight::{Counters, SideOutcome, fight_with};
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
-use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP};
+use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Opponent {
@@ -79,6 +79,10 @@ pub struct Player {
     pub alive: bool,
     /// 1 to 8 once decided, 0 while still playing.
     pub placement: u8,
+    /// Turn the player reached each tier (1 to 6), 0 if never reached.
+    pub tier_turns: [u8; MAX_TIER as usize],
+    /// Counts of (Beast, Mech, neutral) minions on the player's final board.
+    pub final_tribes: [u8; TRIBES],
     pub gold: u8,
     pub gold_next_turn: u8,
     pub extra_max_gold: u8,
@@ -123,6 +127,8 @@ impl Player {
             health: data.rules.starting_health,
             alive: true,
             placement: 0,
+            tier_turns: [1, 0, 0, 0, 0, 0],
+            final_tribes: [0; TRIBES],
             gold: 0,
             gold_next_turn: 0,
             extra_max_gold: 0,
@@ -164,6 +170,34 @@ impl Player {
     pub fn spell_cost(&self, cards: &CardDb) -> Option<u8> {
         let id = self.shop_spell?;
         Some(cards.get(id).cost.saturating_sub(self.spell_discount))
+    }
+
+    /// Highest discover tier of any Patient Scout currently on the board, or 0
+    /// when none is present.
+    pub fn patient_scout_tier(&self, cards: &CardDb) -> u8 {
+        let mut best = 0u8;
+        for m in &self.board {
+            for (card, _) in m.parts() {
+                if matches!(cards.get(card).on_sell, Some(OnSell::DiscoverByTier)) {
+                    let tier = (1 + m.improvements as u8).min(MAX_TIER);
+                    best = best.max(tier);
+                }
+            }
+        }
+        best
+    }
+
+    /// Counts of (Beast, Mech, neutral) minions currently on this player's board.
+    pub fn board_tribes(&self, cards: &CardDb) -> [u8; TRIBES] {
+        let mut out = [0u8; TRIBES];
+        for m in &self.board {
+            match cards.get(m.card).tribe {
+                Tribe::Beast => out[0] += 1,
+                Tribe::Mech => out[1] += 1,
+                Tribe::Neutral => out[2] += 1,
+            }
+        }
+        out
     }
 
     /// Create a copy of `id` with this player's current Volumizer and Beetle
@@ -590,10 +624,12 @@ impl Game {
             }
             Action::Freeze => self.players[p].frozen = !self.players[p].frozen,
             Action::Level => {
+                let turn = self.turn as u8;
                 let pl = &mut self.players[p];
                 pl.gold -= pl.upgrade_cost;
                 pl.tier += 1;
                 pl.upgrade_cost = self.data.rules.upgrade_cost(pl.tier);
+                pl.tier_turns[pl.tier as usize - 1] = turn;
             }
             Action::EndTurn => {}
         }
@@ -1630,6 +1666,7 @@ impl Game {
             let pl = &mut players[p as usize];
             pl.alive = false;
             pl.placement = (first_place + k) as u8;
+            pl.final_tribes = pl.board_tribes(&data.cards);
             if k == 0 {
                 *ghost = Some(Ghost {
                     player: p,
@@ -1658,7 +1695,9 @@ impl Game {
             self.rng.shuffle(&mut left);
             left.sort_by_key(|&p| std::cmp::Reverse(self.players[p as usize].health));
             for (k, &p) in left.iter().enumerate() {
-                self.players[p as usize].placement = k as u8 + 1;
+                let pl = &mut self.players[p as usize];
+                pl.placement = k as u8 + 1;
+                pl.final_tribes = pl.board_tribes(&self.data.cards);
             }
             self.over = true;
         }
