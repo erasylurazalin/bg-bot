@@ -21,6 +21,8 @@ use crate::{BOARD, HAND};
 /// Per-player counters passed into a fight.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Counters {
+    /// The owner's hero Health, for Holy Vanguard; None when unknown.
+    pub health: Option<i32>,
     pub beetle_attack: i32,
     pub beetle_health: i32,
     /// How many times each "improve your future ..." effect has triggered
@@ -182,6 +184,10 @@ struct Side<'a> {
     /// Buffs waiting for a minion that killed a Fishbait, by its uid. They
     /// are handed out by `resolve_deaths`, which sees both sides.
     killer_buffs: ArrayVec<(u16, i32, i32), 8>,
+    /// Minions to destroy, by uid, from a "destroy the minion that killed
+    /// this" Deathrattle (Leeroy). Applied by `resolve_deaths`, which sees
+    /// both sides.
+    killer_destroy: ArrayVec<u16, 8>,
     out: SideOutcome,
 }
 
@@ -213,6 +219,21 @@ impl<'a> Side<'a> {
         let damage_trigger = ms
             .iter()
             .any(|f| f.m.parts().any(|(c, _)| db.get(c).when_damaged.is_some()));
+        // Holy Vanguard: +30/+30 while the hero has 15 or less Health. The
+        // Health already includes every damage reaction (a rewound hit has
+        // given its Health back).
+        if counters.health.is_some_and(|h| h <= 15) {
+            for f in &mut ms {
+                let mut bonus = 0;
+                for (card, golden) in f.m.parts() {
+                    if db.get(card).aura == Some(Aura::HolyVanguard) {
+                        bonus = bonus.max(30 * if golden { 2 } else { 1 });
+                    }
+                }
+                f.m.attack += bonus;
+                f.m.health += bonus;
+            }
+        }
         Side {
             ms,
             hand: &hand[..hand.len().min(HAND)],
@@ -223,6 +244,7 @@ impl<'a> Side<'a> {
             counters,
             beast_buff: (counters.beast_attack, counters.beast_health),
             killer_buffs: ArrayVec::new(),
+            killer_destroy: ArrayVec::new(),
             out: SideOutcome::default(),
         }
     }
@@ -885,6 +907,37 @@ impl<'a> Side<'a> {
                 let n = count as u32 * mul as u32;
                 self.summon_from_hand(db, fx.side, at, n, tribe, fx.skip_ptr, uid, w);
             }
+            Effect::ShieldDragons { count } => {
+                // Dragons without Divine Shield come first; once every one
+                // has it, further picks are wasted on shielded Dragons.
+                let n = count as i32 * mul;
+                let mut without: ArrayVec<usize, BOARD> = ArrayVec::new();
+                let mut with: ArrayVec<usize, BOARD> = ArrayVec::new();
+                for (i, f) in self.ms.iter().enumerate() {
+                    if f.m.health <= 0 || !db.get(f.m.card).tribes.has(Tribe::Dragon) {
+                        continue;
+                    }
+                    if f.m.keywords.has(Keywords::DIVINE_SHIELD) {
+                        let _ = with.try_push(i);
+                    } else {
+                        let _ = without.try_push(i);
+                    }
+                }
+                for _ in 0..n {
+                    let pool = if without.is_empty() { &mut with } else { &mut without };
+                    if pool.is_empty() {
+                        break;
+                    }
+                    let k = rng.below(pool.len() as u32) as usize;
+                    let i = pool.remove(k);
+                    self.gain_keyword_at(db, i, Keywords::DIVINE_SHIELD);
+                }
+            }
+            Effect::DestroyKiller => {
+                if let Some(k) = fx.killer {
+                    let _ = self.killer_destroy.try_push(k);
+                }
+            }
             Effect::BuffRandomHand { attack, health } => {
                 self.buff_random_hand(db, attack * mul, health * mul, rng);
             }
@@ -1164,6 +1217,27 @@ fn give_killer_buffs(sides: &mut [Side<'_>; 2], db: &CardDb) {
     }
 }
 
+/// Hand out the "destroy the minion that killed this" queue (Leeroy). A
+/// destroy ignores Divine Shield, and does nothing when the killer is gone.
+fn apply_killer_destroys(sides: &mut [Side<'_>; 2]) -> bool {
+    let mut queued: ArrayVec<u16, 16> = ArrayVec::new();
+    for s in 0..2 {
+        while let Some(u) = sides[s].killer_destroy.pop() {
+            let _ = queued.try_push(u);
+        }
+    }
+    let mut any = false;
+    for u in queued {
+        for t in 0..2 {
+            if let Some(i) = sides[t].ms.iter().position(|f| f.uid == u && f.m.health > 0) {
+                sides[t].ms[i].m.health = 0;
+                any = true;
+            }
+        }
+    }
+    any
+}
+
 fn resolve_deaths(
     sides: &mut [Side<'_>; 2],
     first_side: usize,
@@ -1177,7 +1251,8 @@ fn resolve_deaths(
         let c1 = att.resolve(db, first_side, uid, rng, w);
         let c2 = def.resolve(db, first_side ^ 1, uid, rng, w);
         give_killer_buffs(sides, db);
-        if !(c1 || c2) {
+        let c3 = apply_killer_destroys(sides);
+        if !(c1 || c2 || c3) {
             break;
         }
     }
@@ -1299,8 +1374,10 @@ fn run_start_of_combat(
                 Some(StartOfCombat::Hopebringer { attack, health, improve }) => {
                     let Some(mi) = sides[turn].index_of(me) else { break };
                     let imp = sides[turn].ms[mi].m.improvements as i32;
-                    let da = attack * mul + imp * improve.0;
-                    let dh = health * mul + imp * improve.1;
+                    // The improvement is part of the buff, so a golden
+                    // Hopebringer doubles it too (+8/+6 per lost shield).
+                    let da = attack * mul + imp * improve.0 * mul;
+                    let dh = health * mul + imp * improve.1 * mul;
                     for i in 0..sides[turn].ms.len() {
                         if sides[turn].ms[i].m.health > 0 {
                             sides[turn].gain_at(db, i, da, dh);
@@ -1355,6 +1432,7 @@ fn attack_triggers(
     turn: usize,
     me: u16,
     attacker: &Minion,
+    target: Option<u16>,
     after: bool,
     db: &CardDb,
     uid: &mut u16,
@@ -1389,10 +1467,40 @@ fn attack_triggers(
                 && host == me
                 && let Some(e) = c.rally
             {
-                let Some(hi) = sides[turn].index_of(host) else { break };
-                let fx = Fx { side: turn, host, killer: None, attacker: None, skip_ptr: true };
-                let mut at = hi + 1;
-                sides[turn].run_effect(db, e, golden, fx, &mut at, uid, rng, w);
+                match e {
+                    // These two read or change the minion being attacked,
+                    // which is on the other side.
+                    Effect::GainTargetAttack => {
+                        if let Some(t) = target
+                            && let Some(di) = sides[turn ^ 1].index_of(t)
+                        {
+                            let stat = sides[turn ^ 1].ms[di].m.attack;
+                            let mul = if golden { 2 } else { 1 };
+                            if let Some(hi) = sides[turn].index_of(host) {
+                                sides[turn].gain_at(db, hi, stat * mul, 0);
+                            }
+                        }
+                    }
+                    Effect::StripTargetKeywords { mask } => {
+                        if let Some(t) = target
+                            && let Some(di) = sides[turn ^ 1].index_of(t)
+                        {
+                            sides[turn ^ 1].ms[di].m.keywords.0 &= !mask;
+                        }
+                    }
+                    _ => {
+                        let Some(hi) = sides[turn].index_of(host) else { break };
+                        let fx = Fx {
+                            side: turn,
+                            host,
+                            killer: None,
+                            attacker: None,
+                            skip_ptr: true,
+                        };
+                        let mut at = hi + 1;
+                        sides[turn].run_effect(db, e, golden, fx, &mut at, uid, rng, w);
+                    }
+                }
             }
             if let Some(t) = trigger(c)
                 && (!t.filter.exclude_self || host != me)
@@ -1441,7 +1549,7 @@ fn attack_swings(
         // Rally and "whenever a friendly minion attacks" trigger when the
         // minion attacks, before damage.
         let attacker = sides[turn].ms[ai].m;
-        attack_triggers(sides, turn, me, &attacker, false, db, uid, rng, w);
+        attack_triggers(sides, turn, me, &attacker, Some(def_uid), false, db, uid, rng, w);
 
         let Some(ai) = sides[turn].index_of(me) else { break };
         let Some(di) = sides[turn ^ 1].index_of(def_uid) else { break };
@@ -1488,7 +1596,7 @@ fn attack_swings(
 
         // "After a friendly minion attacks" triggers (Ravaging Scorpid,
         // Deathstrider).
-        attack_triggers(sides, turn, me, &attacker, true, db, uid, rng, w);
+        attack_triggers(sides, turn, me, &attacker, Some(def_uid), true, db, uid, rng, w);
 
         // Hopebringer improves when a friendly minion loses Divine Shield.
         if x_lost {

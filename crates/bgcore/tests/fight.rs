@@ -351,6 +351,49 @@ fn beast_summon_scaling_leviathan_banana_slamma() {
 }
 
 #[test]
+fn leviathan_beast_buffs_step_up_by_3_and_six_when_golden() {
+    let db = s2_db();
+    let mut wall = db.make(db.by_name("Microbot").unwrap(), false);
+    wall.attack = 10;
+    wall.health = 5000;
+
+    // Two Vermins die in turn; each Deathrattle summons a Beetle. The first
+    // gets +3 Attack, the second +6.
+    let a = vec![
+        db.make(db.by_name("Buzzing Vermin").unwrap(), false),
+        db.make(db.by_name("Buzzing Vermin").unwrap(), false),
+        db.make(db.by_name("Lurking Leviathan").unwrap(), false),
+    ];
+    let mut log = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &a, &[wall], 500, &mut Rng::new(1), &mut log);
+    let mut attacks: Vec<i32> = log
+        .summons
+        .iter()
+        .filter(|(_, _, m)| db.get(m.card).name == "Beetle")
+        .map(|(_, _, m)| m.attack)
+        .collect();
+    attacks.sort();
+    assert_eq!(attacks, vec![5, 8]);
+
+    // A golden Leviathan steps by +6: 8 and 14.
+    let a = vec![
+        db.make(db.by_name("Buzzing Vermin").unwrap(), false),
+        db.make(db.by_name("Buzzing Vermin").unwrap(), false),
+        db.make(db.by_name("Lurking Leviathan").unwrap(), true),
+    ];
+    let mut log = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &a, &[wall], 500, &mut Rng::new(1), &mut log);
+    let mut attacks: Vec<i32> = log
+        .summons
+        .iter()
+        .filter(|(_, _, m)| db.get(m.card).name == "Beetle")
+        .map(|(_, _, m)| m.attack)
+        .collect();
+    attacks.sort();
+    assert_eq!(attacks, vec![8, 14]);
+}
+
+#[test]
 fn titus_rivendare_and_sewer_lord() {
     let db = s2_db();
     let titus = db.make(db.by_name("Titus Rivendare").unwrap(), false);

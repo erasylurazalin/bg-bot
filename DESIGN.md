@@ -479,6 +479,48 @@ side attacks; if neither can attack, the fight is a tie. Only side damage
   damage" effects and counters like Eredar Escapist still fire, and
   Devout Hellcaller still grows from a Demon's damage that gets rewound.
 
+**Who a card can reach.** The wording decides: "friendly" means your
+board, "in the Tavern" means the Tavern, and no qualifier ("another
+minion", "a minion") means your board or the Tavern. Never the hand:
+cards in hand can't be targeted, sold or touched unless the text says
+"in your hand". A minion's life is buy, play, sell; you can't sell from
+hand.
+
+**Types.** "Type" means tribe. Neutral minions have no type and can't be
+the chosen minion of a "minion of its type" card (Eonar's Favor, Lost
+Staff of Hamuul, Natural Blessing...). A dual-tribe or all-type minion
+picked for such a card uses one of its types at random. "A friendly
+minion of each type" (Misplaced Tea Set) gives each minion at most one
+buff, even a dual or all-type one.
+
+**Discard** doesn't exist in this lobby (it's Aberration-specific).
+"If you discard this" text does nothing.
+
+**Robust Evolution** transforms into a random minion exactly one tier
+higher (a tier 6 into another tier 6), whatever your Tavern tier. Only
+Attack and Health carry over, even when lower than the new card's base
+stats; keywords, buffs and effects don't. The old copy goes back to the
+pool and the new one comes from it.
+
+**Patient Scout** starts at Tier 1, improves by 1 at the end of each of
+your turns while on your board (Drakkari doubles it), up to 6, and its
+sale Discovers a minion of exactly that tier.
+
+**Triples keep the highest count.** When three copies become a golden
+minion, any count a copy kept (Lurking Leviathan's summons, Hopebringer's
+lost shields, Patient Scout's tier...) is the highest of the three, never
+the sum. Counts that belong to the player, not a minion, aren't touched:
+Tasty Lobster's count of every Lobster Deathrattle this game (shop or
+fight, golden or not) is the player's, so every Lobster, already on the
+board or made later, reads the same number. A base Lobster gives +2/+1
+times (count + 1), golden double.
+
+**Balinda** doubles every spell cast on a friendly minion (not spells
+with no target, nor spells cast on a Tavern minion), including
+Robust Evolution (the second cast evolves the result again) and Lost
+Staff of Hamuul ("cast on this" triggers fire twice). Channel the
+Devourer's second cast does nothing: the minion is already sold.
+
 **Two kinds of Refresh.** The Tavern roll at the start of a turn is not a
 Refresh for card purposes. Only an explicit Refresh is (the button, paid
 with Gold, Health or free, and effects that say "Refresh" like Snarky

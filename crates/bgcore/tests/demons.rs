@@ -545,7 +545,7 @@ fn tichondrius_and_eredar_react_to_health_paid_for_a_refresh() {
 #[test]
 fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
     let db = db();
-    // two Activates: the Deathrattle gives 2/2 + 2 * 1/1
+    // two Activates: the Deathrattle gives 2/2 + 2 * 2/2
     let mut w = mk(&db, "Sacrificial Wrathguard", false);
     w.improvements = 2;
     let wall = fighter(&db, 50);
@@ -558,9 +558,10 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
         &mut Rng::new(1),
         &mut (),
     );
-    assert_eq!(out.sides[0].tavern_buff_gain, (4, 4));
+    assert_eq!(out.sides[0].tavern_buff_gain, (6, 6));
 
-    // a golden one doubles the whole Deathrattle
+    // a golden one doubles the whole Deathrattle, so each Activate adds
+    // +4/+4 on top of the golden base +4/+4
     let mut w = mk(&db, "Sacrificial Wrathguard", true);
     w.improvements = 2;
     let out = fight_with(
@@ -572,7 +573,7 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
         &mut Rng::new(1),
         &mut (),
     );
-    assert_eq!(out.sides[0].tavern_buff_gain, (8, 8));
+    assert_eq!(out.sides[0].tavern_buff_gain, (12, 12));
 
     // in a whole game the Activate raises the number and the fight applies
     // the Tavern buff to the next Refresh
@@ -591,11 +592,25 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
         .find(|b| !b.this_turn && b.tribe.is_none())
         .copied()
         .expect("the Deathrattle's Tavern buff is kept");
-    assert_eq!((buff.attack, buff.health), (4, 4));
+    assert_eq!((buff.attack, buff.health), (6, 6));
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
-        assert_eq!((m.attack, m.health), (c.attack + 4, c.health + 4));
+        assert_eq!((m.attack, m.health), (c.attack + 6, c.health + 6));
     }
+    g.check_invariants().unwrap();
+
+    // A golden one counts Activates once per Activate, not twice: the
+    // doubled number lives in the Deathrattle.
+    let mut g = game(46);
+    g.players[0].gold = 5;
+    let w = id(&g, "Sacrificial Wrathguard");
+    let slot = g.data.cards.get(w).pool_slot as usize;
+    g.pool[slot] -= 3;
+    let m = g.players[0].make_card(&g.data.cards, w, true, 3);
+    g.players[0].board.push(m);
+    act(&mut g, 0, Action::Activate(0));
+    act(&mut g, 0, Action::Activate(0));
+    assert_eq!(g.players[0].board[0].improvements, 2);
     g.check_invariants().unwrap();
 }
 
@@ -619,7 +634,7 @@ fn deathstrider_triggers_the_wrathguard_in_the_shop_through_a_fishbait_attack() 
         .find(|b| b.tribe.is_none() && !b.this_turn)
         .copied()
         .expect("the Deathrattle's Tavern buff was applied");
-    assert_eq!((buff.attack, buff.health), (4, 4));
+    assert_eq!((buff.attack, buff.health), (6, 6));
     g.check_invariants().unwrap();
 }
 

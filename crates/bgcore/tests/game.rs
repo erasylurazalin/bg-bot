@@ -673,6 +673,71 @@ fn lurking_leviathan_improvement_survives_fight_and_goldrinn_buff_does_not() {
 }
 
 #[test]
+fn triple_keeps_the_leviathan_improvement_count() {
+    let mut g = s2_game(107);
+    put_on_board(&mut g, 0, "Lurking Leviathan");
+    put_on_board(&mut g, 0, "Lurking Leviathan");
+    // Two Leviathans that have already improved twice and three times.
+    g.players[0].board[0].improvements = 2;
+    g.players[0].board[1].improvements = 3;
+    set_shop(&mut g, 0, &["Lurking Leviathan"]);
+    g.players[0].gold = 3;
+    act(&mut g, 0, Action::Buy(0));
+    // The golden one takes the highest of the three counts, not the sum.
+    let h = g.players[0]
+        .hand
+        .iter()
+        .position(|m| m.golden)
+        .expect("the triple made a golden Leviathan in hand");
+    assert_eq!(g.players[0].hand[h].improvements, 3);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    // Playing a golden minion gives a Triple Reward: take its first option.
+    if !g.players[0].discover.is_empty() {
+        act(&mut g, 0, Action::Choose(0));
+    }
+    // A golden Leviathan applies the count at +6 per step: 3 * 2 * (1 + 3).
+    g.give(0, "Flittering Bat").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    act(&mut g, 0, Action::Play { hand: h, pos: 1 });
+    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (1 + 24, 4));
+    assert_eq!(g.players[0].board[0].improvements, 4);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn triple_keeps_the_highest_patient_scout_count() {
+    let mut g = s2_game(108);
+    put_on_board(&mut g, 0, "Patient Scout");
+    put_on_board(&mut g, 0, "Patient Scout");
+    g.players[0].board[0].improvements = 2;
+    g.players[0].board[1].improvements = 4;
+    set_shop(&mut g, 0, &["Patient Scout"]);
+    g.players[0].gold = 3;
+    act(&mut g, 0, Action::Buy(0));
+    let h = g.players[0]
+        .hand
+        .iter()
+        .position(|m| m.golden)
+        .expect("the triple made a golden Patient Scout in hand");
+    // The highest of 2, 4 and 0, not their sum.
+    assert_eq!(g.players[0].hand[h].improvements, 4);
+    // Its sale discovers from tier 1 + 4 = 5.
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    if !g.players[0].discover.is_empty() {
+        act(&mut g, 0, Action::Choose(0));
+    }
+    act(&mut g, 0, Action::Sell(0));
+    assert!(!g.players[0].discover.is_empty());
+    assert!(
+        g.players[0]
+            .discover
+            .iter()
+            .all(|&c| g.data.cards.get(c).tier == 5)
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn brann_and_drakkari_multiply_triggers_including_golden() {
     let mut g = s2_game(106);
     put_on_board(&mut g, 0, "Brann Bronzebeard");
@@ -834,8 +899,11 @@ fn spell_shop_slot_buy_hold_cast_freeze_roll_and_discount() {
     next_turn(&mut g);
     assert_eq!(g.players[0].shop_spell, Some(frozen_spell));
 
-    // With the board empty, a targeted spell in hand cannot be cast.
+    // With the board and the Tavern empty, a targeted spell in hand cannot
+    // be cast. (A Tavern minion is a legal target for "a minion", per
+    // DESIGN.md "Who a card can reach".)
     assert!(g.players[0].board.is_empty());
+    set_shop(&mut g, 0, &[]);
     g.players[0].hand.clear();
     g.give(0, "Tavern Dish Banana").unwrap();
     turn_of(&mut g, 0);
@@ -943,19 +1011,13 @@ fn stat_spells_choose_one_and_discover_get_spells() {
     assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (3, 5));
     assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (12, 19)); // Mech unchanged
 
-    // Eyes of the Earth Mother makes a Tier <= 4 minion Golden; Wave of Gold buffs Golden extra;
+    // Eyes of the Earth Mother makes a Tier <= 4 minion Golden;
     // Perfect Vision sets stats to 20/20; Azerite Empowerment buffs board +2/+2 twice.
     g.give(0, "Eyes of the Earth Mother").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     act(&mut g, 0, Action::Target(0));
     assert!(g.players[0].board[0].golden);
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (4, 3));
-
-    g.give(0, "Wave of Gold").unwrap();
-    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    // Slot 0 is Golden (+6/+4 -> 10/7); Slot 2 is plain (+3/+2 -> 6/7).
-    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 7));
-    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (6, 7));
 
     g.give(0, "Perfect Vision").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });

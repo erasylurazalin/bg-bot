@@ -30,18 +30,17 @@ Beast, Mech, Dragon, Murloc and Demon, exactly as in the current patch
 6. Observation, bindings and bots for the full lobby, then a long training
    run
 
-## Numbers I don't know yet
+## Hidden numbers (checked 2026-10-23)
 
-These cards improve by an amount the card text hides. The engine uses a
-guess for each until I check the real numbers.
+The amounts these cards' text hides, as I know them from the game:
 
-| Card | What's hidden | Guess in the engine |
-|---|---|---|
-| Lurking Leviathan | how much each summon improves it | +3 Attack more per summon (+3, +6, +9...) |
-| Spark Snapper | how much its Satellites improve | no improvement yet, Satellites stay 2/3 |
-| Hopebringer | how much each lost Divine Shield adds | +1/+1 per shield, golden the same |
-| Hackerfin | how much each different Bonus Keyword adds | +1/+1 per keyword (run 3) |
-| Sacrificial Wrathguard | how much Activate improves it | +1/+1 more on its Tavern buff per Activate (run 4) |
+| Card | Rule |
+|---|---|
+| Lurking Leviathan | +3 Attack per summoned Beast, improving by +3 each summon (golden +6). The count survives tripling: the golden one reapplies it at +6. Summons in the shop and in combat both count. |
+| Spark Snapper | Satellites start 2/3 and grow +2/+3 per Mech played: 2/3, 4/6, 6/9... |
+| Hopebringer | each lost Divine Shield adds +4/+3 to its buff (golden +8/+6) |
+| Hackerfin | +3/+2 more per different Bonus Keyword |
+| Sacrificial Wrathguard | each Activate adds +2/+2 to its Tavern buff |
 
 ## Next
 

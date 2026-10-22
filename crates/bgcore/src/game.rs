@@ -67,6 +67,22 @@ pub enum TargetKind {
     /// Trigger the Battlecry of the chosen minion (Kelp Keeper), `runs`
     /// times.
     TriggerBattlecry,
+    /// Buff the chosen minion on the board or in the Tavern (Suspicious
+    /// Prisonguard).
+    AnyBuff { attack: i32, health: i32 },
+    /// Set the chosen minion's (board or Tavern) stats (Tyrael).
+    AnySetStats { attack: i32, health: i32 },
+}
+
+impl TargetKind {
+    /// Whether the player may pick a minion in the Tavern for this target.
+    fn takes_shop(self) -> bool {
+        match self {
+            TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
+            TargetKind::Spell(st) => st.can_target_shop(),
+            _ => false,
+        }
+    }
 }
 
 /// A targeted Battlecry, Choose One option, or Tavern spell waiting for the
@@ -127,7 +143,12 @@ pub struct PendingChooseOne {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DiscoverRequest {
     MinionTier(u8),
+    /// A minion of exactly this tier, locked in hand for a turn (Search
+    /// Through Time).
+    SearchMinionTier(u8),
     SpellTier(u8),
+    /// A Tavern spell of this tier or lower (Rodeo Performer).
+    SpellMaxTier(u8),
     DeathrattleMinion(u8),
     BattlecryMinion(u8),
     TribeMinion(Tribe),
@@ -209,6 +230,9 @@ pub struct Player {
     /// The board slot of the Demon whose Discover makes the hero take damage
     /// equal to the chosen card's Tier (Imposing Percussionist), if any.
     pub discover_damage_from: Option<u8>,
+    /// Whether the Discover now waiting locks its minion in hand for a turn
+    /// (Search Through Time).
+    pub discover_locked: bool,
     /// Upcoming Refreshes and how many Fodders each one gets, oldest first
     /// (Laboratory Assistant, Trapped Clapper, Twisted Wrathguard).
     pub fodder_refreshes: ArrayVec<u8, 64>,
@@ -265,6 +289,7 @@ impl Player {
             discover: ArrayVec::new(),
             discover_queue: ArrayVec::new(),
             discover_damage_from: None,
+            discover_locked: false,
             fodder_refreshes: ArrayVec::new(),
             actions: 0,
             done: false,
@@ -411,7 +436,7 @@ impl Player {
             None => self.tavern_buffs.push(b),
         }
         for m in &mut self.shop {
-            if cards.get(m.card).is(b.tribe) {
+            if !cards.get(m.card).is_spell() && cards.get(m.card).is(b.tribe) {
                 buff(m, b.attack, b.health);
             }
         }
@@ -420,6 +445,9 @@ impl Player {
     /// Put every Tavern buff that applies on a minion that just showed up in
     /// the Tavern.
     pub fn apply_tavern_buffs(&self, cards: &CardDb, m: &mut Minion) {
+        if cards.get(m.card).is_spell() {
+            return;
+        }
         for b in &self.tavern_buffs {
             if cards.get(m.card).is(b.tribe) {
                 buff(m, b.attack, b.health);
@@ -432,7 +460,7 @@ impl Player {
     pub fn end_turn_tavern_buffs(&mut self, cards: &CardDb) {
         for b in self.tavern_buffs.iter().filter(|b| b.this_turn) {
             for m in &mut self.shop {
-                if cards.get(m.card).is(b.tribe) {
+                if !cards.get(m.card).is_spell() && cards.get(m.card).is(b.tribe) {
                     buff(m, -b.attack, -b.health);
                 }
             }
@@ -482,6 +510,7 @@ impl Player {
     pub fn counters(&self, cards: &CardDb) -> Counters {
         let (spell_attack, spell_health) = self.total_spell_bonus(cards);
         Counters {
+            health: Some(self.health),
             beetle_attack: self.beetle_bonus.0,
             beetle_health: self.beetle_bonus.1,
             improve: self.improve,
@@ -654,6 +683,13 @@ impl Game {
         let pl = &self.players[p];
         let r = &self.data.rules;
         if let Some(pt) = pl.pending_target {
+            if pt.kind.takes_shop() {
+                return match a {
+                    Action::Target(s) => self.valid_target(p, &pt, s as usize),
+                    Action::TargetShop(s) => self.valid_shop_target(p, &pt, s as usize),
+                    _ => false,
+                };
+            }
             return matches!(a, Action::Target(s) if self.valid_target(p, &pt, s as usize));
         }
         if pl.pending_shop_target.is_some() {
@@ -667,18 +703,44 @@ impl Game {
         }
         match a {
             Action::Buy(s) => {
-                (s as usize) < pl.shop.len() && pl.gold >= r.buy_cost && !pl.hand.is_full()
+                let s = s as usize;
+                if s >= pl.shop.len() || pl.hand.is_full() {
+                    return false;
+                }
+                let card = self.data.cards.get(pl.shop[s].card);
+                if card.is_spell() {
+                    if card.pay_health {
+                        pl.can_pay_health(card.cost as i32, &self.data.cards)
+                    } else {
+                        let cost = card.cost.saturating_sub(pl.spell_discount);
+                        pl.gold >= cost
+                    }
+                } else {
+                    pl.gold >= r.buy_cost
+                }
             }
             Action::BuySpell => {
-                pl.spell_cost(&self.data.cards).is_some_and(|cost| pl.gold >= cost)
-                    && !pl.hand.is_full()
+                let Some(id) = pl.shop_spell else { return false };
+                let card = self.data.cards.get(id);
+                if pl.hand.is_full() {
+                    return false;
+                }
+                if card.pay_health {
+                    pl.can_pay_health(card.cost as i32, &self.data.cards)
+                } else {
+                    pl.gold >= card.cost.saturating_sub(pl.spell_discount)
+                }
             }
             Action::Sell(s) => (s as usize) < pl.board.len(),
             Action::Activate(s) => {
                 (s as usize) < pl.board.len()
                     && self.activate_of(p, s as usize).is_some_and(|(act, _)| {
                         pl.gold >= act.cost
-                            && (!act.effect.needs_shop_slot() || !pl.shop.is_empty())
+                            && (!act.effect.needs_shop_slot() || self.shop_has_minion(p))
+                            && (!act.effect.needs_any_minion()
+                                || pl.board.len() > 1
+                                || self.shop_has_minion(p))
+                            && (!act.effect.needs_shop_minion() || !pl.hand.is_full())
                             && (!act.effect.needs_rally_target()
                                 || pl.board.iter().enumerate().any(|(i, m)| {
                                     i != s as usize
@@ -701,7 +763,9 @@ impl Game {
                     return false;
                 }
                 let card_id = pl.hand[h].card;
-                if self.data.cards.get(card_id).is_spell() {
+                if pl.hand[h].locked_turns > 0 {
+                    false
+                } else if self.data.cards.get(card_id).is_spell() {
                     pos == 0 && self.can_cast_spell(p, card_id)
                 } else if pos > pl.board.len() {
                     false
@@ -742,28 +806,63 @@ impl Game {
             .find_map(|(card, golden)| self.data.cards.get(card).activate.map(|a| (a, golden)))
     }
 
-    fn valid_spell_target(&self, p: usize, st: SpellTarget, s: usize) -> bool {
-        let b = &self.players[p].board;
-        if s >= b.len() {
+    /// Whether the Tavern holds a minion (not a spell) for an effect that
+    /// needs one.
+    fn shop_has_minion(&self, p: usize) -> bool {
+        self.players[p]
+            .shop
+            .iter()
+            .any(|m| !self.data.cards.get(m.card).is_spell())
+    }
+
+    fn spell_target_ok(&self, st: SpellTarget, m: &Minion) -> bool {
+        let c = self.data.cards.get(m.card);
+        if c.is_spell() {
             return false;
         }
-        let c = self.data.cards.get(b[s].card);
         match st {
             SpellTarget::Buff { .. }
             | SpellTarget::BuffPerBonusKeyword { .. }
-            | SpellTarget::SetStats { .. } => true,
-            SpellTarget::BuffSameTribe { .. } | SpellTarget::SameTribeMinion => {
-                !c.tribes.is_neutral()
-            }
+            | SpellTarget::SetStats { .. }
+            | SpellTarget::TrickyTrousers { .. }
+            | SpellTarget::RobustEvolution => true,
+            SpellTarget::BuffSameTribe { .. }
+            | SpellTarget::SameTribeMinion
+            | SpellTarget::TavernBuffType { .. }
+            | SpellTarget::RefreshWithType => !c.tribes.is_neutral(),
             SpellTarget::Consume { tribe, .. } => c.is(tribe),
-            SpellTarget::MakeGolden { max_tier } => !b[s].golden && c.tier <= max_tier,
+            SpellTarget::MakeGolden { max_tier } => !m.golden && c.tier <= max_tier,
+            SpellTarget::Devourer => true,
+        }
+    }
+
+    fn valid_spell_target(&self, p: usize, st: SpellTarget, s: usize) -> bool {
+        let b = &self.players[p].board;
+        s < b.len() && self.spell_target_ok(st, &b[s])
+    }
+
+    /// Whether the pending target may be taken on the Tavern minion in
+    /// shop slot `s`.
+    fn valid_shop_target(&self, p: usize, pt: &PendingTarget, s: usize) -> bool {
+        let pl = &self.players[p];
+        if s >= pl.shop.len() || self.data.cards.get(pl.shop[s].card).is_spell() {
+            return false;
+        }
+        match pt.kind {
+            TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
+            TargetKind::Spell(st) => st.can_target_shop() && self.spell_target_ok(st, &pl.shop[s]),
+            _ => false,
         }
     }
 
     fn can_choose_option(&self, p: usize, opt: ChooseOption) -> bool {
         match opt {
             ChooseOption::SpellTarget(st) => {
-                (0..self.players[p].board.len()).any(|s| self.valid_spell_target(p, st, s))
+                let pl = &self.players[p];
+                (0..pl.board.len()).any(|s| self.valid_spell_target(p, st, s))
+                    || (st.can_target_shop()
+                        && (0..pl.shop.len())
+                            .any(|s| self.spell_target_ok(st, &pl.shop[s])))
             }
             ChooseOption::MinionTarget { .. }
             | ChooseOption::SpellBonus { .. }
@@ -774,11 +873,20 @@ impl Game {
     pub fn can_cast_spell(&self, p: usize, card_id: CardId) -> bool {
         let c = self.data.cards.get(card_id);
         if let Some(st) = c.spell_target {
-            (0..self.players[p].board.len()).any(|s| self.valid_spell_target(p, st, s))
+            let pl = &self.players[p];
+            (0..pl.board.len()).any(|s| self.valid_spell_target(p, st, s))
+                || (st.can_target_shop()
+                    && (0..pl.shop.len()).any(|s| self.spell_target_ok(st, &pl.shop[s])))
         } else if let Some(opts) = c.choose_one {
             opts.iter().any(|&opt| self.can_choose_option(p, opt))
         } else {
-            c.spell_effect.is_some()
+            // Playing the spell frees its own hand slot, so these only need
+            // something to steal; they are never cast from the Tavern.
+            match c.spell_effect {
+                Some(SpellEffect::StealRandomTavern) => self.shop_has_minion(p),
+                Some(_) => true,
+                None => false,
+            }
         }
     }
 
@@ -796,6 +904,7 @@ impl Game {
             TargetKind::MinionBuff { tribe, .. } | TargetKind::Consume { tribe, .. } => {
                 self.data.cards.get(b[s].card).is(tribe)
             }
+            TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
             TargetKind::Spell(st) => self.valid_spell_target(p, st, s),
             TargetKind::TriggerRally => {
                 b[s].parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
@@ -844,66 +953,42 @@ impl Game {
     fn apply(&mut self, p: usize, a: Action) {
         match a {
             Action::Buy(s) => {
-                let buy_cost = self.data.rules.buy_cost;
-                let pl = &mut self.players[p];
-                let m = pl.shop.remove(s as usize);
-                pl.gold -= buy_cost;
-                pl.hand.push(m);
-                self.check_triple(p, m.card);
-                self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
-                self.fire_event(p, EventKind::CardsBought, 1);
+                let slot = s as usize;
+                let id = self.players[p].shop[slot].card;
+                let c = self.data.cards.get(id);
+                if c.is_spell() {
+                    // A Saloon's Finest slot holds a spell: it is bought at
+                    // its own cost, like the spell slot.
+                    let (pay_health, cost) = (c.pay_health, c.cost);
+                    let m = self.players[p].shop.remove(slot);
+                    self.players[p].hand.push(m);
+                    self.pay_for_spell(p, pay_health, cost);
+                    self.magicfin_teach(p, id);
+                    self.fire_event(p, EventKind::CardsBought, 1);
+                } else {
+                    let buy_cost = self.data.rules.buy_cost;
+                    let pl = &mut self.players[p];
+                    let m = pl.shop.remove(slot);
+                    pl.gold -= buy_cost;
+                    pl.hand.push(m);
+                    self.check_triple(p, m.card);
+                    self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
+                    self.fire_event(p, EventKind::CardsBought, 1);
+                }
             }
             Action::BuySpell => {
-                let cost = self.players[p].spell_cost(&self.data.cards).unwrap();
                 let id = self.players[p].shop_spell.take().unwrap();
+                let c = self.data.cards.get(id);
+                let (pay_health, cost) = (c.pay_health, c.cost);
                 let pl = &mut self.players[p];
-                pl.gold -= cost;
-                pl.spell_discount = 0;
                 let m = pl.make_card(&self.data.cards, id, false, 0);
                 pl.hand.push(m);
-                self.fire_event(p, EventKind::GoldSpent, cost as u32);
-                self.fire_event(p, EventKind::CardsBought, 1);
+                self.pay_for_spell(p, pay_health, cost);
                 self.magicfin_teach(p, id);
+                self.fire_event(p, EventKind::CardsBought, 1);
             }
             Action::Sell(s) => {
-                let m = self.players[p].board.remove(s as usize);
-                let mut sell_gold = self.data.rules.sell_gold;
-                if self.players[p].lost_last_combat {
-                    for (card, golden) in m.parts() {
-                        if let Some(OnSell::GoldIfLost(g)) = self.data.cards.get(card).on_sell {
-                            let mul = if golden { 2 } else { 1 };
-                            sell_gold = g * mul;
-                        }
-                    }
-                }
-                self.players[p].gold = self.players[p].gold.saturating_add(sell_gold);
-                give_back(&mut self.pool, &self.data.cards, &m);
-                for (card, golden) in m.parts() {
-                    match self.data.cards.get(card).on_sell {
-                        Some(OnSell::GetCard { card: tok, count }) => {
-                            let n = count * (if golden { 2 } else { 1 });
-                            for _ in 0..n {
-                                self.give_generated(p, tok);
-                            }
-                        }
-                        Some(OnSell::DiscoverByTier) => {
-                            let tier = (1 + m.improvements as u8).min(MAX_TIER);
-                            let n = if golden { 2 } else { 1 };
-                            for _ in 0..n {
-                                let _ = self.players[p]
-                                    .discover_queue
-                                    .try_push(DiscoverRequest::MinionTier(tier));
-                            }
-                            self.maybe_start_discover(p);
-                        }
-                        Some(OnSell::Effect(e)) => {
-                            let mut pos = 0;
-                            self.run_effect(p, &mut pos, e, golden, 1);
-                        }
-                        Some(OnSell::GoldIfLost(_)) | None => {}
-                    }
-                }
-                self.fire_event(p, EventKind::MinionsSold, 1);
+                self.sell_minion(p, s as usize);
             }
             Action::Activate(s) => {
                 let (act, golden) = self.activate_of(p, s as usize).unwrap();
@@ -1082,6 +1167,64 @@ impl Game {
         if kind == RefreshKind::Explicit {
             Self::feed_fodders(pl, pool, cards, rng);
         }
+    }
+
+    /// Saloon's Finest: every Tavern slot becomes a Tavern spell up to the
+    /// player's tier. Spells have no pool, so repeats are allowed. This is a
+    /// card effect, not the player's own Refresh, so no Fodders.
+    fn refresh_with_spells(
+        pl: &mut Player,
+        cards: &CardDb,
+        rules: &Rules,
+        rng: &mut Rng,
+        pool: &mut [u8],
+    ) {
+        pl.frozen = false;
+        for m in pl.shop.drain(..) {
+            give_back(pool, cards, &m);
+        }
+        pl.shop_spell = None;
+        let size = rules.shop_size(pl.tier);
+        for _ in 0..size {
+            match cards.random_spell(pl.tier, rng) {
+                Some(id) => {
+                    let m = pl.make_card(cards, id, false, 0);
+                    pl.shop.push(m);
+                }
+                None => break,
+            }
+        }
+        pl.shop_spell = cards.random_spell(pl.tier, rng);
+    }
+
+    /// Lost Staff of Hamuul: refresh the Tavern with minions of one type,
+    /// up to the player's tier. A card effect, not the player's own
+    /// Refresh, so no Fodders.
+    fn refresh_with_tribe(
+        pl: &mut Player,
+        pool: &mut [u8],
+        cards: &CardDb,
+        rules: &Rules,
+        rng: &mut Rng,
+        tribe: Tribe,
+    ) {
+        pl.frozen = false;
+        for m in pl.shop.drain(..) {
+            give_back(pool, cards, &m);
+        }
+        pl.shop_spell = None;
+        let size = rules.shop_size(pl.tier);
+        while pl.shop.len() < size {
+            match draw_filtered(pool, cards, rng, 1, pl.tier, &[], |c| c.tribes.has(tribe)) {
+                Some(c) => {
+                    let mut m = pl.make_card(cards, c, false, 1);
+                    pl.apply_tavern_buffs(cards, &mut m);
+                    pl.shop.push(m);
+                }
+                None => break,
+            }
+        }
+        pl.shop_spell = cards.random_spell(pl.tier, rng);
     }
 
     /// The Fodders that just appeared in a Refresh feed themselves if the
@@ -1471,6 +1614,65 @@ impl Game {
         mult
     }
 
+    /// Sell the board minion in `slot`: Gold, the copy back to the pool and
+    /// the sell triggers, exactly as the Sell action does (Channel the
+    /// Devourer sells through here too).
+    fn sell_minion(&mut self, p: usize, slot: usize) -> Minion {
+        let m = self.players[p].board.remove(slot);
+        let mut sell_gold = self.data.rules.sell_gold;
+        if self.players[p].lost_last_combat {
+            for (card, golden) in m.parts() {
+                if let Some(OnSell::GoldIfLost(g)) = self.data.cards.get(card).on_sell {
+                    let mul = if golden { 2 } else { 1 };
+                    sell_gold = g * mul;
+                }
+            }
+        }
+        self.players[p].gold = self.players[p].gold.saturating_add(sell_gold);
+        give_back(&mut self.pool, &self.data.cards, &m);
+        for (card, golden) in m.parts() {
+            match self.data.cards.get(card).on_sell {
+                Some(OnSell::GetCard { card: tok, count }) => {
+                    let n = count * (if golden { 2 } else { 1 });
+                    for _ in 0..n {
+                        self.give_generated(p, tok);
+                    }
+                }
+                Some(OnSell::DiscoverByTier) => {
+                    let tier = (1 + m.improvements as u8).min(MAX_TIER);
+                    let n = if golden { 2 } else { 1 };
+                    for _ in 0..n {
+                        let _ = self.players[p]
+                            .discover_queue
+                            .try_push(DiscoverRequest::MinionTier(tier));
+                    }
+                    self.maybe_start_discover(p);
+                }
+                Some(OnSell::Effect(e)) => {
+                    let mut pos = 0;
+                    self.run_effect(p, &mut pos, e, golden, 1);
+                }
+                Some(OnSell::GoldIfLost(_)) | None => {}
+            }
+        }
+        self.fire_event(p, EventKind::MinionsSold, 1);
+        m
+    }
+
+    /// Pay for a spell bought from the Tavern. A spell bought with Health
+    /// (Hasty Excavation) is hero damage, not Gold; a Gold purchase uses up
+    /// the next-spell discount.
+    fn pay_for_spell(&mut self, p: usize, pay_health: bool, cost: u8) {
+        if pay_health {
+            self.take_shop_damage(p, cost as i32, None);
+        } else {
+            let paid = cost.saturating_sub(self.players[p].spell_discount);
+            self.players[p].gold = self.players[p].gold.saturating_sub(paid);
+            self.players[p].spell_discount = 0;
+            self.fire_event(p, EventKind::GoldSpent, paid as u32);
+        }
+    }
+
     fn cast_spell(&mut self, p: usize, card_id: CardId) {
         self.cast_spell_inner(p, card_id);
         self.fire_event(p, EventKind::SpellsCast, 1);
@@ -1530,8 +1732,11 @@ impl Game {
                     self.players[p].overconfidence_tie.saturating_add(tie);
             }
             SpellEffect::BuffShop { attack, health } => {
+                let cards = &self.data.cards;
                 for m in &mut self.players[p].shop {
-                    buff(m, attack + da, health + dh);
+                    if !cards.get(m.card).is_spell() {
+                        buff(m, attack + da, health + dh);
+                    }
                 }
             }
             SpellEffect::BuffBoard { attack, health, times, golden_extra } => {
@@ -1623,6 +1828,78 @@ impl Game {
             }
             SpellEffect::UpperHand => {
                 self.players[p].upper_hand = self.players[p].upper_hand.saturating_add(1);
+            }
+            SpellEffect::BuffTavernPermanent { attack, health } => {
+                let b = TavernBuff {
+                    tribe: None,
+                    attack: attack + da,
+                    health: health + dh,
+                    this_turn: false,
+                };
+                self.players[p].add_tavern_buff(&self.data.cards, b);
+            }
+            SpellEffect::MisplacedTeaSet { attack, health } => {
+                // One random unbuffed minion of each type on the board; a
+                // dual or all-type minion can only be picked once.
+                let cards = &self.data.cards;
+                let board = &mut self.players[p].board;
+                let mut done = [false; BOARD];
+                for t in Tribe::ALL {
+                    let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
+                    for (i, m) in board.iter().enumerate() {
+                        if !done[i] && cards.get(m.card).tribes.has(t) {
+                            let _ = ok.try_push(i);
+                        }
+                    }
+                    if ok.is_empty() {
+                        continue;
+                    }
+                    let k = self.rng.below(ok.len() as u32) as usize;
+                    let i = ok[k];
+                    done[i] = true;
+                    buff(&mut board[i], attack + da, health + dh);
+                }
+            }
+            SpellEffect::PlanarTelescope => {
+                let cards = &self.data.cards;
+                let mut counts = [0u8; 5];
+                for m in &self.players[p].board {
+                    let t = cards.get(m.card).tribes;
+                    for (k, tribe) in Tribe::ALL.iter().enumerate() {
+                        if t.has(*tribe) {
+                            counts[k] += 1;
+                        }
+                    }
+                }
+                let Some(max) = counts.iter().copied().max().filter(|&n| n > 0) else {
+                    return;
+                };
+                let mut tied: ArrayVec<Tribe, 5> = ArrayVec::new();
+                for (k, tribe) in Tribe::ALL.iter().enumerate() {
+                    if counts[k] == max {
+                        let _ = tied.try_push(*tribe);
+                    }
+                }
+                let k = self.rng.below(tied.len() as u32) as usize;
+                let _ = self.players[p]
+                    .discover_queue
+                    .try_push(DiscoverRequest::TribeMinion(tied[k]));
+            }
+            SpellEffect::StealRandomTavern => self.steal_random_tavern(p),
+            SpellEffect::DiscoverLockedMinion => {
+                let tier = self.players[p].tier;
+                let _ = self.players[p]
+                    .discover_queue
+                    .try_push(DiscoverRequest::SearchMinionTier(tier));
+            }
+            SpellEffect::SaloonFinest => {
+                let Game { data, rng, players, pool, .. } = self;
+                Self::refresh_with_spells(&mut players[p], &data.cards, &data.rules, rng, pool);
+            }
+            SpellEffect::GetCard { card, count } => {
+                for _ in 0..count {
+                    self.give_generated(p, card);
+                }
             }
         }
     }
@@ -1763,7 +2040,11 @@ impl Game {
                             k -= 1;
                         }
                     }
+                    let cards = &self.data.cards;
                     for m in &mut self.players[p].shop {
+                        if cards.get(m.card).is_spell() {
+                            continue;
+                        }
                         buff(m, attack * mul, health * mul);
                         m.keywords.set(keyword);
                     }
@@ -1797,8 +2078,10 @@ impl Game {
                 }
             }
             Effect::ImproveSelf(n) => {
+                // The count is Activates, so a golden Activate adds one too.
+                // Its Deathrattle doubles the per-Activate number instead.
                 if let Some(m) = self.players[p].board.get_mut(*pos) {
-                    let add = n.saturating_mul(mul as u8).saturating_mul(runs);
+                    let add = n.saturating_mul(runs);
                     m.improvements = m.improvements.saturating_add(add as u16);
                 }
             }
@@ -1811,6 +2094,41 @@ impl Game {
                     let _ = self.players[p]
                         .discover_queue
                         .try_push(DiscoverRequest::DemonMinion { max_tier: tier, source });
+                }
+            }
+            Effect::BuffAnyMinion { attack, health } => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::AnyBuff {
+                        attack: attack * mul,
+                        health: health * mul,
+                    },
+                    runs,
+                };
+                self.offer_target(p, pt);
+            }
+            Effect::SetStatsAnyMinion { attack, health } => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::AnySetStats {
+                        attack: attack * mul,
+                        health: health * mul,
+                    },
+                    runs,
+                };
+                self.offer_target(p, pt);
+            }
+            Effect::StealTavern { count } => {
+                let n = count.saturating_mul(mul as u8).saturating_mul(runs);
+                self.steal_highest_tavern(p, n);
+            }
+            Effect::DiscoverSpell { count } => {
+                let n = count.saturating_mul(mul as u8).saturating_mul(runs);
+                let tier = self.players[p].tier;
+                for _ in 0..n {
+                    let _ = self.players[p]
+                        .discover_queue
+                        .try_push(DiscoverRequest::SpellMaxTier(tier));
                 }
             }
             Effect::DamageHero(n) => {
@@ -1962,10 +2280,17 @@ impl Game {
                     }
                 }
             }
+            // A spell cast by a minion (Gatekeeper Amalgam) is a real cast:
+            // it gets the Tavern spell bonus and every "whenever you cast a
+            // spell" card sees it.
             Effect::CastSpell { card, times } => {
-                let Some(se) = self.data.cards.get(card).spell_effect else { return };
                 for _ in 0..times as u32 * mul as u32 * runs as u32 {
-                    self.execute_spell_effect(p, se);
+                    self.cast_spell(p, card);
+                    if self.players[p].pending_target.is_some()
+                        || self.players[p].pending_choose_one.is_some()
+                    {
+                        break;
+                    }
                 }
             }
             Effect::TriggerRally => {
@@ -2064,7 +2389,11 @@ impl Game {
             | Effect::SummonRandomDeathrattle { .. }
             | Effect::TriggerDeathrattle { .. }
             | Effect::SummonFromHand { .. }
-            | Effect::BuffRandomHand { .. } => {}
+            | Effect::BuffRandomHand { .. }
+            | Effect::GainTargetAttack
+            | Effect::StripTargetKeywords { .. }
+            | Effect::DestroyKiller
+            | Effect::ShieldDragons { .. } => {}
         }
     }
 
@@ -2167,6 +2496,55 @@ impl Game {
         }
     }
 
+    /// Steal the `n` highest-Attack Tavern minions into hand (Decoy
+    /// Conjurer); ties go to the left-most. The copies leave the pool like a
+    /// buy and come back when sold.
+    fn steal_highest_tavern(&mut self, p: usize, n: u8) {
+        for _ in 0..n {
+            if self.players[p].hand.is_full() {
+                break;
+            }
+            let cards = &self.data.cards;
+            let shop = &self.players[p].shop;
+            let mut best: Option<usize> = None;
+            for (i, m) in shop.iter().enumerate() {
+                if cards.get(m.card).is_spell() {
+                    continue;
+                }
+                if best.is_none_or(|b| m.attack > shop[b].attack) {
+                    best = Some(i);
+                }
+            }
+            let Some(i) = best else { break };
+            let m = self.players[p].shop.remove(i);
+            let card = m.card;
+            self.players[p].hand.push(m);
+            self.check_triple(p, card);
+        }
+    }
+
+    /// Steal a random Tavern minion into hand (Enchanted Lasso).
+    fn steal_random_tavern(&mut self, p: usize) {
+        if self.players[p].hand.is_full() {
+            return;
+        }
+        let cards = &self.data.cards;
+        let mut ok: ArrayVec<usize, SHOP> = ArrayVec::new();
+        for (i, m) in self.players[p].shop.iter().enumerate() {
+            if !cards.get(m.card).is_spell() {
+                let _ = ok.try_push(i);
+            }
+        }
+        if ok.is_empty() {
+            return;
+        }
+        let k = self.rng.below(ok.len() as u32) as usize;
+        let m = self.players[p].shop.remove(ok[k]);
+        let card = m.card;
+        self.players[p].hand.push(m);
+        self.check_triple(p, card);
+    }
+
     /// The minion in board slot `pos` consumes `count` minions from the
     /// Tavern. A chosen one waits for the player to pick (or takes the only
     /// choice there is).
@@ -2224,24 +2602,228 @@ impl Game {
     }
 
     fn resolve_shop_target(&mut self, p: usize, slot: usize) {
-        let pst = self.players[p].pending_shop_target.take().unwrap();
-        match pst.kind {
-            ShopTargetKind::Consume { keywords, remaining, stat_mul } => {
-                self.consume(p, pst.source as usize, slot, keywords, stat_mul);
-                if remaining > 1 {
-                    self.start_consume(
-                        p,
-                        pst.source as usize,
-                        ConsumePick::Chosen,
-                        keywords,
-                        remaining - 1,
-                        stat_mul,
-                    );
+        if let Some(pst) = self.players[p].pending_shop_target.take() {
+            match pst.kind {
+                ShopTargetKind::Consume { keywords, remaining, stat_mul } => {
+                    self.consume(p, pst.source as usize, slot, keywords, stat_mul);
+                    if remaining > 1 {
+                        self.start_consume(
+                            p,
+                            pst.source as usize,
+                            ConsumePick::Chosen,
+                            keywords,
+                            remaining - 1,
+                            stat_mul,
+                        );
+                    }
+                }
+                ShopTargetKind::Fishbait { card, golden } => {
+                    self.put_fishbait(p, slot, card, golden)
                 }
             }
-            ShopTargetKind::Fishbait { card, golden } => self.put_fishbait(p, slot, card, golden),
+            self.maybe_start_discover(p);
+            return;
         }
+        let Some(pt) = self.players[p].pending_target.take() else { return };
+        self.apply_target_shop(p, &pt, slot);
         self.maybe_start_discover(p);
+    }
+
+    /// Resolve a pending target that the player picked in the Tavern.
+    fn apply_target_shop(&mut self, p: usize, pt: &PendingTarget, slot: usize) {
+        if slot >= self.players[p].shop.len()
+            || self.data.cards.get(self.players[p].shop[slot].card).is_spell()
+        {
+            return;
+        }
+        match pt.kind {
+            TargetKind::AnyBuff { attack, health } => {
+                for _ in 0..pt.runs {
+                    buff(&mut self.players[p].shop[slot], attack, health);
+                }
+            }
+            TargetKind::AnySetStats { attack, health } => {
+                for _ in 0..pt.runs {
+                    let m = &mut self.players[p].shop[slot];
+                    m.attack = attack;
+                    m.health = health;
+                }
+            }
+            TargetKind::Spell(st) => {
+                let target = slot;
+                // A Tavern minion is not a friendly minion, so Balinda's
+                // double cast does not apply to it.
+                for _ in 0..1 {
+                    if target >= self.players[p].shop.len()
+                        || self.data.cards.get(self.players[p].shop[target].card).is_spell()
+                    {
+                        break;
+                    }
+                    let (da, dh) = self.total_spell_bonus(p);
+                    let mut generated: Option<CardId> = None;
+                    let mut stop_after = false;
+                    match st {
+                        SpellTarget::Buff { attack, health, keyword, times, if_win_next_turn_buff } => {
+                            let m = &mut self.players[p].shop[target];
+                            for _ in 0..times {
+                                buff(m, attack + da, health + dh);
+                            }
+                            if keyword != 0 {
+                                m.keywords.set(keyword);
+                            }
+                            if let Some((wb_a, wb_h)) = if_win_next_turn_buff {
+                                m.winners_bread = m.winners_bread.saturating_add(1);
+                                self.players[p].winners_bread_buff = (wb_a, wb_h);
+                            }
+                        }
+                        SpellTarget::BuffPerBonusKeyword { attack, health } => {
+                            let k = self.players[p]
+                                .distinct_bonus_keywords(self.data.rules.bonus_mask)
+                                as i32;
+                            let m = &mut self.players[p].shop[target];
+                            for _ in 0..1 + k {
+                                buff(m, attack + da, health + dh);
+                            }
+                        }
+                        SpellTarget::BuffSameTribe { attack, health } => {
+                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                for o in &mut self.players[p].board {
+                                    if self.data.cards.get(o.card).tribes.has(tribe) {
+                                        buff(o, attack + da, health + dh);
+                                    }
+                                }
+                                if self.data.cards.get(self.players[p].shop[target].card).tribes.has(tribe) {
+                                    buff(&mut self.players[p].shop[target], attack + da, health + dh);
+                                }
+                            }
+                        }
+                        SpellTarget::SameTribeMinion => {
+                            let c_id = self.players[p].shop[target].card;
+                            let t = self.data.cards.get(c_id).tribes;
+                            let tier = self.players[p].tier;
+                            generated =
+                                self.data.cards.random_different_minion(t, c_id, tier, &mut self.rng);
+                        }
+                        SpellTarget::SetStats { attack, health } => {
+                            let m = &mut self.players[p].shop[target];
+                            m.attack = attack;
+                            m.health = health;
+                        }
+                        SpellTarget::TrickyTrousers { attack, health } => {
+                            let m = &mut self.players[p].shop[target];
+                            buff(m, attack + da, health + dh);
+                            if m.keywords.has(Keywords::TAUNT) {
+                                m.keywords.clear(Keywords::TAUNT);
+                            } else {
+                                m.keywords.set(Keywords::TAUNT);
+                            }
+                        }
+                        SpellTarget::RobustEvolution => {
+                            self.robust_evolution_shop(p, target);
+                            stop_after = true;
+                        }
+                        SpellTarget::TavernBuffType { attack, health } => {
+                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                let b = TavernBuff {
+                                    tribe: Some(tribe),
+                                    attack: attack + da,
+                                    health: health + dh,
+                                    this_turn: false,
+                                };
+                                self.players[p].add_tavern_buff(&self.data.cards, b);
+                            }
+                        }
+                        SpellTarget::RefreshWithType => {
+                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                let Game { data, rng, players, pool, .. } = self;
+                                Self::refresh_with_tribe(
+                                    &mut players[p],
+                                    pool,
+                                    &data.cards,
+                                    &data.rules,
+                                    rng,
+                                    tribe,
+                                );
+                            }
+                            stop_after = true;
+                        }
+                        // The rest target a friendly board minion only.
+                        SpellTarget::Consume { .. }
+                        | SpellTarget::MakeGolden { .. }
+                        | SpellTarget::Devourer => {}
+                    }
+                    self.trigger_on_cast_spell(p);
+                    if let Some(gen_c) = generated {
+                        let mut dummy = 0;
+                        self.give_generated_tracking(p, gen_c, &mut dummy);
+                    }
+                    if stop_after {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Robust Evolution on a board minion: a random pool minion exactly one
+    /// tier higher (a tier 6 into another tier 6), keeping only its Attack
+    /// and Health. The old copy goes back to the pool, the new comes from it.
+    fn robust_evolution_board(&mut self, p: usize, slot: usize) {
+        let old = self.players[p].board[slot];
+        let Some(new_id) = self.robust_evolution_draw(old) else { return };
+        let mut m = self.data.cards.make(new_id, false);
+        m.pool_copies = 1;
+        m.attack = old.attack;
+        m.health = old.health;
+        self.players[p].board[slot] = m;
+    }
+
+    fn robust_evolution_shop(&mut self, p: usize, slot: usize) {
+        let old = self.players[p].shop[slot];
+        let Some(new_id) = self.robust_evolution_draw(old) else { return };
+        let mut m = self.data.cards.make(new_id, false);
+        m.pool_copies = 1;
+        m.attack = old.attack;
+        m.health = old.health;
+        self.players[p].shop[slot] = m;
+    }
+
+    /// Return the old copies to the pool and draw the new one. The result is
+    /// never golden; a golden old minion keeps its Attack and Health and
+    /// returns its copies (an assumption, see DESIGN.md).
+    fn robust_evolution_draw(&mut self, old: Minion) -> Option<CardId> {
+        let old_tier = self.data.cards.get(old.card).tier;
+        let new_tier = if old_tier >= MAX_TIER { MAX_TIER } else { old_tier + 1 };
+        let new_id =
+            draw(&mut self.pool, &self.data.cards, &mut self.rng, new_tier, new_tier, &[])?;
+        let (slot, copies, token) = {
+            let c = self.data.cards.get(old.card);
+            (c.pool_slot, old.pool_copies, c.token || c.is_spell())
+        };
+        if copies > 0 && !token {
+            self.pool[slot as usize] += copies;
+        }
+        Some(new_id)
+    }
+
+    /// Channel the Devourer: sell the chosen board minion (a normal sale)
+    /// and give its stats to a random other friendly minion.
+    fn channel_the_devourer(&mut self, p: usize, slot: usize) {
+        if slot >= self.players[p].board.len() {
+            return;
+        }
+        let stats = (self.players[p].board[slot].attack, self.players[p].board[slot].health);
+        self.sell_minion(p, slot);
+        let n = self.players[p].board.len();
+        if n == 0 {
+            return;
+        }
+        let k = self.rng.below(n as u32) as usize;
+        buff(&mut self.players[p].board[k], stats.0, stats.1);
     }
 
     /// Run every event trigger of `kind` on the player's board. Each adds
@@ -2392,6 +2974,7 @@ impl Game {
         pl.pending_target = None;
         pl.pending_shop_target = None;
         pl.discover_damage_from = None;
+        pl.discover_locked = false;
         pl.discover_queue.clear();
         pl.tavern_buffs.clear();
     }
@@ -2425,11 +3008,31 @@ impl Game {
     }
 
     fn offer_target(&mut self, p: usize, pt: PendingTarget) {
-        let mut targets = (0..self.players[p].board.len()).filter(|&s| self.valid_target(p, &pt, s));
-        match (targets.next(), targets.next()) {
-            (None, _) => {}
-            (Some(s), None) => self.apply_target(p, &pt, s),
-            _ => self.players[p].pending_target = Some(pt),
+        let mut board: ArrayVec<usize, BOARD> = ArrayVec::new();
+        for s in 0..self.players[p].board.len() {
+            if self.valid_target(p, &pt, s) {
+                let _ = board.try_push(s);
+            }
+        }
+        let mut shop: ArrayVec<usize, SHOP> = ArrayVec::new();
+        if pt.kind.takes_shop() {
+            for s in 0..self.players[p].shop.len() {
+                if self.valid_shop_target(p, &pt, s) {
+                    let _ = shop.try_push(s);
+                }
+            }
+        }
+        if board.len() + shop.len() != 1 {
+            if board.is_empty() && shop.is_empty() {
+                return;
+            }
+            self.players[p].pending_target = Some(pt);
+            return;
+        }
+        if let Some(&s) = board.first() {
+            self.apply_target(p, &pt, s);
+        } else if let Some(&s) = shop.first() {
+            self.apply_target_shop(p, &pt, s);
         }
     }
 
@@ -2445,6 +3048,18 @@ impl Game {
                     if random_keyword {
                         self.give_random_keyword(p, s);
                     }
+                }
+            }
+            TargetKind::AnyBuff { attack, health } => {
+                for _ in 0..pt.runs {
+                    buff(&mut self.players[p].board[s], attack, health);
+                }
+            }
+            TargetKind::AnySetStats { attack, health } => {
+                for _ in 0..pt.runs {
+                    let m = &mut self.players[p].board[s];
+                    m.attack = attack;
+                    m.health = health;
                 }
             }
             TargetKind::Consume { pick, keywords, count, stat_mul, .. } => {
@@ -2484,6 +3099,10 @@ impl Game {
                     }
                     let (da, dh) = self.total_spell_bonus(p);
                     let mut generated: Option<CardId> = None;
+                    // A spell that removes or transforms its target can't
+                    // usefully be cast again on the same slot (Balinda).
+                    let mut stop_after = false;
+                    let mut target_removed = false;
                     match st {
                         SpellTarget::Buff {
                             attack,
@@ -2515,17 +3134,26 @@ impl Game {
                         }
                         SpellTarget::BuffSameTribe { attack, health } => {
                             let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
-                            for o in &mut self.players[p].board {
-                                if self.data.cards.get(o.card).tribes.overlaps(t) {
-                                    buff(o, attack + da, health + dh);
+                            // DESIGN.md "Types": a dual or all-type minion
+                            // uses one of its types, picked at random.
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                for o in &mut self.players[p].board {
+                                    if self.data.cards.get(o.card).tribes.has(tribe) {
+                                        buff(o, attack + da, health + dh);
+                                    }
                                 }
                             }
                         }
                         SpellTarget::SameTribeMinion => {
                             let c_id = self.players[p].board[target_pos].card;
                             let t = self.data.cards.get(c_id).tribes;
-                            generated =
-                                self.data.cards.random_different_minion(t, c_id, &mut self.rng);
+                            let tier = self.players[p].tier;
+                            generated = self.data.cards.random_different_minion(
+                                t,
+                                c_id,
+                                tier,
+                                &mut self.rng,
+                            );
                         }
                         SpellTarget::SetStats { attack, health } => {
                             let m = &mut self.players[p].board[target_pos];
@@ -2547,20 +3175,72 @@ impl Game {
                                 m.health += gh - base.health;
                             }
                         }
+                        SpellTarget::TrickyTrousers { attack, health } => {
+                            let m = &mut self.players[p].board[target_pos];
+                            buff(m, attack + da, health + dh);
+                            if m.keywords.has(Keywords::TAUNT) {
+                                m.keywords.clear(Keywords::TAUNT);
+                            } else {
+                                m.keywords.set(Keywords::TAUNT);
+                            }
+                        }
+                        SpellTarget::RobustEvolution => {
+                            // Balinda casts it again on the minion the first
+                            // cast produced, in the same slot.
+                            self.robust_evolution_board(p, target_pos);
+                        }
+                        SpellTarget::TavernBuffType { attack, health } => {
+                            let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                let b = TavernBuff {
+                                    tribe: Some(tribe),
+                                    attack: attack + da,
+                                    health: health + dh,
+                                    this_turn: false,
+                                };
+                                self.players[p].add_tavern_buff(&self.data.cards, b);
+                            }
+                        }
+                        SpellTarget::RefreshWithType => {
+                            let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                let Game { data, rng, players, pool, .. } = self;
+                                Self::refresh_with_tribe(
+                                    &mut players[p],
+                                    pool,
+                                    &data.cards,
+                                    &data.rules,
+                                    rng,
+                                    tribe,
+                                );
+                            }
+                            // Balinda casts it again: the Tavern refreshes
+                            // twice and both casts' on-cast triggers fire.
+                        }
+                        SpellTarget::Devourer => {
+                            self.channel_the_devourer(p, target_pos);
+                            stop_after = true;
+                            target_removed = true;
+                        }
                     }
                     self.trigger_on_cast_spell(p);
-                    self.trigger_on_cast_spell_on_target(p, target_pos);
-                    let is_mech = self
-                        .data
-                        .cards
-                        .get(self.players[p].board[target_pos].card)
-                        .tribes
-                        .has(Tribe::Mech);
-                    if is_mech {
-                        self.trigger_on_cast_spell_on_mech(p, target_pos);
+                    if !target_removed && target_pos < self.players[p].board.len() {
+                        self.trigger_on_cast_spell_on_target(p, target_pos);
+                        let is_mech = self
+                            .data
+                            .cards
+                            .get(self.players[p].board[target_pos].card)
+                            .tribes
+                            .has(Tribe::Mech);
+                        if is_mech {
+                            self.trigger_on_cast_spell_on_mech(p, target_pos);
+                        }
                     }
                     if let Some(gen_c) = generated {
                         self.give_generated_tracking(p, gen_c, &mut target_pos);
+                    }
+                    if stop_after {
+                        break;
                     }
                 }
             }
@@ -2585,16 +3265,22 @@ impl Game {
                 DiscoverRequest::DemonMinion { source, .. } => Some(source),
                 _ => None,
             };
+            let locked = matches!(req, DiscoverRequest::SearchMinionTier(_));
             let Game { data, rng, players, pool, .. } = self;
             let pl = &mut players[p];
             pl.discover_damage_from = damage_from;
+            pl.discover_locked = locked;
             while !pl.discover.is_full() {
                 let next = match req {
-                    DiscoverRequest::MinionTier(t) => {
+                    DiscoverRequest::MinionTier(t)
+                    | DiscoverRequest::SearchMinionTier(t) => {
                         draw(pool, &data.cards, rng, t, t, &pl.discover)
                     }
                     DiscoverRequest::SpellTier(t) => {
                         data.cards.random_tier_spell(t, &pl.discover, rng)
+                    }
+                    DiscoverRequest::SpellMaxTier(t) => {
+                        data.cards.random_spell_up_to(t, &pl.discover, rng)
                     }
                     DiscoverRequest::DeathrattleMinion(max_t) => draw_filtered(
                         pool,
@@ -2681,6 +3367,8 @@ impl Game {
         }
         let Game { data, players, pool, .. } = self;
         let pl = &mut players[p];
+        let locked = pl.discover_locked;
+        pl.discover_locked = false;
         let c = pl.discover[k];
         for (i, &o) in pl.discover.iter().enumerate() {
             if i != k && !data.cards.get(o).is_spell() {
@@ -2698,7 +3386,10 @@ impl Game {
         let is_spell = data.cards.get(c).is_spell();
         if !pl.hand.is_full() {
             let pool_copies = if is_spell { 0 } else { 1 };
-            let m = pl.make_card(&data.cards, c, false, pool_copies);
+            let mut m = pl.make_card(&data.cards, c, false, pool_copies);
+            if locked && !is_spell {
+                m.locked_turns = 1;
+            }
             pl.hand.push(m);
             if !is_spell {
                 self.check_triple(p, c);
@@ -2765,7 +3456,12 @@ impl Game {
             gold.magnetizations = gold.magnetizations.saturating_add(m.magnetizations);
             gold.volumizers =
                 gold.volumizers.saturating_add(m.volumizers.saturating_sub(base.volumizers));
-            gold.improvements = gold.improvements.saturating_add(m.improvements);
+            // `improvements` is one minion's own count (Leviathan summons,
+            // Snapper growth, Hopebringer shields, Wrathguard Activates,
+            // Patient Scout tier, Treasure Parrot damage, Scarlet Survivor's
+            // flag, event counters): the golden copy takes the highest of
+            // the three, never the sum.
+            gold.improvements = gold.improvements.max(m.improvements);
             for &a in m.attached_slice() {
                 gold.push_attached(a);
             }
@@ -2852,8 +3548,16 @@ impl Game {
         loop {
             let pl = &self.players[p];
             if let Some(pt) = pl.pending_target {
-                let s = (0..pl.board.len()).find(|&s| self.valid_target(p, &pt, s)).unwrap();
-                self.resolve_target(p, s);
+                if let Some(s) = (0..pl.board.len()).find(|&s| self.valid_target(p, &pt, s)) {
+                    self.resolve_target(p, s);
+                } else if pt.kind.takes_shop()
+                    && let Some(s) = (0..pl.shop.len())
+                        .find(|&s| self.valid_shop_target(p, &pt, s))
+                {
+                    self.resolve_shop_target(p, s);
+                } else {
+                    self.players[p].pending_target = None;
+                }
             } else if pl.pending_shop_target.is_some() {
                 self.resolve_shop_target(p, 0);
             } else if let Some(pco) = pl.pending_choose_one {
@@ -2955,6 +3659,9 @@ impl Game {
             }
             for m in &mut pl.hand {
                 m.winners_bread = 0;
+            }
+            for m in &mut pl.hand {
+                m.locked_turns = m.locked_turns.saturating_sub(1);
             }
             pl.done = false;
             pl.actions = 0;
@@ -3285,11 +3992,10 @@ impl Game {
                     held[slot] += 1;
                 }
             }
-            // generated cards (Fishbait) may be any Tier, a Golden Touch makes a
-            // minion in the Tavern golden
-            if pl.shop.iter().any(|m| !cards.get(m.card).token && cards.get(m.card).tier > pl.tier) {
-                return Err(format!("player {i}: shop has a card it shouldn't"));
-            }
+            // A Tavern minion may be above the player's tier: Robust
+            // Evolution (which ignores the Tavern tier) can put one there.
+            // Generated cards (Fishbait) may be any Tier too, and a Golden
+            // Touch makes a Tavern minion golden.
             if let Some(sp) = pl.shop_spell
                 && (!cards.get(sp).is_spell() || cards.get(sp).tier > pl.tier)
             {

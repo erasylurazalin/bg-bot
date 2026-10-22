@@ -107,6 +107,9 @@ pub struct Minion {
     /// The Tavern spell a token in hand was taught (Magicfin Apprentice).
     /// Its Battlecry casts that spell.
     pub taught_spell: Option<CardId>,
+    /// Turns this minion is locked in hand and can't be played (Search
+    /// Through Time). It goes down by one at the start of its owner's turn.
+    pub locked_turns: u8,
     pub attached: [Attached; MAX_ATTACHED],
     pub n_attached: u8,
 }

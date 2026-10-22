@@ -69,6 +69,26 @@ impl Tribes {
     pub fn overlaps(self, other: Tribes) -> bool {
         self.0 & other.0 != 0
     }
+
+    /// One of the card's tribes picked uniformly at random; None when it is
+    /// neutral (DESIGN.md "Types": a dual or all-type minion uses one of its
+    /// types at random).
+    pub fn random_type(self, rng: &mut Rng) -> Option<Tribe> {
+        let n = self.0.count_ones();
+        if n == 0 {
+            return None;
+        }
+        let mut k = rng.below(n);
+        for t in Tribe::ALL {
+            if self.has(t) {
+                if k == 0 {
+                    return Some(t);
+                }
+                k -= 1;
+            }
+        }
+        None
+    }
 }
 
 /// Which Tavern minion a consuming minion takes.
@@ -106,6 +126,11 @@ pub enum Effect {
         per_keyword: (i32, i32),
         random_keyword: bool,
     },
+    /// Buff one minion the player picks on the board or in the Tavern
+    /// ("another minion", Suspicious Prisonguard).
+    BuffAnyMinion { attack: i32, health: i32 },
+    /// Set one minion's (board or Tavern) stats (Tyrael).
+    SetStatsAnyMinion { attack: i32, health: i32 },
     /// Buff every other friendly minion.
     BuffOthers { tribe: Option<Tribe>, attack: i32, health: i32, per_keyword: (i32, i32) },
     /// Buff every friendly minion, the one with the effect included.
@@ -210,7 +235,8 @@ pub enum Effect {
     /// doubles the stats taken). Soulkeeping Jailer.
     DemonsConsume { count: u8 },
     /// Raise this minion's `improvements` by `n` (Sacrificial Wrathguard's
-    /// "Improve this"). Golden doubles it.
+    /// "Improve this"). The count is Activates, so golden does not double
+    /// it; the Deathrattle's per-improvement number is doubled instead.
     ImproveSelf(u8),
     /// Give every minion in the Tavern stats and one random keyword from
     /// `mask`, the same keyword for all of them (Deft Deserter).
@@ -218,6 +244,24 @@ pub enum Effect {
     /// Discover `count` Demons up to the player's tier; the hero then takes
     /// damage equal to the tier of each one chosen (Imposing Percussionist).
     DiscoverDemonTierDamage(u8),
+    /// Steal the `count` highest-Attack minions from the Tavern into hand
+    /// (Decoy Conjurer). Golden steals two.
+    StealTavern { count: u8 },
+    /// Discover `count` Tavern spells up to the player's tier (Rodeo
+    /// Performer). Golden discovers two.
+    DiscoverSpell { count: u8 },
+    /// Rally: gain the Attack of the minion this one attacks, for this fight
+    /// (Heroic Underdog). A golden one gains double.
+    GainTargetAttack,
+    /// Rally: remove these keywords from the minion this one attacks, for
+    /// this fight (Sin'dorei Straight Shot).
+    StripTargetKeywords { mask: u8 },
+    /// Deathrattle: destroy the minion that killed this one, ignoring Divine
+    /// Shield (Leeroy the Reckless).
+    DestroyKiller,
+    /// Deathrattle: give `count` friendly Dragons Divine Shield, picking
+    /// Dragons without it first (Nadina the Red).
+    ShieldDragons { count: u8 },
 }
 
 impl Effect {
@@ -233,7 +277,21 @@ impl Effect {
                 | Effect::TriggerRally
                 | Effect::TriggerBattlecry
                 | Effect::DiscoverDemonTierDamage(_)
+                | Effect::BuffAnyMinion { .. }
+                | Effect::SetStatsAnyMinion { .. }
         )
+    }
+
+    /// Whether the effect needs the player to pick a minion on the board or
+    /// in the Tavern ("another minion").
+    pub fn needs_any_minion(self) -> bool {
+        matches!(self, Effect::BuffAnyMinion { .. } | Effect::SetStatsAnyMinion { .. })
+    }
+
+    /// Whether the effect takes a Tavern minion into hand, so it needs one
+    /// in the Tavern and room in hand.
+    pub fn needs_shop_minion(self) -> bool {
+        matches!(self, Effect::StealTavern { .. })
     }
 
     /// Whether the effect needs a friendly minion with a Rally to be legal
@@ -274,7 +332,11 @@ impl Effect {
             | Effect::BuffRandomOther { .. }
             | Effect::SummonFromHand { .. }
             | Effect::BuffRandomHand { .. }
-            | Effect::AddFodderRefreshes(_) => true,
+            | Effect::AddFodderRefreshes(_)
+            | Effect::GainTargetAttack
+            | Effect::StripTargetKeywords { .. }
+            | Effect::DestroyKiller
+            | Effect::ShieldDragons { .. } => true,
             _ => false,
         }
     }
@@ -282,7 +344,7 @@ impl Effect {
     /// Whether the effect picks one of the player's Tavern cards, so it can
     /// only be activated while there is one.
     pub fn needs_shop_slot(self) -> bool {
-        matches!(self, Effect::ReplaceWithFishbait { .. })
+        matches!(self, Effect::ReplaceWithFishbait { .. } | Effect::StealTavern { .. })
     }
 }
 
@@ -360,6 +422,53 @@ pub enum SpellTarget {
         keywords: bool,
         count: u8,
     },
+    /// +attack/+health and Taunt, or remove Taunt if it already has it
+    /// (Tricky Trousers).
+    TrickyTrousers { attack: i32, health: i32 },
+    /// Transform the minion into a random minion exactly one tier higher,
+    /// keeping only its Attack and Health (Robust Evolution).
+    RobustEvolution,
+    /// Tavern minions of the chosen minion's type get stats this game
+    /// (Eonar's Favor). A dual or all-type one picks one type at random.
+    TavernBuffType { attack: i32, health: i32 },
+    /// Refresh the Tavern with minions of the chosen minion's type (Lost
+    /// Staff of Hamuul).
+    RefreshWithType,
+    /// Sell the chosen friendly minion and give its stats to a random other
+    /// friendly minion (Channel the Devourer).
+    Devourer,
+}
+
+impl SpellTarget {
+    /// Whether this target may also be a minion in the Tavern. Spells that
+    /// say "a minion" (no "friendly") reach both, per DESIGN.md; "friendly"
+    /// means the board only.
+    pub fn can_target_shop(self) -> bool {
+        matches!(
+            self,
+            SpellTarget::Buff { .. }
+                | SpellTarget::BuffSameTribe { .. }
+                | SpellTarget::SameTribeMinion
+                | SpellTarget::SetStats { .. }
+                | SpellTarget::BuffPerBonusKeyword { .. }
+                | SpellTarget::TrickyTrousers { .. }
+                | SpellTarget::RobustEvolution
+                | SpellTarget::TavernBuffType { .. }
+                | SpellTarget::RefreshWithType
+        )
+    }
+
+    /// Whether the chosen minion must have a type (a neutral can't be
+    /// picked).
+    pub fn needs_type(self) -> bool {
+        matches!(
+            self,
+            SpellTarget::BuffSameTribe { .. }
+                | SpellTarget::SameTribeMinion
+                | SpellTarget::TavernBuffType { .. }
+                | SpellTarget::RefreshWithType
+        )
+    }
 }
 
 /// A Tavern spell (or Choose One spell option) that does not target a minion.
@@ -386,6 +495,24 @@ pub enum SpellEffect {
     GoldenTouch,
     /// Get a random Murloc and a copy of it (Cloning Conch).
     CloningConch,
+    /// Give minions in the Tavern stats for the rest of the game (Staff of
+    /// Enrichment).
+    BuffTavernPermanent { attack: i32, health: i32 },
+    /// For each type on the board, give one random friendly minion of it
+    /// +attack/+health, at most one buff per minion (Misplaced Tea Set).
+    MisplacedTeaSet { attack: i32, health: i32 },
+    /// Discover a minion of the most common type on the board (Planar
+    /// Telescope).
+    PlanarTelescope,
+    /// Steal a random minion from the Tavern into hand (Enchanted Lasso).
+    StealRandomTavern,
+    /// Discover a minion of exactly the player's tier and lock it in hand
+    /// for one turn (Search Through Time).
+    DiscoverLockedMinion,
+    /// Refresh the Tavern with Tavern spells (Saloon's Finest).
+    SaloonFinest,
+    /// Get `count` copies of a card (Weapons Forge).
+    GetCard { card: CardId, count: u8 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -593,6 +720,9 @@ pub enum Aura {
     Balinda,
     /// Has Taunt while it has Divine Shield.
     TauntWhileShielded,
+    /// Has +30/+30 while its owner's hero has 15 or less Health (Holy
+    /// Vanguard). A golden one has +60/+60.
+    HolyVanguard,
 }
 
 #[derive(Clone, Debug)]
@@ -607,6 +737,8 @@ pub struct Card {
     pub keywords: Keywords,
     pub token: bool,
     pub spell: bool,
+    /// Bought with Health instead of Gold (Hasty Excavation).
+    pub pay_health: bool,
     pub cost: u8,
     pub is_beetle: bool,
     pub is_volumizer: bool,
@@ -885,6 +1017,12 @@ struct RawSpell {
     name: String,
     tier: u8,
     cost: u8,
+    /// A spell that is never in the Tavern's spell pool (Pointy Arrow).
+    #[serde(default)]
+    token: bool,
+    /// Bought with Health instead of Gold (Hasty Excavation).
+    #[serde(default)]
+    pay_health: bool,
     effect: Option<RawSpellEffect>,
     choose_one: Option<[RawSpellEffect; 2]>,
 }
@@ -938,6 +1076,30 @@ struct RawSpellEffect {
     /// Get a random Murloc and a copy of it.
     #[serde(default)]
     cloning_conch: bool,
+    /// Give minions in the Tavern stats for the rest of the game.
+    tavern_buff_permanent: Option<[i32; 2]>,
+    /// Misplaced Tea Set: one minion per type on the board.
+    misplaced_tea_set: Option<[i32; 2]>,
+    #[serde(default)]
+    planar_telescope: bool,
+    #[serde(default)]
+    steal_random_tavern: bool,
+    #[serde(default)]
+    discover_locked_minion: bool,
+    #[serde(default)]
+    saloon_finest: bool,
+    /// Get `count` copies of this generated card.
+    get: Option<String>,
+    /// The chosen minion: toggle Taunt with these stats.
+    tricky_trousers: Option<[i32; 2]>,
+    #[serde(default)]
+    robust_evolution: bool,
+    /// Eonar's Favor: Tavern minions of the chosen minion's type.
+    tavern_buff_type: Option<[i32; 2]>,
+    #[serde(default)]
+    refresh_with_type: bool,
+    #[serde(default)]
+    devourer: bool,
 }
 
 #[derive(Deserialize)]
@@ -1038,6 +1200,25 @@ struct RawEffect {
     /// Discover `n` Demons up to the owner's tier, then damage the hero for
     /// their tiers.
     discover_demon_tier_damage: Option<u8>,
+    /// Set a minion's (board or Tavern) stats (Tyrael).
+    set_stats_any: Option<[i32; 2]>,
+    /// Steal the `n` highest-Attack minions from the Tavern (Decoy Conjurer).
+    steal_tavern: Option<u8>,
+    /// Discover `n` Tavern spells up to the owner's tier (Rodeo Performer).
+    discover_spell: Option<u8>,
+    /// Rally: gain the target's Attack (Heroic Underdog).
+    #[serde(default)]
+    gain_target_attack: bool,
+    /// Rally: remove these keywords from the target (Sin'dorei Straight
+    /// Shot).
+    strip_keywords: Option<Vec<String>>,
+    /// Deathrattle: destroy the minion that killed this one (Leeroy the
+    /// Reckless).
+    #[serde(default)]
+    destroy_killer: bool,
+    /// Deathrattle: give `n` friendly Dragons Divine Shield (Nadina the
+    /// Red).
+    shield_dragons: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -1338,6 +1519,21 @@ fn parse_spell_effect(
             if let Some(max_tier) = e.make_golden_max_tier {
                 return Ok((Some(SpellTarget::MakeGolden { max_tier }), None));
             }
+            if let Some([attack, health]) = e.tricky_trousers {
+                return Ok((Some(SpellTarget::TrickyTrousers { attack, health }), None));
+            }
+            if e.robust_evolution {
+                return Ok((Some(SpellTarget::RobustEvolution), None));
+            }
+            if let Some([attack, health]) = e.tavern_buff_type {
+                return Ok((Some(SpellTarget::TavernBuffType { attack, health }), None));
+            }
+            if e.refresh_with_type {
+                return Ok((Some(SpellTarget::RefreshWithType), None));
+            }
+            if e.devourer {
+                return Ok((Some(SpellTarget::Devourer), None));
+            }
             Err("invalid chosen spell effect".into())
         }
         Some("chosen_tribe") => {
@@ -1387,6 +1583,18 @@ fn parse_spell_effect(
                 SpellEffect::GoldenTouch
             } else if e.cloning_conch {
                 SpellEffect::CloningConch
+            } else if let Some([attack, health]) = e.tavern_buff_permanent {
+                SpellEffect::BuffTavernPermanent { attack, health }
+            } else if let Some([attack, health]) = e.misplaced_tea_set {
+                SpellEffect::MisplacedTeaSet { attack, health }
+            } else if e.planar_telescope {
+                SpellEffect::PlanarTelescope
+            } else if e.steal_random_tavern {
+                SpellEffect::StealRandomTavern
+            } else if e.discover_locked_minion {
+                SpellEffect::DiscoverLockedMinion
+            } else if e.saloon_finest {
+                SpellEffect::SaloonFinest
             } else if let Some(b) = e.boon_of_beetles {
                 SpellEffect::BoonOfBeetles(b)
             } else if let Some(soc) = &e.start_of_combat {
@@ -1500,6 +1708,7 @@ impl CardDb {
                     Some("others") => Effect::BuffOthers { tribe: t, attack, health, per_keyword },
                     Some("self") => Effect::BuffSelf { attack, health },
                     Some("all") => Effect::BuffAll { tribe: t, attack, health },
+                    Some("any") => Effect::BuffAnyMinion { attack, health },
                     Some("random") => {
                         let improve = b.improve_counter.as_deref().map(counter).transpose()?;
                         Effect::BuffRandomFriendly { tribe: t, attack, health, improve }
@@ -1614,6 +1823,24 @@ impl CardDb {
                     keyword,
                     count: b.count.unwrap_or(1),
                 }
+            } else if let Some([attack, health]) = b.set_stats_any {
+                Effect::SetStatsAnyMinion { attack, health }
+            } else if let Some(n) = b.steal_tavern {
+                Effect::StealTavern { count: n }
+            } else if let Some(n) = b.discover_spell {
+                Effect::DiscoverSpell { count: n }
+            } else if b.gain_target_attack {
+                Effect::GainTargetAttack
+            } else if let Some(keys) = &b.strip_keywords {
+                let mut mask = 0u8;
+                for k in keys {
+                    mask |= keyword_bit(k)?;
+                }
+                Effect::StripTargetKeywords { mask }
+            } else if b.destroy_killer {
+                Effect::DestroyKiller
+            } else if let Some(n) = b.shield_dragons {
+                Effect::ShieldDragons { count: n }
             } else if let Some(name) = &b.get {
                 let card = generated_id(name)?;
                 Effect::GetCard { card, count: b.count.unwrap_or(1) }
@@ -2010,6 +2237,7 @@ impl CardDb {
                 Some("drakkari") => Some(Aura::Drakkari),
                 Some("balinda") => Some(Aura::Balinda),
                 Some("taunt_while_shielded") => Some(Aura::TauntWhileShielded),
+                Some("holy_vanguard") => Some(Aura::HolyVanguard),
                 Some(other) => return Err(err(format!("unknown aura {other:?}"))),
             };
 
@@ -2023,6 +2251,7 @@ impl CardDb {
                 keywords,
                 token: *token,
                 spell: false,
+                pay_health: false,
                 cost: 0,
                 is_beetle: c.beetle,
                 is_volumizer,
@@ -2078,6 +2307,10 @@ impl CardDb {
                 return Err(err(format!("tier {} is not 1 to 6", sp.tier)));
             }
             let (spell_target, spell_effect) = match &sp.effect {
+                Some(e) if e.get.is_some() => {
+                    let card = generated_id(e.get.as_deref().unwrap()).map_err(&err)?;
+                    (None, Some(SpellEffect::GetCard { card, count: e.count.unwrap_or(1) }))
+                }
                 Some(e) => parse_spell_effect(e).map_err(&err)?,
                 None => (None, None),
             };
@@ -2097,7 +2330,9 @@ impl CardDb {
             if spell_target.is_none() && spell_effect.is_none() && choose_one.is_none() {
                 return Err(err("spell has no effect or choose_one".into()));
             }
-            spells.push(id);
+            if !sp.token {
+                spells.push(id);
+            }
             cards.push(Card {
                 name: sp.name.clone(),
                 tier: sp.tier,
@@ -2106,8 +2341,9 @@ impl CardDb {
                 health: 0,
                 golden_stats: None,
                 keywords: Keywords::default(),
-                token: false,
+                token: sp.token,
                 spell: true,
+                pay_health: sp.pay_health,
                 cost: sp.cost,
                 is_beetle: false,
                 is_volumizer: false,
@@ -2245,14 +2481,21 @@ impl CardDb {
         self.spells.iter().copied().filter(|&id| ok(id)).nth(k)
     }
 
-    /// A random pool minion sharing a tribe with `tribes`, other than `exclude`.
+    /// A random pool minion sharing a tribe with `tribes`, other than
+    /// `exclude`, of Tier `max_tier` or lower.
     pub fn random_different_minion(
         &self,
         tribes: Tribes,
         exclude: CardId,
+        max_tier: u8,
         rng: &mut Rng,
     ) -> Option<CardId> {
-        let ok = |c: usize| self.cards[c].tribes.overlaps(tribes) && c as CardId != exclude;
+        let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
+        let ok = |c: usize| {
+            self.cards[c].tribes.overlaps(tribes)
+                && c as CardId != exclude
+                && self.cards[c].tier <= max_tier
+        };
         let count = (0..self.pool_cards).filter(|&c| ok(c)).count() as u32;
         if count == 0 {
             return None;
@@ -2292,6 +2535,23 @@ impl CardDb {
             .nth(k)
     }
 
+    /// A random Tavern spell of Tier `max_tier` or lower, other than the
+    /// cards in `exclude`.
+    pub fn random_spell_up_to(
+        &self,
+        max_tier: u8,
+        exclude: &[CardId],
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        let ok = |id: CardId| self.cards[id as usize].tier <= max_tier && !exclude.contains(&id);
+        let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
+        if count == 0 {
+            return None;
+        }
+        let k = rng.below(count) as usize;
+        self.spells.iter().copied().filter(|&id| ok(id)).nth(k)
+    }
+
     pub fn random_tier_spell(
         &self,
         tier: u8,
@@ -2329,6 +2589,7 @@ impl CardDb {
             improvements: 0,
             extra_magnetize: 0,
             taught_spell: None,
+            locked_turns: 0,
             attached: [Attached::default(); MAX_ATTACHED],
             n_attached: 0,
         }

@@ -35,6 +35,13 @@ stats = [2, 2]
 keywords = ["magnetic"]
 end_of_turn = { buff_self = [0, 1] }
 
+[[minion]]
+name = "Suspicious Prisonguard"
+tier = 1
+tribe = "neutral"
+stats = [3, 3]
+activate = { cost = 1, effect = { target = "any", buff = [3, 3] } }
+
 # --- Tier 2 ---
 
 [[minion]]
@@ -97,6 +104,13 @@ tribe = "neutral"
 stats = [1, 1]
 end_of_turn = { improve_tier = true }
 on_sell = { discover_by_tier = true }
+
+[[minion]]
+name = "Decoy Conjurer"
+tier = 2
+tribe = "neutral"
+stats = [3, 4]
+activate = { cost = 2, effect = { steal_tavern = 1 } }
 
 [[minion]]
 name = "Intrepid Botanist"
@@ -200,6 +214,13 @@ tribe = "neutral"
 stats = [2, 2]
 battlecry = { get = "Fortify", count = 2 }
 
+[[minion]]
+name = "Fruit Vendor"
+tier = 3
+tribe = "neutral"
+stats = [3, 6]
+activate = { cost = 1, effect = { get = "Tavern Dish Banana", count = 2 } }
+
 # --- Tier 4 ---
 
 [[minion]]
@@ -289,6 +310,30 @@ tribe = "neutral"
 stats = [5, 5]
 keywords = ["divine_shield"]
 spell_buff = [1, 2]
+
+[[minion]]
+name = "Heroic Underdog"
+tier = 4
+tribe = "neutral"
+stats = [1, 10]
+keywords = ["stealth"]
+rally = { gain_target_attack = true }
+
+[[minion]]
+name = "Holy Vanguard"
+tier = 4
+tribe = "neutral"
+stats = [10, 10]
+keywords = ["divine_shield"]
+aura = "holy_vanguard"
+
+[[minion]]
+name = "Sin'dorei Straight Shot"
+tier = 4
+tribe = "neutral"
+stats = [3, 4]
+keywords = ["divine_shield", "windfury"]
+rally = { strip_keywords = ["reborn", "taunt"] }
 
 [[minion]]
 name = "Tortollan Blue Shell"
@@ -384,6 +429,28 @@ tribe = "neutral"
 stats = [6, 10]
 end_of_turn = { copy_last_spell = true }
 
+[[minion]]
+name = "Nightmare Par-tea Guest"
+tier = 5
+tribe = "all"
+stats = [3, 3]
+battlecry = { get = "Misplaced Tea Set" }
+deathrattle = { get = "Misplaced Tea Set" }
+
+[[minion]]
+name = "Leeroy the Reckless"
+tier = 5
+tribe = "neutral"
+stats = [6, 2]
+deathrattle = { effect = { destroy_killer = true } }
+
+[[minion]]
+name = "Rodeo Performer"
+tier = 5
+tribe = "neutral"
+stats = [3, 4]
+battlecry = { discover_spell = 1 }
+
 # --- Tier 6 ---
 
 [[minion]]
@@ -429,6 +496,27 @@ tier = 6
 tribe = "neutral"
 stats = [6, 6]
 aura = "balinda"
+
+[[minion]]
+name = "Gatekeeper Amalgam"
+tier = 6
+tribe = "all"
+stats = [6, 6]
+on_cast_spell_on_self = { cast = "Misplaced Tea Set" }
+
+[[minion]]
+name = "Nadina the Red"
+tier = 6
+tribe = "neutral"
+stats = [8, 4]
+deathrattle = { effect = { shield_dragons = 3 } }
+
+[[minion]]
+name = "Tyrael"
+tier = 6
+tribe = "neutral"
+stats = [10, 10]
+activate = { cost = 1, effect = { set_stats_any = [50, 50] } }
 
 # --- Dragons ---
 
@@ -555,7 +643,8 @@ name = "Hopebringer"
 tier = 5
 tribe = "dragon"
 stats = [4, 3]
-start_of_combat = { hopebringer = { buff = [4, 3], improve = [1, 1] } }
+# Each friendly Divine Shield lost adds +4/+3 (golden +8/+6).
+start_of_combat = { hopebringer = { buff = [4, 3], improve = [4, 3] } }
 
 [[minion]]
 name = "Kalecgos, Arcane Aspect"
@@ -691,7 +780,8 @@ name = "Hackerfin"
 tier = 5
 tribe = "murloc"
 stats = [5, 3]
-battlecry = { target = "others", buff = [3, 2], per_keyword = [1, 1] }
+# +3/+2 per different Bonus Keyword in the warband (golden +6/+4).
+battlecry = { target = "others", buff = [3, 2], per_keyword = [3, 2] }
 
 [[minion]]
 name = "Primalfin Lookout"
@@ -820,13 +910,13 @@ tribe = "demon"
 stats = [4, 4]
 battlecry = { discover_demon_tier_damage = 1 }
 
-# The Improve amount is not in the card data: +1/+1 per Activate is a guess.
+# Each Activate adds +2/+2 to the Deathrattle's Tavern buff (golden +4/+4).
 [[minion]]
 name = "Sacrificial Wrathguard"
 tier = 4
 tribe = "demon"
 stats = [5, 3]
-deathrattle = { tavern_buff = [2, 2], per_improvement = [1, 1] }
+deathrattle = { tavern_buff = [2, 2], per_improvement = [2, 2] }
 activate = { cost = 1, effect = { improve_self = 1 } }
 
 [[minion]]
@@ -1044,6 +1134,12 @@ cost = 2
 effect = { random_tier_minion = 1 }
 
 [[spell]]
+name = "Enchanted Lasso"
+tier = 1
+cost = 2
+effect = { steal_random_tavern = true }
+
+[[spell]]
 name = "A New Sprout"
 tier = 1
 cost = 3
@@ -1081,6 +1177,19 @@ tier = 2
 cost = 3
 effect = { max_gold = 1 }
 
+[[spell]]
+name = "Hasty Excavation"
+tier = 2
+cost = 3
+pay_health = true
+effect = { gold = 1 }
+
+[[spell]]
+name = "Search Through Time"
+tier = 2
+cost = 2
+effect = { discover_locked_minion = true }
+
 # --- Spells: Tier 3 ---
 
 [[spell]]
@@ -1115,6 +1224,30 @@ choose_one = [
     { target = "board", buff = [2, 2] },
     { next_turn_board_buff = [2, 2], times = 2 },
 ]
+
+[[spell]]
+name = "Planar Telescope"
+tier = 3
+cost = 4
+effect = { planar_telescope = true }
+
+[[spell]]
+name = "Robust Evolution"
+tier = 3
+cost = 1
+effect = { target = "chosen", robust_evolution = true }
+
+[[spell]]
+name = "Staff of Enrichment"
+tier = 3
+cost = 2
+effect = { tavern_buff_permanent = [2, 2] }
+
+[[spell]]
+name = "Tricky Trousers"
+tier = 3
+cost = 1
+effect = { target = "chosen", tricky_trousers = [1, 2] }
 
 # --- Spells: Tier 4 ---
 
@@ -1169,6 +1302,38 @@ tier = 4
 cost = 3
 effect = { target = "chosen", tribe = "demon", consume = "random", count = 2, with_keywords = true }
 
+[[spell]]
+name = "Eonar's Favor"
+tier = 4
+cost = 2
+effect = { target = "chosen", tavern_buff_type = [3, 3] }
+
+[[spell]]
+name = "Misplaced Tea Set"
+tier = 4
+cost = 3
+effect = { misplaced_tea_set = [4, 4] }
+
+[[spell]]
+name = "Sludge Corrosion"
+tier = 4
+cost = 1
+effect = { target = "board", buff = [1, 1] }
+
+[[spell]]
+name = "Weapons Forge"
+tier = 4
+cost = 2
+effect = { get = "Pointy Arrow", count = 3 }
+
+# A normal pool spell (the JSON's pool flag is wrong for it); Weapons Forge
+# also gives 3 copies.
+[[spell]]
+name = "Pointy Arrow"
+tier = 1
+cost = 1
+effect = { target = "chosen", buff = [4, 0] }
+
 # --- Spells: Tier 5 ---
 
 [[spell]]
@@ -1185,12 +1350,6 @@ choose_one = [
     { target = "chosen", buff = [6, 6], times = 2 },
     { target = "board", buff = [2, 2] },
 ]
-
-[[spell]]
-name = "Wave of Gold"
-tier = 5
-cost = 2
-effect = { target = "board", buff = [3, 2], golden_extra = true }
 
 [[spell]]
 name = "Upper Hand"
@@ -1222,6 +1381,18 @@ tier = 5
 cost = 4
 effect = { target = "chosen", tribe = "demon", consume = "random", count = 3 }
 
+[[spell]]
+name = "Channel the Devourer"
+tier = 5
+cost = 4
+effect = { target = "chosen", devourer = true }
+
+[[spell]]
+name = "Saloon's Finest"
+tier = 5
+cost = 2
+effect = { saloon_finest = true }
+
 # --- Spells: Tier 6 ---
 
 [[spell]]
@@ -1235,6 +1406,12 @@ name = "Azerite Empowerment"
 tier = 6
 cost = 4
 effect = { target = "board", buff = [2, 2], times = 2 }
+
+[[spell]]
+name = "Lost Staff of Hamuul"
+tier = 6
+cost = 2
+effect = { target = "chosen", refresh_with_type = true }
 
 [[spell]]
 name = "Eyes of the Earth Mother"

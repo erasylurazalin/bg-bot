@@ -82,16 +82,17 @@ fn hopebringer_improves_when_a_friendly_bronze_warden_loses_its_shield() {
     assert!(improved >= 1, "a lost shield should improve the Hopebringer");
 
     // The improvement is used by the next Start of Combat: base +4/+3 plus
-    // one more +1/+1 per lost shield. Hopebringer attacks with 4+4+1 / 3+3+1.
+    // one more +4/+3 per lost shield. Hopebringer attacks with
+    // 4 + (4 + 4) / 3 + (3 + 3).
     let mut hope = mk(&db, "Hopebringer", false);
     hope.improvements = 1;
     let (_, log) = run(&db, &[hope], &[wall(&db)], 1, 1);
-    assert_eq!(log.attacks[0], ("Hopebringer".to_string(), 9, 7));
-    // Golden: base +8/+6, same improvement
+    assert_eq!(log.attacks[0], ("Hopebringer".to_string(), 12, 9));
+    // Golden: base +8/+6 plus +8/+6 per lost shield.
     let mut gold = mk(&db, "Hopebringer", true);
     gold.improvements = 2;
     let (_, log) = run(&db, &[gold], &[wall(&db)], 1, 1);
-    assert_eq!(log.attacks[0], ("Hopebringer".to_string(), 8 + 8 + 2, 6 + 6 + 2));
+    assert_eq!(log.attacks[0], ("Hopebringer".to_string(), 8 + 8 + 2 * 8, 6 + 6 + 2 * 6));
 }
 
 #[test]

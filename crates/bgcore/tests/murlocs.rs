@@ -329,8 +329,19 @@ fn hackerfin_and_seafood_stew_count_different_bonus_keywords() {
     put_on_board(&mut g, 0, "Annoy-o-Module");
     g.give(0, "Hackerfin").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
-    // +3/+2 plus +1/+1 for each of the two keywords.
-    assert_eq!(stats(&g.players[0].board[0]), (2 + 5, 4 + 4));
+    // +3/+2 plus +3/+2 for each of the two keywords.
+    assert_eq!(stats(&g.players[0].board[0]), (2 + 9, 4 + 6));
+
+    // Golden: the whole Battlecry doubles, so +6/+4 plus +6/+4 per keyword.
+    let mut g = game(150);
+    put_on_board(&mut g, 0, "Annoy-o-Module");
+    let c = g.data.cards.by_name("Hackerfin").unwrap();
+    let slot = g.data.cards.get(c).pool_slot as usize;
+    g.pool[slot] -= 3;
+    let hf = g.players[0].make_card(&g.data.cards, c, true, 3);
+    g.players[0].hand.push(hf);
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(stats(&g.players[0].board[0]), (2 + 18, 4 + 12));
 
     let mut g = game(16);
     put_on_board(&mut g, 0, "Annoy-o-Module");
