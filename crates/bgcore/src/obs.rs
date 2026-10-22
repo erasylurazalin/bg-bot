@@ -53,7 +53,7 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
         game.turn as f32,
         pl.frozen as u8 as f32,
         pl.pending_target.is_some() as u8 as f32,
-        pl.pending_target.map_or(0.0, |t| t.source as f32 + 1.0),
+        pl.pending_target.and_then(|t| t.source).map_or(0.0, |s| s as f32 + 1.0),
         !pl.discover.is_empty() as u8 as f32,
         r.max_actions_per_turn.saturating_sub(pl.actions) as f32,
         game.alive() as f32,

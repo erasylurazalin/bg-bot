@@ -54,7 +54,8 @@ pub fn rule_action(game: &Game) -> Action {
         return Action::Target(best.unwrap());
     }
     if pl.pending_choose_one.is_some() {
-        return Action::Choose(0);
+        let choice = (0..2).find(|&k| legal(Action::Choose(k))).unwrap();
+        return Action::Choose(choice);
     }
     if !pl.discover.is_empty() {
         let best = (0..pl.discover.len())
@@ -66,12 +67,29 @@ pub fn rule_action(game: &Game) -> Action {
     if pl.tier < want && legal(Action::Level) {
         return Action::Level;
     }
-    // play the best card in hand while there's room
-    if !pl.hand.is_empty() && !pl.board.is_full() {
-        let h = (0..pl.hand.len()).max_by_key(|&h| value(game, &pl.hand[h])).unwrap();
+    // play the best minion in hand while there's room
+    if !pl.board.is_full()
+        && let Some(h) = (0..pl.hand.len())
+            .filter(|&h| !game.data.cards.get(pl.hand[h].card).is_spell())
+            .max_by_key(|&h| value(game, &pl.hand[h]))
+    {
         return Action::Play { hand: h as u8, pos: pl.board.len() as u8 };
     }
-    let held = |c: u8| pl.hand.iter().chain(&pl.board).filter(|m| m.card == c && !m.golden).count();
+    // cast spells in hand, preferring stat spells
+    if let Some(h) = (0..pl.hand.len())
+        .filter(|&h| {
+            game.data.cards.get(pl.hand[h].card).is_spell()
+                && legal(Action::Play { hand: h as u8, pos: 0 })
+        })
+        .max_by_key(|&h| {
+            let c = game.data.cards.get(pl.hand[h].card);
+            (c.gives_stats() as u8, c.tier)
+        })
+    {
+        return Action::Play { hand: h as u8, pos: 0 };
+    }
+    let held =
+        |c: u8| pl.hand.iter().chain(&pl.board).filter(|m| m.card == c && !m.golden).count();
     let best_shop = (0..pl.shop.len()).max_by_key(|&s| {
         let m = &pl.shop[s];
         let triple = if held(m.card) == 2 { 1000 } else { 0 };
@@ -82,7 +100,7 @@ pub fn rule_action(game: &Game) -> Action {
         && pl.gold >= r.buy_cost
     {
         let m = &pl.shop[s];
-        let room = !pl.board.is_full() || !pl.hand.is_empty();
+        let room = !pl.board.is_full();
         if room || held(m.card) == 2 {
             if legal(Action::Buy(s as u8)) {
                 return Action::Buy(s as u8);
@@ -93,8 +111,24 @@ pub fn rule_action(game: &Game) -> Action {
             return Action::Sell(w as u8);
         }
     }
+    // buy a stat spell after the minion plan when we have a board to buff
+    if let Some(sp) = pl.shop_spell
+        && legal(Action::BuySpell)
+        && game.can_cast_spell(p, sp)
+        && game.data.cards.get(sp).gives_stats()
+        && !pl.board.is_empty()
+    {
+        return Action::BuySpell;
+    }
     if pl.gold >= r.roll_cost + r.buy_cost && legal(Action::Roll) {
         return Action::Roll;
+    }
+    // spend any remaining gold on a castable spell before ending the turn
+    if let Some(sp) = pl.shop_spell
+        && legal(Action::BuySpell)
+        && game.can_cast_spell(p, sp)
+    {
+        return Action::BuySpell;
     }
     Action::EndTurn
 }

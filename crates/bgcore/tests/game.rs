@@ -798,3 +798,373 @@ fn pool_invariants_hold_through_merges_generated_cards_and_sells() {
     }
 }
 
+#[test]
+fn spell_shop_slot_buy_hold_cast_freeze_roll_and_ominous_seer() {
+    let mut g = s2_game(200);
+    // Every player starts with a Tier 1 spell in shop_spell.
+    let sp0 = g.players[0].shop_spell.unwrap();
+    assert!(g.data.cards.get(sp0).is_spell());
+    assert_eq!(g.data.cards.get(sp0).tier, 1);
+
+    // Force a 3-cost spell (A New Sprout) into player 0's shop spell slot.
+    let sprout = g.data.cards.by_name("A New Sprout").unwrap();
+    g.players[0].shop_spell = Some(sprout);
+    assert_eq!(g.players[0].spell_cost(&g.data.cards), Some(3));
+
+    // Play Ominous Seer: next Tavern spell costs 1 less (3 -> 2).
+    g.give(0, "Ominous Seer").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].spell_cost(&g.data.cards), Some(2));
+
+    // Buy the spell: costs 2 gold (3 -> 1), clears shop_spell and discount, puts spell in hand.
+    let pool_before = g.pool.clone();
+    act(&mut g, 0, Action::BuySpell);
+    assert_eq!(g.players[0].gold, 1);
+    assert!(g.players[0].shop_spell.is_none());
+    assert_eq!(g.players[0].spell_discount, 0);
+    assert_eq!(g.players[0].hand.len(), 1);
+    assert_eq!(g.players[0].hand[0].card, sprout);
+    assert_eq!(g.pool, pool_before); // buying a spell never touches the minion pool
+
+    // Roll refreshes the spell slot.
+    act(&mut g, 0, Action::Roll);
+    let frozen_spell = g.players[0].shop_spell.unwrap();
+
+    // Freeze keeps the spell across the turn boundary.
+    act(&mut g, 0, Action::Freeze);
+    next_turn(&mut g);
+    assert_eq!(g.players[0].shop_spell, Some(frozen_spell));
+
+    // Sell Ominous Seer so the board is empty: a targeted spell in hand cannot be cast.
+    act(&mut g, 0, Action::Sell(0));
+    assert!(g.players[0].board.is_empty());
+    g.players[0].hand.clear();
+    g.give(0, "Tavern Dish Banana").unwrap();
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::Play { hand: 0, pos: 0 }));
+    assert_eq!(g.players[0].hand.len(), 1);
+
+    // Holding 3+ copies of a spell never triples it.
+    g.give(0, "Tavern Dish Banana").unwrap();
+    g.give(0, "Tavern Dish Banana").unwrap();
+    assert_eq!(g.players[0].hand.len(), 3);
+    assert!(g.players[0].hand.iter().all(|m| !m.golden));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn gold_spells_delayed_spells_and_strike_oil_cap() {
+    let mut g = s2_game(201);
+    // Tavern Coin (+1 gold now), Careful Investment (+2 gold next turn),
+    // Leaf Through the Pages (2 free rolls), Strike Oil (+1 max gold).
+    let gold0 = g.players[0].gold;
+    g.give(0, "Tavern Coin").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].gold, gold0 + 1);
+
+    g.give(0, "Leaf Through the Pages").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].free_rolls, 2);
+    let gold_before_rolls = g.players[0].gold;
+    act(&mut g, 0, Action::Roll);
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].gold, gold_before_rolls);
+    assert_eq!(g.players[0].free_rolls, 0);
+
+    g.give(0, "Careful Investment").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    g.give(0, "Strike Oil").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+
+    // Overconfidence (+3 gold on win, +1 on tie) and Winner's Bread (+2/+3 now, +4/+6 next turn on win).
+    put_on_board(&mut g, 0, "Mama Bear"); // 5/5 at slot 0, guaranteed to win turn 1
+    let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
+    g.players[q as usize].board.clear();
+
+    g.give(0, "Overconfidence").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    g.give(0, "Winner's Bread").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (5 + 2, 5 + 3));
+
+    next_turn(&mut g);
+    // Turn 2 base gold (4) + Strike Oil (1) + Careful Investment (2) + Overconfidence win (3) = 10.
+    assert_eq!(g.players[0].gold, 10);
+    // Winner's Bread gave +4/+6 at start of turn 2 after winning combat.
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (7 + 4, 8 + 6));
+
+    // Advance past turn 8 to verify Strike Oil raises the 10-gold cap to 11.
+    while g.turn < 9 {
+        // Keep other players alive so the game doesn't end early.
+        for pl in &mut g.players {
+            pl.health = 30;
+        }
+        next_turn(&mut g);
+    }
+    assert_eq!(g.players[0].gold, 11);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn stat_spells_choose_one_and_discover_get_spells() {
+    let mut g = s2_game(202);
+    g.players[0].tier = 5;
+    put_on_board(&mut g, 0, "Buzzing Vermin"); // Beast 1/1 at slot 0
+    put_on_board(&mut g, 0, "Cord Puller"); // Mech 1/1 at slot 1
+
+    // Fortify (+0/+3 and Taunt), Repair Job (+4/+8), Defender's Rites (+7/+7 and Taunt).
+    g.give(0, "Fortify").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(1));
+    assert!(g.players[0].board[1].keywords.has(Keywords::TAUNT));
+    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (1, 4));
+
+    g.give(0, "Repair Job").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (5, 12));
+
+    g.give(0, "Defender's Rites").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (12, 19));
+
+    // Them Apples buffs shop minions (+1/+2).
+    set_shop(&mut g, 0, &["Zoatroid"]); // 3/2 in shop
+    g.give(0, "Them Apples").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!((g.players[0].shop[0].attack, g.players[0].shop[0].health), (4, 4));
+
+    // Natural Blessing buffs all minions on board that share a tribe with the target (+2/+1).
+    put_on_board(&mut g, 0, "Flittering Bat"); // Beast 1/4 at slot 2
+    g.give(0, "Natural Blessing").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(0)); // target Beast at slot 0
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (3, 2));
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (3, 5));
+    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (12, 19)); // Mech unchanged
+
+    // Eyes of the Earth Mother makes a Tier <= 4 minion Golden; Wave of Gold buffs Golden extra;
+    // Perfect Vision sets stats to 20/20; Azerite Empowerment buffs board +2/+2 twice.
+    g.give(0, "Eyes of the Earth Mother").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert!(g.players[0].board[0].golden);
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (4, 3));
+
+    g.give(0, "Wave of Gold").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    // Slot 0 is Golden (+6/+4 -> 10/7); Slot 2 is plain (+3/+2 -> 6/7).
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 7));
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (6, 7));
+
+    g.give(0, "Perfect Vision").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(2));
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (20, 20));
+
+    g.give(0, "Azerite Empowerment").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (24, 24));
+
+    // Choose One: Alliance Flag, Time Management (delayed option), Boundless Potential (spell discover),
+    // Forest's Bounty (targeted option).
+    g.give(0, "Alliance Flag").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Choose(0)); // +3/+1
+    act(&mut g, 0, Action::Target(2));
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (27, 25));
+
+    g.give(0, "Forest's Bounty").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Choose(0)); // +6/+6 twice
+    act(&mut g, 0, Action::Target(2));
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (39, 37));
+
+    g.give(0, "Boundless Potential").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Choose(1)); // Discover a Tavern spell of your Tier (5)
+    assert_eq!(g.players[0].discover.len(), 3);
+    assert!(
+        g.players[0]
+            .discover
+            .iter()
+            .all(|&c| g.data.cards.get(c).is_spell() && g.data.cards.get(c).tier == 5)
+    );
+    act(&mut g, 0, Action::Choose(0));
+    g.players[0].hand.clear();
+
+    // Discover/Get spells: Recruit a Trainee, A New Sprout, Chef's Choice, Contracted Corpse, Hired Headhunter.
+    g.give(0, "Recruit a Trainee").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].hand.len(), 1);
+    assert_eq!(g.data.cards.get(g.players[0].hand[0].card).tier, 1);
+    assert_eq!(g.players[0].hand[0].pool_copies, 0);
+    g.players[0].hand.clear();
+
+    g.give(0, "Chef's Choice").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(1)); // Cord Puller (Mech)
+    assert_eq!(g.players[0].hand.len(), 1);
+    let got = g.players[0].hand[0];
+    assert_eq!(g.data.cards.get(got.card).tribe, bgcore::Tribe::Mech);
+    assert_ne!(got.card, g.players[0].board[1].card);
+    assert_eq!(got.pool_copies, 0);
+    g.players[0].hand.clear();
+
+    g.give(0, "Contracted Corpse").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert!(g.players[0].discover.iter().all(|&c| g.data.cards.get(c).deathrattle.is_some()));
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].hand[0].pool_copies, 1);
+
+    g.give(0, "Hired Headhunter").unwrap();
+    act(&mut g, 0, Action::Play { hand: 1, pos: 0 });
+    assert!(g.players[0].discover.iter().all(|&c| g.data.cards.get(c).battlecry.is_some()));
+    act(&mut g, 0, Action::Choose(0));
+
+    // Time Management option 1: +2/+2 twice at the start of next turn.
+    g.give(0, "Time Management").unwrap();
+    let h_tm = g.players[0].hand.len() as u8 - 1;
+    act(&mut g, 0, Action::Play { hand: h_tm, pos: 0 });
+    act(&mut g, 0, Action::Choose(1));
+    let before = (g.players[0].board[2].attack, g.players[0].board[2].health);
+    next_turn(&mut g);
+    assert_eq!(
+        (g.players[0].board[2].attack, g.players[0].board[2].health),
+        (before.0 + 4, before.1 + 4)
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn boon_of_beetles_keeps_unused_charges_across_combats() {
+    let mut g = s2_game(203);
+    // Give player 0 six minions so there is room for only 1 Beetle at Start of Combat,
+    // and the enemy has an empty board so none of player 0's minions die.
+    for _ in 0..6 {
+        put_on_board(&mut g, 0, "Zoatroid");
+    }
+    let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
+    g.players[q as usize].board.clear();
+
+    g.give(0, "Boon of Beetles").unwrap(); // 2 charges
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].boon_of_beetles, 2);
+
+    // Combat 1: only 1 board slot is open, so 1 Beetle spawns and 1 charge remains!
+    next_turn(&mut g);
+    assert_eq!(g.players[0].boon_of_beetles, 1);
+
+    // Combat 2: clear enemy board again; the remaining 1 charge is used up in Combat 2.
+    let Some(Opponent::Player(q2)) = g.players[0].opponent else { panic!() };
+    g.players[q2 as usize].board.clear();
+    next_turn(&mut g);
+    assert_eq!(g.players[0].boon_of_beetles, 0);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn glambot_balinda_banana_interpreter_snapper_and_utility_drone() {
+    let mut g = s2_game(204);
+    put_on_board(&mut g, 0, "Cord Puller"); // slot 0: 1/1 Mech (target)
+    put_on_board(&mut g, 0, "Glambot"); // slot 1: 4/4 Mech
+    put_on_board(&mut g, 0, "Balinda Stonehearth"); // slot 2: 6/6 Neutral
+    put_on_board(&mut g, 0, "Mechagnome Interpreter"); // slot 3: 3/1 Mech (+3/+1 per Magnetization)
+    put_on_board(&mut g, 0, "Spark Snapper"); // slot 4: 6/8 Mech (only triggers on played Mechs)
+    put_on_board(&mut g, 0, "Utility Drone"); // slot 5: 4/5 Mech (+4/+5 per Magnetization at end of turn)
+
+    // Cast Tavern Dish Banana (+2/+2) on Cord Puller at slot 0:
+    // - Balinda makes it cast twice.
+    // - Each cast gives +2/+2 from Banana, attaches a 4/4 Satellite from Glambot (+4/+4, +1 mag),
+    //   and triggers Mechagnome Interpreter (+3/+1).
+    // - Spark Snapper does NOT trigger on Glambot's Satellites (improvements stays 0, mag is 2 not 4).
+    g.give(0, "Tavern Dish Banana").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+
+    let host = g.players[0].board[0];
+    assert_eq!(host.magnetizations, 2);
+    assert_eq!(g.players[0].board[4].improvements, 0);
+    // Cord Puller: 1/1 + 2 * (2/2 Banana + 4/4 Satellite + 3/1 Interpreter) = 19/15.
+    assert_eq!((host.attack, host.health), (1 + 2 * (2 + 4 + 3), 1 + 2 * (2 + 4 + 1)));
+
+    // End player 0's turn: Utility Drone gives +4/+5 for each of the 2 Magnetizations (+8/+10).
+    act(&mut g, 0, Action::EndTurn);
+    let host = g.players[0].board[0];
+    assert_eq!((host.attack, host.health), (19 + 8, 15 + 10));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn spell_stat_bonuses_botanist_humongozz_and_magnetized_enchanted_sentinel() {
+    let mut g = s2_game(205);
+    put_on_board(&mut g, 0, "Cord Puller"); // slot 0: 1/1 Mech
+    put_on_board(&mut g, 0, "Humon'gozz"); // slot 1: +1/+2 spell bonus while on board
+
+    // Play Intrepid Botanist and choose option 0 (+1 Attack this game).
+    g.give(0, "Intrepid Botanist").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].spell_bonus, (1, 0));
+
+    // Magnetize Enchanted Sentinel (+1/+1 spell bonus) into Cord Puller at slot 0.
+    g.give(0, "Enchanted Sentinel").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    // Total spell bonus is now: Botanist (+1/+0) + Humon'gozz (+1/+2) + Magnetized Sentinel (+1/+1) = +3/+3.
+    assert_eq!(g.total_spell_bonus(0), (3, 3));
+
+    // Cast Shiny Ring (+1/+1 to board): every minion on board gets +(1+3)/+(1+3) = +4/+4!
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    g.give(0, "Shiny Ring").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0 + 4, before.1 + 4)
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn czarina_harbinger_banana_dispenser_groundskeeper_and_rescue_bot() {
+    let mut g = s2_game(206);
+    put_on_board(&mut g, 0, "Charging Czarina"); // slot 0: 4/1 Divine Shield
+    put_on_board(&mut g, 0, "Cord Puller"); // slot 1: 1/1 Divine Shield
+    put_on_board(&mut g, 0, "Balinda Stonehearth"); // slot 2: 6/6 (no Divine Shield)
+    put_on_board(&mut g, 0, "Cataclysmic Harbinger"); // slot 3: copies last spell at end of turn
+    put_on_board(&mut g, 0, "Banana Dispenser"); // slot 4: gives 3 Bananas at end of turn
+
+    // Cast Fortify on Balinda at slot 2:
+    // - Balinda makes it cast twice.
+    // - Czarina fires on each of the 2 casts, giving Divine Shield minions (Czarina and Cord Puller) +8 Attack total!
+    g.give(0, "Fortify").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(2));
+    assert_eq!(g.players[0].board[0].attack, 4 + 8);
+    assert_eq!(g.players[0].board[1].attack, 1 + 8);
+    assert_eq!(g.players[0].board[2].attack, 6); // Balinda has no Divine Shield
+
+    // End player 0's turn: Harbinger gives 1 copy of Fortify, Banana Dispenser gives 3 Tavern Dish Bananas.
+    act(&mut g, 0, Action::EndTurn);
+    let hand_names: Vec<String> = g.players[0].hand.iter().map(|m| name(&g, m)).collect();
+    assert_eq!(
+        hand_names,
+        ["Fortify", "Tavern Dish Banana", "Tavern Dish Banana", "Tavern Dish Banana"]
+    );
+
+    // Iron Groundskeeper gives 2 copies of Fortify when played; Rescue Bot gives a Repair Job when it dies in combat.
+    let mut g2 = s2_game(207);
+    put_on_board(&mut g2, 0, "Rescue Bot");
+    g2.give(0, "Iron Groundskeeper").unwrap();
+    act(&mut g2, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(g2.players[0].hand.len(), 2);
+    assert!(g2.players[0].hand.iter().all(|m| name(&g2, m) == "Fortify"));
+
+    let Some(Opponent::Player(q)) = g2.players[0].opponent else { panic!() };
+    put_on_board(&mut g2, q as usize, "Mama Bear");
+    next_turn(&mut g2);
+    assert!(g2.players[0].hand.iter().any(|m| name(&g2, m) == "Repair Job"));
+    g2.check_invariants().unwrap();
+}
+

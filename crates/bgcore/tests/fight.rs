@@ -413,3 +413,30 @@ fn turquoise_skitterer_and_ravaging_scorpid_buff_beetles_in_combat() {
     assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (7, 7));
 }
 
+#[test]
+fn rescue_bot_and_combat_spells_in_fight() {
+    let db = s2_db();
+    let repair_job = db.by_name("Repair Job").unwrap();
+
+    // Rescue Bot gives 1 Repair Job on death (golden gives 2).
+    let rescue = db.make(db.by_name("Rescue Bot").unwrap(), false);
+    let gold_rescue = db.make(db.by_name("Rescue Bot").unwrap(), true);
+    let mut killer = db.make(db.by_name("Zoatroid").unwrap(), false);
+    killer.attack = 10;
+    killer.health = 10;
+    let out1 = fight(&db, &[rescue], &[killer], 500, &mut Rng::new(1));
+    assert_eq!(out1.sides[0].cards_gained(), &[repair_job]);
+    let out2 = fight(&db, &[gold_rescue], &[killer], 500, &mut Rng::new(1));
+    assert_eq!(out2.sides[0].cards_gained(), &[repair_job, repair_job]);
+
+    // Brood of Nozdormu doubles left-most minion's Attack; Upper Hand sets enemy Health to 1.
+    let mut a = db.make(db.by_name("Zoatroid").unwrap(), false); // 3/2 -> 6/2 with Brood
+    a.health = 10;
+    let mut b = db.make(db.by_name("Zoatroid").unwrap(), false);
+    b.attack = 5;
+    b.health = 100; // set to 1 by Upper Hand
+    let c0 = Counters { brood_of_nozdormu: 1, upper_hand: 1, ..Default::default() };
+    let out3 = fight_with(&db, &[a], &[b], [c0, Counters::default()], 500, &mut Rng::new(1), &mut ());
+    assert_eq!(out3.winner, Some(0));
+}
+

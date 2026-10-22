@@ -17,6 +17,9 @@ use crate::{BOARD, HAND};
 pub struct Counters {
     pub beetle_attack: i32,
     pub beetle_health: i32,
+    pub boon_of_beetles: u8,
+    pub brood_of_nozdormu: u8,
+    pub upper_hand: u8,
 }
 
 /// Side effects from a fight that carry over to one player after combat.
@@ -30,9 +33,11 @@ pub struct SideOutcome {
     pub beetle_attack_gain: i32,
     pub beetle_health_gain: i32,
     /// Generated cards added to the player's hand during this fight
-    /// (Headhunter Gryphon, Conveyor Construct).
+    /// (Headhunter Gryphon, Conveyor Construct, Rescue Bot).
     pub cards: [CardId; HAND],
     pub n_cards: u8,
+    /// Number of Boon of Beetles Beetles summoned during this fight.
+    pub boon_of_beetles_used: u8,
 }
 
 impl SideOutcome {
@@ -224,6 +229,30 @@ impl Side {
         true
     }
 
+    fn spawn_boon_of_beetles(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        uid: &mut u16,
+        w: &mut impl Watch,
+    ) {
+        if self.counters.boon_of_beetles == 0 || self.ms.is_full() {
+            return;
+        }
+        let Some(tok) = db.beetle_token else { return };
+        while self.counters.boon_of_beetles > 0 && !self.ms.is_full() {
+            let mut m = db.make(tok, false);
+            m.keywords.set(Keywords::TAUNT);
+            let pos = self.ms.len();
+            if self.summon(db, side, pos, m, uid, w) {
+                self.counters.boon_of_beetles -= 1;
+                self.out.boon_of_beetles_used = self.out.boon_of_beetles_used.saturating_add(1);
+            } else {
+                break;
+            }
+        }
+    }
+
     fn titus_extra(&self, db: &CardDb) -> u32 {
         let mut extra = 0;
         for f in &self.ms {
@@ -303,6 +332,12 @@ impl Side {
                                 if let Some(v) = db.random_volumizer(rng) {
                                     self.out.push_card(v);
                                 }
+                            }
+                        }
+                        Some(Deathrattle::GetCard { card: tok, count }) => {
+                            let n = count * (if golden { 2 } else { 1 });
+                            for _ in 0..n {
+                                self.out.push_card(tok);
                             }
                         }
                         None => {}
@@ -387,6 +422,9 @@ fn resolve_deaths(
             break;
         }
     }
+    let (att, def) = pair(sides, first_side);
+    att.spawn_boon_of_beetles(db, first_side, uid, w);
+    def.spawn_boon_of_beetles(db, first_side ^ 1, uid, w);
 }
 
 fn run_start_of_combat(
@@ -396,6 +434,24 @@ fn run_start_of_combat(
     rng: &mut Rng,
     w: &mut impl Watch,
 ) {
+    for s in 0..2 {
+        sides[s].spawn_boon_of_beetles(db, s, uid, w);
+    }
+    for s in 0..2 {
+        for _ in 0..sides[s].counters.brood_of_nozdormu {
+            if let Some(f) = sides[s].ms.first_mut() {
+                f.m.attack *= 2;
+            }
+        }
+        for _ in 0..sides[s].counters.upper_hand {
+            let opp = s ^ 1;
+            let n = sides[opp].ms.len();
+            if n > 0 {
+                let k = rng.below(n as u32) as usize;
+                sides[opp].ms[k].m.health = 1;
+            }
+        }
+    }
     let mut soc: [ArrayVec<u16, BOARD>; 2] = [ArrayVec::new(), ArrayVec::new()];
     for s in 0..2 {
         for f in &sides[s].ms {

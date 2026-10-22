@@ -1,5 +1,4 @@
-# Stage 2, phase A minion pool (see docs/CONCEPT.md).
-# Spell-related minions are added in phase B.
+# Stage 2 minion and spell pool (see docs/CONCEPT.md).
 
 # --- Tier 1 ---
 
@@ -47,6 +46,13 @@ tier = 1
 tribe = "neutral"
 stats = [3, 1]
 battlecry = { gold_next_turn = 1 }
+
+[[minion]]
+name = "Ominous Seer"
+tier = 1
+tribe = "neutral"
+stats = [2, 1]
+battlecry = { spell_discount = 1 }
 
 # --- Tier 2 ---
 
@@ -104,6 +110,16 @@ stats = [1, 1]
 end_of_turn = { improve_tier = true }
 on_sell = { discover_by_tier = true }
 
+[[minion]]
+name = "Intrepid Botanist"
+tier = 2
+tribe = "neutral"
+stats = [3, 4]
+choose_one = [
+    { spell_buff = [1, 0] },
+    { spell_buff = [0, 1] },
+]
+
 # --- Tier 3 ---
 
 [[minion]]
@@ -147,11 +163,26 @@ stats = [3, 3]
 battlecry = { random_volumizer = true }
 
 [[minion]]
+name = "Rescue Bot"
+tier = 3
+tribe = "mech"
+stats = [2, 1]
+keywords = ["taunt"]
+deathrattle = { get = "Repair Job", count = 1 }
+
+[[minion]]
 name = "Deadly Spore"
 tier = 3
 tribe = "neutral"
 stats = [1, 1]
 keywords = ["venomous"]
+
+[[minion]]
+name = "Iron Groundskeeper"
+tier = 3
+tribe = "neutral"
+stats = [2, 2]
+battlecry = { get = "Fortify", count = 2 }
 
 # --- Tier 4 ---
 
@@ -184,12 +215,35 @@ stats = [5, 2]
 deathrattle = { random_volumizer = true }
 
 [[minion]]
+name = "Enchanted Sentinel"
+tier = 4
+tribe = "mech"
+stats = [3, 5]
+keywords = ["magnetic"]
+spell_buff = [1, 1]
+
+[[minion]]
+name = "Glambot"
+tier = 4
+tribe = "mech"
+stats = [4, 4]
+on_cast_spell_on_mech = { magnetize_satellite = "Satellite", stats = [4, 4] }
+
+[[minion]]
 name = "Boom-in-a-Box"
 tier = 4
 tribe = "neutral"
 stats = [5, 10]
 keywords = ["taunt"]
 start_of_combat = { damage_all_others = 3 }
+
+[[minion]]
+name = "Humon'gozz"
+tier = 4
+tribe = "neutral"
+stats = [5, 5]
+keywords = ["divine_shield"]
+spell_buff = [1, 2]
 
 [[minion]]
 name = "Tortollan Blue Shell"
@@ -243,6 +297,21 @@ stats = [6, 8]
 on_play_mech = { magnetize_satellite = "Satellite" }
 
 [[minion]]
+name = "Charging Czarina"
+tier = 5
+tribe = "mech"
+stats = [4, 1]
+keywords = ["divine_shield"]
+on_cast_spell = { buff_divine_shield = [4, 0] }
+
+[[minion]]
+name = "Banana Dispenser"
+tier = 5
+tribe = "mech"
+stats = [4, 6]
+end_of_turn = { get = "Tavern Dish Banana", count = 3 }
+
+[[minion]]
 name = "Brann Bronzebeard"
 tier = 5
 tribe = "neutral"
@@ -262,6 +331,13 @@ tier = 5
 tribe = "neutral"
 stats = [1, 5]
 aura = "drakkari"
+
+[[minion]]
+name = "Cataclysmic Harbinger"
+tier = 5
+tribe = "neutral"
+stats = [6, 10]
+end_of_turn = { copy_last_spell = true }
 
 # --- Tier 6 ---
 
@@ -293,6 +369,13 @@ tier = 6
 tribe = "mech"
 stats = [4, 5]
 end_of_turn = { buff_per_magnetization = [4, 5] }
+
+[[minion]]
+name = "Balinda Stonehearth"
+tier = 6
+tribe = "neutral"
+stats = [6, 6]
+aura = "balinda"
 
 # --- Tokens ---
 
@@ -348,3 +431,208 @@ tier = 1
 tribe = "neutral"
 stats = [0, 2]
 keywords = ["taunt"]
+
+# --- Spells: Tier 1 ---
+
+[[spell]]
+name = "Tavern Coin"
+tier = 1
+cost = 1
+effect = { gold = 1 }
+
+[[spell]]
+name = "Tavern Dish Banana"
+tier = 1
+cost = 1
+effect = { target = "chosen", buff = [2, 2] }
+
+[[spell]]
+name = "Fortify"
+tier = 1
+cost = 1
+effect = { target = "chosen", buff = [0, 3], keyword = "taunt" }
+
+[[spell]]
+name = "Them Apples"
+tier = 1
+cost = 1
+effect = { target = "shop", buff = [1, 2] }
+
+[[spell]]
+name = "Alliance Flag"
+tier = 1
+cost = 1
+choose_one = [
+    { target = "chosen", buff = [3, 1] },
+    { target = "chosen", buff = [1, 3] },
+]
+
+[[spell]]
+name = "Recruit a Trainee"
+tier = 1
+cost = 2
+effect = { random_tier_minion = 1 }
+
+[[spell]]
+name = "A New Sprout"
+tier = 1
+cost = 3
+effect = { discover = "tier_1_minion" }
+
+# --- Spells: Tier 2 ---
+
+[[spell]]
+name = "Leaf Through the Pages"
+tier = 2
+cost = 1
+effect = { free_rolls = 2 }
+
+[[spell]]
+name = "Might of Stormwind"
+tier = 2
+cost = 2
+effect = { target = "random_board", count = 4, buff = [1, 2] }
+
+[[spell]]
+name = "Winner's Bread"
+tier = 2
+cost = 2
+effect = { target = "chosen", buff = [2, 3], if_win_next_turn_buff = [4, 6] }
+
+[[spell]]
+name = "Chef's Choice"
+tier = 2
+cost = 2
+effect = { target = "chosen", same_tribe_minion = true }
+
+[[spell]]
+name = "Strike Oil"
+tier = 2
+cost = 3
+effect = { max_gold = 1 }
+
+# --- Spells: Tier 3 ---
+
+[[spell]]
+name = "Careful Investment"
+tier = 3
+cost = 1
+effect = { gold_next_turn = 2 }
+
+[[spell]]
+name = "Overconfidence"
+tier = 3
+cost = 1
+effect = { overconfidence = [3, 1] }
+
+[[spell]]
+name = "Shiny Ring"
+tier = 3
+cost = 2
+effect = { target = "board", buff = [1, 1] }
+
+[[spell]]
+name = "Repair Job"
+tier = 3
+cost = 2
+effect = { target = "chosen", buff = [4, 8] }
+
+[[spell]]
+name = "Time Management"
+tier = 3
+cost = 4
+choose_one = [
+    { target = "board", buff = [2, 2] },
+    { next_turn_board_buff = [2, 2], times = 2 },
+]
+
+# --- Spells: Tier 4 ---
+
+[[spell]]
+name = "Boon of Beetles"
+tier = 4
+cost = 1
+effect = { boon_of_beetles = 2 }
+
+[[spell]]
+name = "Defender's Rites"
+tier = 4
+cost = 2
+effect = { target = "chosen", buff = [7, 7], keyword = "taunt" }
+
+[[spell]]
+name = "Natural Blessing"
+tier = 4
+cost = 2
+effect = { target = "chosen_tribe", buff = [2, 1] }
+
+[[spell]]
+name = "Boundless Potential"
+tier = 4
+cost = 3
+choose_one = [
+    { discover = "tier_minion" },
+    { discover = "tier_spell" },
+]
+
+# --- Spells: Tier 5 ---
+
+[[spell]]
+name = "Brood of Nozdormu"
+tier = 5
+cost = 2
+effect = { start_of_combat = "double_leftmost_attack" }
+
+[[spell]]
+name = "Forest's Bounty"
+tier = 5
+cost = 2
+choose_one = [
+    { target = "chosen", buff = [6, 6], times = 2 },
+    { target = "board", buff = [2, 2] },
+]
+
+[[spell]]
+name = "Wave of Gold"
+tier = 5
+cost = 2
+effect = { target = "board", buff = [3, 2], golden_extra = true }
+
+[[spell]]
+name = "Upper Hand"
+tier = 5
+cost = 3
+effect = { start_of_combat = "enemy_health_to_1" }
+
+[[spell]]
+name = "Contracted Corpse"
+tier = 5
+cost = 3
+effect = { discover = "deathrattle" }
+
+[[spell]]
+name = "Hired Headhunter"
+tier = 5
+cost = 3
+effect = { discover = "battlecry" }
+
+# --- Spells: Tier 6 ---
+
+[[spell]]
+name = "Perfect Vision"
+tier = 6
+cost = 2
+effect = { target = "chosen", set_stats = [20, 20] }
+
+[[spell]]
+name = "Azerite Empowerment"
+tier = 6
+cost = 4
+effect = { target = "board", buff = [2, 2], times = 2 }
+
+[[spell]]
+name = "Eyes of the Earth Mother"
+tier = 6
+cost = 4
+effect = { target = "chosen", make_golden_max_tier = 4 }
+

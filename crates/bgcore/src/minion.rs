@@ -62,6 +62,8 @@ pub struct Minion {
     /// Pool copies held by this minion (1 when drawn from the pool, up to 3
     /// when tripled from pool copies, 0 when generated).
     pub pool_copies: u8,
+    /// Pending Winner's Bread triggers waiting on the next combat's result.
+    pub winners_bread: u8,
     /// Total Magnetizations on this minion. Merging a card with N
     /// Magnetizations adds N + 1.
     pub magnetizations: u16,
@@ -100,6 +102,7 @@ impl Minion {
         self.attack += other.attack;
         self.health += other.health;
         self.keywords.0 |= other.keywords.0;
+        self.winners_bread = self.winners_bread.saturating_add(other.winners_bread);
         self.magnetizations = self.magnetizations.saturating_add(other.magnetizations).saturating_add(1);
         self.volumizers = self.volumizers.saturating_add(other.volumizers);
         if db.get(other.card).carries_effect() {

@@ -6,6 +6,7 @@ use crate::{BOARD, DISCOVER, HAND, SHOP};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Action {
     Buy(u8),
+    BuySpell,
     Sell(u8),
     Play { hand: u8, pos: u8 },
     Target(u8),
@@ -18,7 +19,8 @@ pub enum Action {
 }
 
 const BUY: usize = 0;
-const SELL: usize = BUY + SHOP;
+const BUY_SPELL: usize = BUY + SHOP;
+const SELL: usize = BUY_SPELL + 1;
 const PLAY: usize = SELL + BOARD;
 const TARGET: usize = PLAY + HAND * (BOARD + 1);
 const CHOOSE: usize = TARGET + BOARD;
@@ -35,6 +37,7 @@ impl Action {
     pub fn index(self) -> usize {
         match self {
             Action::Buy(s) => BUY + s as usize,
+            Action::BuySpell => BUY_SPELL,
             Action::Sell(s) => SELL + s as usize,
             Action::Play { hand, pos } => PLAY + hand as usize * (BOARD + 1) + pos as usize,
             Action::Target(s) => TARGET + s as usize,
@@ -52,7 +55,8 @@ impl Action {
 
     pub fn from_index(i: usize) -> Option<Action> {
         Some(match i {
-            _ if i < SELL => Action::Buy((i - BUY) as u8),
+            _ if i < BUY_SPELL => Action::Buy((i - BUY) as u8),
+            BUY_SPELL => Action::BuySpell,
             _ if i < PLAY => Action::Sell((i - SELL) as u8),
             _ if i < TARGET => {
                 let j = i - PLAY;
@@ -78,7 +82,7 @@ impl Action {
     /// Which of the 10 kinds of action this is, in declaration order.
     pub fn kind(self) -> usize {
         match self {
-            Action::Buy(_) => 0,
+            Action::Buy(_) | Action::BuySpell => 0,
             Action::Sell(_) => 1,
             Action::Play { .. } => 2,
             Action::Target(_) => 3,
