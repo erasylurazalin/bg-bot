@@ -79,6 +79,13 @@ pub struct SideOutcome {
     pub hand_stats: [(i32, i32); HAND],
     /// Number of Boon of Beetles Beetles summoned during this fight.
     pub boon_of_beetles_used: u8,
+    /// Tavern stats the player's minions gained for the rest of the game
+    /// (Sacrificial Wrathguard's Deathrattle). The game applies it as an
+    /// ongoing Tavern buff after the fight.
+    pub tavern_buff_gain: (i32, i32),
+    /// Upcoming Refreshes that get Fodders (Trapped Clapper), oldest first.
+    pub fodder_refreshes: [u8; 16],
+    pub n_fodder_refreshes: u8,
 }
 
 impl SideOutcome {
@@ -91,6 +98,17 @@ impl SideOutcome {
         if n < HAND {
             self.cards[n] = c;
             self.n_cards += 1;
+        }
+    }
+
+    /// Queue `count` upcoming Refreshes that each get `per` Fodders.
+    fn push_fodder_refreshes(&mut self, per: u8, count: u32) {
+        for _ in 0..count {
+            let n = self.n_fodder_refreshes as usize;
+            if n < self.fodder_refreshes.len() {
+                self.fodder_refreshes[n] = per;
+                self.n_fodder_refreshes += 1;
+            }
         }
     }
 }
@@ -387,6 +405,45 @@ impl<'a> Side<'a> {
                 self.out.permanent_stats[s].0.saturating_add(da.saturating_mul(mul));
             self.out.permanent_stats[s].1 =
                 self.out.permanent_stats[s].1.saturating_add(dh.saturating_mul(mul));
+        }
+    }
+
+    /// Give the minion in slot `i` stats that it keeps after the fight
+    /// regardless of other keepers (Devout Hellcaller).
+    fn gain_permanent_at(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
+        if db.get(self.ms[i].m.card).fixed_stats {
+            return;
+        }
+        let f = &mut self.ms[i];
+        f.m.attack = f.m.attack.saturating_add(da);
+        f.m.health = f.m.health.saturating_add(dh);
+        if let Some(slot) = f.start_slot {
+            let s = slot as usize;
+            self.out.permanent_stats[s].0 = self.out.permanent_stats[s].0.saturating_add(da);
+            self.out.permanent_stats[s].1 = self.out.permanent_stats[s].1.saturating_add(dh);
+        }
+    }
+
+    /// A friendly Demon (`attacker_uid`) dealt damage: every other friendly
+    /// minion with "After another friendly Demon deals damage" gains its
+    /// stats for good (Devout Hellcaller).
+    fn note_demon_damage(&mut self, db: &CardDb, attacker_uid: u16) {
+        let mut hits: ArrayVec<(u16, i32, i32), BOARD> = ArrayVec::new();
+        for f in &self.ms {
+            if f.m.health <= 0 || f.uid == attacker_uid {
+                continue;
+            }
+            for (card, golden) in f.m.parts() {
+                if let Some((a, h)) = db.get(card).after_demon_damage {
+                    let mul = if golden { 2 } else { 1 };
+                    let _ = hits.try_push((f.uid, a * mul, h * mul));
+                }
+            }
+        }
+        for (host, da, dh) in hits {
+            if let Some(i) = self.index_of(host) {
+                self.gain_permanent_at(db, i, da, dh);
+            }
         }
     }
 
@@ -729,10 +786,13 @@ impl<'a> Side<'a> {
             }
             Effect::GetRandomMinion { tribe } => {
                 for _ in 0..mul {
-                    if let Some(c) = db.random_pool_minion(tribe, rng) {
+                    if let Some(c) = db.random_pool_minion(tribe, self.counters.tier, rng) {
                         self.out.push_card(c);
                     }
                 }
+            }
+            Effect::AddFodderRefreshes(n) => {
+                self.out.push_fodder_refreshes(mul as u8, n as u32);
             }
             Effect::SummonRandomDeathrattle { count } => {
                 for _ in 0..count as i32 * mul {
@@ -906,6 +966,15 @@ impl<'a> Side<'a> {
                         for _ in 0..count as i32 * mul {
                             self.out.push_card(tok);
                         }
+                    }
+                    Deathrattle::TavernBuff { attack, health, per_improvement } => {
+                        // "Improve this" stacks live in the dead minion's
+                        // improvements (Sacrificial Wrathguard).
+                        let n = dead.improvements as i32;
+                        let da = (attack + per_improvement.0 * n) * mul;
+                        let dh = (health + per_improvement.1 * n) * mul;
+                        self.out.tavern_buff_gain.0 += da;
+                        self.out.tavern_buff_gain.1 += dh;
                     }
                     Deathrattle::Effect(e) => {
                         let fx = Fx { side, host, killer, attacker: None, skip_ptr: false };
@@ -1393,6 +1462,12 @@ fn attack_swings(
         att.count_damage(db, turn, ai, dealt_x, uid, rng, w);
         let Some(di) = def.index_of(def_uid) else { continue };
         def.count_damage(db, turn ^ 1, di, dealt_y, uid, rng, w);
+        // Devout Hellcaller: another friendly Demon dealt damage. The
+        // attacker's tribe is a cheap check, so a side without Demons pays
+        // nothing extra here.
+        if dealt_x > 0 && db.get(attacker.card).tribes.has(Tribe::Demon) {
+            sides[turn].note_demon_damage(db, me);
+        }
         // "Whenever this takes damage" (Very Hungry Winterfinner). It fires
         // even when the damage is lethal.
         if dealt_x > 0 && sides[turn ^ 1].damage_trigger {

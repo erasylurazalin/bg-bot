@@ -344,12 +344,21 @@ fn hackerfin_and_seafood_stew_count_different_bonus_keywords() {
 
 #[test]
 fn tad_shoalfin_gormling_and_the_rest() {
-    // Tad: a random Murloc on sell.
+    // Tad: a random Murloc on sell, never above the owner's tier.
     let mut g = game(17);
     put_on_board(&mut g, 0, "Tad");
+    g.players[0].tier = 2;
     act(&mut g, 0, Action::Sell(0));
     assert_eq!(g.players[0].hand.len(), 1);
     assert!(g.data.cards.get(g.players[0].hand[0].card).tribes.has(bgcore::Tribe::Murloc));
+    for seed in 0..20 {
+        let mut g = game(seed);
+        put_on_board(&mut g, 0, "Tad");
+        g.players[0].tier = 2;
+        act(&mut g, 0, Action::Sell(0));
+        let c = g.data.cards.get(g.players[0].hand[0].card);
+        assert!(c.tier <= 2, "{} is tier {}", c.name, c.tier);
+    }
 
     // Shoalfin Mystic: the Tavern spell bonus goes up this game.
     let mut g = game(18);
@@ -420,16 +429,19 @@ fn twilight_shamanic_and_sewer_escapee_buff_the_hand_and_the_board() {
 
 #[test]
 fn primalfin_lookout_discovers_a_murloc_cloning_conch_gives_two() {
-    // With another Murloc on the board, Primalfin Lookout discovers one.
+    // With another Murloc on the board, Primalfin Lookout discovers one, and
+    // only up to the owner's tier (tier 1 has just two Murlocs, so tier 3 is
+    // needed for three options).
     let mut g = game(24);
     put_on_board(&mut g, 0, "Tad");
+    g.players[0].tier = 3;
     g.give(0, "Primalfin Lookout").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
     assert_eq!(g.players[0].discover.len(), 3);
-    assert!(g.players[0]
-        .discover
-        .iter()
-        .all(|&c| g.data.cards.get(c).tribes.has(bgcore::Tribe::Murloc)));
+    assert!(g.players[0].discover.iter().all(|&c| {
+        let card = g.data.cards.get(c);
+        card.tribes.has(bgcore::Tribe::Murloc) && card.tier <= 3
+    }));
     act(&mut g, 0, Action::Choose(0));
 
     // With no other Murloc, nothing.
@@ -438,13 +450,18 @@ fn primalfin_lookout_discovers_a_murloc_cloning_conch_gives_two() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     assert!(g.players[0].discover.is_empty());
 
-    // Cloning Conch: a random Murloc and a copy of it.
-    let mut g = game(26);
-    g.give(0, "Cloning Conch").unwrap();
-    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    assert_eq!(g.players[0].hand.len(), 2);
-    assert_eq!(g.players[0].hand[0].card, g.players[0].hand[1].card);
-    assert!(g.data.cards.get(g.players[0].hand[0].card).tribes.has(bgcore::Tribe::Murloc));
+    // Cloning Conch: a random Murloc and a copy of it, never above the tier.
+    for seed in 26..46 {
+        let mut g = game(seed);
+        g.players[0].tier = 2;
+        g.give(0, "Cloning Conch").unwrap();
+        act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+        assert_eq!(g.players[0].hand.len(), 2);
+        assert_eq!(g.players[0].hand[0].card, g.players[0].hand[1].card);
+        let card = g.data.cards.get(g.players[0].hand[0].card);
+        assert!(card.tribes.has(bgcore::Tribe::Murloc));
+        assert!(card.tier <= 2, "{} is tier {}", card.name, card.tier);
+    }
 }
 
 // ---- The shop harness ----

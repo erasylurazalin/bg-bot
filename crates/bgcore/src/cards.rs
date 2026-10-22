@@ -200,6 +200,24 @@ pub enum Effect {
     /// Trigger the Battlecries of the adjacent minions this many times
     /// (Young Murk-Eye).
     TriggerAdjacentBattlecries(u8),
+    /// Add `count` upcoming Refreshes that each include a Fodder (two when
+    /// golden). Only the current turn's coming Refreshes, not the past ones.
+    AddFodderRefreshes(u8),
+    /// Add Fodders to the very next Refresh (Twisted Wrathguard). Golden adds
+    /// twice as many to it.
+    AddFodderToNextRefresh(u8),
+    /// Every friendly Demon consumes `count` random Tavern minions (golden
+    /// doubles the stats taken). Soulkeeping Jailer.
+    DemonsConsume { count: u8 },
+    /// Raise this minion's `improvements` by `n` (Sacrificial Wrathguard's
+    /// "Improve this"). Golden doubles it.
+    ImproveSelf(u8),
+    /// Give every minion in the Tavern stats and one random keyword from
+    /// `mask`, the same keyword for all of them (Deft Deserter).
+    TavernBuffRandomKeyword { attack: i32, health: i32, mask: u8 },
+    /// Discover `count` Demons up to the player's tier; the hero then takes
+    /// damage equal to the tier of each one chosen (Imposing Percussionist).
+    DiscoverDemonTierDamage(u8),
 }
 
 impl Effect {
@@ -214,6 +232,7 @@ impl Effect {
                 | Effect::Consume { pick: ConsumePick::Chosen, .. }
                 | Effect::TriggerRally
                 | Effect::TriggerBattlecry
+                | Effect::DiscoverDemonTierDamage(_)
         )
     }
 
@@ -254,7 +273,8 @@ impl Effect {
             | Effect::BuffAttacker { .. }
             | Effect::BuffRandomOther { .. }
             | Effect::SummonFromHand { .. }
-            | Effect::BuffRandomHand { .. } => true,
+            | Effect::BuffRandomHand { .. }
+            | Effect::AddFodderRefreshes(_) => true,
             _ => false,
         }
     }
@@ -332,6 +352,14 @@ pub enum SpellTarget {
         attack: i32,
         health: i32,
     },
+    /// The chosen minion (of a tribe, if given) consumes Tavern minions
+    /// (Methodical Madness, Corrupted Cupcakes).
+    Consume {
+        tribe: Option<Tribe>,
+        pick: ConsumePick,
+        keywords: bool,
+        count: u8,
+    },
 }
 
 /// A Tavern spell (or Choose One spell option) that does not target a minion.
@@ -400,6 +428,22 @@ pub enum Deathrattle {
     },
     /// Any effect a fight can run.
     Effect(Effect),
+    /// Give the Tavern minions (of the fight's owner) +attack/+health for the
+    /// rest of the game, once more for each `improvements` the dead minion
+    /// has (Sacrificial Wrathguard). Golden doubles it.
+    TavernBuff {
+        attack: i32,
+        health: i32,
+        per_improvement: (i32, i32),
+    },
+}
+
+/// "After you play a minion of `tribe`, ..." for the minion that has it.
+/// Every effect runs for it; a golden one doubles each.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AfterPlayTribe {
+    pub tribe: Tribe,
+    pub effects: Vec<Effect>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -622,6 +666,15 @@ pub struct Card {
     pub attack_threshold: Option<AttackThreshold>,
     /// Effects that run in order after your hero takes damage.
     pub after_hero_damage: Vec<Effect>,
+    /// Effects that run after the owner plays a minion of a tribe (Wrath
+    /// Weaver, Insatiable Ur'zul).
+    pub after_play_tribe: Option<AfterPlayTribe>,
+    /// Stats this minion gains permanently when another friendly Demon deals
+    /// damage in a fight (Devout Hellcaller).
+    pub after_demon_damage: Option<(i32, i32)>,
+    /// A Demon Fodder: while in the Tavern it feeds itself to a random
+    /// friendly Demon and its slot is refilled (Demon Fodder).
+    pub is_fodder: bool,
     /// Refreshes each turn that cost Health instead of Gold.
     pub health_refreshes: u8,
     pub on_sell: Option<OnSell>,
@@ -713,6 +766,8 @@ impl Card {
             || self.activate.is_some()
             || self.on_event.is_some()
             || !self.after_hero_damage.is_empty()
+            || self.after_play_tribe.is_some()
+            || self.after_demon_damage.is_some()
             || self.health_refreshes > 0
             || self.on_sell.is_some()
             || self.aura.is_some()
@@ -733,6 +788,8 @@ pub struct CardDb {
     pub chromadrakes: Vec<CardId>,
     /// The 1/1 Murloc Magicfin Mycologist teaches a spell to.
     pub taught_token: Option<CardId>,
+    /// The generated Demon Fodder token.
+    pub fodder_token: Option<CardId>,
 }
 
 #[derive(Deserialize)]
@@ -804,6 +861,11 @@ struct RawCard {
     chromadrake: bool,
     #[serde(default)]
     after_hero_damage: Vec<RawEffect>,
+    after_play_tribe: Option<RawAfterPlayTribe>,
+    after_demon_damage: Option<[i32; 2]>,
+    /// A generated Demon Fodder token.
+    #[serde(default)]
+    fodder: bool,
     health_refreshes: Option<u8>,
     on_sell: Option<RawOnSell>,
     aura: Option<String>,
@@ -828,8 +890,22 @@ struct RawSpell {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawAfterPlayTribe {
+    tribe: String,
+    effects: Vec<RawEffect>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawSpellEffect {
     target: Option<String>,
+    /// "chosen", "random" or "highest_health", for a spell whose target
+    /// consumes Tavern minions.
+    consume: Option<String>,
+    #[serde(default)]
+    with_keywords: bool,
+    /// The tribe the spell's target must have.
+    tribe: Option<String>,
     buff: Option<[i32; 2]>,
     keyword: Option<String>,
     times: Option<u8>,
@@ -947,6 +1023,20 @@ struct RawEffect {
     cast_taught: bool,
     /// Trigger the Battlecries of the adjacent minions, `count` times.
     trigger_adjacent_battlecries: Option<u8>,
+    /// Add Fodders to the next `n` Refreshes.
+    add_fodder_refreshes: Option<u8>,
+    /// Add Fodders to the very next Refresh.
+    add_fodder_to_next_refresh: Option<u8>,
+    /// Your Demons each consume `n` random Tavern minions.
+    demons_consume: Option<u8>,
+    /// Raise this minion's `improvements` by `n`.
+    improve_self: Option<u8>,
+    /// Give the Tavern stats and one random keyword out of `keywords`.
+    tavern_buff_random_keyword: Option<[i32; 2]>,
+    keywords: Option<Vec<String>>,
+    /// Discover `n` Demons up to the owner's tier, then damage the hero for
+    /// their tiers.
+    discover_demon_tier_damage: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -971,6 +1061,10 @@ struct RawDeathrattle {
     random_volumizer: Option<bool>,
     get: Option<String>,
     effect: Option<RawEffect>,
+    /// Give the Tavern stats for the rest of the game, improved by the dead
+    /// minion's `improvements`.
+    tavern_buff: Option<[i32; 2]>,
+    per_improvement: Option<[i32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -1200,6 +1294,24 @@ fn parse_spell_effect(
     }
     match e.target.as_deref() {
         Some("chosen") => {
+            if let Some(how) = &e.consume {
+                let pick = match how.as_str() {
+                    "chosen" => ConsumePick::Chosen,
+                    "random" => ConsumePick::Random,
+                    "highest_health" => ConsumePick::HighestHealth,
+                    other => return Err(format!("unknown spell consume {other:?}")),
+                };
+                let tribe = e.tribe.as_deref().map(tribe).transpose()?;
+                return Ok((
+                    Some(SpellTarget::Consume {
+                        tribe,
+                        pick,
+                        keywords: e.with_keywords,
+                        count: e.count.unwrap_or(1),
+                    }),
+                    None,
+                ));
+            }
             if let Some([attack, health]) = e.buff {
                 if e.per_bonus_keyword {
                     return Ok((Some(SpellTarget::BuffPerBonusKeyword { attack, health }), None));
@@ -1370,6 +1482,7 @@ impl CardDb {
         let mut beetle_token: Option<CardId> = None;
         let mut chromadrakes = Vec::new();
         let mut taught_token: Option<CardId> = None;
+        let mut fodder_token: Option<CardId> = None;
 
         let parse_effect = |b: &RawEffect| -> Result<Effect, String> {
             let t = b.tribe.as_deref().map(tribe).transpose()?;
@@ -1451,6 +1564,22 @@ impl CardDb {
                 }
             } else if let Some([attack, health]) = b.tavern_buff {
                 Effect::TavernBuff { tribe: t, attack, health, this_turn: b.this_turn }
+            } else if let Some([attack, health]) = b.tavern_buff_random_keyword {
+                let mut mask = 0u8;
+                for k in b.keywords.as_deref().unwrap_or(&[]) {
+                    mask |= keyword_bit(k)?;
+                }
+                Effect::TavernBuffRandomKeyword { attack, health, mask }
+            } else if let Some(n) = b.add_fodder_refreshes {
+                Effect::AddFodderRefreshes(n)
+            } else if let Some(n) = b.add_fodder_to_next_refresh {
+                Effect::AddFodderToNextRefresh(n)
+            } else if let Some(n) = b.demons_consume {
+                Effect::DemonsConsume { count: n }
+            } else if let Some(n) = b.improve_self {
+                Effect::ImproveSelf(n)
+            } else if let Some(n) = b.discover_demon_tier_damage {
+                Effect::DiscoverDemonTierDamage(n)
             } else if let Some(n) = b.damage_hero {
                 Effect::DamageHero(n)
             } else if b.rewind {
@@ -1510,6 +1639,9 @@ impl CardDb {
             }
             if c.taught_token && *token {
                 taught_token = Some(id);
+            }
+            if c.fodder && *token {
+                fodder_token = Some(id);
             }
             let is_volumizer = c.volumizer_buff.is_some();
             let pool_slot = if is_volumizer {
@@ -1584,6 +1716,21 @@ impl CardDb {
                 after_hero_damage.push(effect);
             }
 
+            let after_play_tribe = match &c.after_play_tribe {
+                None => None,
+                Some(p) => {
+                    let mut effects = Vec::new();
+                    for e in &p.effects {
+                        let effect = parse_effect(e).map_err(&err)?;
+                        if effect.needs_choice() {
+                            return Err(err("after_play_tribe can't ask for a choice".into()));
+                        }
+                        effects.push(effect);
+                    }
+                    Some(AfterPlayTribe { tribe: tribe(&p.tribe).map_err(&err)?, effects })
+                }
+            };
+
             let choose_one = match &c.choose_one {
                 None => None,
                 Some([o1, o2]) => {
@@ -1626,6 +1773,12 @@ impl CardDb {
                 } else if let Some(name) = &d.get {
                     let card = generated_id(name).map_err(&err)?;
                     Deathrattle::GetCard { card, count: d.count.unwrap_or(1) }
+                } else if let Some([attack, health]) = d.tavern_buff {
+                    Deathrattle::TavernBuff {
+                        attack,
+                        health,
+                        per_improvement: d.per_improvement.map_or((0, 0), |[a, h]| (a, h)),
+                    }
                 } else if let Some(e) = &d.effect {
                     let effect = parse_effect(e).map_err(&err)?;
                     if !effect.runs_in_fights() {
@@ -1906,6 +2059,9 @@ impl CardDb {
                 permanent_keep,
                 attack_threshold,
                 after_hero_damage,
+                after_play_tribe,
+                after_demon_damage: c.after_demon_damage.map(|[a, h]| (a, h)),
+                is_fodder: c.fodder,
                 health_refreshes: c.health_refreshes.unwrap_or(0),
                 on_sell,
                 aura,
@@ -1988,6 +2144,9 @@ impl CardDb {
                 permanent_keep: None,
                 attack_threshold: None,
                 after_hero_damage: Vec::new(),
+                after_play_tribe: None,
+                after_demon_damage: None,
+                is_fodder: false,
                 health_refreshes: 0,
                 on_sell: None,
                 aura: None,
@@ -2004,6 +2163,7 @@ impl CardDb {
             beetle_token,
             chromadrakes,
             taught_token,
+            fodder_token,
         })
     }
 
@@ -2042,18 +2202,22 @@ impl CardDb {
         }
     }
 
-    pub fn random_pool_minion(&self, tribe: Tribe, rng: &mut Rng) -> Option<CardId> {
-        let count = (0..self.pool_cards)
-            .filter(|&c| self.cards[c].tribes.has(tribe))
-            .count() as u32;
+    /// A random pool minion of a tribe, of Tier `max_tier` or lower (0 means
+    /// any Tier). "Random minion" cards pick up to the player's current tier.
+    pub fn random_pool_minion(
+        &self,
+        tribe: Tribe,
+        max_tier: u8,
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
+        let ok = |c: usize| self.cards[c].tribes.has(tribe) && self.cards[c].tier <= max_tier;
+        let count = (0..self.pool_cards).filter(|&c| ok(c)).count() as u32;
         if count == 0 {
             return None;
         }
         let k = rng.below(count) as usize;
-        (0..self.pool_cards)
-            .filter(|&c| self.cards[c].tribes.has(tribe))
-            .nth(k)
-            .map(|c| c as CardId)
+        (0..self.pool_cards).filter(|&c| ok(c)).nth(k).map(|c| c as CardId)
     }
 
     /// A random pool minion that has a Deathrattle, of Tier `max_tier` or
