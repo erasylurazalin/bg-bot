@@ -1,212 +1,350 @@
-# Cards for v0.1, made up and loosely modelled on real ones. See DESIGN.md.
-#
-# stats = [attack, health]
-# keywords: taunt, divine_shield, windfury, venomous, reborn
-# battlecry: { buff = [attack, health], target = "chosen" | "others", tribe = ... }
-#   chosen: the player picks one other friendly minion
-#   others: every other friendly minion
-#   tribe limits the targets, leave it out for any minion
-# deathrattle: { summon = "<token name>", count = n }
-#
-# Golden: double stats, buffs doubled, summoned tokens golden.
+# Stage 2, phase A minion pool (see docs/CONCEPT.md).
+# Spell-related minions are added in phase B.
+
+# --- Tier 1 ---
 
 [[minion]]
-name = "Wolf Pup"
-tier = 1
-tribe = "beast"
-stats = [2, 2]
-
-[[minion]]
-name = "Rust Bot"
-tier = 1
-tribe = "mech"
-stats = [1, 2]
-keywords = ["divine_shield"]
-
-[[minion]]
-name = "Den Mother"
+name = "Buzzing Vermin"
 tier = 1
 tribe = "beast"
 stats = [1, 1]
-deathrattle = { summon = "Pup", count = 1 }
+keywords = ["taunt"]
+deathrattle = { summon = "Beetle", count = 1, golden_doubles_count = true }
 
 [[minion]]
-name = "Scrap Hound"
+name = "Flittering Bat"
+tier = 1
+tribe = "beast"
+stats = [1, 4]
+rally = { summon = "Foraging Bat", count = 1, golden_doubles_count = true }
+
+[[minion]]
+name = "Cord Puller"
+tier = 1
+tribe = "mech"
+stats = [1, 1]
+keywords = ["divine_shield"]
+deathrattle = { summon = "Microbot", count = 1 }
+
+[[minion]]
+name = "Lullabot"
+tier = 1
+tribe = "mech"
+stats = [2, 2]
+keywords = ["magnetic"]
+end_of_turn = { buff_self = [0, 1] }
+
+[[minion]]
+name = "Zoatroid"
 tier = 1
 tribe = "neutral"
-stats = [2, 1]
-battlecry = { buff = [1, 1], target = "chosen" }
-
-[[minion]]
-name = "Ram"
-tier = 2
-tribe = "beast"
-stats = [2, 4]
-keywords = ["taunt"]
-
-[[minion]]
-name = "Shield Drone"
-tier = 2
-tribe = "mech"
-stats = [2, 3]
-keywords = ["divine_shield"]
-
-[[minion]]
-name = "Viper"
-tier = 2
-tribe = "beast"
-stats = [2, 1]
-keywords = ["venomous"]
-
-[[minion]]
-name = "Tinkerer"
-tier = 2
-tribe = "neutral"
-stats = [3, 3]
-battlecry = { buff = [2, 2], target = "chosen", tribe = "mech" }
-
-[[minion]]
-name = "Stag"
-tier = 3
-tribe = "beast"
-stats = [4, 4]
-battlecry = { buff = [1, 1], target = "others", tribe = "beast" }
-
-[[minion]]
-name = "Gear Golem"
-tier = 3
-tribe = "mech"
-stats = [3, 5]
-keywords = ["taunt"]
-deathrattle = { summon = "Gear", count = 1 }
-
-[[minion]]
-name = "Twinblade"
-tier = 3
-tribe = "neutral"
-stats = [3, 3]
-keywords = ["windfury"]
-
-[[minion]]
-name = "Ember Spirit"
-tier = 3
-tribe = "neutral"
 stats = [3, 2]
-keywords = ["reborn"]
+on_sell = { get = "Tentacle", count = 1 }
 
 [[minion]]
-name = "Alpha"
-tier = 4
-tribe = "beast"
-stats = [5, 5]
-deathrattle = { summon = "Wolf", count = 2 }
-
-[[minion]]
-name = "Shredder"
-tier = 4
-tribe = "mech"
-stats = [4, 6]
-keywords = ["divine_shield"]
-
-[[minion]]
-name = "Warden"
-tier = 4
+name = "Southsea Busker"
+tier = 1
 tribe = "neutral"
-stats = [3, 7]
-keywords = ["taunt"]
+stats = [3, 1]
+battlecry = { gold_next_turn = 1 }
+
+# --- Tier 2 ---
 
 [[minion]]
-name = "Stalker"
-tier = 4
+name = "Forest Rover"
+tier = 2
 tribe = "beast"
-stats = [5, 3]
+stats = [1, 1]
+battlecry = { beetle_buff = [2, 1] }
+deathrattle = { summon = "Beetle", count = 1, golden_doubles_count = true }
+
+[[minion]]
+name = "Humming Bird"
+tier = 2
+tribe = "beast"
+stats = [1, 4]
+start_of_combat = { combat_beast_buff = [1, 0] }
+
+[[minion]]
+name = "Blue Volumizer"
+tier = 2
+tribe = "mech"
+stats = [1, 3]
+keywords = ["magnetic"]
+volumizer_buff = [0, 3]
+
+[[minion]]
+name = "Green Volumizer"
+tier = 2
+tribe = "mech"
+stats = [3, 3]
+keywords = ["magnetic"]
+volumizer_buff = [1, 1]
+
+[[minion]]
+name = "Red Volumizer"
+tier = 2
+tribe = "mech"
+stats = [3, 1]
+keywords = ["magnetic"]
+volumizer_buff = [3, 0]
+
+[[minion]]
+name = "Mechagnome Interpreter"
+tier = 2
+tribe = "mech"
+stats = [3, 1]
+on_play_or_magnetize_mech = { buff = [3, 1] }
+
+[[minion]]
+name = "Patient Scout"
+tier = 2
+tribe = "neutral"
+stats = [1, 1]
+end_of_turn = { improve_tier = true }
+on_sell = { discover_by_tier = true }
+
+# --- Tier 3 ---
+
+[[minion]]
+name = "Sprightly Scarab"
+tier = 3
+tribe = "beast"
+stats = [3, 1]
+choose_one = [
+    { buff = [1, 1], keyword = "reborn", tribe = "beast" },
+    { buff = [4, 0], keyword = "windfury", tribe = "beast" },
+]
+
+[[minion]]
+name = "Rat Pack"
+tier = 3
+tribe = "beast"
+stats = [2, 2]
+deathrattle = { summon_by_attack = "Rat" }
+
+[[minion]]
+name = "Scarab Tender"
+tier = 3
+tribe = "beast"
+stats = [3, 3]
+battlecry = { beetle_buff = [1, 2] }
+deathrattle = { summon = "Beetle", count = 1, golden_doubles_count = true }
+
+[[minion]]
+name = "Accord-o-Tron"
+tier = 3
+tribe = "mech"
+stats = [3, 3]
+keywords = ["magnetic"]
+start_of_turn = { gold = 1 }
+
+[[minion]]
+name = "Auto Accelerator"
+tier = 3
+tribe = "mech"
+stats = [3, 3]
+battlecry = { random_volumizer = true }
+
+[[minion]]
+name = "Deadly Spore"
+tier = 3
+tribe = "neutral"
+stats = [1, 1]
 keywords = ["venomous"]
 
+# --- Tier 4 ---
+
 [[minion]]
-name = "Great Bear"
+name = "Banana Slamma"
+tier = 4
+tribe = "beast"
+stats = [3, 6]
+on_summon_beast = { multiply_attack_in_combat = true }
+
+[[minion]]
+name = "Headhunter Gryphon"
+tier = 4
+tribe = "beast"
+stats = [3, 5]
+rally = { random_minion = "beast" }
+
+[[minion]]
+name = "Pack Leader"
+tier = 4
+tribe = "beast"
+stats = [3, 3]
+on_summon_beast = { buff = [2, 0] }
+
+[[minion]]
+name = "Conveyor Construct"
+tier = 4
+tribe = "mech"
+stats = [5, 2]
+deathrattle = { random_volumizer = true }
+
+[[minion]]
+name = "Boom-in-a-Box"
+tier = 4
+tribe = "neutral"
+stats = [5, 10]
+keywords = ["taunt"]
+start_of_combat = { damage_all_others = 3 }
+
+[[minion]]
+name = "Tortollan Blue Shell"
+tier = 4
+tribe = "neutral"
+stats = [3, 6]
+on_sell = { gold_if_lost = 5 }
+
+# --- Tier 5 ---
+
+[[minion]]
+name = "Lurking Leviathan"
+tier = 5
+tribe = "beast"
+stats = [3, 9]
+on_summon_beast = { buff = [3, 0], improve_permanently = true }
+
+[[minion]]
+name = "Goldrinn the Great Wolf"
 tier = 5
 tribe = "beast"
 stats = [7, 7]
-keywords = ["taunt"]
-battlecry = { buff = [2, 2], target = "others", tribe = "beast" }
+deathrattle = { combat_beast_buff = [7, 7] }
 
 [[minion]]
-name = "War Engine"
+name = "Turquoise Skitterer"
+tier = 5
+tribe = "beast"
+stats = [5, 5]
+deathrattle = { beetle_buff = [5, 5], summon = "Beetle", count = 1, golden_doubles_count = true }
+
+[[minion]]
+name = "Sewer Lord"
+tier = 5
+tribe = "beast"
+stats = [4, 6]
+deathrattle = { summon = "Sewer Rat", count = 2 }
+
+[[minion]]
+name = "Resourceful Robot"
 tier = 5
 tribe = "mech"
-stats = [6, 6]
-keywords = ["divine_shield", "windfury"]
+stats = [4, 8]
+end_of_turn = { resourceful_robot = true }
 
 [[minion]]
-name = "Undying Knight"
+name = "Spark Snapper"
+tier = 5
+tribe = "mech"
+stats = [6, 8]
+on_play_mech = { magnetize_satellite = "Satellite" }
+
+[[minion]]
+name = "Brann Bronzebeard"
 tier = 5
 tribe = "neutral"
-stats = [6, 4]
-keywords = ["taunt", "reborn"]
+stats = [2, 4]
+aura = "brann"
 
 [[minion]]
-name = "Brute"
+name = "Titus Rivendare"
 tier = 5
 tribe = "neutral"
-stats = [8, 8]
+stats = [1, 7]
+aura = "titus"
 
 [[minion]]
-name = "Ancient Beast"
+name = "Drakkari Enchanter"
+tier = 5
+tribe = "neutral"
+stats = [1, 5]
+aura = "drakkari"
+
+# --- Tier 6 ---
+
+[[minion]]
+name = "Ravaging Scorpid"
 tier = 6
 tribe = "beast"
-stats = [9, 9]
-deathrattle = { summon = "Beast", count = 3 }
+stats = [6, 7]
+after_friendly_attack = { beetle_buff = [4, 4] }
+deathrattle = { summon = "Beetle", count = 1, golden_doubles_count = true }
 
 [[minion]]
-name = "Titan Mech"
+name = "Mama Bear"
+tier = 6
+tribe = "beast"
+stats = [5, 5]
+on_summon_beast = { buff = [4, 4] }
+
+[[minion]]
+name = "Auto Reveille"
 tier = 6
 tribe = "mech"
-stats = [8, 8]
-keywords = ["divine_shield", "taunt"]
-deathrattle = { summon = "Mech", count = 1 }
+stats = [4, 8]
+after_buy = { every = 3 }
 
 [[minion]]
-name = "Champion"
+name = "Utility Drone"
 tier = 6
-tribe = "neutral"
-stats = [10, 10]
-keywords = ["windfury"]
+tribe = "mech"
+stats = [4, 5]
+end_of_turn = { buff_per_magnetization = [4, 5] }
 
-[[minion]]
-name = "Plaguebringer"
-tier = 6
-tribe = "neutral"
-stats = [6, 6]
-keywords = ["venomous", "reborn"]
-
-# Tokens: summoned only, never in the pool or the shop.
+# --- Tokens ---
 
 [[token]]
-name = "Pup"
+name = "Beetle"
+tier = 1
+tribe = "beast"
+stats = [2, 2]
+beetle = true
+
+[[token]]
+name = "Foraging Bat"
 tier = 1
 tribe = "beast"
 stats = [1, 1]
 
 [[token]]
-name = "Gear"
-tier = 1
-tribe = "mech"
-stats = [2, 2]
-
-[[token]]
-name = "Wolf"
+name = "Rat"
 tier = 1
 tribe = "beast"
-stats = [2, 2]
+stats = [1, 1]
 
 [[token]]
-name = "Beast"
+name = "Sewer Rat"
+tier = 2
+tribe = "beast"
+stats = [3, 2]
+deathrattle = { summon = "Turtle", count = 1 }
+
+[[token]]
+name = "Turtle"
 tier = 1
 tribe = "beast"
-stats = [3, 3]
+stats = [2, 3]
+keywords = ["taunt"]
 
 [[token]]
-name = "Mech"
+name = "Microbot"
 tier = 1
 tribe = "mech"
-stats = [4, 4]
+stats = [1, 1]
+
+[[token]]
+name = "Satellite"
+tier = 1
+tribe = "mech"
+stats = [2, 3]
+keywords = ["magnetic"]
+
+[[token]]
+name = "Tentacle"
+tier = 1
+tribe = "neutral"
+stats = [0, 2]
+keywords = ["taunt"]

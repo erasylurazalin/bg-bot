@@ -33,7 +33,7 @@ fn minions<'a>(game: &Game, out: &mut [f32], slots: usize, ms: impl Iterator<Ite
         o[3] = m.health as f32;
         o[4] = m.golden as u8 as f32;
         o[5] = game.data.cards.get(m.card).tier as f32;
-        for (j, (bit, _)) in Keywords::ALL.iter().enumerate() {
+        for (j, (bit, _)) in Keywords::ALL.iter().take(5).enumerate() {
             o[6 + j] = m.keywords.has(*bit) as u8 as f32;
         }
     }

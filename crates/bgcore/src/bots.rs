@@ -53,6 +53,9 @@ pub fn rule_action(game: &Game) -> Action {
             .max_by_key(|&s| value(game, &pl.board[s as usize]));
         return Action::Target(best.unwrap());
     }
+    if pl.pending_choose_one.is_some() {
+        return Action::Choose(0);
+    }
     if !pl.discover.is_empty() {
         let best = (0..pl.discover.len())
             .max_by_key(|&k| value(game, &game.data.cards.make(pl.discover[k], false)))

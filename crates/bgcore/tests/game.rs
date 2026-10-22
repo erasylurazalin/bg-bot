@@ -1,9 +1,18 @@
 use std::sync::Arc;
 
 use bgcore::bots::random_action;
-use bgcore::{Action, Data, Game, Minion, N_ACTIONS, Opponent, Rng};
+use bgcore::{Action, Data, Game, Keywords, Minion, N_ACTIONS, Opponent, Rng};
+
+fn v01_data() -> Data {
+    Data::from_toml(include_str!("data/v01-cards.toml"), include_str!("data/v01-rules.toml"))
+        .unwrap()
+}
 
 fn game(seed: u64) -> Game {
+    Game::new(Arc::new(v01_data()), seed)
+}
+
+fn s2_game(seed: u64) -> Game {
     Game::new(Arc::new(Data::bundled()), seed)
 }
 
@@ -29,13 +38,17 @@ fn next_turn(g: &mut Game) {
 
 fn take(g: &mut Game, name: &str) -> Minion {
     let c = g.data.cards.by_name(name).unwrap();
-    g.pool[c as usize] -= 1;
-    g.data.cards.make(c, false)
+    let slot = g.data.cards.get(c).pool_slot as usize;
+    g.pool[slot] -= 1;
+    g.players[0].make_card(&g.data.cards, c, false, 1)
 }
 
 /// Put a card from the pool straight onto a board.
 fn put_on_board(g: &mut Game, p: usize, name: &str) {
-    let m = take(g, name);
+    let c = g.data.cards.by_name(name).unwrap();
+    let slot = g.data.cards.get(c).pool_slot as usize;
+    g.pool[slot] -= 1;
+    let m = g.players[p].make_card(&g.data.cards, c, false, 1);
     g.players[p].board.push(m);
 }
 
@@ -43,10 +56,14 @@ fn put_on_board(g: &mut Game, p: usize, name: &str) {
 fn set_shop(g: &mut Game, p: usize, names: &[&str]) {
     let old: Vec<Minion> = g.players[p].shop.drain(..).collect();
     for m in old {
-        g.pool[m.card as usize] += 1;
+        let slot = g.data.cards.get(m.card).pool_slot as usize;
+        g.pool[slot] += m.pool_copies;
     }
     for n in names {
-        let m = take(g, n);
+        let c = g.data.cards.by_name(n).unwrap();
+        let slot = g.data.cards.get(c).pool_slot as usize;
+        g.pool[slot] -= 1;
+        let m = g.players[p].make_card(&g.data.cards, c, false, 1);
         g.players[p].shop.push(m);
     }
 }
@@ -439,3 +456,345 @@ fn observation_shows_only_what_the_player_saw() {
     assert_eq!(o[bgcore::obs::OPP_SCALARS], 1.0);
     assert_eq!(o[bgcore::obs::OPP_SCALARS + 2], 8.0); // Brute's attack
 }
+
+#[test]
+fn magnetic_nesting_and_utility_drone() {
+    let mut g = s2_game(100);
+    put_on_board(&mut g, 0, "Cord Puller"); // 1/1 Mech at slot 0
+    put_on_board(&mut g, 0, "Utility Drone"); // 4/5 Mech at slot 1
+
+    // Build a Lullabot carrying another Lullabot directly in hand.
+    let mut l1 = take(&mut g, "Lullabot"); // 2/2, pool_copies = 1
+    let l2 = take(&mut g, "Lullabot"); // 2/2, pool_copies = 1
+    let l_slot = g.data.cards.get(l2.card).pool_slot as usize;
+    g.consumed[l_slot] += l2.pool_copies as u32;
+    l1.magnetize(&g.data.cards, l2);
+    assert_eq!((l1.attack, l1.health, l1.magnetizations), (4, 4, 1));
+    g.players[0].hand.push(l1);
+
+    // Merge the nested Lullabot into Cord Puller at slot 0.
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    let host = g.players[0].board[0];
+    // Cord Puller (1/1) + nested Lullabot (4/4) = 5/5, with 2 Magnetizations.
+    assert_eq!((host.attack, host.health), (5, 5));
+    assert_eq!(host.magnetizations, 2);
+    assert_eq!(host.n_attached, 2);
+
+    // End player 0's turn: 2 Lullabots give +2 Health, Utility Drone gives +8/+10 (2 * +4/+5).
+    act(&mut g, 0, Action::EndTurn);
+    let host = g.players[0].board[0];
+    assert_eq!((host.attack, host.health), (5 + 8, 5 + 2 + 10));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn magnetic_merge_into_full_board_and_normal_placement() {
+    let mut g = s2_game(101);
+    // Place a Beast at slot 0, and a Magnetic placed not next to a Mech places normally.
+    put_on_board(&mut g, 0, "Buzzing Vermin"); // Beast at slot 0
+    g.give(0, "Lullabot").unwrap();
+    // Playing Lullabot at pos 0 (left of a Beast) or pos 1 (right end) places it normally.
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].board.len(), 2);
+    assert_eq!(name(&g, &g.players[0].board[0]), "Lullabot");
+    assert_eq!(g.players[0].board[0].magnetizations, 0);
+
+    // Fill the rest of the board to 7 minions (slot 0 is Lullabot, a Mech; slots 1..7 are Beasts).
+    for _ in 0..5 {
+        put_on_board(&mut g, 0, "Buzzing Vermin");
+    }
+    assert!(g.players[0].board.is_full());
+    g.give(0, "Lullabot").unwrap();
+    turn_of(&mut g, 0);
+    // Board is full: merging into the Mech at slot 0 is legal; placing at slot 1 (Beast) or 7 is not.
+    assert!(g.is_legal(Action::Play { hand: 0, pos: 0 }));
+    assert!(!g.is_legal(Action::Play { hand: 0, pos: 1 }));
+    assert!(!g.is_legal(Action::Play { hand: 0, pos: 7 }));
+
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].board.len(), 7);
+    assert_eq!(g.players[0].board[0].magnetizations, 1);
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (4, 4));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn volumizer_bonus_reaches_hand_shop_and_host_with_volumizers() {
+    let mut g = s2_game(102);
+    g.players[0].tier = 2;
+    put_on_board(&mut g, 0, "Cord Puller"); // 1/1 host at slot 0
+    // Magnetize 3 Volumizers (Blue, Green, Red) into Cord Puller so it holds 3 Volumizers.
+    for v_name in ["Blue Volumizer", "Green Volumizer", "Red Volumizer"] {
+        g.give(0, v_name).unwrap();
+        act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    }
+    assert_eq!(g.players[0].board[0].volumizers, 3);
+    // Bonus so far: +3/+0 (Red) + +1/+1 (Green) + +0/+3 (Blue) = +4/+4.
+    assert_eq!(g.players[0].volumizer_bonus, (4, 4));
+
+    // Put a Red Volumizer in the shop and a Blue Volumizer in hand, and another Green Volumizer to play.
+    set_shop(&mut g, 0, &["Red Volumizer", "Zoatroid", "Zoatroid"]);
+    g.give(0, "Blue Volumizer").unwrap();
+    g.give(0, "Green Volumizer").unwrap();
+
+    let shop_before = (g.players[0].shop[0].attack, g.players[0].shop[0].health);
+    let hand_before = (g.players[0].hand[0].attack, g.players[0].hand[0].health);
+    let host_before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+
+    // Play the Green Volumizer (hand slot 1) as a standalone minion at board pos 1.
+    // Its +1/+1 bonus reaches the shop Volumizer (+1/+1), the hand Volumizer (+1/+1),
+    // and the host with 3 Volumizers inside (+3/+3).
+    act(&mut g, 0, Action::Play { hand: 1, pos: 1 });
+    assert_eq!(
+        (g.players[0].shop[0].attack, g.players[0].shop[0].health),
+        (shop_before.0 + 1, shop_before.1 + 1)
+    );
+    assert_eq!(
+        (g.players[0].hand[0].attack, g.players[0].hand[0].health),
+        (hand_before.0 + 1, hand_before.1 + 1)
+    );
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (host_before.0 + 3, host_before.1 + 3)
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn spark_snapper_and_mechagnome_interpreter_distinguish_play_from_direct_attach() {
+    let mut g = s2_game(103);
+    put_on_board(&mut g, 0, "Cord Puller"); // 1/1 at slot 0
+    put_on_board(&mut g, 0, "Spark Snapper"); // 6/8 at slot 1
+    put_on_board(&mut g, 0, "Mechagnome Interpreter"); // 3/1 at slot 2
+
+    // Play Lullabot (2/2, Magnetic) onto Cord Puller at slot 0:
+    // - Lullabot merges (+2/+2, mag = 1).
+    // - Interpreter sees the played Magnetic (+3/+1).
+    // - Spark Snapper sees the played Magnetic, attaches a 2/3 Satellite (+2/+3, mag = 2),
+    //   and improves itself (improvements = 1).
+    // - Interpreter ALSO sees the directly attached Satellite (+3/+1), while Spark Snapper
+    //   does NOT trigger again on the Satellite.
+    g.give(0, "Lullabot").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    let host = g.players[0].board[0];
+    assert_eq!(host.magnetizations, 2);
+    assert_eq!((host.attack, host.health), (1 + 2 + 3 + 2 + 3, 1 + 2 + 1 + 3 + 1));
+    assert_eq!(g.players[0].board[1].improvements, 1);
+
+    // Put Resourceful Robot on board at slot 3 and end turn:
+    // Resourceful Robot directly attaches a Volumizer to itself (not a play).
+    // Interpreter buffs Resourceful Robot (+3/+1), while Spark Snapper does NOT attach a Satellite
+    // (so Resourceful Robot has 1 Magnetization, not 2, and Spark Snapper stays at improvements = 1).
+    put_on_board(&mut g, 0, "Resourceful Robot");
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(g.players[0].board[3].magnetizations, 1);
+    assert_eq!(g.players[0].board[1].improvements, 1);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn beetle_bonus_from_forest_rover_and_ravaging_scorpid() {
+    let mut g = s2_game(104);
+    g.give(0, "Forest Rover").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].beetle_bonus, (2, 1));
+
+    // Check that Buzzing Vermin's Beetle spawns as 4/3 (2/2 + 2/1) in a fight:
+    // Without the bonus, Vermin (1/1) + Beetle (2/2) loses to a 2/4 minion;
+    // with the +2/+1 bonus, Vermin (1/1) + Beetle (4/3) kills a 2/4 minion and survives at 4/1.
+    let db = &g.data.cards;
+    let vermin = db.make(db.by_name("Buzzing Vermin").unwrap(), false);
+    let mut enemy = db.make(db.by_name("Zoatroid").unwrap(), false);
+    enemy.attack = 2;
+    enemy.health = 4;
+    let out_plain = bgcore::fight_with(
+        db,
+        &[vermin],
+        &[enemy],
+        [Default::default(), Default::default()],
+        500,
+        &mut Rng::new(1),
+        &mut (),
+    );
+    assert_eq!(out_plain.winner, Some(1));
+    let out_buffed = bgcore::fight_with(
+        db,
+        &[vermin],
+        &[enemy],
+        [g.players[0].counters(), Default::default()],
+        500,
+        &mut Rng::new(1),
+        &mut (),
+    );
+    assert_eq!(out_buffed.winner, Some(0));
+
+    // Now sell Forest Rover and put Ravaging Scorpid on player 0's board for a fight.
+    act(&mut g, 0, Action::Sell(0));
+    put_on_board(&mut g, 0, "Ravaging Scorpid");
+    let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
+    put_on_board(&mut g, q as usize, "Buzzing Vermin");
+    next_turn(&mut g);
+    // Scorpid attacked in the fight, raising player 0's beetle_bonus by +4/+4 for future fights.
+    assert!(g.players[0].beetle_bonus.0 >= 6);
+    assert!(g.players[0].beetle_bonus.1 >= 5);
+}
+
+#[test]
+fn lurking_leviathan_improvement_survives_fight_and_goldrinn_buff_does_not() {
+    let mut g = s2_game(105);
+    let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
+    let q = q as usize;
+
+    put_on_board(&mut g, 0, "Buzzing Vermin"); // Taunt, dies first and summons a Beetle
+    put_on_board(&mut g, 0, "Goldrinn the Great Wolf");
+    put_on_board(&mut g, 0, "Lurking Leviathan");
+    // Give Goldrinn Taunt so the enemy kills both Vermin and Goldrinn.
+    g.players[0].board[1].keywords.set(Keywords::TAUNT);
+
+    put_on_board(&mut g, q, "Mama Bear");
+    g.players[q].board[0].attack = 10;
+    g.players[q].board[0].health = 20;
+
+    next_turn(&mut g);
+
+    // After the fight:
+    // - Goldrinn's +7/+7 combat buff did NOT stay on the real board.
+    // - Lurking Leviathan's permanent improvement DID stay on the real board (improvements == 1).
+    let leviathan = g.players[0].board[2];
+    assert_eq!((leviathan.attack, leviathan.health), (3, 9));
+    assert_eq!(leviathan.improvements, 1);
+
+    // Playing a Beast in the shop now gets +6 Attack from the improved Lurking Leviathan (instead of +3).
+    g.give(0, "Flittering Bat").unwrap(); // 1/4 base
+    act(&mut g, 0, Action::Play { hand: 0, pos: 3 });
+    assert_eq!((g.players[0].board[3].attack, g.players[0].board[3].health), (1 + 6, 4));
+    assert_eq!(g.players[0].board[2].improvements, 2);
+}
+
+#[test]
+fn brann_and_drakkari_multiply_triggers_including_golden() {
+    let mut g = s2_game(106);
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    g.give(0, "Southsea Busker").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(g.players[0].gold_next_turn, 2);
+
+    // Golden Brann triggers Battlecries 3 times.
+    // Take 2 more Branns from the pool so the golden Brann holds 3 pool copies.
+    let brann_id = g.data.cards.by_name("Brann Bronzebeard").unwrap() as usize;
+    g.pool[brann_id] -= 2;
+    g.players[0].board[0].golden = true;
+    g.players[0].board[0].pool_copies = 3;
+
+    g.give(0, "Forest Rover").unwrap(); // +2/+1 per trigger
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+    assert_eq!(g.players[0].beetle_bonus, (6, 3));
+
+    // Drakkari triggers end of turn twice, golden three times.
+    put_on_board(&mut g, 0, "Lullabot"); // slot 3: 2/2, +1 HP at end of turn
+    put_on_board(&mut g, 0, "Drakkari Enchanter"); // slot 4
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(g.players[0].board[3].health, 4); // +2 HP with plain Drakkari
+
+    next_turn(&mut g);
+    let drak_id = g.data.cards.by_name("Drakkari Enchanter").unwrap() as usize;
+    g.pool[drak_id] -= 2;
+    g.players[0].board[4].golden = true;
+    g.players[0].board[4].pool_copies = 3;
+    let hp_before = g.players[0].board[3].health;
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(g.players[0].board[3].health, hp_before + 3); // +3 HP with golden Drakkari
+}
+
+#[test]
+fn sprightly_scarab_choose_one_and_patient_scout_discover() {
+    let mut g = s2_game(107);
+    put_on_board(&mut g, 0, "Buzzing Vermin"); // 1/1 at slot 0
+    put_on_board(&mut g, 0, "Flittering Bat"); // 1/4 at slot 1
+    g.give(0, "Sprightly Scarab").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+
+    turn_of(&mut g, 0);
+    assert_eq!(legal(&g), [Action::Choose(0), Action::Choose(1)]);
+    // Option 1: +4 Attack and Windfury to a Beast
+    act(&mut g, 0, Action::Choose(1));
+    turn_of(&mut g, 0);
+    assert_eq!(legal(&g), [Action::Target(0), Action::Target(1)]);
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!(g.players[0].board[1].attack, 5);
+    assert!(g.players[0].board[1].keywords.has(Keywords::WINDFURY));
+
+    // Patient Scout improves its tier at the end of turn and discovers on sell.
+    put_on_board(&mut g, 0, "Patient Scout"); // slot 3, starts at tier 1
+    next_turn(&mut g); // End of turn 1 improves Patient Scout to tier 2
+    assert_eq!(g.players[0].board[3].improvements, 1);
+    act(&mut g, 0, Action::Sell(3));
+    assert_eq!(g.players[0].discover.len(), 3);
+    assert!(g.players[0].discover.iter().all(|&c| g.data.cards.get(c).tier == 2));
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].hand.len(), 1);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn zoatroid_blue_shell_accord_o_tron_and_auto_reveille() {
+    let mut g = s2_game(108);
+    // Zoatroid gives a 0/2 Tentacle with Taunt when sold.
+    put_on_board(&mut g, 0, "Zoatroid");
+    act(&mut g, 0, Action::Sell(0));
+    assert_eq!(g.players[0].hand.len(), 1);
+    assert_eq!(name(&g, &g.players[0].hand[0]), "Tentacle");
+    assert_eq!(g.players[0].hand[0].pool_copies, 0);
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Sell(0)); // selling the generated Tentacle does not change the pool
+
+    // Accord-o-Tron gives +1 Gold at start of turn (even when Magnetized into a host).
+    put_on_board(&mut g, 0, "Cord Puller");
+    g.give(0, "Accord-o-Tron").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 }); // merges into Cord Puller
+    next_turn(&mut g);
+    // Turn 2 base gold is 4 + 1 from Accord-o-Tron = 5.
+    assert_eq!(g.players[0].gold, 5);
+
+    // Tortollan Blue Shell sells for 1 gold normally, and 5 gold after losing a combat.
+    put_on_board(&mut g, 0, "Tortollan Blue Shell");
+    g.players[0].lost_last_combat = true;
+    let gold_before = g.players[0].gold;
+    act(&mut g, 0, Action::Sell(1));
+    assert_eq!(g.players[0].gold, gold_before + 5);
+
+    // Auto Reveille triggers after buying 3 cards.
+    put_on_board(&mut g, 0, "Auto Reveille");
+    g.players[0].gold = 20;
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Flittering Bat", "Zoatroid"]);
+    act(&mut g, 0, Action::Buy(0));
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].board[1].magnetizations, 0);
+    act(&mut g, 0, Action::Buy(0));
+    // 3rd buy triggers Auto Reveille: 1 Magnetization on itself + 1 Volumizer copy in hand.
+    assert_eq!(g.players[0].board[1].magnetizations, 1);
+    assert_eq!(g.players[0].hand.len(), 4);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn pool_invariants_hold_through_merges_generated_cards_and_sells() {
+    for seed in 0..30 {
+        let mut g = s2_game(seed);
+        let mut rng = Rng::new(seed ^ 0x123456);
+        while !g.over {
+            let a = random_action(&g, &mut rng);
+            g.step(a).unwrap();
+            g.check_invariants().unwrap();
+        }
+    }
+    for seed in 0..20 {
+        let mut g = s2_game(seed);
+        while !g.over {
+            let a = bgcore::bots::rule_action(&g);
+            g.step(a).unwrap();
+            g.check_invariants().unwrap();
+        }
+    }
+}
+

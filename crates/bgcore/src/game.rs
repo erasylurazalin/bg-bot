@@ -9,9 +9,12 @@ use std::sync::Arc;
 use arrayvec::ArrayVec;
 
 use crate::action::{Action, N_ACTIONS};
-use crate::cards::{CardDb, Effect, Tribe};
-use crate::fight::fight;
-use crate::minion::{CardId, Minion};
+use crate::cards::{
+    AfterBuy, Aura, CardDb, ChooseOption, Effect, EndOfTurn, OnPlayMech, OnPlayOrMagnetizeMech,
+    OnSell, OnSummonBeast, StartOfTurn, Tribe,
+};
+use crate::fight::{Counters, SideOutcome, fight_with};
+use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP};
 
@@ -31,14 +34,25 @@ pub struct Seen {
     pub turn: u32,
 }
 
-/// A targeted Battlecry waiting for the player to pick its target.
+/// A targeted Battlecry or Choose One option waiting for the player to pick its target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PendingTarget {
-    /// Board slot of the minion whose Battlecry it is.
+    /// Board slot of the minion whose effect it is.
     pub source: u8,
     pub tribe: Option<Tribe>,
     pub attack: i32,
     pub health: i32,
+    pub keyword: u8,
+    pub runs: u8,
+}
+
+/// A Choose One minion (Sprightly Scarab) waiting for the player to pick one
+/// of its two options before picking a target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PendingChooseOne {
+    pub source: u8,
+    pub golden: bool,
+    pub options: [ChooseOption; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -48,17 +62,22 @@ pub struct Player {
     /// 1 to 8 once decided, 0 while still playing.
     pub placement: u8,
     pub gold: u8,
+    pub gold_next_turn: u8,
     pub tier: u8,
     pub upgrade_cost: u8,
     pub frozen: bool,
+    pub lost_last_combat: bool,
+    pub volumizer_bonus: (i32, i32),
+    pub beetle_bonus: (i32, i32),
     pub shop: ArrayVec<Minion, SHOP>,
     pub hand: ArrayVec<Minion, HAND>,
     pub board: ArrayVec<Minion, BOARD>,
+    pub pending_choose_one: Option<PendingChooseOne>,
     pub pending_target: Option<PendingTarget>,
     /// Discover options waiting for a choice. The cards are out of the pool.
     pub discover: ArrayVec<CardId, DISCOVER>,
-    /// A Discover to offer once the pending target is picked.
-    pub discover_queued: bool,
+    /// Queued Discover tiers to offer once pending choices finish.
+    pub discover_queue: ArrayVec<u8, 4>,
     pub actions: u16,
     pub done: bool,
     pub opponent: Option<Opponent>,
@@ -73,21 +92,46 @@ impl Player {
             alive: true,
             placement: 0,
             gold: 0,
+            gold_next_turn: 0,
             tier: 1,
             upgrade_cost: data.rules.upgrade_cost(1),
             frozen: false,
+            lost_last_combat: false,
+            volumizer_bonus: (0, 0),
+            beetle_bonus: (0, 0),
             shop: ArrayVec::new(),
             hand: ArrayVec::new(),
             board: ArrayVec::new(),
+            pending_choose_one: None,
             pending_target: None,
             discover: ArrayVec::new(),
-            discover_queued: false,
+            discover_queue: ArrayVec::new(),
             actions: 0,
             done: false,
             opponent: None,
             last_opponent: None,
             seen: Default::default(),
         }
+    }
+
+    /// Create a copy of `id` with this player's current Volumizer and Beetle
+    /// bonuses applied.
+    pub fn make_card(&self, cards: &CardDb, id: CardId, golden: bool, pool_copies: u8) -> Minion {
+        let mut m = cards.make(id, golden);
+        m.pool_copies = pool_copies;
+        if m.volumizers > 0 {
+            m.attack += self.volumizer_bonus.0 * m.volumizers as i32;
+            m.health += self.volumizer_bonus.1 * m.volumizers as i32;
+        }
+        if cards.get(id).is_beetle {
+            m.attack += self.beetle_bonus.0;
+            m.health += self.beetle_bonus.1;
+        }
+        m
+    }
+
+    pub fn counters(&self) -> Counters {
+        Counters { beetle_attack: self.beetle_bonus.0, beetle_health: self.beetle_bonus.1 }
     }
 }
 
@@ -96,6 +140,7 @@ pub struct Ghost {
     pub player: u8,
     pub board: ArrayVec<Minion, BOARD>,
     pub tier: u8,
+    pub counters: Counters,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,8 +152,11 @@ pub struct Game {
     pub rng: Rng,
     pub turn: u32,
     pub players: [Player; PLAYERS],
-    /// Copies left of each pool card, indexed by card id.
+    /// Copies left of each pool card, indexed by card `pool_slot`.
     pub pool: Vec<u8>,
+    /// Pool copies permanently consumed into hosts via Magnetize, indexed by
+    /// card `pool_slot`.
+    pub consumed: Vec<u32>,
     pub ghost: Option<Ghost>,
     pub over: bool,
     order: ArrayVec<u8, PLAYERS>,
@@ -116,11 +164,30 @@ pub struct Game {
 }
 
 /// Draw one card from the pool, weighted by copies left, among cards of
-/// tier `lo..=hi` that aren't in `exclude`.
-fn draw(pool: &mut [u8], cards: &CardDb, rng: &mut Rng, lo: u8, hi: u8, exclude: &[CardId]) -> Option<CardId> {
+/// tier `lo..=hi` that aren't in `exclude`. When the shared Volumizer slot
+/// is drawn, picks a random Volumizer color not in `exclude`.
+fn draw(
+    pool: &mut [u8],
+    cards: &CardDb,
+    rng: &mut Rng,
+    lo: u8,
+    hi: u8,
+    exclude: &[CardId],
+) -> Option<CardId> {
     let ok = |c: usize| {
-        let t = cards.cards[c].tier;
-        lo <= t && t <= hi && !exclude.contains(&(c as CardId))
+        let card = &cards.cards[c];
+        if card.pool_slot as usize != c {
+            return false;
+        }
+        let t = card.tier;
+        if !(lo <= t && t <= hi) {
+            return false;
+        }
+        if card.is_volumizer {
+            cards.volumizers.iter().any(|v| !exclude.contains(v))
+        } else {
+            !exclude.contains(&(c as CardId))
+        }
     };
     let total: u32 = (0..pool.len()).filter(|&c| ok(c)).map(|c| pool[c] as u32).sum();
     if total == 0 {
@@ -134,6 +201,16 @@ fn draw(pool: &mut [u8], cards: &CardDb, rng: &mut Rng, lo: u8, hi: u8, exclude:
         let n = pool[c] as u32;
         if r < n {
             pool[c] -= 1;
+            if cards.cards[c].is_volumizer {
+                let mut avail: ArrayVec<CardId, 3> = ArrayVec::new();
+                for &v in &cards.volumizers {
+                    if !exclude.contains(&v) {
+                        let _ = avail.try_push(v);
+                    }
+                }
+                let k = rng.below(avail.len() as u32) as usize;
+                return Some(avail[k]);
+            }
             return Some(c as CardId);
         }
         r -= n;
@@ -142,8 +219,9 @@ fn draw(pool: &mut [u8], cards: &CardDb, rng: &mut Rng, lo: u8, hi: u8, exclude:
 }
 
 fn give_back(pool: &mut [u8], cards: &CardDb, m: &Minion) {
-    if !cards.get(m.card).token {
-        pool[m.card as usize] += if m.golden { 3 } else { 1 };
+    if m.pool_copies > 0 && !cards.get(m.card).token {
+        let slot = cards.get(m.card).pool_slot as usize;
+        pool[slot] += m.pool_copies;
     }
 }
 
@@ -155,8 +233,16 @@ fn buff(m: &mut Minion, attack: i32, health: i32) {
 impl Game {
     pub fn new(data: Arc<Data>, seed: u64) -> Game {
         let pool = (0..data.cards.pool_cards)
-            .map(|c| data.rules.copies(data.cards.cards[c].tier))
+            .map(|c| {
+                let card = &data.cards.cards[c];
+                if card.pool_slot as usize == c {
+                    data.rules.copies(card.tier)
+                } else {
+                    0
+                }
+            })
             .collect();
+        let consumed = vec![0u32; data.cards.pool_cards];
         let players = std::array::from_fn(|_| Player::new(&data));
         let mut g = Game {
             data,
@@ -164,6 +250,7 @@ impl Game {
             turn: 0,
             players,
             pool,
+            consumed,
             ghost: None,
             over: false,
             order: ArrayVec::new(),
@@ -194,14 +281,30 @@ impl Game {
         if let Some(pt) = pl.pending_target {
             return matches!(a, Action::Target(s) if self.valid_target(p, &pt, s as usize));
         }
+        if pl.pending_choose_one.is_some() {
+            return matches!(a, Action::Choose(k) if k < 2);
+        }
         if !pl.discover.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.discover.len());
         }
         match a {
-            Action::Buy(s) => (s as usize) < pl.shop.len() && pl.gold >= r.buy_cost && !pl.hand.is_full(),
+            Action::Buy(s) => {
+                (s as usize) < pl.shop.len() && pl.gold >= r.buy_cost && !pl.hand.is_full()
+            }
             Action::Sell(s) => (s as usize) < pl.board.len(),
             Action::Play { hand, pos } => {
-                (hand as usize) < pl.hand.len() && !pl.board.is_full() && pos as usize <= pl.board.len()
+                let h = hand as usize;
+                let pos = pos as usize;
+                if h >= pl.hand.len() || pos > pl.board.len() {
+                    false
+                } else if pl.hand[h].keywords.has(Keywords::MAGNETIC)
+                    && pos < pl.board.len()
+                    && self.data.cards.get(pl.board[pos].card).tribe == Tribe::Mech
+                {
+                    true
+                } else {
+                    !pl.board.is_full()
+                }
             }
             Action::Target(_) | Action::Choose(_) => false,
             Action::Move { from, to } => {
@@ -243,40 +346,88 @@ impl Game {
     }
 
     fn apply(&mut self, p: usize, a: Action) {
-        let Game { data, rng, players, pool, .. } = self;
-        let (cards, rules) = (&data.cards, &data.rules);
-        let pl = &mut players[p];
         match a {
             Action::Buy(s) => {
+                let buy_cost = self.data.rules.buy_cost;
+                let pl = &mut self.players[p];
                 let m = pl.shop.remove(s as usize);
-                pl.gold -= rules.buy_cost;
+                pl.gold -= buy_cost;
                 pl.hand.push(m);
                 self.check_triple(p, m.card);
+                self.run_after_buy(p);
             }
             Action::Sell(s) => {
-                let m = pl.board.remove(s as usize);
-                pl.gold = pl.gold.saturating_add(rules.sell_gold);
-                give_back(pool, cards, &m);
+                let m = self.players[p].board.remove(s as usize);
+                let mut sell_gold = self.data.rules.sell_gold;
+                if self.players[p].lost_last_combat {
+                    for (card, golden) in m.parts() {
+                        if let Some(OnSell::GoldIfLost(g)) = self.data.cards.get(card).on_sell {
+                            let mul = if golden { 2 } else { 1 };
+                            sell_gold = g * mul;
+                        }
+                    }
+                }
+                self.players[p].gold = self.players[p].gold.saturating_add(sell_gold);
+                give_back(&mut self.pool, &self.data.cards, &m);
+                for (card, golden) in m.parts() {
+                    match self.data.cards.get(card).on_sell {
+                        Some(OnSell::GetCard { card: tok, count }) => {
+                            let n = count * (if golden { 2 } else { 1 });
+                            for _ in 0..n {
+                                self.give_generated(p, tok);
+                            }
+                        }
+                        Some(OnSell::DiscoverByTier) => {
+                            let tier = (1 + m.improvements as u8).min(MAX_TIER);
+                            let n = if golden { 2 } else { 1 };
+                            for _ in 0..n {
+                                let _ = self.players[p].discover_queue.try_push(tier);
+                            }
+                            self.maybe_start_discover(p);
+                        }
+                        Some(OnSell::GoldIfLost(_)) | None => {}
+                    }
+                }
             }
             Action::Play { hand, pos } => {
-                let m = pl.hand.remove(hand as usize);
-                pl.board.insert(pos as usize, m);
-                self.battlecry(p, pos as usize);
-                if m.golden {
-                    let pl = &mut self.players[p];
-                    pl.discover_queued = true;
-                    if pl.pending_target.is_none() {
-                        self.start_discover(p);
+                let m = self.players[p].hand.remove(hand as usize);
+                let pos = pos as usize;
+                let is_merge = m.keywords.has(Keywords::MAGNETIC)
+                    && pos < self.players[p].board.len()
+                    && self.data.cards.get(self.players[p].board[pos].card).tribe == Tribe::Mech;
+                if is_merge {
+                    self.magnetize_to(p, pos, m, true);
+                } else {
+                    self.players[p].board.insert(pos, m);
+                    if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
+                        let mul = if m.golden { 2 } else { 1 };
+                        self.add_volumizer_bonus(p, da * mul, dh * mul);
                     }
+                    let t = self.data.cards.get(m.card).tribe;
+                    if t == Tribe::Beast {
+                        self.trigger_summon_beast_in_shop(p, pos);
+                    } else if t == Tribe::Mech {
+                        self.trigger_mech_played_or_magnetized(p, pos, true, true);
+                    }
+                    self.battlecry_or_choose_one(p, pos);
+                }
+                if m.golden {
+                    let tier = (self.players[p].tier + 1).min(MAX_TIER);
+                    let _ = self.players[p].discover_queue.try_push(tier);
+                    self.maybe_start_discover(p);
                 }
             }
             Action::Target(s) => self.resolve_target(p, s as usize),
             Action::Choose(k) => self.resolve_choose(p, k as usize),
             Action::Move { from, to } => {
+                let pl = &mut self.players[p];
                 let m = pl.board.remove(from as usize);
                 pl.board.insert(to as usize, m);
             }
             Action::Roll => {
+                let Game { data, rng, players, pool, .. } = self;
+                let (cards, rules) = (&data.cards, &data.rules);
+                let pl = &mut players[p];
                 pl.gold -= rules.roll_cost;
                 pl.frozen = false;
                 let tier = pl.tier;
@@ -285,11 +436,12 @@ impl Game {
                 }
                 Self::fill_shop(pl, pool, cards, rules.shop_size(tier), rng);
             }
-            Action::Freeze => pl.frozen = !pl.frozen,
+            Action::Freeze => self.players[p].frozen = !self.players[p].frozen,
             Action::Level => {
+                let pl = &mut self.players[p];
                 pl.gold -= pl.upgrade_cost;
                 pl.tier += 1;
-                pl.upgrade_cost = rules.upgrade_cost(pl.tier);
+                pl.upgrade_cost = self.data.rules.upgrade_cost(pl.tier);
             }
             Action::EndTurn => {}
         }
@@ -298,98 +450,348 @@ impl Game {
     fn fill_shop(pl: &mut Player, pool: &mut [u8], cards: &CardDb, size: usize, rng: &mut Rng) {
         while pl.shop.len() < size {
             match draw(pool, cards, rng, 1, pl.tier, &[]) {
-                Some(c) => pl.shop.push(cards.make(c, false)),
+                Some(c) => {
+                    let m = pl.make_card(cards, c, false, 1);
+                    pl.shop.push(m);
+                }
                 None => break,
             }
         }
     }
 
-    fn battlecry(&mut self, p: usize, pos: usize) {
+    fn add_volumizer_bonus(&mut self, p: usize, da: i32, dh: i32) {
+        let pl = &mut self.players[p];
+        pl.volumizer_bonus.0 += da;
+        pl.volumizer_bonus.1 += dh;
+        for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(&mut pl.board) {
+            if m.volumizers > 0 {
+                let k = m.volumizers as i32;
+                m.attack += da * k;
+                m.health += dh * k;
+            }
+        }
+    }
+
+    fn add_beetle_bonus(&mut self, p: usize, da: i32, dh: i32) {
         let cards = &self.data.cards;
         let pl = &mut self.players[p];
-        let m = pl.board[pos];
-        let mul = if m.golden { 2 } else { 1 };
-        match cards.get(m.card).battlecry {
-            Some(Effect::BuffOthers { tribe, attack, health }) => {
-                for (i, o) in pl.board.iter_mut().enumerate() {
-                    if i != pos && cards.get(o.card).is(tribe) {
-                        buff(o, attack * mul, health * mul);
+        pl.beetle_bonus.0 += da;
+        pl.beetle_bonus.1 += dh;
+        for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(&mut pl.board) {
+            if cards.get(m.card).is_beetle {
+                m.attack += da;
+                m.health += dh;
+            }
+        }
+    }
+
+    /// Magnetize `m` into `self.players[p].board[pos]`. `from_play` is true
+    /// when `m` was played from hand, and false when attached directly by an
+    /// effect (Spark Snapper, Resourceful Robot, Auto Reveille).
+    fn magnetize_to(&mut self, p: usize, pos: usize, m: Minion, from_play: bool) {
+        let cards = &self.data.cards;
+        if m.pool_copies > 0 && !cards.get(m.card).token {
+            let slot = cards.get(m.card).pool_slot as usize;
+            self.consumed[slot] += m.pool_copies as u32;
+        }
+        self.players[p].board[pos].magnetize(cards, m);
+        if let Some((da, dh)) = cards.get(m.card).volumizer_buff {
+            let mul = if m.golden { 2 } else { 1 };
+            self.add_volumizer_bonus(p, da * mul, dh * mul);
+        }
+        self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
+    }
+
+    fn trigger_mech_played_or_magnetized(
+        &mut self,
+        p: usize,
+        target_pos: usize,
+        from_play: bool,
+        exclude_target: bool,
+    ) {
+        let len = self.players[p].board.len();
+        for i in 0..len {
+            if exclude_target && i == target_pos {
+                continue;
+            }
+            let m = self.players[p].board[i];
+            for (card, golden) in m.parts() {
+                let c = self.data.cards.get(card);
+                if let Some(OnPlayOrMagnetizeMech::Buff { attack, health }) =
+                    c.on_play_or_magnetize_mech
+                {
+                    let mul = if golden { 2 } else { 1 };
+                    buff(&mut self.players[p].board[target_pos], attack * mul, health * mul);
+                }
+                if from_play
+                    && let Some(OnPlayMech::MagnetizeSatellite { card: sat_id }) = c.on_play_mech
+                {
+                    let imp = self.players[p].board[i].improvements;
+                    self.players[p].board[i].improvements = imp.saturating_add(1);
+                    let stacks = (1 + imp as i32) * (if golden { 2 } else { 1 });
+                    let mut sat = self.data.cards.make(sat_id, false);
+                    sat.attack *= stacks;
+                    sat.health *= stacks;
+                    self.magnetize_to(p, target_pos, sat, false);
+                }
+            }
+        }
+    }
+
+    fn trigger_summon_beast_in_shop(&mut self, p: usize, pos: usize) {
+        let len = self.players[p].board.len();
+        for i in 0..len {
+            if i == pos {
+                continue;
+            }
+            let imp = self.players[p].board[i].improvements;
+            let m = self.players[p].board[i];
+            let mut da = 0;
+            let mut dh = 0;
+            let mut imp_gain = 0u16;
+            for (card, golden) in m.parts() {
+                if let Some(OnSummonBeast::Buff { attack, health, improve_permanently }) =
+                    self.data.cards.get(card).on_summon_beast
+                {
+                    let mul = if golden { 2 } else { 1 };
+                    let stacks = if improve_permanently { 1 + (imp + imp_gain) as i32 } else { 1 };
+                    da += attack * mul * stacks;
+                    dh += health * mul * stacks;
+                    if improve_permanently {
+                        imp_gain += 1;
                     }
                 }
             }
-            Some(Effect::BuffChosen { tribe, attack, health }) => {
-                let pt = PendingTarget { source: pos as u8, tribe, attack: attack * mul, health: health * mul };
-                let mut targets = (0..pl.board.len()).filter(|&s| self.valid_target(p, &pt, s));
-                match (targets.next(), targets.next()) {
-                    (None, _) => {}
-                    (Some(s), None) => buff(&mut self.players[p].board[s], pt.attack, pt.health),
-                    _ => self.players[p].pending_target = Some(pt),
+            if imp_gain > 0 {
+                self.players[p].board[i].improvements = imp.saturating_add(imp_gain);
+            }
+            buff(&mut self.players[p].board[pos], da, dh);
+        }
+    }
+
+    fn brann_mult(&self, p: usize) -> u8 {
+        let mut mult = 1;
+        for m in &self.players[p].board {
+            for (card, golden) in m.parts() {
+                if self.data.cards.get(card).aura == Some(Aura::Brann) {
+                    mult = mult.max(if golden { 3 } else { 2 });
                 }
             }
-            _ => {}
+        }
+        mult
+    }
+
+    fn drakkari_mult(&self, p: usize) -> u8 {
+        let mut mult = 1;
+        for m in &self.players[p].board {
+            for (card, golden) in m.parts() {
+                if self.data.cards.get(card).aura == Some(Aura::Drakkari) {
+                    mult = mult.max(if golden { 3 } else { 2 });
+                }
+            }
+        }
+        mult
+    }
+
+    fn battlecry_or_choose_one(&mut self, p: usize, mut pos: usize) {
+        let m = self.players[p].board[pos];
+        let mul = if m.golden { 2 } else { 1 };
+        let card = self.data.cards.get(m.card);
+        if let Some(options) = card.choose_one {
+            let scaled = options.map(|o| ChooseOption {
+                tribe: o.tribe,
+                attack: o.attack * mul,
+                health: o.health * mul,
+                keyword: o.keyword,
+            });
+            self.players[p].pending_choose_one = Some(PendingChooseOne {
+                source: pos as u8,
+                golden: m.golden,
+                options: scaled,
+            });
+            return;
+        }
+        let Some(bc) = card.battlecry else { return };
+        let runs = self.brann_mult(p);
+        match bc {
+            Effect::BuffOthers { tribe, attack, health } => {
+                let cards = &self.data.cards;
+                let pl = &mut self.players[p];
+                for _ in 0..runs {
+                    for (i, o) in pl.board.iter_mut().enumerate() {
+                        if i != pos && cards.get(o.card).is(tribe) {
+                            buff(o, attack * mul, health * mul);
+                        }
+                    }
+                }
+            }
+            Effect::BuffChosen { tribe, attack, health } => {
+                let pt = PendingTarget {
+                    source: pos as u8,
+                    tribe,
+                    attack: attack * mul,
+                    health: health * mul,
+                    keyword: 0,
+                    runs,
+                };
+                self.offer_target(p, pt);
+            }
+            Effect::BeetleBuff { attack, health } => {
+                for _ in 0..runs {
+                    self.add_beetle_bonus(p, attack * mul, health * mul);
+                }
+            }
+            Effect::GoldNextTurn(g) => {
+                let gain = g.saturating_mul(mul as u8).saturating_mul(runs);
+                self.players[p].gold_next_turn =
+                    self.players[p].gold_next_turn.saturating_add(gain);
+            }
+            Effect::RandomVolumizer => {
+                let total = (mul as u8).saturating_mul(runs);
+                for _ in 0..total {
+                    if let Some(v) = self.data.cards.random_volumizer(&mut self.rng) {
+                        self.give_generated_tracking(p, v, &mut pos);
+                    }
+                }
+            }
+            Effect::Summon { .. } => {}
+        }
+    }
+
+    fn offer_target(&mut self, p: usize, pt: PendingTarget) {
+        let mut targets = (0..self.players[p].board.len()).filter(|&s| self.valid_target(p, &pt, s));
+        match (targets.next(), targets.next()) {
+            (None, _) => {}
+            (Some(s), None) => self.apply_target(p, &pt, s),
+            _ => self.players[p].pending_target = Some(pt),
+        }
+    }
+
+    fn apply_target(&mut self, p: usize, pt: &PendingTarget, s: usize) {
+        let m = &mut self.players[p].board[s];
+        for _ in 0..pt.runs {
+            buff(m, pt.attack, pt.health);
+            if pt.keyword != 0 {
+                m.keywords.set(pt.keyword);
+            }
         }
     }
 
     fn resolve_target(&mut self, p: usize, s: usize) {
-        let pl = &mut self.players[p];
-        let pt = pl.pending_target.take().unwrap();
-        buff(&mut pl.board[s], pt.attack, pt.health);
-        if pl.discover_queued {
-            self.start_discover(p);
-        }
+        let pt = self.players[p].pending_target.take().unwrap();
+        self.apply_target(p, &pt, s);
+        self.maybe_start_discover(p);
     }
 
-    /// The Triple Reward: 3 different minions from one tier up, taken out
-    /// of the pool until the player picks one.
-    fn start_discover(&mut self, p: usize) {
-        let Game { data, rng, players, pool, .. } = self;
-        let pl = &mut players[p];
-        pl.discover_queued = false;
-        let tier = (pl.tier + 1).min(MAX_TIER);
-        while !pl.discover.is_full() {
-            match draw(pool, &data.cards, rng, tier, tier, &pl.discover) {
-                Some(c) => pl.discover.push(c),
-                None => break,
+    fn maybe_start_discover(&mut self, p: usize) {
+        while self.players[p].pending_target.is_none()
+            && self.players[p].pending_choose_one.is_none()
+            && self.players[p].discover.is_empty()
+            && !self.players[p].discover_queue.is_empty()
+        {
+            let tier = self.players[p].discover_queue.remove(0);
+            let Game { data, rng, players, pool, .. } = self;
+            let pl = &mut players[p];
+            while !pl.discover.is_full() {
+                match draw(pool, &data.cards, rng, tier, tier, &pl.discover) {
+                    Some(c) => pl.discover.push(c),
+                    None => break,
+                }
             }
         }
     }
 
     fn resolve_choose(&mut self, p: usize, k: usize) {
+        if let Some(pco) = self.players[p].pending_choose_one.take() {
+            let opt = pco.options[k];
+            let pt = PendingTarget {
+                source: pco.source,
+                tribe: opt.tribe,
+                attack: opt.attack,
+                health: opt.health,
+                keyword: opt.keyword,
+                runs: 1,
+            };
+            self.offer_target(p, pt);
+            self.maybe_start_discover(p);
+            return;
+        }
         let Game { data, players, pool, .. } = self;
         let pl = &mut players[p];
         let c = pl.discover[k];
         for (i, &o) in pl.discover.iter().enumerate() {
             if i != k {
-                pool[o as usize] += 1;
+                let slot = data.cards.get(o).pool_slot as usize;
+                pool[slot] += 1;
             }
         }
         pl.discover.clear();
-        pl.hand.push(data.cards.make(c, false));
-        self.check_triple(p, c);
+        if !pl.hand.is_full() {
+            let m = pl.make_card(&data.cards, c, false, 1);
+            pl.hand.push(m);
+            self.check_triple(p, c);
+        } else {
+            let slot = self.data.cards.get(c).pool_slot as usize;
+            self.pool[slot] += 1;
+        }
+        self.maybe_start_discover(p);
+    }
+
+    fn give_generated(&mut self, p: usize, card: CardId) {
+        let mut dummy = 0;
+        self.give_generated_tracking(p, card, &mut dummy);
+    }
+
+    fn give_generated_tracking(&mut self, p: usize, card: CardId, tracked_pos: &mut usize) {
+        if self.players[p].hand.is_full() {
+            return;
+        }
+        let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+        self.players[p].hand.push(m);
+        self.check_triple_tracking(p, card, tracked_pos);
     }
 
     /// Three copies of a card in hand and on board become a golden one in
-    /// hand, with double printed stats plus the buffs of all three.
+    /// hand, with double printed stats plus the buffs and attachments of all
+    /// three.
     fn check_triple(&mut self, p: usize, card: CardId) {
+        let mut dummy = 0;
+        self.check_triple_tracking(p, card, &mut dummy);
+    }
+
+    fn check_triple_tracking(&mut self, p: usize, card: CardId, tracked_pos: &mut usize) {
         let cards = &self.data.cards;
         let pl = &mut self.players[p];
         let is_copy = |m: &Minion| m.card == card && !m.golden;
-        let n = pl.hand.iter().filter(|m| is_copy(m)).count() + pl.board.iter().filter(|m| is_copy(m)).count();
+        let n = pl.hand.iter().filter(|m| is_copy(m)).count()
+            + pl.board.iter().filter(|m| is_copy(m)).count();
         if n < 3 {
             return;
         }
-        let base = cards.make(card, false);
-        let mut gold = cards.make(card, true);
+        let base = pl.make_card(cards, card, false, 0);
+        let mut gold = pl.make_card(cards, card, true, 0);
         let mut left = 3;
         let mut take = |m: Minion| {
             gold.attack += m.attack - base.attack;
             gold.health += m.health - base.health;
+            gold.keywords.0 |= m.keywords.0;
+            gold.pool_copies = gold.pool_copies.saturating_add(m.pool_copies);
+            gold.magnetizations = gold.magnetizations.saturating_add(m.magnetizations);
+            gold.volumizers =
+                gold.volumizers.saturating_add(m.volumizers.saturating_sub(base.volumizers));
+            gold.improvements = gold.improvements.saturating_add(m.improvements);
+            for &a in m.attached_slice() {
+                gold.push_attached(a);
+            }
         };
         while left > 0 {
             if let Some(i) = pl.hand.iter().position(is_copy) {
                 take(pl.hand.remove(i));
             } else {
                 let i = pl.board.iter().position(is_copy).unwrap();
+                if i < *tracked_pos {
+                    *tracked_pos -= 1;
+                }
                 take(pl.board.remove(i));
             }
             left -= 1;
@@ -397,20 +799,90 @@ impl Game {
         pl.hand.push(gold);
     }
 
+    fn run_after_buy(&mut self, p: usize) {
+        let mut pos = 0;
+        while pos < self.players[p].board.len() {
+            let m = self.players[p].board[pos];
+            for (card, golden) in m.parts() {
+                if let Some(AfterBuy::AutoReveille { every }) = self.data.cards.get(card).after_buy
+                {
+                    self.players[p].board[pos].improvements += 1;
+                    if self.players[p].board[pos].improvements >= every as u16 {
+                        self.players[p].board[pos].improvements -= every as u16;
+                        if let Some(v_id) = self.data.cards.random_volumizer(&mut self.rng) {
+                            let v = self.players[p].make_card(&self.data.cards, v_id, false, 0);
+                            self.magnetize_to(p, pos, v, false);
+                            let copies = if golden { 2 } else { 1 };
+                            for _ in 0..copies {
+                                self.give_generated_tracking(p, v_id, &mut pos);
+                            }
+                        }
+                    }
+                }
+            }
+            pos += 1;
+        }
+    }
+
+    fn run_end_of_turn(&mut self, p: usize) {
+        let runs = self.drakkari_mult(p);
+        let mut pos = 0;
+        while pos < self.players[p].board.len() {
+            let m = self.players[p].board[pos];
+            for _ in 0..runs {
+                for (card, golden) in m.parts() {
+                    let mul = if golden { 2 } else { 1 };
+                    match self.data.cards.get(card).end_of_turn {
+                        Some(EndOfTurn::BuffSelf { attack, health }) => {
+                            buff(&mut self.players[p].board[pos], attack * mul, health * mul);
+                        }
+                        Some(EndOfTurn::ResourcefulRobot) => {
+                            let n = if golden { 2 } else { 1 };
+                            for _ in 0..n {
+                                if let Some(v_id) = self.data.cards.random_volumizer(&mut self.rng)
+                                {
+                                    let v =
+                                        self.players[p].make_card(&self.data.cards, v_id, false, 0);
+                                    self.magnetize_to(p, pos, v, false);
+                                    self.give_generated_tracking(p, v_id, &mut pos);
+                                }
+                            }
+                        }
+                        Some(EndOfTurn::BuffPerMagnetization { attack, health }) => {
+                            for o in &mut self.players[p].board {
+                                let mag = o.magnetizations as i32;
+                                if mag > 0 {
+                                    buff(o, attack * mul * mag, health * mul * mag);
+                                }
+                            }
+                        }
+                        Some(EndOfTurn::ImproveTier) => {
+                            let imp = &mut self.players[p].board[pos].improvements;
+                            *imp = (*imp + 1).min((MAX_TIER - 1) as u16);
+                        }
+                        None => {}
+                    }
+                }
+            }
+            pos += 1;
+        }
+    }
+
     /// The player is done for this turn. Anything still waiting on a choice
-    /// takes the first option.
+    /// takes the first option, then end-of-turn effects run.
     fn finish_shop(&mut self, p: usize) {
         loop {
             let pl = &self.players[p];
             if let Some(pt) = pl.pending_target {
                 let s = (0..pl.board.len()).find(|&s| self.valid_target(p, &pt, s)).unwrap();
                 self.resolve_target(p, s);
-            } else if !pl.discover.is_empty() {
+            } else if pl.pending_choose_one.is_some() || !pl.discover.is_empty() {
                 self.resolve_choose(p, 0);
             } else {
                 break;
             }
         }
+        self.run_end_of_turn(p);
         self.players[p].done = true;
     }
 
@@ -432,12 +904,21 @@ impl Game {
     fn start_turn(&mut self) {
         self.turn += 1;
         let Game { data, rng, players, pool, turn, .. } = self;
-        let gold = data.rules.gold(*turn);
+        let base_gold = data.rules.gold(*turn);
         for pl in players.iter_mut().filter(|p| p.alive) {
             if *turn > 1 {
                 pl.upgrade_cost = pl.upgrade_cost.saturating_sub(1);
             }
-            pl.gold = gold;
+            pl.gold = base_gold.saturating_add(pl.gold_next_turn);
+            pl.gold_next_turn = 0;
+            for m in &pl.board {
+                for (card, golden) in m.parts() {
+                    if let Some(StartOfTurn::GainGold(g)) = data.cards.get(card).start_of_turn {
+                        let gain = g.saturating_mul(if golden { 2 } else { 1 });
+                        pl.gold = pl.gold.saturating_add(gain);
+                    }
+                }
+            }
             pl.done = false;
             pl.actions = 0;
             if pl.frozen {
@@ -459,7 +940,8 @@ impl Game {
     /// Pair the living players at random, avoiding last turn's opponent
     /// when a few shuffles can. With an odd count, one fights the ghost.
     fn pair(&mut self) {
-        let mut alive: ArrayVec<u8, PLAYERS> = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
+        let mut alive: ArrayVec<u8, PLAYERS> =
+            (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
         let repeats = |order: &[u8], players: &[Player; PLAYERS]| {
             order
                 .chunks_exact(2)
@@ -490,29 +972,53 @@ impl Game {
         }
     }
 
+    fn apply_side_outcome(&mut self, p: usize, so: &SideOutcome) {
+        for (slot, &imp) in so.permanent_improvements.iter().enumerate() {
+            if imp > 0 && slot < self.players[p].board.len() {
+                self.players[p].board[slot].improvements =
+                    self.players[p].board[slot].improvements.saturating_add(imp);
+            }
+        }
+        if so.beetle_attack_gain != 0 || so.beetle_health_gain != 0 {
+            self.add_beetle_bonus(p, so.beetle_attack_gain, so.beetle_health_gain);
+        }
+        for &c in so.cards_gained() {
+            self.give_generated(p, c);
+        }
+    }
+
     fn combat(&mut self) {
         let alive = self.alive();
-        let rules = &self.data.rules;
-        let cap = rules.damage_cap(self.turn, alive);
+        let max_attacks = self.data.rules.max_attacks;
+        let cap = self.data.rules.damage_cap(self.turn, alive);
         let capped = |d: i32| cap.map_or(d, |c| d.min(c));
         let mut damage = [0i32; PLAYERS];
         for p in 0..PLAYERS {
             if !self.players[p].alive {
                 continue;
             }
-            let (them, tier) = match self.players[p].opponent {
+            let (them, tier, their_counters) = match self.players[p].opponent {
                 Some(Opponent::Player(q)) if p < q as usize => {
                     let q = &self.players[q as usize];
-                    (q.board.clone(), q.tier)
+                    (q.board.clone(), q.tier, q.counters())
                 }
                 Some(Opponent::Ghost(_)) => {
                     let g = self.ghost.as_ref().unwrap();
-                    (g.board.clone(), g.tier)
+                    (g.board.clone(), g.tier, g.counters)
                 }
                 _ => continue,
             };
             let me = self.players[p].board.clone();
-            let out = fight(&self.data.cards, &me, &them, rules.max_attacks, &mut self.rng);
+            let my_counters = self.players[p].counters();
+            let out = fight_with(
+                &self.data.cards,
+                &me,
+                &them,
+                [my_counters, their_counters],
+                max_attacks,
+                &mut self.rng,
+                &mut (),
+            );
             let turn = self.turn;
             match self.players[p].opponent.unwrap() {
                 Opponent::Player(q) => {
@@ -521,16 +1027,33 @@ impl Game {
                     let my_tier = self.players[p].tier;
                     self.players[q].seen[p] = Seen { board: me, tier: my_tier, turn };
                     match out.winner {
-                        Some(0) => damage[q] += capped(my_tier as i32 + out.survivor_tiers),
-                        Some(_) => damage[p] += capped(tier as i32 + out.survivor_tiers),
-                        None => {}
+                        Some(0) => {
+                            damage[q] += capped(my_tier as i32 + out.survivor_tiers);
+                            self.players[p].lost_last_combat = false;
+                            self.players[q].lost_last_combat = true;
+                        }
+                        Some(_) => {
+                            damage[p] += capped(tier as i32 + out.survivor_tiers);
+                            self.players[p].lost_last_combat = true;
+                            self.players[q].lost_last_combat = false;
+                        }
+                        None => {
+                            self.players[p].lost_last_combat = false;
+                            self.players[q].lost_last_combat = false;
+                        }
                     }
+                    self.apply_side_outcome(p, &out.sides[0]);
+                    self.apply_side_outcome(q, &out.sides[1]);
                 }
                 Opponent::Ghost(g) => {
                     self.players[p].seen[g as usize] = Seen { board: them, tier, turn };
                     if out.winner == Some(1) {
                         damage[p] += capped(tier as i32 + out.survivor_tiers);
+                        self.players[p].lost_last_combat = true;
+                    } else {
+                        self.players[p].lost_last_combat = false;
                     }
+                    self.apply_side_outcome(p, &out.sides[0]);
                 }
             }
         }
@@ -542,8 +1065,9 @@ impl Game {
     }
 
     fn knockouts(&mut self, alive: usize) {
-        let mut dead: ArrayVec<u8, PLAYERS> =
-            (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive && self.players[p as usize].health <= 0).collect();
+        let mut dead: ArrayVec<u8, PLAYERS> = (0..PLAYERS as u8)
+            .filter(|&p| self.players[p as usize].alive && self.players[p as usize].health <= 0)
+            .collect();
         // best first: more health left, ties at random
         self.rng.shuffle(&mut dead);
         dead.sort_by_key(|&p| std::cmp::Reverse(self.players[p as usize].health));
@@ -554,18 +1078,26 @@ impl Game {
             pl.alive = false;
             pl.placement = (first_place + k) as u8;
             if k == 0 {
-                *ghost = Some(Ghost { player: p, board: pl.board.clone(), tier: pl.tier });
+                *ghost = Some(Ghost {
+                    player: p,
+                    board: pl.board.clone(),
+                    tier: pl.tier,
+                    counters: pl.counters(),
+                });
             }
             for m in pl.shop.drain(..).chain(pl.hand.drain(..)).chain(pl.board.drain(..)) {
                 give_back(pool, &data.cards, &m);
             }
             for c in pl.discover.drain(..) {
-                pool[c as usize] += 1;
+                let slot = data.cards.get(c).pool_slot as usize;
+                pool[slot] += 1;
             }
+            pl.pending_choose_one = None;
             pl.pending_target = None;
-            pl.discover_queued = false;
+            pl.discover_queue.clear();
         }
-        let mut left: ArrayVec<u8, PLAYERS> = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
+        let mut left: ArrayVec<u8, PLAYERS> =
+            (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
         if left.len() <= 1 || self.turn >= self.data.rules.max_turns {
             self.rng.shuffle(&mut left);
             left.sort_by_key(|&p| std::cmp::Reverse(self.players[p as usize].health));
@@ -576,20 +1108,23 @@ impl Game {
         }
     }
 
-    /// Every card copy is in the pool or held by someone, nothing is over
-    /// its limit, and the dead hold nothing. Checked after every step in
-    /// debug builds; the fuzzer calls it in release too.
+    /// Every card copy is in the pool, held by someone, or consumed by a
+    /// Magnetization; nothing is over its limit; and the dead hold nothing.
+    /// Checked after every step in debug builds; the fuzzer calls it in
+    /// release too.
     pub fn check_invariants(&self) -> Result<(), String> {
         let cards = &self.data.cards;
         let mut held = vec![0u32; cards.pool_cards];
         for (i, pl) in self.players.iter().enumerate() {
             for m in pl.shop.iter().chain(&pl.hand).chain(&pl.board) {
                 if !cards.get(m.card).token {
-                    held[m.card as usize] += if m.golden { 3 } else { 1 };
+                    let slot = cards.get(m.card).pool_slot as usize;
+                    held[slot] += m.pool_copies as u32;
                 }
             }
             for &c in &pl.discover {
-                held[c as usize] += 1;
+                let slot = cards.get(c).pool_slot as usize;
+                held[slot] += 1;
             }
             if pl.shop.iter().any(|m| m.golden || cards.get(m.card).tier > pl.tier) {
                 return Err(format!("player {i}: shop has a card it shouldn't"));
@@ -602,7 +1137,15 @@ impl Game {
             {
                 return Err(format!("player {i}: pending target source off the board"));
             }
-            let holds_cards = !(pl.shop.is_empty() && pl.hand.is_empty() && pl.board.is_empty() && pl.discover.is_empty());
+            if let Some(pco) = pl.pending_choose_one
+                && pco.source as usize >= pl.board.len()
+            {
+                return Err(format!("player {i}: pending choose_one source off the board"));
+            }
+            let holds_cards = !(pl.shop.is_empty()
+                && pl.hand.is_empty()
+                && pl.board.is_empty()
+                && pl.discover.is_empty());
             if !pl.alive && holds_cards {
                 return Err(format!("player {i}: dead but holds cards"));
             }
@@ -614,10 +1157,15 @@ impl Game {
             }
         }
         for c in 0..cards.pool_cards {
-            let want = self.data.rules.copies(cards.cards[c].tier) as u32;
-            let have = self.pool[c] as u32 + held[c];
+            let card = &cards.cards[c];
+            let want = if card.pool_slot as usize == c {
+                self.data.rules.copies(card.tier) as u32
+            } else {
+                0
+            };
+            let have = self.pool[c] as u32 + held[c] + self.consumed[c];
             if have != want {
-                return Err(format!("{}: {have} copies, should be {want}", cards.cards[c].name));
+                return Err(format!("{}: {have} copies, should be {want}", card.name));
             }
         }
         if self.over {
@@ -634,11 +1182,12 @@ impl Game {
     /// setting up positions, not part of the game.
     pub fn give(&mut self, p: usize, name: &str) -> Option<Minion> {
         let c = self.data.cards.by_name(name)?;
-        if self.pool.get(c as usize).copied().unwrap_or(0) == 0 || self.players[p].hand.is_full() {
+        let slot = self.data.cards.get(c).pool_slot as usize;
+        if self.pool.get(slot).copied().unwrap_or(0) == 0 || self.players[p].hand.is_full() {
             return None;
         }
-        self.pool[c as usize] -= 1;
-        let m = self.data.cards.make(c, false);
+        self.pool[slot] -= 1;
+        let m = self.players[p].make_card(&self.data.cards, c, false, 1);
         self.players[p].hand.push(m);
         Some(m)
     }

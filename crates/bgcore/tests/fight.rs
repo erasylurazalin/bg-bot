@@ -1,7 +1,11 @@
-use bgcore::fight::{Watch, fight_watched};
-use bgcore::{CardDb, Data, Keywords, Minion, Rng, fight};
+use bgcore::fight::{Watch, fight_watched, fight_with};
+use bgcore::{CardDb, Counters, Data, Keywords, Minion, Rng, fight};
 
 fn db() -> CardDb {
+    CardDb::from_toml(include_str!("data/v01-cards.toml")).unwrap()
+}
+
+fn s2_db() -> CardDb {
     Data::bundled().cards
 }
 
@@ -268,3 +272,144 @@ fn same_seed_same_fight() {
         assert_eq!(x, y);
     }
 }
+
+#[test]
+fn start_of_combat_humming_bird_and_boom_in_a_box() {
+    let db = s2_db();
+    // Humming Bird gives friendly Beasts +1 Attack (golden +2) for the combat,
+    // including Beasts summoned later.
+    let a = board(&db, &["Buzzing Vermin", "Humming Bird"]);
+    let mut b = board(&db, &["Zoatroid"]);
+    b[0].attack = 1;
+    b[0].health = 20;
+    let mut log = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &a, &b, 500, &mut Rng::new(1), &mut log);
+    assert_eq!(log.summons.len(), 1);
+    // Beetle is 2/2 base + 1 Attack from Humming Bird = 3/2
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (3, 2));
+
+    // Boom-in-a-Box deals 3 damage to all other minions at Start of Combat
+    // (golden twice, popping shield then dealing 3).
+    let mut boom = db.make(db.by_name("Boom-in-a-Box").unwrap(), true);
+    boom.attack = 0;
+    let mut cord = db.make(db.by_name("Cord Puller").unwrap(), false);
+    cord.health = 3; // Divine Shield + 3 HP: wave 1 pops shield, wave 2 kills it
+    let out = fight(&db, &[boom], &[cord], 500, &mut Rng::new(2));
+    // Cord Puller died in Start of Combat and summoned a 1/1 Microbot, which kills 0-attack Boom.
+    assert_eq!(out.winner, Some(1));
+    assert_eq!(out.survivor_tiers, 1);
+}
+
+#[test]
+fn rally_flittering_bat_and_headhunter_gryphon() {
+    let db = s2_db();
+    let bat = db.make(db.by_name("Flittering Bat").unwrap(), true);
+    let mut dummy = db.make(db.by_name("Zoatroid").unwrap(), false);
+    dummy.attack = 0;
+    dummy.health = 5;
+    let mut log = Log { db: Some(db.clone()), ..Default::default() };
+    let out = fight_watched(&db, &[bat, dummy], &[dummy], 500, &mut Rng::new(1), &mut log);
+    assert_eq!(out.winner, Some(0));
+    // Golden Flittering Bat summons two 1/1 Foraging Bats on its first attack
+    assert!(log.summons.len() >= 2);
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (1, 1));
+    assert_eq!((log.summons[1].2.attack, log.summons[1].2.health), (1, 1));
+
+    // Headhunter Gryphon gives a random Beast on attack (golden gives 2)
+    let gryphon = db.make(db.by_name("Headhunter Gryphon").unwrap(), false);
+    let gold_gryphon = db.make(db.by_name("Headhunter Gryphon").unwrap(), true);
+    let mut target = db.make(db.by_name("Zoatroid").unwrap(), false);
+    target.attack = 100;
+    target.health = 1;
+    let out1 = fight(&db, &[gryphon], &[target], 500, &mut Rng::new(7));
+    assert_eq!(out1.sides[0].cards_gained().len(), 1);
+    let out2 = fight(&db, &[gold_gryphon], &[target], 500, &mut Rng::new(7));
+    assert_eq!(out2.sides[0].cards_gained().len(), 2);
+}
+
+#[test]
+fn beast_summon_scaling_pack_leader_mama_bear_banana_slamma() {
+    let db = s2_db();
+    let vermin = db.make(db.by_name("Buzzing Vermin").unwrap(), false);
+    let pack = db.make(db.by_name("Pack Leader").unwrap(), false);
+    let mama = db.make(db.by_name("Mama Bear").unwrap(), false);
+    let slamma = db.make(db.by_name("Banana Slamma").unwrap(), false);
+    let gold_slamma = db.make(db.by_name("Banana Slamma").unwrap(), true);
+    let mut wall = db.make(db.by_name("Zoatroid").unwrap(), false);
+    wall.attack = 10;
+    wall.health = 100;
+
+    // Beetle (2/2) + Pack Leader (+2/+0) + Mama Bear (+4/+4) = 8/6,
+    // then Banana Slamma doubles Attack to 16/6.
+    let mut log = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &[vermin, pack, mama, slamma], &[wall], 500, &mut Rng::new(1), &mut log);
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (16, 6));
+
+    // With golden Banana Slamma in place of plain, 8/6 triples Attack to 24/6.
+    let mut log2 = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &[vermin, pack, mama, gold_slamma], &[wall], 500, &mut Rng::new(1), &mut log2);
+    assert_eq!((log2.summons[0].2.attack, log2.summons[0].2.health), (24, 6));
+}
+
+#[test]
+fn rat_pack_sewer_lord_and_titus_rivendare() {
+    let db = s2_db();
+    let mut rat_pack = db.make(db.by_name("Rat Pack").unwrap(), false);
+    rat_pack.attack = 4;
+    let titus = db.make(db.by_name("Titus Rivendare").unwrap(), false);
+    let gold_titus = db.make(db.by_name("Titus Rivendare").unwrap(), true);
+    let mut killer = db.make(db.by_name("Zoatroid").unwrap(), false);
+    killer.attack = 10;
+    killer.health = 100;
+
+    // Rat Pack with 4 Attack summons 4 Rats.
+    let mut log = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &[rat_pack], &[killer], 500, &mut Rng::new(1), &mut log);
+    assert_eq!(log.summons.len(), 4);
+
+    // Buzzing Vermin (1 Beetle) with plain Titus summons 2 Beetles; with golden Titus, 3 Beetles.
+    let vermin = db.make(db.by_name("Buzzing Vermin").unwrap(), false);
+    let mut log_t1 = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &[vermin, titus], &[killer], 500, &mut Rng::new(1), &mut log_t1);
+    assert_eq!(log_t1.summons.len(), 2);
+
+    let mut log_t2 = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &[vermin, gold_titus], &[killer], 500, &mut Rng::new(1), &mut log_t2);
+    assert_eq!(log_t2.summons.len(), 3);
+
+    // Sewer Lord summons 2 Sewer Rats, each of which summons a 2/3 Turtle with Taunt.
+    let sewer_lord = db.make(db.by_name("Sewer Lord").unwrap(), false);
+    let mut log_sl = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(&db, &[sewer_lord], &[killer], 500, &mut Rng::new(1), &mut log_sl);
+    let spawned: Vec<String> =
+        log_sl.summons.iter().map(|s| db.get(s.2.card).name.clone()).collect();
+    assert_eq!(spawned, ["Sewer Rat", "Sewer Rat", "Turtle", "Turtle"]);
+}
+
+#[test]
+fn turquoise_skitterer_and_ravaging_scorpid_buff_beetles_in_combat() {
+    let db = s2_db();
+    // Existing Beetle on board (2/2) + Turquoise Skitterer dying (+5/+5, then summons a Beetle):
+    // both the existing Beetle and the newly summoned Beetle have +5/+5 (7/7), and the side
+    // outcome records +5/+5 Beetle gain.
+    let mut skitterer = db.make(db.by_name("Turquoise Skitterer").unwrap(), false);
+    skitterer.keywords.set(Keywords::TAUNT);
+    let beetle = db.make(db.by_name("Beetle").unwrap(), false);
+    let mut killer = db.make(db.by_name("Zoatroid").unwrap(), false);
+    killer.attack = 5;
+    killer.health = 5;
+    let mut log = Log { db: Some(db.clone()), ..Default::default() };
+    let out = fight_with(
+        &db,
+        &[skitterer, beetle],
+        &[killer],
+        [Counters::default(); 2],
+        500,
+        &mut Rng::new(1),
+        &mut log,
+    );
+    assert_eq!(out.winner, Some(0));
+    assert_eq!((out.sides[0].beetle_attack_gain, out.sides[0].beetle_health_gain), (5, 5));
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (7, 7));
+}
+

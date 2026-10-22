@@ -16,9 +16,9 @@ pub mod rules;
 
 pub use action::{Action, N_ACTIONS};
 pub use cards::{Card, CardDb, Effect, Tribe};
-pub use fight::{Outcome, fight};
+pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
 pub use game::{Game, IllegalAction, Opponent, Player};
-pub use minion::{CardId, Keywords, Minion};
+pub use minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
 pub use rng::Rng;
 pub use rules::Rules;
 
