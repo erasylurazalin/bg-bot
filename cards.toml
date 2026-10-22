@@ -361,7 +361,7 @@ name = "Auto Reveille"
 tier = 6
 tribe = "mech"
 stats = [4, 8]
-after_buy = { every = 3 }
+on_event = { event = "cards_bought", every = 3, effect = { magnetize_volumizer = true } }
 
 [[minion]]
 name = "Utility Drone"

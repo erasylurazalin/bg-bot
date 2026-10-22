@@ -7,18 +7,99 @@ use crate::rng::Rng;
 pub enum Tribe {
     Beast,
     Mech,
-    Neutral,
+    Dragon,
+    Murloc,
+    Demon,
 }
 
-/// Battlecry and general minion card text effects.
+impl Tribe {
+    pub const ALL: [Tribe; 5] = [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon];
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+/// The tribes of a card: none (neutral), one, two, or all five ("all").
+/// Every tribe filter in the game asks `has`, so a two-tribe card counts for
+/// both and an "all" card counts for every tribe.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Tribes(u8);
+
+impl Tribes {
+    pub const NONE: Tribes = Tribes(0);
+    pub const ALL: Tribes = Tribes(0b11111);
+
+    pub fn of(t: Tribe) -> Tribes {
+        Tribes(t.bit())
+    }
+
+    pub fn has(self, t: Tribe) -> bool {
+        self.0 & t.bit() != 0
+    }
+
+    /// Neutral: no tribe at all.
+    pub fn is_neutral(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Whether the two sets share a tribe ("a minion of its type").
+    pub fn overlaps(self, other: Tribes) -> bool {
+        self.0 & other.0 != 0
+    }
+}
+
+/// Which Tavern minion a consuming minion takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ConsumePick {
+    /// The player picks one in the Tavern.
+    Chosen,
+    Random,
+    HighestHealth,
+}
+
+/// Who does the consuming.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ConsumeBy {
+    /// The minion with the effect.
+    This,
+    /// A friendly minion the player picks, of this tribe if one is given.
+    Chosen(Option<Tribe>),
+}
+
+/// Battlecry and general minion card text effects. Also what Activate, event
+/// triggers, "after your hero takes damage" and some end of turn effects run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
     /// Summon `count` copies of a token where the minion stood.
     Summon { card: CardId, count: u8 },
-    /// Buff one other friendly minion the player picks.
-    BuffChosen { tribe: Option<Tribe>, attack: i32, health: i32 },
+    /// Buff one other friendly minion the player picks. `per_keyword` is
+    /// added once more for each different Bonus Keyword in the warband.
+    BuffChosen {
+        tribe: Option<Tribe>,
+        attack: i32,
+        health: i32,
+        per_keyword: (i32, i32),
+        random_keyword: bool,
+    },
     /// Buff every other friendly minion.
-    BuffOthers { tribe: Option<Tribe>, attack: i32, health: i32 },
+    BuffOthers { tribe: Option<Tribe>, attack: i32, health: i32, per_keyword: (i32, i32) },
+    /// Buff the minion itself.
+    BuffSelf { attack: i32, health: i32 },
+    /// The minion gains a random Bonus Keyword it doesn't have.
+    RandomKeyword,
+    /// A minion consumes minions from the Tavern and gains their stats, and
+    /// their Bonus Keywords when `keywords` is set.
+    Consume { by: ConsumeBy, pick: ConsumePick, keywords: bool, count: u8 },
+    /// Buff the Tavern minions (of a tribe, if given), now and, unless
+    /// `this_turn`, for the rest of the game.
+    TavernBuff { tribe: Option<Tribe>, attack: i32, health: i32, this_turn: bool },
+    /// Deal damage to your own hero (never below the self damage floor).
+    DamageHero(i32),
+    /// Undo the damage your hero just took.
+    RewindDamage,
+    /// Magnetize a random Volumizer to this minion and get a copy of it.
+    MagnetizeVolumizerAndCopy,
     /// Give your Beetles +attack/+health this game.
     BeetleBuff { attack: i32, health: i32 },
     /// Gain extra Gold next turn.
@@ -29,6 +110,48 @@ pub enum Effect {
     SpellDiscount(u8),
     /// Get `count` copies of a generated card (`count * 2` when golden).
     GetCard { card: CardId, count: u8 },
+}
+
+impl Effect {
+    /// Whether the player has to pick something to finish this effect. Event
+    /// triggers and end of turn effects can't ask, so they can't use these.
+    pub fn needs_choice(self) -> bool {
+        matches!(
+            self,
+            Effect::BuffChosen { .. }
+                | Effect::Consume { by: ConsumeBy::Chosen(_), .. }
+                | Effect::Consume { pick: ConsumePick::Chosen, .. }
+        )
+    }
+}
+
+/// An Activate ability: pay gold, run the effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Activate {
+    pub cost: u8,
+    pub effect: Effect,
+}
+
+/// Things a player does that event triggers count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EventKind {
+    SpellsCast,
+    /// Counts gold, so spending 5 adds 5.
+    GoldSpent,
+    /// Counts damage, so taking 3 adds 3.
+    HeroDamage,
+    MinionsSold,
+    CardsBought,
+}
+
+/// "After N events, do the effect (N left!)". The count lives in the
+/// minion's `improvements`. Going past N keeps the remainder, so one big
+/// event can fire it more than once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventTrigger {
+    pub kind: EventKind,
+    pub every: u8,
+    pub effect: Effect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -136,6 +259,8 @@ pub enum EndOfTurn {
     ImproveTier,
     GetCard { card: CardId, count: u8 },
     CopyLastSpell,
+    /// Any generic effect (one that needs no choice).
+    Effect(Effect),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,11 +307,6 @@ pub enum AfterFriendlyAttack {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AfterBuy {
-    AutoReveille { every: u8 },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnSell {
     GetCard { card: CardId, count: u8 },
     DiscoverByTier,
@@ -205,7 +325,7 @@ pub enum Aura {
 pub struct Card {
     pub name: String,
     pub tier: u8,
-    pub tribe: Tribe,
+    pub tribes: Tribes,
     pub attack: i32,
     pub health: i32,
     pub keywords: Keywords,
@@ -233,7 +353,12 @@ pub struct Card {
     pub on_cast_spell_on_mech: Option<OnCastSpellOnMech>,
     pub on_cast_spell: Option<OnCastSpell>,
     pub after_friendly_attack: Option<AfterFriendlyAttack>,
-    pub after_buy: Option<AfterBuy>,
+    pub activate: Option<Activate>,
+    pub on_event: Option<EventTrigger>,
+    /// Effects that run in order after your hero takes damage.
+    pub after_hero_damage: Vec<Effect>,
+    /// Refreshes each turn that cost Health instead of Gold.
+    pub health_refreshes: u8,
     pub on_sell: Option<OnSell>,
     pub aura: Option<Aura>,
     pub spell_target: Option<SpellTarget>,
@@ -241,8 +366,9 @@ pub struct Card {
 }
 
 impl Card {
+    /// Whether the card has this tribe, always true for no filter.
     pub fn is(&self, tribe: Option<Tribe>) -> bool {
-        tribe.is_none_or(|t| self.tribe == t)
+        tribe.is_none_or(|t| self.tribes.has(t))
     }
 
     pub fn is_spell(&self) -> bool {
@@ -287,7 +413,10 @@ impl Card {
             || self.on_cast_spell_on_mech.is_some()
             || self.on_cast_spell.is_some()
             || self.after_friendly_attack.is_some()
-            || self.after_buy.is_some()
+            || self.activate.is_some()
+            || self.on_event.is_some()
+            || !self.after_hero_damage.is_empty()
+            || self.health_refreshes > 0
             || self.on_sell.is_some()
             || self.aura.is_some()
             || self.spell_buff.is_some()
@@ -320,7 +449,10 @@ struct RawFile {
 struct RawCard {
     name: String,
     tier: u8,
-    tribe: String,
+    /// One tribe, "neutral" or "all".
+    tribe: Option<String>,
+    /// Two or more tribes, for multi-tribe cards.
+    tribes: Option<Vec<String>>,
     stats: [i32; 2],
     #[serde(default)]
     keywords: Vec<String>,
@@ -328,7 +460,7 @@ struct RawCard {
     beetle: bool,
     volumizer_buff: Option<[i32; 2]>,
     spell_buff: Option<[i32; 2]>,
-    battlecry: Option<RawBattlecry>,
+    battlecry: Option<RawEffect>,
     choose_one: Option<[RawMinionChooseOption; 2]>,
     deathrattle: Option<RawDeathrattle>,
     start_of_turn: Option<RawStartOfTurn>,
@@ -341,7 +473,11 @@ struct RawCard {
     on_cast_spell_on_mech: Option<RawOnCastSpellOnMech>,
     on_cast_spell: Option<RawOnCastSpell>,
     after_friendly_attack: Option<RawBeetleBuff>,
-    after_buy: Option<RawAfterBuy>,
+    activate: Option<RawActivate>,
+    on_event: Option<RawOnEvent>,
+    #[serde(default)]
+    after_hero_damage: Vec<RawEffect>,
+    health_refreshes: Option<u8>,
     on_sell: Option<RawOnSell>,
     aura: Option<String>,
 }
@@ -384,10 +520,30 @@ struct RawSpellEffect {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawBattlecry {
+struct RawEffect {
     buff: Option<[i32; 2]>,
+    /// "chosen", "others" or "self", for a buff.
     target: Option<String>,
     tribe: Option<String>,
+    /// Added once more per different Bonus Keyword in the warband.
+    per_keyword: Option<[i32; 2]>,
+    #[serde(default)]
+    random_keyword: bool,
+    /// "chosen", "random" or "highest_health".
+    consume: Option<String>,
+    /// The consumer is a friendly minion the player picks (of `tribe`).
+    #[serde(default)]
+    consume_by_chosen: bool,
+    #[serde(default)]
+    with_keywords: bool,
+    tavern_buff: Option<[i32; 2]>,
+    #[serde(default)]
+    this_turn: bool,
+    damage_hero: Option<i32>,
+    #[serde(default)]
+    rewind: bool,
+    #[serde(default)]
+    magnetize_volumizer: bool,
     beetle_buff: Option<[i32; 2]>,
     gold_next_turn: Option<u8>,
     random_volumizer: Option<bool>,
@@ -435,6 +591,7 @@ struct RawEndOfTurn {
     get: Option<String>,
     count: Option<u8>,
     copy_last_spell: Option<bool>,
+    effect: Option<RawEffect>,
 }
 
 #[derive(Deserialize)]
@@ -496,8 +653,18 @@ struct RawBeetleBuff {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawAfterBuy {
+struct RawActivate {
+    cost: u8,
+    effect: RawEffect,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOnEvent {
+    /// "spells_cast", "gold_spent", "hero_damage", "minions_sold" or "cards_bought".
+    event: String,
     every: u8,
+    effect: RawEffect,
 }
 
 #[derive(Deserialize)]
@@ -513,8 +680,46 @@ fn tribe(s: &str) -> Result<Tribe, String> {
     match s {
         "beast" => Ok(Tribe::Beast),
         "mech" => Ok(Tribe::Mech),
-        "neutral" => Ok(Tribe::Neutral),
+        "dragon" => Ok(Tribe::Dragon),
+        "murloc" => Ok(Tribe::Murloc),
+        "demon" => Ok(Tribe::Demon),
         _ => Err(format!("unknown tribe {s:?}")),
+    }
+}
+
+/// One entry of a card's tribe list: a tribe, "neutral" (none) or "all".
+fn tribe_set(s: &str) -> Result<Tribes, String> {
+    match s {
+        "neutral" => Ok(Tribes::NONE),
+        "all" => Ok(Tribes::ALL),
+        _ => Ok(Tribes::of(tribe(s)?)),
+    }
+}
+
+fn card_tribes(one: &Option<String>, many: &Option<Vec<String>>) -> Result<Tribes, String> {
+    match (one, many) {
+        (Some(t), None) => tribe_set(t),
+        (None, Some(ts)) => {
+            let mut set = Tribes::NONE;
+            for t in ts {
+                let one = tribe_set(t)?;
+                set = Tribes(set.0 | one.0);
+            }
+            Ok(set)
+        }
+        (None, None) => Err("needs tribe or tribes".into()),
+        (Some(_), Some(_)) => Err("has both tribe and tribes".into()),
+    }
+}
+
+fn parse_event(s: &str) -> Result<EventKind, String> {
+    match s {
+        "spells_cast" => Ok(EventKind::SpellsCast),
+        "gold_spent" => Ok(EventKind::GoldSpent),
+        "hero_damage" => Ok(EventKind::HeroDamage),
+        "minions_sold" => Ok(EventKind::MinionsSold),
+        "cards_bought" => Ok(EventKind::CardsBought),
+        other => Err(format!("unknown event {other:?}")),
     }
 }
 
@@ -678,6 +883,62 @@ impl CardDb {
         let mut first_volumizer_slot: Option<CardId> = None;
         let mut beetle_token: Option<CardId> = None;
 
+        let parse_effect = |b: &RawEffect| -> Result<Effect, String> {
+            let t = b.tribe.as_deref().map(tribe).transpose()?;
+            Ok(if let Some([attack, health]) = b.buff {
+                let per_keyword = b.per_keyword.map_or((0, 0), |[a, h]| (a, h));
+                match b.target.as_deref() {
+                    Some("chosen") => Effect::BuffChosen {
+                        tribe: t,
+                        attack,
+                        health,
+                        per_keyword,
+                        random_keyword: b.random_keyword,
+                    },
+                    Some("others") => Effect::BuffOthers { tribe: t, attack, health, per_keyword },
+                    Some("self") => Effect::BuffSelf { attack, health },
+                    other => return Err(format!("battlecry target {other:?}")),
+                }
+            } else if b.random_keyword {
+                Effect::RandomKeyword
+            } else if let Some(how) = &b.consume {
+                let pick = match how.as_str() {
+                    "chosen" => ConsumePick::Chosen,
+                    "random" => ConsumePick::Random,
+                    "highest_health" => ConsumePick::HighestHealth,
+                    other => return Err(format!("unknown consume {other:?}")),
+                };
+                let by = if b.consume_by_chosen { ConsumeBy::Chosen(t) } else { ConsumeBy::This };
+                Effect::Consume {
+                    by,
+                    pick,
+                    keywords: b.with_keywords,
+                    count: b.count.unwrap_or(1),
+                }
+            } else if let Some([attack, health]) = b.tavern_buff {
+                Effect::TavernBuff { tribe: t, attack, health, this_turn: b.this_turn }
+            } else if let Some(n) = b.damage_hero {
+                Effect::DamageHero(n)
+            } else if b.rewind {
+                Effect::RewindDamage
+            } else if b.magnetize_volumizer {
+                Effect::MagnetizeVolumizerAndCopy
+            } else if let Some([attack, health]) = b.beetle_buff {
+                Effect::BeetleBuff { attack, health }
+            } else if let Some(g) = b.gold_next_turn {
+                Effect::GoldNextTurn(g)
+            } else if b.random_volumizer == Some(true) {
+                Effect::RandomVolumizer
+            } else if let Some(d) = b.spell_discount {
+                Effect::SpellDiscount(d)
+            } else if let Some(name) = &b.get {
+                let card = generated_id(name)?;
+                Effect::GetCard { card, count: b.count.unwrap_or(1) }
+            } else {
+                return Err("invalid battlecry".into());
+            })
+        };
+
         for (idx, (c, token)) in all_minions.iter().enumerate() {
             let id = idx as CardId;
             let err = |e: String| format!("cards.toml, {}: {e}", c.name);
@@ -701,30 +962,42 @@ impl CardDb {
             let volumizer_buff = c.volumizer_buff.map(|[a, h]| (a, h));
             let spell_buff = c.spell_buff.map(|[a, h]| (a, h));
 
-            let battlecry = match &c.battlecry {
+            let battlecry = c.battlecry.as_ref().map(&parse_effect).transpose().map_err(&err)?;
+
+            let activate = match &c.activate {
                 None => None,
-                Some(b) => Some(if let Some([attack, health]) = b.buff {
-                    let t = b.tribe.as_deref().map(tribe).transpose().map_err(&err)?;
-                    match b.target.as_deref() {
-                        Some("chosen") => Effect::BuffChosen { tribe: t, attack, health },
-                        Some("others") => Effect::BuffOthers { tribe: t, attack, health },
-                        other => return Err(err(format!("battlecry target {other:?}"))),
-                    }
-                } else if let Some([attack, health]) = b.beetle_buff {
-                    Effect::BeetleBuff { attack, health }
-                } else if let Some(g) = b.gold_next_turn {
-                    Effect::GoldNextTurn(g)
-                } else if b.random_volumizer == Some(true) {
-                    Effect::RandomVolumizer
-                } else if let Some(d) = b.spell_discount {
-                    Effect::SpellDiscount(d)
-                } else if let Some(name) = &b.get {
-                    let card = generated_id(name).map_err(&err)?;
-                    Effect::GetCard { card, count: b.count.unwrap_or(1) }
-                } else {
-                    return Err(err("invalid battlecry".into()));
-                }),
+                Some(a) => {
+                    let effect = parse_effect(&a.effect).map_err(&err)?;
+                    Some(Activate { cost: a.cost, effect })
+                }
             };
+
+            let on_event = match &c.on_event {
+                None => None,
+                Some(e) => {
+                    let effect = parse_effect(&e.effect).map_err(&err)?;
+                    if effect.needs_choice() {
+                        return Err(err("an event trigger can't ask for a choice".into()));
+                    }
+                    if e.every == 0 {
+                        return Err(err("on_event every must be at least 1".into()));
+                    }
+                    Some(EventTrigger {
+                        kind: parse_event(&e.event).map_err(&err)?,
+                        every: e.every,
+                        effect,
+                    })
+                }
+            };
+
+            let mut after_hero_damage = Vec::new();
+            for e in &c.after_hero_damage {
+                let effect = parse_effect(e).map_err(&err)?;
+                if effect.needs_choice() {
+                    return Err(err("after_hero_damage can't ask for a choice".into()));
+                }
+                after_hero_damage.push(effect);
+            }
 
             let choose_one = match &c.choose_one {
                 None => None,
@@ -790,6 +1063,12 @@ impl CardDb {
                     EndOfTurn::GetCard { card, count: e.count.unwrap_or(1) }
                 } else if e.copy_last_spell == Some(true) {
                     EndOfTurn::CopyLastSpell
+                } else if let Some(eff) = &e.effect {
+                    let effect = parse_effect(eff).map_err(&err)?;
+                    if effect.needs_choice() {
+                        return Err(err("an end of turn effect can't ask for a choice".into()));
+                    }
+                    EndOfTurn::Effect(effect)
                 } else {
                     return Err(err("invalid end_of_turn".into()));
                 }),
@@ -876,8 +1155,6 @@ impl CardDb {
                 }
             });
 
-            let after_buy = c.after_buy.as_ref().map(|b| AfterBuy::AutoReveille { every: b.every });
-
             let on_sell = match &c.on_sell {
                 None => None,
                 Some(s) => Some(if let Some(name) = &s.get {
@@ -904,7 +1181,7 @@ impl CardDb {
             cards.push(Card {
                 name: c.name.clone(),
                 tier: c.tier,
-                tribe: tribe(&c.tribe).map_err(&err)?,
+                tribes: card_tribes(&c.tribe, &c.tribes).map_err(&err)?,
                 attack: c.stats[0],
                 health: c.stats[1],
                 keywords,
@@ -929,7 +1206,10 @@ impl CardDb {
                 on_cast_spell_on_mech,
                 on_cast_spell,
                 after_friendly_attack,
-                after_buy,
+                activate,
+                on_event,
+                after_hero_damage,
+                health_refreshes: c.health_refreshes.unwrap_or(0),
                 on_sell,
                 aura,
                 spell_target: None,
@@ -967,7 +1247,7 @@ impl CardDb {
             cards.push(Card {
                 name: sp.name.clone(),
                 tier: sp.tier,
-                tribe: Tribe::Neutral,
+                tribes: Tribes::NONE,
                 attack: 0,
                 health: 0,
                 keywords: Keywords::default(),
@@ -992,7 +1272,10 @@ impl CardDb {
                 on_cast_spell_on_mech: None,
                 on_cast_spell: None,
                 after_friendly_attack: None,
-                after_buy: None,
+                activate: None,
+                on_event: None,
+                after_hero_damage: Vec::new(),
+                health_refreshes: 0,
                 on_sell: None,
                 aura: None,
                 spell_target,
@@ -1033,25 +1316,26 @@ impl CardDb {
 
     pub fn random_pool_minion(&self, tribe: Tribe, rng: &mut Rng) -> Option<CardId> {
         let count = (0..self.pool_cards)
-            .filter(|&c| self.cards[c].tribe == tribe)
+            .filter(|&c| self.cards[c].tribes.has(tribe))
             .count() as u32;
         if count == 0 {
             return None;
         }
         let k = rng.below(count) as usize;
         (0..self.pool_cards)
-            .filter(|&c| self.cards[c].tribe == tribe)
+            .filter(|&c| self.cards[c].tribes.has(tribe))
             .nth(k)
             .map(|c| c as CardId)
     }
 
+    /// A random pool minion sharing a tribe with `tribes`, other than `exclude`.
     pub fn random_different_minion(
         &self,
-        tribe: Tribe,
+        tribes: Tribes,
         exclude: CardId,
         rng: &mut Rng,
     ) -> Option<CardId> {
-        let ok = |c: usize| self.cards[c].tribe == tribe && c as CardId != exclude;
+        let ok = |c: usize| self.cards[c].tribes.overlaps(tribes) && c as CardId != exclude;
         let count = (0..self.pool_cards).filter(|&c| ok(c)).count() as u32;
         if count == 0 {
             return None;

@@ -150,10 +150,12 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion) {
     o[SLOT_ATTACK] = m.attack as f32;
     o[SLOT_HEALTH] = m.health as f32;
     o[SLOT_GOLDEN] = m.golden as u8 as f32;
-    o[SLOT_BEAST] = (c.tribe == Tribe::Beast) as u8 as f32;
-    o[SLOT_MECH] = (c.tribe == Tribe::Mech) as u8 as f32;
-    o[SLOT_NEUTRAL] = (c.tribe == Tribe::Neutral) as u8 as f32;
-    for (j, (bit, _)) in Keywords::ALL.iter().enumerate() {
+    o[SLOT_BEAST] = c.tribes.has(Tribe::Beast) as u8 as f32;
+    o[SLOT_MECH] = c.tribes.has(Tribe::Mech) as u8 as f32;
+    o[SLOT_NEUTRAL] = c.tribes.is_neutral() as u8 as f32;
+    // The layout has room for the first six keywords. Stealth, Dragon, Murloc
+    // and Demon are not in the observation yet, it is redone later.
+    for (j, (bit, _)) in Keywords::ALL.iter().take(6).enumerate() {
         o[SLOT_KEYWORDS + j] = m.keywords.has(*bit) as u8 as f32;
     }
     o[SLOT_MAGNETIZATIONS] = m.magnetizations as f32;

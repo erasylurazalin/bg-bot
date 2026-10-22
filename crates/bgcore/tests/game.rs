@@ -1009,7 +1009,7 @@ fn stat_spells_choose_one_and_discover_get_spells() {
     act(&mut g, 0, Action::Target(1)); // Cord Puller (Mech)
     assert_eq!(g.players[0].hand.len(), 1);
     let got = g.players[0].hand[0];
-    assert_eq!(g.data.cards.get(got.card).tribe, bgcore::Tribe::Mech);
+    assert!(g.data.cards.get(got.card).tribes.has(bgcore::Tribe::Mech));
     assert_ne!(got.card, g.players[0].board[1].card);
     assert_eq!(got.pool_copies, 0);
     g.players[0].hand.clear();

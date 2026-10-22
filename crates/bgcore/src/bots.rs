@@ -40,32 +40,29 @@ pub const RUSH_CURVE: [u8; 8] = [1, 2, 2, 3, 4, 4, 5, 6];
 
 fn preferred_tribe(game: &Game, p: usize) -> Option<Tribe> {
     let pl = &game.players[p];
-    let mut beasts = 0;
-    let mut mechs = 0;
+    let mut counts = [0u32; Tribe::ALL.len()];
     for m in pl.board.iter().chain(&pl.hand) {
         let c = game.data.cards.get(m.card);
         if c.is_spell() {
             continue;
         }
-        match c.tribe {
-            Tribe::Beast => beasts += 1,
-            Tribe::Mech => mechs += 1,
-            Tribe::Neutral => {}
+        for (n, t) in counts.iter_mut().zip(Tribe::ALL) {
+            *n += c.tribes.has(t) as u32;
         }
     }
-    if beasts > mechs {
-        Some(Tribe::Beast)
-    } else if mechs > beasts {
-        Some(Tribe::Mech)
-    } else {
-        None
+    // the tribe with the most cards, if one leads alone
+    let best = *counts.iter().max().unwrap();
+    let mut leaders = Tribe::ALL.into_iter().zip(counts).filter(|&(_, n)| n == best);
+    match (leaders.next(), leaders.next()) {
+        (Some((t, _)), None) if best > 0 => Some(t),
+        _ => None,
     }
 }
 
 fn card_value(game: &Game, pref: Option<Tribe>, m: &Minion) -> i32 {
     let c = game.data.cards.get(m.card);
     let golden = if m.golden { 100 } else { 0 };
-    let tribe = if Some(c.tribe) == pref { 6 } else { 0 };
+    let tribe = if pref.is_some_and(|t| c.tribes.has(t)) { 6 } else { 0 };
     golden + c.tier as i32 * 10 + m.attack + m.health + tribe
 }
 
@@ -78,7 +75,7 @@ fn play_pos(game: &Game, p: usize, pref: Option<Tribe>, m: &Minion) -> Option<u8
     let pl = &game.players[p];
     if m.keywords.has(Keywords::MAGNETIC)
         && let Some(s) = (0..pl.board.len())
-            .filter(|&s| game.data.cards.get(pl.board[s].card).tribe == Tribe::Mech)
+            .filter(|&s| game.data.cards.get(pl.board[s].card).tribes.has(Tribe::Mech))
             .max_by_key(|&s| board_value(game, pref, &pl.board[s]))
     {
         return Some(s as u8);
@@ -104,6 +101,10 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
             .filter(|&s| legal(Action::Target(s)))
             .max_by_key(|&s| board_value(game, pref, &pl.board[s as usize]));
         return Action::Target(best.unwrap());
+    }
+    if pl.pending_shop_target.is_some() {
+        let best = (0..pl.shop.len()).max_by_key(|&s| pl.shop[s].attack + pl.shop[s].health);
+        return Action::TargetShop(best.unwrap() as u8);
     }
     if pl.pending_choose_one.is_some() {
         let choice = (0..2).find(|&k| legal(Action::Choose(k))).unwrap();
@@ -157,7 +158,7 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
         return Action::Play { hand: h as u8, pos: 0 };
     }
 
-    let has_mech = pl.board.iter().any(|m| game.data.cards.get(m.card).tribe == Tribe::Mech);
+    let has_mech = pl.board.iter().any(|m| game.data.cards.get(m.card).tribes.has(Tribe::Mech));
     let shop_score = |m: &Minion| {
         let triple = if held(m.card) == 2 {
             1000

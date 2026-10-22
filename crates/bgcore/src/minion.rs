@@ -1,4 +1,5 @@
 use crate::CardDb;
+use crate::rng::Rng;
 
 pub type CardId = u8;
 
@@ -20,14 +21,19 @@ impl Keywords {
     pub const VENOMOUS: u8 = 8;
     pub const REBORN: u8 = 16;
     pub const MAGNETIC: u8 = 32;
+    pub const STEALTH: u8 = 64;
 
-    pub const ALL: [(u8, &'static str); 6] = [
+    /// Every keyword a minion can carry, by its name in the data files.
+    /// Which of these are Bonus Keywords is a rule (`bonus_keywords` in
+    /// rules.toml), not a property of this list.
+    pub const ALL: [(u8, &'static str); 7] = [
         (Self::TAUNT, "taunt"),
         (Self::DIVINE_SHIELD, "divine_shield"),
         (Self::WINDFURY, "windfury"),
         (Self::VENOMOUS, "venomous"),
         (Self::REBORN, "reborn"),
         (Self::MAGNETIC, "magnetic"),
+        (Self::STEALTH, "stealth"),
     ];
 
     pub fn has(self, k: u8) -> bool {
@@ -40,6 +46,27 @@ impl Keywords {
 
     pub fn clear(&mut self, k: u8) {
         self.0 &= !k;
+    }
+
+    /// A random keyword out of `mask` that this set doesn't have yet, None
+    /// when it has them all.
+    pub fn random_missing(self, mask: u8, rng: &mut Rng) -> Option<u8> {
+        let missing = mask & !self.0;
+        let n = missing.count_ones();
+        if n == 0 {
+            return None;
+        }
+        let mut k = rng.below(n);
+        for bit in 0..8 {
+            let b = 1u8 << bit;
+            if missing & b != 0 {
+                if k == 0 {
+                    return Some(b);
+                }
+                k -= 1;
+            }
+        }
+        None
     }
 }
 
@@ -70,7 +97,8 @@ pub struct Minion {
     /// Number of Volumizers this minion is or carries inside it.
     pub volumizers: u16,
     /// Per-minion scaling or progress counter (Lurking Leviathan, Spark
-    /// Snapper, Patient Scout tier offset, Auto Reveille buy counter).
+    /// Snapper, Patient Scout tier offset, and the count of an event
+    /// trigger, which `events_left` turns into the "(N left!)" number).
     pub improvements: u16,
     pub attached: [Attached; MAX_ATTACHED],
     pub n_attached: u8,
@@ -87,6 +115,14 @@ impl Minion {
             self.attached[n] = a;
             self.n_attached += 1;
         }
+    }
+
+    /// The "(N left!)" of this minion's event trigger, None when no part of
+    /// it has one.
+    pub fn events_left(&self, db: &CardDb) -> Option<u8> {
+        self.parts().find_map(|(c, _)| db.get(c).on_event).map(|t| {
+            t.every.saturating_sub(self.improvements.min(u8::MAX as u16) as u8).max(1)
+        })
     }
 
     /// Yields `(card, golden)` for the minion itself followed by every

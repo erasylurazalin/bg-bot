@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+use crate::minion::Keywords;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DamageCap {
@@ -26,11 +28,29 @@ pub struct Rules {
     pub max_turns: u32,
     pub max_actions_per_turn: u16,
     pub max_attacks: u32,
+    /// Damage a player deals to their own hero (card effects, Health costs)
+    /// can't take them below this. Combat damage ignores it.
+    /// Health a Refresh costs when it is paid in Health.
+    pub health_refresh_cost: i32,
+    /// The keywords "random Bonus Keyword" picks from and "different Bonus
+    /// Keywords" counts, by name (see `Keywords::ALL`).
+    pub bonus_keywords: Vec<String>,
+    /// `bonus_keywords` as a keyword bit set.
+    #[serde(skip)]
+    pub bonus_mask: u8,
 }
 
 impl Rules {
     pub fn from_toml(s: &str) -> Result<Rules, String> {
-        let r: Rules = toml::from_str(s).map_err(|e| format!("rules.toml: {e}"))?;
+        let mut r: Rules = toml::from_str(s).map_err(|e| format!("rules.toml: {e}"))?;
+        for name in &r.bonus_keywords {
+            let bit = Keywords::ALL
+                .iter()
+                .find(|(_, n)| n == name)
+                .map(|(b, _)| *b)
+                .ok_or_else(|| format!("rules.toml: unknown bonus keyword {name:?}"))?;
+            r.bonus_mask |= bit;
+        }
         if r.shop_sizes.iter().any(|&n| n as usize > crate::SHOP || n == 0) {
             return Err(format!("rules.toml: shop sizes must be 1 to {}", crate::SHOP));
         }

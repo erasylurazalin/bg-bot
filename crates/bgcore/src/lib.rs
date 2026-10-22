@@ -15,7 +15,7 @@ pub mod rng;
 pub mod rules;
 
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
-pub use cards::{Card, CardDb, Effect, Tribe};
+pub use cards::{Card, CardDb, Effect, Tribe, Tribes};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
 pub use game::{Game, IllegalAction, Opponent, Player};
 pub use minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
@@ -28,7 +28,9 @@ pub const HAND: usize = 10;
 pub const SHOP: usize = 6;
 pub const DISCOVER: usize = 3;
 pub const MAX_TIER: u8 = 6;
-pub const TRIBES: usize = 3;
+/// Slots in `Player::final_tribes`: Beast, Mech, neutral, Dragon, Murloc,
+/// Demon. A multi-tribe minion counts in each of its tribes' slots.
+pub const TRIBES: usize = 6;
 
 /// Cards and rules together, shared by every game.
 #[derive(Debug, Clone)]

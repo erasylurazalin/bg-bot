@@ -28,3 +28,11 @@ uncapped_at_players = 4
 max_turns = 40
 max_actions_per_turn = 60
 max_attacks = 500
+
+# Health a Refresh costs when a card makes it cost Health instead of Gold.
+health_refresh_cost = 1
+
+# The Bonus Keywords: what "gain a random Bonus Keyword" picks from and what
+# "different Bonus Keywords in your warband" counts. Magnetic is a keyword
+# but not a Bonus Keyword.
+bonus_keywords = ["taunt", "divine_shield", "windfury", "venomous", "reborn", "stealth"]

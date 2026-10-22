@@ -146,7 +146,7 @@ impl Side {
         self.beast_buff.0 += da;
         self.beast_buff.1 += dh;
         for f in &mut self.ms {
-            if f.m.health > 0 && db.get(f.m.card).tribe == Tribe::Beast {
+            if f.m.health > 0 && db.get(f.m.card).tribes.has(Tribe::Beast) {
                 f.m.attack += da;
                 f.m.health += dh;
             }
@@ -172,7 +172,7 @@ impl Side {
         }
         self.insert(pos, Fm { m, uid: *uid, start_slot: None });
         *uid += 1;
-        if c.tribe == Tribe::Beast {
+        if c.tribes.has(Tribe::Beast) {
             self.ms[pos].m.attack += self.beast_buff.0;
             self.ms[pos].m.health += self.beast_buff.1;
             for j in 0..self.ms.len() {
@@ -386,19 +386,31 @@ fn hit(target: &mut Minion, dmg: i32, source: &mut Minion) {
     }
 }
 
-fn pick_defender(def: &Side, rng: &mut Rng) -> usize {
-    let taunts = def.ms.iter().filter(|f| f.m.keywords.has(Keywords::TAUNT)).count();
+fn targetable(f: &Fm) -> bool {
+    !f.m.keywords.has(Keywords::STEALTH)
+}
+
+/// The defender is random among the enemies. Taunt minions come first and
+/// Stealth minions can never be picked. None when every enemy has Stealth:
+/// the attacking side then loses its turn.
+fn pick_defender(def: &Side, rng: &mut Rng) -> Option<usize> {
+    let eligible = |f: &&Fm| targetable(f);
+    let taunts = def.ms.iter().filter(eligible).filter(|f| f.m.keywords.has(Keywords::TAUNT)).count();
     if taunts == 0 {
-        return rng.below(def.ms.len() as u32) as usize;
+        let n = def.ms.iter().filter(eligible).count() as u32;
+        if n == 0 {
+            return None;
+        }
+        let k = rng.below(n) as usize;
+        return Some(def.ms.iter().enumerate().filter(|(_, f)| eligible(f)).nth(k).unwrap().0);
     }
     let k = rng.below(taunts as u32) as usize;
     def.ms
         .iter()
         .enumerate()
-        .filter(|(_, f)| f.m.keywords.has(Keywords::TAUNT))
+        .filter(|(_, f)| eligible(f) && f.m.keywords.has(Keywords::TAUNT))
         .nth(k)
-        .unwrap()
-        .0
+        .map(|(i, _)| i)
 }
 
 fn pair(sides: &mut [Side; 2], turn: usize) -> (&mut Side, &mut Side) {
@@ -548,8 +560,10 @@ pub fn fight_with(
     let mut attacks = 0;
     let mut skips = 0;
     while !sides[0].ms.is_empty() && !sides[1].ms.is_empty() && attacks < max_attacks {
+        // nothing to attack when every enemy has Stealth: the turn passes
+        let can_target = sides[turn ^ 1].ms.iter().any(targetable);
         let att = &mut sides[turn];
-        let Some(i) = att.next_attacker() else {
+        let Some(i) = att.next_attacker().filter(|_| can_target) else {
             skips += 1;
             if skips >= 2 {
                 break; // neither side can attack
@@ -566,8 +580,11 @@ pub fn fight_with(
             if sides[turn].ms[ai].m.attack <= 0 || sides[turn ^ 1].ms.is_empty() {
                 break;
             }
-            let di = pick_defender(&sides[turn ^ 1], rng);
+            let Some(di) = pick_defender(&sides[turn ^ 1], rng) else { break };
             let def_uid = sides[turn ^ 1].ms[di].uid;
+
+            // Attacking ends Stealth.
+            sides[turn].ms[ai].m.keywords.clear(Keywords::STEALTH);
 
             // Rally triggers when the minion attacks, before damage.
             let att_m = sides[turn].ms[ai].m;
