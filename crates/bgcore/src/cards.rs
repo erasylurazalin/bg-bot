@@ -34,10 +34,16 @@ pub enum Tribe {
     Dragon,
     Murloc,
     Demon,
+    Pirate,
 }
 
 impl Tribe {
+    /// The five tribes the observation has slots for (layout frozen until the
+    /// run that redoes the observation for every tribe). Rules use `EVERY`.
     pub const ALL: [Tribe; 5] = [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon];
+    /// Every tribe a card can have.
+    pub const EVERY: [Tribe; 6] =
+        [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon, Tribe::Pirate];
 
     fn bit(self) -> u8 {
         1 << self as u8
@@ -52,7 +58,7 @@ pub struct Tribes(u8);
 
 impl Tribes {
     pub const NONE: Tribes = Tribes(0);
-    pub const ALL: Tribes = Tribes(0b11111);
+    pub const ALL: Tribes = Tribes(0b111111);
 
     pub fn of(t: Tribe) -> Tribes {
         Tribes(t.bit())
@@ -81,7 +87,7 @@ impl Tribes {
             return None;
         }
         let mut k = rng.below(n);
-        for t in Tribe::ALL {
+        for t in Tribe::EVERY {
             if self.has(t) {
                 if k == 0 {
                     return Some(t);
@@ -100,7 +106,7 @@ impl Tribes {
 /// for one that can't be picked (dead). Returns the picked indexes.
 pub fn pick_one_per_type(tribes: &[Tribes], rng: &mut Rng) -> ArrayVec<usize, BOARD> {
     let mut picked: ArrayVec<usize, BOARD> = ArrayVec::new();
-    for t in Tribe::ALL {
+    for t in Tribe::EVERY {
         let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
         for (i, ts) in tribes.iter().enumerate().take(BOARD) {
             if !picked.contains(&i) && ts.has(t) {
@@ -301,6 +307,31 @@ pub enum Effect {
     /// Give this minion's current stats to the left-most minion in hand
     /// (Futurefin). A golden minion gives double.
     GiveOwnStatsToLeftmostHand,
+    /// Get a Lockbox, or open the one in hand `sooner` turns sooner (golden
+    /// doubles the number of turns, it is still one Lockbox).
+    GetLockbox { sooner: u8 },
+    /// Get a random Bounty (two when golden).
+    GetRandomBounty,
+    /// Give all friendly minions stats; golden minions keep them after the
+    /// fight (Ship Master Eudora).
+    BuffAllKeepGolden { attack: i32, health: i32 },
+    /// Give the minions next to this one +attack, once and again for each
+    /// friendly Golden minion (Surfing Sylvar).
+    BuffAdjacentPerGolden { attack: i32 },
+    /// Buff one other friendly minion the player picks (of a tribe), by
+    /// `attack`/`health` plus `per_gold` for each Gold spent this turn
+    /// (Lovesick Balladist).
+    BuffChosenPerGold { tribe: Option<Tribe>, attack: i32, health: i32, per_gold: (i32, i32) },
+    /// Make `count` friendly minions of a tribe (if given) of Tier `max_tier`
+    /// or lower Golden on the board, picked by the player (Elite Navigator,
+    /// Captain Sanders). Golden doubles `count`.
+    MakeGoldenChosen { tribe: Option<Tribe>, max_tier: u8, count: u8 },
+    /// Get `count` random Golden minions of exactly this tier from the pool;
+    /// they give no Triple Reward (Silent Deliverer). Golden doubles it.
+    GetGoldenMinion { tier: u8, count: u8 },
+    /// Give the other friendly minions of a tribe +attack/+health, times one
+    /// plus the Golden minions the player played this game (Hooktusk).
+    BuffOthersPerGolden { tribe: Option<Tribe>, attack: i32, health: i32 },
 }
 
 impl Effect {
@@ -318,6 +349,8 @@ impl Effect {
                 | Effect::DiscoverDemonTierDamage(_)
                 | Effect::BuffAnyMinion { .. }
                 | Effect::SetStatsAnyMinion { .. }
+                | Effect::BuffChosenPerGold { .. }
+                | Effect::MakeGoldenChosen { .. }
         )
     }
 
@@ -378,6 +411,9 @@ impl Effect {
             | Effect::ShieldDragons { .. }
             | Effect::GetRandomTierMinion { .. }
             | Effect::BuffEachType { .. }
+            | Effect::GetLockbox { .. }
+            | Effect::GetRandomBounty
+            | Effect::BuffAllKeepGolden { .. }
             | Effect::DamageTargetAndNeighbor => true,
             _ => false,
         }
@@ -555,6 +591,14 @@ pub enum SpellEffect {
     SaloonFinest,
     /// Get `count` copies of a card (Weapons Forge).
     GetCard { card: CardId, count: u8 },
+    /// An unplayable Lockbox that counts down from this many turns (its
+    /// count lives in the hand minion's `improvements`).
+    Lockbox(u8),
+    /// Give the left-most minion on the board stats (Selfish Bounty).
+    BuffLeftmost { attack: i32, health: i32 },
+    /// Get a random minion of the most common type on the board (Friendly
+    /// Bounty).
+    FriendlyBounty,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -752,6 +796,9 @@ pub enum OnSell {
     Effect(Effect),
     DiscoverByTier,
     GoldIfLost(u8),
+    /// If the minion is Golden when sold, Discover a Tier 7 minion (Greedy
+    /// Conniver).
+    DiscoverTier7IfGolden,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -769,6 +816,8 @@ pub enum Aura {
     /// Magnetic also Magnetizes to this one (twice when golden). Polarizing
     /// Beatboxer.
     PolarizingBeatboxer,
+    /// Your Bounties cast twice (three times when golden). Proud Privateer.
+    ProudPrivateer,
 }
 
 /// "After you summon a minion in combat, give it this minion's current
@@ -871,6 +920,18 @@ pub struct Card {
     pub after_summon_give_stats: Option<AfterSummonGiveStats>,
     pub spell_target: Option<SpellTarget>,
     pub spell_effect: Option<SpellEffect>,
+    /// Always Golden, with its printed stats (Aureate Laureate): it is made
+    /// Golden and gives no Triple Reward.
+    pub always_golden: bool,
+    /// Also damages the enemies next to the one it attacks (Blade Collector).
+    pub cleave: bool,
+    /// Gets this much for every Golden minion its owner played this game,
+    /// wherever it is (Maritime Extortionist).
+    pub buff_per_golden_played: Option<(i32, i32)>,
+    /// After its owner Discovers a card (Hooktusk).
+    pub after_discover: Option<Effect>,
+    /// One of the five Bounties, which share one slot of the spell draw.
+    pub is_bounty: bool,
 }
 
 impl Card {
@@ -966,6 +1027,7 @@ impl Card {
             || self.after_demon_damage.is_some()
             || self.health_refreshes > 0
             || self.on_sell.is_some()
+            || self.after_discover.is_some()
             || self.aura.is_some()
             || self.after_summon_give_stats.is_some()
             || self.spell_buff.is_some()
@@ -991,6 +1053,11 @@ pub struct CardDb {
     pub taught_token: Option<CardId>,
     /// The generated Demon Fodder token.
     pub fodder_token: Option<CardId>,
+    /// The five Bounties. Only the first is in `spells`: the five are one
+    /// slot of every spell draw, and a drawn Bounty is one of them at random.
+    pub bounties: Vec<CardId>,
+    /// The generated Lockbox spell.
+    pub lockbox: Option<CardId>,
 }
 
 #[derive(Deserialize)]
@@ -1071,6 +1138,12 @@ struct RawCard {
     on_sell: Option<RawOnSell>,
     aura: Option<String>,
     after_summon_give_stats: Option<RawAfterSummonGiveStats>,
+    #[serde(default)]
+    always_golden: bool,
+    #[serde(default)]
+    cleave: bool,
+    buff_per_golden_played: Option<[i32; 2]>,
+    after_discover: Option<RawEffect>,
 }
 
 #[derive(Deserialize)]
@@ -1098,6 +1171,9 @@ struct RawSpell {
     /// Bought with Health instead of Gold (Hasty Excavation).
     #[serde(default)]
     pay_health: bool,
+    /// One of the five Bounties (they share one slot of the spell draw).
+    #[serde(default)]
+    bounty: bool,
     effect: Option<RawSpellEffect>,
     choose_one: Option<[RawSpellEffect; 2]>,
 }
@@ -1175,6 +1251,12 @@ struct RawSpellEffect {
     refresh_with_type: bool,
     #[serde(default)]
     devourer: bool,
+    /// An unplayable Lockbox that opens after this many turns.
+    lockbox: Option<u8>,
+    /// Give the left-most minion on the board stats (Selfish Bounty).
+    buff_leftmost: Option<[i32; 2]>,
+    #[serde(default)]
+    friendly_bounty: bool,
 }
 
 #[derive(Deserialize)]
@@ -1305,6 +1387,23 @@ struct RawEffect {
     /// Give this minion's stats to the left-most minion in hand (Futurefin).
     #[serde(default)]
     give_stats_leftmost_hand: bool,
+    /// Get a Lockbox, or open the held one this many turns sooner.
+    lockbox_sooner: Option<u8>,
+    #[serde(default)]
+    random_bounty: bool,
+    /// Give all friendly minions the buff; golden minions keep it.
+    keep_golden: Option<[i32; 2]>,
+    /// Give adjacent minions this much Attack, repeated per Golden minion.
+    adjacent_per_golden: Option<i32>,
+    /// Added once more for each Gold spent this turn.
+    per_gold_spent: Option<[i32; 2]>,
+    /// Make friendly minions up to this tier Golden on the board.
+    make_golden_max_tier: Option<u8>,
+    /// Get random Golden minions of exactly this tier.
+    golden_minion_tier: Option<u8>,
+    /// Scale a buff by one plus the Golden minions played this game.
+    #[serde(default)]
+    per_golden_played: bool,
 }
 
 #[derive(Deserialize)]
@@ -1476,6 +1575,8 @@ struct RawOnEvent {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawOnSell {
+    #[serde(default)]
+    discover_tier7_if_golden: bool,
     get: Option<String>,
     count: Option<u8>,
     discover_by_tier: Option<bool>,
@@ -1490,6 +1591,7 @@ fn tribe(s: &str) -> Result<Tribe, String> {
         "dragon" => Ok(Tribe::Dragon),
         "murloc" => Ok(Tribe::Murloc),
         "demon" => Ok(Tribe::Demon),
+        "pirate" => Ok(Tribe::Pirate),
         _ => Err(format!("unknown tribe {s:?}")),
     }
 }
@@ -1681,6 +1783,12 @@ fn parse_spell_effect(
                 SpellEffect::DiscoverLockedMinion
             } else if e.saloon_finest {
                 SpellEffect::SaloonFinest
+            } else if let Some(n) = e.lockbox {
+                SpellEffect::Lockbox(n)
+            } else if let Some([attack, health]) = e.buff_leftmost {
+                SpellEffect::BuffLeftmost { attack, health }
+            } else if e.friendly_bounty {
+                SpellEffect::FriendlyBounty
             } else if let Some(b) = e.boon_of_beetles {
                 SpellEffect::BoonOfBeetles(b)
             } else if let Some(soc) = &e.start_of_combat {
@@ -1781,7 +1889,30 @@ impl CardDb {
 
         let parse_effect = |b: &RawEffect| -> Result<Effect, String> {
             let t = b.tribe.as_deref().map(tribe).transpose()?;
-            Ok(if let Some([attack, health]) = b.buff {
+            Ok(if let Some(per_gold) = b.per_gold_spent {
+                let [attack, health] = b.buff.ok_or("per_gold_spent needs buff")?;
+                Effect::BuffChosenPerGold {
+                    tribe: t,
+                    attack,
+                    health,
+                    per_gold: (per_gold[0], per_gold[1]),
+                }
+            } else if b.per_golden_played {
+                let [attack, health] = b.buff.ok_or("per_golden_played needs buff")?;
+                Effect::BuffOthersPerGolden { tribe: t, attack, health }
+            } else if let Some([attack, health]) = b.keep_golden {
+                Effect::BuffAllKeepGolden { attack, health }
+            } else if let Some(attack) = b.adjacent_per_golden {
+                Effect::BuffAdjacentPerGolden { attack }
+            } else if let Some(max_tier) = b.make_golden_max_tier {
+                Effect::MakeGoldenChosen { tribe: t, max_tier, count: b.count.unwrap_or(1) }
+            } else if let Some(tier) = b.golden_minion_tier {
+                Effect::GetGoldenMinion { tier, count: b.count.unwrap_or(1) }
+            } else if let Some(n) = b.lockbox_sooner {
+                Effect::GetLockbox { sooner: n }
+            } else if b.random_bounty {
+                Effect::GetRandomBounty
+            } else if let Some([attack, health]) = b.buff {
                 let per_keyword = b.per_keyword.map_or((0, 0), |[a, h]| (a, h));
                 match b.target.as_deref() {
                     Some("chosen") => Effect::BuffChosen {
@@ -2310,7 +2441,9 @@ impl CardDb {
 
             let on_sell = match &c.on_sell {
                 None => None,
-                Some(s) => Some(if let Some(name) = &s.get {
+                Some(s) => Some(if s.discover_tier7_if_golden {
+                    OnSell::DiscoverTier7IfGolden
+                } else if let Some(name) = &s.get {
                     let card = generated_id(name).map_err(&err)?;
                     OnSell::GetCard { card, count: s.count.unwrap_or(1) }
                 } else if s.discover_by_tier == Some(true) {
@@ -2333,7 +2466,19 @@ impl CardDb {
                 Some("taunt_while_shielded") => Some(Aura::TauntWhileShielded),
                 Some("holy_vanguard") => Some(Aura::HolyVanguard),
                 Some("polarizing_beatboxer") => Some(Aura::PolarizingBeatboxer),
+                Some("proud_privateer") => Some(Aura::ProudPrivateer),
                 Some(other) => return Err(err(format!("unknown aura {other:?}"))),
+            };
+
+            let after_discover = match &c.after_discover {
+                None => None,
+                Some(e) => {
+                    let effect = parse_effect(e).map_err(&err)?;
+                    if effect.needs_choice() {
+                        return Err(err("an after_discover effect can't ask for a choice".into()));
+                    }
+                    Some(effect)
+                }
             };
 
             cards.push(Card {
@@ -2396,9 +2541,15 @@ impl CardDb {
                     .map(|a| AfterSummonGiveStats { times: a.times }),
                 spell_target: None,
                 spell_effect: None,
+                always_golden: c.always_golden,
+                cleave: c.cleave,
+                buff_per_golden_played: c.buff_per_golden_played.map(|[a, h]| (a, h)),
+                after_discover,
+                is_bounty: false,
             });
         }
 
+        let mut bounties: Vec<CardId> = Vec::new();
         for sp in &raw.spell {
             let id = cards.len() as CardId;
             let err = |e: String| format!("cards.toml, {}: {e}", sp.name);
@@ -2429,7 +2580,14 @@ impl CardDb {
             if spell_target.is_none() && spell_effect.is_none() && choose_one.is_none() {
                 return Err(err("spell has no effect or choose_one".into()));
             }
-            if !sp.token {
+            if sp.bounty {
+                // The five Bounties are one slot of the spell draw: only the
+                // first stands in `spells`.
+                if bounties.is_empty() && !sp.token {
+                    spells.push(id);
+                }
+                bounties.push(id);
+            } else if !sp.token {
                 spells.push(id);
             }
             cards.push(Card {
@@ -2489,9 +2647,18 @@ impl CardDb {
                 after_summon_give_stats: None,
                 spell_target,
                 spell_effect,
+                always_golden: false,
+                cleave: false,
+                buff_per_golden_played: None,
+                after_discover: None,
+                is_bounty: sp.bounty,
             });
         }
 
+        let lockbox = cards
+            .iter()
+            .position(|c| matches!(c.spell_effect, Some(SpellEffect::Lockbox(_))))
+            .map(|i| i as CardId);
         let tiers: Vec<u8> = cards.iter().map(|c| c.tier).collect();
         let ids_up_to_tier = (0..=crate::CARD_MAX_TIER)
             .map(|hi| (0..pool_cards).filter(|&c| tiers[c] <= hi).map(|c| c as u8).collect())
@@ -2507,6 +2674,8 @@ impl CardDb {
             chromadrakes,
             taught_token,
             fodder_token,
+            bounties,
+            lockbox,
         })
     }
 
@@ -2601,6 +2770,38 @@ impl CardDb {
         (0..self.pool_cards).filter(|&c| ok(c)).nth(k).map(|c| c as CardId)
     }
 
+    /// Whether a spell may be drawn when `exclude` is already taken. The
+    /// shared Bounty slot is open while one of the five is not excluded.
+    fn spell_open(&self, id: CardId, exclude: &[CardId]) -> bool {
+        if self.cards[id as usize].is_bounty {
+            self.bounties.iter().any(|b| !exclude.contains(b))
+        } else {
+            !exclude.contains(&id)
+        }
+    }
+
+    /// A drawn Bounty slot becomes a random one of the five (not in
+    /// `exclude`); any other spell is itself.
+    fn resolve_bounty(&self, id: CardId, exclude: &[CardId], rng: &mut Rng) -> CardId {
+        if !self.cards[id as usize].is_bounty {
+            return id;
+        }
+        let n = self.bounties.iter().filter(|b| !exclude.contains(b)).count() as u32;
+        if n == 0 {
+            return id;
+        }
+        let k = rng.below(n) as usize;
+        self.bounties.iter().copied().filter(|b| !exclude.contains(b)).nth(k).unwrap_or(id)
+    }
+
+    /// "A random Bounty": one of the five, uniformly.
+    pub fn random_bounty(&self, rng: &mut Rng) -> Option<CardId> {
+        if self.bounties.is_empty() {
+            return None;
+        }
+        Some(self.bounties[rng.below(self.bounties.len() as u32) as usize])
+    }
+
     /// A random spell that costs `cost`, of any Tier.
     pub fn random_spell_of_cost(&self, cost: u8, rng: &mut Rng) -> Option<CardId> {
         let ok = |id: CardId| self.cards[id as usize].cost == cost;
@@ -2609,7 +2810,8 @@ impl CardDb {
             return None;
         }
         let k = rng.below(count) as usize;
-        self.spells.iter().copied().filter(|&id| ok(id)).nth(k)
+        let id = self.spells.iter().copied().filter(|&id| ok(id)).nth(k)?;
+        Some(self.resolve_bounty(id, &[], rng))
     }
 
     /// A random pool minion sharing a tribe with `tribes`, other than
@@ -2658,11 +2860,13 @@ impl CardDb {
             return None;
         }
         let k = rng.below(count) as usize;
-        self.spells
+        let id = self
+            .spells
             .iter()
             .copied()
             .filter(|&id| self.cards[id as usize].tier <= max_tier)
-            .nth(k)
+            .nth(k)?;
+        Some(self.resolve_bounty(id, &[], rng))
     }
 
     /// A random Tavern spell of Tier `max_tier` or lower, other than the
@@ -2673,13 +2877,14 @@ impl CardDb {
         exclude: &[CardId],
         rng: &mut Rng,
     ) -> Option<CardId> {
-        let ok = |id: CardId| self.cards[id as usize].tier <= max_tier && !exclude.contains(&id);
+        let ok = |id: CardId| self.cards[id as usize].tier <= max_tier && self.spell_open(id, exclude);
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {
             return None;
         }
         let k = rng.below(count) as usize;
-        self.spells.iter().copied().filter(|&id| ok(id)).nth(k)
+        let id = self.spells.iter().copied().filter(|&id| ok(id)).nth(k)?;
+        Some(self.resolve_bounty(id, exclude, rng))
     }
 
     pub fn random_tier_spell(
@@ -2688,18 +2893,21 @@ impl CardDb {
         exclude: &[CardId],
         rng: &mut Rng,
     ) -> Option<CardId> {
-        let ok = |id: CardId| self.cards[id as usize].tier == tier && !exclude.contains(&id);
+        let ok = |id: CardId| self.cards[id as usize].tier == tier && self.spell_open(id, exclude);
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {
             return None;
         }
         let k = rng.below(count) as usize;
-        self.spells.iter().copied().filter(|&id| ok(id)).nth(k)
+        let id = self.spells.iter().copied().filter(|&id| ok(id)).nth(k)?;
+        Some(self.resolve_bounty(id, exclude, rng))
     }
 
     /// A fresh generated copy of a card (`pool_copies = 0`).
     pub fn make(&self, id: CardId, golden: bool) -> Minion {
         let c = self.get(id);
+        // Aureate Laureate is always Golden, and gives no Triple Reward.
+        let golden = golden || c.always_golden;
         let m = if golden { 2 } else { 1 };
         let (attack, health) = if golden {
             c.golden_stats.unwrap_or((c.attack * 2, c.health * 2))
@@ -2712,11 +2920,16 @@ impl CardDb {
             health,
             keywords: c.keywords,
             golden,
+            no_reward: c.always_golden,
             pool_copies: 0,
             winners_bread: 0,
             magnetizations: 0,
             volumizers: u16::from(c.is_volumizer),
-            improvements: 0,
+            // A Lockbox's `improvements` is the turns it has left.
+            improvements: match c.spell_effect {
+                Some(SpellEffect::Lockbox(n)) => n as u16,
+                _ => 0,
+            },
             extra_magnetize: 0,
             taught_spell: None,
             locked_turns: 0,

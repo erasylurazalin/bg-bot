@@ -50,21 +50,22 @@ pub fn tribe_name(t: Tribe) -> &'static str {
         Tribe::Dragon => "Dragon",
         Tribe::Murloc => "Murloc",
         Tribe::Demon => "Demon",
+        Tribe::Pirate => "Pirate",
     }
 }
 
 pub fn parse_tribe(s: &str) -> Option<Tribe> {
-    Tribe::ALL.into_iter().find(|&t| tribe_name(t).eq_ignore_ascii_case(s.trim()))
+    Tribe::EVERY.into_iter().find(|&t| tribe_name(t).eq_ignore_ascii_case(s.trim()))
 }
 
 fn card_tribes(c: &Card) -> String {
     if c.tribes.is_neutral() {
         return "Neutral".into();
     }
-    if Tribe::ALL.iter().all(|&t| c.tribes.has(t)) {
+    if Tribe::EVERY.iter().all(|&t| c.tribes.has(t)) {
         return "All types".into();
     }
-    Tribe::ALL.iter().filter(|&&t| c.tribes.has(t)).map(|&t| tribe_name(t)).collect::<Vec<_>>().join("/")
+    Tribe::EVERY.iter().filter(|&&t| c.tribes.has(t)).map(|&t| tribe_name(t)).collect::<Vec<_>>().join("/")
 }
 
 fn tags(m: &Minion, db: &CardDb) -> String {
@@ -315,6 +316,9 @@ fn describe_target(pt: &PendingTarget) -> String {
         }
         TargetKind::AnyBuff { attack, health } => format!("a minion gets +{attack}/+{health}"),
         TargetKind::AnySetStats { attack, health } => format!("a minion's stats become {attack}/{health}"),
+        TargetKind::MakeGolden { tribe, .. } => {
+            format!("{} becomes Golden", tribe.map_or("a minion", |t| tribe_name(t)))
+        }
         TargetKind::TriggerRally => "trigger a Rally".into(),
         TargetKind::TriggerBattlecry => "trigger a Battlecry".into(),
         TargetKind::Consume { .. } => "it consumes Tavern minions".into(),

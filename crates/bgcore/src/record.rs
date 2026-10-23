@@ -141,6 +141,8 @@ struct FileMinion {
     locked_turns: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     activated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    no_reward: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attached: Vec<FileAttached>,
 }
@@ -167,6 +169,7 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         taught_spell: m.taught_spell.map(|c| db.get(c).name.clone()),
         locked_turns: differs(m.locked_turns as u64, 0).map(|v| v as u8),
         activated: m.activated.then_some(true),
+        no_reward: (m.no_reward != base.no_reward).then_some(m.no_reward),
         attached: m
             .attached_slice()
             .iter()
@@ -219,6 +222,9 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     if let Some(v) = f.activated {
         m.activated = v;
+    }
+    if let Some(v) = f.no_reward {
+        m.no_reward = v;
     }
     for a in &f.attached {
         m.push_attached(Attached { card: card_id(db, &a.card)?, golden: a.golden });

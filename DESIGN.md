@@ -600,7 +600,9 @@ don't stack, and a golden copy sets its own count from its golden text.
 
 **Spending gold.** Anything that actually uses gold counts: buying,
 upgrading, rolling, Activate costs. Health paid instead of gold and free
-Refreshes don't. "After you spend N Gold" counters carry over turns;
+Refreshes don't. "After you spend N Gold" counters carry over turns
+(Gunpowder Courier is every 6 Gold, as its counter shows, not 5 as its
+text says);
 "gold spent this turn" resets each turn.
 
 **Lockbox.** A Lockbox sits in hand, can't be played and takes a hand
@@ -608,6 +610,14 @@ slot. It counts down at the end of your turn (Drakkari doubles it). At 0
 it opens into a random golden minion with a type, up to your tier, which
 gives a triple reward as usual. Getting another Lockbox while you hold one
 makes it open sooner instead (1 turn, or 2 if the card says so).
+Timing: a Lockbox got on turn 1 shows 5 turns, shows 4 after the end of
+turn 1, and opens at the end of turn 5, before that turn's fight. Its
+minion can't be played that turn, but it is in hand for the fight, so
+anything that summons from hand can summon it.
+
+**A spell cast twice counts twice everywhere.** Proud Privateer's second
+Bounty cast is a second spell for every trigger and every "spells cast"
+counter.
 
 **Pairing, damage, ending** as in Part 2: shuffle and avoid the last
 opponent, ghost for an odd count, damage is tier plus surviving minions'

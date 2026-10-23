@@ -21,7 +21,7 @@ crates/
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
-    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, neutrals),
+    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, neutrals),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card), fight.rs,
                       game.rs, d1a.rs; tests/data/ has test-only card files
@@ -113,6 +113,31 @@ rules behind each are in DESIGN.md Part 3.
   `Game::magnetize_to`, which also runs `beatboxers_copy` (Polarizing
   Beatboxer, `Aura::PolarizingBeatboxer`), so a new "whenever you Magnetize"
   card hooks in there.
+- **Pirates (tribe 6).** `Tribe::EVERY` is every tribe the rules know (use it
+  in rules code); `Tribe::ALL` stays the five the observation has slots for
+  until the run that redoes the observation. `Tribes::ALL` ("all types")
+  includes Pirate.
+- **Golden minions.** Played from hand, a Golden minion adds to
+  `Player.golden_played` (Extortionist's `buff_per_golden_played`, Hooktusk's
+  `BuffOthersPerGolden`) and gives a Triple Reward unless `Minion.no_reward`
+  is set (Aureate Laureate is `always_golden`, Silent Deliverer's minions).
+  `TargetKind::MakeGolden` makes a board minion Golden with no reward and no
+  count (Elite Navigator, Captain Sanders).
+- **Golden draws from the pool.** `draw_golden` (game.rs) takes up to three
+  copies for one Golden minion (Lockbox, Silent Deliverer).
+- **Gold spent.** Every payment goes through `fire_event(GoldSpent, n)`, which
+  also adds to `Player.gold_spent_turn` (Lovesick Balladist). Health payments
+  and free Refreshes never call it with gold.
+- **Lockbox.** A generated spell in hand; its `improvements` is the turns
+  left. `give_lockbox(p, sooner)` gets one or shortens the held one,
+  `tick_lockboxes` runs at the end of the turn (Drakkari doubles it). A
+  Deathrattle gets one through `SideOutcome::lockboxes`.
+- **Bounties.** The five share one slot of every spell draw: `CardDb.spells`
+  holds only the first, `random_spell*` turn a drawn Bounty into one of the
+  five (`bounties`), "get a random Bounty" is `CardDb::random_bounty`.
+  `bounty_mult` is Proud Privateer's cast count.
+- **Cleave.** `Card.cleave`: `attack_swings` hits the two enemies next to the
+  target with the attacker's Attack and no damage back (Blade Collector).
 - **Legal actions.** `Game::legal_mask` only asks `is_legal` for slots that
   can be legal (a test checks it against `is_legal` everywhere). Use it
   rather than looping `is_legal` over every action.

@@ -151,7 +151,7 @@ rally = { buff = [4, 1], target = "others" }
 [[minion]]
 name = "Treasure Parrot"
 tier = 3
-tribe = "beast"
+tribes = ["beast", "pirate"]
 stats = [5, 5]
 damage_milestone = { total = 35, effect = { get = "Golden Touch" } }
 
@@ -588,7 +588,7 @@ whenever_friendly_attack = { attacker_tribe = "dragon", attacker_another = true,
 [[minion]]
 name = "Timecap'n Hooktail"
 tier = 3
-tribe = "dragon"
+tribes = ["dragon", "pirate"]
 stats = [1, 4]
 on_cast_spell = { buff_all = [1, 0] }
 
@@ -1039,6 +1039,169 @@ tribe = "beast"
 stats = [16, 32]
 after_summon_give_stats = { times = 3 }
 
+# --- Pirates ---
+# The dual-tribe Pirates (Timecap'n Hooktail, Treasure Parrot) sit with their
+# other tribe above. Aureate Laureate's golden card has the same stats as the
+# base card: it is always Golden (golden_stats = printed stats, no triple).
+
+[[minion]]
+name = "Aureate Laureate"
+tier = 1
+tribe = "pirate"
+stats = [2, 2]
+golden_stats = [2, 2]
+keywords = ["divine_shield"]
+always_golden = true
+no_triple = true
+
+[[minion]]
+name = "Southsea Busker"
+tier = 1
+tribe = "pirate"
+stats = [3, 1]
+battlecry = { gold_next_turn = 1 }
+
+[[minion]]
+name = "Bilgewater Breakout"
+tier = 2
+tribe = "pirate"
+stats = [3, 2]
+battlecry = { lockbox_sooner = 1 }
+
+[[minion]]
+name = "Clever Castaway"
+tier = 2
+tribe = "pirate"
+stats = [2, 3]
+activate = { cost = 2, effect = { discover_spell = 1 } }
+
+[[minion]]
+name = "Surfing Sylvar"
+tier = 2
+tribe = "pirate"
+stats = [1, 2]
+end_of_turn = { effect = { adjacent_per_golden = 1 } }
+
+[[minion]]
+name = "Azsharan Cutlassier"
+tier = 3
+tribe = "pirate"
+stats = [6, 4]
+battlecry = { spell_bonus = [1, 0] }
+
+[[minion]]
+name = "Greedy Conniver"
+tier = 3
+tribe = "pirate"
+stats = [7, 7]
+on_sell = { discover_tier7_if_golden = true }
+
+[[minion]]
+name = "Locked-up Mutineer"
+tier = 3
+tribe = "pirate"
+stats = [6, 3]
+deathrattle = { effect = { lockbox_sooner = 1 } }
+
+[[minion]]
+name = "Bigwig Bandit"
+tier = 4
+tribe = "pirate"
+stats = [4, 6]
+rally = { random_bounty = true }
+
+[[minion]]
+name = "Blade Collector"
+tier = 4
+tribe = "pirate"
+stats = [3, 2]
+cleave = true
+
+[[minion]]
+name = "Gunpowder Courier"
+tier = 4
+tribe = "pirate"
+stats = [2, 5]
+on_event = { event = "gold_spent", every = 6, effect = { buff = [3, 1], target = "all", tribe = "pirate" } }
+
+[[minion]]
+name = "Lovesick Balladist"
+tier = 4
+tribe = "pirate"
+stats = [3, 4]
+battlecry = { buff = [0, 2], target = "chosen", tribe = "pirate", per_gold_spent = [0, 1] }
+
+[[minion]]
+name = "Maritime Extortionist"
+tier = 4
+tribe = "pirate"
+stats = [7, 7]
+buff_per_golden_played = [7, 7]
+
+[[minion]]
+name = "Elite Navigator"
+tier = 5
+tribe = "pirate"
+stats = [5, 5]
+battlecry = { make_golden_max_tier = 4, tribe = "pirate" }
+
+[[minion]]
+name = "Enterprising Escapee"
+tier = 5
+tribe = "pirate"
+stats = [6, 6]
+on_event = { event = "gold_spent", every = 6, effect = { lockbox_sooner = 1 } }
+
+[[minion]]
+name = "Proud Privateer"
+tier = 5
+tribe = "pirate"
+stats = [8, 8]
+aura = "proud_privateer"
+
+[[minion]]
+name = "Ship Master Eudora"
+tier = 5
+tribe = "pirate"
+stats = [8, 3]
+deathrattle = { effect = { keep_golden = [6, 6] } }
+
+[[minion]]
+name = "Shipwrecked Rascal"
+tier = 5
+tribe = "pirate"
+stats = [5, 4]
+battlecry = { random_bounty = true }
+deathrattle = { effect = { random_bounty = true } }
+
+[[minion]]
+name = "Hooktusk, Master Marauder"
+tier = 6
+tribe = "pirate"
+stats = [4, 4]
+after_discover = { buff = [1, 1], target = "others", tribe = "pirate", per_golden_played = true }
+
+[[minion]]
+name = "Silent Deliverer"
+tier = 6
+tribe = "pirate"
+stats = [7, 7]
+battlecry = { golden_minion_tier = 4 }
+
+[[minion]]
+name = "Sky Admiral Rogers"
+tier = 6
+tribe = "pirate"
+stats = [4, 5]
+on_event = { event = "gold_spent", every = 9, effect = { random_bounty = true } }
+
+[[minion]]
+name = "Captain Sanders"
+tier = 7
+tribe = "pirate"
+stats = [9, 9]
+battlecry = { make_golden_max_tier = 6 }
+
 # --- Tokens ---
 
 [[token]]
@@ -1475,3 +1638,55 @@ tier = 6
 cost = 4
 effect = { target = "chosen", make_golden_max_tier = 4 }
 
+# --- Spells: Pirates ---
+# The five Bounties share one slot of the spell draw (a drawn Bounty is a
+# random one of them). Tier 3, cost 2.
+
+[[spell]]
+name = "Friendly Bounty"
+tier = 3
+cost = 2
+bounty = true
+effect = { friendly_bounty = true }
+
+[[spell]]
+name = "Healthy Bounty"
+tier = 3
+cost = 2
+bounty = true
+effect = { target = "random_board", count = 4, buff = [0, 4] }
+
+[[spell]]
+name = "Hostile Bounty"
+tier = 3
+cost = 2
+bounty = true
+effect = { target = "random_board", count = 4, buff = [4, 0] }
+
+[[spell]]
+name = "Selfish Bounty"
+tier = 3
+cost = 2
+bounty = true
+effect = { buff_leftmost = [6, 6] }
+
+[[spell]]
+name = "Wealthy Bounty"
+tier = 3
+cost = 2
+bounty = true
+effect = { gold = 2 }
+
+[[spell]]
+name = "Wave of Gold"
+tier = 5
+cost = 2
+effect = { target = "board", buff = [3, 2], golden_extra = true }
+
+# Generated only: an unplayable spell in hand that opens after 5 turns.
+[[spell]]
+name = "Lockbox"
+tier = 3
+cost = 2
+token = true
+effect = { lockbox = 5 }

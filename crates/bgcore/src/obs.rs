@@ -380,6 +380,9 @@ fn target_kind(k: TargetKind) -> (usize, (i32, i32)) {
         TargetKind::TriggerBattlecry => (4, (0, 0)),
         TargetKind::AnyBuff { attack, health } => (5, (attack, health)),
         TargetKind::AnySetStats { attack, health } => (6, (attack, health)),
+        // Same slot as the Make Golden spell (the layout is frozen until the
+        // observation run).
+        TargetKind::MakeGolden { .. } => (2, (0, 0)),
     }
 }
 

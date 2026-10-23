@@ -508,7 +508,12 @@ fn golden_touch_makes_a_tavern_minion_golden() {
     g.give(0, "Golden Touch").unwrap();
     let before: Vec<(i32, i32)> = g.players[0].shop.iter().map(stats).collect();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    let golden: Vec<usize> = (0..g.players[0].shop.len()).filter(|&i| g.players[0].shop[i].golden).collect();
+    // Aureate Laureate is always Golden: only a Golden Touch counts.
+    let golden: Vec<usize> = (0..g.players[0].shop.len())
+        .filter(|&i| {
+            g.players[0].shop[i].golden && !g.data.cards.get(g.players[0].shop[i].card).always_golden
+        })
+        .collect();
     assert_eq!(golden.len(), 1);
     let i = golden[0];
     assert_eq!(stats(&g.players[0].shop[i]), (before[i].0 * 2, before[i].1 * 2));
@@ -600,7 +605,7 @@ fn rally_and_attack_triggers_only_take_effects_a_fight_can_run() {
         let toml = format!("{}\n[[token]]\nname = \"B\"\ntier = 1\ntribe = \"beast\"\nstats = [0, 1]\n", base(bad));
         assert!(CardDb::from_toml(&toml).is_err(), "{bad} should be refused");
     }
-    let bad_tribe = base("whenever_friendly_attack = { attacker_tribe = \"pirate\", effect = { buff = [1, 1], target = \"all\" } }");
+    let bad_tribe = base("whenever_friendly_attack = { attacker_tribe = \"elemental\", effect = { buff = [1, 1], target = \"all\" } }");
     assert!(CardDb::from_toml(&bad_tribe).unwrap_err().contains("unknown tribe"));
 }
 

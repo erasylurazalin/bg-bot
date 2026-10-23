@@ -52,19 +52,19 @@ const HEALTH_FLOOR: i32 = 10;
 
 fn preferred_tribe(game: &Game, p: usize) -> Option<Tribe> {
     let pl = &game.players[p];
-    let mut counts = [0u32; Tribe::ALL.len()];
+    let mut counts = [0u32; Tribe::EVERY.len()];
     for m in pl.board.iter().chain(&pl.hand) {
         let c = game.data.cards.get(m.card);
         if c.is_spell() {
             continue;
         }
-        for (n, t) in counts.iter_mut().zip(Tribe::ALL) {
+        for (n, t) in counts.iter_mut().zip(Tribe::EVERY) {
             *n += c.tribes.has(t) as u32;
         }
     }
     // the tribe with the most cards, if one leads alone
     let best = *counts.iter().max().unwrap();
-    let mut leaders = Tribe::ALL.into_iter().zip(counts).filter(|&(_, n)| n == best);
+    let mut leaders = Tribe::EVERY.into_iter().zip(counts).filter(|&(_, n)| n == best);
     match (leaders.next(), leaders.next()) {
         (Some((t, _)), None) if best > 0 => Some(t),
         _ => None,

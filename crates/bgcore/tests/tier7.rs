@@ -732,24 +732,25 @@ fn los_board(db: &CardDb) -> Vec<Minion> {
 #[test]
 fn last_one_standing_buffs_one_minion_of_each_type_once_and_can_pick_itself() {
     let db = db();
-    let mut picked_itself = false;
-    let mut skipped_itself = false;
+    // Pirate is a type too, and the Last One Standing is the only Pirate
+    // here: it is always among the picks (as its own Pirate pick, or earlier
+    // for another type), so it is buffed once and five or six minions are.
+    let mut five = false;
+    let mut six = false;
     for seed in 0..300 {
         let (out, _) = run(&db, &los_board(&db), &[wall(&db)], 1, seed);
         let perm = &out.sides[0].permanent_stats;
-        // five types, five different minions, each +15/+15 exactly once
         let buffed: Vec<usize> = (0..6).filter(|&i| perm[i] != (0, 0)).collect();
-        assert_eq!(buffed.len(), 5, "seed {seed}: {perm:?}");
+        assert!(buffed.len() == 5 || buffed.len() == 6, "seed {seed}: {perm:?}");
         assert!(buffed.iter().all(|&i| perm[i] == (15, 15)), "seed {seed}: {perm:?}");
-        // each of the four single-type minions is the only pick for its type
-        // unless the Last One Standing (every type) took it first
-        if perm[0] != (0, 0) {
-            picked_itself = true;
+        assert!(perm[0] == (15, 15), "seed {seed}: it is the only Pirate: {perm:?}");
+        if buffed.len() == 5 {
+            five = true;
         } else {
-            skipped_itself = true;
+            six = true;
         }
     }
-    assert!(picked_itself && skipped_itself);
+    assert!(five && six);
 
     // Alone it is every type but one minion: one buff, not five.
     let (out, _) = run(&db, &[mk(&db, "The Last One Standing", false)], &[wall(&db)], 1, 1);
@@ -759,7 +760,7 @@ fn last_one_standing_buffs_one_minion_of_each_type_once_and_can_pick_itself() {
     assert_eq!(out.sides[0].permanent_stats[0], (30, 30));
     let (out, _) = run(&db, &los_board_golden(&db), &[wall(&db)], 1, 2);
     let total: i32 = out.sides[0].permanent_stats.iter().map(|s| s.0).sum();
-    assert_eq!(total, 10 * 15, "two passes of five buffs");
+    assert!((10 * 15..=12 * 15).contains(&total), "two passes of five or six buffs: {total}");
 }
 
 fn los_board_golden(db: &CardDb) -> Vec<Minion> {

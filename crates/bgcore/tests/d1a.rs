@@ -123,7 +123,7 @@ fn a_card_needs_exactly_one_of_tribe_and_tribes() {
     assert!(CardDb::from_toml(both).unwrap_err().contains("both tribe and tribes"));
     let none = "[[minion]]\nname = \"A\"\ntier = 1\nstats = [1, 1]\n";
     assert!(CardDb::from_toml(none).unwrap_err().contains("needs tribe"));
-    let bad = "[[minion]]\nname = \"A\"\ntier = 1\ntribes = [\"beast\", \"pirate\"]\nstats = [1, 1]\n";
+    let bad = "[[minion]]\nname = \"A\"\ntier = 1\ntribes = [\"beast\", \"elemental\"]\nstats = [1, 1]\n";
     assert!(CardDb::from_toml(bad).unwrap_err().contains("unknown tribe"));
 }
 

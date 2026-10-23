@@ -91,11 +91,28 @@ pub struct SideOutcome {
     /// Upcoming Refreshes that get Fodders (Trapped Clapper), oldest first.
     pub fodder_refreshes: [u8; 16],
     pub n_fodder_refreshes: u8,
+    /// Lockboxes the player got in this fight, in order, each as the number
+    /// of turns it opens sooner when one is already held (Locked-up
+    /// Mutineer).
+    pub lockboxes: [u8; 8],
+    pub n_lockboxes: u8,
 }
 
 impl SideOutcome {
     pub fn cards_gained(&self) -> &[CardId] {
         &self.cards[..self.n_cards as usize]
+    }
+
+    pub fn lockboxes_gained(&self) -> &[u8] {
+        &self.lockboxes[..self.n_lockboxes as usize]
+    }
+
+    fn push_lockbox(&mut self, sooner: u8) {
+        let n = self.n_lockboxes as usize;
+        if n < self.lockboxes.len() {
+            self.lockboxes[n] = sooner;
+            self.n_lockboxes += 1;
+        }
     }
 
     fn push_card(&mut self, c: CardId) {
@@ -982,6 +999,36 @@ impl<'a> Side<'a> {
                     }
                 }
             }
+            Effect::GetLockbox { sooner } => {
+                self.out.push_lockbox(sooner.saturating_mul(mul as u8));
+            }
+            Effect::GetRandomBounty => {
+                for _ in 0..mul {
+                    if let Some(c) = db.random_bounty(rng) {
+                        self.out.push_card(c);
+                    }
+                }
+            }
+            Effect::BuffAllKeepGolden { attack, health } => {
+                // Every living minion gets it for the fight; the Golden ones
+                // keep it for good.
+                let (da, dh) = (attack * mul, health * mul);
+                for i in 0..self.ms.len() {
+                    if self.ms[i].m.health <= 0 {
+                        continue;
+                    }
+                    let keeps = self.ms[i].m.golden && self.keep_mul(db, i).is_none();
+                    self.gain_at(db, i, da, dh);
+                    if keeps
+                        && !db.get(self.ms[i].m.card).fixed_stats
+                        && let Some(slot) = self.ms[i].start_slot
+                    {
+                        let s = slot as usize;
+                        self.out.permanent_stats[s].0 = self.out.permanent_stats[s].0.saturating_add(da);
+                        self.out.permanent_stats[s].1 = self.out.permanent_stats[s].1.saturating_add(dh);
+                    }
+                }
+            }
             Effect::BuffEachType { attack, health } => {
                 // A golden minion does the whole thing twice, with fresh
                 // picks, so one minion can get two buffs from it.
@@ -1233,6 +1280,24 @@ fn hit(target: &mut Minion, dmg: i32, source: &mut Minion) -> i32 {
         source.keywords.clear(Keywords::VENOMOUS);
     }
     dmg
+}
+
+/// The uids of the enemies next to `target` when the attacker cleaves
+/// (Blade Collector), as the board stands before the hit.
+fn cleave_targets(db: &CardDb, attacker: &Minion, def: &Side, target: u16) -> ArrayVec<u16, 2> {
+    let mut out = ArrayVec::new();
+    if !attacker.parts().any(|(c, _)| db.get(c).cleave) {
+        return out;
+    }
+    if let Some(di) = def.index_of(target) {
+        if let Some(l) = di.checked_sub(1) {
+            out.push(def.ms[l].uid);
+        }
+        if di + 1 < def.ms.len() {
+            out.push(def.ms[di + 1].uid);
+        }
+    }
+    out
 }
 
 fn targetable(f: &Fm) -> bool {
@@ -1729,6 +1794,45 @@ fn attack_swings(
             xf.killer = Some(yf.uid);
         }
         att.count_damage(db, turn, ai, dealt_x, uid, rng, w);
+        // Cleave (Blade Collector): the enemies next to the one attacked take
+        // the same damage, shields pop, Venomous kills them, and they hit
+        // nothing back. The attacker's Venomous is used up by the first kill.
+        let cleave_victims = cleave_targets(db, &attacker, def, def_uid);
+        let mut cleave_dealt = 0;
+        if !cleave_victims.is_empty() {
+            let mut src = attacker;
+            let mut killed = false;
+            for v in cleave_victims {
+                let Some(vi) = def.index_of(v) else { continue };
+                let (was_alive, was_shielded) =
+                    (def.ms[vi].m.health > 0, def.ms[vi].m.keywords.has(Keywords::DIVINE_SHIELD));
+                let mut one = src;
+                let dealt = hit(&mut def.ms[vi].m, dx, &mut one);
+                def.ms[vi].taken += dealt;
+                cleave_dealt += dealt;
+                if was_alive && def.ms[vi].m.health <= 0 && dealt > 0 {
+                    def.ms[vi].killer = Some(me);
+                    killed = true;
+                }
+                if dealt > 0 && def.damage_trigger {
+                    def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
+                }
+                if was_shielded && !def.ms[vi].m.keywords.has(Keywords::DIVINE_SHIELD) {
+                    def.note_shield_lost(db);
+                }
+            }
+            if killed && src.keywords.has(Keywords::VENOMOUS) {
+                src.keywords.clear(Keywords::VENOMOUS);
+                if let Some(ai) = att.index_of(me) {
+                    att.ms[ai].m.keywords.clear(Keywords::VENOMOUS);
+                }
+            }
+            if cleave_dealt > 0
+                && let Some(ai) = att.index_of(me)
+            {
+                att.count_damage(db, turn, ai, cleave_dealt, uid, rng, w);
+            }
+        }
         let Some(di) = def.index_of(def_uid) else { continue };
         def.count_damage(db, turn ^ 1, di, dealt_y, uid, rng, w);
         // Devout Hellcaller: another friendly Demon dealt damage. The

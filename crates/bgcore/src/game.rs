@@ -72,6 +72,10 @@ pub enum TargetKind {
     AnyBuff { attack: i32, health: i32 },
     /// Set the chosen minion's (board or Tavern) stats (Tyrael).
     AnySetStats { attack: i32, health: i32 },
+    /// Make the chosen friendly minion (of a tribe, up to a tier) Golden on
+    /// the board (Elite Navigator, Captain Sanders). The pending target's
+    /// `runs` is how many are still to be made.
+    MakeGolden { tribe: Option<Tribe>, max_tier: u8 },
 }
 
 impl TargetKind {
@@ -211,6 +215,11 @@ pub struct Player {
     pub beast_bonus: (i32, i32),
     /// Deathrattles triggered this game, which Falling Sky Golem reads.
     pub deathrattles_triggered: u32,
+    /// Golden minions played from hand to the board this game (Maritime
+    /// Extortionist, Hooktusk). A minion made Golden on the board isn't one.
+    pub golden_played: u32,
+    /// Gold spent this turn (Lovesick Balladist). Resets every turn.
+    pub gold_spent_turn: u16,
     pub spell_bonus: (i32, i32),
     pub spell_discount: u8,
     /// Magicfin Mycologist uses spent this turn. Resets every turn.
@@ -278,6 +287,8 @@ impl Player {
             improve: [0; N_COUNTERS],
             beast_bonus: (0, 0),
             deathrattles_triggered: 0,
+            golden_played: 0,
+            gold_spent_turn: 0,
             spell_bonus: (0, 0),
             spell_discount: 0,
             mycologist_uses: 0,
@@ -491,6 +502,11 @@ impl Player {
             m.attack += a * n;
             m.health += h * n;
         }
+        if let Some((a, h)) = c.buff_per_golden_played {
+            let n = self.golden_played as i32 * m.mul();
+            m.attack += a * n;
+            m.health += h * n;
+        }
         m
     }
 
@@ -685,6 +701,71 @@ fn draw_rigged(
         return Some(c);
     }
     draw_filtered(pool, cards, rng, lo, hi, exclude, pred)
+}
+
+/// Draw one Golden minion from the pool: a card of tier `lo..=hi` (with a
+/// type when `typed`), weighted by copies left, taking the three copies a
+/// Golden minion stands for (fewer when the pool has fewer; cards with all
+/// three left are preferred). With a sandbox `rig` the rigged tribe and
+/// neutral cards come first. Returns the card and how many copies it took.
+fn draw_golden(
+    pool: &mut [u8],
+    cards: &CardDb,
+    rng: &mut Rng,
+    lo: u8,
+    hi: u8,
+    typed: bool,
+    rig: Option<Tribe>,
+) -> Option<(CardId, u8)> {
+    for min in [3u8, 1] {
+        for rigged in [rig.is_some(), false] {
+            let ok = |c: usize| {
+                let card = &cards.cards[c];
+                pool[c] >= min
+                    && card.pool_slot as usize == c
+                    && lo <= card.tier
+                    && card.tier <= hi
+                    && (!typed || !card.tribes.is_neutral())
+                    && (!rigged || card.rig_ok(rig))
+            };
+            let total: u32 = (0..cards.pool_cards).filter(|&c| ok(c)).map(|c| pool[c] as u32).sum();
+            if total == 0 {
+                continue;
+            }
+            let mut r = rng.below(total);
+            for c in 0..cards.pool_cards {
+                if !ok(c) {
+                    continue;
+                }
+                let n = pool[c] as u32;
+                if r < n {
+                    let take = pool[c].min(3);
+                    pool[c] -= take;
+                    let id = if cards.cards[c].is_volumizer {
+                        cards.volumizers[rng.below(cards.volumizers.len() as u32) as usize]
+                    } else {
+                        c as CardId
+                    };
+                    return Some((id, take));
+                }
+                r -= n;
+            }
+        }
+    }
+    None
+}
+
+/// Make a minion Golden where it stands: its stats go to the golden card's
+/// (double the printed ones), keeping every buff.
+fn golden_up(cards: &CardDb, m: &mut Minion) {
+    if m.golden {
+        return;
+    }
+    let base = cards.get(m.card);
+    let (ga, gh) = base.golden_stats.unwrap_or((base.attack * 2, base.health * 2));
+    m.golden = true;
+    m.attack += ga - base.attack;
+    m.health += gh - base.health;
 }
 
 fn give_back(pool: &mut [u8], cards: &CardDb, m: &Minion) {
@@ -1026,6 +1107,8 @@ impl Game {
             // something to steal; they are never cast from the Tavern.
             match c.spell_effect {
                 Some(SpellEffect::StealRandomTavern) => self.shop_has_minion(p),
+                // A Lockbox is unplayable.
+                Some(SpellEffect::Lockbox(_)) => false,
                 Some(_) => true,
                 None => false,
             }
@@ -1048,6 +1131,10 @@ impl Game {
             }
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
             TargetKind::Spell(st) => self.valid_spell_target(p, st, s),
+            TargetKind::MakeGolden { tribe, max_tier } => {
+                let c = self.data.cards.get(b[s].card);
+                !b[s].golden && c.tier <= max_tier && c.is(tribe)
+            }
             TargetKind::TriggerRally => {
                 b[s].parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
             }
@@ -1180,11 +1267,17 @@ impl Game {
                     self.fire_after_play_tribe(p, t);
                 }
                 if m.golden {
-                    let tier = (self.players[p].tier + 1).min(MAX_TIER);
-                    let _ = self.players[p]
-                        .discover_queue
-                        .try_push(DiscoverRequest::MinionTier(tier));
-                    self.maybe_start_discover(p);
+                    // A Golden minion played from hand counts for Maritime
+                    // Extortionist and Hooktusk, and gives a Triple Reward
+                    // unless its text or its source says it doesn't.
+                    self.add_golden_played(p, 1);
+                    if !m.no_reward {
+                        let tier = (self.players[p].tier + 1).min(MAX_TIER);
+                        let _ = self.players[p]
+                            .discover_queue
+                            .try_push(DiscoverRequest::MinionTier(tier));
+                        self.maybe_start_discover(p);
+                    }
                 }
             }
             Action::Target(s) => self.resolve_target(p, s as usize),
@@ -1416,6 +1509,23 @@ impl Game {
     /// Magnetized into a host, and Humon'gozz).
     pub fn total_spell_bonus(&self, p: usize) -> (i32, i32) {
         self.players[p].total_spell_bonus(&self.data.cards)
+    }
+
+    /// The player played `n` more Golden minions from hand: Maritime
+    /// Extortionist grows wherever it is (Tavern, hand or board).
+    fn add_golden_played(&mut self, p: usize, n: u32) {
+        let cards = &self.data.cards;
+        let pl = &mut self.players[p];
+        pl.golden_played = pl.golden_played.saturating_add(n);
+        for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(&mut pl.board) {
+            for (card, golden) in m.parts().collect::<ArrayVec<_, { crate::MAX_ATTACHED + 1 }>>() {
+                if let Some((a, h)) = cards.get(card).buff_per_golden_played {
+                    let k = n as i32 * if golden { 2 } else { 1 };
+                    m.attack += a * k;
+                    m.health += h * k;
+                }
+            }
+        }
     }
 
     fn add_volumizer_bonus(&mut self, p: usize, da: i32, dh: i32) {
@@ -1824,6 +1934,21 @@ impl Game {
         mult
     }
 
+    /// How many times the player's Bounties cast: once, twice with a Proud
+    /// Privateer, three times with a Golden one. "Twice" is a fixed count, so
+    /// two Privateers don't stack (the highest wins).
+    fn bounty_mult(&self, p: usize) -> u8 {
+        let mut mult = 1;
+        for m in &self.players[p].board {
+            for (card, golden) in m.parts() {
+                if self.data.cards.get(card).aura == Some(Aura::ProudPrivateer) {
+                    mult = mult.max(if golden { 3 } else { 2 });
+                }
+            }
+        }
+        mult
+    }
+
     fn balinda_mult(&self, p: usize) -> u8 {
         let mut mult = 1;
         for m in &self.players[p].board {
@@ -1874,6 +1999,11 @@ impl Game {
                     let mut pos = 0;
                     self.run_effect(p, &mut pos, e, golden, 1);
                 }
+                Some(OnSell::DiscoverTier7IfGolden) => {
+                    if golden {
+                        self.discover_tier7_minion(p);
+                    }
+                }
                 Some(OnSell::GoldIfLost(_)) | None => {}
             }
         }
@@ -1896,8 +2026,14 @@ impl Game {
     }
 
     fn cast_spell(&mut self, p: usize, card_id: CardId) {
+        // A Bounty cast again (Proud Privateer) is another spell cast for
+        // every trigger and every "spells cast" counter.
+        let c = self.data.cards.get(card_id);
+        let casts = if c.is_bounty && c.spell_effect.is_some() { self.bounty_mult(p) } else { 1 };
         self.cast_spell_inner(p, card_id);
-        self.fire_event(p, EventKind::SpellsCast, 1);
+        for _ in 0..casts {
+            self.fire_event(p, EventKind::SpellsCast, 1);
+        }
     }
 
     fn cast_spell_inner(&mut self, p: usize, card_id: CardId) {
@@ -1926,8 +2062,12 @@ impl Game {
                 options,
             });
         } else if let Some(se) = c.spell_effect {
-            self.trigger_on_cast_spell(p);
-            self.execute_spell_effect(p, se);
+            // Proud Privateer: a Bounty casts again, each cast a spell cast.
+            let casts = if c.is_bounty { self.bounty_mult(p) } else { 1 };
+            for _ in 0..casts {
+                self.trigger_on_cast_spell(p);
+                self.execute_spell_effect(p, se);
+            }
             self.maybe_start_discover(p);
         }
     }
@@ -2073,10 +2213,10 @@ impl Game {
             }
             SpellEffect::PlanarTelescope => {
                 let cards = &self.data.cards;
-                let mut counts = [0u8; 5];
+                let mut counts = [0u8; Tribe::EVERY.len()];
                 for m in &self.players[p].board {
                     let t = cards.get(m.card).tribes;
-                    for (k, tribe) in Tribe::ALL.iter().enumerate() {
+                    for (k, tribe) in Tribe::EVERY.iter().enumerate() {
                         if t.has(*tribe) {
                             counts[k] += 1;
                         }
@@ -2085,8 +2225,8 @@ impl Game {
                 let Some(max) = counts.iter().copied().max().filter(|&n| n > 0) else {
                     return;
                 };
-                let mut tied: ArrayVec<Tribe, 5> = ArrayVec::new();
-                for (k, tribe) in Tribe::ALL.iter().enumerate() {
+                let mut tied: ArrayVec<Tribe, { Tribe::EVERY.len() }> = ArrayVec::new();
+                for (k, tribe) in Tribe::EVERY.iter().enumerate() {
                     if counts[k] == max {
                         let _ = tied.try_push(*tribe);
                     }
@@ -2110,6 +2250,39 @@ impl Game {
             SpellEffect::GetCard { card, count } => {
                 for _ in 0..count {
                     self.give_generated(p, card);
+                }
+            }
+            // A Lockbox can't be cast.
+            SpellEffect::Lockbox(_) => {}
+            SpellEffect::BuffLeftmost { attack, health } => {
+                if let Some(m) = self.players[p].board.first_mut() {
+                    buff(m, attack + da, health + dh);
+                }
+            }
+            SpellEffect::FriendlyBounty => {
+                let cards = &self.data.cards;
+                let mut counts = [0u8; Tribe::EVERY.len()];
+                for m in &self.players[p].board {
+                    let t = cards.get(m.card).tribes;
+                    for (k, tribe) in Tribe::EVERY.iter().enumerate() {
+                        if t.has(*tribe) {
+                            counts[k] += 1;
+                        }
+                    }
+                }
+                let Some(max) = counts.iter().copied().max().filter(|&n| n > 0) else {
+                    return;
+                };
+                let mut tied: ArrayVec<Tribe, { Tribe::EVERY.len() }> = ArrayVec::new();
+                for (k, tribe) in Tribe::EVERY.iter().enumerate() {
+                    if counts[k] == max {
+                        let _ = tied.try_push(*tribe);
+                    }
+                }
+                let tribe = tied[self.rng.below(tied.len() as u32) as usize];
+                let tier = self.players[p].tier;
+                if let Some(c) = self.data.cards.random_pool_minion(tribe, tier, &mut self.rng) {
+                    self.give_generated(p, c);
                 }
             }
         }
@@ -2625,8 +2798,76 @@ impl Game {
                     buff(&mut self.players[p].hand[i], host.attack * n, host.health * n);
                 }
             }
+            Effect::GetLockbox { sooner } => {
+                for _ in 0..runs {
+                    self.give_lockbox(p, sooner.saturating_mul(mul as u8));
+                }
+            }
+            Effect::GetRandomBounty => {
+                for _ in 0..mul as u8 * runs {
+                    if let Some(c) = self.data.cards.random_bounty(&mut self.rng) {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
+            Effect::BuffAdjacentPerGolden { attack } => {
+                // Once, and again for each friendly Golden minion.
+                let golden_count = self.players[p].board.iter().filter(|m| m.golden).count() as i32;
+                let n = (1 + golden_count) * runs as i32;
+                let here = *pos;
+                let board = &mut self.players[p].board;
+                for j in [here.checked_sub(1), Some(here + 1)].into_iter().flatten() {
+                    if let Some(o) = board.get_mut(j) {
+                        buff(o, attack * mul * n, 0);
+                    }
+                }
+            }
+            Effect::BuffChosenPerGold { tribe, attack, health, per_gold } => {
+                let g = self.players[p].gold_spent_turn as i32;
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::MinionBuff {
+                        tribe,
+                        attack: (attack + per_gold.0 * g) * mul,
+                        health: (health + per_gold.1 * g) * mul,
+                        keyword: 0,
+                        random_keyword: false,
+                    },
+                    runs,
+                };
+                self.offer_target(p, pt);
+            }
+            Effect::MakeGoldenChosen { tribe, max_tier, count } => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::MakeGolden { tribe, max_tier },
+                    runs: count.saturating_mul(mul as u8).saturating_mul(runs),
+                };
+                self.offer_target(p, pt);
+            }
+            Effect::GetGoldenMinion { tier, count } => {
+                let n = count.saturating_mul(mul as u8).saturating_mul(runs);
+                for _ in 0..n {
+                    if !self.give_golden_minion(p, tier, tier, false, true) {
+                        break;
+                    }
+                }
+            }
+            Effect::BuffOthersPerGolden { tribe, attack, health } => {
+                let k = 1 + self.players[p].golden_played as i32;
+                let cards = &self.data.cards;
+                let pl = &mut self.players[p];
+                for _ in 0..runs {
+                    for (i, o) in pl.board.iter_mut().enumerate() {
+                        if i != *pos && cards.get(o.card).is(tribe) {
+                            buff(o, attack * mul * k, health * mul * k);
+                        }
+                    }
+                }
+            }
             // These only happen in fights.
-            Effect::DamageTargetAndNeighbor
+            Effect::BuffAllKeepGolden { .. }
+            | Effect::DamageTargetAndNeighbor
             | Effect::BuffKiller { .. }
             | Effect::BuffAttacker { .. }
             | Effect::BuffRandomOther { .. }
@@ -3094,6 +3335,10 @@ impl Game {
         if amount == 0 {
             return;
         }
+        if kind == EventKind::GoldSpent {
+            let pl = &mut self.players[p];
+            pl.gold_spent_turn = pl.gold_spent_turn.saturating_add(amount.min(u16::MAX as u32) as u16);
+        }
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             let m = self.players[p].board[pos];
@@ -3310,6 +3555,15 @@ impl Game {
                     if random_keyword {
                         self.give_random_keyword(p, s);
                     }
+                }
+            }
+            TargetKind::MakeGolden { .. } => {
+                // A minion made Golden on the board gives no Triple Reward
+                // and doesn't count as a Golden minion played.
+                golden_up(&self.data.cards, &mut self.players[p].board[s]);
+                if pt.runs > 1 {
+                    let again = PendingTarget { runs: pt.runs - 1, ..*pt };
+                    self.offer_target(p, again);
                 }
             }
             TargetKind::AnyBuff { attack, health } => {
@@ -3665,7 +3919,102 @@ impl Game {
         if let Some((source, d)) = damage {
             self.take_shop_damage(p, d, Some(source as usize));
         }
+        self.fire_after_discover(p);
         self.maybe_start_discover(p);
+    }
+
+    /// Draw a Golden minion for the player (from the pool, three copies) and
+    /// put it in hand. `no_reward` marks it as giving no Triple Reward.
+    /// False when the hand is full or nothing is left.
+    fn give_golden_minion(&mut self, p: usize, lo: u8, hi: u8, typed: bool, no_reward: bool) -> bool {
+        if self.players[p].hand.is_full() {
+            return false;
+        }
+        let Some(m) = self.draw_golden_minion(p, lo, hi, typed, no_reward) else { return false };
+        self.players[p].hand.push(m);
+        true
+    }
+
+    fn draw_golden_minion(&mut self, p: usize, lo: u8, hi: u8, typed: bool, no_reward: bool) -> Option<Minion> {
+        let Game { data, rng, players, pool, .. } = self;
+        let pl = &mut players[p];
+        let (id, copies) = draw_golden(pool, &data.cards, rng, lo, hi, typed, pl.rig)?;
+        let mut m = pl.make_card(&data.cards, id, true, copies);
+        m.no_reward |= no_reward;
+        Some(m)
+    }
+
+    /// Get a Lockbox. With one already in hand it opens `sooner` turns
+    /// sooner instead (and opens now if that takes it to 0). With a full
+    /// hand and no Lockbox the new one is lost.
+    fn give_lockbox(&mut self, p: usize, sooner: u8) {
+        let cards = &self.data.cards;
+        let Some(id) = cards.lockbox else { return };
+        let pl = &mut self.players[p];
+        if let Some(i) = pl.hand.iter().position(|m| m.card == id) {
+            let left = pl.hand[i].improvements.saturating_sub(sooner as u16);
+            pl.hand[i].improvements = left;
+            if left == 0 {
+                self.open_lockbox(p, i);
+            }
+            return;
+        }
+        if pl.hand.is_full() {
+            return;
+        }
+        let m = pl.make_card(cards, id, false, 0);
+        pl.hand.push(m);
+    }
+
+    /// The Lockbox in hand slot `i` breaks open: it becomes a random Golden
+    /// minion with a type, up to the player's tier, taken from the pool.
+    fn open_lockbox(&mut self, p: usize, i: usize) {
+        let tier = self.players[p].tier;
+        match self.draw_golden_minion(p, 1, tier, true, false) {
+            Some(m) => self.players[p].hand[i] = m,
+            None => {
+                self.players[p].hand.remove(i);
+            }
+        }
+    }
+
+    /// End of the owner's turn: every Lockbox in hand counts down `times`
+    /// (Drakkari doubles it) and opens at 0.
+    fn tick_lockboxes(&mut self, p: usize, times: u8) {
+        let Some(id) = self.data.cards.lockbox else { return };
+        for _ in 0..times {
+            let mut i = 0;
+            while i < self.players[p].hand.len() {
+                if self.players[p].hand[i].card == id {
+                    let m = &mut self.players[p].hand[i];
+                    m.improvements = m.improvements.saturating_sub(1);
+                    if m.improvements == 0 {
+                        let before = self.players[p].hand.len();
+                        self.open_lockbox(p, i);
+                        if self.players[p].hand.len() < before {
+                            continue;
+                        }
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+
+    /// After the player Discovers a card: Hooktusk and its like run.
+    fn fire_after_discover(&mut self, p: usize) {
+        let mut pos = 0;
+        while pos < self.players[p].board.len() {
+            let m = self.players[p].board[pos];
+            for (card, golden) in m.parts() {
+                if let Some(e) = self.data.cards.get(card).after_discover
+                    && pos < self.players[p].board.len()
+                {
+                    self.run_effect(p, &mut pos, e, golden, 1);
+                }
+            }
+            pos += 1;
+        }
     }
 
     /// Get a random tier 7 minion, as a generated card (no pool copy), for
@@ -3830,6 +4179,8 @@ impl Game {
             }
             pos += 1;
         }
+        // A Lockbox is an end of turn countdown too, so Drakkari doubles it.
+        self.tick_lockboxes(p, runs);
     }
 
     /// The player is done for this turn. Anything still waiting on a choice
@@ -3961,6 +4312,7 @@ impl Game {
             pl.actions = 0;
             pl.health_refreshes_used = 0;
             pl.mycologist_uses = 0;
+            pl.gold_spent_turn = 0;
             if pl.frozen {
                 pl.frozen = false;
             } else {
@@ -4094,6 +4446,9 @@ impl Game {
         }
         for &c in so.cards_gained() {
             self.give_generated(p, c);
+        }
+        for &n in so.lockboxes_gained() {
+            self.give_lockbox(p, n);
         }
     }
 
