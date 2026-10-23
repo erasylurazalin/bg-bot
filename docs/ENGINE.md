@@ -198,6 +198,15 @@ Deleting `.venv` undoes it.
   it also no longer beats its oldest snapshot.
 - Any change to the action space or observation breaks old checkpoints;
   start a new run.
+- `--model` picks the network: `mlp` (default, 3.0M parameters, all slots
+  concatenated), `attn` (a 3-layer transformer over the card slots, 0.53M)
+  or `pool` (the same slot tokens pooled per zone, 0.71M). The last two
+  score per-slot actions from the token of the slot they act on. It is
+  saved in the checkpoint and `--resume` builds what the checkpoint holds.
+  `attn` runs its layers in bf16 and recomputes them in the backward pass
+  to fit a minibatch of 8192 (about 5 GB); it does about 10 updates a
+  minute against `mlp`'s 70, `pool` about 35. `python model.py` checks
+  that the per-slot logits follow their slots.
 
 ## Known weak spots
 

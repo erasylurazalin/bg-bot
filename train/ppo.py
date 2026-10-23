@@ -2,6 +2,10 @@
 
     .venv/bin/python train/ppo.py --name stage2-smoke --minutes 5
     .venv/bin/python train/ppo.py --name run2 --resume runs/run2/ckpt.pt
+    .venv/bin/python train/ppo.py --name attn1 --model attn
+
+--model picks the network (model.py): mlp (the default), attn or pool. It is
+saved in the checkpoint, and --resume builds what the checkpoint holds.
 
 Each game seats learners (this network, trained), snapshots (older copies of
 it), standard curve bots, rush curve bots, and random bots. Reward is placement
@@ -25,7 +29,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
-from model import Net, masked
+from model import MODELS, build, masked
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
@@ -56,6 +60,8 @@ def args():
     a.add_argument("--name", required=True)
     a.add_argument("--minutes", type=float, default=10)
     a.add_argument("--resume")
+    a.add_argument("--model", choices=list(MODELS),
+                   help="network (default mlp); on --resume the checkpoint's")
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--envs", type=int, default=1024)
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
@@ -212,12 +218,18 @@ def main():
     N, T = cfg.envs, cfg.steps
     env = bgpy.VecEnv(N, cfg.seed, lineup)
     names = env.card_names()
-    net = Net(len(names)).to(dev)
+    ck = torch.load(cfg.resume, map_location=dev) if cfg.resume else None
+    if ck is not None:
+        saved = ck.get("cfg", {}).get("model", "mlp")
+        if cfg.model and cfg.model != saved:
+            print(f"--model {cfg.model} ignored: {cfg.resume} holds a {saved} network")
+        cfg.model = saved
+    cfg.model = cfg.model or "mlp"
+    net = build(cfg.model, len(names)).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     pool = []  # snapshot state dicts, on the CPU
     update, best, t_total = 0, 9.0, 0.0
-    if cfg.resume:
-        ck = torch.load(cfg.resume, map_location=dev)
+    if ck is not None:
         net.load_state_dict(ck["net"])
         opt.load_state_dict(ck["opt"])
         for g in opt.param_groups:
@@ -226,9 +238,9 @@ def main():
         print(f"resumed {cfg.resume} at update {update}")
     if not pool:
         pool.append(copy.deepcopy({k: v.cpu() for k, v in net.state_dict().items()}))
-    snap = Net(len(names)).to(dev)
+    snap = build(cfg.model, len(names)).to(dev)
     kind_of = KIND_OF.to(dev)
-    print(f"{sum(p.numel() for p in net.parameters()) / 1e6:.2f}M parameters on {dev}")
+    print(f"{cfg.model}: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M parameters on {dev}")
 
     tb = SummaryWriter(out / "tb")
     csv_path = out / "metrics.csv"
@@ -439,7 +451,7 @@ def main():
             torch.save(ck, out / "ckpt.pt")
             if minutes - last_keep >= cfg.keep_every:
                 (out / "keep").mkdir(exist_ok=True)
-                torch.save({"net": net.state_dict(), "update": update}, out / "keep" / f"net_{update}.pt")
+                torch.save({"net": net.state_dict(), "update": update, "model": cfg.model}, out / "keep" / f"net_{update}.pt")
                 last_keep = minutes
             # plateau: the rolling score hasn't improved for a while and it no
             # longer beats its oldest snapshot
