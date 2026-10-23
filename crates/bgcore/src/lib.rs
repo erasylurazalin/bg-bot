@@ -31,7 +31,12 @@ pub const HAND: usize = 10;
 /// more minion than the tier's shop size.
 pub const SHOP: usize = 7;
 pub const DISCOVER: usize = 3;
+/// The highest Tavern tier: the most a player can level to, and the most any
+/// "up to your tier" draw can reach.
 pub const MAX_TIER: u8 = 6;
+/// The highest tier a card can have. Tier 7 minions are in the pool but the
+/// Tavern never offers them: only an effect that names tier 7 produces one.
+pub const CARD_MAX_TIER: u8 = 7;
 /// Slots in `Player::final_tribes`: Beast, Mech, neutral, Dragon, Murloc,
 /// Demon. A multi-tribe minion counts in each of its tribes' slots.
 pub const TRIBES: usize = 6;

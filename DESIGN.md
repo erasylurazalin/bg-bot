@@ -433,8 +433,53 @@ value in `rules.toml`.
   so on.
 - Spells have no limited pool. (Assumption; I haven't checked it.)
 - Some groups share one pool slot: the three Volumizers are one slot and a
-  drawn one gets a random color. (The Bounty spells do the same in the
-  real game; they're Pirate cards, not in this lobby.)
+  drawn one gets a random color. The five Bounty spells are one slot the
+  same way, and a drawn Bounty is a random one of the five.
+
+**Growing to every tribe (2026-10-23).** The current patch has ten tribes:
+Beast, Mech, Dragon, Murloc, Demon, Pirate, Elemental, Undead, Quilboar,
+Aberration. Naga left the game; Aberration replaced them. They come in one
+run at a time: tier 7, Pirates, Elementals, Undead, Quilboar, Aberration,
+then a lobby of five random tribes like the real game.
+
+**Tier 7.** You can't level into tier 7. A triple at tier 6 Discovers a
+tier 6 minion. A tier 7 minion only comes from a card that explicitly
+says tier 7 (Greedy Conniver). Tier 7 minions are in the pool with the
+same copy count as tier 6 (a guess; Blizzard doesn't show it).
+
+**Rally timing.** Every Rally triggers when its minion attacks, before the
+attack lands (Obsidian Ravager's damage, Heroic Underdog's gain, The Last
+One Standing's buff all happen first). Deathstrider is the exception: it
+says "after a friendly Rally minion attacks", so it fires after.
+
+**A Rally that kills the target.** If the Rally kills the target, the
+attack doesn't land: the attacker takes no damage back, and "after a
+friendly minion attacks" still fires. That's what makes Obsidian Ravager
+strong. If the target survives the Rally, the normal hit and its damage
+back happen.
+
+**Reborn and maximum stats.** A Reborn minion counts as damaged down to 1
+Health, not as a minion whose maximum is 1. A Reborn Stalwart Kodo has a
+maximum of 32 Health and 1 left; with Goldrinn's +7 Health it has 8 left
+and a maximum of 39. Anything that reads maximum Health sees the full
+value. (Comes back for the Undead tribe.)
+
+**Polarizing Beatboxer.** It sees every Magnetization to a different
+minion, wherever it comes from: a Magnetic from hand, Spark Snapper's and
+Glambot's Satellites, Drone Duplicator's extras, and Magnetizations to a
+minion in the Tavern (Glambot plus a spell on a Tavern Mech). The copy is
+of the Magnetic as it attached, buffs included: a Lullabot that Mechagnome
+Interpreter made 5/3 gives Beatboxer a 5/3 copy. Interpreter sees the copy
+as a Magnetization but doesn't buff it again (no 8/4). Spark Snapper only
+triggers on a Mech played from hand, never on a copy or a Satellite. A
+copied Volumizer counts as Magnetized for the first time (in
+docs/UNSURE.md).
+
+**Tribes of a card versus tribes of the lobby.** A minion with two tribes
+is in the pool if either tribe is in the lobby. A card always keeps all
+its tribes, whatever the lobby has: with no Beasts in the lobby, Treasure
+Parrot is still a Beast, so "a friendly minion of each type" can buff it
+as the Beast and a Pirate next to it as the Pirate.
 
 ## Rules beyond Part 1
 
@@ -496,7 +541,8 @@ the chosen minion of a "minion of its type" card (Eonar's Favor, Lost
 Staff of Hamuul, Natural Blessing...). A dual-tribe or all-type minion
 picked for such a card uses one of its types at random. "A friendly
 minion of each type" (Misplaced Tea Set) gives each minion at most one
-buff, even a dual or all-type one.
+buff, even a dual or all-type one, and can pick the card itself (The
+Last One Standing). "Each type" means the types on your board.
 
 **Discard** doesn't exist in this lobby (it's Aberration-specific).
 "If you discard this" text does nothing.
@@ -539,6 +585,30 @@ buy or consume.
 
 **Golden cards** follow their real golden card text.
 
+**Triple rewards.** Any golden minion played from hand to the board gives
+a triple reward, unless its text says otherwise (Aureate Laureate, Silent
+Deliverer). That includes a Lockbox's minion and a Tavern minion that
+Golden Touch made golden, then bought and played. A minion that becomes
+golden on the board (Elite Navigator, Captain Sanders) gives nothing, and
+it doesn't count as a golden minion "played" (Maritime Extortionist,
+Hooktusk).
+
+**"Twice" versus "an extra time".** "Your X trigger twice" or "cast twice"
+(Brann, Drakkari, Balinda, Proud Privateer) sets a fixed count: two copies
+don't stack, and a golden copy sets its own count from its golden text.
+"An extra time" (Titus) adds on top, so several stack.
+
+**Spending gold.** Anything that actually uses gold counts: buying,
+upgrading, rolling, Activate costs. Health paid instead of gold and free
+Refreshes don't. "After you spend N Gold" counters carry over turns;
+"gold spent this turn" resets each turn.
+
+**Lockbox.** A Lockbox sits in hand, can't be played and takes a hand
+slot. It counts down at the end of your turn (Drakkari doubles it). At 0
+it opens into a random golden minion with a type, up to your tier, which
+gives a triple reward as usual. Getting another Lockbox while you hold one
+makes it open sooner instead (1 turn, or 2 if the card says so).
+
 **Pairing, damage, ending** as in Part 2: shuffle and avoid the last
 opponent, ghost for an odd count, damage is tier plus surviving minions'
 tiers with the cap from `rules.toml`, game ends with one player left or at
@@ -555,4 +625,5 @@ has the layout. A turn is capped at 60 actions.
 ## Not in this game yet
 
 Hero choice and hero powers, armor, trinkets, quests, Dark Gifts, the
-Deity, the other five tribes, tribe bans per lobby, Duos.
+Deity, the other five tribes (coming one run at a time), tribe bans per
+lobby, Duos. Naga are gone from the real game.

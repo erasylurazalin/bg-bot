@@ -983,6 +983,62 @@ tribe = "demon"
 stats = [8, 8]
 on_event = { event = "minions_sold", every = 1, effect = { add_fodder_to_next_refresh = 1 } }
 
+# --- Tier 7 ---
+# In the pool, but the Tavern never offers them and you can't level to tier 7:
+# only a card that names tier 7 produces one.
+
+[[minion]]
+name = "Polarizing Beatboxer"
+tier = 7
+tribe = "mech"
+stats = [5, 10]
+aura = "polarizing_beatboxer"
+
+[[minion]]
+name = "Champion of Sargeras"
+tier = 7
+tribe = "demon"
+stats = [8, 8]
+battlecry = { tavern_buff = [8, 8] }
+deathrattle = { tavern_buff = [8, 8] }
+
+[[minion]]
+name = "Obsidian Ravager"
+tier = 7
+tribe = "dragon"
+stats = [7, 7]
+rally = { damage_target_and_neighbor = true }
+
+[[minion]]
+name = "Futurefin"
+tier = 7
+tribe = "murloc"
+stats = [7, 13]
+end_of_turn = { effect = { give_stats_leftmost_hand = true } }
+
+[[minion]]
+name = "Highkeeper Ra"
+tier = 7
+tribe = "neutral"
+stats = [6, 6]
+battlecry = { random_tier_minion = 6 }
+deathrattle = { effect = { random_tier_minion = 6 } }
+rally = { random_tier_minion = 6 }
+
+[[minion]]
+name = "The Last One Standing"
+tier = 7
+tribe = "all"
+stats = [15, 15]
+rally = { buff_each_type = [15, 15] }
+
+[[minion]]
+name = "Stalwart Kodo"
+tier = 7
+tribe = "beast"
+stats = [16, 32]
+after_summon_give_stats = { times = 3 }
+
 # --- Tokens ---
 
 [[token]]

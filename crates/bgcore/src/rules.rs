@@ -21,7 +21,8 @@ pub struct Rules {
     pub roll_cost: u8,
     pub upgrade_costs: [u8; 5],
     pub shop_sizes: [u8; 6],
-    pub copies_per_tier: [u8; 6],
+    /// Pool copies per card, tiers 1 to 7 (`CARD_MAX_TIER`).
+    pub copies_per_tier: [u8; 7],
     pub damage_caps: Vec<DamageCap>,
     pub late_damage_cap: i32,
     pub uncapped_at_players: u8,

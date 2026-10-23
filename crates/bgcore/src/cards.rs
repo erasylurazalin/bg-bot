@@ -1,7 +1,9 @@
+use arrayvec::ArrayVec;
 use serde::Deserialize;
 
 use crate::minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
 use crate::rng::Rng;
+use crate::BOARD;
 
 /// A per-player count that an "improve your future ..." effect raises and
 /// scales by. Each variant is one slot in `Counters::improve`.
@@ -89,6 +91,29 @@ impl Tribes {
         }
         None
     }
+}
+
+/// "Give a friendly minion of each type ..." (Misplaced Tea Set, The Last One
+/// Standing): for each type in turn, one random minion of that type that has
+/// not been picked yet, so every minion gets at most one buff, even a dual or
+/// all-type one. `tribes[i]` is the types of board minion `i`, `Tribes::NONE`
+/// for one that can't be picked (dead). Returns the picked indexes.
+pub fn pick_one_per_type(tribes: &[Tribes], rng: &mut Rng) -> ArrayVec<usize, BOARD> {
+    let mut picked: ArrayVec<usize, BOARD> = ArrayVec::new();
+    for t in Tribe::ALL {
+        let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
+        for (i, ts) in tribes.iter().enumerate().take(BOARD) {
+            if !picked.contains(&i) && ts.has(t) {
+                ok.push(i);
+            }
+        }
+        if ok.is_empty() {
+            continue;
+        }
+        let k = rng.below(ok.len() as u32) as usize;
+        picked.push(ok[k]);
+    }
+    picked
 }
 
 /// Which Tavern minion a consuming minion takes.
@@ -262,6 +287,20 @@ pub enum Effect {
     /// Deathrattle: give `count` friendly Dragons Divine Shield, picking
     /// Dragons without it first (Nadina the Red).
     ShieldDragons { count: u8 },
+    /// Get a random minion of exactly this tier (Highkeeper Ra gets Tier 6).
+    /// Golden gets two.
+    GetRandomTierMinion { tier: u8 },
+    /// Give a friendly minion of each type the stats permanently, one random
+    /// minion per type and at most one buff per minion (The Last One
+    /// Standing). A golden minion does the whole thing twice.
+    BuffEachType { attack: i32, health: i32 },
+    /// Rally: deal this minion's Attack to the minion it attacks and to one
+    /// random minion next to it (both neighbours when golden). Obsidian
+    /// Ravager.
+    DamageTargetAndNeighbor,
+    /// Give this minion's current stats to the left-most minion in hand
+    /// (Futurefin). A golden minion gives double.
+    GiveOwnStatsToLeftmostHand,
 }
 
 impl Effect {
@@ -336,7 +375,10 @@ impl Effect {
             | Effect::GainTargetAttack
             | Effect::StripTargetKeywords { .. }
             | Effect::DestroyKiller
-            | Effect::ShieldDragons { .. } => true,
+            | Effect::ShieldDragons { .. }
+            | Effect::GetRandomTierMinion { .. }
+            | Effect::BuffEachType { .. }
+            | Effect::DamageTargetAndNeighbor => true,
             _ => false,
         }
     }
@@ -723,6 +765,18 @@ pub enum Aura {
     /// Has +30/+30 while its owner's hero has 15 or less Health (Holy
     /// Vanguard). A golden one has +60/+60.
     HolyVanguard,
+    /// Whenever its owner Magnetizes to a different minion, the same
+    /// Magnetic also Magnetizes to this one (twice when golden). Polarizing
+    /// Beatboxer.
+    PolarizingBeatboxer,
+}
+
+/// "After you summon a minion in combat, give it this minion's current
+/// Attack and maximum Health, `times` times per combat" (Stalwart Kodo).
+/// A golden minion gives double.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AfterSummonGiveStats {
+    pub times: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -812,6 +866,9 @@ pub struct Card {
     pub health_refreshes: u8,
     pub on_sell: Option<OnSell>,
     pub aura: Option<Aura>,
+    /// Gives each minion its owner summons in combat this minion's stats
+    /// (Stalwart Kodo).
+    pub after_summon_give_stats: Option<AfterSummonGiveStats>,
     pub spell_target: Option<SpellTarget>,
     pub spell_effect: Option<SpellEffect>,
 }
@@ -910,6 +967,7 @@ impl Card {
             || self.health_refreshes > 0
             || self.on_sell.is_some()
             || self.aura.is_some()
+            || self.after_summon_give_stats.is_some()
             || self.spell_buff.is_some()
     }
 }
@@ -1012,6 +1070,13 @@ struct RawCard {
     health_refreshes: Option<u8>,
     on_sell: Option<RawOnSell>,
     aura: Option<String>,
+    after_summon_give_stats: Option<RawAfterSummonGiveStats>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAfterSummonGiveStats {
+    times: u8,
 }
 
 #[derive(Deserialize)]
@@ -1229,6 +1294,17 @@ struct RawEffect {
     /// Deathrattle: give `n` friendly Dragons Divine Shield (Nadina the
     /// Red).
     shield_dragons: Option<u8>,
+    /// Get a random minion of exactly this tier (Highkeeper Ra).
+    random_tier_minion: Option<u8>,
+    /// Give a friendly minion of each type stats permanently (The Last One
+    /// Standing).
+    buff_each_type: Option<[i32; 2]>,
+    /// Rally: damage the target and a neighbour (Obsidian Ravager).
+    #[serde(default)]
+    damage_target_and_neighbor: bool,
+    /// Give this minion's stats to the left-most minion in hand (Futurefin).
+    #[serde(default)]
+    give_stats_leftmost_hand: bool,
 }
 
 #[derive(Deserialize)]
@@ -1851,6 +1927,14 @@ impl CardDb {
                 Effect::DestroyKiller
             } else if let Some(n) = b.shield_dragons {
                 Effect::ShieldDragons { count: n }
+            } else if let Some(tier) = b.random_tier_minion {
+                Effect::GetRandomTierMinion { tier }
+            } else if let Some([attack, health]) = b.buff_each_type {
+                Effect::BuffEachType { attack, health }
+            } else if b.damage_target_and_neighbor {
+                Effect::DamageTargetAndNeighbor
+            } else if b.give_stats_leftmost_hand {
+                Effect::GiveOwnStatsToLeftmostHand
             } else if let Some(name) = &b.get {
                 let card = generated_id(name)?;
                 Effect::GetCard { card, count: b.count.unwrap_or(1) }
@@ -1862,8 +1946,8 @@ impl CardDb {
         for (idx, (c, token)) in all_minions.iter().enumerate() {
             let id = idx as CardId;
             let err = |e: String| format!("cards.toml, {}: {e}", c.name);
-            if !(1..=crate::MAX_TIER).contains(&c.tier) {
-                return Err(err(format!("tier {} is not 1 to 6", c.tier)));
+            if !(1..=crate::CARD_MAX_TIER).contains(&c.tier) {
+                return Err(err(format!("tier {} is not 1 to {}", c.tier, crate::CARD_MAX_TIER)));
             }
             let mut keywords = Keywords::default();
             for k in &c.keywords {
@@ -2248,6 +2332,7 @@ impl CardDb {
                 Some("balinda") => Some(Aura::Balinda),
                 Some("taunt_while_shielded") => Some(Aura::TauntWhileShielded),
                 Some("holy_vanguard") => Some(Aura::HolyVanguard),
+                Some("polarizing_beatboxer") => Some(Aura::PolarizingBeatboxer),
                 Some(other) => return Err(err(format!("unknown aura {other:?}"))),
             };
 
@@ -2305,6 +2390,10 @@ impl CardDb {
                 health_refreshes: c.health_refreshes.unwrap_or(0),
                 on_sell,
                 aura,
+                after_summon_give_stats: c
+                    .after_summon_give_stats
+                    .as_ref()
+                    .map(|a| AfterSummonGiveStats { times: a.times }),
                 spell_target: None,
                 spell_effect: None,
             });
@@ -2397,13 +2486,14 @@ impl CardDb {
                 health_refreshes: 0,
                 on_sell: None,
                 aura: None,
+                after_summon_give_stats: None,
                 spell_target,
                 spell_effect,
             });
         }
 
         let tiers: Vec<u8> = cards.iter().map(|c| c.tier).collect();
-        let ids_up_to_tier = (0..=crate::MAX_TIER)
+        let ids_up_to_tier = (0..=crate::CARD_MAX_TIER)
             .map(|hi| (0..pool_cards).filter(|&c| tiers[c] <= hi).map(|c| c as u8).collect())
             .collect();
         Ok(CardDb {
@@ -2543,6 +2633,13 @@ impl CardDb {
         }
         let k = rng.below(count) as usize;
         (0..self.pool_cards).filter(|&c| ok(c)).nth(k).map(|c| c as CardId)
+    }
+
+    /// A random tier 7 minion, for the cards that say "a Tier 7 minion"
+    /// (none in the lobby yet, Greedy Conniver is the first). Never
+    /// reachable any other way: every other draw stops at the Tavern tiers.
+    pub fn random_tier7_minion(&self, rig: Option<Tribe>, rng: &mut Rng) -> Option<CardId> {
+        self.random_tier_minion(crate::CARD_MAX_TIER, rig, rng)
     }
 
     /// A random pool minion of exactly `tier`, narrowed by a sandbox `rig`

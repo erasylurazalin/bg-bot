@@ -12,7 +12,7 @@ use arrayvec::ArrayVec;
 
 use crate::cards::{
     N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, Effect, OnSummonBeast, PermanentKeep,
-    SpellEffect, StartOfCombat, Tribe,
+    SpellEffect, StartOfCombat, Tribe, Tribes, pick_one_per_type,
 };
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
@@ -149,6 +149,12 @@ struct Fm {
     avenge: u16,
     /// The uid of the minion that dealt the damage that killed this one.
     killer: Option<u16>,
+    /// Damage this minion's Health has taken in this fight. Its maximum
+    /// Health is its Health plus this (Stalwart Kodo).
+    taken: i32,
+    /// How many times this minion's "after you summon" gift has fired this
+    /// fight (Stalwart Kodo).
+    gifts: u8,
 }
 
 /// Who an effect runs for and where it summons.
@@ -176,6 +182,9 @@ struct Side<'a> {
     hand_bonus: [(i32, i32); HAND],
     /// Whether any minion on the board reacts to taking damage.
     damage_trigger: bool,
+    /// Whether any minion on the board gives stats to minions summoned
+    /// after it (Stalwart Kodo).
+    gift_trigger: bool,
     /// Bit `i` marks the hand minion in slot `i` summoned for this combat
     /// only: later hand checks no longer see it.
     hand_taken: u16,
@@ -216,12 +225,15 @@ impl<'a> Side<'a> {
     ) -> Side<'a> {
         let mut ms = ArrayVec::new();
         for (slot, &m) in board.iter().take(BOARD).enumerate() {
-            ms.push(Fm { m, uid: *uid, start_slot: Some(slot as u8), avenge: 0, killer: None });
+            ms.push(Fm { m, uid: *uid, start_slot: Some(slot as u8), avenge: 0, killer: None, taken: 0, gifts: 0 });
             *uid += 1;
         }
         let damage_trigger = ms
             .iter()
             .any(|f| f.m.parts().any(|(c, _)| db.get(c).when_damaged.is_some()));
+        let gift_trigger = ms
+            .iter()
+            .any(|f| f.m.parts().any(|(c, _)| db.get(c).after_summon_give_stats.is_some()));
         // Holy Vanguard: +30/+30 while the hero has 15 or less Health. The
         // Health already includes every damage reaction (a rewound hit has
         // given its Health back).
@@ -242,6 +254,7 @@ impl<'a> Side<'a> {
             hand: &hand[..hand.len().min(HAND)],
             hand_bonus: [(0, 0); HAND],
             damage_trigger,
+            gift_trigger,
             hand_taken: 0,
             ptr: 0,
             counters,
@@ -629,11 +642,17 @@ impl<'a> Side<'a> {
         if c.when_damaged.is_some() {
             self.damage_trigger = true;
         }
+        if c.after_summon_give_stats.is_some() {
+            self.gift_trigger = true;
+        }
         if c.is_beetle {
             m.attack += self.counters.beetle_attack;
             m.health += self.counters.beetle_health;
         }
-        self.insert(pos, Fm { m, uid: *uid, start_slot: None, avenge: 0, killer: None });
+        self.insert(
+            pos,
+            Fm { m, uid: *uid, start_slot: None, avenge: 0, killer: None, taken: 0, gifts: 0 },
+        );
         *uid += 1;
         if c.tribes.has(Tribe::Beast) {
             self.ms[pos].m.attack += self.beast_buff.0;
@@ -684,6 +703,26 @@ impl<'a> Side<'a> {
                         let factor = if golden { 3 } else { 2 };
                         self.ms[pos].m.attack *= factor;
                     }
+                }
+            }
+        }
+        // Stalwart Kodo: each one on the board gives the new minion its
+        // current Attack and maximum Health, a few times per fight.
+        if self.gift_trigger {
+            for j in 0..self.ms.len() {
+                if j == pos || self.ms[j].m.health <= 0 {
+                    continue;
+                }
+                let mj = self.ms[j].m;
+                for (card, golden) in mj.parts() {
+                    let Some(g) = db.get(card).after_summon_give_stats else { continue };
+                    if self.ms[j].gifts >= g.times {
+                        continue;
+                    }
+                    self.ms[j].gifts += 1;
+                    let mul = if golden { 2 } else { 1 };
+                    let max_health = mj.health + self.ms[j].taken;
+                    self.gain_at(db, pos, mj.attack * mul, max_health * mul);
                 }
             }
         }
@@ -936,6 +975,27 @@ impl<'a> Side<'a> {
                     self.gain_keyword_at(db, i, Keywords::DIVINE_SHIELD);
                 }
             }
+            Effect::GetRandomTierMinion { tier } => {
+                for _ in 0..mul {
+                    if let Some(c) = db.random_tier_minion(tier, self.counters.rig, rng) {
+                        self.out.push_card(c);
+                    }
+                }
+            }
+            Effect::BuffEachType { attack, health } => {
+                // A golden minion does the whole thing twice, with fresh
+                // picks, so one minion can get two buffs from it.
+                for _ in 0..mul {
+                    let mut tribes: ArrayVec<Tribes, BOARD> = ArrayVec::new();
+                    for f in &self.ms {
+                        let t = if f.m.health > 0 { db.get(f.m.card).tribes } else { Tribes::NONE };
+                        tribes.push(t);
+                    }
+                    for i in pick_one_per_type(&tribes, rng) {
+                        self.gain_permanent_at(db, i, attack, health);
+                    }
+                }
+            }
             Effect::DestroyKiller => {
                 if let Some(k) = fx.killer {
                     let _ = self.killer_destroy.try_push(k);
@@ -1127,9 +1187,13 @@ impl<'a> Side<'a> {
             self.avenge_tick(db, side, uid, rng, w);
             if dead.keywords.has(Keywords::REBORN) {
                 let mut m = db.make(dead.card, dead.golden);
+                // It counts as damaged down to 1 Health, so its maximum
+                // Health is the full value (Stalwart Kodo reads it).
+                let full = m.health;
                 m.health = 1;
                 m.keywords.clear(Keywords::REBORN);
                 if self.summon(db, side, i, m, uid, w) {
+                    self.ms[i].taken = (full - 1).max(0);
                     i += 1;
                 }
             }
@@ -1353,6 +1417,7 @@ fn run_start_of_combat(
                                 }
                                 let had = sides[s].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD);
                                 let dealt = deal_damage(&mut sides[s].ms[i].m, dmg);
+                                sides[s].ms[i].taken += dealt;
                                 if had && !sides[s].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD)
                                 {
                                     shields_lost[s] = true;
@@ -1426,6 +1491,69 @@ fn run_start_of_combat(
     }
 }
 
+/// Obsidian Ravager's Rally: the minion `host` of side `turn`, which is
+/// attacking the minion `target`, deals its Attack to the target and to one
+/// random neighbour of it (both when `golden`). It is damage, not an attack,
+/// so only the target's side reacts to it, but Divine Shield, Venomous,
+/// damage counters and "takes damage" triggers all see it. The deaths it
+/// causes are resolved by the caller before the attack itself lands.
+#[allow(clippy::too_many_arguments)]
+fn rally_damage(
+    sides: &mut [Side<'_>; 2],
+    turn: usize,
+    host: u16,
+    golden: bool,
+    target: u16,
+    db: &CardDb,
+    uid: &mut u16,
+    rng: &mut Rng,
+    w: &mut impl Watch,
+) {
+    let Some(di) = sides[turn ^ 1].index_of(target) else { return };
+    let mut victims: ArrayVec<u16, 3> = ArrayVec::new();
+    victims.push(target);
+    let def = &sides[turn ^ 1];
+    let mut near: ArrayVec<u16, 2> = ArrayVec::new();
+    if let Some(l) = di.checked_sub(1) {
+        near.push(def.ms[l].uid);
+    }
+    if di + 1 < def.ms.len() {
+        near.push(def.ms[di + 1].uid);
+    }
+    if golden {
+        victims.extend(near);
+    } else if !near.is_empty() {
+        victims.push(near[rng.below(near.len() as u32) as usize]);
+    }
+    for v in victims {
+        let (att, def) = pair(sides, turn);
+        let Some(hi) = att.index_of(host) else { return };
+        let Some(vi) = def.index_of(v) else { continue };
+        let (xf, yf) = (&mut att.ms[hi], &mut def.ms[vi]);
+        let (was_alive, was_shielded) = (yf.m.health > 0, yf.m.keywords.has(Keywords::DIVINE_SHIELD));
+        let dealt = hit(&mut yf.m, xf.m.attack, &mut xf.m);
+        yf.taken += dealt;
+        if was_alive && yf.m.health <= 0 && dealt > 0 {
+            yf.killer = Some(xf.uid);
+        }
+        let shield_lost = was_shielded && !yf.m.keywords.has(Keywords::DIVINE_SHIELD);
+        let demon = db.get(xf.m.card).tribes.has(Tribe::Demon);
+        att.count_damage(db, turn, hi, dealt, uid, rng, w);
+        if dealt > 0 && demon {
+            att.note_demon_damage(db, host);
+        }
+        if shield_lost {
+            def.note_shield_lost(db);
+        }
+        if dealt > 0
+            && def.damage_trigger
+            && let Some(vi) = def.index_of(v)
+        {
+            def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
+        }
+    }
+}
+
 /// Run the attack triggers of one kind for the minion `me`, which attacks:
 /// Rally (for `me` only) and "whenever a friendly minion attacks" before the
 /// damage, or "after a friendly minion attacks" after it.
@@ -1491,6 +1619,11 @@ fn attack_triggers(
                             sides[turn ^ 1].ms[di].m.keywords.0 &= !mask;
                         }
                     }
+                    Effect::DamageTargetAndNeighbor => {
+                        if let Some(t) = target {
+                            rally_damage(sides, turn, host, golden, t, db, uid, rng, w);
+                        }
+                    }
                     _ => {
                         let Some(hi) = sides[turn].index_of(host) else { break };
                         let fx = Fx {
@@ -1554,6 +1687,23 @@ fn attack_swings(
         let attacker = sides[turn].ms[ai].m;
         attack_triggers(sides, turn, me, &attacker, Some(def_uid), false, db, uid, rng, w);
 
+        // Rally damage (Obsidian Ravager) can kill before the attack lands.
+        // The deaths resolve now; when the target is among them the swing
+        // fizzles, but "after a friendly minion attacks" still happens.
+        if sides.iter().any(|s| s.ms.iter().any(|f| f.m.health <= 0)) {
+            resolve_deaths(sides, turn, db, uid, rng, w);
+            let Some(ai) = sides[turn].index_of(me) else { break };
+            if sides[turn ^ 1].ms.is_empty() {
+                break;
+            }
+            if sides[turn ^ 1].index_of(def_uid).is_none() {
+                let attacker = sides[turn].ms[ai].m;
+                attack_triggers(sides, turn, me, &attacker, Some(def_uid), true, db, uid, rng, w);
+                resolve_deaths(sides, turn, db, uid, rng, w);
+                continue;
+            }
+        }
+
         let Some(ai) = sides[turn].index_of(me) else { break };
         let Some(di) = sides[turn ^ 1].index_of(def_uid) else { break };
         let attacker = sides[turn].ms[ai].m;
@@ -1568,6 +1718,8 @@ fn attack_swings(
         let (xf, yf) = (&mut att.ms[ai], &mut def.ms[di]);
         let dealt_x = hit(&mut yf.m, dx, &mut xf.m);
         let dealt_y = hit(&mut xf.m, dy, &mut yf.m);
+        yf.taken += dealt_x;
+        xf.taken += dealt_y;
         let x_lost = x_shielded && !xf.m.keywords.has(Keywords::DIVINE_SHIELD);
         let y_lost = y_shielded && !yf.m.keywords.has(Keywords::DIVINE_SHIELD);
         if y_alive && yf.m.health <= 0 && dealt_x > 0 {
@@ -1836,7 +1988,10 @@ mod tests {
         // golden at count 0: twice the buff, and the count still goes up by one
         let gold = db.make(db.by_name("Tasty Lobster").unwrap(), true);
         let (mut s, mut uid) = side2(&db, &["Cage Gnawer"]);
-        s.ms.insert(0, Fm { m: gold, uid: 99, start_slot: None, avenge: 0, killer: None });
+        s.ms.insert(
+            0,
+            Fm { m: gold, uid: 99, start_slot: None, avenge: 0, killer: None, taken: 0, gifts: 0 },
+        );
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (2 + 4, 7 + 2));

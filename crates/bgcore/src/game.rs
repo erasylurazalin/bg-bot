@@ -13,7 +13,7 @@ use crate::cards::{
     N_COUNTERS,
     Aura, Card, CardDb, ChooseOption, ConsumeBy, ConsumePick, DiscoverKind, Effect, EndOfTurn,
     EventKind, OnCastSpell, OnCastSpellOnMech, OnPlayMech, OnPlayOrMagnetizeMech, OnSell,
-    OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, Tribe,
+    OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, Tribe, Tribes, pick_one_per_type,
 };
 use crate::fight::{Counters, SideOutcome, fight_with_hands};
 use crate::minion::{CardId, Keywords, Minion};
@@ -627,7 +627,7 @@ fn draw_filtered(
     let mut total = 0u32;
     // Ids in ascending order, so the walk below sees cards in the same order
     // as a scan of the whole pool; `ok` still checks everything.
-    for &c in &cards.ids_up_to_tier[(hi as usize).min(crate::MAX_TIER as usize)] {
+    for &c in &cards.ids_up_to_tier[(hi as usize).min(crate::CARD_MAX_TIER as usize)] {
         let c = c as usize;
         if ok(c) {
             total += pool[c] as u32;
@@ -1487,7 +1487,11 @@ impl Game {
             let mul = if m.golden { 2 } else { 1 };
             self.add_volumizer_bonus(p, da * mul, dh * mul);
         }
+        // The copy a Beatboxer gets is the Magnetic as it attached, with the
+        // buff the host got from Mechagnome Interpreter and the like.
+        let m1 = self.with_magnetize_buffs(p, m);
         self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
+        self.beatboxers_copy(p, Some(pos), m1);
         // Drone Duplicator: the same Magnetization happens again, without
         // taking another copy from the pool.
         for _ in 0..extra {
@@ -1496,6 +1500,79 @@ impl Game {
             }
             self.players[p].board[pos].magnetize(&self.data.cards, m);
             self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
+            self.beatboxers_copy(p, Some(pos), m1);
+        }
+    }
+
+    /// `m` plus what "whenever you play or Magnetize a Mech" cards on the
+    /// board give a Mech it Magnetizes to.
+    fn with_magnetize_buffs(&self, p: usize, mut m: Minion) -> Minion {
+        for o in &self.players[p].board {
+            for (card, golden) in o.parts() {
+                if let Some(OnPlayOrMagnetizeMech::Buff { attack, health }) =
+                    self.data.cards.get(card).on_play_or_magnetize_mech
+                {
+                    let mul = if golden { 2 } else { 1 };
+                    m.attack += attack * mul;
+                    m.health += health * mul;
+                }
+            }
+        }
+        m
+    }
+
+    /// Polarizing Beatboxer: `m` just Magnetized to the minion in board slot
+    /// `host` (None: a minion in the Tavern), so every board minion other than
+    /// the host with the Beatboxer's text gets a copy of the same Magnetic
+    /// (twice when golden). Each copy is a Magnetization of its own (Utility
+    /// Drone counts it; a Volumizer copy raises your Volumizers again) but not
+    /// a play, takes no pool copy, is not buffed again by Mechagnome
+    /// Interpreter, and sends nothing on: with two Beatboxers, A's copy to B
+    /// doesn't come back to A.
+    fn beatboxers_copy(&mut self, p: usize, host: Option<usize>, m: Minion) {
+        let len = self.players[p].board.len();
+        for j in 0..len {
+            if Some(j) == host {
+                continue;
+            }
+            let copies: u32 = self.players[p].board[j]
+                .parts()
+                .filter(|&(c, _)| self.data.cards.get(c).aura == Some(Aura::PolarizingBeatboxer))
+                .map(|(_, golden)| if golden { 2 } else { 1 })
+                .sum();
+            for _ in 0..copies {
+                self.players[p].board[j].magnetize(&self.data.cards, m);
+                if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
+                    let mul = if m.golden { 2 } else { 1 };
+                    self.add_volumizer_bonus(p, da * mul, dh * mul);
+                }
+            }
+        }
+    }
+
+    /// Glambot: a spell was cast on the Mech in Tavern slot `slot`, so a
+    /// Satellite is Magnetized to it for each Glambot (twice if golden) and
+    /// every Beatboxer gets a copy of each. No board trigger buffs a Tavern
+    /// minion.
+    fn glambot_on_shop_mech(&mut self, p: usize, slot: usize) {
+        let mut sats: ArrayVec<(CardId, i32, i32), 16> = ArrayVec::new();
+        for m in &self.players[p].board {
+            for (card, golden) in m.parts() {
+                if let Some(OnCastSpellOnMech::MagnetizeSatellite { card: sat, attack, health }) =
+                    self.data.cards.get(card).on_cast_spell_on_mech
+                {
+                    for _ in 0..(if golden { 2 } else { 1 }) {
+                        let _ = sats.try_push((sat, attack, health));
+                    }
+                }
+            }
+        }
+        for (sat_id, attack, health) in sats {
+            let mut sat = self.data.cards.make(sat_id, false);
+            sat.attack = attack;
+            sat.health = health;
+            self.players[p].shop[slot].magnetize(&self.data.cards, sat);
+            self.beatboxers_copy(p, None, sat);
         }
     }
 
@@ -1988,20 +2065,9 @@ impl Game {
                 // dual or all-type minion can only be picked once.
                 let cards = &self.data.cards;
                 let board = &mut self.players[p].board;
-                let mut done = [false; BOARD];
-                for t in Tribe::ALL {
-                    let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
-                    for (i, m) in board.iter().enumerate() {
-                        if !done[i] && cards.get(m.card).tribes.has(t) {
-                            let _ = ok.try_push(i);
-                        }
-                    }
-                    if ok.is_empty() {
-                        continue;
-                    }
-                    let k = self.rng.below(ok.len() as u32) as usize;
-                    let i = ok[k];
-                    done[i] = true;
+                let tribes: ArrayVec<Tribes, BOARD> =
+                    board.iter().map(|m| cards.get(m.card).tribes).collect();
+                for i in pick_one_per_type(&tribes, &mut self.rng) {
                     buff(&mut board[i], attack + da, health + dh);
                 }
             }
@@ -2527,8 +2593,41 @@ impl Game {
                 }
                 self.maybe_start_discover(p);
             }
+            Effect::GetRandomTierMinion { tier } => {
+                let rig = self.players[p].rig;
+                for _ in 0..mul * runs as i32 {
+                    if let Some(c) = self.data.cards.random_tier_minion(tier, rig, &mut self.rng) {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
+            // A Rally triggered in the shop (Sky-hatch Runaway): the buffs
+            // are permanent in the shop anyway.
+            Effect::BuffEachType { attack, health } => {
+                for _ in 0..mul * runs as i32 {
+                    let cards = &self.data.cards;
+                    let board = &mut self.players[p].board;
+                    let tribes: ArrayVec<Tribes, BOARD> =
+                        board.iter().map(|m| cards.get(m.card).tribes).collect();
+                    for i in pick_one_per_type(&tribes, &mut self.rng) {
+                        if !cards.get(board[i].card).fixed_stats {
+                            buff(&mut board[i], attack, health);
+                        }
+                    }
+                }
+            }
+            Effect::GiveOwnStatsToLeftmostHand => {
+                let Some(host) = self.players[p].board.get(*pos).copied() else { return };
+                let n = mul * runs as i32;
+                let cards = &self.data.cards;
+                let slot = self.players[p].hand.iter().position(|m| !cards.get(m.card).is_spell());
+                if let Some(i) = slot {
+                    buff(&mut self.players[p].hand[i], host.attack * n, host.health * n);
+                }
+            }
             // These only happen in fights.
-            Effect::BuffKiller { .. }
+            Effect::DamageTargetAndNeighbor
+            | Effect::BuffKiller { .. }
             | Effect::BuffAttacker { .. }
             | Effect::BuffRandomOther { .. }
             | Effect::SummonRandomDeathrattle { .. }
@@ -2901,6 +3000,12 @@ impl Game {
                         | SpellTarget::Devourer => {}
                     }
                     self.trigger_on_cast_spell(p);
+                    if !stop_after
+                        && target < self.players[p].shop.len()
+                        && self.data.cards.get(self.players[p].shop[target].card).tribes.has(Tribe::Mech)
+                    {
+                        self.glambot_on_shop_mech(p, target);
+                    }
                     if let Some(gen_c) = generated {
                         let mut dummy = 0;
                         self.give_generated_tracking(p, gen_c, &mut dummy);
@@ -2942,7 +3047,9 @@ impl Game {
     /// returns its copies (an assumption, see DESIGN.md).
     fn robust_evolution_draw(&mut self, p: usize, old: Minion) -> Option<CardId> {
         let old_tier = self.data.cards.get(old.card).tier;
-        let new_tier = if old_tier >= MAX_TIER { MAX_TIER } else { old_tier + 1 };
+        // Tier 6 and tier 7 minions stay on their tier: no minion is ever
+        // evolved up to tier 7.
+        let new_tier = if old_tier >= MAX_TIER { old_tier } else { old_tier + 1 };
         let rig = self.players[p].rig;
         let new_id = draw_rigged(
             &mut self.pool,
@@ -3558,6 +3665,32 @@ impl Game {
         if let Some((source, d)) = damage {
             self.take_shop_damage(p, d, Some(source as usize));
         }
+        self.maybe_start_discover(p);
+    }
+
+    /// Get a random tier 7 minion, as a generated card (no pool copy), for
+    /// "Get a Tier 7 minion". False when the hand is full or none exists.
+    /// Nothing else in the lobby makes a tier 7 minion; the Pirate run's
+    /// Greedy Conniver is the first card that will use this.
+    pub fn give_tier7_minion(&mut self, p: usize) -> bool {
+        let rig = self.players[p].rig;
+        let Some(c) = self.data.cards.random_tier7_minion(rig, &mut self.rng) else {
+            return false;
+        };
+        if self.players[p].hand.is_full() {
+            return false;
+        }
+        self.give_generated(p, c);
+        true
+    }
+
+    /// Queue "Discover a Tier 7 minion": three different tier 7 minions from
+    /// the pool, the pick takes its copy (the same as every Discover) and
+    /// the rest go back. Opens at once unless a choice is already open.
+    pub fn discover_tier7_minion(&mut self, p: usize) {
+        let _ = self.players[p]
+            .discover_queue
+            .try_push(DiscoverRequest::MinionTier(crate::CARD_MAX_TIER));
         self.maybe_start_discover(p);
     }
 

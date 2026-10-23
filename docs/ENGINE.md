@@ -22,6 +22,7 @@ crates/
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, neutrals),
+                      tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card), fight.rs,
                       game.rs, d1a.rs; tests/data/ has test-only card files
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
@@ -91,6 +92,27 @@ rules behind each are in DESIGN.md Part 3.
 - **Generated cards** (`pool_copies = 0`): tokens, Chromadrakes, Fodder,
   Fishbait. They never touch the pool.
 - **Golden stats** that aren't double the base use `golden_stats`.
+- **Tier 7.** `CARD_MAX_TIER` (7) is the highest card tier, `MAX_TIER` (6)
+  the highest Tavern tier: the Tavern, leveling and every "up to your
+  tier" draw stop at 6. Tier 7 minions are in the pool (`copies_per_tier`
+  has seven entries) and only an effect that names the tier makes one:
+  `Game::give_tier7_minion` (generated, no pool copy) and
+  `Game::discover_tier7_minion` (a Discover, the pick takes its copy) are
+  the helpers, `CardDb::random_tier7_minion` the draw. The Pirate run's
+  Greedy Conniver is the first user.
+- **Rally runs before the hit, and can kill.** `attack_swings` resolves the
+  deaths a Rally caused before the attack lands; when the target died, the
+  swing fizzles (no hit, no retaliation) but "after a friendly minion
+  attacks" still fires. Obsidian Ravager is the first Rally that damages.
+- **One pick per type.** `cards::pick_one_per_type` is the pick Misplaced
+  Tea Set and The Last One Standing share: one random minion per type, each
+  minion at most once.
+- **Maximum Health in a fight.** `Fm.taken` counts the damage a minion's
+  Health took, so its maximum is Health plus `taken` (Stalwart Kodo).
+- **Magnetize hooks.** Every Magnetization goes through
+  `Game::magnetize_to`, which also runs `beatboxers_copy` (Polarizing
+  Beatboxer, `Aura::PolarizingBeatboxer`), so a new "whenever you Magnetize"
+  card hooks in there.
 - **Legal actions.** `Game::legal_mask` only asks `is_legal` for slots that
   can be legal (a test checks it against `is_legal` everywhere). Use it
   rather than looping `is_legal` over every action.
@@ -232,6 +254,29 @@ Deleting `.venv` undoes it.
   parameter of another checkpoint of the same model whose name and shape
   match, for example `attn` with `full` into `next`; it prints what was
   fresh. `--warmup N` ramps the learning rate up over N updates.
+
+## Agent briefs and references
+
+Tribe runs are done by subagents from briefs in `docs/briefs/` (one file
+per run: house rules, the cards with their text, the owner's rules, tests,
+done-means). Write the brief only after the owner has answered the unsure
+rules; DESIGN.md Part 3 holds the answers.
+
+`~/projects/bg/bg/engine.py` is the owner's tracker fight simulator in
+Python, with combat effects for about 325 cards of every tribe, much of it
+checked by hand against real games. It's the best reference for how a
+card fights. DESIGN.md wins where they disagree (for example, a per-type
+pick gives each minion at most one buff, unlike its `_phalanx`).
+
+## Model comparison (night 2026-10-23)
+
+150 minutes each, same settings. Place vs 7 bots, standard / rush:
+mlp 2.01 / 1.98 (934k games), pool 2.38 / 2.12 (409k), attn with
+`--opp-boards next` 3.30 / 2.86 (228k, its last minutes shared the GPU).
+Per game the three are close; attn levels fastest. mlp wins per minute
+because it's about 4x faster. None learned standard curves or tribe
+boards: the opponents and the reward are the bottleneck, not the network.
+mlp stays the default until a head-to-head says otherwise.
 
 ## Known weak spots
 

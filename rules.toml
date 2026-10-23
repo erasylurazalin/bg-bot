@@ -13,7 +13,8 @@ roll_cost = 1
 # start of every turn, to 0.
 upgrade_costs = [5, 7, 8, 11, 10]
 shop_sizes = [3, 4, 4, 5, 5, 6]
-copies_per_tier = [16, 15, 13, 11, 9, 7]
+# Tier 7 has the same count as tier 6 (a guess, Blizzard doesn't show it).
+copies_per_tier = [16, 15, 13, 11, 9, 7, 7]
 
 # Damage to a hero is capped by turn. Past the last entry the cap is
 # late_damage_cap, and with uncapped_at_players or fewer alive there is no
