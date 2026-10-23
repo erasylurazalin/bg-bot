@@ -20,11 +20,13 @@ crates/
     src/bots.rs       random, standard-curve and rush-curve bots
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
+    src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, neutrals),
                       deathrattles.rs (a loop over every Deathrattle card), fight.rs,
                       game.rs, d1a.rs; tests/data/ has test-only card files
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
   bgpy/               PyO3 bindings: a batch of games stepped together
+  bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
   model.py            policy and value network
   ppo.py              PPO self-play, evals, checkpoints
@@ -93,6 +95,32 @@ rules behind each are in DESIGN.md Part 3.
   can be legal (a test checks it against `is_legal` everywhere). Use it
   rather than looping `is_legal` over every action.
 
+## The sandbox
+
+`Game::new_sandbox(data, seed, tribe, free_rolls)` is a one-player game for
+practising a build: only player 0 lives, every Tavern roll shows the tribe's
+minions plus neutral ones (`Player.rig`, checked in `fill_shop`), the player
+gets `free_rolls` free Refreshes at the start of each turn, and each turn
+ends in `sandbox_combat`: the player fights a copy of their own board, hand
+and counters with the real fight, only the player's side outcome is applied,
+and Health never changes in combat. Shop damage still counts and ends the
+game at 0. The latest fight (board and hand as they fought, result, side
+outcome) is in `Game.sandbox.last_fight`. Normal games never set `sandbox`.
+
+```
+cargo run --release -p bgsandbox -- --tribe murloc --label lobster --seed 7
+```
+
+It asks for the tribe and a label when the flags are missing, prints the
+seed, and reads commands from stdin (`help` lists them). Every end of turn
+rewrites `boards/<tribe>-<label>-<seed>.toml` from the game's history, so
+`undo` (which replays the seed and all actions but the last) also removes an
+undone turn from the file. `--boards DIR` writes elsewhere, `--free-rolls N`
+changes the 3. `bgcore::record::load_file` reads a file back into per-turn
+boards and hands of `Minion`s. Each turn holds the board that went into the
+mirror fight (after end-of-turn effects, before the fight's permanent gains).
+Card text on the `?` command comes from `ref/lobby5.tsv` when it exists.
+
 ## Adding a card
 
 1. Copy its exact text, stats and tier from `ref/lobby5.tsv`, and the golden
@@ -136,6 +164,7 @@ cargo build --release -p bgbench
 ./target/release/bgbench fuzz [games]   # random play, invariants after every action
 ./target/release/bgbench match [games]  # bots against each other
 ./target/release/bgbench peak [n]       # peak boards of each build against each other
+cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 ```
 
 Python side, from the repo root:

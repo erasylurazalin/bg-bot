@@ -241,6 +241,9 @@ pub struct Player {
     pub opponent: Option<Opponent>,
     pub last_opponent: Option<Opponent>,
     pub seen: [Seen; PLAYERS],
+    /// Sandbox only: every Tavern roll shows just this tribe and neutral
+    /// minions. None in a normal game.
+    pub rig: Option<Tribe>,
 }
 
 impl Player {
@@ -296,6 +299,7 @@ impl Player {
             opponent: None,
             last_opponent: None,
             seen: Default::default(),
+            rig: None,
         }
     }
 
@@ -550,8 +554,38 @@ pub struct Game {
     pub consumed: Vec<u32>,
     pub ghost: Option<Ghost>,
     pub over: bool,
+    /// Set only by `Game::new_sandbox`: one player, a rigged Tavern and a
+    /// fight against a copy of the player's own board. None in a normal game.
+    pub sandbox: Option<Sandbox>,
     order: ArrayVec<u8, PLAYERS>,
     cursor: usize,
+}
+
+/// Settings and results of a sandbox game (see `Game::new_sandbox`).
+#[derive(Clone, Debug)]
+pub struct Sandbox {
+    pub tribe: Tribe,
+    /// Free Refreshes the player has at the start of every turn.
+    pub free_rolls: u8,
+    /// The latest mirror fight, for whoever records the game.
+    pub last_fight: Option<SandboxFight>,
+}
+
+/// One mirror fight in a sandbox game: what fought, who won and what the
+/// player's side carried over.
+#[derive(Clone, Debug)]
+pub struct SandboxFight {
+    pub turn: u32,
+    pub tier: u8,
+    pub health: i32,
+    /// The board and the hand as they went into the fight (after the
+    /// end-of-turn effects).
+    pub board: ArrayVec<Minion, BOARD>,
+    pub hand: ArrayVec<Minion, HAND>,
+    /// Some(0) the player won, Some(1) the mirror won, None a tie.
+    pub winner: Option<usize>,
+    /// What the player's side carried over, as the game applied it.
+    pub side: SideOutcome,
 }
 
 /// Draw one card from the pool, weighted by copies left, among cards of
@@ -623,6 +657,12 @@ fn draw_filtered(
     unreachable!()
 }
 
+/// Whether a Tavern roll may show this card: always in a normal game, only
+/// the rigged tribe and neutral minions in a sandbox.
+fn rigged_ok(rig: Option<Tribe>, c: &Card) -> bool {
+    rig.is_none_or(|t| c.tribes.is_neutral() || c.tribes.has(t))
+}
+
 fn draw(
     pool: &mut [u8],
     cards: &CardDb,
@@ -649,6 +689,31 @@ fn buff(m: &mut Minion, attack: i32, health: i32) {
 
 impl Game {
     pub fn new(data: Arc<Data>, seed: u64) -> Game {
+        let mut g = Game::unstarted(data, seed);
+        g.start_turn();
+        g
+    }
+
+    /// A one-player practice game for the sandbox: only player 0 plays, no
+    /// pairing and no opponents. Every Tavern roll shows only minions of
+    /// `tribe` and neutral ones, the player gets `free_rolls` free Refreshes
+    /// each turn, and each turn ends with a fight against a copy of the
+    /// player's own board that never damages the hero. Shop-phase damage
+    /// still counts and ends the game at 0 Health. Normal games never set
+    /// any of this.
+    pub fn new_sandbox(data: Arc<Data>, seed: u64, tribe: Tribe, free_rolls: u8) -> Game {
+        let mut g = Game::unstarted(data, seed);
+        for p in 1..PLAYERS {
+            g.players[p].alive = false;
+            g.players[p].placement = p as u8 + 1;
+        }
+        g.players[0].rig = Some(tribe);
+        g.sandbox = Some(Sandbox { tribe, free_rolls, last_fight: None });
+        g.start_turn();
+        g
+    }
+
+    fn unstarted(data: Arc<Data>, seed: u64) -> Game {
         let pool = (0..data.cards.pool_cards)
             .map(|c| {
                 let card = &data.cards.cards[c];
@@ -661,7 +726,7 @@ impl Game {
             .collect();
         let consumed = vec![0u32; data.cards.pool_cards];
         let players = std::array::from_fn(|_| Player::new(&data));
-        let mut g = Game {
+        Game {
             data,
             rng: Rng::new(seed),
             turn: 0,
@@ -670,11 +735,10 @@ impl Game {
             consumed,
             ghost: None,
             over: false,
+            sandbox: None,
             order: ArrayVec::new(),
             cursor: 0,
-        };
-        g.start_turn();
-        g
+        }
     }
 
     /// Whose action is next, None once the game is over.
@@ -1195,8 +1259,9 @@ impl Game {
         let slots = size + 1;
         let fodders = (fodders as usize).min(slots);
         let normal = size.saturating_sub(fodders);
+        let rig = pl.rig;
         while pl.shop.len() < normal {
-            match draw(pool, cards, rng, 1, pl.tier, &[]) {
+            match draw_filtered(pool, cards, rng, 1, pl.tier, &[], |c| rigged_ok(rig, c)) {
                 Some(c) => {
                     let mut m = pl.make_card(cards, c, false, 1);
                     pl.apply_tavern_buffs(cards, &mut m);
@@ -1322,7 +1387,8 @@ impl Game {
                 .map(|(j, _)| j)
                 .unwrap();
             buff(&mut pl.board[di], fodder.attack, fodder.health);
-            if let Some(c) = draw(pool, cards, rng, 1, pl.tier, &[]) {
+            let rig = pl.rig;
+            if let Some(c) = draw_filtered(pool, cards, rng, 1, pl.tier, &[], |c| rigged_ok(rig, c)) {
                 let mut m = pl.make_card(cards, c, false, 1);
                 pl.apply_tavern_buffs(cards, &mut m);
                 pl.shop.insert(i, m);
@@ -3670,8 +3736,11 @@ impl Game {
                 continue;
             }
             let (da, dh) = self.total_spell_bonus(p);
-            let Game { data, rng, players, pool, .. } = self;
+            let Game { data, rng, players, pool, sandbox, .. } = self;
             let pl = &mut players[p];
+            if let Some(sb) = sandbox {
+                pl.free_rolls = pl.free_rolls.max(sb.free_rolls);
+            }
             // the Beast bonus lasts until now; it never kills a Beast
             let (ba, bh) = std::mem::take(&mut pl.beast_bonus);
             if (ba, bh) != (0, 0) {
@@ -3871,6 +3940,10 @@ impl Game {
     }
 
     fn combat(&mut self) {
+        if self.sandbox.is_some() {
+            self.sandbox_combat();
+            return;
+        }
         let alive = self.alive();
         let max_attacks = self.data.rules.max_attacks;
         let cap = self.data.rules.damage_cap(self.turn, alive);
@@ -3987,6 +4060,52 @@ impl Game {
             pl.last_opponent = pl.opponent.take();
         }
         self.knockouts(alive);
+    }
+
+    /// The sandbox fight: the player against a copy of their own board,
+    /// hand and counters. Only the player's side outcome is applied, and
+    /// the fight never costs Health.
+    fn sandbox_combat(&mut self) {
+        let max_attacks = self.data.rules.max_attacks;
+        let cards = &self.data.cards;
+        let pl = &self.players[0];
+        let reads_board =
+            |b: &[Minion]| b.iter().any(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()));
+        let reads_hand = |h: &[Minion]| h.iter().any(|m| cards.get(m.card).reads_hand());
+        let hand: &[Minion] =
+            if reads_board(&pl.board) || reads_hand(&pl.hand) { &pl.hand } else { &[] };
+        let me = pl.board.clone();
+        let counters = pl.counters(cards);
+        let out = fight_with_hands(
+            cards,
+            &me,
+            &me,
+            [hand, hand],
+            [counters, counters],
+            max_attacks,
+            &mut self.rng,
+            &mut (),
+        );
+        let fight = SandboxFight {
+            turn: self.turn,
+            tier: pl.tier,
+            health: pl.health,
+            board: me.clone(),
+            hand: pl.hand.clone(),
+            winner: out.winner,
+            side: out.sides[0],
+        };
+        let pl = &mut self.players[0];
+        pl.won_last_combat = out.winner == Some(0);
+        pl.lost_last_combat = out.winner == Some(1);
+        self.apply_side_outcome(0, &out.sides[0], true);
+        if let Some(sb) = &mut self.sandbox {
+            sb.last_fight = Some(fight);
+        }
+        if self.turn >= self.data.rules.max_turns {
+            self.players[0].placement = 1;
+            self.over = true;
+        }
     }
 
     fn knockouts(&mut self, alive: usize) {

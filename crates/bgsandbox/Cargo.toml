@@ -1,0 +1,7 @@
+[package]
+name = "bgsandbox"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bgcore = { path = "../bgcore" }

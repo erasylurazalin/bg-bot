@@ -11,13 +11,14 @@ pub mod fight;
 pub mod game;
 pub mod minion;
 pub mod obs;
+pub mod record;
 pub mod rng;
 pub mod rules;
 
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 pub use cards::{Card, CardDb, Effect, Tribe, Tribes};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
-pub use game::{Game, IllegalAction, Opponent, Player};
+pub use game::{Game, IllegalAction, Opponent, Player, Sandbox, SandboxFight};
 pub use minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
 pub use rng::Rng;
 pub use rules::Rules;
