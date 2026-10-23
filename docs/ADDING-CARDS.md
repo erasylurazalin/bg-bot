@@ -74,6 +74,9 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Triple wildcard | `triple_wildcard = "elemental"` | `check_triple_tracking` (`TriplePlan`) | Elemental of Surprise |
 | Excess damage on a kill | `overkill = true` | `attack_swings` in fight.rs (golden hits both neighbours) | Wildfire Elemental |
 | Spell target that reads the Tavern or this turn | `half_of_highest`, `per_played_this_turn` | `SpellTarget::HalfOfHighestTavern`, `BuffPerTribePlayed`, `Player.elementals_played_turn` | Arcane Absorption |
+| After a friendly minion is Reborn | `on_reborn = { banshee = [a, h] }` / `{ phantom = true }` | `Side::note_reborn`, called by `Side::resolve` (fights and shop destroys) | Barrier Banshee |
+| Destroy a friendly minion in the shop | `Effect::DestroyChosenDiscover`, `GiveRebornDestroy`, `SpellTarget::Butchering` | `Game::destroy_in_shop` -> `fight::shop_destroy` | Maw Caster |
+| Player bonus "wherever they are" | `undead_bonus = [a, h]` effect, `on_cast_spell = { undead_bonus }`, `buff_per_kind_death` | `Game::add_undead_bonus`, `add_knight_deaths`, `Player::make_card`, `Side::summon` | Nerubian Deathswarmer |
 | Activate (N) | `activate = { cost, effect }` | `Action::Activate` in `apply`; legality in `is_legal` (needs_* checks on `Effect`) | Suspicious Prisonguard |
 | Golden played from hand | `buff_per_golden_played`, `after_discover` scaling | `Action::Play` -> `add_golden_played`, `Player.golden_played` | Maritime Extortionist |
 | Tavern buff (this game / this turn) | `Effect::TavernBuff`, `tavern_buff` | `Player::add_tavern_buff`, `apply_tavern_buffs`, `end_turn_tavern_buffs` | Champion of Sargeras |
@@ -130,8 +133,9 @@ exactly one legal target and drops the effect when there is none.
 ## 3. New-tribe checklist
 
 1. `cards.rs`: add the variant to `Tribe`, add it to `Tribe::EVERY` (rules use this) and
-   `tribe()` parse; widen `Tribes::ALL` ("all types") by one bit (`u8` mask: at most 8
-   tribes). `Tribe::ALL` stays the five-tribe list the observation uses until the
+   `tribe()` parse, and bump the length in `EVERY: [Tribe; N]`; widen `Tribes::ALL`
+   ("all types") by one bit (`u8` mask: at most 8 tribes, and Undead is the eighth, so
+   the mask is full: a ninth tribe needs `Tribes(u16)` and `Tribe::bit`). `Tribe::ALL` stays the five-tribe list the observation uses until the
    observation run: do not touch it before then.
 2. Tribe loops that must use `EVERY`: `Tribes::random_type`, `pick_one_per_type`,
    `bots::preferred_tribe`, sandbox `screen.rs` (`tribe_name` match, `parse_tribe`,
@@ -141,9 +145,14 @@ exactly one legal target and drops the effect when there is none.
    (`attacker_tribe = "..."`) and `tests/d1a.rs` (`a_card_needs_exactly_one_of_tribe_and_tribes`)
    use a tribe that does not exist ("quilboar" now; "pirate" and "elemental" are real).
    Also raise `MAX_TAVERN_BUFFS` in game.rs (one Tavern buff per tribe filter and
-   duration, so 2 x (tribes + 1)); a push past it panics.
+   duration, so 2 x (tribes + 1), 18 with eight tribes); a push past it panics.
 4. `tests/tier7.rs` Last One Standing test counts picks per type: an all-type minion is
-   every tribe, so a new tribe changes its expected count. Re-check it.
+   every tribe, so a new tribe changes its expected count. Re-check it. An all-type
+   minion is also a member of the new tribe for every "your <tribe>" rule (Amalgam,
+   Par-tea Guest and The Last One Standing count as Undead).
+   `tests/deathrattles.rs` puts Titus next to the Deathrattle card under test: a card
+   whose Start of Combat destroys its neighbours (Stitched Salvager) needs a filler
+   between them (the test does that for any card with a Start of Combat).
 5. Observation: layout frozen (`obs.rs` header, `TRIBES = 6` slots, `final_tribes`,
    `board_tribes`, bgpy constants). Do not add slots in a tribe run. `N_CARDS` in bgpy
    is `cards.len()` and grows with every card: old checkpoints stop loading, expected.
@@ -240,8 +249,8 @@ for parse-error tests.
   "friendly" only the board, never the hand): `TargetKind::takes_shop`.
 - **Existing tests change when a tribe lands** (all-type minions, tribe counts); see
   the checklist. Fix expectations only after confirming the rule, and report it.
-- **Do not trust JSON pool flags blindly** (Pointy Arrow is a pool spell with the flag
-  false). The "(N left!)" display can disagree with the text (Gunpowder Courier);
+- **Do not trust JSON pool flags blindly** (Rot Hide Gnoll is flagged but not in
+  the pool; `docs/card-data.md` has the game's own flags). The "(N left!)" display can disagree with the text (Gunpowder Courier);
   DESIGN.md records the owner's answer.
 
 ## 6. Systems the Pirate run added
@@ -299,3 +308,54 @@ for parse-error tests.
 - **Fights.** Wildfire's splash is in `attack_swings` (`Card.overkill`);
   `Effect::BuffOthersPerImprovement` reads the host's `improvements`
   (Ultraviolet Ascendant).
+
+## 8. Systems the Undead run added
+
+- **Undead (tribe 8).** `Tribe::EVERY` has eight tribes and `Tribes::ALL` is
+  `0b11111111`, the whole `u8` mask. Prosthetic Hand is Mech and Undead
+  (`tribes = [..]`) and `magnetize_to_undead = true` lets it merge into an
+  Undead (`Game::can_magnetize`, used by `is_legal` and `Action::Play`).
+- **Player bonuses are baked into stats.** "Your Undead have +N this game
+  (wherever they are)" is `Player.undead_bonus`; `Player::make_card` adds it to every
+  Undead it makes (draws, Discovers, generated, triples), and `Game::add_undead_bonus`
+  adds a gain to the Tavern, the hand and the board. In a fight `Counters.undead_attack`
+  and `undead_health` do the same for minions made in it: `Side::summon` adds them,
+  `Side::summon_baked` (hand minions, Salvager's exact copy) does not, and
+  `SideOutcome::undead_gain` brings an in-fight gain back (the game gives it to the
+  board only after a fight; a shop destroy already changed the board). Eternal Knight is
+  the same with `Card.buff_per_kind_death` and `Player.knight_deaths`
+  (`Counters.knight_deaths`, `SideOutcome::knight_deaths`, `Game::add_knight_deaths`).
+  A new "wherever it is" bonus should copy this pair.
+- **Reborn comes back through `summon`.** `Side::resolve` makes the plain card with
+  1 Health, so the bonuses of `summon` apply (a Reborn Undead with +1 Health is 2
+  Health) and `taken` keeps the maximum at the full value, then `Side::note_reborn`
+  runs the `Card.on_reborn` cards (Barrier Banshee, Snazzy Phantom; never the Reborn
+  minion itself).
+- **Destroying in the shop.** `fight::shop_destroy` builds a one-sided `Side`, sets
+  the victims to 0 Health and calls `Side::resolve`, so Deathrattles (Titus too),
+  Reborn, Knight deaths, Banshee and Phantom all run as in a fight. It returns the new
+  board, where a tracked slot ended up (Dead Bellringer's own slot moves when Skeletons
+  appear on its left), the `SideOutcome` and the minions that died (their pool copies go
+  back to the pool in `Game::destroy_in_shop`). `Side.outside` makes Plaguerunner give
+  +4 instead of +2. Avenge does not count shop deaths (`Side.count_avenge`).
+  Maw Caster (`TargetKind::DestroyDiscover`), Dead Bellringer
+  (`TargetKind::RebornDestroy`), Butchering (`SpellTarget::Butchering`) and Tomb
+  Turning's death all use it.
+- **Tomb Turning.** The Discovered minion has `Minion.doomed`
+  (`DiscoverRequest::DoomedTribeMinion`, `Player.discover_doomed`). Played, the flag
+  stays on the board minion until `Game::resolve_doomed` finds no pending choice or
+  Discover left, then destroys it. `finish_shop` clears the flag in hand.
+- **Fight-only Effects.** `GiveRebornRandom` (Mummifier; `Side.dr_card` is the dying
+  card, so "different" excludes copies), `SummonAttacker` plus `Side.immediate` and
+  `run_immediate` (Eternal Tycoon's Knight swings after the attack that killed),
+  `GetPlainCopy` (`Side.start_cards`, Lichling Hoarder), `GetRandomMinionHeld` and
+  `SummonHeld` (`Side.held`, Deathly Striker: what it got is taken back out of
+  `SideOutcome.cards` when summoned), `DestroyLeftNeighbor` and `SummonSalvaged`
+  (`Side.salvage`, Stitched Salvager).
+- **Spell triggers.** `OnCastSpell::UndeadBonus` (Forsaken Weaver) is called once per
+  cast by `trigger_on_cast_spell`, so a double cast counts twice. Casts inside a fight
+  (Runic Arcanist's Shiny Ring) trigger it through `Side::on_spell_cast`, and the gain
+  leaves the fight in `SideOutcome::undead_gain`. A second cast that does nothing
+  (Balinda on Butchering or Channel the Devourer, `stop_after`) is not a spell cast.
+- **Tests.** `tests/undead.rs`; a fight with a victim that has Taunt and 1 Health, or
+  Taunt "fodder" minions that die one per attack, is the way to script who dies when.

@@ -145,6 +145,8 @@ struct FileMinion {
     no_reward: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     temp_shield: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    doomed: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attached: Vec<FileAttached>,
 }
@@ -173,6 +175,7 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         activated: m.activated.then_some(true),
         no_reward: (m.no_reward != base.no_reward).then_some(m.no_reward),
         temp_shield: m.temp_shield.then_some(true),
+        doomed: m.doomed.then_some(true),
         attached: m
             .attached_slice()
             .iter()
@@ -231,6 +234,9 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     if let Some(v) = f.temp_shield {
         m.temp_shield = v;
+    }
+    if let Some(v) = f.doomed {
+        m.doomed = v;
     }
     for a in &f.attached {
         m.push_attached(Attached { card: card_id(db, &a.card)?, golden: a.golden });

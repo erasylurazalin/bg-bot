@@ -21,7 +21,7 @@ crates/
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
-    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, neutrals),
+    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, neutrals),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card), fight.rs,
                       game.rs, d1a.rs; tests/data/ has test-only card files
@@ -115,6 +115,8 @@ rules behind each are in DESIGN.md Part 3.
   card hooks in there.
 - **Pirates, Golden minions, gold spent, Lockbox, Bounties, Cleave:** see
   `docs/ADDING-CARDS.md` section 6.
+- **Undead** (the Undead bonus, Reborn in the shop, shop destroys, Knight
+  count, Phantom chain): see `docs/ADDING-CARDS.md` section 8.
 - **Elementals** (refresh amount, free Refreshes, Baller count, Surprise
   triples, Slab, Prison, Wildfire): see `docs/ADDING-CARDS.md` section 7.
 - **Legal actions.** `Game::legal_mask` only asks `is_legal` for slots that
@@ -177,8 +179,8 @@ the engine has it (as of the D1a commit).
   Has tokens and golden versions. Some retired cards are missing from it.
 - `ref/bg-pool.tsv`: the solo Battlegrounds pool from it.
 - `ref/lobby5.tsv`: our lobby, built from the JSON (the rule is in
-  DESIGN.md Part 3). The JSON's pool flags aren't perfect: Pointy Arrow is
-  a tier 1 pool spell though `isBattlegroundsPoolSpell` is false.
+  DESIGN.md Part 3). The JSON's pool flags aren't perfect (Rot Hide Gnoll);
+  `docs/card-data.md` and `tools/export_cards.py` read the game's own.
 - Useful flags in the JSON: `isBattlegroundsPoolMinion`,
   `isBattlegroundsPoolSpell`, `isBattlegroundsDuosExclusive` (drop these),
   `battlegroundsAssociatedRaces` (the tribe a spell or neutral minion

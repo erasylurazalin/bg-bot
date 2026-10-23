@@ -116,6 +116,10 @@ pub struct Minion {
     /// Turns this minion is locked in hand and can't be played (Search
     /// Through Time). It goes down by one at the start of its owner's turn.
     pub locked_turns: u8,
+    /// A Tomb Turning Undead that dies right after it is played, as long as
+    /// that happens in the turn it was Discovered (the flag comes off in
+    /// hand at the end of the turn).
+    pub doomed: bool,
     /// Whether its Activate was already used this turn. Cleared at the start
     /// of its owner's turn; a copy bought or made later starts unused.
     pub activated: bool,

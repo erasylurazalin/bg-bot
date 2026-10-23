@@ -68,7 +68,7 @@ fn normal_games_are_not_rigged() {
         }
         let a = random_action(&g, &mut rng);
         g.step(a).unwrap();
-        for m in &g.players[0].shop {
+        for m in g.players.iter().flat_map(|p| &p.shop) {
             for (i, t) in Tribe::ALL.iter().enumerate() {
                 seen[i] |= g.data.cards.get(m.card).tribes.has(*t);
             }

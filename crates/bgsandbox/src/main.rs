@@ -6,7 +6,7 @@ use bgsandbox::screen::parse_tribe;
 use bgsandbox::{Config, Session, play};
 
 const USAGE: &str = "\
-usage: bgsandbox [--tribe beast|mech|dragon|murloc|demon|pirate|elemental] [--label TEXT] [--seed N]
+usage: bgsandbox [--tribe beast|mech|dragon|murloc|demon|pirate|elemental|undead] [--label TEXT] [--seed N]
                  [--free-rolls N] [--boards DIR]
 
 A one-player Battlegrounds sandbox: a normal game with the full pool, no opponents.

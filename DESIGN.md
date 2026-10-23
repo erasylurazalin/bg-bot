@@ -601,8 +601,8 @@ don't stack, and a golden copy sets its own count from its golden text.
 **Spending gold.** Anything that actually uses gold counts: buying,
 upgrading, rolling, Activate costs. Health paid instead of gold and free
 Refreshes don't. "After you spend N Gold" counters carry over turns
-(Gunpowder Courier is every 6 Gold, as its counter shows, not 5 as its
-text says);
+(Gunpowder Courier is every 5 Gold, as its text says, checked in a real
+game 2026-10-24; its "(6 Gold left!)" display is wrong);
 "gold spent this turn" resets each turn.
 
 **Lockbox.** A Lockbox sits in hand, can't be played and takes a hand
@@ -675,6 +675,13 @@ the JSON flags it.
   Butchering also gives your Undead +1 Health wherever they are.
 - **Butchering** gives +8 Attack; with a Health spell bonus its text shows
   +8/+N and it gives the Health too.
+  The bonus lands before the destroy, so the Reborn copy comes back with
+  it and Snazzy Phantom sees the higher Attack.
+  Balinda does nothing for Butchering: like Channel the Devourer, the
+  second cast does nothing because its target is gone, and it doesn't count
+  as a spell cast (same for Channel the Devourer).
+- **Avenge** counts only deaths in a fight, never shop deaths.
+- **Forsaken Weaver** also reacts to spells cast during a fight.
 - **Plaguerunner** gives +4 when it dies outside combat, +2 in a fight.
 - **Reborn, in a fight or in the shop:** the minion fully dies (its
   Deathrattles fire, death triggers count), then comes back in the same

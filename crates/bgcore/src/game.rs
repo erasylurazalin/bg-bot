@@ -76,6 +76,12 @@ pub enum TargetKind {
     /// the board (Elite Navigator, Captain Sanders). The pending target's
     /// `runs` is how many are still to be made.
     MakeGolden { tribe: Option<Tribe>, max_tier: u8 },
+    /// Destroy the chosen friendly minion of a tribe (not this one), then
+    /// Discover `discover` minions of that tribe (Maw Caster).
+    DestroyDiscover { tribe: Tribe, discover: u8 },
+    /// Give the chosen friendly minion of a tribe, not a copy of this card,
+    /// Reborn and destroy it; this minion gains the stats (Dead Bellringer).
+    RebornDestroy { tribe: Tribe, attack: i32, health: i32 },
 }
 
 impl TargetKind {
@@ -132,8 +138,8 @@ pub struct TavernBuff {
     pub this_turn: bool,
 }
 
-/// One buff per (tribe filter, duration): 7 tribes and no filter, times 2.
-pub const MAX_TAVERN_BUFFS: usize = 16;
+/// One buff per (tribe filter, duration): 8 tribes and no filter, times 2.
+pub const MAX_TAVERN_BUFFS: usize = 18;
 
 /// A Choose One minion or spell waiting for the player to pick one of its
 /// two options.
@@ -156,6 +162,9 @@ pub enum DiscoverRequest {
     DeathrattleMinion(u8),
     BattlecryMinion(u8),
     TribeMinion(Tribe),
+    /// A minion of the tribe, up to the tier, that dies if it is played in
+    /// the turn it was Discovered (Tomb Turning).
+    DoomedTribeMinion(Tribe),
     /// A Demon of Tier `max_tier` or lower; the pick damages the hero by its
     /// Tier, dealt by the friendly minion in board slot `source` (Imposing
     /// Percussionist).
@@ -249,6 +258,15 @@ pub struct Player {
     /// Whether the Discover now waiting locks its minion in hand for a turn
     /// (Search Through Time).
     pub discover_locked: bool,
+    /// Whether the Discover now waiting marks its minion to die when played
+    /// this turn (Tomb Turning).
+    pub discover_doomed: bool,
+    /// Your Undead's Attack and Health "this game, wherever they are". Every
+    /// Undead you own carries it in its stats (board, hand, Tavern), and
+    /// every Undead made later gets it.
+    pub undead_bonus: (i32, i32),
+    /// Eternal Knights that died this game, which every Knight reads.
+    pub knight_deaths: u32,
     /// Upcoming Refreshes and how many Fodders each one gets, oldest first
     /// (Laboratory Assistant, Trapped Clapper, Twisted Wrathguard).
     pub fodder_refreshes: ArrayVec<u8, 64>,
@@ -313,6 +331,9 @@ impl Player {
             discover_queue: ArrayVec::new(),
             discover_damage_from: None,
             discover_locked: false,
+            discover_doomed: false,
+            undead_bonus: (0, 0),
+            knight_deaths: 0,
             fodder_refreshes: ArrayVec::new(),
             actions: 0,
             done: false,
@@ -516,6 +537,15 @@ impl Player {
             m.attack += a * n;
             m.health += h * n;
         }
+        if c.tribes.has(Tribe::Undead) && !c.fixed_stats {
+            m.attack += self.undead_bonus.0;
+            m.health += self.undead_bonus.1;
+        }
+        if let Some((a, h)) = c.buff_per_kind_death {
+            let n = self.knight_deaths as i32 * m.mul();
+            m.attack += a * n;
+            m.health += h * n;
+        }
         m
     }
 
@@ -551,6 +581,9 @@ impl Player {
             upper_hand: self.upper_hand,
             spell_attack,
             spell_health,
+            undead_attack: self.undead_bonus.0,
+            undead_health: self.undead_bonus.1,
+            knight_deaths: self.knight_deaths,
             rig: self.rig,
         }
     }
@@ -927,6 +960,10 @@ impl Game {
                                 || pl.board.len() > 1
                                 || self.shop_has_minion(p))
                             && (!act.effect.needs_shop_minion() || !pl.hand.is_full())
+                            && act
+                                .effect
+                                .needs_different_of_tribe()
+                                .is_none_or(|t| self.has_different_of_tribe(p, s as usize, t))
                             && (!act.effect.needs_rally_target()
                                 || pl.board.iter().enumerate().any(|(i, m)| {
                                     i != s as usize
@@ -957,7 +994,7 @@ impl Game {
                     false
                 } else if pl.hand[h].keywords.has(Keywords::MAGNETIC)
                     && pos < pl.board.len()
-                    && self.data.cards.get(pl.board[pos].card).tribes.has(Tribe::Mech)
+                    && self.can_magnetize(card_id, pl.board[pos].card)
                 {
                     true
                 } else {
@@ -1034,6 +1071,25 @@ impl Game {
         }
     }
 
+    /// Whether the Magnetic card `hand_card` can merge into the board minion
+    /// `board_card`: a Mech, or an Undead for a card that says so
+    /// (Prosthetic Hand).
+    fn can_magnetize(&self, hand_card: CardId, board_card: CardId) -> bool {
+        let cards = &self.data.cards;
+        let t = cards.get(board_card).tribes;
+        t.has(Tribe::Mech) || (cards.get(hand_card).magnetize_to_undead && t.has(Tribe::Undead))
+    }
+
+    /// Whether the board minion in slot `s` has another friendly minion of
+    /// `tribe` that is not a copy of it to point at.
+    fn has_different_of_tribe(&self, p: usize, s: usize, tribe: Tribe) -> bool {
+        let board = &self.players[p].board;
+        let cards = &self.data.cards;
+        board.iter().enumerate().any(|(i, m)| {
+            i != s && m.card != board[s].card && cards.get(m.card).tribes.has(tribe)
+        })
+    }
+
     /// The Activate ability of the board minion in slot `s` (the first part
     /// of it that has one) and whether that part is golden.
     fn activate_of(&self, p: usize, s: usize) -> Option<(crate::cards::Activate, bool)> {
@@ -1071,6 +1127,7 @@ impl Game {
             SpellTarget::Devourer => true,
             SpellTarget::HalfOfHighestTavern { tribe } => c.tribes.has(tribe),
             SpellTarget::BuffPerTribePlayed { .. } => true,
+            SpellTarget::Butchering { .. } => c.tribes.has(Tribe::Undead),
         }
     }
 
@@ -1150,6 +1207,13 @@ impl Game {
                 let c = self.data.cards.get(b[s].card);
                 !b[s].golden && c.tier <= max_tier && c.is(tribe)
             }
+            TargetKind::DestroyDiscover { tribe, .. } => {
+                self.data.cards.get(b[s].card).tribes.has(tribe)
+            }
+            TargetKind::RebornDestroy { tribe, .. } => {
+                let host = pt.source.map(|src| b[src as usize].card);
+                self.data.cards.get(b[s].card).tribes.has(tribe) && Some(b[s].card) != host
+            }
             TargetKind::TriggerRally => {
                 b[s].parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
             }
@@ -1193,6 +1257,7 @@ impl Game {
         }
         let p = self.current_player().unwrap();
         self.apply(p, a);
+        self.resolve_doomed(p);
         // A hero knocked out mid-action may still collect cards from effects
         // that were running when it died.
         for q in 0..PLAYERS {
@@ -1277,7 +1342,7 @@ impl Game {
                 let pos = pos as usize;
                 let is_merge = m.keywords.has(Keywords::MAGNETIC)
                     && pos < self.players[p].board.len()
-                    && self.data.cards.get(self.players[p].board[pos].card).tribes.has(Tribe::Mech);
+                    && self.can_magnetize(m.card, self.players[p].board[pos].card);
                 if is_merge {
                     self.magnetize_to(p, pos, m, true);
                 } else {
@@ -1633,6 +1698,72 @@ impl Game {
         }
     }
 
+    /// Your Undead have +da/+dh this game, wherever they are: the ones in the
+    /// Tavern and the hand now (and the board when `board`), and every Undead
+    /// made later. A fight or shop destroy that already gave the board its
+    /// share passes `board = false`.
+    fn add_undead_bonus(&mut self, p: usize, da: i32, dh: i32, board: bool) {
+        if da == 0 && dh == 0 {
+            return;
+        }
+        let cards = &self.data.cards;
+        let pl = &mut self.players[p];
+        pl.undead_bonus.0 += da;
+        pl.undead_bonus.1 += dh;
+        let on_board = if board { &mut pl.board[..] } else { &mut [] };
+        for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(on_board) {
+            let c = cards.get(m.card);
+            if !c.is_spell() && !c.fixed_stats && c.tribes.has(Tribe::Undead) {
+                m.attack += da;
+                m.health += dh;
+            }
+        }
+    }
+
+    /// `n` more of the player's Eternal Knights died: every Knight, in the
+    /// Tavern, the hand and (when `board`) on the board, grows.
+    fn add_knight_deaths(&mut self, p: usize, n: u32, board: bool) {
+        if n == 0 {
+            return;
+        }
+        let cards = &self.data.cards;
+        let pl = &mut self.players[p];
+        pl.knight_deaths = pl.knight_deaths.saturating_add(n);
+        let on_board = if board { &mut pl.board[..] } else { &mut [] };
+        for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(on_board) {
+            if let Some((a, h)) = cards.get(m.card).buff_per_kind_death {
+                let k = n as i32 * m.mul();
+                m.attack += a * k;
+                m.health += h * k;
+            }
+        }
+    }
+
+    /// Destroy the board minions in `victims` in the shop phase: they die for
+    /// real (Deathrattles, Reborn, Knight deaths, Banshee and Phantom). Returns
+    /// where the `track`ed board slot ended up.
+    fn destroy_in_shop(&mut self, p: usize, victims: &[usize], track: Option<usize>) -> Option<usize> {
+        let Game { data, rng, players, pool, .. } = self;
+        let pl = &mut players[p];
+        let out = crate::fight::shop_destroy(
+            &data.cards,
+            &pl.board,
+            victims,
+            track,
+            pl.counters(&data.cards),
+            rng,
+        );
+        // The minions that died leave the warband for good, and take their
+        // pool copies back to the pool.
+        for m in &out.dead {
+            give_back(pool, &data.cards, m);
+        }
+        pl.board.clear();
+        pl.board.extend(out.board);
+        self.apply_side_outcome(p, &out.side, false);
+        out.tracked
+    }
+
     /// The player triggered `n` more Deathrattles: Falling Sky Golem and its
     /// like grow, wherever they are.
     fn add_deathrattles_triggered(&mut self, p: usize, n: u32, board: bool) {
@@ -1807,6 +1938,10 @@ impl Game {
                                 buff(o, attack * mul, health * mul);
                             }
                         }
+                    }
+                    Some(OnCastSpell::UndeadBonus { attack, health }) => {
+                        let mul = if golden { 2 } else { 1 };
+                        self.add_undead_bonus(p, attack * mul, health * mul, true);
                     }
                     Some(OnCastSpell::BuffAll { attack, health }) => {
                         // A golden one gives the same buff twice.
@@ -2301,6 +2436,11 @@ impl Game {
                     DiscoverKind::BattlecryMinion => DiscoverRequest::BattlecryMinion(tier),
                 };
                 let _ = self.players[p].discover_queue.try_push(req);
+            }
+            SpellEffect::TombTurning => {
+                let _ = self.players[p]
+                    .discover_queue
+                    .try_push(DiscoverRequest::DoomedTribeMinion(Tribe::Undead));
             }
             SpellEffect::MightyDragonbreath { attack, health } => {
                 let cards = &self.data.cards;
@@ -3083,8 +3223,43 @@ impl Game {
                     buff(host, a * n, h * n);
                 }
             }
+            Effect::UndeadBonus { attack, health, outside_attack } => {
+                let a = if outside_attack != 0 { outside_attack } else { attack };
+                let n = mul * runs as i32;
+                self.add_undead_bonus(p, a * n, health * n, true);
+            }
+            Effect::DestroyChosenDiscover { tribe, count } => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::DestroyDiscover {
+                        tribe,
+                        discover: count.saturating_mul(mul as u8).saturating_mul(runs),
+                    },
+                    runs: 1,
+                };
+                self.offer_target(p, pt);
+            }
+            Effect::GiveRebornDestroy { tribe, attack, health } => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::RebornDestroy {
+                        tribe,
+                        attack: attack * mul,
+                        health: health * mul,
+                    },
+                    runs: 1,
+                };
+                self.offer_target(p, pt);
+            }
             // These only happen in fights.
-            Effect::BuffOthersPerImprovement { .. }
+            Effect::GiveRebornRandom { .. }
+            | Effect::SummonAttacker { .. }
+            | Effect::GetPlainCopy
+            | Effect::GetRandomMinionHeld { .. }
+            | Effect::SummonHeld
+            | Effect::DestroyLeftNeighbor
+            | Effect::SummonSalvaged
+            | Effect::BuffOthersPerImprovement { .. }
             | Effect::BuffAllKeepGolden { .. }
             | Effect::DamageTargetAndNeighbor
             | Effect::BuffKiller { .. }
@@ -3458,6 +3633,7 @@ impl Game {
                         SpellTarget::Consume { .. }
                         | SpellTarget::MakeGolden { .. }
                         | SpellTarget::HalfOfHighestTavern { .. }
+                        | SpellTarget::Butchering { .. }
                         | SpellTarget::Devourer => {}
                         SpellTarget::BuffPerTribePlayed { attack, health, per, .. } => {
                             let n = self.players[p].elementals_played_turn as i32;
@@ -3809,6 +3985,22 @@ impl Game {
                     buff(&mut self.players[p].board[s], attack, health);
                 }
             }
+            TargetKind::DestroyDiscover { tribe, discover } => {
+                self.destroy_in_shop(p, &[s], None);
+                for _ in 0..discover {
+                    let _ = self.players[p]
+                        .discover_queue
+                        .try_push(DiscoverRequest::TribeMinion(tribe));
+                }
+            }
+            TargetKind::RebornDestroy { attack, health, .. } => {
+                let host = pt.source.map(|x| x as usize);
+                self.players[p].board[s].keywords.set(Keywords::REBORN);
+                let tracked = self.destroy_in_shop(p, &[s], host);
+                if let Some(h) = tracked {
+                    buff(&mut self.players[p].board[h], attack, health);
+                }
+            }
             TargetKind::AnySetStats { attack, health } => {
                 for _ in 0..pt.runs {
                     let m = &mut self.players[p].board[s];
@@ -4002,6 +4194,16 @@ impl Game {
                                 health + per.1 * n + dh,
                             );
                         }
+                        SpellTarget::Butchering { attack } => {
+                            // The bonus lands first, so a Reborn copy comes
+                            // back with it. Like Channel the Devourer, a
+                            // second cast (Balinda) does nothing: its
+                            // target is gone.
+                            self.add_undead_bonus(p, attack + da, dh, true);
+                            self.destroy_in_shop(p, &[target_pos], None);
+                            stop_after = true;
+                            target_removed = true;
+                        }
                     }
                     self.trigger_on_cast_spell(p);
                     if !target_removed && target_pos < self.players[p].board.len() {
@@ -4046,10 +4248,12 @@ impl Game {
                 _ => None,
             };
             let locked = matches!(req, DiscoverRequest::SearchMinionTier(_));
+            let doomed = matches!(req, DiscoverRequest::DoomedTribeMinion(_));
             let Game { data, rng, players, pool, .. } = self;
             let pl = &mut players[p];
             pl.discover_damage_from = damage_from;
             pl.discover_locked = locked;
+            pl.discover_doomed = doomed;
             while !pl.discover.is_full() {
                 let next = match req {
                     DiscoverRequest::MinionTier(t)
@@ -4082,7 +4286,7 @@ impl Game {
                         pl.rig,
                         |c| c.battlecry.is_some(),
                     ),
-                    DiscoverRequest::TribeMinion(t) => {
+                    DiscoverRequest::TribeMinion(t) | DiscoverRequest::DoomedTribeMinion(t) => {
                         // a "Discover a Murloc" only offers up to the tier
                         draw_filtered(pool, &data.cards, rng, 1, pl.tier, &pl.discover, |c| {
                             c.tribes.has(t)
@@ -4151,6 +4355,7 @@ impl Game {
         let pl = &mut players[p];
         let locked = pl.discover_locked;
         pl.discover_locked = false;
+        let doomed = std::mem::take(&mut pl.discover_doomed);
         let c = pl.discover[k];
         for (i, &o) in pl.discover.iter().enumerate() {
             if i != k && !data.cards.get(o).is_spell() {
@@ -4171,6 +4376,9 @@ impl Game {
             let mut m = pl.make_card(&data.cards, c, false, pool_copies);
             if locked && !is_spell {
                 m.locked_turns = 1;
+            }
+            if doomed && !is_spell {
+                m.doomed = true;
             }
             pl.hand.push(m);
             if !is_spell {
@@ -4514,6 +4722,30 @@ impl Game {
 
     /// The player is done for this turn. Anything still waiting on a choice
     /// takes the first option, then end-of-turn effects run.
+    /// A played Tomb Turning Undead dies once its Battlecry, and whatever it
+    /// asked the player to choose or Discover, is done.
+    fn resolve_doomed(&mut self, p: usize) {
+        let pl = &self.players[p];
+        if !pl.alive
+            || pl.pending_target.is_some()
+            || pl.pending_shop_target.is_some()
+            || pl.pending_choose_one.is_some()
+            || !pl.discover.is_empty()
+            || !pl.discover_queue.is_empty()
+        {
+            return;
+        }
+        let victims: ArrayVec<usize, BOARD> =
+            pl.board.iter().enumerate().filter(|(_, m)| m.doomed).map(|(i, _)| i).collect();
+        if victims.is_empty() {
+            return;
+        }
+        for m in &mut self.players[p].board {
+            m.doomed = false;
+        }
+        self.destroy_in_shop(p, &victims, None);
+    }
+
     fn finish_shop(&mut self, p: usize) {
         loop {
             let pl = &self.players[p];
@@ -4538,6 +4770,11 @@ impl Game {
             } else {
                 break;
             }
+        }
+        self.resolve_doomed(p);
+        // A Tomb Turning Undead that wasn't played this turn is a normal one.
+        for m in &mut self.players[p].hand {
+            m.doomed = false;
         }
         self.run_end_of_turn(p);
         let cards = &self.data.cards;
@@ -4766,6 +5003,8 @@ impl Game {
             pl.beast_bonus.1 += so.beast_bonus_gain.1;
         }
         self.add_deathrattles_triggered(p, so.deathrattles_triggered as u32, after_fight);
+        self.add_undead_bonus(p, so.undead_gain.0, so.undead_gain.1, after_fight);
+        self.add_knight_deaths(p, so.knight_deaths, after_fight);
         // Sacrificial Wrathguard's Deathrattle: a Tavern buff for the game.
         if so.tavern_buff_gain != (0, 0) {
             let b = TavernBuff {

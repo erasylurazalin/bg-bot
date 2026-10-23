@@ -52,6 +52,7 @@ pub fn tribe_name(t: Tribe) -> &'static str {
         Tribe::Demon => "Demon",
         Tribe::Pirate => "Pirate",
         Tribe::Elemental => "Elemental",
+        Tribe::Undead => "Undead",
     }
 }
 
@@ -323,6 +324,12 @@ fn describe_target(pt: &PendingTarget) -> String {
         TargetKind::TriggerRally => "trigger a Rally".into(),
         TargetKind::TriggerBattlecry => "trigger a Battlecry".into(),
         TargetKind::Consume { .. } => "it consumes Tavern minions".into(),
+        TargetKind::DestroyDiscover { tribe, .. } => {
+            format!("destroy a {}, then Discover one", tribe_name(tribe))
+        }
+        TargetKind::RebornDestroy { tribe, attack, health } => {
+            format!("a {} gets Reborn and is destroyed, you gain +{attack}/+{health}", tribe_name(tribe))
+        }
         TargetKind::Spell(st) => format!("{st:?}"),
     }
 }

@@ -12,7 +12,7 @@ use arrayvec::ArrayVec;
 
 use crate::cards::{
     N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, Effect, OnSummonBeast, PermanentKeep,
-    SpellEffect, StartOfCombat, Tribe, Tribes, pick_one_per_type,
+    OnCastSpell, OnReborn, SpellEffect, StartOfCombat, Tribe, Tribes, pick_one_per_type,
 };
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
@@ -43,6 +43,13 @@ pub struct Counters {
     /// (Runic Arcanist, Crimson Vindicator).
     pub spell_attack: i32,
     pub spell_health: i32,
+    /// The player's Undead bonus "wherever they are" (Nerubian Deathswarmer,
+    /// Plaguerunner, Butchering, Forsaken Weaver). Undead on the board and in
+    /// the hand already carry it; Undead made in the fight get it.
+    pub undead_attack: i32,
+    pub undead_health: i32,
+    /// Eternal Knights that died this game, which every Knight reads.
+    pub knight_deaths: u32,
     /// Sandbox only: "any minion" draws inside the fight (Ghastcoiler) only
     /// pick this tribe and neutral minions. None in a normal game.
     pub rig: Option<crate::cards::Tribe>,
@@ -99,6 +106,12 @@ pub struct SideOutcome {
     /// Mutineer).
     pub lockboxes: [u8; 8],
     pub n_lockboxes: u8,
+    /// Increase to the player's Undead bonus (Plaguerunner's Deathrattle).
+    /// The game adds it to the Undead that are not in the fight's copy of the
+    /// board.
+    pub undead_gain: (i32, i32),
+    /// Eternal Knights of the player that died in this fight.
+    pub knight_deaths: u32,
 }
 
 impl SideOutcome {
@@ -123,6 +136,16 @@ impl SideOutcome {
         if n < HAND {
             self.cards[n] = c;
             self.n_cards += 1;
+        }
+    }
+
+    /// Take back the last gained card `c` (a card that was summoned from the
+    /// hand it was just put in).
+    fn remove_card(&mut self, c: CardId) {
+        let n = self.n_cards as usize;
+        if let Some(i) = self.cards[..n].iter().rposition(|&x| x == c) {
+            self.cards.copy_within(i + 1..n, i);
+            self.n_cards -= 1;
         }
     }
 
@@ -220,6 +243,25 @@ struct Side<'a> {
     /// this" Deathrattle (Leeroy). Applied by `resolve_deaths`, which sees
     /// both sides.
     killer_destroy: ArrayVec<u16, 8>,
+    /// The cards of the minions that started the fight on the board
+    /// (Lichling Hoarder copies one of them).
+    start_cards: ArrayVec<CardId, BOARD>,
+    /// Minions this fight's Deathly Strikers got, to be summoned from the hand
+    /// by a Deathrattle.
+    held: ArrayVec<CardId, 8>,
+    /// What Stitched Salvagers destroyed: the host's uid and an exact copy
+    /// of the minion, for the Deathrattle to summon.
+    salvage: ArrayVec<(u16, Minion), 4>,
+    /// Minions waiting to attack as soon as the current attack is over
+    /// (Eternal Tycoon's Knight), by uid.
+    immediate: ArrayVec<u16, 8>,
+    /// The card whose Deathrattle is running ("a different Undead").
+    dr_card: Option<CardId>,
+    /// This side is in the shop phase, not a fight (Plaguerunner gives more).
+    outside: bool,
+    /// Whether deaths count for Avenge. A shop destroy doesn't: its counts
+    /// would start from 0 every time.
+    count_avenge: bool,
     out: SideOutcome,
 }
 
@@ -281,6 +323,13 @@ impl<'a> Side<'a> {
             beast_buff: (counters.beast_attack, counters.beast_health),
             killer_buffs: ArrayVec::new(),
             killer_destroy: ArrayVec::new(),
+            start_cards: board.iter().take(BOARD).map(|m| m.card).collect(),
+            held: ArrayVec::new(),
+            salvage: ArrayVec::new(),
+            immediate: ArrayVec::new(),
+            dr_card: None,
+            outside: false,
+            count_avenge: true,
             out: SideOutcome::default(),
         }
     }
@@ -340,7 +389,7 @@ impl<'a> Side<'a> {
             let Some(i) = self.best_in_hand(db, tribe) else { break };
             let m = self.hand_at(i);
             self.hand_taken |= 1 << i;
-            if !self.summon(db, side, *at, m, uid, w) {
+            if !self.summon_baked(db, side, *at, m, uid, w) {
                 self.hand_taken &= !(1 << i);
                 break;
             }
@@ -576,6 +625,115 @@ impl<'a> Side<'a> {
         }
     }
 
+    /// Your Undead have +da/+dh this game, wherever they are: the living
+    /// ones on the board, the ones in the hand (for a summon from it), and
+    /// the ones summoned later. The game gives the rest through
+    /// `SideOutcome::undead_gain`.
+    fn gain_undead(&mut self, db: &CardDb, da: i32, dh: i32) {
+        self.counters.undead_attack += da;
+        self.counters.undead_health += dh;
+        self.out.undead_gain.0 += da;
+        self.out.undead_gain.1 += dh;
+        for i in 0..self.ms.len() {
+            if self.ms[i].m.health > 0 && db.get(self.ms[i].m.card).tribes.has(Tribe::Undead) {
+                self.gain_at(db, i, da, dh);
+            }
+        }
+        for i in 0..self.hand.len() {
+            let c = db.get(self.hand[i].card);
+            if !self.hand_taken(i) && !c.is_spell() && !c.fixed_stats && c.tribes.has(Tribe::Undead)
+            {
+                self.hand_bonus[i].0 = self.hand_bonus[i].0.saturating_add(da);
+                self.hand_bonus[i].1 = self.hand_bonus[i].1.saturating_add(dh);
+            }
+        }
+    }
+
+    /// The side cast a Tavern spell in the fight: Forsaken Weaver and its like
+    /// give the Undead their bonus, which lasts the game.
+    fn on_spell_cast(&mut self, db: &CardDb) {
+        let mut gains: ArrayVec<(i32, i32), 16> = ArrayVec::new();
+        for f in &self.ms {
+            if f.m.health <= 0 {
+                continue;
+            }
+            for (card, golden) in f.m.parts() {
+                if let Some(OnCastSpell::UndeadBonus { attack, health }) = db.get(card).on_cast_spell {
+                    let mul = if golden { 2 } else { 1 };
+                    let _ = gains.try_push((attack * mul, health * mul));
+                }
+            }
+        }
+        for (a, h) in gains {
+            self.gain_undead(db, a, h);
+        }
+    }
+
+    /// A friendly Eternal Knight died: every Knight, on the board or in the
+    /// hand, grows (golden ones double), and the count goes up for the Knights
+    /// summoned later.
+    fn note_knight_death(&mut self, db: &CardDb) {
+        self.counters.knight_deaths += 1;
+        self.out.knight_deaths += 1;
+        for i in 0..self.ms.len() {
+            if self.ms[i].m.health <= 0 {
+                continue;
+            }
+            if let Some((a, h)) = db.get(self.ms[i].m.card).buff_per_kind_death {
+                let mul = self.ms[i].m.mul();
+                self.gain_at(db, i, a * mul, h * mul);
+            }
+        }
+        for i in 0..self.hand.len() {
+            if self.hand_taken(i) {
+                continue;
+            }
+            if let Some((a, h)) = db.get(self.hand[i].card).buff_per_kind_death {
+                let mul = self.hand[i].mul();
+                self.hand_bonus[i].0 = self.hand_bonus[i].0.saturating_add(a * mul);
+                self.hand_bonus[i].1 = self.hand_bonus[i].1.saturating_add(h * mul);
+            }
+        }
+    }
+
+    /// The minion in slot `idx` just came back through Reborn: every other
+    /// friendly minion that reacts to a Reborn does (Barrier Banshee, Snazzy
+    /// Phantom). A minion never reacts to its own Reborn.
+    fn note_reborn(&mut self, db: &CardDb, idx: usize) {
+        let rb_uid = self.ms[idx].uid;
+        let rb_attack = self.ms[idx].m.attack;
+        let mut hosts: ArrayVec<(u16, OnReborn, bool), BOARD> = ArrayVec::new();
+        for f in &self.ms {
+            if f.m.health <= 0 || f.uid == rb_uid {
+                continue;
+            }
+            for (card, golden) in f.m.parts() {
+                if let Some(r) = db.get(card).on_reborn {
+                    let _ = hosts.try_push((f.uid, r, golden));
+                }
+            }
+        }
+        for (host, r, golden) in hosts {
+            let mul = if golden { 2 } else { 1 };
+            match r {
+                OnReborn::Banshee { attack, health } => {
+                    if let Some(i) = self.index_of(host) {
+                        self.gain_at(db, i, attack * mul, health * mul);
+                        self.ms[i].m.keywords.set(Keywords::DIVINE_SHIELD);
+                    }
+                }
+                OnReborn::Phantom => {
+                    let last = self.ms.iter().rposition(|f| {
+                        f.m.health > 0 && db.get(f.m.card).tribes.has(Tribe::Undead)
+                    });
+                    if let Some(j) = last {
+                        self.gain_at(db, j, rb_attack * mul, rb_attack * mul);
+                    }
+                }
+            }
+        }
+    }
+
     fn next_attacker(&self) -> Option<usize> {
         let n = self.ms.len();
         if n == 0 {
@@ -650,15 +808,54 @@ impl<'a> Side<'a> {
         db: &CardDb,
         side: usize,
         pos: usize,
+        m: Minion,
+        uid: &mut u16,
+        w: &mut impl Watch,
+    ) -> bool {
+        self.summon_with(db, side, pos, m, uid, w, true)
+    }
+
+    /// Summon a minion that already carries the player's bonuses (a hand
+    /// minion, an exact copy): the Undead and Knight bonuses are not added.
+    fn summon_baked(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        pos: usize,
+        m: Minion,
+        uid: &mut u16,
+        w: &mut impl Watch,
+    ) -> bool {
+        self.summon_with(db, side, pos, m, uid, w, false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn summon_with(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        pos: usize,
         mut m: Minion,
         uid: &mut u16,
         w: &mut impl Watch,
+        bonus: bool,
     ) -> bool {
         if self.ms.is_full() {
             return false;
         }
         let pos = pos.min(self.ms.len());
         let c = db.get(m.card);
+        if bonus && !c.fixed_stats {
+            if c.tribes.has(Tribe::Undead) {
+                m.attack += self.counters.undead_attack;
+                m.health += self.counters.undead_health;
+            }
+            if let Some((a, h)) = c.buff_per_kind_death {
+                let n = self.counters.knight_deaths as i32 * m.mul();
+                m.attack += a * n;
+                m.health += h * n;
+            }
+        }
         if c.when_damaged.is_some() {
             self.damage_trigger = true;
         }
@@ -1076,6 +1273,10 @@ impl<'a> Side<'a> {
             Effect::CastSpell { card, times } => {
                 let Some(sp) = db.get(card).spell_effect else { return };
                 for _ in 0..times as i32 * mul {
+                    let cast = matches!(
+                        sp,
+                        SpellEffect::BuffBoard { .. } | SpellEffect::MightyDragonbreath { .. }
+                    );
                     match sp {
                         SpellEffect::BuffBoard { attack, health, times, .. } => {
                             for _ in 0..times {
@@ -1086,6 +1287,118 @@ impl<'a> Side<'a> {
                             self.cast_mighty_dragonbreath(db, attack, health);
                         }
                         _ => break,
+                    }
+                    if cast {
+                        self.on_spell_cast(db);
+                    }
+                }
+            }
+            Effect::UndeadBonus { attack, health, outside_attack } => {
+                let a = if self.outside && outside_attack != 0 { outside_attack } else { attack };
+                self.gain_undead(db, a * mul, health * mul);
+            }
+            Effect::GiveRebornRandom { tribe, count } => {
+                for _ in 0..count as i32 * mul {
+                    let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
+                    for (i, f) in self.ms.iter().enumerate() {
+                        if f.m.health > 0
+                            && f.uid != fx.host
+                            && db.get(f.m.card).tribes.has(tribe)
+                            && !f.m.keywords.has(Keywords::REBORN)
+                            && Some(f.m.card) != self.dr_card
+                        {
+                            ok.push(i);
+                        }
+                    }
+                    if ok.is_empty() {
+                        break;
+                    }
+                    let i = ok[rng.below(ok.len() as u32) as usize];
+                    self.gain_keyword_at(db, i, Keywords::REBORN);
+                }
+            }
+            Effect::SummonAttacker { card } => {
+                let m = db.make(card, golden);
+                if self.summon(db, fx.side, *at, m, uid, w) {
+                    let new = *uid - 1;
+                    let _ = self.immediate.try_push(new);
+                    if fx.skip_ptr && *at == self.ptr {
+                        self.ptr += 1;
+                    }
+                    *at += 1;
+                }
+            }
+            Effect::GetPlainCopy => {
+                for _ in 0..mul {
+                    if !self.start_cards.is_empty() {
+                        let k = rng.below(self.start_cards.len() as u32) as usize;
+                        self.out.push_card(self.start_cards[k]);
+                    }
+                }
+            }
+            Effect::GetRandomMinionHeld { tribe } => {
+                for _ in 0..mul {
+                    if let Some(c) = db.random_pool_minion(tribe, self.counters.tier, rng) {
+                        let before = self.out.n_cards;
+                        self.out.push_card(c);
+                        if self.out.n_cards > before {
+                            let _ = self.held.try_push(c);
+                        }
+                    }
+                }
+            }
+            Effect::SummonHeld => {
+                while let Some(&c) = self.held.first() {
+                    let m = db.make(c, false);
+                    if !self.summon(db, fx.side, *at, m, uid, w) {
+                        break;
+                    }
+                    self.held.remove(0);
+                    self.out.remove_card(c);
+                    if fx.skip_ptr && *at == self.ptr {
+                        self.ptr += 1;
+                    }
+                    *at += 1;
+                }
+            }
+            Effect::DestroyLeftNeighbor => {
+                let Some(hi) = self.index_of(fx.host) else { return };
+                let mut targets: ArrayVec<usize, 2> = ArrayVec::new();
+                if let Some(l) = hi.checked_sub(1) {
+                    targets.push(l);
+                }
+                if golden && hi + 1 < self.ms.len() {
+                    targets.push(hi + 1);
+                }
+                for t in targets {
+                    let f = self.ms[t];
+                    if f.m.health <= 0 {
+                        continue;
+                    }
+                    // Another Salvager is destroyed but never copied.
+                    let is_salvager = db.get(f.m.card).deathrattle
+                        == Some(Deathrattle::Effect(Effect::SummonSalvaged));
+                    if !is_salvager {
+                        let mut copy = f.m;
+                        copy.health = f.m.health + f.taken;
+                        copy.pool_copies = 0;
+                        let _ = self.salvage.try_push((fx.host, copy));
+                    }
+                    self.ms[t].m.health = 0;
+                    self.ms[t].killer = Some(fx.host);
+                }
+            }
+            Effect::SummonSalvaged => {
+                for k in 0..self.salvage.len() {
+                    let (host, copy) = self.salvage[k];
+                    if host != fx.host {
+                        continue;
+                    }
+                    if self.summon_baked(db, fx.side, *at, copy, uid, w) {
+                        if fx.skip_ptr && *at == self.ptr {
+                            self.ptr += 1;
+                        }
+                        *at += 1;
                     }
                 }
             }
@@ -1112,6 +1425,7 @@ impl<'a> Side<'a> {
         w: &mut impl Watch,
     ) -> usize {
         let mut pos = at;
+        self.dr_card = Some(dead.card);
         for _ in 0..runs {
             for (card, golden) in dead.parts() {
                 let Some(dr) = db.get(card).deathrattle else { continue };
@@ -1251,9 +1565,14 @@ impl<'a> Side<'a> {
             let fm = self.remove(i);
             let dead = fm.m;
             w.death(side, i, &dead);
+            if db.get(dead.card).buff_per_kind_death.is_some() {
+                self.note_knight_death(db);
+            }
             let runs = self.deathrattle_fires(db);
             i += self.fire_deathrattles(db, side, &dead, fm.uid, fm.killer, i, runs, uid, rng, w);
-            self.avenge_tick(db, side, uid, rng, w);
+            if self.count_avenge {
+                self.avenge_tick(db, side, uid, rng, w);
+            }
             if dead.keywords.has(Keywords::REBORN) {
                 let mut m = db.make(dead.card, dead.golden);
                 // It counts as damaged down to 1 Health, so its maximum
@@ -1263,6 +1582,7 @@ impl<'a> Side<'a> {
                 m.keywords.clear(Keywords::REBORN);
                 if self.summon(db, side, i, m, uid, w) {
                     self.ms[i].taken = (full - 1).max(0);
+                    self.note_reborn(db, i);
                     i += 1;
                 }
             }
@@ -1440,7 +1760,7 @@ fn run_start_of_combat(
             }
             let m = sides[s].hand_at(i);
             let at = sides[s].ms.len();
-            sides[s].summon(db, s, at, m, uid, w);
+            sides[s].summon_baked(db, s, at, m, uid, w);
         }
     }
     for s in 0..2 {
@@ -1572,6 +1892,7 @@ fn run_start_of_combat(
             }
         }
         resolve_deaths(sides, turn, db, uid, rng, w);
+        run_immediate(sides, db, uid, rng, w);
         if idx[turn ^ 1] < soc[turn ^ 1].len() {
             turn ^= 1;
         }
@@ -1739,6 +2060,28 @@ fn attack_triggers(
                 };
                 let mut at = hi + 1;
                 sides[turn].run_effect(db, t.effect, golden, fx, &mut at, uid, rng, w);
+            }
+        }
+    }
+}
+
+/// Minions that were summoned to attack at once (Eternal Tycoon's Knight)
+/// swing now, out of turn, each once, without moving the attack order.
+fn run_immediate(
+    sides: &mut [Side<'_>; 2],
+    db: &CardDb,
+    uid: &mut u16,
+    rng: &mut Rng,
+    w: &mut impl Watch,
+) {
+    for s in 0..2 {
+        while !sides[s].immediate.is_empty() {
+            let u = sides[s].immediate.remove(0);
+            let ready = sides[s]
+                .index_of(u)
+                .is_some_and(|i| sides[s].ms[i].m.health > 0 && sides[s].ms[i].m.attack > 0);
+            if ready && !sides[s ^ 1].ms.is_empty() {
+                attack_swings(sides, s, u, db, uid, rng, w);
             }
         }
     }
@@ -1936,6 +2279,7 @@ fn attack_swings(
         // The attacking side's dead are handled first.
         resolve_deaths(sides, turn, db, uid, rng, w);
     }
+    run_immediate(sides, db, uid, rng, w);
 }
 
 pub fn fight(db: &CardDb, a: &[Minion], b: &[Minion], max_attacks: u32, rng: &mut Rng) -> Outcome {
@@ -2055,12 +2399,76 @@ pub fn tavern_attack(
         Side::new(db, board, &[], counters, &mut uid),
         Side::new(db, &[target], &[], Counters::default(), &mut uid),
     ];
+    sides[0].outside = true;
     let me = sides[0].ms[attacker].uid;
     attack_swings(&mut sides, 0, me, db, &mut uid, rng, &mut ());
     TavernAttack {
         board: sides[0].ms.iter().map(|f| f.m).collect(),
         target: sides[1].ms.first().map(|f| f.m),
         side: sides[0].out,
+    }
+}
+
+/// What destroying minions in the shop phase leaves behind.
+#[derive(Clone, Debug)]
+pub struct ShopDestroy {
+    /// The board afterwards: Deathrattle summons, Reborn minions and every
+    /// gain of the deaths are in it.
+    pub board: ArrayVec<Minion, BOARD>,
+    /// Where the tracked minion ended up, if it is still there.
+    pub tracked: Option<usize>,
+    /// Cards, Undead bonus and other gains that carry over. The board
+    /// already has what it gave the minions on it.
+    pub side: SideOutcome,
+    /// Every minion that died, as it was when it died.
+    pub dead: ArrayVec<Minion, 32>,
+}
+
+struct DeadWatch(ArrayVec<Minion, 32>);
+
+impl Watch for DeadWatch {
+    fn death(&mut self, _side: usize, _pos: usize, m: &Minion) {
+        let _ = self.0.try_push(*m);
+    }
+}
+
+/// Destroy the minions in `victims` (board slots) in the shop phase. They
+/// die for real: Deathrattles fire (Titus included), Eternal Knight deaths
+/// count, Reborn brings them back in the same slot, and Banshee and Phantom
+/// react. The `track`ed board slot is followed through the changes. Avenge
+/// does not count shop deaths (its counts start from 0 in every fight).
+pub fn shop_destroy(
+    db: &CardDb,
+    board: &[Minion],
+    victims: &[usize],
+    track: Option<usize>,
+    counters: Counters,
+    rng: &mut Rng,
+) -> ShopDestroy {
+    let mut uid = 0u16;
+    let counters = Counters {
+        health: None,
+        boon_of_beetles: 0,
+        brood_of_nozdormu: 0,
+        upper_hand: 0,
+        ..counters
+    };
+    let mut side = Side::new(db, board, &[], counters, &mut uid);
+    side.outside = true;
+    side.count_avenge = false;
+    let track_uid = track.and_then(|t| side.ms.get(t).map(|f| f.uid));
+    for &v in victims {
+        if let Some(f) = side.ms.get_mut(v) {
+            f.m.health = 0;
+        }
+    }
+    let mut w = DeadWatch(ArrayVec::new());
+    side.resolve(db, 0, &mut uid, rng, &mut w);
+    ShopDestroy {
+        board: side.ms.iter().map(|f| f.m).collect(),
+        tracked: track_uid.and_then(|u| side.index_of(u)),
+        side: side.out,
+        dead: w.0,
     }
 }
 

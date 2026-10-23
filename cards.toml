@@ -196,9 +196,10 @@ deathrattle = { get = "Repair Job", count = 1 }
 [[minion]]
 name = "Prosthetic Hand"
 tier = 3
-tribe = "mech"
+tribes = ["mech", "undead"]
 stats = [3, 1]
 keywords = ["magnetic", "reborn"]
+magnetize_to_undead = true
 
 [[minion]]
 name = "Deadly Spore"
@@ -1358,6 +1359,161 @@ tribe = "elemental"
 stats = [10, 10]
 after_buy = { buff = [20, 20], multiply = 2, golden_multiply = 3 }
 
+# --- Undead ---
+# "Your Undead have +N this game" is a player bonus every Undead carries
+# (Player.undead_bonus). Golden stats are all double the printed ones.
+
+[[minion]]
+name = "Harmless Bonehead"
+tier = 1
+tribe = "undead"
+stats = [1, 1]
+deathrattle = { summon = "Skeleton", count = 2, golden_doubles_count = true }
+
+[[minion]]
+name = "Risen Rider"
+tier = 1
+tribe = "undead"
+stats = [2, 1]
+keywords = ["taunt", "reborn"]
+
+[[minion]]
+name = "Eternal Knight"
+tier = 2
+tribe = "undead"
+stats = [4, 2]
+buff_per_kind_death = [4, 2]
+
+[[minion]]
+name = "Nerubian Deathswarmer"
+tier = 2
+tribe = "undead"
+stats = [1, 4]
+battlecry = { undead_bonus = [1, 0] }
+
+[[minion]]
+name = "Scarlet Skull"
+tier = 2
+tribe = "undead"
+stats = [2, 1]
+keywords = ["reborn"]
+deathrattle = { effect = { buff = [1, 2], target = "random", tribe = "undead" } }
+
+[[minion]]
+name = "Cadaver Caretaker"
+tier = 3
+tribe = "undead"
+stats = [3, 3]
+deathrattle = { summon = "Skeleton", count = 3, golden_doubles_count = true }
+
+[[minion]]
+name = "Handless Forsaken"
+tier = 3
+tribe = "undead"
+stats = [2, 1]
+deathrattle = { summon = "Helping Hand", count = 1, golden_doubles_count = true }
+
+[[minion]]
+name = "Mummifier"
+tier = 3
+tribe = "undead"
+stats = [5, 2]
+deathrattle = { effect = { give_reborn_random = "undead", count = 1 } }
+
+[[minion]]
+name = "Dead Bellringer"
+tier = 4
+tribe = "undead"
+stats = [3, 6]
+activate = { cost = 1, effect = { give_reborn_destroy = "undead", buff = [4, 4] } }
+
+[[minion]]
+name = "Friendly Geist"
+tier = 4
+tribe = "undead"
+stats = [6, 3]
+deathrattle = { effect = { spell_bonus = [1, 0] } }
+
+[[minion]]
+name = "Maw Caster"
+tier = 4
+tribe = "undead"
+stats = [4, 5]
+battlecry = { destroy_chosen_discover = "undead", count = 1 }
+
+[[minion]]
+name = "Plaguerunner"
+tier = 4
+tribe = "undead"
+stats = [4, 2]
+deathrattle = { effect = { undead_bonus = [2, 0], outside_attack = 4 } }
+
+[[minion]]
+name = "Barrier Banshee"
+tier = 5
+tribe = "undead"
+stats = [8, 8]
+on_reborn = { banshee = [8, 8] }
+
+[[minion]]
+name = "Drustfallen Butcher"
+tier = 5
+tribe = "undead"
+stats = [2, 7]
+avenge = { every = 4, effect = { get = "Butchering" } }
+
+[[minion]]
+name = "Eternal Summoner"
+tier = 5
+tribe = "undead"
+stats = [8, 1]
+keywords = ["reborn"]
+deathrattle = { effect = { summon = "Eternal Knight" } }
+
+[[minion]]
+name = "Eternal Tycoon"
+tier = 5
+tribe = "undead"
+stats = [4, 8]
+avenge = { every = 5, effect = { summon_attacker = "Eternal Knight" } }
+
+[[minion]]
+name = "Lichling Hoarder"
+tier = 5
+tribe = "undead"
+stats = [6, 9]
+avenge = { every = 3, effect = { get_plain_copy = true } }
+
+[[minion]]
+name = "Deathly Striker"
+tier = 6
+tribe = "undead"
+stats = [8, 8]
+avenge = { every = 4, effect = { get_random_held = "undead" } }
+deathrattle = { effect = { summon_held = true } }
+
+[[minion]]
+name = "Forsaken Weaver"
+tier = 6
+tribe = "undead"
+stats = [3, 8]
+on_cast_spell = { undead_bonus = [3, 0] }
+
+[[minion]]
+name = "Snazzy Phantom"
+tier = 6
+tribe = "undead"
+stats = [6, 8]
+on_reborn = { phantom = true }
+
+[[minion]]
+name = "Stitched Salvager"
+tier = 7
+tribe = "undead"
+stats = [16, 4]
+start_of_combat = { effect = { destroy_left = true } }
+deathrattle = { effect = { summon_salvaged = true } }
+
 # --- Tokens ---
 
 [[token]]
@@ -1472,6 +1628,19 @@ tier = 1
 tribe = "demon"
 stats = [2, 2]
 fodder = true
+
+[[token]]
+name = "Skeleton"
+tier = 1
+tribe = "undead"
+stats = [1, 1]
+
+[[token]]
+name = "Helping Hand"
+tier = 1
+tribe = "undead"
+stats = [2, 1]
+keywords = ["reborn"]
 
 # --- Spells: Tier 1 ---
 
@@ -1707,12 +1876,13 @@ tier = 4
 cost = 2
 effect = { get = "Pointy Arrow", count = 3 }
 
-# A normal pool spell (the JSON's pool flag is wrong for it); Weapons Forge
-# also gives 3 copies.
+# Only from Weapons Forge, never in the Tavern (checked in a real game and in
+# the game files, 2026-10-24).
 [[spell]]
 name = "Pointy Arrow"
 tier = 1
 cost = 1
+token = true
 effect = { target = "chosen", buff = [4, 0] }
 
 # --- Spells: Tier 5 ---
@@ -1882,3 +2052,17 @@ tier = 5
 cost = 2
 token = true
 effect = { target = "chosen", buff = [4, 4], per_played_this_turn = [2, 2], tribe = "elemental" }
+
+# --- Spells: Undead ---
+
+[[spell]]
+name = "Tomb Turning"
+tier = 4
+cost = 2
+effect = { tomb_turning = true }
+
+[[spell]]
+name = "Butchering"
+tier = 5
+cost = 3
+effect = { target = "chosen", butchering = 8 }

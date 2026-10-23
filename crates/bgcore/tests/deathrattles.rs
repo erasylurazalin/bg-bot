@@ -77,18 +77,23 @@ fn every_deathrattle_fires_once_twice_and_three_times() {
             let how = if golden { "golden" } else { "normal" };
             let one = fired(&db, &[victim(&db, c, golden)]);
             assert_eq!(one, 1, "{name} ({how}) dying in a fight");
-            let titus = fired(
-                &db,
-                &[victim(&db, c, golden), make(&db, "Titus Rivendare")],
-            );
+            // A Start of Combat that destroys its neighbours (Stitched
+            // Salvager) would destroy Titus too: keep a filler between.
+            let gap: Vec<Minion> = if db.get(c).start_of_combat.is_some() {
+                vec![make(&db, "Microbot")]
+            } else {
+                vec![]
+            };
+            let with = |titus: Minion| {
+                let mut board = vec![victim(&db, c, golden)];
+                board.extend(gap.iter().copied());
+                board.push(titus);
+                board
+            };
+            let titus = fired(&db, &with(make(&db, "Titus Rivendare")));
             assert_eq!(titus, 2, "{name} ({how}) dying with Titus on board");
-            let golden_titus = fired(
-                &db,
-                &[
-                    victim(&db, c, golden),
-                    db.make(card(&db, "Titus Rivendare"), true),
-                ],
-            );
+            let golden_titus =
+                fired(&db, &with(db.make(card(&db, "Titus Rivendare"), true)));
             assert_eq!(golden_titus, 3, "{name} ({how}) dying with golden Titus");
         }
     }

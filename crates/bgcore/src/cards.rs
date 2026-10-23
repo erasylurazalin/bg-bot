@@ -39,6 +39,7 @@ pub enum Tribe {
     Demon,
     Pirate,
     Elemental,
+    Undead,
 }
 
 impl Tribe {
@@ -46,7 +47,7 @@ impl Tribe {
     /// run that redoes the observation for every tribe). Rules use `EVERY`.
     pub const ALL: [Tribe; 5] = [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon];
     /// Every tribe a card can have.
-    pub const EVERY: [Tribe; 7] = [
+    pub const EVERY: [Tribe; 8] = [
         Tribe::Beast,
         Tribe::Mech,
         Tribe::Dragon,
@@ -54,6 +55,7 @@ impl Tribe {
         Tribe::Demon,
         Tribe::Pirate,
         Tribe::Elemental,
+        Tribe::Undead,
     ];
 
     fn bit(self) -> u8 {
@@ -69,7 +71,7 @@ pub struct Tribes(u8);
 
 impl Tribes {
     pub const NONE: Tribes = Tribes(0);
-    pub const ALL: Tribes = Tribes(0b1111111);
+    pub const ALL: Tribes = Tribes(0b11111111);
 
     pub fn of(t: Tribe) -> Tribes {
         Tribes(t.bit())
@@ -363,6 +365,40 @@ pub enum Effect {
     /// Give the other friendly minions of a tribe the stats, times one plus
     /// this minion's `improvements` (Ultraviolet Ascendant). Golden doubles.
     BuffOthersPerImprovement { tribe: Option<Tribe>, attack: i32, health: i32 },
+    /// Your Undead have +attack/+health this game, wherever they are
+    /// (Nerubian Deathswarmer, Plaguerunner, Butchering, Forsaken Weaver).
+    /// Golden doubles it. `outside_attack` replaces `attack` when it runs
+    /// outside combat (Plaguerunner's +4 against +2 in a fight), 0 for no
+    /// difference.
+    UndeadBonus { attack: i32, health: i32, outside_attack: i32 },
+    /// Give `count` random friendly minions of a tribe without Reborn that
+    /// are not a copy of this card Reborn (Mummifier). Golden doubles the
+    /// count.
+    GiveRebornRandom { tribe: Tribe, count: u8 },
+    /// Summon a card that attacks right after the current attack is over
+    /// (Eternal Tycoon). Fights only.
+    SummonAttacker { card: CardId },
+    /// Get a plain copy of a random minion that started this fight on your
+    /// board (Lichling Hoarder). Golden gets two.
+    GetPlainCopy,
+    /// Get a random pool minion of a tribe, up to your tier, that this
+    /// minion's Deathrattle can summon from hand for this fight (Deathly
+    /// Striker). Golden gets two. Fights only.
+    GetRandomMinionHeld { tribe: Tribe },
+    /// Summon the minions `GetRandomMinionHeld` got this fight. They leave
+    /// the hand for good. Fights only.
+    SummonHeld,
+    /// Start of Combat: destroy the minion to the left (both neighbours when
+    /// golden), remembering a copy of each (Stitched Salvager).
+    DestroyLeftNeighbor,
+    /// Deathrattle: summon the exact copies `DestroyLeftNeighbor` kept.
+    SummonSalvaged,
+    /// Battlecry: destroy a friendly minion of a tribe you pick, then
+    /// Discover `count` of that tribe (Maw Caster). Golden Discovers twice.
+    DestroyChosenDiscover { tribe: Tribe, count: u8 },
+    /// Activate: give a different friendly minion of a tribe Reborn, then
+    /// destroy it, and this minion gains the stats (Dead Bellringer).
+    GiveRebornDestroy { tribe: Tribe, attack: i32, health: i32 },
 }
 
 impl Effect {
@@ -382,7 +418,18 @@ impl Effect {
                 | Effect::SetStatsAnyMinion { .. }
                 | Effect::BuffChosenPerGold { .. }
                 | Effect::MakeGoldenChosen { .. }
+                | Effect::DestroyChosenDiscover { .. }
+                | Effect::GiveRebornDestroy { .. }
         )
+    }
+
+    /// Whether the effect needs another friendly minion of a tribe that is
+    /// not a copy of the host (Dead Bellringer's Activate).
+    pub fn needs_different_of_tribe(self) -> Option<Tribe> {
+        match self {
+            Effect::GiveRebornDestroy { tribe, .. } => Some(tribe),
+            _ => None,
+        }
     }
 
     /// Whether the effect needs the player to pick a minion on the board or
@@ -447,6 +494,14 @@ impl Effect {
             | Effect::BuffAllKeepGolden { .. }
             | Effect::RefreshBuff { .. }
             | Effect::BuffOthersPerImprovement { .. }
+            | Effect::UndeadBonus { .. }
+            | Effect::GiveRebornRandom { .. }
+            | Effect::SummonAttacker { .. }
+            | Effect::GetPlainCopy
+            | Effect::GetRandomMinionHeld { .. }
+            | Effect::SummonHeld
+            | Effect::DestroyLeftNeighbor
+            | Effect::SummonSalvaged
             | Effect::DamageTargetAndNeighbor => true,
             _ => false,
         }
@@ -556,6 +611,10 @@ pub enum SpellTarget {
     /// Give a minion (board or Tavern) stats, plus `per` for each minion of
     /// `tribe` its owner played this turn (Conflagration).
     BuffPerTribePlayed { tribe: Tribe, attack: i32, health: i32, per: (i32, i32) },
+    /// Destroy the chosen friendly Undead, then your Undead have +attack this
+    /// game, wherever they are (Butchering). The Tavern spell bonus adds to
+    /// both stats.
+    Butchering { attack: i32 },
 }
 
 impl SpellTarget {
@@ -646,6 +705,8 @@ pub enum SpellEffect {
     RefreshBuff { attack: i32, health: i32 },
     /// Get one of each of two cards (Temperature Shift).
     GetTwo { a: CardId, b: CardId },
+    /// Discover an Undead that dies if you play it this turn (Tomb Turning).
+    TombTurning,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -817,6 +878,17 @@ pub enum OnSummonBeast {
     MultiplyAttackInCombat,
 }
 
+/// "After a friendly minion is Reborn" (never this minion's own Reborn). A
+/// golden minion doubles the numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnReborn {
+    /// Gain Divine Shield and stats (Barrier Banshee).
+    Banshee { attack: i32, health: i32 },
+    /// Give your right-most Undead stats equal to the Attack the Reborn
+    /// minion came back with (Snazzy Phantom).
+    Phantom,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnPlayMech {
     MagnetizeSatellite { card: CardId },
@@ -838,6 +910,9 @@ pub enum OnCastSpell {
     /// Buff every friendly minion. A golden minion does it twice rather
     /// than twice as much (Timecap'n Hooktail).
     BuffAll { attack: i32, health: i32 },
+    /// Your Undead have +attack/+health this game, wherever they are (Forsaken
+    /// Weaver). Golden doubles it.
+    UndeadBonus { attack: i32, health: i32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1005,6 +1080,15 @@ pub struct Card {
     pub play_shield: Option<Tribe>,
     /// After its owner buys a minion (Stone Age Slab).
     pub after_buy: Option<AfterBuy>,
+    /// Gets this much for every friendly minion with this same flag that died
+    /// this game, wherever it is (Eternal Knight). Golden doubles it.
+    pub buff_per_kind_death: Option<(i32, i32)>,
+    /// After another friendly minion is Reborn (Barrier Banshee, Snazzy
+    /// Phantom).
+    pub on_reborn: Option<OnReborn>,
+    /// A Magnetic minion that can Magnetize to an Undead as well as a Mech
+    /// (Prosthetic Hand).
+    pub magnetize_to_undead: bool,
 }
 
 impl Card {
@@ -1108,6 +1192,7 @@ impl Card {
             || self.aura.is_some()
             || self.after_summon_give_stats.is_some()
             || self.spell_buff.is_some()
+            || self.on_reborn.is_some()
     }
 }
 
@@ -1228,6 +1313,18 @@ struct RawCard {
     /// Tribe whose members get Divine Shield when played.
     play_shield: Option<String>,
     after_buy: Option<RawAfterBuy>,
+    buff_per_kind_death: Option<[i32; 2]>,
+    on_reborn: Option<RawOnReborn>,
+    #[serde(default)]
+    magnetize_to_undead: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOnReborn {
+    banshee: Option<[i32; 2]>,
+    #[serde(default)]
+    phantom: bool,
 }
 
 #[derive(Deserialize)]
@@ -1361,6 +1458,12 @@ struct RawSpellEffect {
     half_of_highest: bool,
     /// Buff by `buff`, plus this per minion of `tribe` played this turn.
     per_played_this_turn: Option<[i32; 2]>,
+    /// Butchering: destroy the chosen friendly Undead, then this much Attack
+    /// for every Undead this game.
+    butchering: Option<i32>,
+    /// Tomb Turning: Discover an Undead that dies if played this turn.
+    #[serde(default)]
+    tomb_turning: bool,
 }
 
 #[derive(Deserialize)]
@@ -1522,6 +1625,30 @@ struct RawEffect {
     /// Multiply a buff by one plus this minion's `improvements`.
     #[serde(default)]
     per_improvement: bool,
+    /// Your Undead have +buff this game (wherever they are).
+    undead_bonus: Option<[i32; 2]>,
+    /// The Attack `undead_bonus` gives when it runs outside combat.
+    outside_attack: Option<i32>,
+    /// Give random friendly minions of this tribe Reborn (`count` of them).
+    give_reborn_random: Option<String>,
+    /// Summon this card, which attacks right after the current attack.
+    summon_attacker: Option<String>,
+    #[serde(default)]
+    get_plain_copy: bool,
+    /// Get a random minion of this tribe that this Deathrattle can summon.
+    get_random_held: Option<String>,
+    #[serde(default)]
+    summon_held: bool,
+    #[serde(default)]
+    destroy_left: bool,
+    #[serde(default)]
+    summon_salvaged: bool,
+    /// Destroy a chosen friendly minion of this tribe, then Discover `count`
+    /// of that tribe.
+    destroy_chosen_discover: Option<String>,
+    /// Give a different friendly minion of this tribe Reborn, destroy it, and
+    /// gain the buff.
+    give_reborn_destroy: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1666,6 +1793,7 @@ struct RawOnCastSpellOnMech {
 struct RawOnCastSpell {
     buff_divine_shield: Option<[i32; 2]>,
     buff_all: Option<[i32; 2]>,
+    undead_bonus: Option<[i32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -1711,6 +1839,7 @@ fn tribe(s: &str) -> Result<Tribe, String> {
         "demon" => Ok(Tribe::Demon),
         "pirate" => Ok(Tribe::Pirate),
         "elemental" => Ok(Tribe::Elemental),
+        "undead" => Ok(Tribe::Undead),
         _ => Err(format!("unknown tribe {s:?}")),
     }
 }
@@ -1787,6 +1916,9 @@ fn parse_spell_effect(
             if e.half_of_highest {
                 let t = e.tribe.as_deref().ok_or("half_of_highest needs a tribe")?;
                 return Ok((Some(SpellTarget::HalfOfHighestTavern { tribe: tribe(t)? }), None));
+            }
+            if let Some(attack) = e.butchering {
+                return Ok((Some(SpellTarget::Butchering { attack }), None));
             }
             if let Some(per) = e.per_played_this_turn {
                 let [attack, health] = e.buff.ok_or("per_played_this_turn needs buff")?;
@@ -1918,6 +2050,8 @@ fn parse_spell_effect(
                 SpellEffect::StealRandomTavern
             } else if e.discover_locked_minion {
                 SpellEffect::DiscoverLockedMinion
+            } else if e.tomb_turning {
+                SpellEffect::TombTurning
             } else if e.saloon_finest {
                 SpellEffect::SaloonFinest
             } else if let Some([attack, health]) = e.refresh_buff {
@@ -2028,7 +2162,32 @@ impl CardDb {
 
         let parse_effect = |b: &RawEffect| -> Result<Effect, String> {
             let t = b.tribe.as_deref().map(tribe).transpose()?;
-            Ok(if let Some([attack, health]) = b.refresh_buff {
+            Ok(if let Some([attack, health]) = b.undead_bonus {
+                Effect::UndeadBonus {
+                    attack,
+                    health,
+                    outside_attack: b.outside_attack.unwrap_or(0),
+                }
+            } else if let Some(name) = &b.give_reborn_random {
+                Effect::GiveRebornRandom { tribe: tribe(name)?, count: b.count.unwrap_or(1) }
+            } else if let Some(name) = &b.summon_attacker {
+                Effect::SummonAttacker { card: minion_id(name)? }
+            } else if b.get_plain_copy {
+                Effect::GetPlainCopy
+            } else if let Some(name) = &b.get_random_held {
+                Effect::GetRandomMinionHeld { tribe: tribe(name)? }
+            } else if b.summon_held {
+                Effect::SummonHeld
+            } else if b.destroy_left {
+                Effect::DestroyLeftNeighbor
+            } else if b.summon_salvaged {
+                Effect::SummonSalvaged
+            } else if let Some(name) = &b.destroy_chosen_discover {
+                Effect::DestroyChosenDiscover { tribe: tribe(name)?, count: b.count.unwrap_or(1) }
+            } else if let Some(name) = &b.give_reborn_destroy {
+                let [attack, health] = b.buff.ok_or("give_reborn_destroy needs buff")?;
+                Effect::GiveRebornDestroy { tribe: tribe(name)?, attack, health }
+            } else if let Some([attack, health]) = b.refresh_buff {
                 Effect::RefreshBuff { attack, health }
             } else if let Some(n) = b.free_refreshes {
                 Effect::FreeRefreshes(n)
@@ -2591,6 +2750,8 @@ impl CardDb {
                     OnCastSpell::BuffDivineShield { attack, health }
                 } else if let Some([attack, health]) = cs.buff_all {
                     OnCastSpell::BuffAll { attack, health }
+                } else if let Some([attack, health]) = cs.undead_bonus {
+                    OnCastSpell::UndeadBonus { attack, health }
                 } else {
                     return Err(err("invalid on_cast_spell".into()));
                 }),
@@ -2636,6 +2797,17 @@ impl CardDb {
                     }
                     Some(effect)
                 }
+            };
+
+            let on_reborn = match &c.on_reborn {
+                None => None,
+                Some(r) => Some(if let Some([attack, health]) = r.banshee {
+                    OnReborn::Banshee { attack, health }
+                } else if r.phantom {
+                    OnReborn::Phantom
+                } else {
+                    return Err(err("invalid on_reborn".into()));
+                }),
             };
 
             cards.push(Card {
@@ -2717,6 +2889,9 @@ impl CardDb {
                     multiply: a.multiply,
                     golden_multiply: a.golden_multiply,
                 }),
+                buff_per_kind_death: c.buff_per_kind_death.map(|[a, h]| (a, h)),
+                on_reborn,
+                magnetize_to_undead: c.magnetize_to_undead,
             });
         }
 
@@ -2835,6 +3010,9 @@ impl CardDb {
                 triple_wildcard: None,
                 play_shield: None,
                 after_buy: None,
+                buff_per_kind_death: None,
+                on_reborn: None,
+                magnetize_to_undead: false,
             });
         }
 
@@ -3117,6 +3295,7 @@ impl CardDb {
             extra_magnetize: 0,
             taught_spell: None,
             locked_turns: 0,
+            doomed: false,
             activated: false,
             attached: [Attached::default(); MAX_ATTACHED],
             n_attached: 0,

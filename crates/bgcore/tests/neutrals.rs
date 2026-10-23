@@ -764,24 +764,15 @@ fn nightmare_par_tea_guest_deathrattle_gets_a_tea_set() {
 // ---- Pointy Arrow in the pool, and Balinda's double casts ----
 
 #[test]
-fn pointy_arrow_is_a_normal_pool_spell() {
+fn pointy_arrow_only_comes_from_weapons_forge() {
     let d = db();
     let arrow = d.by_name("Pointy Arrow").unwrap();
-    assert!(d.spells.contains(&arrow), "Pointy Arrow must be in the spell pool");
-    assert_eq!(d.get(arrow).tier, 1);
-    assert_eq!(d.get(arrow).cost, 1);
+    assert!(!d.spells.contains(&arrow), "Pointy Arrow is not in the spell pool");
     let mut rng = Rng::new(7);
-    let mut slot_draw = false;
-    let mut discover_draw = false;
     for _ in 0..1000 {
-        slot_draw |= d.random_spell(1, &mut rng) == Some(arrow);
-        discover_draw |= d.random_tier_spell(1, &[], &mut rng) == Some(arrow);
-        if slot_draw && discover_draw {
-            break;
-        }
+        assert_ne!(d.random_spell(1, &mut rng), Some(arrow));
+        assert_ne!(d.random_tier_spell(1, &[], &mut rng), Some(arrow));
     }
-    assert!(slot_draw, "Pointy Arrow can come out of the tier 1 spell pool");
-    assert!(discover_draw, "Pointy Arrow can be Discovered as a tier 1 spell");
 }
 
 #[test]
