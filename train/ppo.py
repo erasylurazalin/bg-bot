@@ -389,6 +389,10 @@ def main():
             perm = torch.randperm(n, device=dev)
             for i in range(0, n, cfg.minibatch):
                 idx = perm[i:i + cfg.minibatch]
+                # the learner's step count varies, so the last minibatch can be tiny:
+                # its advantage std is noise, or NaN for one sample (which poisoned a run)
+                if idx.numel() < 256:
+                    continue
                 logits, v = net(f_obs[idx])
                 dist = torch.distributions.Categorical(logits=masked(logits, f_mask[idx]))
                 lp = dist.log_prob(f_act[idx])
