@@ -111,7 +111,9 @@ fn spell_cost(g: &Game, id: CardId) -> String {
     if c.pay_health {
         format!("{} health", c.cost)
     } else {
-        format!("{}g", c.cost.saturating_sub(g.players[0].spell_discount))
+        let d = g.players[0].spell_discount;
+        let paid = c.cost.saturating_sub(d);
+        if paid < c.cost { format!("{paid}g, was {}g", c.cost) } else { format!("{paid}g") }
     }
 }
 
