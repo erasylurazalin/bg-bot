@@ -18,7 +18,7 @@ pub enum Look {
     Discover(usize),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cmd {
     Buy(usize),
     BuySpell,
@@ -38,6 +38,8 @@ pub enum Cmd {
     Undo,
     Quit,
     Help,
+    /// Set or change the label of this game.
+    Label(String),
 }
 
 fn number(s: &str) -> Option<usize> {
@@ -79,7 +81,21 @@ fn look(rest: &str) -> Result<Look, String> {
 
 /// Parse one line. Err carries the message to show.
 pub fn parse(line: &str) -> Result<Cmd, String> {
-    let line = line.trim().to_lowercase();
+    let original = line.trim();
+    if let Some((word, rest)) = original.split_once(char::is_whitespace)
+        && word.eq_ignore_ascii_case("label")
+    {
+        let text = rest.trim();
+        return if text.is_empty() {
+            Err("label needs a name, for example: label lobster".into())
+        } else {
+            Ok(Cmd::Label(text.to_string()))
+        };
+    }
+    let line = original.to_lowercase();
+    if line == "label" {
+        return Err("label needs a name, for example: label lobster".into());
+    }
     if line.is_empty() {
         return Err("type a command, or help".into());
     }
@@ -179,12 +195,14 @@ mod tests {
         assert_eq!(parse("quit"), Ok(Cmd::Quit));
         assert_eq!(parse("help"), Ok(Cmd::Help));
         assert_eq!(parse("?"), Ok(Cmd::Help));
+        assert_eq!(parse("label Magnetic Mechs"), Ok(Cmd::Label("Magnetic Mechs".into())));
+        assert_eq!(parse("  LABEL   lobster "), Ok(Cmd::Label("lobster".into())));
     }
 
     #[test]
     fn junk_is_an_error() {
         for bad in ["", "   ", "zzz", "b", "b0", "b x", "b1 2", "p", "p1 2 3", "m2", "m2 x", "s", "r 3",
-            "e now", "?x", "? 0", "undo 2", "1 2", "t", "pp1"]
+            "e now", "label", "label   ", "?x", "? 0", "undo 2", "1 2", "t", "pp1"]
         {
             assert!(parse(bad).is_err(), "{bad:?} should not parse");
         }

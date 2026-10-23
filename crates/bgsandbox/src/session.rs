@@ -12,8 +12,12 @@ use crate::parse::{Arg, Cmd, Look, parse};
 use crate::screen::{self, CardTexts, tribe_name};
 
 pub struct Config {
-    pub tribe: Tribe,
-    pub label: String,
+    /// Rig the Tavern and every minion draw to this tribe plus neutrals;
+    /// None plays the normal full pool.
+    pub tribe: Option<Tribe>,
+    /// The build played. None until the player names it (at the end, or
+    /// with the label command), recorded as "unlabeled" meanwhile.
+    pub label: Option<String>,
     pub seed: u64,
     pub free_rolls: u8,
     pub boards_dir: PathBuf,
@@ -23,7 +27,11 @@ pub struct Config {
 pub struct Reply {
     pub text: String,
     pub quit: bool,
+    /// The game is over (hero knocked out or turn limit) after this command.
+    pub over: bool,
 }
+
+pub const UNLABELED: &str = "unlabeled";
 
 pub struct Session {
     cfg: Config,
@@ -36,6 +44,13 @@ pub struct Session {
     turns: Vec<TurnRecord>,
     /// The card whose effect opened the choice now waiting, for the prompt.
     ctx: Option<String>,
+    label: String,
+    label_given: bool,
+    /// The end-of-game label prompt was already shown.
+    label_asked: bool,
+    /// The file the recording is in right now: a temporary
+    /// `game-<seed>.toml` until `finish` renames it after the label.
+    current: Option<PathBuf>,
 }
 
 const HELP: &str = "\
@@ -52,14 +67,19 @@ How to play (numbers are what the screen shows, counting from 1):
   u         upgrade the Tavern           e        end turn
   ? 3       full card text: Tavern 3     ?s spell slot   ?h1 hand 1   ?b2 board 2   ?d1 Discover option 1
   undo      take back the last action (works across turns, even an e)
+  label X   set or change the label of this game (the build you play, e.g. lobster)
   quit      save and exit                help     this list
 Tags: T taunt, DS divine shield, W windfury, V venomous, R reborn, S stealth, G golden,
 M magnetic, A1 Activate ready (cost 1), L2 locked in hand 2 more turns.
 A Magnetic minion merges into the Mech at the position you give; to put it on the board
 unmerged, play it at the right end (plain p1).
-The Tavern only shows your tribe and neutral minions. Every turn ends with a fight against
-a copy of your own board: it never hurts your hero, only shop damage does.
-Every end-of-turn board is saved to boards/<tribe>-<label>-<seed>.toml.";
+It is a normal game with the full pool (with --tribe X the Tavern and every minion draw only
+show that tribe and neutral minions). Every turn ends with a fight against a copy of your own
+board: it never hurts your hero, only shop damage does.
+Every end-of-turn board is saved to boards/game-<seed>.toml while you play. At the end (quit,
+hero death) you are asked to label the build and the file is renamed to
+boards/<label>-<seed>.toml (<tribe>-<label>-<seed> with --tribe). An existing file is never
+overwritten, a suffix -2, -3 is added.";
 
 pub fn help() -> &'static str {
     HELP
@@ -84,17 +104,85 @@ impl Session {
     pub fn new(cfg: Config) -> Session {
         let data = Arc::new(Data::bundled());
         let (game, turns, ctx) = Session::build(&cfg, &data, &[]);
-        Session { cfg, data, texts: CardTexts::load(), game, history: Vec::new(), turns, ctx }
+        let label_given = cfg.label.as_ref().is_some_and(|l| !l.trim().is_empty());
+        let label = if label_given { cfg.label.clone().unwrap().trim().to_string() } else { UNLABELED.to_string() };
+        Session {
+            cfg,
+            data,
+            texts: CardTexts::load(),
+            game,
+            history: Vec::new(),
+            turns,
+            ctx,
+            label,
+            label_given,
+            label_asked: false,
+            current: None,
+        }
     }
 
-    /// The file this game records to.
-    pub fn file_path(&self) -> PathBuf {
-        self.cfg.boards_dir.join(format!(
-            "{}-{}-{}.toml",
-            tribe_name(self.cfg.tribe).to_lowercase(),
-            sanitize(&self.cfg.label),
-            self.cfg.seed
-        ))
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Set or change the label (an empty text changes nothing).
+    pub fn set_label(&mut self, text: &str) {
+        let t = text.trim();
+        if !t.is_empty() {
+            self.label = t.to_string();
+            self.label_given = true;
+        }
+    }
+
+    /// Whether the end-of-game label question should be asked now.
+    pub fn needs_label(&self) -> bool {
+        !self.label_given && !self.label_asked && !self.turns.is_empty()
+    }
+
+    /// Take the answer to the label question; blank keeps "unlabeled".
+    pub fn answer_label(&mut self, text: &str) {
+        self.label_asked = true;
+        self.set_label(text);
+    }
+
+    /// The file name the finished game gets, before any suffix.
+    fn final_name(&self) -> String {
+        let label = sanitize(&self.label);
+        match self.cfg.tribe {
+            Some(t) => format!("{}-{label}-{}", tribe_name(t).to_lowercase(), self.cfg.seed),
+            None => format!("{label}-{}", self.cfg.seed),
+        }
+    }
+
+    /// The file the recording is in now, None before the first fought turn.
+    pub fn file_path(&self) -> Option<PathBuf> {
+        self.current.clone()
+    }
+
+    /// A path in the boards folder for `stem` that no file has yet.
+    fn free_path(&self, stem: &str, keep: Option<&PathBuf>) -> PathBuf {
+        let mut n = 1;
+        loop {
+            let name = if n == 1 { format!("{stem}.toml") } else { format!("{stem}-{n}.toml") };
+            let p = self.cfg.boards_dir.join(name);
+            if !p.exists() || keep == Some(&p) {
+                return p;
+            }
+            n += 1;
+        }
+    }
+
+    /// Save, then rename the file to its final name from the label. Safe to
+    /// call again: with the same label nothing moves.
+    pub fn finish(&mut self) -> Result<Option<PathBuf>, String> {
+        let Some(path) = self.save()? else { return Ok(None) };
+        let target = self.free_path(&self.final_name(), Some(&path));
+        if target != path {
+            std::fs::rename(&path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+            self.current = Some(target.clone());
+            return Ok(Some(target));
+        }
+        Ok(Some(path))
     }
 
     pub fn game(&self) -> &Game {
@@ -166,8 +254,8 @@ impl Session {
 
     fn record(&self) -> GameRecord {
         GameRecord {
-            tribe: tribe_name(self.cfg.tribe).to_string(),
-            label: self.cfg.label.clone(),
+            tribe: self.cfg.tribe.map(|t| tribe_name(t).to_string()),
+            label: self.label.clone(),
             seed: self.cfg.seed,
             free_rolls: self.cfg.free_rolls,
             date: record::today(),
@@ -177,18 +265,28 @@ impl Session {
 
     /// Write the recording from the history. With no fought turn there is
     /// nothing to keep, so a file left by an undone turn is removed.
-    pub fn save(&self) -> Result<Option<PathBuf>, String> {
-        let path = self.file_path();
+    pub fn save(&mut self) -> Result<Option<PathBuf>, String> {
         if self.turns.is_empty() {
-            match std::fs::remove_file(&path) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(format!("{}: {e}", path.display()));
+            if let Some(path) = self.current.take() {
+                match std::fs::remove_file(&path) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                        return Err(format!("{}: {e}", path.display()));
+                    }
+                    _ => {}
                 }
-                _ => return Ok(None),
             }
+            return Ok(None);
         }
         let text = record::to_toml(&self.data.cards, &self.record())?;
         std::fs::create_dir_all(&self.cfg.boards_dir).map_err(|e| format!("{}: {e}", self.cfg.boards_dir.display()))?;
+        let path = match &self.current {
+            Some(p) => p.clone(),
+            None => {
+                let p = self.free_path(&format!("game-{}", self.cfg.seed), None);
+                self.current = Some(p.clone());
+                p
+            }
+        };
         // write beside the file and rename, so a crash never leaves half a game
         let tmp = path.with_extension("toml.tmp");
         std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
@@ -201,21 +299,30 @@ impl Session {
     }
 
     pub fn banner(&self) -> String {
+        let rig = match self.cfg.tribe {
+            Some(t) => format!("{} Tavern (rigged)", tribe_name(t)),
+            None => "normal full pool".to_string(),
+        };
+        let label = if self.label_given { format!("label {:?}", self.label) } else { "label asked at the end".to_string() };
         format!(
-            "bgsandbox: {} Tavern, label {:?}, seed {} (replay with --seed {}), {} free Refreshes a turn.\nRecording to {}\nType help for the commands.\n\n{}",
-            tribe_name(self.cfg.tribe),
-            self.cfg.label,
+            "bgsandbox: {rig}, {label}, seed {} (replay with --seed {}), {} free Refreshes a turn.\nRecording to {}/game-{}.toml, renamed after the label at the end.\nType help for the commands.\n\n{}",
             self.cfg.seed,
             self.cfg.seed,
             self.cfg.free_rolls,
-            self.file_path().display(),
+            self.cfg.boards_dir.display(),
+            self.cfg.seed,
             self.screen()
         )
     }
 
     /// Run one typed line.
     pub fn exec(&mut self, line: &str) -> Reply {
-        let say = |text: String| Reply { text, quit: false };
+        let (text, quit) = self.exec_inner(line);
+        Reply { text, quit, over: self.game.over }
+    }
+
+    fn exec_inner(&mut self, line: &str) -> (String, bool) {
+        let say = |text: String| (text, false);
         let cmd = match parse(line) {
             Ok(c) => c,
             Err(e) => return say(e),
@@ -224,12 +331,22 @@ impl Session {
             Cmd::Help => return say(HELP.to_string()),
             Cmd::Info(l) => return say(self.info(l)),
             Cmd::Quit => {
-                let text = match self.save() {
+                let text = match self.finish() {
                     Ok(Some(p)) => format!("Saved {} turns to {}", self.turns.len(), p.display()),
                     Ok(None) => "No turn was played to the end, so no file was written.".to_string(),
                     Err(e) => format!("could not save: {e}"),
                 };
-                return Reply { text, quit: true };
+                return (text, true);
+            }
+            Cmd::Label(text) => {
+                self.set_label(&text);
+                let mut out = format!("Label is now {:?}.", self.label);
+                if self.current.is_some()
+                    && let Err(e) = self.save()
+                {
+                    out.push_str(&format!(" COULD NOT UPDATE THE FILE: {e}"));
+                }
+                return say(out);
             }
             Cmd::Undo => return say(self.undo()),
             _ => {}
@@ -391,7 +508,7 @@ impl Session {
                     one(Action::Play { hand: h, pos: pos as u8 })
                 }
             }
-            Cmd::Help | Cmd::Info(_) | Cmd::Undo | Cmd::Quit => unreachable!(),
+            Cmd::Help | Cmd::Info(_) | Cmd::Undo | Cmd::Quit | Cmd::Label(_) => unreachable!(),
         }
     }
 

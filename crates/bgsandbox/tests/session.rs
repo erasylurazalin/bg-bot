@@ -16,7 +16,39 @@ fn tmp(name: &str) -> PathBuf {
 }
 
 fn session(tribe: Tribe, seed: u64, dir: &Path) -> Session {
-    Session::new(Config { tribe, label: "test".into(), seed, free_rolls: 3, boards_dir: dir.to_path_buf() })
+    Session::new(Config {
+        tribe: Some(tribe),
+        label: Some("test".into()),
+        seed,
+        free_rolls: 3,
+        boards_dir: dir.to_path_buf(),
+    })
+}
+
+fn open_session(seed: u64, label: Option<&str>, dir: &Path) -> Session {
+    Session::new(Config {
+        tribe: None,
+        label: label.map(String::from),
+        seed,
+        free_rolls: 0,
+        boards_dir: dir.to_path_buf(),
+    })
+}
+
+/// Run the command loop on a script as if at a terminal, returns the output.
+fn play_script(s: &mut Session, script: &str) -> String {
+    let mut input = std::io::Cursor::new(script.as_bytes().to_vec());
+    let mut out: Vec<u8> = Vec::new();
+    bgsandbox::play(s, &mut input, &mut out, true);
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn boards_in(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .map(|r| r.map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect())
+        .unwrap_or_default();
+    v.sort();
+    v
 }
 
 #[test]
@@ -94,7 +126,7 @@ fn undo_restores_the_exact_state_across_turns() {
         }
     }
     assert!(s.turns().len() >= 3);
-    let file = s.file_path();
+    let file = s.file_path().unwrap();
     assert!(file.exists());
     // undo one at a time and compare with each earlier state, an `e` among them
     while prints.len() > 1 {
@@ -201,7 +233,7 @@ fn a_scripted_session_through_the_binary_writes_the_file() {
     let d = dir.to_str().unwrap();
     // buy, play, roll, end turn for several turns, undo, quit
     let script = "b1\np1\nr\ne\nb1\np1\nr\ne\nb1\nb2\np1\nu\ne\ne\nundo\n?b1\nzzz\nquit\n";
-    let args = ["--tribe", "murloc", "--label", "Test Run", "--seed", "42", "--boards", d];
+    let args = ["--tribe", "murloc", "--label", "Test Run", "--seed", "42", "--free-rolls", "3", "--boards", d];
     let (status, out) = run_binary(&args, script);
     assert!(status.success(), "{out}");
     assert!(out.contains("seed 42"), "{out}");
@@ -210,7 +242,7 @@ fn a_scripted_session_through_the_binary_writes_the_file() {
     let file = dir.join("murloc-Test-Run-42.toml");
     assert!(file.exists(), "no file in {dir:?}: {out}");
     let rec = record::load_file(&Data::bundled().cards, &file).unwrap();
-    assert_eq!((rec.tribe.as_str(), rec.label.as_str(), rec.seed, rec.free_rolls), ("Murloc", "Test Run", 42, 3));
+    assert_eq!((rec.tribe.as_deref(), rec.label.as_str(), rec.seed, rec.free_rolls), (Some("Murloc"), "Test Run", 42, 3));
     // four turns ended, then one undone
     assert_eq!(rec.turns.len(), 3, "{out}");
     assert_eq!(rec.turns.iter().map(|t| t.turn).collect::<Vec<_>>(), [1, 2, 3]);
@@ -219,7 +251,7 @@ fn a_scripted_session_through_the_binary_writes_the_file() {
     // the same script again gives the same file: seed and actions replay
     let first = std::fs::read_to_string(&file).unwrap();
     let dir2 = tmp("binary2");
-    let args2 = ["--tribe", "murloc", "--label", "Test Run", "--seed", "42", "--boards", dir2.to_str().unwrap()];
+    let args2 = ["--tribe", "murloc", "--label", "Test Run", "--seed", "42", "--free-rolls", "3", "--boards", dir2.to_str().unwrap()];
     let (status, _) = run_binary(&args2, script);
     assert!(status.success());
     let second = std::fs::read_to_string(dir2.join("murloc-Test-Run-42.toml")).unwrap();
@@ -229,15 +261,141 @@ fn a_scripted_session_through_the_binary_writes_the_file() {
 }
 
 #[test]
-fn the_binary_asks_when_given_no_flags_and_exits_cleanly_at_eof() {
-    let dir = tmp("ask");
+fn the_default_game_is_unrigged_with_no_free_rolls() {
+    let dir = tmp("default");
     let d = dir.to_str().unwrap();
-    let (status, out) = run_binary(&["--boards", d], "dragon\nfodder run\n77\ne\n");
+    let (status, out) = run_binary(&["--seed", "9", "--boards", d], "r
+e
+");
     assert!(status.success(), "{out}");
-    assert!(out.contains("seed 77"), "{out}");
-    assert!(dir.join("dragon-fodder-run-77.toml").exists(), "{out}");
+    assert!(out.contains("normal full pool"), "{out}");
+    // no free Refreshes and no tribe prompt: the first Refresh costs gold
+    assert!(out.contains("Free rolls 0"), "{out}");
+    assert!(out.contains("Gold 2/3"), "{out}");
+    assert_eq!(boards_in(&dir), ["unlabeled-9.toml"], "piped input keeps 'unlabeled'");
+    let rec = record::load_file(&Data::bundled().cards, &dir.join("unlabeled-9.toml")).unwrap();
+    assert_eq!((rec.tribe, rec.label.as_str(), rec.free_rolls), (None, "unlabeled", 0));
+    let text = std::fs::read_to_string(dir.join("unlabeled-9.toml")).unwrap();
+    assert!(text.contains("rigged = false") && !text.contains("tribe"), "{text}");
+    let s = open_session(9, None, &dir);
+    assert!(s.game().players[0].rig.is_none());
     let (status, out) = run_binary(&["--tribe", "nope"], "");
     assert!(!status.success());
     assert!(out.contains("unknown tribe"), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_rigged_game_records_the_tribe_in_header_and_name() {
+    let dir = tmp("rigged");
+    let d = dir.to_str().unwrap();
+    let (status, out) = run_binary(&["--tribe", "beast", "--label", "lobster", "--seed", "4", "--boards", d], "e
+");
+    assert!(status.success(), "{out}");
+    assert_eq!(boards_in(&dir), ["beast-lobster-4.toml"]);
+    let text = std::fs::read_to_string(dir.join("beast-lobster-4.toml")).unwrap();
+    assert!(text.contains("rigged = true") && text.contains("tribe = \"Beast\""), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_label_is_asked_at_the_end_and_renames_the_file() {
+    let dir = tmp("ask-label");
+    let mut s = open_session(5, None, &dir);
+    let out = play_script(&mut s, "b1
+p1
+e
+e
+quit
+Fodder Run
+");
+    assert!(out.contains("Label this game"), "{out}");
+    assert_eq!(boards_in(&dir), ["Fodder-Run-5.toml"], "{out}");
+    let rec = record::load_file(&Data::bundled().cards, &dir.join("Fodder-Run-5.toml")).unwrap();
+    assert_eq!((rec.label.as_str(), rec.turns.len()), ("Fodder Run", 2));
+    // during the game the file has the temporary name
+    let dir2 = tmp("ask-label2");
+    let mut s = open_session(5, None, &dir2);
+    s.exec("e");
+    assert_eq!(boards_in(&dir2), ["game-5.toml"]);
+    // a blank answer keeps unlabeled
+    let dir3 = tmp("ask-label3");
+    let mut s = open_session(5, None, &dir3);
+    play_script(&mut s, "e
+quit
+
+");
+    assert_eq!(boards_in(&dir3), ["unlabeled-5.toml"]);
+    // end of input at the question does not hang or lose the game
+    let dir4 = tmp("ask-label4");
+    let mut s = open_session(5, None, &dir4);
+    play_script(&mut s, "e
+");
+    assert_eq!(boards_in(&dir4), ["unlabeled-5.toml"]);
+    // a label given up front is not asked again
+    let dir5 = tmp("ask-label5");
+    let mut s = open_session(5, Some("magnetic"), &dir5);
+    let out = play_script(&mut s, "e
+quit
+");
+    assert!(!out.contains("Label this game"), "{out}");
+    assert_eq!(boards_in(&dir5), ["magnetic-5.toml"]);
+    for d in [dir, dir2, dir3, dir4, dir5] {
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[test]
+fn the_label_command_sets_and_changes_it_any_time() {
+    let dir = tmp("label-cmd");
+    let mut s = open_session(6, None, &dir);
+    let fp = s.fingerprint();
+    assert!(s.exec("label").text.contains("needs a name"));
+    assert_eq!(s.label(), "unlabeled");
+    s.exec("label lobster");
+    assert_eq!(s.fingerprint(), fp, "a label is not a game action");
+    s.exec("e");
+    assert!(std::fs::read_to_string(dir.join("game-6.toml")).unwrap().contains("label = \"lobster\""));
+    s.exec("label Magnetic Mechs");
+    assert!(std::fs::read_to_string(dir.join("game-6.toml")).unwrap().contains("label = \"Magnetic Mechs\""));
+    // given by the command, so the end does not ask again
+    let out = play_script(&mut s, "quit
+");
+    assert!(!out.contains("Label this game"), "{out}");
+    assert_eq!(boards_in(&dir), ["Magnetic-Mechs-6.toml"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_label_is_asked_when_the_game_ends() {
+    // 40 turns is the turn limit: the game ends and asks without a quit
+    let dir = tmp("game-end");
+    let mut s = open_session(8, None, &dir);
+    let script = "e\n".repeat(40) + "grind\nquit\n";
+    let out = play_script(&mut s, &script);
+    assert!(out.contains("GAME OVER"), "{out}");
+    assert!(out.contains("Label this game"), "{out}");
+    assert_eq!(boards_in(&dir), ["grind-8.toml"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_existing_board_file_is_never_overwritten() {
+    let dir = tmp("no-overwrite");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("lobster-5.toml"), "keep me").unwrap();
+    std::fs::write(dir.join("game-5.toml"), "keep me too").unwrap();
+    let mut s = open_session(5, Some("lobster"), &dir);
+    s.exec("e");
+    s.exec("quit");
+    assert_eq!(boards_in(&dir), ["game-5.toml", "lobster-5-2.toml", "lobster-5.toml"]);
+    assert_eq!(std::fs::read_to_string(dir.join("lobster-5.toml")).unwrap(), "keep me");
+    assert_eq!(std::fs::read_to_string(dir.join("game-5.toml")).unwrap(), "keep me too");
+    // a second game with the same label and seed gets the next suffix
+    let mut s = open_session(5, Some("lobster"), &dir);
+    s.exec("e");
+    s.exec("quit");
+    assert!(dir.join("lobster-5-3.toml").exists(), "{:?}", boards_in(&dir));
+    assert_eq!(std::fs::read_to_string(dir.join("lobster-5.toml")).unwrap(), "keep me");
     let _ = std::fs::remove_dir_all(&dir);
 }

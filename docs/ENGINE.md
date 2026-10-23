@@ -98,28 +98,44 @@ rules behind each are in DESIGN.md Part 3.
 ## The sandbox
 
 `Game::new_sandbox(data, seed, tribe, free_rolls)` is a one-player game for
-practising a build: only player 0 lives, every Tavern roll shows the tribe's
-minions plus neutral ones (`Player.rig`, checked in `fill_shop`), the player
-gets `free_rolls` free Refreshes at the start of each turn, and each turn
-ends in `sandbox_combat`: the player fights a copy of their own board, hand
-and counters with the real fight, only the player's side outcome is applied,
-and Health never changes in combat. Shop damage still counts and ends the
-game at 0. The latest fight (board and hand as they fought, result, side
-outcome) is in `Game.sandbox.last_fight`. Normal games never set `sandbox`.
+playing a build and recording its boards: only player 0 lives, there is no
+pairing, and each turn ends in `sandbox_combat`: the player fights a copy of
+their own board, hand and counters with the real fight, only the player's side
+outcome is applied, and Health never changes in combat. Shop damage still
+counts and ends the game at 0, and the game ends at the turn limit. The latest
+fight (board and hand as they fought, result, side outcome) is in
+`Game.sandbox.last_fight`. Normal games never set `sandbox`.
+
+By default the pool is the normal full pool and there are no free Refreshes
+(`free_rolls` 0). With `tribe: Some(t)` the game is rigged (`Player.rig`):
+Tavern rolls and every "any minion" draw (Discovers, triple rewards, random
+tier minions, Robust Evolution, Fodder refills, Ghastcoiler in the fight via
+`Counters.rig`) only show that tribe and neutral minions, falling back to all
+minions when none is left. Cards that name a tribe keep it.
 
 ```
-cargo run --release -p bgsandbox -- --tribe murloc --label lobster --seed 7
+cargo run --release -p bgsandbox                       # a normal game
+cargo run --release -p bgsandbox -- --tribe murloc     # a rigged Tavern
 ```
 
-It asks for the tribe and a label when the flags are missing, prints the
-seed, and reads commands from stdin (`help` lists them). Every end of turn
-rewrites `boards/<tribe>-<label>-<seed>.toml` from the game's history, so
-`undo` (which replays the seed and all actions but the last) also removes an
-undone turn from the file. `--boards DIR` writes elsewhere, `--free-rolls N`
-changes the 3. `bgcore::record::load_file` reads a file back into per-turn
-boards and hands of `Minion`s. Each turn holds the board that went into the
-mirror fight (after end-of-turn effects, before the fight's permanent gains).
-Card text on the `?` command comes from `ref/lobby5.tsv` when it exists.
+Flags: `--tribe X`, `--label TEXT`, `--seed N` (random and printed by
+default), `--free-rolls N` (default 0), `--boards DIR`. Commands are read from
+stdin (`help` lists them). Every end of turn rewrites the recording from the
+game's history, so `undo` (which replays the seed and all actions but the
+last) also removes an undone turn from the file.
+
+The label is the build you played. Give `--label`, or type `label <text>` at
+any time, or answer the question at the end (quit, hero death, turn limit;
+a terminal only: with piped input it stays `unlabeled`). During the game the
+file is `boards/game-<seed>.toml`; at the end it is renamed to
+`boards/<label>-<seed>.toml`, or `boards/<tribe>-<label>-<seed>.toml` when
+rigged. An existing file is never overwritten, a suffix `-2`, `-3` is added.
+The header holds `rigged`, the `tribe` when rigged, the label, seed,
+`free_rolls` and date. `bgcore::record::load_file` reads a file back into
+per-turn boards and hands of `Minion`s. Each turn holds the board that went
+into the mirror fight (after end-of-turn effects, before the fight's permanent
+gains). Card text on the `?` command comes from `ref/lobby5.tsv` when it
+exists.
 
 ## Adding a card
 

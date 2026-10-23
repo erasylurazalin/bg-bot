@@ -1,7 +1,7 @@
 //! Recorded sandbox games: the end-of-turn boards of one game as a TOML
 //! file, and the loader that reads one back into `Minion`s.
 //!
-//! A file has a header (tribe, label, seed, free rolls, date) and one
+//! A file has a header (rigged, tribe when rigged, label, seed, free rolls, date) and one
 //! `[[turn]]` per fought turn, each with its `[[turn.board]]` minions in
 //! order and its `[[turn.hand]]`. A minion always has `card`, `golden`,
 //! `attack`, `health` and `keywords`; every other `Minion` field is written
@@ -73,7 +73,8 @@ impl TurnRecord {
 /// A whole recorded game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GameRecord {
-    pub tribe: String,
+    /// The tribe the Tavern was rigged to, None for a normal full pool.
+    pub tribe: Option<String>,
     pub label: String,
     pub seed: u64,
     pub free_rolls: u8,
@@ -84,7 +85,11 @@ pub struct GameRecord {
 
 #[derive(Serialize, Deserialize)]
 struct FileGame {
-    tribe: String,
+    /// Whether the Tavern and the draws were rigged to `tribe`.
+    #[serde(default)]
+    rigged: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tribe: Option<String>,
     label: String,
     seed: i64,
     free_rolls: u8,
@@ -225,6 +230,7 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
 pub fn to_toml(db: &CardDb, g: &GameRecord) -> Result<String, String> {
     let seed = i64::try_from(g.seed).map_err(|_| "seed too large for a TOML integer".to_string())?;
     let file = FileGame {
+        rigged: Some(g.tribe.is_some()),
         tribe: g.tribe.clone(),
         label: g.label.clone(),
         seed,
@@ -263,8 +269,9 @@ pub fn load_str(db: &CardDb, text: &str) -> Result<GameRecord, String> {
             hand: minions(&t.hand).map_err(|e| format!("turn {}: {e}", t.turn))?,
         });
     }
+    let tribe = if file.rigged.unwrap_or(file.tribe.is_some()) { file.tribe } else { None };
     Ok(GameRecord {
-        tribe: file.tribe,
+        tribe,
         label: file.label,
         seed: u64::try_from(file.seed).map_err(|_| "negative seed".to_string())?,
         free_rolls: file.free_rolls,

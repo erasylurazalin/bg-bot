@@ -565,7 +565,9 @@ pub struct Game {
 /// Settings and results of a sandbox game (see `Game::new_sandbox`).
 #[derive(Clone, Debug)]
 pub struct Sandbox {
-    pub tribe: Tribe,
+    /// The tribe the Tavern and every minion draw are rigged to, None for
+    /// the normal full pool.
+    pub tribe: Option<Tribe>,
     /// Free Refreshes the player has at the start of every turn.
     pub free_rolls: u8,
     /// The latest mirror fight, for whoever records the game.
@@ -706,19 +708,20 @@ impl Game {
     }
 
     /// A one-player practice game for the sandbox: only player 0 plays, no
-    /// pairing and no opponents. Every Tavern roll shows only minions of
-    /// `tribe` and neutral ones, the player gets `free_rolls` free Refreshes
+    /// pairing and no opponents. With a `tribe`, every Tavern roll and
+    /// every "any minion" draw shows only minions of it and neutral ones
+    /// (None keeps the normal full pool). The player gets `free_rolls` free Refreshes
     /// each turn, and each turn ends with a fight against a copy of the
     /// player's own board that never damages the hero. Shop-phase damage
     /// still counts and ends the game at 0 Health. Normal games never set
     /// any of this.
-    pub fn new_sandbox(data: Arc<Data>, seed: u64, tribe: Tribe, free_rolls: u8) -> Game {
+    pub fn new_sandbox(data: Arc<Data>, seed: u64, tribe: Option<Tribe>, free_rolls: u8) -> Game {
         let mut g = Game::unstarted(data, seed);
         for p in 1..PLAYERS {
             g.players[p].alive = false;
             g.players[p].placement = p as u8 + 1;
         }
-        g.players[0].rig = Some(tribe);
+        g.players[0].rig = tribe;
         g.sandbox = Some(Sandbox { tribe, free_rolls, last_fight: None });
         g.start_turn();
         g

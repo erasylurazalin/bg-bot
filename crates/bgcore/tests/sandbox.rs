@@ -12,7 +12,7 @@ fn data() -> Arc<Data> {
 }
 
 fn sandbox(seed: u64, tribe: Tribe, free: u8) -> Game {
-    Game::new_sandbox(data(), seed, tribe, free)
+    Game::new_sandbox(data(), seed, Some(tribe), free)
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn shop_damage_ends_the_game() {
 fn record_of(g: &Game, turns: &[TurnRecord]) -> GameRecord {
     let tribe = g.sandbox.as_ref().unwrap().tribe;
     GameRecord {
-        tribe: format!("{tribe:?}"),
+        tribe: tribe.map(|t| format!("{t:?}")),
         label: "test".into(),
         seed: 99,
         free_rolls: 3,
@@ -296,4 +296,64 @@ fn rig_still_draws_at_every_tier() {
     for tier in 1..=6 {
         assert!(db.random_tier_minion(tier, Some(Tribe::Beast), &mut rng).is_some());
     }
+}
+
+#[test]
+fn an_unrigged_sandbox_uses_the_full_pool() {
+    let mut g = Game::new_sandbox(data(), 3, None, 0);
+    assert!(g.players[0].rig.is_none() && g.sandbox.as_ref().unwrap().tribe.is_none());
+    assert_eq!(g.players[0].free_rolls, 0);
+    let mut seen = [false; 5];
+    let mut rolls = 0;
+    while !g.over && rolls < 300 {
+        if g.is_legal(Action::Level) {
+            g.step(Action::Level).unwrap();
+        }
+        if g.is_legal(Action::Roll) {
+            g.step(Action::Roll).unwrap();
+            rolls += 1;
+        } else {
+            g.step(Action::EndTurn).unwrap();
+        }
+        for m in &g.players[0].shop {
+            for (i, t) in Tribe::ALL.iter().enumerate() {
+                seen[i] |= g.data.cards.get(m.card).tribes.has(*t);
+            }
+        }
+    }
+    assert!(seen.iter().all(|&s| s), "a full pool shows every tribe: {seen:?}");
+    // a Discover offers other tribes too
+    let mut other = false;
+    for seed in 0..30 {
+        let mut g = Game::new_sandbox(data(), seed, None, 0);
+        g.players[0].tier = 6;
+        give_card(&mut g, "Hired Headhunter", false);
+        g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+        other |= offered(&g).iter().any(|&c| {
+            let t = g.data.cards.get(c).tribes;
+            !t.is_neutral() && !t.has(Tribe::Beast)
+        });
+    }
+    assert!(other);
+}
+
+#[test]
+fn an_unrigged_record_round_trips() {
+    let mut g = Game::new_sandbox(data(), 5, None, 0);
+    let mut turns = Vec::new();
+    for _ in 0..3 {
+        g.step(Action::EndTurn).unwrap();
+        turns.push(TurnRecord::from_fight(g.sandbox.as_ref().unwrap().last_fight.as_ref().unwrap()));
+    }
+    let rec = GameRecord {
+        tribe: None,
+        label: "unlabeled".into(),
+        seed: 5,
+        free_rolls: 0,
+        date: record::today(),
+        turns,
+    };
+    let text = record::to_toml(&g.data.cards, &rec).unwrap();
+    assert!(text.contains("rigged = false"));
+    assert_eq!(record::load_str(&g.data.cards, &text).unwrap(), rec);
 }
