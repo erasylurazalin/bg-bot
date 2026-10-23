@@ -113,31 +113,8 @@ rules behind each are in DESIGN.md Part 3.
   `Game::magnetize_to`, which also runs `beatboxers_copy` (Polarizing
   Beatboxer, `Aura::PolarizingBeatboxer`), so a new "whenever you Magnetize"
   card hooks in there.
-- **Pirates (tribe 6).** `Tribe::EVERY` is every tribe the rules know (use it
-  in rules code); `Tribe::ALL` stays the five the observation has slots for
-  until the run that redoes the observation. `Tribes::ALL` ("all types")
-  includes Pirate.
-- **Golden minions.** Played from hand, a Golden minion adds to
-  `Player.golden_played` (Extortionist's `buff_per_golden_played`, Hooktusk's
-  `BuffOthersPerGolden`) and gives a Triple Reward unless `Minion.no_reward`
-  is set (Aureate Laureate is `always_golden`, Silent Deliverer's minions).
-  `TargetKind::MakeGolden` makes a board minion Golden with no reward and no
-  count (Elite Navigator, Captain Sanders).
-- **Golden draws from the pool.** `draw_golden` (game.rs) takes up to three
-  copies for one Golden minion (Lockbox, Silent Deliverer).
-- **Gold spent.** Every payment goes through `fire_event(GoldSpent, n)`, which
-  also adds to `Player.gold_spent_turn` (Lovesick Balladist). Health payments
-  and free Refreshes never call it with gold.
-- **Lockbox.** A generated spell in hand; its `improvements` is the turns
-  left. `give_lockbox(p, sooner)` gets one or shortens the held one,
-  `tick_lockboxes` runs at the end of the turn (Drakkari doubles it). A
-  Deathrattle gets one through `SideOutcome::lockboxes`.
-- **Bounties.** The five share one slot of every spell draw: `CardDb.spells`
-  holds only the first, `random_spell*` turn a drawn Bounty into one of the
-  five (`bounties`), "get a random Bounty" is `CardDb::random_bounty`.
-  `bounty_mult` is Proud Privateer's cast count.
-- **Cleave.** `Card.cleave`: `attack_swings` hits the two enemies next to the
-  target with the attacker's Attack and no damage back (Blade Collector).
+- **Pirates, Golden minions, gold spent, Lockbox, Bounties, Cleave:** see
+  `docs/ADDING-CARDS.md` section 6.
 - **Legal actions.** `Game::legal_mask` only asks `is_legal` for slots that
   can be legal (a test checks it against `is_legal` everywhere). Use it
   rather than looping `is_legal` over every action.
@@ -186,21 +163,10 @@ exists.
 
 ## Adding a card
 
-1. Copy its exact text, stats and tier from `ref/lobby5.tsv`, and the golden
-   version from `ref/hsjson-cards.json` (a pool card's
-   `battlegroundsPremiumDbfId` points at its golden card).
-2. Express it in `cards.toml` with existing triggers and effects. If none
-   fits, add a variant in `cards.rs` (parsing) and handle it where it
-   fires (`game.rs` for the shop, `fight.rs` for combat).
-3. Generated cards it makes (tokens, spells) also go in `cards.toml`, as
-   tokens, with data from the JSON.
-4. Test it with the real card in `crates/bgcore/tests/`.
-5. `cargo test --workspace`, `cargo clippy --workspace --all-targets`,
-   `cargo run --release -p bgbench -- fuzz 20000`.
+See `docs/ADDING-CARDS.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).
 
-`docs/mechanics-inventory.md` lists every mechanic the 5-tribe pool uses
-and whether the engine has it (as of the D1a commit; runs after that fill
-it in).
+`docs/mechanics-inventory.md` lists every mechanic the 5-tribe pool uses and whether
+the engine has it (as of the D1a commit).
 
 ## Card data snapshots (`ref/`, git-ignored)
 
