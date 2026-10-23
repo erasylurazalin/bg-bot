@@ -258,6 +258,22 @@ fn kelp_keeper_triggers_a_battlecry_that_kalecgos_sees() {
 }
 
 #[test]
+fn golden_kelp_keeper_triggers_the_battlecry_twice_from_one_use() {
+    let mut g = game(61);
+    put_on_board(&mut g, 0, "Kelp Keeper");
+    g.players[0].board[0].golden = true;
+    put_on_board(&mut g, 0, "Hackerfin");
+    let before = stats(&g.players[0].board[0]);
+    act(&mut g, 0, Action::Activate(0));
+    // Hackerfin's +3/+2 to the other minions, twice
+    let after = stats(&g.players[0].board[0]);
+    assert_eq!((after.0 - before.0, after.1 - before.1), (6, 4));
+    // that was the one use for the turn
+    assert!(!g.is_legal(Action::Activate(0)));
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn young_murk_eye_triggers_the_adjacent_battlecries_at_end_of_turn() {
     let mut g = game(12);
     put_on_board(&mut g, 0, "Hackerfin");

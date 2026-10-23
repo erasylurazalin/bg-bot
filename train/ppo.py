@@ -1,4 +1,4 @@
-"""PPO self-play for Stage 2 Battlegrounds.
+"""PPO self-play for the five-tribe Battlegrounds lobby.
 
     .venv/bin/python train/ppo.py --name stage2-smoke --minutes 5
     .venv/bin/python train/ppo.py --name run2 --resume runs/run2/ckpt.pt
@@ -40,9 +40,11 @@ EVAL_KEYS = [
     "place_vs_snapshot",
     "turn_t3", "turn_t4", "turn_t5",
     "curve_econ_rush", "curve_rush", "curve_standard", "curve_slow",
-    "tribe_beast", "tribe_mech", "tribe_mixed",
-    "place_beast", "place_mech", "place_mixed",
+    *[f"tribe_{t}" for t in ("beast", "mech", "dragon", "murloc", "demon", "mixed")],
+    *[f"place_{t}" for t in ("beast", "mech", "dragon", "murloc", "demon", "mixed")],
 ]
+# Columns of bgpy's tribe counts: Beast, Mech, neutral, Dragon, Murloc, Demon.
+TRIBE_COLS = {"beast": 0, "mech": 1, "dragon": 3, "murloc": 4, "demon": 5}
 TRAIN_KEYS = [
     "entropy", "approx_kl", "clipfrac", "value_loss", "explained_var", "steps_per_s",
     "actions_per_turn", "tier_t6", "tier_t10", "health_end",
@@ -174,10 +176,17 @@ def summarize_records(records):
     standard = ~econ_rush & ~rush & (t3 > 0) & (t3 <= 5) & (t4 > 0) & (t4 <= 7)
     slow = ~(econ_rush | rush | standard)
 
-    beasts, mechs, neutrals = tribes[:, 0], tribes[:, 1], tribes[:, 2]
-    mostly_beast = beasts > (mechs + neutrals)
-    mostly_mech = mechs > (beasts + neutrals)
-    mixed = ~(mostly_beast | mostly_mech)
+    # A board's tribe is the most common of the five when at least 4 minions
+    # have it (a dual or all-type minion counts for each); otherwise mixed.
+    counts = tribes[:, list(TRIBE_COLS.values())]
+    main = counts.argmax(1)
+    has_main = counts.max(1) >= 4
+    groups = {t: has_main & (main == k) for k, t in enumerate(TRIBE_COLS)}
+    groups["mixed"] = ~has_main
+    tribe_rep = {}
+    for t, sel in groups.items():
+        tribe_rep[f"tribe_{t}"] = float(sel.mean())
+        tribe_rep[f"place_{t}"] = float(places[sel].mean()) if sel.any() else float("nan")
 
     return {
         "turn_t3": turn_t3,
@@ -187,12 +196,7 @@ def summarize_records(records):
         "curve_rush": float(rush.mean()),
         "curve_standard": float(standard.mean()),
         "curve_slow": float(slow.mean()),
-        "tribe_beast": float(mostly_beast.mean()),
-        "tribe_mech": float(mostly_mech.mean()),
-        "tribe_mixed": float(mixed.mean()),
-        "place_beast": float(places[mostly_beast].mean()) if mostly_beast.any() else float("nan"),
-        "place_mech": float(places[mostly_mech].mean()) if mostly_mech.any() else float("nan"),
-        "place_mixed": float(places[mixed].mean()) if mixed.any() else float("nan"),
+        **tribe_rep,
     }
 
 
@@ -456,9 +460,9 @@ def main():
                 f"t3/4/5 {rep['turn_t3']:.1f}/{rep['turn_t4']:.1f}/{rep['turn_t5']:.1f}  "
                 f"crv(std {rep['curve_standard']:.0%} rush {rep['curve_rush']:.0%} "
                 f"econ {rep['curve_econ_rush']:.0%} slow {rep['curve_slow']:.0%})  "
-                f"trb(B {rep['tribe_beast']:.0%}@{rep['place_beast']:.2f} "
-                f"M {rep['tribe_mech']:.0%}@{rep['place_mech']:.2f} "
-                f"X {rep['tribe_mixed']:.0%}@{rep['place_mixed']:.2f})  "
+                "trb(" + " ".join(
+                    f"{t[:2]} {rep[f'tribe_{t}']:.0%}@{rep[f'place_{t}']:.2f}"
+                    for t in ("beast", "mech", "dragon", "murloc", "demon", "mixed")) + ")  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}",
                 flush=True,
             )

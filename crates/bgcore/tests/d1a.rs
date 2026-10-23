@@ -233,12 +233,35 @@ fn activate_pays_its_cost_and_runs_its_effect() {
     act(&mut g, 0, Action::Target(1));
     assert_eq!(stats(&g, 0, 1), (5, 5));
     assert_eq!(stats(&g, 0, 0), (2, 2));
-    // it can be used again while there is gold
-    act(&mut g, 0, Action::Activate(2));
-    act(&mut g, 0, Action::Target(1));
-    assert_eq!((g.players[0].gold, stats(&g, 0, 1)), (1, (8, 8)));
+    // once per turn: a second use is illegal even with the gold
     assert!(!is_legal(&mut g, 0, Action::Activate(2)));
+    assert!(!legal(&g).contains(&Action::Activate(2)));
     g.check_invariants().unwrap();
+}
+
+#[test]
+fn activate_is_legal_again_next_turn_and_a_moved_minion_stays_used() {
+    let mut g = game(60);
+    put_on_board(&mut g, 0, "Test Neutral");
+    put_on_board(&mut g, 0, "Test Activator");
+    turn_of(&mut g, 0);
+    g.players[0].gold = 9;
+    act(&mut g, 0, Action::Activate(1));
+    assert!(!is_legal(&mut g, 0, Action::Activate(1)));
+    // moving it doesn't reset it
+    act(&mut g, 0, Action::Move { from: 1, to: 0 });
+    assert!(!is_legal(&mut g, 0, Action::Activate(0)));
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    g.players[0].gold = 9;
+    assert!(g.is_legal(Action::Activate(0)));
+    assert!(legal(&g).contains(&Action::Activate(0)));
+    // a copy bought later is a new minion and starts unused
+    act(&mut g, 0, Action::Activate(0));
+    act(&mut g, 0, Action::Sell(0));
+    put_on_board(&mut g, 0, "Test Activator");
+    let last = g.players[0].board.len() as u8 - 1;
+    assert!(is_legal(&mut g, 0, Action::Activate(last)));
 }
 
 #[test]
@@ -252,6 +275,9 @@ fn activate_with_one_target_picks_it_and_with_none_still_costs() {
     assert!(g.players[0].pending_target.is_none());
     assert_eq!(stats(&g, 0, 0), (5, 5));
     act(&mut g, 0, Action::Sell(0));
+    // the Activator is spent, so a fresh copy takes its place
+    act(&mut g, 0, Action::Sell(0));
+    put_on_board(&mut g, 0, "Test Activator");
     g.players[0].gold = 4;
     act(&mut g, 0, Action::Activate(0));
     assert_eq!(g.players[0].gold, 2);
@@ -312,12 +338,16 @@ fn a_random_bonus_keyword_is_never_one_it_has() {
         turn_of(&mut g, 0);
         let mut have = 0u32;
         for _ in 0..6 {
+            // once per turn
+            next_turn(&mut g);
+            turn_of(&mut g, 0);
             act(&mut g, 0, Action::Activate(0));
             let now = (g.players[0].board[0].keywords.0 & g.data.rules.bonus_mask).count_ones();
             assert_eq!(now, have + 1, "seed {seed}: it must gain a new keyword every time");
             have = now;
         }
         // it has them all, so nothing more happens
+        next_turn(&mut g);
         let before = g.players[0].board[0].keywords;
         act(&mut g, 0, Action::Activate(0));
         assert_eq!(g.players[0].board[0].keywords, before);
@@ -911,34 +941,35 @@ fn gang_up_on_player_0(g: &mut Game) {
 }
 
 #[test]
-fn after_damage_triggers_fire_on_combat_damage_too() {
+fn losing_a_fight_triggers_no_after_damage_minion() {
     let mut g = game(53);
     put_on_board(&mut g, 0, "Test Punisher");
+    let before = stats(&g, 0, 0);
     gang_up_on_player_0(&mut g);
     next_turn(&mut g);
-    // the opponent's tier 1 plus its one tier 1 minion
+    // the opponent's tier 1 plus its one tier 1 minion: taken normally
     assert_eq!(g.players[0].health, 28);
-    assert_eq!(stats(&g, 0, 0), (3, 3));
-    assert_eq!(g.players[0].last_damage, 2);
+    assert_eq!(stats(&g, 0, 0), before, "the Punisher didn't react");
+    assert_eq!(g.players[0].last_damage, 0);
 }
 
 #[test]
-fn rewind_undoes_combat_damage_before_knockouts() {
+fn combat_damage_is_not_rewound_and_triggers_nothing() {
     let mut g = game(54);
     put_on_board(&mut g, 0, "Test Rewinder");
+    let before = stats(&g, 0, 0);
     gang_up_on_player_0(&mut g);
     next_turn(&mut g);
-    assert_eq!(g.players[0].health, 30);
-    assert_eq!(stats(&g, 0, 0), (4, 4));
+    assert_eq!(g.players[0].health, 28);
+    assert_eq!(stats(&g, 0, 0), before, "no +2 Health from the Rewinder");
 
-    // even a lethal blow is undone, since the triggers run before the knockout
+    // a lethal loss knocks the hero out even with a rewind on the board
     let mut g = game(55);
     put_on_board(&mut g, 0, "Test Rewinder");
     g.players[0].health = 1;
     gang_up_on_player_0(&mut g);
     next_turn(&mut g);
-    assert!(g.players[0].alive);
-    assert_eq!(g.players[0].health, 1);
+    assert!(!g.players[0].alive);
 }
 
 #[test]

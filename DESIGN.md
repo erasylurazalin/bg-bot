@@ -451,8 +451,9 @@ all of them, every effect keeps working, and the Magnetization count adds
 up for Utility Drone. A merged pool copy is consumed and doesn't return to
 the pool.
 
-**Activate.** A minion with `Activate (N)` can be used any number of times
-a turn for N gold each.
+**Activate.** A minion with `Activate (N)` can be used once per turn for N
+gold, unless its text says otherwise. A golden minion does its effect
+stronger or twice (per its golden text), not more uses.
 
 **Consuming.** A minion that consumes a Tavern minion gains its stats
 (some also its Bonus Keywords). The consumed copy goes back to the pool.
@@ -475,6 +476,10 @@ side attacks; if neither can attack, the fight is a tie. Only side damage
   the middle of its turn, and isn't paired for that turn's fights.
 - Paying Health is the hero taking damage: every "after your hero takes
   damage" card reacts to it.
+- Rewinds and every other "after your hero takes damage" minion only work
+  while that minion is on your board, which means during your turn. The
+  damage from losing a fight lands after the fight, when your board isn't
+  in play, so it isn't rewound and doesn't trigger them.
 - Damage counts before a rewind gives it back, so "after your hero takes
   damage" effects and counters like Eredar Escapist still fire, and
   Devout Hellcaller still grows from a Demon's damage that gets rewound.

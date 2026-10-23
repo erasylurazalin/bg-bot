@@ -146,9 +146,11 @@ impl VecEnv {
 
     /// Take `actions[i]` for the waiting seat of game i. Fills
     /// `places[i, seat]`, `tier_turns[i, seat, 0..6]` and
-    /// `tribes[i, seat, 0..3]` for every seat knocked out or finished during
-    /// this call (0 for the rest), and `reset[i]` for games that ended and
-    /// restarted. Raises on an illegal action.
+    /// `tribes[i, seat, 0..TRIBES]` (Beast, Mech, neutral, Dragon, Murloc,
+    /// Demon) for every seat knocked out or finished during this call,
+    /// including a hero knocked out by its own effect damage mid-turn (0 for
+    /// the rest), and `reset[i]` for games that ended and restarted. Raises
+    /// on an illegal action.
     fn step(
         &mut self,
         py: Python<'_>,
@@ -306,6 +308,11 @@ impl VecEnv {
 
 #[pymodule]
 fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // A game step inlines into rayon's splitting helper with a 64 KB frame,
+    // nested once per split and again for stolen jobs: the default 2 MB
+    // worker stack overflows (a bare segfault, since Python has no Rust
+    // overflow handler). Fails harmlessly if a pool already exists.
+    let _ = rayon::ThreadPoolBuilder::new().stack_size(64 << 20).build_global();
     let n_cards = Data::bundled().cards.cards.len();
     m.add_class::<VecEnv>()?;
     m.add("OBS_SIZE", OBS_SIZE)?;
@@ -314,15 +321,16 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("PLAYERS", PLAYERS)?;
     m.add("MAX_TIER", MAX_TIER as usize)?;
     m.add("TRIBES", TRIBES)?;
-    m.add("SCALARS", obs::SCALARS)?;
-    m.add("SLOT_FEATURES", obs::SLOT_FEATURES)?;
-    m.add("MINION_FEATURES", obs::MINION_FEATURES)?;
-    m.add("OPP_SCALARS", obs::OPP_SCALARS)?;
     m.add("BOARD", bgcore::BOARD)?;
     m.add("HAND", bgcore::HAND)?;
     m.add("SHOP", bgcore::SHOP)?;
-    m.add("SHOP_SPELL", obs::SHOP_SPELL)?;
     m.add("DISCOVER", bgcore::DISCOVER)?;
+    // every layout constant of the observation, by its name in obs.rs
+    m.add("SHOP_SPELL", obs::SHOP_SPELL)?;
+    m.add("SLOT_FEATURES", obs::SLOT_FEATURES)?;
+    m.add("MINION_FEATURES", obs::MINION_FEATURES)?;
+    m.add("SCALARS", obs::SCALARS)?;
+    m.add("OPP_SCALARS", obs::OPP_SCALARS)?;
     m.add("OWN_SLOTS", obs::OWN_SLOTS)?;
     m.add("OPP_SLOTS", obs::OPP_SLOTS)?;
     m.add("TOTAL_SLOTS", obs::TOTAL_SLOTS)?;
@@ -339,52 +347,103 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SCALAR_HEALTH", obs::SCALAR_HEALTH)?;
     m.add("SCALAR_TURN", obs::SCALAR_TURN)?;
     m.add("SCALAR_FROZEN", obs::SCALAR_FROZEN)?;
-    m.add("SCALAR_PENDING_TARGET", obs::SCALAR_PENDING_TARGET)?;
-    m.add("SCALAR_PENDING_TARGET_SOURCE", obs::SCALAR_PENDING_TARGET_SOURCE)?;
-    m.add("SCALAR_PENDING_DISCOVER", obs::SCALAR_PENDING_DISCOVER)?;
     m.add("SCALAR_ACTIONS_LEFT", obs::SCALAR_ACTIONS_LEFT)?;
     m.add("SCALAR_ALIVE", obs::SCALAR_ALIVE)?;
     m.add("SCALAR_GHOST", obs::SCALAR_GHOST)?;
+    m.add("SCALAR_WON_LAST_COMBAT", obs::SCALAR_WON_LAST_COMBAT)?;
+    m.add("SCALAR_LOST_LAST_COMBAT", obs::SCALAR_LOST_LAST_COMBAT)?;
+    m.add("SCALAR_GOLD_NEXT_TURN", obs::SCALAR_GOLD_NEXT_TURN)?;
+    m.add("SCALAR_EXTRA_MAX_GOLD", obs::SCALAR_EXTRA_MAX_GOLD)?;
+    m.add("SCALAR_FREE_ROLLS", obs::SCALAR_FREE_ROLLS)?;
+    m.add("SCALAR_NEXT_ROLL_HEALTH", obs::SCALAR_NEXT_ROLL_HEALTH)?;
+    m.add("SCALAR_HEALTH_REFRESHES_LEFT", obs::SCALAR_HEALTH_REFRESHES_LEFT)?;
+    m.add("SCALAR_CAN_REWIND", obs::SCALAR_CAN_REWIND)?;
+    m.add("SCALAR_SPELL_DISCOUNT", obs::SCALAR_SPELL_DISCOUNT)?;
+    m.add("SCALAR_SHOP_SPELL_COST", obs::SCALAR_SHOP_SPELL_COST)?;
+    m.add("SCALAR_SHOP_SPELL_PAY_HEALTH", obs::SCALAR_SHOP_SPELL_PAY_HEALTH)?;
+    m.add("SCALAR_SPELL_ATTACK", obs::SCALAR_SPELL_ATTACK)?;
+    m.add("SCALAR_SPELL_HEALTH", obs::SCALAR_SPELL_HEALTH)?;
     m.add("SCALAR_VOLUMIZER_ATTACK", obs::SCALAR_VOLUMIZER_ATTACK)?;
     m.add("SCALAR_VOLUMIZER_HEALTH", obs::SCALAR_VOLUMIZER_HEALTH)?;
     m.add("SCALAR_BEETLE_ATTACK", obs::SCALAR_BEETLE_ATTACK)?;
     m.add("SCALAR_BEETLE_HEALTH", obs::SCALAR_BEETLE_HEALTH)?;
-    m.add("SCALAR_PATIENT_SCOUT_TIER", obs::SCALAR_PATIENT_SCOUT_TIER)?;
-    m.add("SCALAR_GOLD_NEXT_TURN", obs::SCALAR_GOLD_NEXT_TURN)?;
-    m.add("SCALAR_EXTRA_MAX_GOLD", obs::SCALAR_EXTRA_MAX_GOLD)?;
-    m.add("SCALAR_FREE_ROLLS", obs::SCALAR_FREE_ROLLS)?;
-    m.add("SCALAR_SPELL_DISCOUNT", obs::SCALAR_SPELL_DISCOUNT)?;
-    m.add("SCALAR_SPELL_ATTACK", obs::SCALAR_SPELL_ATTACK)?;
-    m.add("SCALAR_SPELL_HEALTH", obs::SCALAR_SPELL_HEALTH)?;
     m.add("SCALAR_BOON_OF_BEETLES", obs::SCALAR_BOON_OF_BEETLES)?;
     m.add("SCALAR_BROOD_OF_NOZDORMU", obs::SCALAR_BROOD_OF_NOZDORMU)?;
     m.add("SCALAR_UPPER_HAND", obs::SCALAR_UPPER_HAND)?;
+    m.add("SCALAR_PATIENT_SCOUT_TIER", obs::SCALAR_PATIENT_SCOUT_TIER)?;
+    m.add("SCALAR_TASTY_LOBSTER", obs::SCALAR_TASTY_LOBSTER)?;
+    m.add("SCALAR_BEAST_BONUS_ATTACK", obs::SCALAR_BEAST_BONUS_ATTACK)?;
+    m.add("SCALAR_BEAST_BONUS_HEALTH", obs::SCALAR_BEAST_BONUS_HEALTH)?;
+    m.add("SCALAR_DEATHRATTLES", obs::SCALAR_DEATHRATTLES)?;
+    m.add("SCALAR_FODDER_NEXT", obs::SCALAR_FODDER_NEXT)?;
+    m.add("SCALAR_FODDER_QUEUED", obs::SCALAR_FODDER_QUEUED)?;
+    m.add("SCALAR_FODDER_REFRESHES", obs::SCALAR_FODDER_REFRESHES)?;
+    m.add("SCALAR_MAGICFIN_LEFT", obs::SCALAR_MAGICFIN_LEFT)?;
+    m.add("SCALAR_OVERCONFIDENCE_WIN", obs::SCALAR_OVERCONFIDENCE_WIN)?;
+    m.add("SCALAR_OVERCONFIDENCE_TIE", obs::SCALAR_OVERCONFIDENCE_TIE)?;
+    m.add("SCALAR_WINNERS_BREAD_ATTACK", obs::SCALAR_WINNERS_BREAD_ATTACK)?;
+    m.add("SCALAR_WINNERS_BREAD_HEALTH", obs::SCALAR_WINNERS_BREAD_HEALTH)?;
+    m.add("SCALAR_NEXT_TURN_BUFF_ATTACK", obs::SCALAR_NEXT_TURN_BUFF_ATTACK)?;
+    m.add("SCALAR_NEXT_TURN_BUFF_HEALTH", obs::SCALAR_NEXT_TURN_BUFF_HEALTH)?;
+    m.add("SCALAR_TAVERN_BUFFS", obs::SCALAR_TAVERN_BUFFS)?;
+    m.add("TAVERN_BUFF_FILTERS", obs::TAVERN_BUFF_FILTERS)?;
     m.add("SCALAR_LAST_SPELL", obs::SCALAR_LAST_SPELL)?;
-    m.add("SCALAR_WON_LAST_COMBAT", obs::SCALAR_WON_LAST_COMBAT)?;
-    m.add("SCALAR_LOST_LAST_COMBAT", obs::SCALAR_LOST_LAST_COMBAT)?;
+    m.add("SCALAR_PENDING_TARGET", obs::SCALAR_PENDING_TARGET)?;
+    m.add("SCALAR_PENDING_TARGET_SHOP", obs::SCALAR_PENDING_TARGET_SHOP)?;
+    m.add("SCALAR_PENDING_SHOP_SLOT", obs::SCALAR_PENDING_SHOP_SLOT)?;
     m.add("SCALAR_PENDING_CHOOSE_ONE", obs::SCALAR_PENDING_CHOOSE_ONE)?;
+    m.add("SCALAR_PENDING_DISCOVER", obs::SCALAR_PENDING_DISCOVER)?;
+    m.add("SCALAR_PENDING_SOURCE", obs::SCALAR_PENDING_SOURCE)?;
+    m.add("SCALAR_PENDING_CARD", obs::SCALAR_PENDING_CARD)?;
+    m.add("SCALAR_PENDING_RUNS", obs::SCALAR_PENDING_RUNS)?;
+    m.add("SCALAR_PENDING_ATTACK", obs::SCALAR_PENDING_ATTACK)?;
+    m.add("SCALAR_PENDING_HEALTH", obs::SCALAR_PENDING_HEALTH)?;
+    m.add("SCALAR_TARGET_KIND", obs::SCALAR_TARGET_KIND)?;
+    m.add("TARGET_KINDS", obs::TARGET_KINDS)?;
+    m.add("SCALAR_SHOP_CONSUME_LEFT", obs::SCALAR_SHOP_CONSUME_LEFT)?;
+    m.add("SCALAR_SHOP_FISHBAIT", obs::SCALAR_SHOP_FISHBAIT)?;
+    m.add("SCALAR_DISCOVER_LOCKED", obs::SCALAR_DISCOVER_LOCKED)?;
+    m.add("SCALAR_DISCOVER_DAMAGE", obs::SCALAR_DISCOVER_DAMAGE)?;
+    m.add("SCALAR_DISCOVER_QUEUE", obs::SCALAR_DISCOVER_QUEUE)?;
+    m.add("SCALAR_CHOOSE_ONE", obs::SCALAR_CHOOSE_ONE)?;
+    m.add("CHOOSE_FEATURES", obs::CHOOSE_FEATURES)?;
     m.add("SLOT_PRESENT", obs::SLOT_PRESENT)?;
     m.add("SLOT_CARD_ID", obs::SLOT_CARD_ID)?;
     m.add("SLOT_IS_SPELL", obs::SLOT_IS_SPELL)?;
     m.add("SLOT_ATTACK", obs::SLOT_ATTACK)?;
     m.add("SLOT_HEALTH", obs::SLOT_HEALTH)?;
+    m.add("SLOT_FIGHT_ATTACK", obs::SLOT_FIGHT_ATTACK)?;
+    m.add("SLOT_FIGHT_HEALTH", obs::SLOT_FIGHT_HEALTH)?;
     m.add("SLOT_GOLDEN", obs::SLOT_GOLDEN)?;
     m.add("SLOT_TIER", obs::SLOT_TIER)?;
+    m.add("SLOT_TRIBES", obs::SLOT_TRIBES)?;
     m.add("SLOT_BEAST", obs::SLOT_BEAST)?;
     m.add("SLOT_MECH", obs::SLOT_MECH)?;
-    m.add("SLOT_NEUTRAL", obs::SLOT_NEUTRAL)?;
+    m.add("SLOT_DRAGON", obs::SLOT_DRAGON)?;
+    m.add("SLOT_MURLOC", obs::SLOT_MURLOC)?;
+    m.add("SLOT_DEMON", obs::SLOT_DEMON)?;
     m.add("SLOT_KEYWORDS", obs::SLOT_KEYWORDS)?;
+    m.add("SLOT_STEALTH", obs::SLOT_STEALTH)?;
     m.add("SLOT_MAGNETIZATIONS", obs::SLOT_MAGNETIZATIONS)?;
     m.add("SLOT_VOLUMIZERS", obs::SLOT_VOLUMIZERS)?;
     m.add("SLOT_IMPROVEMENTS", obs::SLOT_IMPROVEMENTS)?;
+    m.add("SLOT_EVENTS_LEFT", obs::SLOT_EVENTS_LEFT)?;
     m.add("SLOT_FROM_POOL", obs::SLOT_FROM_POOL)?;
     m.add("SLOT_WINNERS_BREAD", obs::SLOT_WINNERS_BREAD)?;
+    m.add("SLOT_TAUGHT_SPELL", obs::SLOT_TAUGHT_SPELL)?;
+    m.add("SLOT_LOCKED", obs::SLOT_LOCKED)?;
+    m.add("SLOT_ACTIVATE_COST", obs::SLOT_ACTIVATE_COST)?;
+    m.add("SLOT_EXTRA_MAGNETIZE", obs::SLOT_EXTRA_MAGNETIZE)?;
+    m.add("SLOT_COST", obs::SLOT_COST)?;
     m.add("OPP_ALIVE", obs::OPP_ALIVE)?;
     m.add("OPP_HEALTH", obs::OPP_HEALTH)?;
     m.add("OPP_TIER", obs::OPP_TIER)?;
     m.add("OPP_SEEN", obs::OPP_SEEN)?;
     m.add("OPP_TURNS_SINCE", obs::OPP_TURNS_SINCE)?;
     m.add("OPP_NEXT", obs::OPP_NEXT)?;
+    m.add("OPP_LAST", obs::OPP_LAST)?;
+    m.add("OPP_PLACEMENT", obs::OPP_PLACEMENT)?;
+    m.add("OPP_TRIBES", obs::OPP_TRIBES)?;
     m.add("ACTION_KINDS", ACTION_KINDS.to_vec())?;
     m.add("END_TURN", Action::EndTurn.index())?;
     m.add("LEARNER", LEARNER)?;

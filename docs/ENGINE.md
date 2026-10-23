@@ -61,8 +61,8 @@ rules behind each are in DESIGN.md Part 3.
   the board or in the Tavern), `PendingShopTarget` (a Tavern slot),
   `PendingChooseOne`, and Discover (`DiscoverRequest`). While one is open,
   the only legal actions answer it.
-- **Activate (N).** Pays gold, any number of times a turn, with or without
-  a target.
+- **Activate (N).** Pays gold, once per turn per minion (`Minion.activated`,
+  cleared at the start of the owner's turn), with or without a target.
 - **Triggering in the shop.** Rally (Sky-hatch Runaway), Battlecries
   (Kelp Keeper, Young Murk-Eye; counted for Kalecgos, doubled by Brann),
   Deathrattles (Deathstrider after a Fishbait attack).
@@ -81,7 +81,8 @@ rules behind each are in DESIGN.md Part 3.
 - **Refresh kinds.** `RefreshKind { TurnStart, Explicit, Effect }`: only an
   explicit Refresh (the player's action) takes queued Fodders.
 - **Hero health.** `take_hero_damage` runs the "after your hero takes
-  damage" reactions (rewinds included); effect damage in the shop can
+  damage" reactions (rewinds included) for damage taken in the shop; combat
+  damage just lowers Health and reacts to nothing; effect damage in the shop can
   knock a hero out mid-turn; `can_pay_health` gates Health costs.
 - **Tavern buffs** "this game" and "this turn", consuming Tavern minions,
   stealing them, Fishbait and Demon Fodder as generated Tavern cards.
@@ -175,6 +176,16 @@ Deleting `.venv` undoes it.
   nothing yet. Planned: boards taken
   from build-forcing bots playing real games.
 - The curve bots are simple yardsticks; beating them doesn't prove a curve
-  is bad.
-- The observation doesn't show the new tribes, Stealth, counters, pending
-  choices or Holy Vanguard's conditional +30/+30 yet; that is the D4 step.
+  is bad. They answer every pending choice (falling back to the first legal
+  action), use Activates (the ones that add stats or cards before rolling,
+  the rest with leftover gold), keep 10 Health when paying with Health,
+  roll for queued Fodders when a Demon is on the board, and pick targets
+  by the effect (the weakest minion for Channel the Devourer and Robust
+  Evolution, the biggest gain for Tyrael's 50/50). They never reorder
+  the board.
+- The observation covers the five-tribe lobby (layout at the top of
+  `obs.rs`): tribes, every keyword, per-minion counters, player counters,
+  pending choices, and "fight stats" (Holy Vanguard's +30/+30 at 15 Health
+  or less, the shop Goldrinn bonus a Beast in hand gets when played).
+  Relentless Deflector's Taunt while shielded isn't a feature; the card
+  embedding has to learn it.

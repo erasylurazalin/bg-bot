@@ -110,6 +110,9 @@ pub struct Minion {
     /// Turns this minion is locked in hand and can't be played (Search
     /// Through Time). It goes down by one at the start of its owner's turn.
     pub locked_turns: u8,
+    /// Whether its Activate was already used this turn. Cleared at the start
+    /// of its owner's turn; a copy bought or made later starts unused.
+    pub activated: bool,
     pub attached: [Attached; MAX_ATTACHED],
     pub n_attached: u8,
 }

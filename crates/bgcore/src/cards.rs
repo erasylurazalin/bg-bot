@@ -2600,6 +2600,7 @@ impl CardDb {
             extra_magnetize: 0,
             taught_spell: None,
             locked_turns: 0,
+            activated: false,
             attached: [Attached::default(); MAX_ATTACHED],
             n_attached: 0,
         }

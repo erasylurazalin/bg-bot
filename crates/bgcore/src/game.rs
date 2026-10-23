@@ -76,7 +76,7 @@ pub enum TargetKind {
 
 impl TargetKind {
     /// Whether the player may pick a minion in the Tavern for this target.
-    fn takes_shop(self) -> bool {
+    pub fn takes_shop(self) -> bool {
         match self {
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
             TargetKind::Spell(st) => st.can_target_shop(),
@@ -747,6 +747,7 @@ impl Game {
             Action::Sell(s) => (s as usize) < pl.board.len(),
             Action::Activate(s) => {
                 (s as usize) < pl.board.len()
+                    && !pl.board[s as usize].activated
                     && self.activate_of(p, s as usize).is_some_and(|(act, _)| {
                         pl.gold >= act.cost
                             && (!act.effect.needs_shop_slot() || self.shop_has_minion(p))
@@ -1056,6 +1057,7 @@ impl Game {
             Action::Activate(s) => {
                 let (act, golden) = self.activate_of(p, s as usize).unwrap();
                 self.players[p].gold -= act.cost;
+                self.players[p].board[s as usize].activated = true;
                 let mut pos = s as usize;
                 self.run_effect(p, &mut pos, act.effect, golden, 1);
                 self.maybe_start_discover(p);
@@ -2922,8 +2924,9 @@ impl Game {
 
     /// The hero takes `amount` damage, then the "after your hero takes
     /// damage" effects and the damage event triggers run. They fire even
-    /// when a rewind among them gives the Health back. Combat damage is
-    /// settled by `knockouts` after the fights; Health costs are checked by
+    /// when a rewind among them gives the Health back. Combat damage doesn't
+    /// come through here (no minion reacts to it) and is settled by
+    /// `knockouts` after the fights; Health costs are checked by
     /// `can_pay_health` before they're paid, so they can't kill.
     ///
     /// `source` is the board slot of the friendly Demon that dealt it, if
@@ -3712,6 +3715,7 @@ impl Game {
             let (wb_a, wb_h) = pl.winners_bread_buff;
             let won = pl.won_last_combat;
             for m in &mut pl.board {
+                m.activated = false;
                 if m.winners_bread > 0 {
                     if won {
                         let n = m.winners_bread as i32;
@@ -3974,8 +3978,11 @@ impl Game {
             }
         }
         for (p, d) in damage.into_iter().enumerate() {
-            // Combat damage to the hero is not a friendly Demon dealing it.
-            self.take_hero_damage(p, d, None);
+            // A lost fight means the board wasn't in play, so no minion
+            // reacts: no rewind, no "after your hero takes damage", no
+            // damage event count. The hero just loses the Health, and
+            // `knockouts` settles any that reach 0.
+            self.players[p].health -= d;
             let pl = &mut self.players[p];
             pl.last_opponent = pl.opponent.take();
         }

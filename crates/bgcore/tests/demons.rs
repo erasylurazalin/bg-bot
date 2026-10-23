@@ -581,6 +581,7 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
     g.players[0].gold = 5;
     put_on_board(&mut g, 0, "Sacrificial Wrathguard");
     act(&mut g, 0, Action::Activate(0));
+    next_turn(&mut g);
     act(&mut g, 0, Action::Activate(0));
     assert_eq!(g.players[0].board[0].improvements, 2);
     gang_up_on_player_0(&mut g);
@@ -609,6 +610,7 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
     let m = g.players[0].make_card(&g.data.cards, w, true, 3);
     g.players[0].board.push(m);
     act(&mut g, 0, Action::Activate(0));
+    next_turn(&mut g);
     act(&mut g, 0, Action::Activate(0));
     assert_eq!(g.players[0].board[0].improvements, 2);
     g.check_invariants().unwrap();

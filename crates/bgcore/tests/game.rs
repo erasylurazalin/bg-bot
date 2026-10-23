@@ -1313,7 +1313,11 @@ fn stage2_observation_spells_magnetizations_and_scalars() {
         SLOT_GOLDEN,
         SLOT_BEAST,
         SLOT_MECH,
-        SLOT_NEUTRAL,
+        SLOT_FIGHT_ATTACK,
+        SLOT_FIGHT_HEALTH,
+        SLOT_DEMON,
+        SLOT_TAUGHT_SPELL,
+        SLOT_ACTIVATE_COST,
         SLOT_MAGNETIZATIONS,
         SLOT_VOLUMIZERS,
         SLOT_IMPROVEMENTS,
@@ -1328,7 +1332,7 @@ fn stage2_observation_spells_magnetizations_and_scalars() {
     assert_eq!(hand1[SLOT_PRESENT], 1.0);
     assert_eq!(hand1[SLOT_IS_SPELL], 0.0);
     assert_eq!(hand1[SLOT_MECH], 1.0);
-    assert_eq!(hand1[SLOT_NEUTRAL], 0.0);
+    assert_eq!(hand1[SLOT_BEAST] + hand1[SLOT_DRAGON] + hand1[SLOT_MURLOC] + hand1[SLOT_DEMON], 0.0);
     assert_eq!(hand1[SLOT_FROM_POOL], 0.0);
 
     // Check board slot 0 (Cord Puller with Red Volumizer + Snapper Satellite + Winner's Bread).
