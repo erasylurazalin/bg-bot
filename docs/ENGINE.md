@@ -215,14 +215,23 @@ Deleting `.venv` undoes it.
 - Any change to the action space or observation breaks old checkpoints;
   start a new run.
 - `--model` picks the network: `mlp` (default, 3.0M parameters, all slots
-  concatenated), `attn` (a 3-layer transformer over the card slots, 0.53M)
+  concatenated), `attn` (a 3-layer transformer over the card slots, 0.56M)
   or `pool` (the same slot tokens pooled per zone, 0.71M). The last two
-  score per-slot actions from the token of the slot they act on. It is
-  saved in the checkpoint and `--resume` builds what the checkpoint holds.
-  `attn` runs its layers in bf16 and recomputes them in the backward pass
-  to fit a minibatch of 8192 (about 5 GB); it does about 10 updates a
-  minute against `mlp`'s 70, `pool` about 35. `python model.py` checks
-  that the per-slot logits follow their slots.
+  score per-slot actions from the token of the slot they act on.
+  `--opp-boards` sets how `attn` sees opponent boards: `full` (every
+  opponent minion a token, 85 tokens), `pooled` (each board pooled into
+  its opponent's token, 36) or `next` (pooled, plus the next opponent's
+  board in full, 43; the default). Both are saved in the checkpoint and
+  `--resume` builds what the checkpoint holds. `attn` runs its layers in
+  bf16, recomputes them in the backward pass to fit a minibatch of 8192,
+  and is compiled with torch.compile unless `--no-compile`. It does about
+  20 updates a minute with `next` (10 with `full`) against `mlp`'s 70,
+  `pool` about 35. `python model.py` checks that the per-slot logits
+  follow their slots.
+- `--init-from PATH` starts a new run (fresh optimizer) from every
+  parameter of another checkpoint of the same model whose name and shape
+  match, for example `attn` with `full` into `next`; it prints what was
+  fresh. `--warmup N` ramps the learning rate up over N updates.
 
 ## Known weak spots
 

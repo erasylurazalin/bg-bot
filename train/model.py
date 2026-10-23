@@ -307,30 +307,79 @@ class Block(nn.Module):
         return x + self.ff(self.n2(x))
 
 
+OPP_BOARDS = ("full", "pooled", "next")
+
+
+def _pool(t, m):
+    """Mean and max of tokens t (..., n, d) over the present ones m (..., n),
+    0 when none is present: (..., 2d)."""
+    m = m[..., None]
+    cnt = m.sum(-2)
+    mean = (t * m).sum(-2) / cnt.clamp(min=1)
+    mx = t.masked_fill(~m, -1e9).max(-2).values * (cnt > 0)
+    return torch.cat([mean, mx], -1)
+
+
 class AttnNet(nn.Module):
-    """Transformer over 1 + 7 + 77 tokens: my scalars (the summary), each
-    opponent's scalars, and every card slot. Empty slots are masked as keys.
-    Actions come from ActionHead on the final slot tokens and the summary;
-    the value from the summary.
+    """Transformer over my scalars (the summary token), each opponent's
+    scalars, and the card slots. Empty slots are masked as keys. Actions
+    come from ActionHead on the final own slot tokens and the summary; the
+    value from the summary.
 
-    A training minibatch of 8192 is 700k tokens, and each layer keeps about
-    4 GB of activations for the backward pass in fp32, so when gradients are
-    on each layer is recomputed in the backward pass instead (about a third
-    more compute, a fraction of the memory)."""
+    How opponent boards go in (`opp_boards`):
+    - full: every opponent minion is a token (1 + 7 + 77 = 85 tokens).
+    - pooled: each opponent's minions go through the same slot encoder, then
+      mean and max over them, projected to d, are added to that opponent's
+      token; only my 28 slots stay tokens (36 tokens).
+    - next: pooled, plus the board of the opponent I face next as 7 full
+      tokens with a learned "facing" embedding (43 tokens).
 
-    def __init__(self, n_cards=bgpy.N_CARDS, d=128, layers=3, heads=4, ff=256, emb=32, bf16=True):
+    A training minibatch of 8192 at 85 tokens is 700k tokens, and each layer
+    keeps about 4 GB of activations for the backward pass in fp32, so the
+    layers run in bf16 and, when gradients are on, are recomputed in the
+    backward pass instead (about a third more compute, a fraction of the
+    memory)."""
+
+    def __init__(self, n_cards=bgpy.N_CARDS, d=128, layers=3, heads=4, ff=256, emb=32, bf16=True,
+                 opp_boards="next"):
         super().__init__()
+        assert opp_boards in OPP_BOARDS, opp_boards
         self.bf16 = bf16
+        self.opp_boards = opp_boards
         self.inp = SlotInputs(n_cards, d, emb)
         self.blocks = nn.ModuleList(Block(d, heads, ff) for _ in range(layers))
         self.norm = nn.LayerNorm(d)
         self.head = ActionHead(d, d)
         self.value = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1))
+        if opp_boards != "full":
+            self.opp_pool = nn.Linear(2 * d, d)
+        if opp_boards == "next":
+            self.facing = nn.Parameter(torch.zeros(d))
+            self.register_buffer("next_cols", OWN_END + torch.arange(OPP) * OPP_BLOCK + bgpy.OPP_NEXT)
+
+    def compile_layers(self):
+        """torch.compile each layer in place (parameter names unchanged)."""
+        for blk in self.blocks:
+            blk.compile(dynamic=True)
 
     def forward(self, obs):
         slots, present, me, opp = self.inp(obs)
-        x = torch.cat([me[:, None], opp, slots], 1)
-        keep = torch.cat([present.new_ones(present.shape[0], 1 + OPP), present], 1)[:, None, None]
+        b = obs.shape[0]
+        if self.opp_boards == "full":
+            toks, keep = slots, present
+        else:
+            ob = slots[:, OWN_SLOTS:].reshape(b, OPP, bgpy.BOARD, -1)
+            op = present[:, OWN_SLOTS:].reshape(b, OPP, bgpy.BOARD)
+            opp = opp + self.opp_pool(_pool(ob, op))
+            toks, keep = slots[:, :OWN_SLOTS], present[:, :OWN_SLOTS]
+            if self.opp_boards == "next":
+                nxt = obs[:, self.next_cols]
+                i = nxt.argmax(1)
+                ar = torch.arange(b, device=obs.device)
+                toks = torch.cat([toks, ob[ar, i] + self.facing], 1)
+                keep = torch.cat([keep, op[ar, i] & (nxt.sum(1, keepdim=True) > 0)], 1)
+        x = torch.cat([me[:, None], opp, toks], 1)
+        keep = torch.cat([keep.new_ones(b, 1 + OPP), keep], 1)[:, None, None]
         with torch.autocast("cuda", torch.bfloat16, enabled=self.bf16 and x.is_cuda):
             for blk in self.blocks:
                 if torch.is_grad_enabled():
@@ -372,19 +421,65 @@ class PoolNet(nn.Module):
 
 
 MODELS = {"mlp": Net, "attn": AttnNet, "pool": PoolNet}
+# Settings that change a model's shape, with their defaults; other models
+# ignore them.
+MODEL_OPTS = {"attn": {"opp_boards": "next"}}
 
 
-def build(kind, n_cards=bgpy.N_CARDS):
-    return MODELS[kind](n_cards)
+def model_opts(kind, **given):
+    """The shape settings `kind` uses: `given` where set, else the default."""
+    return {k: given.get(k) or v for k, v in MODEL_OPTS.get(kind, {}).items()}
 
 
-def load(path, dev="cpu"):
+def build(kind, n_cards=bgpy.N_CARDS, compile=False, **opts):
+    net = MODELS[kind](n_cards, **model_opts(kind, **opts))
+    if compile and hasattr(net, "compile_layers"):
+        net.compile_layers()
+    return net
+
+
+def ck_model(ck):
+    """(kind, shape settings) of a ppo.py checkpoint or keep/ copy. Older
+    ones have no model (mlp) or no opp_boards (attn was full then)."""
+    cfg = ck.get("cfg", {})
+    kind = ck.get("model", cfg.get("model", "mlp"))
+    saved = ck.get("model_opts", {k: cfg[k] for k in MODEL_OPTS.get(kind, {}) if k in cfg})
+    if kind == "attn":
+        saved.setdefault("opp_boards", "full")
+    return kind, model_opts(kind, **saved)
+
+
+def load(path, dev="cpu", compile=False):
     """The network saved in a ppo.py checkpoint, built as the model it was
-    trained with (checkpoints from before --model are mlp)."""
+    trained with."""
     ck = torch.load(path, map_location=dev)
-    net = build(ck.get("model", ck.get("cfg", {}).get("model", "mlp"))).to(dev)
+    kind, opts = ck_model(ck)
+    net = build(kind, compile=compile, **opts).to(dev)
     net.load_state_dict(ck["net"])
     return net
+
+
+def warm_start(net, kind, path):
+    """Load every entry of the checkpoint at `path` whose name and shape match
+    `net` (a `kind` model). Returns (loaded, fresh, skipped) parameter names:
+    fresh are net's parameters it had nothing for, skipped are the
+    checkpoint's that didn't fit. Refuses another kind of model."""
+    ck = torch.load(path, map_location="cpu")
+    src_kind, src_opts = ck_model(ck)
+    if src_kind != kind:
+        raise SystemExit(f"--init-from {path} holds {src_kind}, not {kind}: "
+                         "nothing to carry over")
+    src = ck["net"]
+    own = net.state_dict()
+    take = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
+    net.load_state_dict(take, strict=False)
+    params = [k for k, _ in net.named_parameters()]
+    loaded = [k for k in params if k in take]
+    fresh = [k for k in params if k not in take]
+    skipped = [k for k in src if k not in take]
+    if not loaded:
+        raise SystemExit(f"--init-from {path}: no parameter matches by name and shape")
+    return loaded, fresh, skipped, src_opts
 
 
 SELL_A = slice(bgpy.SHOP + 1, bgpy.SHOP + 1 + bgpy.BOARD)
@@ -440,8 +535,9 @@ def check_pointers():
     present = obs[:, bgpy.SCALARS:OWN_END].reshape(len(obs), OWN_SLOTS, SF)[:, :, bgpy.SLOT_PRESENT] > 0
     cards = obs[:, bgpy.SCALARS:OWN_END].reshape(len(obs), OWN_SLOTS, SF)[:, :, bgpy.SLOT_CARD_ID]
     glob = list(range(off["roll"].start, bgpy.N_ACTIONS))
-    for kind in ("attn", "pool"):
-        net = build(kind).eval()
+    for kind, opts in (("attn", {"opp_boards": "full"}), ("attn", {"opp_boards": "pooled"}),
+                       ("attn", {"opp_boards": "next"}), ("pool", {})):
+        net = build(kind, **opts).eval()
         with torch.no_grad():
             net.inp.pos.weight.zero_()
             for zs, kinds, label in ((BOARD_T, ("sell", "activate", "target"), "board"),
@@ -471,7 +567,7 @@ def check_pointers():
                     assert torch.allclose(grid0[:, perm][:, :, perm], grid1, atol=1e-4, equal_nan=True), kind
                 assert torch.allclose(l0[:, glob], l1[:, glob], atol=1e-4), (kind, label, "global")
                 assert torch.allclose(v0, v1, atol=1e-4), (kind, label, "value")
-        print(f"{kind}: pointer logits follow their slots")
+        print(f"{kind} {opts}: pointer logits follow their slots")
 
 
 if __name__ == "__main__":

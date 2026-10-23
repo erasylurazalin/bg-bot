@@ -4,8 +4,14 @@
     .venv/bin/python train/ppo.py --name run2 --resume runs/run2/ckpt.pt
     .venv/bin/python train/ppo.py --name attn1 --model attn
 
---model picks the network (model.py): mlp (the default), attn or pool. It is
+--model picks the network (model.py): mlp (the default), attn or pool.
+--opp-boards says how attn sees opponent boards (next by default). Both are
 saved in the checkpoint, and --resume builds what the checkpoint holds.
+--init-from starts a new run from another checkpoint's weights, every
+parameter whose name and shape match, with a fresh optimizer:
+
+    .venv/bin/python train/ppo.py --name attn2 --model attn --opp-boards next \
+        --init-from runs/attn1/best.pt
 
 Each game seats learners (this network, trained), snapshots (older copies of
 it), standard curve bots, rush curve bots, and random bots. Reward is placement
@@ -29,7 +35,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
-from model import MODELS, build, masked
+from model import MODELS, OPP_BOARDS, build, ck_model, masked, model_opts, warm_start
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
@@ -61,7 +67,14 @@ def args():
     a.add_argument("--minutes", type=float, default=10)
     a.add_argument("--resume")
     a.add_argument("--model", choices=list(MODELS),
-                   help="network (default mlp); on --resume the checkpoint's")
+                   help="network (default mlp, or --init-from's); on --resume the checkpoint's")
+    a.add_argument("--opp-boards", choices=OPP_BOARDS,
+                   help="attn: opponent minions as tokens (full), pooled into each opponent's "
+                        "token (pooled), or pooled plus the next opponent's in full (next, the default)")
+    a.add_argument("--compile", action=argparse.BooleanOptionalAction,
+                   help="torch.compile the attention layers (default: on for attn)")
+    a.add_argument("--init-from", help="checkpoint to take matching weights from, for a new run")
+    a.add_argument("--warmup", type=int, default=0, help="updates of linear lr warmup")
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--envs", type=int, default=1024)
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
@@ -211,6 +224,29 @@ def main():
     torch.manual_seed(cfg.seed)
     random.seed(cfg.seed)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    ck = torch.load(cfg.resume, map_location=dev) if cfg.resume else None
+    if ck is not None:
+        if cfg.init_from:
+            raise SystemExit("--resume and --init-from don't go together")
+        saved, opts = ck_model(ck)
+        given = {"model": cfg.model, **{k: getattr(cfg, k) for k in model_opts(saved)}}
+        for k, v in given.items():
+            if v and v != {"model": saved, **opts}[k]:
+                print(f"--{k.replace('_', '-')} {v} ignored: {cfg.resume} holds "
+                      f"{saved} {opts}")
+        cfg.model = saved
+    else:
+        if cfg.init_from and not cfg.model:
+            cfg.model = ck_model(torch.load(cfg.init_from, map_location="cpu"))[0]
+        cfg.model = cfg.model or "mlp"
+        opts = model_opts(cfg.model, opp_boards=cfg.opp_boards)
+    for k, v in opts.items():
+        setattr(cfg, k, v)
+    if cfg.init_from:
+        src_kind = ck_model(torch.load(cfg.init_from, map_location="cpu"))[0]
+        if src_kind != cfg.model:
+            raise SystemExit(f"--init-from {cfg.init_from} holds {src_kind}, not "
+                             f"{cfg.model}: nothing to carry over")
     out = Path("runs") / cfg.name
     out.mkdir(parents=True, exist_ok=True)
     lineup = [int(x) for x in cfg.lineup.split(",")]
@@ -218,14 +254,14 @@ def main():
     N, T = cfg.envs, cfg.steps
     env = bgpy.VecEnv(N, cfg.seed, lineup)
     names = env.card_names()
-    ck = torch.load(cfg.resume, map_location=dev) if cfg.resume else None
-    if ck is not None:
-        saved = ck.get("cfg", {}).get("model", "mlp")
-        if cfg.model and cfg.model != saved:
-            print(f"--model {cfg.model} ignored: {cfg.resume} holds a {saved} network")
-        cfg.model = saved
-    cfg.model = cfg.model or "mlp"
-    net = build(cfg.model, len(names)).to(dev)
+    if cfg.compile is None:
+        cfg.compile = cfg.model == "attn"
+    net = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
+    if cfg.init_from:
+        loaded, fresh, skipped, src_opts = warm_start(net, cfg.model, cfg.init_from)
+        print(f"init from {cfg.init_from} ({cfg.model} {src_opts}): {len(loaded)} parameter "
+              f"tensors loaded, {len(fresh)} fresh: {', '.join(fresh) or 'none'}; "
+              f"not used: {', '.join(skipped) or 'none'}")
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     pool = []  # snapshot state dicts, on the CPU
     update, best, t_total = 0, 9.0, 0.0
@@ -238,9 +274,10 @@ def main():
         print(f"resumed {cfg.resume} at update {update}")
     if not pool:
         pool.append(copy.deepcopy({k: v.cpu() for k, v in net.state_dict().items()}))
-    snap = build(cfg.model, len(names)).to(dev)
+    snap = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
     kind_of = KIND_OF.to(dev)
-    print(f"{cfg.model}: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M parameters on {dev}")
+    print(f"{cfg.model} {opts or ''}: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M "
+          f"parameters on {dev}{', compiled' if cfg.compile and cfg.model == 'attn' else ''}")
 
     tb = SummaryWriter(out / "tb")
     csv_path = out / "metrics.csv"
@@ -344,6 +381,9 @@ def main():
         f_ret = rets.reshape(-1)[sel]
         f_val = vals.reshape(-1)[sel]
         n = f_obs.shape[0]
+        if cfg.warmup:
+            for g in opt.param_groups:
+                g["lr"] = cfg.lr * min(1.0, (update + 1) / cfg.warmup)
         kls, clips, ents, vls = [], [], [], []
         for _ in range(cfg.epochs):
             perm = torch.randperm(n, device=dev)
@@ -443,7 +483,8 @@ def main():
             csv_file.flush()
             score = 0.5 * (vs_std + vs_rush)
             ck = {"net": net.state_dict(), "opt": opt.state_dict(), "pool": pool, "update": update,
-                  "best": best, "t_total": minutes, "cfg": vars(cfg)}
+                  "best": best, "t_total": minutes, "cfg": vars(cfg), "model": cfg.model,
+                  "model_opts": opts}
             if score < best:
                 best = score
                 ck["best"] = best
@@ -451,7 +492,8 @@ def main():
             torch.save(ck, out / "ckpt.pt")
             if minutes - last_keep >= cfg.keep_every:
                 (out / "keep").mkdir(exist_ok=True)
-                torch.save({"net": net.state_dict(), "update": update, "model": cfg.model}, out / "keep" / f"net_{update}.pt")
+                torch.save({"net": net.state_dict(), "update": update, "model": cfg.model,
+                            "model_opts": opts}, out / "keep" / f"net_{update}.pt")
                 last_keep = minutes
             # plateau: the rolling score hasn't improved for a while and it no
             # longer beats its oldest snapshot
