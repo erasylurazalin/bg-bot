@@ -826,6 +826,12 @@ impl Card {
         self.spell
     }
 
+    /// Whether an "any minion" draw may show this card: always without a
+    /// sandbox rig, otherwise only the rigged tribe and neutral minions.
+    pub fn rig_ok(&self, rig: Option<Tribe>) -> bool {
+        rig.is_none_or(|t| self.tribes.is_neutral() || self.tribes.has(t))
+    }
+
     /// Whether this spell gives stats to minions (used by the rule bot).
     pub fn gives_stats(&self) -> bool {
         matches!(
@@ -2469,9 +2475,34 @@ impl CardDb {
 
     /// A random pool minion that has a Deathrattle, of Tier `max_tier` or
     /// lower (0 means any Tier).
-    pub fn random_deathrattle_minion(&self, max_tier: u8, rng: &mut Rng) -> Option<CardId> {
+    ///
+    /// This is an "any minion" draw, so a sandbox `rig` narrows it (see
+    /// `Card::rig_ok`), falling back to every candidate when none is left.
+    pub fn random_deathrattle_minion(
+        &self,
+        max_tier: u8,
+        rig: Option<Tribe>,
+        rng: &mut Rng,
+    ) -> Option<CardId> {
         let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
-        let ok = |c: usize| self.cards[c].deathrattle.is_some() && self.cards[c].tier <= max_tier;
+        self.pick_rigged(
+            |c| self.cards[c].deathrattle.is_some() && self.cards[c].tier <= max_tier,
+            rig,
+            rng,
+        )
+    }
+
+    /// One pool card out of those `ok` accepts, uniformly. With a `rig`
+    /// only rig-legal cards count, unless there are none, then all do.
+    fn pick_rigged(
+        &self,
+        ok: impl Fn(usize) -> bool,
+        rig: Option<Tribe>,
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        let rigged = |c: usize| ok(c) && self.cards[c].rig_ok(rig);
+        let use_rig = rig.is_some() && (0..self.pool_cards).any(rigged);
+        let ok = |c: usize| if use_rig { rigged(c) } else { ok(c) };
         let count = (0..self.pool_cards).filter(|&c| ok(c)).count() as u32;
         if count == 0 {
             return None;
@@ -2514,18 +2545,10 @@ impl CardDb {
         (0..self.pool_cards).filter(|&c| ok(c)).nth(k).map(|c| c as CardId)
     }
 
-    pub fn random_tier_minion(&self, tier: u8, rng: &mut Rng) -> Option<CardId> {
-        let count = (0..self.pool_cards)
-            .filter(|&c| self.cards[c].tier == tier)
-            .count() as u32;
-        if count == 0 {
-            return None;
-        }
-        let k = rng.below(count) as usize;
-        (0..self.pool_cards)
-            .filter(|&c| self.cards[c].tier == tier)
-            .nth(k)
-            .map(|c| c as CardId)
+    /// A random pool minion of exactly `tier`, narrowed by a sandbox `rig`
+    /// like `random_deathrattle_minion`.
+    pub fn random_tier_minion(&self, tier: u8, rig: Option<Tribe>, rng: &mut Rng) -> Option<CardId> {
+        self.pick_rigged(|c| self.cards[c].tier == tier, rig, rng)
     }
 
     pub fn random_spell(&self, max_tier: u8, rng: &mut Rng) -> Option<CardId> {

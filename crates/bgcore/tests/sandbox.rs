@@ -196,3 +196,104 @@ fn the_loader_rejects_garbage() {
         golden=false\nattack=1\nhealth=1\nkeywords=[]\n";
     assert!(record::load_str(&db, bad).unwrap_err().contains("Nope"));
 }
+
+/// The cards a rigged player is now being offered by a Discover.
+fn offered(g: &Game) -> Vec<bgcore::CardId> {
+    g.players[0].discover.iter().copied().collect()
+}
+
+fn give_card(g: &mut Game, name: &str, golden: bool) {
+    let id = g.data.cards.by_name(name).unwrap();
+    let m = g.data.cards.make(id, golden);
+    g.players[0].hand.push(m);
+}
+
+fn assert_rigged(g: &Game, tribe: Tribe, what: &str) {
+    let o = offered(g);
+    assert_eq!(o.len(), 3, "{what}: {o:?}");
+    for id in o {
+        let c = g.data.cards.get(id);
+        assert!(c.tribes.is_neutral() || c.tribes.has(tribe), "{what} offered {}", c.name);
+    }
+}
+
+#[test]
+fn triple_reward_discover_is_rigged() {
+    for seed in 0..30 {
+        let mut g = sandbox(seed, Tribe::Beast, 3);
+        g.players[0].tier = 5;
+        give_card(&mut g, "Wolf Pup", true);
+        g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+        assert_rigged(&g, Tribe::Beast, "triple reward");
+        g.check_invariants().unwrap();
+    }
+}
+
+#[test]
+fn generic_discover_is_rigged() {
+    // Hired Headhunter: "Discover a Battlecry minion", an any-minion draw
+    for tribe in [Tribe::Beast, Tribe::Mech, Tribe::Demon] {
+        for seed in 0..30 {
+            let mut g = sandbox(seed, tribe, 3);
+            g.players[0].tier = 6;
+            give_card(&mut g, "Hired Headhunter", false);
+            g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+            assert_rigged(&g, tribe, "Hired Headhunter");
+            g.check_invariants().unwrap();
+        }
+    }
+}
+
+#[test]
+fn named_tribe_discover_keeps_its_tribe() {
+    // Primalfin Lookout in a Beast game still discovers Murlocs
+    for seed in 0..30 {
+        let mut g = sandbox(seed, Tribe::Beast, 3);
+        g.players[0].tier = 6;
+        for n in ["Bubble Gunner", "Primalfin Lookout"] {
+            give_card(&mut g, n, false);
+        }
+        g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+        g.step(Action::Play { hand: 0, pos: 1 }).unwrap();
+        let o = offered(&g);
+        assert_eq!(o.len(), 3, "seed {seed}");
+        for id in o {
+            let c = g.data.cards.get(id);
+            assert!(c.tribes.has(Tribe::Murloc), "offered {} (not a Murloc)", c.name);
+        }
+    }
+}
+
+#[test]
+fn rig_reaches_random_draws_and_the_fight() {
+    let g = sandbox(1, Tribe::Beast, 3);
+    let db = &g.data.cards;
+    assert_eq!(g.players[0].counters(db).rig, Some(Tribe::Beast));
+    let mut rng = Rng::new(9);
+    for _ in 0..500 {
+        let c = db.get(db.random_deathrattle_minion(6, Some(Tribe::Beast), &mut rng).unwrap());
+        assert!(c.deathrattle.is_some() && (c.tribes.is_neutral() || c.tribes.has(Tribe::Beast)));
+        let c = db.get(db.random_tier_minion(3, Some(Tribe::Beast), &mut rng).unwrap());
+        assert!(c.tier == 3 && (c.tribes.is_neutral() || c.tribes.has(Tribe::Beast)));
+    }
+    // no rig: any tribe shows up
+    let seen: std::collections::HashSet<_> =
+        (0..500).map(|_| db.random_tier_minion(3, None, &mut rng).unwrap()).collect();
+    assert!(seen.iter().any(|&c| db.get(c).tribes.has(Tribe::Murloc)));
+    // the mirror fight with a Ghastcoiler runs and keeps the pool whole
+    let mut g = sandbox(2, Tribe::Beast, 3);
+    put(&mut g, &["Ghastcoiler", "Tasty Lobster"]);
+    g.step(Action::EndTurn).unwrap();
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn rig_still_draws_at_every_tier() {
+    let g = sandbox(1, Tribe::Beast, 3);
+    let db = &g.data.cards;
+    let mut rng = Rng::new(4);
+    // every tier has a rig-legal card; an empty filter falls back to all cards
+    for tier in 1..=6 {
+        assert!(db.random_tier_minion(tier, Some(Tribe::Beast), &mut rng).is_some());
+    }
+}

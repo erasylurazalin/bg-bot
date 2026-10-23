@@ -526,6 +526,7 @@ impl Player {
             upper_hand: self.upper_hand,
             spell_attack,
             spell_health,
+            rig: self.rig,
         }
     }
 }
@@ -660,18 +661,28 @@ fn draw_filtered(
 /// Whether a Tavern roll may show this card: always in a normal game, only
 /// the rigged tribe and neutral minions in a sandbox.
 fn rigged_ok(rig: Option<Tribe>, c: &Card) -> bool {
-    rig.is_none_or(|t| c.tribes.is_neutral() || c.tribes.has(t))
+    c.rig_ok(rig)
 }
 
-fn draw(
+/// `draw_filtered` for an "any minion" draw: with a sandbox rig it only
+/// offers rig-legal cards, and when none is left it draws unfiltered.
+#[allow(clippy::too_many_arguments)]
+fn draw_rigged(
     pool: &mut [u8],
     cards: &CardDb,
     rng: &mut Rng,
     lo: u8,
     hi: u8,
     exclude: &[CardId],
+    rig: Option<Tribe>,
+    pred: impl Fn(&Card) -> bool,
 ) -> Option<CardId> {
-    draw_filtered(pool, cards, rng, lo, hi, exclude, |_| true)
+    if rig.is_some()
+        && let Some(c) = draw_filtered(pool, cards, rng, lo, hi, exclude, |c| pred(c) && c.rig_ok(rig))
+    {
+        return Some(c);
+    }
+    draw_filtered(pool, cards, rng, lo, hi, exclude, pred)
 }
 
 fn give_back(pool: &mut [u8], cards: &CardDb, m: &Minion) {
@@ -1894,7 +1905,7 @@ impl Game {
                     .try_push((attack, health, times));
             }
             SpellEffect::RandomTierMinion(tier) => {
-                if let Some(c) = self.data.cards.random_tier_minion(tier, &mut self.rng) {
+                if let Some(c) = self.data.cards.random_tier_minion(tier, self.players[p].rig, &mut self.rng) {
                     self.give_generated(p, c);
                 }
             }
@@ -2905,7 +2916,7 @@ impl Game {
     /// and Health. The old copy goes back to the pool, the new comes from it.
     fn robust_evolution_board(&mut self, p: usize, slot: usize) {
         let old = self.players[p].board[slot];
-        let Some(new_id) = self.robust_evolution_draw(old) else { return };
+        let Some(new_id) = self.robust_evolution_draw(p, old) else { return };
         let mut m = self.data.cards.make(new_id, false);
         m.pool_copies = 1;
         m.attack = old.attack;
@@ -2915,7 +2926,7 @@ impl Game {
 
     fn robust_evolution_shop(&mut self, p: usize, slot: usize) {
         let old = self.players[p].shop[slot];
-        let Some(new_id) = self.robust_evolution_draw(old) else { return };
+        let Some(new_id) = self.robust_evolution_draw(p, old) else { return };
         let mut m = self.data.cards.make(new_id, false);
         m.pool_copies = 1;
         m.attack = old.attack;
@@ -2926,11 +2937,20 @@ impl Game {
     /// Return the old copies to the pool and draw the new one. The result is
     /// never golden; a golden old minion keeps its Attack and Health and
     /// returns its copies (an assumption, see DESIGN.md).
-    fn robust_evolution_draw(&mut self, old: Minion) -> Option<CardId> {
+    fn robust_evolution_draw(&mut self, p: usize, old: Minion) -> Option<CardId> {
         let old_tier = self.data.cards.get(old.card).tier;
         let new_tier = if old_tier >= MAX_TIER { MAX_TIER } else { old_tier + 1 };
-        let new_id =
-            draw(&mut self.pool, &self.data.cards, &mut self.rng, new_tier, new_tier, &[])?;
+        let rig = self.players[p].rig;
+        let new_id = draw_rigged(
+            &mut self.pool,
+            &self.data.cards,
+            &mut self.rng,
+            new_tier,
+            new_tier,
+            &[],
+            rig,
+            |_| true,
+        )?;
         let (slot, copies, token) = {
             let c = self.data.cards.get(old.card);
             (c.pool_slot, old.pool_copies, c.token || c.is_spell())
@@ -3406,7 +3426,7 @@ impl Game {
                 let next = match req {
                     DiscoverRequest::MinionTier(t)
                     | DiscoverRequest::SearchMinionTier(t) => {
-                        draw(pool, &data.cards, rng, t, t, &pl.discover)
+                        draw_rigged(pool, &data.cards, rng, t, t, &pl.discover, pl.rig, |_| true)
                     }
                     DiscoverRequest::SpellTier(t) => {
                         data.cards.random_tier_spell(t, &pl.discover, rng)
@@ -3414,22 +3434,24 @@ impl Game {
                     DiscoverRequest::SpellMaxTier(t) => {
                         data.cards.random_spell_up_to(t, &pl.discover, rng)
                     }
-                    DiscoverRequest::DeathrattleMinion(max_t) => draw_filtered(
+                    DiscoverRequest::DeathrattleMinion(max_t) => draw_rigged(
                         pool,
                         &data.cards,
                         rng,
                         1,
                         max_t,
                         &pl.discover,
+                        pl.rig,
                         |c| c.deathrattle.is_some(),
                     ),
-                    DiscoverRequest::BattlecryMinion(max_t) => draw_filtered(
+                    DiscoverRequest::BattlecryMinion(max_t) => draw_rigged(
                         pool,
                         &data.cards,
                         rng,
                         1,
                         max_t,
                         &pl.discover,
+                        pl.rig,
                         |c| c.battlecry.is_some(),
                     ),
                     DiscoverRequest::TribeMinion(t) => {

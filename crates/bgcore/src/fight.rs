@@ -43,6 +43,9 @@ pub struct Counters {
     /// (Runic Arcanist, Crimson Vindicator).
     pub spell_attack: i32,
     pub spell_health: i32,
+    /// Sandbox only: "any minion" draws inside the fight (Ghastcoiler) only
+    /// pick this tribe and neutral minions. None in a normal game.
+    pub rig: Option<crate::cards::Tribe>,
 }
 
 /// Side effects from a fight that carry over to one player after combat.
@@ -824,7 +827,7 @@ impl<'a> Side<'a> {
             }
             Effect::SummonRandomDeathrattle { count } => {
                 for _ in 0..count as i32 * mul {
-                    let Some(c) = db.random_deathrattle_minion(self.counters.tier, rng) else { break };
+                    let Some(c) = db.random_deathrattle_minion(self.counters.tier, self.counters.rig, rng) else { break };
                     let m = db.make(c, false);
                     if self.summon(db, fx.side, *at, m, uid, w) {
                         *at += 1;
