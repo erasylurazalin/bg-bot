@@ -426,8 +426,10 @@ value in `rules.toml`.
 - Out because they need systems this game doesn't have: Dark Paradox
   (Dark Gifts), Armor Stash (armor), Energizing Chamber (the Deity),
   Unmasked Identity (hero powers). No Duos-only cards.
-- That is 130 minions and 50 spells, about a real lobby's density. The
-  list is built from Blizzard's card data, see `docs/ENGINE.md`.
+- That was 130 minions and 50 spells for the five-tribe lobby. With eight
+  tribes built it's 201 pool minions and 59 pool spells (2026-10-24); the
+  game's full solo pool is 272 and 73. The game's own card data is
+  exported by `tools/export_cards.py`, see `docs/card-data.md`.
 - Generated cards that belong to these tribes are in too, though never in
   the pool: Chromadrakes, Demon Fodder, Fishbait, Satellites, Beetles and
   so on.
@@ -647,8 +649,9 @@ counter.
   The Surprise's Divine Shield and buffs carry into the golden X. A golden
   Surprise can still triple with two copies of X into a golden X, the only
   card that triples while already golden.
-- **"After you play an Elemental"** never counts the card being played
-  (Ultraviolet Ascendant, Unbound Tempest).
+- **"After you play an X"** never counts the card being played, for every
+  card (Ultraviolet Ascendant, Unbound Tempest, Wrath Weaver, Insatiable
+  Ur'zul, the Pirate and Demon cards).
 - **Stone Age Slab before Living Prison:** on the same buy, Slabs buff the
   minion first, then an armed Prison gains its stats (buffs included).
 - **Arcane Absorption** takes a random minion on a Health tie. Spell power
@@ -712,6 +715,14 @@ the JSON flags it.
 - **Barrier Banshee, Snazzy Phantom** trigger on other minions' Reborn,
   never their own. Phantom gives the right-most Undead +X/+X, X being the
   Reborn minion's Attack as it comes back (player bonuses included).
+
+**Tier 7 spells** (Sacred Gift, Sharing is Caring, Hallowed Ritual,
+Menagerie Tableware) are real cards but never come up in normal play: the
+Tavern and every "up to your tier" draw stop at tier 6, so only an effect
+that names tier 7 could give one.
+
+**Disguised Graverobber** is in now that Undead are. Dark Paradox stays
+out until Dark Gifts exist.
 
 **Pairing, damage, ending** as in Part 2: shuffle and avoid the last
 opponent, ghost for an odd count, damage is tier plus surviving minions'

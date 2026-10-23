@@ -100,6 +100,8 @@ rules behind each are in DESIGN.md Part 3.
   `Game::discover_tier7_minion` (a Discover, the pick takes its copy) are
   the helpers, `CardDb::random_tier7_minion` the draw. The Pirate run's
   Greedy Conniver is the first user.
+  The four tier 7 spells are in `cards.toml` but every spell draw caps at
+  `MAX_TIER`, so none is offered. A generated spell (Lockbox) has tier 0.
 - **Rally runs before the hit, and can kill.** `attack_swings` resolves the
   deaths a Rally caused before the attack lands; when the target died, the
   swing fizzles (no hit, no retaliation) but "after a friendly minion

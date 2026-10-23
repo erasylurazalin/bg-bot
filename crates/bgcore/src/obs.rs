@@ -385,7 +385,7 @@ fn target_kind(k: TargetKind) -> (usize, (i32, i32)) {
         TargetKind::MakeGolden { .. } => (2, (0, 0)),
         // Maw Caster's destroy shares the Consume slot, Dead Bellringer's the
         // buff slot (the layout is frozen until the observation run).
-        TargetKind::DestroyDiscover { .. } => (1, (0, 0)),
+        TargetKind::DestroyDiscover { .. } | TargetKind::DestroyCopy { .. } => (1, (0, 0)),
         TargetKind::RebornDestroy { attack, health, .. } => (0, (attack, health)),
     }
 }

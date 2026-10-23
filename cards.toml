@@ -222,6 +222,13 @@ tribe = "neutral"
 stats = [3, 6]
 activate = { cost = 1, effect = { get = "Tavern Dish Banana", count = 2 } }
 
+[[minion]]
+name = "Disguised Graverobber"
+tier = 3
+tribe = "neutral"
+stats = [4, 4]
+battlecry = { destroy_chosen_get_copy = "undead", count = 1 }
+
 # --- Tier 4 ---
 
 [[minion]]
@@ -392,7 +399,7 @@ name = "Spark Snapper"
 tier = 5
 tribe = "mech"
 stats = [6, 8]
-on_play_mech = { magnetize_satellite = "Satellite" }
+on_play_mech = { magnetize_satellite = "Satellite", stats = [2, 3] }
 
 [[minion]]
 name = "Charging Czarina"
@@ -1123,7 +1130,7 @@ name = "Gunpowder Courier"
 tier = 4
 tribe = "pirate"
 stats = [2, 5]
-on_event = { event = "gold_spent", every = 6, effect = { buff = [3, 1], target = "all", tribe = "pirate" } }
+on_event = { event = "gold_spent", every = 5, effect = { buff = [3, 1], target = "all", tribe = "pirate" } }
 
 [[minion]]
 name = "Lovesick Balladist"
@@ -1343,7 +1350,7 @@ tier = 6
 tribe = "elemental"
 stats = [6, 6]
 start_of_combat = { effect = { buff = [3, 3], tribe = "elemental", per_improvement = true } }
-after_play_tribe = { tribe = "elemental", exclude_played = true, effects = [{ improve_self = 1 }] }
+after_play_tribe = { tribe = "elemental", effects = [{ improve_self = 1 }] }
 
 [[minion]]
 name = "Unbound Tempest"
@@ -1561,7 +1568,7 @@ stats = [1, 1]
 name = "Satellite"
 tier = 1
 tribe = "mech"
-stats = [2, 3]
+stats = [4, 4]
 keywords = ["magnetic"]
 
 # The Chromadrakes: generated only, never in the pool.
@@ -1970,6 +1977,34 @@ tier = 6
 cost = 4
 effect = { target = "chosen", make_golden_max_tier = 4 }
 
+# --- Spells: Tier 7 ---
+# Real cards that no draw reaches: the Tavern and every "up to your tier"
+# draw stop at tier 6 (CardDb::random_spell and friends cap at MAX_TIER).
+
+[[spell]]
+name = "Sacred Gift"
+tier = 7
+cost = 4
+effect = { target = "chosen", buff = [0, 0], keyword = "divine_shield" }
+
+[[spell]]
+name = "Sharing is Caring"
+tier = 7
+cost = 2
+effect = { start_of_combat = "enemy_stats_to_leftmost" }
+
+[[spell]]
+name = "Hallowed Ritual"
+tier = 7
+cost = 5
+effect = { discover = "tier_7_minion" }
+
+[[spell]]
+name = "Menagerie Tableware"
+tier = 7
+cost = 4
+effect = { menagerie_tableware = [3, 3] }
+
 # --- Spells: Pirates ---
 # The five Bounties share one slot of the spell draw (a drawn Bounty is a
 # random one of them). Tier 3, cost 2.
@@ -2018,7 +2053,7 @@ effect = { target = "board", buff = [3, 2], golden_extra = true }
 # Generated only: an unplayable spell in hand that opens after 5 turns.
 [[spell]]
 name = "Lockbox"
-tier = 3
+tier = 0
 cost = 2
 token = true
 effect = { lockbox = 5 }
@@ -2048,7 +2083,7 @@ effect = { target = "chosen", half_of_highest = true, tribe = "elemental" }
 
 [[spell]]
 name = "Conflagration"
-tier = 5
+tier = 4
 cost = 2
 token = true
 effect = { target = "chosen", buff = [4, 4], per_played_this_turn = [2, 2], tribe = "elemental" }

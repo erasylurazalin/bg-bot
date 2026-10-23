@@ -396,6 +396,9 @@ pub enum Effect {
     /// Battlecry: destroy a friendly minion of a tribe you pick, then
     /// Discover `count` of that tribe (Maw Caster). Golden Discovers twice.
     DestroyChosenDiscover { tribe: Tribe, count: u8 },
+    /// Battlecry: destroy a friendly minion of a tribe you pick and get
+    /// `copies` plain copies of it (Disguised Graverobber; golden doubles).
+    DestroyChosenGetCopy { tribe: Tribe, copies: u8 },
     /// Activate: give a different friendly minion of a tribe Reborn, then
     /// destroy it, and this minion gains the stats (Dead Bellringer).
     GiveRebornDestroy { tribe: Tribe, attack: i32, health: i32 },
@@ -419,6 +422,7 @@ impl Effect {
                 | Effect::BuffChosenPerGold { .. }
                 | Effect::MakeGoldenChosen { .. }
                 | Effect::DestroyChosenDiscover { .. }
+                | Effect::DestroyChosenGetCopy { .. }
                 | Effect::GiveRebornDestroy { .. }
         )
     }
@@ -552,6 +556,8 @@ pub enum DiscoverKind {
     MyTierSpell,
     DeathrattleMinion,
     BattlecryMinion,
+    /// A Tier 7 minion (Hallowed Ritual).
+    Tier7Minion,
 }
 
 /// A Tavern spell (or Choose One spell option) that targets a friendly minion.
@@ -670,6 +676,12 @@ pub enum SpellEffect {
     MightyDragonbreath { attack: i32, health: i32 },
     BroodOfNozdormu,
     UpperHand,
+    /// Start of Combat: the left-most minion gains the nearest enemy
+    /// minion's stats (Sharing is Caring).
+    SharingIsCaring,
+    /// Give your minions stats, again for each different friendly minion
+    /// type (Menagerie Tableware).
+    MenagerieTableware { attack: i32, health: i32 },
     /// Make a random minion in the Tavern golden.
     GoldenTouch,
     /// Get a random Murloc and a copy of it (Cloning Conch).
@@ -763,9 +775,6 @@ pub enum Deathrattle {
 /// Every effect runs for it; a golden one doubles each.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AfterPlayTribe {
-    /// The card being played never counts for itself, and this runs right
-    /// after it lands, before its Battlecry (Ultraviolet Ascendant).
-    pub exclude_played: bool,
     pub tribe: Tribe,
     pub effects: Vec<Effect>,
 }
@@ -891,7 +900,7 @@ pub enum OnReborn {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnPlayMech {
-    MagnetizeSatellite { card: CardId },
+    MagnetizeSatellite { card: CardId, attack: i32, health: i32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1370,8 +1379,6 @@ struct RawSpell {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawAfterPlayTribe {
-    #[serde(default)]
-    exclude_played: bool,
     tribe: String,
     effects: Vec<RawEffect>,
 }
@@ -1448,6 +1455,8 @@ struct RawSpellEffect {
     buff_leftmost: Option<[i32; 2]>,
     #[serde(default)]
     friendly_bounty: bool,
+    #[serde(default)]
+    menagerie_tableware: Option<[i32; 2]>,
     /// Add to the "after the Tavern is Refreshed" amount.
     refresh_buff: Option<[i32; 2]>,
     /// Get one of each of two named cards.
@@ -1646,6 +1655,10 @@ struct RawEffect {
     /// Destroy a chosen friendly minion of this tribe, then Discover `count`
     /// of that tribe.
     destroy_chosen_discover: Option<String>,
+    /// Destroy a chosen friendly minion of this tribe, then get `count`
+    /// plain copies of it.
+    #[serde(default)]
+    destroy_chosen_get_copy: Option<String>,
     /// Give a different friendly minion of this tribe Reborn, destroy it, and
     /// gain the buff.
     give_reborn_destroy: Option<String>,
@@ -1779,6 +1792,7 @@ struct RawOnSummonBeast {
 #[serde(deny_unknown_fields)]
 struct RawOnPlayMech {
     magnetize_satellite: String,
+    stats: [i32; 2],
 }
 
 #[derive(Deserialize)]
@@ -1896,6 +1910,7 @@ fn parse_discover(s: &str) -> Result<DiscoverKind, String> {
         "tier_spell" => Ok(DiscoverKind::MyTierSpell),
         "deathrattle" => Ok(DiscoverKind::DeathrattleMinion),
         "battlecry" => Ok(DiscoverKind::BattlecryMinion),
+        "tier_7_minion" => Ok(DiscoverKind::Tier7Minion),
         other => Err(format!("unknown discover {other:?}")),
     }
 }
@@ -2060,6 +2075,8 @@ fn parse_spell_effect(
                 SpellEffect::Lockbox(n)
             } else if let Some([attack, health]) = e.buff_leftmost {
                 SpellEffect::BuffLeftmost { attack, health }
+            } else if let Some([attack, health]) = e.menagerie_tableware {
+                SpellEffect::MenagerieTableware { attack, health }
             } else if e.friendly_bounty {
                 SpellEffect::FriendlyBounty
             } else if let Some(b) = e.boon_of_beetles {
@@ -2068,6 +2085,7 @@ fn parse_spell_effect(
                 match soc.as_str() {
                     "double_leftmost_attack" => SpellEffect::BroodOfNozdormu,
                     "enemy_health_to_1" => SpellEffect::UpperHand,
+                    "enemy_stats_to_leftmost" => SpellEffect::SharingIsCaring,
                     other => return Err(format!("unknown spell start_of_combat {other:?}")),
                 }
             } else {
@@ -2184,6 +2202,8 @@ impl CardDb {
                 Effect::SummonSalvaged
             } else if let Some(name) = &b.destroy_chosen_discover {
                 Effect::DestroyChosenDiscover { tribe: tribe(name)?, count: b.count.unwrap_or(1) }
+            } else if let Some(name) = &b.destroy_chosen_get_copy {
+                Effect::DestroyChosenGetCopy { tribe: tribe(name)?, copies: b.count.unwrap_or(1) }
             } else if let Some(name) = &b.give_reborn_destroy {
                 let [attack, health] = b.buff.ok_or("give_reborn_destroy needs buff")?;
                 Effect::GiveRebornDestroy { tribe: tribe(name)?, attack, health }
@@ -2493,7 +2513,6 @@ impl CardDb {
                         effects.push(effect);
                     }
                     Some(AfterPlayTribe {
-                        exclude_played: p.exclude_played,
                         tribe: tribe(&p.tribe).map_err(&err)?,
                         effects,
                     })
@@ -2680,7 +2699,7 @@ impl CardDb {
                 None => None,
                 Some(p) => {
                     let card = token_id(&p.magnetize_satellite).map_err(&err)?;
-                    Some(OnPlayMech::MagnetizeSatellite { card })
+                    Some(OnPlayMech::MagnetizeSatellite { card, attack: p.stats[0], health: p.stats[1] })
                 }
             };
 
@@ -2899,8 +2918,10 @@ impl CardDb {
         for sp in &raw.spell {
             let id = cards.len() as CardId;
             let err = |e: String| format!("cards.toml, {}: {e}", sp.name);
-            if !(1..=crate::MAX_TIER).contains(&sp.tier) {
-                return Err(err(format!("tier {} is not 1 to 6", sp.tier)));
+            // Tier 0 is for a generated spell (Lockbox); tier 7 spells are
+            // never drawn (every draw stops at tier 6).
+            if sp.tier > crate::CARD_MAX_TIER || (sp.tier == 0 && !sp.token) {
+                return Err(err(format!("tier {} is not 1 to 7 (0 only for a token)", sp.tier)));
             }
             let (spell_target, spell_effect) = match &sp.effect {
                 Some(e) if e.get.is_some() => {
@@ -3165,7 +3186,10 @@ impl CardDb {
 
     /// A random spell that costs `cost`, of any Tier.
     pub fn random_spell_of_cost(&self, cost: u8, rng: &mut Rng) -> Option<CardId> {
-        let ok = |id: CardId| self.cards[id as usize].cost == cost;
+        let ok = |id: CardId| {
+            self.cards[id as usize].cost == cost
+                && self.cards[id as usize].tier <= crate::MAX_TIER
+        };
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {
             return None;
@@ -3212,6 +3236,7 @@ impl CardDb {
     }
 
     pub fn random_spell(&self, max_tier: u8, rng: &mut Rng) -> Option<CardId> {
+        let max_tier = max_tier.min(crate::MAX_TIER);
         let count = self
             .spells
             .iter()
@@ -3238,6 +3263,7 @@ impl CardDb {
         exclude: &[CardId],
         rng: &mut Rng,
     ) -> Option<CardId> {
+        let max_tier = max_tier.min(crate::MAX_TIER);
         let ok = |id: CardId| self.cards[id as usize].tier <= max_tier && self.spell_open(id, exclude);
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {
@@ -3254,6 +3280,9 @@ impl CardDb {
         exclude: &[CardId],
         rng: &mut Rng,
     ) -> Option<CardId> {
+        if tier > crate::MAX_TIER {
+            return None;
+        }
         let ok = |id: CardId| self.cards[id as usize].tier == tier && self.spell_open(id, exclude);
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {

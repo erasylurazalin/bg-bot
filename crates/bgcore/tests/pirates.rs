@@ -398,13 +398,12 @@ fn gold_spent_counters_carry_over_turns_and_ignore_health_and_free_refreshes() {
     act(&mut g, 0, Action::Buy(0));
     assert_eq!(g.players[0].gold_spent_turn, 3);
     assert_eq!(g.players[0].board[0].improvements, 3);
-    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(3));
+    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(2));
     // the count carries over the turn
     end_all_turns(&mut g);
     assert_eq!(g.players[0].gold_spent_turn, 0, "this turn's gold resets");
     assert_eq!(g.players[0].board[0].improvements, 3);
-    // 3 more gold: 6 spent in all, the Pirates get +3/+1
-    act(&mut g, 0, Action::Roll);
+    // 2 more gold: 5 spent in all, the Pirates get +3/+1
     act(&mut g, 0, Action::Roll);
     assert_eq!(stats(&g.players[0].board[1]), (pirate_before.0, pirate_before.1));
     act(&mut g, 0, Action::Roll);
@@ -419,20 +418,20 @@ fn gold_spent_counters_carry_over_turns_and_ignore_health_and_free_refreshes() {
 fn one_big_payment_fires_a_threshold_more_than_once() {
     let mut g = game(11);
     put_on_board(&mut g, 0, "Gunpowder Courier", false);
-    // one payment of 12 Gold (a Level) at 6 per trigger: twice
+    // one payment of 12 Gold (a Level) at 5 per trigger: twice, 2 left over
     g.players[0].gold = 12;
     g.players[0].upgrade_cost = 12;
     act(&mut g, 0, Action::Level);
     assert_eq!(g.players[0].gold, 0);
     assert_eq!(stats(&g.players[0].board[0]), (2 + 6, 5 + 2));
-    assert_eq!(g.players[0].board[0].improvements, 0);
+    assert_eq!(g.players[0].board[0].improvements, 2);
 }
 
 #[test]
-fn the_thresholds_are_six_gold_for_the_courier_six_for_the_escapee_nine_for_rogers() {
+fn the_thresholds_are_five_gold_for_the_courier_six_for_the_escapee_nine_for_rogers() {
     let db = db();
     let ev = |n: &str| db.get(id(&db, n)).on_event.unwrap().every;
-    assert_eq!(ev("Gunpowder Courier"), 6);
+    assert_eq!(ev("Gunpowder Courier"), 5);
     assert_eq!(ev("Enterprising Escapee"), 6);
     assert_eq!(ev("Sky Admiral Rogers"), 9);
 }
@@ -442,12 +441,12 @@ fn a_golden_gunpowder_courier_gives_twice_as_much() {
     let mut g = game(12);
     put_on_board(&mut g, 0, "Gunpowder Courier", true);
     g.players[0].gold = 10;
-    for _ in 0..5 {
+    for _ in 0..4 {
         act(&mut g, 0, Action::Roll);
     }
-    assert_eq!(stats(&g.players[0].board[0]), (4, 10), "not at 5 Gold");
+    assert_eq!(stats(&g.players[0].board[0]), (4, 10), "not at 4 Gold");
     act(&mut g, 0, Action::Roll);
-    assert_eq!(stats(&g.players[0].board[0]), (4 + 6, 10 + 2));
+    assert_eq!(stats(&g.players[0].board[0]), (4 + 6, 10 + 2), "fires at 5 Gold");
 }
 
 #[test]

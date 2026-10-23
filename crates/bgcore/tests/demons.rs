@@ -372,12 +372,13 @@ fn urzul_can_consume_a_waiting_fodder() {
     let mut g = game(35);
     clear_shop(&mut g, 0);
     put_token_in_shop(&mut g, 0, "Demon Fodder", false);
-    g.give(0, "Insatiable Ur'zul").unwrap();
+    put_on_board(&mut g, 0, "Insatiable Ur'zul");
+    g.give(0, "Flaming Enforcer").unwrap();
     let before_pool: u32 = g.pool.iter().map(|&n| n as u32).sum();
-    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
     // a Fodder in the Tavern is a normal Tavern minion: Ur'zul's after-play
-    // consume eats it for +2/+2, and the generated copy never touches the
-    // pool
+    // consume (for the next Demon played, never its own play) eats it for
+    // +2/+2, and the generated copy never touches the pool
     assert_eq!(stats(&g.players[0].board[0]), (4 + 2, 6 + 2));
     assert!(g.players[0].shop.is_empty());
     assert_eq!(g.pool.iter().map(|&n| n as u32).sum::<u32>(), before_pool);
@@ -676,8 +677,9 @@ fn insatiable_ur_zul_consumes_when_it_is_played_and_returns_the_copy() {
     let slot = g.data.cards.get(id(&g, "Buzzing Vermin")).pool_slot as usize;
     set_shop(&mut g, 0, &["Buzzing Vermin"]);
     let before = g.pool[slot];
-    g.give(0, "Insatiable Ur'zul").unwrap();
-    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    put_on_board(&mut g, 0, "Insatiable Ur'zul");
+    g.give(0, "Flaming Enforcer").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
     // 4/6 plus the 1/1 it ate
     assert_eq!(stats(&g.players[0].board[0]), (5, 7));
     assert!(g.players[0].shop.is_empty());
@@ -912,9 +914,10 @@ fn eredar_escapist_is_damage_counted_and_carries_over() {
     let mut g = game(25);
     put_on_board(&mut g, 0, "Eredar Escapist");
     g.players[0].board[0].improvements = 3;
-    g.give(0, "Wrath Weaver").unwrap();
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.give(0, "Flaming Enforcer").unwrap();
     g.players[0].health = 30;
-    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
     // the demon play is 1 damage: 3 + 1 = 4, so the Cupcakes arrive
     assert!(hand_has(&g, "Corrupted Cupcakes"));
     assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(4));

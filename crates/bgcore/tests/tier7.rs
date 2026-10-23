@@ -1124,7 +1124,10 @@ fn beatboxer_copies_spark_snappers_satellite_but_nothing_triggers_from_a_copy() 
     put_on_board(&mut g, 0, "Polarizing Beatboxer", false);
     put_on_board(&mut g, 0, "Spark Snapper", false);
     put_in_hand(&mut g, 0, "Cord Puller", false);
+    // Spark Snapper attaches a 2/3 (the Satellite token itself is 4/4)
     let sat = g.data.cards.make(id(&g.data.cards, "Satellite"), false);
+    assert_eq!(stats(&sat), (4, 4));
+    let sat = Minion { attack: 2, health: 3, ..sat };
     act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
     let b = &g.players[0].board;
     // the played Puller and the Beatboxer each got one Satellite

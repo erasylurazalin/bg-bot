@@ -58,7 +58,7 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Gold spent / hero damage / sold / bought / Elementals played | `on_event = { event = "gold_spent" / "hero_damage" / "minions_sold" / "cards_bought" / "elementals_played", every, effect }` | `Game::fire_event` (count in `improvements`, remainder kept, can fire several times) | Gunpowder Courier |
 | Sell | `on_sell = {..}` | `Game::sell_minion` (`OnSell`) | Greedy Conniver |
 | Buy | `Action::Buy`/`BuySpell` in `apply`; triple via `check_triple` | `apply` | none yet |
-| Play a minion of a tribe | `after_play_tribe = { tribe, effects }` | `fire_after_play_tribe` | Wrath Weaver |
+| Play a minion of a tribe | `after_play_tribe = { tribe, effects }` (never counts the minion being played, no flag; runs right after it lands, before its Battlecry) | `fire_after_play_tribe` | Wrath Weaver |
 | While in hand, after a tribe is played | `while_in_hand` | `trigger_in_hand_on_play` | Bream Counter |
 | After you trigger a Battlecry | `after_battlecry` | `fire_after_battlecry` | Kalecgos |
 | Discover (the effect) | `discover_spell`, `discover_tribe_if_another`, `Effect::Discover*`, spell `discover = ..` | `discover_queue` of `DiscoverRequest`, `maybe_start_discover`, `resolve_choose` | Rodeo Performer |
@@ -75,7 +75,7 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Excess damage on a kill | `overkill = true` | `attack_swings` in fight.rs (golden hits both neighbours) | Wildfire Elemental |
 | Spell target that reads the Tavern or this turn | `half_of_highest`, `per_played_this_turn` | `SpellTarget::HalfOfHighestTavern`, `BuffPerTribePlayed`, `Player.elementals_played_turn` | Arcane Absorption |
 | After a friendly minion is Reborn | `on_reborn = { banshee = [a, h] }` / `{ phantom = true }` | `Side::note_reborn`, called by `Side::resolve` (fights and shop destroys) | Barrier Banshee |
-| Destroy a friendly minion in the shop | `Effect::DestroyChosenDiscover`, `GiveRebornDestroy`, `SpellTarget::Butchering` | `Game::destroy_in_shop` -> `fight::shop_destroy` | Maw Caster |
+| Destroy a friendly minion in the shop | `Effect::DestroyChosenDiscover`, `DestroyChosenGetCopy`, `GiveRebornDestroy`, `SpellTarget::Butchering` | `Game::destroy_in_shop` -> `fight::shop_destroy` | Maw Caster |
 | Player bonus "wherever they are" | `undead_bonus = [a, h]` effect, `on_cast_spell = { undead_bonus }`, `buff_per_kind_death` | `Game::add_undead_bonus`, `add_knight_deaths`, `Player::make_card`, `Side::summon` | Nerubian Deathswarmer |
 | Activate (N) | `activate = { cost, effect }` | `Action::Activate` in `apply`; legality in `is_legal` (needs_* checks on `Effect`) | Suspicious Prisonguard |
 | Golden played from hand | `buff_per_golden_played`, `after_discover` scaling | `Action::Play` -> `add_golden_played`, `Player.golden_played` | Maritime Extortionist |
@@ -111,7 +111,9 @@ exactly one legal target and drops the effect when there is none.
 | Get a random pool minion (generated) | `random_minion`, Highkeeper Ra (`random_tier_minion`) | `CardDb::random_pool_minion`, `random_tier_minion` |
 | Get a pool minion that takes a copy | Discover (`DiscoverRequest`), Silent Deliverer (`draw_golden`) | pool copies come out of `Game.pool`, go back on sell |
 | Discover | Rodeo Performer (spell), Patient Scout (minion by tier), `discover_tier7_minion` | queue + `maybe_start_discover`; unpicked minions go back |
-| Tier 7 draw | Greedy Conniver | `give_tier7_minion`, `discover_tier7_minion` |
+| Tier 7 draw | Greedy Conniver, Hallowed Ritual (`discover = "tier_7_minion"`) | `give_tier7_minion`, `discover_tier7_minion` |
+| Tier 7 spell | Sacred Gift, Sharing is Caring, Menagerie Tableware | in `spells` like any pool spell, but every spell draw (`random_spell`, `random_spell_up_to`, `random_tier_spell`, `random_spell_of_cost`) caps at `MAX_TIER`, so none is ever offered |
+| Start of Combat spell | Brood of Nozdormu, Upper Hand, Sharing is Caring | a `Player` count passed in `Counters`, read in `run_start_of_combat`, cleared after the fight |
 | Golden: doubles numbers | any card, `mul` in `run_effect` | "twice" (fixed count, max over copies): Brann/Balinda/Proud Privateer. "An extra time" (stacks): Titus |
 | Golden count differs from x2 | golden text says "twice" vs doubled stats | read the golden card; `golden_doubles_count` for summons, `golden_stats` for stats |
 | Make a minion golden on the board | Elite Navigator (`make_golden_max_tier`) | no reward, not counted as played; `golden_up` |
@@ -167,6 +169,10 @@ exactly one legal target and drops the effect when there is none.
    (Volumizers). A new group needs the same handling in `draw_filtered`.
 9. `record.rs`: a new `Minion` field needs an `Option` in `FileMinion` plus the
    to/from conversions (done for `no_reward`).
+9a. Quilboar run, known data: Felboar is Quilboar and Demon in the game (store
+   `tribes = ["demon", "quilboar"]` once Quilboar exists; it is one tribe until then).
+   Firescale Hoarder and Ominous Seer are also Naga in the game; irrelevant while
+   Naga is out, edit them in place if Naga is ever built.
 10. Sandbox: `--tribe X` rigs the Tavern and every "any minion" draw
     (`Card::rig_ok`); new draw helpers must take `rig` (`draw_rigged`, `pick_rigged`,
     `draw_golden`). Update the usage string in `bgsandbox/src/main.rs`.
@@ -215,6 +221,10 @@ for parse-error tests.
 
 ## 5. Gotchas
 
+- **Satellite.** The token is 4/4 (Glambot's); an attacher passes its own stats
+  (`stats = [..]` on `on_play_mech` and `on_cast_spell_on_mech`, Spark Snapper 2/3).
+- **Spell tiers.** A spell is tier 1 to 7, or 0 for a generated one (Lockbox). Tier 7
+  spells are in the pool list but no draw reaches them (see the hook index).
 - **Fuzz never sees tier 7.** The Tavern stops at tier 6 (`MAX_TIER`), so tier 7 cards
   only appear through a card that names tier 7. The fuzzer reaches them only through
   such cards; test tier 7 paths directly.
@@ -293,10 +303,10 @@ for parse-error tests.
 - **Elemental plays.** In `Action::Play`, right after the board insert:
   `Player.elementals_played_turn` (Conflagration, reset in `start_turn`) and
   `give_play_shield`, then, before the Battlecry, `fire_event(ElementalsPlayed)`
-  (Unbound Tempest) and Ultraviolet Ascendant's `after_play_tribe` with
-  `exclude_played = true`. Neither counts the minion being played (DESIGN.md);
-  the older Pirate and Demon `after_play_tribe` cards still do. Only minions
-  played from hand count.
+  (Unbound Tempest) and every `after_play_tribe` card (Wrath Weaver, Insatiable
+  Ur'zul, Ultraviolet Ascendant). None counts the minion being played (DESIGN.md);
+  `fire_after_play_tribe` skips its board slot, and they all run before the
+  Battlecry. Only minions played from hand count.
 - **Triples with a stand-in.** `check_triple_tracking` builds a `TriplePlan`:
   three plain copies first, else two of a card plus one stand-in, else one
   plus two. Each source minion's buffs are measured against its own card,
@@ -338,7 +348,9 @@ for parse-error tests.
   appear on its left), the `SideOutcome` and the minions that died (their pool copies go
   back to the pool in `Game::destroy_in_shop`). `Side.outside` makes Plaguerunner give
   +4 instead of +2. Avenge does not count shop deaths (`Side.count_avenge`).
-  Maw Caster (`TargetKind::DestroyDiscover`), Dead Bellringer
+  Maw Caster (`TargetKind::DestroyDiscover`), Disguised Graverobber
+  (`TargetKind::DestroyCopy`: destroy, then `give_generated` the plain card, golden
+  gives two, lost when the hand is full), Dead Bellringer
   (`TargetKind::RebornDestroy`), Butchering (`SpellTarget::Butchering`) and Tomb
   Turning's death all use it.
 - **Tomb Turning.** The Discovered minion has `Minion.doomed`

@@ -175,6 +175,9 @@ fn counters_line(g: &Game) -> String {
     if pl.upper_hand > 0 {
         parts.push(format!("Upper Hand {}", pl.upper_hand));
     }
+    if pl.sharing_is_caring > 0 {
+        parts.push(format!("Sharing is Caring {}", pl.sharing_is_caring));
+    }
     if pl.gold_next_turn > 0 {
         parts.push(format!("Gold next turn +{}", pl.gold_next_turn));
     }
@@ -326,6 +329,9 @@ fn describe_target(pt: &PendingTarget) -> String {
         TargetKind::Consume { .. } => "it consumes Tavern minions".into(),
         TargetKind::DestroyDiscover { tribe, .. } => {
             format!("destroy a {}, then Discover one", tribe_name(tribe))
+        }
+        TargetKind::DestroyCopy { tribe, copies } => {
+            format!("destroy a {}, then get {copies} plain copies of it", tribe_name(tribe))
         }
         TargetKind::RebornDestroy { tribe, attack, health } => {
             format!("a {} gets Reborn and is destroyed, you gain +{attack}/+{health}", tribe_name(tribe))

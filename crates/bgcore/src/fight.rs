@@ -39,6 +39,8 @@ pub struct Counters {
     pub boon_of_beetles: u8,
     pub brood_of_nozdormu: u8,
     pub upper_hand: u8,
+    /// Pending Sharing is Caring Start of Combat triggers.
+    pub sharing_is_caring: u8,
     /// The player's Tavern spell bonus, for spells cast inside the fight
     /// (Runic Arcanist, Crimson Vindicator).
     pub spell_attack: i32,
@@ -1778,6 +1780,19 @@ fn run_start_of_combat(
             }
         }
     }
+    // Sharing is Caring: the left-most minion gains the stats of the
+    // nearest enemy minion (its left-most), as they are now. Both sides read
+    // before either gains.
+    let shared: [(i32, i32); 2] = std::array::from_fn(|s| {
+        sides[s ^ 1].ms.first().map_or((0, 0), |f| (f.m.attack, f.m.health))
+    });
+    for s in 0..2 {
+        let n = sides[s].counters.sharing_is_caring as i32;
+        if let Some(f) = sides[s].ms.first_mut() {
+            f.m.attack += shared[s].0 * n;
+            f.m.health += shared[s].1 * n;
+        }
+    }
     let mut soc: [ArrayVec<u16, BOARD>; 2] = [ArrayVec::new(), ArrayVec::new()];
     for s in 0..2 {
         for f in &sides[s].ms {
@@ -2394,7 +2409,13 @@ pub fn tavern_attack(
     rng: &mut Rng,
 ) -> TavernAttack {
     let mut uid = 0u16;
-    let counters = Counters { boon_of_beetles: 0, brood_of_nozdormu: 0, upper_hand: 0, ..counters };
+    let counters = Counters {
+        boon_of_beetles: 0,
+        brood_of_nozdormu: 0,
+        upper_hand: 0,
+        sharing_is_caring: 0,
+        ..counters
+    };
     let mut sides = [
         Side::new(db, board, &[], counters, &mut uid),
         Side::new(db, &[target], &[], Counters::default(), &mut uid),
@@ -2451,6 +2472,7 @@ pub fn shop_destroy(
         boon_of_beetles: 0,
         brood_of_nozdormu: 0,
         upper_hand: 0,
+        sharing_is_caring: 0,
         ..counters
     };
     let mut side = Side::new(db, board, &[], counters, &mut uid);

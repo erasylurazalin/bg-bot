@@ -79,6 +79,9 @@ pub enum TargetKind {
     /// Destroy the chosen friendly minion of a tribe (not this one), then
     /// Discover `discover` minions of that tribe (Maw Caster).
     DestroyDiscover { tribe: Tribe, discover: u8 },
+    /// Destroy the chosen friendly minion of a tribe (not this one), then
+    /// get `copies` plain copies of it (Disguised Graverobber).
+    DestroyCopy { tribe: Tribe, copies: u8 },
     /// Give the chosen friendly minion of a tribe, not a copy of this card,
     /// Reborn and destroy it; this minion gains the stats (Dead Bellringer).
     RebornDestroy { tribe: Tribe, attack: i32, health: i32 },
@@ -213,6 +216,7 @@ pub struct Player {
     pub boon_of_beetles: u8,
     pub brood_of_nozdormu: u8,
     pub upper_hand: u8,
+    pub sharing_is_caring: u8,
     pub volumizer_bonus: (i32, i32),
     pub beetle_bonus: (i32, i32),
     /// How many times each "improve your future ..." effect has triggered
@@ -307,6 +311,7 @@ impl Player {
             boon_of_beetles: 0,
             brood_of_nozdormu: 0,
             upper_hand: 0,
+            sharing_is_caring: 0,
             volumizer_bonus: (0, 0),
             beetle_bonus: (0, 0),
             improve: [0; N_COUNTERS],
@@ -579,6 +584,7 @@ impl Player {
             boon_of_beetles: self.boon_of_beetles,
             brood_of_nozdormu: self.brood_of_nozdormu,
             upper_hand: self.upper_hand,
+            sharing_is_caring: self.sharing_is_caring,
             spell_attack,
             spell_health,
             undead_attack: self.undead_bonus.0,
@@ -1207,7 +1213,7 @@ impl Game {
                 let c = self.data.cards.get(b[s].card);
                 !b[s].golden && c.tier <= max_tier && c.is(tribe)
             }
-            TargetKind::DestroyDiscover { tribe, .. } => {
+            TargetKind::DestroyDiscover { tribe, .. } | TargetKind::DestroyCopy { tribe, .. } => {
                 self.data.cards.get(b[s].card).tribes.has(tribe)
             }
             TargetKind::RebornDestroy { tribe, .. } => {
@@ -1359,7 +1365,7 @@ impl Game {
                             self.players[p].elementals_played_turn.saturating_add(1);
                         self.give_play_shield(p, pos);
                     }
-                    self.fire_after_play_tribe(p, t, true, pos);
+                    self.fire_after_play_tribe(p, t, pos);
                     if t.has(Tribe::Elemental) {
                         self.fire_event_skipping(p, EventKind::ElementalsPlayed, 1, Some(pos));
                     }
@@ -1378,7 +1384,6 @@ impl Game {
                     if t.has(Tribe::Murloc) {
                         self.trigger_in_hand_on_play(p, Tribe::Murloc);
                     }
-                    self.fire_after_play_tribe(p, t, false, pos);
                 }
                 if m.golden {
                     // A Golden minion played from hand counts for Maritime
@@ -1911,14 +1916,15 @@ impl Game {
                     buff(&mut self.players[p].board[target_pos], attack * mul, health * mul);
                 }
                 if from_play
-                    && let Some(OnPlayMech::MagnetizeSatellite { card: sat_id }) = c.on_play_mech
+                    && let Some(OnPlayMech::MagnetizeSatellite { card: sat_id, attack: sa, health: sh }) =
+                        c.on_play_mech
                 {
                     let imp = self.players[p].board[i].improvements;
                     self.players[p].board[i].improvements = imp.saturating_add(1);
                     let stacks = (1 + imp as i32) * (if golden { 2 } else { 1 });
                     let mut sat = self.data.cards.make(sat_id, false);
-                    sat.attack *= stacks;
-                    sat.health *= stacks;
+                    sat.attack = sa * stacks;
+                    sat.health = sh * stacks;
                     self.magnetize_to(p, target_pos, sat, false);
                 }
             }
@@ -2084,16 +2090,15 @@ impl Game {
         }
     }
 
-    /// A minion of `tribes` was just played: every minion with an "after you
-    /// play a minion of this tribe" trigger runs its effects (Wrath Weaver,
-    /// Insatiable Ur'zul). The one just played counts too, except for cards
-    /// with `exclude_played`, which run `early` (right after the played minion
-    /// lands in board slot `played`) and skip it.
+    /// A minion of `tribes` was just played into board slot `played`: every
+    /// other minion with an "after you play a minion of this tribe" trigger
+    /// runs its effects (Wrath Weaver, Insatiable Ur'zul, Ultraviolet
+    /// Ascendant). The one just played never counts for itself. This runs
+    /// right after it lands, before its Battlecry.
     fn fire_after_play_tribe(
         &mut self,
         p: usize,
         tribes: crate::cards::Tribes,
-        early: bool,
         played: usize,
     ) {
         let mut pos = 0;
@@ -2102,9 +2107,7 @@ impl Game {
             for (card, golden) in m.parts() {
                 let n = match self.data.cards.get(card).after_play_tribe {
                     Some(ref t)
-                        if tribes.has(t.tribe)
-                            && t.exclude_played == early
-                            && !(early && pos == played) =>
+                        if tribes.has(t.tribe) && pos != played =>
                     {
                         t.effects.len()
                     }
@@ -2434,6 +2437,7 @@ impl Game {
                     DiscoverKind::MyTierSpell => DiscoverRequest::SpellTier(tier),
                     DiscoverKind::DeathrattleMinion => DiscoverRequest::DeathrattleMinion(tier),
                     DiscoverKind::BattlecryMinion => DiscoverRequest::BattlecryMinion(tier),
+                    DiscoverKind::Tier7Minion => DiscoverRequest::MinionTier(crate::CARD_MAX_TIER),
                 };
                 let _ = self.players[p].discover_queue.try_push(req);
             }
@@ -2488,6 +2492,23 @@ impl Game {
                     m.golden = true;
                     m.attack += ga - base.attack;
                     m.health += gh - base.health;
+                }
+            }
+            SpellEffect::SharingIsCaring => {
+                self.players[p].sharing_is_caring =
+                    self.players[p].sharing_is_caring.saturating_add(1);
+            }
+            SpellEffect::MenagerieTableware { attack, health } => {
+                let cards = &self.data.cards;
+                let types = Tribe::EVERY
+                    .iter()
+                    .filter(|t| self.players[p].board.iter().any(|m| cards.get(m.card).tribes.has(**t)))
+                    .count();
+                let times = 1 + types;
+                for _ in 0..times {
+                    for m in &mut self.players[p].board {
+                        buff(m, attack + da, health + dh);
+                    }
                 }
             }
             SpellEffect::UpperHand => {
@@ -3239,6 +3260,17 @@ impl Game {
                 };
                 self.offer_target(p, pt);
             }
+            Effect::DestroyChosenGetCopy { tribe, copies } => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::DestroyCopy {
+                        tribe,
+                        copies: copies.saturating_mul(mul as u8).saturating_mul(runs),
+                    },
+                    runs: 1,
+                };
+                self.offer_target(p, pt);
+            }
             Effect::GiveRebornDestroy { tribe, attack, health } => {
                 let pt = PendingTarget {
                     source: Some(*pos as u8),
@@ -3545,7 +3577,9 @@ impl Game {
                         SpellTarget::Buff { attack, health, keyword, times, if_win_next_turn_buff } => {
                             let m = &mut self.players[p].shop[target];
                             for _ in 0..times {
-                                buff(m, attack + da, health + dh);
+                                // A keyword-only spell (Sacred Gift) gets no spell bonus.
+                                let (ba, bh) = if attack == 0 && health == 0 { (0, 0) } else { (attack + da, health + dh) };
+                                buff(m, ba, bh);
                             }
                             if keyword != 0 {
                                 m.keywords.set(keyword);
@@ -3993,6 +4027,13 @@ impl Game {
                         .try_push(DiscoverRequest::TribeMinion(tribe));
                 }
             }
+            TargetKind::DestroyCopy { copies, .. } => {
+                let card = self.players[p].board[s].card;
+                self.destroy_in_shop(p, &[s], None);
+                for _ in 0..copies {
+                    self.give_generated(p, card);
+                }
+            }
             TargetKind::RebornDestroy { attack, health, .. } => {
                 let host = pt.source.map(|x| x as usize);
                 self.players[p].board[s].keywords.set(Keywords::REBORN);
@@ -4066,7 +4107,9 @@ impl Game {
                         } => {
                             let m = &mut self.players[p].board[target_pos];
                             for _ in 0..times {
-                                buff(m, attack + da, health + dh);
+                                // A keyword-only spell (Sacred Gift) gets no spell bonus.
+                                let (ba, bh) = if attack == 0 && health == 0 { (0, 0) } else { (attack + da, health + dh) };
+                                buff(m, ba, bh);
                             }
                             if keyword != 0 {
                                 m.keywords.set(keyword);
@@ -5029,6 +5072,7 @@ impl Game {
                 self.players[p].boon_of_beetles.saturating_sub(so.boon_of_beetles_used);
             self.players[p].brood_of_nozdormu = 0;
             self.players[p].upper_hand = 0;
+            self.players[p].sharing_is_caring = 0;
         }
         for &c in so.cards_gained() {
             self.give_generated(p, c);
