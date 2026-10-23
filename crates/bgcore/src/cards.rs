@@ -10,9 +10,11 @@ use crate::BOARD;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Counter {
     TastyLobster,
+    /// Ballers sold this game, shared by Fire, Snow and Air Baller.
+    Baller,
 }
 
-pub const N_COUNTERS: usize = 1;
+pub const N_COUNTERS: usize = 2;
 
 impl Counter {
     pub fn index(self) -> usize {
@@ -23,6 +25,7 @@ impl Counter {
 fn counter(name: &str) -> Result<Counter, String> {
     match name {
         "tasty_lobster" => Ok(Counter::TastyLobster),
+        "baller" => Ok(Counter::Baller),
         other => Err(format!("unknown counter {other:?}")),
     }
 }
@@ -35,6 +38,7 @@ pub enum Tribe {
     Murloc,
     Demon,
     Pirate,
+    Elemental,
 }
 
 impl Tribe {
@@ -42,8 +46,15 @@ impl Tribe {
     /// run that redoes the observation for every tribe). Rules use `EVERY`.
     pub const ALL: [Tribe; 5] = [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon];
     /// Every tribe a card can have.
-    pub const EVERY: [Tribe; 6] =
-        [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon, Tribe::Pirate];
+    pub const EVERY: [Tribe; 7] = [
+        Tribe::Beast,
+        Tribe::Mech,
+        Tribe::Dragon,
+        Tribe::Murloc,
+        Tribe::Demon,
+        Tribe::Pirate,
+        Tribe::Elemental,
+    ];
 
     fn bit(self) -> u8 {
         1 << self as u8
@@ -58,7 +69,7 @@ pub struct Tribes(u8);
 
 impl Tribes {
     pub const NONE: Tribes = Tribes(0);
-    pub const ALL: Tribes = Tribes(0b111111);
+    pub const ALL: Tribes = Tribes(0b1111111);
 
     pub fn of(t: Tribe) -> Tribes {
         Tribes(t.bit())
@@ -332,6 +343,26 @@ pub enum Effect {
     /// Give the other friendly minions of a tribe +attack/+health, times one
     /// plus the Golden minions the player played this game (Hooktusk).
     BuffOthersPerGolden { tribe: Option<Tribe>, attack: i32, health: i32 },
+    /// Add to the player's "after the Tavern is Refreshed this game" amount
+    /// (Waveling, En-Djinn Blazer, Easterly Winds). Every explicit Refresh
+    /// gives the whole amount to one random Tavern minion. Golden doubles it.
+    RefreshBuff { attack: i32, health: i32 },
+    /// Gain free Refreshes, which are used before Gold and carry over turns
+    /// (Refreshing Anomaly). Golden doubles it.
+    FreeRefreshes(u8),
+    /// Give friendly minions stats multiplied by one plus the player's count
+    /// of `counter`, then raise the count (the Ballers: "Improve your future
+    /// Ballers"). Golden doubles the stats, not the count.
+    BuffAllImproving { attack: i32, health: i32, counter: Counter },
+    /// Activate: this minion gains the stats of the next minion its owner
+    /// buys this turn (Living Prison). Armed in `improvements`.
+    ArmNextBuy,
+    /// Gain the stats of the highest-Health minion in the Tavern (Unbound
+    /// Tempest). Golden gains double.
+    GainHighestTavernStats,
+    /// Give the other friendly minions of a tribe the stats, times one plus
+    /// this minion's `improvements` (Ultraviolet Ascendant). Golden doubles.
+    BuffOthersPerImprovement { tribe: Option<Tribe>, attack: i32, health: i32 },
 }
 
 impl Effect {
@@ -414,6 +445,8 @@ impl Effect {
             | Effect::GetLockbox { .. }
             | Effect::GetRandomBounty
             | Effect::BuffAllKeepGolden { .. }
+            | Effect::RefreshBuff { .. }
+            | Effect::BuffOthersPerImprovement { .. }
             | Effect::DamageTargetAndNeighbor => true,
             _ => false,
         }
@@ -443,6 +476,8 @@ pub enum EventKind {
     HeroDamage,
     MinionsSold,
     CardsBought,
+    /// Elementals played from hand (Unbound Tempest).
+    ElementalsPlayed,
 }
 
 /// "After N events, do the effect (N left!)". The count lives in the
@@ -515,6 +550,12 @@ pub enum SpellTarget {
     /// Sell the chosen friendly minion and give its stats to a random other
     /// friendly minion (Channel the Devourer).
     Devourer,
+    /// Give the chosen friendly minion of a tribe half (rounded up) the stats
+    /// of the highest-Health minion in the Tavern (Arcane Absorption).
+    HalfOfHighestTavern { tribe: Tribe },
+    /// Give a minion (board or Tavern) stats, plus `per` for each minion of
+    /// `tribe` its owner played this turn (Conflagration).
+    BuffPerTribePlayed { tribe: Tribe, attack: i32, health: i32, per: (i32, i32) },
 }
 
 impl SpellTarget {
@@ -533,6 +574,7 @@ impl SpellTarget {
                 | SpellTarget::RobustEvolution
                 | SpellTarget::TavernBuffType { .. }
                 | SpellTarget::RefreshWithType
+                | SpellTarget::BuffPerTribePlayed { .. }
         )
     }
 
@@ -599,6 +641,11 @@ pub enum SpellEffect {
     /// Get a random minion of the most common type on the board (Friendly
     /// Bounty).
     FriendlyBounty,
+    /// Add to the "after the Tavern is Refreshed this game" amount (Easterly
+    /// Winds).
+    RefreshBuff { attack: i32, health: i32 },
+    /// Get one of each of two cards (Temperature Shift).
+    GetTwo { a: CardId, b: CardId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -655,6 +702,9 @@ pub enum Deathrattle {
 /// Every effect runs for it; a golden one doubles each.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AfterPlayTribe {
+    /// The card being played never counts for itself, and this runs right
+    /// after it lands, before its Battlecry (Ultraviolet Ascendant).
+    pub exclude_played: bool,
     pub tribe: Tribe,
     pub effects: Vec<Effect>,
 }
@@ -820,6 +870,17 @@ pub enum Aura {
     ProudPrivateer,
 }
 
+/// "After you buy a minion, give it +attack/+health and multiply its stats,
+/// once per turn" (Stone Age Slab). A golden minion multiplies by
+/// `golden_multiply`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AfterBuy {
+    pub attack: i32,
+    pub health: i32,
+    pub multiply: i32,
+    pub golden_multiply: i32,
+}
+
 /// "After you summon a minion in combat, give it this minion's current
 /// Attack and maximum Health, `times` times per combat" (Stalwart Kodo).
 /// A golden minion gives double.
@@ -932,6 +993,18 @@ pub struct Card {
     pub after_discover: Option<Effect>,
     /// One of the five Bounties, which share one slot of the spell draw.
     pub is_bounty: bool,
+    /// After this attacks and kills a minion, it deals the excess damage to an
+    /// adjacent enemy, both when golden (Wildfire Elemental).
+    pub overkill: bool,
+    /// Can stand in for any minion of this tribe in a triple (Elemental of
+    /// Surprise).
+    pub triple_wildcard: Option<Tribe>,
+    /// Whenever its owner plays a minion of this tribe from hand, it gets
+    /// Divine Shield until the next shop phase, for good when this is golden
+    /// (Ichoron the Protector).
+    pub play_shield: Option<Tribe>,
+    /// After its owner buys a minion (Stone Age Slab).
+    pub after_buy: Option<AfterBuy>,
 }
 
 impl Card {
@@ -958,6 +1031,8 @@ impl Card {
                 SpellTarget::Buff { .. }
                     | SpellTarget::BuffSameTribe { .. }
                     | SpellTarget::BuffPerBonusKeyword { .. }
+                    | SpellTarget::BuffPerTribePlayed { .. }
+                    | SpellTarget::HalfOfHighestTavern { .. }
             )
         )
             || matches!(
@@ -1028,6 +1103,8 @@ impl Card {
             || self.health_refreshes > 0
             || self.on_sell.is_some()
             || self.after_discover.is_some()
+            || self.play_shield.is_some()
+            || self.after_buy.is_some()
             || self.aura.is_some()
             || self.after_summon_give_stats.is_some()
             || self.spell_buff.is_some()
@@ -1144,6 +1221,21 @@ struct RawCard {
     cleave: bool,
     buff_per_golden_played: Option<[i32; 2]>,
     after_discover: Option<RawEffect>,
+    #[serde(default)]
+    overkill: bool,
+    /// Tribe a triple wildcard stands in for.
+    triple_wildcard: Option<String>,
+    /// Tribe whose members get Divine Shield when played.
+    play_shield: Option<String>,
+    after_buy: Option<RawAfterBuy>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAfterBuy {
+    buff: [i32; 2],
+    multiply: i32,
+    golden_multiply: i32,
 }
 
 #[derive(Deserialize)]
@@ -1181,6 +1273,8 @@ struct RawSpell {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawAfterPlayTribe {
+    #[serde(default)]
+    exclude_played: bool,
     tribe: String,
     effects: Vec<RawEffect>,
 }
@@ -1257,6 +1351,16 @@ struct RawSpellEffect {
     buff_leftmost: Option<[i32; 2]>,
     #[serde(default)]
     friendly_bounty: bool,
+    /// Add to the "after the Tavern is Refreshed" amount.
+    refresh_buff: Option<[i32; 2]>,
+    /// Get one of each of two named cards.
+    get_pair: Option<[String; 2]>,
+    /// Give the chosen friendly minion (of `tribe`) half the stats of the
+    /// highest-Health Tavern minion.
+    #[serde(default)]
+    half_of_highest: bool,
+    /// Buff by `buff`, plus this per minion of `tribe` played this turn.
+    per_played_this_turn: Option<[i32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -1404,6 +1508,20 @@ struct RawEffect {
     /// Scale a buff by one plus the Golden minions played this game.
     #[serde(default)]
     per_golden_played: bool,
+    /// Add to the "after the Tavern is Refreshed this game" amount.
+    refresh_buff: Option<[i32; 2]>,
+    free_refreshes: Option<u8>,
+    /// Multiply a buff by one plus the named counter, then raise it.
+    #[serde(default)]
+    improving_counter: Option<String>,
+    /// Arm this minion to gain the stats of the next minion bought.
+    #[serde(default)]
+    arm_next_buy: bool,
+    #[serde(default)]
+    gain_highest_tavern_stats: bool,
+    /// Multiply a buff by one plus this minion's `improvements`.
+    #[serde(default)]
+    per_improvement: bool,
 }
 
 #[derive(Deserialize)]
@@ -1592,6 +1710,7 @@ fn tribe(s: &str) -> Result<Tribe, String> {
         "murloc" => Ok(Tribe::Murloc),
         "demon" => Ok(Tribe::Demon),
         "pirate" => Ok(Tribe::Pirate),
+        "elemental" => Ok(Tribe::Elemental),
         _ => Err(format!("unknown tribe {s:?}")),
     }
 }
@@ -1628,6 +1747,7 @@ fn parse_event(s: &str) -> Result<EventKind, String> {
         "hero_damage" => Ok(EventKind::HeroDamage),
         "minions_sold" => Ok(EventKind::MinionsSold),
         "cards_bought" => Ok(EventKind::CardsBought),
+        "elementals_played" => Ok(EventKind::ElementalsPlayed),
         other => Err(format!("unknown event {other:?}")),
     }
 }
@@ -1664,6 +1784,23 @@ fn parse_spell_effect(
     }
     match e.target.as_deref() {
         Some("chosen") => {
+            if e.half_of_highest {
+                let t = e.tribe.as_deref().ok_or("half_of_highest needs a tribe")?;
+                return Ok((Some(SpellTarget::HalfOfHighestTavern { tribe: tribe(t)? }), None));
+            }
+            if let Some(per) = e.per_played_this_turn {
+                let [attack, health] = e.buff.ok_or("per_played_this_turn needs buff")?;
+                let t = e.tribe.as_deref().ok_or("per_played_this_turn needs a tribe")?;
+                return Ok((
+                    Some(SpellTarget::BuffPerTribePlayed {
+                        tribe: tribe(t)?,
+                        attack,
+                        health,
+                        per: (per[0], per[1]),
+                    }),
+                    None,
+                ));
+            }
             if let Some(how) = &e.consume {
                 let pick = match how.as_str() {
                     "chosen" => ConsumePick::Chosen,
@@ -1783,6 +1920,8 @@ fn parse_spell_effect(
                 SpellEffect::DiscoverLockedMinion
             } else if e.saloon_finest {
                 SpellEffect::SaloonFinest
+            } else if let Some([attack, health]) = e.refresh_buff {
+                SpellEffect::RefreshBuff { attack, health }
             } else if let Some(n) = e.lockbox {
                 SpellEffect::Lockbox(n)
             } else if let Some([attack, health]) = e.buff_leftmost {
@@ -1889,7 +2028,21 @@ impl CardDb {
 
         let parse_effect = |b: &RawEffect| -> Result<Effect, String> {
             let t = b.tribe.as_deref().map(tribe).transpose()?;
-            Ok(if let Some(per_gold) = b.per_gold_spent {
+            Ok(if let Some([attack, health]) = b.refresh_buff {
+                Effect::RefreshBuff { attack, health }
+            } else if let Some(n) = b.free_refreshes {
+                Effect::FreeRefreshes(n)
+            } else if let Some(name) = &b.improving_counter {
+                let [attack, health] = b.buff.ok_or("improving_counter needs buff")?;
+                Effect::BuffAllImproving { attack, health, counter: counter(name)? }
+            } else if b.arm_next_buy {
+                Effect::ArmNextBuy
+            } else if b.gain_highest_tavern_stats {
+                Effect::GainHighestTavernStats
+            } else if b.per_improvement {
+                let [attack, health] = b.buff.ok_or("per_improvement needs buff")?;
+                Effect::BuffOthersPerImprovement { tribe: t, attack, health }
+            } else if let Some(per_gold) = b.per_gold_spent {
                 let [attack, health] = b.buff.ok_or("per_gold_spent needs buff")?;
                 Effect::BuffChosenPerGold {
                     tribe: t,
@@ -2180,7 +2333,11 @@ impl CardDb {
                         }
                         effects.push(effect);
                     }
-                    Some(AfterPlayTribe { tribe: tribe(&p.tribe).map_err(&err)?, effects })
+                    Some(AfterPlayTribe {
+                        exclude_played: p.exclude_played,
+                        tribe: tribe(&p.tribe).map_err(&err)?,
+                        effects,
+                    })
                 }
             };
 
@@ -2546,6 +2703,20 @@ impl CardDb {
                 buff_per_golden_played: c.buff_per_golden_played.map(|[a, h]| (a, h)),
                 after_discover,
                 is_bounty: false,
+                overkill: c.overkill,
+                triple_wildcard: c
+                    .triple_wildcard
+                    .as_deref()
+                    .map(tribe)
+                    .transpose()
+                    .map_err(&err)?,
+                play_shield: c.play_shield.as_deref().map(tribe).transpose().map_err(&err)?,
+                after_buy: c.after_buy.as_ref().map(|a| AfterBuy {
+                    attack: a.buff[0],
+                    health: a.buff[1],
+                    multiply: a.multiply,
+                    golden_multiply: a.golden_multiply,
+                }),
             });
         }
 
@@ -2560,6 +2731,14 @@ impl CardDb {
                 Some(e) if e.get.is_some() => {
                     let card = generated_id(e.get.as_deref().unwrap()).map_err(&err)?;
                     (None, Some(SpellEffect::GetCard { card, count: e.count.unwrap_or(1) }))
+                }
+                // Two cards that may be pool minions (generated copies of
+                // them, with no pool copy): Temperature Shift.
+                Some(e) if e.get_pair.is_some() => {
+                    let [a, b] = e.get_pair.as_ref().unwrap();
+                    let a = minion_id(a).map_err(&err)?;
+                    let b = minion_id(b).map_err(&err)?;
+                    (None, Some(SpellEffect::GetTwo { a, b }))
                 }
                 Some(e) => parse_spell_effect(e).map_err(&err)?,
                 None => (None, None),
@@ -2652,6 +2831,10 @@ impl CardDb {
                 buff_per_golden_played: None,
                 after_discover: None,
                 is_bounty: sp.bounty,
+                overkill: false,
+                triple_wildcard: None,
+                play_shield: None,
+                after_buy: None,
             });
         }
 
@@ -2921,6 +3104,7 @@ impl CardDb {
             keywords: c.keywords,
             golden,
             no_reward: c.always_golden,
+            temp_shield: false,
             pool_copies: 0,
             winners_bread: 0,
             magnetizations: 0,

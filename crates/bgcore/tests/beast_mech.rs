@@ -115,7 +115,7 @@ fn a_lobster_the_hyena_summons_is_plain_and_a_dying_lobster_raises_the_count() {
     let db = db();
     // The improvement is to the Deathrattle, not to Lobster stats: even with a count of 3
     // the Lobster a Hyena summons is a plain 2/1.
-    let counters = [Counters { improve: [3], ..Default::default() }, Counters::default()];
+    let counters = [Counters { improve: [3, 0], ..Default::default() }, Counters::default()];
     let (_, log) = run(&db, &[mk(&db, "Hoarding Hyena", false)], &[wall(&db)], counters, 1);
     assert_eq!((log.summons[0].2.as_str(), log.summons[0].3, log.summons[0].4), ("Tasty Lobster", 2, 1));
     // a Lobster that dies raises the count: here one killed by a strong enemy
@@ -123,7 +123,7 @@ fn a_lobster_the_hyena_summons_is_plain_and_a_dying_lobster_raises_the_count() {
     killer.attack = 50;
     killer.health = 50;
     let out = bgcore::fight(&db, &[mk(&db, "Tasty Lobster", false)], &[killer], 500, &mut Rng::new(1));
-    assert_eq!(out.sides[0].improve_gain, [1]);
+    assert_eq!(out.sides[0].improve_gain, [1, 0]);
     assert_eq!(out.sides[0].deathrattles_triggered, 1);
 }
 
@@ -138,7 +138,7 @@ fn the_lobster_count_is_live_in_a_fight_and_carries_into_the_next_one() {
     killer.health = 50;
     let a = [mk(&db, "Tasty Lobster", false), mk(&db, "Tasty Lobster", false)];
     let out = bgcore::fight(&db, &a, &[killer], 500, &mut Rng::new(1));
-    assert_eq!(out.sides[0].improve_gain, [2]);
+    assert_eq!(out.sides[0].improve_gain, [2, 0]);
     assert_eq!(out.sides[0].deathrattles_triggered, 2);
 }
 
@@ -153,7 +153,7 @@ fn deathstrider_triggers_the_leftmost_deathrattle_after_a_rally_minion_attacks()
     // Lobster attacks (no Rally), then the Hyena attacks (Rally): Deathstrider triggers the
     // Lobster's Deathrattle, which raises the Lobster count and buffs a random Beast.
     let (out, log) = run(&db, &a, &[wall(&db)], [Counters::default(); 2], 2);
-    assert_eq!(out.sides[0].improve_gain, [1]);
+    assert_eq!(out.sides[0].improve_gain, [1, 0]);
     assert_eq!(out.sides[0].deathrattles_triggered, 1);
     assert_eq!(log.attacks.len(), 2);
 
@@ -168,7 +168,7 @@ fn deathstrider_triggers_the_leftmost_deathrattle_after_a_rally_minion_attacks()
         mk(&db, "Deathstrider", true),
     ];
     let (out, _) = run(&db, &a, &[wall(&db)], [Counters::default(); 2], 2);
-    assert_eq!(out.sides[0].improve_gain, [2]);
+    assert_eq!(out.sides[0].improve_gain, [2, 0]);
     assert_eq!(out.sides[0].deathrattles_triggered, 2);
 
     // it is the left-most Deathrattle: here the Vermin's, which summons a Beetle
@@ -181,7 +181,7 @@ fn deathstrider_triggers_the_leftmost_deathrattle_after_a_rally_minion_attacks()
     let (out, log) = run(&db, &a, &[wall(&db)], [Counters::default(); 2], 3);
     let names: Vec<&str> = log.summons.iter().map(|s| s.2.as_str()).collect();
     assert_eq!(names, ["Tasty Lobster", "Beetle"]);
-    assert_eq!(out.sides[0].improve_gain, [0]);
+    assert_eq!(out.sides[0].improve_gain, [0, 0]);
     // the Beetle stands right of the Vermin
     assert_eq!(log.summons[1].1, 1);
 
@@ -568,7 +568,7 @@ fn tasty_lobster_improvements_and_falling_sky_golem_reach_the_player() {
     }
     let pl = &g.players[0];
     // the Lobster died once: the next Lobster Deathrattle is stronger, and the Golem counts it
-    assert_eq!(pl.improve, [1]);
+    assert_eq!(pl.improve, [1, 0]);
     assert_eq!(pl.deathrattles_triggered, 1);
     let golem = pl.board.iter().find(|m| name(&g, m) == "Falling Sky Golem").unwrap();
     assert_eq!(stats(golem), (4 + 4, 2 + 2));
@@ -605,7 +605,7 @@ fn rally_and_attack_triggers_only_take_effects_a_fight_can_run() {
         let toml = format!("{}\n[[token]]\nname = \"B\"\ntier = 1\ntribe = \"beast\"\nstats = [0, 1]\n", base(bad));
         assert!(CardDb::from_toml(&toml).is_err(), "{bad} should be refused");
     }
-    let bad_tribe = base("whenever_friendly_attack = { attacker_tribe = \"elemental\", effect = { buff = [1, 1], target = \"all\" } }");
+    let bad_tribe = base("whenever_friendly_attack = { attacker_tribe = \"quilboar\", effect = { buff = [1, 1], target = \"all\" } }");
     assert!(CardDb::from_toml(&bad_tribe).unwrap_err().contains("unknown tribe"));
 }
 

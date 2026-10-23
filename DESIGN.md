@@ -619,6 +619,93 @@ anything that summons from hand can summon it.
 Bounty cast is a second spell for every trigger and every "spells cast"
 counter.
 
+**Halves round up.** Any "half" in card text rounds up (half of 5 is 3).
+
+**Elementals (2026-10-23).**
+- **Ballers** share one player count across Fire, Snow and Air Baller:
+  every Baller sold improves every future Baller's sell effect by one
+  step. A step is +1 Attack for Fire, +1 Health for Snow, +2/+2 for Air;
+  a golden Baller's step is double (+2, +2, +4/+4).
+- **"After the Tavern is Refreshed this game"** (Waveling, En-Djinn Blazer,
+  Easterly Winds) only fires on explicit Refreshes, like the Fodder. All
+  of them add into one player-level amount, and each Refresh gives that
+  whole amount to one random Tavern minion: two dead Wavelings give one
+  minion +8/+8, never +4/+4 to two minions.
+- **Ichoron** shields Elementals played from hand only. The shield goes at
+  the start of the next shop phase, used or not (golden: it stays).
+- **Arcane Absorption** can only be cast on a friendly Elemental, so it's
+  unplayable with none on the board. With an empty Tavern it can still be
+  cast, gives nothing, and still counts as a spell cast.
+- **Free Refreshes** are a player count that adds up and carries over
+  turns.
+- **Every Tavern spell counts** for "whenever you cast a Tavern spell"
+  (Living Azerite) and spell counters: generated ones, spells cast by an
+  effect (Air Revenant's Easterly Winds), Bounties, and each extra cast
+  (Proud Privateer, Balinda).
+- **Elemental of Surprise** stands in for any Elemental in a triple: two
+  copies of X plus a Surprise, or two Surprises plus X, make a golden X.
+  The Surprise's Divine Shield and buffs carry into the golden X. A golden
+  Surprise can still triple with two copies of X into a golden X, the only
+  card that triples while already golden.
+- **"After you play an Elemental"** never counts the card being played
+  (Ultraviolet Ascendant, Unbound Tempest).
+- **Stone Age Slab before Living Prison:** on the same buy, Slabs buff the
+  minion first, then an armed Prison gains its stats (buffs included).
+- **Arcane Absorption** takes a random minion on a Health tie. Spell power
+  (the Tavern spell bonus) adds on top, so +1/+1 gives +1/+1 more.
+- **Ultraviolet Ascendant** improves only while it's on your board.
+- **Unbound Tempest** fires every 4 Elementals played; the count carries
+  over turns.
+- **Stone Age Slab:** +20/+20, then double (golden: triple), once per turn
+  per Slab. Several Slabs all fire on the same buy, left to right.
+
+**Generated versus pool.** A card that gets or summons a card ("get a
+random Undead", tokens, copies) makes it from nothing: no pool copy, and
+selling it later adds nothing to the pool. A Discover takes its pick from
+the pool, up to your tier. Lockbox and Silent Deliverer take pool copies
+(their own rules above). Blizzard doesn't say, so these are guesses.
+
+**Undead (2026-10-24).** Rot Hide Gnoll is not in the current pool, though
+the JSON flags it.
+- **"Your Undead have +N this game (wherever they are)"** (Nerubian
+  Deathswarmer, Plaguerunner, Butchering, Forsaken Weaver) is a player
+  bonus every Undead you own reads: board, hand, Tavern, summoned in combat
+  (Skeletons too), and Undead you get later. A sold Undead loses it. Spell
+  power adds to Butchering's: with a +1 Health Tavern spell bonus,
+  Butchering also gives your Undead +1 Health wherever they are.
+- **Butchering** gives +8 Attack; with a Health spell bonus its text shows
+  +8/+N and it gives the Health too.
+- **Plaguerunner** gives +4 when it dies outside combat, +2 in a fight.
+- **Reborn, in a fight or in the shop:** the minion fully dies (its
+  Deathrattles fire, death triggers count), then comes back in the same
+  slot as its plain card with 1 Health and no Reborn. Its own buffs are
+  gone, but player bonuses (Undead Attack and Health wherever they are)
+  apply, so it can come back with 50 Attack and 2 Health. This is the
+  core of the Snazzy Phantom build. A minion Reborn in the shop keeps its
+  1 Health (plus bonuses) for later turns and fights; it never heals back.
+- **"A different friendly Undead"** (Dead Bellringer, Mummifier) excludes
+  itself and any other copy of the same card.
+- **Dead Bellringer:** you choose the target. It gets Reborn, then is
+  destroyed (fully dies, comes back through Reborn), and Bellringer gains
+  +4/+4.
+- **Mummifier:** a random Undead without Reborn; none left, wasted.
+- **Maw Caster, Butchering:** you choose the Undead to destroy; with none,
+  nothing happens (Butchering can't be cast).
+- **Tomb Turning:** the Discovered Undead dies right after it's played
+  that turn, after its Battlecry (in docs/UNSURE.md). Kept in hand to a
+  later turn, it's a normal minion.
+- **Lichling Hoarder:** a plain copy (no golden, no buffs) of a random
+  minion that was on your board at the end of the shop phase, itself and
+  dead ones included.
+- **Deathly Striker:** a random Undead up to your tier. Its Deathrattle
+  summons the Undead it got this fight; after the fight it's gone.
+- **Stitched Salvager:** the minion to its left fully dies at Start of
+  Combat (Deathrattles, death triggers, its own Reborn). The Deathrattle's
+  exact copy keeps everything.
+- **Barrier Banshee, Snazzy Phantom** trigger on other minions' Reborn,
+  never their own. Phantom gives the right-most Undead +X/+X, X being the
+  Reborn minion's Attack as it comes back (player bonuses included).
+
 **Pairing, damage, ending** as in Part 2: shuffle and avoid the last
 opponent, ghost for an odd count, damage is tier plus surviving minions'
 tiers with the cap from `rules.toml`, game ends with one player left or at

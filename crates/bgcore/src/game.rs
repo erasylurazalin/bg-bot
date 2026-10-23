@@ -132,8 +132,8 @@ pub struct TavernBuff {
     pub this_turn: bool,
 }
 
-/// One buff per (tribe filter, duration): 5 tribes and no filter, times 2.
-pub const MAX_TAVERN_BUFFS: usize = 12;
+/// One buff per (tribe filter, duration): 7 tribes and no filter, times 2.
+pub const MAX_TAVERN_BUFFS: usize = 16;
 
 /// A Choose One minion or spell waiting for the player to pick one of its
 /// two options.
@@ -220,6 +220,13 @@ pub struct Player {
     pub golden_played: u32,
     /// Gold spent this turn (Lovesick Balladist). Resets every turn.
     pub gold_spent_turn: u16,
+    /// Elementals played from hand this turn (Conflagration). Resets every
+    /// turn.
+    pub elementals_played_turn: u16,
+    /// What "after the Tavern is Refreshed this game" gives: the sum of every
+    /// Waveling, En-Djinn Blazer and Easterly Winds so far. Each explicit
+    /// Refresh gives the whole amount to one random Tavern minion.
+    pub refresh_buff: (i32, i32),
     pub spell_bonus: (i32, i32),
     pub spell_discount: u8,
     /// Magicfin Mycologist uses spent this turn. Resets every turn.
@@ -289,6 +296,8 @@ impl Player {
             deathrattles_triggered: 0,
             golden_played: 0,
             gold_spent_turn: 0,
+            elementals_played_turn: 0,
+            refresh_buff: (0, 0),
             spell_bonus: (0, 0),
             spell_discount: 0,
             mycologist_uses: 0,
@@ -781,6 +790,10 @@ fn buff(m: &mut Minion, attack: i32, health: i32) {
     m.health += health;
 }
 
+/// What turns Golden in a triple: the card, how many of its own copies go in,
+/// and a stand-in card (Elemental of Surprise) with how many of those.
+type TriplePlan = (CardId, usize, Option<(CardId, usize)>);
+
 impl Game {
     pub fn new(data: Arc<Data>, seed: u64) -> Game {
         let mut g = Game::unstarted(data, seed);
@@ -1056,6 +1069,8 @@ impl Game {
             SpellTarget::Consume { tribe, .. } => c.is(tribe),
             SpellTarget::MakeGolden { max_tier } => !m.golden && c.tier <= max_tier,
             SpellTarget::Devourer => true,
+            SpellTarget::HalfOfHighestTavern { tribe } => c.tribes.has(tribe),
+            SpellTarget::BuffPerTribePlayed { .. } => true,
         }
     }
 
@@ -1147,6 +1162,30 @@ impl Game {
         }
     }
 
+    /// The Attack and Health of the highest-Health minion in the player's
+    /// Tavern, a random one of them on a Health tie (no random number is
+    /// drawn without a tie). None with no minion there.
+    fn highest_tavern_stats(&mut self, p: usize) -> Option<(i32, i32)> {
+        let cards = &self.data.cards;
+        let mut best: ArrayVec<(i32, i32), { crate::SHOP }> = ArrayVec::new();
+        for m in &self.players[p].shop {
+            if cards.get(m.card).is_spell() {
+                continue;
+            }
+            if best.first().is_none_or(|&(_, h)| m.health > h) {
+                best.clear();
+            }
+            if best.first().is_none_or(|&(_, h)| m.health == h) {
+                best.push((m.attack, m.health));
+            }
+        }
+        match best.len() {
+            0 => None,
+            1 => Some(best[0]),
+            n => Some(best[self.rng.below(n as u32) as usize]),
+        }
+    }
+
     /// Take an action for the current player.
     pub fn step(&mut self, a: Action) -> Result<(), IllegalAction> {
         if !self.is_legal(a) {
@@ -1200,6 +1239,7 @@ impl Game {
                     let m = pl.shop.remove(slot);
                     pl.gold -= buy_cost;
                     pl.hand.push(m);
+                    self.after_buy_effects(p);
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
                     self.fire_event(p, EventKind::CardsBought, 1);
@@ -1249,6 +1289,15 @@ impl Game {
                     }
                     self.players[p].board.insert(pos, m);
                     let t = self.data.cards.get(m.card).tribes;
+                    if t.has(Tribe::Elemental) {
+                        self.players[p].elementals_played_turn =
+                            self.players[p].elementals_played_turn.saturating_add(1);
+                        self.give_play_shield(p, pos);
+                    }
+                    self.fire_after_play_tribe(p, t, true, pos);
+                    if t.has(Tribe::Elemental) {
+                        self.fire_event_skipping(p, EventKind::ElementalsPlayed, 1, Some(pos));
+                    }
                     if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
                         let mul = if m.golden { 2 } else { 1 };
                         self.add_volumizer_bonus(p, da * mul, dh * mul);
@@ -1264,7 +1313,7 @@ impl Game {
                     if t.has(Tribe::Murloc) {
                         self.trigger_in_hand_on_play(p, Tribe::Murloc);
                     }
-                    self.fire_after_play_tribe(p, t);
+                    self.fire_after_play_tribe(p, t, false, pos);
                 }
                 if m.golden {
                     // A Golden minion played from hand counts for Maritime
@@ -1342,6 +1391,27 @@ impl Game {
         }
         pl.shop_spell = None;
         Self::fill_shop(pl, pool, cards, rules.shop_size(pl.tier), rng, kind);
+        Self::apply_refresh_buff(pl, cards, rng);
+    }
+
+    /// "After the Tavern is Refreshed this game": the whole amount goes to
+    /// one random minion in the Tavern. Called by every Refresh except the
+    /// automatic roll at the start of a turn. It draws no random number when
+    /// there is nothing to give.
+    fn apply_refresh_buff(pl: &mut Player, cards: &CardDb, rng: &mut Rng) {
+        let (a, h) = pl.refresh_buff;
+        if a == 0 && h == 0 {
+            return;
+        }
+        let ok = |m: &Minion| !cards.get(m.card).is_spell() && !cards.get(m.card).fixed_stats;
+        let n = pl.shop.iter().filter(|m| ok(m)).count() as u32;
+        if n == 0 {
+            return;
+        }
+        let k = rng.below(n) as usize;
+        if let Some(m) = pl.shop.iter_mut().filter(|m| ok(m)).nth(k) {
+            buff(m, a, h);
+        }
     }
 
     /// Fill the Tavern: `size` minion slots and the spell slot. Only the
@@ -1432,6 +1502,7 @@ impl Game {
             }
         }
         pl.shop_spell = cards.random_spell(pl.tier, rng);
+        Self::apply_refresh_buff(pl, cards, rng);
     }
 
     /// Lost Staff of Hamuul: refresh the Tavern with minions of one type,
@@ -1462,6 +1533,7 @@ impl Game {
             }
         }
         pl.shop_spell = cards.random_spell(pl.tier, rng);
+        Self::apply_refresh_buff(pl, cards, rng);
     }
 
     /// The Fodders that just appeared in a Refresh feed themselves if the
@@ -1879,14 +1951,28 @@ impl Game {
 
     /// A minion of `tribes` was just played: every minion with an "after you
     /// play a minion of this tribe" trigger runs its effects (Wrath Weaver,
-    /// Insatiable Ur'zul). The one just played counts too.
-    fn fire_after_play_tribe(&mut self, p: usize, tribes: crate::cards::Tribes) {
+    /// Insatiable Ur'zul). The one just played counts too, except for cards
+    /// with `exclude_played`, which run `early` (right after the played minion
+    /// lands in board slot `played`) and skip it.
+    fn fire_after_play_tribe(
+        &mut self,
+        p: usize,
+        tribes: crate::cards::Tribes,
+        early: bool,
+        played: usize,
+    ) {
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             let m = self.players[p].board[pos];
             for (card, golden) in m.parts() {
                 let n = match self.data.cards.get(card).after_play_tribe {
-                    Some(ref t) if tribes.has(t.tribe) => t.effects.len(),
+                    Some(ref t)
+                        if tribes.has(t.tribe)
+                            && t.exclude_played == early
+                            && !(early && pos == played) =>
+                    {
+                        t.effects.len()
+                    }
                     _ => 0,
                 };
                 for k in 0..n {
@@ -1907,6 +1993,82 @@ impl Game {
                 }
             }
             pos += 1;
+        }
+    }
+
+    /// Ichoron the Protector: a minion of its tribe was just played into
+    /// board slot `pos`, so it gets Divine Shield. The shield goes at the
+    /// start of the next shop phase, unless a Golden Ichoron gave it (then it
+    /// stays) or the minion already had one.
+    fn give_play_shield(&mut self, p: usize, pos: usize) {
+        let cards = &self.data.cards;
+        let tribes = cards.get(self.players[p].board[pos].card).tribes;
+        let mut any = false;
+        let mut for_good = false;
+        for m in &self.players[p].board {
+            for (card, golden) in m.parts() {
+                if let Some(t) = cards.get(card).play_shield
+                    && tribes.has(t)
+                {
+                    any = true;
+                    for_good |= golden;
+                }
+            }
+        }
+        if !any {
+            return;
+        }
+        let m = &mut self.players[p].board[pos];
+        if !m.keywords.has(Keywords::DIVINE_SHIELD) {
+            m.keywords.set(Keywords::DIVINE_SHIELD);
+            m.temp_shield = !for_good;
+        }
+    }
+
+    /// A minion was just bought into the last hand slot (before it can
+    /// triple): every Stone Age Slab that has not fired this turn buffs and
+    /// multiplies it, left to right, then an armed Living Prison gains its
+    /// stats (the Slab buffs included).
+    fn after_buy_effects(&mut self, p: usize) {
+        let cards = &self.data.cards;
+        let pl = &mut self.players[p];
+        let Some(last) = pl.hand.len().checked_sub(1) else { return };
+        if cards.get(pl.hand[last].card).is_spell() {
+            return;
+        }
+        if !cards.get(pl.hand[last].card).fixed_stats {
+            for i in 0..pl.board.len() {
+                let slab = pl.board[i].parts().find_map(|(card, golden)| {
+                    cards.get(card).after_buy.map(|a| (a, golden))
+                });
+                if let Some((a, golden)) = slab
+                    && !pl.board[i].activated
+                {
+                    pl.board[i].activated = true;
+                    let b = &mut pl.hand[last];
+                    b.attack += a.attack;
+                    b.health += a.health;
+                    let times = if golden { a.golden_multiply } else { a.multiply };
+                    b.attack = b.attack.saturating_mul(times);
+                    b.health = b.health.saturating_mul(times);
+                }
+            }
+        }
+        let bought = pl.hand[last];
+        for m in &mut pl.board {
+            if m.improvements == 0 {
+                continue;
+            }
+            let mut mul = 0;
+            for (card, golden) in m.parts() {
+                if matches!(cards.get(card).activate, Some(a) if a.effect == Effect::ArmNextBuy) {
+                    mul = mul.max(if golden { 2 } else { 1 });
+                }
+            }
+            if mul > 0 {
+                m.improvements = 0;
+                buff(m, bought.attack * mul, bought.health * mul);
+            }
         }
     }
 
@@ -2258,6 +2420,15 @@ impl Game {
                 if let Some(m) = self.players[p].board.first_mut() {
                     buff(m, attack + da, health + dh);
                 }
+            }
+            SpellEffect::RefreshBuff { attack, health } => {
+                let pl = &mut self.players[p];
+                pl.refresh_buff.0 += attack + da;
+                pl.refresh_buff.1 += health + dh;
+            }
+            SpellEffect::GetTwo { a, b } => {
+                self.give_generated(p, a);
+                self.give_generated(p, b);
             }
             SpellEffect::FriendlyBounty => {
                 let cards = &self.data.cards;
@@ -2865,8 +3036,56 @@ impl Game {
                     }
                 }
             }
+            Effect::RefreshBuff { attack, health } => {
+                let n = mul * runs as i32;
+                let pl = &mut self.players[p];
+                pl.refresh_buff.0 += attack * n;
+                pl.refresh_buff.1 += health * n;
+            }
+            Effect::FreeRefreshes(n) => {
+                let gain = n.saturating_mul(mul as u8).saturating_mul(runs);
+                self.players[p].free_rolls = self.players[p].free_rolls.saturating_add(gain);
+            }
+            Effect::BuffAllImproving { attack, health, counter } => {
+                for _ in 0..runs {
+                    let k = 1 + self.players[p].improve[counter.index()] as i32;
+                    let cards = &self.data.cards;
+                    for o in &mut self.players[p].board {
+                        if !cards.get(o.card).fixed_stats {
+                            buff(o, attack * mul * k, health * mul * k);
+                        }
+                    }
+                    let n = &mut self.players[p].improve[counter.index()];
+                    *n = n.saturating_add(1);
+                }
+            }
+            Effect::ArmNextBuy => {
+                if let Some(m) = self.players[p].board.get_mut(*pos) {
+                    m.improvements = 1;
+                }
+            }
+            Effect::GainHighestTavernStats => {
+                let cards = &self.data.cards;
+                let pl = &mut self.players[p];
+                let mut best: Option<(i32, i32)> = None;
+                let mut best_health = i32::MIN;
+                for m in &pl.shop {
+                    if !cards.get(m.card).is_spell() && m.health > best_health {
+                        best_health = m.health;
+                        best = Some((m.attack, m.health));
+                    }
+                }
+                if let Some((a, h)) = best
+                    && let Some(host) = pl.board.get_mut(*pos)
+                    && !cards.get(host.card).fixed_stats
+                {
+                    let n = mul * runs as i32;
+                    buff(host, a * n, h * n);
+                }
+            }
             // These only happen in fights.
-            Effect::BuffAllKeepGolden { .. }
+            Effect::BuffOthersPerImprovement { .. }
+            | Effect::BuffAllKeepGolden { .. }
             | Effect::DamageTargetAndNeighbor
             | Effect::BuffKiller { .. }
             | Effect::BuffAttacker { .. }
@@ -3238,7 +3457,16 @@ impl Game {
                         // The rest target a friendly board minion only.
                         SpellTarget::Consume { .. }
                         | SpellTarget::MakeGolden { .. }
+                        | SpellTarget::HalfOfHighestTavern { .. }
                         | SpellTarget::Devourer => {}
+                        SpellTarget::BuffPerTribePlayed { attack, health, per, .. } => {
+                            let n = self.players[p].elementals_played_turn as i32;
+                            buff(
+                                &mut self.players[p].shop[target],
+                                attack + per.0 * n + da,
+                                health + per.1 * n + dh,
+                            );
+                        }
                     }
                     self.trigger_on_cast_spell(p);
                     if !stop_after
@@ -3332,6 +3560,12 @@ impl Game {
     /// `amount` to its count and fires once for every full `every` in it,
     /// keeping the remainder.
     fn fire_event(&mut self, p: usize, kind: EventKind, amount: u32) {
+        self.fire_event_skipping(p, kind, amount, None);
+    }
+
+    /// `fire_event`, leaving out the board minion in slot `skip` (a card
+    /// never counts its own play).
+    fn fire_event_skipping(&mut self, p: usize, kind: EventKind, amount: u32, skip: Option<usize>) {
         if amount == 0 {
             return;
         }
@@ -3341,6 +3575,10 @@ impl Game {
         }
         let mut pos = 0;
         while pos < self.players[p].board.len() {
+            if skip == Some(pos) {
+                pos += 1;
+                continue;
+            }
             let m = self.players[p].board[pos];
             for (card, golden) in m.parts() {
                 let Some(t) = self.data.cards.get(card).on_event else { continue };
@@ -3609,9 +3847,16 @@ impl Game {
             }
             TargetKind::Spell(st) => {
                 let mut target_pos = s;
-                for _ in 0..pt.runs {
+                for k in 0..pt.runs {
                     if target_pos >= self.players[p].board.len() {
                         break;
+                    }
+                    // Every extra cast (Balinda) is another spell cast.
+                    if k > 0 {
+                        self.fire_event(p, EventKind::SpellsCast, 1);
+                        if target_pos >= self.players[p].board.len() {
+                            break;
+                        }
                     }
                     let (da, dh) = self.total_spell_bonus(p);
                     let mut generated: Option<CardId> = None;
@@ -3737,6 +3982,25 @@ impl Game {
                             self.channel_the_devourer(p, target_pos);
                             stop_after = true;
                             target_removed = true;
+                        }
+                        SpellTarget::HalfOfHighestTavern { .. } => {
+                            // Half, rounded up, of the highest-Health Tavern
+                            // minion. An empty Tavern gives nothing.
+                            if let Some((a, h)) = self.highest_tavern_stats(p) {
+                                buff(
+                                    &mut self.players[p].board[target_pos],
+                                    (a + 1) / 2 + da,
+                                    (h + 1) / 2 + dh,
+                                );
+                            }
+                        }
+                        SpellTarget::BuffPerTribePlayed { attack, health, per, .. } => {
+                            let n = self.players[p].elementals_played_turn as i32;
+                            buff(
+                                &mut self.players[p].board[target_pos],
+                                attack + per.0 * n + da,
+                                health + per.1 * n + dh,
+                            );
                         }
                     }
                     self.trigger_on_cast_spell(p);
@@ -4072,52 +4336,117 @@ impl Game {
         if cards.get(card).is_spell() || cards.get(card).no_triple {
             return;
         }
-        let pl = &mut self.players[p];
-        let is_copy = |m: &Minion| m.card == card && !m.golden;
-        let n = pl.hand.iter().filter(|m| is_copy(m)).count()
-            + pl.board.iter().filter(|m| is_copy(m)).count();
-        if n < 3 {
-            return;
+        let pl = &self.players[p];
+        // Plain copies in hand and on the board; a Golden minion never counts.
+        let copies = |id: CardId| {
+            pl.hand.iter().chain(&pl.board).filter(|m| m.card == id && !m.golden).count()
+        };
+        // Which card turns Golden and which cards it is made of: `x` of its
+        // own copies and `w` of one wildcard card (Elemental of Surprise
+        // stands in for any Elemental). Three plain copies come first.
+        // A stand-in counts even when it is Golden (the only card that
+        // triples while already golden).
+        let stand_ins = |id: CardId| {
+            pl.hand.iter().chain(&pl.board).filter(|m| m.card == id).count()
+        };
+        let wild_of = |id: CardId| cards.get(id).triple_wildcard;
+        let can_stand_in = |w: CardId, x: CardId| {
+            w != x && wild_of(w).is_some_and(|t| cards.get(x).tribes.has(t))
+        };
+        let mut plan: Option<TriplePlan> = None;
+        if copies(card) >= 3 {
+            plan = Some((card, 3, None));
+        } else if wild_of(card).is_none() {
+            // Two of the card plus one stand-in, or one plus two stand-ins.
+            let n = copies(card);
+            let ids = 0..cards.cards.len() as CardId;
+            if n >= 2
+                && let Some(w) = ids.clone().find(|&w| can_stand_in(w, card) && stand_ins(w) >= 1)
+            {
+                plan = Some((card, 2, Some((w, 1))));
+            } else if n >= 1
+                && let Some(w) = ids.clone().find(|&w| can_stand_in(w, card) && stand_ins(w) >= 2)
+            {
+                plan = Some((card, 1, Some((w, 2))));
+            }
+        } else {
+            // The new card is a wildcard: find a card it completes. Two of
+            // the card plus this wildcard first, then one plus two wildcards.
+            let n_w = stand_ins(card);
+            let pool_ids = 0..cards.cards.len() as CardId;
+            let x = pool_ids
+                .clone()
+                .find(|&x| can_stand_in(card, x) && copies(x) >= 2 && n_w >= 1)
+                .map(|x| (x, 2usize, 1usize))
+                .or_else(|| {
+                    pool_ids
+                        .clone()
+                        .find(|&x| can_stand_in(card, x) && copies(x) >= 1 && n_w >= 2)
+                        .map(|x| (x, 1usize, 2usize))
+                });
+            if let Some((x, nx, nw)) = x {
+                plan = Some((x, nx, Some((card, nw))));
+            }
         }
-        let base = pl.make_card(cards, card, false, 0);
-        let mut gold = pl.make_card(cards, card, true, 0);
-        let mut left = 3;
+        let Some((x_card, x_count, wild)) = plan else { return };
+        let pl = &mut self.players[p];
+        let mut gold = pl.make_card(cards, x_card, true, 0);
         // a Beast on the board carries the until-next-turn Beast bonus; the
         // golden one in hand gets it when it is played, not twice
-        let board_bonus =
-            if cards.get(card).tribes.has(Tribe::Beast) { pl.beast_bonus } else { (0, 0) };
-        let mut take = |m: Minion, bonus: (i32, i32)| {
-            gold.attack += m.attack - bonus.0 - base.attack;
-            gold.health += m.health - bonus.1 - base.health;
-            gold.keywords.0 |= m.keywords.0;
-            gold.pool_copies = gold.pool_copies.saturating_add(m.pool_copies);
-            gold.winners_bread = gold.winners_bread.saturating_add(m.winners_bread);
-            gold.magnetizations = gold.magnetizations.saturating_add(m.magnetizations);
-            gold.volumizers =
-                gold.volumizers.saturating_add(m.volumizers.saturating_sub(base.volumizers));
-            // `improvements` is one minion's own count (Leviathan summons,
-            // Snapper growth, Hopebringer shields, Wrathguard Activates,
-            // Patient Scout tier, Treasure Parrot damage, Scarlet Survivor's
-            // flag, event counters): the golden copy takes the highest of
-            // the three, never the sum.
-            gold.improvements = gold.improvements.max(m.improvements);
-            for &a in m.attached_slice() {
-                gold.push_attached(a);
+        let beast_bonus = pl.beast_bonus;
+        let mut returned: ArrayVec<Minion, 2> = ArrayVec::new();
+        let mut take_from = |pl: &mut Player, id: CardId, n: usize, same: bool, gold: &mut Minion| {
+            for _ in 0..n {
+                let is_copy = |m: &Minion| m.card == id && (!m.golden || !same);
+                let (m, from_board) = if let Some(i) = pl.hand.iter().position(is_copy) {
+                    (pl.hand.remove(i), false)
+                } else {
+                    let i = pl.board.iter().position(is_copy).unwrap();
+                    if i < *tracked_pos {
+                        *tracked_pos -= 1;
+                    }
+                    (pl.board.remove(i), true)
+                };
+                let base = pl.make_card(cards, id, m.golden, 0);
+                let bonus = if from_board && cards.get(id).tribes.has(Tribe::Beast) {
+                    beast_bonus
+                } else {
+                    (0, 0)
+                };
+                gold.attack += m.attack - bonus.0 - base.attack;
+                gold.health += m.health - bonus.1 - base.health;
+                gold.winners_bread = gold.winners_bread.saturating_add(m.winners_bread);
+                gold.magnetizations = gold.magnetizations.saturating_add(m.magnetizations);
+                gold.volumizers =
+                    gold.volumizers.saturating_add(m.volumizers.saturating_sub(base.volumizers));
+                for &a in m.attached_slice() {
+                    gold.push_attached(a);
+                }
+                if same {
+                    gold.keywords.0 |= m.keywords.0;
+                    gold.pool_copies = gold.pool_copies.saturating_add(m.pool_copies);
+                    // `improvements` is one minion's own count (Leviathan
+                    // summons, Snapper growth, Hopebringer shields, Wrathguard
+                    // Activates, Patient Scout tier, Treasure Parrot damage,
+                    // Scarlet Survivor's flag, event counters): the golden
+                    // copy takes the highest of the three, never the sum.
+                    gold.improvements = gold.improvements.max(m.improvements);
+                } else {
+                    // A stand-in brings its buffs and its Divine Shield (the
+                    // point of the card); its pool copies go back to the pool.
+                    gold.keywords.0 |= m.keywords.0;
+                    let _ = returned.try_push(m);
+                }
             }
         };
-        while left > 0 {
-            if let Some(i) = pl.hand.iter().position(is_copy) {
-                take(pl.hand.remove(i), (0, 0));
-            } else {
-                let i = pl.board.iter().position(is_copy).unwrap();
-                if i < *tracked_pos {
-                    *tracked_pos -= 1;
-                }
-                take(pl.board.remove(i), board_bonus);
-            }
-            left -= 1;
+        take_from(pl, x_card, x_count, true, &mut gold);
+        if let Some((w, n)) = wild {
+            take_from(pl, w, n, false, &mut gold);
         }
         pl.hand.push(gold);
+        for m in returned {
+            give_back(&mut self.pool, cards, &m);
+        }
     }
 
     fn run_end_of_turn(&mut self, p: usize) {
@@ -4211,8 +4540,17 @@ impl Game {
             }
         }
         self.run_end_of_turn(p);
+        let cards = &self.data.cards;
         for m in &mut self.players[p].board {
             m.extra_magnetize = 0;
+            // An armed Living Prison that found no minion to buy is wasted.
+            if m.improvements > 0
+                && m.parts().any(|(c, _)| {
+                    matches!(cards.get(c).activate, Some(a) if a.effect == Effect::ArmNextBuy)
+                })
+            {
+                m.improvements = 0;
+            }
         }
         self.players[p].end_turn_tavern_buffs(&self.data.cards);
         self.players[p].done = true;
@@ -4294,6 +4632,11 @@ impl Game {
             let won = pl.won_last_combat;
             for m in &mut pl.board {
                 m.activated = false;
+                // Ichoron's Divine Shield lasts until the next shop phase.
+                if m.temp_shield {
+                    m.keywords.clear(Keywords::DIVINE_SHIELD);
+                    m.temp_shield = false;
+                }
                 if m.winners_bread > 0 {
                     if won {
                         let n = m.winners_bread as i32;
@@ -4313,6 +4656,7 @@ impl Game {
             pl.health_refreshes_used = 0;
             pl.mycologist_uses = 0;
             pl.gold_spent_turn = 0;
+            pl.elementals_played_turn = 0;
             if pl.frozen {
                 pl.frozen = false;
             } else {
@@ -4432,6 +4776,9 @@ impl Game {
             };
             self.players[p].add_tavern_buff(&self.data.cards, b);
         }
+        // Waveling's Deathrattle: more for the Refreshes to come.
+        self.players[p].refresh_buff.0 += so.refresh_buff_gain.0;
+        self.players[p].refresh_buff.1 += so.refresh_buff_gain.1;
         // Trapped Clapper's Deathrattle: Fodders for upcoming Refreshes. A
         // fight's list is one entry per upcoming Refresh, and they stack on
         // any Refreshes the player already queued.

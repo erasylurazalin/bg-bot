@@ -88,6 +88,9 @@ pub struct SideOutcome {
     /// (Sacrificial Wrathguard's Deathrattle). The game applies it as an
     /// ongoing Tavern buff after the fight.
     pub tavern_buff_gain: (i32, i32),
+    /// Increase to the player's "after the Tavern is Refreshed this game"
+    /// amount (Waveling's Deathrattle).
+    pub refresh_buff_gain: (i32, i32),
     /// Upcoming Refreshes that get Fodders (Trapped Clapper), oldest first.
     pub fodder_refreshes: [u8; 16],
     pub n_fodder_refreshes: u8,
@@ -1002,6 +1005,25 @@ impl<'a> Side<'a> {
             Effect::GetLockbox { sooner } => {
                 self.out.push_lockbox(sooner.saturating_mul(mul as u8));
             }
+            Effect::RefreshBuff { attack, health } => {
+                self.out.refresh_buff_gain.0 += attack * mul;
+                self.out.refresh_buff_gain.1 += health * mul;
+            }
+            Effect::BuffOthersPerImprovement { tribe, attack, health } => {
+                // Times one plus the host's `improvements` (Ultraviolet
+                // Ascendant counts the Elementals played while it was on the
+                // board).
+                let Some(hi) = self.index_of(fx.host) else { return };
+                let k = 1 + self.ms[hi].m.improvements as i32;
+                for i in 0..self.ms.len() {
+                    if self.ms[i].uid != fx.host
+                        && self.ms[i].m.health > 0
+                        && db.get(self.ms[i].m.card).is(tribe)
+                    {
+                        self.gain_at(db, i, attack * mul * k, health * mul * k);
+                    }
+                }
+            }
             Effect::GetRandomBounty => {
                 for _ in 0..mul {
                     if let Some(c) = db.random_bounty(rng) {
@@ -1780,6 +1802,7 @@ fn attack_swings(
         );
         w.attack(turn, &att.ms[ai].m, &def.ms[di].m);
         let (dx, dy) = (att.ms[ai].m.attack, def.ms[di].m.attack);
+        let def_health_before = def.ms[di].m.health;
         let (xf, yf) = (&mut att.ms[ai], &mut def.ms[di]);
         let dealt_x = hit(&mut yf.m, dx, &mut xf.m);
         let dealt_y = hit(&mut xf.m, dy, &mut yf.m);
@@ -1831,6 +1854,51 @@ fn attack_swings(
                 && let Some(ai) = att.index_of(me)
             {
                 att.count_damage(db, turn, ai, cleave_dealt, uid, rng, w);
+            }
+        }
+        // Wildfire Elemental: when the hit killed the minion, the excess
+        // damage goes to one random adjacent enemy (both when golden). The
+        // board is still intact, so the neighbours are where they stood.
+        if dealt_x > 0 && y_alive && def_health_before <= dx {
+            let both = attacker
+                .parts()
+                .filter(|&(c, _)| db.get(c).overkill)
+                .map(|(_, golden)| golden)
+                .reduce(|a, b| a || b);
+            let excess = dx - def_health_before;
+            if let Some(both) = both
+                && excess > 0
+                && let Some(di) = def.index_of(def_uid)
+            {
+                let mut near: ArrayVec<u16, 2> = ArrayVec::new();
+                if let Some(l) = di.checked_sub(1) {
+                    near.push(def.ms[l].uid);
+                }
+                if di + 1 < def.ms.len() {
+                    near.push(def.ms[di + 1].uid);
+                }
+                if !both && near.len() > 1 {
+                    let keep = near[rng.below(near.len() as u32) as usize];
+                    near.retain(|u| *u == keep);
+                }
+                for v in near {
+                    let Some(vi) = def.index_of(v) else { continue };
+                    let (was_alive, was_shielded) = (
+                        def.ms[vi].m.health > 0,
+                        def.ms[vi].m.keywords.has(Keywords::DIVINE_SHIELD),
+                    );
+                    let dealt = deal_damage(&mut def.ms[vi].m, excess);
+                    def.ms[vi].taken += dealt;
+                    if was_alive && def.ms[vi].m.health <= 0 && dealt > 0 {
+                        def.ms[vi].killer = Some(me);
+                    }
+                    if dealt > 0 && def.damage_trigger {
+                        def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
+                    }
+                    if was_shielded && !def.ms[vi].m.keywords.has(Keywords::DIVINE_SHIELD) {
+                        def.note_shield_lost(db);
+                    }
+                }
             }
         }
         let Some(di) = def.index_of(def_uid) else { continue };
@@ -2077,8 +2145,8 @@ mod tests {
         // Cage Gnawer is the only other Beast: 2/7 becomes 4/8, the Mech is left alone
         assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (4, 8));
         assert_eq!((s.ms[1].m.attack, s.ms[1].m.health), (1, 1));
-        assert_eq!(s.counters.improve, [1]);
-        assert_eq!(s.out.improve_gain, [1]);
+        assert_eq!(s.counters.improve, [1, 0]);
+        assert_eq!(s.out.improve_gain, [1, 0]);
 
         // a second Lobster, made plain, now gives +4/+2
         let lobster = db.make(db.by_name("Tasty Lobster").unwrap(), false);
@@ -2087,7 +2155,7 @@ mod tests {
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (8, 10));
-        assert_eq!(s.out.improve_gain, [2]);
+        assert_eq!(s.out.improve_gain, [2, 0]);
 
         // golden at count 0: twice the buff, and the count still goes up by one
         let gold = db.make(db.by_name("Tasty Lobster").unwrap(), true);
@@ -2099,7 +2167,7 @@ mod tests {
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (2 + 4, 7 + 2));
-        assert_eq!(s.out.improve_gain, [1]);
+        assert_eq!(s.out.improve_gain, [1, 0]);
     }
 
     #[test]
@@ -2111,7 +2179,7 @@ mod tests {
         s.ms[1].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         assert_eq!((s.ms[1].m.attack, s.ms[1].m.health), (2 + 2 + 4, 7 + 1 + 2));
-        assert_eq!(s.out.improve_gain, [2]);
+        assert_eq!(s.out.improve_gain, [2, 0]);
 
         // Deathstrider's trigger, then the same Lobster dying: +2/+1 then +4/+2. The
         // living Lobster is a Beast too, so the first buff may land on it.
@@ -2124,24 +2192,24 @@ mod tests {
             s.run_effect(&db, e, false, fx, &mut at, &mut uid, &mut rng, &mut ());
             let first_on_gnawer = s.ms[1].m.attack == 4;
             assert_eq!(s.ms[0].m.attack + s.ms[1].m.attack, 2 + 2 + 2);
-            assert_eq!(s.counters.improve, [1]);
+            assert_eq!(s.counters.improve, [1, 0]);
             s.ms[0].m.health = 0;
             s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
             let (a, h) = if first_on_gnawer { (2 + 2 + 4, 7 + 1 + 2) } else { (2 + 4, 7 + 2) };
             assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (a, h));
-            assert_eq!(s.out.improve_gain, [2]);
+            assert_eq!(s.out.improve_gain, [2, 0]);
         }
 
         // a count carried in from an earlier fight: base +4/+2, golden +8/+4
         let mut uid = 0;
-        let counters = Counters { improve: [1], ..Counters::default() };
+        let counters = Counters { improve: [1, 0], ..Counters::default() };
         let gold = db.make(db.by_name("Tasty Lobster").unwrap(), true);
         let gnawer = db.make(db.by_name("Cage Gnawer").unwrap(), false);
         let mut s = Side::new(&db, &[gold, gnawer], &[], counters, &mut uid);
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (2 + 8, 7 + 4));
-        assert_eq!(s.counters.improve, [2]);
+        assert_eq!(s.counters.improve, [2, 0]);
     }
 
     #[test]

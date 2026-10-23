@@ -89,6 +89,9 @@ pub struct Minion {
     /// Gives no Triple Reward when played (Aureate Laureate, Silent
     /// Deliverer's minions).
     pub no_reward: bool,
+    /// Its Divine Shield was given "until next turn" (Ichoron the
+    /// Protector): it comes off at the start of the next shop phase.
+    pub temp_shield: bool,
     /// Pool copies held by this minion (1 when drawn from the pool, up to 3
     /// when tripled from pool copies, 0 when generated).
     pub pool_copies: u8,

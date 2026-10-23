@@ -21,7 +21,7 @@ crates/
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
-    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, neutrals),
+    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, neutrals),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card), fight.rs,
                       game.rs, d1a.rs; tests/data/ has test-only card files
@@ -115,6 +115,8 @@ rules behind each are in DESIGN.md Part 3.
   card hooks in there.
 - **Pirates, Golden minions, gold spent, Lockbox, Bounties, Cleave:** see
   `docs/ADDING-CARDS.md` section 6.
+- **Elementals** (refresh amount, free Refreshes, Baller count, Surprise
+  triples, Slab, Prison, Wildfire): see `docs/ADDING-CARDS.md` section 7.
 - **Legal actions.** `Game::legal_mask` only asks `is_legal` for slots that
   can be legal (a test checks it against `is_legal` everywhere). Use it
   rather than looping `is_legal` over every action.

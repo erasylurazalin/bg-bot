@@ -51,6 +51,7 @@ pub fn tribe_name(t: Tribe) -> &'static str {
         Tribe::Murloc => "Murloc",
         Tribe::Demon => "Demon",
         Tribe::Pirate => "Pirate",
+        Tribe::Elemental => "Elemental",
     }
 }
 

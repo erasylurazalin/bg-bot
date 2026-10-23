@@ -55,7 +55,7 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Magnetize / Mech played | `on_play_mech`, `on_play_or_magnetize_mech`, `on_cast_spell_on_mech`, `aura = polarizing_beatboxer` | `magnetize_to`, `trigger_mech_played_or_magnetized`, `beatboxers_copy`, `Minion::magnetize` | Spark Snapper |
 | Cast a Tavern spell | `on_cast_spell`, `on_cast_spell_on_self`, `on_cast_spell_on_tribe` | `trigger_on_cast_spell`, `trigger_on_cast_spell_on_target`; one call per cast (a Bounty cast twice calls it twice) | Timecap'n Hooktail |
 | Spell cast event counter | `on_event = { event = "spells_cast" }` | `cast_spell` -> `fire_event(SpellsCast)` | Felboar |
-| Gold spent / hero damage / sold / bought | `on_event = { event = "gold_spent" / "hero_damage" / "minions_sold" / "cards_bought", every, effect }` | `Game::fire_event` (count in `improvements`, remainder kept, can fire several times) | Gunpowder Courier |
+| Gold spent / hero damage / sold / bought / Elementals played | `on_event = { event = "gold_spent" / "hero_damage" / "minions_sold" / "cards_bought" / "elementals_played", every, effect }` | `Game::fire_event` (count in `improvements`, remainder kept, can fire several times) | Gunpowder Courier |
 | Sell | `on_sell = {..}` | `Game::sell_minion` (`OnSell`) | Greedy Conniver |
 | Buy | `Action::Buy`/`BuySpell` in `apply`; triple via `check_triple` | `apply` | none yet |
 | Play a minion of a tribe | `after_play_tribe = { tribe, effects }` | `fire_after_play_tribe` | Wrath Weaver |
@@ -65,6 +65,15 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | After you Discover | `after_discover = {..}` | `fire_after_discover` (end of `resolve_choose`) | Hooktusk |
 | Hero takes damage | `after_hero_damage = [..]`, `DamageHero` | `take_hero_damage`, `take_shop_damage` (can kill), `can_pay_health` | Wrath Weaver |
 | Refresh | `health_refreshes`, `RefreshKind` | `refresh_shop`, `fill_shop`, Roll in `apply` | Malchezaar |
+| After the Tavern is Refreshed | `refresh_buff = [a, h]` (effect and spell effect) | `Player.refresh_buff`, `apply_refresh_buff` (end of `refresh_shop`, `refresh_with_spells`, `refresh_with_tribe`); a fight adds through `SideOutcome::refresh_buff_gain` | Waveling |
+| Free Refreshes | `free_refreshes = n` | `Player.free_rolls`, used first by Roll | Refreshing Anomaly |
+| Sell, improving a shared count | `on_sell = { effect = { improving_counter = "baller", buff } }` | `Effect::BuffAllImproving`, `Counter::Baller` | Fire Baller |
+| Played minion of a tribe gets Divine Shield | `play_shield = "elemental"` | `give_play_shield` (right after the board insert, before the Battlecry), `Minion.temp_shield`, cleared in `start_turn` | Ichoron the Protector |
+| After you buy a minion | `after_buy = { buff, multiply, golden_multiply }` | `after_buy_effects` in `Action::Buy`, before `check_triple`; uses `Minion.activated` as the once-per-turn flag | Stone Age Slab |
+| Arm for the next buy | `activate = { effect = { arm_next_buy = true } }` | `Effect::ArmNextBuy` (armed in `improvements`), `after_buy_effects`, cleared in `finish_shop` | Living Prison |
+| Triple wildcard | `triple_wildcard = "elemental"` | `check_triple_tracking` (`TriplePlan`) | Elemental of Surprise |
+| Excess damage on a kill | `overkill = true` | `attack_swings` in fight.rs (golden hits both neighbours) | Wildfire Elemental |
+| Spell target that reads the Tavern or this turn | `half_of_highest`, `per_played_this_turn` | `SpellTarget::HalfOfHighestTavern`, `BuffPerTribePlayed`, `Player.elementals_played_turn` | Arcane Absorption |
 | Activate (N) | `activate = { cost, effect }` | `Action::Activate` in `apply`; legality in `is_legal` (needs_* checks on `Effect`) | Suspicious Prisonguard |
 | Golden played from hand | `buff_per_golden_played`, `after_discover` scaling | `Action::Play` -> `add_golden_played`, `Player.golden_played` | Maritime Extortionist |
 | Tavern buff (this game / this turn) | `Effect::TavernBuff`, `tavern_buff` | `Player::add_tavern_buff`, `apply_tavern_buffs`, `end_turn_tavern_buffs` | Champion of Sargeras |
@@ -130,7 +139,9 @@ exactly one legal target and drops the effect when there is none.
    grep `Tribe::ALL` and `Tribe::EVERY` to check nothing else needs it.
 3. Tests that use an unknown tribe as the bad value: `tests/beast_mech.rs`
    (`attacker_tribe = "..."`) and `tests/d1a.rs` (`a_card_needs_exactly_one_of_tribe_and_tribes`)
-   used "pirate"; use a tribe that still does not exist.
+   use a tribe that does not exist ("quilboar" now; "pirate" and "elemental" are real).
+   Also raise `MAX_TAVERN_BUFFS` in game.rs (one Tavern buff per tribe filter and
+   duration, so 2 x (tribes + 1)); a push past it panics.
 4. `tests/tier7.rs` Last One Standing test counts picks per type: an all-type minion is
    every tribe, so a new tribe changes its expected count. Re-check it.
 5. Observation: layout frozen (`obs.rs` header, `TRIBES = 6` slots, `final_tribes`,
@@ -180,6 +191,13 @@ One file per tribe in `crates/bgcore/tests/`; each defines its own small helpers
 | What a fight left over | `Outcome.sides[i]`: `cards_gained()`, `permanent_stats`, `lockboxes_gained()`, ... |
 | The pool is exact | `g.check_invariants().unwrap()` after any setup that touches cards |
 | A whole random game | `bots::random_action(&g, &mut rng)` loop with `check_invariants` |
+
+Helper traps: after any action `current_player` moves on, so call `turn_of(g, p)`
+before asking `g.is_legal(..)`; a targeted spell sets `pending_target` even with one
+legal target, so answer it with `act(g, p, Action::Target(i))`; a Golden minion played
+from hand opens a Triple Reward Discover (`Action::Choose(0)`) before anything else is
+legal; Cord Puller has Divine Shield (do not use it as a "no shield" minion); a card
+bought, played or given in a test can triple with the copies already in hand.
 
 Run one test file: `cargo test -p bgcore --test pirates`; one test: add its name;
 `-- --nocapture` for prints. Whole suite: `cargo test --workspace`.
@@ -250,3 +268,34 @@ for parse-error tests.
   Proud Privateer's cast count; each cast is a spell cast for triggers and counters.
 - **Cleave.** `Card.cleave`: `attack_swings` hits the two enemies next to the target
   with the attacker's Attack and no damage back (Blade Collector).
+
+## 7. Systems the Elemental run added
+
+- **Elementals (tribe 7).** `Tribe::EVERY` has seven tribes, `Tribes::ALL` is
+  `0b1111111` (one bit left in the `u8` mask). Flaming Enforcer is Demon and
+  Elemental (`tribes = [..]`). The observation still has five tribe slots.
+- **The Refresh amount.** One `Player.refresh_buff` that Waveling's
+  Deathrattle (fight or shop), En-Djinn Blazer and Easterly Winds add into;
+  every Refresh except the turn-start roll gives all of it to one random
+  non-spell, non-`fixed_stats` Tavern minion. No random number is drawn while it is 0,
+  so seeded games without these cards are unchanged.
+- **A second player counter.** `N_COUNTERS` is 2: `Counter::Baller` is the
+  count of Ballers sold. Tests that spell out `improve` arrays need two entries.
+- **Elemental plays.** In `Action::Play`, right after the board insert:
+  `Player.elementals_played_turn` (Conflagration, reset in `start_turn`) and
+  `give_play_shield`, then, before the Battlecry, `fire_event(ElementalsPlayed)`
+  (Unbound Tempest) and Ultraviolet Ascendant's `after_play_tribe` with
+  `exclude_played = true`. Neither counts the minion being played (DESIGN.md);
+  the older Pirate and Demon `after_play_tribe` cards still do. Only minions
+  played from hand count.
+- **Triples with a stand-in.** `check_triple_tracking` builds a `TriplePlan`:
+  three plain copies first, else two of a card plus one stand-in, else one
+  plus two. Each source minion's buffs are measured against its own card,
+  the stand-in keeps only keywords it was given, and its pool copy goes back
+  to the pool.
+- **Spells counted twice.** `apply_target` fires one extra `SpellsCast` event for
+  every extra Balinda cast on a friendly minion (Proud Privateer's extra Bounty
+  casts were already counted in `cast_spell`).
+- **Fights.** Wildfire's splash is in `attack_swings` (`Card.overkill`);
+  `Effect::BuffOthersPerImprovement` reads the host's `improvements`
+  (Ultraviolet Ascendant).
