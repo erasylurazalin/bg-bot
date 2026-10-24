@@ -153,6 +153,8 @@ struct FileMinion {
     gem_health: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     both_effects: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    linked: Option<u16>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attached: Vec<FileAttached>,
 }
@@ -185,6 +187,7 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         gem_attack: differs(m.gem_attack as u64, 0).map(|v| v as i32),
         gem_health: differs(m.gem_health as u64, 0).map(|v| v as i32),
         both_effects: m.both_effects.then_some(true),
+        linked: differs(m.linked as u64, 0).map(|v| v as u16),
         attached: m
             .attached_slice()
             .iter()
@@ -255,6 +258,9 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     if let Some(v) = f.both_effects {
         m.both_effects = v;
+    }
+    if let Some(v) = f.linked {
+        m.linked = v;
     }
     for a in &f.attached {
         m.push_attached(Attached { card: card_id(db, &a.card)?, golden: a.golden });

@@ -12,10 +12,10 @@ use crate::action::{Action, N_ACTIONS};
 use crate::cards::{
     N_COUNTERS, Aura, Card, CardDb, ChooseOption, ConsumeBy, ConsumePick, DiscoverKind, Effect,
     EndOfTurn, EventKind, OnCastSpell, OnCastSpellOnMech, OnPlayMech, OnPlayOrMagnetizeMech,
-    OnSell, OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, TimesRole, Tribe, Tribes,
-    how_many_times, pick_one_per_type,
+    OnDiscard, OnSell, OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, TimesRole, Tribe,
+    Tribes, how_many_times, pick_one_per_type,
 };
-use crate::fight::{Counters, SideOutcome, fight_with_hands};
+use crate::fight::{Counters, Deity, SideOutcome, fight_with_hands};
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 use crate::rules::Rules;
@@ -148,8 +148,8 @@ pub struct TavernBuff {
     pub this_turn: bool,
 }
 
-/// One buff per (tribe filter, duration): 9 tribes and no filter, times 2.
-pub const MAX_TAVERN_BUFFS: usize = 20;
+/// One buff per (tribe filter, duration): 10 tribes and no filter, times 2.
+pub const MAX_TAVERN_BUFFS: usize = 22;
 
 /// A Choose One minion or spell waiting for the player to pick one of its
 /// two options.
@@ -329,6 +329,10 @@ pub struct Player {
     /// Whether the Discover now waiting marks its Choose One pick as having
     /// both effects (Fandral's Fortune).
     pub discover_both: bool,
+    pub deity: Option<Deity>,
+    pub discarded: u32,
+    pub spells_cast: u32,
+    pub next_link: u16,
     pub actions: u16,
     pub done: bool,
     pub opponent: Option<Opponent>,
@@ -403,6 +407,10 @@ impl Player {
             gem_health: 1,
             barrage: (0, 0),
             trailblazer_covers: 0,
+            deity: None,
+            discarded: 0,
+            spells_cast: 0,
+            next_link: 1,
             actions: 0,
             done: false,
             opponent: None,
@@ -655,6 +663,8 @@ impl Player {
             knight_deaths: self.knight_deaths,
             gem_attack: self.gem_attack,
             gem_health: self.gem_health,
+            deity: self.deity,
+            spells_cast: self.spells_cast,
             rig: self.rig,
         }
     }
@@ -926,6 +936,7 @@ impl Game {
     }
 
     fn unstarted(data: Arc<Data>, seed: u64) -> Game {
+        const ABERRATIONS_IN_LOBBY: bool = true;
         let pool = (0..data.cards.pool_cards)
             .map(|c| {
                 let card = &data.cards.cards[c];
@@ -937,10 +948,22 @@ impl Game {
             })
             .collect();
         let consumed = vec![0u32; data.cards.pool_cards];
-        let players = std::array::from_fn(|_| Player::new(&data));
+        let mut players: [Player; PLAYERS] = std::array::from_fn(|_| Player::new(&data));
+        let gods: ArrayVec<CardId, 2> = data.cards.cards.iter().enumerate()
+            .filter(|(_, c)| c.deity.is_some())
+            .map(|(id, _)| id as CardId)
+            .collect();
+        let mut rng = Rng::new(seed);
+        let god = (ABERRATIONS_IN_LOBBY && !gods.is_empty())
+            .then(|| gods[rng.below(gods.len() as u32) as usize]);
+        if let Some(card) = god {
+            for pl in &mut players {
+                pl.deity = Some(Deity { card, attack: 1, health: 1, golden: false });
+            }
+        }
         Game {
             data,
-            rng: Rng::new(seed),
+            rng,
             turn: 0,
             players,
             pool,
@@ -1393,7 +1416,7 @@ impl Game {
                     // its own cost, like the spell slot.
                     let (pay_health, cost) = (c.pay_health, c.cost);
                     let m = self.players[p].shop.remove(slot);
-                    self.players[p].hand.push(m);
+                    self.add_to_hand(p, m);
                     self.pay_for_spell(p, pay_health, cost);
                     self.magicfin_teach(p, id);
                     self.fire_event(p, EventKind::CardsBought, 1);
@@ -1402,7 +1425,7 @@ impl Game {
                     let pl = &mut self.players[p];
                     let m = pl.shop.remove(slot);
                     pl.gold -= buy_cost;
-                    pl.hand.push(m);
+                    self.add_to_hand(p, m);
                     self.after_buy_effects(p);
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
@@ -1415,7 +1438,7 @@ impl Game {
                 let (pay_health, cost) = (c.pay_health, c.cost);
                 let pl = &mut self.players[p];
                 let m = pl.make_card(&self.data.cards, id, false, 0);
-                pl.hand.push(m);
+                self.add_to_hand(p, m);
                 self.pay_for_spell(p, pay_health, cost);
                 self.magicfin_teach(p, id);
                 self.fire_event(p, EventKind::CardsBought, 1);
@@ -1443,6 +1466,22 @@ impl Game {
             }
             Action::Play { hand, pos } => {
                 let m = self.players[p].hand.remove(hand as usize);
+                if m.linked != 0 {
+                    let group = m.linked & 0x3fff;
+                    if m.linked & 0xc000 == 0x8000 {
+                        for other in &mut self.players[p].hand {
+                            if other.linked & 0x3fff == group {
+                                other.linked |= 0x4000;
+                            }
+                        }
+                    } else {
+                        while let Some(slot) = self.players[p].hand.iter()
+                            .position(|other| other.linked & 0x3fff == group)
+                        {
+                            self.discard_card(p, slot);
+                        }
+                    }
+                }
                 let card = self.data.cards.get(m.card);
                 if card.is_spell() {
                     let choose_one = card.choose_one.is_some();
@@ -2088,6 +2127,24 @@ impl Game {
                         let mul = if golden { 2 } else { 1 };
                         self.add_undead_bonus(p, attack * mul, health * mul, true);
                     }
+                    Some(OnCastSpell::BuffSelfAndDeity { attack, health }) => {
+                        let mul = if golden { 2 } else { 1 };
+                        buff(&mut self.players[p].board[i], attack * mul, health * mul);
+                        if let Some(deity) = &mut self.players[p].deity {
+                            deity.attack += attack * mul;
+                            deity.health += health * mul;
+                        }
+                    }
+                    Some(OnCastSpell::BuffAllAndDeity { attack, health }) => {
+                        let mul = if golden { 2 } else { 1 };
+                        for o in &mut self.players[p].board {
+                            buff(o, attack * mul, health * mul);
+                        }
+                        if let Some(deity) = &mut self.players[p].deity {
+                            deity.attack += attack * mul;
+                            deity.health += health * mul;
+                        }
+                    }
                     Some(OnCastSpell::BuffAll { attack, health }) => {
                         // A golden one gives the same buff twice.
                         let times = if golden { 2 } else { 1 };
@@ -2211,7 +2268,7 @@ impl Game {
         self.players[p].mycologist_uses += 1;
         let mut m = self.players[p].make_card(cards, token, false, 0);
         m.taught_spell = Some(spell);
-        self.players[p].hand.push(m);
+        self.add_to_hand(p, m);
     }
 
     /// A minion of `tribe` was just played: hand cards that grow while in
@@ -2418,7 +2475,7 @@ impl Game {
         let tier = (self.players[p].tier + 1).min(MAX_TIER);
         let mut m = self.players[p].make_card(&self.data.cards, id, false, 0);
         m.improvements = tier as u16;
-        self.players[p].hand.push(m);
+        self.add_to_hand(p, m);
     }
 
     /// Get `n` Blood Gems in hand; the ones past a full hand are lost.
@@ -2503,13 +2560,32 @@ impl Game {
         if !self.valid_discard(p, s) {
             return;
         }
-        let m = self.players[p].hand.remove(s);
-        give_back(&mut self.pool, &self.data.cards, &m);
-        // The "when you discard" hook: event triggers on the board read it.
-        self.fire_event(p, EventKind::Discarded, 1);
+        self.discard_card(p, s);
         let mut pos = pd.source as usize;
         self.run_effect(p, &mut pos, pd.reward, pd.golden, 1);
         self.maybe_start_discover(p);
+    }
+
+    fn discard_card(&mut self, p: usize, s: usize) -> Option<Minion> {
+        if s >= self.players[p].hand.len() {
+            return None;
+        }
+        let m = self.players[p].hand.remove(s);
+        give_back(&mut self.pool, &self.data.cards, &m);
+        self.players[p].discarded = self.players[p].discarded.saturating_add(1);
+        self.fire_event(p, EventKind::Discarded, 1);
+        match self.data.cards.get(m.card).on_discard {
+            Some(OnDiscard::CastSpell(times)) => {
+                for _ in 0..times {
+                    self.cast_spell(p, m);
+                }
+            }
+            Some(OnDiscard::MaxGold(n)) => {
+                self.players[p].extra_max_gold = self.players[p].extra_max_gold.saturating_add(n);
+            }
+            None => {}
+        }
+        Some(m)
     }
 
     /// Sell the board minion in `slot`: Gold, the copy back to the pool and
@@ -2664,6 +2740,12 @@ impl Game {
     fn execute_spell_effect(&mut self, p: usize, se: SpellEffect, tavern: bool) {
         let (da, dh) = if tavern { self.total_spell_bonus(p) } else { (0, 0) };
         match se {
+            SpellEffect::BuffDeity { attack, health } => {
+                if let Some(deity) = &mut self.players[p].deity {
+                    deity.attack += attack + da;
+                    deity.health += health + dh;
+                }
+            }
             SpellEffect::GainGold(g) => {
                 self.players[p].gold = self.players[p].gold.saturating_add(g);
             }
@@ -3129,6 +3211,87 @@ impl Game {
         let mul = if golden { 2 } else { 1 };
         let bonus_mask = self.data.rules.bonus_mask;
         match e {
+            Effect::BuffDeity { attack, health, per_spell } => {
+                let n = self.players[p].spells_cast as i32;
+                if let Some(deity) = &mut self.players[p].deity {
+                    deity.attack += (attack + per_spell.0 * n) * mul * runs as i32;
+                    deity.health += (health + per_spell.1 * n) * mul * runs as i32;
+                }
+            }
+            Effect::BuffSelfAndDeity { attack, health } => {
+                if let Some(m) = self.players[p].board.get_mut(*pos) {
+                    buff(m, attack * mul * runs as i32, health * mul * runs as i32);
+                }
+                if let Some(deity) = &mut self.players[p].deity {
+                    deity.attack += attack * mul * runs as i32;
+                    deity.health += health * mul * runs as i32;
+                }
+            }
+            Effect::BuffDeityAndImprove { attack, health } => {
+                for _ in 0..runs {
+                    let imp = self.players[p].board.get(*pos).map_or(0, |m| m.improvements as i32);
+                    if let Some(deity) = &mut self.players[p].deity {
+                        deity.attack += attack * (1 + imp) * mul;
+                        deity.health += health * (1 + imp) * mul;
+                    }
+                    if let Some(m) = self.players[p].board.get_mut(*pos) {
+                        m.improvements = m.improvements.saturating_add(1);
+                    }
+                }
+            }
+            Effect::BuffLeftmostPerDiscard { attack, health } => {
+                let n = 1 + self.players[p].discarded as i32;
+                if let Some(m) = self.players[p].board.first_mut() {
+                    buff(m, attack * n * mul * runs as i32, health * n * mul * runs as i32);
+                }
+            }
+            Effect::GetRandomSpellUpTo { cost, count } => {
+                let tier = self.players[p].tier;
+                for _ in 0..count.saturating_mul(mul as u8).saturating_mul(runs) {
+                    let card = match cost {
+                        Some(cost) => self.data.cards.random_spell_of_cost_up_to(cost, tier, &mut self.rng),
+                        None => self.data.cards.random_spell(tier, &mut self.rng),
+                    };
+                    if let Some(card) = card {
+                        self.give_generated_tracking(p, card, pos);
+                    }
+                }
+            }
+            Effect::GetLinkedSpells { count } => {
+                let tier = self.players[p].tier;
+                let mut cards = ArrayVec::<CardId, HAND>::new();
+                for _ in 0..count.saturating_mul(mul as u8).saturating_mul(runs) {
+                    if let Some(card) = self.data.cards.random_spell(tier, &mut self.rng) {
+                        let _ = cards.try_push(card);
+                    }
+                }
+                self.give_linked(p, &cards, golden);
+            }
+            Effect::GetLinkedMinions { tribe, count } => {
+                let tier = self.players[p].tier;
+                let mut cards = ArrayVec::<CardId, HAND>::new();
+                for _ in 0..count.saturating_mul(mul as u8).saturating_mul(runs) {
+                    if let Some(card) = self.data.cards.random_pool_minion(tribe, tier, &mut self.rng) {
+                        let _ = cards.try_push(card);
+                    }
+                }
+                self.give_linked(p, &cards, golden);
+            }
+            Effect::DiscardLeftmostSpells { count, attack, health } => {
+                for _ in 0..count.saturating_mul(mul as u8).saturating_mul(runs) {
+                    let cards = &self.data.cards;
+                    let slot = self.players[p].hand.iter()
+                        .position(|m| cards.get(m.card).tavern_spell);
+                    let Some(slot) = slot else { break };
+                    self.discard_card(p, slot);
+                    if let Some(m) = self.players[p].board.get_mut(*pos) {
+                        buff(m, attack, health);
+                    }
+                }
+            }
+            Effect::SummonAndBuffAll { .. }
+            | Effect::SummonDeadAberrations { .. }
+            | Effect::DamageHighestHealth => {}
             Effect::BuffOthers { tribe, attack, health, per_keyword } => {
                 let cards = &self.data.cards;
                 let pl = &mut self.players[p];
@@ -3771,7 +3934,7 @@ impl Game {
                         self.play_gems_on_board(p, 0, 1);
                     } else {
                         let m = self.players[p].make_card(&self.data.cards, gem, false, 0);
-                        self.players[p].hand.push(m);
+                        self.add_to_hand(p, m);
                     }
                 }
             }
@@ -3967,7 +4130,7 @@ impl Game {
             let Some(i) = best else { break };
             let m = self.players[p].shop.remove(i);
             let card = m.card;
-            self.players[p].hand.push(m);
+            self.add_to_hand(p, m);
             self.check_triple(p, card);
         }
     }
@@ -3990,7 +4153,7 @@ impl Game {
         let k = self.rng.below(ok.len() as u32) as usize;
         let m = self.players[p].shop.remove(ok[k]);
         let card = m.card;
-        self.players[p].hand.push(m);
+        self.add_to_hand(p, m);
         self.check_triple(p, card);
     }
 
@@ -4373,6 +4536,9 @@ impl Game {
             let pl = &mut self.players[p];
             pl.gold_spent_turn = pl.gold_spent_turn.saturating_add(amount.min(u16::MAX as u32) as u16);
         }
+        if kind == EventKind::SpellsCast {
+            self.players[p].spells_cast = self.players[p].spells_cast.saturating_add(amount);
+        }
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             if skip == Some(pos) {
@@ -4386,13 +4552,18 @@ impl Game {
                     continue;
                 }
                 let imp = &mut self.players[p].board[pos].improvements;
-                let mut count = *imp as u32 + amount;
+                // An every-1 trigger has no remainder to keep, so it leaves
+                // `improvements` alone: an effect that improves itself on
+                // every fire (Harbinger Aph'lass) stores its level there.
+                let mut count = if t.every == 1 { amount } else { *imp as u32 + amount };
                 let mut fires = 0;
                 while count >= t.every as u32 {
                     count -= t.every as u32;
                     fires += 1;
                 }
-                *imp = count as u16;
+                if t.every > 1 {
+                    *imp = count as u16;
+                }
                 for _ in 0..fires {
                     self.run_effect(p, &mut pos, t.effect, golden, 1);
                 }
@@ -5072,7 +5243,7 @@ impl Game {
             if both && !is_spell {
                 m.both_effects = true;
             }
-            pl.hand.push(m);
+            self.add_to_hand(p, m);
             if !is_spell {
                 self.check_triple(p, c);
             }
@@ -5095,7 +5266,7 @@ impl Game {
             return false;
         }
         let Some(m) = self.draw_golden_minion(p, lo, hi, typed, no_reward) else { return false };
-        self.players[p].hand.push(m);
+        self.add_to_hand(p, m);
         true
     }
 
@@ -5127,7 +5298,7 @@ impl Game {
             return;
         }
         let m = pl.make_card(cards, id, false, 0);
-        pl.hand.push(m);
+        self.add_to_hand(p, m);
     }
 
     /// The Lockbox in hand slot `i` breaks open: it becomes a random Golden
@@ -5212,13 +5383,45 @@ impl Game {
         self.give_generated_tracking(p, card, &mut dummy);
     }
 
-    fn give_generated_tracking(&mut self, p: usize, card: CardId, tracked_pos: &mut usize) {
+    fn add_to_hand(&mut self, p: usize, m: Minion) -> bool {
         if self.players[p].hand.is_full() {
+            return false;
+        }
+        self.players[p].hand.push(m);
+        for i in 0..self.players[p].board.len() {
+            let board = self.players[p].board[i];
+            for (card, golden) in board.parts() {
+                if let Some((attack, health)) = self.data.cards.get(card).on_card_added {
+                    let mul = if golden { 2 } else { 1 };
+                    if let Some(deity) = &mut self.players[p].deity {
+                        deity.attack += attack * mul;
+                        deity.health += health * mul;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    fn give_linked(&mut self, p: usize, cards: &[CardId], golden: bool) {
+        if cards.is_empty() {
             return;
         }
+        let id = self.players[p].next_link & 0x3fff;
+        self.players[p].next_link = if id == 0x3fff { 1 } else { id + 1 };
+        let linked = id | if golden { 0x8000 } else { 0 };
+        for &card in cards {
+            let mut m = self.players[p].make_card(&self.data.cards, card, false, 0);
+            m.linked = linked;
+            if self.add_to_hand(p, m) && !self.data.cards.get(card).is_spell() {
+                self.check_triple(p, card);
+            }
+        }
+    }
+
+    fn give_generated_tracking(&mut self, p: usize, card: CardId, tracked_pos: &mut usize) {
         let m = self.players[p].make_card(&self.data.cards, card, false, 0);
-        self.players[p].hand.push(m);
-        if !self.data.cards.get(card).is_spell() {
+        if self.add_to_hand(p, m) && !self.data.cards.get(card).is_spell() {
             self.check_triple_tracking(p, card, tracked_pos);
         }
     }
@@ -5346,9 +5549,9 @@ impl Game {
         if let Some((w, n)) = wild {
             take_from(pl, w, n, false, &mut gold);
         }
-        pl.hand.push(gold);
+        self.add_to_hand(p, gold);
         for m in returned {
-            give_back(&mut self.pool, cards, &m);
+            give_back(&mut self.pool, &self.data.cards, &m);
         }
     }
 
@@ -5723,6 +5926,11 @@ impl Game {
                 }
             }
         }
+        if let Some(deity) = &mut self.players[p].deity {
+            deity.attack += so.deity_gain.0;
+            deity.health += so.deity_gain.1;
+        }
+        self.players[p].spells_cast = self.players[p].spells_cast.saturating_add(so.spells_cast_gain);
         let (sa, sh) = so.spell_bonus_gain;
         if sa != 0 || sh != 0 {
             self.players[p].spell_bonus.0 += sa;
@@ -6112,7 +6320,7 @@ impl Game {
         let card = self.data.cards.get(c);
         if card.is_spell() || card.token {
             let m = self.players[p].make_card(&self.data.cards, c, false, 0);
-            self.players[p].hand.push(m);
+            self.add_to_hand(p, m);
             return Some(m);
         }
         let slot = card.pool_slot as usize;
@@ -6121,7 +6329,7 @@ impl Game {
         }
         self.pool[slot] -= 1;
         let m = self.players[p].make_card(&self.data.cards, c, false, 1);
-        self.players[p].hand.push(m);
+        self.add_to_hand(p, m);
         Some(m)
     }
 }

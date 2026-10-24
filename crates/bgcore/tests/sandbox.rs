@@ -162,7 +162,7 @@ fn a_recorded_game_round_trips_through_the_loader() {
     // Random play in a Mech sandbox for many turns, so boards carry
     // Magnetizations, improvements, golden minions and hands.
     let mut tried_attached = false;
-    for seed in 0..6u64 {
+    for seed in 0..12u64 {
         let mut g = sandbox(seed, Tribe::Mech, 3);
         let mut rng = Rng::new(seed + 100);
         let mut turns: Vec<TurnRecord> = Vec::new();

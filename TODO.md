@@ -80,18 +80,47 @@ The amounts these cards' text hides, as I know them from the game:
 | Hackerfin | +3/+2 more per different Bonus Keyword |
 | Sacrificial Wrathguard | each Activate adds +2/+2 to its Tavern buff |
 
-## Next
+## Next: finish the tribes, then a clean slate
+
+1. **Remove v0.1 and the made-up cards.** The old mini game's invented
+   cards (`tests/data/v01-*.toml`, `tests/data/d1a-cards.toml`) and the
+   tests and fallbacks built on them confuse agents, who mistake them for
+   real cards. Port any rule test worth keeping (Taunt, Divine Shield,
+   Reborn, Venomous, Windfury, triples, pool counts) to real cards, then
+   delete the rest: the v0.1 data, DESIGN.md Part 2, the v0.1 fallbacks in
+   the code, and the stale planning docs (`docs/CONCEPT.md`,
+   `docs/mechanics-inventory.md`, `docs/pool-analysis.md`).
+2. **A lobby of five random tribes per game**, like the real one (Deity
+   only with Aberrations, dual-tribe minions in if either tribe is).
+3. **A new observation.** The layout has been frozen since the five-tribe
+   lobby, so the bot can't see most of what came after: Blood Gem value,
+   the Deity, the Undead bonus, the Refresh buff, pending discards, Triple
+   Rewards, the lobby's tribes. Then bots for all ten tribes and a smoke
+   run.
+4. **Extend the card export** to heroes, hero powers, trinkets and Dark
+   Gifts, so every later run starts from the game's own data.
+
+## Then: the rest of the game
+
+1. **Heroes, the frame first:** hero choice, starting health and armor,
+   damage hitting armor first, Armor Stash, hero powers as a system
+   (cost, once per turn, passives, start of turn and Start of Combat
+   timing).
+2. **Hero powers in batches**, grouped by mechanic like the tribes,
+   starting with the heroes in my own games (the tracker's logs show
+   which).
+3. **Trinkets:** the lesser and greater choices at their set turns.
+4. **Dark Gifts**, and Dark Paradox with them.
+
+Each season changes some of this; the export and the audit script make
+catching up after a patch cheap.
+
+## Also on the list
 
 - Check our fights against `~/projects/bg`, the tracker, which simulates
-  real boards from my logs. With real cards on both sides this finally
-  makes sense.
+  real boards from my logs.
 - Peak boards taken from bots that force each build, to check balance
   between the builds.
 - Better scripted bots as yardsticks.
-
-## Later
-
-- Hero powers and hero choice.
-- Trinkets, quests and whatever the season adds.
-- All ten tribes with five banned per lobby, like the real game.
+- Split `game.rs` (about 5,000 lines) by system, so agents read less.
 - The suggestion window, fed by the tracker's log reader.

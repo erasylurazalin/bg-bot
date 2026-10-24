@@ -1722,6 +1722,187 @@ tribe = "quilboar"
 stats = [6, 15]
 rally = { summon_stat_copy = "Golem" }
 
+# --- Aberrations ---
+
+[[minion]]
+name = "Joyous"
+tier = 1
+tribe = "aberration"
+stats = [2, 3]
+battlecry = { buff_deity = [2, 1] }
+
+[[minion]]
+name = "Zoatroid"
+tier = 1
+tribe = "aberration"
+stats = [3, 2]
+keywords = ["taunt"]
+on_sell = { get = "Aberrant Tentacle" }
+
+[[minion]]
+name = "Brain Rotter"
+tier = 2
+tribe = "aberration"
+stats = [3, 4]
+activate = { cost = 0, discard = true, effect = { buff_deity = [2, 2] } }
+
+[[minion]]
+name = "Underrot Spawn"
+tier = 2
+tribe = "aberration"
+stats = [2, 2]
+keywords = ["taunt"]
+deathrattle = { effect = { summon_and_buff = "Aberrant Tentacle", buff = [1, 0], golden_doubles_count = true } }
+
+[[minion]]
+name = "Wandering Willbreaker"
+tier = 2
+tribe = "aberration"
+stats = [1, 3]
+on_sell = { effect = { linked_spells = 2 } }
+
+[[minion]]
+name = "Abyssal Envoy"
+tier = 3
+tribe = "aberration"
+stats = [2, 2]
+activate = { cost = 0, discard = true, effect = { random_spell_up_to = true } }
+
+[[minion]]
+name = "Drifting Sacrifice"
+tier = 3
+tribe = "aberration"
+stats = [2, 1]
+keywords = ["reborn"]
+deathrattle = { effect = { buff_deity = [2, 1] } }
+
+[[minion]]
+name = "Fetid Corroder"
+tier = 3
+tribe = "aberration"
+stats = [3, 3]
+battlecry = { get = "Sludge Corrosion", count = 1 }
+
+[[minion]]
+name = "Unwilling Slacker"
+tier = 3
+tribe = "aberration"
+stats = [3, 2]
+deathrattle = { effect = { random_spell_up_to = true, random_spell_cost = 1 } }
+
+[[minion]]
+name = "Vicious Mindslasher"
+tier = 3
+tribe = "aberration"
+stats = [1, 2]
+on_cast_spell = { buff_self_and_deity = [1, 2] }
+
+[[minion]]
+name = "Cutthroat K'Thir"
+tier = 4
+tribe = "aberration"
+stats = [4, 4]
+on_event = { event = "discarded", every = 1, effect = { buff_self_and_deity = [4, 4] } }
+
+[[minion]]
+name = "Faceless Operative"
+tier = 4
+tribe = "aberration"
+stats = [4, 2]
+on_sell = { effect = { linked_minions = "aberration", count = 2 } }
+
+[[minion]]
+name = "Mindbending Recruiter"
+tier = 4
+tribe = "aberration"
+stats = [6, 2]
+activate = { cost = 0, discard = true, effect = { random_minion = "aberration", count = 1 } }
+
+[[minion]]
+name = "Nightmare Corroder"
+tier = 4
+tribe = "aberration"
+stats = [4, 5]
+end_of_turn = { get = "Sludge Corrosion", count = 1 }
+
+[[minion]]
+name = "Parasitic Fleshling"
+tier = 4
+tribe = "aberration"
+stats = [4, 6]
+end_of_turn = { effect = { buff_leftmost_per_discard = [2, 2] } }
+
+[[minion]]
+name = "De-volition-ist"
+tier = 5
+tribe = "aberration"
+stats = [4, 8]
+after_friendly_attack = { effect = { damage_highest_health = true } }
+
+[[minion]]
+name = "Faceless Converter"
+tier = 5
+tribe = "aberration"
+stats = [5, 5]
+deathrattle = { effect = { buff_deity = [2, 1], per_spell = [2, 1] } }
+
+[[minion]]
+name = "Mindbender Ghur'sha"
+tier = 5
+tribe = "aberration"
+stats = [3, 9]
+on_event = { event = "discarded", every = 1, effect = { buff = [4, 4], target = "others" } }
+
+[[minion]]
+name = "Mysterious K'Thir"
+tier = 5
+tribe = "aberration"
+stats = [7, 7]
+end_of_turn = { effect = { discard_leftmost_spells = 3, buff = [7, 7] } }
+
+[[minion]]
+name = "N'raqi Frostcaller"
+tier = 5
+tribe = "aberration"
+stats = [6, 3]
+activate = { cost = 0, discard = true, effect = { spell_bonus = [1, 1] } }
+
+[[minion]]
+name = "N'raqi Sapper"
+tier = 5
+tribe = "aberration"
+stats = [6, 3]
+battlecry = { get = "Energizing Chamber", count = 1 }
+deathrattle = { effect = { get = "Energizing Chamber", count = 1 } }
+
+[[minion]]
+name = "Dark Puppeteer"
+tier = 6
+tribe = "aberration"
+stats = [8, 4]
+deathrattle = { effect = { spell_bonus = [0, 4] } }
+
+[[minion]]
+name = "Harbinger Aph'lass"
+tier = 6
+tribe = "aberration"
+stats = [3, 6]
+on_event = { event = "discarded", every = 1, effect = { buff_deity_and_improve = [2, 1] } }
+
+[[minion]]
+name = "The Shadow of Doubt"
+tier = 6
+tribe = "aberration"
+stats = [6, 8]
+on_card_added = { buff = [4, 5] }
+
+[[minion]]
+name = "Sha of Fear"
+tier = 7
+tribe = "aberration"
+stats = [10, 13]
+on_cast_spell = { buff_all_and_deity = [3, 3] }
+
 # --- Tokens ---
 
 [[token]]
@@ -1859,6 +2040,28 @@ name = "Golem"
 tier = 1
 tribe = "neutral"
 stats = [1, 1]
+
+[[token]]
+name = "Aberrant Tentacle"
+tier = 1
+tribe = "aberration"
+stats = [0, 2]
+keywords = ["taunt"]
+
+[[token]]
+name = "C'Thun"
+tier = 1
+tribe = "aberration"
+stats = [1, 1]
+deity = "cthun"
+
+[[token]]
+name = "Y'Shaarj"
+tier = 1
+tribe = "aberration"
+stats = [1, 1]
+deity = "yshaarj"
+deathrattle = { effect = { summon_dead_aberrations = 2 } }
 
 # --- Spells: Tier 1 ---
 
@@ -2086,6 +2289,7 @@ effect = { misplaced_tea_set = [4, 4] }
 name = "Sludge Corrosion"
 tier = 4
 cost = 1
+on_discard = "cast_twice"
 effect = { target = "board", buff = [1, 1] }
 
 [[spell]]
@@ -2332,6 +2536,22 @@ name = "Fandral's Fortune"
 tier = 6
 cost = 3
 effect = { discover = "choose_one_minion" }
+
+# --- Spells: Aberrations ---
+
+[[spell]]
+name = "Corrupted Coin"
+tier = 5
+cost = 2
+on_discard = "max_gold_2"
+effect = { gold = 2 }
+
+[[spell]]
+name = "Energizing Chamber"
+tier = 5
+cost = 1
+on_discard = "cast_twice"
+effect = { buff_deity = [7, 7] }
 
 # Generated Quilboar spells: plain spells, not Tavern spells.
 

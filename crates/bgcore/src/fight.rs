@@ -11,13 +11,21 @@
 use arrayvec::ArrayVec;
 
 use crate::cards::{
-    N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, Effect, OnSummonBeast, PermanentKeep,
-    OnCastSpell, OnReborn, SpellEffect, StartOfCombat, TimesRole, Tribe, Tribes, how_many_times,
+    N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, DeityKind, Effect, OnSummonBeast,
+    PermanentKeep, OnCastSpell, OnReborn, SpellEffect, StartOfCombat, TimesRole, Tribe, Tribes, how_many_times,
     pick_one_per_type,
 };
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 use crate::{BOARD, HAND};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Deity {
+    pub card: CardId,
+    pub attack: i32,
+    pub health: i32,
+    pub golden: bool,
+}
 
 /// Per-player counters passed into a fight.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -57,6 +65,8 @@ pub struct Counters {
     /// raises it inside a fight, for good through `SideOutcome::gem_gain`).
     pub gem_attack: i32,
     pub gem_health: i32,
+    pub deity: Option<Deity>,
+    pub spells_cast: u32,
     /// Sandbox only: "any minion" draws inside the fight (Ghastcoiler) only
     /// pick this tribe and neutral minions. None in a normal game.
     pub rig: Option<crate::cards::Tribe>,
@@ -85,6 +95,8 @@ impl Default for Counters {
             knight_deaths: 0,
             gem_attack: 1,
             gem_health: 1,
+            deity: None,
+            spells_cast: 0,
             rig: None,
         }
     }
@@ -150,6 +162,8 @@ pub struct SideOutcome {
     /// Increase to the player's Blood Gem value, for good (Sanguine Refiner's
     /// Rally, Sanguine Champion).
     pub gem_gain: (i32, i32),
+    pub deity_gain: (i32, i32),
+    pub spells_cast_gain: u32,
     /// Permanent Blood Gem stats gained by the minion in each starting board
     /// slot (Razorfen Vineweaver): the game adds them to the board minion's
     /// stats and Blood Gem stats after the fight.
@@ -299,6 +313,9 @@ struct Side<'a> {
     immediate: ArrayVec<u16, 8>,
     /// The card whose Deathrattle is running ("a different Undead").
     dr_card: Option<CardId>,
+    deity_left: u8,
+    deity_awakened: bool,
+    dead_aberrations: ArrayVec<Minion, 4>,
     /// This side is in the shop phase, not a fight (Plaguerunner gives more).
     outside: bool,
     /// Whether deaths count for Avenge. A shop destroy doesn't: its counts
@@ -370,6 +387,9 @@ impl<'a> Side<'a> {
             salvage: ArrayVec::new(),
             immediate: ArrayVec::new(),
             dr_card: None,
+            deity_left: 4,
+            deity_awakened: false,
+            dead_aberrations: ArrayVec::new(),
             outside: false,
             count_avenge: true,
             out: SideOutcome::default(),
@@ -691,23 +711,42 @@ impl<'a> Side<'a> {
         }
     }
 
-    /// The side cast a Tavern spell in the fight: Forsaken Weaver and its like
-    /// give the Undead their bonus, which lasts the game.
+    /// The side cast a Tavern spell in the fight: permanent bonuses leave in
+    /// the outcome and combat buffs stay on this side.
     fn on_spell_cast(&mut self, db: &CardDb) {
-        let mut gains: ArrayVec<(i32, i32), 16> = ArrayVec::new();
+        self.counters.spells_cast = self.counters.spells_cast.saturating_add(1);
+        self.out.spells_cast_gain = self.out.spells_cast_gain.saturating_add(1);
+        let mut triggers: ArrayVec<(u16, OnCastSpell, bool), 32> = ArrayVec::new();
         for f in &self.ms {
             if f.m.health <= 0 {
                 continue;
             }
             for (card, golden) in f.m.parts() {
-                if let Some(OnCastSpell::UndeadBonus { attack, health }) = db.get(card).on_cast_spell {
-                    let mul = if golden { 2 } else { 1 };
-                    let _ = gains.try_push((attack * mul, health * mul));
+                if let Some(trigger) = db.get(card).on_cast_spell {
+                    let _ = triggers.try_push((f.uid, trigger, golden));
                 }
             }
         }
-        for (a, h) in gains {
-            self.gain_undead(db, a, h);
+        for (host, trigger, golden) in triggers {
+            let mul = if golden { 2 } else { 1 };
+            match trigger {
+                OnCastSpell::UndeadBonus { attack, health } => self.gain_undead(db, attack * mul, health * mul),
+                OnCastSpell::BuffSelfAndDeity { attack, health } => {
+                    if let Some(i) = self.index_of(host) {
+                        self.gain_at(db, i, attack * mul, health * mul);
+                    }
+                    self.buff_deity(attack * mul, health * mul);
+                }
+                OnCastSpell::BuffAllAndDeity { attack, health } => {
+                    for i in 0..self.ms.len() {
+                        if self.ms[i].m.health > 0 {
+                            self.gain_at(db, i, attack * mul, health * mul);
+                        }
+                    }
+                    self.buff_deity(attack * mul, health * mul);
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1061,6 +1100,52 @@ impl<'a> Side<'a> {
     ) {
         let mul: i32 = if golden { 2 } else { 1 };
         match e {
+            Effect::BuffDeity { attack, health, per_spell } => {
+                let n = self.counters.spells_cast as i32;
+                self.buff_deity((attack + per_spell.0 * n) * mul, (health + per_spell.1 * n) * mul);
+            }
+            Effect::GetRandomSpellUpTo { cost, count } => {
+                for _ in 0..count as i32 * mul {
+                    let card = match cost {
+                        Some(cost) => db.random_spell_of_cost_up_to(cost, self.counters.tier, rng),
+                        None => db.random_spell(self.counters.tier, rng),
+                    };
+                    if let Some(card) = card {
+                        self.out.push_card(card);
+                    }
+                }
+            }
+            Effect::SummonAndBuffAll { card, count, attack, golden_doubles_count } => {
+                let (n, g) = if golden_doubles_count {
+                    (count * mul as u8, false)
+                } else {
+                    (count, golden)
+                };
+                for _ in 0..n {
+                    if self.summon(db, fx.side, *at, db.make(card, g), uid, w) {
+                        *at += 1;
+                    }
+                }
+                for i in 0..self.ms.len() {
+                    if self.ms[i].m.health > 0 {
+                        self.gain_at(db, i, attack * mul, 0);
+                    }
+                }
+            }
+            Effect::SummonDeadAberrations { count } => {
+                let dead: ArrayVec<Minion, 4> = self.dead_aberrations.iter()
+                    .take((count as i32 * mul) as usize).copied().collect();
+                for dead in dead {
+                    let (attack, health) = (dead.attack, dead.health);
+                    if !self.summon(db, fx.side, *at, dead, uid, w) {
+                        break;
+                    }
+                    self.ms[*at].m.attack = attack;
+                    self.ms[*at].m.health = health;
+                    self.ms[*at].taken = 0;
+                    *at += 1;
+                }
+            }
             Effect::Summon { card, count, golden_doubles_count } => {
                 let (n, g) = if golden_doubles_count {
                     (count * mul as u8, false)
@@ -1658,6 +1743,86 @@ impl<'a> Side<'a> {
         }
     }
 
+    fn buff_deity(&mut self, attack: i32, health: i32) {
+        if let Some(deity) = &mut self.counters.deity {
+            deity.attack += attack;
+            deity.health += health;
+            self.out.deity_gain.0 += attack;
+            self.out.deity_gain.1 += health;
+        }
+    }
+
+    fn try_awaken(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        let Some(deity) = self.counters.deity else { return };
+        if self.deity_awakened || self.deity_left > 0 || self.ms.is_full() {
+            return;
+        }
+        let mut god = db.make(deity.card, deity.golden);
+        god.attack = deity.attack;
+        god.health = deity.health.max(1);
+        let at = self.ms.len();
+        if !self.summon(db, side, at, god, uid, w) {
+            return;
+        }
+        self.deity_awakened = true;
+        if db.get(deity.card).deity != Some(DeityKind::Cthun) {
+            return;
+        }
+        let Some(god_index) = self.ms.get(at).filter(|f| f.m.health > 0).map(|_| at) else { return };
+        let god = self.ms[god_index].m;
+        let mut others: ArrayVec<usize, BOARD> = (0..self.ms.len())
+            .filter(|&i| i != god_index && self.ms[i].m.health > 0)
+            .collect();
+        if others.is_empty() {
+            return;
+        }
+        let mul = if deity.golden { 2 } else { 1 };
+        for (total, attack) in [(god.attack * mul, true), (god.health * mul, false)] {
+            let share = total / others.len() as i32;
+            let extra = total % others.len() as i32;
+            rng.shuffle(&mut others);
+            for (k, &i) in others.iter().enumerate() {
+                let n = share + i32::from((k as i32) < extra);
+                if attack {
+                    self.gain_at(db, i, n, 0);
+                } else {
+                    self.gain_at(db, i, 0, n);
+                }
+            }
+        }
+    }
+
+    fn note_deity_death(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        fm: Fm,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        if self.outside || self.counters.deity.is_none() {
+            return;
+        }
+        let card = db.get(fm.m.card);
+        if card.tribes.has(Tribe::Aberration) {
+            if card.deity.is_none() && self.dead_aberrations.len() < 4 {
+                let mut dead = fm.m;
+                dead.health += fm.taken;
+                self.dead_aberrations.push(dead);
+            }
+            self.deity_left = self.deity_left.saturating_sub(1);
+        }
+        self.try_awaken(db, side, uid, rng, w);
+    }
+
     /// Remove the dead in board order. Each one's Deathrattle runs, then
     /// Avenge counts it, then its Reborn, before the next dead minion is
     /// looked at.
@@ -1685,6 +1850,7 @@ impl<'a> Side<'a> {
             }
             let runs = self.deathrattle_fires(db);
             i += self.fire_deathrattles(db, side, &dead, fm.uid, fm.killer, i, runs, uid, rng, w);
+            self.note_deity_death(db, side, fm, uid, rng, w);
             if self.count_avenge {
                 self.avenge_tick(db, side, uid, rng, w);
             }
@@ -2090,6 +2256,45 @@ fn rally_damage(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn highest_health_damage(
+    sides: &mut [Side<'_>; 2],
+    turn: usize,
+    host: u16,
+    golden: bool,
+    db: &CardDb,
+    uid: &mut u16,
+    rng: &mut Rng,
+    w: &mut impl Watch,
+) {
+    let def = &sides[turn ^ 1];
+    let highest = def.ms.iter().filter(|f| f.m.health > 0).map(|f| f.m.health).max();
+    let Some(highest) = highest else { return };
+    let targets: ArrayVec<u16, BOARD> = def.ms.iter()
+        .filter(|f| f.m.health > 0 && f.m.health == highest)
+        .map(|f| f.uid)
+        .collect();
+    let target = targets[rng.below(targets.len() as u32) as usize];
+    let (att, def) = pair(sides, turn);
+    let Some(hi) = att.index_of(host) else { return };
+    let Some(vi) = def.index_of(target) else { return };
+    let damage = att.ms[hi].m.attack * if golden { 2 } else { 1 };
+    let (xf, yf) = (&mut att.ms[hi], &mut def.ms[vi]);
+    let was_shielded = yf.m.keywords.has(Keywords::DIVINE_SHIELD);
+    let dealt = deal_damage(&mut yf.m, damage);
+    yf.taken += dealt;
+    if yf.m.health <= 0 && dealt > 0 {
+        yf.killer = Some(xf.uid);
+    }
+    att.count_damage(db, turn, hi, dealt, uid, rng, w);
+    if was_shielded && !def.ms[vi].m.keywords.has(Keywords::DIVINE_SHIELD) {
+        def.note_shield_lost(db);
+    }
+    if dealt > 0 && def.damage_trigger {
+        def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
+    }
+}
+
 /// Run the attack triggers of one kind for the minion `me`, which attacks:
 /// Rally (for `me` only) and "whenever a friendly minion attacks" before the
 /// damage, or "after a friendly minion attacks" after it.
@@ -2200,6 +2405,10 @@ fn attack_triggers(
                 && (!t.filter.exclude_self || host != me)
                 && filter_ok(db, t.filter, attacker)
             {
+                if t.effect == Effect::DamageHighestHealth {
+                    highest_health_damage(sides, turn, host, golden, db, uid, rng, w);
+                    continue;
+                }
                 let Some(hi) = sides[turn].index_of(host) else { break };
                 let fx = Fx {
                     side: turn,

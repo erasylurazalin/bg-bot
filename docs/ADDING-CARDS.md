@@ -55,7 +55,7 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Magnetize / Mech played | `on_play_mech`, `on_play_or_magnetize_mech`, `on_cast_spell_on_mech`, `aura = polarizing_beatboxer` | `magnetize_to`, `trigger_mech_played_or_magnetized`, `beatboxers_copy`, `Minion::magnetize` | Spark Snapper |
 | Cast a Tavern spell | `on_cast_spell`, `on_cast_spell_on_self`, `on_cast_spell_on_tribe` | `trigger_on_cast_spell`, `trigger_on_cast_spell_on_target`; one call per cast (a Bounty cast twice calls it twice) | Timecap'n Hooktail |
 | Spell cast event counter | `on_event = { event = "spells_cast" }` | `cast_spell` -> `fire_event(SpellsCast)` | Felboar |
-| Gold spent / hero damage / sold / bought / Elementals played | `on_event = { event = "gold_spent" / "hero_damage" / "minions_sold" / "cards_bought" / "elementals_played", every, effect }` | `Game::fire_event` (count in `improvements`, remainder kept, can fire several times) | Gunpowder Courier |
+| Gold spent / hero damage / sold / bought / Elementals played / discarded | `on_event = { event = "gold_spent" / "hero_damage" / "minions_sold" / "cards_bought" / "elementals_played" / "discarded", every, effect }` | `Game::fire_event` (count in `improvements`, remainder kept, can fire several times; an every-1 trigger leaves `improvements` alone so a self-improving effect can use it) | Gunpowder Courier |
 | Sell | `on_sell = {..}` | `Game::sell_minion` (`OnSell`) | Greedy Conniver |
 | Buy | `Action::Buy`/`BuySpell` in `apply`; triple via `check_triple` | `apply` | none yet |
 | Play a minion of a tribe | `after_play_tribe = { tribe, effects }` (never counts the minion being played, no flag; runs right after it lands, before its Battlecry) | `fire_after_play_tribe` | Wrath Weaver |
@@ -94,6 +94,11 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Cards gained in a fight | `get = "X"`, `random_*` effects | `SideOutcome.cards`, `apply_side_outcome` -> `give_generated` | Headhunter Gryphon |
 | Spell effect (no target) | `[[spell]] effect = { gold = 2 }` etc | `cast_spell_inner` -> `execute_spell_effect` (`SpellEffect`) | Tavern Coin |
 | Spell effect (needs a minion) | `effect = { target = "chosen", .. }` | `cast_spell_inner` -> `PendingTarget` -> `apply_target` (`SpellTarget`) | Tavern Dish Banana |
+| A card is discarded, any source | `on_event = { event = "discarded" }`; on the discarded spell itself `on_discard = "cast_twice"` / `"max_gold_2"` | `Game::discard_card` (Activates, linked cards, Mysterious K'Thir): pool copy back, the `Discarded` event, then `OnDiscard` (two real Tavern spell casts, or maximum Gold) | Cutthroat K'Thir |
+| A card is added to your hand | `on_card_added = { buff }` | `Game::add_to_hand`, the one path into a hand (buys, Gems, Triple Rewards, Discover picks, generated, Lockbox, `Game::give`) | The Shadow of Doubt |
+| Give your Deity stats | `buff_deity` (+`per_spell`), `buff_self_and_deity`, `buff_deity_and_improve`, spell `buff_deity`, `on_cast_spell = { buff_self_and_deity / buff_all_and_deity }` | `Game::run_effect` / `execute_spell_effect` / `trigger_on_cast_spell`; in a fight `Side::buff_deity`, the gain leaves through `SideOutcome::deity_gain` | Joyous |
+| Linked cards | `linked_spells = 2`, `linked_minions = "aberration"` (golden links four) | `Game::give_linked`, `Minion.linked`; `Action::Play` discards the rest of the group (a golden four after two plays) | Wandering Willbreaker |
+| The god tokens | token `deity = "cthun"` / `"yshaarj"` | `Game::unstarted` picks one god per lobby onto `Player.deity`; fights: `Side::note_deity_death`, `try_awaken`, C'Thun's split, `Effect::SummonDeadAberrations` | C'Thun |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -141,7 +146,7 @@ exactly one legal target and drops the effect when there is none.
 
 1. `cards.rs`: add the variant to `Tribe`, add it to `Tribe::EVERY` (rules use this) and
    `tribe()` parse, and bump the length in `EVERY: [Tribe; N]`. The mask `Tribes`
-   is a `u16` (nine tribes fit with room for more); `Tribes::ALL` ("all types")
+   is a `u16` (ten tribes fit with room for more); `Tribes::ALL` ("all types")
    gets the new bit. `Tribe::ALL` stays the five-tribe list the observation
    uses until the observation run: do not touch it before then.
 2. Tribe loops that must use `EVERY`: `Tribes::random_type`, `pick_one_per_type`,
@@ -153,7 +158,7 @@ exactly one legal target and drops the effect when there is none.
    use a tribe that does not exist: "naga" (it left the game and will never be
    built, so these tests never need changing again).
    Also raise `MAX_TAVERN_BUFFS` in game.rs (one Tavern buff per tribe filter and
-   duration, so 2 x (tribes + 1), 20 with nine tribes); a push past it panics.
+   duration, so 2 x (tribes + 1), 22 with ten tribes); a push past it panics.
 4. `tests/tier7.rs` Last One Standing test counts picks per type: an all-type minion is
    every tribe, so a new tribe changes its expected count. Re-check it. An all-type
    minion is also a member of the new tribe for every "your <tribe>" rule (Amalgam,
@@ -433,3 +438,63 @@ for parse-error tests.
   `attack_triggers`: a Golem token with the Juggernaut's stats (double when
   golden) is summoned to its right and `attack_swings_at` makes it attack the
   target first; a kill fizzles the Juggernaut's own swing (Ravager rule).
+
+## 10. Systems the Aberration run added
+
+- **Aberrations (tribe 10).** `Tribe::EVERY` has ten tribes and `Tribes::ALL`
+  is `0b11_1111_1111`; `MAX_TAVERN_BUFFS` is 22. The observation still has
+  five tribe slots.
+- **The Deity.** One god per lobby (C'Thun or Y'Shaarj), drawn from the game's
+  RNG in `Game::unstarted` (the `ABERRATIONS_IN_LOBBY` const is the switch for
+  the five-random-tribes lobby). Every player's `Player.deity` starts 1/1;
+  `Effect::BuffDeity` (with `per_spell`), `BuffSelfAndDeity` and the
+  `OnCastSpell` deity parts grow it in the shop, `Side::buff_deity` in a
+  fight, and a fight's gains come back through `SideOutcome::deity_gain`.
+  `Side::note_deity_death` counts friendly Aberration deaths (tokens and
+  Reborn copies, never the god itself) after each death's Deathrattles: at
+  the fourth, `Side::try_awaken` summons the god at the right end with the
+  Deity's current stats as a normal summon, retrying after any later death
+  while the board is full. Once per fight, the count restarts each fight.
+  C'Thun then splits its Attack and Health (golden double) among the other
+  living minions, equal shares, the remainder +1 to random different ones,
+  and keeps its own stats. Y'Shaarj's Deathrattle
+  (`Effect::SummonDeadAberrations`) summons the first 2 (golden 4) friendly
+  Aberrations that died that fight where it stood, at their maximum stats
+  (Health plus the damage `Fm.taken`).
+- **One discard path.** `Game::discard_card(p, slot)`: `valid_discard`,
+  `give_back`, the `Player.discarded` count, `fire_event(Discarded)`, then
+  the card's own `Card.on_discard`: `OnDiscard::CastSpell(2)` casts it as
+  real Tavern spells (spell power, cast triggers, spell counters),
+  `OnDiscard::MaxGold(2)` only raises maximum Gold. Every discard goes
+  through it: Activate rewards, linked cards, Mysterious K'Thir
+  (`Effect::DiscardLeftmostSpells`, the N left-most Tavern spells only,
+  skipping Blood Gems and Triple Rewards).
+- **Every-1 event triggers keep `improvements`.** `Game::fire_event` stores
+  an event trigger's remainder in `Minion.improvements`; an every-1 trigger
+  has none, so it leaves the field alone and an effect that improves itself
+  on every fire (Harbinger Aph'lass, `Effect::BuffDeityAndImprove`) stores
+  its level there.
+- **One hand-insert hook.** `Game::add_to_hand` is the only path into a
+  player's hand (buys, generated cards, Discover picks, Triple Rewards,
+  Blood Gems, the Lockbox, `Game::give`); a full hand drops the card first,
+  then `Card.on_card_added` runs (The Shadow of Doubt buffs the Deity).
+- **Linked cards.** `Minion.linked`: the low 14 bits are a group id from
+  `Player.next_link`, bit 15 (0x8000) marks a golden four-card group, bit 14
+  (0x4000) that one of it was played. `Game::give_linked`
+  (`Effect::GetLinkedSpells`, `GetLinkedMinions`) stamps the cards;
+  `Action::Play` discards the rest of the group at once for a pair, after
+  the second play for a golden four, through `discard_card` (a real
+  discard). The link lasts across turns and is recorded in `record.rs`.
+- **De-volition-ist.** `Effect::DamageHighestHealth`, intercepted in
+  `attack_triggers` after the minion's own swing (even when it died
+  attacking): damage equal to its Attack (golden double) to a random tied
+  highest-Health enemy, honouring Divine Shield and Venomous.
+- **Hidden numbers** (DESIGN.md): Mindbending Recruiter's Activate costs 0;
+  Aph'lass +2/+1 improving +2/+1 per discard; Parasitic Fleshling +2/+2 per
+  card discarded this game (`Player.discarded`); Faceless Converter +2/+1
+  per Tavern spell cast this game (`Player.spells_cast`, raised by fights
+  through `SideOutcome::spells_cast_gain`).
+- **Tests.** `tests/aberration.rs`. A Boom-in-a-Box Start of Combat (a
+  golden one deals two waves) kills known low-health Aberrations in board
+  order, which scripts the four deaths an awakening needs without a random
+  attacker; two different sleeper tokens make per-minion gains measurable.

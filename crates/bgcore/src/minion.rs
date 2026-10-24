@@ -131,6 +131,9 @@ pub struct Minion {
     /// A Choose One card with both effects combined (Fandral's Fortune's
     /// Discover): playing it runs both options instead of asking.
     pub both_effects: bool,
+    /// Linked hand cards share a nonzero id. The high bits mark a golden
+    /// four-card group and whether its first card was played.
+    pub linked: u16,
     pub attached: [Attached; MAX_ATTACHED],
     pub n_attached: u8,
 }

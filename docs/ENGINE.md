@@ -21,7 +21,7 @@ crates/
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
-    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, neutrals),
+    tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card), fight.rs,
                       game.rs, d1a.rs; tests/data/ has test-only card files
@@ -122,6 +122,8 @@ rules behind each are in DESIGN.md Part 3.
 - **Quilboar** (Blood Gems and the gem value, Tavern spells versus plain
   spells, the Triple Reward spell, set-versus-add, discard, both effects,
   the Juggernaut Golem): see `docs/ADDING-CARDS.md` section 9.
+- **Aberration** (the Deity, one discard path, one hand-insert hook, linked
+  cards): see `docs/ADDING-CARDS.md` section 10.
 - **Elementals** (refresh amount, free Refreshes, Baller count, Surprise
   triples, Slab, Prison, Wildfire): see `docs/ADDING-CARDS.md` section 7.
 - **Legal actions.** `Game::legal_mask` only asks `is_legal` for slots that

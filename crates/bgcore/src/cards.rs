@@ -41,6 +41,7 @@ pub enum Tribe {
     Elemental,
     Undead,
     Quilboar,
+    Aberration,
 }
 
 impl Tribe {
@@ -48,7 +49,7 @@ impl Tribe {
     /// run that redoes the observation for every tribe). Rules use `EVERY`.
     pub const ALL: [Tribe; 5] = [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon];
     /// Every tribe a card can have.
-    pub const EVERY: [Tribe; 9] = [
+    pub const EVERY: [Tribe; 10] = [
         Tribe::Beast,
         Tribe::Mech,
         Tribe::Dragon,
@@ -58,6 +59,7 @@ impl Tribe {
         Tribe::Elemental,
         Tribe::Undead,
         Tribe::Quilboar,
+        Tribe::Aberration,
     ];
 
     fn bit(self) -> u16 {
@@ -73,7 +75,7 @@ pub struct Tribes(u16);
 
 impl Tribes {
     pub const NONE: Tribes = Tribes(0);
-    pub const ALL: Tribes = Tribes(0b1_1111_1111);
+    pub const ALL: Tribes = Tribes(0b11_1111_1111);
 
     pub fn of(t: Tribe) -> Tribes {
         Tribes(t.bit())
@@ -159,6 +161,17 @@ pub enum ConsumeBy {
 /// triggers, "after your hero takes damage" and some end of turn effects run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Effect {
+    BuffDeity { attack: i32, health: i32, per_spell: (i32, i32) },
+    BuffSelfAndDeity { attack: i32, health: i32 },
+    BuffDeityAndImprove { attack: i32, health: i32 },
+    BuffLeftmostPerDiscard { attack: i32, health: i32 },
+    GetRandomSpellUpTo { cost: Option<u8>, count: u8 },
+    GetLinkedSpells { count: u8 },
+    GetLinkedMinions { tribe: Tribe, count: u8 },
+    DiscardLeftmostSpells { count: u8, attack: i32, health: i32 },
+    SummonAndBuffAll { card: CardId, count: u8, attack: i32, golden_doubles_count: bool },
+    SummonDeadAberrations { count: u8 },
+    DamageHighestHealth,
     /// Summon `count` copies of a card (a token or a pool minion) next to the
     /// minion. A golden minion summons `count` golden copies, or, with
     /// `golden_doubles_count`, twice as many plain ones. Fights only.
@@ -495,7 +508,12 @@ impl Effect {
     pub fn runs_in_fights(self) -> bool {
         match self {
             Effect::BuffOthers { per_keyword, .. } => per_keyword == (0, 0),
-            Effect::Summon { .. }
+            Effect::BuffDeity { .. }
+            | Effect::GetRandomSpellUpTo { .. }
+            | Effect::SummonAndBuffAll { .. }
+            | Effect::SummonDeadAberrations { .. }
+            | Effect::DamageHighestHealth
+            | Effect::Summon { .. }
             | Effect::BuffAll { .. }
             | Effect::BuffSelf { .. }
             | Effect::BuffRandomFriendly { .. }
@@ -707,6 +725,7 @@ impl SpellTarget {
 /// A Tavern spell (or Choose One spell option) that does not target a minion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SpellEffect {
+    BuffDeity { attack: i32, health: i32 },
     GainGold(u8),
     GoldNextTurn(u8),
     MaxGold(u8),
@@ -978,12 +997,26 @@ pub enum OnPlayOrMagnetizeMech {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeityKind {
+    Cthun,
+    Yshaarj,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnDiscard {
+    CastSpell(u8),
+    MaxGold(u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnCastSpellOnMech {
     MagnetizeSatellite { card: CardId, attack: i32, health: i32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnCastSpell {
+    BuffSelfAndDeity { attack: i32, health: i32 },
+    BuffAllAndDeity { attack: i32, health: i32 },
     BuffDivineShield { attack: i32, health: i32 },
     /// Buff every friendly minion. A golden minion does it twice rather
     /// than twice as much (Timecap'n Hooktail).
@@ -1211,6 +1244,9 @@ pub struct Card {
     /// A Magnetic minion that can Magnetize to an Undead as well as a Mech
     /// (Prosthetic Hand).
     pub magnetize_to_undead: bool,
+    pub deity: Option<DeityKind>,
+    pub on_card_added: Option<(i32, i32)>,
+    pub on_discard: Option<OnDiscard>,
     /// A Tavern spell (BATTLEGROUND_SPELL in the game data): only these fire
     /// "Tavern spell" triggers and spell counters, and get spell power. Plain
     /// spells (Blood Gem, Gem Day, Triple Reward, Lockbox) do not.
@@ -1476,6 +1512,8 @@ struct RawCard {
     /// Blood Gems played on all your Quilboar after a Choose One card
     /// (Turbo Hogrider).
     after_choose_one_play: Option<u8>,
+    deity: Option<String>,
+    on_card_added: Option<RawBuff>,
 }
 
 #[derive(Deserialize)]
@@ -1529,6 +1567,7 @@ struct RawSpell {
     /// The Blood Gem itself.
     #[serde(default)]
     blood_gem: bool,
+    on_discard: Option<String>,
     effect: Option<RawSpellEffect>,
     choose_one: Option<[RawSpellEffect; 2]>,
 }
@@ -1569,6 +1608,7 @@ struct RawSpellEffect {
     gold: Option<u8>,
     gold_next_turn: Option<u8>,
     max_gold: Option<u8>,
+    buff_deity: Option<[i32; 2]>,
     free_rolls: Option<u8>,
     overconfidence: Option<[u8; 2]>,
     random_tier_minion: Option<u8>,
@@ -1688,6 +1728,20 @@ struct RawEffect {
     spell_discount: Option<u8>,
     /// Raise the player's Tavern spell bonus this game.
     spell_bonus: Option<[i32; 2]>,
+    buff_deity: Option<[i32; 2]>,
+    per_spell: Option<[i32; 2]>,
+    buff_self_and_deity: Option<[i32; 2]>,
+    buff_deity_and_improve: Option<[i32; 2]>,
+    buff_leftmost_per_discard: Option<[i32; 2]>,
+    #[serde(default)]
+    random_spell_up_to: bool,
+    linked_spells: Option<u8>,
+    linked_minions: Option<String>,
+    discard_leftmost_spells: Option<u8>,
+    summon_and_buff: Option<String>,
+    summon_dead_aberrations: Option<u8>,
+    #[serde(default)]
+    damage_highest_health: bool,
     #[serde(default)]
     random_chromadrake: bool,
     /// Cast a named Tavern spell, `count` times.
@@ -2017,6 +2071,8 @@ struct RawOnCastSpellOnMech {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawOnCastSpell {
+    buff_self_and_deity: Option<[i32; 2]>,
+    buff_all_and_deity: Option<[i32; 2]>,
     buff_divine_shield: Option<[i32; 2]>,
     buff_all: Option<[i32; 2]>,
     undead_bonus: Option<[i32; 2]>,
@@ -2071,6 +2127,7 @@ fn tribe(s: &str) -> Result<Tribe, String> {
         "elemental" => Ok(Tribe::Elemental),
         "undead" => Ok(Tribe::Undead),
         "quilboar" => Ok(Tribe::Quilboar),
+        "aberration" => Ok(Tribe::Aberration),
         _ => Err(format!("unknown tribe {s:?}")),
     }
 }
@@ -2142,6 +2199,9 @@ fn parse_spell_effect(
         None => 0,
     };
     let times = e.times.unwrap_or(1);
+    if let Some([attack, health]) = e.buff_deity {
+        return Ok((None, Some(SpellEffect::BuffDeity { attack, health })));
+    }
     if let Some([attack, health]) = e.mighty_dragonbreath {
         return Ok((None, Some(SpellEffect::MightyDragonbreath { attack, health })));
     }
@@ -2414,7 +2474,37 @@ impl CardDb {
 
         let parse_effect = |b: &RawEffect| -> Result<Effect, String> {
             let t = b.tribe.as_deref().map(tribe).transpose()?;
-            Ok(if let Some([attack, health]) = b.undead_bonus {
+            Ok(if let Some([attack, health]) = b.buff_deity {
+                let per = b.per_spell.unwrap_or([0, 0]);
+                Effect::BuffDeity { attack, health, per_spell: (per[0], per[1]) }
+            } else if let Some([attack, health]) = b.buff_self_and_deity {
+                Effect::BuffSelfAndDeity { attack, health }
+            } else if let Some([attack, health]) = b.buff_deity_and_improve {
+                Effect::BuffDeityAndImprove { attack, health }
+            } else if let Some([attack, health]) = b.buff_leftmost_per_discard {
+                Effect::BuffLeftmostPerDiscard { attack, health }
+            } else if b.random_spell_up_to {
+                Effect::GetRandomSpellUpTo { cost: b.random_spell_cost, count: b.count.unwrap_or(1) }
+            } else if let Some(count) = b.linked_spells {
+                Effect::GetLinkedSpells { count }
+            } else if let Some(name) = &b.linked_minions {
+                Effect::GetLinkedMinions { tribe: tribe(name)?, count: b.count.unwrap_or(2) }
+            } else if let Some(count) = b.discard_leftmost_spells {
+                let [attack, health] = b.buff.ok_or("discard_leftmost_spells needs buff")?;
+                Effect::DiscardLeftmostSpells { count, attack, health }
+            } else if let Some(name) = &b.summon_and_buff {
+                let [attack, _] = b.buff.ok_or("summon_and_buff needs buff")?;
+                Effect::SummonAndBuffAll {
+                    card: minion_id(name)?,
+                    count: b.count.unwrap_or(1),
+                    attack,
+                    golden_doubles_count: b.golden_doubles_count,
+                }
+            } else if let Some(count) = b.summon_dead_aberrations {
+                Effect::SummonDeadAberrations { count }
+            } else if b.damage_highest_health {
+                Effect::DamageHighestHealth
+            } else if let Some([attack, health]) = b.undead_bonus {
                 Effect::UndeadBonus {
                     attack,
                     health,
@@ -3045,7 +3135,11 @@ impl CardDb {
 
             let on_cast_spell = match &c.on_cast_spell {
                 None => None,
-                Some(cs) => Some(if let Some([attack, health]) = cs.buff_divine_shield {
+                Some(cs) => Some(if let Some([attack, health]) = cs.buff_self_and_deity {
+                    OnCastSpell::BuffSelfAndDeity { attack, health }
+                } else if let Some([attack, health]) = cs.buff_all_and_deity {
+                    OnCastSpell::BuffAllAndDeity { attack, health }
+                } else if let Some([attack, health]) = cs.buff_divine_shield {
                     OnCastSpell::BuffDivineShield { attack, health }
                 } else if let Some([attack, health]) = cs.buff_all {
                     OnCastSpell::BuffAll { attack, health }
@@ -3192,6 +3286,13 @@ impl CardDb {
                 buff_per_kind_death: c.buff_per_kind_death.map(|[a, h]| (a, h)),
                 on_reborn,
                 magnetize_to_undead: c.magnetize_to_undead,
+                deity: c.deity.as_deref().map(|s| match s {
+                    "cthun" => Ok(DeityKind::Cthun),
+                    "yshaarj" => Ok(DeityKind::Yshaarj),
+                    _ => Err(format!("unknown deity {s:?}")),
+                }).transpose().map_err(&err)?,
+                on_card_added: c.on_card_added.as_ref().map(|b| (b.buff[0], b.buff[1])),
+                on_discard: None,
                 tavern_spell: false,
                 blood_gem: false,
                 on_gem_played_on_self: c.on_gem_played_on_self,
@@ -3328,6 +3429,13 @@ impl CardDb {
                 buff_per_kind_death: None,
                 on_reborn: None,
                 magnetize_to_undead: false,
+                deity: None,
+                on_card_added: None,
+                on_discard: sp.on_discard.as_deref().map(|s| match s {
+                    "cast_twice" => Ok(OnDiscard::CastSpell(2)),
+                    "max_gold_2" => Ok(OnDiscard::MaxGold(2)),
+                    _ => Err(format!("unknown on_discard {s:?}")),
+                }).transpose().map_err(&err)?,
                 tavern_spell: sp.tavern_spell,
                 blood_gem: sp.blood_gem,
                 on_gem_played_on_self: None,
@@ -3490,11 +3598,15 @@ impl CardDb {
         Some(self.bounties[rng.below(self.bounties.len() as u32) as usize])
     }
 
-    /// A random spell that costs `cost`, of any Tier.
+    /// A random spell that costs `cost`, of any Tavern Tier.
     pub fn random_spell_of_cost(&self, cost: u8, rng: &mut Rng) -> Option<CardId> {
+        self.random_spell_of_cost_up_to(cost, crate::MAX_TIER, rng)
+    }
+
+    pub fn random_spell_of_cost_up_to(&self, cost: u8, max_tier: u8, rng: &mut Rng) -> Option<CardId> {
+        let max_tier = max_tier.min(crate::MAX_TIER);
         let ok = |id: CardId| {
-            self.cards[id as usize].cost == cost
-                && self.cards[id as usize].tier <= crate::MAX_TIER
+            self.cards[id as usize].cost == cost && self.cards[id as usize].tier <= max_tier
         };
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {
@@ -3647,6 +3759,7 @@ impl CardDb {
             gem_attack: 0,
             gem_health: 0,
             both_effects: false,
+            linked: 0,
             attached: [Attached::default(); MAX_ATTACHED],
             n_attached: 0,
         }

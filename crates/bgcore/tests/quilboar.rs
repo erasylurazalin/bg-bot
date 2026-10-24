@@ -966,7 +966,7 @@ fn the_tribe_mask_is_sixteen_bits_wide_with_quilboar_ninth() {
     for t in Tribe::EVERY {
         assert!(Tribes::ALL.has(t), "{t:?} missing from the all-tribes mask");
     }
-    assert_eq!(Tribe::EVERY.len(), 9);
+    assert_eq!(Tribe::EVERY.len(), 10);
     let dbc = db();
     // Felboar is Demon and Quilboar in the game
     let felboar = dbc.get(id(&dbc, "Felboar"));
@@ -983,7 +983,7 @@ fn the_tribe_mask_is_sixteen_bits_wide_with_quilboar_ninth() {
     .unwrap();
     assert!(ok.get(0).tribes.has(Tribe::Quilboar));
     assert!(CardDb::from_toml(
-        "[[minion]]\nname = \"Q\"\ntier = 1\ntribe = \"aberration\"\nstats = [1, 1]\n"
+        "[[minion]]\nname = \"Q\"\ntier = 1\ntribe = \"ogre\"\nstats = [1, 1]\n"
     )
     .is_err());
     // a dual-tribe parse
