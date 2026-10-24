@@ -224,6 +224,8 @@ fn triple_reward_discover_is_rigged() {
         g.players[0].tier = 5;
         give_card(&mut g, "Wolf Pup", true);
         g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+        // the reward is a spell in hand now: casting it opens the Discover
+        g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
         assert_rigged(&g, Tribe::Beast, "triple reward");
         g.check_invariants().unwrap();
     }

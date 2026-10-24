@@ -1,0 +1,1147 @@
+//! The Quilboar tribe, with the real cards from cards.toml: Blood Gems and
+//! the gem value, Tavern spells versus plain spells, Balinda and Hot-Air
+//! Surveyor gem casts, Roogug, Gem Confiscation, Blood Gem Barrage, the
+//! discard, Thorned Trailblazer, the Triple Reward spell, Fandral's Fortune,
+//! Jailbird Juggernaut's Golem and the widened tribe mask.
+
+use std::sync::Arc;
+
+use bgcore::cards::Tribes;
+use bgcore::fight::{Counters, fight_with};
+use bgcore::{Action, CardDb, CardId, Data, Game, Minion, Rng, Tribe};
+
+fn db() -> CardDb {
+    Data::bundled().cards
+}
+
+fn game(seed: u64) -> Game {
+    Game::new(Arc::new(Data::bundled()), seed)
+}
+
+fn mk(dbc: &CardDb, name: &str, golden: bool) -> Minion {
+    dbc.make(dbc.by_name(name).expect(name), golden)
+}
+
+fn id(dbc: &CardDb, name: &str) -> CardId {
+    dbc.by_name(name).expect(name)
+}
+
+fn stats(m: &Minion) -> (i32, i32) {
+    (m.attack, m.health)
+}
+
+/// A minion that never attacks and takes a long time to kill.
+fn wall(dbc: &CardDb) -> Minion {
+    let mut w = mk(dbc, "Microbot", false);
+    w.attack = 0;
+    w.health = 1000;
+    w
+}
+
+fn turn_of(g: &mut Game, p: usize) {
+    while g.current_player() != Some(p) {
+        g.step(Action::Freeze).unwrap();
+    }
+}
+
+fn act(g: &mut Game, p: usize, a: Action) {
+    turn_of(g, p);
+    g.step(a).unwrap_or_else(|_| panic!("{a:?} illegal for player {p}"));
+}
+
+/// Everyone ends their turn until the next turn starts.
+fn end_all_turns(g: &mut Game) {
+    let t = g.turn;
+    while g.turn == t {
+        g.step(Action::EndTurn).unwrap();
+    }
+}
+
+/// A card from the pool straight onto the board; golden takes three copies.
+fn put_on_board(g: &mut Game, p: usize, name: &str, golden: bool) {
+    let c = id(&g.data.cards, name);
+    let slot = g.data.cards.get(c).pool_slot as usize;
+    let copies = if golden { 3 } else { 1 };
+    g.pool[slot] -= copies;
+    let m = g.players[p].make_card(&g.data.cards, c, golden, copies);
+    g.players[p].board.push(m);
+}
+
+fn put_in_hand(g: &mut Game, p: usize, name: &str, golden: bool) {
+    let c = id(&g.data.cards, name);
+    let slot = g.data.cards.get(c).pool_slot as usize;
+    let copies = if golden { 3 } else { 1 };
+    g.pool[slot] -= copies;
+    let m = g.players[p].make_card(&g.data.cards, c, golden, copies);
+    g.players[p].hand.push(m);
+}
+
+fn set_shop(g: &mut Game, p: usize, names: &[&str]) {
+    let old: Vec<Minion> = g.players[p].shop.drain(..).collect();
+    for m in old {
+        let slot = g.data.cards.get(m.card).pool_slot as usize;
+        g.pool[slot] += m.pool_copies;
+    }
+    for n in names {
+        let c = id(&g.data.cards, n);
+        let slot = g.data.cards.get(c).pool_slot as usize;
+        g.pool[slot] -= 1;
+        let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+        g.players[p].shop.push(m);
+    }
+}
+
+fn name(g: &Game, m: &Minion) -> String {
+    g.data.cards.get(m.card).name.clone()
+}
+
+fn play(g: &mut Game, p: usize, hand: u8, pos: u8) {
+    act(g, p, Action::Play { hand, pos });
+}
+
+/// The hand slot of the first Blood Gem, if any.
+fn gem_slot(g: &Game, p: usize) -> Option<usize> {
+    let gem = id(&g.data.cards, "Blood Gem");
+    g.players[p].hand.iter().position(|m| m.card == gem)
+}
+
+/// The covers start_turn would count from the board (put_on_board bypasses
+/// the play path).
+fn recount_trailblazers(g: &mut Game) {
+    let mut covers = 0u8;
+    for m in &g.players[0].board {
+        covers = covers.saturating_add(g.data.cards.get(m.card).choose_one_cover * m.mul() as u8);
+    }
+    g.players[0].trailblazer_covers = covers;
+}
+
+fn gems_in_hand(g: &Game, p: usize) -> usize {
+    let gem = id(&g.data.cards, "Blood Gem");
+    g.players[p].hand.iter().filter(|m| m.card == gem).count()
+}
+
+/// Cast one Blood Gem from hand on the board minion in slot `pos`.
+fn cast_gem(g: &mut Game, p: usize, pos: u8) {
+    let h = gem_slot(g, p).expect("no Blood Gem in hand") as u8;
+    play(g, p, h, 0);
+    act(g, p, Action::Target(pos));
+}
+
+// ================= Blood Gems and the gem value =================
+
+#[test]
+fn razorfen_geomancer_gets_gems_and_a_gem_casts_on_board_and_tavern() {
+    let mut g = game(2);
+    put_in_hand(&mut g, 0, "Razorfen Geomancer", false);
+    play(&mut g, 0, 0, 0);
+    assert_eq!(gems_in_hand(&g, 0), 2);
+    // a Gem casts on a friendly minion with the player's value, and is
+    // tracked as Blood Gem stats on it
+    let before = stats(&g.players[0].board[0]);
+    cast_gem(&mut g, 0, 0);
+    assert_eq!(stats(&g.players[0].board[0]), (before.0 + 1, before.1 + 1));
+    assert_eq!(g.players[0].board[0].gem_attack, 1);
+    assert_eq!(g.players[0].board[0].gem_health, 1);
+    // and on a minion in the Tavern ("a minion")
+    set_shop(&mut g, 0, &["Wolf Pup"]);
+    let shop_before = stats(&g.players[0].shop[0]);
+    let h = gem_slot(&g, 0).unwrap() as u8;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::TargetShop(0));
+    assert_eq!(stats(&g.players[0].shop[0]), (shop_before.0 + 1, shop_before.1 + 1));
+    assert_eq!(g.players[0].shop[0].gem_attack, 1);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_gem_value_grows_this_game_from_every_source() {
+    let mut g = game(3);
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (1, 1));
+    // Fearless Foodie: +1/+1 or 4 Gems
+    put_in_hand(&mut g, 0, "Fearless Foodie", false);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (2, 2));
+    // Sanguine Champion's Battlecry: +2/+1
+    put_in_hand(&mut g, 0, "Sanguine Champion", false);
+    play(&mut g, 0, 0, 0);
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (4, 3));
+    // a Gem now gives the whole value
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    let before = stats(&g.players[0].board[0]);
+    cast_gem(&mut g, 0, 0);
+    assert_eq!(stats(&g.players[0].board[0]), (before.0 + 4, before.1 + 3));
+    // Gem Day: +1 Attack or +1 Health
+    g.give(0, "Gem Day").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (5, 3));
+    g.give(0, "Gem Day").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::Choose(1));
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (5, 4));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn golden_choose_one_cards_double_their_numbers() {
+    let mut g = game(4);
+    put_in_hand(&mut g, 0, "Fearless Foodie", true);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (3, 3));
+    let mut g = game(4);
+    put_in_hand(&mut g, 0, "Crater Miner", true);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(gems_in_hand(&g, 0), 4, "golden: 4 gems");
+    let mut g = game(4);
+    put_in_hand(&mut g, 0, "Crater Miner", true);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(1));
+    let days = g.players[0].hand.iter().filter(|m| name(&g, m) == "Gem Day").count();
+    assert_eq!(days, 2, "golden: 2 Gem Days");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn blood_gems_are_plain_spells_no_counters_no_azerite_no_spell_power() {
+    // Felboar counts Tavern spells only
+    let mut g = game(5);
+    put_on_board(&mut g, 0, "Felboar", false);
+    set_shop(&mut g, 0, &["Wolf Pup"]);
+    g.players[0].gold = 10;
+    g.give(0, "Blood Gem").unwrap();
+    g.give(0, "Blood Gem").unwrap();
+    g.give(0, "Blood Gem").unwrap();
+    for _ in 0..3 {
+        cast_gem(&mut g, 0, 0);
+    }
+    assert_eq!(g.players[0].board[0].improvements, 0, "gems do not count as spells");
+    g.give(0, "Tavern Coin").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert_eq!(g.players[0].board[0].improvements, 1, "a Tavern spell does");
+
+    // Living Azerite reacts to Tavern spells only
+    let mut g = game(6);
+    put_on_board(&mut g, 0, "Living Azerite", false);
+    set_shop(&mut g, 0, &["Dune Dweller", "Dune Dweller"]);
+    let before = stats(&g.players[0].shop[0]);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 0);
+    assert_eq!(stats(&g.players[0].shop[0]), before, "a gem is not a Tavern spell");
+    g.give(0, "Tavern Coin").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert_eq!(stats(&g.players[0].shop[0]), (before.0 + 4, before.1 + 3), "a Tavern spell does");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn balinda_sets_and_each_surveyor_adds_gem_casts() {
+    let mut g = game(7);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 0);
+    assert_eq!(g.players[0].board[0].gem_attack, 1, "one cast alone");
+
+    let mut g = game(8);
+    put_on_board(&mut g, 0, "Balinda Stonehearth", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 1);
+    assert_eq!(g.players[0].board[1].gem_attack, 2, "Balinda: 2 casts");
+
+    let mut g = game(9);
+    put_on_board(&mut g, 0, "Balinda Stonehearth", false);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 2);
+    assert_eq!(g.players[0].board[2].gem_attack, 3, "Balinda plus one Surveyor: 3 casts");
+
+    // two Surveyors stack, golden ones add two
+    let mut g = game(10);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", false);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 2);
+    assert_eq!(g.players[0].board[2].gem_attack, 3, "two adders stack");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn roogug_plays_gems_from_hand_only_and_never_loops() {
+    let mut g = game(11);
+    put_on_board(&mut g, 0, "Geomagus Roogug", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 0);
+    // the cast gem lands on Roogug, which plays its own on the Camper
+    assert_eq!(g.players[0].board[0].gem_attack, 1, "the cast gem");
+    assert_eq!(g.players[0].board[1].gem_attack, 1, "Roogug's gem on a different minion");
+
+    // a gem on another minion does nothing to Roogug
+    let mut g = game(12);
+    put_on_board(&mut g, 0, "Geomagus Roogug", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 1);
+    assert_eq!(g.players[0].board[0].gem_attack, 0);
+    assert_eq!(g.players[0].board[1].gem_attack, 1);
+
+    // two Roogugs: one from-hand gem moves one gem across, no loop
+    let mut g = game(13);
+    put_on_board(&mut g, 0, "Geomagus Roogug", false);
+    put_on_board(&mut g, 0, "Geomagus Roogug", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 0);
+    let total: i32 = g.players[0].board.iter().map(|m| m.gem_attack).sum();
+    assert_eq!(total, 2, "the cast gem and one reaction, never more");
+    g.check_invariants().unwrap();
+}
+
+// ================= Gem Confiscation and Barrage =================
+
+#[test]
+fn gem_confiscation_plays_gems_and_steals_the_neighbours_gem_stats() {
+    let mut g = game(14);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    put_on_board(&mut g, 0, "Prodigious Tusker", false);
+    put_on_board(&mut g, 0, "Roadboar", false);
+    // buffed gem stats on both neighbours: two gems each
+    for _ in 0..2 {
+        g.give(0, "Blood Gem").unwrap();
+        cast_gem(&mut g, 0, 0);
+        g.give(0, "Blood Gem").unwrap();
+        cast_gem(&mut g, 0, 2);
+    }
+    assert_eq!(g.players[0].board[0].gem_attack, 2);
+    assert_eq!(g.players[0].board[2].gem_attack, 2);
+    let mid = stats(&g.players[0].board[1]);
+    g.give(0, "Gem Confiscation").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::Target(1));
+    // 3 gems of the player's +1/+1, plus 2/2 of gems from each neighbour
+    assert_eq!(stats(&g.players[0].board[1]), (mid.0 + 3 + 4, mid.1 + 3 + 4));
+    assert_eq!(g.players[0].board[1].gem_attack, 7);
+    assert_eq!(g.players[0].board[1].gem_health, 7);
+    // the neighbours lost exactly their gem stats
+    let left = stats(&g.players[0].board[0]);
+    assert_eq!(g.players[0].board[0].gem_attack, 0);
+    let right = stats(&g.players[0].board[2]);
+    assert_eq!(g.players[0].board[2].gem_health, 0);
+    assert_eq!(left.0, 2); // the Camper's base 2 attack, gems gone
+    assert_eq!(right.1, 4); // the Roadboar's base 4 health, gems gone
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn blood_gem_barrage_buffs_every_tavern_minion_on_every_explicit_refresh() {
+    let mut g = game(15);
+    set_shop(&mut g, 0, &["Wolf Pup", "Cord Puller"]);
+    let base: Vec<(i32, i32)> = g.players[0].shop.iter().map(stats).collect();
+    g.give(0, "Blood Gem Barrage").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    // gems at their base +1/+1 add no bonus: the cast queues +2/+2
+    assert_eq!(g.players[0].barrage, (2, 2));
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        assert_eq!(stats(m), (c.attack + 2, c.health + 2), "every Tavern minion, from its card base");
+        assert_eq!(m.gem_attack, 2, "counted as Blood Gem stats");
+        assert_eq!(m.gem_health, 2);
+    }
+    drop(base);
+    // each cast adds on top
+    g.give(0, "Blood Gem Barrage").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert_eq!(g.players[0].barrage, (4, 4));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn barrage_adds_the_gem_bonus_and_spell_power_once_per_cast() {
+    let mut g = game(16);
+    // gems at +2/+2
+    put_in_hand(&mut g, 0, "Fearless Foodie", false);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(0));
+    // spell power +1/+0 (Intrepid Botanist)
+    put_in_hand(&mut g, 0, "Intrepid Botanist", false);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].total_spell_bonus(&g.data.cards), (1, 0));
+    g.give(0, "Blood Gem Barrage").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    // 2 + gem bonus 1 (gems at +2/+2) + spell power 1 = 4 attack,
+    // 2 + 1 + 0 = 3 health
+    assert_eq!(g.players[0].barrage, (4, 3));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn veteran_brigand_casts_barrage_three_times_or_gems_the_board() {
+    let mut g = game(17);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    put_on_board(&mut g, 0, "Roadboar", false);
+    put_in_hand(&mut g, 0, "Veteran Brigand", false);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(1)); // cast Barrage 3 times
+    assert_eq!(g.players[0].barrage, (6, 6), "three casts of +2/+2 add on top");
+    // each Barrage cast is a Tavern spell cast: after the 3 casts Felboar
+    // has consumed a Tavern minion (its "every 3 spells" counter cycled once)
+    let mut g = game(19);
+    put_on_board(&mut g, 0, "Felboar", false);
+    set_shop(&mut g, 0, &["Wolf Pup"]);
+    let wolf = stats(&g.players[0].shop[0]);
+    let before = stats(&g.players[0].board[0]);
+    put_in_hand(&mut g, 0, "Veteran Brigand", false);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(1));
+    let felboar = g.players[0].board.iter().position(|m| name(&g, m) == "Felboar").unwrap();
+    assert_eq!(stats(&g.players[0].board[felboar]), (before.0 + wolf.0, before.1 + wolf.1),
+        "three real casts fed Felboar once");
+    assert_eq!(g.players[0].board[felboar].improvements, 0, "the count kept no remainder");
+    // option 0: 3 gems on all your minions
+    let mut g = game(18);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    put_on_board(&mut g, 0, "Roadboar", false);
+    put_in_hand(&mut g, 0, "Veteran Brigand", false);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].board[0].gem_attack, 3);
+    assert_eq!(g.players[0].board[1].gem_attack, 3);
+    g.check_invariants().unwrap();
+}
+
+// ================= Discard =================
+
+#[test]
+fn mangled_bandit_discards_a_playable_card_and_the_pool_copy_goes_back() {
+    let mut g = game(19);
+    put_on_board(&mut g, 0, "Mangled Bandit", false);
+    put_in_hand(&mut g, 0, "Wolf Pup", false);
+    g.give(0, "Blood Gem").unwrap();
+    g.give(0, "Lockbox").unwrap();
+    let pup = id(&g.data.cards, "Wolf Pup");
+    let pool_before = g.pool[g.data.cards.get(pup).pool_slot as usize];
+    act(&mut g, 0, Action::Activate(0));
+    assert!(g.players[0].pending_discard.is_some());
+    // the Lockbox is unplayable: it is not a legal discard
+    let lb = g.players[0].hand.iter().position(|m| name(&g, m) == "Lockbox").unwrap();
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::Discard(lb as u8)));
+    let gem = gem_slot(&g, 0).unwrap();
+    assert!(g.is_legal(Action::Discard(gem as u8)), "a Blood Gem is playable");
+    // discard the pool minion: its copy goes back and 3 gems arrive
+    act(&mut g, 0, Action::Discard(0));
+    assert_eq!(g.pool[g.data.cards.get(pup).pool_slot as usize], pool_before + 1);
+    assert!(g.players[0].hand.iter().all(|m| name(&g, m) != "Wolf Pup"));
+    assert_eq!(gems_in_hand(&g, 0), 4, "the held gem and the 3 reward gems");
+    g.check_invariants().unwrap();
+
+    // discarding a generated card (a Blood Gem) gives nothing back
+    let mut g = game(20);
+    put_on_board(&mut g, 0, "Mangled Bandit", false);
+    g.give(0, "Blood Gem").unwrap();
+    act(&mut g, 0, Action::Activate(0));
+    let gem = gem_slot(&g, 0).unwrap() as u8;
+    act(&mut g, 0, Action::Discard(gem));
+    assert_eq!(gems_in_hand(&g, 0), 3, "the reward gems, the discarded one gone");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_bandit_with_nothing_discardable_cannot_activate() {
+    let mut g = game(21);
+    put_on_board(&mut g, 0, "Mangled Bandit", false);
+    g.give(0, "Lockbox").unwrap();
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::Activate(0)), "the only card is unplayable");
+    g.give(0, "Blood Gem").unwrap();
+    turn_of(&mut g, 0);
+    assert!(g.is_legal(Action::Activate(0)));
+}
+
+// ================= Trailblazer, Fandral, both effects =================
+
+#[test]
+fn trailblazer_runs_both_effects_of_the_first_choose_one_each_turn() {
+    let mut g = game(22);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    recount_trailblazers(&mut g);
+    put_in_hand(&mut g, 0, "Crater Miner", false);
+    play(&mut g, 0, 0, 0);
+    // covered: both effects ran, no Choose One prompt opened
+    assert!(g.players[0].pending_choose_one.is_none());
+    assert_eq!(gems_in_hand(&g, 0), 2);
+    assert!(g.players[0].hand.iter().any(|m| name(&g, m) == "Gem Day"));
+    // a second Choose One card the same turn asks as usual (hand 0 holds the
+    // Triple Reward spell; the Infiltrator went in at the end)
+    put_in_hand(&mut g, 0, "Sly Infiltrator", false);
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert!(g.players[0].pending_choose_one.is_some());
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].free_rolls, 2);
+    // the next turn covers one again
+    end_all_turns(&mut g);
+    put_in_hand(&mut g, 0, "Crater Miner", false);
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert!(g.players[0].pending_choose_one.is_none());
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn two_trailblazers_cover_two_and_a_golden_one_covers_two() {
+    let mut g = game(23);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    recount_trailblazers(&mut g);
+    for k in 0..2 {
+        put_in_hand(&mut g, 0, "Crater Miner", false);
+        let h = g.players[0].hand.len() as u8 - 1;
+        play(&mut g, 0, h, 0);
+        assert!(g.players[0].pending_choose_one.is_none(), "covered play {k}");
+    }
+    put_in_hand(&mut g, 0, "Crater Miner", false);
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert!(g.players[0].pending_choose_one.is_some(), "the third asks");
+    act(&mut g, 0, Action::Choose(0));
+
+    let mut g = game(24);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", true);
+    recount_trailblazers(&mut g);
+    for k in 0..2 {
+        put_in_hand(&mut g, 0, "Crater Miner", false);
+        let h = g.players[0].hand.len() as u8 - 1;
+        play(&mut g, 0, h, 0);
+        assert!(g.players[0].pending_choose_one.is_none(), "golden covers two: play {k}");
+    }
+    put_in_hand(&mut g, 0, "Crater Miner", false);
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert!(g.players[0].pending_choose_one.is_some(), "the third asks");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn fandral_discovers_a_choose_one_with_both_effects() {
+    let mut g = game(25);
+    g.players[0].tier = 6;
+    g.players[0].gold = 10;
+    g.give(0, "Fandral's Fortune").unwrap();
+    play(&mut g, 0, 0, 0);
+    assert_eq!(g.players[0].discover.len(), 3);
+    for &c in &g.players[0].discover {
+        assert!(g.data.cards.get(c).choose_one.is_some(), "only Choose One cards");
+        assert!(g.data.cards.get(c).tier <= 6);
+    }
+    let pick = g.players[0].discover[0];
+    act(&mut g, 0, Action::Choose(0));
+    let m = g.players[0].hand[0];
+    assert_eq!(m.card, pick);
+    assert!(m.both_effects);
+    // playing it runs both options with no prompt
+    g.players[0].board.clear();
+    play(&mut g, 0, 0, 0);
+    assert!(g.players[0].pending_choose_one.is_none());
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn turbo_hogrider_plays_gems_on_all_quilboar_after_a_choose_one_play() {
+    let mut g = game(26);
+    put_on_board(&mut g, 0, "Turbo Hogrider", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    put_on_board(&mut g, 0, "Wolf Pup", false);
+    g.give(0, "Gem Day").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    // nothing happens while the choice is open
+    assert_eq!(g.players[0].board[1].gem_attack, 0);
+    act(&mut g, 0, Action::Choose(0));
+    // Gem Day's +1 Attack lands first, so the 2 gems are +2/+1 each
+    assert_eq!(g.players[0].board[1].gem_attack, 4, "2 gems on the Quilboar");
+    assert_eq!(g.players[0].board[1].gem_health, 2);
+    assert_eq!(g.players[0].board[2].gem_attack, 0, "a Beast gets none");
+    // the Hogrider itself is a Quilboar and counts
+    assert_eq!(g.players[0].board[0].gem_attack, 4);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn turbo_hogrider_waits_until_the_choice_is_made_so_the_played_quilboar_gets_gems() {
+    let mut g = game(26);
+    put_on_board(&mut g, 0, "Turbo Hogrider", false);
+    put_in_hand(&mut g, 0, "Sly Infiltrator", false);
+    play(&mut g, 0, 0, 1);
+    assert!(g.players[0].pending_choose_one.is_some());
+    assert_eq!(g.players[0].board[1].gem_attack, 0, "not yet: the choice is open");
+    act(&mut g, 0, Action::Choose(0)); // the free Refreshes
+    assert_eq!(name(&g, &g.players[0].board[1]), "Sly Infiltrator");
+    assert_eq!(g.players[0].board[1].gem_attack, 2, "the played Quilboar gets the 2 gems");
+    assert_eq!(g.players[0].board[0].gem_attack, 2);
+    g.check_invariants().unwrap();
+}
+
+// ================= Triple Reward as a spell =================
+
+#[test]
+fn the_triple_reward_tier_is_fixed_when_it_is_given() {
+    let mut g = game(27);
+    g.players[0].tier = 3;
+    put_in_hand(&mut g, 0, "Tusked Camper", true);
+    play(&mut g, 0, 0, 0);
+    let reward = &g.players[0].hand[0];
+    assert_eq!(name(&g, reward), "Triple Reward");
+    assert_eq!(reward.improvements, 4, "tier + 1 when it was given");
+    // leveling before casting changes nothing
+    g.players[0].tier = 6;
+    play(&mut g, 0, 0, 0);
+    assert_eq!(g.players[0].discover.len(), 3);
+    assert!(g.players[0].discover.iter().all(|&c| g.data.cards.get(c).tier == 4));
+    act(&mut g, 0, Action::Choose(0));
+    let picked = g.players[0].hand.last().unwrap();
+    assert_eq!(g.data.cards.get(picked.card).tier, 4);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_reward_comes_before_battlecry_cards_and_is_lost_on_a_full_hand() {
+    // Razorfen Flapper's Battlecry adds a Blood Gem Barrage to the hand
+    let mut g = game(28);
+    put_in_hand(&mut g, 0, "Razorfen Flapper", true);
+    play(&mut g, 0, 0, 0);
+    let names: Vec<String> = g.players[0].hand.iter().map(|m| name(&g, m)).collect();
+    assert_eq!(names[0], "Triple Reward", "the reward is first");
+    assert_eq!(names[1], "Blood Gem Barrage");
+
+    // a full hand loses it (one slot freed by the play goes to the reward)
+    let mut g = game(29);
+    put_in_hand(&mut g, 0, "Razorfen Flapper", true);
+    while g.players[0].hand.len() < 10 {
+        g.give(0, "Fortify").unwrap();
+    }
+    play(&mut g, 0, 0, 0);
+    assert!(g.players[0].hand.iter().any(|m| name(&g, m) == "Triple Reward"));
+    assert!(g.players[0].hand.iter().all(|m| name(&g, m) != "Blood Gem Barrage"));
+    g.check_invariants().unwrap();
+}
+
+// ================= Max gold, end of turn, misc cards =================
+
+#[test]
+fn snare_trapper_raises_the_maximum_gold_past_ten() {
+    let mut g = game(30);
+    put_in_hand(&mut g, 0, "Snare Trapper", false);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(1));
+    assert_eq!(g.players[0].extra_max_gold, 1);
+    // reach a late turn: the cap is the turn gold plus the extra
+    while g.turn < 15 {
+        end_all_turns(&mut g);
+    }
+    assert_eq!(g.players[0].gold, 11, "10 turn gold plus 1");
+
+    let mut g = game(31);
+    put_in_hand(&mut g, 0, "Snare Trapper", true);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(1));
+    assert_eq!(g.players[0].extra_max_gold, 2, "golden: 2");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn gem_rat_and_trench_fighter_get_their_spells_at_end_of_turn() {
+    let mut g = game(32);
+    put_on_board(&mut g, 0, "Gem Rat", false);
+    put_on_board(&mut g, 0, "Trench Fighter", false);
+    end_all_turns(&mut g);
+    let names: Vec<String> = g.players[0].hand.iter().map(|m| name(&g, m)).collect();
+    assert!(names.contains(&"Gem Day".to_string()));
+    assert!(names.contains(&"Gem Confiscation".to_string()));
+    assert_eq!(g.players[0].gem_attack, 1, "nothing else fired");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn sly_infiltrator_and_roadboar_and_bramble_tunneler() {
+    let mut g = game(33);
+    put_in_hand(&mut g, 0, "Sly Infiltrator", false);
+    play(&mut g, 0, 0, 0);
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].free_rolls, 2);
+
+    // Roadboar's Rally gets a Blood Gem into the hand, in a fight
+    let dbc = db();
+    let out = fight_with(
+        &dbc,
+        &[mk(&dbc, "Roadboar", false)],
+        &[wall(&dbc)],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(1),
+        &mut (),
+    );
+    assert_eq!(out.sides[0].cards_gained(), &[id(&dbc, "Blood Gem")]);
+
+    // Bramble Tunneler's Rally gets a random Choose One card up to the tier
+    let out = fight_with(
+        &dbc,
+        &[mk(&dbc, "Bramble Tunneler", false)],
+        &[wall(&dbc)],
+        [Counters { tier: 6, ..Counters::default() }, Counters::default()],
+        1,
+        &mut Rng::new(2),
+        &mut (),
+    );
+    let got = out.sides[0].cards_gained();
+    assert_eq!(got.len(), 1);
+    let c = dbc.get(got[0]);
+    assert!(c.choose_one.is_some(), "a Choose One card: {}", c.name);
+    assert!(c.tier <= 6);
+}
+
+#[test]
+fn victorious_geomant_overflows_gems_onto_the_leftmost_minion() {
+    let mut g = game(34);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    put_on_board(&mut g, 0, "Victorious Geomant", false);
+    g.players[0].gold = 10;
+    while g.players[0].hand.len() < 8 {
+        g.give(0, "Fortify").unwrap();
+    }
+    let bandit = g.players[0].board.iter().position(|m| name(&g, m) == "Victorious Geomant").unwrap();
+    act(&mut g, 0, Action::Activate(bandit as u8));
+    // 6 gems: 2 fit in hand, 4 are cast on the left-most minion
+    assert_eq!(gems_in_hand(&g, 0), 2);
+    assert_eq!(g.players[0].board[0].gem_attack, 4, "the left-most, not the Geomant");
+    assert_eq!(g.players[0].board[1].gem_attack, 0);
+    g.check_invariants().unwrap();
+}
+
+// ================= Gems in fights =================
+
+#[test]
+fn rally_gems_in_a_fight_use_the_gem_value_and_refiner_raises_it_for_good() {
+    let dbc = db();
+    // Tusked Camper's Rally plays a gem on itself, at the side's gem value
+    let out = fight_with(
+        &dbc,
+        &[mk(&dbc, "Tusked Camper", false)],
+        &[wall(&dbc)],
+        [Counters { tier: 6, ..Counters::default() }, Counters::default()],
+        1,
+        &mut Rng::new(3),
+        &mut (),
+    );
+    assert_eq!(out.sides[0].permanent_stats[0], (0, 0), "fight gems are temporary");
+
+    // Sanguine Refiner's Rally raises the value inside the fight, and the
+    // gain is for good (it leaves through the outcome)
+    let out = fight_with(
+        &dbc,
+        &[mk(&dbc, "Sanguine Refiner", false), mk(&dbc, "Tusked Camper", false)],
+        &[wall(&dbc), wall(&dbc)],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(4),
+        &mut (),
+    );
+    assert_eq!(out.sides[0].gem_gain, (1, 2), "one Rally");
+}
+
+#[test]
+fn vineweaver_gems_are_permanent_and_carry_out_of_the_fight() {
+    let dbc = db();
+    let out = fight_with(
+        &dbc,
+        &[mk(&dbc, "Razorfen Vineweaver", false)],
+        &[wall(&dbc)],
+        [Counters { gem_attack: 2, gem_health: 1, ..Counters::default() }, Counters::default()],
+        1,
+        &mut Rng::new(5),
+        &mut (),
+    );
+    // 4 permanent gems at +2/+1: +8/+4, kept after the fight as stats and
+    // as Blood Gem stats
+    assert_eq!(out.sides[0].permanent_stats[0], (8, 4));
+    assert_eq!(out.sides[0].permanent_gems[0], (8, 4));
+}
+
+#[test]
+fn tusker_gems_the_attacker_and_bonker_gems_all_others() {
+    let dbc = db();
+    // Prodigious Tusker: whenever ANOTHER friendly minion attacks. The
+    // Tusker itself never attacks here (0 attack), so its own slot never
+    // gains anything and nothing is permanent.
+    let mut camper = mk(&dbc, "Tusked Camper", false);
+    camper.attack = 3;
+    let mut tusker = mk(&dbc, "Prodigious Tusker", false);
+    tusker.attack = 0;
+    let out = fight_with(
+        &dbc,
+        &[camper, tusker],
+        &[wall(&dbc)],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(6),
+        &mut (),
+    );
+    assert_eq!(out.sides[0].permanent_stats[1], (0, 0), "the Tusker only reacts");
+
+    // Bonker's Rally gems every OTHER friendly minion: the Bonker swings
+    // first (left-most), its Rally gems the Camper, and the Camper's own
+    // swing right after carries the gem.
+    struct Saw(Vec<(String, i32)>);
+    impl bgcore::fight::Watch for Saw {
+        fn attack(&mut self, _side: usize, attacker: &Minion, _defender: &Minion) {
+            let db2 = db();
+            self.0.push((db2.get(attacker.card).name.clone(), attacker.attack));
+        }
+    }
+    let mut w = Saw(Vec::new());
+    let mut bonker = mk(&dbc, "Bonker", false);
+    bonker.attack = 2;
+    let mut camper = mk(&dbc, "Tusked Camper", false);
+    camper.attack = 2;
+    let _ = fight_with(
+        &dbc,
+        &[bonker, camper],
+        &[wall(&dbc)],
+        [Counters::default(); 2],
+        2,
+        &mut Rng::new(7),
+        &mut w,
+    );
+    // Windfury: the Bonker swings twice (no gem on itself either time), then
+    // the Camper swings carrying Bonker's Rally gem (+1) and its own (+1)
+    assert_eq!(w.0[0], ("Bonker".to_string(), 2), "no gem on itself");
+    assert_eq!(w.0[1], ("Bonker".to_string(), 2), "still none on the second swing");
+    // 2 base + one Rally gem per Windfury swing of Bonker (2) + its own
+    assert_eq!(w.0[2], ("Tusked Camper".to_string(), 5), "two of Bonker's gems plus its own Rally");
+}
+
+#[test]
+fn tusked_camper_and_bonker_gem_themselves_and_others_in_a_fight() {
+    // A direct look at the fight board through the Watch: the Camper attacks
+    // and shows its gem in its health when it next swings.
+    let dbc = db();
+    struct Saw(Vec<(String, i32, i32)>);
+    impl bgcore::fight::Watch for Saw {
+        fn attack(&mut self, _side: usize, attacker: &Minion, _defender: &Minion) {
+            let db2 = db();
+            self.0.push((
+                db2.get(attacker.card).name.clone(),
+                attacker.attack,
+                attacker.health,
+            ));
+        }
+    }
+    let mut w = Saw(Vec::new());
+    let mut camper = mk(&dbc, "Tusked Camper", false);
+    camper.attack = 3;
+    fight_with(
+        &dbc,
+        &[camper, mk(&dbc, "Prodigious Tusker", false)],
+        &[wall(&dbc)],
+        [Counters::default(); 2],
+        2,
+        &mut Rng::new(8),
+        &mut w,
+    );
+    // the first swing is the Camper at 3 attack; after it (Rally gem +1/+1
+    // and the Tusker's reaction gem +1/+1) its later swings show 5 attack
+    // the Camper swung once, already carrying its Rally gem (+1/+1) and the
+    // Tusker's reaction gem (+1/+1): 3+2 attack, 3+2 health. The Tusker
+    // swung at its base stats: nothing gems the attacker for its own attack.
+    assert_eq!(w.0.len(), 2, "{:?}", w.0);
+    assert_eq!(w.0[0], ("Tusked Camper".to_string(), 5, 5));
+    assert_eq!(w.0[1], ("Prodigious Tusker".to_string(), 2, 5));
+}
+
+// ================= Jailbird Juggernaut =================
+
+#[test]
+fn the_golem_attacks_first_with_the_juggernauts_stats_and_stays() {
+    let dbc = db();
+    let mut w = SawAttacks(Vec::new());
+    let out = fight_with(
+        &dbc,
+        &[mk(&dbc, "Jailbird Juggernaut", false)],
+        &[wall(&dbc)],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(9),
+        &mut w,
+    );
+    // the Golem (6/15, the Juggernaut's stats) swung first
+    assert_eq!(w.0[0], ("Golem".to_string(), 6, 15));
+    assert!(w.0.iter().any(|(n, _, _)| n == "Jailbird Juggernaut"));
+    // both survive: the wall has 0 attack
+    assert_eq!(out.sides[0].permanent_stats[0], (0, 0));
+    // the wall took both hits
+    assert_eq!(w.0.len(), 2);
+}
+
+struct SawAttacks(Vec<(String, i32, i32)>);
+
+impl bgcore::fight::Watch for SawAttacks {
+    fn attack(&mut self, _side: usize, attacker: &Minion, _defender: &Minion) {
+        let db2 = db();
+        self.0.push((db2.get(attacker.card).name.clone(), attacker.attack, attacker.health));
+    }
+}
+
+#[test]
+fn a_golem_kill_fizzles_the_juggernauts_swing() {
+    let dbc = db();
+    let mut w = SawAttacks(Vec::new());
+    let mut pup = mk(&dbc, "Wolf Pup", false);
+    pup.health = 1;
+    let out = fight_with(
+        &dbc,
+        &[mk(&dbc, "Jailbird Juggernaut", false)],
+        &[pup],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(10),
+        &mut w,
+    );
+    // only the Golem swung: the pup died to it, so the Juggernaut's own
+    // attack fizzled and it took nothing back
+    assert_eq!(w.0.len(), 1);
+    assert_eq!(w.0[0].0, "Golem");
+    assert_eq!(out.winner, Some(0));
+}
+
+#[test]
+fn a_golden_juggernaut_makes_a_double_stat_golem_and_a_full_board_makes_none() {
+    let dbc = db();
+    let mut w = SawAttacks(Vec::new());
+    fight_with(
+        &dbc,
+        &[mk(&dbc, "Jailbird Juggernaut", true)],
+        &[wall(&dbc)],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(11),
+        &mut w,
+    );
+    assert_eq!(w.0[0], ("Golem".to_string(), 24, 60), "double the golden stats");
+
+    // a full board: no Golem, the Juggernaut attacks normally
+    let mut w = SawAttacks(Vec::new());
+    fight_with(
+        &dbc,
+        &[mk(&dbc, "Jailbird Juggernaut", false), wall(&dbc), wall(&dbc), wall(&dbc), wall(&dbc), wall(&dbc), wall(&dbc)],
+        &[wall(&dbc)],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(12),
+        &mut w,
+    );
+    assert_eq!(w.0.len(), 1, "just the Juggernaut's own swing: {:?}", w.0);
+    assert_eq!(w.0[0].0, "Jailbird Juggernaut");
+}
+
+// ================= The tribe mask =================
+
+#[test]
+fn the_tribe_mask_is_sixteen_bits_wide_with_quilboar_ninth() {
+    for t in Tribe::EVERY {
+        assert!(Tribes::ALL.has(t), "{t:?} missing from the all-tribes mask");
+    }
+    assert_eq!(Tribe::EVERY.len(), 9);
+    let dbc = db();
+    // Felboar is Demon and Quilboar in the game
+    let felboar = dbc.get(id(&dbc, "Felboar"));
+    assert!(felboar.tribes.has(Tribe::Demon));
+    assert!(felboar.tribes.has(Tribe::Quilboar));
+    assert!(!felboar.tribes.has(Tribe::Beast));
+    // an all-type minion is a member of the new tribe too
+    let all = Tribes::ALL;
+    assert!(all.has(Tribe::Quilboar));
+    // the parser knows "quilboar" and rejects an unknown tribe
+    let ok = CardDb::from_toml(
+        "[[minion]]\nname = \"Q\"\ntier = 1\ntribe = \"quilboar\"\nstats = [1, 1]\n",
+    )
+    .unwrap();
+    assert!(ok.get(0).tribes.has(Tribe::Quilboar));
+    assert!(CardDb::from_toml(
+        "[[minion]]\nname = \"Q\"\ntier = 1\ntribe = \"aberration\"\nstats = [1, 1]\n"
+    )
+    .is_err());
+    // a dual-tribe parse
+    let ok = CardDb::from_toml(
+        "[[minion]]\nname = \"Q\"\ntier = 1\ntribes = [\"demon\", \"quilboar\"]\nstats = [1, 1]\n",
+    )
+    .unwrap();
+    assert!(ok.get(0).tribes.has(Tribe::Demon) && ok.get(0).tribes.has(Tribe::Quilboar));
+}
+
+#[test]
+fn every_quilboar_card_is_in_the_data_with_its_real_numbers() {
+    let dbc = db();
+    let expect: &[(&str, u8, i32, i32)] = &[
+        ("Razorfen Geomancer", 1, 2, 1),
+        ("Tusked Camper", 1, 2, 3),
+        ("Crater Miner", 2, 2, 2),
+        ("Prodigious Tusker", 2, 2, 5),
+        ("Roadboar", 2, 2, 4),
+        ("Fearless Foodie", 3, 2, 4),
+        ("Gem Rat", 3, 4, 4),
+        ("Mangled Bandit", 3, 3, 3),
+        ("Sly Infiltrator", 3, 4, 5),
+        ("Thorned Trailblazer", 3, 4, 5),
+        ("Trench Fighter", 3, 3, 3),
+        ("Bonker", 4, 2, 7),
+        ("Bramble Tunneler", 4, 3, 6),
+        ("Geomagus Roogug", 4, 4, 6),
+        ("Hot-Air Surveyor", 4, 3, 7),
+        ("Razorfen Flapper", 4, 5, 3),
+        ("Snare Trapper", 4, 4, 4),
+        ("Razorfen Vineweaver", 5, 4, 4),
+        ("Sanguine Refiner", 5, 3, 8),
+        ("Sanguine Champion", 6, 9, 4),
+        ("Turbo Hogrider", 6, 6, 8),
+        ("Veteran Brigand", 6, 8, 8),
+        ("Victorious Geomant", 6, 10, 10),
+        ("Jailbird Juggernaut", 7, 6, 15),
+    ];
+    for &(n, tier, a, h) in expect {
+        let c = dbc.get(id(&dbc, n));
+        assert_eq!(c.tier, tier, "{n}");
+        assert_eq!((c.attack, c.health), (a, h), "{n}");
+        assert!(c.tribes.has(Tribe::Quilboar), "{n}");
+        assert!(!c.token, "{n} is a pool minion");
+    }
+    // the pool spells and the generated ones
+    for (n, tier, cost, tavern) in [
+        ("Blood Gem Barrage", 4, 1, true),
+        ("Gem Confiscation", 4, 1, true),
+        ("Fandral's Fortune", 6, 3, true),
+        ("Blood Gem", 0, 0, false),
+        ("Gem Day", 0, 0, false),
+        ("Triple Reward", 0, 0, false),
+    ] {
+        let c = dbc.get(id(&dbc, n));
+        assert!(c.is_spell(), "{n}");
+        assert_eq!(c.tier, tier, "{n}");
+        assert_eq!(c.cost, cost, "{n}");
+        assert_eq!(c.tavern_spell, tavern, "{n}");
+    }
+    // the Golem token: neutral tier 1, no keywords
+    let golem = dbc.get(id(&dbc, "Golem"));
+    assert!(golem.token);
+    assert_eq!(golem.tier, 1);
+    assert!(golem.tribes.is_neutral());
+    assert_eq!(golem.keywords.0, 0);
+    // the Blood Gem variants stay out
+    assert!(dbc.by_name("Divine Shield").is_none());
+}
+
+#[test]
+fn a_gem_gets_no_spell_power_and_a_golden_roogug_plays_two() {
+    let mut g = game(35);
+    // spell power +1/+0 on board
+    put_on_board(&mut g, 0, "Intrepid Botanist", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    let before = stats(&g.players[0].board[1]);
+    cast_gem(&mut g, 0, 1);
+    assert_eq!(stats(&g.players[0].board[1]), (before.0 + 1, before.1 + 1),
+        "the gem value only, no Tavern spell bonus");
+
+    // a golden Roogug plays two gems for one from hand
+    let mut g = game(36);
+    put_on_board(&mut g, 0, "Geomagus Roogug", true);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 0);
+    assert_eq!(g.players[0].board[0].gem_attack, 1, "the cast gem");
+    assert_eq!(g.players[0].board[1].gem_attack, 2, "two from the golden Roogug");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn gem_confiscation_on_a_tavern_minion_steals_from_its_tavern_neighbours() {
+    let mut g = game(37);
+    set_shop(&mut g, 0, &["Wolf Pup", "Cord Puller", "Lullabot"]);
+    // two gems on the left neighbour
+    g.players[0].shop[0].attack += 2;
+    g.players[0].shop[0].health += 2;
+    g.players[0].shop[0].gem_attack = 2;
+    g.players[0].shop[0].gem_health = 2;
+    let mid = stats(&g.players[0].shop[1]);
+    g.give(0, "Gem Confiscation").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::TargetShop(1));
+    // 3 gems on the Cord Puller plus the Wolf Pup's 2/2 of gems; the Microbot
+    // (right neighbour) had none
+    assert_eq!(stats(&g.players[0].shop[1]), (mid.0 + 3 + 2, mid.1 + 3 + 2));
+    assert_eq!(g.players[0].shop[1].gem_attack, 5);
+    assert_eq!(g.players[0].shop[0].gem_attack, 0);
+    let pup_base = stats(&g.players[0].shop[0]);
+    let pup = g.data.cards.get(id(&g.data.cards, "Wolf Pup"));
+    assert_eq!((pup_base.0, pup_base.1), (pup.attack, pup.health), "back to its card stats");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn sanguine_champion_deathrattle_raises_the_gem_value_for_good() {
+    let dbc = db();
+    let mut champ = mk(&dbc, "Sanguine Champion", false);
+    champ.health = 1;
+    champ.keywords.set(bgcore::Keywords::TAUNT);
+    let mut killer = wall(&dbc);
+    killer.attack = 50;
+    let out = fight_with(
+        &dbc,
+        &[champ],
+        &[killer],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(12),
+        &mut (),
+    );
+    assert_eq!(out.sides[0].gem_gain, (2, 1), "the Deathrattle, for good");
+}
+
+#[test]
+fn razorfen_flappers_deathrattle_gets_a_barrage_spell() {
+    let dbc = db();
+    let mut flapper = mk(&dbc, "Razorfen Flapper", false);
+    flapper.health = 1;
+    flapper.keywords.set(bgcore::Keywords::TAUNT);
+    let mut killer = wall(&dbc);
+    killer.attack = 50;
+    let out = fight_with(
+        &dbc,
+        &[flapper],
+        &[killer],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(13),
+        &mut (),
+    );
+    assert!(out.sides[0]
+        .cards_gained()
+        .iter()
+        .any(|&c| dbc.get(c).name == "Blood Gem Barrage"));
+}

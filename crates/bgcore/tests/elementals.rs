@@ -400,7 +400,7 @@ fn tavern_tempest_gets_a_random_elemental_up_to_your_tier() {
     let mut g = game(7);
     put_in_hand(&mut g, 0, "Tavern Tempest", true);
     play(&mut g, 0, 0, 0);
-    assert_eq!(g.players[0].hand.len(), 2, "two Elementals came");
+    assert_eq!(g.players[0].hand.len(), 3, "two Elementals and the Triple Reward");
 }
 
 fn play_new_tempest(g: &mut Game) {
@@ -711,7 +711,7 @@ fn leyline_surfacer_gets_arcane_absorption_from_the_battlecry_and_the_deathrattl
     let mut g = game(25);
     put_in_hand(&mut g, 0, "Leyline Surfacer", true);
     play(&mut g, 0, 0, 0);
-    assert_eq!(g.players[0].hand.len(), 2, "golden: 2 Arcane Absorptions");
+    assert_eq!(g.players[0].hand.len(), 3, "golden: 2 Arcane Absorptions and the Triple Reward");
     // the Deathrattle works in combat
     let db = db();
     let mut killer = mk(&db, "Microbot", false);
@@ -766,7 +766,7 @@ fn firelands_fugitive_gets_a_conflagration_golden_two() {
     let mut g = game(28);
     put_in_hand(&mut g, 0, "Firelands Fugitive", true);
     play(&mut g, 0, 0, 0);
-    assert_eq!(g.players[0].hand.len(), 2);
+    assert_eq!(g.players[0].hand.len(), 3, "two Conflagrations and the Triple Reward");
 }
 
 // ================= Free Refreshes =================
@@ -779,8 +779,8 @@ fn refreshing_anomaly_gives_free_refreshes_that_add_up_carry_over_and_are_used_f
     put_in_hand(&mut g, 0, "Refreshing Anomaly", true);
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 1);
-    // a golden minion played from hand gives a Triple Reward Discover
-    act(&mut g, 0, Action::Choose(0));
+    // a golden play also puts a Triple Reward spell in hand; no Discover opens
+    assert!(g.players[0].discover.is_empty());
     assert_eq!(g.players[0].free_rolls, 2 + 4, "golden gives 4");
     // used before gold, and not gold spent
     let gold = g.players[0].gold;
@@ -1475,9 +1475,9 @@ fn a_golden_surprise_triples_with_two_copies_and_everything_goes_back_right() {
     assert_eq!(gold.pool_copies, 2);
     assert_eq!(g.pool[surprise], before + 3, "its three copies went back");
     g.check_invariants().unwrap();
-    // played from hand it gives a triple reward
+    // played from hand it puts a Triple Reward spell in hand
     play(&mut g, 0, 0, 0);
-    assert!(!g.players[0].discover.is_empty());
+    assert!(g.players[0].hand.iter().any(|m| name(&g, m) == "Triple Reward"));
 }
 
 #[test]

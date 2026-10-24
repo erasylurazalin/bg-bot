@@ -53,6 +53,7 @@ pub fn tribe_name(t: Tribe) -> &'static str {
         Tribe::Pirate => "Pirate",
         Tribe::Elemental => "Elemental",
         Tribe::Undead => "Undead",
+        Tribe::Quilboar => "Quilboar",
     }
 }
 
@@ -184,6 +185,12 @@ fn counters_line(g: &Game) -> String {
     if pl.extra_max_gold > 0 {
         parts.push(format!("Max gold +{}", pl.extra_max_gold));
     }
+    if pl.gem_attack != 1 || pl.gem_health != 1 {
+        parts.push(format!("Blood Gems +{}/+{}", pl.gem_attack, pl.gem_health));
+    }
+    if pl.barrage != (0, 0) {
+        parts.push(format!("Barrage +{}/+{} per Refresh", pl.barrage.0, pl.barrage.1));
+    }
     for b in &pl.tavern_buffs {
         let who = b.tribe.map_or("all", tribe_name);
         let how = if b.this_turn { "this turn" } else { "this game" };
@@ -267,6 +274,16 @@ pub fn prompt(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> Option<String> 
         return Some(format!(
             "CHOICE: pick a Tavern minion{from}. Type its slot number (or tN).{text}\n  Tavern: {}",
             shop.join(" | ")
+        ));
+    }
+    if pl.pending_discard.is_some() {
+        let hand: Vec<String> = (0..pl.hand.len())
+            .filter(|&s| g.is_legal(Action::Discard(s as u8)))
+            .map(|s| format!("{} {}", s + 1, label(g, &pl.hand[s])))
+            .collect();
+        return Some(format!(
+            "CHOICE: discard a card{from}. Type a hand number (cN).\n  Hand: {}",
+            if hand.is_empty() { "none".into() } else { hand.join(" | ") }
         ));
     }
     if let Some(pco) = pl.pending_choose_one {

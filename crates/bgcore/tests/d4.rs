@@ -376,6 +376,8 @@ fn curve_bot_answers_a_target_only_the_tavern_can_take() {
         source: Some(0),
         kind: TargetKind::AnySetStats { attack: 50, health: 50 },
         runs: 1,
+        tavern: true,
+        gem: false,
     });
     assert!(!g.players[0].shop.is_empty());
     for a in [standard_action(&g), rush_action(&g)] {

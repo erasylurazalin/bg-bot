@@ -301,8 +301,8 @@ fn laboratory_assistant_puts_a_fodder_in_each_of_the_next_three_refreshes() {
     g.players[0].hand[0].golden = true;
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     assert_eq!(g.players[0].fodder_refreshes.as_slice(), [2, 2, 2]);
-    // playing a golden minion also opens its own Discover: take it, then sell
-    act(&mut g, 0, Action::Choose(0));
+    // playing a golden minion puts a Triple Reward spell in hand; nothing is
+    // open to answer, so sell right away
     act(&mut g, 0, Action::Sell(0));
     act(&mut g, 0, Action::Roll);
     assert_eq!(fodder_count(&g, 0), 2);
@@ -890,8 +890,9 @@ fn imposing_percussionist_damages_the_hero_for_the_demons_tier() {
     g.give(0, "Imposing Percussionist").unwrap();
     g.players[0].hand[0].golden = true;
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    // the second Demon Discover waits, after the one a golden play opens
-    assert_eq!(g.players[0].discover_queue.len(), 2);
+    // the second Demon Discover waits (the Triple Reward is a spell in hand
+    // now, not a Discover)
+    assert_eq!(g.players[0].discover_queue.len(), 1);
     assert!(g.players[0]
         .discover
         .iter()

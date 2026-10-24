@@ -15,6 +15,9 @@ pub enum Action {
     /// Pick a minion in the Tavern (shop slot), for a chosen consume.
     TargetShop(u8),
     Choose(u8),
+    /// Answer an open discard prompt: the hand slot of the card to throw
+    /// away (Mangled Bandit's Activate).
+    Discard(u8),
     Move { from: u8, to: u8 },
     Roll,
     Freeze,
@@ -30,14 +33,15 @@ const PLAY: usize = ACTIVATE + BOARD;
 const TARGET: usize = PLAY + HAND * (BOARD + 1);
 const TARGET_SHOP: usize = TARGET + BOARD;
 const CHOOSE: usize = TARGET_SHOP + SHOP;
-const MOVE: usize = CHOOSE + DISCOVER;
+const DISCARD: usize = CHOOSE + DISCOVER;
+const MOVE: usize = DISCARD + HAND;
 const ROLL: usize = MOVE + BOARD * (BOARD - 1);
 const FREEZE: usize = ROLL + 1;
 const LEVEL: usize = FREEZE + 1;
 const END_TURN: usize = LEVEL + 1;
 
 pub const N_ACTIONS: usize = END_TURN + 1;
-pub const N_KINDS: usize = 13;
+pub const N_KINDS: usize = 14;
 pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("buy", SHOP),
     ("buy_spell", 1),
@@ -47,6 +51,7 @@ pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("target", BOARD),
     ("target_shop", SHOP),
     ("choose", DISCOVER),
+    ("discard", HAND),
     ("move", BOARD * (BOARD - 1)),
     ("roll", 1),
     ("freeze", 1),
@@ -65,6 +70,7 @@ impl Action {
             Action::Target(s) => TARGET + s as usize,
             Action::TargetShop(s) => TARGET_SHOP + s as usize,
             Action::Choose(k) => CHOOSE + k as usize,
+            Action::Discard(s) => DISCARD + s as usize,
             Action::Move { from, to } => {
                 let to = if to > from { to - 1 } else { to };
                 MOVE + from as usize * (BOARD - 1) + to as usize
@@ -88,7 +94,8 @@ impl Action {
             }
             _ if i < TARGET_SHOP => Action::Target((i - TARGET) as u8),
             _ if i < CHOOSE => Action::TargetShop((i - TARGET_SHOP) as u8),
-            _ if i < MOVE => Action::Choose((i - CHOOSE) as u8),
+            _ if i < DISCARD => Action::Choose((i - CHOOSE) as u8),
+            _ if i < MOVE => Action::Discard((i - DISCARD) as u8),
             _ if i < ROLL => {
                 let j = i - MOVE;
                 let from = j / (BOARD - 1);
@@ -104,7 +111,7 @@ impl Action {
         })
     }
 
-    /// Which of the 13 kinds of action this is, in declaration order.
+    /// Which of the 14 kinds of action this is, in declaration order.
     pub fn kind(self) -> usize {
         match self {
             Action::Buy(_) => 0,
@@ -115,11 +122,12 @@ impl Action {
             Action::Target(_) => 5,
             Action::TargetShop(_) => 6,
             Action::Choose(_) => 7,
-            Action::Move { .. } => 8,
-            Action::Roll => 9,
-            Action::Freeze => 10,
-            Action::Level => 11,
-            Action::EndTurn => 12,
+            Action::Discard(_) => 8,
+            Action::Move { .. } => 9,
+            Action::Roll => 10,
+            Action::Freeze => 11,
+            Action::Level => 12,
+            Action::EndTurn => 13,
         }
     }
 }

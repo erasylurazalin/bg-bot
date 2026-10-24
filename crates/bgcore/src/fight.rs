@@ -12,14 +12,15 @@ use arrayvec::ArrayVec;
 
 use crate::cards::{
     N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, Effect, OnSummonBeast, PermanentKeep,
-    OnCastSpell, OnReborn, SpellEffect, StartOfCombat, Tribe, Tribes, pick_one_per_type,
+    OnCastSpell, OnReborn, SpellEffect, StartOfCombat, TimesRole, Tribe, Tribes, how_many_times,
+    pick_one_per_type,
 };
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 use crate::{BOARD, HAND};
 
 /// Per-player counters passed into a fight.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Counters {
     /// The owner's hero Health, for Holy Vanguard; None when unknown.
     pub health: Option<i32>,
@@ -52,9 +53,41 @@ pub struct Counters {
     pub undead_health: i32,
     /// Eternal Knights that died this game, which every Knight reads.
     pub knight_deaths: u32,
+    /// What one of this side's Blood Gems gives (Sanguine Refiner's Rally
+    /// raises it inside a fight, for good through `SideOutcome::gem_gain`).
+    pub gem_attack: i32,
+    pub gem_health: i32,
     /// Sandbox only: "any minion" draws inside the fight (Ghastcoiler) only
     /// pick this tribe and neutral minions. None in a normal game.
     pub rig: Option<crate::cards::Tribe>,
+}
+
+/// Every player's Blood Gems start at +1/+1, so a fight without the player's
+/// real counters still plays them at that size.
+impl Default for Counters {
+    fn default() -> Counters {
+        Counters {
+            health: None,
+            beetle_attack: 0,
+            beetle_health: 0,
+            improve: [0; N_COUNTERS],
+            beast_attack: 0,
+            beast_health: 0,
+            tier: 0,
+            boon_of_beetles: 0,
+            brood_of_nozdormu: 0,
+            upper_hand: 0,
+            sharing_is_caring: 0,
+            spell_attack: 0,
+            spell_health: 0,
+            undead_attack: 0,
+            undead_health: 0,
+            knight_deaths: 0,
+            gem_attack: 1,
+            gem_health: 1,
+            rig: None,
+        }
+    }
 }
 
 /// Side effects from a fight that carry over to one player after combat.
@@ -114,6 +147,13 @@ pub struct SideOutcome {
     pub undead_gain: (i32, i32),
     /// Eternal Knights of the player that died in this fight.
     pub knight_deaths: u32,
+    /// Increase to the player's Blood Gem value, for good (Sanguine Refiner's
+    /// Rally, Sanguine Champion).
+    pub gem_gain: (i32, i32),
+    /// Permanent Blood Gem stats gained by the minion in each starting board
+    /// slot (Razorfen Vineweaver): the game adds them to the board minion's
+    /// stats and Blood Gem stats after the fight.
+    pub permanent_gems: [(i32, i32); BOARD],
 }
 
 impl SideOutcome {
@@ -974,21 +1014,35 @@ impl<'a> Side<'a> {
     }
 
     /// How many times one Deathrattle fires for this side: once, plus one
-    /// for each Titus Rivendare and two for a golden one. Every path that
-    /// fires a Deathrattle asks here, so a new way to repeat them (trinkets,
-    /// quest rewards) is added in this one place.
+    /// for each Titus Rivendare and two for a golden one ("an extra time"
+    /// stacks). Every path that fires a Deathrattle asks here, so a new way
+    /// to repeat them (trinkets, quest rewards) is added in this one place.
     fn deathrattle_fires(&self, db: &CardDb) -> u32 {
-        let mut fires = 1;
-        for f in &self.ms {
-            if f.m.health > 0 {
-                for (card, golden) in f.m.parts() {
-                    if db.get(card).aura == Some(Aura::Titus) {
-                        fires += if golden { 2 } else { 1 };
-                    }
-                }
-            }
+        let parts = self.ms.iter().filter(|f| f.m.health > 0).flat_map(|f| f.m.parts());
+        how_many_times(db, parts, |a| (a == Aura::Titus).then_some(TimesRole::Adder)) as u32
+    }
+
+    /// Play `times` Blood Gems on the minion in slot `i`: its stats for this
+    /// fight and, when `permanent` (Razorfen Vineweaver), stats and Blood Gem
+    /// stats the game gives the board minion after the fight.
+    fn gem_at(&mut self, db: &CardDb, i: usize, times: i32, permanent: bool) {
+        let da = self.counters.gem_attack.saturating_mul(times);
+        let dh = self.counters.gem_health.saturating_mul(times);
+        if db.get(self.ms[i].m.card).fixed_stats {
+            return;
         }
-        fires
+        let f = &mut self.ms[i];
+        f.m.attack = f.m.attack.saturating_add(da);
+        f.m.health = f.m.health.saturating_add(dh);
+        if permanent
+            && let Some(slot) = f.start_slot
+        {
+            let s = slot as usize;
+            self.out.permanent_stats[s].0 = self.out.permanent_stats[s].0.saturating_add(da);
+            self.out.permanent_stats[s].1 = self.out.permanent_stats[s].1.saturating_add(dh);
+            self.out.permanent_gems[s].0 = self.out.permanent_gems[s].0.saturating_add(da);
+            self.out.permanent_gems[s].1 = self.out.permanent_gems[s].1.saturating_add(dh);
+        }
     }
 
     /// Run one effect for the minion `fx.host`. `at` is where summons go
@@ -1402,6 +1456,65 @@ impl<'a> Side<'a> {
                         }
                         *at += 1;
                     }
+                }
+            }
+            Effect::GetGems(n) => {
+                if let Some(gem) = db.blood_gem {
+                    for _ in 0..n as i32 * mul {
+                        self.out.push_card(gem);
+                    }
+                }
+            }
+            Effect::GemSelf { count, permanent } => {
+                if let Some(i) = self.index_of(fx.host) {
+                    self.gem_at(db, i, count as i32 * mul, permanent);
+                }
+            }
+            Effect::GemOthers(count) => {
+                let n = count as i32 * mul;
+                for i in 0..self.ms.len() {
+                    if self.ms[i].uid != fx.host && self.ms[i].m.health > 0 {
+                        self.gem_at(db, i, n, false);
+                    }
+                }
+            }
+            Effect::GemAttacker(count) => {
+                if let Some(a) = fx.attacker
+                    && let Some(i) = self.index_of(a)
+                    && self.ms[i].m.health > 0
+                {
+                    self.gem_at(db, i, count as i32 * mul, false);
+                }
+            }
+            Effect::GemBonus { attack, health } => {
+                // "This game": the fight's Gems grow now, the player's for
+                // good through the outcome.
+                self.counters.gem_attack += attack * mul;
+                self.counters.gem_health += health * mul;
+                self.out.gem_gain.0 += attack * mul;
+                self.out.gem_gain.1 += health * mul;
+            }
+            Effect::GetRandomChooseOne(n) => {
+                for _ in 0..n as i32 * mul {
+                    if let Some(c) =
+                        db.random_choose_one_minion(self.counters.tier, self.counters.rig, rng)
+                    {
+                        self.out.push_card(c);
+                    }
+                }
+            }
+            // Jailbird Juggernaut's Rally is intercepted in `attack_triggers`,
+            // where the target is known; this arm only summons the stat copy.
+            Effect::SummonStatCopyAttacker { card } => {
+                let Some(hi) = self.index_of(fx.host) else { return };
+                let mut m = db.make(card, false);
+                m.attack = self.ms[hi].m.attack.saturating_mul(mul);
+                m.health = self.ms[hi].m.health.saturating_mul(mul);
+                if self.summon(db, fx.side, *at, m, uid, w) {
+                    if fx.skip_ptr && *at == self.ptr {
+                        self.ptr += 1;
+                    }
+                    *at += 1;
                 }
             }
             // Parsing keeps every other effect out of fights.
@@ -2047,6 +2160,28 @@ fn attack_triggers(
                             rally_damage(sides, turn, host, golden, t, db, uid, rng, w);
                         }
                     }
+                    Effect::SummonStatCopyAttacker { card } => {
+                        // Jailbird Juggernaut: a Golem with this minion's
+                        // stats (double when golden) is summoned to its right
+                        // and attacks the target first. If it kills the
+                        // target, the Juggernaut's own swing fizzles below,
+                        // like a Rally that killed it. A full board summons
+                        // nothing and the Juggernaut attacks normally.
+                        let Some(hi) = sides[turn].index_of(host) else { break };
+                        let (a, h) =
+                            (sides[turn].ms[hi].m.attack, sides[turn].ms[hi].m.health);
+                        let mut golem = db.make(card, false);
+                        let k = if golden { 2 } else { 1 };
+                        golem.attack = a.saturating_mul(k);
+                        golem.health = h.saturating_mul(k);
+                        let at = hi + 1;
+                        if sides[turn].summon(db, turn, at, golem, uid, w)
+                            && let Some(&t) = target.as_ref()
+                        {
+                            let golem_uid = sides[turn].ms[at].uid;
+                            attack_swings_at(sides, turn, golem_uid, Some(t), db, uid, rng, w);
+                        }
+                    }
                     _ => {
                         let Some(hi) = sides[turn].index_of(host) else { break };
                         let fx = Fx {
@@ -2113,15 +2248,37 @@ fn attack_swings(
     rng: &mut Rng,
     w: &mut impl Watch,
 ) {
+    attack_swings_at(sides, turn, me, None, db, uid, rng, w);
+}
+
+/// `attack_swings` with the first swing's target forced (Jailbird
+/// Juggernaut's Golem attacks the Juggernaut's target). A forced target that
+/// is already gone means no swing; later Windfury swings pick freely.
+#[allow(clippy::too_many_arguments)]
+fn attack_swings_at(
+    sides: &mut [Side<'_>; 2],
+    turn: usize,
+    me: u16,
+    forced: Option<u16>,
+    db: &CardDb,
+    uid: &mut u16,
+    rng: &mut Rng,
+    w: &mut impl Watch,
+) {
     let windfury = sides[turn]
         .index_of(me)
         .is_some_and(|i| sides[turn].ms[i].m.keywords.has(Keywords::WINDFURY));
+    let mut forced = forced;
     for _ in 0..(if windfury { 2 } else { 1 }) {
         let Some(ai) = sides[turn].index_of(me) else { break };
         if sides[turn].ms[ai].m.attack <= 0 || sides[turn ^ 1].ms.is_empty() {
             break;
         }
-        let Some(di) = pick_defender(db, &sides[turn ^ 1], rng) else { break };
+        let di = match forced.take() {
+            Some(u) => sides[turn ^ 1].index_of(u),
+            None => pick_defender(db, &sides[turn ^ 1], rng),
+        };
+        let Some(di) = di else { break };
         let def_uid = sides[turn ^ 1].ms[di].uid;
 
         // Attacking ends Stealth.

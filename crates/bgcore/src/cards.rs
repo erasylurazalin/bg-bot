@@ -40,6 +40,7 @@ pub enum Tribe {
     Pirate,
     Elemental,
     Undead,
+    Quilboar,
 }
 
 impl Tribe {
@@ -47,7 +48,7 @@ impl Tribe {
     /// run that redoes the observation for every tribe). Rules use `EVERY`.
     pub const ALL: [Tribe; 5] = [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon];
     /// Every tribe a card can have.
-    pub const EVERY: [Tribe; 8] = [
+    pub const EVERY: [Tribe; 9] = [
         Tribe::Beast,
         Tribe::Mech,
         Tribe::Dragon,
@@ -56,22 +57,23 @@ impl Tribe {
         Tribe::Pirate,
         Tribe::Elemental,
         Tribe::Undead,
+        Tribe::Quilboar,
     ];
 
-    fn bit(self) -> u8 {
-        1 << self as u8
+    fn bit(self) -> u16 {
+        1 << self as u16
     }
 }
 
-/// The tribes of a card: none (neutral), one, two, or all five ("all").
+/// The tribes of a card: none (neutral), one, two, or all ("all").
 /// Every tribe filter in the game asks `has`, so a two-tribe card counts for
 /// both and an "all" card counts for every tribe.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Tribes(u8);
+pub struct Tribes(u16);
 
 impl Tribes {
     pub const NONE: Tribes = Tribes(0);
-    pub const ALL: Tribes = Tribes(0b11111111);
+    pub const ALL: Tribes = Tribes(0b1_1111_1111);
 
     pub fn of(t: Tribe) -> Tribes {
         Tribes(t.bit())
@@ -155,7 +157,7 @@ pub enum ConsumeBy {
 
 /// Battlecry and general minion card text effects. Also what Activate, event
 /// triggers, "after your hero takes damage" and some end of turn effects run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Effect {
     /// Summon `count` copies of a card (a token or a pool minion) next to the
     /// minion. A golden minion summons `count` golden copies, or, with
@@ -402,6 +404,32 @@ pub enum Effect {
     /// Activate: give a different friendly minion of a tribe Reborn, then
     /// destroy it, and this minion gains the stats (Dead Bellringer).
     GiveRebornDestroy { tribe: Tribe, attack: i32, health: i32 },
+    /// Get `count` Blood Gems in hand (Razorfen Geomancer, Roadboar). A
+    /// golden minion gets twice as many. Gems past a full hand are lost.
+    GetGems(u8),
+    /// Get `count` Blood Gems in hand; the ones that do not fit are cast on
+    /// the left-most friendly minion instead (Victorious Geomant). Shop only.
+    GetGemsCastOverflow(u8),
+    /// Play `count` Blood Gems on the minion with the effect (Tusked Camper,
+    /// Razorfen Vineweaver). `permanent` keeps the stats after a fight
+    /// (Vineweaver); in the shop every gain is permanent anyway.
+    GemSelf { count: u8, permanent: bool },
+    /// Play `count` Blood Gems on every other friendly minion (Bonker).
+    GemOthers(u8),
+    /// Play `count` Blood Gems on the minion that just attacked (Prodigious
+    /// Tusker). Fights only.
+    GemAttacker(u8),
+    /// Your Blood Gems give an extra +attack/+health this game (Sanguine
+    /// Refiner's Rally, Sanguine Champion, Fearless Foodie, Gem Day).
+    GemBonus { attack: i32, health: i32 },
+    /// Get `count` random Choose One cards, any tribe, up to your tier
+    /// (Bramble Tunneler). Golden gets twice as many.
+    GetRandomChooseOne(u8),
+    /// Rally: summon a copy of `card` with this minion's current stats
+    /// (double when golden) to its right, which attacks the target first,
+    /// before this minion's own swing (Jailbird Juggernaut). Fights only;
+    /// the shop copy just summons it.
+    SummonStatCopyAttacker { card: CardId },
 }
 
 impl Effect {
@@ -506,6 +534,13 @@ impl Effect {
             | Effect::SummonHeld
             | Effect::DestroyLeftNeighbor
             | Effect::SummonSalvaged
+            | Effect::GetGems(_)
+            | Effect::GemSelf { .. }
+            | Effect::GemOthers(_)
+            | Effect::GemAttacker(_)
+            | Effect::GemBonus { .. }
+            | Effect::GetRandomChooseOne(_)
+            | Effect::SummonStatCopyAttacker { .. }
             | Effect::DamageTargetAndNeighbor => true,
             _ => false,
         }
@@ -523,6 +558,9 @@ impl Effect {
 pub struct Activate {
     pub cost: u8,
     pub effect: Effect,
+    /// The player discards a card in hand first; with nothing discardable the
+    /// Activate can't be used (Mangled Bandit).
+    pub discard: bool,
 }
 
 /// Things a player does that event triggers count.
@@ -537,6 +575,9 @@ pub enum EventKind {
     CardsBought,
     /// Elementals played from hand (Unbound Tempest).
     ElementalsPlayed,
+    /// Cards discarded (Mangled Bandit's Activate). The hook "when you
+    /// discard" triggers read.
+    Discarded,
 }
 
 /// "After N events, do the effect (N left!)". The count lives in the
@@ -558,6 +599,8 @@ pub enum DiscoverKind {
     BattlecryMinion,
     /// A Tier 7 minion (Hallowed Ritual).
     Tier7Minion,
+    /// A Choose One minion with both effects combined (Fandral's Fortune).
+    ChooseOneMinion,
 }
 
 /// A Tavern spell (or Choose One spell option) that targets a friendly minion.
@@ -621,6 +664,10 @@ pub enum SpellTarget {
     /// game, wherever they are (Butchering). The Tavern spell bonus adds to
     /// both stats.
     Butchering { attack: i32 },
+    /// Play `gems` Blood Gems on the chosen minion (board or Tavern), then
+    /// move all its neighbours' Blood Gem stats onto it: they lose them, it
+    /// gains them (Gem Confiscation).
+    Confiscation { gems: u8 },
 }
 
 impl SpellTarget {
@@ -640,7 +687,8 @@ impl SpellTarget {
                 | SpellTarget::TavernBuffType { .. }
                 | SpellTarget::RefreshWithType
                 | SpellTarget::BuffPerTribePlayed { .. }
-        )
+                | SpellTarget::Confiscation { .. }
+            )
     }
 
     /// Whether the chosen minion must have a type (a neutral can't be
@@ -712,6 +760,27 @@ pub enum SpellEffect {
     /// Get a random minion of the most common type on the board (Friendly
     /// Bounty).
     FriendlyBounty,
+    /// Get `count` Blood Gems in hand (a Choose One option).
+    GetGems(u8),
+    /// Your Blood Gems give an extra +attack/+health this game (Gem Day, a
+    /// Choose One option).
+    GemBonus { attack: i32, health: i32 },
+    /// Play `count` Blood Gems on every friendly minion (Veteran Brigand's
+    /// Choose One option).
+    GemsOnBoard(u8),
+    /// "After the Tavern is Refreshed this game", every Tavern minion gets
+    /// this much worth of Blood Gems, plus the Gem bonus and the Tavern spell
+    /// bonus once per cast. Each cast adds on top (Blood Gem Barrage).
+    Barrage { attack: i32, health: i32 },
+    /// Cast a named Tavern spell `times` times, each cast a real one (Veteran
+    /// Brigand's Blood Gem Barrage option).
+    CastSpell { card: CardId, times: u8 },
+    /// Get `count` random minions of this tribe, up to your tier, generated
+    /// (Snare Trapper's Choose One option).
+    RandomTribeMinion { tribe: Tribe, count: u8 },
+    /// Discover a minion of the tier stored on this spell copy when it was
+    /// given (Triple Reward).
+    TripleReward,
     /// Add to the "after the Tavern is Refreshed this game" amount (Easterly
     /// Winds).
     RefreshBuff { attack: i32, health: i32 },
@@ -952,6 +1021,50 @@ pub enum Aura {
     PolarizingBeatboxer,
     /// Your Bounties cast twice (three times when golden). Proud Privateer.
     ProudPrivateer,
+    /// Your Blood Gems played from your hand cast an extra time (two when
+    /// golden). Hot-Air Surveyor.
+    HotAirSurveyor,
+}
+
+/// A card's role in a "how many times" count (DESIGN.md "Set versus add, as
+/// one mechanic").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimesRole {
+    /// "Trigger twice" / "cast twice" (golden "three times"): a fixed count,
+    /// the highest one wins, copies never stack.
+    Setter,
+    /// "An extra time" (golden "two extra times"): adds on top, copies stack.
+    Adder,
+}
+
+impl Aura {
+    /// The count every setter aura names: twice, three times when golden.
+    /// An adder adds one less than this ("an extra time", "two extra times").
+    pub fn times(self, golden: bool) -> u8 {
+        if golden { 3 } else { 2 }
+    }
+}
+
+/// The shared "how many times" count of DESIGN.md's "Set versus add": the
+/// highest value any setter on the board gives (1 when none), plus what each
+/// adder adds. `role` classifies an aura; auras it ignores are not counted.
+/// `parts` yields every (card, golden) of the board, attachments included.
+pub fn how_many_times(
+    cards: &CardDb,
+    parts: impl Iterator<Item = (CardId, bool)>,
+    role: impl Fn(Aura) -> Option<TimesRole>,
+) -> u8 {
+    let mut set = 1u8;
+    let mut add = 0u8;
+    for (card, golden) in parts {
+        let Some(a) = cards.get(card).aura else { continue };
+        match role(a) {
+            Some(TimesRole::Setter) => set = set.max(a.times(golden)),
+            Some(TimesRole::Adder) => add = add.saturating_add(a.times(golden) - 1),
+            None => {}
+        }
+    }
+    set.saturating_add(add)
 }
 
 /// "After you buy a minion, give it +attack/+health and multiply its stats,
@@ -1098,6 +1211,25 @@ pub struct Card {
     /// A Magnetic minion that can Magnetize to an Undead as well as a Mech
     /// (Prosthetic Hand).
     pub magnetize_to_undead: bool,
+    /// A Tavern spell (BATTLEGROUND_SPELL in the game data): only these fire
+    /// "Tavern spell" triggers and spell counters, and get spell power. Plain
+    /// spells (Blood Gem, Gem Day, Triple Reward, Lockbox) do not.
+    pub tavern_spell: bool,
+    /// The Blood Gem itself (BG20_GEM): a plain 0-cost spell whose buff is
+    /// the player's current Blood Gem value.
+    pub blood_gem: bool,
+    /// Whenever a Blood Gem is cast from hand on this minion, this plays this
+    /// many Blood Gems on a random different friendly minion (Geomagus
+    /// Roogug). Golden doubles the count. The Gems it plays are not from
+    /// hand, so they never chain.
+    pub on_gem_played_on_self: Option<u8>,
+    /// How many Choose One cards played this turn get both effects combined
+    /// (Thorned Trailblazer). Golden doubles it. Left to right, each
+    /// Trailblazer covers one more card.
+    pub choose_one_cover: u8,
+    /// After you play a Choose One card, this plays this many Blood Gems on
+    /// all your Quilboar (Turbo Hogrider). Golden doubles it.
+    pub after_choose_one_play: Option<u8>,
 }
 
 impl Card {
@@ -1202,6 +1334,9 @@ impl Card {
             || self.after_summon_give_stats.is_some()
             || self.spell_buff.is_some()
             || self.on_reborn.is_some()
+            || self.on_gem_played_on_self.is_some()
+            || self.choose_one_cover > 0
+            || self.after_choose_one_play.is_some()
     }
 }
 
@@ -1229,6 +1364,10 @@ pub struct CardDb {
     pub bounties: Vec<CardId>,
     /// The generated Lockbox spell.
     pub lockbox: Option<CardId>,
+    /// The generated Blood Gem spell.
+    pub blood_gem: Option<CardId>,
+    /// The generated Triple Reward spell.
+    pub triple_reward: Option<CardId>,
 }
 
 #[derive(Deserialize)]
@@ -1261,7 +1400,10 @@ struct RawCard {
     volumizer_buff: Option<[i32; 2]>,
     spell_buff: Option<[i32; 2]>,
     battlecry: Option<RawEffect>,
-    choose_one: Option<[RawMinionChooseOption; 2]>,
+    /// A Choose One option: a minion-target buff (the `RawMinionChooseOption`
+    /// fields) or a whole spell effect (the `RawSpellEffect` fields), the way
+    /// the Quilboar Choose One cards mix both.
+    choose_one: Option<[RawChooseOption; 2]>,
     deathrattle: Option<RawDeathrattle>,
     start_of_turn: Option<RawStartOfTurn>,
     end_of_turn: Option<RawEndOfTurn>,
@@ -1326,6 +1468,14 @@ struct RawCard {
     on_reborn: Option<RawOnReborn>,
     #[serde(default)]
     magnetize_to_undead: bool,
+    /// Blood Gems this plays on a random different friendly minion when a
+    /// Gem lands on it (Roogug).
+    on_gem_played_on_self: Option<u8>,
+    /// Choose One cards each turn that get both effects (Trailblazer).
+    choose_one_cover: Option<u8>,
+    /// Blood Gems played on all your Quilboar after a Choose One card
+    /// (Turbo Hogrider).
+    after_choose_one_play: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -1372,8 +1522,19 @@ struct RawSpell {
     /// One of the five Bounties (they share one slot of the spell draw).
     #[serde(default)]
     bounty: bool,
+    /// A Tavern spell (BATTLEGROUND_SPELL). Every pool spell is one; plain
+    /// spells (Blood Gem, Gem Day, Triple Reward) say `tavern_spell = false`.
+    #[serde(default = "default_true")]
+    tavern_spell: bool,
+    /// The Blood Gem itself.
+    #[serde(default)]
+    blood_gem: bool,
     effect: Option<RawSpellEffect>,
     choose_one: Option<[RawSpellEffect; 2]>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Deserialize)]
@@ -1473,6 +1634,26 @@ struct RawSpellEffect {
     /// Tomb Turning: Discover an Undead that dies if played this turn.
     #[serde(default)]
     tomb_turning: bool,
+    /// Gem Confiscation: play `confiscate` Blood Gems on the chosen minion
+    /// and steal its neighbours' Blood Gem stats.
+    confiscate: Option<u8>,
+    /// Get this many Blood Gems (a Choose One option).
+    get_gems: Option<u8>,
+    /// Your Blood Gems give this much extra this game (a Choose One option).
+    gem_bonus: Option<[i32; 2]>,
+    /// Play this many Blood Gems on every friendly minion (a Choose One
+    /// option).
+    gems_on_board: Option<u8>,
+    /// Blood Gem Barrage: add to the per-Refresh Tavern gem amount.
+    barrage: Option<[i32; 2]>,
+    /// Cast a named spell this many times (a Choose One option).
+    cast: Option<String>,
+    /// Get a random minion of this tribe (a Choose One option).
+    random_tribe_minion: Option<String>,
+    /// Triple Reward: Discover a minion of the tier fixed when this copy was
+    /// given.
+    #[serde(default)]
+    triple_reward: bool,
 }
 
 #[derive(Deserialize)]
@@ -1662,6 +1843,37 @@ struct RawEffect {
     /// Give a different friendly minion of this tribe Reborn, destroy it, and
     /// gain the buff.
     give_reborn_destroy: Option<String>,
+    /// Get this many Blood Gems.
+    get_gems: Option<u8>,
+    /// Get this many Blood Gems; the ones past a full hand are cast on the
+    /// left-most minion.
+    get_gems_overflow: Option<u8>,
+    /// Play this many Blood Gems on this minion. `gem_permanent` keeps them
+    /// after a fight (Vineweaver).
+    gem_self: Option<u8>,
+    #[serde(default)]
+    gem_permanent: bool,
+    /// Play this many Blood Gems on the other friendly minions.
+    gem_others: Option<u8>,
+    /// Play this many Blood Gems on the minion that just attacked.
+    gem_attacker: Option<u8>,
+    /// Your Blood Gems give this much extra this game.
+    gem_bonus: Option<[i32; 2]>,
+    /// Get this many random Choose One cards.
+    random_choose_one: Option<u8>,
+    /// Rally: summon a copy of this card with this minion's stats, which
+    /// attacks the target first (Jailbird Juggernaut).
+    summon_stat_copy: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+// The spell shape carries every spell-effect field, which makes the two
+// variants very different in size; only a handful are ever built.
+#[allow(clippy::large_enum_variant)]
+enum RawChooseOption {
+    Minion(RawMinionChooseOption),
+    Spell(RawSpellEffect),
 }
 
 #[derive(Deserialize)]
@@ -1821,6 +2033,10 @@ struct RawBuff {
 struct RawActivate {
     cost: u8,
     effect: RawEffect,
+    /// Ask the player to discard a card in hand first; with nothing
+    /// discardable the Activate does nothing (Mangled Bandit).
+    #[serde(default)]
+    discard: bool,
 }
 
 #[derive(Deserialize)]
@@ -1854,6 +2070,7 @@ fn tribe(s: &str) -> Result<Tribe, String> {
         "pirate" => Ok(Tribe::Pirate),
         "elemental" => Ok(Tribe::Elemental),
         "undead" => Ok(Tribe::Undead),
+        "quilboar" => Ok(Tribe::Quilboar),
         _ => Err(format!("unknown tribe {s:?}")),
     }
 }
@@ -1891,6 +2108,7 @@ fn parse_event(s: &str) -> Result<EventKind, String> {
         "minions_sold" => Ok(EventKind::MinionsSold),
         "cards_bought" => Ok(EventKind::CardsBought),
         "elementals_played" => Ok(EventKind::ElementalsPlayed),
+        "discarded" => Ok(EventKind::Discarded),
         other => Err(format!("unknown event {other:?}")),
     }
 }
@@ -1911,6 +2129,7 @@ fn parse_discover(s: &str) -> Result<DiscoverKind, String> {
         "deathrattle" => Ok(DiscoverKind::DeathrattleMinion),
         "battlecry" => Ok(DiscoverKind::BattlecryMinion),
         "tier_7_minion" => Ok(DiscoverKind::Tier7Minion),
+        "choose_one_minion" => Ok(DiscoverKind::ChooseOneMinion),
         other => Err(format!("unknown discover {other:?}")),
     }
 }
@@ -1934,6 +2153,9 @@ fn parse_spell_effect(
             }
             if let Some(attack) = e.butchering {
                 return Ok((Some(SpellTarget::Butchering { attack }), None));
+            }
+            if let Some(gems) = e.confiscate {
+                return Ok((Some(SpellTarget::Confiscation { gems }), None));
             }
             if let Some(per) = e.per_played_this_turn {
                 let [attack, health] = e.buff.ok_or("per_played_this_turn needs buff")?;
@@ -2079,6 +2301,18 @@ fn parse_spell_effect(
                 SpellEffect::MenagerieTableware { attack, health }
             } else if e.friendly_bounty {
                 SpellEffect::FriendlyBounty
+            } else if let Some(n) = e.get_gems {
+                SpellEffect::GetGems(n)
+            } else if let Some([attack, health]) = e.gem_bonus {
+                SpellEffect::GemBonus { attack, health }
+            } else if let Some(n) = e.gems_on_board {
+                SpellEffect::GemsOnBoard(n)
+            } else if let Some([attack, health]) = e.barrage {
+                SpellEffect::Barrage { attack, health }
+            } else if let Some(name) = &e.random_tribe_minion {
+                SpellEffect::RandomTribeMinion { tribe: tribe(name)?, count: e.count.unwrap_or(1) }
+            } else if e.triple_reward {
+                SpellEffect::TripleReward
             } else if let Some(b) = e.boon_of_beetles {
                 SpellEffect::BoonOfBeetles(b)
             } else if let Some(soc) = &e.start_of_combat {
@@ -2207,6 +2441,22 @@ impl CardDb {
             } else if let Some(name) = &b.give_reborn_destroy {
                 let [attack, health] = b.buff.ok_or("give_reborn_destroy needs buff")?;
                 Effect::GiveRebornDestroy { tribe: tribe(name)?, attack, health }
+            } else if let Some(n) = b.get_gems {
+                Effect::GetGems(n)
+            } else if let Some(n) = b.get_gems_overflow {
+                Effect::GetGemsCastOverflow(n)
+            } else if let Some(n) = b.gem_self {
+                Effect::GemSelf { count: n, permanent: b.gem_permanent }
+            } else if let Some(n) = b.gem_others {
+                Effect::GemOthers(n)
+            } else if let Some(n) = b.gem_attacker {
+                Effect::GemAttacker(n)
+            } else if let Some([attack, health]) = b.gem_bonus {
+                Effect::GemBonus { attack, health }
+            } else if let Some(n) = b.random_choose_one {
+                Effect::GetRandomChooseOne(n)
+            } else if let Some(name) = &b.summon_stat_copy {
+                Effect::SummonStatCopyAttacker { card: minion_id(name)? }
             } else if let Some([attack, health]) = b.refresh_buff {
                 Effect::RefreshBuff { attack, health }
             } else if let Some(n) = b.free_refreshes {
@@ -2444,7 +2694,7 @@ impl CardDb {
                 None => None,
                 Some(a) => {
                     let effect = parse_effect(&a.effect).map_err(&err)?;
-                    Some(Activate { cost: a.cost, effect })
+                    Some(Activate { cost: a.cost, effect, discard: a.discard })
                 }
             };
 
@@ -2522,19 +2772,49 @@ impl CardDb {
             let choose_one = match &c.choose_one {
                 None => None,
                 Some([o1, o2]) => {
-                    let parse_opt = |o: &RawMinionChooseOption| -> Result<ChooseOption, String> {
-                        if let Some([attack, health]) = o.buff {
-                            let kw = o.keyword.as_deref().ok_or("choose_one buff needs keyword")?;
-                            Ok(ChooseOption::MinionTarget {
-                                tribe: o.tribe.as_deref().map(tribe).transpose()?,
-                                attack,
-                                health,
-                                keyword: keyword_bit(kw)?,
-                            })
-                        } else if let Some([attack, health]) = o.spell_buff {
-                            Ok(ChooseOption::SpellBonus { attack, health })
-                        } else {
-                            Err("invalid minion choose_one".into())
+                    let parse_opt = |o: &RawChooseOption| -> Result<ChooseOption, String> {
+                        match o {
+                            RawChooseOption::Minion(o) => {
+                                if let Some([attack, health]) = o.buff {
+                                    let kw =
+                                        o.keyword.as_deref().ok_or("choose_one buff needs keyword")?;
+                                    Ok(ChooseOption::MinionTarget {
+                                        tribe: o.tribe.as_deref().map(tribe).transpose()?,
+                                        attack,
+                                        health,
+                                        keyword: keyword_bit(kw)?,
+                                    })
+                                } else if let Some([attack, health]) = o.spell_buff {
+                                    Ok(ChooseOption::SpellBonus { attack, health })
+                                } else {
+                                    Err("invalid minion choose_one".into())
+                                }
+                            }
+                            RawChooseOption::Spell(o) => {
+                                // "Get a Gem Day" as an option: the same
+                                // generated-card form a spell's own effect
+                                // uses, parsed here because it needs the
+                                // card ids.
+                                if let Some(name) = &o.get {
+                                    let card = generated_id(name)?;
+                                    return Ok(ChooseOption::SpellEffect(SpellEffect::GetCard {
+                                        card,
+                                        count: o.count.unwrap_or(1),
+                                    }));
+                                }
+                                if let Some(name) = &o.cast {
+                                    let card = spell_id(name)?;
+                                    return Ok(ChooseOption::SpellEffect(SpellEffect::CastSpell {
+                                        card,
+                                        times: o.count.unwrap_or(1),
+                                    }));
+                                }
+                                match parse_spell_effect(o)? {
+                                    (Some(st), None) => Ok(ChooseOption::SpellTarget(st)),
+                                    (None, Some(se)) => Ok(ChooseOption::SpellEffect(se)),
+                                    _ => Err("invalid spell choose_one".into()),
+                                }
+                            }
                         }
                     };
                     Some([parse_opt(o1).map_err(&err)?, parse_opt(o2).map_err(&err)?])
@@ -2804,6 +3084,7 @@ impl CardDb {
                 Some("holy_vanguard") => Some(Aura::HolyVanguard),
                 Some("polarizing_beatboxer") => Some(Aura::PolarizingBeatboxer),
                 Some("proud_privateer") => Some(Aura::ProudPrivateer),
+                Some("hot_air_surveyor") => Some(Aura::HotAirSurveyor),
                 Some(other) => return Err(err(format!("unknown aura {other:?}"))),
             };
 
@@ -2911,6 +3192,11 @@ impl CardDb {
                 buff_per_kind_death: c.buff_per_kind_death.map(|[a, h]| (a, h)),
                 on_reborn,
                 magnetize_to_undead: c.magnetize_to_undead,
+                tavern_spell: false,
+                blood_gem: false,
+                on_gem_played_on_self: c.on_gem_played_on_self,
+                choose_one_cover: c.choose_one_cover.unwrap_or(0),
+                after_choose_one_play: c.after_choose_one_play,
             });
         }
 
@@ -2935,6 +3221,14 @@ impl CardDb {
                     let a = minion_id(a).map_err(&err)?;
                     let b = minion_id(b).map_err(&err)?;
                     (None, Some(SpellEffect::GetTwo { a, b }))
+                }
+                // Cast a named spell, `count` times (Veteran Brigand).
+                Some(e) if e.cast.is_some() => {
+                    let card = spell_id(e.cast.as_deref().unwrap()).map_err(&err)?;
+                    (
+                        None,
+                        Some(SpellEffect::CastSpell { card, times: e.count.unwrap_or(1) }),
+                    )
                 }
                 Some(e) => parse_spell_effect(e).map_err(&err)?,
                 None => (None, None),
@@ -3034,12 +3328,22 @@ impl CardDb {
                 buff_per_kind_death: None,
                 on_reborn: None,
                 magnetize_to_undead: false,
+                tavern_spell: sp.tavern_spell,
+                blood_gem: sp.blood_gem,
+                on_gem_played_on_self: None,
+                choose_one_cover: 0,
+                after_choose_one_play: None,
             });
         }
 
         let lockbox = cards
             .iter()
             .position(|c| matches!(c.spell_effect, Some(SpellEffect::Lockbox(_))))
+            .map(|i| i as CardId);
+        let blood_gem = cards.iter().position(|c| c.blood_gem).map(|i| i as CardId);
+        let triple_reward = cards
+            .iter()
+            .position(|c| matches!(c.spell_effect, Some(SpellEffect::TripleReward)))
             .map(|i| i as CardId);
         let tiers: Vec<u8> = cards.iter().map(|c| c.tier).collect();
         let ids_up_to_tier = (0..=crate::CARD_MAX_TIER)
@@ -3058,6 +3362,8 @@ impl CardDb {
             fodder_token,
             bounties,
             lockbox,
+            blood_gem,
+            triple_reward,
         })
     }
 
@@ -3235,6 +3541,18 @@ impl CardDb {
         self.pick_rigged(|c| self.cards[c].tier == tier, rig, rng)
     }
 
+    /// A random pool minion with a Choose One, any tribe, of Tier `max_tier`
+    /// or lower, narrowed by a sandbox `rig` (Bramble Tunneler, Fandral's
+    /// Fortune).
+    pub fn random_choose_one_minion(
+        &self,
+        max_tier: u8,
+        rig: Option<Tribe>,
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        self.pick_rigged(|c| self.cards[c].choose_one.is_some() && self.cards[c].tier <= max_tier, rig, rng)
+    }
+
     pub fn random_spell(&self, max_tier: u8, rng: &mut Rng) -> Option<CardId> {
         let max_tier = max_tier.min(crate::MAX_TIER);
         let count = self
@@ -3326,6 +3644,9 @@ impl CardDb {
             locked_turns: 0,
             doomed: false,
             activated: false,
+            gem_attack: 0,
+            gem_health: 0,
+            both_effects: false,
             attached: [Attached::default(); MAX_ATTACHED],
             n_attached: 0,
         }

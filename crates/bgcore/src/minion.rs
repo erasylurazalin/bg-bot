@@ -123,6 +123,14 @@ pub struct Minion {
     /// Whether its Activate was already used this turn. Cleared at the start
     /// of its owner's turn; a copy bought or made later starts unused.
     pub activated: bool,
+    /// Attack and Health this minion has gained from Blood Gems, from every
+    /// source (Gem Confiscation steals exactly these). Shop gains persist;
+    /// a fight's gems are gone with it unless they were permanent.
+    pub gem_attack: i32,
+    pub gem_health: i32,
+    /// A Choose One card with both effects combined (Fandral's Fortune's
+    /// Discover): playing it runs both options instead of asking.
+    pub both_effects: bool,
     pub attached: [Attached; MAX_ATTACHED],
     pub n_attached: u8,
 }
@@ -161,7 +169,7 @@ impl Minion {
     }
 
     /// Merge `other` into `self` as a Magnetization, recursively bringing all
-    /// stats, keywords, magnetization counts, Volumizer counts and effects.
+    /// its stats, keywords, magnetization counts, Volumizer counts and effects.
     pub fn magnetize(&mut self, db: &CardDb, other: Minion) {
         self.attack += other.attack;
         self.health += other.health;
@@ -169,6 +177,8 @@ impl Minion {
         self.winners_bread = self.winners_bread.saturating_add(other.winners_bread);
         self.magnetizations = self.magnetizations.saturating_add(other.magnetizations).saturating_add(1);
         self.volumizers = self.volumizers.saturating_add(other.volumizers);
+        self.gem_attack = self.gem_attack.saturating_add(other.gem_attack);
+        self.gem_health = self.gem_health.saturating_add(other.gem_health);
         if db.get(other.card).carries_effect() {
             self.push_attached(Attached { card: other.card, golden: other.golden });
         }

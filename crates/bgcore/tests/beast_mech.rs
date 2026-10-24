@@ -605,7 +605,7 @@ fn rally_and_attack_triggers_only_take_effects_a_fight_can_run() {
         let toml = format!("{}\n[[token]]\nname = \"B\"\ntier = 1\ntribe = \"beast\"\nstats = [0, 1]\n", base(bad));
         assert!(CardDb::from_toml(&toml).is_err(), "{bad} should be refused");
     }
-    let bad_tribe = base("whenever_friendly_attack = { attacker_tribe = \"quilboar\", effect = { buff = [1, 1], target = \"all\" } }");
+    let bad_tribe = base("whenever_friendly_attack = { attacker_tribe = \"naga\", effect = { buff = [1, 1], target = \"all\" } }");
     assert!(CardDb::from_toml(&bad_tribe).unwrap_err().contains("unknown tribe"));
 }
 

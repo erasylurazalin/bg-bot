@@ -254,6 +254,14 @@ fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Action> 
             });
         return Some(best_of(scored).unwrap_or_else(|| first_legal(game)));
     }
+    if pl.pending_discard.is_some() {
+        // Throw away the least valuable discardable card.
+        let scored = (0..pl.hand.len() as u8)
+            .map(Action::Discard)
+            .filter(|&a| legal(a))
+            .map(|a| (a, -card_value(game, pref, &pl.hand[a_slot(a)])));
+        return Some(best_of(scored).unwrap_or_else(|| first_legal(game)));
+    }
     if let Some(pco) = pl.pending_choose_one {
         let scored = (0..2u8)
             .map(Action::Choose)
@@ -295,7 +303,9 @@ fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Action> 
 /// The slot or option index an answering action points at.
 fn a_slot(a: Action) -> usize {
     match a {
-        Action::Target(s) | Action::TargetShop(s) | Action::Choose(s) => s as usize,
+        Action::Target(s) | Action::TargetShop(s) | Action::Choose(s) | Action::Discard(s) => {
+            s as usize
+        }
         _ => unreachable!(),
     }
 }

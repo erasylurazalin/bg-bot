@@ -232,8 +232,7 @@ fn undead_bonus_reaches_the_board_the_hand_the_tavern_and_later_undead() {
     put_on_board(&mut g, 0, "Risen Rider", false);
     put_in_hand(&mut g, 0, "Nerubian Deathswarmer", true);
     play(&mut g, 0, 0, 1);
-    // the Triple Reward Discover comes first
-    act(&mut g, 0, Action::Choose(0));
+    // the Triple Reward went to the hand as a spell; no Discover to answer
     assert_eq!(g.players[0].undead_bonus, (2, 0));
     assert_eq!(stats(&g.players[0].board[0]), (4, 1));
 }

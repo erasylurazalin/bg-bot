@@ -336,7 +336,9 @@ fn golden_graverobber_gets_two_copies_and_a_full_hand_loses_the_rest() {
     assert_eq!(riders, 2);
     g.check_invariants().unwrap();
 
-    // One free slot after the play: the second copy is lost.
+    // One free slot after the play: the Triple Reward comes before anything
+    // the Battlecry adds to the hand, so it takes the slot and both copies
+    // are lost.
     let mut g = game(13);
     put_on_board(&mut g, 0, "Harmless Bonehead", false);
     put_in_hand(&mut g, 0, "Disguised Graverobber", true);
@@ -350,7 +352,13 @@ fn golden_graverobber_gets_two_copies_and_a_full_hand_loses_the_rest() {
         .iter()
         .filter(|m| g.data.cards.get(m.card).name == "Harmless Bonehead")
         .count();
-    assert_eq!(riders, 1);
+    assert_eq!(riders, 0);
+    let rewards = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).name == "Triple Reward")
+        .count();
+    assert_eq!(rewards, 1);
     g.check_invariants().unwrap();
 }
 

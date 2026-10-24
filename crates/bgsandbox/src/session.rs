@@ -61,8 +61,8 @@ How to play (numbers are what the screen shows, counting from 1):
             (c1 alone opens the target prompt; p and c are the same command)
   s4        sell board minion 4          m2 5     move board minion 2 to position 5
   a3        Activate board minion 3 (a target prompt follows if it needs one)
-  1 2 3     answer an open choice: a Discover or Choose One option, or a board
-            target; t3 answers with Tavern minion 3
+  1 2 3     answer an open choice: a Discover or Choose One option, a board
+            target, or the hand card to discard; t3 answers with Tavern minion 3
   r         Refresh (free ones first)    f        freeze / unfreeze the Tavern
   u         upgrade the Tavern           e        end turn
   ? 3       full card text: Tavern 3     ?s spell slot   ?h1 hand 1   ?b2 board 2   ?d1 Discover option 1
@@ -245,6 +245,7 @@ impl Session {
         if p.pending_target.is_none()
             && p.pending_shop_target.is_none()
             && p.pending_choose_one.is_none()
+            && p.pending_discard.is_none()
             && p.discover.is_empty()
         {
             *ctx = None;
@@ -449,6 +450,7 @@ impl Session {
         let open = pl.pending_target.is_some()
             || pl.pending_shop_target.is_some()
             || pl.pending_choose_one.is_some()
+            || pl.pending_discard.is_some()
             || !pl.discover.is_empty();
         let idx = |n: usize, len: usize, what: &str| -> Result<u8, String> {
             if n >= 1 && n <= len {
@@ -519,6 +521,13 @@ impl Session {
                 Arg::Board(n) => Action::Target(n.saturating_sub(1).min(255) as u8),
                 Arg::Tavern(n) => Action::TargetShop(n.saturating_sub(1).min(255) as u8),
             }
+        } else if pl.pending_discard.is_some() {
+            match arg {
+                Arg::Board(n) => Action::Discard(n.saturating_sub(1).min(255) as u8),
+                Arg::Tavern(_) => {
+                    return Err("this choice takes a hand card number, not a Tavern slot".into())
+                }
+            }
         } else if pl.pending_shop_target.is_some() {
             match arg {
                 Arg::Board(n) | Arg::Tavern(n) => Action::TargetShop(n.saturating_sub(1).min(255) as u8),
@@ -574,6 +583,7 @@ impl Session {
         if pl.pending_target.is_some()
             || pl.pending_shop_target.is_some()
             || pl.pending_choose_one.is_some()
+            || pl.pending_discard.is_some()
             || !pl.discover.is_empty()
         {
             return "answer the open choice first (see the CHOICE below the board)".into();

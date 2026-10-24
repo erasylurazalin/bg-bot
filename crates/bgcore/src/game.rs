@@ -10,10 +10,10 @@ use arrayvec::ArrayVec;
 
 use crate::action::{Action, N_ACTIONS};
 use crate::cards::{
-    N_COUNTERS,
-    Aura, Card, CardDb, ChooseOption, ConsumeBy, ConsumePick, DiscoverKind, Effect, EndOfTurn,
-    EventKind, OnCastSpell, OnCastSpellOnMech, OnPlayMech, OnPlayOrMagnetizeMech, OnSell,
-    OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, Tribe, Tribes, pick_one_per_type,
+    N_COUNTERS, Aura, Card, CardDb, ChooseOption, ConsumeBy, ConsumePick, DiscoverKind, Effect,
+    EndOfTurn, EventKind, OnCastSpell, OnCastSpellOnMech, OnPlayMech, OnPlayOrMagnetizeMech,
+    OnSell, OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, TimesRole, Tribe, Tribes,
+    how_many_times, pick_one_per_type,
 };
 use crate::fight::{Counters, SideOutcome, fight_with_hands};
 use crate::minion::{CardId, Keywords, Minion};
@@ -106,6 +106,13 @@ pub struct PendingTarget {
     pub source: Option<u8>,
     pub kind: TargetKind,
     pub runs: u8,
+    /// The spell being cast is a Tavern spell: only those fire "Tavern spell"
+    /// triggers and spell counters, and get spell power.
+    pub tavern: bool,
+    /// The spell being cast is a Blood Gem: its buff is the player's Blood
+    /// Gem value, the stats it gives are Blood Gem stats, and each cast is a
+    /// Gem played on the target (Geomagus Roogug reacts to those from hand).
+    pub gem: bool,
 }
 
 /// A chosen consume waiting for the player to pick the Tavern minion.
@@ -141,8 +148,8 @@ pub struct TavernBuff {
     pub this_turn: bool,
 }
 
-/// One buff per (tribe filter, duration): 8 tribes and no filter, times 2.
-pub const MAX_TAVERN_BUFFS: usize = 18;
+/// One buff per (tribe filter, duration): 9 tribes and no filter, times 2.
+pub const MAX_TAVERN_BUFFS: usize = 20;
 
 /// A Choose One minion or spell waiting for the player to pick one of its
 /// two options.
@@ -151,6 +158,30 @@ pub struct PendingChooseOne {
     pub source: Option<u8>,
     pub golden: bool,
     pub options: [ChooseOption; 2],
+    /// The spell being cast is a Tavern spell (see `PendingTarget::tavern`).
+    pub tavern: bool,
+}
+
+/// One option of a "both effects combined" Choose One that still has to run,
+/// after the option before it is done waiting on its own target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct QueuedOption {
+    pub source: Option<u8>,
+    pub option: ChooseOption,
+    /// Whether the Choose One spell was a Tavern spell.
+    pub tavern: bool,
+}
+
+/// "Discard a card" (Mangled Bandit's Activate) waiting for the player to
+/// pick the card in hand to throw away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PendingDiscard {
+    /// Board slot of the minion whose effect it is.
+    pub source: u8,
+    /// What the discard earns, run after the card is gone.
+    pub reward: Effect,
+    /// Whether the minion with the effect is golden (doubles the reward).
+    pub golden: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -172,6 +203,9 @@ pub enum DiscoverRequest {
     /// Tier, dealt by the friendly minion in board slot `source` (Imposing
     /// Percussionist).
     DemonMinion { max_tier: u8, source: u8 },
+    /// A Choose One minion, any tribe, up to the tier; the pick has both
+    /// effects combined (Fandral's Fortune).
+    ChooseOneMinion,
 }
 
 /// Why the Tavern is filled. Only the player's own Refresh action (paid with
@@ -252,6 +286,14 @@ pub struct Player {
     pub pending_choose_one: Option<PendingChooseOne>,
     pub pending_target: Option<PendingTarget>,
     pub pending_shop_target: Option<PendingShopTarget>,
+    /// "Discard a card" waiting for the player's pick.
+    pub pending_discard: Option<PendingDiscard>,
+    /// Choose One cards played whose choice is still open: Turbo Hogrider
+    /// reacts once the card is fully resolved (`resolve_hogrider`).
+    pub hogrider_pending: u8,
+    /// Options of a "both effects combined" Choose One that still have to
+    /// run, after the one before them is done waiting on its target.
+    pub choose_queue: ArrayVec<QueuedOption, 2>,
     /// Discover options waiting for a choice. Minion cards here are out of the pool.
     pub discover: ArrayVec<CardId, DISCOVER>,
     /// Queued Discover requests to offer once pending choices finish.
@@ -274,6 +316,19 @@ pub struct Player {
     /// Upcoming Refreshes and how many Fodders each one gets, oldest first
     /// (Laboratory Assistant, Trapped Clapper, Twisted Wrathguard).
     pub fodder_refreshes: ArrayVec<u8, 64>,
+    /// What one of this player's Blood Gems gives, raised by "your Blood Gems
+    /// give an extra +X/+Y this game". Starts at +1/+1.
+    pub gem_attack: i32,
+    pub gem_health: i32,
+    /// Blood Gem Barrage casts: every explicit Refresh gives this much, as
+    /// Blood Gems, to every minion in the Tavern.
+    pub barrage: (i32, i32),
+    /// Choose One cards left this turn that get both effects combined
+    /// (Thorned Trailblazer).
+    pub trailblazer_covers: u8,
+    /// Whether the Discover now waiting marks its Choose One pick as having
+    /// both effects (Fandral's Fortune).
+    pub discover_both: bool,
     pub actions: u16,
     pub done: bool,
     pub opponent: Option<Opponent>,
@@ -332,14 +387,22 @@ impl Player {
             pending_choose_one: None,
             pending_target: None,
             pending_shop_target: None,
+            pending_discard: None,
+            hogrider_pending: 0,
+            choose_queue: ArrayVec::new(),
             discover: ArrayVec::new(),
             discover_queue: ArrayVec::new(),
             discover_damage_from: None,
             discover_locked: false,
             discover_doomed: false,
+            discover_both: false,
             undead_bonus: (0, 0),
             knight_deaths: 0,
             fodder_refreshes: ArrayVec::new(),
+            gem_attack: 1,
+            gem_health: 1,
+            barrage: (0, 0),
+            trailblazer_covers: 0,
             actions: 0,
             done: false,
             opponent: None,
@@ -590,6 +653,8 @@ impl Player {
             undead_attack: self.undead_bonus.0,
             undead_health: self.undead_bonus.1,
             knight_deaths: self.knight_deaths,
+            gem_attack: self.gem_attack,
+            gem_health: self.gem_health,
             rig: self.rig,
         }
     }
@@ -919,6 +984,9 @@ impl Game {
         if pl.pending_shop_target.is_some() {
             return matches!(a, Action::TargetShop(s) if (s as usize) < pl.shop.len());
         }
+        if pl.pending_discard.is_some() {
+            return matches!(a, Action::Discard(s) if self.valid_discard(p, s as usize));
+        }
         if let Some(pco) = pl.pending_choose_one {
             return matches!(a, Action::Choose(k) if k < 2 && self.can_choose_option(p, pco.options[k as usize]));
         }
@@ -961,6 +1029,7 @@ impl Game {
                     && !pl.board[s as usize].activated
                     && self.activate_of(p, s as usize).is_some_and(|(act, _)| {
                         pl.gold >= act.cost
+                            && (!act.discard || self.has_discardable(p))
                             && (!act.effect.needs_shop_slot() || self.shop_has_minion(p))
                             && (!act.effect.needs_any_minion()
                                 || pl.board.len() > 1
@@ -1007,7 +1076,9 @@ impl Game {
                     !pl.board.is_full()
                 }
             }
-            Action::Target(_) | Action::TargetShop(_) | Action::Choose(_) => false,
+            Action::Target(_) | Action::TargetShop(_) | Action::Choose(_) | Action::Discard(_) => {
+                false
+            }
             Action::Move { from, to } => {
                 (from as usize) < pl.board.len() && (to as usize) < pl.board.len() && from != to
             }
@@ -1042,6 +1113,10 @@ impl Game {
         } else if pl.pending_shop_target.is_some() {
             for s in 0..pl.shop.len() as u8 {
                 ask(Action::TargetShop(s));
+            }
+        } else if pl.pending_discard.is_some() {
+            for s in 0..pl.hand.len() as u8 {
+                ask(Action::Discard(s));
             }
         } else if pl.pending_choose_one.is_some() {
             for k in 0..2 {
@@ -1096,6 +1171,22 @@ impl Game {
         })
     }
 
+    /// Whether the card in hand slot `s` may be discarded: any playable card
+    /// (a Blood Gem included), never an unplayable one (the Lockbox) or a
+    /// minion locked in hand.
+    fn valid_discard(&self, p: usize, s: usize) -> bool {
+        let Some(m) = self.players[p].hand.get(s) else { return false };
+        if m.locked_turns > 0 {
+            return false;
+        }
+        !matches!(self.data.cards.get(m.card).spell_effect, Some(SpellEffect::Lockbox(_)))
+    }
+
+    /// Whether the player holds any card a discard could take.
+    fn has_discardable(&self, p: usize) -> bool {
+        (0..self.players[p].hand.len()).any(|s| self.valid_discard(p, s))
+    }
+
     /// The Activate ability of the board minion in slot `s` (the first part
     /// of it that has one) and whether that part is golden.
     fn activate_of(&self, p: usize, s: usize) -> Option<(crate::cards::Activate, bool)> {
@@ -1134,6 +1225,7 @@ impl Game {
             SpellTarget::HalfOfHighestTavern { tribe } => c.tribes.has(tribe),
             SpellTarget::BuffPerTribePlayed { .. } => true,
             SpellTarget::Butchering { .. } => c.tribes.has(Tribe::Undead),
+            SpellTarget::Confiscation { .. } => true,
         }
     }
 
@@ -1264,6 +1356,7 @@ impl Game {
         let p = self.current_player().unwrap();
         self.apply(p, a);
         self.resolve_doomed(p);
+        self.resolve_hogrider(p);
         // A hero knocked out mid-action may still collect cards from effects
         // that were running when it died.
         for q in 0..PLAYERS {
@@ -1334,23 +1427,42 @@ impl Game {
                 let (act, golden) = self.activate_of(p, s as usize).unwrap();
                 self.players[p].gold -= act.cost;
                 self.players[p].board[s as usize].activated = true;
-                let mut pos = s as usize;
-                self.run_effect(p, &mut pos, act.effect, golden, 1);
-                self.maybe_start_discover(p);
+                if act.discard {
+                    // The reward runs once the player has picked the card.
+                    self.players[p].pending_discard = Some(PendingDiscard {
+                        source: s,
+                        reward: act.effect,
+                        golden,
+                    });
+                } else {
+                    let mut pos = s as usize;
+                    self.run_effect(p, &mut pos, act.effect, golden, 1);
+                    self.maybe_start_discover(p);
+                }
                 self.fire_event(p, EventKind::GoldSpent, act.cost as u32);
             }
             Action::Play { hand, pos } => {
                 let m = self.players[p].hand.remove(hand as usize);
-                if self.data.cards.get(m.card).is_spell() {
-                    self.cast_spell(p, m.card);
+                let card = self.data.cards.get(m.card);
+                if card.is_spell() {
+                    let choose_one = card.choose_one.is_some();
+                    self.cast_spell(p, m);
+                    if choose_one {
+                        // Turbo Hogrider reacts once the card is resolved.
+                        self.players[p].hogrider_pending += 1;
+                    }
                     return;
                 }
                 let pos = pos as usize;
                 let is_merge = m.keywords.has(Keywords::MAGNETIC)
                     && pos < self.players[p].board.len()
                     && self.can_magnetize(m.card, self.players[p].board[pos].card);
+                let mut choose_one_play = false;
                 if is_merge {
                     self.magnetize_to(p, pos, m, true);
+                    if m.golden && !m.no_reward {
+                        self.give_triple_reward(p);
+                    }
                 } else {
                     let mut m = m;
                     if self.data.cards.get(m.card).tribes.has(Tribe::Beast) {
@@ -1360,6 +1472,17 @@ impl Game {
                     }
                     self.players[p].board.insert(pos, m);
                     let t = self.data.cards.get(m.card).tribes;
+                    // The Triple Reward comes before anything the Battlecry
+                    // adds to the hand (and is lost on a full hand).
+                    if m.golden && !m.no_reward {
+                        self.give_triple_reward(p);
+                    }
+                    // A Trailblazer just landed: it covers one more Choose
+                    // One card this turn (golden: two more).
+                    let cover = self.data.cards.get(m.card).choose_one_cover * m.mul() as u8;
+                    self.players[p].trailblazer_covers =
+                        self.players[p].trailblazer_covers.saturating_add(cover);
+                    choose_one_play = self.data.cards.get(m.card).choose_one.is_some();
                     if t.has(Tribe::Elemental) {
                         self.players[p].elementals_played_turn =
                             self.players[p].elementals_played_turn.saturating_add(1);
@@ -1387,21 +1510,17 @@ impl Game {
                 }
                 if m.golden {
                     // A Golden minion played from hand counts for Maritime
-                    // Extortionist and Hooktusk, and gives a Triple Reward
-                    // unless its text or its source says it doesn't.
+                    // Extortionist and Hooktusk.
                     self.add_golden_played(p, 1);
-                    if !m.no_reward {
-                        let tier = (self.players[p].tier + 1).min(MAX_TIER);
-                        let _ = self.players[p]
-                            .discover_queue
-                            .try_push(DiscoverRequest::MinionTier(tier));
-                        self.maybe_start_discover(p);
-                    }
+                }
+                if choose_one_play {
+                    self.players[p].hogrider_pending += 1;
                 }
             }
             Action::Target(s) => self.resolve_target(p, s as usize),
             Action::TargetShop(s) => self.resolve_shop_target(p, s as usize),
             Action::Choose(k) => self.resolve_choose(p, k as usize),
+            Action::Discard(s) => self.resolve_discard(p, s as usize),
             Action::Move { from, to } => {
                 let pl = &mut self.players[p];
                 let m = pl.board.remove(from as usize);
@@ -1462,12 +1581,13 @@ impl Game {
         pl.shop_spell = None;
         Self::fill_shop(pl, pool, cards, rules.shop_size(pl.tier), rng, kind);
         Self::apply_refresh_buff(pl, cards, rng);
+        Self::apply_barrage(pl, cards);
     }
 
-    /// "After the Tavern is Refreshed this game": the whole amount goes to
-    /// one random minion in the Tavern. Called by every Refresh except the
-    /// automatic roll at the start of a turn. It draws no random number when
-    /// there is nothing to give.
+    /// "After the Tavern is Refreshed this game" (Waveling, En-Djinn Blazer,
+    /// Easterly Winds): the whole amount goes to one random minion in the
+    /// Tavern. Called by every Refresh except the automatic roll at the start
+    /// of a turn. It draws no random number when there is nothing to give.
     fn apply_refresh_buff(pl: &mut Player, cards: &CardDb, rng: &mut Rng) {
         let (a, h) = pl.refresh_buff;
         if a == 0 && h == 0 {
@@ -1481,6 +1601,23 @@ impl Game {
         let k = rng.below(n) as usize;
         if let Some(m) = pl.shop.iter_mut().filter(|m| ok(m)).nth(k) {
             buff(m, a, h);
+        }
+    }
+
+    /// Blood Gem Barrage: after every Refresh (all but the turn-start roll),
+    /// every minion in the Tavern gains the whole amount cast so far, as
+    /// Blood Gem stats.
+    fn apply_barrage(pl: &mut Player, cards: &CardDb) {
+        let (a, h) = pl.barrage;
+        if a == 0 && h == 0 {
+            return;
+        }
+        for m in &mut pl.shop {
+            if !cards.get(m.card).is_spell() && !cards.get(m.card).fixed_stats {
+                buff(m, a, h);
+                m.gem_attack += a;
+                m.gem_health += h;
+            }
         }
     }
 
@@ -1573,6 +1710,7 @@ impl Game {
         }
         pl.shop_spell = cards.random_spell(pl.tier, rng);
         Self::apply_refresh_buff(pl, cards, rng);
+        Self::apply_barrage(pl, cards);
     }
 
     /// Lost Staff of Hamuul: refresh the Tavern with minions of one type,
@@ -1604,6 +1742,7 @@ impl Game {
         }
         pl.shop_spell = cards.random_spell(pl.tier, rng);
         Self::apply_refresh_buff(pl, cards, rng);
+        Self::apply_barrage(pl, cards);
     }
 
     /// The Fodders that just appeared in a Refresh feed themselves if the
@@ -2210,55 +2349,167 @@ impl Game {
         }
     }
 
+    /// "Set versus add, as one mechanic" (DESIGN.md): every "how many times"
+    /// count is the highest value a setter on the board sets (1 if none),
+    /// plus what each adder adds. See `cards::how_many_times`.
+    fn times_count(&self, p: usize, role: impl Fn(Aura) -> Option<TimesRole> + Copy) -> u8 {
+        let cards = &self.data.cards;
+        let parts = self.players[p].board.iter().flat_map(|m| m.parts());
+        how_many_times(cards, parts, role)
+    }
+
     fn brann_mult(&self, p: usize) -> u8 {
-        let mut mult = 1;
-        for m in &self.players[p].board {
-            for (card, golden) in m.parts() {
-                if self.data.cards.get(card).aura == Some(Aura::Brann) {
-                    mult = mult.max(if golden { 3 } else { 2 });
-                }
-            }
-        }
-        mult
+        self.times_count(p, |a| (a == Aura::Brann).then_some(TimesRole::Setter))
     }
 
     fn drakkari_mult(&self, p: usize) -> u8 {
-        let mut mult = 1;
-        for m in &self.players[p].board {
-            for (card, golden) in m.parts() {
-                if self.data.cards.get(card).aura == Some(Aura::Drakkari) {
-                    mult = mult.max(if golden { 3 } else { 2 });
-                }
-            }
-        }
-        mult
+        self.times_count(p, |a| (a == Aura::Drakkari).then_some(TimesRole::Setter))
     }
 
     /// How many times the player's Bounties cast: once, twice with a Proud
     /// Privateer, three times with a Golden one. "Twice" is a fixed count, so
     /// two Privateers don't stack (the highest wins).
     fn bounty_mult(&self, p: usize) -> u8 {
-        let mut mult = 1;
-        for m in &self.players[p].board {
-            for (card, golden) in m.parts() {
-                if self.data.cards.get(card).aura == Some(Aura::ProudPrivateer) {
-                    mult = mult.max(if golden { 3 } else { 2 });
-                }
-            }
-        }
-        mult
+        self.times_count(p, |a| (a == Aura::ProudPrivateer).then_some(TimesRole::Setter))
     }
 
     fn balinda_mult(&self, p: usize) -> u8 {
-        let mut mult = 1;
-        for m in &self.players[p].board {
-            for (card, golden) in m.parts() {
-                if self.data.cards.get(card).aura == Some(Aura::Balinda) {
-                    mult = mult.max(if golden { 3 } else { 2 });
+        self.times_count(p, |a| (a == Aura::Balinda).then_some(TimesRole::Setter))
+    }
+
+    /// How many times a Blood Gem cast from hand on a friendly minion plays:
+    /// Balinda sets the count (golden: 3), each Hot-Air Surveyor adds one
+    /// (golden: two). Balinda plus one Surveyor: 3 casts.
+    fn gem_casts(&self, p: usize) -> u8 {
+        self.times_count(p, |a| match a {
+            Aura::Balinda => Some(TimesRole::Setter),
+            Aura::HotAirSurveyor => Some(TimesRole::Adder),
+            _ => None,
+        })
+    }
+
+    /// Spend one Thorned Trailblazer coverage, if any is left this turn.
+    fn take_trailblazer_cover(&mut self, p: usize) -> bool {
+        if self.players[p].trailblazer_covers > 0 {
+            self.players[p].trailblazer_covers -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// A Golden minion played from hand puts a Triple Reward spell in hand,
+    /// a 0-cost plain spell whose Discover tier is fixed now: one above the
+    /// player's tier, tier 6 at most. Lost on a full hand. A card set without
+    /// the reward spell (the v0.1 data) Discovers at once instead, its own
+    /// rule.
+    fn give_triple_reward(&mut self, p: usize) {
+        let Some(id) = self.data.cards.triple_reward else {
+            let tier = (self.players[p].tier + 1).min(MAX_TIER);
+            let _ = self.players[p]
+                .discover_queue
+                .try_push(DiscoverRequest::MinionTier(tier));
+            self.maybe_start_discover(p);
+            return;
+        };
+        if self.players[p].hand.is_full() {
+            return;
+        }
+        let tier = (self.players[p].tier + 1).min(MAX_TIER);
+        let mut m = self.players[p].make_card(&self.data.cards, id, false, 0);
+        m.improvements = tier as u16;
+        self.players[p].hand.push(m);
+    }
+
+    /// Get `n` Blood Gems in hand; the ones past a full hand are lost.
+    fn give_gems(&mut self, p: usize, n: u8) {
+        let Some(gem) = self.data.cards.blood_gem else { return };
+        for _ in 0..n {
+            self.give_generated(p, gem);
+        }
+    }
+
+    /// Play `times` Blood Gems on a friendly minion (the player's Gem value,
+    /// tracked as Blood Gem stats). Shop only: a fight plays its Gems through
+    /// the fight's own counters.
+    fn play_gems_on_board(&mut self, p: usize, pos: usize, times: u8) {
+        let (ga, gh) = (self.players[p].gem_attack, self.players[p].gem_health);
+        if let Some(m) = self.players[p].board.get_mut(pos) {
+            m.attack += ga * times as i32;
+            m.health += gh * times as i32;
+            m.gem_attack += ga * times as i32;
+            m.gem_health += gh * times as i32;
+        }
+    }
+
+    /// A Blood Gem was just cast from hand onto the friendly minion in
+    /// `target`: every Geomagus Roogug there plays its Blood Gems on a random
+    /// different friendly minion. Those Gems are not from hand, so two
+    /// Roogugs never loop.
+    fn roogug_on_gem(&mut self, p: usize, target: usize) {
+        let Some((count, golden)) = self.players[p].board.get(target).and_then(|m| {
+            m.parts().find_map(|(c, g)| self.data.cards.get(c).on_gem_played_on_self.map(|n| (n, g)))
+        }) else {
+            return;
+        };
+        let times = count * (if golden { 2 } else { 1 });
+        let n = self.players[p].board.len();
+        if n <= 1 {
+            return;
+        }
+        for _ in 0..times {
+            // A different friendly minion, uniformly at random.
+            let k = self.rng.below((n - 1) as u32) as usize;
+            let at = if k < target { k } else { k + 1 };
+            self.play_gems_on_board(p, at, 1);
+        }
+    }
+
+    /// A Choose One card was just played: every Turbo Hogrider plays its
+    /// Blood Gems on all friendly Quilboar.
+    fn after_choose_one_played(&mut self, p: usize) {
+        let cards = &self.data.cards;
+        let hogs: ArrayVec<(u8, bool), BOARD> = self.players[p]
+            .board
+            .iter()
+            .filter_map(|m| {
+                m.parts().find_map(|(c, g)| {
+                    cards.get(c).after_choose_one_play.map(|n| (n, g))
+                })
+            })
+            .collect();
+        if hogs.is_empty() {
+            return;
+        }
+        for (count, golden) in hogs {
+            let times = count * (if golden { 2 } else { 1 });
+            let (ga, gh) = (self.players[p].gem_attack, self.players[p].gem_health);
+            for m in &mut self.players[p].board {
+                if cards.get(m.card).tribes.has(Tribe::Quilboar) {
+                    m.attack += ga * times as i32;
+                    m.health += gh * times as i32;
+                    m.gem_attack += ga * times as i32;
+                    m.gem_health += gh * times as i32;
                 }
             }
         }
-        mult
+    }
+
+    /// The player picked the card in hand slot `s` to discard (Mangled
+    /// Bandit's Activate): it is gone, a pool copy goes back to the pool, and
+    /// the reward runs.
+    fn resolve_discard(&mut self, p: usize, s: usize) {
+        let Some(pd) = self.players[p].pending_discard.take() else { return };
+        if !self.valid_discard(p, s) {
+            return;
+        }
+        let m = self.players[p].hand.remove(s);
+        give_back(&mut self.pool, &self.data.cards, &m);
+        // The "when you discard" hook: event triggers on the board read it.
+        self.fire_event(p, EventKind::Discarded, 1);
+        let mut pos = pd.source as usize;
+        self.run_effect(p, &mut pos, pd.reward, pd.golden, 1);
+        self.maybe_start_discover(p);
     }
 
     /// Sell the board minion in `slot`: Gold, the copy back to the pool and
@@ -2325,55 +2576,93 @@ impl Game {
         }
     }
 
-    fn cast_spell(&mut self, p: usize, card_id: CardId) {
+    fn cast_spell(&mut self, p: usize, m: Minion) {
         // A Bounty cast again (Proud Privateer) is another spell cast for
-        // every trigger and every "spells cast" counter.
-        let c = self.data.cards.get(card_id);
+        // every trigger and every "spells cast" counter. Only a Tavern spell
+        // counts as a spell cast at all (DESIGN.md): a Blood Gem, a Gem Day
+        // and a Triple Reward do not.
+        let c = self.data.cards.get(m.card);
         let casts = if c.is_bounty && c.spell_effect.is_some() { self.bounty_mult(p) } else { 1 };
-        self.cast_spell_inner(p, card_id);
-        for _ in 0..casts {
-            self.fire_event(p, EventKind::SpellsCast, 1);
+        let tavern = c.tavern_spell;
+        self.cast_spell_inner(p, m);
+        if tavern {
+            for _ in 0..casts {
+                self.fire_event(p, EventKind::SpellsCast, 1);
+            }
         }
     }
 
-    fn cast_spell_inner(&mut self, p: usize, card_id: CardId) {
-        self.players[p].last_spell = Some(card_id);
-        let c = self.data.cards.get(card_id);
+    fn cast_spell_inner(&mut self, p: usize, m: Minion) {
+        self.players[p].last_spell = Some(m.card);
+        let c = self.data.cards.get(m.card);
+        let tavern = c.tavern_spell;
         if let Some(st) = c.spell_target {
             // A spell cast outside `Action::Play` (a taught spell) can have no
             // legal target; it fizzles instead of waiting on a choice that
             // could never be made.
-            if !(0..self.players[p].board.len()).any(|s| self.valid_spell_target(p, st, s)) {
+            let castable =
+                (0..self.players[p].board.len()).any(|s| self.valid_spell_target(p, st, s))
+                    || (st.can_target_shop()
+                        && (0..self.players[p].shop.len())
+                            .any(|s| self.spell_target_ok(st, &self.players[p].shop[s])));
+            if !castable {
                 return;
             }
-            let runs = self.balinda_mult(p);
+            // A Blood Gem plays once per cast: Balinda sets the count and
+            // each Hot-Air Surveyor adds one ("Set versus add").
+            let (runs, gem) = if c.blood_gem {
+                (self.gem_casts(p), true)
+            } else {
+                (self.balinda_mult(p), false)
+            };
             self.players[p].pending_target = Some(PendingTarget {
                 source: None,
                 kind: TargetKind::Spell(st),
                 runs,
+                tavern,
+                gem,
             });
         } else if let Some(options) = c.choose_one {
             if !options.iter().any(|&opt| self.can_choose_option(p, opt)) {
                 return;
             }
-            self.players[p].pending_choose_one = Some(PendingChooseOne {
-                source: None,
-                golden: false,
-                options,
-            });
+            // A Trailblazer's coverage runs both effects instead of asking.
+            if self.take_trailblazer_cover(p) {
+                self.resolve_choose_options(p, None, options, tavern, true);
+            } else {
+                self.players[p].pending_choose_one = Some(PendingChooseOne {
+                    source: None,
+                    golden: false,
+                    options,
+                    tavern,
+                });
+            }
         } else if let Some(se) = c.spell_effect {
+            if matches!(se, SpellEffect::TripleReward) {
+                // The tier was fixed when the reward was given.
+                let tier = (m.improvements as u8).clamp(1, MAX_TIER);
+                let _ = self.players[p]
+                    .discover_queue
+                    .try_push(DiscoverRequest::MinionTier(tier));
+                self.maybe_start_discover(p);
+                return;
+            }
             // Proud Privateer: a Bounty casts again, each cast a spell cast.
             let casts = if c.is_bounty { self.bounty_mult(p) } else { 1 };
             for _ in 0..casts {
-                self.trigger_on_cast_spell(p);
-                self.execute_spell_effect(p, se);
+                if tavern {
+                    self.trigger_on_cast_spell(p);
+                }
+                self.execute_spell_effect(p, se, tavern);
             }
             self.maybe_start_discover(p);
         }
     }
 
-    fn execute_spell_effect(&mut self, p: usize, se: SpellEffect) {
-        let (da, dh) = self.total_spell_bonus(p);
+    /// Run a spell effect (or a Choose One option). `tavern` says whether the
+    /// spell cast is a Tavern spell: only those get spell power.
+    fn execute_spell_effect(&mut self, p: usize, se: SpellEffect, tavern: bool) {
+        let (da, dh) = if tavern { self.total_spell_bonus(p) } else { (0, 0) };
         match se {
             SpellEffect::GainGold(g) => {
                 self.players[p].gold = self.players[p].gold.saturating_add(g);
@@ -2438,6 +2727,7 @@ impl Game {
                     DiscoverKind::DeathrattleMinion => DiscoverRequest::DeathrattleMinion(tier),
                     DiscoverKind::BattlecryMinion => DiscoverRequest::BattlecryMinion(tier),
                     DiscoverKind::Tier7Minion => DiscoverRequest::MinionTier(crate::CARD_MAX_TIER),
+                    DiscoverKind::ChooseOneMinion => DiscoverRequest::ChooseOneMinion,
                 };
                 let _ = self.players[p].discover_queue.try_push(req);
             }
@@ -2617,6 +2907,54 @@ impl Game {
                     self.give_generated(p, c);
                 }
             }
+            SpellEffect::GetGems(n) => self.give_gems(p, n),
+            SpellEffect::GemBonus { attack, health } => {
+                let pl = &mut self.players[p];
+                pl.gem_attack += attack;
+                pl.gem_health += health;
+            }
+            SpellEffect::GemsOnBoard(n) => {
+                // Gems played by an effect, not from hand: no Roogug chain.
+                let (ga, gh) = (self.players[p].gem_attack, self.players[p].gem_health);
+                for m in &mut self.players[p].board {
+                    m.attack += ga * n as i32;
+                    m.health += gh * n as i32;
+                    m.gem_attack += ga * n as i32;
+                    m.gem_health += gh * n as i32;
+                }
+            }
+            SpellEffect::Barrage { attack, health } => {
+                // The Gem bonus (what a Gem gives above its base +1/+1) and
+                // the Tavern spell bonus land once per cast, and each cast
+                // adds on top for the coming Refreshes.
+                let (ga, gh) = (self.players[p].gem_attack - 1, self.players[p].gem_health - 1);
+                let pl = &mut self.players[p];
+                pl.barrage.0 += attack + ga + da;
+                pl.barrage.1 += health + gh + dh;
+            }
+            SpellEffect::CastSpell { card, times } => {
+                for _ in 0..times {
+                    let m = self.data.cards.make(card, false);
+                    self.cast_spell(p, m);
+                    if self.players[p].pending_target.is_some()
+                        || self.players[p].pending_choose_one.is_some()
+                    {
+                        break;
+                    }
+                }
+            }
+            SpellEffect::RandomTribeMinion { tribe, count } => {
+                let tier = self.players[p].tier;
+                for _ in 0..count {
+                    if let Some(c) =
+                        self.data.cards.random_pool_minion(tribe, tier, &mut self.rng)
+                    {
+                        self.give_generated(p, c);
+                    }
+                }
+            }
+            // Handled where the spell is cast (the tier lives on the copy).
+            SpellEffect::TripleReward => {}
         }
     }
 
@@ -2638,19 +2976,132 @@ impl Game {
                     attack: attack * mul,
                     health: health * mul,
                 },
+                // A golden Choose One card doubles these numbers too
+                // (Fearless Foodie, Sly Infiltrator, Snare Trapper, Veteran
+                // Brigand, Crater Miner's Gem Days).
+                ChooseOption::SpellEffect(se) => ChooseOption::SpellEffect(match se {
+                    SpellEffect::GetGems(n) => SpellEffect::GetGems(n * mul as u8),
+                    SpellEffect::GemsOnBoard(n) => SpellEffect::GemsOnBoard(n * mul as u8),
+                    SpellEffect::GetCard { card, count } => {
+                        SpellEffect::GetCard { card, count: count * mul as u8 }
+                    }
+                    SpellEffect::GemBonus { attack, health } => {
+                        SpellEffect::GemBonus { attack: attack * mul, health: health * mul }
+                    }
+                    SpellEffect::FreeRolls(n) => SpellEffect::FreeRolls(n * mul as u8),
+                    SpellEffect::MaxGold(n) => SpellEffect::MaxGold(n * mul as u8),
+                    SpellEffect::CastSpell { card, times } => {
+                        SpellEffect::CastSpell { card, times: times * mul as u8 }
+                    }
+                    SpellEffect::RandomTribeMinion { tribe, count } => {
+                        SpellEffect::RandomTribeMinion { tribe, count: count * mul as u8 }
+                    }
+                    other => other,
+                }),
                 other => other,
             });
-            self.players[p].pending_choose_one = Some(PendingChooseOne {
-                source: Some(pos as u8),
-                golden: m.golden,
-                options: scaled,
-            });
+            // Both effects combined: the card says so (Fandral's Fortune) or
+            // a Trailblazer covers this play.
+            let covered = !m.both_effects && self.take_trailblazer_cover(p);
+            if m.both_effects || covered {
+                self.resolve_choose_options(p, Some(pos as u8), scaled, true, true);
+            } else {
+                self.players[p].pending_choose_one = Some(PendingChooseOne {
+                    source: Some(pos as u8),
+                    golden: m.golden,
+                    options: scaled,
+                    tavern: true,
+                });
+            }
             return;
         }
         let Some(bc) = card.battlecry else { return };
         let runs = self.brann_mult(p);
         self.run_effect(p, &mut pos, bc, m.golden, runs);
         self.fire_after_battlecry(p, runs);
+    }
+
+    /// Run one option of a Choose One (the shared body of `resolve_choose`
+    /// and the both-effects paths).
+    fn apply_choose_option(&mut self, p: usize, source: Option<u8>, opt: ChooseOption, tavern: bool) {
+        match opt {
+            ChooseOption::MinionTarget { tribe, attack, health, keyword } => {
+                let pt = PendingTarget {
+                    source,
+                    kind: TargetKind::MinionBuff {
+                        tribe,
+                        attack,
+                        health,
+                        keyword,
+                        random_keyword: false,
+                    },
+                    runs: 1,
+                    tavern: true,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            ChooseOption::SpellBonus { attack, health } => {
+                self.players[p].spell_bonus.0 += attack;
+                self.players[p].spell_bonus.1 += health;
+            }
+            ChooseOption::SpellTarget(st) => {
+                let runs = self.balinda_mult(p);
+                self.players[p].pending_target = Some(PendingTarget {
+                    source: None,
+                    kind: TargetKind::Spell(st),
+                    runs,
+                    tavern,
+                    gem: false,
+                });
+            }
+            ChooseOption::SpellEffect(se) => {
+                if tavern {
+                    self.trigger_on_cast_spell(p);
+                }
+                self.execute_spell_effect(p, se, tavern);
+            }
+        }
+    }
+
+    /// A Choose One with both effects combined: the first option runs now,
+    /// the second right after it, or through the queue when the first leaves
+    /// a target prompt open. `source.is_some()` means the Choose One is a
+    /// minion's Battlecry, so "after you trigger a Battlecry" fires once.
+    fn resolve_choose_options(
+        &mut self,
+        p: usize,
+        source: Option<u8>,
+        options: [ChooseOption; 2],
+        tavern: bool,
+        both: bool,
+    ) {
+        if !both {
+            self.players[p].pending_choose_one = Some(PendingChooseOne {
+                source,
+                golden: false,
+                options,
+                tavern,
+            });
+            return;
+        }
+        self.apply_choose_option(p, source, options[0], tavern);
+        let blocked = self.players[p].pending_target.is_some()
+            || self.players[p].pending_shop_target.is_some()
+            || self.players[p].pending_choose_one.is_some()
+            || self.players[p].pending_discard.is_some()
+            || !self.players[p].discover.is_empty();
+        if blocked {
+            let _ = self.players[p]
+                .choose_queue
+                .try_push(QueuedOption { source, option: options[1], tavern });
+        } else {
+            self.apply_choose_option(p, source, options[1], tavern);
+        }
+        if source.is_some() {
+            self.fire_after_battlecry(p, 1);
+        }
+        self.maybe_start_discover(p);
     }
 
     /// "After you trigger a Battlecry" effects (Kalecgos). One trigger per
@@ -2708,6 +3159,8 @@ impl Game {
                         random_keyword,
                     },
                     runs,
+                        tavern: true,
+                        gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -2728,6 +3181,8 @@ impl Game {
                             source: Some(*pos as u8),
                             kind: TargetKind::Consume { tribe, pick, keywords, count, stat_mul },
                             runs: 1,
+                                tavern: true,
+                                gem: false,
                         };
                         self.offer_target(p, pt);
                     }
@@ -2820,6 +3275,8 @@ impl Game {
                         health: health * mul,
                     },
                     runs,
+                        tavern: true,
+                        gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -2831,6 +3288,8 @@ impl Game {
                         health: health * mul,
                     },
                     runs,
+                        tavern: true,
+                        gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -3001,7 +3460,8 @@ impl Game {
             // spell" card sees it.
             Effect::CastSpell { card, times } => {
                 for _ in 0..times as u32 * mul as u32 * runs as u32 {
-                    self.cast_spell(p, card);
+                    let m = self.data.cards.make(card, false);
+                    self.cast_spell(p, m);
                     if self.players[p].pending_target.is_some()
                         || self.players[p].pending_choose_one.is_some()
                     {
@@ -3014,6 +3474,8 @@ impl Game {
                     source: Some(*pos as u8),
                     kind: TargetKind::TriggerRally,
                     runs: (mul as u8).saturating_mul(runs),
+                    tavern: true,
+                    gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -3022,6 +3484,8 @@ impl Game {
                     source: Some(*pos as u8),
                     kind: TargetKind::TriggerBattlecry,
                     runs: (mul as u8).saturating_mul(runs),
+                    tavern: true,
+                    gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -3089,7 +3553,8 @@ impl Game {
                     return;
                 };
                 for _ in 0..mul as u8 * runs {
-                    self.cast_spell(p, sp);
+                    let m = self.data.cards.make(sp, false);
+                    self.cast_spell(p, m);
                     if self.players[p].pending_target.is_some()
                         || self.players[p].pending_choose_one.is_some()
                     {
@@ -3166,6 +3631,8 @@ impl Game {
                         random_keyword: false,
                     },
                     runs,
+                        tavern: true,
+                        gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -3174,6 +3641,8 @@ impl Game {
                     source: Some(*pos as u8),
                     kind: TargetKind::MakeGolden { tribe, max_tier },
                     runs: count.saturating_mul(mul as u8).saturating_mul(runs),
+                        tavern: true,
+                        gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -3257,6 +3726,8 @@ impl Game {
                         discover: count.saturating_mul(mul as u8).saturating_mul(runs),
                     },
                     runs: 1,
+                        tavern: true,
+                        gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -3268,6 +3739,8 @@ impl Game {
                         copies: copies.saturating_mul(mul as u8).saturating_mul(runs),
                     },
                     runs: 1,
+                        tavern: true,
+                        gem: false,
                 };
                 self.offer_target(p, pt);
             }
@@ -3280,8 +3753,72 @@ impl Game {
                         health: health * mul,
                     },
                     runs: 1,
+                    tavern: true,
+                    gem: false,
                 };
                 self.offer_target(p, pt);
+            }
+            Effect::GetGems(n) => {
+                let total = n.saturating_mul(mul as u8).saturating_mul(runs);
+                self.give_gems(p, total);
+            }
+            Effect::GetGemsCastOverflow(n) => {
+                let total = n.saturating_mul(mul as u8).saturating_mul(runs);
+                let Some(gem) = self.data.cards.blood_gem else { return };
+                for _ in 0..total {
+                    if self.players[p].hand.is_full() {
+                        // Cast on the left-most friendly minion instead.
+                        self.play_gems_on_board(p, 0, 1);
+                    } else {
+                        let m = self.players[p].make_card(&self.data.cards, gem, false, 0);
+                        self.players[p].hand.push(m);
+                    }
+                }
+            }
+            // A Rally triggered in the shop (Sky-hatch Runaway): the Gems are
+            // permanent in the shop anyway.
+            Effect::GemSelf { count, permanent: _ } => {
+                let times = count.saturating_mul(mul as u8).saturating_mul(runs);
+                self.play_gems_on_board(p, *pos, times);
+            }
+            Effect::GemOthers(count) => {
+                let times = count.saturating_mul(mul as u8).saturating_mul(runs);
+                let board_len = self.players[p].board.len();
+                for i in 0..board_len {
+                    if i != *pos {
+                        self.play_gems_on_board(p, i, times);
+                    }
+                }
+            }
+            Effect::GemBonus { attack, health } => {
+                let n = mul * runs as i32;
+                let pl = &mut self.players[p];
+                pl.gem_attack += attack * n;
+                pl.gem_health += health * n;
+            }
+            Effect::GetRandomChooseOne(n) => {
+                let total = n as i32 * mul * runs as i32;
+                let tier = self.players[p].tier;
+                let rig = self.players[p].rig;
+                for _ in 0..total {
+                    if let Some(c) =
+                        self.data.cards.random_choose_one_minion(tier, rig, &mut self.rng)
+                    {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
+            // The shop copy of Jailbird Juggernaut's Rally (Sky-hatch
+            // Runaway): summon the stat copy; there is no target to attack.
+            Effect::SummonStatCopyAttacker { card } => {
+                let Some(host) = self.players[p].board.get(*pos) else { return };
+                let mut m = self.players[p].make_card(&self.data.cards, card, false, 0);
+                m.attack = host.attack * mul;
+                m.health = host.health * mul;
+                let at = *pos + 1;
+                if !self.players[p].board.is_full() && at <= self.players[p].board.len() {
+                    self.players[p].board.insert(at, m);
+                }
             }
             // These only happen in fights.
             Effect::GiveRebornRandom { .. }
@@ -3304,7 +3841,8 @@ impl Game {
             | Effect::GainTargetAttack
             | Effect::StripTargetKeywords { .. }
             | Effect::DestroyKiller
-            | Effect::ShieldDragons { .. } => {}
+            | Effect::ShieldDragons { .. }
+            | Effect::GemAttacker(_) => {}
         }
     }
 
@@ -3570,23 +4108,36 @@ impl Game {
                     {
                         break;
                     }
-                    let (da, dh) = self.total_spell_bonus(p);
+                    let (da, dh) = if pt.tavern { self.total_spell_bonus(p) } else { (0, 0) };
                     let mut generated: Option<CardId> = None;
                     let mut stop_after = false;
                     match st {
                         SpellTarget::Buff { attack, health, keyword, times, if_win_next_turn_buff } => {
-                            let m = &mut self.players[p].shop[target];
-                            for _ in 0..times {
-                                // A keyword-only spell (Sacred Gift) gets no spell bonus.
-                                let (ba, bh) = if attack == 0 && health == 0 { (0, 0) } else { (attack + da, health + dh) };
-                                buff(m, ba, bh);
-                            }
-                            if keyword != 0 {
-                                m.keywords.set(keyword);
-                            }
-                            if let Some((wb_a, wb_h)) = if_win_next_turn_buff {
-                                m.winners_bread = m.winners_bread.saturating_add(1);
-                                self.players[p].winners_bread_buff = (wb_a, wb_h);
+                            if pt.gem {
+                                // A Blood Gem on a Tavern minion: one cast,
+                                // the player's Gem value, tracked as Blood
+                                // Gem stats.
+                                let (ga, gh) =
+                                    (self.players[p].gem_attack, self.players[p].gem_health);
+                                let m = &mut self.players[p].shop[target];
+                                m.attack += ga;
+                                m.health += gh;
+                                m.gem_attack += ga;
+                                m.gem_health += gh;
+                            } else {
+                                let m = &mut self.players[p].shop[target];
+                                for _ in 0..times {
+                                    // A keyword-only spell (Sacred Gift) gets no spell bonus.
+                                    let (ba, bh) = if attack == 0 && health == 0 { (0, 0) } else { (attack + da, health + dh) };
+                                    buff(m, ba, bh);
+                                }
+                                if keyword != 0 {
+                                    m.keywords.set(keyword);
+                                }
+                                if let Some((wb_a, wb_h)) = if_win_next_turn_buff {
+                                    m.winners_bread = m.winners_bread.saturating_add(1);
+                                    self.players[p].winners_bread_buff = (wb_a, wb_h);
+                                }
                             }
                         }
                         SpellTarget::BuffPerBonusKeyword { attack, health } => {
@@ -3663,6 +4214,43 @@ impl Game {
                             }
                             stop_after = true;
                         }
+                        SpellTarget::Confiscation { gems } => {
+                            // 3 Gems on the Tavern minion, then its
+                            // neighbours' Blood Gem stats move onto it.
+                            let (ga, gh) =
+                                (self.players[p].gem_attack, self.players[p].gem_health);
+                            {
+                                let m = &mut self.players[p].shop[target];
+                                m.attack += ga * gems as i32;
+                                m.health += gh * gems as i32;
+                                m.gem_attack += ga * gems as i32;
+                                m.gem_health += gh * gems as i32;
+                            }
+                            for n in [target.checked_sub(1), Some(target + 1)]
+                                .into_iter()
+                                .flatten()
+                            {
+                                let (sa, sh) = match self.players[p].shop.get(n) {
+                                    Some(m) if !self.data.cards.get(m.card).is_spell() => {
+                                        (m.gem_attack, m.gem_health)
+                                    }
+                                    _ => continue,
+                                };
+                                if sa == 0 && sh == 0 {
+                                    continue;
+                                }
+                                let nm = &mut self.players[p].shop[n];
+                                nm.attack -= sa;
+                                nm.health -= sh;
+                                nm.gem_attack = 0;
+                                nm.gem_health = 0;
+                                let m = &mut self.players[p].shop[target];
+                                m.attack += sa;
+                                m.health += sh;
+                                m.gem_attack += sa;
+                                m.gem_health += sh;
+                            }
+                        }
                         // The rest target a friendly board minion only.
                         SpellTarget::Consume { .. }
                         | SpellTarget::MakeGolden { .. }
@@ -3678,7 +4266,9 @@ impl Game {
                             );
                         }
                     }
-                    self.trigger_on_cast_spell(p);
+                    if pt.tavern {
+                        self.trigger_on_cast_spell(p);
+                    }
                     if !stop_after
                         && target < self.players[p].shop.len()
                         && self.data.cards.get(self.players[p].shop[target].card).tribes.has(Tribe::Mech)
@@ -3911,7 +4501,9 @@ impl Game {
             && pl.discover_queue.is_empty()
             && pl.pending_target.is_none()
             && pl.pending_shop_target.is_none()
-            && pl.pending_choose_one.is_none();
+            && pl.pending_choose_one.is_none()
+            && pl.pending_discard.is_none()
+            && pl.choose_queue.is_empty();
         if idle {
             return;
         }
@@ -3928,6 +4520,8 @@ impl Game {
         pl.pending_choose_one = None;
         pl.pending_target = None;
         pl.pending_shop_target = None;
+        pl.pending_discard = None;
+        pl.choose_queue.clear();
         pl.discover_damage_from = None;
         pl.discover_locked = false;
         pl.discover_queue.clear();
@@ -4084,14 +4678,15 @@ impl Game {
                     if target_pos >= self.players[p].board.len() {
                         break;
                     }
-                    // Every extra cast (Balinda) is another spell cast.
-                    if k > 0 {
+                    // Every extra cast (Balinda) is another spell cast. Only a
+                    // Tavern spell counts (a Blood Gem does not).
+                    if k > 0 && pt.tavern {
                         self.fire_event(p, EventKind::SpellsCast, 1);
                         if target_pos >= self.players[p].board.len() {
                             break;
                         }
                     }
-                    let (da, dh) = self.total_spell_bonus(p);
+                    let (da, dh) = if pt.tavern { self.total_spell_bonus(p) } else { (0, 0) };
                     let mut generated: Option<CardId> = None;
                     // A spell that removes or transforms its target can't
                     // usefully be cast again on the same slot (Balinda).
@@ -4105,18 +4700,30 @@ impl Game {
                             times,
                             if_win_next_turn_buff,
                         } => {
-                            let m = &mut self.players[p].board[target_pos];
-                            for _ in 0..times {
-                                // A keyword-only spell (Sacred Gift) gets no spell bonus.
-                                let (ba, bh) = if attack == 0 && health == 0 { (0, 0) } else { (attack + da, health + dh) };
-                                buff(m, ba, bh);
-                            }
-                            if keyword != 0 {
-                                m.keywords.set(keyword);
-                            }
-                            if let Some((wb_a, wb_h)) = if_win_next_turn_buff {
-                                m.winners_bread = m.winners_bread.saturating_add(1);
-                                self.players[p].winners_bread_buff = (wb_a, wb_h);
+                            if pt.gem {
+                                // A Blood Gem: the player's Gem value, no
+                                // spell power, tracked as Blood Gem stats.
+                                let (ga, gh) =
+                                    (self.players[p].gem_attack, self.players[p].gem_health);
+                                let m = &mut self.players[p].board[target_pos];
+                                m.attack += ga;
+                                m.health += gh;
+                                m.gem_attack += ga;
+                                m.gem_health += gh;
+                            } else {
+                                let m = &mut self.players[p].board[target_pos];
+                                for _ in 0..times {
+                                    // A keyword-only spell (Sacred Gift) gets no spell bonus.
+                                    let (ba, bh) = if attack == 0 && health == 0 { (0, 0) } else { (attack + da, health + dh) };
+                                    buff(m, ba, bh);
+                                }
+                                if keyword != 0 {
+                                    m.keywords.set(keyword);
+                                }
+                                if let Some((wb_a, wb_h)) = if_win_next_turn_buff {
+                                    m.winners_bread = m.winners_bread.saturating_add(1);
+                                    self.players[p].winners_bread_buff = (wb_a, wb_h);
+                                }
                             }
                         }
                         SpellTarget::BuffPerBonusKeyword { attack, health } => {
@@ -4247,10 +4854,52 @@ impl Game {
                             stop_after = true;
                             target_removed = true;
                         }
+                        SpellTarget::Confiscation { gems } => {
+                            // 3 Gems on the target, then the neighbours'
+                            // Blood Gem stats move onto it: they lose them,
+                            // it gains them.
+                            let (ga, gh) =
+                                (self.players[p].gem_attack, self.players[p].gem_health);
+                            {
+                                let m = &mut self.players[p].board[target_pos];
+                                m.attack += ga * gems as i32;
+                                m.health += gh * gems as i32;
+                                m.gem_attack += ga * gems as i32;
+                                m.gem_health += gh * gems as i32;
+                            }
+                            for n in [target_pos.checked_sub(1), Some(target_pos + 1)]
+                                .into_iter()
+                                .flatten()
+                            {
+                                let (sa, sh) = match self.players[p].board.get(n) {
+                                    Some(m) => (m.gem_attack, m.gem_health),
+                                    None => continue,
+                                };
+                                if sa == 0 && sh == 0 {
+                                    continue;
+                                }
+                                let nm = &mut self.players[p].board[n];
+                                nm.attack -= sa;
+                                nm.health -= sh;
+                                nm.gem_attack = 0;
+                                nm.gem_health = 0;
+                                let m = &mut self.players[p].board[target_pos];
+                                m.attack += sa;
+                                m.health += sh;
+                                m.gem_attack += sa;
+                                m.gem_health += sh;
+                            }
+                        }
                     }
-                    self.trigger_on_cast_spell(p);
+                    if pt.tavern {
+                        self.trigger_on_cast_spell(p);
+                    }
                     if !target_removed && target_pos < self.players[p].board.len() {
                         self.trigger_on_cast_spell_on_target(p, target_pos);
+                        if pt.gem {
+                            // A Gem was played from hand on the target.
+                            self.roogug_on_gem(p, target_pos);
+                        }
                         let is_mech = self
                             .data
                             .cards
@@ -4279,12 +4928,27 @@ impl Game {
     }
 
     fn maybe_start_discover(&mut self, p: usize) {
-        while self.players[p].pending_target.is_none()
-            && self.players[p].pending_shop_target.is_none()
-            && self.players[p].pending_choose_one.is_none()
-            && self.players[p].discover.is_empty()
-            && !self.players[p].discover_queue.is_empty()
-        {
+        loop {
+            {
+                let pl = &self.players[p];
+                if pl.pending_target.is_some()
+                    || pl.pending_shop_target.is_some()
+                    || pl.pending_choose_one.is_some()
+                    || pl.pending_discard.is_some()
+                    || !pl.discover.is_empty()
+                {
+                    return;
+                }
+            }
+            // A both-effects Choose One option waiting for the one before it.
+            if let Some(q) = self.players[p].choose_queue.first().copied() {
+                self.players[p].choose_queue.remove(0);
+                self.apply_choose_option(p, q.source, q.option, q.tavern);
+                continue;
+            }
+            if self.players[p].discover_queue.is_empty() {
+                return;
+            }
             let req = self.players[p].discover_queue.remove(0);
             let damage_from = match req {
                 DiscoverRequest::DemonMinion { source, .. } => Some(source),
@@ -4292,11 +4956,13 @@ impl Game {
             };
             let locked = matches!(req, DiscoverRequest::SearchMinionTier(_));
             let doomed = matches!(req, DiscoverRequest::DoomedTribeMinion(_));
+            let both = matches!(req, DiscoverRequest::ChooseOneMinion);
             let Game { data, rng, players, pool, .. } = self;
             let pl = &mut players[p];
             pl.discover_damage_from = damage_from;
             pl.discover_locked = locked;
             pl.discover_doomed = doomed;
+            pl.discover_both = both;
             while !pl.discover.is_full() {
                 let next = match req {
                     DiscoverRequest::MinionTier(t)
@@ -4329,6 +4995,16 @@ impl Game {
                         pl.rig,
                         |c| c.battlecry.is_some(),
                     ),
+                    DiscoverRequest::ChooseOneMinion => draw_rigged(
+                        pool,
+                        &data.cards,
+                        rng,
+                        1,
+                        pl.tier,
+                        &pl.discover,
+                        pl.rig,
+                        |c| c.choose_one.is_some(),
+                    ),
                     DiscoverRequest::TribeMinion(t) | DiscoverRequest::DoomedTribeMinion(t) => {
                         // a "Discover a Murloc" only offers up to the tier
                         draw_filtered(pool, &data.cards, rng, 1, pl.tier, &pl.discover, |c| {
@@ -4355,38 +5031,7 @@ impl Game {
 
     fn resolve_choose(&mut self, p: usize, k: usize) {
         if let Some(pco) = self.players[p].pending_choose_one.take() {
-            match pco.options[k] {
-                ChooseOption::MinionTarget { tribe, attack, health, keyword } => {
-                    let pt = PendingTarget {
-                        source: pco.source,
-                        kind: TargetKind::MinionBuff {
-                            tribe,
-                            attack,
-                            health,
-                            keyword,
-                            random_keyword: false,
-                        },
-                        runs: 1,
-                    };
-                    self.offer_target(p, pt);
-                }
-                ChooseOption::SpellBonus { attack, health } => {
-                    self.players[p].spell_bonus.0 += attack;
-                    self.players[p].spell_bonus.1 += health;
-                }
-                ChooseOption::SpellTarget(st) => {
-                    let runs = self.balinda_mult(p);
-                    self.players[p].pending_target = Some(PendingTarget {
-                        source: None,
-                        kind: TargetKind::Spell(st),
-                        runs,
-                    });
-                }
-                ChooseOption::SpellEffect(se) => {
-                    self.trigger_on_cast_spell(p);
-                    self.execute_spell_effect(p, se);
-                }
-            }
+            self.apply_choose_option(p, pco.source, pco.options[k], pco.tavern);
             // A minion's Choose One is its Battlecry.
             if pco.source.is_some() {
                 self.fire_after_battlecry(p, 1);
@@ -4399,6 +5044,7 @@ impl Game {
         let locked = pl.discover_locked;
         pl.discover_locked = false;
         let doomed = std::mem::take(&mut pl.discover_doomed);
+        let both = std::mem::take(&mut pl.discover_both);
         let c = pl.discover[k];
         for (i, &o) in pl.discover.iter().enumerate() {
             if i != k && !data.cards.get(o).is_spell() {
@@ -4422,6 +5068,9 @@ impl Game {
             }
             if doomed && !is_spell {
                 m.doomed = true;
+            }
+            if both && !is_spell {
+                m.both_effects = true;
             }
             pl.hand.push(m);
             if !is_spell {
@@ -4670,6 +5319,9 @@ impl Game {
                 gold.magnetizations = gold.magnetizations.saturating_add(m.magnetizations);
                 gold.volumizers =
                     gold.volumizers.saturating_add(m.volumizers.saturating_sub(base.volumizers));
+                // Blood Gem stats are buffs like any other: they add up.
+                gold.gem_attack = gold.gem_attack.saturating_add(m.gem_attack);
+                gold.gem_health = gold.gem_health.saturating_add(m.gem_health);
                 for &a in m.attached_slice() {
                     gold.push_attached(a);
                 }
@@ -4767,15 +5419,33 @@ impl Game {
     /// takes the first option, then end-of-turn effects run.
     /// A played Tomb Turning Undead dies once its Battlecry, and whatever it
     /// asked the player to choose or Discover, is done.
-    fn resolve_doomed(&mut self, p: usize) {
-        let pl = &self.players[p];
-        if !pl.alive
-            || pl.pending_target.is_some()
+    fn choice_open(pl: &Player) -> bool {
+        pl.pending_target.is_some()
             || pl.pending_shop_target.is_some()
             || pl.pending_choose_one.is_some()
+            || pl.pending_discard.is_some()
             || !pl.discover.is_empty()
             || !pl.discover_queue.is_empty()
-        {
+            || !pl.choose_queue.is_empty()
+    }
+
+    /// Turbo Hogrider fires for each Choose One card played once nothing
+    /// that card started is still waiting for a pick, so the minion that was
+    /// played (Intrepid Botanist...) is on the board with its choice done.
+    fn resolve_hogrider(&mut self, p: usize) {
+        let pl = &self.players[p];
+        if pl.hogrider_pending == 0 || !pl.alive || Self::choice_open(pl) {
+            return;
+        }
+        let n = std::mem::take(&mut self.players[p].hogrider_pending);
+        for _ in 0..n {
+            self.after_choose_one_played(p);
+        }
+    }
+
+    fn resolve_doomed(&mut self, p: usize) {
+        let pl = &self.players[p];
+        if !pl.alive || Self::choice_open(pl) {
             return;
         }
         let victims: ArrayVec<usize, BOARD> =
@@ -4805,16 +5475,26 @@ impl Game {
                 }
             } else if pl.pending_shop_target.is_some() {
                 self.resolve_shop_target(p, 0);
+            } else if pl.pending_discard.is_some() {
+                // Throw away the first card a discard may take.
+                match (0..pl.hand.len()).find(|&s| self.valid_discard(p, s)) {
+                    Some(s) => self.resolve_discard(p, s),
+                    None => self.players[p].pending_discard = None,
+                }
             } else if let Some(pco) = pl.pending_choose_one {
                 let k = (0..2).find(|&k| self.can_choose_option(p, pco.options[k])).unwrap();
                 self.resolve_choose(p, k);
             } else if !pl.discover.is_empty() {
                 self.resolve_choose(p, 0);
+            } else if !pl.choose_queue.is_empty() {
+                // Both-effects Choose One options still waiting.
+                self.maybe_start_discover(p);
             } else {
                 break;
             }
         }
         self.resolve_doomed(p);
+        self.resolve_hogrider(p);
         // A Tomb Turning Undead that wasn't played this turn is a normal one.
         for m in &mut self.players[p].hand {
             m.doomed = false;
@@ -4937,6 +5617,11 @@ impl Game {
             pl.mycologist_uses = 0;
             pl.gold_spent_turn = 0;
             pl.elementals_played_turn = 0;
+            // The Trailblazers on the board now cover this turn's first
+            // Choose One cards (one each, two for a golden one).
+            pl.trailblazer_covers = pl.board.iter().fold(0u8, |acc, m| {
+                acc.saturating_add(data.cards.get(m.card).choose_one_cover * m.mul() as u8)
+            });
             if pl.frozen {
                 pl.frozen = false;
             } else {
@@ -5028,6 +5713,15 @@ impl Game {
                     self.players[p].hand[slot].health += dh;
                 }
             }
+            // Razorfen Vineweaver's permanent Blood Gems: the stats come as
+            // permanent_stats, and the same gain is Blood Gem stats.
+            for (slot, &(da, dh)) in so.permanent_gems.iter().enumerate() {
+                if (da != 0 || dh != 0) && slot < self.players[p].board.len() {
+                    let m = &mut self.players[p].board[slot];
+                    m.gem_attack += da;
+                    m.gem_health += dh;
+                }
+            }
         }
         let (sa, sh) = so.spell_bonus_gain;
         if sa != 0 || sh != 0 {
@@ -5048,6 +5742,12 @@ impl Game {
         self.add_deathrattles_triggered(p, so.deathrattles_triggered as u32, after_fight);
         self.add_undead_bonus(p, so.undead_gain.0, so.undead_gain.1, after_fight);
         self.add_knight_deaths(p, so.knight_deaths, after_fight);
+        // A Sanguine Refiner Rally in a fight raises the Gem value for good.
+        if so.gem_gain != (0, 0) {
+            let pl = &mut self.players[p];
+            pl.gem_attack += so.gem_gain.0;
+            pl.gem_health += so.gem_gain.1;
+        }
         // Sacrificial Wrathguard's Deathrattle: a Tavern buff for the game.
         if so.tavern_buff_gain != (0, 0) {
             let b = TavernBuff {
@@ -5286,6 +5986,8 @@ impl Game {
             pl.pending_choose_one = None;
             pl.pending_target = None;
             pl.pending_shop_target = None;
+            pl.pending_discard = None;
+            pl.choose_queue.clear();
             pl.tavern_buffs.clear();
             pl.discover_queue.clear();
         }
@@ -5353,6 +6055,11 @@ impl Game {
                 && (pst.source as usize >= pl.board.len() || pl.shop.is_empty())
             {
                 return Err(format!("player {i}: pending shop target has nothing to act on"));
+            }
+            if let Some(pd) = pl.pending_discard
+                && pd.source as usize >= pl.board.len()
+            {
+                return Err(format!("player {i}: pending discard source off the board"));
             }
             if let Some(pco) = pl.pending_choose_one
                 && let Some(src) = pco.source

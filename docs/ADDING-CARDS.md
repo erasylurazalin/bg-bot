@@ -78,6 +78,11 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Destroy a friendly minion in the shop | `Effect::DestroyChosenDiscover`, `DestroyChosenGetCopy`, `GiveRebornDestroy`, `SpellTarget::Butchering` | `Game::destroy_in_shop` -> `fight::shop_destroy` | Maw Caster |
 | Player bonus "wherever they are" | `undead_bonus = [a, h]` effect, `on_cast_spell = { undead_bonus }`, `buff_per_kind_death` | `Game::add_undead_bonus`, `add_knight_deaths`, `Player::make_card`, `Side::summon` | Nerubian Deathswarmer |
 | Activate (N) | `activate = { cost, effect }` | `Action::Activate` in `apply`; legality in `is_legal` (needs_* checks on `Effect`) | Suspicious Prisonguard |
+| Activate with a discard | `activate = { cost, discard = true, effect }` | opens `pending_discard`, answered by `Action::Discard`; needs a discardable card | Mangled Bandit |
+| A Blood Gem cast from hand lands on this | `on_gem_played_on_self = 1` | `Game::roogug_on_gem` (from-hand casts only, never a chain) | Geomagus Roogug |
+| A Choose One card each turn gets both effects | `choose_one_cover = 1` | `Player.trailblazer_covers` (start of turn, plus a Trailblazer played), `resolve_choose_options` | Thorned Trailblazer |
+| After a Choose One card is played | `after_choose_one_play = 2` | `Player.hogrider_pending`, fired by `Game::resolve_hogrider` once no choice is open (from `step` and `finish_shop`) | Turbo Hogrider |
+| Rally: summon a stat copy that attacks first | `rally = { summon_stat_copy = "Golem" }` | `attack_triggers` + `attack_swings_at` (fight); shop copy summons only | Jailbird Juggernaut |
 | Golden played from hand | `buff_per_golden_played`, `after_discover` scaling | `Action::Play` -> `add_golden_played`, `Player.golden_played` | Maritime Extortionist |
 | Tavern buff (this game / this turn) | `Effect::TavernBuff`, `tavern_buff` | `Player::add_tavern_buff`, `apply_tavern_buffs`, `end_turn_tavern_buffs` | Champion of Sargeras |
 | Consume Tavern minion | `consume = "chosen"/"random"/"highest_health"` | `start_consume`, `consume`, `PendingShopTarget` | Mind Muck |
@@ -135,19 +140,20 @@ exactly one legal target and drops the effect when there is none.
 ## 3. New-tribe checklist
 
 1. `cards.rs`: add the variant to `Tribe`, add it to `Tribe::EVERY` (rules use this) and
-   `tribe()` parse, and bump the length in `EVERY: [Tribe; N]`; widen `Tribes::ALL`
-   ("all types") by one bit (`u8` mask: at most 8 tribes, and Undead is the eighth, so
-   the mask is full: a ninth tribe needs `Tribes(u16)` and `Tribe::bit`). `Tribe::ALL` stays the five-tribe list the observation uses until the
-   observation run: do not touch it before then.
+   `tribe()` parse, and bump the length in `EVERY: [Tribe; N]`. The mask `Tribes`
+   is a `u16` (nine tribes fit with room for more); `Tribes::ALL` ("all types")
+   gets the new bit. `Tribe::ALL` stays the five-tribe list the observation
+   uses until the observation run: do not touch it before then.
 2. Tribe loops that must use `EVERY`: `Tribes::random_type`, `pick_one_per_type`,
    `bots::preferred_tribe`, sandbox `screen.rs` (`tribe_name` match, `parse_tribe`,
    `card_tribes`), Planar Telescope and Friendly Bounty counts in `game.rs`.
    grep `Tribe::ALL` and `Tribe::EVERY` to check nothing else needs it.
 3. Tests that use an unknown tribe as the bad value: `tests/beast_mech.rs`
    (`attacker_tribe = "..."`) and `tests/d1a.rs` (`a_card_needs_exactly_one_of_tribe_and_tribes`)
-   use a tribe that does not exist ("quilboar" now; "pirate" and "elemental" are real).
+   use a tribe that does not exist: "naga" (it left the game and will never be
+   built, so these tests never need changing again).
    Also raise `MAX_TAVERN_BUFFS` in game.rs (one Tavern buff per tribe filter and
-   duration, so 2 x (tribes + 1), 18 with eight tribes); a push past it panics.
+   duration, so 2 x (tribes + 1), 20 with nine tribes); a push past it panics.
 4. `tests/tier7.rs` Last One Standing test counts picks per type: an all-type minion is
    every tribe, so a new tribe changes its expected count. Re-check it. An all-type
    minion is also a member of the new tribe for every "your <tribe>" rule (Amalgam,
@@ -169,10 +175,9 @@ exactly one legal target and drops the effect when there is none.
    (Volumizers). A new group needs the same handling in `draw_filtered`.
 9. `record.rs`: a new `Minion` field needs an `Option` in `FileMinion` plus the
    to/from conversions (done for `no_reward`).
-9a. Quilboar run, known data: Felboar is Quilboar and Demon in the game (store
-   `tribes = ["demon", "quilboar"]` once Quilboar exists; it is one tribe until then).
-   Firescale Hoarder and Ominous Seer are also Naga in the game; irrelevant while
-   Naga is out, edit them in place if Naga is ever built.
+9a. Quilboar run, done: Felboar is `tribes = ["demon", "quilboar"]`.
+    Firescale Hoarder and Ominous Seer are also Naga in the game; irrelevant while
+    Naga is out, edit them in place if Naga is ever built.
 10. Sandbox: `--tribe X` rigs the Tavern and every "any minion" draw
     (`Card::rig_ok`); new draw helpers must take `rig` (`draw_rigged`, `pick_rigged`,
     `draw_golden`). Update the usage string in `bgsandbox/src/main.rs`.
@@ -210,9 +215,12 @@ One file per tribe in `crates/bgcore/tests/`; each defines its own small helpers
 Helper traps: after any action `current_player` moves on, so call `turn_of(g, p)`
 before asking `g.is_legal(..)`; a targeted spell sets `pending_target` even with one
 legal target, so answer it with `act(g, p, Action::Target(i))`; a Golden minion played
-from hand opens a Triple Reward Discover (`Action::Choose(0)`) before anything else is
-legal; Cord Puller has Divine Shield (do not use it as a "no shield" minion); a card
-bought, played or given in a test can triple with the copies already in hand.
+from hand puts a Triple Reward spell in hand (cast it to open its Discover; card
+sets without the reward spell, like the v0.1 data, Discover at once); an Activate
+with `discard = true` opens `pending_discard`, answered with
+`act(g, p, Action::Discard(i))`; Cord Puller has Divine Shield (do not use it as a
+"no shield" minion); a card bought, played or given in a test can triple with the
+copies already in hand.
 
 Run one test file: `cargo test -p bgcore --test pirates`; one test: add its name;
 `-- --nocapture` for prints. Whole suite: `cargo test --workspace`.
@@ -371,3 +379,57 @@ for parse-error tests.
   (Balinda on Butchering or Channel the Devourer, `stop_after`) is not a spell cast.
 - **Tests.** `tests/undead.rs`; a fight with a victim that has Taunt and 1 Health, or
   Taunt "fodder" minions that die one per attack, is the way to script who dies when.
+
+## 9. Systems the Quilboar run added
+
+- **Quilboars (tribe 9).** `Tribe::EVERY` has nine tribes and the mask
+  `Tribes` is a `u16`; `Tribes::ALL` is `0b1_1111_1111`. Felboar is Demon and
+  Quilboar. The observation still has five tribe slots.
+- **Tavern spells versus plain spells.** `Card.tavern_spell` (from
+  `tavern_spell = false` in the toml; pool spells default to true) gates the
+  "Tavern spell" triggers (`trigger_on_cast_spell`), the `SpellsCast` event
+  counter and spell power: `PendingTarget.tavern` and
+  `PendingChooseOne.tavern` carry the flag to `apply_target` and
+  `execute_spell_effect`. The Blood Gem, Gem Day, the Triple Reward and the
+  Lockbox are plain spells.
+- **Blood Gems.** A player value `Player.gem_attack/gem_health` (starts 1/1,
+  `Effect::GemBonus` raises it, in a fight too through
+  `SideOutcome::gem_gain`), the generated Blood Gem spell whose buff is that
+  value, and per-minion Blood Gem stats `Minion.gem_attack/gem_health` from
+  every source (hand casts, Barrage, Confiscation, Roogug, Hogrider, Rally
+  gems). Fight gems are plain buffs unless `permanent` (Vineweaver), which
+  leaves through `SideOutcome::permanent_gems`. A hand cast on a friendly
+  minion plays `gem_casts` times: Balinda sets, each Hot-Air Surveyor adds
+  ("Set versus add", `cards::how_many_times`). Roogug
+  (`on_gem_played_on_self`) reacts only to gems cast from hand. Blood Gem
+  Barrage adds to `Player.barrage` per cast; every Refresh but the turn-start
+  roll gives it to every Tavern minion (`apply_barrage`).
+- **Triple Reward as a card.** A golden minion played from hand puts the
+  Triple Reward spell in hand (`Game::give_triple_reward`), its Discover tier
+  in the copy's `improvements`, fixed when given; it comes before anything the
+  Battlecry adds to the hand and is lost on a full hand. Card sets without
+  the spell (v0.1 data) Discover at once.
+- **Set versus add, one helper.** `cards::how_many_times(parts, role)`:
+  the highest setter (Brann, Drakkari, Balinda, Proud Privateer; 1 if none)
+  plus each adder's extra (Titus, Hot-Air Surveyor). `brann_mult`,
+  `drakkari_mult`, `balinda_mult`, `bounty_mult` and the fight's
+  `deathrattle_fires` all ask it.
+- **Discard.** `Action::Discard(i)` answers `Player.pending_discard`, opened
+  by an Activate with `discard = true` (Mangled Bandit): the reward effect
+  runs after the pick. Any playable card is discardable (a Blood Gem
+  included), never the Lockbox or a locked minion; a discarded pool minion's
+  copy goes back. The "when you discard" hook is the `Discarded` event.
+- **Both effects combined.** Thorned Trailblazer
+  (`choose_one_cover`, counted per turn in `Player.trailblazer_covers`) and
+  Fandral's Fortune (a Discover whose pick gets `Minion.both_effects`) run a
+  Choose One's two options in order, through `Player.choose_queue` when the
+  first leaves a target prompt open.
+- **Turbo Hogrider.** `after_choose_one_play` fires after every Choose One
+  card played, minion or spell, but only once the card is fully resolved
+  (no pending choice, target or Discover; `Game::choice_open`), so the
+  played Quilboar gets the gems. Same deferral pattern as Tomb Turning's
+  `resolve_doomed`.
+- **Jailbird Juggernaut.** `Effect::SummonStatCopyAttacker`, intercepted in
+  `attack_triggers`: a Golem token with the Juggernaut's stats (double when
+  golden) is summoned to its right and `attack_swings_at` makes it attack the
+  target first; a kill fizzles the Juggernaut's own swing (Ravager rule).

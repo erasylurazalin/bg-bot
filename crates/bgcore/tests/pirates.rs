@@ -201,7 +201,13 @@ fn a_golden_minion_played_from_hand_gives_a_reward_and_counts_for_the_extortioni
     assert_eq!(pl.golden_played, 1);
     // +7/+7 for the Golden minion played
     assert_eq!(stats(&pl.board[0]), (14, 14));
-    // the Triple Reward: a Discover of tier + 1
+    // the Triple Reward: a spell in hand whose cast Discovers tier + 1
+    assert!(pl.discover.is_empty());
+    assert_eq!(pl.hand.len(), 1);
+    let reward = pl.hand[0];
+    assert_eq!(g.data.cards.get(reward.card).name, "Triple Reward");
+    play(&mut g, 0, 0, 0);
+    let pl = &g.players[0];
     assert_eq!(pl.discover.len(), 3);
     assert!(pl.discover.iter().all(|&c| g.data.cards.get(c).tier == pl.tier + 1));
     g.check_invariants().unwrap();
@@ -215,12 +221,10 @@ fn the_extortionist_grows_wherever_it_is() {
     put_in_hand(&mut g, 0, "Cord Puller", true);
     put_in_hand(&mut g, 0, "Cord Puller", true);
     play(&mut g, 0, 2, 1);
-    // finish the reward Discover
-    act(&mut g, 0, Action::Choose(0));
+    // the Triple Reward spell sits in hand next to the Extortionist
     assert_eq!(stats(&g.players[0].board[0]), (14, 14));
     assert_eq!(stats(&g.players[0].hand[0]), (14, 14));
     play(&mut g, 0, 1, 2);
-    act(&mut g, 0, Action::Choose(0));
     assert_eq!(stats(&g.players[0].board[0]), (21, 21));
     assert_eq!(stats(&g.players[0].hand[0]), (21, 21));
     // one drawn later starts with the count
@@ -351,11 +355,15 @@ fn silent_deliverer_gets_a_golden_tier_4_minion_that_gives_no_reward() {
     assert!(g.players[0].discover.is_empty());
     assert_eq!(g.players[0].golden_played, 1);
     g.check_invariants().unwrap();
-    // a plain Golden minion from hand does give one
+    // a plain Golden minion from hand does give one, as a castable spell
     put_in_hand(&mut g, 0, "Cord Puller", true);
     let last = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, last, 0);
-    assert_eq!(g.players[0].discover.len(), 3);
+    assert!(g.players[0].discover.is_empty());
+    assert!(g.players[0]
+        .hand
+        .iter()
+        .any(|m| g.data.cards.get(m.card).name == "Triple Reward"));
 }
 
 #[test]
@@ -363,8 +371,8 @@ fn a_golden_silent_deliverer_gets_two() {
     let mut g = game(9);
     put_in_hand(&mut g, 0, "Silent Deliverer", true);
     play(&mut g, 0, 0, 0);
-    // the Deliverer's own Triple Reward Discover is open: answer it
-    act(&mut g, 0, Action::Choose(0));
+    // the Deliverer's own play put a Triple Reward spell in hand (a spell,
+    // so it is not one of the no_reward minions counted below)
     let golds: Vec<&Minion> = g.players[0].hand.iter().filter(|m| m.no_reward).collect();
     assert_eq!(golds.len(), 2);
     assert!(golds.iter().all(|m| m.golden && g.data.cards.get(m.card).tier == 4));
@@ -537,7 +545,6 @@ fn a_second_lockbox_opens_the_first_sooner_instead() {
     put_in_hand(&mut g, 0, "Bilgewater Breakout", true);
     let h = g.players[0].hand.len() - 1;
     play(&mut g, 0, h as u8, 2);
-    act(&mut g, 0, Action::Choose(0)); // its Triple Reward
     let i = lockbox_slot(&g, 0).unwrap();
     assert_eq!(g.players[0].hand[i].improvements, 2);
     g.check_invariants().unwrap();
@@ -578,7 +585,10 @@ fn a_lockbox_opens_into_a_golden_minion_of_your_tier_with_a_triple_reward() {
     g.players[0].hand[0].improvements = 1;
     end_all_turns(&mut g);
     play(&mut g, 0, 0, 0);
-    assert_eq!(g.players[0].discover.len(), 3);
+    assert!(g.players[0]
+        .hand
+        .iter()
+        .any(|m| g.data.cards.get(m.card).name == "Triple Reward"));
     assert_eq!(g.players[0].golden_played, 1);
     g.check_invariants().unwrap();
 }
@@ -751,7 +761,6 @@ fn the_rascal_battlecry_and_golden_get_bounties_in_the_shop() {
     let mut g = game(30);
     put_in_hand(&mut g, 0, "Shipwrecked Rascal", true);
     play(&mut g, 0, 0, 0);
-    act(&mut g, 0, Action::Choose(0));
     let bounties = g.players[0].hand.iter().filter(|m| g.data.cards.bounties.contains(&m.card)).count();
     assert_eq!(bounties, 2);
 }
@@ -1083,7 +1092,6 @@ fn azsharan_cutlassier_raises_the_tavern_spell_bonus() {
     assert_eq!(g.players[0].spell_bonus, (1, 0));
     put_in_hand(&mut g, 0, "Azsharan Cutlassier", true);
     play(&mut g, 0, 0, 1);
-    act(&mut g, 0, Action::Choose(0));
     assert_eq!(g.players[0].spell_bonus, (3, 0));
 }
 

@@ -42,6 +42,32 @@ one at a time, after the tier 7 minions:
 Then my real boards as the "good player" in each lobby, so staying low
 stops paying off.
 
+## After the tribes: teaching it strategies
+
+Self-play alone never found a plan that takes five turns to pay off (the
+night runs stayed low with mixed boards). So I show it the comps instead
+of waiting for it to stumble on them:
+
+1. **Scripted comp bots**, one per known build (Snazzy Undead, Blood Gem
+   Quilboar...; `ref/hsreplay-comps-2026-10-22.md` is a start). They play
+   toward their comp on purpose, as opponents and as a source of
+   demonstration games.
+2. **Learning from demonstrations** (imitation learning / behaviour
+   cloning): copy the comp bots' and my own games first, then let PPO
+   improve past them. My games come from the tracker's log reader.
+3. **A strategy input** (goal-conditioned policy): tell the network which
+   comp it's going for, so it keeps every comp instead of collapsing to
+   one, and the suggestion window can say "going Snazzy, buy this".
+4. **Starting mid-plan** (reverse curriculum): begin training games from
+   half-built comps, then move the start earlier until it builds them
+   from turn 1.
+
+The catch: copying comps teaches it to force them even when the lobby
+doesn't give the pieces. Self-play afterwards is what teaches it when to
+commit and when to pivot. Later, a short search at decision time (try a
+few shop options, simulate the fights, score them with the value network)
+is the other big upgrade, TD-Gammon style.
+
 ## Hidden numbers (checked 2026-10-23)
 
 The amounts these cards' text hides, as I know them from the game:

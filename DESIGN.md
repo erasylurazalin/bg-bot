@@ -84,8 +84,12 @@ fight phase.
 - A golden minion has double the printed stats plus the bonus stats of all
   three copies that made it. Its effect is doubled (twice the numbers, or the
   effect triggers twice).
-- Playing a golden minion gives a Triple Reward: a spell that discovers a
-  minion from one tier above your current tier (tier 6 at most).
+- Playing a golden minion gives a Triple Reward: a 0-cost plain spell (not
+  a Tavern spell) that goes to your hand. Its tier is fixed when you get
+  it: one above your tier then (tier 6 at most). Played on tier 4, it
+  Discovers tier 5 even if you level before casting it. You can also keep
+  it and never cast it. It comes before anything the golden minion's
+  Battlecry adds to your hand; with a full hand it's lost.
 
 ### Spells
 
@@ -600,6 +604,12 @@ Hooktusk).
 don't stack, and a golden copy sets its own count from its golden text.
 "An extra time" (Titus) adds on top, so several stack.
 
+**Set versus add, as one mechanic.** Every "how many times" count works
+the same way: the count is the highest value any setter gives (1 if none),
+plus what each adder adds (one, or its golden number). Setters: Brann, Drakkari, Balinda, Proud
+Privateer ("twice", golden "three times"). Adders: Titus, Hot-Air
+Surveyor ("an extra time"). Future cards slot into one side or the other.
+
 **Spending gold.** Anything that actually uses gold counts: buying,
 upgrading, rolling, Activate costs. Health paid instead of gold and free
 Refreshes don't. "After you spend N Gold" counters carry over turns
@@ -723,6 +733,96 @@ that names tier 7 could give one.
 
 **Disguised Graverobber** is in now that Undead are. Dark Paradox stays
 out until Dark Gifts exist.
+
+**Tavern spells versus other spells.** A Tavern spell is a
+BATTLEGROUND_SPELL in the game data: the spells the Tavern offers, and
+some generated ones (Pointy Arrow, Arcane Absorption, Conflagration).
+Blood Gems, Gem Day and the Lockbox are plain spells, not Tavern spells.
+Only Tavern spells count where a card says "Tavern spell" (Living Azerite,
+Forsaken Weaver, spell counters like Felboar's), and only they get spell
+power (the Tavern spell bonus).
+
+**Quilboar (2026-10-24).**
+- **Blood Gem:** a 0-cost plain spell, "Give a minion +1/+1", generated,
+  takes a hand slot. What one Gem gives is a player value starting at
+  +1/+1; "your Blood Gems give an extra +X/+Y this game" adds to it (a
+  Sanguine Refiner Rally in a fight still raises it for good). Gems played
+  in a fight last that fight only; Razorfen Vineweaver's "permanent" ones
+  carry out. No spell power on Gems.
+- **Casting Gems more than once** follows "Set versus add" above: Balinda
+  sets a Gem cast on your minion to 2 casts (golden 3), each Hot-Air
+  Surveyor adds one. Balinda plus one Surveyor: 3 casts. Each cast is a
+  Gem played.
+- **Geomagus Roogug** reacts only to Gems cast from hand (extra casts
+  included), and plays its Gem on a random different friendly minion. A
+  Gem from Roogug isn't from hand, so two Roogugs never loop.
+- **Stats from Blood Gems** are tracked per minion (stats, not a gem
+  count, so bigger Gems count fully), from every source, Barrage included.
+- **Gem Confiscation:** plays 3 Gems on the target, then takes all the
+  Blood Gem stats from its neighbours: they lose them, the target gains
+  them.
+- **Blood Gem Barrage:** on every explicit Refresh, every Tavern minion
+  gets +2/+2 worth of Blood Gems, plus the Gem bonus once (with Gems at
+  +2/+2, that's +3/+3), plus spell power (it's a Tavern spell). Each cast
+  adds on top (Veteran Brigand's three casts too).
+- **Turbo Hogrider** waits until the Choose One card is fully resolved, so
+  a Quilboar you just played (Sly Infiltrator) gets the Gems too.
+- **Balinda on Gem Confiscation:** the second cast plays 3 more Gems on the
+  target and steals nothing (the neighbours are already empty).
+- **Gem Day** costs 0, only comes from Gem Rat, is not a Tavern spell, and
+  is a Choose One card (Turbo Hogrider, Thorned Trailblazer).
+- **Discard** (Mangled Bandit now, Aberration later): you choose a card in
+  hand; any playable card, a Blood Gem included, never an unplayable one
+  like the Lockbox. A discarded pool minion's copy goes back to the pool;
+  a generated one adds nothing.
+- **Thorned Trailblazer:** the first Choose One card you play each turn
+  gets both effects, automatically. Several Trailblazers each cover one
+  more card, left to right, so none is wasted.
+- **Maximum Gold** (Snare Trapper, like Strike Oil) adds on top of the
+  turn's gold and can go past 10.
+- **Jailbird Juggernaut:** the Golem is summoned to its right, attacks the
+  target first, and stays as a normal tier 1 minion with whatever stats
+  it has left. If it kills the target, the Juggernaut's attack fizzles
+  like Obsidian Ravager's. With a full board (7) no Golem is summoned,
+  like any summon, and the Juggernaut just attacks normally.
+- **Fandral's Fortune:** Discovers a Choose One card from any tribe, up to
+  your tier, from the pool; it has both effects combined.
+
+**Aberration and the Deity (2026-10-24).**
+- **The Deity** exists only in lobbies with Aberrations. The whole lobby
+  gets the same god, chosen at random: C'Thun or Y'Shaarj. Every player's
+  Deity starts as a 1/1; "give your Deity +X/+Y" grows it for the rest of
+  the game, also from a fight (Drifting Sacrifice). In each fight, after 4
+  friendly Aberrations die (tokens and Reborn copies count), it awakens at
+  the right end with its current stats as a normal summon; with no room it
+  waits for space. At most one awakening per fight; the count starts over
+  each fight. C'Thun splits its stats among your other minions (equal
+  shares, the remainder +1 to random ones; golden double). Y'Shaarj's
+  Deathrattle brings back your first 2 Aberrations that died that fight
+  with their maximum stats (golden 4). A golden Deity only comes from a
+  trinket, which isn't built yet.
+- **"If you discard this, cast it twice"** (Sludge Corrosion, Energizing
+  Chamber): those are two real Tavern spell casts (Vicious Mindslasher,
+  Sha of Fear, Faceless Converter, Living Azerite, Forsaken Weaver, spell
+  counters, spell power). Corrupted Coin discarded isn't cast at all: it
+  just raises your maximum Gold by 2 (played normally, it's a Tavern spell
+  that gives 2 Gold).
+- **Linked cards** (Wandering Willbreaker, Faceless Operative): playing one
+  discards the other, a real discard with every discard trigger. The link
+  lasts across turns. Golden: four cards, playing two discards the rest.
+- **Random Tavern spells** (Willbreaker, Abyssal Envoy, Unwilling Slacker)
+  come from the Tavern spells up to your tier, generated.
+- **Mysterious K'Thir** discards your 3 left-most Tavern spells in hand at
+  the end of turn (skipping other cards), as normal discards.
+- **The Shadow of Doubt** reacts to every card added to your hand: bought
+  minions, Blood Gems, Triple Rewards, Discover picks, everything.
+- **Hidden numbers:** Mindbending Recruiter's Activate costs 0. Harbinger
+  Aph'lass gives +2/+1 and improves by +2/+1 per discard. Parasitic
+  Fleshling improves by +2/+2 per card discarded this game. Faceless
+  Converter improves by +2/+1 per Tavern spell cast this game.
+- **De-volition-ist:** a Health tie picks at random, and it fires even if
+  it died attacking (like Blade Collector or Wildfire Elemental).
+- Corrupted Coin and Energizing Chamber come in with this tribe.
 
 **Pairing, damage, ending** as in Part 2: shuffle and avoid the last
 opponent, ghost for an odd count, damage is tier plus surviving minions'

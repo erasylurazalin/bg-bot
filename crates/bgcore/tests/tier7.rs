@@ -244,6 +244,10 @@ fn a_triple_at_tier_6_discovers_tier_6_not_tier_7() {
         set_shop(&mut g, 0, &["Wolf Pup", "Cord Puller", "Cord Puller"]);
         act(&mut g, 0, Action::Buy(0));
         act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+        // the reward spell's tier was fixed at play time: tier 6, not 7
+        let p = &g.players[0];
+        assert_eq!(p.hand[0].improvements, 6);
+        act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
         let p = &g.players[0];
         assert_eq!(p.discover.len(), 3);
         assert!(p.discover.iter().all(|&c| g.data.cards.get(c).tier == 6), "seed {seed}");
@@ -521,8 +525,7 @@ fn ra_battlecry_gets_a_tier_6_minion_golden_gets_two_full_hand_loses_it() {
     let mut g = game(32);
     put_in_hand(&mut g, 0, "Highkeeper Ra", true);
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    // the golden play also opens its Discover
-    act(&mut g, 0, Action::Choose(0));
+    // the golden play also puts a Triple Reward spell in hand (tier 0)
     let tier6 = g.players[0]
         .hand
         .iter()
@@ -539,14 +542,21 @@ fn ra_battlecry_gets_a_tier_6_minion_golden_gets_two_full_hand_loses_it() {
         g.players[0].hand.push(m);
     }
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    act(&mut g, 0, Action::Choose(0));
     assert_eq!(g.players[0].hand.len(), 10);
+    // the one free slot goes to the Triple Reward spell (it comes before
+    // anything the Battlecry adds), so both tier 6 minions are lost
+    let rewards = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).name == "Triple Reward")
+        .count();
+    assert_eq!(rewards, 1);
     let tier6 = g.players[0]
         .hand
         .iter()
         .filter(|m| g.data.cards.get(m.card).tier == 6)
         .count();
-    assert_eq!(tier6, 1, "the second one found no room");
+    assert_eq!(tier6, 0, "both found no room");
     g.check_invariants().unwrap();
 }
 
@@ -619,7 +629,6 @@ fn champion_battlecry_buffs_the_tavern_this_game() {
     set_shop(&mut g, 0, &["Wolf Pup", "Cord Puller", "Cord Puller"]);
     let base: Vec<(i32, i32)> = g.players[0].shop.iter().map(stats).collect();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    act(&mut g, 0, Action::Choose(0));
     for (b, m) in base.iter().zip(&g.players[0].shop) {
         assert_eq!(stats(m), (b.0 + 16, b.1 + 16));
     }
