@@ -38,11 +38,11 @@ pub fn random_action(game: &Game, rng: &mut Rng) -> Action {
     Action::from_index(starts[kind] + i).unwrap()
 }
 
-/// Standard curve from docs/CONCEPT.md: tier 2 on turn 2, tier 3 on turn 5,
+/// Standard curve: tier 2 on turn 2, tier 3 on turn 5,
 /// tier 4 on turn 7, tier 5 on turn 11, tier 6 when affordable after that.
 pub const STANDARD_CURVE: [u8; 12] = [1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6];
 
-/// Rush curve from docs/CONCEPT.md: tier 2 on turn 2, tier 3 on turn 4,
+/// Rush curve: tier 2 on turn 2, tier 3 on turn 4,
 /// tier 4 on turn 5, tier 5 on turn 7, tier 6 when affordable after that.
 pub const RUSH_CURVE: [u8; 8] = [1, 2, 2, 3, 4, 4, 5, 6];
 
@@ -469,17 +469,12 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
     Action::EndTurn
 }
 
-/// Curve bot playing the standard leveling curve from docs/CONCEPT.md.
+/// Curve bot playing the standard leveling curve.
 pub fn standard_action(game: &Game) -> Action {
     curve_action(game, &STANDARD_CURVE)
 }
 
-/// Curve bot playing the rush leveling curve from docs/CONCEPT.md.
+/// Curve bot playing the rush leveling curve.
 pub fn rush_action(game: &Game) -> Action {
     curve_action(game, &RUSH_CURVE)
-}
-
-/// Alias for `standard_action` kept for compatibility with v0.1 tests.
-pub fn rule_action(game: &Game) -> Action {
-    standard_action(game)
 }

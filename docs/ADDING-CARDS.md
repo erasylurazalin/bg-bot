@@ -1,7 +1,7 @@
 # Adding cards and tribes
 
 A working reference for whoever adds the next tribe. Rules are in
-`DESIGN.md` Part 3 (they win over everything here), the code map and
+`DESIGN.md` Part 2 (they win over everything here), the code map and
 principles in `docs/ENGINE.md`. Function names, no line numbers: grep them.
 
 Files: `cards.toml` (data), `crates/bgcore/src/cards.rs` (parsing, `Effect` and
@@ -154,9 +154,10 @@ exactly one legal target and drops the effect when there is none.
    `card_tribes`), Planar Telescope and Friendly Bounty counts in `game.rs`.
    grep `Tribe::ALL` and `Tribe::EVERY` to check nothing else needs it.
 3. Tests that use an unknown tribe as the bad value: `tests/beast_mech.rs`
-   (`attacker_tribe = "..."`) and `tests/d1a.rs` (`a_card_needs_exactly_one_of_tribe_and_tribes`)
-   use a tribe that does not exist: "naga" (it left the game and will never be
-   built, so these tests never need changing again).
+   (`attacker_tribe = "..."`) and `tests/core_rules.rs`
+   (`a_card_needs_exactly_one_of_tribe_and_tribes`) use a tribe that does not
+   exist: "naga" (it left the game and will never be built, so these tests
+   never need changing again).
    Also raise `MAX_TAVERN_BUFFS` in game.rs (one Tavern buff per tribe filter and
    duration, so 2 x (tribes + 1), 22 with ten tribes); a push past it panics.
 4. `tests/tier7.rs` Last One Standing test counts picks per type: an all-type minion is
@@ -220,8 +221,7 @@ One file per tribe in `crates/bgcore/tests/`; each defines its own small helpers
 Helper traps: after any action `current_player` moves on, so call `turn_of(g, p)`
 before asking `g.is_legal(..)`; a targeted spell sets `pending_target` even with one
 legal target, so answer it with `act(g, p, Action::Target(i))`; a Golden minion played
-from hand puts a Triple Reward spell in hand (cast it to open its Discover; card
-sets without the reward spell, like the v0.1 data, Discover at once); an Activate
+from hand puts a Triple Reward spell in hand (cast it to open its Discover); an Activate
 with `discard = true` opens `pending_discard`, answered with
 `act(g, p, Action::Discard(i))`; Cord Puller has Divine Shield (do not use it as a
 "no shield" minion); a card bought, played or given in a test can triple with the
@@ -229,8 +229,10 @@ copies already in hand.
 
 Run one test file: `cargo test -p bgcore --test pirates`; one test: add its name;
 `-- --nocapture` for prints. Whole suite: `cargo test --workspace`.
-Test card databases for rule tests: `tests/data/*.toml` (`CardDb::from_toml`); use them
-for parse-error tests.
+Parse-error tests build small TOML strings inline and hand them to
+`CardDb::from_toml` (see `tests/core_rules.rs`); a full card set must come out of
+`Data::bundled()` or `Data::from_toml`, which refuses a card set without the
+Triple Reward spell.
 
 ## 5. Gotchas
 
@@ -413,7 +415,7 @@ for parse-error tests.
   Triple Reward spell in hand (`Game::give_triple_reward`), its Discover tier
   in the copy's `improvements`, fixed when given; it comes before anything the
   Battlecry adds to the hand and is lost on a full hand. Card sets without
-  the spell (v0.1 data) Discover at once.
+  the spell, `Data::from_toml` refuses the card set.
 - **Set versus add, one helper.** `cards::how_many_times(parts, role)`:
   the highest setter (Brann, Drakkari, Balinda, Proud Privateer; 1 if none)
   plus each adder's extra (Titus, Hot-Air Surveyor). `brann_mult`,

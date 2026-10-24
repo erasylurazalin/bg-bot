@@ -1,13 +1,12 @@
 # bg-bot design
 
-Three parts. The first describes Hearthstone Battlegrounds as completely as I
+Two parts. The first describes Hearthstone Battlegrounds as completely as I
 can, as the reference for everything the engine will grow into. The second
-defines v0.1, the mini game the first bot learned on; it's history now, kept
-because the v0.1 rule tests still run on it. The third is the game we build
-now: a lobby of five real tribes, exactly as in the current patch.
+is the game we build: the real tribes, cards and rules of the current patch,
+with every rule I decided.
 
-`docs/ENGINE.md` maps the code, `docs/CONCEPT.md` explains the card pool
-choices.
+`docs/ENGINE.md` maps the code, `docs/ADDING-CARDS.md` is the working
+reference for adding cards.
 
 Facts marked **(check)** are from memory and may be stale or wrong. Settle
 them from Power.log (`~/projects/bg` reads it) or from playing before the
@@ -195,226 +194,7 @@ tie deals no damage.
 The bot must only get what a player sees, or it learns to cheat and the
 advisor won't work.
 
-# Part 2: v0.1, the mini game (history)
-
-Superseded by Part 3. The engine still carries these rules in
-`crates/bgcore/tests/data/v01-*.toml` for the old tests.
-
-
-Goal: the smallest game that still has the real decisions (economy, leveling,
-rolling, triples, board order) and plays fast. Everything left out is listed
-at the end.
-
-## Rules
-
-Same as Part 1, with these choices fixed.
-
-- **Players:** 8. Health 30, no armor, no hero powers, no hero choice.
-- **Gold:** turn `t` gives `min(t + 2, 10)`. Buy 3, sell 1, roll 1, freeze
-  free.
-- **Tiers:** 1 to 6, base upgrade costs 5, 7, 8, 11, 10, minus 1 per turn
-  without upgrading, minimum 0. These are config values, not constants in the
-  code.
-- **Shop:** 3, 4, 4, 5, 5, 6 minions by tier. No spell slot.
-- **Pool:** copies by tier 16, 15, 13, 11, 9, 7, only minions from the v0.1
-  card list. One lobby always uses both types.
-- **Refresh:** start of each turn and on each roll. Unbought minions go back
-  to the pool. A frozen shop keeps its minions and fills empty slots at the
-  start of the turn. Freezing lasts one refresh.
-- **Selling:** returns the minion to the pool, a golden one returns 3 copies.
-  Tokens just vanish.
-- **Triples:** as in Part 1. The golden minion gets double printed stats plus
-  the bonus stats of all three copies. Playing it adds a Discover choice from
-  tier `min(tier + 1, 6)`, offered as 3 different minions taken from the
-  pool. The two not picked go back.
-- **Golden effects:** buff numbers doubled. Summons make the same number of
-  tokens, but golden ones (double stats).
-- **Pairing:** at the start of each turn, shuffle the living players and
-  pair them, avoiding the previous opponent if possible (up to 16 shuffles).
-  Pairs are known during the shop phase, as in the real game. With an odd
-  number, one plays the ghost of the most recently knocked out player, and
-  damage to the ghost is ignored.
-- **Damage:** winner's tier plus the tiers of its surviving minions (tokens
-  count as tier 1). Capped as in Part 1: 5 on turns 1 to 4, 10 on turns 5
-  to 7, 15 after that, none once 4 or fewer players are left. The turns and
-  caps are config values.
-- **Knockouts:** players knocked out in the same turn are ranked by health
-  left, ties at random. The best ranked of them becomes the ghost. A
-  knocked-out player's cards go back to the pool.
-- **End:** when one player is left, or at turn 40 (rank the rest by health).
-- **Fight:** exactly the rules in Part 1, minus Start of Combat (no v0.1 card
-  has it). Safety cap: 500 attacks, then a tie. Where Part 1 leaves room,
-  the engine does what `~/projects/bg`'s engine does, so the two can be
-  compared: dead minions are handled one at a time in board order, each
-  one's Deathrattle and then its Reborn before the next; the next attacker
-  is tracked with a pointer that shifts when minions left of it die or
-  appear; Windfury swings twice in a row.
-
-## Cards
-
-Two types, Beast and Mech, plus neutrals. 24 minions, 4 per tier, all made up
-for v0.1 and loosely modelled on real ones. Tokens are not in the pool.
-
-| Tier | Name | Type | Stats | Text |
-|---|---|---|---|---|
-| 1 | Wolf Pup | Beast | 2/2 | |
-| 1 | Rust Bot | Mech | 1/2 | Divine Shield |
-| 1 | Den Mother | Beast | 1/1 | Deathrattle: summon a 1/1 Pup token (Beast) |
-| 1 | Scrap Hound | Neutral | 2/1 | Battlecry: give a friendly minion +1/+1 |
-| 2 | Ram | Beast | 2/4 | Taunt |
-| 2 | Shield Drone | Mech | 2/3 | Divine Shield |
-| 2 | Viper | Beast | 2/1 | Venomous |
-| 2 | Tinkerer | Neutral | 3/3 | Battlecry: give a friendly Mech +2/+2 |
-| 3 | Stag | Beast | 4/4 | Battlecry: give your other Beasts +1/+1 |
-| 3 | Gear Golem | Mech | 3/5 | Taunt. Deathrattle: summon a 2/2 Gear token (Mech) |
-| 3 | Twinblade | Neutral | 3/3 | Windfury |
-| 3 | Ember Spirit | Neutral | 3/2 | Reborn |
-| 4 | Alpha | Beast | 5/5 | Deathrattle: summon two 2/2 Wolf tokens (Beast) |
-| 4 | Shredder | Mech | 4/6 | Divine Shield |
-| 4 | Warden | Neutral | 3/7 | Taunt |
-| 4 | Stalker | Beast | 5/3 | Venomous |
-| 5 | Great Bear | Beast | 7/7 | Taunt. Battlecry: give your other Beasts +2/+2 |
-| 5 | War Engine | Mech | 6/6 | Divine Shield, Windfury |
-| 5 | Undying Knight | Neutral | 6/4 | Taunt, Reborn |
-| 5 | Brute | Neutral | 8/8 | |
-| 6 | Ancient Beast | Beast | 9/9 | Deathrattle: summon three 3/3 Beast tokens |
-| 6 | Titan Mech | Mech | 8/8 | Divine Shield, Taunt. Deathrattle: summon a 4/4 Mech token |
-| 6 | Champion | Neutral | 10/10 | Windfury |
-| 6 | Plaguebringer | Neutral | 6/6 | Venomous, Reborn |
-
-Numbers will need balancing once bots play it. A card that wins every game
-is a balance bug, not a finding. Cards live in a data file (`cards.toml`),
-and the rule numbers in `rules.toml`, so changing a number doesn't touch the
-logic.
-
-Targeted Battlecries (Scrap Hound, Tinkerer) let the player pick another
-friendly minion. With one valid target it is picked automatically, with none
-the minion is played and the Battlecry does nothing. Battlecries that buff
-"your other Beasts" (Stag, Great Bear) reach the board only, not the hand.
-
-## Actions
-
-One player's shop phase is a sequence of actions:
-
-| Action | Arguments | Legal when |
-|---|---|---|
-| Buy | shop slot 0..5 | slot filled, gold ≥ 3, hand not full |
-| Sell | board slot 0..6 | slot filled |
-| Play | hand slot 0..9, position 0..7 | board not full |
-| Target | board slot 0..6 | a Battlecry is waiting for a target |
-| Choose | option 0..2 | a Discover is waiting |
-| Move | board slot to board slot | both in range |
-| Roll | | gold ≥ 1 |
-| Freeze | | always (toggles) |
-| Level | | tier < 6, gold ≥ current cost |
-| End turn | | always |
-
-While a Target or Discover is waiting, only Target or Choose is legal, End
-turn included.
-
-The action space is a flat list of all of these (149 entries) with a
-legality mask from the engine. A turn is capped at 60 actions, after which
-the engine ends it, and a waiting Target or Discover takes its first
-option.
-
-**Order between players.** The real shop phase is simultaneous, and the only
-thing players share is the pool. v0.1 runs players one action at a time in a
-random order that changes every turn. That's close to "whoever clicks first
-gets the minion" without needing real time.
-
-## Observation
-
-Per player, as fixed-size arrays (no strings):
-
-- Own: gold, tier, upgrade cost, health, turn, frozen flag, the shop (6
-  slots), hand (10), board (7), pending Target or Discover.
-- Each minion slot: card index, attack, health, golden, keyword flags, empty
-  flag.
-- Each opponent (7 slots, in a fixed order relative to me): alive, health,
-  tier, turns since I last fought them, and that board (7 minion slots).
-- Who I fight next, once pairings are known (the real game shows it).
-
-The exact tensor layout belongs to the training side. The engine exposes
-the state as plain structs and a function that writes the arrays.
-
-## Engine structure (Rust)
-
-```
-bg-bot/
-  cards.toml          card data for the current version
-  rules.toml          rule numbers: gold, costs, pool, damage caps, limits
-  crates/
-    bgcore/           rules only: state, shop, fight, bots, no I/O, no Python
-    bgpy/             PyO3 bindings: a vectorised env for training (Stage 1)
-    bgbench/          benchmarks, fuzzer, bot matches
-  train/              Python: PyTorch, PPO, evaluation (Stage 1)
-```
-
-- **State:** plain structs with fixed capacity (`arrayvec` or arrays plus a
-  length). A minion is a card index, attack, health, a keyword bit set and a
-  golden flag. No heap allocation inside a fight or a shop action.
-- **Effects as data:** card text is an enum of effects (`Summon { card, n }`,
-  `Buff { who, attack, health }`, ...) attached to triggers (`Battlecry`,
-  `Deathrattle`, later `StartOfCombat`, `Avenge(n)`, ...). New mechanics add
-  variants, not one-off code per card, and the cards file picks from them.
-- **Randomness:** one seeded RNG per game, xoshiro256++ written in bgcore
-  (not a crate, so crate updates can't change replays). A seed plus the list of actions replays a game exactly,
-  which is how bugs get reported and tests get written.
-- **Fight as a pure function:** `fight(&Board, &Board, &mut Rng) ->
-  Outcome { winner, damage }`. It can be benchmarked, tested and compared
-  with bg's engine by itself.
-- **Vectorised env:** bgpy holds thousands of games, steps them all with one
-  batch of actions from Python and returns one batch of observations and
-  masks. That keeps the GPU fed and the Python overhead per step small.
-  Games run in parallel on all cores with `rayon`.
-
-## Testing
-
-- **Unit tests per rule:** Taunt, Divine Shield, Reborn, Venomous, Windfury,
-  Deathrattle position, the 7-minion limit, triples, pool counts, upgrade
-  discounts.
-- **Invariants checked in debug builds:** pool copies plus copies held by
-  players always equal the starting count; gold never negative; boards never
-  over 7, hands never over 10.
-- **Cross-check with bg:** v0.1 cards are made up, but the keyword rules are
-  the same. Build the same keyword-only boards in both engines, run 10,000
-  fights each, and the win, tie and loss rates should agree within noise.
-- **Random-play fuzzing:** millions of random legal actions, no panics, no
-  broken invariants.
-
-## Speed targets
-
-Measured with random legal actions on 32 threads, release build:
-
-- a fight: a few microseconds
-- a full 8-player game: well under a millisecond on one core
-- in total: at least 10,000 games per second
-
-If v0.1 can't do that, fix the engine before training. Later content will
-only make it slower.
-
-## Training (outline, details later)
-
-- PPO with action masks. One network shared by all seats, so one game gives 8
-  players' worth of experience.
-- Reward: placement only, mapped to roughly +1 for 1st down to -1 for 8th,
-  given at knockout or game end.
-- Opponents: the current network, plus older copies, so it doesn't learn
-  moves that only beat itself.
-- Baselines to beat: random legal moves, and a rule bot (buy the
-  highest-tier minion, level on a fixed curve, triple when possible, never
-  roll below 3 gold). Progress is measured as average placement against
-  them.
-
-## Not in v0.1
-
-Hero choice and hero powers, armor, spells, Magnetic, Avenge, Rally, Start of
-Combat, End of Turn effects, Cleave, Stealth, Poisonous, Mega-Windfury,
-trinkets, quests, Dark Gifts, the Deity, the other 8 types, type bans, the
-real card pool, the turn timer. They come back in later
-versions, roughly in the order in `TODO.md`.
-
-# Part 3: the five-tribe lobby
+# Part 2: the game we build
 
 The game the bot learns now. Everything in Part 1 applies, with the
 choices below fixed. Where Part 1 says **(check)**, the engine uses the
@@ -422,18 +202,17 @@ value in `rules.toml`.
 
 ## The pool
 
-- Five tribes: Beast, Mech, Dragon, Murloc, Demon. Every real solo-pool
-  minion of those tribes, plus neutrals, tiers 1 to 6. A card with two
-  tribes is in if either is.
-- Spells: every solo-pool Tavern spell, minus the ones the card data ties
-  to a tribe outside the five (`battlegroundsAssociatedRaces`).
+- All ten tribes of the current patch: Beast, Mech, Dragon, Murloc, Demon,
+  Pirate, Elemental, Undead, Quilboar, Aberration (Naga left the game).
+  Every real solo-pool minion of those tribes, plus neutrals, tiers 1 to 7.
+  A card with two tribes is in if either is. For now every lobby has all
+  ten; the five-random-tribes lobby is next on TODO.md.
+- Spells: every solo-pool Tavern spell.
 - Out because they need systems this game doesn't have: Dark Paradox
-  (Dark Gifts), Armor Stash (armor), Energizing Chamber (the Deity),
-  Unmasked Identity (hero powers). No Duos-only cards.
-- That was 130 minions and 50 spells for the five-tribe lobby. With eight
-  tribes built it's 201 pool minions and 59 pool spells (2026-10-24); the
-  game's full solo pool is 272 and 73. The game's own card data is
-  exported by `tools/export_cards.py`, see `docs/card-data.md`.
+  (Dark Gifts), Armor Stash (armor), Unmasked Identity (hero powers). No
+  Duos-only cards.
+- The game's own card data is exported by `tools/export_cards.py`, see
+  `docs/card-data.md`.
 - Generated cards that belong to these tribes are in too, though never in
   the pool: Chromadrakes, Demon Fodder, Fishbait, Satellites, Beetles and
   so on.
@@ -824,10 +603,28 @@ power (the Tavern spell bonus).
   it died attacking (like Blade Collector or Wildfire Elemental).
 - Corrupted Coin and Energizing Chamber come in with this tribe.
 
-**Pairing, damage, ending** as in Part 2: shuffle and avoid the last
-opponent, ghost for an odd count, damage is tier plus surviving minions'
-tiers with the cap from `rules.toml`, game ends with one player left or at
-turn 40.
+**Pairing:** at the start of each turn, shuffle the living players and
+pair them, avoiding the previous opponent if possible (up to 16 shuffles).
+Pairs are known during the shop phase. With an odd number, one plays the
+ghost of the most recently knocked out player, and damage to the ghost is
+ignored.
+
+**Damage:** the winner's tier plus the tiers of its surviving minions
+(tokens count as tier 1), capped by turn as `rules.toml` says (5 on turns 1
+to 4, 10 on turns 5 to 7, 15 after that, none once 4 or fewer players are
+left).
+
+**Knockouts and the end:** players knocked out in the same turn are ranked
+by health left, ties at random; the best ranked of them becomes the ghost.
+A knocked-out player's cards go back to the pool. The game ends when one
+player is left, or at turn 40 (the rest ranked by health).
+
+**Fight details** where Part 1 leaves room (they match `~/projects/bg`'s
+engine, so the two can be compared): dead minions are handled one at a time
+in board order, each one's Deathrattle and then its Reborn before the next;
+the next attacker is tracked with a pointer that shifts when minions left of
+it die or appear; Windfury swings twice in a row. Safety cap: 500 attacks,
+then a tie.
 
 ## Actions
 

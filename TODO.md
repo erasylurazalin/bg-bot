@@ -82,14 +82,8 @@ The amounts these cards' text hides, as I know them from the game:
 
 ## Next: finish the tribes, then a clean slate
 
-1. **Remove v0.1 and the made-up cards.** The old mini game's invented
-   cards (`tests/data/v01-*.toml`, `tests/data/d1a-cards.toml`) and the
-   tests and fallbacks built on them confuse agents, who mistake them for
-   real cards. Port any rule test worth keeping (Taunt, Divine Shield,
-   Reborn, Venomous, Windfury, triples, pool counts) to real cards, then
-   delete the rest: the v0.1 data, DESIGN.md Part 2, the v0.1 fallbacks in
-   the code, and the stale planning docs (`docs/CONCEPT.md`,
-   `docs/mechanics-inventory.md`, `docs/pool-analysis.md`).
+1. ~~Remove v0.1 and the made-up cards.~~ Done 2026-10-24: every old rule
+   test now runs on real cards (`tests/core_rules.rs`).
 2. **A lobby of five random tribes per game**, like the real one (Deity
    only with Aberrations, dual-tribe minions in if either tribe is).
 3. **A new observation.** The layout has been frozen since the five-tribe

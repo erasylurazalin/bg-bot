@@ -1,5 +1,6 @@
-//! Rules of the v0.1 mini Battlegrounds: state, shop, fight. No I/O and no
-//! Python here, see DESIGN.md.
+//! The rules of Hearthstone Battlegrounds as this project models them:
+//! card data, the shop phase and the fight. No I/O and no Python here,
+//! see DESIGN.md.
 
 // Card ids index the pool and the card list, so index loops read best there.
 #![allow(clippy::needless_range_loop)]
@@ -50,7 +51,11 @@ pub struct Data {
 
 impl Data {
     pub fn from_toml(cards: &str, rules: &str) -> Result<Data, String> {
-        Ok(Data { cards: CardDb::from_toml(cards)?, rules: Rules::from_toml(rules)? })
+        let cards = CardDb::from_toml(cards)?;
+        if cards.triple_reward.is_none() {
+            return Err("cards.toml: no Triple Reward spell: a golden minion played from hand has no reward to give".into());
+        }
+        Ok(Data { cards, rules: Rules::from_toml(rules)? })
     }
 
     /// The cards.toml and rules.toml at the repo root, built into the binary.

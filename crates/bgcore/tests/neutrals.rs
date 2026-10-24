@@ -886,6 +886,22 @@ fn natural_blessing_picks_one_type_of_a_dual_minion() {
 }
 
 #[test]
+fn a_same_tribe_buff_reaches_a_minion_through_either_of_its_tribes() {
+    let mut g = game(33);
+    put_on_board(&mut g, 0, "Gearfin"); // Mech and Murloc
+    put_on_board(&mut g, 0, "Lullabot"); // Mech
+    put_on_board(&mut g, 0, "Tad"); // Murloc
+    g.give(0, "Natural Blessing").unwrap();
+    play_card(&mut g, 0, "Natural Blessing");
+    act(&mut g, 0, Action::Target(1)); // the Lullabot is a Mech
+    // the buff reaches Gearfin through its Mech tribe, never Tad
+    assert_eq!(stats(&g.players[0].board[0]), (6 + 2, 5 + 1));
+    assert_eq!(stats(&g.players[0].board[1]), (2 + 2, 2 + 1));
+    assert_eq!(stats(&g.players[0].board[2]), (2, 2));
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn patient_scout_improves_and_discovers_its_tier() {
     let mut g = game(32);
     put_on_board(&mut g, 0, "Patient Scout");

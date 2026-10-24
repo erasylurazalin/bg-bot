@@ -2864,8 +2864,8 @@ pub fn shop_destroy(
 mod tests {
     use super::*;
 
-    fn v01_db() -> CardDb {
-        CardDb::from_toml(include_str!("../tests/data/v01-cards.toml")).unwrap()
+    fn db() -> CardDb {
+        crate::Data::bundled().cards
     }
 
     fn side(db: &CardDb, names: &[&str]) -> (Side<'static>, u16) {
@@ -2881,46 +2881,60 @@ mod tests {
 
     #[test]
     fn deathrattle_summons_where_the_minion_stood() {
-        let db = v01_db();
-        let (mut s, mut uid) = side(&db, &["Wolf Pup", "Den Mother", "Ram"]);
+        let db = db();
+        let (mut s, mut uid) = side(&db, &["Cord Puller", "Buzzing Vermin", "Amber Guardian"]);
         let mut rng = Rng::new(1);
         s.ms[1].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
-        assert_eq!(names(&db, &s), ["Wolf Pup", "Pup", "Ram"]);
+        assert_eq!(names(&db, &s), ["Cord Puller", "Beetle", "Amber Guardian"]);
     }
 
     #[test]
     fn summons_past_seven_are_lost() {
-        let db = v01_db();
-        let (mut s, mut uid) = side(&db, &["Ram", "Ram", "Alpha", "Ram", "Ram", "Ram", "Ram"]);
+        let db = db();
+        let (mut s, mut uid) = side(
+            &db,
+            &[
+                "Amber Guardian",
+                "Amber Guardian",
+                "Sewer Lord",
+                "Amber Guardian",
+                "Amber Guardian",
+                "Amber Guardian",
+                "Amber Guardian",
+            ],
+        );
         let mut rng = Rng::new(1);
-        s.ms[2].m.health = -3;
+        s.ms[2].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
-        assert_eq!(names(&db, &s), ["Ram", "Ram", "Wolf", "Ram", "Ram", "Ram", "Ram"]);
+        assert_eq!(
+            names(&db, &s),
+            ["Amber Guardian", "Amber Guardian", "Sewer Rat", "Amber Guardian", "Amber Guardian", "Amber Guardian", "Amber Guardian"]
+        );
     }
 
     #[test]
     fn golden_deathrattle_summons_golden_tokens() {
-        let db = v01_db();
+        let db = db();
         let mut uid = 0;
         let mut rng = Rng::new(1);
-        let alpha = db.make(db.by_name("Alpha").unwrap(), true);
-        let mut s = Side::new(&db, &[alpha], &[], Counters::default(), &mut uid);
+        let lord = db.make(db.by_name("Sewer Lord").unwrap(), true);
+        let mut s = Side::new(&db, &[lord], &[], Counters::default(), &mut uid);
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         assert_eq!(s.ms.len(), 2);
-        assert!(s.ms.iter().all(|f| f.m.golden && f.m.attack == 4 && f.m.health == 4));
+        assert!(s.ms.iter().all(|f| f.m.golden && f.m.attack == 6 && f.m.health == 4));
     }
 
     #[test]
     fn removing_before_the_pointer_keeps_the_next_attacker() {
-        let db = v01_db();
-        let (mut s, mut uid) = side(&db, &["Wolf Pup", "Ram", "Viper"]);
+        let db = db();
+        let (mut s, mut uid) = side(&db, &["Cord Puller", "Amber Guardian", "Deadly Spore"]);
         let mut rng = Rng::new(1);
-        s.ptr = 2; // Viper is next
+        s.ptr = 2; // Deadly Spore is next
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
-        assert_eq!(db.get(s.ms[s.next_attacker().unwrap()].m.card).name, "Viper");
+        assert_eq!(db.get(s.ms[s.next_attacker().unwrap()].m.card).name, "Deadly Spore");
     }
 
     fn s2_db() -> CardDb {

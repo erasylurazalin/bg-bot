@@ -582,6 +582,19 @@ fn tasty_lobster_improvements_and_falling_sky_golem_reach_the_player() {
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn an_all_type_minion_is_a_mech_for_magnetic() {
+    let mut g = game(310);
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam"); // every tribe, a Mech too
+    g.give(0, "Lullabot").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    // the Magnetic merges into the all-type minion instead of placing
+    assert_eq!(g.players[0].board.len(), 1);
+    assert_eq!(g.players[0].board[0].magnetizations, 1);
+    assert_eq!(stats(&g.players[0].board[0]), (6 + 2, 6 + 2));
+    g.check_invariants().unwrap();
+}
+
 // ---- Card data ----
 
 #[test]

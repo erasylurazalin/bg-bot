@@ -2457,18 +2457,13 @@ impl Game {
 
     /// A Golden minion played from hand puts a Triple Reward spell in hand,
     /// a 0-cost plain spell whose Discover tier is fixed now: one above the
-    /// player's tier, tier 6 at most. Lost on a full hand. A card set without
-    /// the reward spell (the v0.1 data) Discovers at once instead, its own
-    /// rule.
+    /// player's tier, tier 6 at most. Lost on a full hand.
     fn give_triple_reward(&mut self, p: usize) {
-        let Some(id) = self.data.cards.triple_reward else {
-            let tier = (self.players[p].tier + 1).min(MAX_TIER);
-            let _ = self.players[p]
-                .discover_queue
-                .try_push(DiscoverRequest::MinionTier(tier));
-            self.maybe_start_discover(p);
-            return;
-        };
+        let id = self
+            .data
+            .cards
+            .triple_reward
+            .expect("the card data has no Triple Reward spell");
         if self.players[p].hand.is_full() {
             return;
         }

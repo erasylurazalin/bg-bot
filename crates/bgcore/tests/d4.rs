@@ -278,6 +278,29 @@ fn pending_choose_one_and_discover_are_shown() {
 }
 
 #[test]
+fn the_opponent_is_hidden_until_you_fight() {
+    let mut g = game(7);
+    let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
+    let q = q as usize;
+    put_on_board(&mut g, q, "Sewer Lord");
+    // q's board is not visible before the fight...
+    let opp = |out: &[f32]| {
+        let start = OWN_END + ((q + PLAYERS - 1) % PLAYERS) * OPP_BLOCK;
+        out[start..start + OPP_BLOCK].to_vec()
+    };
+    let o = opp(&view(&g, 0));
+    assert_eq!(o[OPP_NEXT], 1.0); // next opponent
+    assert_eq!(o[OPP_SEEN], 0.0); // never seen
+    assert_eq!(o[OPP_SCALARS + SLOT_PRESENT], 0.0); // no minion shown
+    // ...and is after it
+    next_turn(&mut g);
+    let o = opp(&view(&g, 0));
+    assert_eq!(o[OPP_SEEN], 1.0);
+    assert_eq!(o[OPP_SCALARS + SLOT_PRESENT], 1.0);
+    assert_eq!(o[OPP_SCALARS + SLOT_ATTACK], 4.0); // Sewer Lord's attack
+}
+
+#[test]
 fn opponents_show_last_opponent_tribes_and_placement() {
     let mut g = game(6);
     let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };

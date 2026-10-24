@@ -1,7 +1,7 @@
 # How the engine and training fit together
 
 A map of the code for whoever works on it next. The rules themselves are in
-`DESIGN.md`, the card pool's reasoning in `docs/CONCEPT.md`.
+`DESIGN.md`.
 
 ## Layout
 
@@ -23,8 +23,9 @@ crates/
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
                       tier7.rs (tier 7 in the engine and its seven minions),
-                      deathrattles.rs (a loop over every Deathrattle card), fight.rs,
-                      game.rs, d1a.rs; tests/data/ has test-only card files
+                      deathrattles.rs (a loop over every Deathrattle card),
+                      core_rules.rs (the generic rules on the real data), fight.rs,
+                      game.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
   bgpy/               PyO3 bindings: a batch of games stepped together
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
@@ -58,7 +59,7 @@ docs/                 concept, pool analysis, mechanics inventory (a snapshot fr
 ## Systems the five-tribe lobby added
 
 What exists, so the next card reuses it instead of rebuilding it. The
-rules behind each are in DESIGN.md Part 3.
+rules behind each are in DESIGN.md Part 2.
 
 - **Choices the player makes mid-action.** `PendingTarget` (a minion on
   the board or in the Tavern), `PendingShopTarget` (a Tavern slot),
@@ -176,9 +177,6 @@ exists.
 
 See `docs/ADDING-CARDS.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).
 
-`docs/mechanics-inventory.md` lists every mechanic the 5-tribe pool uses and whether
-the engine has it (as of the D1a commit).
-
 ## Card data snapshots (`ref/`, git-ignored)
 
 - `ref/hsjson-cards.json`: the full HearthstoneJSON card file
@@ -186,7 +184,7 @@ the engine has it (as of the D1a commit).
   Has tokens and golden versions. Some retired cards are missing from it.
 - `ref/bg-pool.tsv`: the solo Battlegrounds pool from it.
 - `ref/lobby5.tsv`: our lobby, built from the JSON (the rule is in
-  DESIGN.md Part 3). The JSON's pool flags aren't perfect (Rot Hide Gnoll);
+  DESIGN.md Part 2). The JSON's pool flags aren't perfect (Rot Hide Gnoll);
   `docs/card-data.md` and `tools/export_cards.py` read the game's own.
 - Useful flags in the JSON: `isBattlegroundsPoolMinion`,
   `isBattlegroundsPoolSpell`, `isBattlegroundsDuosExclusive` (drop these),
@@ -262,7 +260,7 @@ Deleting `.venv` undoes it.
 Tribe runs are done by subagents from briefs in `docs/briefs/` (one file
 per run: house rules, the cards with their text, the owner's rules, tests,
 done-means). Write the brief only after the owner has answered the unsure
-rules; DESIGN.md Part 3 holds the answers.
+rules; DESIGN.md Part 2 holds the answers.
 
 `~/projects/bg/bg/engine.py` is the owner's tracker fight simulator in
 Python, with combat effects for about 325 cards of every tribe, much of it

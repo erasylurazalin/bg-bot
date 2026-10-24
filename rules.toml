@@ -1,4 +1,4 @@
-# Rules for v0.1. See DESIGN.md, Part 2. Board 7, hand 10, shop 6 and
+# The rules. See DESIGN.md, Part 2. Board 7, hand 10, shop 6 and
 # 8 players are fixed in the code, because the action space and the
 # observation layout depend on them.
 

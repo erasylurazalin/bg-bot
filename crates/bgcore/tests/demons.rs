@@ -652,6 +652,8 @@ fn mind_muck_has_a_demon_consume_the_minion_you_choose() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
     // only the Hellcaller can be chosen (the source is not)
     assert!(g.players[0].pending_shop_target.is_some());
+    // and the waiting pick must be answered before anything else
+    assert!(!is_legal(&mut g, 0, Action::EndTurn));
     act(&mut g, 0, Action::TargetShop(1));
     // Cord Puller is a 1/1
     assert_eq!(stats(&g.players[0].board[0]), (5, 5));
@@ -1150,4 +1152,163 @@ fn random_murlocs_and_discovers_stay_within_the_players_tier() {
         assert!(card.tribes.has(Tribe::Murloc));
         assert!(card.tier <= 2, "seed {seed}: {} is tier {}", card.name, card.tier);
     }
+}
+
+#[test]
+fn a_waiting_tavern_pick_takes_the_first_when_the_turn_runs_out() {
+    let mut g = game(29);
+    put_on_board(&mut g, 0, "Devout Hellcaller");
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Cord Puller"]);
+    g.give(0, "Mind Muck").unwrap();
+    turn_of(&mut g, 0);
+    g.players[0].actions = g.data.rules.max_actions_per_turn - 1;
+    g.step(Action::Play { hand: 0, pos: 1 }).unwrap();
+    // the turn is over and the waiting pick took the left-most Tavern minion
+    assert!(g.players[0].done);
+    assert!(g.players[0].pending_shop_target.is_none());
+    assert_eq!(g.players[0].shop.len(), 1);
+    assert_eq!(stats(&g.players[0].board[0]), (4 + 1, 4 + 1));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn flaming_enforcer_takes_the_leftmost_of_equal_healths() {
+    let mut g = game(30);
+    put_on_board(&mut g, 0, "Flaming Enforcer");
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Cord Puller"]);
+    // equal Health: the left-most one is eaten
+    act(&mut g, 0, Action::EndTurn);
+    let names: Vec<_> = g.players[0]
+        .shop
+        .iter()
+        .map(|m| g.data.cards.get(m.card).name.clone())
+        .collect();
+    assert_eq!(names, ["Cord Puller"]);
+    assert_eq!(stats(&g.players[0].board[0]), (4 + 1, 5 + 1));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn malchezaars_uses_come_back_gold_beats_health_and_golden_doubles() {
+    // the two uses come back next turn
+    let mut g = game(33);
+    g.players[0].gold = 0;
+    g.players[0].health = 2;
+    put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].health, 1);
+    assert!(!is_legal(&mut g, 0, Action::Roll));
+    next_turn(&mut g);
+    g.players[0].gold = 0;
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 2);
+    // with Gold the next Refresh is paid in Gold and keeps the Health uses
+    g.players[0].gold = 1;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!((g.players[0].health, g.players[0].gold), (1, 0));
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 2);
+    g.check_invariants().unwrap();
+
+    // a golden refresher has twice the uses
+    let mut g = game(34);
+    g.players[0].gold = 0;
+    put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
+    g.players[0].board[0].golden = true;
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 4);
+    for _ in 0..4 {
+        act(&mut g, 0, Action::Roll);
+    }
+    assert!(!is_legal(&mut g, 0, Action::Roll));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_bought_minion_keeps_a_this_turn_tavern_buff_which_the_tavern_loses() {
+    let mut g = game(35);
+    g.players[0].gold = 0;
+    g.players[0].health = 5;
+    put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
+    put_on_board(&mut g, 0, "Ashen Corruptor");
+    set_shop(&mut g, 0, &["Buzzing Vermin"]);
+    // the Health-paid Refresh is rewound and still fires Ashen Corruptor's
+    // Tavern buff, which lasts this turn only
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].health, 5);
+    let base = g.data.cards.get(g.players[0].shop[0].card);
+    let (ba, bh) = (base.attack, base.health);
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        assert_eq!((m.attack, m.health), (c.attack + 2, c.health + 2), "{}", c.name);
+    }
+    // the bought minion keeps the buff
+    g.players[0].gold = 3;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(stats(&g.players[0].hand[0]), (ba + 2, bh + 2));
+    act(&mut g, 0, Action::EndTurn);
+    // the Tavern is plain again, the bought minion is not
+    turn_of(&mut g, 0);
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        assert_eq!((m.attack, m.health), (c.attack, c.health), "{}", c.name);
+    }
+    assert_eq!(stats(&g.players[0].hand[0]), (ba + 2, bh + 2));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn this_turn_and_this_game_tavern_buffs_stack_and_only_the_turn_one_ends() {
+    let mut g = game(36);
+    g.players[0].gold = 0;
+    g.players[0].health = 5;
+    put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
+    put_on_board(&mut g, 0, "Ashen Corruptor");
+    put_on_board(&mut g, 0, "Devilish Distractor");
+    act(&mut g, 0, Action::Roll);
+    // the Corruptor's +2/+2 this turn
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        assert_eq!((m.attack, m.health), (c.attack + 2, c.health + 2), "{}", c.name);
+    }
+    // and the Distractor's +1/+2 this game (Fortify cast on the Demon)
+    g.players[0].gold = 9;
+    g.give(0, "Fortify").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(2));
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        assert_eq!((m.attack, m.health), (c.attack + 3, c.health + 4), "{}", c.name);
+    }
+    act(&mut g, 0, Action::EndTurn);
+    turn_of(&mut g, 0);
+    // only the this-game buff is left on the fresh Tavern
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        assert_eq!((m.attack, m.health), (c.attack + 1, c.health + 2), "{}", c.name);
+    }
+    assert_eq!(g.players[0].tavern_buffs.len(), 1);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn combat_damage_is_not_rewound_and_triggers_nothing() {
+    let mut g = game(37);
+    put_on_board(&mut g, 0, "Soul Rewinder");
+    put_on_board(&mut g, 0, "Tichondrius");
+    let rewinder = stats(&g.players[0].board[0]);
+    let tichondrius = stats(&g.players[0].board[1]);
+    gang_up_on_player_0(&mut g);
+    next_turn(&mut g);
+    // the fight is lost: the damage is taken normally (tier 1 plus the one
+    // tier-1 survivor), not rewound, and Tichondrius does not react to it
+    assert_eq!(g.players[0].health, 28);
+    assert_eq!(g.players[0].last_damage, 0);
+    assert_eq!(stats(&g.players[0].board[0]), rewinder);
+    assert_eq!(stats(&g.players[0].board[1]), tichondrius);
+    // and combat kills from 1 Health, where a Health cost could not
+    let mut g = game(38);
+    put_on_board(&mut g, 0, "Soul Rewinder");
+    g.players[0].health = 1;
+    gang_up_on_player_0(&mut g);
+    next_turn(&mut g);
+    assert!(!g.players[0].alive);
+    g.check_invariants().unwrap();
 }
