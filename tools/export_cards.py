@@ -8,7 +8,9 @@ Run with the venv that has UnityPy:
 Reads (never writes) ~/hearthstone-linux/hearthstone/. Writes
 ref/bg-cards-<build>.json, a copy at ref/bg-cards.json, and
 ref/bg-disagreements.json (comparison with ref/hsjson-cards.json and with
-the Power.log pool tags, only if those exist). No network.
+the Power.log pool tags, only if those exist). Also writes
+ref/bg-meta-<build>.json and a copy at ref/bg-meta.json: heroes, hero powers,
+trinkets and Dark Gifts (see docs/card-data.md). No network.
 """
 import argparse, collections, glob, json, os, re, shutil, sys, warnings
 
@@ -48,6 +50,23 @@ SUBSETS = {1591: "DRAGON", 1592: "MURLOC", 1593: "DEMON", 1594: "BEAST", 1595: "
            1596: "PIRATE", 1688: "ELEMENTAL", 1845: "QUILBOAR", 2272: "NAGA",
            2347: "UNDEAD", 4757: "ABERRATION"}
 ID_RE = re.compile(r"^(BG|TB_Bacon|EBG|BGS)")
+
+# Meta export (heroes, hero powers, trinkets, Dark Gifts).
+T_HERO_POWER = 380           # HERO_POWER: dbf id of the hero's power
+T_ARMOR = 292
+T_SPELL_SCHOOL = 1635        # 11 = Lesser trinket, 12 = Greater trinket
+T_HERO_DRAFTABLE = 1491      # BACON_HERO_CAN_BE_DRAFTED
+T_HERO_BASE = 2376           # BACON_HEROPOWER_BASE_HERO_ID: dbf id of the hero a power belongs to
+T_SKIN, T_SKIN_PARENT = 2038, 2039
+T_COMPANION = 2130           # BACON_COMPANION_ID: the hero's buddy
+T_HERO_ARMOR_2 = 3206        # unnamed in CardDefs, mostly ARMOR minus 2 (unresolved)
+T_TRINKET = 3407             # BACON_TRINKET
+T_DARK_GIFT_MENTION = 3627   # DARK_GIFT: card grants or mentions a Dark Gift
+T_NIGHTMARE_BONUS = 3567     # IS_NIGHTMARE_BONUS: set on every Dark Gift card
+T_HIDE_COST = 684
+GIFT_ID_RE = re.compile(r"^BG36_MidGameEffect_000t\d*t?$")
+GIFT_ENCH_RE = re.compile(r"^(BG36_MidGameEffect_000t\d*t?)e\d*$")   # as in bg/battlegrounds.py
+TRINKET_SCHOOLS = {11: "LESSER", 12: "GREATER"}
 
 
 def split_alt(text):
@@ -159,6 +178,217 @@ def power_log_evidence():
             for k, v in res.items()}
 
 
+def loc(v):
+    return v["m_locValues"][0] if isinstance(v, dict) else (v[0] if v else "")
+
+
+def log_meta():
+    """Per card id from every Power.log: entity count, CARDTYPE values and zones logged."""
+    res = collections.defaultdict(lambda: {"entities": 0, "types": collections.Counter(),
+                                           "zones": collections.Counter()})
+    head = re.compile(r"GameState\.DebugPrintPower\(\) -\s+(?:FULL_ENTITY - Creating|SHOW_ENTITY - Updating)\b.*?CardID=(\S*)\s*$")
+    tag = re.compile(r"GameState\.DebugPrintPower\(\) -\s{6,}tag=(\S+) value=(\S+)")
+    for f in sorted(glob.glob(GAME + "/Logs/*/Power.log")):
+        cur = None
+        with open(f, errors="replace") as fh:
+            for line in fh:
+                if "GameState.DebugPrintPower() -" not in line:
+                    continue
+                m = head.search(line)
+                if m:
+                    cur = m.group(1) or None
+                    if cur:
+                        res[cur]["entities"] += 1
+                    continue
+                if cur:
+                    m = tag.search(line)
+                    if not m:
+                        cur = None
+                        continue
+                    k, v = m.groups()
+                    if k == "CARDTYPE":
+                        res[cur]["types"][v] += 1
+                    elif k == "ZONE":
+                        res[cur]["zones"][v] += 1
+    return res
+
+
+def text_fields(raw, nums):
+    """Same text rules as for cards: split at the real '@', fill {n}, plain versions."""
+    parts = split_alt(raw)
+    nt, un1 = fill(parts[0], nums)
+    alt = parts[1] if len(parts) > 1 else None
+    at, un2 = fill(alt, nums) if alt is not None else (None, [])
+    return {"text_template": raw, "text": nt, "text_alt": at,
+            "text_plain": plain(nt), "text_alt_plain": plain(at) if at is not None else None,
+            "text_extra_parts": parts[2:],
+            "unresolved_numbers": sorted(set(un1 + un2))}
+
+
+def export_meta(build, tags, recs, refdir, no_log):
+    cid = lambda d: recs[d]["m_noteMiniGuid"]
+    by_cid = {cid(d): d for d in recs}
+    log = None if no_log else log_meta()
+
+    def seen(card_id):
+        if log is None or card_id not in log:
+            return None if log is None else 0
+        return log[card_id]["entities"]
+
+    def common(d):
+        t = tags[d]
+        nums = [t.get(k) for k in NUM_TAGS]
+        o = {"card_id": cid(d), "dbf_id": d, "name": loc(recs[d]["m_name"]),
+             "cost": t.get(T_COST)}
+        o.update(text_fields(loc(recs[d]["m_textInHand"]), nums))
+        o["script_data"] = {"num_1": nums[0], "num_2": nums[1], "num_3": nums[2], "num_4": nums[3]}
+        o["keywords"] = sorted(KEYWORDS[k] for k in KEYWORDS if t.get(k) == 1)
+        o["lobby_subsets"] = sorted(SUBSETS[k] for k in SUBSETS if t.get(k) == 1)
+        o["duos_exclusive"] = t.get(T_DUOS_ONLY, 0) == 1
+        return o
+
+    def rawtags(d):
+        return {str(k): v for k, v in sorted(tags[d].items())}
+
+    # Heroes: CARDTYPE 3, a BG id or the draftable tag, not a cosmetic skin.
+    is_skin = lambda d: T_SKIN in tags[d] or T_SKIN_PARENT in tags[d]
+    hero_ids = [d for d in sorted(recs) if tags[d].get(T_CARDTYPE) == 3 and not is_skin(d)
+                and (T_HERO_DRAFTABLE in tags[d] or ID_RE.match(cid(d)))]
+    skins = collections.defaultdict(list)
+    for d in recs:
+        if tags[d].get(T_CARDTYPE) == 3 and T_SKIN_PARENT in tags[d]:
+            skins[tags[d][T_SKIN_PARENT]].append(cid(d))
+    hero_by_power = {}
+    heroes = []
+    for d in hero_ids:
+        t = tags[d]
+        duos = t.get(T_DUOS_ONLY, 0) == 1
+        draft = t.get(T_HERO_DRAFTABLE, 0)
+        hp = t.get(T_HERO_POWER)
+        hp_card = recs[hp] if hp in recs else None
+        if hp is not None:
+            hero_by_power.setdefault(hp, d)
+        heroes.append({
+            "card_id": cid(d), "dbf_id": d, "name": loc(recs[d]["m_name"]),
+            "health": t.get(T_HEALTH), "armor": t.get(T_ARMOR),
+            "armor_tag_3206": t.get(T_HERO_ARMOR_2), "armor_tiers": None,
+            "hero_power_dbf_id": hp,
+            "hero_power_card_id": hp_card["m_noteMiniGuid"] if hp_card else None,
+            "buddy_dbf_id": t.get(T_COMPANION),
+            "buddy_card_id": cid(t[T_COMPANION]) if t.get(T_COMPANION) in recs else None,
+            "lobby_subsets": sorted(SUBSETS[k] for k in SUBSETS if t.get(k) == 1),
+            "pool_tag": "BACON_HERO_CAN_BE_DRAFTED (1491)", "pool_tag_value": t.get(T_HERO_DRAFTABLE),
+            "duos_exclusive": duos, "in_solo_pool": draft == 1 and not duos,
+            "skin_card_ids": sorted(skins.get(d, [])),
+            "log_entities": seen(cid(d)) if log is not None else None,
+            "log_entities_with_skins": (sum(seen(c) for c in [cid(d)] + skins.get(d, []))
+                                        if log is not None else None),
+            "tags": rawtags(d)})
+
+    # Hero powers: CARDTYPE 10, a BG id or the power of a BG hero.
+    hero_of = {h["dbf_id"]: h for h in heroes}
+    hp_ids = [d for d in sorted(recs) if tags[d].get(T_CARDTYPE) == 10
+              and (ID_RE.match(cid(d)) or d in hero_by_power)]
+    powers = []
+    for d in hp_ids:
+        t = tags[d]
+        owner = hero_of.get(t.get(T_HERO_BASE)) or hero_of.get(hero_by_power.get(d))
+        o = common(d)
+        o["hide_cost"] = t.get(T_HIDE_COST, 0) == 1
+        # No passive tag exists in the data. Only the card text says it.
+        o["passive_by_text"] = bool(re.search(r"passive", o["text_template"], re.I))
+        o["is_base_power"] = d in hero_by_power
+        o["hero_card_id"] = owner["card_id"] if owner else None
+        o["hero_dbf_id"] = owner["dbf_id"] if owner else None
+        o["hero_link"] = ("BACON_HEROPOWER_BASE_HERO_ID (2376)" if t.get(T_HERO_BASE) in hero_of
+                          else "HERO_POWER (380) of the hero" if owner else None)
+        o["hero_in_solo_pool"] = owner["in_solo_pool"] if owner else None
+        o["log_entities"] = seen(cid(d)) if log is not None else None
+        o["tags"] = rawtags(d)
+        powers.append(o)
+
+    # Trinkets: CARDTYPE 44.
+    trinkets = []
+    for d in sorted(recs):
+        t = tags[d]
+        if t.get(T_CARDTYPE) != 44:
+            continue
+        c = cid(d)
+        o = common(d)
+        placeholder = "_Trinket_" in c
+        base = c[:-1] if c.endswith("t") else None
+        o["slot"] = TRINKET_SCHOOLS.get(t.get(T_SPELL_SCHOOL), "SCHOOL_%s" % t.get(T_SPELL_SCHOOL))
+        o["slot_tag"] = "SPELL_SCHOOL (1635): 11 Lesser, 12 Greater"
+        o["is_placeholder"] = placeholder
+        o["upgrade_of"] = base if base in by_cid and tags[by_cid[base]].get(T_SPELL_SCHOOL) == 11 else None
+        o["pool_tag"] = "BACON_TRINKET (3407)"
+        o["pool_tag_value"] = t.get(T_TRINKET)
+        o["mentions_dark_gift"] = t.get(T_DARK_GIFT_MENTION, 0) == 1
+        o["in_solo_pool"] = t.get(T_TRINKET) == 1 and not placeholder and not o["duos_exclusive"]
+        o["log_entities"] = seen(c) if log is not None else None
+        o["tags"] = rawtags(d)
+        trinkets.append(o)
+
+    # Dark Gifts: the SPELL card the gift is made from, id BG36_MidGameEffect_000t*.
+    ench = collections.defaultdict(list)
+    for d in recs:
+        m = GIFT_ENCH_RE.match(cid(d))
+        if m and tags[d].get(T_CARDTYPE) == 6:
+            ench[m.group(1)].append(cid(d))
+    ench_seen = collections.Counter()
+    if log is not None:
+        for c, v in log.items():
+            m = GIFT_ENCH_RE.match(c)
+            if m:
+                ench_seen[m.group(1)] += v["entities"]
+    gifts = []
+    for d in sorted(recs):
+        c = cid(d)
+        t = tags[d]
+        if t.get(T_CARDTYPE) != 5 or not GIFT_ID_RE.match(c):
+            continue
+        o = common(d)
+        o["gift_tag"] = "IS_NIGHTMARE_BONUS (3567)"
+        o["gift_tag_value"] = t.get(T_NIGHTMARE_BONUS)
+        o["is_variant"] = c.endswith("t") and c[len("BG36_MidGameEffect_000"):] != "t"
+        o["enchantment_card_ids"] = sorted(ench.get(c, []))
+        o["in_solo_pool"] = t.get(T_NIGHTMARE_BONUS) == 1 and not o["duos_exclusive"]
+        o["pool_tag"] = "IS_NIGHTMARE_BONUS (3567), no separate pool flag found"
+        o["log_entities"] = seen(c) if log is not None else None
+        o["log_enchantment_entities"] = ench_seen.get(c, 0) if log is not None else None
+        o["tags"] = rawtags(d)
+        gifts.append(o)
+    placeholders = [{"card_id": cid(d), "name": loc(recs[d]["m_name"])} for d in sorted(recs)
+                    if cid(d) == "BG36_MidGameEffect_010"]
+
+    # Cards that mention or grant a Dark Gift (tag 3627), by type, for the doc.
+    mention = collections.Counter(CARDTYPES.get(tags[d].get(T_CARDTYPE), str(tags[d].get(T_CARDTYPE)))
+                                  for d in recs if tags[d].get(T_DARK_GIFT_MENTION) == 1)
+    n = lambda xs, k="in_solo_pool": sum(1 for x in xs if x[k])
+    counts = {
+        "heroes": len(heroes), "heroes_in_solo_pool": n(heroes),
+        "heroes_duos_exclusive": sum(1 for h in heroes if h["duos_exclusive"]),
+        "hero_skins_not_exported": sum(len(v) for v in skins.values()),
+        "hero_powers": len(powers), "hero_powers_of_solo_pool_heroes": sum(1 for p in powers if p["hero_in_solo_pool"]),
+        "hero_powers_passive_by_text": sum(1 for p in powers if p["passive_by_text"]),
+        "hero_powers_without_hero": sum(1 for p in powers if p["hero_card_id"] is None),
+        "trinkets": len(trinkets), "trinkets_in_solo_pool": n(trinkets),
+        "trinkets_lesser_in_solo_pool": sum(1 for x in trinkets if x["in_solo_pool"] and x["slot"] == "LESSER"),
+        "trinkets_greater_in_solo_pool": sum(1 for x in trinkets if x["in_solo_pool"] and x["slot"] == "GREATER"),
+        "dark_gifts": len(gifts), "dark_gifts_in_solo_pool": n(gifts),
+        "cards_with_dark_gift_tag_3627": dict(mention),
+    }
+    out = {"game_build": build, "unity_version": UnityPy.config.FALLBACK_UNITY_VERSION,
+           "source": "Data/OSX/dbf.unity3d", "power_log_used": log is not None, "counts": counts,
+           "heroes": heroes, "hero_powers": powers, "trinkets": trinkets, "dark_gifts": gifts,
+           "dark_gift_placeholders": placeholders}
+    path = os.path.join(refdir, "bg-meta-%s.json" % build)
+    with open(path, "w") as fh:
+        json.dump(out, fh, indent=1, ensure_ascii=False)
+    shutil.copyfile(path, os.path.join(refdir, "bg-meta.json"))
+    print("wrote", path, counts)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--build", help="override the build number used in the file name")
@@ -256,6 +486,7 @@ def main():
         json.dump(out, fh, indent=1, ensure_ascii=False)
     shutil.copyfile(path, os.path.join(refdir, "bg-cards.json"))
     print("wrote", path, out["counts"])
+    export_meta(build, tags, recs, refdir, args.no_log)
 
     # Comparison with HearthstoneJSON and with the live Power.log tags.
     dis = {"pool_flags": [], "texts_with_separator": [], "log": {}}
