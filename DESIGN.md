@@ -205,12 +205,12 @@ value in `rules.toml`.
 - All ten tribes of the current patch: Beast, Mech, Dragon, Murloc, Demon,
   Pirate, Elemental, Undead, Quilboar, Aberration (Naga left the game).
   Every real solo-pool minion of those tribes, plus neutrals, tiers 1 to 7.
-  A card with two tribes is in if either is. For now every lobby has all
-  ten; the five-random-tribes lobby is next on TODO.md.
+  A card with two tribes is in if either is. Each game draws 5 of the
+  ten (see "The lobby's tribes").
 - Spells: every solo-pool Tavern spell.
 - Out because they need systems this game doesn't have: Dark Paradox
-  (Dark Gifts), Armor Stash (armor), Unmasked Identity (hero powers). No
-  Duos-only cards.
+  (Dark Gifts). Armor Stash and Unmasked Identity come with the heroes
+  run. No Duos-only cards.
 - The game's own card data is exported by `tools/export_cards.py`, see
   `docs/card-data.md`.
 - Generated cards that belong to these tribes are in too, though never in
@@ -667,6 +667,41 @@ the next attacker is tracked with a pointer that shifts when minions left of
 it die or appear; Windfury swings twice in a row. Safety cap: 500 attacks,
 then a tie.
 
+## Heroes (2026-10-25)
+
+**Which heroes.** The data is `ref/bg-meta.json`. Each hero plays with its
+STARTING power, `heroes[].hero_power_dbf_id`. The `hero_powers` list also
+holds powers a hero only gets later (Aranna's Spectral Sight is unlocked,
+Bru'kan's Water Invocation is chosen): those are never a starting power.
+Naga are gone, so Naga-tied heroes are out. A hero tied to tribes is
+offered only if at least one of its tribes is in the lobby. Only the heroes
+built so far are offered; the rest come in batches. Buddies are out, except
+through E.T.C.'s power (a late batch).
+
+**The pick.** Before turn 1 each player is offered `hero_choices` heroes
+(rules.toml, 2 by default, a free account; the Battle Pass gives 4 and a
+reroll, which we skip) and picks one. No hero is offered twice in a lobby.
+The pick happens before turn 1 starts, so start-of-turn powers work on
+turn 1.
+
+**Health and armor.** A hero has 30 Health plus its armor from the data
+(Patchwerk: 60 Health from his power, no armor). Every point of damage to
+the hero, from fights and from the shop (Health costs, "take damage"),
+takes armor first. Armor never comes back unless a card says so. Self
+damage (Health costs, "take damage") counts the same whether armor or
+Health took it, like every other self damage, and Soul Rewinder and Ashen
+Corruptor rewind all of it: the armor lost comes back as armor.
+Armor Stash ("Set your Armor to 5") sets, it doesn't add.
+
+**The power.** A button power costs its Gold and works once per turn
+unless its text says otherwise ("Twice per turn", "Once per game", "Unlocks
+at Tier N", "Unlocks on Turn N"). A power with no cost in the data costs 0
+or is passive.
+
+**Getting a card from the Tavern without buying it** ("steal"): the card
+goes to hand for free, leaves the pool like a bought copy, and is not a
+buy, so "after you buy" triggers don't fire.
+
 ## Actions
 
 Buy a minion or the spell, sell, play (minion to a position, or cast a
@@ -677,6 +712,5 @@ has the layout. A turn is capped at 60 actions.
 
 ## Not in this game yet
 
-Hero choice and hero powers, armor, trinkets, quests, Dark Gifts, the
-Deity, the other five tribes (coming one run at a time), tribe bans per
-lobby, Duos. Naga are gone from the real game.
+Most hero powers (they come in batches), trinkets, quests, Dark Gifts,
+Duos. Naga are gone from the real game.
