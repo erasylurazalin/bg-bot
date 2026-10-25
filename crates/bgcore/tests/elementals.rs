@@ -1299,33 +1299,56 @@ fn a_slab_triple_fires_again_this_turn() {
 }
 
 #[test]
-fn a_prison_triple_starts_unarmed() {
-    // the copy Activated and armed; the golden from the triple is not armed,
-    // and can arm itself again this turn
-    let mut g = game(55);
+fn a_prison_triple_carries_its_copies_arms() {
+    // the third copy arrives without a buy (stolen from the Tavern), so the
+    // two armed copies' arms are still held: the golden carries both (1 + 1),
+    // and its own press adds its double, so the next minion bought gives
+    // 1x + 1x + 2x = 4x its stats
+    let mut g = game(56);
     put_on_board(&mut g, 0, "Living Prison", false);
-    set_shop(&mut g, 0, &["Cord Puller", "Living Prison", "Living Prison"]);
-    g.players[0].shop[0].attack = 5;
-    g.players[0].shop[0].health = 6;
+    put_on_board(&mut g, 0, "Living Prison", false);
     g.players[0].gold = 20;
     act(&mut g, 0, Action::Activate(0));
-    assert_eq!(g.players[0].board[0].improvements, 1, "armed");
-    act(&mut g, 0, Action::Buy(1)); // the second Prison
-    act(&mut g, 0, Action::Buy(1)); // the third triples
+    act(&mut g, 0, Action::Activate(1));
+    set_shop(&mut g, 0, &["Living Prison"]);
+    cast(&mut g, "Enchanted Lasso"); // steals the Prison: the triple forms
     let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    assert_eq!(g.players[0].hand[gold].improvements, 2, "both arms carried");
     play(&mut g, 0, gold as u8, 0);
-    assert_eq!(g.players[0].board[0].improvements, 0, "the golden starts unarmed");
-    let base = stats(&g.players[0].board[0]);
-    act(&mut g, 0, Action::Buy(0));
-    assert_eq!(stats(&g.players[0].board[0]), base, "an unarmed golden gains nothing");
-    // its own Activate is fresh too: arm it, buy, gain double the stats
-    act(&mut g, 0, Action::Activate(0));
+    act(&mut g, 0, Action::Activate(0)); // the golden's own press
+    assert_eq!(g.players[0].board[0].improvements, 4);
     set_shop(&mut g, 0, &["Cord Puller"]);
     g.players[0].shop[0].attack = 5;
     g.players[0].shop[0].health = 6;
     act(&mut g, 0, Action::Buy(0));
-    assert_eq!(stats(&g.players[0].board[0]), (base.0 + 10, base.1 + 12),
-        "the armed golden takes double the bought stats");
+    // golden Prison 8/10 plus four times the bought 5/6
+    assert_eq!(stats(&g.players[0].board[0]), (8 + 20, 10 + 24));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn buying_the_third_prison_spends_the_copies_arms_on_it() {
+    // buying the third Prison fires the two armed copies on it before the
+    // triple (after_buy_effects runs before check_triple): each gains its
+    // stats, the golden carries no arms
+    let mut g = game(57);
+    put_on_board(&mut g, 0, "Living Prison", false);
+    put_on_board(&mut g, 0, "Living Prison", false);
+    g.players[0].gold = 20;
+    act(&mut g, 0, Action::Activate(0));
+    act(&mut g, 0, Action::Activate(1));
+    set_shop(&mut g, 0, &["Living Prison"]);
+    act(&mut g, 0, Action::Buy(0)); // base 4/5: each armed copy gains +4/+5
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    assert_eq!(g.players[0].hand[gold].improvements, 0, "the arms were spent");
+    // golden Prison 8/10 plus the two +4/+5 gains
+    assert_eq!(stats(&g.players[0].hand[gold]), (8 + 8, 10 + 10));
+    play(&mut g, 0, gold as u8, 0);
+    set_shop(&mut g, 0, &["Cord Puller"]);
+    g.players[0].shop[0].attack = 5;
+    g.players[0].shop[0].health = 6;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(stats(&g.players[0].board[0]), (16, 20), "unarmed: nothing gained");
     g.check_invariants().unwrap();
 }
 

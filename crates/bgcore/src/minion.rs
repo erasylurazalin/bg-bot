@@ -105,6 +105,9 @@ pub struct Minion {
     /// Per-minion scaling or progress counter (Lurking Leviathan, Spark
     /// Snapper, Patient Scout tier offset, and the count of an event
     /// trigger, which `events_left` turns into the "(N left!)" number).
+    /// For a Living Prison it is the arms it holds: shares of the next
+    /// bought minion's stats this turn (a golden's own press is worth two),
+    /// which add up in a triple instead of taking the highest count.
     pub improvements: u16,
     /// Extra times the next Magnetization to this minion happens this turn
     /// (Drone Duplicator). Used up by that Magnetization, cleared at the end

@@ -2385,18 +2385,18 @@ impl Game {
         }
         let bought = pl.hand[last];
         for m in &mut pl.board {
-            if m.improvements == 0 {
+            // A Prison's held arms are shares of the bought minion's stats
+            // (its own golden press is worth two); arms from several copies
+            // add up.
+            let arms = m.improvements;
+            if arms == 0 {
                 continue;
             }
-            let mut mul = 0;
-            for (card, golden) in m.parts() {
-                if matches!(cards.get(card).activate, Some(a) if a.effect == Effect::ArmNextBuy) {
-                    mul = mul.max(if golden { 2 } else { 1 });
-                }
-            }
-            if mul > 0 {
+            if m.parts().any(|(card, _)| {
+                matches!(cards.get(card).activate, Some(a) if a.effect == Effect::ArmNextBuy)
+            }) {
                 m.improvements = 0;
-                buff(m, bought.attack * mul, bought.health * mul);
+                buff(m, bought.attack * arms as i32, bought.health * arms as i32);
             }
         }
     }
@@ -3861,7 +3861,8 @@ impl Game {
             }
             Effect::ArmNextBuy => {
                 if let Some(m) = self.players[p].board.get_mut(*pos) {
-                    m.improvements = 1;
+                    // A golden Prison's own press is worth two shares.
+                    m.improvements = m.improvements.saturating_add(mul as u16);
                 }
             }
             Effect::GainHighestTavernStats => {
@@ -5502,6 +5503,10 @@ impl Game {
         let Some((x_card, x_count, wild)) = plan else { return };
         let pl = &mut self.players[p];
         let mut gold = pl.make_card(cards, x_card, true, 0);
+        // A Living Prison's arms are the one "this turn" effect that adds up
+        // in a triple instead of taking the highest count.
+        let arms_add =
+            matches!(cards.get(x_card).activate, Some(a) if a.effect == Effect::ArmNextBuy);
         // a Beast on the board carries the until-next-turn Beast bonus; the
         // golden one in hand gets it when it is played, not twice
         let beast_bonus = pl.beast_bonus;
@@ -5539,12 +5544,26 @@ impl Game {
                 if same {
                     gold.keywords.0 |= m.keywords.0;
                     gold.pool_copies = gold.pool_copies.saturating_add(m.pool_copies);
-                    // `improvements` is one minion's own count (Leviathan
-                    // summons, Snapper growth, Hopebringer shields, Wrathguard
-                    // Activates, Patient Scout tier, Treasure Parrot damage,
-                    // Scarlet Survivor's flag, event counters): the golden
-                    // copy takes the highest of the three, never the sum.
-                    gold.improvements = gold.improvements.max(m.improvements);
+                    // Drone Duplicator's extra Magnetizations are a "this
+                    // turn" effect a pressed copy was still holding: the
+                    // golden keeps them, adding.
+                    gold.extra_magnetize =
+                        gold.extra_magnetize.saturating_add(m.extra_magnetize);
+                    if arms_add {
+                        // A Living Prison's arms add up the same way: each
+                        // held arm is one share of the next bought minion's
+                        // stats (the golden's own press adds its double on
+                        // top).
+                        gold.improvements = gold.improvements.saturating_add(m.improvements);
+                    } else {
+                        // `improvements` is one minion's own count (Leviathan
+                        // summons, Snapper growth, Hopebringer shields,
+                        // Wrathguard Activates, Patient Scout tier, Treasure
+                        // Parrot damage, Scarlet Survivor's flag, event
+                        // counters): the golden copy takes the highest of the
+                        // three, never the sum.
+                        gold.improvements = gold.improvements.max(m.improvements);
+                    }
                 } else {
                     // A stand-in brings its buffs and its Divine Shield (the
                     // point of the card); its pool copies go back to the pool.
@@ -5556,12 +5575,6 @@ impl Game {
         take_from(pl, x_card, x_count, true, &mut gold);
         if let Some((w, n)) = wild {
             take_from(pl, w, n, false, &mut gold);
-        }
-        // An armed Living Prison's arm is a leftover of its copies, not a
-        // progress count: the golden starts unarmed (uses belong to the
-        // minion, "a golden from a triple starts fresh").
-        if matches!(cards.get(x_card).activate, Some(a) if a.effect == Effect::ArmNextBuy) {
-            gold.improvements = 0;
         }
         self.add_to_hand(p, gold);
         for m in returned {
@@ -5718,7 +5731,10 @@ impl Game {
         }
         self.run_end_of_turn(p);
         let cards = &self.data.cards;
-        for m in &mut self.players[p].board {
+        // "This turn" effects end with the turn wherever the minion is: a
+        // golden made from a triple holds its copies' in hand.
+        let pl = &mut self.players[p];
+        for m in pl.board.iter_mut().chain(pl.hand.iter_mut()) {
             m.extra_magnetize = 0;
             // An armed Living Prison that found no minion to buy is wasted.
             if m.improvements > 0

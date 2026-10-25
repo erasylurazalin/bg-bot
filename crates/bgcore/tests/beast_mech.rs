@@ -322,6 +322,24 @@ fn name(g: &Game, m: &Minion) -> String {
     g.data.cards.get(m.card).name.clone()
 }
 
+/// Replace a player's shop with the named cards, through the pool.
+fn set_shop(g: &mut Game, p: usize, names: &[&str]) {
+    let old: Vec<Minion> = g.players[p].shop.drain(..).collect();
+    for m in old {
+        if !g.data.cards.get(m.card).token {
+            let slot = g.data.cards.get(m.card).pool_slot as usize;
+            g.pool[slot] += m.pool_copies;
+        }
+    }
+    for n in names {
+        let c = g.data.cards.by_name(n).unwrap();
+        let slot = g.data.cards.get(c).pool_slot as usize;
+        g.pool[slot] -= 1;
+        let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+        g.players[p].shop.push(m);
+    }
+}
+
 fn stats(m: &Minion) -> (i32, i32) {
     (m.attack, m.health)
 }
@@ -489,34 +507,51 @@ fn drone_duplicator_makes_the_next_magnetization_happen_again() {
 }
 
 #[test]
-fn a_drone_duplicator_triple_starts_without_extra_magnetizations() {
-    // the copy Activated and holds a charge; the golden from the triple
-    // starts with none, and Magnetizing into it happens once
-    let mut g = game(11);
+fn drone_presses_carry_into_the_triple_and_add_up() {
+    // two Drones pressed (1 extra each), then the third bought: the golden
+    // carries 1 + 1 = 2 extras, its own press adds 2 more (it starts with a
+    // fresh Activate), so the next Magnetization happens 4 extra times,
+    // 5 in total
+    let mut g = game(9);
+    put_on_board(&mut g, 0, "Drone Duplicator");
     put_on_board(&mut g, 0, "Drone Duplicator");
     g.players[0].gold = 20;
     act(&mut g, 0, Action::Activate(0));
-    assert_eq!(g.players[0].board[0].extra_magnetize, 1);
-    let dd = g.data.cards.by_name("Drone Duplicator").unwrap();
-    for m in g.players[0].shop.drain(..) {
-        let slot = g.data.cards.get(m.card).pool_slot as usize;
-        g.pool[slot] += m.pool_copies;
-    }
-    for _ in 0..2 {
-        let slot = g.data.cards.get(dd).pool_slot as usize;
-        g.pool[slot] -= 1;
-        let m = g.players[0].make_card(&g.data.cards, dd, false, 1);
-        g.players[0].shop.push(m);
-        act(&mut g, 0, Action::Buy(0));
-    }
+    act(&mut g, 0, Action::Activate(1));
+    set_shop(&mut g, 0, &["Drone Duplicator"]);
+    act(&mut g, 0, Action::Buy(0)); // the third copy triples
+    assert_eq!(g.players[0].board.len(), 0, "the copies went into the golden");
     let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
     act(&mut g, 0, Action::Play { hand: gold as u8, pos: 0 });
-    assert!(g.players[0].board[0].golden);
-    assert_eq!(g.players[0].board[0].extra_magnetize, 0, "the charge died with the copies");
+    assert_eq!(g.players[0].board[0].extra_magnetize, 2, "the copies' extras carried");
+    act(&mut g, 0, Action::Activate(0));
+    assert_eq!(g.players[0].board[0].extra_magnetize, 4, "the golden's own press adds 2");
     g.give(0, "Annoy-o-Module").unwrap(); // 2/4 Magnetic
     let h = g.players[0].hand.len() as u8 - 1;
-    act(&mut g, 0, Action::Play { hand: h, pos: 0 });
-    assert_eq!(g.players[0].board[0].magnetizations, 1, "merges once, not twice");
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    assert_eq!(g.players[0].board[0].magnetizations, 5, "1 + 4 extra");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_drone_triple_keeps_only_its_copies_pressed_extras() {
+    // both copies pressed, the golden not: 1 + 1 carried, 3 Magnetizations
+    // in total
+    let mut g = game(10);
+    put_on_board(&mut g, 0, "Drone Duplicator");
+    put_on_board(&mut g, 0, "Drone Duplicator");
+    g.players[0].gold = 20;
+    act(&mut g, 0, Action::Activate(0));
+    act(&mut g, 0, Action::Activate(1));
+    set_shop(&mut g, 0, &["Drone Duplicator"]);
+    act(&mut g, 0, Action::Buy(0));
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    act(&mut g, 0, Action::Play { hand: gold as u8, pos: 0 });
+    assert_eq!(g.players[0].board[0].extra_magnetize, 2);
+    g.give(0, "Annoy-o-Module").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    assert_eq!(g.players[0].board[0].magnetizations, 3);
     g.check_invariants().unwrap();
 }
 

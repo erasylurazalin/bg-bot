@@ -66,12 +66,12 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Hero takes damage | `after_hero_damage = [..]`, `DamageHero` | `take_hero_damage`, `take_shop_damage` (can kill), `can_pay_health` | Wrath Weaver |
 | Refresh | `health_refreshes`, `RefreshKind` | `refresh_shop`, `fill_shop`, Roll in `apply` | Malchezaar |
 | After the Tavern is Refreshed | `refresh_buff = [a, h]` (effect and spell effect) | `Player.refresh_buff`, `apply_refresh_buff` (end of `refresh_shop`, `refresh_with_spells`, `refresh_with_tribe`, and in `start_turn` when the turn-start roll changed the Tavern); a fight adds through `SideOutcome::refresh_buff_gain` | Waveling |
-| Limited uses per turn | `choose_one_cover` (Trailblazer combines), `health_refreshes` (Malchezaar's Health Refreshes), `teaches_spell` (Mycologist teachings) | `Minion.uses_left`, set from `Minion::turn_uses` at start of turn and when the minion is played; spent by `take_trailblazer_cover`, `spend_health_refresh`, `magicfin_teach`. Uses belong to the minion: sold with it, and a golden from a triple starts fresh | Thorned Trailblazer |
+| Limited uses per turn | `choose_one_cover` (Trailblazer combines), `health_refreshes` (Malchezaar's Health Refreshes), `teaches_spell` (Mycologist teachings) | `Minion.uses_left`, set from `Minion::turn_uses` at start of turn and when the minion is played; spent by `take_trailblazer_cover`, `spend_health_refresh`, `magicfin_teach`. Uses belong to the minion: sold with it. A golden from a triple starts with fresh uses, but it keeps the copies' pending "this turn" effects, adding: Drone Duplicator's held extra Magnetizations (`extra_magnetize`, summed) and Living Prison's held arms (`improvements`, summed) | Thorned Trailblazer |
 | Free Refreshes | `free_refreshes = n` | `Player.free_rolls`, used first by Roll | Refreshing Anomaly |
 | Sell, improving a shared count | `on_sell = { effect = { improving_counter = "baller", buff } }` | `Effect::BuffAllImproving`, `Counter::Baller` | Fire Baller |
 | Played minion of a tribe gets Divine Shield | `play_shield = "elemental"` | `give_play_shield` (right after the board insert, before the Battlecry), `Minion.temp_shield`, cleared in `start_turn` | Ichoron the Protector |
 | After you buy a minion | `after_buy = { buff, multiply, golden_multiply }` | `after_buy_effects` in `Action::Buy`, before `check_triple`; uses `Minion.activated` as the once-per-turn flag | Stone Age Slab |
-| Arm for the next buy | `activate = { effect = { arm_next_buy = true } }` | `Effect::ArmNextBuy` (armed in `improvements`), `after_buy_effects`, cleared in `finish_shop` | Living Prison |
+| Arm for the next buy | `activate = { effect = { arm_next_buy = true } }` | `Effect::ArmNextBuy` (armed in `improvements`: a held arm is one share of the next bought minion's stats, a golden's own press two; arms add up, and a triple's golden keeps the copies' held arms), `after_buy_effects`, cleared in `finish_shop` | Living Prison |
 | Triple wildcard | `triple_wildcard = "elemental"` | `check_triple_tracking` (`TriplePlan`) | Elemental of Surprise |
 | Excess damage on a kill | `overkill = true` | `attack_swings` in fight.rs (golden hits both neighbours) | Wildfire Elemental |
 | Spell target that reads the Tavern or this turn | `half_of_highest`, `per_played_this_turn` | `SpellTarget::HalfOfHighestTavern`, `BuffPerTribePlayed`, `Player.elementals_played_turn` | Arcane Absorption |
@@ -263,7 +263,8 @@ Triple Reward spell.
 - **`Minion` is `Copy`, fixed size; no heap in fights or shop actions** (`arrayvec`).
   A new `Minion` field must be set in `CardDb::make` (only constructor), recorded in
   `record.rs`, and survive `Minion::magnetize`/triple merges (triple: `check_triple`
-  sums buffs, takes the highest `improvements`).
+  sums buffs, takes the highest `improvements`; a Living Prison's arms and a Drone
+  Duplicator's held extras are the exceptions, they sum).
 - **`SideOutcome` is `Copy` with fixed arrays** (cards, lockboxes, permanent stats by
   start slot). Anything a fight gives the owner goes through it and
   `apply_side_outcome`.
