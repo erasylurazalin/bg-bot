@@ -45,9 +45,6 @@ pub enum Tribe {
 }
 
 impl Tribe {
-    /// The five tribes the observation has slots for (layout frozen until the
-    /// run that redoes the observation for every tribe). Rules use `EVERY`.
-    pub const ALL: [Tribe; 5] = [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon];
     /// Every tribe a card can have.
     pub const EVERY: [Tribe; 10] = [
         Tribe::Beast,

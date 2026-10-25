@@ -38,9 +38,9 @@ pub const MAX_TIER: u8 = 6;
 /// The highest tier a card can have. Tier 7 minions are in the pool but the
 /// Tavern never offers them: only an effect that names tier 7 produces one.
 pub const CARD_MAX_TIER: u8 = 7;
-/// Slots in `Player::final_tribes`: Beast, Mech, neutral, Dragon, Murloc,
-/// Demon. A multi-tribe minion counts in each of its tribes' slots.
-pub const TRIBES: usize = 6;
+/// Slots in `Player::final_tribes`: the ten tribes in `Tribe::EVERY` order,
+/// then neutral. A multi-tribe minion counts in each of its tribes' slots.
+pub const TRIBES: usize = 11;
 
 /// Cards and rules together, shared by every game.
 #[derive(Debug, Clone)]

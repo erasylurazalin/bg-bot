@@ -3,7 +3,7 @@
 //! Card ids are written as id + 1 (0 for none); the model embeds them.
 //!
 //! Layout, in order:
-//! - SCALARS own values (103):
+//! - SCALARS own values (160):
 //!   0  gold
 //!   1  tier
 //!   2  upgrade_cost
@@ -48,30 +48,59 @@
 //!   41 winners_bread_health
 //!   42 next_turn_buff_attack (board buff queued for the start of next turn, summed)
 //!   43 next_turn_buff_health
-//!   44..68 Tavern buffs: 6 filters (any, Beast, Mech, Dragon, Murloc, Demon)
-//!   x 4 values (this game attack, this game health, this turn attack, this
-//!   turn health)
-//!   68 last_spell (card id + 1 of the last Tavern spell cast, 0 if none)
+//!   44..87 Tavern buffs: 11 filters (any, then the ten tribes in `Tribe::EVERY`
+//!   order) x 4 values (this game attack, this game health, this turn attack,
+//!   this turn health)
+//!   88 last_spell (card id + 1 of the last Tavern spell cast, 0 if none)
+//!   89..98 lobby, multi-hot over `Tribe::EVERY`: the five tribes this game's
+//!   lobby holds
+//!   99 gem_attack (what one of this player's Blood Gems gives)
+//!   100 gem_health
+//!   101 barrage_attack (Blood Gem Barrage: Gems every explicit Refresh gives)
+//!   102 barrage_health
+//!   103 refresh_attack (Waveling / En-Djinn / Easterly Winds: what the next
+//!   explicit Refresh gives one Tavern minion, summed)
+//!   104 refresh_health
+//!   105 baller (Ballers sold this game)
+//!   106 undead_attack (the Undead bonus, this game wherever they are)
+//!   107 undead_health
+//!   108 knight_deaths (Eternal Knights that died this game)
+//!   109 elementals_played (Elementals played from hand this turn)
+//!   110 golden_played (Golden minions played from hand this game)
+//!   111 gold_spent (gold spent this turn)
+//!   112 discarded (cards discarded this game)
+//!   113 spells_cast (Tavern spells cast this game)
+//!   114 trailblazer_covers (Choose One cards left this turn that get both
+//!   effects, Thorned Trailblazer)
+//!   115 sharing_is_caring (pending Sharing is Caring Start of Combat triggers)
+//!   116 last_damage (damage the hero took last, what a rewind gives back)
+//!   117..122 own Deity, DEITY_FEATURES values: present, C'Thun, Y'Shaarj
+//!   (one-hot), attack, health, golden
 //!   Pending choice (while one is open, only actions that answer it are legal):
-//!   69 pending_target (a minion target on the board only)
-//!   70 pending_target_shop (a minion target on the board or in the Tavern)
-//!   71 pending_shop_slot (a Tavern slot target: a chosen consume or Fishbait)
-//!   72 pending_choose_one
-//!   73 pending_discover
-//!   74 pending_source (board slot + 1 of the minion whose effect it is, 0 for a spell)
-//!   75 pending_card (card id + 1 of that minion, or of the last spell cast
+//!   123 pending_target (a minion target on the board only)
+//!   124 pending_target_shop (a minion target on the board or in the Tavern)
+//!   125 pending_shop_slot (a Tavern slot target: a chosen consume or Fishbait)
+//!   126 pending_choose_one
+//!   127 pending_discover
+//!   128 pending_discard (a "discard a card" pick, Mangled Bandit)
+//!   129 pending_source (board slot + 1 of the minion whose effect it is, 0 for a spell)
+//!   130 pending_card (card id + 1 of that minion, or of the last spell cast
 //!   for a spell target or Choose One spell; 0 for a Discover)
-//!   76 pending_runs (times the target effect runs: Brann, Balinda)
-//!   77 pending_attack (Attack the target effect gives or sets, 0 if none)
-//!   78 pending_health
-//!   79..86 target kind, one-hot: buff, consume, spell, trigger_rally,
+//!   131 pending_runs (times the target effect runs: Brann, Balinda)
+//!   132 pending_attack (Attack the target effect gives or sets, 0 if none)
+//!   133 pending_health
+//!   134..140 target kind, one-hot: buff, consume, spell, trigger_rally,
 //!   trigger_battlecry, any_buff, any_set_stats
-//!   86 shop_consume_left (Tavern minions the chosen consume still takes)
-//!   87 shop_fishbait (1 if the Tavern slot target puts a Fishbait there)
-//!   88 discover_locked (1 if the Discovered minion is locked in hand a turn)
-//!   89 discover_damage (1 if the hero takes damage equal to the chosen Tier)
-//!   90 discover_queue (more Discovers waiting after this one)
-//!   91..103 Choose One options, 2 x 6: kind one-hot (minion target, spell
+//!   141 shop_consume_left (Tavern minions the chosen consume still takes)
+//!   142 shop_fishbait (1 if the Tavern slot target puts a Fishbait there)
+//!   143 discover_locked (1 if the Discovered minion is locked in hand a turn)
+//!   144 discover_damage (1 if the hero takes damage equal to the chosen Tier)
+//!   145 discover_doomed (1 if the Discovered minion dies when played this
+//!   turn, Tomb Turning)
+//!   146 discover_both (1 if the Discovered Choose One minion gets both
+//!   effects, Fandral's Fortune)
+//!   147 discover_queue (more Discovers waiting after this one)
+//!   148..159 Choose One options, 2 x 6: kind one-hot (minion target, spell
 //!   bonus, spell target, spell effect), attack, health
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
@@ -79,13 +108,16 @@
 //!   board (BOARD = 7), Discover options (DISCOVER = 3). A Tavern spell that
 //!   sits in a minion slot (Saloon's Finest) is written there as a spell.
 //! - 7 opponents, in seat order starting after me (each OPP_BLOCK values):
-//!   OPP_SCALARS (13): alive, health, tier, seen (1 if I ever fought them),
+//!   OPP_SCALARS (28): alive, health, tier, seen (1 if I ever fought them),
 //!   turns_since (since that fight), next (my opponent this turn, or the ghost
 //!   of this player), last (my opponent last turn), placement (0 while
-//!   alive), then the tribe counts of their last seen board (Beast, Mech,
-//!   Dragon, Murloc, Demon); followed by that board (BOARD = 7 card slots).
+//!   alive), the tribe counts of their last seen board (ten values,
+//!   `Tribe::EVERY` order), their Deity as it went into that fight
+//!   (DEITY_FEATURES values, laid out like mine), and their Blood Gem value
+//!   and Tavern spell bonus as they went into it (attack, health each); then
+//!   that board (BOARD = 7 card slots).
 //!
-//! A card slot is SLOT_FEATURES (32) values:
+//! A card slot is SLOT_FEATURES (78) values:
 //!   0  present (1 if occupied)
 //!   1  card id + 1 (one id space covering minions, tokens and spells)
 //!   2  is_spell
@@ -97,36 +129,54 @@
 //!      Goldrinn bonus it gets when played. Equal to attack otherwise.
 //!   6  fight_health
 //!   7  golden
-//!   8  tier (1 to 6)
-//!   9..14 tribes, multi-hot: Beast, Mech, Dragon, Murloc, Demon (an all-type
-//!         minion sets all five, a neutral none)
-//!   14..21 keywords: taunt, divine_shield, windfury, venomous, reborn,
+//!   8  tier (1 to 7)
+//!   9..18 tribes, multi-hot over `Tribe::EVERY` (an all-type minion sets all
+//!          ten, a neutral none)
+//!   19..25 keywords: taunt, divine_shield, windfury, venomous, reborn,
 //!          magnetic, stealth
-//!   21 magnetizations (total Magnetizations on this minion)
-//!   22 volumizers (Volumizers this minion is or carries)
-//!   23 improvements (the minion's own count: Leviathan, Spark Snapper, Patient
+//!   26 magnetizations (total Magnetizations on this minion)
+//!   27 volumizers (Volumizers this minion is or carries)
+//!   28 improvements (the minion's own count: Leviathan, Spark Snapper, Patient
 //!      Scout, Hopebringer, Sacrificial Wrathguard, event counters)
-//!   24 events_left (the "(N left!)" of its event trigger, 0 if it has none)
-//!   25 from_pool (1 if backed by pool copies, 0 if generated, token or spell)
-//!   26 winners_bread (pending Winner's Bread stacks)
-//!   27 taught_spell (card id + 1 of the spell a Magicfin token casts, 0 if none)
-//!   28 locked_turns (turns it stays locked in hand, Search Through Time)
-//!   29 activate_cost (Gold of its Activate, 0 if it has none or it was
+//!   29 events_left (the "(N left!)" of its event trigger, 0 if it has none)
+//!   30 from_pool (1 if backed by pool copies, 0 if generated, token or spell)
+//!   31 winners_bread (pending Winner's Bread stacks)
+//!   32 taught_spell (card id + 1 of the spell a Magicfin token casts, 0 if none)
+//!   33 locked_turns (turns it stays locked in hand, Search Through Time)
+//!   34 activate_cost (Gold of its Activate, 0 if it has none or it was
 //!      already used this turn: once per turn per minion)
-//!   30 extra_magnetize (extra times the next Magnetization to it happens, Drone Duplicator)
-//!   31 cost (a spell's printed cost; the buy cost for a minion)
+//!   35 extra_magnetize (extra times the next Magnetization to it happens, Drone Duplicator)
+//!   36 cost (a spell's printed cost; the buy cost for a minion)
+//!   37 gem_attack (Attack this minion has gained from Blood Gems)
+//!   38 gem_health
+//!   39 temp_shield (its Divine Shield is Ichoron's, off at the start of the
+//!      next turn)
+//!   40 doomed (dies right after it is played this turn, Tomb Turning)
+//!   41 both_effects (a Choose One card with both effects combined, Fandral's
+//!      Fortune's pick or a Trailblazer cover)
+//!   42 linked (one of a group of cards that came together; playing one
+//!      discards the others)
+//!   43 link_group (the group id it shares with them)
+//!   44 tavern_spell (a spell that is a Tavern spell, not a plain one: Blood
+//!      Gem, Triple Reward)
+//!   45 no_reward (a Golden play of it gives no Triple Reward, Aureate
+//!      Laureate and Silent Deliverer's minions)
+//!   46..61 attached: card id + 1 of each effect-carrying card Magnetized
+//!          into it, in the order they merged (0 for an empty slot)
+//!   62..77 attached_golden: whether that attachment is golden
 //! An empty slot is all zeros.
 
-use crate::cards::{Aura, CardDb, ChooseOption, SpellEffect, SpellTarget, Tribe};
+use crate::cards::{Aura, CardDb, ChooseOption, Counter, DeityKind, SpellEffect, SpellTarget, Tribe};
+use crate::fight::Deity;
 use crate::game::{Game, Opponent, Player, ShopTargetKind, TargetKind};
-use crate::minion::{Keywords, Minion};
+use crate::minion::{Keywords, MAX_ATTACHED, Minion};
 use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 
 pub const SHOP_SPELL: usize = 1;
-pub const SLOT_FEATURES: usize = 32;
+pub const SLOT_FEATURES: usize = 78;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
-pub const SCALARS: usize = 103;
-pub const OPP_SCALARS: usize = 13;
+pub const SCALARS: usize = 160;
+pub const OPP_SCALARS: usize = 28;
 
 pub const OWN_SLOTS: usize = SHOP + SHOP_SPELL + HAND + BOARD + DISCOVER;
 pub const OPP_SLOTS: usize = (PLAYERS - 1) * BOARD;
@@ -185,32 +235,81 @@ pub const SCALAR_WINNERS_BREAD_ATTACK: usize = 40;
 pub const SCALAR_WINNERS_BREAD_HEALTH: usize = 41;
 pub const SCALAR_NEXT_TURN_BUFF_ATTACK: usize = 42;
 pub const SCALAR_NEXT_TURN_BUFF_HEALTH: usize = 43;
-/// 6 filters (any, then the five tribes in `Tribe::ALL` order) x 4 values.
+/// 11 filters (any, then the ten tribes in `Tribe::EVERY` order) x 4 values.
 pub const SCALAR_TAVERN_BUFFS: usize = 44;
-pub const TAVERN_BUFF_FILTERS: usize = 6;
-pub const SCALAR_LAST_SPELL: usize = 68;
-pub const SCALAR_PENDING_TARGET: usize = 69;
-pub const SCALAR_PENDING_TARGET_SHOP: usize = 70;
-pub const SCALAR_PENDING_SHOP_SLOT: usize = 71;
-pub const SCALAR_PENDING_CHOOSE_ONE: usize = 72;
-pub const SCALAR_PENDING_DISCOVER: usize = 73;
-pub const SCALAR_PENDING_SOURCE: usize = 74;
-pub const SCALAR_PENDING_CARD: usize = 75;
-pub const SCALAR_PENDING_RUNS: usize = 76;
-pub const SCALAR_PENDING_ATTACK: usize = 77;
-pub const SCALAR_PENDING_HEALTH: usize = 78;
+pub const TAVERN_BUFF_FILTERS: usize = 11;
+pub const SCALAR_LAST_SPELL: usize = 88;
+/// LOBBY_TRIBES values, `Tribe::EVERY` order: the tribes of this game's lobby.
+pub const SCALAR_LOBBY: usize = 89;
+pub const LOBBY_TRIBES: usize = Tribe::EVERY.len();
+/// What one of this player's Blood Gems gives.
+pub const SCALAR_GEM_ATTACK: usize = 99;
+pub const SCALAR_GEM_HEALTH: usize = 100;
+/// Blood Gem Barrage: Gems every explicit Refresh gives the Tavern.
+pub const SCALAR_BARRAGE_ATTACK: usize = 101;
+pub const SCALAR_BARRAGE_HEALTH: usize = 102;
+/// What an explicit Refresh gives one Tavern minion (Waveling, En-Djinn
+/// Blazer, Easterly Winds), summed.
+pub const SCALAR_REFRESH_ATTACK: usize = 103;
+pub const SCALAR_REFRESH_HEALTH: usize = 104;
+/// Ballers sold this game.
+pub const SCALAR_BALLER: usize = 105;
+/// The Undead bonus, this game wherever they are.
+pub const SCALAR_UNDEAD_ATTACK: usize = 106;
+pub const SCALAR_UNDEAD_HEALTH: usize = 107;
+/// Eternal Knights that died this game.
+pub const SCALAR_KNIGHT_DEATHS: usize = 108;
+/// Elementals played from hand this turn.
+pub const SCALAR_ELEMENTALS_PLAYED: usize = 109;
+/// Golden minions played from hand this game.
+pub const SCALAR_GOLDEN_PLAYED: usize = 110;
+/// Gold spent this turn.
+pub const SCALAR_GOLD_SPENT: usize = 111;
+/// Cards discarded this game.
+pub const SCALAR_DISCARDED: usize = 112;
+/// Tavern spells cast this game.
+pub const SCALAR_SPELLS_CAST: usize = 113;
+/// Choose One cards left this turn that get both effects (Thorned
+/// Trailblazer).
+pub const SCALAR_TRAILBLAZER_COVERS: usize = 114;
+/// Pending Sharing is Caring Start of Combat triggers.
+pub const SCALAR_SHARING_IS_CARING: usize = 115;
+/// Damage the hero took last, what a rewind gives back.
+pub const SCALAR_LAST_DAMAGE: usize = 116;
+/// Own Deity, DEITY_FEATURES values: present, C'Thun, Y'Shaarj (one-hot),
+/// attack, health, golden.
+pub const SCALAR_DEITY: usize = 117;
+pub const DEITY_FEATURES: usize = 6;
+pub const SCALAR_DEITY_CTHUN: usize = SCALAR_DEITY + 1;
+pub const SCALAR_DEITY_YSHAARJ: usize = SCALAR_DEITY + 2;
+pub const SCALAR_DEITY_ATTACK: usize = SCALAR_DEITY + 3;
+pub const SCALAR_DEITY_HEALTH: usize = SCALAR_DEITY + 4;
+pub const SCALAR_DEITY_GOLDEN: usize = SCALAR_DEITY + 5;
+pub const SCALAR_PENDING_TARGET: usize = 123;
+pub const SCALAR_PENDING_TARGET_SHOP: usize = 124;
+pub const SCALAR_PENDING_SHOP_SLOT: usize = 125;
+pub const SCALAR_PENDING_CHOOSE_ONE: usize = 126;
+pub const SCALAR_PENDING_DISCOVER: usize = 127;
+pub const SCALAR_PENDING_DISCARD: usize = 128;
+pub const SCALAR_PENDING_SOURCE: usize = 129;
+pub const SCALAR_PENDING_CARD: usize = 130;
+pub const SCALAR_PENDING_RUNS: usize = 131;
+pub const SCALAR_PENDING_ATTACK: usize = 132;
+pub const SCALAR_PENDING_HEALTH: usize = 133;
 /// One-hot over buff, consume, spell, trigger_rally, trigger_battlecry,
 /// any_buff, any_set_stats.
-pub const SCALAR_TARGET_KIND: usize = 79;
+pub const SCALAR_TARGET_KIND: usize = 134;
 pub const TARGET_KINDS: usize = 7;
-pub const SCALAR_SHOP_CONSUME_LEFT: usize = 86;
-pub const SCALAR_SHOP_FISHBAIT: usize = 87;
-pub const SCALAR_DISCOVER_LOCKED: usize = 88;
-pub const SCALAR_DISCOVER_DAMAGE: usize = 89;
-pub const SCALAR_DISCOVER_QUEUE: usize = 90;
+pub const SCALAR_SHOP_CONSUME_LEFT: usize = 141;
+pub const SCALAR_SHOP_FISHBAIT: usize = 142;
+pub const SCALAR_DISCOVER_LOCKED: usize = 143;
+pub const SCALAR_DISCOVER_DAMAGE: usize = 144;
+pub const SCALAR_DISCOVER_DOOMED: usize = 145;
+pub const SCALAR_DISCOVER_BOTH: usize = 146;
+pub const SCALAR_DISCOVER_QUEUE: usize = 147;
 /// 2 options x CHOOSE_FEATURES: kind one-hot (minion target, spell bonus,
 /// spell target, spell effect), attack, health.
-pub const SCALAR_CHOOSE_ONE: usize = 91;
+pub const SCALAR_CHOOSE_ONE: usize = 148;
 pub const CHOOSE_FEATURES: usize = 6;
 
 pub const SLOT_PRESENT: usize = 0;
@@ -222,27 +321,56 @@ pub const SLOT_FIGHT_ATTACK: usize = 5;
 pub const SLOT_FIGHT_HEALTH: usize = 6;
 pub const SLOT_GOLDEN: usize = 7;
 pub const SLOT_TIER: usize = 8;
-/// Five values, `Tribe::ALL` order: Beast, Mech, Dragon, Murloc, Demon.
+/// Ten values, `Tribe::EVERY` order: Beast, Mech, Dragon, Murloc, Demon,
+/// Pirate, Elemental, Undead, Quilboar, Aberration.
 pub const SLOT_TRIBES: usize = 9;
 pub const SLOT_BEAST: usize = SLOT_TRIBES;
 pub const SLOT_MECH: usize = SLOT_TRIBES + 1;
 pub const SLOT_DRAGON: usize = SLOT_TRIBES + 2;
 pub const SLOT_MURLOC: usize = SLOT_TRIBES + 3;
 pub const SLOT_DEMON: usize = SLOT_TRIBES + 4;
+pub const SLOT_PIRATE: usize = SLOT_TRIBES + 5;
+pub const SLOT_ELEMENTAL: usize = SLOT_TRIBES + 6;
+pub const SLOT_UNDEAD: usize = SLOT_TRIBES + 7;
+pub const SLOT_QUILBOAR: usize = SLOT_TRIBES + 8;
+pub const SLOT_ABERRATION: usize = SLOT_TRIBES + 9;
 /// Seven values, `Keywords::ALL` order.
-pub const SLOT_KEYWORDS: usize = 14;
+pub const SLOT_KEYWORDS: usize = 19;
 pub const SLOT_STEALTH: usize = SLOT_KEYWORDS + 6;
-pub const SLOT_MAGNETIZATIONS: usize = 21;
-pub const SLOT_VOLUMIZERS: usize = 22;
-pub const SLOT_IMPROVEMENTS: usize = 23;
-pub const SLOT_EVENTS_LEFT: usize = 24;
-pub const SLOT_FROM_POOL: usize = 25;
-pub const SLOT_WINNERS_BREAD: usize = 26;
-pub const SLOT_TAUGHT_SPELL: usize = 27;
-pub const SLOT_LOCKED: usize = 28;
-pub const SLOT_ACTIVATE_COST: usize = 29;
-pub const SLOT_EXTRA_MAGNETIZE: usize = 30;
-pub const SLOT_COST: usize = 31;
+pub const SLOT_MAGNETIZATIONS: usize = 26;
+pub const SLOT_VOLUMIZERS: usize = 27;
+pub const SLOT_IMPROVEMENTS: usize = 28;
+pub const SLOT_EVENTS_LEFT: usize = 29;
+pub const SLOT_FROM_POOL: usize = 30;
+pub const SLOT_WINNERS_BREAD: usize = 31;
+pub const SLOT_TAUGHT_SPELL: usize = 32;
+pub const SLOT_LOCKED: usize = 33;
+pub const SLOT_ACTIVATE_COST: usize = 34;
+pub const SLOT_EXTRA_MAGNETIZE: usize = 35;
+pub const SLOT_COST: usize = 36;
+/// Attack and Health this minion has gained from Blood Gems.
+pub const SLOT_GEM_ATTACK: usize = 37;
+pub const SLOT_GEM_HEALTH: usize = 38;
+/// Its Divine Shield lasts only until the next turn (Ichoron the Protector).
+pub const SLOT_TEMP_SHIELD: usize = 39;
+/// It dies right after it is played this turn (Tomb Turning).
+pub const SLOT_DOOMED: usize = 40;
+/// A Choose One card with both effects combined (Fandral's Fortune pick).
+pub const SLOT_BOTH_EFFECTS: usize = 41;
+/// One of a group of cards that came linked; playing one discards the rest.
+pub const SLOT_LINKED: usize = 42;
+/// The id its group shares.
+pub const SLOT_LINK_GROUP: usize = 43;
+/// A Tavern spell (not a plain spell like a Blood Gem or Triple Reward).
+pub const SLOT_TAVERN_SPELL: usize = 44;
+/// A Golden play of it gives no Triple Reward (Aureate Laureate, Silent
+/// Deliverer's minions).
+pub const SLOT_NO_REWARD: usize = 45;
+/// MAX_ATTACHED values: card id + 1 of each effect-carrying card Magnetized
+/// into it, in merge order (0 for an empty slot).
+pub const SLOT_ATTACHED: usize = 46;
+/// MAX_ATTACHED values: whether each attachment is golden.
+pub const SLOT_ATTACHED_GOLDEN: usize = SLOT_ATTACHED + MAX_ATTACHED;
 
 pub const OPP_ALIVE: usize = 0;
 pub const OPP_HEALTH: usize = 1;
@@ -252,15 +380,35 @@ pub const OPP_TURNS_SINCE: usize = 4;
 pub const OPP_NEXT: usize = 5;
 pub const OPP_LAST: usize = 6;
 pub const OPP_PLACEMENT: usize = 7;
-/// Five values, `Tribe::ALL` order.
+/// Ten values, `Tribe::EVERY` order.
 pub const OPP_TRIBES: usize = 8;
+/// Their Deity as it went into the last fight, DEITY_FEATURES values laid out
+/// like `SCALAR_DEITY`.
+pub const OPP_DEITY: usize = 18;
+pub const OPP_DEITY_CTHUN: usize = OPP_DEITY + 1;
+pub const OPP_DEITY_YSHAARJ: usize = OPP_DEITY + 2;
+pub const OPP_DEITY_ATTACK: usize = OPP_DEITY + 3;
+pub const OPP_DEITY_HEALTH: usize = OPP_DEITY + 4;
+pub const OPP_DEITY_GOLDEN: usize = OPP_DEITY + 5;
+/// Their Blood Gem value as it went into that fight.
+pub const OPP_GEM_ATTACK: usize = 24;
+pub const OPP_GEM_HEALTH: usize = 25;
+/// Their Tavern spell bonus as it went into that fight.
+pub const OPP_SPELL_ATTACK: usize = 26;
+pub const OPP_SPELL_HEALTH: usize = 27;
 
 const _: () = assert!(SCALAR_TAVERN_BUFFS + TAVERN_BUFF_FILTERS * 4 == SCALAR_LAST_SPELL);
+const _: () = assert!(SCALAR_LOBBY + LOBBY_TRIBES == SCALAR_GEM_ATTACK);
+const _: () = assert!(SCALAR_DEITY + DEITY_FEATURES == SCALAR_PENDING_TARGET);
 const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_LEFT);
 const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALARS);
-const _: () = assert!(SLOT_TRIBES + Tribe::ALL.len() == SLOT_KEYWORDS);
+const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
-const _: () = assert!(OPP_TRIBES + Tribe::ALL.len() == OPP_SCALARS);
+const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
+const _: () = assert!(SLOT_ATTACHED_GOLDEN + MAX_ATTACHED == SLOT_FEATURES);
+const _: () = assert!(OPP_TRIBES + Tribe::EVERY.len() == OPP_DEITY);
+const _: () = assert!(OPP_DEITY + DEITY_FEATURES == OPP_GEM_ATTACK);
+const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_SCALARS);
 
 /// Holy Vanguard's bonus on this minion if its hero is at `health`: +30/+30
 /// (+60 golden) at 15 Health or less, added at the start of a fight.
@@ -285,6 +433,21 @@ struct Owner {
     beast_bonus: (i32, i32),
 }
 
+/// A Deity block, `DEITY_FEATURES` values starting at `base`: present, which
+/// god (one-hot), attack, health, golden. All zeros when there is none.
+fn write_deity(o: &mut [f32], db: &CardDb, d: Option<Deity>) {
+    let Some(d) = d else { return };
+    o[0] = 1.0;
+    match db.get(d.card).deity {
+        Some(DeityKind::Cthun) => o[1] = 1.0,
+        Some(DeityKind::Yshaarj) => o[2] = 1.0,
+        None => {}
+    }
+    o[3] = d.attack as f32;
+    o[4] = d.health as f32;
+    o[5] = d.golden as u8 as f32;
+}
+
 fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     let db = &game.data.cards;
     let c = db.get(m.card);
@@ -292,6 +455,11 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     o[SLOT_CARD_ID] = m.card as f32 + 1.0;
     o[SLOT_IS_SPELL] = c.is_spell() as u8 as f32;
     o[SLOT_TIER] = c.tier as f32;
+    o[SLOT_TAVERN_SPELL] = c.tavern_spell as u8 as f32;
+    o[SLOT_LINKED] = (m.linked != 0) as u8 as f32;
+    o[SLOT_LINK_GROUP] = (m.linked & 0x3fff) as f32;
+    o[SLOT_BOTH_EFFECTS] = m.both_effects as u8 as f32;
+    o[SLOT_NO_REWARD] = m.no_reward as u8 as f32;
     if c.is_spell() {
         o[SLOT_COST] = c.cost as f32;
         return;
@@ -304,7 +472,7 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     o[SLOT_FIGHT_ATTACK] = (m.attack + v + ba) as f32;
     o[SLOT_FIGHT_HEALTH] = (m.health + v + bh) as f32;
     o[SLOT_GOLDEN] = m.golden as u8 as f32;
-    for (j, t) in Tribe::ALL.into_iter().enumerate() {
+    for (j, t) in Tribe::EVERY.into_iter().enumerate() {
         o[SLOT_TRIBES + j] = c.tribes.has(t) as u8 as f32;
     }
     for (j, (bit, _)) in Keywords::ALL.iter().enumerate() {
@@ -325,6 +493,14 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
         m.parts().find_map(|(card, _)| db.get(card).activate).map_or(0.0, |a| a.cost as f32)
     };
     o[SLOT_EXTRA_MAGNETIZE] = m.extra_magnetize as f32;
+    o[SLOT_GEM_ATTACK] = m.gem_attack as f32;
+    o[SLOT_GEM_HEALTH] = m.gem_health as f32;
+    o[SLOT_TEMP_SHIELD] = m.temp_shield as u8 as f32;
+    o[SLOT_DOOMED] = m.doomed as u8 as f32;
+    for (j, a) in m.attached_slice().iter().enumerate() {
+        o[SLOT_ATTACHED + j] = a.card as f32 + 1.0;
+        o[SLOT_ATTACHED_GOLDEN + j] = a.golden as u8 as f32;
+    }
 }
 
 fn write_slots<'a>(
@@ -380,11 +556,10 @@ fn target_kind(k: TargetKind) -> (usize, (i32, i32)) {
         TargetKind::TriggerBattlecry => (4, (0, 0)),
         TargetKind::AnyBuff { attack, health } => (5, (attack, health)),
         TargetKind::AnySetStats { attack, health } => (6, (attack, health)),
-        // Same slot as the Make Golden spell (the layout is frozen until the
-        // observation run).
+        // Same slot as the Make Golden spell.
         TargetKind::MakeGolden { .. } => (2, (0, 0)),
         // Maw Caster's destroy shares the Consume slot, Dead Bellringer's the
-        // buff slot (the layout is frozen until the observation run).
+        // buff slot.
         TargetKind::DestroyDiscover { .. } | TargetKind::DestroyCopy { .. } => (1, (0, 0)),
         TargetKind::RebornDestroy { attack, health, .. } => (0, (attack, health)),
     }
@@ -454,7 +629,8 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     s[SCALAR_BROOD_OF_NOZDORMU] = pl.brood_of_nozdormu as f32;
     s[SCALAR_UPPER_HAND] = pl.upper_hand as f32;
     s[SCALAR_PATIENT_SCOUT_TIER] = pl.patient_scout_tier(db) as f32;
-    s[SCALAR_TASTY_LOBSTER] = pl.improve[crate::cards::Counter::TastyLobster.index()] as f32;
+    s[SCALAR_TASTY_LOBSTER] = pl.improve[Counter::TastyLobster.index()] as f32;
+    s[SCALAR_BALLER] = pl.improve[Counter::Baller.index()] as f32;
     s[SCALAR_BEAST_BONUS_ATTACK] = pl.beast_bonus.0 as f32;
     s[SCALAR_BEAST_BONUS_HEALTH] = pl.beast_bonus.1 as f32;
     s[SCALAR_DEATHRATTLES] = pl.deathrattles_triggered as f32;
@@ -480,6 +656,27 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
         s[k + 1] += b.health as f32;
     }
     s[SCALAR_LAST_SPELL] = pl.last_spell.map_or(0.0, |c| c as f32 + 1.0);
+    for (j, t) in Tribe::EVERY.into_iter().enumerate() {
+        s[SCALAR_LOBBY + j] = game.lobby.has(t) as u8 as f32;
+    }
+    s[SCALAR_GEM_ATTACK] = pl.gem_attack as f32;
+    s[SCALAR_GEM_HEALTH] = pl.gem_health as f32;
+    s[SCALAR_BARRAGE_ATTACK] = pl.barrage.0 as f32;
+    s[SCALAR_BARRAGE_HEALTH] = pl.barrage.1 as f32;
+    s[SCALAR_REFRESH_ATTACK] = pl.refresh_buff.0 as f32;
+    s[SCALAR_REFRESH_HEALTH] = pl.refresh_buff.1 as f32;
+    s[SCALAR_UNDEAD_ATTACK] = pl.undead_bonus.0 as f32;
+    s[SCALAR_UNDEAD_HEALTH] = pl.undead_bonus.1 as f32;
+    s[SCALAR_KNIGHT_DEATHS] = pl.knight_deaths as f32;
+    s[SCALAR_ELEMENTALS_PLAYED] = pl.elementals_played_turn as f32;
+    s[SCALAR_GOLDEN_PLAYED] = pl.golden_played as f32;
+    s[SCALAR_GOLD_SPENT] = pl.gold_spent_turn as f32;
+    s[SCALAR_DISCARDED] = pl.discarded as f32;
+    s[SCALAR_SPELLS_CAST] = pl.spells_cast as f32;
+    s[SCALAR_TRAILBLAZER_COVERS] = pl.trailblazer_covers as f32;
+    s[SCALAR_SHARING_IS_CARING] = pl.sharing_is_caring as f32;
+    s[SCALAR_LAST_DAMAGE] = pl.last_damage as f32;
+    write_deity(&mut s[SCALAR_DEITY..], db, pl.deity);
 
     // The card a pending choice comes from: the source minion, or for a
     // spell (no source) the spell just cast.
@@ -518,10 +715,14 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
             s[base + 4] = a as f32;
             s[base + 5] = h as f32;
         }
+    } else if pl.pending_discard.is_some() {
+        s[SCALAR_PENDING_DISCARD] = 1.0;
     } else if !pl.discover.is_empty() {
         s[SCALAR_PENDING_DISCOVER] = 1.0;
         s[SCALAR_DISCOVER_LOCKED] = pl.discover_locked as u8 as f32;
         s[SCALAR_DISCOVER_DAMAGE] = pl.discover_damage_from.is_some() as u8 as f32;
+        s[SCALAR_DISCOVER_DOOMED] = pl.discover_doomed as u8 as f32;
+        s[SCALAR_DISCOVER_BOTH] = pl.discover_both as u8 as f32;
     }
     s[SCALAR_DISCOVER_QUEUE] = pl.discover_queue.len() as f32;
 }
@@ -572,10 +773,15 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
         o[OPP_PLACEMENT] = them.placement as f32;
         for m in &seen.board {
             let c = db.get(m.card);
-            for (j, t) in Tribe::ALL.into_iter().enumerate() {
+            for (j, t) in Tribe::EVERY.into_iter().enumerate() {
                 o[OPP_TRIBES + j] += c.tribes.has(t) as u8 as f32;
             }
         }
+        write_deity(&mut o[OPP_DEITY..], db, seen.deity);
+        o[OPP_GEM_ATTACK] = seen.gem.0 as f32;
+        o[OPP_GEM_HEALTH] = seen.gem.1 as f32;
+        o[OPP_SPELL_ATTACK] = seen.spell.0 as f32;
+        o[OPP_SPELL_HEALTH] = seen.spell.1 as f32;
         i += OPP_SCALARS;
         let owner = Owner { health: them.health, beast_bonus: (0, 0) };
         i += write_slots(game, &mut out[i..], BOARD, seen.board.iter(), owner);

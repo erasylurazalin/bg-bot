@@ -172,7 +172,7 @@ fn random_play_never_panics_and_undoes_cleanly() {
         v
     };
     let mut prompts: Vec<String> = Vec::new();
-    for (i, tribe) in Tribe::ALL.into_iter().enumerate() {
+    for (i, tribe) in Tribe::EVERY.into_iter().enumerate() {
         let dir = tmp(&format!("fuzz{i}"));
         let mut s = session(tribe, 100 + i as u64, &dir);
         let mut rng = Rng::new(i as u64 + 1);

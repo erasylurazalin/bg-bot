@@ -146,8 +146,8 @@ impl VecEnv {
 
     /// Take `actions[i]` for the waiting seat of game i. Fills
     /// `places[i, seat]`, `tier_turns[i, seat, 0..6]` and
-    /// `tribes[i, seat, 0..TRIBES]` (Beast, Mech, neutral, Dragon, Murloc,
-    /// Demon) for every seat knocked out or finished during this call,
+    /// `tribes[i, seat, 0..TRIBES]` (the ten tribes in `Tribe::EVERY` order,
+    /// then neutral) for every seat knocked out or finished during this call,
     /// including a hero knocked out by its own effect damage mid-turn (0 for
     /// the rest), and `reset[i]` for games that ended and restarted. Raises
     /// on an illegal action.
@@ -388,11 +388,39 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SCALAR_TAVERN_BUFFS", obs::SCALAR_TAVERN_BUFFS)?;
     m.add("TAVERN_BUFF_FILTERS", obs::TAVERN_BUFF_FILTERS)?;
     m.add("SCALAR_LAST_SPELL", obs::SCALAR_LAST_SPELL)?;
+    m.add("SCALAR_LOBBY", obs::SCALAR_LOBBY)?;
+    m.add("LOBBY_TRIBES", obs::LOBBY_TRIBES)?;
+    m.add("SCALAR_GEM_ATTACK", obs::SCALAR_GEM_ATTACK)?;
+    m.add("SCALAR_GEM_HEALTH", obs::SCALAR_GEM_HEALTH)?;
+    m.add("SCALAR_BARRAGE_ATTACK", obs::SCALAR_BARRAGE_ATTACK)?;
+    m.add("SCALAR_BARRAGE_HEALTH", obs::SCALAR_BARRAGE_HEALTH)?;
+    m.add("SCALAR_REFRESH_ATTACK", obs::SCALAR_REFRESH_ATTACK)?;
+    m.add("SCALAR_REFRESH_HEALTH", obs::SCALAR_REFRESH_HEALTH)?;
+    m.add("SCALAR_BALLER", obs::SCALAR_BALLER)?;
+    m.add("SCALAR_UNDEAD_ATTACK", obs::SCALAR_UNDEAD_ATTACK)?;
+    m.add("SCALAR_UNDEAD_HEALTH", obs::SCALAR_UNDEAD_HEALTH)?;
+    m.add("SCALAR_KNIGHT_DEATHS", obs::SCALAR_KNIGHT_DEATHS)?;
+    m.add("SCALAR_ELEMENTALS_PLAYED", obs::SCALAR_ELEMENTALS_PLAYED)?;
+    m.add("SCALAR_GOLDEN_PLAYED", obs::SCALAR_GOLDEN_PLAYED)?;
+    m.add("SCALAR_GOLD_SPENT", obs::SCALAR_GOLD_SPENT)?;
+    m.add("SCALAR_DISCARDED", obs::SCALAR_DISCARDED)?;
+    m.add("SCALAR_SPELLS_CAST", obs::SCALAR_SPELLS_CAST)?;
+    m.add("SCALAR_TRAILBLAZER_COVERS", obs::SCALAR_TRAILBLAZER_COVERS)?;
+    m.add("SCALAR_SHARING_IS_CARING", obs::SCALAR_SHARING_IS_CARING)?;
+    m.add("SCALAR_LAST_DAMAGE", obs::SCALAR_LAST_DAMAGE)?;
+    m.add("SCALAR_DEITY", obs::SCALAR_DEITY)?;
+    m.add("DEITY_FEATURES", obs::DEITY_FEATURES)?;
+    m.add("SCALAR_DEITY_CTHUN", obs::SCALAR_DEITY_CTHUN)?;
+    m.add("SCALAR_DEITY_YSHAARJ", obs::SCALAR_DEITY_YSHAARJ)?;
+    m.add("SCALAR_DEITY_ATTACK", obs::SCALAR_DEITY_ATTACK)?;
+    m.add("SCALAR_DEITY_HEALTH", obs::SCALAR_DEITY_HEALTH)?;
+    m.add("SCALAR_DEITY_GOLDEN", obs::SCALAR_DEITY_GOLDEN)?;
     m.add("SCALAR_PENDING_TARGET", obs::SCALAR_PENDING_TARGET)?;
     m.add("SCALAR_PENDING_TARGET_SHOP", obs::SCALAR_PENDING_TARGET_SHOP)?;
     m.add("SCALAR_PENDING_SHOP_SLOT", obs::SCALAR_PENDING_SHOP_SLOT)?;
     m.add("SCALAR_PENDING_CHOOSE_ONE", obs::SCALAR_PENDING_CHOOSE_ONE)?;
     m.add("SCALAR_PENDING_DISCOVER", obs::SCALAR_PENDING_DISCOVER)?;
+    m.add("SCALAR_PENDING_DISCARD", obs::SCALAR_PENDING_DISCARD)?;
     m.add("SCALAR_PENDING_SOURCE", obs::SCALAR_PENDING_SOURCE)?;
     m.add("SCALAR_PENDING_CARD", obs::SCALAR_PENDING_CARD)?;
     m.add("SCALAR_PENDING_RUNS", obs::SCALAR_PENDING_RUNS)?;
@@ -404,6 +432,8 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SCALAR_SHOP_FISHBAIT", obs::SCALAR_SHOP_FISHBAIT)?;
     m.add("SCALAR_DISCOVER_LOCKED", obs::SCALAR_DISCOVER_LOCKED)?;
     m.add("SCALAR_DISCOVER_DAMAGE", obs::SCALAR_DISCOVER_DAMAGE)?;
+    m.add("SCALAR_DISCOVER_DOOMED", obs::SCALAR_DISCOVER_DOOMED)?;
+    m.add("SCALAR_DISCOVER_BOTH", obs::SCALAR_DISCOVER_BOTH)?;
     m.add("SCALAR_DISCOVER_QUEUE", obs::SCALAR_DISCOVER_QUEUE)?;
     m.add("SCALAR_CHOOSE_ONE", obs::SCALAR_CHOOSE_ONE)?;
     m.add("CHOOSE_FEATURES", obs::CHOOSE_FEATURES)?;
@@ -422,6 +452,11 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SLOT_DRAGON", obs::SLOT_DRAGON)?;
     m.add("SLOT_MURLOC", obs::SLOT_MURLOC)?;
     m.add("SLOT_DEMON", obs::SLOT_DEMON)?;
+    m.add("SLOT_PIRATE", obs::SLOT_PIRATE)?;
+    m.add("SLOT_ELEMENTAL", obs::SLOT_ELEMENTAL)?;
+    m.add("SLOT_UNDEAD", obs::SLOT_UNDEAD)?;
+    m.add("SLOT_QUILBOAR", obs::SLOT_QUILBOAR)?;
+    m.add("SLOT_ABERRATION", obs::SLOT_ABERRATION)?;
     m.add("SLOT_KEYWORDS", obs::SLOT_KEYWORDS)?;
     m.add("SLOT_STEALTH", obs::SLOT_STEALTH)?;
     m.add("SLOT_MAGNETIZATIONS", obs::SLOT_MAGNETIZATIONS)?;
@@ -435,6 +470,18 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SLOT_ACTIVATE_COST", obs::SLOT_ACTIVATE_COST)?;
     m.add("SLOT_EXTRA_MAGNETIZE", obs::SLOT_EXTRA_MAGNETIZE)?;
     m.add("SLOT_COST", obs::SLOT_COST)?;
+    m.add("SLOT_GEM_ATTACK", obs::SLOT_GEM_ATTACK)?;
+    m.add("SLOT_GEM_HEALTH", obs::SLOT_GEM_HEALTH)?;
+    m.add("SLOT_TEMP_SHIELD", obs::SLOT_TEMP_SHIELD)?;
+    m.add("SLOT_DOOMED", obs::SLOT_DOOMED)?;
+    m.add("SLOT_BOTH_EFFECTS", obs::SLOT_BOTH_EFFECTS)?;
+    m.add("SLOT_LINKED", obs::SLOT_LINKED)?;
+    m.add("SLOT_LINK_GROUP", obs::SLOT_LINK_GROUP)?;
+    m.add("SLOT_TAVERN_SPELL", obs::SLOT_TAVERN_SPELL)?;
+    m.add("SLOT_NO_REWARD", obs::SLOT_NO_REWARD)?;
+    m.add("SLOT_ATTACHED", obs::SLOT_ATTACHED)?;
+    m.add("SLOT_ATTACHED_GOLDEN", obs::SLOT_ATTACHED_GOLDEN)?;
+    m.add("ATTACHED_SLOTS", bgcore::minion::MAX_ATTACHED)?;
     m.add("OPP_ALIVE", obs::OPP_ALIVE)?;
     m.add("OPP_HEALTH", obs::OPP_HEALTH)?;
     m.add("OPP_TIER", obs::OPP_TIER)?;
@@ -444,6 +491,16 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("OPP_LAST", obs::OPP_LAST)?;
     m.add("OPP_PLACEMENT", obs::OPP_PLACEMENT)?;
     m.add("OPP_TRIBES", obs::OPP_TRIBES)?;
+    m.add("OPP_DEITY", obs::OPP_DEITY)?;
+    m.add("OPP_DEITY_CTHUN", obs::OPP_DEITY_CTHUN)?;
+    m.add("OPP_DEITY_YSHAARJ", obs::OPP_DEITY_YSHAARJ)?;
+    m.add("OPP_DEITY_ATTACK", obs::OPP_DEITY_ATTACK)?;
+    m.add("OPP_DEITY_HEALTH", obs::OPP_DEITY_HEALTH)?;
+    m.add("OPP_DEITY_GOLDEN", obs::OPP_DEITY_GOLDEN)?;
+    m.add("OPP_GEM_ATTACK", obs::OPP_GEM_ATTACK)?;
+    m.add("OPP_GEM_HEALTH", obs::OPP_GEM_HEALTH)?;
+    m.add("OPP_SPELL_ATTACK", obs::OPP_SPELL_ATTACK)?;
+    m.add("OPP_SPELL_HEALTH", obs::OPP_SPELL_HEALTH)?;
     m.add("ACTION_KINDS", ACTION_KINDS.to_vec())?;
     m.add("END_TURN", Action::EndTurn.index())?;
     m.add("LEARNER", LEARNER)?;

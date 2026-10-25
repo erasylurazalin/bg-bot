@@ -357,11 +357,17 @@ Robust Evolution (the second cast evolves the result again) and Lost
 Staff of Hamuul ("cast on this" triggers fire twice). Channel the
 Devourer's second cast does nothing: the minion is already sold.
 
-**Two kinds of Refresh.** The Tavern roll at the start of a turn is not a
-Refresh for card purposes. Only an explicit Refresh is (the button, paid
-with Gold, Health or free, and effects that say "Refresh" like Snarky
-Shark's). Fodders queued for "your next Refreshes" only go into explicit
-ones.
+**Two kinds of Refresh.** An explicit Refresh is the button (paid with
+Gold, Health or free) or an effect that says "Refresh" (Snarky Shark).
+Fodders queued for "your next Refreshes" only go into explicit ones. The
+roll at the start of a turn also counts as a Refresh for "after the
+Tavern is Refreshed" buffs (Waveling, En-Djinn Blazer, Easterly Winds,
+Blood Gem Barrage), but only if the Tavern changed: an unfrozen Tavern
+always changes; a frozen one counts only if it had to fill an empty slot.
+A fully frozen, full Tavern isn't refreshed. So buying one card and
+freezing makes the next turn's roll fill that slot, and the buffs land
+again on every Tavern minion, the frozen ones included (Barrage) or on one
+random one (Waveling's amount).
 
 **Demon Fodder** feeds itself to a random friendly Demon on the Refresh it
 appears in, and its slot refills with a minion (the spell slot too). With
@@ -418,7 +424,8 @@ counter.
   step. A step is +1 Attack for Fire, +1 Health for Snow, +2/+2 for Air;
   a golden Baller's step is double (+2, +2, +4/+4).
 - **"After the Tavern is Refreshed this game"** (Waveling, En-Djinn Blazer,
-  Easterly Winds) only fires on explicit Refreshes, like the Fodder. All
+  Easterly Winds) fires on every Refresh, the turn-start roll included when
+  the Tavern changed (see "Two kinds of Refresh"). All
   of them add into one player-level amount, and each Refresh gives that
   whole amount to one random Tavern minion: two dead Wavelings give one
   minion +8/+8, never +4/+4 to two minions.
@@ -540,7 +547,8 @@ power (the Tavern spell bonus).
 - **Gem Confiscation:** plays 3 Gems on the target, then takes all the
   Blood Gem stats from its neighbours: they lose them, the target gains
   them.
-- **Blood Gem Barrage:** on every explicit Refresh, every Tavern minion
+- **Blood Gem Barrage:** on every Refresh (see "Two kinds of Refresh"),
+  every Tavern minion
   gets +2/+2 worth of Blood Gems, plus the Gem bonus once (with Gems at
   +2/+2, that's +3/+3), plus spell power (it's a Tavern spell). Each cast
   adds on top (Veteran Brigand's three casts too).
@@ -611,8 +619,30 @@ the lobby (`lobby_subsets` in the export: Nadina the Red needs Dragon,
 Disguised Graverobber needs Undead, and 26 Tavern spells are tied the same
 way). The Deity only exists with Aberrations in. Nothing from outside the
 lobby ever shows up: every Discover, "get a random X" and random draw uses
-the lobby. (Rare trinket, hero and timewarp effects break this in the real
+the lobby. Planar Telescope and Friendly Bounty count only lobby tribes
+for "your most common type" (a Felboar without Quilboar in the lobby is
+just a Demon). (Rare trinket, hero and timewarp effects break this in the real
 game; none exist here yet, and each can widen its own draw when it comes.)
+
+**What the bot sees (the observation, 2026-10-25).** What a player sees
+in the real client, nothing more. Own side: everything the interface or
+the cards show (gold, tier, gem value, spell power, the Deity's stats,
+"N left" counters, improved numbers). Opponents: health, tier, placement,
+the lobby, and from your last fight against them their board, Deity stats,
+spell power and gem value (shown during combat only, so they are "as last
+seen"). The tracker in `~/projects/bg` reads exactly this from a real
+game (`bg/battlegrounds.py`, the `Fight` record), and the suggestion
+window will build the observation from it.
+
+**Uses run out per minion, and a golden from a triple starts fresh.**
+Effects with limited uses (Activate once per turn, Stone Age Slab once per
+turn, Thorned Trailblazer's combines each turn) belong to the minion. A
+triple's golden comes with its own full uses, and the copies take their
+leftovers with them: an unused Trailblazer tripled gives a golden with
+exactly 2 combines that turn, not 3; a used-up one tripled gives a fresh 2.
+(The strategy is to use them up before tripling.) Progress counters are
+different: they keep the highest count (see "Triples keep the highest
+count").
 
 **Pairing:** at the start of each turn, shuffle the living players and
 pair them, avoiding the previous opponent if possible (up to 16 shuffles).

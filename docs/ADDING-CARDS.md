@@ -148,12 +148,11 @@ exactly one legal target and drops the effect when there is none.
 1. `cards.rs`: add the variant to `Tribe`, add it to `Tribe::EVERY` (rules use this) and
    `tribe()` parse, and bump the length in `EVERY: [Tribe; N]`. The mask `Tribes`
    is a `u16` (ten tribes fit with room for more); `Tribes::ALL` ("all types")
-   gets the new bit. `Tribe::ALL` stays the five-tribe list the observation
-   uses until the observation run: do not touch it before then.
+   gets the new bit.
 2. Tribe loops that must use `EVERY`: `Tribes::random_type`, `pick_one_per_type`,
    `bots::preferred_tribe`, sandbox `screen.rs` (`tribe_name` match, `parse_tribe`,
    `card_tribes`), Planar Telescope and Friendly Bounty counts in `game.rs`.
-   grep `Tribe::ALL` and `Tribe::EVERY` to check nothing else needs it.
+   grep `Tribe::EVERY` to check nothing else needs it.
    The lobby needs nothing: `Tribes::random_lobby(5, ..)` rolls 5 of `EVERY` and
    every draw filters through `Card::lobby_ok` on its own.
 3. Tests that use an unknown tribe as the bad value: `tests/beast_mech.rs`
@@ -170,9 +169,12 @@ exactly one legal target and drops the effect when there is none.
    `tests/deathrattles.rs` puts Titus next to the Deathrattle card under test: a card
    whose Start of Combat destroys its neighbours (Stitched Salvager) needs a filler
    between them (the test does that for any card with a Start of Combat).
-5. Observation: layout frozen (`obs.rs` header, `TRIBES = 6` slots, `final_tribes`,
-   `board_tribes`, bgpy constants). Do not add slots in a tribe run. `N_CARDS` in bgpy
-   is `cards.len()` and grows with every card: old checkpoints stop loading, expected.
+5. Observation: tribes are ten-wide everywhere and the lobby is a multi-hot
+   (the layout is in the `obs.rs` header; `TRIBES = 11` slots in
+   `final_tribes` and `board_tribes`, the ten tribes then neutral). Still do
+   not add features in a tribe run: the layout changes only in an observation
+   run, and `N_CARDS` in bgpy is `cards.len()` and grows with every card.
+   Either way old checkpoints stop loading, expected.
    New `TargetKind` variants need an arm in `obs::target_kind` (share a slot).
    New `Effect`/`SpellEffect` variants do not need obs changes unless a match is exhaustive.
 6. `cards.toml`: pool minions go in the `[[minion]]` section (before tokens; ids
@@ -288,8 +290,8 @@ Triple Reward spell.
 
 ## 6. Systems the Pirate run added
 
-- **Pirates (tribe 6).** `Tribe::EVERY` is every tribe the rules know; `Tribe::ALL`
-  stays the five the observation has slots for. `Tribes::ALL` includes Pirate.
+- **Pirates (tribe 6).** `Tribe::EVERY` is every tribe the rules know;
+  `Tribes::ALL` includes Pirate.
 - **Golden minions.** Played from hand, a Golden minion adds to
   `Player.golden_played` (Extortionist, Hooktusk) and gives a Triple Reward unless
   `Minion.no_reward` (Aureate Laureate is `always_golden`, Silent Deliverer's
@@ -315,7 +317,7 @@ Triple Reward spell.
 
 - **Elementals (tribe 7).** `Tribe::EVERY` has seven tribes, `Tribes::ALL` is
   `0b1111111` (one bit left in the `u8` mask). Flaming Enforcer is Demon and
-  Elemental (`tribes = [..]`). The observation still has five tribe slots.
+  Elemental (`tribes = [..]`).
 - **The Refresh amount.** One `Player.refresh_buff` that Waveling's
   Deathrattle (fight or shop), En-Djinn Blazer and Easterly Winds add into;
   every Refresh except the turn-start roll gives all of it to one random
@@ -399,7 +401,7 @@ Triple Reward spell.
 
 - **Quilboars (tribe 9).** `Tribe::EVERY` has nine tribes and the mask
   `Tribes` is a `u16`; `Tribes::ALL` is `0b1_1111_1111`. Felboar is Demon and
-  Quilboar. The observation still has five tribe slots.
+  Quilboar.
 - **Tavern spells versus plain spells.** `Card.tavern_spell` (from
   `tavern_spell = false` in the toml; pool spells default to true) gates the
   "Tavern spell" triggers (`trigger_on_cast_spell`), the `SpellsCast` event
@@ -452,8 +454,8 @@ Triple Reward spell.
 ## 10. Systems the Aberration run added
 
 - **Aberrations (tribe 10).** `Tribe::EVERY` has ten tribes and `Tribes::ALL`
-  is `0b11_1111_1111`; `MAX_TAVERN_BUFFS` is 22. The observation still has
-  five tribe slots.
+  is `0b11_1111_1111`; `MAX_TAVERN_BUFFS` is 22. The observation covers
+  every tribe since the 2026-10-25 observation run.
 - **The Deity.** One god per lobby (C'Thun or Y'Shaarj), drawn from the game's
   RNG in `Game::unstarted`, and only when Aberration is in the lobby (see the
   lobby section in `docs/ENGINE.md`). Every player's `Player.deity` starts 1/1;

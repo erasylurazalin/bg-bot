@@ -21,7 +21,7 @@ fn one(tribe: Tribe) -> Tribes {
 
 #[test]
 fn a_one_tribe_lobby_shows_only_the_tribe_and_neutrals() {
-    for tribe in Tribe::ALL {
+    for tribe in Tribe::EVERY {
         let lobby = one(tribe);
         let mut g = sandbox(7, lobby, 3);
         let (mut tribal, mut neutral) = (0, 0);

@@ -86,11 +86,8 @@ The amounts these cards' text hides, as I know them from the game:
    test now runs on real cards (`tests/core_rules.rs`).
 2. ~~A lobby of five random tribes per game.~~ Done 2026-10-25
    (`tests/lobby.rs`).
-3. **A new observation.** The layout has been frozen since the five-tribe
-   lobby, so the bot can't see most of what came after: Blood Gem value,
-   the Deity, the Undead bonus, the Refresh buff, pending discards, Triple
-   Rewards, the lobby's tribes. Then bots for all ten tribes and a smoke
-   run.
+3. ~~A new observation.~~ Done 2026-10-25 (OBS_SIZE 6362, ten tribes,
+   gems, Deity, opponents as last seen in combat).
 4. **Extend the card export** to heroes, hero powers, trinkets and Dark
    Gifts, so every later run starts from the game's own data.
 

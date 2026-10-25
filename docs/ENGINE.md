@@ -261,10 +261,13 @@ Deleting `.venv` undoes it.
 - `--stop-flat N` stops a run after N minutes without gains, but only when
   it also no longer beats its oldest snapshot.
 - Any change to the action space or observation breaks old checkpoints;
-  start a new run.
-- `--model` picks the network: `mlp` (default, 3.0M parameters, all slots
-  concatenated), `attn` (a 3-layer transformer over the card slots, 0.56M)
-  or `pool` (the same slot tokens pooled per zone, 0.71M). The last two
+  start a new run. The 2026-10-25 observation rewrite (all ten tribes, the
+  lobby, the Deity, Blood Gems, attachments, and opponents' Deity, gem value
+  and spell power as last seen; OBS_SIZE 2658 to 6362) broke every earlier
+  checkpoint, expected.
+- `--model` picks the network: `mlp` (default, 3.1M parameters, all slots
+  concatenated), `attn` (a 3-layer transformer over the card slots, 0.65M)
+  or `pool` (the same slot tokens pooled per zone, 0.76M). The last two
   score per-slot actions from the token of the slot they act on.
   `--opp-boards` sets how `attn` sees opponent boards: `full` (every
   opponent minion a token, 85 tokens), `pooled` (each board pooled into
@@ -317,9 +320,13 @@ mlp stays the default until a head-to-head says otherwise.
   by the effect (the weakest minion for Channel the Devourer and Robust
   Evolution, the biggest gain for Tyrael's 50/50). They never reorder
   the board.
-- The observation covers the five-tribe lobby (layout at the top of
-  `obs.rs`): tribes, every keyword, per-minion counters, player counters,
-  pending choices, and "fight stats" (Holy Vanguard's +30/+30 at 15 Health
-  or less, the shop Goldrinn bonus a Beast in hand gets when played).
-  Relentless Deflector's Taunt while shielded isn't a feature; the card
-  embedding has to learn it.
+- The observation covers every tribe (layout at the top of `obs.rs`): the
+  lobby's five tribes as a multi-hot, ten-wide tribe multi-hots, every
+  keyword, per-minion counters (Blood Gem stats, attachments, links,
+  Ichoron's one-turn shield, doomed picks), player counters (gem value,
+  Undead bonus, Knight deaths, discards, spells cast, ...), own and
+  as-last-seen opponent Deities, and opponents' gem value and spell power
+  from the last fight with them, plus "fight stats" (Holy Vanguard's +30/+30
+  at 15 Health or less, the shop Goldrinn bonus a Beast in hand gets when
+  played). Relentless Deflector's Taunt while shielded isn't a feature; the
+  card embedding has to learn it.

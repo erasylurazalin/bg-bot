@@ -34,10 +34,18 @@ OWN_END = bgpy.OWN_END
 
 # Card ids, embedded rather than scaled.
 SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD]
-SLOT_IDS = [bgpy.SLOT_CARD_ID, bgpy.SLOT_TAUGHT_SPELL]
-# Stats can run into the hundreds late (Holy Vanguard, Tyrael's 50/50), so
-# these are log-scaled after the division.
-SLOT_LOG = [bgpy.SLOT_ATTACK, bgpy.SLOT_HEALTH, bgpy.SLOT_FIGHT_ATTACK, bgpy.SLOT_FIGHT_HEALTH]
+# The minion's own id, the spell a Magicfin token was taught, and the ids of
+# the effect-carrying cards Magnetized into it.
+SLOT_IDS = [bgpy.SLOT_CARD_ID, bgpy.SLOT_TAUGHT_SPELL] + list(
+    range(bgpy.SLOT_ATTACHED, bgpy.SLOT_ATTACHED + bgpy.ATTACHED_SLOTS))
+# Stats can run into the hundreds late (Holy Vanguard, Tyrael's 50/50, Blood
+# Gems on a big Quilboar), so these are log-scaled after the division.
+SLOT_LOG = [bgpy.SLOT_ATTACK, bgpy.SLOT_HEALTH, bgpy.SLOT_FIGHT_ATTACK, bgpy.SLOT_FIGHT_HEALTH,
+            bgpy.SLOT_GEM_ATTACK, bgpy.SLOT_GEM_HEALTH]
+# The same for scalars that grow without bound over a game.
+SCALAR_LOG = [bgpy.SCALAR_DEATHRATTLES, bgpy.SCALAR_KNIGHT_DEATHS, bgpy.SCALAR_DISCARDED,
+              bgpy.SCALAR_SPELLS_CAST, bgpy.SCALAR_UNDEAD_ATTACK, bgpy.SCALAR_UNDEAD_HEALTH,
+              bgpy.SCALAR_DEITY_ATTACK, bgpy.SCALAR_DEITY_HEALTH, bgpy.SCALAR_LAST_DAMAGE]
 
 
 def _scales(n, prefix, table):
@@ -67,17 +75,28 @@ SCALAR_SCALE = _scales(bgpy.SCALARS, "SCALAR_", {
     "WINNERS_BREAD_ATTACK": 10, "WINNERS_BREAD_HEALTH": 10,
     "NEXT_TURN_BUFF_ATTACK": 10, "NEXT_TURN_BUFF_HEALTH": 10,
     (bgpy.SCALAR_TAVERN_BUFFS, bgpy.TAVERN_BUFF_FILTERS * 4): 10,
+    "GEM_ATTACK": 10, "GEM_HEALTH": 10, "BARRAGE_ATTACK": 10, "BARRAGE_HEALTH": 10,
+    "REFRESH_ATTACK": 10, "REFRESH_HEALTH": 10, "BALLER": 10,
+    "UNDEAD_ATTACK": 50, "UNDEAD_HEALTH": 50, "KNIGHT_DEATHS": 50,
+    "ELEMENTALS_PLAYED": 20, "GOLDEN_PLAYED": 10, "GOLD_SPENT": 20,
+    "DISCARDED": 20, "SPELLS_CAST": 20, "TRAILBLAZER_COVERS": 2,
+    "SHARING_IS_CARING": 2, "LAST_DAMAGE": 15,
+    "DEITY_ATTACK": 50, "DEITY_HEALTH": 50,
     "PENDING_SOURCE": 7, "PENDING_RUNS": 2, "PENDING_ATTACK": 20, "PENDING_HEALTH": 20,
     "SHOP_CONSUME_LEFT": 3, "DISCOVER_QUEUE": 3,
     **{(bgpy.SCALAR_CHOOSE_ONE + j * bgpy.CHOOSE_FEATURES + 4, 2): 10 for j in range(2)},
 })
 OPP_SCALE = _scales(bgpy.OPP_SCALARS, "OPP_", {
-    "HEALTH": 30, "TIER": 6, "TURNS_SINCE": 10, "PLACEMENT": 8, (bgpy.OPP_TRIBES, 5): 7,
+    "HEALTH": 30, "TIER": 6, "TURNS_SINCE": 10, "PLACEMENT": 8, (bgpy.OPP_TRIBES, 10): 7,
+    "DEITY_ATTACK": 50, "DEITY_HEALTH": 50, "GEM_ATTACK": 10, "GEM_HEALTH": 10,
+    "SPELL_ATTACK": 10, "SPELL_HEALTH": 10,
 })
+OPP_LOG = [bgpy.OPP_DEITY_ATTACK, bgpy.OPP_DEITY_HEALTH]
 SLOT_SCALE = _scales(SF, "SLOT_", {
     "ATTACK": 10, "HEALTH": 10, "FIGHT_ATTACK": 10, "FIGHT_HEALTH": 10, "TIER": 6,
     "MAGNETIZATIONS": 10, "VOLUMIZERS": 10, "IMPROVEMENTS": 10, "EVENTS_LEFT": 4,
     "WINNERS_BREAD": 2, "ACTIVATE_COST": 2, "EXTRA_MAGNETIZE": 2, "COST": 3,
+    "GEM_ATTACK": 50, "GEM_HEALTH": 50, "LINK_GROUP": 64,
 })
 
 assert len(SCALAR_SCALE) == bgpy.SCALARS
@@ -107,7 +126,9 @@ class Net(nn.Module):
         keep[SCALAR_IDS] = 0.0
         self.register_buffer("s_scale", torch.tensor(SCALAR_SCALE, dtype=torch.float32))
         self.register_buffer("s_keep", keep)
+        self.register_buffer("s_log", torch.tensor(SCALAR_LOG))
         self.register_buffer("o_scale", torch.tensor(OPP_SCALE, dtype=torch.float32))
+        self.register_buffer("o_log", torch.tensor(OPP_LOG))
         self.register_buffer("m_scale", torch.tensor(SLOT_SCALE, dtype=torch.float32)[feats])
         self.register_buffer("feats", torch.tensor(feats, dtype=torch.long))
         self.register_buffer("log_cols", torch.tensor([feats.index(i) for i in SLOT_LOG]))
@@ -116,10 +137,13 @@ class Net(nn.Module):
         b = obs.shape[0]
         raw = obs[:, :bgpy.SCALARS]
         scalars = raw / self.s_scale * self.s_keep
+        scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
         s_cards = self.card(raw[:, SCALAR_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
         opp = obs[:, OWN_END:].reshape(b, OPP, OPP_BLOCK)
-        opp_scalars = (opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale).reshape(b, -1)
+        o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale
+        o[:, :, self.o_log] = torch.log1p(o[:, :, self.o_log].clamp(min=0))
+        opp_scalars = o.reshape(b, -1)
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
         n = slots.shape[1]
@@ -186,7 +210,9 @@ class SlotInputs(nn.Module):
         keep[SCALAR_IDS] = 0.0
         self.register_buffer("s_scale", torch.tensor(SCALAR_SCALE, dtype=torch.float32))
         self.register_buffer("s_keep", keep)
+        self.register_buffer("s_log", torch.tensor(SCALAR_LOG))
         self.register_buffer("o_scale", torch.tensor(OPP_SCALE, dtype=torch.float32))
+        self.register_buffer("o_log", torch.tensor(OPP_LOG))
         self.register_buffer("m_scale", torch.tensor(SLOT_SCALE, dtype=torch.float32)[feats])
         self.register_buffer("feats", torch.tensor(feats, dtype=torch.long))
         self.register_buffer("log_cols", torch.tensor([feats.index(i) for i in SLOT_LOG]))
@@ -199,10 +225,13 @@ class SlotInputs(nn.Module):
         b = obs.shape[0]
         raw = obs[:, :bgpy.SCALARS]
         scalars = raw / self.s_scale * self.s_keep
+        scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
         s_cards = self.card(raw[:, SCALAR_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
         opp = obs[:, OWN_END:].reshape(b, OPP, OPP_BLOCK)
-        opp_scalars = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale
+        o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale
+        o[:, :, self.o_log] = torch.log1p(o[:, :, self.o_log].clamp(min=0))
+        opp_scalars = o
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
         n = slots.shape[1]
@@ -229,8 +258,9 @@ class ActionHead(nn.Module):
     - play hand k at position p: a term from hand slot k's z, plus a dot
       product of its query with the gap p (the board minions left and right
       of it, and a learned embedding of p)
-    - move from j to t: a term from board slot j's z, plus a dot product of
-      j's query with t's key
+    - discard k: from hand slot k's z
+    - move from j to t: a term from board slot j's z, plus a dot product
+      of j's query with t's key
     - roll, freeze, level, end turn: from s
     Plus a per-action bias that starts at the kind prior, with the scoring
     weights small, so the starting policy is about Net's."""
@@ -240,8 +270,9 @@ class ActionHead(nn.Module):
         self.norm = nn.LayerNorm(d)
         self.tok = nn.Linear(d, hidden)
         self.ctx = nn.Linear(d, hidden)
-        # columns: buy, buy_spell, sell, activate, target, target_shop, choose, play, move
-        self.ptr = nn.Linear(hidden, 9)
+        # columns: buy, buy_spell, sell, activate, target, target_shop,
+        # choose, play, discard, move
+        self.ptr = nn.Linear(hidden, 10)
         self.play_q = nn.Linear(hidden, qk)
         self.gap_l = nn.Linear(hidden, qk)
         self.gap_r = nn.Linear(hidden, qk)
@@ -268,7 +299,7 @@ class ActionHead(nn.Module):
                 + self.gap)
         play = p[:, HAND_R, 7, None] + torch.einsum(
             "bhq,bpq->bhp", self.play_q(hand), gaps) * self.scale
-        move = p[:, BOARD_R, 8, None] + torch.einsum(
+        move = p[:, BOARD_R, 9, None] + torch.einsum(
             "bfq,btq->bft", self.move_q(board), self.move_k(board)) * self.scale
         move = move.gather(2, self.move_to.expand(b, -1, -1))
         logits = torch.cat([
@@ -280,6 +311,7 @@ class ActionHead(nn.Module):
             p[:, BOARD_R, 4],
             p[:, SHOP_R, 5],
             p[:, DISC_R, 6] + g[:, 4:],
+            p[:, HAND_R, 8],
             move.reshape(b, -1),
             g[:, :4],
         ], 1)
@@ -542,7 +574,7 @@ def check_pointers():
             net.inp.pos.weight.zero_()
             for zs, kinds, label in ((BOARD_T, ("sell", "activate", "target"), "board"),
                                      (SHOP_T, ("buy", "target_shop"), "tavern"),
-                                     (HAND_T, ("play",), "hand")):
+                                     (HAND_T, ("play", "discard"), "hand")):
                 rows = present[:, zs] & present[:, zs + 1] & (cards[:, zs] != cards[:, zs + 1])
                 x = obs[rows]
                 assert len(x) >= 8, f"only {len(x)} samples with two different {label} cards"

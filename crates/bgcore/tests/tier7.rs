@@ -273,7 +273,7 @@ fn random_draws_up_to_your_tier_never_reach_tier_7() {
     let db = db();
     let mut rng = Rng::new(3);
     for _ in 0..3000 {
-        for t in Tribe::ALL {
+        for t in Tribe::EVERY {
             let c = db.random_pool_minion(t, 0, bgcore::Tribes::ALL, &mut rng).unwrap();
             assert!(db.get(c).tier <= 6);
         }

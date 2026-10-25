@@ -1,4 +1,4 @@
-"""PPO self-play for the five-tribe Battlegrounds lobby.
+"""PPO self-play for the Battlegrounds lobby (5 of the 10 tribes each game).
 
     .venv/bin/python train/ppo.py --name stage2-smoke --minutes 5
     .venv/bin/python train/ppo.py --name run2 --resume runs/run2/ckpt.pt
@@ -45,16 +45,20 @@ END_TURN = bgpy.END_TURN
 SHOP_START = bgpy.SHOP_START
 ACTIONS_LEFT = bgpy.SCALAR_ACTIONS_LEFT
 
+TRIBE_NAMES = ("beast", "mech", "dragon", "murloc", "demon", "pirate",
+               "elemental", "undead", "quilboar", "aberration")
+REPORT_GROUPS = TRIBE_NAMES + ("mixed",)
 EVAL_KEYS = [
     "place_vs_std", "place_vs_rush", "place_4v4_std", "place_4v4_rush", "place_4v4_mix",
     "place_vs_snapshot",
     "turn_t3", "turn_t4", "turn_t5",
     "curve_econ_rush", "curve_rush", "curve_standard", "curve_slow",
-    *[f"tribe_{t}" for t in ("beast", "mech", "dragon", "murloc", "demon", "mixed")],
-    *[f"place_{t}" for t in ("beast", "mech", "dragon", "murloc", "demon", "mixed")],
+    *[f"tribe_{t}" for t in REPORT_GROUPS],
+    *[f"place_{t}" for t in REPORT_GROUPS],
 ]
-# Columns of bgpy's tribe counts: Beast, Mech, neutral, Dragon, Murloc, Demon.
-TRIBE_COLS = {"beast": 0, "mech": 1, "dragon": 3, "murloc": 4, "demon": 5}
+# Columns of bgpy's tribe counts: the ten tribes in bgcore's `Tribe::EVERY`
+# order, then neutral.
+TRIBE_COLS = {t: k for k, t in enumerate(TRIBE_NAMES)}
 TRAIN_KEYS = [
     "entropy", "approx_kl", "clipfrac", "value_loss", "explained_var", "steps_per_s",
     "actions_per_turn", "tier_t6", "tier_t10", "health_end",
@@ -195,7 +199,7 @@ def summarize_records(records):
     standard = ~econ_rush & ~rush & (t3 > 0) & (t3 <= 5) & (t4 > 0) & (t4 <= 7)
     slow = ~(econ_rush | rush | standard)
 
-    # A board's tribe is the most common of the five when at least 4 minions
+    # A board's tribe is the most common of the ten when at least 4 minions
     # have it (a dual or all-type minion counts for each); otherwise mixed.
     counts = tribes[:, list(TRIBE_COLS.values())]
     main = counts.argmax(1)
@@ -520,7 +524,7 @@ def main():
                 f"econ {rep['curve_econ_rush']:.0%} slow {rep['curve_slow']:.0%})  "
                 "trb(" + " ".join(
                     f"{t[:2]} {rep[f'tribe_{t}']:.0%}@{rep[f'place_{t}']:.2f}"
-                    for t in ("beast", "mech", "dragon", "murloc", "demon", "mixed")) + ")  "
+                    for t in REPORT_GROUPS) + ")  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}",
                 flush=True,
             )

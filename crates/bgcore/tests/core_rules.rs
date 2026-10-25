@@ -808,9 +808,9 @@ fn board_tribes_count_each_tribe_of_a_minion() {
         put_on_board(&mut g, 0, n, false);
     }
     put_on_board(&mut g, 0, "Prosthetic Hand", false);
-    // Beast, Mech, neutral, Dragon, Murloc, Demon: the Hand is Mech and
-    // Undead, the Felboar Demon and Quilboar, and neither has a slot here.
-    assert_eq!(g.players[0].board_tribes(&g.data.cards), [1, 2, 1, 1, 0, 1]);
+    // The ten tribes in Tribe::EVERY order, then neutral: the Hand is Mech
+    // and Undead, the Felboar Demon and Quilboar, the Underdog neutral.
+    assert_eq!(g.players[0].board_tribes(&g.data.cards), [1, 2, 1, 0, 1, 0, 0, 1, 1, 0, 1]);
 }
 
 // ---- Stealth ----

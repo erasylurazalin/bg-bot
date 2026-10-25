@@ -39,6 +39,33 @@ pub struct Seen {
     pub tier: u8,
     /// The turn of that fight, 0 for never.
     pub turn: u32,
+    /// Their Deity as it went into that fight.
+    pub deity: Option<Deity>,
+    /// Their Blood Gem value as it went into that fight (what the client
+    /// shows during combat, so it is "as last seen").
+    pub gem: (i32, i32),
+    /// Their Tavern spell bonus as it went into that fight.
+    pub spell: (i32, i32),
+}
+
+impl Seen {
+    /// Both sides of a fight as the other player sees it: the board that went
+    /// in and the counters the client shows during combat.
+    fn at_fight(
+        board: ArrayVec<Minion, BOARD>,
+        tier: u8,
+        turn: u32,
+        c: &Counters,
+    ) -> Seen {
+        Seen {
+            board,
+            tier,
+            turn,
+            deity: c.deity,
+            gem: (c.gem_attack, c.gem_health),
+            spell: (c.spell_attack, c.spell_health),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -437,23 +464,17 @@ impl Player {
         best
     }
 
-    /// Counts per `TRIBES` slot (Beast, Mech, neutral, Dragon, Murloc, Demon)
-    /// of the minions currently on this player's board. A multi-tribe minion
-    /// counts once in each of its tribes.
+    /// Counts per `TRIBES` slot (the ten tribes in `Tribe::EVERY` order, then
+    /// neutral) of the minions currently on this player's board. A
+    /// multi-tribe minion counts once in each of its tribes.
     pub fn board_tribes(&self, cards: &CardDb) -> [u8; TRIBES] {
         let mut out = [0u8; TRIBES];
         for m in &self.board {
             let t = cards.get(m.card).tribes;
             if t.is_neutral() {
-                out[2] += 1;
+                out[Tribe::EVERY.len()] += 1;
             }
-            for (slot, tribe) in [
-                (0, Tribe::Beast),
-                (1, Tribe::Mech),
-                (3, Tribe::Dragon),
-                (4, Tribe::Murloc),
-                (5, Tribe::Demon),
-            ] {
+            for (slot, tribe) in Tribe::EVERY.into_iter().enumerate() {
                 if t.has(tribe) {
                     out[slot] += 1;
                 }
@@ -6029,6 +6050,12 @@ impl Game {
             };
             let me = self.players[p].board.clone();
             let my_counters = self.players[p].counters(cards, self.lobby);
+            // What each side sees of the other: the boards that went in, and
+            // the counters the client shows during combat, as the fight starts.
+            let turn = self.turn;
+            let my_tier = self.players[p].tier;
+            let their_seen = Seen::at_fight(them.clone(), tier, turn, &their_counters);
+            let my_seen = Seen::at_fight(me.clone(), my_tier, turn, &my_counters);
             let hands: [&[Minion]; 2] = [my_hand, their_hand];
             let out = fight_with_hands(
                 &self.data.cards,
@@ -6040,13 +6067,11 @@ impl Game {
                 &mut self.rng,
                 &mut (),
             );
-            let turn = self.turn;
             match self.players[p].opponent.unwrap() {
                 Opponent::Player(q) => {
                     let q = q as usize;
-                    self.players[p].seen[q] = Seen { board: them, tier, turn };
-                    let my_tier = self.players[p].tier;
-                    self.players[q].seen[p] = Seen { board: me, tier: my_tier, turn };
+                    self.players[p].seen[q] = their_seen;
+                    self.players[q].seen[p] = my_seen;
                     match out.winner {
                         Some(0) => {
                             damage[q] += capped(my_tier as i32 + out.survivor_tiers);
@@ -6073,7 +6098,7 @@ impl Game {
                     self.apply_side_outcome(q, &out.sides[1], true);
                 }
                 Opponent::Ghost(g) => {
-                    self.players[p].seen[g as usize] = Seen { board: them, tier, turn };
+                    self.players[p].seen[g as usize] = their_seen;
                     match out.winner {
                         Some(0) => {
                             self.players[p].lost_last_combat = false;

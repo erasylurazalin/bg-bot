@@ -1,4 +1,4 @@
-//! D4: the observation for the five-tribe lobby, and curve bots that never
+//! D4: the observation for the ten-tribe lobby, and curve bots that never
 //! get stuck.
 
 use std::sync::Arc;
@@ -14,6 +14,13 @@ fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
 
 fn game(seed: u64) -> Game {
     Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon]))
+}
+
+/// A game with every tribe in the lobby, for cards the five-tribe lobby
+/// doesn't stock (`put_on_board` takes its copy out of the pool).
+fn game_all(seed: u64) -> Game {
+    let lobby = Tribe::EVERY.into_iter().fold(bgcore::Tribes::NONE, |m, t| m.with(t));
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby)
 }
 
 fn turn_of(g: &mut Game, p: usize) {
@@ -94,7 +101,7 @@ fn slots_show_tribes_keywords_and_counters() {
     let vanguard = board_slot(&out, 0);
     assert_eq!(vanguard[SLOT_CARD_ID], id(&g, "Holy Vanguard") as f32 + 1.0);
     assert_eq!(vanguard[SLOT_TIER], 4.0);
-    assert_eq!(&vanguard[SLOT_TRIBES..SLOT_TRIBES + 5], &[0.0; 5], "a neutral has no tribe");
+    assert_eq!(&vanguard[SLOT_TRIBES..SLOT_TRIBES + 10], &[0.0; 10], "a neutral has no tribe");
     assert_eq!(vanguard[SLOT_KEYWORDS + 1], 1.0, "divine shield");
     assert_eq!(vanguard[SLOT_FROM_POOL], 1.0);
     // above 15 Health, Holy Vanguard fights with its own stats
@@ -102,7 +109,7 @@ fn slots_show_tribes_keywords_and_counters() {
     assert_eq!((vanguard[SLOT_HEALTH], vanguard[SLOT_FIGHT_HEALTH]), (10.0, 10.0));
 
     let amalgam = board_slot(&out, 1);
-    assert_eq!(&amalgam[SLOT_TRIBES..SLOT_TRIBES + 5], &[1.0; 5], "all types set every tribe");
+    assert_eq!(&amalgam[SLOT_TRIBES..SLOT_TRIBES + 10], &[1.0; 10], "all types set every tribe");
     assert_eq!(amalgam[SLOT_EXTRA_MAGNETIZE], 2.0);
     assert_eq!(board_slot(&out, 2)[SLOT_STEALTH], 1.0);
     assert_eq!(board_slot(&out, 2)[SLOT_KEYWORDS + 3], 0.0);
@@ -205,11 +212,13 @@ fn scalars_show_player_counters() {
     assert_eq!(out[SCALAR_CAN_REWIND], 0.0);
     assert_eq!(out[SCALAR_MAGICFIN_LEFT], 1.0);
     assert_eq!(out[SCALAR_SHOP_SPELL_COST], 2.0, "A New Sprout costs 3, minus 1");
-    // filter 0 is "any", then the tribes in Tribe::ALL order (Demon is 5)
+    // filter 0 is "any", then the tribes in Tribe::EVERY order (Demon is 5)
     let tb = |filter: usize, k: usize| out[SCALAR_TAVERN_BUFFS + filter * 4 + k];
     assert_eq!((tb(0, 0), tb(0, 1), tb(0, 2), tb(0, 3)), (2.0, 1.0, 0.0, 0.0));
     assert_eq!((tb(5, 0), tb(5, 1), tb(5, 2), tb(5, 3)), (0.0, 0.0, 2.0, 1.0));
-    assert_eq!(tb(1, 0) + tb(2, 0) + tb(3, 0) + tb(4, 0), 0.0);
+    for f in [1, 2, 3, 4, 6, 7, 8, 9, 10] {
+        assert_eq!(tb(f, 0) + tb(f, 2), 0.0);
+    }
 
     // a free roll comes first; used Health Refreshes and Magicfin teachings count down
     g.players[0].free_rolls = 1;
@@ -322,8 +331,8 @@ fn opponents_show_last_opponent_tribes_and_placement() {
     assert_eq!(o[OPP_SEEN], 1.0);
     assert_eq!(o[OPP_LAST], 1.0, "fought last turn");
     assert_eq!(o[OPP_PLACEMENT], 0.0);
-    // Beast, Mech, Dragon, Murloc each 1 (the Amalgam), Demon 2
-    assert_eq!(&o[OPP_TRIBES..OPP_TRIBES + 5], &[1.0, 1.0, 1.0, 1.0, 2.0]);
+    // the Amalgam gives 1 in each of the ten, the Escapist makes Demon 2
+    assert_eq!(&o[OPP_TRIBES..OPP_TRIBES + 10], &[1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
     for r in 1..PLAYERS {
         if r != q {
             assert_eq!(block(r)[OPP_LAST], 0.0);
@@ -336,6 +345,181 @@ fn opponents_show_last_opponent_tribes_and_placement() {
     let out2 = view(&g, 0);
     let start = OWN_END + (q - 1) * OPP_BLOCK;
     assert_eq!(out2[start + vanguard + SLOT_FIGHT_ATTACK], o[vanguard + SLOT_ATTACK] + 30.0);
+}
+
+#[test]
+fn the_lobby_multihot_shows_the_five_tribes_of_this_game() {
+    let data = Arc::new(Data::bundled());
+    let five = lobby(&[Tribe::Pirate, Tribe::Elemental, Tribe::Undead, Tribe::Quilboar, Tribe::Aberration]);
+    let g = Game::new_with_lobby(data, 11, five);
+    let out = view(&g, 0);
+    for (j, t) in Tribe::EVERY.into_iter().enumerate() {
+        assert_eq!(out[SCALAR_LOBBY + j], five.has(t) as u8 as f32);
+    }
+    // the five tribes the game() helper uses read 0, these five read 1
+    assert_eq!(&out[SCALAR_LOBBY..SCALAR_LOBBY + 5], &[0.0; 5]);
+    assert_eq!(&out[SCALAR_LOBBY + 5..SCALAR_LOBBY + 10], &[1.0; 5]);
+    // the same five in a game of the game() helper
+    let g = game(12);
+    let out = view(&g, 0);
+    assert_eq!(&out[SCALAR_LOBBY..SCALAR_LOBBY + 5], &[1.0; 5]);
+    assert_eq!(&out[SCALAR_LOBBY + 5..SCALAR_LOBBY + 10], &[0.0; 5]);
+}
+
+#[test]
+fn slots_show_the_new_tribes() {
+    let mut g = game_all(13);
+    turn_of(&mut g, 0);
+    put_on_board(&mut g, 0, "Aureate Laureate"); // Pirate
+    put_on_board(&mut g, 0, "Crackling Cyclone"); // Elemental
+    put_on_board(&mut g, 0, "Harmless Bonehead"); // Undead
+    put_on_board(&mut g, 0, "Razorfen Geomancer"); // Quilboar
+    put_on_board(&mut g, 0, "Joyous"); // Aberration
+    let out = view(&g, 0);
+    for (s, k) in [(0usize, SLOT_PIRATE), (1, SLOT_ELEMENTAL), (2, SLOT_UNDEAD), (3, SLOT_QUILBOAR), (4, SLOT_ABERRATION)] {
+        let slot = board_slot(&out, s);
+        assert_eq!(slot[k], 1.0);
+        let others: Vec<f32> = (SLOT_TRIBES..SLOT_TRIBES + 10)
+            .filter(|&j| j != k)
+            .map(|j| slot[j])
+            .collect();
+        assert_eq!(others, vec![0.0; 9], "one tribe each");
+    }
+}
+
+#[test]
+fn the_own_deity_block_is_shown() {
+    let mut g = game(14);
+    turn_of(&mut g, 0);
+    let out = view(&g, 0);
+    assert_eq!(&out[SCALAR_DEITY..SCALAR_DEITY + DEITY_FEATURES], &[0.0; DEITY_FEATURES],
+        "no Aberration in the lobby, no Deity");
+    let cthun = bgcore::fight::Deity {
+        card: id(&g, "C'Thun"),
+        attack: 5,
+        health: 6,
+        golden: false,
+    };
+    g.players[0].deity = Some(cthun);
+    let out = view(&g, 0);
+    assert_eq!(out[SCALAR_DEITY], 1.0);
+    assert_eq!((out[SCALAR_DEITY_CTHUN], out[SCALAR_DEITY_YSHAARJ]), (1.0, 0.0));
+    assert_eq!((out[SCALAR_DEITY_ATTACK], out[SCALAR_DEITY_HEALTH]), (5.0, 6.0));
+    assert_eq!(out[SCALAR_DEITY_GOLDEN], 0.0);
+    // a golden Y'Shaarj instead
+    g.players[0].deity = Some(bgcore::fight::Deity {
+        card: id(&g, "Y'Shaarj"),
+        attack: 10,
+        health: 12,
+        golden: true,
+    });
+    let out = view(&g, 0);
+    assert_eq!((out[SCALAR_DEITY_CTHUN], out[SCALAR_DEITY_YSHAARJ]), (0.0, 1.0));
+    assert_eq!((out[SCALAR_DEITY_ATTACK], out[SCALAR_DEITY_HEALTH], out[SCALAR_DEITY_GOLDEN]), (10.0, 12.0, 1.0));
+}
+
+#[test]
+fn an_opponents_deity_gems_and_spell_power_show_as_last_seen() {
+    let mut g = game(15);
+    let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
+    let q = q as usize;
+    let cthun = id(&g, "C'Thun");
+    let them = &mut g.players[q];
+    them.deity = Some(bgcore::fight::Deity { card: cthun, attack: 7, health: 8, golden: false });
+    them.gem_attack = 3;
+    them.gem_health = 4;
+    them.spell_bonus = (2, 2);
+    let block = |out: &[f32], q: usize| {
+        let start = OWN_END + ((q + PLAYERS - 1) % PLAYERS) * OPP_BLOCK;
+        out[start..start + OPP_BLOCK].to_vec()
+    };
+    // before the fight nothing of it is visible
+    let o = block(&view(&g, 0), q);
+    assert_eq!(o[OPP_SEEN], 0.0);
+    assert_eq!(&o[OPP_DEITY..OPP_DEITY + DEITY_FEATURES], &[0.0; DEITY_FEATURES]);
+    assert_eq!((o[OPP_GEM_ATTACK], o[OPP_GEM_HEALTH], o[OPP_SPELL_ATTACK], o[OPP_SPELL_HEALTH]),
+               (0.0, 0.0, 0.0, 0.0));
+    next_turn(&mut g);
+    let o = block(&view(&g, 0), q);
+    assert_eq!(o[OPP_SEEN], 1.0);
+    assert_eq!((o[OPP_DEITY], o[OPP_DEITY_CTHUN], o[OPP_DEITY_YSHAARJ]), (1.0, 1.0, 0.0));
+    assert_eq!((o[OPP_DEITY_ATTACK], o[OPP_DEITY_HEALTH], o[OPP_DEITY_GOLDEN]), (7.0, 8.0, 0.0));
+    assert_eq!((o[OPP_GEM_ATTACK], o[OPP_GEM_HEALTH]), (3.0, 4.0));
+    assert_eq!((o[OPP_SPELL_ATTACK], o[OPP_SPELL_HEALTH]), (2.0, 2.0));
+    // their gem value and spell power change, but what I saw doesn't until
+    // the next fight with them
+    let yshaarj = id(&g, "Y'Shaarj");
+    let them = &mut g.players[q];
+    them.gem_attack = 9;
+    them.gem_health = 9;
+    them.spell_bonus = (7, 7);
+    them.deity = Some(bgcore::fight::Deity { card: yshaarj, attack: 20, health: 20, golden: true });
+    let o = block(&view(&g, 0), q);
+    assert_eq!((o[OPP_GEM_ATTACK], o[OPP_GEM_HEALTH]), (3.0, 4.0));
+    assert_eq!((o[OPP_SPELL_ATTACK], o[OPP_SPELL_HEALTH]), (2.0, 2.0));
+    assert_eq!((o[OPP_DEITY_ATTACK], o[OPP_DEITY_GOLDEN]), (7.0, 0.0));
+}
+
+#[test]
+fn gem_stats_temp_shields_and_doomed_minions_show_on_slots() {
+    let mut g = game_all(16);
+    turn_of(&mut g, 0);
+    put_on_board(&mut g, 0, "Banana Slamma");
+    g.players[0].board[0].gem_attack = 5;
+    g.players[0].board[0].gem_health = 6;
+    put_on_board(&mut g, 0, "Ichoron the Protector");
+    g.players[0].board[1].temp_shield = true;
+    g.players[0].board[1].keywords.set(bgcore::Keywords::DIVINE_SHIELD);
+    // Tomb Turning's pick: doomed in hand
+    let doomed = g.give(0, "Banana Slamma").unwrap();
+    g.players[0].hand[0].doomed = true;
+
+    let out = view(&g, 0);
+    let slamma = board_slot(&out, 0);
+    assert_eq!((slamma[SLOT_GEM_ATTACK], slamma[SLOT_GEM_HEALTH]), (5.0, 6.0));
+    assert_eq!((slamma[SLOT_ATTACK], slamma[SLOT_HEALTH]), (doomed.attack as f32, doomed.health as f32));
+    let ichoron = board_slot(&out, 1);
+    assert_eq!((ichoron[SLOT_TEMP_SHIELD], ichoron[SLOT_KEYWORDS + 1]), (1.0, 1.0));
+    assert_eq!(board_slot(&out, 0)[SLOT_TEMP_SHIELD], 0.0);
+    let hand = hand_slot(&out, 0);
+    assert_eq!(hand[SLOT_DOOMED], 1.0);
+    assert_eq!(hand_slot(&out, 1)[SLOT_DOOMED], 0.0, "only the marked card is doomed");
+}
+
+#[test]
+fn linked_cards_share_a_group_id() {
+    let mut g = game_all(17);
+    turn_of(&mut g, 0);
+    g.players[0].hand.clear();
+    put_on_board(&mut g, 0, "Wandering Willbreaker");
+    act(&mut g, 0, Action::Sell(0)); // its sell gives two linked spells
+    let out = view(&g, 0);
+    let a = hand_slot(&out, 0);
+    let b = hand_slot(&out, 1);
+    assert_eq!((a[SLOT_LINKED], b[SLOT_LINKED]), (1.0, 1.0));
+    assert_eq!(a[SLOT_LINK_GROUP], b[SLOT_LINK_GROUP]);
+    assert!(a[SLOT_LINK_GROUP] > 0.0);
+    assert_eq!((a[SLOT_IS_SPELL], a[SLOT_TAVERN_SPELL]), (1.0, 1.0));
+    assert_eq!(hand_slot(&out, 2)[SLOT_LINKED], 0.0, "a card given later is not in the group");
+}
+
+#[test]
+fn a_pending_discard_shows_next_to_the_other_pending_choices() {
+    let mut g = game_all(18);
+    turn_of(&mut g, 0);
+    put_on_board(&mut g, 0, "Mangled Bandit");
+    g.give(0, "Banana Slamma").unwrap();
+    act(&mut g, 0, Action::Activate(0));
+    assert!(g.players[0].pending_discard.is_some());
+    let out = view(&g, 0);
+    assert_eq!(out[SCALAR_PENDING_DISCARD], 1.0);
+    assert_eq!(
+        out[SCALAR_PENDING_TARGET] + out[SCALAR_PENDING_TARGET_SHOP] + out[SCALAR_PENDING_SHOP_SLOT]
+            + out[SCALAR_PENDING_CHOOSE_ONE] + out[SCALAR_PENDING_DISCOVER],
+        0.0
+    );
+    act(&mut g, 0, Action::Discard(0));
+    assert_eq!(view(&g, 0)[SCALAR_PENDING_DISCARD], 0.0);
 }
 
 // ---- Bots ----
