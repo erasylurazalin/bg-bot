@@ -514,11 +514,40 @@ def load(path, dev="cpu", compile=False):
     return net
 
 
-def warm_start(net, kind, path):
+def table_names(text):
+    """Card names by id from a cards.toml text, in the engine's order:
+    minions, then tokens, then spells (CardDb::parse)."""
+    import tomllib
+    raw = tomllib.loads(text)
+    return [c["name"] for part in ("minion", "token", "spell") for c in raw.get(part, [])]
+
+
+def _remap(src_w, own_w, old_names, new_names):
+    """An embedding table for `new_names` with each name's row from `src_w`
+    (laid out by `old_names`); row 0 (empty) is carried, new names keep
+    `own_w`'s fresh rows. Returns (table, kept, new, dropped) counts."""
+    w = own_w.clone()
+    w[0] = src_w[0]
+    old = {n: i for i, n in enumerate(old_names)}
+    kept = 0
+    for i, n in enumerate(new_names):
+        j = old.get(n)
+        if j is not None and j + 1 < src_w.shape[0]:
+            w[i + 1] = src_w[j + 1]
+            kept += 1
+    dropped = len(set(old_names) - set(new_names))
+    return w, kept, len(new_names) - kept, dropped
+
+
+def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_heroes=None):
     """Load every entry of the checkpoint at `path` whose name and shape match
-    `net` (a `kind` model). Returns (loaded, fresh, skipped) parameter names:
-    fresh are net's parameters it had nothing for, skipped are the
-    checkpoint's that didn't fit. Refuses another kind of model."""
+    `net` (a `kind` model). The card and hero embeddings are matched by name
+    instead, row by row, so a card added, removed or moved in cards.toml
+    keeps what the model knew about every other card: `cards` / `heroes` are
+    this run's names by id, the checkpoint's own come from the checkpoint
+    (`card_names`, `hero_names`) or `old_cards` / `old_heroes` for one saved
+    before it stored them. Returns (loaded, fresh, skipped, src_opts,
+    remapped) where remapped describes each table matched by name."""
     ck = torch.load(path, map_location="cpu")
     src_kind, src_opts = ck_model(ck)
     if src_kind != kind:
@@ -527,6 +556,17 @@ def warm_start(net, kind, path):
     src = ck["net"]
     own = net.state_dict()
     take = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
+    remapped = []
+    tables = (("card.weight", cards, ck.get("card_names") or old_cards),
+              ("hero.weight", heroes, ck.get("hero_names") or old_heroes))
+    for suffix, new_names, old_names in tables:
+        if new_names is None or old_names is None:
+            continue
+        for k in own:
+            if k.endswith(suffix) and k in src:
+                w, kept, new, dropped = _remap(src[k], own[k], old_names, new_names)
+                take[k] = w
+                remapped.append(f"{k}: {kept} kept, {new} new, {dropped} dropped")
     net.load_state_dict(take, strict=False)
     params = [k for k, _ in net.named_parameters()]
     loaded = [k for k in params if k in take]
@@ -534,7 +574,7 @@ def warm_start(net, kind, path):
     skipped = [k for k in src if k not in take]
     if not loaded:
         raise SystemExit(f"--init-from {path}: no parameter matches by name and shape")
-    return loaded, fresh, skipped, src_opts
+    return loaded, fresh, skipped, src_opts, remapped
 
 
 SELL_A = slice(bgpy.SHOP + 1, bgpy.SHOP + 1 + bgpy.BOARD)

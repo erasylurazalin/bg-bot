@@ -384,6 +384,14 @@ Deleting `.venv` undoes it.
   parameter of another checkpoint of the same model whose name and shape
   match, for example `attn` with `full` into `next`; it prints what was
   fresh. `--warmup N` ramps the learning rate up over N updates.
+- The card and hero embeddings carry over by name, not by position: a
+  card added, removed or moved in `cards.toml` (a new patch, a token)
+  keeps every other card's row, and only new cards start fresh. Every
+  checkpoint saves `card_names` and `hero_names` for this. A checkpoint
+  from before 2026-10-25 has none; `--init-cards-rev REV` rebuilds them
+  from `cards.toml` and `heroes.toml` at the commit it trained on
+  (`runs/n1025-attn` trained on `7b545bd`). `--resume` still needs the
+  same cards: after a card change, start a new run with `--init-from`.
 
 ## Agent briefs and references
 

@@ -363,9 +363,16 @@ impl VecEnv {
         Ok(())
     }
 
-    /// Card names by id, for logging.
+    /// Card names by id, for logging and for matching a checkpoint's card
+    /// embedding by name.
     fn card_names(&self) -> Vec<String> {
         self.data.cards.cards.iter().map(|c| c.name.clone()).collect()
+    }
+
+    /// Hero names by index, for matching a checkpoint's hero embedding by
+    /// name.
+    fn hero_names(&self) -> Vec<String> {
+        self.data.heroes.heroes.iter().map(|h| h.name.clone()).collect()
     }
 }
 

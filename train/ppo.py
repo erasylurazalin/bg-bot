@@ -38,7 +38,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
 import real_boards
-from model import MODELS, OPP_BOARDS, build, ck_model, masked, model_opts, warm_start
+from model import MODELS, OPP_BOARDS, build, ck_model, masked, model_opts, table_names, warm_start
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
@@ -84,6 +84,9 @@ def args():
     a.add_argument("--compile", action=argparse.BooleanOptionalAction,
                    help="torch.compile the attention layers (default: on for attn)")
     a.add_argument("--init-from", help="checkpoint to take matching weights from, for a new run")
+    a.add_argument("--init-cards-rev",
+                   help="git revision whose cards.toml and heroes.toml an --init-from checkpoint "
+                        "was trained on, for checkpoints saved before they stored card names")
     a.add_argument("--warmup", type=int, default=0, help="updates of linear lr warmup")
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--envs", type=int, default=1024)
@@ -141,6 +144,26 @@ def act(net, obs, mask, greedy=False):
 
 
 @torch.no_grad()
+def names_at_rev(rev):
+    """Card and hero names by id as cards.toml and heroes.toml stood at a git
+    revision (no heroes before heroes.toml existed)."""
+    import subprocess
+    import tomllib
+    root = Path(__file__).resolve().parent.parent
+
+    def show(path):
+        r = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{path}"],
+                           capture_output=True, text=True)
+        return r.stdout if r.returncode == 0 else None
+
+    cards = show("cards.toml")
+    if cards is None:
+        raise SystemExit(f"--init-cards-rev {rev}: no cards.toml there")
+    heroes = show("heroes.toml")
+    hero_list = [h["name"] for h in tomllib.loads(heroes).get("hero", [])] if heroes else []
+    return table_names(cards), hero_list
+
+
 def evaluate(net, n_games, lineup, dev, seed, real_boards=None):
     """Play n_games with `lineup` and return (avg_place, learner_records)."""
     n = min(n_games, 1024)
@@ -281,14 +304,22 @@ def main():
     N, T = cfg.envs, cfg.steps
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real)
     names = env.card_names()
+    hero_names = env.hero_names()
     if cfg.compile is None:
         cfg.compile = cfg.model == "attn"
     net = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
     if cfg.init_from:
-        loaded, fresh, skipped, src_opts = warm_start(net, cfg.model, cfg.init_from)
+        old_cards = old_heroes = None
+        if cfg.init_cards_rev:
+            old_cards, old_heroes = names_at_rev(cfg.init_cards_rev)
+        loaded, fresh, skipped, src_opts, remapped = warm_start(
+            net, cfg.model, cfg.init_from, cards=names, heroes=hero_names,
+            old_cards=old_cards, old_heroes=old_heroes)
         print(f"init from {cfg.init_from} ({cfg.model} {src_opts}): {len(loaded)} parameter "
               f"tensors loaded, {len(fresh)} fresh: {', '.join(fresh) or 'none'}; "
               f"not used: {', '.join(skipped) or 'none'}")
+        for r in remapped:
+            print(f"  by name: {r}")
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     pool = []  # snapshot state dicts, on the CPU
     update, best, t_total = 0, 9.0, 0.0
@@ -520,7 +551,7 @@ def main():
             score = 0.5 * (vs_std + vs_rush)
             ck = {"net": net.state_dict(), "opt": opt.state_dict(), "pool": pool, "update": update,
                   "best": best, "t_total": minutes, "cfg": vars(cfg), "model": cfg.model,
-                  "model_opts": opts}
+                  "model_opts": opts, "card_names": names, "hero_names": hero_names}
             if score < best:
                 best = score
                 ck["best"] = best
@@ -529,7 +560,8 @@ def main():
             if minutes - last_keep >= cfg.keep_every:
                 (out / "keep").mkdir(exist_ok=True)
                 torch.save({"net": net.state_dict(), "update": update, "model": cfg.model,
-                            "model_opts": opts}, out / "keep" / f"net_{update}.pt")
+                            "model_opts": opts, "card_names": names, "hero_names": hero_names},
+                           out / "keep" / f"net_{update}.pt")
                 last_keep = minutes
             # plateau: the rolling score hasn't improved for a while and it no
             # longer beats its oldest snapshot
