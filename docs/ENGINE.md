@@ -14,7 +14,10 @@ crates/
   bgcore/             the rules: no I/O, no Python
     src/cards.rs      card data: TOML parsing into Card, Effect, triggers
     src/heroes.rs     hero data: heroes.toml into Hero, HeroPower, PowerEffect
-    src/game.rs       one 8-player game: shop phase, actions, pairing, combat, knockouts
+    src/game/          one 8-player game: shop phase, actions, pairing, combat, knockouts;
+                      one file per system: mod.rs (types, constructors, step, legality,
+                      advance), player.rs, heroes.rs, shop.rs, play.rs, effects.rs,
+                      spells.rs, discover.rs, targets.rs, triples.rs, turn.rs, invariants.rs
     src/fight.rs      the fight: a pure function of two boards, an RNG and counters
     src/minion.rs     Minion (Copy, fixed size), Keywords, Magnetic attachments
     src/action.rs     the flat action space and its index mapping

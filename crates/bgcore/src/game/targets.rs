@@ -1,0 +1,657 @@
+//! Pending board and shop targets: offer, apply and resolve.
+
+use arrayvec::ArrayVec;
+use crate::cards::{
+    ConsumePick,
+    EventKind,
+    SpellTarget,
+    Tribe,
+};
+use crate::minion::{
+    CardId,
+    Keywords,
+};
+use crate::{
+    BOARD,
+    SHOP,
+};
+use super::{
+    DiscoverRequest,
+    Game,
+    PendingTarget,
+    ShopTargetKind,
+    TargetKind,
+    TavernBuff,
+};
+use super::shop::golden_up;
+use super::effects::buff;
+
+impl Game {
+    pub(super) fn resolve_shop_target(&mut self, p: usize, slot: usize) {
+        if let Some(pst) = self.players[p].pending_shop_target.take() {
+            match pst.kind {
+                ShopTargetKind::Consume { keywords, remaining, stat_mul } => {
+                    self.consume(p, pst.source as usize, slot, keywords, stat_mul);
+                    if remaining > 1 {
+                        self.start_consume(
+                            p,
+                            pst.source as usize,
+                            ConsumePick::Chosen,
+                            keywords,
+                            remaining - 1,
+                            stat_mul,
+                        );
+                    }
+                }
+                ShopTargetKind::Fishbait { card, golden } => {
+                    self.put_fishbait(p, slot, card, golden)
+                }
+            }
+            self.maybe_start_discover(p);
+            return;
+        }
+        let Some(pt) = self.players[p].pending_target.take() else { return };
+        self.apply_target_shop(p, &pt, slot);
+        self.maybe_start_discover(p);
+    }
+
+    /// Resolve a pending target that the player picked in the Tavern.
+    fn apply_target_shop(&mut self, p: usize, pt: &PendingTarget, slot: usize) {
+        if let TargetKind::StealShopCard { damage } = pt.kind {
+            if self.steal_shop_card(p, slot) {
+                // The damage runs through the hero-damage path, so armor
+                // takes it and a rewind on the board gives it back
+                // (DESIGN.md "Heroes").
+                self.take_shop_damage(p, damage, None);
+            }
+            return;
+        }
+        if slot >= self.players[p].shop.len()
+            || self.data.cards.get(self.players[p].shop[slot].card).is_spell()
+        {
+            return;
+        }
+        match pt.kind {
+            TargetKind::AnyBuff { attack, health } => {
+                for _ in 0..pt.runs {
+                    buff(&mut self.players[p].shop[slot], attack, health);
+                }
+            }
+            TargetKind::AnySetStats { attack, health } => {
+                for _ in 0..pt.runs {
+                    let m = &mut self.players[p].shop[slot];
+                    m.attack = attack;
+                    m.health = health;
+                }
+            }
+            TargetKind::Spell(st) => {
+                let target = slot;
+                // A Tavern minion is not a friendly minion, so Balinda's
+                // double cast does not apply to it.
+                for _ in 0..1 {
+                    if target >= self.players[p].shop.len()
+                        || self.data.cards.get(self.players[p].shop[target].card).is_spell()
+                    {
+                        break;
+                    }
+                    let (da, dh) = if pt.tavern { self.total_spell_bonus(p) } else { (0, 0) };
+                    let mut generated: Option<CardId> = None;
+                    let mut stop_after = false;
+                    match st {
+                        SpellTarget::Buff { attack, health, keyword, times, if_win_next_turn_buff } => {
+                            if pt.gem {
+                                // A Blood Gem on a Tavern minion: one cast,
+                                // the player's Gem value, tracked as Blood
+                                // Gem stats.
+                                let (ga, gh) =
+                                    (self.players[p].gem_attack, self.players[p].gem_health);
+                                let m = &mut self.players[p].shop[target];
+                                m.attack += ga;
+                                m.health += gh;
+                                m.gem_attack += ga;
+                                m.gem_health += gh;
+                            } else {
+                                let m = &mut self.players[p].shop[target];
+                                for _ in 0..times {
+                                    // A keyword-only spell (Sacred Gift) gets no spell bonus.
+                                    let (ba, bh) = if attack == 0 && health == 0 { (0, 0) } else { (attack + da, health + dh) };
+                                    buff(m, ba, bh);
+                                }
+                                if keyword != 0 {
+                                    m.keywords.set(keyword);
+                                }
+                                if let Some((wb_a, wb_h)) = if_win_next_turn_buff {
+                                    m.winners_bread = m.winners_bread.saturating_add(1);
+                                    self.players[p].winners_bread_buff = (wb_a, wb_h);
+                                }
+                            }
+                        }
+                        SpellTarget::BuffPerBonusKeyword { attack, health } => {
+                            let k = self.players[p]
+                                .distinct_bonus_keywords(self.data.rules.bonus_mask)
+                                as i32;
+                            let m = &mut self.players[p].shop[target];
+                            for _ in 0..1 + k {
+                                buff(m, attack + da, health + dh);
+                            }
+                        }
+                        SpellTarget::BuffSameTribe { attack, health } => {
+                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                for o in &mut self.players[p].board {
+                                    if self.data.cards.get(o.card).tribes.has(tribe) {
+                                        buff(o, attack + da, health + dh);
+                                    }
+                                }
+                                if self.data.cards.get(self.players[p].shop[target].card).tribes.has(tribe) {
+                                    buff(&mut self.players[p].shop[target], attack + da, health + dh);
+                                }
+                            }
+                        }
+                        SpellTarget::SameTribeMinion => {
+                            let c_id = self.players[p].shop[target].card;
+                            let t = self.data.cards.get(c_id).tribes;
+                            let tier = self.players[p].tier;
+                            generated = self.data.cards.random_different_minion(t, c_id, tier, self.lobby, &mut self.rng);
+                        }
+                        SpellTarget::SetStats { attack, health } => {
+                            let m = &mut self.players[p].shop[target];
+                            m.attack = attack;
+                            m.health = health;
+                        }
+                        SpellTarget::TrickyTrousers { attack, health } => {
+                            let m = &mut self.players[p].shop[target];
+                            buff(m, attack + da, health + dh);
+                            if m.keywords.has(Keywords::TAUNT) {
+                                m.keywords.clear(Keywords::TAUNT);
+                            } else {
+                                m.keywords.set(Keywords::TAUNT);
+                            }
+                        }
+                        SpellTarget::RobustEvolution => {
+                            self.robust_evolution_shop(p, target);
+                            stop_after = true;
+                        }
+                        SpellTarget::TavernBuffType { attack, health } => {
+                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                let b = TavernBuff {
+                                    tribe: Some(tribe),
+                                    attack: attack + da,
+                                    health: health + dh,
+                                    this_turn: false,
+                                };
+                                self.players[p].add_tavern_buff(&self.data.cards, b);
+                            }
+                        }
+                        SpellTarget::RefreshWithType => {
+                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                let Game { data, rng, players, pool, lobby, .. } = self;
+                                Self::refresh_with_tribe(
+                                    &mut players[p],
+                                    pool,
+                                    &data.cards,
+                                    &data.rules,
+                                    rng,
+                                    *lobby,
+                                    tribe,
+                                );
+                            }
+                            stop_after = true;
+                        }
+                        SpellTarget::Confiscation { gems } => {
+                            // 3 Gems on the Tavern minion, then its
+                            // neighbours' Blood Gem stats move onto it.
+                            let (ga, gh) =
+                                (self.players[p].gem_attack, self.players[p].gem_health);
+                            {
+                                let m = &mut self.players[p].shop[target];
+                                m.attack += ga * gems as i32;
+                                m.health += gh * gems as i32;
+                                m.gem_attack += ga * gems as i32;
+                                m.gem_health += gh * gems as i32;
+                            }
+                            for n in [target.checked_sub(1), Some(target + 1)]
+                                .into_iter()
+                                .flatten()
+                            {
+                                let (sa, sh) = match self.players[p].shop.get(n) {
+                                    Some(m) if !self.data.cards.get(m.card).is_spell() => {
+                                        (m.gem_attack, m.gem_health)
+                                    }
+                                    _ => continue,
+                                };
+                                if sa == 0 && sh == 0 {
+                                    continue;
+                                }
+                                let nm = &mut self.players[p].shop[n];
+                                nm.attack -= sa;
+                                nm.health -= sh;
+                                nm.gem_attack = 0;
+                                nm.gem_health = 0;
+                                let m = &mut self.players[p].shop[target];
+                                m.attack += sa;
+                                m.health += sh;
+                                m.gem_attack += sa;
+                                m.gem_health += sh;
+                            }
+                        }
+                        // The rest target a friendly board minion only.
+                        SpellTarget::Consume { .. }
+                        | SpellTarget::MakeGolden { .. }
+                        | SpellTarget::HalfOfHighestTavern { .. }
+                        | SpellTarget::Butchering { .. }
+                        | SpellTarget::Devourer => {}
+                        SpellTarget::BuffPerTribePlayed { attack, health, per, .. } => {
+                            let n = self.players[p].elementals_played_turn as i32;
+                            buff(
+                                &mut self.players[p].shop[target],
+                                attack + per.0 * n + da,
+                                health + per.1 * n + dh,
+                            );
+                        }
+                    }
+                    if pt.tavern {
+                        self.trigger_on_cast_spell(p);
+                    }
+                    if !stop_after
+                        && target < self.players[p].shop.len()
+                        && self.data.cards.get(self.players[p].shop[target].card).tribes.has(Tribe::Mech)
+                    {
+                        self.glambot_on_shop_mech(p, target);
+                    }
+                    if let Some(gen_c) = generated {
+                        let mut dummy = 0;
+                        self.give_generated_tracking(p, gen_c, &mut dummy);
+                    }
+                    if stop_after {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn offer_target(&mut self, p: usize, pt: PendingTarget) {
+        let mut board: ArrayVec<usize, BOARD> = ArrayVec::new();
+        for s in 0..self.players[p].board.len() {
+            if self.valid_target(p, &pt, s) {
+                let _ = board.try_push(s);
+            }
+        }
+        let mut shop: ArrayVec<usize, SHOP> = ArrayVec::new();
+        if pt.kind.takes_shop() {
+            for s in 0..self.players[p].shop.len() {
+                if self.valid_shop_target(p, &pt, s) {
+                    let _ = shop.try_push(s);
+                }
+            }
+            // A card steal may also take the spell slot, one past the cards.
+            if matches!(pt.kind, TargetKind::StealShopCard { .. })
+                && self.valid_shop_target(p, &pt, self.players[p].shop.len())
+            {
+                let _ = shop.try_push(self.players[p].shop.len());
+            }
+        }
+        if board.len() + shop.len() != 1 {
+            if board.is_empty() && shop.is_empty() {
+                return;
+            }
+            self.players[p].pending_target = Some(pt);
+            return;
+        }
+        if let Some(&s) = board.first() {
+            self.apply_target(p, &pt, s);
+        } else if let Some(&s) = shop.first() {
+            self.apply_target_shop(p, &pt, s);
+        }
+    }
+
+    fn apply_target(&mut self, p: usize, pt: &PendingTarget, s: usize) {
+        match pt.kind {
+            // Never reached: a card steal is a Tavern pick (`apply_target_shop`).
+            TargetKind::StealShopCard { .. } => {}
+            TargetKind::MinionBuff { attack, health, keyword, random_keyword, .. } => {
+                for _ in 0..pt.runs {
+                    let m = &mut self.players[p].board[s];
+                    buff(m, attack, health);
+                    if keyword != 0 {
+                        m.keywords.set(keyword);
+                    }
+                    if random_keyword {
+                        self.give_random_keyword(p, s);
+                    }
+                }
+            }
+            TargetKind::MakeGolden { .. } => {
+                // A minion made Golden on the board gives no Triple Reward
+                // and doesn't count as a Golden minion played.
+                golden_up(&self.data.cards, &mut self.players[p].board[s]);
+                if pt.runs > 1 {
+                    let again = PendingTarget { runs: pt.runs - 1, ..*pt };
+                    self.offer_target(p, again);
+                }
+            }
+            TargetKind::AnyBuff { attack, health } => {
+                for _ in 0..pt.runs {
+                    buff(&mut self.players[p].board[s], attack, health);
+                }
+            }
+            TargetKind::DestroyDiscover { tribe, discover } => {
+                self.destroy_in_shop(p, &[s], None);
+                for _ in 0..discover {
+                    let _ = self.players[p]
+                        .discover_queue
+                        .try_push(DiscoverRequest::TribeMinion(tribe));
+                }
+            }
+            TargetKind::DestroyCopy { copies, .. } => {
+                let card = self.players[p].board[s].card;
+                self.destroy_in_shop(p, &[s], None);
+                for _ in 0..copies {
+                    self.give_generated(p, card);
+                }
+            }
+            TargetKind::RebornDestroy { attack, health, .. } => {
+                let host = pt.source.map(|x| x as usize);
+                self.players[p].board[s].keywords.set(Keywords::REBORN);
+                let tracked = self.destroy_in_shop(p, &[s], host);
+                if let Some(h) = tracked {
+                    buff(&mut self.players[p].board[h], attack, health);
+                }
+            }
+            TargetKind::AnySetStats { attack, health } => {
+                for _ in 0..pt.runs {
+                    let m = &mut self.players[p].board[s];
+                    m.attack = attack;
+                    m.health = health;
+                }
+            }
+            TargetKind::Consume { pick, keywords, count, stat_mul, .. } => {
+                self.start_consume(p, s, pick, keywords, count, stat_mul);
+            }
+            TargetKind::TriggerRally => {
+                for _ in 0..pt.runs {
+                    let Some(m) = self.players[p].board.get(s).copied() else { break };
+                    for (card, golden) in m.parts() {
+                        let Some(e) = self.data.cards.get(card).rally else { continue };
+                        let mut pos = s;
+                        self.run_effect(p, &mut pos, e, golden, 1);
+                    }
+                }
+            }
+            TargetKind::TriggerBattlecry => {
+                for _ in 0..pt.runs {
+                    if s >= self.players[p].board.len() {
+                        break;
+                    }
+                    self.battlecry_or_choose_one(p, s);
+                    // A targeting Battlecry or a Choose One waits for its
+                    // own choice; don't run it again.
+                    if self.players[p].pending_target.is_some()
+                        || self.players[p].pending_choose_one.is_some()
+                    {
+                        break;
+                    }
+                }
+                self.maybe_start_discover(p);
+            }
+            TargetKind::Spell(st) => {
+                let mut target_pos = s;
+                for k in 0..pt.runs {
+                    if target_pos >= self.players[p].board.len() {
+                        break;
+                    }
+                    // Every extra cast (Balinda) is another spell cast. Only a
+                    // Tavern spell counts (a Blood Gem does not).
+                    if k > 0 && pt.tavern {
+                        self.fire_event(p, EventKind::SpellsCast, 1);
+                        if target_pos >= self.players[p].board.len() {
+                            break;
+                        }
+                    }
+                    let (da, dh) = if pt.tavern { self.total_spell_bonus(p) } else { (0, 0) };
+                    let mut generated: Option<CardId> = None;
+                    // A spell that removes or transforms its target can't
+                    // usefully be cast again on the same slot (Balinda).
+                    let mut stop_after = false;
+                    let mut target_removed = false;
+                    match st {
+                        SpellTarget::Buff {
+                            attack,
+                            health,
+                            keyword,
+                            times,
+                            if_win_next_turn_buff,
+                        } => {
+                            if pt.gem {
+                                // A Blood Gem: the player's Gem value, no
+                                // spell power, tracked as Blood Gem stats.
+                                let (ga, gh) =
+                                    (self.players[p].gem_attack, self.players[p].gem_health);
+                                let m = &mut self.players[p].board[target_pos];
+                                m.attack += ga;
+                                m.health += gh;
+                                m.gem_attack += ga;
+                                m.gem_health += gh;
+                            } else {
+                                let m = &mut self.players[p].board[target_pos];
+                                for _ in 0..times {
+                                    // A keyword-only spell (Sacred Gift) gets no spell bonus.
+                                    let (ba, bh) = if attack == 0 && health == 0 { (0, 0) } else { (attack + da, health + dh) };
+                                    buff(m, ba, bh);
+                                }
+                                if keyword != 0 {
+                                    m.keywords.set(keyword);
+                                }
+                                if let Some((wb_a, wb_h)) = if_win_next_turn_buff {
+                                    m.winners_bread = m.winners_bread.saturating_add(1);
+                                    self.players[p].winners_bread_buff = (wb_a, wb_h);
+                                }
+                            }
+                        }
+                        SpellTarget::BuffPerBonusKeyword { attack, health } => {
+                            let k = self.players[p]
+                                .distinct_bonus_keywords(self.data.rules.bonus_mask)
+                                as i32;
+                            let m = &mut self.players[p].board[target_pos];
+                            for _ in 0..1 + k {
+                                buff(m, attack + da, health + dh);
+                            }
+                        }
+                        SpellTarget::BuffSameTribe { attack, health } => {
+                            let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+                            // DESIGN.md "Types": a dual or all-type minion
+                            // uses one of its types, picked at random.
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                for o in &mut self.players[p].board {
+                                    if self.data.cards.get(o.card).tribes.has(tribe) {
+                                        buff(o, attack + da, health + dh);
+                                    }
+                                }
+                            }
+                        }
+                        SpellTarget::SameTribeMinion => {
+                            let c_id = self.players[p].board[target_pos].card;
+                            let t = self.data.cards.get(c_id).tribes;
+                            let tier = self.players[p].tier;
+                            generated = self.data.cards.random_different_minion(
+                                t,
+                                c_id,
+                                tier,
+                                self.lobby,
+                                &mut self.rng,
+                            );
+                        }
+                        SpellTarget::SetStats { attack, health } => {
+                            let m = &mut self.players[p].board[target_pos];
+                            m.attack = attack;
+                            m.health = health;
+                        }
+                        SpellTarget::Consume { pick, keywords, count, .. } => {
+                            self.start_consume(p, target_pos, pick, keywords, count, 1);
+                        }
+                        SpellTarget::MakeGolden { .. } => {
+                            let m = &mut self.players[p].board[target_pos];
+                            if !m.golden {
+                                let base = self.data.cards.get(m.card);
+                                let (ga, gh) = base
+                                    .golden_stats
+                                    .unwrap_or((base.attack * 2, base.health * 2));
+                                m.golden = true;
+                                m.attack += ga - base.attack;
+                                m.health += gh - base.health;
+                            }
+                        }
+                        SpellTarget::TrickyTrousers { attack, health } => {
+                            let m = &mut self.players[p].board[target_pos];
+                            buff(m, attack + da, health + dh);
+                            if m.keywords.has(Keywords::TAUNT) {
+                                m.keywords.clear(Keywords::TAUNT);
+                            } else {
+                                m.keywords.set(Keywords::TAUNT);
+                            }
+                        }
+                        SpellTarget::RobustEvolution => {
+                            // Balinda casts it again on the minion the first
+                            // cast produced, in the same slot.
+                            self.robust_evolution_board(p, target_pos);
+                        }
+                        SpellTarget::TavernBuffType { attack, health } => {
+                            let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                let b = TavernBuff {
+                                    tribe: Some(tribe),
+                                    attack: attack + da,
+                                    health: health + dh,
+                                    this_turn: false,
+                                };
+                                self.players[p].add_tavern_buff(&self.data.cards, b);
+                            }
+                        }
+                        SpellTarget::RefreshWithType => {
+                            let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+                            if let Some(tribe) = t.random_type(&mut self.rng) {
+                                let Game { data, rng, players, pool, lobby, .. } = self;
+                                Self::refresh_with_tribe(
+                                    &mut players[p],
+                                    pool,
+                                    &data.cards,
+                                    &data.rules,
+                                    rng,
+                                    *lobby,
+                                    tribe,
+                                );
+                            }
+                            // Balinda casts it again: the Tavern refreshes
+                            // twice and both casts' on-cast triggers fire.
+                        }
+                        SpellTarget::Devourer => {
+                            self.channel_the_devourer(p, target_pos);
+                            stop_after = true;
+                            target_removed = true;
+                        }
+                        SpellTarget::HalfOfHighestTavern { .. } => {
+                            // Half, rounded up, of the highest-Health Tavern
+                            // minion. An empty Tavern gives nothing.
+                            if let Some((a, h)) = self.highest_tavern_stats(p) {
+                                buff(
+                                    &mut self.players[p].board[target_pos],
+                                    (a + 1) / 2 + da,
+                                    (h + 1) / 2 + dh,
+                                );
+                            }
+                        }
+                        SpellTarget::BuffPerTribePlayed { attack, health, per, .. } => {
+                            let n = self.players[p].elementals_played_turn as i32;
+                            buff(
+                                &mut self.players[p].board[target_pos],
+                                attack + per.0 * n + da,
+                                health + per.1 * n + dh,
+                            );
+                        }
+                        SpellTarget::Butchering { attack } => {
+                            // The bonus lands first, so a Reborn copy comes
+                            // back with it. Like Channel the Devourer, a
+                            // second cast (Balinda) does nothing: its
+                            // target is gone.
+                            self.add_undead_bonus(p, attack + da, dh, true);
+                            self.destroy_in_shop(p, &[target_pos], None);
+                            stop_after = true;
+                            target_removed = true;
+                        }
+                        SpellTarget::Confiscation { gems } => {
+                            // 3 Gems on the target, then the neighbours'
+                            // Blood Gem stats move onto it: they lose them,
+                            // it gains them.
+                            let (ga, gh) =
+                                (self.players[p].gem_attack, self.players[p].gem_health);
+                            {
+                                let m = &mut self.players[p].board[target_pos];
+                                m.attack += ga * gems as i32;
+                                m.health += gh * gems as i32;
+                                m.gem_attack += ga * gems as i32;
+                                m.gem_health += gh * gems as i32;
+                            }
+                            for n in [target_pos.checked_sub(1), Some(target_pos + 1)]
+                                .into_iter()
+                                .flatten()
+                            {
+                                let (sa, sh) = match self.players[p].board.get(n) {
+                                    Some(m) => (m.gem_attack, m.gem_health),
+                                    None => continue,
+                                };
+                                if sa == 0 && sh == 0 {
+                                    continue;
+                                }
+                                let nm = &mut self.players[p].board[n];
+                                nm.attack -= sa;
+                                nm.health -= sh;
+                                nm.gem_attack = 0;
+                                nm.gem_health = 0;
+                                let m = &mut self.players[p].board[target_pos];
+                                m.attack += sa;
+                                m.health += sh;
+                                m.gem_attack += sa;
+                                m.gem_health += sh;
+                            }
+                        }
+                    }
+                    if pt.tavern {
+                        self.trigger_on_cast_spell(p);
+                    }
+                    if !target_removed && target_pos < self.players[p].board.len() {
+                        self.trigger_on_cast_spell_on_target(p, target_pos);
+                        if pt.gem {
+                            // A Gem was played from hand on the target.
+                            self.roogug_on_gem(p, target_pos);
+                        }
+                        let is_mech = self
+                            .data
+                            .cards
+                            .get(self.players[p].board[target_pos].card)
+                            .tribes
+                            .has(Tribe::Mech);
+                        if is_mech {
+                            self.trigger_on_cast_spell_on_mech(p, target_pos);
+                        }
+                    }
+                    if let Some(gen_c) = generated {
+                        self.give_generated_tracking(p, gen_c, &mut target_pos);
+                    }
+                    if stop_after {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn resolve_target(&mut self, p: usize, s: usize) {
+        let pt = self.players[p].pending_target.take().unwrap();
+        self.apply_target(p, &pt, s);
+        self.maybe_start_discover(p);
+    }
+}

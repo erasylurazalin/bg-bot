@@ -5,7 +5,8 @@ A working reference for whoever adds the next tribe. Rules are in
 principles in `docs/ENGINE.md`. Function names, no line numbers: grep them.
 
 Files: `cards.toml` (data), `crates/bgcore/src/cards.rs` (parsing, `Effect` and
-trigger enums), `game.rs` (shop phase), `fight.rs` (combat), `minion.rs`.
+trigger enums), `game/` (shop phase, one file per system, see `docs/ENGINE.md`),
+`fight.rs` (combat), `minion.rs`.
 
 ## Workflow
 
@@ -34,6 +35,13 @@ doubles per its own golden flag. `run_effect` exists twice: `Game::run_effect`
 (shop, takes `pos`, `golden`, `runs`) and `Side::run_effect` (fight). An `Effect`
 variant that a fight can run must be in `Effect::runs_in_fights`; the parser rejects
 Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
+
+The shop-phase functions named below live in `crates/bgcore/src/game/`, one file
+per system (see `docs/ENGINE.md` for the map): `run_effect` and event triggers in
+effects.rs, spells in spells.rs, hero powers in heroes.rs, the Tavern and pool in
+shop.rs, Discover and Choose One in discover.rs, pending targets in targets.rs,
+triples in triples.rs, turn flow and combat in turn.rs, and `step`/`apply` and
+legality in mod.rs.
 
 | Kind | cards.toml field | Fires in | Example |
 |---|---|---|---|
@@ -176,7 +184,7 @@ exactly one legal target and drops the effect when there is none.
    gets the new bit.
 2. Tribe loops that must use `EVERY`: `Tribes::random_type`, `pick_one_per_type`,
    `bots::preferred_tribe`, sandbox `screen.rs` (`tribe_name` match, `parse_tribe`,
-   `card_tribes`), Planar Telescope and Friendly Bounty counts in `game.rs`.
+   `card_tribes`), Planar Telescope and Friendly Bounty counts in `game/spells.rs`.
    grep `Tribe::EVERY` to check nothing else needs it.
    The lobby needs nothing: `Tribes::random_lobby(5, ..)` rolls 5 of `EVERY` and
    every draw filters through `Card::lobby_ok` on its own.
@@ -185,7 +193,7 @@ exactly one legal target and drops the effect when there is none.
    (`a_card_needs_exactly_one_of_tribe_and_tribes`) use a tribe that does not
    exist: "naga" (it left the game and will never be built, so these tests
    never need changing again).
-   Also raise `MAX_TAVERN_BUFFS` in game.rs (one Tavern buff per tribe filter and
+   Also raise `MAX_TAVERN_BUFFS` in game/mod.rs (one Tavern buff per tribe filter and
    duration, so 2 x (tribes + 1), 22 with ten tribes); a push past it panics.
 4. `tests/tier7.rs` Last One Standing test counts picks per type: an all-type minion is
    every tribe, so a new tribe changes its expected count. Re-check it. An all-type
@@ -323,7 +331,7 @@ Triple Reward spell.
   `Minion.no_reward` (Aureate Laureate is `always_golden`, Silent Deliverer's
   minions). `TargetKind::MakeGolden` makes a board minion Golden with no reward and
   no count (Elite Navigator, Captain Sanders).
-- **Golden draws from the pool.** `draw_golden` (game.rs) takes up to three copies for
+- **Golden draws from the pool.** `draw_golden` (game/shop.rs) takes up to three copies for
   one Golden minion (Lockbox, Silent Deliverer).
 - **Gold spent.** Every payment goes through `fire_event(GoldSpent, n)`, which also
   adds to `Player.gold_spent_turn` (Lovesick Balladist). Health payments and free
