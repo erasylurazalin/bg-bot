@@ -977,6 +977,15 @@ impl Game {
         g
     }
 
+    /// The hero game training and `bgbench` play: every player gets a random
+    /// hero, no pick (Era, 2026-10-25). Finley's power Discover still waits
+    /// for an answer before turn 1.
+    pub fn new_random_heroes(data: Arc<Data>, seed: u64) -> Game {
+        let mut g = Game::unstarted(data, seed, None);
+        g.deal_random_heroes();
+        g
+    }
+
     /// The hero game with a fixed lobby, for tests and the sandbox.
     pub fn new_heroes_with_lobby(data: Arc<Data>, seed: u64, lobby: Tribes) -> Game {
         let mut g = Game::unstarted(data, seed, Some(lobby));
@@ -1080,6 +1089,30 @@ impl Game {
         self.order = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
         self.rng.shuffle(&mut self.order);
         self.cursor = 0;
+    }
+
+    /// Every living player takes a random hero the lobby allows, no two the
+    /// same. Turn 0 then only waits for Finley's power Discover; with none
+    /// open, turn 1 starts right away.
+    fn deal_random_heroes(&mut self) {
+        let mut deck: Vec<u8> = self.data.heroes.lobby_allowed(self.lobby).collect();
+        self.rng.shuffle(&mut deck);
+        let mut at = 0;
+        for p in 0..PLAYERS {
+            if self.players[p].alive && at < deck.len() {
+                self.take_hero(p, deck[at]);
+                at += 1;
+            }
+        }
+        for p in 0..PLAYERS {
+            self.players[p].done = !self.players[p].alive || !Self::choice_open(&self.players[p]);
+        }
+        self.order = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
+        self.rng.shuffle(&mut self.order);
+        match self.order.iter().position(|&p| !self.players[p as usize].done) {
+            Some(c) => self.cursor = c,
+            None => self.start_turn(),
+        }
     }
 
     /// Give player `p` this hero outright, no offer: the pick phase's
@@ -5704,6 +5737,11 @@ impl Game {
             self.players[p].power_offer.clear();
             let power = self.data.heroes.get(of).power.clone();
             self.players[p].power = Some(PowerState::fresh(of, &power));
+            // A start-of-game power picked before turn 1 (Finley's Discover
+            // finding All Patched Up) still does its part: the extra Health.
+            if self.turn == 0 {
+                self.players[p].health += self.data.heroes.get(of).extra_health;
+            }
             self.refresh_power_unlock(p);
             self.maybe_start_discover(p);
             return;

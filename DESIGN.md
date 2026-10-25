@@ -682,7 +682,10 @@ through E.T.C.'s power (a late batch).
 (rules.toml, 2 by default, a free account; the Battle Pass gives 4 and a
 reroll, which we skip) and picks one. No hero is offered twice in a lobby.
 The pick happens before turn 1 starts, so start-of-turn powers work on
-turn 1.
+turn 1. Training and `bgbench` games skip the pick: every player gets a
+random hero, no two the same (Era, 2026-10-25). The pick stays for the
+sandbox. Unmasked Identity never offers Patchwerk's power; Finley can
+find it, and then starts with its 30 extra Health.
 
 **Health and armor.** A hero has 30 Health plus its armor from the data
 (Patchwerk: 60 Health from his power, no armor). Every point of damage to

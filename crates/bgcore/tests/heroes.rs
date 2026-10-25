@@ -135,10 +135,11 @@ fn heroes_toml_parses_with_the_fourteen_heroes() {
         d.heroes.get(d.heroes.by_name("Death Speaker Blackthorn").unwrap()).tribes.has(Tribe::Quilboar)
     );
     assert!(d.heroes.get(d.heroes.by_name("Alexstrasza").unwrap()).tribes.has(Tribe::Dragon));
-    // Unmasked Identity's exclusion list holds Finley, A. F. Kay and Faelin.
+    // Unmasked Identity's exclusion list holds Finley, A. F. Kay, Faelin
+    // and Patchwerk (Era: his power can't come from Unmasked Identity).
     let ui = db().by_name("Unmasked Identity").unwrap();
     let excludes = db().get(ui).exclude_heroes.clone();
-    for card_id in ["TB_BaconShop_HERO_40", "TB_BaconShop_HERO_16", "BG22_HERO_201"] {
+    for card_id in ["TB_BaconShop_HERO_40", "TB_BaconShop_HERO_16", "BG22_HERO_201", "TB_BaconShop_HERO_34"] {
         assert!(excludes.contains(&card_id.to_string()), "{card_id}");
     }
     // Smart Savings is a passive whatever the data's cost says, Bloodbound is
@@ -786,4 +787,55 @@ fn the_observation_carries_the_hero_features() {
         assert_eq!(out[at] as usize, g.players[q].hero.unwrap() as usize + 1);
         assert_eq!(out[at + 1] as i32, g.players[q].armor);
     }
+}
+
+// ---- Random heroes (training and bgbench games) ----
+
+#[test]
+fn random_hero_games_deal_everyone_a_different_hero_without_a_pick() {
+    let d = data();
+    for seed in 0..50 {
+        let mut g = Game::new_random_heroes(d.clone(), seed);
+        let mut seen = Vec::new();
+        for p in 0..8 {
+            let h = g.players[p].hero.expect("everyone has a hero");
+            assert!(!seen.contains(&h), "seed {seed}: hero dealt twice");
+            seen.push(h);
+            assert!(g.players[p].hero_offer.iter().all(|&o| o == u8::MAX), "no pick");
+        }
+        // Turn 0 only waits for Finley's power Discover.
+        while g.turn == 0 {
+            let p = g.current_player().unwrap();
+            assert!(!g.players[p].power_offer.is_empty(), "seed {seed}");
+            g.step(Action::Choose(0)).unwrap();
+        }
+        assert_eq!(g.turn, 1);
+        g.check_invariants().unwrap();
+    }
+}
+
+#[test]
+fn finley_finding_all_patched_up_starts_with_60_health_and_his_armor() {
+    let d = data();
+    for seed in 0..400 {
+        let mut g = Game::new_random_heroes(d.clone(), seed);
+        while g.turn == 0 {
+            let p = g.current_player().unwrap();
+            let k = g.players[p]
+                .power_offer
+                .iter()
+                .position(|&h| g.data.heroes.get(h).name == "Patchwerk");
+            let Some(k) = k else {
+                g.step(Action::Choose(0)).unwrap();
+                continue;
+            };
+            let armor = g.players[p].armor;
+            assert_eq!(g.players[p].health, 30);
+            g.step(Action::Choose(k as u8)).unwrap();
+            assert_eq!(g.players[p].health, 60, "All Patched Up's 30 extra Health");
+            assert_eq!(g.players[p].armor, armor, "Finley keeps his armor (UNSURE.md)");
+            return;
+        }
+    }
+    panic!("no Finley was offered All Patched Up in 400 seeds");
 }

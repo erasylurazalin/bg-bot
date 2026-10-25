@@ -47,7 +47,7 @@ impl Env {
             }
         }
         rng.shuffle(&mut kinds);
-        Env { game: Game::new_heroes(data.clone(), seed), kinds, rng, reported: [false; PLAYERS] }
+        Env { game: Game::new_random_heroes(data.clone(), seed), kinds, rng, reported: [false; PLAYERS] }
     }
 
     fn is_python(&self, p: usize) -> bool {
