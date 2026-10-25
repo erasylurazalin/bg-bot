@@ -169,6 +169,13 @@ Attack this game (wherever they are)." and alternate "... have +8/+0 this game
 
 # Heroes, hero powers, trinkets, Dark Gifts (`bg-meta.json`)
 
+Note for the engine: `hero_powers` holds non-starting powers too (Aranna's
+unlocked Spectral Sight, Bru'kan's chosen Water Invocation, the `_t1..t4` and
+`p2` alternate forms); only a hero's `hero_power_dbf_id` is its starting
+power, which is all `heroes.toml` uses. Heroes are matched by `card_id`
+(tag 380 points at the power; some names appear on tutorial or Bob variants
+with different card_ids, `in_solo_pool` sorts them out).
+
 Same source (`dbf.unity3d`), same text rules and script-data rules as for cards
 (`text`, `text_alt`, `text_template`, `script_data`, `unresolved_numbers`,
 `lobby_subsets`, `keywords`, raw `tags`). `bg-cards.json` is unchanged. Top

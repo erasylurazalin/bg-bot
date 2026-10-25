@@ -293,7 +293,7 @@ fn lobby(ts: &[Tribe]) -> Tribes {
 fn the_lobby_reaches_random_draws_and_the_fight() {
     let g = sandbox(1, one(Tribe::Beast), 3);
     let db = &g.data.cards;
-    assert_eq!(g.players[0].counters(db, g.lobby).lobby, g.lobby);
+    assert_eq!(g.players[0].counters(&g.data, g.lobby).lobby, g.lobby);
     let mut rng = Rng::new(9);
     for _ in 0..500 {
         let c = db.get(db.random_deathrattle_minion(6, g.lobby, &mut rng).unwrap());

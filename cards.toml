@@ -2580,6 +2580,24 @@ cost = 1
 on_discard = "cast_twice"
 effect = { buff_deity = [7, 7] }
 
+[[spell]]
+name = "Armor Stash"
+tier = 5
+cost = 3
+effect = { set_armor = 5 }
+
+[[spell]]
+name = "Unmasked Identity"
+tier = 5
+cost = 3
+# Powers this Discover never offers, by hero card_id (DESIGN.md "Heroes"):
+# Sir Finley Mrrgglton, A. F. Kay, Ambassador Faelin.
+effect = { discover_hero_power = true, exclude_heroes = [
+    "TB_BaconShop_HERO_40",
+    "TB_BaconShop_HERO_16",
+    "BG22_HERO_201",
+] }
+
 # Generated Quilboar spells: plain spells, not Tavern spells.
 
 [[spell]]

@@ -8,10 +8,12 @@ A map of the code for whoever works on it next. The rules themselves are in
 ```
 cards.toml            every card: minions, tokens, spells, golden behaviour
 rules.toml            every rule number: gold, costs, pool copies, damage caps, limits
+heroes.toml           the built heroes and their powers (see "Heroes")
 peak_boards.toml      hand-made peak boards for `bgbench peak` (guesses, see below)
 crates/
   bgcore/             the rules: no I/O, no Python
     src/cards.rs      card data: TOML parsing into Card, Effect, triggers
+    src/heroes.rs     hero data: heroes.toml into Hero, HeroPower, PowerEffect
     src/game.rs       one 8-player game: shop phase, actions, pairing, combat, knockouts
     src/fight.rs      the fight: a pure function of two boards, an RNG and counters
     src/minion.rs     Minion (Copy, fixed size), Keywords, Magnetic attachments
@@ -22,6 +24,7 @@ crates/
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
+                      heroes.rs (the hero frame: pick, armor, the 14 powers, the two spells),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card),
                       lobby.rs (the 5-tribe lobby and every draw that respects it),
@@ -156,6 +159,46 @@ lobby)` (a test may pass more than 5 to reach its cards) and
 `Game::new_sandbox(data, seed, Some(lobby), free_rolls)`. The bots'
 `preferred_tribe` counts only lobby tribes.
 
+## Heroes
+
+`heroes.toml` (DESIGN.md "Heroes") holds the built heroes: armor, extra
+Health, the tribes a hero is tied to (offered only with one of them in the
+lobby) and the power, as data (`PowerEffect` in heroes.rs: the engine never
+matches a hero by name). Games with heroes come from `Game::new_heroes` (or
+`new_heroes_with_lobby` / `new_sandbox_heroes`); `Game::new` and friends
+build hero-less games so old tests pass unchanged, and
+`Game::new_sandbox_with_hero` / `Game::assign_hero` force a hero.
+
+- **The pick** runs at turn 0: `open_hero_picks` deals `hero_choices`
+  (rules.toml, 2) offers per player without replacement (round by round, so
+  a short hero table still feeds everyone), the players answer with
+  `Action::Choose` in shuffled order (nothing else is legal), and turn 1
+  starts once all have picked (`advance`). Player.hero_offer holds the offer.
+- **Health and armor**: take_hero applies armor, extra Health and the power.
+  Every hero damage takes armor first (`take_hero_damage`, the combat damage
+  in `combat`, Health costs via `can_pay_health`); a rewind gives back what
+  was taken, armor as armor (`last_damage_armor`). Armor Stash sets armor.
+- **The power**: `Player.power` is a `PowerState` (whose power, uses left
+  this turn, used this game, unlocked, one progress counter) reset each turn
+  in `start_turn`. `Action::HeroPower` presses a button power
+  (`Game::power_usable` is the legality, `press_power` pays and runs it);
+  targeted powers open the pending-target flow like spells (`offer_target`).
+  Passives hook into the existing triggers: FreeRefreshPerTurn and the
+  uses/unlock reset in `start_turn`, GoldAfterUpgrade in `Action::Level`,
+  GoldAfterBuyTribe in `Action::Buy`, GoldNextTurnAfterSell in `sell_minion`,
+  SocLeftmost through `Counters.soc_leftmost` at the top of
+  `run_start_of_combat` (before any minion's).
+- **Discovering a hero power** (Unmasked Identity, Finley's Adventure!):
+  `discover_hero_power(p, excludes)`, one engine function taking the source's
+  exclusion list (hero card_ids, in cards.toml for the spell, on the hero for
+  Finley). Offers are `Player.power_offer`, answered with `Choose`; the pick
+  replaces the power with a fresh `PowerState`. Finley's runs right after his
+  pick, before turn 1. Room for trinkets and Dark Gifts sits on Player
+  (`trinkets`, `dark_gifts`), unused.
+- Bots answer the pick and a power Discover in `answer_pending`, and press a
+  legal button with gold that would be left over (Gonna Be Rich! waits for
+  turn 8). `bgbench` and `bgpy` games play with heroes.
+
 ## The sandbox
 
 `Game::new_sandbox(data, seed, lobby, free_rolls)` is a one-player game for
@@ -179,9 +222,11 @@ cargo run --release -p bgsandbox -- --tribe murloc          # a one-tribe lobby
 cargo run --release -p bgsandbox -- --tribe beast,mech,dragon,murloc,demon
 ```
 
-Flags: `--tribe A[,B,...]` (1 to 5 distinct tribes: the lobby), `--label
+Flags: `--tribe A[,B,...]` (1 to 5 distinct tribes: the lobby), `--hero
+NAME` (play that built hero instead of picking from the offer), `--label
 TEXT`, `--seed N` (random and printed by default), `--free-rolls N` (default
-0), `--boards DIR`. Commands are read from stdin (`help` lists them). Every
+0), `--boards DIR`. The screen shows your hero, armor and power; `hp` presses
+the button. Commands are read from stdin (`help` lists them). Every
 end of turn rewrites the recording from the game's history, so `undo` (which
 replays the seed and all actions but the last) also removes an undone turn
 from the file.
@@ -264,7 +309,12 @@ Deleting `.venv` undoes it.
   start a new run. The 2026-10-25 observation rewrite (all ten tribes, the
   lobby, the Deity, Blood Gems, attachments, and opponents' Deity, gem value
   and spell power as last seen; OBS_SIZE 2658 to 6362) broke every earlier
-  checkpoint, expected.
+  checkpoint, expected. The heroes run the same day added own and opponents'
+  heroes (a hero embedding beside the card one), armor, the power state, the
+  hero offer during the pick and the `hero_power` action kind (OBS_SIZE to
+  6389, SCALARS 173, OPP_SCALARS 30): every checkpoint before it breaks too.
+- Games from `bgpy` play with heroes (`Game::new_heroes`), pick included;
+  learner seats answer the pick and any power Discover with `choose`.
 - `--model` picks the network: `mlp` (default, 3.1M parameters, all slots
   concatenated), `attn` (a 3-layer transformer over the card slots, 0.65M)
   or `pool` (the same slot tokens pooled per zone, 0.76M). The last two
@@ -320,8 +370,10 @@ mlp stays the default until a head-to-head says otherwise.
   by the effect (the weakest minion for Channel the Devourer and Robust
   Evolution, the biggest gain for Tyrael's 50/50). They never reorder
   the board.
-- The observation covers every tribe (layout at the top of `obs.rs`): the
-  lobby's five tribes as a multi-hot, ten-wide tribe multi-hots, every
+- The observation covers every tribe and the heroes (layout at the top of
+  `obs.rs`): own and opponents' heroes and armor, the power state,
+  the hero offer during the pick, the lobby's five tribes as a multi-hot,
+  ten-wide tribe multi-hots, every
   keyword, per-minion counters (Blood Gem stats, attachments, links,
   Ichoron's one-turn shield, doomed picks), player counters (gem value,
   Undead bonus, Knight deaths, discards, spells cast, ...), own and

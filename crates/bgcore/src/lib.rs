@@ -10,6 +10,7 @@ pub mod bots;
 pub mod cards;
 pub mod fight;
 pub mod game;
+pub mod heroes;
 pub mod minion;
 pub mod obs;
 pub mod record;
@@ -19,7 +20,8 @@ pub mod rules;
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 pub use cards::{Card, CardDb, Effect, Tribe, Tribes};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
-pub use game::{Game, IllegalAction, Opponent, Player, Sandbox, SandboxFight};
+pub use game::{Game, IllegalAction, Opponent, Player, PowerState, Sandbox, SandboxFight};
+pub use heroes::{Hero, HeroDb, HeroPower, PowerEffect};
 pub use minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
 pub use rng::Rng;
 pub use rules::Rules;
@@ -47,23 +49,37 @@ pub const TRIBES: usize = 11;
 pub struct Data {
     pub cards: CardDb,
     pub rules: Rules,
+    /// The built heroes. Empty in a `from_toml` card set (no hero game).
+    pub heroes: HeroDb,
 }
 
 impl Data {
+    /// A card set with no heroes: games built from it have no pick, no armor
+    /// and no powers (the parser tests use this).
     pub fn from_toml(cards: &str, rules: &str) -> Result<Data, String> {
+        Data::from_toml_with_heroes(cards, rules, "")
+    }
+
+    pub fn from_toml_with_heroes(cards: &str, rules: &str, heroes: &str) -> Result<Data, String> {
         let cards = CardDb::from_toml(cards)?;
         if cards.triple_reward.is_none() {
             return Err("cards.toml: no Triple Reward spell: a golden minion played from hand has no reward to give".into());
         }
-        Ok(Data { cards, rules: Rules::from_toml(rules)? })
+        Ok(Data {
+            cards,
+            rules: Rules::from_toml(rules)?,
+            heroes: HeroDb::from_toml(heroes)?,
+        })
     }
 
-    /// The cards.toml and rules.toml at the repo root, built into the binary.
+    /// The cards.toml, rules.toml and heroes.toml at the repo root, built
+    /// into the binary.
     pub fn bundled() -> Data {
-        Data::from_toml(
+        Data::from_toml_with_heroes(
             include_str!("../../../cards.toml"),
             include_str!("../../../rules.toml"),
+            include_str!("../../../heroes.toml"),
         )
-        .expect("bundled cards.toml or rules.toml is broken")
+        .expect("bundled cards.toml, rules.toml or heroes.toml is broken")
     }
 }

@@ -33,6 +33,8 @@ pub enum Cmd {
     Roll,
     Freeze,
     Upgrade,
+    /// Press the hero power button.
+    Power,
     End,
     Info(Look),
     Undo,
@@ -152,6 +154,7 @@ pub fn parse(line: &str) -> Result<Cmd, String> {
         },
         "a" | "act" | "activate" => one("a board minion").map(Cmd::Activate),
         "r" | "roll" | "refresh" => none(Cmd::Roll),
+        "hp" | "power" | "hero_power" => none(Cmd::Power),
         "f" | "freeze" | "unfreeze" => none(Cmd::Freeze),
         "u" | "up" | "upgrade" | "level" => none(Cmd::Upgrade),
         "e" | "end" => none(Cmd::End),
@@ -182,6 +185,7 @@ mod tests {
         assert_eq!(parse("1"), Ok(Cmd::Pick(Arg::Board(1))));
         assert_eq!(parse("t4"), Ok(Cmd::Pick(Arg::Tavern(4))));
         assert_eq!(parse("r"), Ok(Cmd::Roll));
+        assert_eq!(parse("hp"), Ok(Cmd::Power));
         assert_eq!(parse("f"), Ok(Cmd::Freeze));
         assert_eq!(parse("u"), Ok(Cmd::Upgrade));
         assert_eq!(parse("e"), Ok(Cmd::End));

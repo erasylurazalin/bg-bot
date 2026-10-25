@@ -16,6 +16,7 @@ use crate::cards::{
     Tribes, how_many_times, pick_one_per_type,
 };
 use crate::fight::{Counters, Deity, SeenCounters, SideOutcome, fight_with_hands};
+use crate::heroes::PowerEffect;
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 use crate::rules::Rules;
@@ -108,6 +109,10 @@ pub enum TargetKind {
     /// Give the chosen friendly minion of a tribe, not a copy of this card,
     /// Reborn and destroy it; this minion gains the stats (Dead Bellringer).
     RebornDestroy { tribe: Tribe, attack: i32, health: i32 },
+    /// Steal the chosen Tavern card into hand, any card (the spell slot
+    /// included, a spell in a minion slot too), then the hero takes `damage`
+    /// (Graveyard Shift).
+    StealShopCard { damage: i32 },
 }
 
 impl TargetKind {
@@ -116,6 +121,7 @@ impl TargetKind {
         match self {
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
             TargetKind::Spell(st) => st.can_target_shop(),
+            TargetKind::StealShopCard { .. } => true,
             _ => false,
         }
     }
@@ -242,10 +248,53 @@ enum RefreshKind {
     Effect,
 }
 
+/// A player's hero power: which hero's power it is and everything the game
+/// tracks about using it. Replacing the power (Unmasked Identity, Finley's
+/// Discover) builds a fresh one: the old one's progress is lost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PowerState {
+    /// Index into `HeroDb` of the hero whose power this is (the player's own
+    /// hero, or the one whose power was Discovered).
+    pub of: u8,
+    /// Button presses left this turn.
+    pub uses_left: u8,
+    /// Button presses this game.
+    pub used_game: u32,
+    /// Whether an unlock condition ("Unlocks at Tier 4") has been met.
+    pub unlocked: bool,
+    /// One generic progress counter, for later powers ("(N left!)").
+    pub progress: u32,
+}
+
+impl PowerState {
+    fn fresh(of: u8, power: &crate::heroes::HeroPower) -> PowerState {
+        PowerState { of, uses_left: power.uses_per_turn, used_game: 0, unlocked: true, progress: 0 }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Player {
     pub health: i32,
     pub alive: bool,
+    /// The hero this player picked (index into `HeroDb`), None in a game
+    /// without heroes.
+    pub hero: Option<u8>,
+    /// Armor: every damage to the hero takes it first, and it never comes
+    /// back unless a card says so.
+    pub armor: i32,
+    /// The hero power and its state. None without a hero; replaced whole by
+    /// a Discovered power.
+    pub power: Option<PowerState>,
+    /// Heroes offered before turn 1 (indices into `HeroDb`), `u8::MAX` for an
+    /// empty offer slot. While one is open the only legal action answers it.
+    pub hero_offer: [u8; DISCOVER],
+    /// Powers offered by a Hero Power Discover (indices into `HeroDb`),
+    /// answered like a Discover.
+    pub power_offer: ArrayVec<u8, DISCOVER>,
+    /// Trinket slots (lesser, greater). Room for a later run, unused.
+    pub trinkets: [u8; 2],
+    /// Dark Gift uses. Room for a later run, unused.
+    pub dark_gifts: u8,
     /// 1 to 8 once decided, 0 while still playing.
     pub placement: u8,
     /// Turn the player reached each tier (1 to 6), 0 if never reached.
@@ -255,6 +304,9 @@ pub struct Player {
     pub tavern_buffs: ArrayVec<TavernBuff, MAX_TAVERN_BUFFS>,
     /// Damage the hero took last, what "rewind it" gives back.
     pub last_damage: i32,
+    /// How much of `last_damage` armor took: a rewind gives that much back as
+    /// armor, the rest as Health.
+    pub last_damage_armor: i32,
     pub gold: u8,
     pub gold_next_turn: u8,
     pub extra_max_gold: u8,
@@ -362,11 +414,19 @@ impl Player {
         Player {
             health: data.rules.starting_health,
             alive: true,
+            hero: None,
+            armor: 0,
+            power: None,
+            hero_offer: [u8::MAX; DISCOVER],
+            power_offer: ArrayVec::new(),
+            trinkets: [0; 2],
+            dark_gifts: 0,
             placement: 0,
             tier_turns: [1, 0, 0, 0, 0, 0],
             final_tribes: [0; TRIBES],
             tavern_buffs: ArrayVec::new(),
             last_damage: 0,
+            last_damage_armor: 0,
             gold: 0,
             gold_next_turn: 0,
             extra_max_gold: 0,
@@ -545,9 +605,10 @@ impl Player {
     }
 
     /// Whether a Health cost can be paid: it can't kill the hero, unless a
-    /// rewind on the board gives the Health straight back.
+    /// rewind on the board gives the Health straight back. Armor absorbs the
+    /// cost first, so only what gets past it counts.
     pub fn can_pay_health(&self, cost: i32, cards: &CardDb) -> bool {
-        self.health - cost >= 1 || self.can_rewind(cards)
+        self.health - (cost - self.armor).max(0) >= 1 || self.can_rewind(cards)
     }
 
     /// Whether the next Refresh would be paid in Health.
@@ -655,7 +716,8 @@ impl Player {
         (da, dh)
     }
 
-    pub fn counters(&self, cards: &CardDb, lobby: Tribes) -> Counters {
+    pub fn counters(&self, data: &Data, lobby: Tribes) -> Counters {
+        let cards = &data.cards;
         let (spell_attack, spell_health) = self.total_spell_bonus(cards);
         Counters {
             health: Some(self.health),
@@ -668,6 +730,12 @@ impl Player {
             boon_of_beetles: self.boon_of_beetles,
             brood_of_nozdormu: self.brood_of_nozdormu,
             upper_hand: self.upper_hand,
+            soc_leftmost: self.power.map_or(0, |st| {
+                match data.heroes.get(st.of).power.effect {
+                    PowerEffect::SocLeftmost { keywords } => keywords,
+                    _ => 0,
+                }
+            }),
             sharing_is_caring: self.sharing_is_caring,
             spell_attack,
             spell_health,
@@ -900,6 +968,22 @@ impl Game {
         g
     }
 
+    /// A game with heroes: before turn 1 every living player is offered
+    /// `hero_choices` heroes and picks one with `Action::Choose`, then turn 1
+    /// starts (DESIGN.md "The pick"). The lobby is rolled from the seed.
+    pub fn new_heroes(data: Arc<Data>, seed: u64) -> Game {
+        let mut g = Game::unstarted(data, seed, None);
+        g.open_hero_picks();
+        g
+    }
+
+    /// The hero game with a fixed lobby, for tests and the sandbox.
+    pub fn new_heroes_with_lobby(data: Arc<Data>, seed: u64, lobby: Tribes) -> Game {
+        let mut g = Game::unstarted(data, seed, Some(lobby));
+        g.open_hero_picks();
+        g
+    }
+
     /// A normal game with a fixed lobby: for tests and the sandbox, which
     /// need known tribes. Games that roll one pick exactly 5 of the 10
     /// (DESIGN.md); a test may pass more to set up its cards.
@@ -925,6 +1009,285 @@ impl Game {
         g.sandbox = Some(Sandbox { free_rolls, last_fight: None });
         g.start_turn();
         g
+    }
+
+    /// The sandbox with heroes: player 0 picks from an offer before turn 1,
+    /// like any hero game, with the sandbox's one living player.
+    pub fn new_sandbox_heroes(
+        data: Arc<Data>,
+        seed: u64,
+        lobby: Option<Tribes>,
+        free_rolls: u8,
+    ) -> Game {
+        let mut g = Game::unstarted(data, seed, lobby);
+        for p in 1..PLAYERS {
+            g.players[p].alive = false;
+            g.players[p].placement = p as u8 + 1;
+        }
+        g.sandbox = Some(Sandbox { free_rolls, last_fight: None });
+        g.open_hero_picks();
+        g
+    }
+
+    /// The sandbox with one hero forced (the --hero option): the pick phase
+    /// runs with that hero as the only offer, so Finley's power Discover and
+    /// turn 1 line up exactly as they do with a picked hero.
+    pub fn new_sandbox_with_hero(
+        data: Arc<Data>,
+        seed: u64,
+        lobby: Option<Tribes>,
+        free_rolls: u8,
+        hero: u8,
+    ) -> Game {
+        let mut g = Game::unstarted(data, seed, lobby);
+        for p in 1..PLAYERS {
+            g.players[p].alive = false;
+            g.players[p].placement = p as u8 + 1;
+        }
+        g.sandbox = Some(Sandbox { free_rolls, last_fight: None });
+        g.open_hero_picks();
+        g.players[0].hero_offer = [hero, u8::MAX, u8::MAX];
+        g.step(crate::action::Action::Choose(0)).expect("the forced hero is offered");
+        g
+    }
+
+    /// Deal the hero offers and start the pick phase (turn 0): the living
+    /// players, in a shuffled order, each answer their offer with
+    /// `Action::Choose`; a player who picked is done, and once everyone has,
+    /// turn 1 starts (`advance`). Offers are drawn without replacement from
+    /// the heroes the lobby allows, round by round so a short hero table
+    /// still gives everyone a hero.
+    fn open_hero_picks(&mut self) {
+        let mut deck: Vec<u8> = self.data.heroes.lobby_allowed(self.lobby).collect();
+        self.rng.shuffle(&mut deck);
+        let n = self.data.rules.hero_choices as usize;
+        let mut at = 0;
+        for round in 0..n {
+            for p in 0..PLAYERS {
+                if !self.players[p].alive || at >= deck.len() {
+                    continue;
+                }
+                self.players[p].hero_offer[round] = deck[at];
+                at += 1;
+            }
+        }
+        for p in 0..PLAYERS {
+            // A player the hero table could not feed picks nothing and waits
+            // the pick phase out (unreachable with the heroes built so far).
+            let empty = self.players[p].hero_offer.iter().all(|&h| h == u8::MAX);
+            self.players[p].done = !self.players[p].alive || empty;
+        }
+        self.order = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
+        self.rng.shuffle(&mut self.order);
+        self.cursor = 0;
+    }
+
+    /// Give player `p` this hero outright, no offer: the pick phase's
+    /// effects (armor, extra Health, the power, Finley's Discover when
+    /// `discover`, which the pick phase runs by itself). For tests and the
+    /// sandbox's --hero.
+    pub fn assign_hero(&mut self, p: usize, hero: u8) {
+        self.take_hero(p, hero);
+    }
+
+    /// The player takes the hero: health, armor, power state, and Finley's
+    /// power Discover if the hero's power is one.
+    fn take_hero(&mut self, p: usize, hero: u8) {
+        let h = self.data.heroes.get(hero);
+        let (extra_health, armor, discovers, excludes) =
+            (h.extra_health, h.armor, h.power.effect == PowerEffect::DiscoverPower, h.power_excludes.clone());
+        self.players[p].health += extra_health;
+        self.players[p].armor = armor as i32;
+        self.players[p].hero = Some(hero);
+        self.players[p].power = Some(PowerState::fresh(hero, &self.data.heroes.get(hero).power));
+        self.refresh_power_unlock(p);
+        if discovers {
+            self.discover_hero_power(p, &excludes);
+        }
+    }
+
+    /// Set the power's unlock flag from the player's tier and the turn
+    /// ("Unlocks at Tier N", "Unlocks on Turn N").
+    fn refresh_power_unlock(&mut self, p: usize) {
+        let Some(st) = self.players[p].power else { return };
+        let power = &self.data.heroes.get(st.of).power;
+        let pl = &self.players[p];
+        let unlocked = pl.tier >= power.unlock_tier && self.turn >= power.unlock_turn;
+        self.players[p].power.as_mut().unwrap().unlocked = unlocked;
+    }
+
+    /// Whether the player's power button may be pressed right now: a button,
+    /// unlocked, uses left, not past its once-per-game, the Gold for it, and
+    /// whatever its effect needs to land on something.
+    pub fn power_usable(&self, p: usize) -> bool {
+        let Some(st) = self.players[p].power else { return false };
+        let power = &self.data.heroes.get(st.of).power;
+        let pl = &self.players[p];
+        if power.passive
+            || !st.unlocked
+            || st.uses_left == 0
+            || (power.once_per_game && st.used_game > 0)
+            || pl.gold < power.cost
+        {
+            return false;
+        }
+        let hand_room = !pl.hand.is_full();
+        let shop_minion = self.shop_has_minion(p);
+        match power.effect {
+            PowerEffect::GiveDivineShield | PowerEffect::MakeGolden => {
+                !pl.board.is_empty() && pl.board.iter().any(|m| !m.golden)
+            }
+            PowerEffect::StealCardDamage { .. } => {
+                hand_room && (shop_minion || pl.shop_spell.is_some())
+            }
+            PowerEffect::StealRandomDoubleHealth => hand_room && shop_minion,
+            _ => true,
+        }
+    }
+
+    /// The hero power button is pressed: pay, spend a use, run the effect.
+    fn press_power(&mut self, p: usize) {
+        let (of, cost) = {
+            let st = self.players[p].power.unwrap();
+            (st.of, self.data.heroes.get(st.of).power.cost)
+        };
+        let effect = self.data.heroes.get(of).power.effect;
+        let st = self.players[p].power.as_mut().unwrap();
+        st.uses_left = st.uses_left.saturating_sub(1);
+        st.used_game += 1;
+        self.players[p].gold -= cost;
+        match effect {
+            PowerEffect::ExtraMaxGold(n) => {
+                self.players[p].extra_max_gold = self.players[p].extra_max_gold.saturating_add(n);
+            }
+            PowerEffect::GiveDivineShield => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::MinionBuff {
+                        tribe: None,
+                        attack: 0,
+                        health: 0,
+                        keyword: Keywords::DIVINE_SHIELD,
+                        random_keyword: false,
+                    },
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            PowerEffect::StealCardDamage(damage) => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::StealShopCard { damage },
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            PowerEffect::StealRandomDoubleHealth => {
+                self.steal_random_shop_double_health(p);
+            }
+            PowerEffect::MakeGolden => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::MakeGolden { tribe: None, max_tier: crate::CARD_MAX_TIER },
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            PowerEffect::GetGems(n) => self.give_gems(p, n),
+            PowerEffect::DiscoverTribe(t) => {
+                let _ = self.players[p].discover_queue.try_push(DiscoverRequest::TribeMinion(t));
+                self.maybe_start_discover(p);
+            }
+            _ => {}
+        }
+        self.fire_event(p, EventKind::GoldSpent, cost as u32);
+    }
+
+    /// Steal a random minion from the Tavern into hand and double its Health
+    /// (Brick by Brick). The pool copy leaves with the card, like a buy.
+    fn steal_random_shop_double_health(&mut self, p: usize) {
+        let slots: ArrayVec<usize, SHOP> = (0..self.players[p].shop.len())
+            .filter(|&s| !self.data.cards.get(self.players[p].shop[s].card).is_spell())
+            .collect();
+        if slots.is_empty() {
+            return;
+        }
+        let k = self.rng.below(slots.len() as u32) as usize;
+        let mut m = self.players[p].shop.remove(slots[k]);
+        m.health *= 2;
+        self.add_to_hand(p, m);
+    }
+
+    /// Steal the Tavern card the player picked into hand: a shop slot (any
+    /// card in it) or, one past the last, the spell slot. Graveyard Shift's
+    /// damage lands after the card is in hand. The hand can fill between the
+    /// press and the pick (a "gold spent" trigger hands out a card), and then
+    /// the steal fizzles: the card goes back where it stood (a pool copy
+    /// never vanishes). Returns whether the card was taken.
+    fn steal_shop_card(&mut self, p: usize, slot: usize) -> bool {
+        let from_spell = slot >= self.players[p].shop.len();
+        let pl = &mut self.players[p];
+        let m = if !from_spell {
+            pl.shop.remove(slot)
+        } else if let Some(id) = pl.shop_spell.take() {
+            pl.make_card(&self.data.cards, id, false, 0)
+        } else {
+            return false;
+        };
+        if self.add_to_hand(p, m) {
+            return true;
+        }
+        // The hand filled up: put the card back where it stood.
+        let pl = &mut self.players[p];
+        if from_spell {
+            pl.shop_spell = Some(m.card);
+        } else {
+            pl.shop.insert(slot, m);
+        }
+        false
+    }
+
+    /// Offer the player a choice of hero powers, the one engine function
+    /// Unmasked Identity and Finley's Adventure! share (DESIGN.md
+    /// "Discovering a hero power"): three starting powers of built heroes,
+    /// never the player's current power, never a hero on `excludes` (hero
+    /// card_ids), never a hero tied only to tribes outside the lobby.
+    fn discover_hero_power(&mut self, p: usize, excludes: &[String]) {
+        let current = self.players[p].power.map(|st| st.of);
+        let options: Vec<u8> = self
+            .data
+            .heroes
+            .lobby_allowed(self.lobby)
+            .filter(|&h| Some(h) != current && !excludes.contains(&self.data.heroes.get(h).card_id))
+            .collect();
+        if options.is_empty() {
+            return;
+        }
+        // Draw three distinct ones (a reservoir sample over the candidates).
+        let mut picks: ArrayVec<u8, DISCOVER> = ArrayVec::new();
+        let mut left = options.len() as u32;
+        for &h in &options {
+            let want = (DISCOVER - picks.len()) as u32;
+            if picks.len() < DISCOVER && self.rng.below(left) < want {
+                picks.push(h);
+            }
+            left -= 1;
+        }
+        self.players[p].power_offer = picks;
+    }
+
+    /// The player picked a hero from the offer (turn 0): the offer closes,
+    /// the hero lands (health, armor, power, Finley's Discover).
+    fn pick_hero(&mut self, p: usize, k: usize) {
+        let hero = self.players[p].hero_offer[k];
+        self.players[p].hero_offer = [u8::MAX; DISCOVER];
+        self.take_hero(p, hero);
     }
 
     fn unstarted(data: Arc<Data>, seed: u64, fixed: Option<Tribes>) -> Game {
@@ -988,6 +1351,11 @@ impl Game {
         let Some(p) = self.current_player() else { return false };
         let pl = &self.players[p];
         let r = &self.data.rules;
+        // The hero pick (turn 0): only answering the offer is legal.
+        if self.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX) {
+            return matches!(a, Action::Choose(k) if (k as usize) < DISCOVER
+                && pl.hero_offer[k as usize] != u8::MAX);
+        }
         if let Some(pt) = pl.pending_target {
             if pt.kind.takes_shop() {
                 return match a {
@@ -1009,6 +1377,10 @@ impl Game {
         }
         if !pl.discover.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.discover.len());
+        }
+        // A Hero Power Discover (Unmasked Identity, Finley): like a Discover.
+        if !pl.power_offer.is_empty() {
+            return matches!(a, Action::Choose(k) if (k as usize) < pl.power_offer.len());
         }
         match a {
             Action::Buy(s) => {
@@ -1106,6 +1478,7 @@ impl Game {
             }
             Action::Freeze | Action::EndTurn => true,
             Action::Level => pl.tier < MAX_TIER && pl.gold >= pl.upgrade_cost,
+            Action::HeroPower => self.power_usable(p),
         }
     }
 
@@ -1118,7 +1491,11 @@ impl Game {
         let Some(p) = self.current_player() else { return };
         let pl = &self.players[p];
         let mut ask = |a: Action| mask[a.index()] = self.is_legal(a);
-        if let Some(pt) = pl.pending_target {
+        if self.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX) {
+            for k in 0..DISCOVER as u8 {
+                ask(Action::Choose(k));
+            }
+        } else if let Some(pt) = pl.pending_target {
             for s in 0..BOARD as u8 {
                 ask(Action::Target(s));
             }
@@ -1143,6 +1520,10 @@ impl Game {
             for k in 0..pl.discover.len() as u8 {
                 ask(Action::Choose(k));
             }
+        } else if !pl.power_offer.is_empty() {
+            for k in 0..pl.power_offer.len() as u8 {
+                ask(Action::Choose(k));
+            }
         } else {
             for s in 0..pl.shop.len() as u8 {
                 ask(Action::Buy(s));
@@ -1165,6 +1546,7 @@ impl Game {
             ask(Action::Roll);
             ask(Action::Freeze);
             ask(Action::Level);
+            ask(Action::HeroPower);
             ask(Action::EndTurn);
         }
     }
@@ -1255,6 +1637,12 @@ impl Game {
     /// shop slot `s`.
     fn valid_shop_target(&self, p: usize, pt: &PendingTarget, s: usize) -> bool {
         let pl = &self.players[p];
+        // A card steal takes any Tavern card: a shop slot whatever is in it,
+        // and one past the last, the spell slot.
+        if let TargetKind::StealShopCard { .. } = pt.kind {
+            return s < pl.shop.len()
+                || (s == pl.shop.len() && pl.shop_spell.is_some() && s < SHOP);
+        }
         if s >= pl.shop.len() || self.data.cards.get(pl.shop[s].card).is_spell() {
             return false;
         }
@@ -1317,6 +1705,8 @@ impl Game {
                 self.data.cards.get(b[s].card).is(tribe)
             }
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
+            // A card steal is answered on a Tavern slot, never a board one.
+            TargetKind::StealShopCard { .. } => false,
             TargetKind::Spell(st) => self.valid_spell_target(p, st, s),
             TargetKind::MakeGolden { tribe, max_tier } => {
                 let c = self.data.cards.get(b[s].card);
@@ -1387,10 +1777,22 @@ impl Game {
         // A hero knocked out by its own effect damage takes no more actions.
         if self.players[p].alive {
             self.check_attack_thresholds(p);
-            let pl = &mut self.players[p];
-            pl.actions += 1;
-            if a == Action::EndTurn || pl.actions >= self.data.rules.max_actions_per_turn {
-                self.finish_shop(p);
+            if self.turn == 0 {
+                // The pick phase: a player who picked a hero and answered
+                // everything it opened is done until turn 1.
+                let pl = &self.players[p];
+                let picked = pl.hero.is_some()
+                    && pl.hero_offer.iter().all(|&h| h == u8::MAX)
+                    && !Self::choice_open(pl);
+                if picked {
+                    self.players[p].done = true;
+                }
+            } else {
+                let pl = &mut self.players[p];
+                pl.actions += 1;
+                if a == Action::EndTurn || pl.actions >= self.data.rules.max_actions_per_turn {
+                    self.finish_shop(p);
+                }
             }
         }
         self.advance();
@@ -1424,6 +1826,14 @@ impl Game {
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
                     self.fire_event(p, EventKind::CardsBought, 1);
+                    // "After you buy a Pirate, gain 1 Gold" (I'm the Cap'n Now).
+                    if let Some(st) = self.players[p].power
+                        && let PowerEffect::GoldAfterBuyTribe { tribe, gold } =
+                            self.data.heroes.get(st.of).power.effect
+                        && self.data.cards.get(m.card).tribes.has(tribe)
+                    {
+                        self.players[p].gold = self.players[p].gold.saturating_add(gold);
+                    }
                 }
             }
             Action::BuySpell => {
@@ -1551,7 +1961,13 @@ impl Game {
             }
             Action::Target(s) => self.resolve_target(p, s as usize),
             Action::TargetShop(s) => self.resolve_shop_target(p, s as usize),
-            Action::Choose(k) => self.resolve_choose(p, k as usize),
+            Action::Choose(k) => {
+                if self.turn == 0 && self.players[p].hero_offer.iter().any(|&h| h != u8::MAX) {
+                    self.pick_hero(p, k as usize);
+                } else {
+                    self.resolve_choose(p, k as usize);
+                }
+            }
             Action::Discard(s) => self.resolve_discard(p, s as usize),
             Action::Move { from, to } => {
                 let pl = &mut self.players[p];
@@ -1589,8 +2005,19 @@ impl Game {
                 pl.tier += 1;
                 pl.upgrade_cost = self.data.rules.upgrade_cost(pl.tier);
                 pl.tier_turns[pl.tier as usize - 1] = turn;
+                // "After you upgrade the Tavern, gain 2 Gold" (Everbloom), and
+                // an unlock condition may just be met (Queen of Dragons).
+                let gain = self.players[p].power
+                    .and_then(|st| match self.data.heroes.get(st.of).power.effect {
+                        PowerEffect::GoldAfterUpgrade(g) => Some(g),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                self.players[p].gold = self.players[p].gold.saturating_add(gain);
+                self.refresh_power_unlock(p);
                 self.fire_event(p, EventKind::GoldSpent, cost as u32);
             }
+            Action::HeroPower => self.press_power(p),
             Action::EndTurn => {}
         }
     }
@@ -1931,7 +2358,7 @@ impl Game {
             &pl.board,
             victims,
             track,
-            pl.counters(&data.cards, *lobby),
+            pl.counters(data, *lobby),
             rng,
         );
         // The minions that died leave the warband for good, and take their
@@ -2595,6 +3022,14 @@ impl Game {
             }
         }
         self.players[p].gold = self.players[p].gold.saturating_add(sell_gold);
+        // "After you sell a minion, gain 1 Gold next turn" (Smart Savings).
+        if let Some(st) = self.players[p].power
+            && let PowerEffect::GoldNextTurnAfterSell(g) =
+                self.data.heroes.get(st.of).power.effect
+        {
+            let pl = &mut self.players[p];
+            pl.gold_next_turn = pl.gold_next_turn.saturating_add(g);
+        }
         give_back(&mut self.pool, &self.data.cards, &m);
         for (card, golden) in m.parts() {
             match self.data.cards.get(card).on_sell {
@@ -2715,6 +3150,16 @@ impl Game {
                 self.maybe_start_discover(p);
                 return;
             }
+            if matches!(se, SpellEffect::DiscoverHeroPower) {
+                // The exclusion list lives on the card, so the intercept runs
+                // here where the card is known.
+                let excludes = c.exclude_heroes.clone();
+                if tavern {
+                    self.trigger_on_cast_spell(p);
+                }
+                self.discover_hero_power(p, &excludes);
+                return;
+            }
             // Proud Privateer: a Bounty casts again, each cast a spell cast.
             let casts = if c.is_bounty { self.bounty_mult(p) } else { 1 };
             for _ in 0..casts {
@@ -2810,6 +3255,10 @@ impl Game {
                     .discover_queue
                     .try_push(DiscoverRequest::DoomedTribeMinion(Tribe::Undead));
             }
+            SpellEffect::SetArmor(n) => {
+                self.players[p].armor = n as i32;
+            }
+            SpellEffect::DiscoverHeroPower => {}
             SpellEffect::MightyDragonbreath { attack, health } => {
                 let cards = &self.data.cards;
                 for pass in 0..3 {
@@ -3480,8 +3929,12 @@ impl Game {
             }
             Effect::RewindDamage => {
                 let pl = &mut self.players[p];
-                pl.health += pl.last_damage;
+                // What the damage took comes back as it was taken: the Health
+                // as Health, the Armor as Armor (DESIGN.md "Heroes").
+                pl.health += pl.last_damage - pl.last_damage_armor;
+                pl.armor += pl.last_damage_armor;
                 pl.last_damage = 0;
+                pl.last_damage_armor = 0;
             }
             Effect::MagnetizeVolumizerAndCopy => {
                 for _ in 0..runs {
@@ -4074,7 +4527,7 @@ impl Game {
             &pl.board,
             ai,
             pl.shop[slot],
-            pl.counters(&data.cards, *lobby),
+            pl.counters(data, *lobby),
             rng,
         );
         pl.board.clear();
@@ -4251,6 +4704,15 @@ impl Game {
 
     /// Resolve a pending target that the player picked in the Tavern.
     fn apply_target_shop(&mut self, p: usize, pt: &PendingTarget, slot: usize) {
+        if let TargetKind::StealShopCard { damage } = pt.kind {
+            if self.steal_shop_card(p, slot) {
+                // The damage runs through the hero-damage path, so armor
+                // takes it and a rewind on the board gives it back
+                // (DESIGN.md "Heroes").
+                self.take_shop_damage(p, damage, None);
+            }
+            return;
+        }
         if slot >= self.players[p].shop.len()
             || self.data.cards.get(self.players[p].shop[slot].card).is_spell()
         {
@@ -4594,8 +5056,12 @@ impl Game {
         if amount <= 0 {
             return;
         }
-        pl.health -= amount;
+        // Armor takes it first (DESIGN.md "Health and armor").
+        let to_armor = pl.armor.min(amount);
+        pl.armor -= to_armor;
+        pl.health -= amount - to_armor;
         pl.last_damage = amount;
+        pl.last_damage_armor = to_armor;
         self.note_shop_demon_damage(p, source);
         let mut pos = 0;
         while pos < self.players[p].board.len() {
@@ -4640,7 +5106,7 @@ impl Game {
                 player: p as u8,
                 board: pl.board.clone(),
                 tier: pl.tier,
-                counters: pl.counters(&data.cards, *lobby),
+                counters: pl.counters(data, *lobby),
             });
             pl.opponent = None;
             pl.done = true;
@@ -4681,7 +5147,8 @@ impl Game {
             && pl.pending_shop_target.is_none()
             && pl.pending_choose_one.is_none()
             && pl.pending_discard.is_none()
-            && pl.choose_queue.is_empty();
+            && pl.choose_queue.is_empty()
+            && pl.power_offer.is_empty();
         if idle {
             return;
         }
@@ -4704,6 +5171,7 @@ impl Game {
         pl.discover_locked = false;
         pl.discover_queue.clear();
         pl.tavern_buffs.clear();
+        pl.power_offer.clear();
     }
 
     /// A friendly Demon dealt damage in the shop phase: every other friendly
@@ -4748,6 +5216,12 @@ impl Game {
                     let _ = shop.try_push(s);
                 }
             }
+            // A card steal may also take the spell slot, one past the cards.
+            if matches!(pt.kind, TargetKind::StealShopCard { .. })
+                && self.valid_shop_target(p, &pt, self.players[p].shop.len())
+            {
+                let _ = shop.try_push(self.players[p].shop.len());
+            }
         }
         if board.len() + shop.len() != 1 {
             if board.is_empty() && shop.is_empty() {
@@ -4765,6 +5239,8 @@ impl Game {
 
     fn apply_target(&mut self, p: usize, pt: &PendingTarget, s: usize) {
         match pt.kind {
+            // Never reached: a card steal is a Tavern pick (`apply_target_shop`).
+            TargetKind::StealShopCard { .. } => {}
             TargetKind::MinionBuff { attack, health, keyword, random_keyword, .. } => {
                 for _ in 0..pt.runs {
                     let m = &mut self.players[p].board[s];
@@ -5220,6 +5696,18 @@ impl Game {
             self.maybe_start_discover(p);
             return;
         }
+        // A Hero Power pick (Unmasked Identity, Finley's Discover): the
+        // chosen power replaces the current one with a fresh state; the
+        // offers left standing are simply dropped (powers are not pool cards).
+        if !self.players[p].power_offer.is_empty() {
+            let of = self.players[p].power_offer[k];
+            self.players[p].power_offer.clear();
+            let power = self.data.heroes.get(of).power.clone();
+            self.players[p].power = Some(PowerState::fresh(of, &power));
+            self.refresh_power_unlock(p);
+            self.maybe_start_discover(p);
+            return;
+        }
         let Game { data, players, pool, .. } = self;
         let pl = &mut players[p];
         let locked = pl.discover_locked;
@@ -5657,6 +6145,7 @@ impl Game {
             || !pl.discover.is_empty()
             || !pl.discover_queue.is_empty()
             || !pl.choose_queue.is_empty()
+            || !pl.power_offer.is_empty()
     }
 
     /// Turbo Hogrider fires for each Choose One card played once nothing
@@ -5714,7 +6203,7 @@ impl Game {
             } else if let Some(pco) = pl.pending_choose_one {
                 let k = (0..2).find(|&k| self.can_choose_option(p, pco.options[k])).unwrap();
                 self.resolve_choose(p, k);
-            } else if !pl.discover.is_empty() {
+            } else if !pl.discover.is_empty() || !pl.power_offer.is_empty() {
                 self.resolve_choose(p, 0);
             } else if !pl.choose_queue.is_empty() {
                 // Both-effects Choose One options still waiting.
@@ -5761,6 +6250,12 @@ impl Game {
                 return;
             }
         }
+        // Turn 0 is the hero pick: once everyone has picked, turn 1 starts
+        // (no fights before it).
+        if self.turn == 0 {
+            self.start_turn();
+            return;
+        }
         self.combat();
         if !self.over {
             self.start_turn();
@@ -5797,6 +6292,20 @@ impl Game {
             let base_gold = base_turn_gold.saturating_add(pl.extra_max_gold);
             pl.gold = base_gold.saturating_add(pl.gold_next_turn);
             pl.gold_next_turn = 0;
+            // The power button's uses come back, an unlock condition may be
+            // met, and "at the start of your turn" passives run (Clairvoyance:
+            // a free Refresh that stacks with any saved).
+            if let Some(st) = pl.power {
+                let power = &data.heroes.get(st.of).power;
+                let (uses, unlock_tier, unlock_turn, effect) =
+                    (power.uses_per_turn, power.unlock_tier, power.unlock_turn, power.effect);
+                pl.power.as_mut().unwrap().uses_left = uses;
+                pl.power.as_mut().unwrap().unlocked =
+                    pl.tier >= unlock_tier && turn >= unlock_turn;
+                if let PowerEffect::FreeRefreshPerTurn(n) = effect {
+                    pl.free_rolls = pl.free_rolls.saturating_add(n);
+                }
+            }
             if turn > 1 {
                 if pl.won_last_combat {
                     pl.gold = pl.gold.saturating_add(pl.overconfidence_win);
@@ -6057,7 +6566,7 @@ impl Game {
                     } else {
                         &[]
                     };
-                    (q.board.clone(), q.tier, q.counters(cards, self.lobby), hand)
+                    (q.board.clone(), q.tier, q.counters(&self.data, self.lobby), hand)
                 }
                 Some(Opponent::Ghost(_)) => {
                     let g = self.ghost.as_ref().unwrap();
@@ -6073,7 +6582,7 @@ impl Game {
                 &[]
             };
             let me = self.players[p].board.clone();
-            let my_counters = self.players[p].counters(cards, self.lobby);
+            let my_counters = self.players[p].counters(&self.data, self.lobby);
             let turn = self.turn;
             let my_tier = self.players[p].tier;
             let hands: [&[Minion]; 2] = [my_hand, their_hand];
@@ -6145,10 +6654,12 @@ impl Game {
         for (p, d) in damage.into_iter().enumerate() {
             // A lost fight means the board wasn't in play, so no minion
             // reacts: no rewind, no "after your hero takes damage", no
-            // damage event count. The hero just loses the Health, and
-            // `knockouts` settles any that reach 0.
-            self.players[p].health -= d;
+            // damage event count. The hero just loses the Health (armor
+            // first), and `knockouts` settles any that reach 0.
             let pl = &mut self.players[p];
+            let to_armor = pl.armor.min(d);
+            pl.armor -= to_armor;
+            pl.health -= d - to_armor;
             pl.last_opponent = pl.opponent.take();
         }
         self.knockouts(alive);
@@ -6167,7 +6678,7 @@ impl Game {
         let hand: &[Minion] =
             if reads_board(&pl.board) || reads_hand(&pl.hand) { &pl.hand } else { &[] };
         let me = pl.board.clone();
-        let counters = pl.counters(cards, self.lobby);
+        let counters = pl.counters(&self.data, self.lobby);
         let out = fight_with_hands(
             cards,
             &me,
@@ -6219,7 +6730,7 @@ impl Game {
                     player: p,
                     board: pl.board.clone(),
                     tier: pl.tier,
-                    counters: pl.counters(&data.cards, *lobby),
+                    counters: pl.counters(data, *lobby),
                 });
             }
             pl.shop_spell = None;
@@ -6239,6 +6750,7 @@ impl Game {
             pl.choose_queue.clear();
             pl.tavern_buffs.clear();
             pl.discover_queue.clear();
+            pl.power_offer.clear();
         }
         let mut left: ArrayVec<u8, PLAYERS> =
             (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
@@ -6326,6 +6838,34 @@ impl Game {
             }
             if !(1..=MAX_TIER).contains(&pl.tier) {
                 return Err(format!("player {i}: tier {}", pl.tier));
+            }
+            if pl.armor < 0 {
+                return Err(format!("player {i}: armor {}", pl.armor));
+            }
+            // No hero is offered twice in a lobby, so no two players share one.
+            if let Some(h) = pl.hero {
+                if (0..PLAYERS).any(|q| q != i && self.players[q].hero == Some(h)) {
+                    return Err(format!("player {i}: hero {} twice", self.data.heroes.get(h).name));
+                }
+                if pl.power.is_none() {
+                    return Err(format!("player {i}: a hero without a power"));
+                }
+            }
+            if let Some(st) = pl.power {
+                if st.of as usize >= self.data.heroes.heroes.len() {
+                    return Err(format!("player {i}: power of hero {}", st.of));
+                }
+                let power = &self.data.heroes.get(st.of).power;
+                if st.uses_left > power.uses_per_turn {
+                    return Err(format!("player {i}: {} uses left", st.uses_left));
+                }
+            }
+            if pl
+                .hero_offer
+                .iter()
+                .any(|&h| h != u8::MAX && h as usize >= self.data.heroes.heroes.len())
+            {
+                return Err(format!("player {i}: hero offer out of range"));
             }
         }
         for c in 0..cards.pool_cards {

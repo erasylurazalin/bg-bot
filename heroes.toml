@@ -1,0 +1,95 @@
+# The built heroes (DESIGN.md "Heroes"). Stats, armor and tribe ties are from
+# ref/bg-meta.json, matched by card_id, never by name. A power is data here:
+# passive = true means no button; uses_per_turn, once_per_game, unlock_tier
+# and unlock_turn are the button's limits; effect is what it does. Later
+# batches append entries here; the engine never matches a hero by name.
+
+[[hero]]
+name = "Nozdormu"
+card_id = "TB_BaconShop_HERO_57"
+armor = 13
+power = { name = "Clairvoyance", card_id = "TB_BaconShop_HP_063", passive = true, effect = { free_refresh_per_turn = 1 } }
+
+[[hero]]
+name = "Forest Warden Omu"
+card_id = "TB_BaconShop_HERO_74"
+armor = 6
+power = { name = "Everbloom", card_id = "TB_BaconShop_HP_082", passive = true, effect = { gold_after_upgrade = 2 } }
+
+[[hero]]
+name = "Cap'n Hoggarr"
+card_id = "BG26_HERO_101"
+armor = 14
+tribes = ["pirate"]
+power = { name = "I'm the Cap'n Now", card_id = "BG26_HERO_101p", passive = true, effect = { gold_after_buy_tribe = 1, tribe = "pirate" } }
+
+[[hero]]
+name = "Trade Prince Gallywix"
+card_id = "TB_BaconShop_HERO_10"
+armor = 5
+power = { name = "Smart Savings", card_id = "TB_BaconShop_HP_008", passive = true, effect = { gold_next_turn_after_sell = 1 } }
+
+[[hero]]
+name = "Patchwerk"
+card_id = "TB_BaconShop_HERO_34"
+extra_health = 30
+power = { name = "All Patched Up", card_id = "TB_BaconShop_HP_035", passive = true, effect = {} }
+
+[[hero]]
+name = "Al'Akir"
+card_id = "TB_BaconShop_HERO_76"
+armor = 15
+power = { name = "Swatting Insects", card_id = "TB_BaconShop_HP_086", passive = true, effect = { soc_leftmost = ["taunt", "divine_shield", "windfury"] } }
+
+[[hero]]
+name = "Forest Lord Cenarius"
+card_id = "BG32_HERO_001"
+armor = 13
+power = { name = "Wisdom of Ancients", card_id = "BG32_HERO_001p", cost = 3, effect = { extra_max_gold = 1 } }
+
+[[hero]]
+name = "George the Fallen"
+card_id = "TB_BaconShop_HERO_15"
+armor = 15
+power = { name = "Boon of Light", card_id = "TB_BaconShop_HP_010", cost = 1, effect = { give_divine_shield = true } }
+
+[[hero]]
+name = "Lich Baz'hial"
+card_id = "TB_BaconShop_HERO_25"
+armor = 18
+tribes = ["demon"]
+power = { name = "Graveyard Shift", card_id = "TB_BaconShop_HP_049", cost = 2, effect = { steal_card_damage = 2 } }
+
+[[hero]]
+name = "Pyramad"
+card_id = "TB_BaconShop_HERO_39"
+armor = 14
+power = { name = "Brick by Brick", card_id = "TB_BaconShop_HP_040", cost = 2, effect = { steal_random_double_health = true } }
+
+[[hero]]
+name = "Reno Jackson"
+card_id = "TB_BaconShop_HERO_41"
+armor = 12
+power = { name = "Gonna Be Rich!", card_id = "TB_BaconShop_HP_046", cost = 0, once_per_game = true, effect = { make_golden = true } }
+
+[[hero]]
+name = "Death Speaker Blackthorn"
+card_id = "BG20_HERO_103"
+armor = 18
+tribes = ["quilboar"]
+power = { name = "Bloodbound", card_id = "BG20_HERO_103p", cost = 1, uses_per_turn = 2, effect = { get_gems = 2 } }
+
+[[hero]]
+name = "Alexstrasza"
+card_id = "TB_BaconShop_HERO_56"
+armor = 8
+tribes = ["dragon"]
+power = { name = "Queen of Dragons", card_id = "TB_BaconShop_HP_064", cost = 1, unlock_tier = 4, effect = { discover_tribe = "dragon" } }
+
+[[hero]]
+name = "Sir Finley Mrrgglton"
+card_id = "TB_BaconShop_HERO_40"
+armor = 14
+# Powers his Discover never offers, by hero card_id. Only himself for now.
+power_excludes = ["TB_BaconShop_HERO_40"]
+power = { name = "Adventure!", card_id = "TB_BaconShop_HP_057", passive = true, effect = { discover_power = true } }

@@ -30,6 +30,10 @@ max_turns = 40
 max_actions_per_turn = 60
 max_attacks = 500
 
+# Heroes each player is offered before turn 1 (a free account; the Battle
+# Pass gives 4 and a reroll, which we skip). At most DISCOVER options.
+hero_choices = 2
+
 # Health a Refresh costs when a card makes it cost Health instead of Gold.
 health_refresh_cost = 1
 

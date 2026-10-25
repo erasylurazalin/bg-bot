@@ -101,6 +101,10 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Linked cards | `linked_spells = 2`, `linked_minions = "aberration"` (golden links four) | `Game::give_linked`, `Minion.linked`; `Action::Play` discards the rest of the group (a golden four after two plays) | Wandering Willbreaker |
 | The god tokens | token `deity = "cthun"` / `"yshaarj"` | `Game::unstarted` picks one god per lobby onto `Player.deity`; fights: `Side::note_deity_death`, `try_awaken`, C'Thun's split, `Effect::SummonDeadAberrations` | C'Thun |
 | A neutral or spell tied to one tribe | `lobby = "<tribe>"` (the export's `lobby_subsets`) | `Card.lobby_ok` filters it into the pool and every draw; it only exists in lobbies with that tribe | Butchering |
+| Set your Armor to N | `effect = { set_armor = N }` | `cast_spell_inner` -> `SpellEffect::SetArmor` | Armor Stash |
+| Discover a new Hero Power | `effect = { discover_hero_power = true, exclude_heroes = [..] }` | `cast_spell_inner` -> `Game::discover_hero_power` (offers in `Player.power_offer`, answered with Choose) | Unmasked Identity |
+| Hero power (button) | `heroes.toml` `power = { cost, uses_per_turn, once_per_game, unlock_tier, unlock_turn, effect }` | `Action::HeroPower` -> `Game::press_power` (`power_usable` is the legality); a targeted power opens the pending-target flow | Lich Baz'hial |
+| Hero power (passive) | `passive = true` + the effect | the trigger it hooks: `FreeRefreshPerTurn` in `start_turn`, `GoldAfterUpgrade` in `Action::Level`, `GoldAfterBuyTribe` in `Action::Buy`, `GoldNextTurnAfterSell` in `sell_minion`, `SocLeftmost` through `Counters.soc_leftmost` (before any minion's Start of Combat) | Nozdormu |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -143,6 +147,26 @@ exactly one legal target and drops the effect when there is none.
 | Dual / all tribes | Treasure Parrot (`tribes = [..]`), `tribe = "all"` | `Tribes` bit set; every filter asks `has` |
 | Effect only while in hand | Bream Counter, Choral Mrrrglr | |
 | Stats that the Tavern can't change | Fishbait (`fixed_stats`) | |
+
+## 2b. Adding a hero
+
+1. `heroes.toml`: one `[[hero]]` entry (armor and `card_id` from
+   `ref/bg-meta.json`, matched by card_id never by name; `extra_health` for
+   Patchwerk; `tribes = [...]` when `lobby_subsets` ties the hero; the power
+   as data). Powers that need a new effect shape get a `PowerEffect` variant
+   in `crates/bgcore/src/heroes.rs` plus where it fires (the hook index
+   above); reuse cards.toml machinery where one exists (Blood Gems, Discover,
+   free Refreshes, Divine Shield, `extra_max_gold`, `gold_next_turn`,
+   make Golden).
+2. A button power with a target opens the pending flow in `press_power`
+   (`offer_target`); check its needs in `Game::power_usable` (a target to
+   land on, hand room for a steal).
+3. Tests in `crates/bgcore/tests/heroes.rs`: `hero_game(seed, "Name")` builds
+   a game with the hero forced on player 0 (or `Game::new_heroes_with_lobby`
+   to play the pick itself), `clear_board` keeps the pool exact.
+4. Update `docs/ENGINE.md` "Heroes" if the frame changed; the pick offers,
+   the observation (hero indices are embedded, `N_HEROES` in bgpy) and the
+   bots need nothing per hero.
 
 ## 3. New-tribe checklist
 

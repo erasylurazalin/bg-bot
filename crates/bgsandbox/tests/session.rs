@@ -15,9 +15,14 @@ fn tmp(name: &str) -> PathBuf {
     dir
 }
 
+/// George the Fallen: his power is a button these scripts never press, so
+/// the forced hero changes nothing they check.
+const SCRIPT_HERO: &str = "George the Fallen";
+
 fn session(tribe: Tribe, seed: u64, dir: &Path) -> Session {
     Session::new(Config {
         lobby: Some(bgcore::Tribes::of(tribe)),
+        hero: Some(SCRIPT_HERO.into()),
         label: Some("test".into()),
         seed,
         free_rolls: 3,
@@ -28,6 +33,7 @@ fn session(tribe: Tribe, seed: u64, dir: &Path) -> Session {
 fn open_session(seed: u64, label: Option<&str>, dir: &Path) -> Session {
     Session::new(Config {
         lobby: None,
+        hero: Some(SCRIPT_HERO.into()),
         label: label.map(String::from),
         seed,
         free_rolls: 0,
@@ -233,7 +239,7 @@ fn a_scripted_session_through_the_binary_writes_the_file() {
     let d = dir.to_str().unwrap();
     // buy, play, roll, end turn for several turns, undo, quit
     let script = "b1\np1\nr\ne\nb1\np1\nr\ne\nb1\nb2\np1\nu\ne\ne\nundo\n?b1\nzzz\nquit\n";
-    let args = ["--tribe", "murloc", "--label", "Test Run", "--seed", "42", "--free-rolls", "3", "--boards", d];
+    let args = ["--tribe", "murloc", "--hero", SCRIPT_HERO, "--label", "Test Run", "--seed", "42", "--free-rolls", "3", "--boards", d];
     let (status, out) = run_binary(&args, script);
     assert!(status.success(), "{out}");
     assert!(out.contains("seed 42"), "{out}");
@@ -251,7 +257,7 @@ fn a_scripted_session_through_the_binary_writes_the_file() {
     // the same script again gives the same file: seed and actions replay
     let first = std::fs::read_to_string(&file).unwrap();
     let dir2 = tmp("binary2");
-    let args2 = ["--tribe", "murloc", "--label", "Test Run", "--seed", "42", "--free-rolls", "3", "--boards", dir2.to_str().unwrap()];
+    let args2 = ["--tribe", "murloc", "--hero", SCRIPT_HERO, "--label", "Test Run", "--seed", "42", "--free-rolls", "3", "--boards", dir2.to_str().unwrap()];
     let (status, _) = run_binary(&args2, script);
     assert!(status.success());
     let second = std::fs::read_to_string(dir2.join("murloc-Test-Run-42.toml")).unwrap();
@@ -264,11 +270,13 @@ fn a_scripted_session_through_the_binary_writes_the_file() {
 fn the_default_game_is_unrigged_with_no_free_rolls() {
     let dir = tmp("default");
     let d = dir.to_str().unwrap();
-    let (status, out) = run_binary(&["--seed", "9", "--boards", d], "r
+    let (status, out) = run_binary(&["--seed", "9", "--boards", d], "1
+r
 e
 ");
     assert!(status.success(), "{out}");
     assert!(out.contains("a rolled 5-tribe lobby"), "{out}");
+    assert!(out.contains("CHOICE: pick your hero"), "{out}");
     // no free Refreshes and no tribe prompt: the first Refresh costs gold
     assert!(out.contains("Free rolls 0"), "{out}");
     assert!(out.contains("Gold 2/3"), "{out}");
@@ -289,7 +297,8 @@ e
 fn a_rigged_game_records_the_tribe_in_header_and_name() {
     let dir = tmp("rigged");
     let d = dir.to_str().unwrap();
-    let (status, out) = run_binary(&["--tribe", "beast", "--label", "lobster", "--seed", "4", "--boards", d], "e
+    let (status, out) = run_binary(&["--tribe", "beast", "--label", "lobster", "--seed", "4", "--boards", d], "1
+e
 ");
     assert!(status.success(), "{out}");
     assert_eq!(boards_in(&dir), ["beast-lobster-4.toml"]);
@@ -376,6 +385,48 @@ fn the_label_is_asked_when_the_game_ends() {
     assert!(out.contains("GAME OVER"), "{out}");
     assert!(out.contains("Label this game"), "{out}");
     assert_eq!(boards_in(&dir), ["grind-8.toml"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_hero_pick_and_power_button_work() {
+    let dir = tmp("hero-pick");
+    // Without --hero the game opens on the pick; hp presses a button power.
+    let mut s = Session::new(Config {
+        lobby: Some(bgcore::Tribes::of(Tribe::Beast)),
+        hero: None,
+        label: Some("pick".into()),
+        seed: 21,
+        free_rolls: 0,
+        boards_dir: dir.to_path_buf(),
+    });
+    let r = s.exec("p1");
+    assert!(r.text.contains("answer the open choice"), "{}", r.text);
+    let r = s.exec("1");
+    assert!(r.text.contains("Hero: "), "{}", r.text);
+    assert!(s.game().turn == 1, "the pick is before turn 1");
+    assert!(s.game().players[0].hero.is_some());
+    // Finley's Discover runs right after his pick, before turn 1.
+    let mut finley = Session::new(Config {
+        lobby: Some(bgcore::Tribes::of(Tribe::Beast)),
+        hero: Some("Sir Finley Mrrgglton".into()),
+        label: None,
+        seed: 21,
+        free_rolls: 0,
+        boards_dir: dir.to_path_buf(),
+    });
+    // His power Discover waits right after the pick, so nothing else works.
+    assert!(finley.banner().contains("pick a Hero Power"));
+    let r = finley.exec("hp");
+    assert!(r.text.contains("answer the open choice"), "{}", r.text);
+    let r = finley.exec("1");
+    assert!(r.text.contains("Hero: Sir Finley Mrrgglton"), "{}", r.text);
+    let power = finley.game().players[0].power.unwrap();
+    assert_ne!(
+        finley.game().data.heroes.get(power.of).power.card_id,
+        "TB_BaconShop_HP_057",
+        "Adventure! is replaced by the pick"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

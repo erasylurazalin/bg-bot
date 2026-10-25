@@ -58,7 +58,7 @@ fn bench_fights(n: usize) {
 
 /// Plays one game with random actions. Returns (steps, turns).
 fn play(data: &Arc<Data>, seed: u64, check: bool) -> Result<(u64, u32), String> {
-    let mut g = Game::new(data.clone(), seed);
+    let mut g = Game::new_heroes(data.clone(), seed);
     let mut rng = Rng::new(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
     let mut steps = 0;
     while !g.over {
@@ -146,7 +146,7 @@ fn bot_match(n: u64) {
             let sums: Vec<[f64; 2]> = (0..n)
                 .into_par_iter()
                 .map(|seed| {
-                    let mut g = Game::new(data.clone(), seed);
+                    let mut g = Game::new_heroes(data.clone(), seed);
                     let mut rng = Rng::new(seed ^ 0x5eed);
                     let mut seats: Vec<bool> = (0..bgcore::PLAYERS).map(|i| i < rule).collect();
                     rng.shuffle(&mut seats);

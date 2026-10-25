@@ -320,7 +320,7 @@ fn holy_vanguard_does_not_show_a_rewound_hit() {
     // Wrath Weaver dealt 1 and Soul Rewinder gave it back: the hero is at
     // 16, so Holy Vanguard has no bonus.
     assert_eq!(g.players[0].health, 16);
-    let counters = [g.players[0].counters(&g.data.cards, g.lobby), Counters::default()];
+    let counters = [g.players[0].counters(&g.data, g.lobby), Counters::default()];
     let d = db();
     let a = vec![mk(&d, "Holy Vanguard", false), mk(&d, "Microbot", false)];
     let b = vec![mk(&d, "Microbot", false)];

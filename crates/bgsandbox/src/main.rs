@@ -6,8 +6,8 @@ use bgsandbox::screen::parse_lobby;
 use bgsandbox::{Config, Session, play};
 
 const USAGE: &str = "\
-usage: bgsandbox [--tribe A[,B,C,D,E]] [--label TEXT] [--seed N]
-                 [--free-rolls N] [--boards DIR]
+usage: bgsandbox [--tribe A[,B,C,D,E]] [--hero NAME] [--label TEXT]
+                 [--seed N] [--free-rolls N] [--boards DIR]
 
 A one-player Battlegrounds sandbox: no opponents. The pool is a real 5-tribe
 lobby, rolled from the seed (every tribe of it shows in the Tavern, Discovers
@@ -22,6 +22,8 @@ boards/game-<seed>.toml.
            or <tribe>-<label>-<seed> when rigged; an existing file is never overwritten.
 --seed     defaults to a random one that is printed.
 --free-rolls  free Refreshes each turn, default 0.
+--hero     play this built hero (by name) instead of picking from an offer;
+           a forced hero ignores its lobby tie.
 Commands are read from stdin, type help once it runs.";
 
 fn random_seed() -> u64 {
@@ -41,6 +43,7 @@ fn fail(msg: &str) -> ExitCode {
 
 fn main() -> ExitCode {
     let mut lobby = None;
+    let mut hero = None;
     let mut label = None;
     let mut seed = None;
     let mut free_rolls = 0u8;
@@ -57,6 +60,7 @@ fn main() -> ExitCode {
                     ))?);
                 }
                 "--label" => label = Some(value("--label")?),
+                "--hero" => hero = Some(value("--hero")?),
                 "--seed" => {
                     let v = value("--seed")?;
                     let n: u64 = v.parse().map_err(|_| format!("bad seed {v:?}"))?;
@@ -83,7 +87,17 @@ fn main() -> ExitCode {
         }
     }
     let seed = seed.unwrap_or_else(random_seed);
-    let mut session = Session::new(Config { lobby, label, seed, free_rolls, boards_dir: boards });
+    let session_data = std::sync::Arc::new(bgcore::Data::bundled());
+    if let Some(name) = &hero
+        && !session_data.heroes.heroes.iter().any(|h| &h.name == name)
+    {
+        let names: Vec<&str> = session_data.heroes.heroes.iter().map(|h| h.name.as_str()).collect();
+        return fail(&format!("no built hero {name:?}; the heroes are: {}", names.join(", ")));
+    }
+    let mut session = Session::new_with_data(
+        Config { lobby, hero, label, seed, free_rolls, boards_dir: boards },
+        session_data,
+    );
     let tty = std::io::stdin().is_terminal();
     let stdin = std::io::stdin();
     let mut input = stdin.lock();

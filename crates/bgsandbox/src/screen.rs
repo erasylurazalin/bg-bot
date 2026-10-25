@@ -236,13 +236,43 @@ pub fn state(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> String {
     let up = if pl.tier < bgcore::MAX_TIER { format!(" (up {}g)", pl.upgrade_cost) } else { String::new() };
     let _ = write!(
         out,
-        "Turn {}  Tier {}{}  Gold {}/{}  Health {}  Free rolls {}",
-        g.turn, pl.tier, up, pl.gold, max_gold, pl.health, pl.free_rolls
+        "Turn {}  Tier {}{}  Gold {}/{}  Health {}  Armor {}  Free rolls {}",
+        g.turn, pl.tier, up, pl.gold, max_gold, pl.health, pl.armor, pl.free_rolls
     );
     if pl.frozen {
         out.push_str("  [Frozen]");
     }
     out.push('\n');
+    let heroes = &g.data.heroes;
+    let hero_line = match pl.hero {
+        Some(h) => {
+            let hero = heroes.get(h);
+            let power = match &pl.power {
+                Some(st) => {
+                    let pw = &heroes.get(st.of).power;
+                    let state = if pw.passive {
+                        String::new()
+                    } else {
+                        format!(
+                            " ({}, {}/{} uses{}{})",
+                            if pw.cost == 0 { "free".into() } else { format!("{}g", pw.cost) },
+                            st.uses_left,
+                            pw.uses_per_turn,
+                            if st.unlocked { "" } else { ", locked" },
+                            if pw.once_per_game && st.used_game > 0 { ", used" } else { "" },
+                        )
+                    };
+                    format!("{}: {}{}{}", hero.name, pw.name, if state.is_empty() { "" } else { " " }, state)
+                }
+                None => String::new(),
+            };
+            format!("Hero: {} (armor {}) {}", hero.name, pl.armor, power)
+        }
+        None => String::new(),
+    };
+    if !hero_line.is_empty() {
+        let _ = writeln!(out, "{hero_line}");
+    }
     let _ = writeln!(out, "Lobby: {}", lobby_names(g.lobby));
     let c = counters_line(g);
     if !c.is_empty() {
@@ -329,6 +359,46 @@ pub fn prompt(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> Option<String> 
             .collect();
         return Some(format!("CHOICE: Choose One{from}. Type 1 or 2.{text}\n  {}", opts.join("\n  ")));
     }
+    // The hero pick before turn 1.
+    if g.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX) {
+        let heroes = &g.data.heroes;
+        let opts: Vec<String> = pl
+            .hero_offer
+            .iter()
+            .filter(|&&h| h != u8::MAX)
+            .map(|&h| {
+                let hero = heroes.get(h);
+                format!(
+                    "{} (armor {}, {}, {})",
+                    hero.name,
+                    hero.armor,
+                    power_text(heroes, h),
+                    if hero.tribes.is_neutral() {
+                        "any lobby".to_string()
+                    } else {
+                        format!("needs {}", lobby_names(hero.tribes))
+                    },
+                )
+            })
+            .collect();
+        return Some(format!(
+            "CHOICE: pick your hero. Type its number.\n  {}",
+            opts.join("\n  ")
+        ));
+    }
+    // A Hero Power Discover (Unmasked Identity, Finley's Adventure!).
+    if !pl.power_offer.is_empty() {
+        let heroes = &g.data.heroes;
+        let opts: Vec<String> = pl
+            .power_offer
+            .iter()
+            .map(|&h| format!("{} {}", heroes.get(h).name, power_text(heroes, h)))
+            .collect();
+        return Some(format!(
+            "CHOICE: pick a Hero Power. It replaces your current one.\n  {}",
+            opts.join("\n  ")
+        ));
+    }
     if !pl.discover.is_empty() {
         let opts: Vec<String> = pl
             .discover
@@ -359,6 +429,28 @@ pub fn prompt(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> Option<String> 
     None
 }
 
+/// A hero power as one short line: name, button cost and limits.
+fn power_text(heroes: &bgcore::heroes::HeroDb, h: u8) -> String {
+    let pw = &heroes.get(h).power;
+    let mut out = String::new();
+    if !pw.passive {
+        out.push_str(&format!(
+            "power {}g{}",
+            pw.cost,
+            if pw.uses_per_turn > 1 { format!(", {}/turn", pw.uses_per_turn) } else { String::new() },
+        ));
+        if pw.unlock_tier > 0 {
+            out.push_str(&format!(", unlocks at Tier {}", pw.unlock_tier));
+        }
+        if pw.once_per_game {
+            out.push_str(", once per game");
+        }
+    } else {
+        out.push_str("passive");
+    }
+    out
+}
+
 fn describe_target(pt: &PendingTarget) -> String {
     match pt.kind {
         TargetKind::MinionBuff { tribe, attack, health, keyword, .. } => {
@@ -381,6 +473,9 @@ fn describe_target(pt: &PendingTarget) -> String {
         }
         TargetKind::RebornDestroy { tribe, attack, health } => {
             format!("a {} gets Reborn and is destroyed, you gain +{attack}/+{health}", tribe_name(tribe))
+        }
+        TargetKind::StealShopCard { damage } => {
+            format!("steal a Tavern card (any card, the spell slot too), take {damage} damage")
         }
         TargetKind::Spell(st) => format!("{st:?}"),
     }

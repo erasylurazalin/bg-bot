@@ -47,7 +47,7 @@ impl Env {
             }
         }
         rng.shuffle(&mut kinds);
-        Env { game: Game::new(data.clone(), seed), kinds, rng, reported: [false; PLAYERS] }
+        Env { game: Game::new_heroes(data.clone(), seed), kinds, rng, reported: [false; PLAYERS] }
     }
 
     fn is_python(&self, p: usize) -> bool {
@@ -109,20 +109,25 @@ impl VecEnv {
     /// `lineup`: how many seats of each kind (learner, snapshot, standard,
     /// rush, random) a new game gets, shuffled into random seats.
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None))]
     fn new(
         n: usize,
         seed: u64,
         lineup: [u8; SEAT_KINDS],
         cards_toml: Option<&str>,
         rules_toml: Option<&str>,
+        heroes_toml: Option<&str>,
     ) -> PyResult<VecEnv> {
         let lineup = check_lineup(lineup)?;
-        let data = match (cards_toml, rules_toml) {
-            (None, None) => Data::bundled(),
-            (Some(c), Some(r)) => Data::from_toml(c, r).map_err(PyValueError::new_err)?,
+        let data = match (cards_toml, rules_toml, heroes_toml) {
+            (None, None, None) => Data::bundled(),
+            (Some(c), Some(r), h) => {
+                Data::from_toml_with_heroes(c, r, h.unwrap_or("")).map_err(PyValueError::new_err)?
+            }
             _ => {
-                return Err(PyValueError::new_err("give both cards_toml and rules_toml, or neither"));
+                return Err(PyValueError::new_err(
+                    "give cards_toml and rules_toml (heroes_toml optional), or none of them",
+                ));
             }
         };
         let data = Arc::new(data);
@@ -314,7 +319,9 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // overflow handler). Fails harmlessly if a pool already exists.
     let _ = rayon::ThreadPoolBuilder::new().stack_size(64 << 20).build_global();
     let n_cards = Data::bundled().cards.cards.len();
+    let n_heroes = Data::bundled().heroes.heroes.len();
     m.add_class::<VecEnv>()?;
+    m.add("N_HEROES", n_heroes)?;
     m.add("OBS_SIZE", OBS_SIZE)?;
     m.add("N_ACTIONS", N_ACTIONS)?;
     m.add("N_CARDS", n_cards)?;
@@ -503,6 +510,20 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("OPP_SPELL_HEALTH", obs::OPP_SPELL_HEALTH)?;
     m.add("ACTION_KINDS", ACTION_KINDS.to_vec())?;
     m.add("END_TURN", Action::EndTurn.index())?;
+    m.add("HERO_POWER", Action::HeroPower.index())?;
+    m.add("SCALAR_ARMOR", obs::SCALAR_ARMOR)?;
+    m.add("SCALAR_HERO", obs::SCALAR_HERO)?;
+    m.add("SCALAR_POWER_HERO", obs::SCALAR_POWER_HERO)?;
+    m.add("SCALAR_POWER_COST", obs::SCALAR_POWER_COST)?;
+    m.add("SCALAR_POWER_USES_LEFT", obs::SCALAR_POWER_USES_LEFT)?;
+    m.add("SCALAR_POWER_USED_GAME", obs::SCALAR_POWER_USED_GAME)?;
+    m.add("SCALAR_POWER_UNLOCKED", obs::SCALAR_POWER_UNLOCKED)?;
+    m.add("SCALAR_POWER_USABLE", obs::SCALAR_POWER_USABLE)?;
+    m.add("SCALAR_PENDING_HERO", obs::SCALAR_PENDING_HERO)?;
+    m.add("SCALAR_PENDING_POWER", obs::SCALAR_PENDING_POWER)?;
+    m.add("SCALAR_HERO_OFFER", obs::SCALAR_HERO_OFFER)?;
+    m.add("OPP_HERO", obs::OPP_HERO)?;
+    m.add("OPP_ARMOR", obs::OPP_ARMOR)?;
     m.add("LEARNER", LEARNER)?;
     m.add("SNAPSHOT", SNAPSHOT)?;
     m.add("STANDARD", STANDARD)?;

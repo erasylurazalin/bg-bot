@@ -34,6 +34,12 @@ OWN_END = bgpy.OWN_END
 
 # Card ids, embedded rather than scaled.
 SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD]
+# Hero ids, embedded with their own table: own hero, the power's hero, and
+# the hero offer slots during the pick.
+HERO_IDS = [bgpy.SCALAR_HERO, bgpy.SCALAR_POWER_HERO] + list(
+    range(bgpy.SCALAR_HERO_OFFER, bgpy.SCALAR_HERO_OFFER + bgpy.DISCOVER))
+# Each opponent's hero (always visible), same hero embedding.
+OPP_IDS = [bgpy.OPP_HERO]
 # The minion's own id, the spell a Magicfin token was taught, and the ids of
 # the effect-carrying cards Magnetized into it.
 SLOT_IDS = [bgpy.SLOT_CARD_ID, bgpy.SLOT_TAUGHT_SPELL] + list(
@@ -84,12 +90,13 @@ SCALAR_SCALE = _scales(bgpy.SCALARS, "SCALAR_", {
     "DEITY_ATTACK": 50, "DEITY_HEALTH": 50,
     "PENDING_SOURCE": 7, "PENDING_RUNS": 2, "PENDING_ATTACK": 20, "PENDING_HEALTH": 20,
     "SHOP_CONSUME_LEFT": 3, "DISCOVER_QUEUE": 3,
+    "ARMOR": 25, "POWER_COST": 3, "POWER_USES_LEFT": 2, "POWER_USED_GAME": 5,
     **{(bgpy.SCALAR_CHOOSE_ONE + j * bgpy.CHOOSE_FEATURES + 4, 2): 10 for j in range(2)},
 })
 OPP_SCALE = _scales(bgpy.OPP_SCALARS, "OPP_", {
     "HEALTH": 30, "TIER": 6, "TURNS_SINCE": 10, "PLACEMENT": 8, (bgpy.OPP_TRIBES, 10): 7,
     "DEITY_ATTACK": 50, "DEITY_HEALTH": 50, "GEM_ATTACK": 10, "GEM_HEALTH": 10,
-    "SPELL_ATTACK": 10, "SPELL_HEALTH": 10,
+    "SPELL_ATTACK": 10, "SPELL_HEALTH": 10, "ARMOR": 25,
 })
 OPP_LOG = [bgpy.OPP_DEITY_ATTACK, bgpy.OPP_DEITY_HEALTH]
 SLOT_SCALE = _scales(SF, "SLOT_", {
@@ -105,14 +112,15 @@ assert len(SLOT_SCALE) == SF
 
 
 class Net(nn.Module):
-    def __init__(self, n_cards=bgpy.N_CARDS, emb=32, slot=64, hidden=512):
+    def __init__(self, n_cards=bgpy.N_CARDS, n_heroes=bgpy.N_HEROES, emb=32, slot=64, hidden=512):
         super().__init__()
         self.card = nn.Embedding(n_cards + 1, emb)  # 0 is an empty slot or no card
+        self.hero = nn.Embedding(n_heroes + 1, emb)  # 0 is no hero
         feats = [i for i in range(SF) if i not in SLOT_IDS]
         self.slot = nn.Sequential(nn.Linear(len(SLOT_IDS) * emb + len(feats), slot), nn.ReLU())
         n_slots = bgpy.TOTAL_SLOTS
-        n_in = (n_slots * slot + bgpy.SCALARS + len(SCALAR_IDS) * emb
-                + OPP * bgpy.OPP_SCALARS)
+        n_in = (n_slots * slot + bgpy.SCALARS + (len(SCALAR_IDS) + len(HERO_IDS)) * emb
+                + OPP * (bgpy.OPP_SCALARS + emb))
         self.trunk = nn.Sequential(
             nn.Linear(n_in, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
@@ -124,10 +132,13 @@ class Net(nn.Module):
             self.policy.bias.copy_(kind_prior())
         keep = torch.ones(bgpy.SCALARS)
         keep[SCALAR_IDS] = 0.0
+        keep[HERO_IDS] = 0.0
         self.register_buffer("s_scale", torch.tensor(SCALAR_SCALE, dtype=torch.float32))
         self.register_buffer("s_keep", keep)
         self.register_buffer("s_log", torch.tensor(SCALAR_LOG))
         self.register_buffer("o_scale", torch.tensor(OPP_SCALE, dtype=torch.float32))
+        self.register_buffer("o_keep", torch.tensor(
+            [0.0 if i in OPP_IDS else 1.0 for i in range(bgpy.OPP_SCALARS)]))
         self.register_buffer("o_log", torch.tensor(OPP_LOG))
         self.register_buffer("m_scale", torch.tensor(SLOT_SCALE, dtype=torch.float32)[feats])
         self.register_buffer("feats", torch.tensor(feats, dtype=torch.long))
@@ -139,11 +150,13 @@ class Net(nn.Module):
         scalars = raw / self.s_scale * self.s_keep
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
         s_cards = self.card(raw[:, SCALAR_IDS].long()).reshape(b, -1)
+        s_heroes = self.hero(raw[:, HERO_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
         opp = obs[:, OWN_END:].reshape(b, OPP, OPP_BLOCK)
-        o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale
+        o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale * self.o_keep
         o[:, :, self.o_log] = torch.log1p(o[:, :, self.o_log].clamp(min=0))
-        opp_scalars = o.reshape(b, -1)
+        o_heroes = self.hero(opp[:, :, OPP_IDS].long()).reshape(b, -1)
+        opp_scalars = torch.cat([o.reshape(b, -1), o_heroes], 1)
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
         n = slots.shape[1]
@@ -151,7 +164,7 @@ class Net(nn.Module):
         feats = slots[:, :, self.feats] / self.m_scale
         feats[:, :, self.log_cols] = torch.log1p(feats[:, :, self.log_cols].clamp(min=0))
         enc = self.slot(torch.cat([cards, feats], 2)).reshape(b, -1)
-        h = self.trunk(torch.cat([enc, scalars, s_cards, opp_scalars], 1))
+        h = self.trunk(torch.cat([enc, scalars, s_cards, s_heroes, opp_scalars], 1))
         return self.policy(h), self.value(h).squeeze(1)
 
 
@@ -196,23 +209,29 @@ class SlotInputs(nn.Module):
     spell and pending card embedded) and one per opponent's scalars (plus
     that opponent's zone embedding, shared with its board)."""
 
-    def __init__(self, n_cards, d, emb):
+    def __init__(self, n_cards, d, emb, n_heroes=bgpy.N_HEROES):
         super().__init__()
         self.card = nn.Embedding(n_cards + 1, emb)
+        self.hero = nn.Embedding(n_heroes + 1, emb)
         feats = [i for i in range(SF) if i not in SLOT_IDS]
         self.enc = nn.Sequential(nn.Linear(len(SLOT_IDS) * emb + len(feats), d), nn.GELU(),
                                  nn.Linear(d, d))
         self.zone = nn.Embedding(len(ZONES), d)
         self.pos = nn.Embedding(max(ZONES), d)
-        self.me = nn.Linear(bgpy.SCALARS + len(SCALAR_IDS) * emb, d)
-        self.opp = nn.Linear(bgpy.OPP_SCALARS, d)
+        self.me = nn.Linear(bgpy.SCALARS + (len(SCALAR_IDS) + len(HERO_IDS)) * emb, d)
+        self.opp = nn.Linear(bgpy.OPP_SCALARS - len(OPP_IDS) + emb, d)
         keep = torch.ones(bgpy.SCALARS)
         keep[SCALAR_IDS] = 0.0
+        keep[HERO_IDS] = 0.0
         self.register_buffer("s_scale", torch.tensor(SCALAR_SCALE, dtype=torch.float32))
         self.register_buffer("s_keep", keep)
         self.register_buffer("s_log", torch.tensor(SCALAR_LOG))
         self.register_buffer("o_scale", torch.tensor(OPP_SCALE, dtype=torch.float32))
+        self.register_buffer("o_keep", torch.tensor(
+            [0.0 if i in OPP_IDS else 1.0 for i in range(bgpy.OPP_SCALARS)]))
         self.register_buffer("o_log", torch.tensor(OPP_LOG))
+        self.register_buffer("o_cols", torch.tensor(
+            [i for i in range(bgpy.OPP_SCALARS) if i not in OPP_IDS]))
         self.register_buffer("m_scale", torch.tensor(SLOT_SCALE, dtype=torch.float32)[feats])
         self.register_buffer("feats", torch.tensor(feats, dtype=torch.long))
         self.register_buffer("log_cols", torch.tensor([feats.index(i) for i in SLOT_LOG]))
@@ -227,11 +246,13 @@ class SlotInputs(nn.Module):
         scalars = raw / self.s_scale * self.s_keep
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
         s_cards = self.card(raw[:, SCALAR_IDS].long()).reshape(b, -1)
+        s_heroes = self.hero(raw[:, HERO_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
         opp = obs[:, OWN_END:].reshape(b, OPP, OPP_BLOCK)
-        o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale
+        o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale * self.o_keep
         o[:, :, self.o_log] = torch.log1p(o[:, :, self.o_log].clamp(min=0))
-        opp_scalars = o
+        o_hero = self.hero(opp[:, :, OPP_IDS].long()).squeeze(2)
+        opp_scalars = torch.cat([o[:, :, self.o_cols], o_hero], 2)
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
         n = slots.shape[1]
@@ -240,7 +261,7 @@ class SlotInputs(nn.Module):
         feats[:, :, self.log_cols] = torch.log1p(feats[:, :, self.log_cols].clamp(min=0))
         tok = self.enc(torch.cat([cards, feats], 2)) + self.zone(self.zone_of) + self.pos(self.pos_of)
         present = slots[:, :, bgpy.SLOT_PRESENT] > 0
-        me = self.me(torch.cat([scalars, s_cards], 1))
+        me = self.me(torch.cat([scalars, s_cards, s_heroes], 1))
         opp_tok = self.opp(opp_scalars) + self.zone(self.opp_zone)
         return tok, present, me, opp_tok
 
@@ -261,7 +282,7 @@ class ActionHead(nn.Module):
     - discard k: from hand slot k's z
     - move from j to t: a term from board slot j's z, plus a dot product
       of j's query with t's key
-    - roll, freeze, level, end turn: from s
+    - roll, freeze, level, end turn, hero power: from s
     Plus a per-action bias that starts at the kind prior, with the scoring
     weights small, so the starting policy is about Net's."""
 
@@ -279,7 +300,8 @@ class ActionHead(nn.Module):
         self.gap = nn.Parameter(torch.randn(bgpy.BOARD + 1, qk) * 0.1)
         self.move_q = nn.Linear(hidden, qk)
         self.move_k = nn.Linear(hidden, qk)
-        self.glob = nn.Linear(d, 4 + bgpy.DISCOVER)  # roll, freeze, level, end; Choose One
+        # roll, freeze, level, end, hero power; then the Choose One columns
+        self.glob = nn.Linear(d, 5 + bgpy.DISCOVER)
         self.bias = nn.Parameter(kind_prior())
         for m in (self.ptr, self.play_q, self.move_q, self.glob):
             nn.init.orthogonal_(m.weight, 0.01)
@@ -310,10 +332,11 @@ class ActionHead(nn.Module):
             play.reshape(b, -1),
             p[:, BOARD_R, 4],
             p[:, SHOP_R, 5],
-            p[:, DISC_R, 6] + g[:, 4:],
+            p[:, DISC_R, 6] + g[:, 4:4 + bgpy.DISCOVER],
             p[:, HAND_R, 8],
             move.reshape(b, -1),
             g[:, :4],
+            g[:, 4 + bgpy.DISCOVER:5 + bgpy.DISCOVER],
         ], 1)
         return logits + self.bias
 

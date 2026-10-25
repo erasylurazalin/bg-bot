@@ -832,6 +832,11 @@ pub enum SpellEffect {
     GetTwo { a: CardId, b: CardId },
     /// Discover an Undead that dies if you play it this turn (Tomb Turning).
     TombTurning,
+    /// Set your Armor to this much (Armor Stash). Sets, doesn't add.
+    SetArmor(u8),
+    /// Discover a new Hero Power (Unmasked Identity). `exclude_heroes` (on
+    /// the Card) lists heroes whose powers are never offered.
+    DiscoverHeroPower,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1295,6 +1300,10 @@ pub struct Card {
     /// After you play a Choose One card, this plays this many Blood Gems on
     /// all your Quilboar (Turbo Hogrider). Golden doubles it.
     pub after_choose_one_play: Option<u8>,
+    /// Hero card_ids whose starting powers a "Discover a new Hero Power"
+    /// spell never offers (Unmasked Identity's exclusion list). Data only;
+    /// the game resolves them against the hero table.
+    pub exclude_heroes: Vec<String>,
 }
 
 impl Card {
@@ -1716,6 +1725,14 @@ struct RawSpellEffect {
     /// Tomb Turning: Discover an Undead that dies if played this turn.
     #[serde(default)]
     tomb_turning: bool,
+    /// Set your Armor to this much (Armor Stash).
+    set_armor: Option<u8>,
+    /// Discover a new Hero Power (Unmasked Identity).
+    #[serde(default)]
+    discover_hero_power: bool,
+    /// Heroes whose powers that Discover never offers, by hero card_id.
+    #[serde(default)]
+    exclude_heroes: Vec<String>,
     /// Gem Confiscation: play `confiscate` Blood Gems on the chosen minion
     /// and steal its neighbours' Blood Gem stats.
     confiscate: Option<u8>,
@@ -2158,7 +2175,7 @@ struct RawOnSell {
     effect: Option<RawEffect>,
 }
 
-fn tribe(s: &str) -> Result<Tribe, String> {
+pub(crate) fn tribe(s: &str) -> Result<Tribe, String> {
     match s {
         "beast" => Ok(Tribe::Beast),
         "mech" => Ok(Tribe::Mech),
@@ -2391,6 +2408,10 @@ fn parse_spell_effect(
                 SpellEffect::DiscoverLockedMinion
             } else if e.tomb_turning {
                 SpellEffect::TombTurning
+            } else if let Some(n) = e.set_armor {
+                SpellEffect::SetArmor(n)
+            } else if e.discover_hero_power {
+                SpellEffect::DiscoverHeroPower
             } else if e.saloon_finest {
                 SpellEffect::SaloonFinest
             } else if let Some([attack, health]) = e.refresh_buff {
@@ -3341,6 +3362,7 @@ impl CardDb {
                 on_gem_played_on_self: c.on_gem_played_on_self,
                 choose_one_cover: c.choose_one_cover.unwrap_or(0),
                 after_choose_one_play: c.after_choose_one_play,
+                exclude_heroes: Vec::new(),
             });
         }
 
@@ -3485,6 +3507,7 @@ impl CardDb {
                 on_gem_played_on_self: None,
                 choose_one_cover: 0,
                 after_choose_one_play: None,
+                exclude_heroes: sp.effect.as_ref().map_or(Vec::new(), |e| e.exclude_heroes.clone()),
             });
         }
 

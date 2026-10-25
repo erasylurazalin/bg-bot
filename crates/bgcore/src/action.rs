@@ -23,6 +23,8 @@ pub enum Action {
     Freeze,
     Level,
     EndTurn,
+    /// Press the hero power button.
+    HeroPower,
 }
 
 const BUY: usize = 0;
@@ -39,9 +41,10 @@ const ROLL: usize = MOVE + BOARD * (BOARD - 1);
 const FREEZE: usize = ROLL + 1;
 const LEVEL: usize = FREEZE + 1;
 const END_TURN: usize = LEVEL + 1;
+const HERO_POWER: usize = END_TURN + 1;
 
-pub const N_ACTIONS: usize = END_TURN + 1;
-pub const N_KINDS: usize = 14;
+pub const N_ACTIONS: usize = HERO_POWER + 1;
+pub const N_KINDS: usize = 15;
 pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("buy", SHOP),
     ("buy_spell", 1),
@@ -57,6 +60,7 @@ pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("freeze", 1),
     ("level", 1),
     ("end", 1),
+    ("hero_power", 1),
 ];
 
 impl Action {
@@ -79,6 +83,7 @@ impl Action {
             Action::Freeze => FREEZE,
             Action::Level => LEVEL,
             Action::EndTurn => END_TURN,
+            Action::HeroPower => HERO_POWER,
         }
     }
 
@@ -107,11 +112,12 @@ impl Action {
             FREEZE => Action::Freeze,
             LEVEL => Action::Level,
             END_TURN => Action::EndTurn,
+            HERO_POWER => Action::HeroPower,
             _ => return None,
         })
     }
 
-    /// Which of the 14 kinds of action this is, in declaration order.
+    /// Which of the 15 kinds of action this is, in declaration order.
     pub fn kind(self) -> usize {
         match self {
             Action::Buy(_) => 0,
@@ -128,6 +134,7 @@ impl Action {
             Action::Freeze => 11,
             Action::Level => 12,
             Action::EndTurn => 13,
+            Action::HeroPower => 14,
         }
     }
 }

@@ -29,6 +29,8 @@ pub struct Rules {
     pub max_turns: u32,
     pub max_actions_per_turn: u16,
     pub max_attacks: u32,
+    /// Heroes each player is offered before turn 1; at most `DISCOVER`.
+    pub hero_choices: u8,
     /// Damage a player deals to their own hero (card effects, Health costs)
     /// can't take them below this. Combat damage ignores it.
     /// Health a Refresh costs when it is paid in Health.
@@ -61,6 +63,9 @@ impl Rules {
         }
         if r.max_actions_per_turn == 0 {
             return Err("rules.toml: max_actions_per_turn must be at least 1".into());
+        }
+        if r.hero_choices == 0 || r.hero_choices as usize > crate::DISCOVER {
+            return Err(format!("rules.toml: hero_choices must be 1 to {}", crate::DISCOVER));
         }
         Ok(r)
     }

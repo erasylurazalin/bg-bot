@@ -102,13 +102,28 @@
 //!   147 discover_queue (more Discovers waiting after this one)
 //!   148..159 Choose One options, 2 x 6: kind one-hot (minion target, spell
 //!   bonus, spell target, spell effect), attack, health
+//!   Heroes:
+//!   160 armor
+//!   161 hero (index into the hero table + 1, 0 with none)
+//!   162 power hero (whose power it is, index + 1; Unmasked Identity can
+//!   change it away from the hero)
+//!   163 power cost
+//!   164 power uses left this turn
+//!   165 power used this game
+//!   166 power unlocked
+//!   167 power usable (a button, unlocked, uses left, the Gold for it, and a
+//!   target for target powers)
+//!   168 pending hero pick (the offer before turn 1 is open)
+//!   169 pending power pick (a Hero Power Discover is open)
+//!   170..172 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
 //!   board (BOARD = 7), Discover options (DISCOVER = 3). A Tavern spell that
 //!   sits in a minion slot (Saloon's Finest) is written there as a spell.
 //! - 7 opponents, in seat order starting after me (each OPP_BLOCK values):
-//!   OPP_SCALARS (28): alive, health, tier, seen (1 if I ever fought them),
+//!   OPP_SCALARS (30): alive, health, armor, tier, hero (index + 1, 0 with
+//!   none), seen (1 if I ever fought them),
 //!   turns_since (since that fight), next (my opponent this turn, or the ghost
 //!   of this player), last (my opponent last turn), placement (0 while
 //!   alive), the tribe counts of their last seen board (ten values,
@@ -175,8 +190,8 @@ use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 pub const SHOP_SPELL: usize = 1;
 pub const SLOT_FEATURES: usize = 78;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
-pub const SCALARS: usize = 160;
-pub const OPP_SCALARS: usize = 28;
+pub const SCALARS: usize = 173;
+pub const OPP_SCALARS: usize = 30;
 
 pub const OWN_SLOTS: usize = SHOP + SHOP_SPELL + HAND + BOARD + DISCOVER;
 pub const OPP_SLOTS: usize = (PLAYERS - 1) * BOARD;
@@ -312,6 +327,20 @@ pub const SCALAR_DISCOVER_QUEUE: usize = 147;
 /// spell target, spell effect), attack, health.
 pub const SCALAR_CHOOSE_ONE: usize = 148;
 pub const CHOOSE_FEATURES: usize = 6;
+pub const SCALAR_ARMOR: usize = 160;
+/// Own hero, index into the hero table + 1 (0 with none).
+pub const SCALAR_HERO: usize = 161;
+/// Whose power the player has (Unmasked Identity changes it), index + 1.
+pub const SCALAR_POWER_HERO: usize = 162;
+pub const SCALAR_POWER_COST: usize = 163;
+pub const SCALAR_POWER_USES_LEFT: usize = 164;
+pub const SCALAR_POWER_USED_GAME: usize = 165;
+pub const SCALAR_POWER_UNLOCKED: usize = 166;
+pub const SCALAR_POWER_USABLE: usize = 167;
+pub const SCALAR_PENDING_HERO: usize = 168;
+pub const SCALAR_PENDING_POWER: usize = 169;
+/// DISCOVER slots of the hero offer before turn 1, hero index + 1, 0 empty.
+pub const SCALAR_HERO_OFFER: usize = 170;
 
 pub const SLOT_PRESENT: usize = 0;
 pub const SLOT_CARD_ID: usize = 1;
@@ -397,19 +426,26 @@ pub const OPP_GEM_HEALTH: usize = 25;
 /// Their Tavern spell bonus as it went into that fight.
 pub const OPP_SPELL_ATTACK: usize = 26;
 pub const OPP_SPELL_HEALTH: usize = 27;
+/// Their hero, index into the hero table + 1 (0 with none): heroes are
+/// always visible.
+pub const OPP_HERO: usize = 28;
+/// Their armor, live.
+pub const OPP_ARMOR: usize = 29;
 
 const _: () = assert!(SCALAR_TAVERN_BUFFS + TAVERN_BUFF_FILTERS * 4 == SCALAR_LAST_SPELL);
 const _: () = assert!(SCALAR_LOBBY + LOBBY_TRIBES == SCALAR_GEM_ATTACK);
 const _: () = assert!(SCALAR_DEITY + DEITY_FEATURES == SCALAR_PENDING_TARGET);
 const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_LEFT);
-const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALARS);
+const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
+const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
 const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
 const _: () = assert!(SLOT_ATTACHED_GOLDEN + MAX_ATTACHED == SLOT_FEATURES);
 const _: () = assert!(OPP_TRIBES + Tribe::EVERY.len() == OPP_DEITY);
 const _: () = assert!(OPP_DEITY + DEITY_FEATURES == OPP_GEM_ATTACK);
-const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_SCALARS);
+const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_HERO);
+const _: () = assert!(OPP_HERO + 2 == OPP_SCALARS);
 
 /// Holy Vanguard's bonus on this minion if its hero is at `health`: +30/+30
 /// (+60 golden) at 15 Health or less, added at the start of a fight.
@@ -563,6 +599,8 @@ fn target_kind(k: TargetKind) -> (usize, (i32, i32)) {
         // buff slot.
         TargetKind::DestroyDiscover { .. } | TargetKind::DestroyCopy { .. } => (1, (0, 0)),
         TargetKind::RebornDestroy { attack, health, .. } => (0, (attack, health)),
+        // A Tavern card steal shares the any-buff slot (a shop pick).
+        TargetKind::StealShopCard { .. } => (5, (0, 0)),
     }
 }
 
@@ -727,6 +765,29 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
         s[SCALAR_DISCOVER_BOTH] = pl.discover_both as u8 as f32;
     }
     s[SCALAR_DISCOVER_QUEUE] = pl.discover_queue.len() as f32;
+
+    s[SCALAR_ARMOR] = pl.armor as f32;
+    s[SCALAR_HERO] = pl.hero.map_or(0.0, |h| h as f32 + 1.0);
+    if let Some(st) = pl.power {
+        let power = &db_heroes(game).get(st.of).power;
+        s[SCALAR_POWER_HERO] = st.of as f32 + 1.0;
+        s[SCALAR_POWER_COST] = power.cost as f32;
+        s[SCALAR_POWER_USES_LEFT] = st.uses_left as f32;
+        s[SCALAR_POWER_USED_GAME] = st.used_game as f32;
+        s[SCALAR_POWER_UNLOCKED] = st.unlocked as u8 as f32;
+        s[SCALAR_POWER_USABLE] = game.power_usable(p) as u8 as f32;
+    }
+    s[SCALAR_PENDING_HERO] =
+        (game.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX)) as u8 as f32;
+    s[SCALAR_PENDING_POWER] = (!pl.power_offer.is_empty()) as u8 as f32;
+    for (k, &h) in pl.hero_offer.iter().enumerate() {
+        s[SCALAR_HERO_OFFER + k] = if h == u8::MAX { 0.0 } else { h as f32 + 1.0 };
+    }
+}
+
+/// The hero table of the game's data (a shorthand for the hero features).
+fn db_heroes(game: &Game) -> &crate::heroes::HeroDb {
+    &game.data.heroes
 }
 
 /// Write player `p`'s view into `out`, which must hold OBS_SIZE values.
@@ -784,6 +845,8 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
         o[OPP_GEM_HEALTH] = seen.gem.1 as f32;
         o[OPP_SPELL_ATTACK] = seen.spell.0 as f32;
         o[OPP_SPELL_HEALTH] = seen.spell.1 as f32;
+        o[OPP_HERO] = them.hero.map_or(0.0, |h| h as f32 + 1.0);
+        o[OPP_ARMOR] = them.armor as f32;
         i += OPP_SCALARS;
         let owner = Owner { health: them.health, beast_bonus: (0, 0) };
         i += write_slots(game, &mut out[i..], BOARD, seen.board.iter(), owner);

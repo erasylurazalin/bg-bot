@@ -15,6 +15,9 @@ pub struct Config {
     /// The lobby the sandbox plays with (the --tribe tribes); None rolls the
     /// normal 5 of 10.
     pub lobby: Option<Tribes>,
+    /// The hero forced with --hero (its name); None offers a pick from the
+    /// hero table instead.
+    pub hero: Option<String>,
     /// The build played. None until the player names it (at the end, or
     /// with the label command), recorded as "unlabeled" meanwhile.
     pub label: Option<String>,
@@ -62,9 +65,11 @@ How to play (numbers are what the screen shows, counting from 1):
   s4        sell board minion 4          m2 5     move board minion 2 to position 5
   a3        Activate board minion 3 (a target prompt follows if it needs one)
   1 2 3     answer an open choice: a Discover or Choose One option, a board
-            target, or the hand card to discard; t3 answers with Tavern minion 3
+            target, the hand card to discard, or a hero on offer; t3 answers
+            with Tavern minion 3 (the spell slot is one past the last card)
   r         Refresh (free ones first)    f        freeze / unfreeze the Tavern
   u         upgrade the Tavern           e        end turn
+  hp        press your hero power (a target prompt follows if it needs one)
   ? 3       full card text: Tavern 3     ?s spell slot   ?h1 hand 1   ?b2 board 2   ?d1 Discover option 1
   undo      take back the last action (works across turns, even an e)
   label X   set or change the label of this game (the build you play, e.g. lobster)
@@ -102,7 +107,12 @@ fn hand_name(g: &Game, hand: usize) -> Option<String> {
 
 impl Session {
     pub fn new(cfg: Config) -> Session {
-        let data = Arc::new(Data::bundled());
+        Session::new_with_data(cfg, Arc::new(Data::bundled()))
+    }
+
+    /// A session over a shared card set (the binary checks --hero against
+    /// the same one before starting).
+    pub fn new_with_data(cfg: Config, data: Arc<Data>) -> Session {
         let (game, turns, ctx) = Session::build(&cfg, &data, &[]);
         let label_given = cfg.label.as_ref().is_some_and(|l| !l.trim().is_empty());
         let label = if label_given { cfg.label.clone().unwrap().trim().to_string() } else { UNLABELED.to_string() };
@@ -219,7 +229,16 @@ impl Session {
 
     /// The game and its recording after `history`, played from the seed.
     fn build(cfg: &Config, data: &Arc<Data>, history: &[Vec<Action>]) -> (Game, Vec<TurnRecord>, Option<String>) {
-        let mut game = Game::new_sandbox(data.clone(), cfg.seed, cfg.lobby, cfg.free_rolls);
+        let mut game = match &cfg.hero {
+            Some(name) => {
+                let h = data
+                    .heroes
+                    .by_name(name)
+                    .unwrap_or_else(|| panic!("no built hero named {name:?}"));
+                Game::new_sandbox_with_hero(data.clone(), cfg.seed, cfg.lobby, cfg.free_rolls, h)
+            }
+            None => Game::new_sandbox_heroes(data.clone(), cfg.seed, cfg.lobby, cfg.free_rolls),
+        };
         let mut turns = Vec::new();
         let mut ctx = None;
         for cmd in history {
@@ -251,6 +270,8 @@ impl Session {
             && p.pending_choose_one.is_none()
             && p.pending_discard.is_none()
             && p.discover.is_empty()
+            && p.power_offer.is_empty()
+            && (game.turn != 0 || p.hero_offer.iter().all(|&h| h == u8::MAX))
         {
             *ctx = None;
         }
@@ -455,7 +476,9 @@ impl Session {
             || pl.pending_shop_target.is_some()
             || pl.pending_choose_one.is_some()
             || pl.pending_discard.is_some()
-            || !pl.discover.is_empty();
+            || !pl.discover.is_empty()
+            || !pl.power_offer.is_empty()
+            || (g.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX));
         let idx = |n: usize, len: usize, what: &str| -> Result<u8, String> {
             if n >= 1 && n <= len {
                 Ok((n - 1) as u8)
@@ -482,6 +505,7 @@ impl Session {
                 one(Action::Move { from, to })
             }
             Cmd::Roll => one(Action::Roll),
+            Cmd::Power => one(Action::HeroPower),
             Cmd::Freeze => one(Action::Freeze),
             Cmd::Upgrade => one(Action::Level),
             Cmd::End => one(Action::EndTurn),
@@ -536,7 +560,11 @@ impl Session {
             match arg {
                 Arg::Board(n) | Arg::Tavern(n) => Action::TargetShop(n.saturating_sub(1).min(255) as u8),
             }
-        } else if pl.pending_choose_one.is_some() || !pl.discover.is_empty() {
+        } else if pl.pending_choose_one.is_some()
+            || !pl.discover.is_empty()
+            || !pl.power_offer.is_empty()
+            || (self.game.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX))
+        {
             match arg {
                 Arg::Board(n) => Action::Choose(n.saturating_sub(1).min(255) as u8),
                 Arg::Tavern(_) => return Err("this choice takes a plain number, not a Tavern slot".into()),
@@ -589,6 +617,8 @@ impl Session {
             || pl.pending_choose_one.is_some()
             || pl.pending_discard.is_some()
             || !pl.discover.is_empty()
+            || !pl.power_offer.is_empty()
+            || (g.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX))
         {
             return "answer the open choice first (see the CHOICE below the board)".into();
         }
@@ -615,6 +645,25 @@ impl Session {
                 }
             },
             Action::Roll => format!("not enough gold: a Refresh costs {}, you have {} and no free Refreshes left", r.roll_cost, pl.gold),
+            Action::HeroPower => {
+                let (Some(st), pl) = (pl.power, pl) else {
+                    return "you have no hero power".into();
+                };
+                let power = &g.data.heroes.get(st.of).power;
+                if power.passive {
+                    format!("{} is passive: it has no button", power.name)
+                } else if !st.unlocked {
+                    format!("{} unlocks at Tier {}", power.name, power.unlock_tier)
+                } else if st.uses_left == 0 {
+                    "no uses of the power left this turn".into()
+                } else if power.once_per_game && st.used_game > 0 {
+                    "the power was already used this game".into()
+                } else if pl.gold < power.cost {
+                    gold(power.cost)
+                } else {
+                    "there is nothing for the power to target right now".into()
+                }
+            }
             Action::Level => {
                 if pl.tier >= bgcore::MAX_TIER {
                     "the Tavern is already at the top tier".into()

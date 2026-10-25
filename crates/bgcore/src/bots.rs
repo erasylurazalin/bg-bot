@@ -7,6 +7,7 @@
 
 use crate::action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 use crate::cards::{ChooseOption, Effect, SpellEffect, SpellTarget, Tribe};
+use crate::heroes::PowerEffect;
 use crate::game::{Game, ShopTargetKind, TargetKind};
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
@@ -127,6 +128,12 @@ fn target_score(game: &Game, pref: Option<Tribe>, kind: TargetKind, m: &Minion, 
     let set_gain = |a: i32, h: i32| (a - m.attack) + (h - m.health);
     place
         + match kind {
+            // Boon of Light: the highest-Attack minion without a shield.
+            TargetKind::MinionBuff { keyword, attack: 0, health: 0, .. }
+                if keyword == crate::minion::Keywords::DIVINE_SHIELD =>
+            {
+                if m.keywords.has(Keywords::DIVINE_SHIELD) { -1000 } else { m.attack }
+            }
             TargetKind::AnySetStats { attack, health } => set_gain(attack, health),
             TargetKind::Spell(st) => match st {
                 SpellTarget::SetStats { attack, health } => set_gain(attack, health),
@@ -227,6 +234,16 @@ fn health_ok(game: &Game, p: usize, cost: i32) -> bool {
 fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Action> {
     let pl = &game.players[p];
     let legal = |a: Action| game.is_legal(a);
+    // The hero pick before turn 1: take the first offered hero (the offers
+    // differ per player, so games still vary).
+    if game.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX) {
+        let k = pl.hero_offer.iter().position(|&h| h != u8::MAX).unwrap();
+        return Some(Action::Choose(k as u8));
+    }
+    // A Hero Power Discover: take the first offered power.
+    if !pl.power_offer.is_empty() {
+        return Some(Action::Choose(0));
+    }
     if let Some(pt) = pl.pending_target {
         let board = (0..pl.board.len() as u8)
             .map(Action::Target)
@@ -468,6 +485,19 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
         && spell_buy_ok(game, p, sp, false)
     {
         return Action::BuySpell;
+    }
+
+    // The hero power button: any gold left here would be left over, so a
+    // legal press is worth it. Gonna Be Rich! waits for a strong minion
+    // (turn 8 on): it is once per game.
+    if legal(Action::HeroPower) {
+        let waits = pl.power.is_some_and(|st| {
+            matches!(game.data.heroes.get(st.of).power.effect, PowerEffect::MakeGolden)
+                && game.turn < 8
+        });
+        if !waits {
+            return Action::HeroPower;
+        }
     }
 
     Action::EndTurn

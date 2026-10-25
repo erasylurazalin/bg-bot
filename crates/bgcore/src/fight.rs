@@ -48,6 +48,10 @@ pub struct Counters {
     pub boon_of_beetles: u8,
     pub brood_of_nozdormu: u8,
     pub upper_hand: u8,
+    /// A hero power's Start of Combat: the keyword mask the left-most
+    /// friendly minion gains before any minion's own Start of Combat runs
+    /// (Al'Akir's Swatting Insects). 0 for none.
+    pub soc_leftmost: u8,
     /// Pending Sharing is Caring Start of Combat triggers.
     pub sharing_is_caring: u8,
     /// The player's Tavern spell bonus, for spells cast inside the fight
@@ -88,6 +92,7 @@ impl Default for Counters {
             boon_of_beetles: 0,
             brood_of_nozdormu: 0,
             upper_hand: 0,
+            soc_leftmost: 0,
             sharing_is_caring: 0,
             spell_attack: 0,
             spell_health: 0,
@@ -2039,6 +2044,16 @@ fn run_start_of_combat(
 ) {
     for s in 0..2 {
         sides[s].spawn_boon_of_beetles(db, s, uid, w);
+    }
+    // A hero power's Start of Combat goes before any minion's (DESIGN.md
+    // "Order of events"): Al'Akir's left-most minion gains its keywords.
+    for s in 0..2 {
+        let kw = sides[s].counters.soc_leftmost;
+        if kw != 0
+            && let Some(f) = sides[s].ms.first_mut()
+        {
+            f.m.keywords.0 |= kw;
+        }
     }
     // Flighty Scout triggers from the hand, so it comes before the board's
     // Start of Combat effects. One copy each, in hand order, if there is
