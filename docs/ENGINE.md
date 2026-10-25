@@ -338,6 +338,11 @@ Deleting `.venv` undoes it.
 
 ## Training notes
 
+- Day to day, `./train/go.sh HOURS` continues the current run
+  (`r1025-attn`) for that many hours and stops, detached, resuming from
+  the last checkpoint after a crash; `./train/stop.sh` stops it, and
+  `train/runs/go.log` says what happened. Each start reloads
+  `boards/real`.
 - One network plays every learner seat. Seats per game come from
   `--lineup` (learner, snapshot, standard bot, rush bot, random, real; the
   real seats play boards from `--real-boards`, default `boards/real` when
