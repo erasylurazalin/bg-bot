@@ -5,7 +5,7 @@ use std::fmt::Write;
 
 use bgcore::cards::Card;
 use bgcore::game::{PendingTarget, TargetKind};
-use bgcore::{Action, CardDb, CardId, Game, Keywords, Minion, Tribe};
+use bgcore::{Action, CardDb, CardId, Game, Keywords, Minion, Tribe, Tribes};
 
 /// Card text from `ref/lobby5.tsv` when that file is there (it is
 /// git-ignored), keyed by card name.
@@ -60,6 +60,33 @@ pub fn tribe_name(t: Tribe) -> &'static str {
 
 pub fn parse_tribe(s: &str) -> Option<Tribe> {
     Tribe::EVERY.into_iter().find(|&t| tribe_name(t).eq_ignore_ascii_case(s.trim()))
+}
+
+/// A lobby mask as "Beast, Mech, ...".
+pub fn lobby_names(t: Tribes) -> String {
+    Tribe::EVERY
+        .iter()
+        .filter(|&&tribe| t.has(tribe))
+        .map(|&tribe| tribe_name(tribe))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Parse a `--tribe` value: one or more comma-separated tribes (1 to 5,
+/// distinct), the lobby a sandbox plays with.
+pub fn parse_lobby(s: &str) -> Option<Tribes> {
+    let mut lobby = Tribes::NONE;
+    for part in s.split(',') {
+        if part.trim().is_empty() {
+            return None;
+        }
+        let t = parse_tribe(part)?;
+        if lobby.has(t) {
+            return None;
+        }
+        lobby = lobby.with(t);
+    }
+    (1..=5).contains(&lobby.len()).then_some(lobby)
 }
 
 fn card_tribes(c: &Card) -> String {
@@ -216,6 +243,7 @@ pub fn state(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> String {
         out.push_str("  [Frozen]");
     }
     out.push('\n');
+    let _ = writeln!(out, "Lobby: {}", lobby_names(g.lobby));
     let c = counters_line(g);
     if !c.is_empty() {
         let _ = writeln!(out, "{c}");

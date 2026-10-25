@@ -67,9 +67,10 @@ pub struct Counters {
     pub gem_health: i32,
     pub deity: Option<Deity>,
     pub spells_cast: u32,
-    /// Sandbox only: "any minion" draws inside the fight (Ghastcoiler) only
-    /// pick this tribe and neutral minions. None in a normal game.
-    pub rig: Option<crate::cards::Tribe>,
+    /// The game's lobby: every card draw inside the fight (Ghastcoiler, a
+    /// random Chromadrake, random spells) stays inside it. `Tribes::ALL`
+    /// (a fight without a game behind it) draws from everything.
+    pub lobby: crate::cards::Tribes,
 }
 
 /// Every player's Blood Gems start at +1/+1, so a fight without the player's
@@ -97,7 +98,7 @@ impl Default for Counters {
             gem_health: 1,
             deity: None,
             spells_cast: 0,
-            rig: None,
+            lobby: crate::cards::Tribes::ALL,
         }
     }
 }
@@ -1107,8 +1108,8 @@ impl<'a> Side<'a> {
             Effect::GetRandomSpellUpTo { cost, count } => {
                 for _ in 0..count as i32 * mul {
                     let card = match cost {
-                        Some(cost) => db.random_spell_of_cost_up_to(cost, self.counters.tier, rng),
-                        None => db.random_spell(self.counters.tier, rng),
+                        Some(cost) => db.random_spell_of_cost_up_to(cost, self.counters.tier, self.counters.lobby, rng),
+                        None => db.random_spell(self.counters.tier, self.counters.lobby, rng),
                     };
                     if let Some(card) = card {
                         self.out.push_card(card);
@@ -1214,7 +1215,7 @@ impl<'a> Side<'a> {
             }
             Effect::GetRandomMinion { tribe } => {
                 for _ in 0..mul {
-                    if let Some(c) = db.random_pool_minion(tribe, self.counters.tier, rng) {
+                    if let Some(c) = db.random_pool_minion(tribe, self.counters.tier, self.counters.lobby, rng) {
                         self.out.push_card(c);
                     }
                 }
@@ -1224,7 +1225,7 @@ impl<'a> Side<'a> {
             }
             Effect::SummonRandomDeathrattle { count } => {
                 for _ in 0..count as i32 * mul {
-                    let Some(c) = db.random_deathrattle_minion(self.counters.tier, self.counters.rig, rng) else { break };
+                    let Some(c) = db.random_deathrattle_minion(self.counters.tier, self.counters.lobby, rng) else { break };
                     let m = db.make(c, false);
                     if self.summon(db, fx.side, *at, m, uid, w) {
                         *at += 1;
@@ -1251,7 +1252,7 @@ impl<'a> Side<'a> {
             }
             Effect::RandomVolumizer => {
                 for _ in 0..mul {
-                    if let Some(v) = db.random_volumizer(rng) {
+                    if let Some(v) = db.random_volumizer(self.counters.lobby, rng) {
                         self.out.push_card(v);
                     }
                 }
@@ -1269,7 +1270,7 @@ impl<'a> Side<'a> {
             }
             Effect::RandomChromadrake => {
                 for _ in 0..mul {
-                    if let Some(c) = db.random_chromadrake(rng) {
+                    if let Some(c) = db.random_chromadrake(self.counters.lobby, rng) {
                         self.out.push_card(c);
                     }
                 }
@@ -1335,7 +1336,7 @@ impl<'a> Side<'a> {
             }
             Effect::GetRandomTierMinion { tier } => {
                 for _ in 0..mul {
-                    if let Some(c) = db.random_tier_minion(tier, self.counters.rig, rng) {
+                    if let Some(c) = db.random_tier_minion(tier, self.counters.lobby, rng) {
                         self.out.push_card(c);
                     }
                 }
@@ -1364,7 +1365,7 @@ impl<'a> Side<'a> {
             }
             Effect::GetRandomBounty => {
                 for _ in 0..mul {
-                    if let Some(c) = db.random_bounty(rng) {
+                    if let Some(c) = db.random_bounty(self.counters.lobby, rng) {
                         self.out.push_card(c);
                     }
                 }
@@ -1479,7 +1480,7 @@ impl<'a> Side<'a> {
             }
             Effect::GetRandomMinionHeld { tribe } => {
                 for _ in 0..mul {
-                    if let Some(c) = db.random_pool_minion(tribe, self.counters.tier, rng) {
+                    if let Some(c) = db.random_pool_minion(tribe, self.counters.tier, self.counters.lobby, rng) {
                         let before = self.out.n_cards;
                         self.out.push_card(c);
                         if self.out.n_cards > before {
@@ -1582,7 +1583,7 @@ impl<'a> Side<'a> {
             Effect::GetRandomChooseOne(n) => {
                 for _ in 0..n as i32 * mul {
                     if let Some(c) =
-                        db.random_choose_one_minion(self.counters.tier, self.counters.rig, rng)
+                        db.random_choose_one_minion(self.counters.tier, self.counters.lobby, rng)
                     {
                         self.out.push_card(c);
                     }
@@ -1662,7 +1663,7 @@ impl<'a> Side<'a> {
                     }
                     Deathrattle::RandomVolumizer => {
                         for _ in 0..mul {
-                            if let Some(v) = db.random_volumizer(rng) {
+                            if let Some(v) = db.random_volumizer(self.counters.lobby, rng) {
                                 self.out.push_card(v);
                             }
                         }

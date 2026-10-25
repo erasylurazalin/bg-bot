@@ -24,6 +24,7 @@ crates/
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card),
+                      lobby.rs (the 5-tribe lobby and every draw that respects it),
                       core_rules.rs (the generic rules on the real data), fight.rs,
                       game.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
@@ -131,9 +132,33 @@ rules behind each are in DESIGN.md Part 2.
   can be legal (a test checks it against `is_legal` everywhere). Use it
   rather than looping `is_legal` over every action.
 
+## The lobby
+
+Every game plays with exactly 5 of the 10 tribes (DESIGN.md "The lobby's
+tribes"). `Game::unstarted` rolls them with the game's RNG (`Tribes::random_lobby`)
+and stores them on `Game.lobby`; the same seed always rolls the same lobby. The
+pool starts with copies only of lobby cards (`Card::lobby_ok`: a minion with a
+lobby tribe, or a neutral or spell not tied to a tribe outside it; a neutral or
+spell tied through cards.toml `lobby = "<tribe>"`, the game data's
+`lobby_subsets`, is in only with that tribe; all-type minions are always in),
+`check_invariants` checks the rest stay at 0, and every card draw takes the
+lobby as its filter: the Tavern rolls, Discovers, "get a random X", random
+spells, random tier minions, random Choose One cards, Bounties, Chromadrakes,
+Volumizers, Robust Evolution and the draws inside a fight (the lobby travels
+there in `Counters.lobby`; `Tribes::ALL` draws from everything, which is what a
+fight without a game behind it uses). Nothing outside the lobby can appear, and
+a draw with no in-lobby candidate returns None (the effect fizzles). The Deity
+exists only when Aberration is in the lobby. A draw filter is just a `Tribes`
+mask, so a future trinket or hero effect can pass a wider one for its own draw.
+
+Tests and the sandbox can fix the lobby: `Game::new_with_lobby(data, seed,
+lobby)` (a test may pass more than 5 to reach its cards) and
+`Game::new_sandbox(data, seed, Some(lobby), free_rolls)`. The bots'
+`preferred_tribe` counts only lobby tribes.
+
 ## The sandbox
 
-`Game::new_sandbox(data, seed, tribe, free_rolls)` is a one-player game for
+`Game::new_sandbox(data, seed, lobby, free_rolls)` is a one-player game for
 playing a build and recording its boards: only player 0 lives, there is no
 pairing, and each turn ends in `sandbox_combat`: the player fights a copy of
 their own board, hand and counters with the real fight, only the player's side
@@ -142,32 +167,33 @@ counts and ends the game at 0, and the game ends at the turn limit. The latest
 fight (board and hand as they fought, result, side outcome) is in
 `Game.sandbox.last_fight`. Normal games never set `sandbox`.
 
-By default the pool is the normal full pool and there are no free Refreshes
-(`free_rolls` 0). With `tribe: Some(t)` the game is rigged (`Player.rig`):
-Tavern rolls and every "any minion" draw (Discovers, triple rewards, random
-tier minions, Robust Evolution, Fodder refills, Ghastcoiler in the fight via
-`Counters.rig`) only show that tribe and neutral minions, falling back to all
-minions when none is left. Cards that name a tribe keep it.
+With `lobby: None` the game rolls its 5 tribes from the seed like any game.
+With `Some(lobby)` the lobby is fixed: the screen shows it, and the pool is
+exactly that lobby's cards (one tribe plays like a rigged Tavern used to: only
+that tribe and neutral minions show up). There are no free Refreshes unless
+`free_rolls` says so.
 
 ```
-cargo run --release -p bgsandbox                       # a normal game
-cargo run --release -p bgsandbox -- --tribe murloc     # a rigged Tavern
+cargo run --release -p bgsandbox                            # a rolled 5-tribe lobby
+cargo run --release -p bgsandbox -- --tribe murloc          # a one-tribe lobby
+cargo run --release -p bgsandbox -- --tribe beast,mech,dragon,murloc,demon
 ```
 
-Flags: `--tribe X`, `--label TEXT`, `--seed N` (random and printed by
-default), `--free-rolls N` (default 0), `--boards DIR`. Commands are read from
-stdin (`help` lists them). Every end of turn rewrites the recording from the
-game's history, so `undo` (which replays the seed and all actions but the
-last) also removes an undone turn from the file.
+Flags: `--tribe A[,B,...]` (1 to 5 distinct tribes: the lobby), `--label
+TEXT`, `--seed N` (random and printed by default), `--free-rolls N` (default
+0), `--boards DIR`. Commands are read from stdin (`help` lists them). Every
+end of turn rewrites the recording from the game's history, so `undo` (which
+replays the seed and all actions but the last) also removes an undone turn
+from the file.
 
 The label is the build you played. Give `--label`, or type `label <text>` at
 any time, or answer the question at the end (quit, hero death, turn limit;
 a terminal only: with piped input it stays `unlabeled`). During the game the
 file is `boards/game-<seed>.toml`; at the end it is renamed to
-`boards/<label>-<seed>.toml`, or `boards/<tribe>-<label>-<seed>.toml` when
-rigged. An existing file is never overwritten, a suffix `-2`, `-3` is added.
-The header holds `rigged`, the `tribe` when rigged, the label, seed,
-`free_rolls` and date. `bgcore::record::load_file` reads a file back into
+`boards/<label>-<seed>.toml`, or `boards/<tribes>-<label>-<seed>.toml` with a
+fixed lobby (the tribe names joined by dashes). An existing file is never
+overwritten, a suffix `-2`, `-3` is added. The header holds `rigged`, the
+`tribe` when fixed, the label, seed, `free_rolls` and date. `bgcore::record::load_file` reads a file back into
 per-turn boards and hands of `Minion`s. Each turn holds the board that went
 into the mirror fight (after end-of-turn effects, before the fight's permanent
 gains). Card text on the `?` command comes from `ref/lobby5.tsv` when it

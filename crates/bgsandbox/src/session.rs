@@ -6,15 +6,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bgcore::record::{self, GameRecord, TurnRecord};
-use bgcore::{Action, Data, Game, SandboxFight, Tribe};
+use bgcore::{Action, Data, Game, SandboxFight, Tribes};
 
 use crate::parse::{Arg, Cmd, Look, parse};
-use crate::screen::{self, CardTexts, tribe_name};
+use crate::screen::{self, CardTexts};
 
 pub struct Config {
-    /// Rig the Tavern and every minion draw to this tribe plus neutrals;
-    /// None plays the normal full pool.
-    pub tribe: Option<Tribe>,
+    /// The lobby the sandbox plays with (the --tribe tribes); None rolls the
+    /// normal 5 of 10.
+    pub lobby: Option<Tribes>,
     /// The build played. None until the player names it (at the end, or
     /// with the label command), recorded as "unlabeled" meanwhile.
     pub label: Option<String>,
@@ -73,9 +73,9 @@ Tags: T taunt, DS divine shield, W windfury, V venomous, R reborn, S stealth, G 
 M magnetic, A1 Activate ready (cost 1), L2 locked in hand 2 more turns.
 A Magnetic minion merges into the Mech at the position you give; to put it on the board
 unmerged, play it at the right end (plain p1).
-It is a normal game with the full pool (with --tribe X the Tavern and every minion draw only
-show that tribe and neutral minions). Every turn ends with a fight against a copy of your own
-board: it never hurts your hero, only shop damage does.
+The pool is this game's 5-tribe lobby (with --tribe it is the tribes you named). Every turn
+ends with a fight against a copy of your own board: it never hurts your hero, only shop
+damage does.
 Every end-of-turn board is saved to boards/game-<seed>.toml while you play. At the end (quit,
 hero death) you are asked to label the build and the file is renamed to
 boards/<label>-<seed>.toml (<tribe>-<label>-<seed> with --tribe). An existing file is never
@@ -148,8 +148,12 @@ impl Session {
     /// The file name the finished game gets, before any suffix.
     fn final_name(&self) -> String {
         let label = sanitize(&self.label);
-        match self.cfg.tribe {
-            Some(t) => format!("{}-{label}-{}", tribe_name(t).to_lowercase(), self.cfg.seed),
+        match self.cfg.lobby {
+            Some(t) => format!(
+                "{}-{label}-{}",
+                crate::screen::lobby_names(t).to_lowercase().replace(", ", "-"),
+                self.cfg.seed
+            ),
             None => format!("{label}-{}", self.cfg.seed),
         }
     }
@@ -215,7 +219,7 @@ impl Session {
 
     /// The game and its recording after `history`, played from the seed.
     fn build(cfg: &Config, data: &Arc<Data>, history: &[Vec<Action>]) -> (Game, Vec<TurnRecord>, Option<String>) {
-        let mut game = Game::new_sandbox(data.clone(), cfg.seed, cfg.tribe, cfg.free_rolls);
+        let mut game = Game::new_sandbox(data.clone(), cfg.seed, cfg.lobby, cfg.free_rolls);
         let mut turns = Vec::new();
         let mut ctx = None;
         for cmd in history {
@@ -255,7 +259,7 @@ impl Session {
 
     fn record(&self) -> GameRecord {
         GameRecord {
-            tribe: self.cfg.tribe.map(|t| tribe_name(t).to_string()),
+            tribe: self.cfg.lobby.map(crate::screen::lobby_names),
             label: self.label.clone(),
             seed: self.cfg.seed,
             free_rolls: self.cfg.free_rolls,
@@ -300,9 +304,9 @@ impl Session {
     }
 
     pub fn banner(&self) -> String {
-        let rig = match self.cfg.tribe {
-            Some(t) => format!("{} Tavern (rigged)", tribe_name(t)),
-            None => "normal full pool".to_string(),
+        let rig = match self.cfg.lobby {
+            Some(t) => format!("{} lobby", crate::screen::lobby_names(t)),
+            None => "a rolled 5-tribe lobby".to_string(),
         };
         let label = if self.label_given { format!("label {:?}", self.label) } else { "label asked at the end".to_string() };
         format!(

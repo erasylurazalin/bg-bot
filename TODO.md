@@ -84,8 +84,8 @@ The amounts these cards' text hides, as I know them from the game:
 
 1. ~~Remove v0.1 and the made-up cards.~~ Done 2026-10-24: every old rule
    test now runs on real cards (`tests/core_rules.rs`).
-2. **A lobby of five random tribes per game**, like the real one (Deity
-   only with Aberrations, dual-tribe minions in if either tribe is).
+2. ~~A lobby of five random tribes per game.~~ Done 2026-10-25
+   (`tests/lobby.rs`).
 3. **A new observation.** The layout has been frozen since the five-tribe
    lobby, so the bot can't see most of what came after: Blood Gem value,
    the Deity, the Undead bonus, the Refresh buff, pending discards, Triple

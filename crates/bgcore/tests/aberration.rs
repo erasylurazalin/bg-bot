@@ -7,14 +7,18 @@
 use std::sync::Arc;
 
 use bgcore::fight::{Deity, Watch, fight_with};
-use bgcore::{Action, CardDb, CardId, Counters, Data, Game, Keywords, Minion, Rng};
+use bgcore::{Tribe, Action, CardDb, CardId, Counters, Data, Game, Keywords, Minion, Rng};
 
 fn db() -> CardDb {
     Data::bundled().cards
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Aberration, Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Quilboar]))
 }
 
 fn mk(db: &CardDb, name: &str, golden: bool) -> Minion {

@@ -13,8 +13,12 @@ fn db() -> CardDb {
     Data::bundled().cards
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Undead]))
 }
 
 fn mk(db: &CardDb, name: &str, golden: bool) -> Minion {
@@ -1242,7 +1246,7 @@ fn random_games_with_an_undead_tavern_keep_every_invariant() {
     let data = Arc::new(Data::bundled());
     let mut played_undead = 0;
     for seed in 0..40u64 {
-        let mut g = Game::new_sandbox(data.clone(), seed, Some(Tribe::Undead), 3);
+        let mut g = Game::new_sandbox(data.clone(), seed, Some(bgcore::Tribes::of(Tribe::Undead)), 3);
         let mut rng = Rng::new(seed + 1000);
         let mut steps = 0;
         while !g.over && steps < 3000 {

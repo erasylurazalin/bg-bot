@@ -59,7 +59,11 @@ fn preferred_tribe(game: &Game, p: usize) -> Option<Tribe> {
             continue;
         }
         for (n, t) in counts.iter_mut().zip(Tribe::EVERY) {
-            *n += c.tribes.has(t) as u32;
+            // an out-of-lobby tribe can never be preferred: an all-type
+            // minion counts for it, but no card of it can ever be bought
+            if game.lobby.has(t) {
+                *n += c.tribes.has(t) as u32;
+            }
         }
     }
     // the tribe with the most cards, if one leads alone

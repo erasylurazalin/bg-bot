@@ -81,6 +81,11 @@ impl Tribes {
         Tribes(t.bit())
     }
 
+    /// This set plus `t`.
+    pub fn with(self, t: Tribe) -> Tribes {
+        Tribes(self.0 | t.bit())
+    }
+
     pub fn has(self, t: Tribe) -> bool {
         self.0 & t.bit() != 0
     }
@@ -113,6 +118,28 @@ impl Tribes {
             }
         }
         None
+    }
+
+    /// A lobby: `n` of the ten tribes, distinct, uniformly at random
+    /// (DESIGN.md "The lobby's tribes": every game has 5).
+    pub fn random_lobby(n: usize, rng: &mut Rng) -> Tribes {
+        let mut left: ArrayVec<Tribe, { Tribe::EVERY.len() }> = Tribe::EVERY.into_iter().collect();
+        let mut lobby = Tribes::NONE;
+        for _ in 0..n {
+            let k = rng.below(left.len() as u32) as usize;
+            lobby = lobby.with(left[k]);
+            left.swap_remove(k);
+        }
+        lobby
+    }
+
+    /// How many tribes the set holds.
+    pub fn len(self) -> u32 {
+        self.0.count_ones()
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
     }
 }
 
@@ -1124,6 +1151,10 @@ pub struct Card {
     pub name: String,
     pub tier: u8,
     pub tribes: Tribes,
+    /// The tribe this neutral or spell is tied to (cards.toml `lobby`, the
+    /// game data's `lobby_subsets`): it only exists in lobbies with that
+    /// tribe. None when no tie.
+    pub lobby: Option<Tribe>,
     pub attack: i32,
     pub health: i32,
     /// Golden stats, when the data doesn't double the printed ones.
@@ -1278,10 +1309,17 @@ impl Card {
         self.spell
     }
 
-    /// Whether an "any minion" draw may show this card: always without a
-    /// sandbox rig, otherwise only the rigged tribe and neutral minions.
-    pub fn rig_ok(&self, rig: Option<Tribe>) -> bool {
-        rig.is_none_or(|t| self.tribes.is_neutral() || self.tribes.has(t))
+    /// Whether the card may exist in a lobby of these tribes, which is also
+    /// the filter every card draw applies: a minion with a lobby tribe, or a
+    /// neutral or spell not tied to a tribe outside it (`Card.lobby`, the
+    /// game data's `lobby_subsets`). An all-type minion is always in. A
+    /// wider mask widens the draw (a future trinket), `Tribes::ALL` is no
+    /// filter.
+    pub fn lobby_ok(&self, lobby: Tribes) -> bool {
+        match self.lobby {
+            Some(t) => lobby.has(t),
+            None => self.tribes.is_neutral() || self.tribes.overlaps(lobby),
+        }
     }
 
     /// Whether this spell gives stats to minions (used by the rule bot).
@@ -1425,6 +1463,9 @@ struct RawCard {
     tribe: Option<String>,
     /// Two or more tribes, for multi-tribe cards.
     tribes: Option<Vec<String>>,
+    /// A tribe this neutral is tied to (lobby_subsets in the export): it
+    /// only exists in lobbies with that tribe.
+    lobby: Option<String>,
     stats: [i32; 2],
     /// Golden stats when they are not exactly double the printed ones (the
     /// data has one such card).
@@ -1551,6 +1592,9 @@ struct RawSpell {
     name: String,
     tier: u8,
     cost: u8,
+    /// A tribe the spell is tied to (lobby_subsets in the export): it only
+    /// exists in lobbies with that tribe.
+    lobby: Option<String>,
     /// A spell that is never in the Tavern's spell pool (Pointy Arrow).
     #[serde(default)]
     token: bool,
@@ -3208,6 +3252,7 @@ impl CardDb {
                 name: c.name.clone(),
                 tier: c.tier,
                 tribes: card_tribes(&c.tribe, &c.tribes).map_err(&err)?,
+                lobby: c.lobby.as_deref().map(tribe).transpose().map_err(&err)?,
                 attack: c.stats[0],
                 health: c.stats[1],
                 golden_stats: c.golden_stats.map(|[a, h]| (a, h)),
@@ -3364,6 +3409,7 @@ impl CardDb {
                 name: sp.name.clone(),
                 tier: sp.tier,
                 tribes: Tribes::NONE,
+                lobby: sp.lobby.as_deref().map(tribe).transpose().map_err(&err)?,
                 attack: 0,
                 health: 0,
                 golden_stats: None,
@@ -3475,9 +3521,10 @@ impl CardDb {
         })
     }
 
-    /// One of the five Chromadrakes, uniformly.
-    pub fn random_chromadrake(&self, rng: &mut Rng) -> Option<CardId> {
-        if self.chromadrakes.is_empty() {
+    /// One of the five Chromadrakes, uniformly; only in a lobby with Dragons
+    /// (they are all Dragons). None otherwise.
+    pub fn random_chromadrake(&self, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        if self.chromadrakes.is_empty() || !lobby.has(Tribe::Dragon) {
             None
         } else {
             let k = rng.below(self.chromadrakes.len() as u32) as usize;
@@ -3501,8 +3548,8 @@ impl CardDb {
         self.cards.iter().position(|c| c.name == alt).map(|i| i as CardId)
     }
 
-    pub fn random_volumizer(&self, rng: &mut Rng) -> Option<CardId> {
-        if self.volumizers.is_empty() {
+    pub fn random_volumizer(&self, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        if self.volumizers.is_empty() || !lobby.has(Tribe::Mech) {
             None
         } else {
             let k = rng.below(self.volumizers.len() as u32) as usize;
@@ -3512,14 +3559,21 @@ impl CardDb {
 
     /// A random pool minion of a tribe, of Tier `max_tier` or lower (0 means
     /// any Tier). "Random minion" cards pick up to the player's current tier.
+    /// The lobby is the filter: only minions with a lobby tribe (an all-type
+    /// minion is every tribe) count.
     pub fn random_pool_minion(
         &self,
         tribe: Tribe,
         max_tier: u8,
+        lobby: Tribes,
         rng: &mut Rng,
     ) -> Option<CardId> {
         let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
-        let ok = |c: usize| self.cards[c].tribes.has(tribe) && self.cards[c].tier <= max_tier;
+        let ok = |c: usize| {
+            self.cards[c].tribes.has(tribe)
+                && self.cards[c].tier <= max_tier
+                && self.cards[c].lobby_ok(lobby)
+        };
         let count = (0..self.pool_cards).filter(|&c| ok(c)).count() as u32;
         if count == 0 {
             return None;
@@ -3529,35 +3583,29 @@ impl CardDb {
     }
 
     /// A random pool minion that has a Deathrattle, of Tier `max_tier` or
-    /// lower (0 means any Tier).
-    ///
-    /// This is an "any minion" draw, so a sandbox `rig` narrows it (see
-    /// `Card::rig_ok`), falling back to every candidate when none is left.
+    /// lower (0 means any Tier). The lobby filters it.
     pub fn random_deathrattle_minion(
         &self,
         max_tier: u8,
-        rig: Option<Tribe>,
+        lobby: Tribes,
         rng: &mut Rng,
     ) -> Option<CardId> {
         let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
-        self.pick_rigged(
+        self.pick_lobby(
             |c| self.cards[c].deathrattle.is_some() && self.cards[c].tier <= max_tier,
-            rig,
+            lobby,
             rng,
         )
     }
 
-    /// One pool card out of those `ok` accepts, uniformly. With a `rig`
-    /// only rig-legal cards count, unless there are none, then all do.
-    fn pick_rigged(
+    /// One pool card out of those `ok` accepts, uniformly, within `lobby`.
+    fn pick_lobby(
         &self,
         ok: impl Fn(usize) -> bool,
-        rig: Option<Tribe>,
+        lobby: Tribes,
         rng: &mut Rng,
     ) -> Option<CardId> {
-        let rigged = |c: usize| ok(c) && self.cards[c].rig_ok(rig);
-        let use_rig = rig.is_some() && (0..self.pool_cards).any(rigged);
-        let ok = |c: usize| if use_rig { rigged(c) } else { ok(c) };
+        let ok = |c: usize| ok(c) && self.cards[c].lobby_ok(lobby);
         let count = (0..self.pool_cards).filter(|&c| ok(c)).count() as u32;
         if count == 0 {
             return None;
@@ -3590,23 +3638,33 @@ impl CardDb {
         self.bounties.iter().copied().filter(|b| !exclude.contains(b)).nth(k).unwrap_or(id)
     }
 
-    /// "A random Bounty": one of the five, uniformly.
-    pub fn random_bounty(&self, rng: &mut Rng) -> Option<CardId> {
-        if self.bounties.is_empty() {
+    /// "A random Bounty": one of the five, uniformly. The Bounties are tied
+    /// to Pirates, so only in a lobby with Pirates.
+    pub fn random_bounty(&self, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        if self.bounties.is_empty() || !self.cards[self.bounties[0] as usize].lobby_ok(lobby) {
             return None;
         }
         Some(self.bounties[rng.below(self.bounties.len() as u32) as usize])
     }
 
-    /// A random spell that costs `cost`, of any Tavern Tier.
-    pub fn random_spell_of_cost(&self, cost: u8, rng: &mut Rng) -> Option<CardId> {
-        self.random_spell_of_cost_up_to(cost, crate::MAX_TIER, rng)
+    /// A random spell that costs `cost`, of any Tavern Tier. The lobby
+    /// filters every spell draw.
+    pub fn random_spell_of_cost(&self, cost: u8, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        self.random_spell_of_cost_up_to(cost, crate::MAX_TIER, lobby, rng)
     }
 
-    pub fn random_spell_of_cost_up_to(&self, cost: u8, max_tier: u8, rng: &mut Rng) -> Option<CardId> {
+    pub fn random_spell_of_cost_up_to(
+        &self,
+        cost: u8,
+        max_tier: u8,
+        lobby: Tribes,
+        rng: &mut Rng,
+    ) -> Option<CardId> {
         let max_tier = max_tier.min(crate::MAX_TIER);
         let ok = |id: CardId| {
-            self.cards[id as usize].cost == cost && self.cards[id as usize].tier <= max_tier
+            self.cards[id as usize].cost == cost
+                && self.cards[id as usize].tier <= max_tier
+                && self.cards[id as usize].lobby_ok(lobby)
         };
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {
@@ -3618,12 +3676,13 @@ impl CardDb {
     }
 
     /// A random pool minion sharing a tribe with `tribes`, other than
-    /// `exclude`, of Tier `max_tier` or lower.
+    /// `exclude`, of Tier `max_tier` or lower. The lobby filters it.
     pub fn random_different_minion(
         &self,
         tribes: Tribes,
         exclude: CardId,
         max_tier: u8,
+        lobby: Tribes,
         rng: &mut Rng,
     ) -> Option<CardId> {
         let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
@@ -3631,6 +3690,7 @@ impl CardDb {
             self.cards[c].tribes.overlaps(tribes)
                 && c as CardId != exclude
                 && self.cards[c].tier <= max_tier
+                && self.cards[c].lobby_ok(lobby)
         };
         let count = (0..self.pool_cards).filter(|&c| ok(c)).count() as u32;
         if count == 0 {
@@ -3643,34 +3703,39 @@ impl CardDb {
     /// A random tier 7 minion, for the cards that say "a Tier 7 minion"
     /// (none in the lobby yet, Greedy Conniver is the first). Never
     /// reachable any other way: every other draw stops at the Tavern tiers.
-    pub fn random_tier7_minion(&self, rig: Option<Tribe>, rng: &mut Rng) -> Option<CardId> {
-        self.random_tier_minion(crate::CARD_MAX_TIER, rig, rng)
+    /// The lobby filters it.
+    pub fn random_tier7_minion(&self, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        self.random_tier_minion(crate::CARD_MAX_TIER, lobby, rng)
     }
 
-    /// A random pool minion of exactly `tier`, narrowed by a sandbox `rig`
-    /// like `random_deathrattle_minion`.
-    pub fn random_tier_minion(&self, tier: u8, rig: Option<Tribe>, rng: &mut Rng) -> Option<CardId> {
-        self.pick_rigged(|c| self.cards[c].tier == tier, rig, rng)
+    /// A random pool minion of exactly `tier`, within the lobby.
+    pub fn random_tier_minion(&self, tier: u8, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        self.pick_lobby(|c| self.cards[c].tier == tier, lobby, rng)
     }
 
     /// A random pool minion with a Choose One, any tribe, of Tier `max_tier`
-    /// or lower, narrowed by a sandbox `rig` (Bramble Tunneler, Fandral's
-    /// Fortune).
+    /// or lower, within the lobby (Bramble Tunneler, Fandral's Fortune).
     pub fn random_choose_one_minion(
         &self,
         max_tier: u8,
-        rig: Option<Tribe>,
+        lobby: Tribes,
         rng: &mut Rng,
     ) -> Option<CardId> {
-        self.pick_rigged(|c| self.cards[c].choose_one.is_some() && self.cards[c].tier <= max_tier, rig, rng)
+        self.pick_lobby(
+            |c| self.cards[c].choose_one.is_some() && self.cards[c].tier <= max_tier,
+            lobby,
+            rng,
+        )
     }
 
-    pub fn random_spell(&self, max_tier: u8, rng: &mut Rng) -> Option<CardId> {
+    pub fn random_spell(&self, max_tier: u8, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
         let max_tier = max_tier.min(crate::MAX_TIER);
         let count = self
             .spells
             .iter()
-            .filter(|&&id| self.cards[id as usize].tier <= max_tier)
+            .filter(|&&id| {
+                self.cards[id as usize].tier <= max_tier && self.cards[id as usize].lobby_ok(lobby)
+            })
             .count() as u32;
         if count == 0 {
             return None;
@@ -3680,21 +3745,28 @@ impl CardDb {
             .spells
             .iter()
             .copied()
-            .filter(|&id| self.cards[id as usize].tier <= max_tier)
+            .filter(|&id| {
+                self.cards[id as usize].tier <= max_tier && self.cards[id as usize].lobby_ok(lobby)
+            })
             .nth(k)?;
         Some(self.resolve_bounty(id, &[], rng))
     }
 
     /// A random Tavern spell of Tier `max_tier` or lower, other than the
-    /// cards in `exclude`.
+    /// cards in `exclude`. The lobby filters every spell draw.
     pub fn random_spell_up_to(
         &self,
         max_tier: u8,
         exclude: &[CardId],
+        lobby: Tribes,
         rng: &mut Rng,
     ) -> Option<CardId> {
         let max_tier = max_tier.min(crate::MAX_TIER);
-        let ok = |id: CardId| self.cards[id as usize].tier <= max_tier && self.spell_open(id, exclude);
+        let ok = |id: CardId| {
+            self.cards[id as usize].tier <= max_tier
+                && self.cards[id as usize].lobby_ok(lobby)
+                && self.spell_open(id, exclude)
+        };
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {
             return None;
@@ -3708,12 +3780,17 @@ impl CardDb {
         &self,
         tier: u8,
         exclude: &[CardId],
+        lobby: Tribes,
         rng: &mut Rng,
     ) -> Option<CardId> {
         if tier > crate::MAX_TIER {
             return None;
         }
-        let ok = |id: CardId| self.cards[id as usize].tier == tier && self.spell_open(id, exclude);
+        let ok = |id: CardId| {
+            self.cards[id as usize].tier == tier
+                && self.cards[id as usize].lobby_ok(lobby)
+                && self.spell_open(id, exclude)
+        };
         let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
         if count == 0 {
             return None;

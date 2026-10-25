@@ -603,6 +603,17 @@ power (the Tavern spell bonus).
   it died attacking (like Blade Collector or Wildfire Elemental).
 - Corrupted Coin and Energizing Chamber come in with this tribe.
 
+**The lobby's tribes (2026-10-24).** Each game picks exactly 5 of the 10
+tribes, uniformly at random. In the pool: minions with at least one lobby
+tribe (a dual-tribe minion is in if either tribe is), plus neutrals and
+spells, except neutrals and spells the game data ties to a tribe outside
+the lobby (`lobby_subsets` in the export: Nadina the Red needs Dragon,
+Disguised Graverobber needs Undead, and 26 Tavern spells are tied the same
+way). The Deity only exists with Aberrations in. Nothing from outside the
+lobby ever shows up: every Discover, "get a random X" and random draw uses
+the lobby. (Rare trinket, hero and timewarp effects break this in the real
+game; none exist here yet, and each can widen its own draw when it comes.)
+
 **Pairing:** at the start of each turn, shuffle the living players and
 pair them, avoiding the previous opponent if possible (up to 16 shuffles).
 Pairs are known during the shop phase. With an odd number, one plays the

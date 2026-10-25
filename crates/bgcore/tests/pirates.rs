@@ -12,8 +12,12 @@ fn db() -> CardDb {
     Data::bundled().cards
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Murloc, Tribe::Demon, Tribe::Pirate]))
 }
 
 fn mk(db: &CardDb, name: &str, golden: bool) -> Minion {
@@ -673,7 +677,7 @@ fn the_five_bounties_are_one_slot_of_the_spell_draw() {
     let mut bounty_draws = 0u32;
     let n = 20000;
     for _ in 0..n {
-        let s = db.random_spell(6, &mut rng).unwrap();
+        let s = db.random_spell(6, bgcore::Tribes::ALL, &mut rng).unwrap();
         if let Some(k) = db.bounties.iter().position(|&b| b == s) {
             seen[k] += 1;
             bounty_draws += 1;
@@ -685,7 +689,7 @@ fn the_five_bounties_are_one_slot_of_the_spell_draw() {
     assert!((bounty_draws as f64 - expect).abs() < expect * 0.3, "one slot: {bounty_draws} vs {expect}");
     // never in the Tavern below tier 3
     for _ in 0..500 {
-        let s = db.random_spell(2, &mut rng).unwrap();
+        let s = db.random_spell(2, bgcore::Tribes::ALL, &mut rng).unwrap();
         assert!(!db.get(s).is_bounty);
     }
     // a Discover never offers the same Bounty twice
@@ -695,7 +699,7 @@ fn the_five_bounties_are_one_slot_of_the_spell_draw() {
         let mut offered = Vec::new();
         let mut rng = Rng::new(seed);
         for _ in 0..3 {
-            let s = db.random_spell_up_to(6, &offered, &mut rng).unwrap();
+            let s = db.random_spell_up_to(6, &offered, bgcore::Tribes::ALL, &mut rng).unwrap();
             assert!(!offered.contains(&s));
             offered.push(s);
         }
@@ -1149,7 +1153,7 @@ fn a_lockbox_opens_before_the_fight_and_its_minion_can_be_summoned_from_hand() {
     let data = Arc::new(Data::bundled());
     let mut found = false;
     for seed in 0..60u64 {
-        let mut g = Game::new_sandbox(data.clone(), seed, Some(Tribe::Murloc), 0);
+        let mut g = Game::new_sandbox(data.clone(), seed, Some(bgcore::Tribes::of(Tribe::Murloc)), 0);
         put_on_board(&mut g, 0, "Diremuck Forager", false);
         g.give(0, "Lockbox").unwrap();
         // got on turn 1: 5, then 4 after turn 1, 3, 2, 1: opens at the end of turn 5

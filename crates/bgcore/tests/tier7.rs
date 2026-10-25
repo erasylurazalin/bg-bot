@@ -23,8 +23,18 @@ fn db() -> CardDb {
     Data::bundled().cards
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon]))
+}
+
+/// A lobby with every tier 7 minion's tribe, so the tier 7 tests can give
+/// them all out (Highkeeper Ra is neutral, The Last One Standing is all).
+fn tier7_lobby() -> bgcore::Tribes {
+    lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon])
 }
 
 fn mk(db: &CardDb, name: &str, golden: bool) -> Minion {
@@ -181,7 +191,10 @@ fn stats(m: &Minion) -> (i32, i32) {
 #[test]
 fn the_seven_tier_7_minions_are_in_the_pool_with_tier_6_copies() {
     let data = Data::bundled();
-    let g = Game::new(Arc::new(Data::bundled()), 1);
+    // a lobby with every tier 7 minion's tribe (Mech, Demon, Dragon, Murloc,
+    // Beast; Highkeeper Ra is neutral and The Last One Standing is all)
+    let lobby = tier7_lobby();
+    let g = Game::new_with_lobby(Arc::new(Data::bundled()), 1, lobby);
     let tier6 = data.rules.copies(6);
     assert_eq!(data.rules.copies(7), tier6);
     for n in TIER7 {
@@ -261,18 +274,18 @@ fn random_draws_up_to_your_tier_never_reach_tier_7() {
     let mut rng = Rng::new(3);
     for _ in 0..3000 {
         for t in Tribe::ALL {
-            let c = db.random_pool_minion(t, 0, &mut rng).unwrap();
+            let c = db.random_pool_minion(t, 0, bgcore::Tribes::ALL, &mut rng).unwrap();
             assert!(db.get(c).tier <= 6);
         }
-        let c = db.random_deathrattle_minion(0, None, &mut rng).unwrap();
+        let c = db.random_deathrattle_minion(0, bgcore::Tribes::ALL, &mut rng).unwrap();
         assert!(db.get(c).tier <= 6);
         let tribes = db.get(id(&db, "Wolf Pup")).tribes;
-        let c = db.random_different_minion(tribes, 0, 0, &mut rng).unwrap();
+        let c = db.random_different_minion(tribes, 0, 0, bgcore::Tribes::ALL, &mut rng).unwrap();
         assert!(db.get(c).tier <= 6);
     }
     // And the tier 6 draw Highkeeper Ra uses is exactly tier 6.
     for _ in 0..500 {
-        let c = db.random_tier_minion(6, None, &mut rng).unwrap();
+        let c = db.random_tier_minion(6, bgcore::Tribes::ALL, &mut rng).unwrap();
         assert_eq!(db.get(c).tier, 6);
     }
 }
@@ -338,7 +351,7 @@ fn robust_evolution_never_takes_a_minion_up_to_tier_7() {
 fn games_with_tier_7_minions_in_play_keep_the_pool_exact() {
     let data = Arc::new(Data::bundled());
     for seed in 0..120 {
-        let mut g = Game::new(data.clone(), seed);
+        let mut g = Game::new_with_lobby(data.clone(), seed, tier7_lobby());
         for p in 0..bgcore::PLAYERS {
             for (k, n) in TIER7.iter().enumerate() {
                 if (k + p + seed as usize).is_multiple_of(2) {

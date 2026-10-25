@@ -2,17 +2,21 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use bgsandbox::screen::parse_tribe;
+use bgsandbox::screen::parse_lobby;
 use bgsandbox::{Config, Session, play};
 
 const USAGE: &str = "\
-usage: bgsandbox [--tribe beast|mech|dragon|murloc|demon|pirate|elemental|undead|quilboar|aberration] [--label TEXT] [--seed N]
+usage: bgsandbox [--tribe A[,B,C,D,E]] [--label TEXT] [--seed N]
                  [--free-rolls N] [--boards DIR]
 
-A one-player Battlegrounds sandbox: a normal game with the full pool, no opponents.
-Every turn ends with a fight against a copy of your own board (it never hurts your hero),
-and the end-of-turn boards are saved to boards/game-<seed>.toml.
---tribe X  rig the Tavern and every minion draw to that tribe plus neutral minions.
+A one-player Battlegrounds sandbox: no opponents. The pool is a real 5-tribe
+lobby, rolled from the seed (every tribe of it shows in the Tavern, Discovers
+and every random draw). Every turn ends with a fight against a copy of your own
+board (it never hurts your hero), and the end-of-turn boards are saved to
+boards/game-<seed>.toml.
+--tribe A,B,...  fix the lobby to these tribes (1 to 5, comma separated); with
+                 one tribe it plays like the old rigged Tavern: only that tribe
+                 and neutral minions show up.
 --label    the build you play. Without it you are asked at the end (or use the label
            command in the game). The file is renamed to boards/<label>-<seed>.toml,
            or <tribe>-<label>-<seed> when rigged; an existing file is never overwritten.
@@ -36,7 +40,7 @@ fn fail(msg: &str) -> ExitCode {
 }
 
 fn main() -> ExitCode {
-    let mut tribe = None;
+    let mut lobby = None;
     let mut label = None;
     let mut seed = None;
     let mut free_rolls = 0u8;
@@ -48,7 +52,9 @@ fn main() -> ExitCode {
             match a.as_str() {
                 "--tribe" => {
                     let v = value("--tribe")?;
-                    tribe = Some(parse_tribe(&v).ok_or(format!("unknown tribe {v:?}"))?);
+                    lobby = Some(parse_lobby(&v).ok_or(format!(
+                        "--tribe wants 1 to 5 distinct tribes, comma separated, got {v:?}"
+                    ))?);
                 }
                 "--label" => label = Some(value("--label")?),
                 "--seed" => {
@@ -77,7 +83,7 @@ fn main() -> ExitCode {
         }
     }
     let seed = seed.unwrap_or_else(random_seed);
-    let mut session = Session::new(Config { tribe, label, seed, free_rolls, boards_dir: boards });
+    let mut session = Session::new(Config { lobby, label, seed, free_rolls, boards_dir: boards });
     let tty = std::io::stdin().is_terminal();
     let stdin = std::io::stdin();
     let mut input = stdin.lock();

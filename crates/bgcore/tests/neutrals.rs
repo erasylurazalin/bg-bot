@@ -21,8 +21,12 @@ fn id(g: &Game, name: &str) -> CardId {
     g.data.cards.by_name(name).unwrap_or_else(|| panic!("no card {name}"))
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon, Tribe::Pirate]))
 }
 
 fn turn_of(g: &mut Game, p: usize) {
@@ -291,7 +295,7 @@ fn holy_vanguard_does_not_show_a_rewound_hit() {
     // Wrath Weaver dealt 1 and Soul Rewinder gave it back: the hero is at
     // 16, so Holy Vanguard has no bonus.
     assert_eq!(g.players[0].health, 16);
-    let counters = [g.players[0].counters(&g.data.cards), Counters::default()];
+    let counters = [g.players[0].counters(&g.data.cards, g.lobby), Counters::default()];
     let d = db();
     let a = vec![mk(&d, "Holy Vanguard", false), mk(&d, "Microbot", false)];
     let b = vec![mk(&d, "Microbot", false)];
@@ -770,8 +774,8 @@ fn pointy_arrow_only_comes_from_weapons_forge() {
     assert!(!d.spells.contains(&arrow), "Pointy Arrow is not in the spell pool");
     let mut rng = Rng::new(7);
     for _ in 0..1000 {
-        assert_ne!(d.random_spell(1, &mut rng), Some(arrow));
-        assert_ne!(d.random_tier_spell(1, &[], &mut rng), Some(arrow));
+        assert_ne!(d.random_spell(1, bgcore::Tribes::ALL, &mut rng), Some(arrow));
+        assert_ne!(d.random_tier_spell(1, &[], bgcore::Tribes::ALL, &mut rng), Some(arrow));
     }
 }
 

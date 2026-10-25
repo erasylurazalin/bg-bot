@@ -6,16 +6,18 @@
 use std::sync::Arc;
 
 use bgcore::fight::{Watch, fight_with};
-use bgcore::{
-    Action, CardDb, CardId, Counters, Data, Game, HAND, Keywords, Minion, Rng,
-};
+use bgcore::{Tribe, Action, CardDb, CardId, Counters, Data, Game, HAND, Keywords, Minion, Rng,};
 
 fn db() -> CardDb {
     Data::bundled().cards
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Demon, Tribe::Elemental, Tribe::Mech, Tribe::Pirate, Tribe::Undead]))
 }
 
 fn id(db: &CardDb, name: &str) -> CardId {
@@ -108,9 +110,9 @@ fn conflagration_is_tier_4_and_lockbox_is_tier_0_and_neither_is_ever_drawn() {
     for max_tier in 0..=7u8 {
         for _ in 0..400 {
             for c in [
-                db.random_spell(max_tier, &mut rng),
-                db.random_spell_up_to(max_tier, &[], &mut rng),
-                db.random_tier_spell(max_tier, &[], &mut rng),
+                db.random_spell(max_tier, bgcore::Tribes::ALL, &mut rng),
+                db.random_spell_up_to(max_tier, &[], bgcore::Tribes::ALL, &mut rng),
+                db.random_tier_spell(max_tier, &[], bgcore::Tribes::ALL, &mut rng),
             ]
             .into_iter()
             .flatten()
@@ -124,7 +126,7 @@ fn conflagration_is_tier_4_and_lockbox_is_tier_0_and_neither_is_ever_drawn() {
     // A random spell by cost, of any tier, still stops at tier 6.
     for cost in 0..=8u8 {
         for _ in 0..400 {
-            if let Some(c) = db.random_spell_of_cost(cost, &mut rng) {
+            if let Some(c) = db.random_spell_of_cost(cost, bgcore::Tribes::ALL, &mut rng) {
                 assert!(db.get(c).tier <= 6, "{} is tier 7", db.get(c).name);
             }
         }

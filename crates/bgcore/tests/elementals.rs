@@ -14,8 +14,12 @@ fn db() -> CardDb {
     Data::bundled().cards
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Elemental, Tribe::Demon, Tribe::Pirate]))
 }
 
 fn mk(db: &CardDb, name: &str, golden: bool) -> Minion {
@@ -217,7 +221,7 @@ fn elementals_are_a_type_for_the_all_type_minions_and_the_sandbox_rig() {
     let db = db();
     let last = db.get(id(&db, "The Last One Standing"));
     assert!(last.tribes.has(Tribe::Elemental));
-    let g = Game::new_sandbox(Arc::new(Data::bundled()), 3, Some(Tribe::Elemental), 0);
+    let g = Game::new_sandbox(Arc::new(Data::bundled()), 3, Some(bgcore::Tribes::of(Tribe::Elemental)), 0);
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
         if !c.is_spell() {
@@ -607,7 +611,7 @@ fn a_golden_ichorons_shield_has_no_time_limit() {
 fn ichorons_shield_comes_off_at_turn_start_in_a_game_that_keeps_the_board() {
     // Sandbox games keep the board through the mirror fight.
     let data = Arc::new(Data::bundled());
-    let mut g = Game::new_sandbox(data, 4, None, 0);
+    let mut g = Game::new_sandbox(data, 4, Some(lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Elemental, Tribe::Demon, Tribe::Pirate])), 0);
     put_on_board(&mut g, 0, "Ichoron the Protector", false);
     play_new(&mut g, "Dune Dweller");
     play_new(&mut g, "Cord Puller");
@@ -621,7 +625,7 @@ fn ichorons_shield_comes_off_at_turn_start_in_a_game_that_keeps_the_board() {
     assert!(b[0].keywords.has(Keywords::DIVINE_SHIELD));
     // a Golden Ichoron's shield stays
     let data = Arc::new(Data::bundled());
-    let mut g = Game::new_sandbox(data, 5, None, 0);
+    let mut g = Game::new_sandbox(data, 5, Some(lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Elemental, Tribe::Demon, Tribe::Pirate])), 0);
     put_on_board(&mut g, 0, "Ichoron the Protector", true);
     play_new(&mut g, "Dune Dweller");
     g.step(Action::EndTurn).unwrap();
@@ -1089,7 +1093,7 @@ fn unbound_tempest_carries_its_count_over_turns_and_an_empty_tavern_still_resets
     play_new(&mut g, "Crackling Cyclone");
     // keep the board through the turn
     let data = Arc::new(Data::bundled());
-    let mut s = Game::new_sandbox(data, 6, None, 0);
+    let mut s = Game::new_sandbox(data, 6, Some(lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Elemental, Tribe::Demon, Tribe::Pirate])), 0);
     put_on_board(&mut s, 0, "Unbound Tempest", false);
     play_new(&mut s, "Crackling Cyclone");
     play_new(&mut s, "Crackling Cyclone");
@@ -1231,7 +1235,7 @@ fn a_golden_prison_gains_double_and_an_unused_one_is_wasted() {
     assert_eq!(stats(&g.players[0].board[0]), (8 + 10, 10 + 12));
     // no buy this turn: wasted
     let data = Arc::new(Data::bundled());
-    let mut s = Game::new_sandbox(data, 8, None, 0);
+    let mut s = Game::new_sandbox(data, 8, Some(lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Elemental, Tribe::Demon, Tribe::Pirate])), 0);
     put_on_board(&mut s, 0, "Living Prison", false);
     s.players[0].gold = 10;
     act(&mut s, 0, Action::Activate(0));
@@ -1366,7 +1370,7 @@ fn whole_random_games_with_elementals_keep_the_pool_exact() {
     let data = Arc::new(Data::bundled());
     for seed in 0..12u64 {
         let mut g = if seed % 2 == 0 {
-            Game::new_sandbox(data.clone(), 900 + seed, Some(Tribe::Elemental), 2)
+            Game::new_sandbox(data.clone(), 900 + seed, Some(bgcore::Tribes::of(Tribe::Elemental)), 2)
         } else {
             Game::new(data.clone(), 900 + seed)
         };

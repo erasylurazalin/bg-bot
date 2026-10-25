@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use bgcore::fight::{Watch, fight_with};
-use bgcore::{Action, CardDb, Counters, Data, Game, Keywords, Minion, Rng};
+use bgcore::{Tribe, Action, CardDb, Counters, Data, Game, Keywords, Minion, Rng};
 
 fn db() -> CardDb {
     Data::bundled().cards
@@ -515,8 +515,12 @@ fn firescale_hoarder_and_draconic_warden_hand_over_cards_in_both_directions() {
 
 // ---- The shop harness ----
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Demon, Tribe::Pirate]))
 }
 
 fn turn_of(g: &mut Game, p: usize) {

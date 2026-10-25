@@ -1,6 +1,8 @@
 # The Beast and Mech minions of the 5-tribe lobby (ref/lobby5.tsv), the neutral
 # minions and the spells so far. Later runs add the other tribes and finish
 # the neutrals and spells.
+# `lobby = "<tribe>"` ties a neutral or spell to one tribe (the game data's
+# lobby_subsets): it only exists in lobbies with that tribe.
 
 # --- Tier 1 ---
 
@@ -266,6 +268,7 @@ activate = { cost = 1, effect = { get = "Tavern Dish Banana", count = 2 } }
 
 [[minion]]
 name = "Disguised Graverobber"
+lobby = "undead"
 tier = 3
 tribe = "neutral"
 stats = [4, 4]
@@ -672,6 +675,7 @@ on_cast_spell_on_self = { cast = "Misplaced Tea Set" }
 
 [[minion]]
 name = "Nadina the Red"
+lobby = "dragon"
 tier = 6
 tribe = "neutral"
 stats = [8, 4]
@@ -2224,12 +2228,14 @@ effect = { target = "chosen", tricky_trousers = [1, 2] }
 
 [[spell]]
 name = "Mighty Dragonbreath"
+lobby = "dragon"
 tier = 4
 cost = 2
 effect = { mighty_dragonbreath = [3, 2] }
 
 [[spell]]
 name = "Boon of Beetles"
+lobby = "beast"
 tier = 4
 cost = 1
 effect = { boon_of_beetles = 2 }
@@ -2257,18 +2263,21 @@ choose_one = [
 
 [[spell]]
 name = "Seafood Stew"
+lobby = "murloc"
 tier = 3
 cost = 2
 effect = { target = "chosen", buff = [1, 1], per_bonus_keyword = true }
 
 [[spell]]
 name = "Cloning Conch"
+lobby = "murloc"
 tier = 4
 cost = 4
 effect = { cloning_conch = true }
 
 [[spell]]
 name = "Methodical Madness"
+lobby = "demon"
 tier = 4
 cost = 3
 effect = { target = "chosen", tribe = "demon", consume = "random", count = 2, with_keywords = true }
@@ -2287,6 +2296,7 @@ effect = { misplaced_tea_set = [4, 4] }
 
 [[spell]]
 name = "Sludge Corrosion"
+lobby = "aberration"
 tier = 4
 cost = 1
 on_discard = "cast_twice"
@@ -2311,6 +2321,7 @@ effect = { target = "chosen", buff = [4, 0] }
 
 [[spell]]
 name = "Brood of Nozdormu"
+lobby = "dragon"
 tier = 5
 cost = 2
 effect = { start_of_combat = "double_leftmost_attack" }
@@ -2350,6 +2361,7 @@ effect = { discover = "battlecry" }
 
 [[spell]]
 name = "Corrupted Cupcakes"
+lobby = "demon"
 tier = 5
 cost = 4
 effect = { target = "chosen", tribe = "demon", consume = "random", count = 3 }
@@ -2426,6 +2438,7 @@ effect = { menagerie_tableware = [3, 3] }
 
 [[spell]]
 name = "Friendly Bounty"
+lobby = "pirate"
 tier = 3
 cost = 2
 bounty = true
@@ -2433,6 +2446,7 @@ effect = { friendly_bounty = true }
 
 [[spell]]
 name = "Healthy Bounty"
+lobby = "pirate"
 tier = 3
 cost = 2
 bounty = true
@@ -2440,6 +2454,7 @@ effect = { target = "random_board", count = 4, buff = [0, 4] }
 
 [[spell]]
 name = "Hostile Bounty"
+lobby = "pirate"
 tier = 3
 cost = 2
 bounty = true
@@ -2447,6 +2462,7 @@ effect = { target = "random_board", count = 4, buff = [4, 0] }
 
 [[spell]]
 name = "Selfish Bounty"
+lobby = "pirate"
 tier = 3
 cost = 2
 bounty = true
@@ -2454,6 +2470,7 @@ effect = { buff_leftmost = [6, 6] }
 
 [[spell]]
 name = "Wealthy Bounty"
+lobby = "pirate"
 tier = 3
 cost = 2
 bounty = true
@@ -2461,6 +2478,7 @@ effect = { gold = 2 }
 
 [[spell]]
 name = "Wave of Gold"
+lobby = "pirate"
 tier = 5
 cost = 2
 effect = { target = "board", buff = [3, 2], golden_extra = true }
@@ -2479,12 +2497,14 @@ effect = { lockbox = 5 }
 
 [[spell]]
 name = "Easterly Winds"
+lobby = "elemental"
 tier = 4
 cost = 1
 effect = { refresh_buff = [9, 9] }
 
 [[spell]]
 name = "Temperature Shift"
+lobby = "elemental"
 tier = 4
 cost = 4
 effect = { get_pair = ["Fire Baller", "Snow Baller"] }
@@ -2507,12 +2527,14 @@ effect = { target = "chosen", buff = [4, 4], per_played_this_turn = [2, 2], trib
 
 [[spell]]
 name = "Tomb Turning"
+lobby = "undead"
 tier = 4
 cost = 2
 effect = { tomb_turning = true }
 
 [[spell]]
 name = "Butchering"
+lobby = "undead"
 tier = 5
 cost = 3
 effect = { target = "chosen", butchering = 8 }
@@ -2521,18 +2543,21 @@ effect = { target = "chosen", butchering = 8 }
 
 [[spell]]
 name = "Blood Gem Barrage"
+lobby = "quilboar"
 tier = 4
 cost = 1
 effect = { barrage = [2, 2] }
 
 [[spell]]
 name = "Gem Confiscation"
+lobby = "quilboar"
 tier = 4
 cost = 1
 effect = { target = "chosen", confiscate = 3 }
 
 [[spell]]
 name = "Fandral's Fortune"
+lobby = "quilboar"
 tier = 6
 cost = 3
 effect = { discover = "choose_one_minion" }
@@ -2541,6 +2566,7 @@ effect = { discover = "choose_one_minion" }
 
 [[spell]]
 name = "Corrupted Coin"
+lobby = "aberration"
 tier = 5
 cost = 2
 on_discard = "max_gold_2"
@@ -2548,6 +2574,7 @@ effect = { gold = 2 }
 
 [[spell]]
 name = "Energizing Chamber"
+lobby = "aberration"
 tier = 5
 cost = 1
 on_discard = "cast_twice"

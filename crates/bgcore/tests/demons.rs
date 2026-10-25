@@ -23,8 +23,12 @@ fn fighter(db: &CardDb, attack: i32) -> Minion {
     w
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Murloc, Tribe::Demon, Tribe::Elemental]))
 }
 
 fn turn_of(g: &mut Game, p: usize) {

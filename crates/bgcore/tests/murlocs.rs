@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use bgcore::fight::{Watch, fight_with, fight_with_hands};
-use bgcore::{Action, CardDb, Counters, Data, Game, Keywords, Minion, Opponent, Rng};
+use bgcore::{Tribe, Action, CardDb, Counters, Data, Game, Keywords, Minion, Opponent, Rng};
 
 fn db() -> CardDb {
     Data::bundled().cards
@@ -493,8 +493,12 @@ fn primalfin_lookout_discovers_a_murloc_cloning_conch_gives_two() {
 
 // ---- The shop harness ----
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon]))
 }
 
 fn opponent(g: &Game, p: usize) -> usize {

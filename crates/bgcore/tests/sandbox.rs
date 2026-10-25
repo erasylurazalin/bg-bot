@@ -1,24 +1,29 @@
-//! The sandbox game: one player, a rigged Tavern, free Refreshes and the
+//! The sandbox game: one player, a fixed lobby, free Refreshes and the
 //! mirror fight, plus the recording of its boards.
 
 use std::sync::Arc;
 
 use bgcore::bots::random_action;
 use bgcore::record::{self, GameRecord, TurnRecord};
-use bgcore::{Action, Data, Game, Rng, Tribe};
+use bgcore::{Action, Data, Game, Rng, Tribe, Tribes};
 
 fn data() -> Arc<Data> {
     Arc::new(Data::bundled())
 }
 
-fn sandbox(seed: u64, tribe: Tribe, free: u8) -> Game {
-    Game::new_sandbox(data(), seed, Some(tribe), free)
+fn sandbox(seed: u64, lobby: Tribes, free: u8) -> Game {
+    Game::new_sandbox(data(), seed, Some(lobby), free)
+}
+
+fn one(tribe: Tribe) -> Tribes {
+    Tribes::of(tribe)
 }
 
 #[test]
-fn rigged_tavern_shows_only_the_tribe_and_neutrals() {
+fn a_one_tribe_lobby_shows_only_the_tribe_and_neutrals() {
     for tribe in Tribe::ALL {
-        let mut g = sandbox(7, tribe, 3);
+        let lobby = one(tribe);
+        let mut g = sandbox(7, lobby, 3);
         let (mut tribal, mut neutral) = (0, 0);
         let mut rolls = 0;
         let mut rng = Rng::new(3);
@@ -39,7 +44,7 @@ fn rigged_tavern_shows_only_the_tribe_and_neutrals() {
                     continue;
                 }
                 assert!(
-                    c.tribes.is_neutral() || c.tribes.has(tribe),
+                    c.lobby_ok(lobby),
                     "{tribe:?} Tavern showed {}",
                     c.name
                 );
@@ -56,30 +61,43 @@ fn rigged_tavern_shows_only_the_tribe_and_neutrals() {
 }
 
 #[test]
-fn normal_games_are_not_rigged() {
-    let mut g = Game::new(data(), 5);
-    assert!(g.sandbox.is_none());
-    assert!(g.players.iter().all(|p| p.rig.is_none()));
-    let mut seen = [false; 5];
-    let mut rng = Rng::new(1);
-    for _ in 0..300 {
-        if g.over {
-            break;
+fn normal_games_roll_a_five_tribe_lobby() {
+    let data = data();
+    let mut seen = [false; Tribe::EVERY.len()];
+    for seed in 0..30u64 {
+        let mut g = Game::new(data.clone(), seed);
+        assert!(g.sandbox.is_none());
+        assert_eq!(g.lobby.len(), 5, "seed {seed}: {:?}", g.lobby);
+        for t in Tribe::EVERY {
+            seen[t as usize] |= g.lobby.has(t);
         }
-        let a = random_action(&g, &mut rng);
-        g.step(a).unwrap();
-        for m in g.players.iter().flat_map(|p| &p.shop) {
-            for (i, t) in Tribe::ALL.iter().enumerate() {
-                seen[i] |= g.data.cards.get(m.card).tribes.has(*t);
+        let mut rng = Rng::new(1);
+        let mut rolls = 0;
+        while !g.over && rolls < 60 {
+            let a = random_action(&g, &mut rng);
+            g.step(a).unwrap();
+            for m in g.players.iter().flat_map(|p| &p.shop) {
+                assert!(
+                    g.data.cards.get(m.card).lobby_ok(g.lobby),
+                    "seed {seed}: {} is outside the lobby",
+                    g.data.cards.get(m.card).name
+                );
+            }
+            if g.is_legal(Action::Roll) {
+                g.step(Action::Roll).unwrap();
+                rolls += 1;
             }
         }
     }
-    assert!(seen.iter().all(|&s| s), "a normal Tavern should show every tribe: {seen:?}");
+    assert!(
+        seen.iter().all(|&s| s),
+        "30 seeds should roll every tribe into some lobby: {seen:?}"
+    );
 }
 
 #[test]
 fn three_free_refreshes_then_paid() {
-    let mut g = sandbox(11, Tribe::Beast, 3);
+    let mut g = sandbox(11, one(Tribe::Beast), 3);
     assert_eq!(g.players[0].gold, 3);
     for left in [2, 1, 0] {
         g.step(Action::Roll).unwrap();
@@ -93,7 +111,7 @@ fn three_free_refreshes_then_paid() {
     assert_eq!(g.turn, 2);
     assert_eq!(g.players[0].free_rolls, 3);
     // and the flag sets the number
-    let g0 = sandbox(11, Tribe::Beast, 0);
+    let g0 = sandbox(11, one(Tribe::Beast), 0);
     assert_eq!(g0.players[0].free_rolls, 0);
 }
 
@@ -107,7 +125,7 @@ fn put(g: &mut Game, names: &[&str]) {
 
 #[test]
 fn mirror_fight_applies_lobster_count_and_spell_bonus() {
-    let mut g = sandbox(21, Tribe::Beast, 3);
+    let mut g = sandbox(21, one(Tribe::Beast), 3);
     put(&mut g, &["Tasty Lobster", "Blue Whelp"]);
     let lobster_before = g.players[0].improve[0];
     let spell_before = g.players[0].spell_bonus;
@@ -123,7 +141,7 @@ fn mirror_fight_applies_lobster_count_and_spell_bonus() {
 
 #[test]
 fn mirror_fight_never_changes_health() {
-    let mut g = sandbox(33, Tribe::Dragon, 3);
+    let mut g = sandbox(33, one(Tribe::Dragon), 3);
     for _ in 0..12 {
         // a weak board that can lose to its own mirror
         put(&mut g, &["Glim Guardian", "Blue Whelp"]);
@@ -135,7 +153,7 @@ fn mirror_fight_never_changes_health() {
 
 #[test]
 fn shop_damage_ends_the_game() {
-    let mut g = sandbox(41, Tribe::Demon, 3);
+    let mut g = sandbox(41, one(Tribe::Demon), 3);
     put(&mut g, &["Wrath Weaver"]);
     g.players[0].health = 1;
     let w = g.data.cards.make(g.data.cards.by_name("Wrath Weaver").unwrap(), false);
@@ -145,10 +163,9 @@ fn shop_damage_ends_the_game() {
     assert!(g.over, "the hero should be knocked out by the Wrath Weaver damage");
 }
 
-fn record_of(g: &Game, turns: &[TurnRecord]) -> GameRecord {
-    let tribe = g.sandbox.as_ref().unwrap().tribe;
+fn record_of(turns: &[TurnRecord]) -> GameRecord {
     GameRecord {
-        tribe: tribe.map(|t| format!("{t:?}")),
+        tribe: None,
         label: "test".into(),
         seed: 99,
         free_rolls: 3,
@@ -159,11 +176,11 @@ fn record_of(g: &Game, turns: &[TurnRecord]) -> GameRecord {
 
 #[test]
 fn a_recorded_game_round_trips_through_the_loader() {
-    // Random play in a Mech sandbox for many turns, so boards carry
+    // Random play in a Mech lobby for many turns, so boards carry
     // Magnetizations, improvements, golden minions and hands.
     let mut tried_attached = false;
     for seed in 0..12u64 {
-        let mut g = sandbox(seed, Tribe::Mech, 3);
+        let mut g = sandbox(seed, one(Tribe::Mech), 3);
         let mut rng = Rng::new(seed + 100);
         let mut turns: Vec<TurnRecord> = Vec::new();
         let mut steps = 0;
@@ -179,7 +196,7 @@ fn a_recorded_game_round_trips_through_the_loader() {
         }
         assert!(turns.len() >= 5, "seed {seed}: only {} turns recorded", turns.len());
         tried_attached |= turns.iter().flat_map(|t| &t.board).any(|m| m.magnetizations > 0);
-        let rec = record_of(&g, &turns);
+        let rec = record_of(&turns);
         let text = record::to_toml(&g.data.cards, &rec).unwrap();
         let back = record::load_str(&g.data.cards, &text).unwrap();
         assert_eq!(back, rec, "seed {seed} did not round trip:\n{text}");
@@ -197,7 +214,7 @@ fn the_loader_rejects_garbage() {
     assert!(record::load_str(&db, bad).unwrap_err().contains("Nope"));
 }
 
-/// The cards a rigged player is now being offered by a Discover.
+/// The cards the player is now being offered by a Discover.
 fn offered(g: &Game) -> Vec<bgcore::CardId> {
     g.players[0].discover.iter().copied().collect()
 }
@@ -208,39 +225,39 @@ fn give_card(g: &mut Game, name: &str, golden: bool) {
     g.players[0].hand.push(m);
 }
 
-fn assert_rigged(g: &Game, tribe: Tribe, what: &str) {
+fn assert_in_lobby(g: &Game, lobby: Tribes, what: &str) {
     let o = offered(g);
     assert_eq!(o.len(), 3, "{what}: {o:?}");
     for id in o {
         let c = g.data.cards.get(id);
-        assert!(c.tribes.is_neutral() || c.tribes.has(tribe), "{what} offered {}", c.name);
+        assert!(c.lobby_ok(lobby), "{what} offered {}", c.name);
     }
 }
 
 #[test]
-fn triple_reward_discover_is_rigged() {
+fn triple_reward_discover_stays_in_the_lobby() {
     for seed in 0..30 {
-        let mut g = sandbox(seed, Tribe::Beast, 3);
+        let mut g = sandbox(seed, one(Tribe::Beast), 3);
         g.players[0].tier = 5;
         give_card(&mut g, "Wolf Pup", true);
         g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
         // the reward is a spell in hand now: casting it opens the Discover
         g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
-        assert_rigged(&g, Tribe::Beast, "triple reward");
+        assert_in_lobby(&g, one(Tribe::Beast), "triple reward");
         g.check_invariants().unwrap();
     }
 }
 
 #[test]
-fn generic_discover_is_rigged() {
+fn generic_discover_stays_in_the_lobby() {
     // Hired Headhunter: "Discover a Battlecry minion", an any-minion draw
     for tribe in [Tribe::Beast, Tribe::Mech, Tribe::Demon] {
         for seed in 0..30 {
-            let mut g = sandbox(seed, tribe, 3);
+            let mut g = sandbox(seed, one(tribe), 3);
             g.players[0].tier = 6;
             give_card(&mut g, "Hired Headhunter", false);
             g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
-            assert_rigged(&g, tribe, "Hired Headhunter");
+            assert_in_lobby(&g, one(tribe), "Hired Headhunter");
             g.check_invariants().unwrap();
         }
     }
@@ -248,9 +265,11 @@ fn generic_discover_is_rigged() {
 
 #[test]
 fn named_tribe_discover_keeps_its_tribe() {
-    // Primalfin Lookout in a Beast game still discovers Murlocs
+    // Primalfin Lookout in a lobby that also has Murlocs still discovers
+    // Murlocs, not just any lobby card.
+    let lobby = lobby(&[Tribe::Beast, Tribe::Murloc, Tribe::Mech, Tribe::Dragon, Tribe::Demon]);
     for seed in 0..30 {
-        let mut g = sandbox(seed, Tribe::Beast, 3);
+        let mut g = sandbox(seed, lobby, 3);
         g.players[0].tier = 6;
         for n in ["Bubble Gunner", "Primalfin Lookout"] {
             give_card(&mut g, n, false);
@@ -266,46 +285,49 @@ fn named_tribe_discover_keeps_its_tribe() {
     }
 }
 
+fn lobby(ts: &[Tribe]) -> Tribes {
+    ts.iter().copied().fold(Tribes::NONE, |m, t| m.with(t))
+}
+
 #[test]
-fn rig_reaches_random_draws_and_the_fight() {
-    let g = sandbox(1, Tribe::Beast, 3);
+fn the_lobby_reaches_random_draws_and_the_fight() {
+    let g = sandbox(1, one(Tribe::Beast), 3);
     let db = &g.data.cards;
-    assert_eq!(g.players[0].counters(db).rig, Some(Tribe::Beast));
+    assert_eq!(g.players[0].counters(db, g.lobby).lobby, g.lobby);
     let mut rng = Rng::new(9);
     for _ in 0..500 {
-        let c = db.get(db.random_deathrattle_minion(6, Some(Tribe::Beast), &mut rng).unwrap());
-        assert!(c.deathrattle.is_some() && (c.tribes.is_neutral() || c.tribes.has(Tribe::Beast)));
-        let c = db.get(db.random_tier_minion(3, Some(Tribe::Beast), &mut rng).unwrap());
-        assert!(c.tier == 3 && (c.tribes.is_neutral() || c.tribes.has(Tribe::Beast)));
+        let c = db.get(db.random_deathrattle_minion(6, g.lobby, &mut rng).unwrap());
+        assert!(c.deathrattle.is_some() && c.lobby_ok(g.lobby));
+        let c = db.get(db.random_tier_minion(3, g.lobby, &mut rng).unwrap());
+        assert!(c.tier == 3 && c.lobby_ok(g.lobby));
     }
-    // no rig: any tribe shows up
+    // no lobby filter (Tribes::ALL): any tribe shows up
     let seen: std::collections::HashSet<_> =
-        (0..500).map(|_| db.random_tier_minion(3, None, &mut rng).unwrap()).collect();
+        (0..500).map(|_| db.random_tier_minion(3, Tribes::ALL, &mut rng).unwrap()).collect();
     assert!(seen.iter().any(|&c| db.get(c).tribes.has(Tribe::Murloc)));
     // the mirror fight with a Ghastcoiler runs and keeps the pool whole
-    let mut g = sandbox(2, Tribe::Beast, 3);
+    let mut g = sandbox(2, one(Tribe::Beast), 3);
     put(&mut g, &["Ghastcoiler", "Tasty Lobster"]);
     g.step(Action::EndTurn).unwrap();
     g.check_invariants().unwrap();
 }
 
 #[test]
-fn rig_still_draws_at_every_tier() {
-    let g = sandbox(1, Tribe::Beast, 3);
+fn a_one_tribe_lobby_draws_at_every_tier() {
+    let g = sandbox(1, one(Tribe::Beast), 3);
     let db = &g.data.cards;
     let mut rng = Rng::new(4);
-    // every tier has a rig-legal card; an empty filter falls back to all cards
+    // every tier has a Beast or neutral minion, so every draw finds one
     for tier in 1..=6 {
-        assert!(db.random_tier_minion(tier, Some(Tribe::Beast), &mut rng).is_some());
+        assert!(db.random_tier_minion(tier, g.lobby, &mut rng).is_some());
     }
 }
 
 #[test]
-fn an_unrigged_sandbox_uses_the_full_pool() {
+fn a_rolled_sandbox_lobby_keeps_its_tribes() {
     let mut g = Game::new_sandbox(data(), 3, None, 0);
-    assert!(g.players[0].rig.is_none() && g.sandbox.as_ref().unwrap().tribe.is_none());
+    assert_eq!(g.lobby.len(), 5);
     assert_eq!(g.players[0].free_rolls, 0);
-    let mut seen = [false; 5];
     let mut rolls = 0;
     while !g.over && rolls < 300 {
         if g.is_legal(Action::Level) {
@@ -318,16 +340,18 @@ fn an_unrigged_sandbox_uses_the_full_pool() {
             g.step(Action::EndTurn).unwrap();
         }
         for m in &g.players[0].shop {
-            for (i, t) in Tribe::ALL.iter().enumerate() {
-                seen[i] |= g.data.cards.get(m.card).tribes.has(*t);
-            }
+            assert!(
+                g.data.cards.get(m.card).lobby_ok(g.lobby),
+                "{} is outside the lobby",
+                g.data.cards.get(m.card).name
+            );
         }
     }
-    assert!(seen.iter().all(|&s| s), "a full pool shows every tribe: {seen:?}");
-    // a Discover offers other tribes too
+    // a Discover offers other lobby tribes too, in a lobby with several
+    let lobby = lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon]);
     let mut other = false;
     for seed in 0..30 {
-        let mut g = Game::new_sandbox(data(), seed, None, 0);
+        let mut g = Game::new_sandbox(data(), seed, Some(lobby), 0);
         g.players[0].tier = 6;
         give_card(&mut g, "Hired Headhunter", false);
         g.step(Action::Play { hand: 0, pos: 0 }).unwrap();

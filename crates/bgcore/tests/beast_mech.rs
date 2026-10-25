@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use bgcore::fight::{Watch, fight_watched, fight_with};
-use bgcore::{Action, CardDb, Counters, Data, Game, Keywords, Minion, Rng};
+use bgcore::{Tribe, Action, CardDb, Counters, Data, Game, Keywords, Minion, Rng};
 
 fn db() -> CardDb {
     Data::bundled().cards
@@ -290,8 +290,12 @@ fn golden_spark_snapper_satellites_start_at_4_6_and_grow_by_4_6() {
     g.check_invariants().unwrap();
 }
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Murloc, Tribe::Pirate, Tribe::Undead]))
 }
 
 fn turn_of(g: &mut Game, p: usize) {

@@ -8,8 +8,12 @@ use bgcore::game::{PendingTarget, TargetKind, TavernBuff};
 use bgcore::obs::*;
 use bgcore::{Action, Data, Game, Minion, N_ACTIONS, Opponent, PLAYERS, Rng, Tribe};
 
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
+
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon]))
 }
 
 fn turn_of(g: &mut Game, p: usize) {
@@ -369,8 +373,10 @@ fn curve_bots_finish_many_games_against_each_other() {
 fn curve_bots_play_every_card() {
     let data = Arc::new(Data::bundled());
     let names: Vec<String> = data.cards.cards.iter().map(|c| c.name.clone()).collect();
+    // every tribe: the point is that the curve bots can be handed every card
+    let lobby = Tribe::EVERY.into_iter().fold(bgcore::Tribes::NONE, |m, t| m.with(t));
     for (k, name) in names.iter().enumerate() {
-        let mut g = Game::new(data.clone(), 5000 + k as u64);
+        let mut g = Game::new_with_lobby(data.clone(), 5000 + k as u64, lobby);
         // two bots get the card at the start (when pool copies allow), golden for one
         for p in [0usize, 1] {
             if g.give(p, name).is_some() && p == 1 {

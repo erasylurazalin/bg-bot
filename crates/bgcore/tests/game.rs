@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
 use bgcore::bots::random_action;
-use bgcore::{Action, Data, Game, Keywords, Minion, N_ACTIONS, Opponent, Rng};
+use bgcore::{Tribe, Action, Data, Game, Keywords, Minion, N_ACTIONS, Opponent, Rng};
+
+fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
+    ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
+}
 
 fn game(seed: u64) -> Game {
-    Game::new(Arc::new(Data::bundled()), seed)
+    Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon]))
 }
 
 /// Let the other players toggle freeze until it's `p`'s action.
@@ -242,7 +246,7 @@ fn beetle_bonus_from_forest_rover_and_ravaging_scorpid() {
         db,
         &[vermin],
         &[enemy],
-        [g.players[0].counters(&g.data.cards), Default::default()],
+        [g.players[0].counters(&g.data.cards, g.lobby), Default::default()],
         500,
         &mut Rng::new(1),
         &mut (),

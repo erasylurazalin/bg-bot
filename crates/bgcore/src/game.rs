@@ -338,9 +338,6 @@ pub struct Player {
     pub opponent: Option<Opponent>,
     pub last_opponent: Option<Opponent>,
     pub seen: [Seen; PLAYERS],
-    /// Sandbox only: every Tavern roll shows just this tribe and neutral
-    /// minions. None in a normal game.
-    pub rig: Option<Tribe>,
 }
 
 impl Player {
@@ -416,7 +413,6 @@ impl Player {
             opponent: None,
             last_opponent: None,
             seen: Default::default(),
-            rig: None,
         }
     }
 
@@ -642,7 +638,7 @@ impl Player {
         (da, dh)
     }
 
-    pub fn counters(&self, cards: &CardDb) -> Counters {
+    pub fn counters(&self, cards: &CardDb, lobby: Tribes) -> Counters {
         let (spell_attack, spell_health) = self.total_spell_bonus(cards);
         Counters {
             health: Some(self.health),
@@ -665,7 +661,7 @@ impl Player {
             gem_health: self.gem_health,
             deity: self.deity,
             spells_cast: self.spells_cast,
-            rig: self.rig,
+            lobby,
         }
     }
 }
@@ -685,6 +681,9 @@ pub struct IllegalAction;
 pub struct Game {
     pub data: Arc<Data>,
     pub rng: Rng,
+    /// The five tribes of this game's lobby (DESIGN.md "The lobby's
+    /// tribes"): the pool and every draw are filtered to them.
+    pub lobby: Tribes,
     pub turn: u32,
     pub players: [Player; PLAYERS],
     /// Copies left of each pool card, indexed by card `pool_slot`.
@@ -704,9 +703,6 @@ pub struct Game {
 /// Settings and results of a sandbox game (see `Game::new_sandbox`).
 #[derive(Clone, Debug)]
 pub struct Sandbox {
-    /// The tribe the Tavern and every minion draw are rigged to, None for
-    /// the normal full pool.
-    pub tribe: Option<Tribe>,
     /// Free Refreshes the player has at the start of every turn.
     pub free_rolls: u8,
     /// The latest mirror fight, for whoever records the game.
@@ -733,6 +729,7 @@ pub struct SandboxFight {
 /// Draw one card from the pool, weighted by copies left, among cards of
 /// tier `lo..=hi` that satisfy `pred` and aren't in `exclude`. When the shared
 /// Volumizer slot is drawn, picks a random Volumizer color not in `exclude`.
+#[allow(clippy::too_many_arguments)]
 fn draw_filtered(
     pool: &mut [u8],
     cards: &CardDb,
@@ -740,6 +737,7 @@ fn draw_filtered(
     lo: u8,
     hi: u8,
     exclude: &[CardId],
+    lobby: Tribes,
     pred: impl Fn(&Card) -> bool,
 ) -> Option<CardId> {
     // A card with no copies left (or one that is not a pool slot, which never
@@ -753,7 +751,7 @@ fn draw_filtered(
             return false;
         }
         let card = &cards.cards[c];
-        if card.pool_slot as usize != c || !pred(card) {
+        if card.pool_slot as usize != c || !card.lobby_ok(lobby) || !pred(card) {
             return false;
         }
         if card.is_volumizer {
@@ -799,38 +797,10 @@ fn draw_filtered(
     unreachable!()
 }
 
-/// Whether a Tavern roll may show this card: always in a normal game, only
-/// the rigged tribe and neutral minions in a sandbox.
-fn rigged_ok(rig: Option<Tribe>, c: &Card) -> bool {
-    c.rig_ok(rig)
-}
-
-/// `draw_filtered` for an "any minion" draw: with a sandbox rig it only
-/// offers rig-legal cards, and when none is left it draws unfiltered.
-#[allow(clippy::too_many_arguments)]
-fn draw_rigged(
-    pool: &mut [u8],
-    cards: &CardDb,
-    rng: &mut Rng,
-    lo: u8,
-    hi: u8,
-    exclude: &[CardId],
-    rig: Option<Tribe>,
-    pred: impl Fn(&Card) -> bool,
-) -> Option<CardId> {
-    if rig.is_some()
-        && let Some(c) = draw_filtered(pool, cards, rng, lo, hi, exclude, |c| pred(c) && c.rig_ok(rig))
-    {
-        return Some(c);
-    }
-    draw_filtered(pool, cards, rng, lo, hi, exclude, pred)
-}
-
 /// Draw one Golden minion from the pool: a card of tier `lo..=hi` (with a
 /// type when `typed`), weighted by copies left, taking the three copies a
 /// Golden minion stands for (fewer when the pool has fewer; cards with all
-/// three left are preferred). With a sandbox `rig` the rigged tribe and
-/// neutral cards come first. Returns the card and how many copies it took.
+/// three left are preferred). The lobby filters it.
 fn draw_golden(
     pool: &mut [u8],
     cards: &CardDb,
@@ -838,41 +808,39 @@ fn draw_golden(
     lo: u8,
     hi: u8,
     typed: bool,
-    rig: Option<Tribe>,
+    lobby: Tribes,
 ) -> Option<(CardId, u8)> {
     for min in [3u8, 1] {
-        for rigged in [rig.is_some(), false] {
-            let ok = |c: usize| {
-                let card = &cards.cards[c];
-                pool[c] >= min
-                    && card.pool_slot as usize == c
-                    && lo <= card.tier
-                    && card.tier <= hi
-                    && (!typed || !card.tribes.is_neutral())
-                    && (!rigged || card.rig_ok(rig))
-            };
-            let total: u32 = (0..cards.pool_cards).filter(|&c| ok(c)).map(|c| pool[c] as u32).sum();
-            if total == 0 {
+        let ok = |c: usize| {
+            let card = &cards.cards[c];
+            pool[c] >= min
+                && card.pool_slot as usize == c
+                && lo <= card.tier
+                && card.tier <= hi
+                && (!typed || !card.tribes.is_neutral())
+                && card.lobby_ok(lobby)
+        };
+        let total: u32 = (0..cards.pool_cards).filter(|&c| ok(c)).map(|c| pool[c] as u32).sum();
+        if total == 0 {
+            continue;
+        }
+        let mut r = rng.below(total);
+        for c in 0..cards.pool_cards {
+            if !ok(c) {
                 continue;
             }
-            let mut r = rng.below(total);
-            for c in 0..cards.pool_cards {
-                if !ok(c) {
-                    continue;
-                }
-                let n = pool[c] as u32;
-                if r < n {
-                    let take = pool[c].min(3);
-                    pool[c] -= take;
-                    let id = if cards.cards[c].is_volumizer {
-                        cards.volumizers[rng.below(cards.volumizers.len() as u32) as usize]
-                    } else {
-                        c as CardId
-                    };
-                    return Some((id, take));
-                }
-                r -= n;
+            let n = pool[c] as u32;
+            if r < n {
+                let take = pool[c].min(3);
+                pool[c] -= take;
+                let id = if cards.cards[c].is_volumizer {
+                    cards.volumizers[rng.below(cards.volumizers.len() as u32) as usize]
+                } else {
+                    c as CardId
+                };
+                return Some((id, take));
             }
+            r -= n;
         }
     }
     None
@@ -910,37 +878,45 @@ type TriplePlan = (CardId, usize, Option<(CardId, usize)>);
 
 impl Game {
     pub fn new(data: Arc<Data>, seed: u64) -> Game {
-        let mut g = Game::unstarted(data, seed);
+        let mut g = Game::unstarted(data, seed, None);
+        g.start_turn();
+        g
+    }
+
+    /// A normal game with a fixed lobby: for tests and the sandbox, which
+    /// need known tribes. Games that roll one pick exactly 5 of the 10
+    /// (DESIGN.md); a test may pass more to set up its cards.
+    pub fn new_with_lobby(data: Arc<Data>, seed: u64, lobby: Tribes) -> Game {
+        let mut g = Game::unstarted(data, seed, Some(lobby));
         g.start_turn();
         g
     }
 
     /// A one-player practice game for the sandbox: only player 0 plays, no
-    /// pairing and no opponents. With a `tribe`, every Tavern roll and
-    /// every "any minion" draw shows only minions of it and neutral ones
-    /// (None keeps the normal full pool). The player gets `free_rolls` free Refreshes
-    /// each turn, and each turn ends with a fight against a copy of the
-    /// player's own board that never damages the hero. Shop-phase damage
-    /// still counts and ends the game at 0 Health. Normal games never set
-    /// any of this.
-    pub fn new_sandbox(data: Arc<Data>, seed: u64, tribe: Option<Tribe>, free_rolls: u8) -> Game {
-        let mut g = Game::unstarted(data, seed);
+    /// pairing and no opponents. With a `lobby`, the game's tribes are fixed
+    /// to it (the sandbox's --tribe); None rolls the normal 5. The player
+    /// gets `free_rolls` free Refreshes each turn, and each turn ends with a
+    /// fight against a copy of the player's own board that never damages the
+    /// hero. Shop-phase damage still counts and ends the game at 0 Health.
+    /// Normal games never set any of this.
+    pub fn new_sandbox(data: Arc<Data>, seed: u64, lobby: Option<Tribes>, free_rolls: u8) -> Game {
+        let mut g = Game::unstarted(data, seed, lobby);
         for p in 1..PLAYERS {
             g.players[p].alive = false;
             g.players[p].placement = p as u8 + 1;
         }
-        g.players[0].rig = tribe;
-        g.sandbox = Some(Sandbox { tribe, free_rolls, last_fight: None });
+        g.sandbox = Some(Sandbox { free_rolls, last_fight: None });
         g.start_turn();
         g
     }
 
-    fn unstarted(data: Arc<Data>, seed: u64) -> Game {
-        const ABERRATIONS_IN_LOBBY: bool = true;
+    fn unstarted(data: Arc<Data>, seed: u64, fixed: Option<Tribes>) -> Game {
+        let mut rng = Rng::new(seed);
+        let lobby = fixed.unwrap_or_else(|| Tribes::random_lobby(5, &mut rng));
         let pool = (0..data.cards.pool_cards)
             .map(|c| {
                 let card = &data.cards.cards[c];
-                if card.pool_slot as usize == c {
+                if card.pool_slot as usize == c && card.lobby_ok(lobby) {
                     data.rules.copies(card.tier)
                 } else {
                     0
@@ -953,8 +929,8 @@ impl Game {
             .filter(|(_, c)| c.deity.is_some())
             .map(|(id, _)| id as CardId)
             .collect();
-        let mut rng = Rng::new(seed);
-        let god = (ABERRATIONS_IN_LOBBY && !gods.is_empty())
+        // The Deity only exists in lobbies with Aberrations (DESIGN.md).
+        let god = (lobby.has(Tribe::Aberration) && !gods.is_empty())
             .then(|| gods[rng.below(gods.len() as u32) as usize]);
         if let Some(card) = god {
             for pl in &mut players {
@@ -964,6 +940,7 @@ impl Game {
         Game {
             data,
             rng,
+            lobby,
             turn: 0,
             players,
             pool,
@@ -1566,7 +1543,7 @@ impl Game {
                 pl.board.insert(to as usize, m);
             }
             Action::Roll => {
-                let Game { data, rng, players, pool, .. } = self;
+                let Game { data, rng, players, pool, lobby, .. } = self;
                 let (cards, rules) = (&data.cards, &data.rules);
                 let pl = &mut players[p];
                 let mut gold_spent = 0;
@@ -1580,7 +1557,7 @@ impl Game {
                     pl.gold -= rules.roll_cost;
                     gold_spent = rules.roll_cost;
                 }
-                Self::refresh_shop(pl, pool, cards, rules, rng, RefreshKind::Explicit);
+                Self::refresh_shop(pl, pool, cards, rules, rng, *lobby, RefreshKind::Explicit);
                 if health_paid > 0 {
                     // A Health cost is not a Demon dealing damage.
                     self.take_hero_damage(p, health_paid, None);
@@ -1611,6 +1588,7 @@ impl Game {
         cards: &CardDb,
         rules: &Rules,
         rng: &mut Rng,
+        lobby: Tribes,
         kind: RefreshKind,
     ) {
         pl.frozen = false;
@@ -1618,7 +1596,7 @@ impl Game {
             give_back(pool, cards, &m);
         }
         pl.shop_spell = None;
-        Self::fill_shop(pl, pool, cards, rules.shop_size(pl.tier), rng, kind);
+        Self::fill_shop(pl, pool, cards, rules.shop_size(pl.tier), rng, lobby, kind);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
     }
@@ -1667,12 +1645,14 @@ impl Game {
     /// Demon Fodders (they are not extra slots). A Fodder can also take the
     /// spell slot, which then has no spell this Refresh; Fodders beyond all
     /// slots are lost.
+    #[allow(clippy::too_many_arguments)]
     fn fill_shop(
         pl: &mut Player,
         pool: &mut [u8],
         cards: &CardDb,
         size: usize,
         rng: &mut Rng,
+        lobby: Tribes,
         kind: RefreshKind,
     ) {
         let fodders = match kind {
@@ -1682,9 +1662,8 @@ impl Game {
         let slots = size + 1;
         let fodders = (fodders as usize).min(slots);
         let normal = size.saturating_sub(fodders);
-        let rig = pl.rig;
         while pl.shop.len() < normal {
-            match draw_filtered(pool, cards, rng, 1, pl.tier, &[], |c| rigged_ok(rig, c)) {
+            match draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |_| true) {
                 Some(c) => {
                     let mut m = pl.make_card(cards, c, false, 1);
                     pl.apply_tavern_buffs(cards, &mut m);
@@ -1711,14 +1690,14 @@ impl Game {
         // keeps the spell it already had.
         if pl.shop.len() <= size {
             if pl.shop_spell.is_none() {
-                pl.shop_spell = cards.random_spell(pl.tier, rng);
+                pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
             }
         } else {
             pl.shop_spell = None;
         }
         // Only an explicit Refresh feeds the Fodders it just made.
         if kind == RefreshKind::Explicit {
-            Self::feed_fodders(pl, pool, cards, rng);
+            Self::feed_fodders(pl, pool, cards, rng, lobby);
         }
     }
 
@@ -1731,6 +1710,7 @@ impl Game {
         rules: &Rules,
         rng: &mut Rng,
         pool: &mut [u8],
+        lobby: Tribes,
     ) {
         pl.frozen = false;
         for m in pl.shop.drain(..) {
@@ -1739,7 +1719,7 @@ impl Game {
         pl.shop_spell = None;
         let size = rules.shop_size(pl.tier);
         for _ in 0..size {
-            match cards.random_spell(pl.tier, rng) {
+            match cards.random_spell(pl.tier, lobby, rng) {
                 Some(id) => {
                     let m = pl.make_card(cards, id, false, 0);
                     pl.shop.push(m);
@@ -1747,7 +1727,7 @@ impl Game {
                 None => break,
             }
         }
-        pl.shop_spell = cards.random_spell(pl.tier, rng);
+        pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
     }
@@ -1755,12 +1735,14 @@ impl Game {
     /// Lost Staff of Hamuul: refresh the Tavern with minions of one type,
     /// up to the player's tier. A card effect, not the player's own
     /// Refresh, so no Fodders.
+    #[allow(clippy::too_many_arguments)]
     fn refresh_with_tribe(
         pl: &mut Player,
         pool: &mut [u8],
         cards: &CardDb,
         rules: &Rules,
         rng: &mut Rng,
+        lobby: Tribes,
         tribe: Tribe,
     ) {
         pl.frozen = false;
@@ -1770,7 +1752,7 @@ impl Game {
         pl.shop_spell = None;
         let size = rules.shop_size(pl.tier);
         while pl.shop.len() < size {
-            match draw_filtered(pool, cards, rng, 1, pl.tier, &[], |c| c.tribes.has(tribe)) {
+            match draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |c| c.tribes.has(tribe)) {
                 Some(c) => {
                     let mut m = pl.make_card(cards, c, false, 1);
                     pl.apply_tavern_buffs(cards, &mut m);
@@ -1779,7 +1761,7 @@ impl Game {
                 None => break,
             }
         }
-        pl.shop_spell = cards.random_spell(pl.tier, rng);
+        pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
     }
@@ -1791,7 +1773,7 @@ impl Game {
     /// Fodder that waits because there was no Demon never feeds later, even
     /// when a Demon lands, and it is a plain 2/2 Demon until the shop is
     /// refreshed again.
-    fn feed_fodders(pl: &mut Player, pool: &mut [u8], cards: &CardDb, rng: &mut Rng) {
+    fn feed_fodders(pl: &mut Player, pool: &mut [u8], cards: &CardDb, rng: &mut Rng, lobby: Tribes) {
         let is_demon = |m: &Minion| cards.get(m.card).tribes.has(Tribe::Demon);
         if !pl.board.iter().any(is_demon) {
             return;
@@ -1814,8 +1796,7 @@ impl Game {
                 .map(|(j, _)| j)
                 .unwrap();
             buff(&mut pl.board[di], fodder.attack, fodder.health);
-            let rig = pl.rig;
-            if let Some(c) = draw_filtered(pool, cards, rng, 1, pl.tier, &[], |c| rigged_ok(rig, c)) {
+            if let Some(c) = draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |_| true) {
                 let mut m = pl.make_card(cards, c, false, 1);
                 pl.apply_tavern_buffs(cards, &mut m);
                 pl.shop.insert(i, m);
@@ -1926,14 +1907,14 @@ impl Game {
     /// real (Deathrattles, Reborn, Knight deaths, Banshee and Phantom). Returns
     /// where the `track`ed board slot ended up.
     fn destroy_in_shop(&mut self, p: usize, victims: &[usize], track: Option<usize>) -> Option<usize> {
-        let Game { data, rng, players, pool, .. } = self;
+        let Game { data, rng, players, pool, lobby, .. } = self;
         let pl = &mut players[p];
         let out = crate::fight::shop_destroy(
             &data.cards,
             &pl.board,
             victims,
             track,
-            pl.counters(&data.cards),
+            pl.counters(&data.cards, *lobby),
             rng,
         );
         // The minions that died leave the warband for good, and take their
@@ -2791,7 +2772,7 @@ impl Game {
                     .try_push((attack, health, times));
             }
             SpellEffect::RandomTierMinion(tier) => {
-                if let Some(c) = self.data.cards.random_tier_minion(tier, self.players[p].rig, &mut self.rng) {
+                if let Some(c) = self.data.cards.random_tier_minion(tier, self.lobby, &mut self.rng) {
                     self.give_generated(p, c);
                 }
             }
@@ -2839,7 +2820,7 @@ impl Game {
             SpellEffect::CloningConch => {
                 let tier = self.players[p].tier;
                 if let Some(c) =
-                    self.data.cards.random_pool_minion(Tribe::Murloc, tier, &mut self.rng)
+                    self.data.cards.random_pool_minion(Tribe::Murloc, tier, self.lobby, &mut self.rng)
                 {
                     self.give_generated(p, c);
                     self.give_generated(p, c);
@@ -2907,7 +2888,9 @@ impl Game {
                 for m in &self.players[p].board {
                     let t = cards.get(m.card).tribes;
                     for (k, tribe) in Tribe::EVERY.iter().enumerate() {
-                        if t.has(*tribe) {
+                        // only a lobby tribe can be discovered from, so only
+                        // lobby tribes count toward the most common one
+                        if self.lobby.has(*tribe) && t.has(*tribe) {
                             counts[k] += 1;
                         }
                     }
@@ -2934,8 +2917,8 @@ impl Game {
                     .try_push(DiscoverRequest::SearchMinionTier(tier));
             }
             SpellEffect::SaloonFinest => {
-                let Game { data, rng, players, pool, .. } = self;
-                Self::refresh_with_spells(&mut players[p], &data.cards, &data.rules, rng, pool);
+                let Game { data, rng, players, pool, lobby, .. } = self;
+                Self::refresh_with_spells(&mut players[p], &data.cards, &data.rules, rng, pool, *lobby);
             }
             SpellEffect::GetCard { card, count } => {
                 for _ in 0..count {
@@ -2964,7 +2947,9 @@ impl Game {
                 for m in &self.players[p].board {
                     let t = cards.get(m.card).tribes;
                     for (k, tribe) in Tribe::EVERY.iter().enumerate() {
-                        if t.has(*tribe) {
+                        // only a lobby tribe can be drawn from, so only lobby
+                        // tribes count toward the most common one
+                        if self.lobby.has(*tribe) && t.has(*tribe) {
                             counts[k] += 1;
                         }
                     }
@@ -2980,7 +2965,9 @@ impl Game {
                 }
                 let tribe = tied[self.rng.below(tied.len() as u32) as usize];
                 let tier = self.players[p].tier;
-                if let Some(c) = self.data.cards.random_pool_minion(tribe, tier, &mut self.rng) {
+                if let Some(c) =
+                    self.data.cards.random_pool_minion(tribe, tier, self.lobby, &mut self.rng)
+                {
                     self.give_generated(p, c);
                 }
             }
@@ -3024,7 +3011,7 @@ impl Game {
                 let tier = self.players[p].tier;
                 for _ in 0..count {
                     if let Some(c) =
-                        self.data.cards.random_pool_minion(tribe, tier, &mut self.rng)
+                        self.data.cards.random_pool_minion(tribe, tier, self.lobby, &mut self.rng)
                     {
                         self.give_generated(p, c);
                     }
@@ -3124,13 +3111,19 @@ impl Game {
             }
             ChooseOption::SpellTarget(st) => {
                 let runs = self.balinda_mult(p);
-                self.players[p].pending_target = Some(PendingTarget {
-                    source: None,
-                    kind: TargetKind::Spell(st),
-                    runs,
-                    tavern,
-                    gem: false,
-                });
+                // offer_target, not a raw set: the shop may have changed since
+                // the choice was offered (Saloon's Finest), and a prompt with
+                // no legal target could never be answered.
+                self.offer_target(
+                    p,
+                    PendingTarget {
+                        source: None,
+                        kind: TargetKind::Spell(st),
+                        runs,
+                        tavern,
+                        gem: false,
+                    },
+                );
             }
             ChooseOption::SpellEffect(se) => {
                 if tavern {
@@ -3244,8 +3237,10 @@ impl Game {
                 let tier = self.players[p].tier;
                 for _ in 0..count.saturating_mul(mul as u8).saturating_mul(runs) {
                     let card = match cost {
-                        Some(cost) => self.data.cards.random_spell_of_cost_up_to(cost, tier, &mut self.rng),
-                        None => self.data.cards.random_spell(tier, &mut self.rng),
+                        Some(cost) => {
+                            self.data.cards.random_spell_of_cost_up_to(cost, tier, self.lobby, &mut self.rng)
+                        }
+                        None => self.data.cards.random_spell(tier, self.lobby, &mut self.rng),
                     };
                     if let Some(card) = card {
                         self.give_generated_tracking(p, card, pos);
@@ -3256,7 +3251,7 @@ impl Game {
                 let tier = self.players[p].tier;
                 let mut cards = ArrayVec::<CardId, HAND>::new();
                 for _ in 0..count.saturating_mul(mul as u8).saturating_mul(runs) {
-                    if let Some(card) = self.data.cards.random_spell(tier, &mut self.rng) {
+                    if let Some(card) = self.data.cards.random_spell(tier, self.lobby, &mut self.rng) {
                         let _ = cards.try_push(card);
                     }
                 }
@@ -3266,7 +3261,7 @@ impl Game {
                 let tier = self.players[p].tier;
                 let mut cards = ArrayVec::<CardId, HAND>::new();
                 for _ in 0..count.saturating_mul(mul as u8).saturating_mul(runs) {
-                    if let Some(card) = self.data.cards.random_pool_minion(tribe, tier, &mut self.rng) {
+                    if let Some(card) = self.data.cards.random_pool_minion(tribe, tier, self.lobby, &mut self.rng) {
                         let _ = cards.try_push(card);
                     }
                 }
@@ -3474,7 +3469,7 @@ impl Game {
             }
             Effect::MagnetizeVolumizerAndCopy => {
                 for _ in 0..runs {
-                    if let Some(v_id) = self.data.cards.random_volumizer(&mut self.rng) {
+                    if let Some(v_id) = self.data.cards.random_volumizer(self.lobby, &mut self.rng) {
                         let v = self.players[p].make_card(&self.data.cards, v_id, false, 0);
                         self.magnetize_to(p, *pos, v, false);
                         for _ in 0..mul {
@@ -3496,7 +3491,7 @@ impl Game {
             Effect::RandomVolumizer => {
                 let total = (mul as u8).saturating_mul(runs);
                 for _ in 0..total {
-                    if let Some(v) = self.data.cards.random_volumizer(&mut self.rng) {
+                    if let Some(v) = self.data.cards.random_volumizer(self.lobby, &mut self.rng) {
                         self.give_generated_tracking(p, v, pos);
                     }
                 }
@@ -3549,7 +3544,7 @@ impl Game {
                 let tier = self.players[p].tier;
                 for _ in 0..mul * runs as i32 {
                     if let Some(c) =
-                        self.data.cards.random_pool_minion(tribe, tier, &mut self.rng)
+                        self.data.cards.random_pool_minion(tribe, tier, self.lobby, &mut self.rng)
                     {
                         self.give_generated_tracking(p, c, pos);
                     }
@@ -3558,7 +3553,7 @@ impl Game {
             Effect::GetRandomSpell { cost, count } => {
                 let total = count as i32 * mul * runs as i32;
                 for _ in 0..total {
-                    if let Some(c) = self.data.cards.random_spell_of_cost(cost, &mut self.rng) {
+                    if let Some(c) = self.data.cards.random_spell_of_cost(cost, self.lobby, &mut self.rng) {
                         self.give_generated_tracking(p, c, pos);
                     }
                 }
@@ -3608,7 +3603,7 @@ impl Game {
             }
             Effect::RandomChromadrake => {
                 for _ in 0..mul as u8 * runs {
-                    if let Some(c) = self.data.cards.random_chromadrake(&mut self.rng) {
+                    if let Some(c) = self.data.cards.random_chromadrake(self.lobby, &mut self.rng) {
                         self.give_generated_tracking(p, c, pos);
                     }
                 }
@@ -3722,9 +3717,10 @@ impl Game {
                 self.maybe_start_discover(p);
             }
             Effect::GetRandomTierMinion { tier } => {
-                let rig = self.players[p].rig;
                 for _ in 0..mul * runs as i32 {
-                    if let Some(c) = self.data.cards.random_tier_minion(tier, rig, &mut self.rng) {
+                    if let Some(c) =
+                        self.data.cards.random_tier_minion(tier, self.lobby, &mut self.rng)
+                    {
                         self.give_generated_tracking(p, c, pos);
                     }
                 }
@@ -3760,7 +3756,7 @@ impl Game {
             }
             Effect::GetRandomBounty => {
                 for _ in 0..mul as u8 * runs {
-                    if let Some(c) = self.data.cards.random_bounty(&mut self.rng) {
+                    if let Some(c) = self.data.cards.random_bounty(self.lobby, &mut self.rng) {
                         self.give_generated_tracking(p, c, pos);
                     }
                 }
@@ -3957,10 +3953,9 @@ impl Game {
             Effect::GetRandomChooseOne(n) => {
                 let total = n as i32 * mul * runs as i32;
                 let tier = self.players[p].tier;
-                let rig = self.players[p].rig;
                 for _ in 0..total {
                     if let Some(c) =
-                        self.data.cards.random_choose_one_minion(tier, rig, &mut self.rng)
+                        self.data.cards.random_choose_one_minion(tier, self.lobby, &mut self.rng)
                     {
                         self.give_generated_tracking(p, c, pos);
                     }
@@ -4033,13 +4028,14 @@ impl Game {
     /// An effect that says "Refresh" is not the player's own Refresh, so it
     /// leaves Fodders queued for upcoming Refreshes alone.
     fn refresh_with_fishbait(&mut self, p: usize, card: CardId, golden: bool) {
-        let Game { data, rng, players, pool, .. } = self;
+        let Game { data, rng, players, pool, lobby, .. } = self;
         Self::refresh_shop(
             &mut players[p],
             pool,
             &data.cards,
             &data.rules,
             rng,
+            *lobby,
             RefreshKind::Effect,
         );
         if !players[p].shop.is_empty() {
@@ -4050,7 +4046,7 @@ impl Game {
     /// The left-most Beast on the player's board attacks the Tavern minion in
     /// `slot`. It dies, or stays if the Beast can't hurt it.
     fn tavern_attack(&mut self, p: usize, slot: usize) {
-        let Game { data, rng, players, .. } = self;
+        let Game { data, rng, players, lobby, .. } = self;
         let pl = &mut players[p];
         let Some(ai) = pl.board.iter().position(|m| data.cards.get(m.card).tribes.has(Tribe::Beast))
         else {
@@ -4061,7 +4057,7 @@ impl Game {
             &pl.board,
             ai,
             pl.shop[slot],
-            pl.counters(&data.cards),
+            pl.counters(&data.cards, *lobby),
             rng,
         );
         pl.board.clear();
@@ -4324,8 +4320,7 @@ impl Game {
                             let c_id = self.players[p].shop[target].card;
                             let t = self.data.cards.get(c_id).tribes;
                             let tier = self.players[p].tier;
-                            generated =
-                                self.data.cards.random_different_minion(t, c_id, tier, &mut self.rng);
+                            generated = self.data.cards.random_different_minion(t, c_id, tier, self.lobby, &mut self.rng);
                         }
                         SpellTarget::SetStats { attack, health } => {
                             let m = &mut self.players[p].shop[target];
@@ -4360,13 +4355,14 @@ impl Game {
                         SpellTarget::RefreshWithType => {
                             let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
                             if let Some(tribe) = t.random_type(&mut self.rng) {
-                                let Game { data, rng, players, pool, .. } = self;
+                                let Game { data, rng, players, pool, lobby, .. } = self;
                                 Self::refresh_with_tribe(
                                     &mut players[p],
                                     pool,
                                     &data.cards,
                                     &data.rules,
                                     rng,
+                                    *lobby,
                                     tribe,
                                 );
                             }
@@ -4472,20 +4468,19 @@ impl Game {
     /// Return the old copies to the pool and draw the new one. The result is
     /// never golden; a golden old minion keeps its Attack and Health and
     /// returns its copies (an assumption, see DESIGN.md).
-    fn robust_evolution_draw(&mut self, p: usize, old: Minion) -> Option<CardId> {
+    fn robust_evolution_draw(&mut self, _p: usize, old: Minion) -> Option<CardId> {
         let old_tier = self.data.cards.get(old.card).tier;
         // Tier 6 and tier 7 minions stay on their tier: no minion is ever
         // evolved up to tier 7.
         let new_tier = if old_tier >= MAX_TIER { old_tier } else { old_tier + 1 };
-        let rig = self.players[p].rig;
-        let new_id = draw_rigged(
+        let new_id = draw_filtered(
             &mut self.pool,
             &self.data.cards,
             &mut self.rng,
             new_tier,
             new_tier,
             &[],
-            rig,
+            self.lobby,
             |_| true,
         )?;
         let (slot, copies, token) = {
@@ -4619,7 +4614,7 @@ impl Game {
     fn knock_out_mid_turn(&mut self, p: usize) {
         let place = self.alive() as u8;
         {
-            let Game { data, players, ghost, .. } = self;
+            let Game { data, players, ghost, lobby, .. } = self;
             let pl = &mut players[p];
             pl.alive = false;
             pl.placement = place;
@@ -4628,7 +4623,7 @@ impl Game {
                 player: p as u8,
                 board: pl.board.clone(),
                 tier: pl.tier,
-                counters: pl.counters(&data.cards),
+                counters: pl.counters(&data.cards, *lobby),
             });
             pl.opponent = None;
             pl.done = true;
@@ -4921,6 +4916,7 @@ impl Game {
                                 t,
                                 c_id,
                                 tier,
+                                self.lobby,
                                 &mut self.rng,
                             );
                         }
@@ -4973,13 +4969,14 @@ impl Game {
                         SpellTarget::RefreshWithType => {
                             let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
                             if let Some(tribe) = t.random_type(&mut self.rng) {
-                                let Game { data, rng, players, pool, .. } = self;
+                                let Game { data, rng, players, pool, lobby, .. } = self;
                                 Self::refresh_with_tribe(
                                     &mut players[p],
                                     pool,
                                     &data.cards,
                                     &data.rules,
                                     rng,
+                                    *lobby,
                                     tribe,
                                 );
                             }
@@ -5123,7 +5120,7 @@ impl Game {
             let locked = matches!(req, DiscoverRequest::SearchMinionTier(_));
             let doomed = matches!(req, DiscoverRequest::DoomedTribeMinion(_));
             let both = matches!(req, DiscoverRequest::ChooseOneMinion);
-            let Game { data, rng, players, pool, .. } = self;
+            let Game { data, rng, players, pool, lobby, .. } = self;
             let pl = &mut players[p];
             pl.discover_damage_from = damage_from;
             pl.discover_locked = locked;
@@ -5133,47 +5130,47 @@ impl Game {
                 let next = match req {
                     DiscoverRequest::MinionTier(t)
                     | DiscoverRequest::SearchMinionTier(t) => {
-                        draw_rigged(pool, &data.cards, rng, t, t, &pl.discover, pl.rig, |_| true)
+                        draw_filtered(pool, &data.cards, rng, t, t, &pl.discover, *lobby, |_| true)
                     }
                     DiscoverRequest::SpellTier(t) => {
-                        data.cards.random_tier_spell(t, &pl.discover, rng)
+                        data.cards.random_tier_spell(t, &pl.discover, *lobby, rng)
                     }
                     DiscoverRequest::SpellMaxTier(t) => {
-                        data.cards.random_spell_up_to(t, &pl.discover, rng)
+                        data.cards.random_spell_up_to(t, &pl.discover, *lobby, rng)
                     }
-                    DiscoverRequest::DeathrattleMinion(max_t) => draw_rigged(
+                    DiscoverRequest::DeathrattleMinion(max_t) => draw_filtered(
                         pool,
                         &data.cards,
                         rng,
                         1,
                         max_t,
                         &pl.discover,
-                        pl.rig,
+                        *lobby,
                         |c| c.deathrattle.is_some(),
                     ),
-                    DiscoverRequest::BattlecryMinion(max_t) => draw_rigged(
+                    DiscoverRequest::BattlecryMinion(max_t) => draw_filtered(
                         pool,
                         &data.cards,
                         rng,
                         1,
                         max_t,
                         &pl.discover,
-                        pl.rig,
+                        *lobby,
                         |c| c.battlecry.is_some(),
                     ),
-                    DiscoverRequest::ChooseOneMinion => draw_rigged(
+                    DiscoverRequest::ChooseOneMinion => draw_filtered(
                         pool,
                         &data.cards,
                         rng,
                         1,
                         pl.tier,
                         &pl.discover,
-                        pl.rig,
+                        *lobby,
                         |c| c.choose_one.is_some(),
                     ),
                     DiscoverRequest::TribeMinion(t) | DiscoverRequest::DoomedTribeMinion(t) => {
                         // a "Discover a Murloc" only offers up to the tier
-                        draw_filtered(pool, &data.cards, rng, 1, pl.tier, &pl.discover, |c| {
+                        draw_filtered(pool, &data.cards, rng, 1, pl.tier, &pl.discover, *lobby, |c| {
                             c.tribes.has(t)
                         })
                     }
@@ -5184,6 +5181,7 @@ impl Game {
                         1,
                         max_t,
                         &pl.discover,
+                        *lobby,
                         |c| c.tribes.has(Tribe::Demon),
                     ),
                 };
@@ -5266,9 +5264,9 @@ impl Game {
     }
 
     fn draw_golden_minion(&mut self, p: usize, lo: u8, hi: u8, typed: bool, no_reward: bool) -> Option<Minion> {
-        let Game { data, rng, players, pool, .. } = self;
+        let Game { data, rng, players, pool, lobby, .. } = self;
         let pl = &mut players[p];
-        let (id, copies) = draw_golden(pool, &data.cards, rng, lo, hi, typed, pl.rig)?;
+        let (id, copies) = draw_golden(pool, &data.cards, rng, lo, hi, typed, *lobby)?;
         let mut m = pl.make_card(&data.cards, id, true, copies);
         m.no_reward |= no_reward;
         Some(m)
@@ -5352,8 +5350,7 @@ impl Game {
     /// Nothing else in the lobby makes a tier 7 minion; the Pirate run's
     /// Greedy Conniver is the first card that will use this.
     pub fn give_tier7_minion(&mut self, p: usize) -> bool {
-        let rig = self.players[p].rig;
-        let Some(c) = self.data.cards.random_tier7_minion(rig, &mut self.rng) else {
+        let Some(c) = self.data.cards.random_tier7_minion(self.lobby, &mut self.rng) else {
             return false;
         };
         if self.players[p].hand.is_full() {
@@ -5565,7 +5562,7 @@ impl Game {
                         Some(EndOfTurn::ResourcefulRobot) => {
                             let n = if golden { 2 } else { 1 };
                             for _ in 0..n {
-                                if let Some(v_id) = self.data.cards.random_volumizer(&mut self.rng)
+                                if let Some(v_id) = self.data.cards.random_volumizer(self.lobby, &mut self.rng)
                                 {
                                     let v =
                                         self.players[p].make_card(&self.data.cards, v_id, false, 0);
@@ -5831,7 +5828,7 @@ impl Game {
             let size = data.rules.shop_size(pl.tier);
             // The automatic roll at the start of a turn is not a Refresh for
             // card purposes, so it leaves queued Fodders for an explicit one.
-            Self::fill_shop(pl, pool, &data.cards, size, rng, RefreshKind::TurnStart);
+            Self::fill_shop(pl, pool, &data.cards, size, rng, self.lobby, RefreshKind::TurnStart);
         }
         for p in 0..PLAYERS {
             if self.players[p].alive {
@@ -6015,7 +6012,7 @@ impl Game {
                     } else {
                         &[]
                     };
-                    (q.board.clone(), q.tier, q.counters(cards), hand)
+                    (q.board.clone(), q.tier, q.counters(cards, self.lobby), hand)
                 }
                 Some(Opponent::Ghost(_)) => {
                     let g = self.ghost.as_ref().unwrap();
@@ -6031,7 +6028,7 @@ impl Game {
                 &[]
             };
             let me = self.players[p].board.clone();
-            let my_counters = self.players[p].counters(cards);
+            let my_counters = self.players[p].counters(cards, self.lobby);
             let hands: [&[Minion]; 2] = [my_hand, their_hand];
             let out = fight_with_hands(
                 &self.data.cards,
@@ -6121,7 +6118,7 @@ impl Game {
         let hand: &[Minion] =
             if reads_board(&pl.board) || reads_hand(&pl.hand) { &pl.hand } else { &[] };
         let me = pl.board.clone();
-        let counters = pl.counters(cards);
+        let counters = pl.counters(cards, self.lobby);
         let out = fight_with_hands(
             cards,
             &me,
@@ -6163,7 +6160,7 @@ impl Game {
         dead.sort_by_key(|&p| std::cmp::Reverse(self.players[p as usize].health));
         let first_place = alive - dead.len() + 1;
         for (k, &p) in dead.iter().enumerate() {
-            let Game { data, players, pool, ghost, .. } = self;
+            let Game { data, players, pool, ghost, lobby, .. } = self;
             let pl = &mut players[p as usize];
             pl.alive = false;
             pl.placement = (first_place + k) as u8;
@@ -6173,7 +6170,7 @@ impl Game {
                     player: p,
                     board: pl.board.clone(),
                     tier: pl.tier,
-                    counters: pl.counters(&data.cards),
+                    counters: pl.counters(&data.cards, *lobby),
                 });
             }
             pl.shop_spell = None;
@@ -6284,7 +6281,9 @@ impl Game {
         }
         for c in 0..cards.pool_cards {
             let card = &cards.cards[c];
-            let want = if card.pool_slot as usize == c {
+            // A card outside the lobby holds no copies anywhere: it was never
+            // in this game's pool.
+            let want = if card.pool_slot as usize == c && card.lobby_ok(self.lobby) {
                 self.data.rules.copies(card.tier) as u32
             } else {
                 0

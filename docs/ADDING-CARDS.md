@@ -99,6 +99,7 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Give your Deity stats | `buff_deity` (+`per_spell`), `buff_self_and_deity`, `buff_deity_and_improve`, spell `buff_deity`, `on_cast_spell = { buff_self_and_deity / buff_all_and_deity }` | `Game::run_effect` / `execute_spell_effect` / `trigger_on_cast_spell`; in a fight `Side::buff_deity`, the gain leaves through `SideOutcome::deity_gain` | Joyous |
 | Linked cards | `linked_spells = 2`, `linked_minions = "aberration"` (golden links four) | `Game::give_linked`, `Minion.linked`; `Action::Play` discards the rest of the group (a golden four after two plays) | Wandering Willbreaker |
 | The god tokens | token `deity = "cthun"` / `"yshaarj"` | `Game::unstarted` picks one god per lobby onto `Player.deity`; fights: `Side::note_deity_death`, `try_awaken`, C'Thun's split, `Effect::SummonDeadAberrations` | C'Thun |
+| A neutral or spell tied to one tribe | `lobby = "<tribe>"` (the export's `lobby_subsets`) | `Card.lobby_ok` filters it into the pool and every draw; it only exists in lobbies with that tribe | Butchering |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -153,6 +154,8 @@ exactly one legal target and drops the effect when there is none.
    `bots::preferred_tribe`, sandbox `screen.rs` (`tribe_name` match, `parse_tribe`,
    `card_tribes`), Planar Telescope and Friendly Bounty counts in `game.rs`.
    grep `Tribe::ALL` and `Tribe::EVERY` to check nothing else needs it.
+   The lobby needs nothing: `Tribes::random_lobby(5, ..)` rolls 5 of `EVERY` and
+   every draw filters through `Card::lobby_ok` on its own.
 3. Tests that use an unknown tribe as the bad value: `tests/beast_mech.rs`
    (`attacker_tribe = "..."`) and `tests/core_rules.rs`
    (`a_card_needs_exactly_one_of_tribe_and_tribes`) use a tribe that does not
@@ -175,6 +178,9 @@ exactly one legal target and drops the effect when there is none.
 6. `cards.toml`: pool minions go in the `[[minion]]` section (before tokens; ids
    `0..pool_cards` are the pool). Max 256 pool minions (`MAX_POOL_CARDS`; draws store
    ids as `u8`). Dual-tribe cards of older tribes get `tribes = [..]` edited in place.
+   Check the export for pool spells and neutrals the new tribe ties
+   (`lobby_subsets` in `ref/bg-cards.json`, matched by card_id) and give them
+   `lobby = "<tribe>"`; a tribe's own spells usually have no tie.
 7. `rules.toml`: pool copies per tier are by tier (`copies_per_tier`); nothing per
    tribe. Bonus keywords list is global. No change for a new tribe.
 8. Pool slots: cards that share one pool slot set `pool_slot` in `from_toml`
@@ -184,9 +190,11 @@ exactly one legal target and drops the effect when there is none.
 9a. Quilboar run, done: Felboar is `tribes = ["demon", "quilboar"]`.
     Firescale Hoarder and Ominous Seer are also Naga in the game; irrelevant while
     Naga is out, edit them in place if Naga is ever built.
-10. Sandbox: `--tribe X` rigs the Tavern and every "any minion" draw
-    (`Card::rig_ok`); new draw helpers must take `rig` (`draw_rigged`, `pick_rigged`,
-    `draw_golden`). Update the usage string in `bgsandbox/src/main.rs`.
+10. Sandbox: `--tribe A[,B,...]` fixes the lobby the sandbox plays with; the
+    screen shows it (`Lobby:` line). New draw helpers must take the lobby mask
+    (a `Tribes`, `Tribes::ALL` draws from everything) and filter through
+    `Card::lobby_ok`; see `CardDb::random_tier_minion` for the shape. Update
+    the usage string in `bgsandbox/src/main.rs`.
 11. New `Effect` variants: add to `needs_choice` / `needs_any_minion` / `runs_in_fights`
     as fits, to the shop `Game::run_effect` (put fight-only ones in its last arm), to
     `Side::run_effect` if it runs in fights (it ends with `_ => {}`).
@@ -447,8 +455,8 @@ Triple Reward spell.
   is `0b11_1111_1111`; `MAX_TAVERN_BUFFS` is 22. The observation still has
   five tribe slots.
 - **The Deity.** One god per lobby (C'Thun or Y'Shaarj), drawn from the game's
-  RNG in `Game::unstarted` (the `ABERRATIONS_IN_LOBBY` const is the switch for
-  the five-random-tribes lobby). Every player's `Player.deity` starts 1/1;
+  RNG in `Game::unstarted`, and only when Aberration is in the lobby (see the
+  lobby section in `docs/ENGINE.md`). Every player's `Player.deity` starts 1/1;
   `Effect::BuffDeity` (with `per_spell`), `BuffSelfAndDeity` and the
   `OnCastSpell` deity parts grow it in the shop, `Side::buff_deity` in a
   fight, and a fight's gains come back through `SideOutcome::deity_gain`.

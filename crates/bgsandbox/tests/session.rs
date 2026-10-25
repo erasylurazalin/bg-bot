@@ -17,7 +17,7 @@ fn tmp(name: &str) -> PathBuf {
 
 fn session(tribe: Tribe, seed: u64, dir: &Path) -> Session {
     Session::new(Config {
-        tribe: Some(tribe),
+        lobby: Some(bgcore::Tribes::of(tribe)),
         label: Some("test".into()),
         seed,
         free_rolls: 3,
@@ -27,7 +27,7 @@ fn session(tribe: Tribe, seed: u64, dir: &Path) -> Session {
 
 fn open_session(seed: u64, label: Option<&str>, dir: &Path) -> Session {
     Session::new(Config {
-        tribe: None,
+        lobby: None,
         label: label.map(String::from),
         seed,
         free_rolls: 0,
@@ -268,7 +268,7 @@ fn the_default_game_is_unrigged_with_no_free_rolls() {
 e
 ");
     assert!(status.success(), "{out}");
-    assert!(out.contains("normal full pool"), "{out}");
+    assert!(out.contains("a rolled 5-tribe lobby"), "{out}");
     // no free Refreshes and no tribe prompt: the first Refresh costs gold
     assert!(out.contains("Free rolls 0"), "{out}");
     assert!(out.contains("Gold 2/3"), "{out}");
@@ -278,10 +278,10 @@ e
     let text = std::fs::read_to_string(dir.join("unlabeled-9.toml")).unwrap();
     assert!(text.contains("rigged = false") && !text.contains("tribe"), "{text}");
     let s = open_session(9, None, &dir);
-    assert!(s.game().players[0].rig.is_none());
+    assert_eq!(s.game().lobby.len(), 5);
     let (status, out) = run_binary(&["--tribe", "nope"], "");
     assert!(!status.success());
-    assert!(out.contains("unknown tribe"), "{out}");
+    assert!(out.contains("--tribe wants 1 to 5 distinct tribes"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
