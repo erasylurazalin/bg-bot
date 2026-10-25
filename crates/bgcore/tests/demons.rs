@@ -63,7 +63,8 @@ fn put_on_board(g: &mut Game, p: usize, name: &str) {
     let c = id(g, name);
     let slot = g.data.cards.get(c).pool_slot as usize;
     g.pool[slot] -= 1;
-    let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    let mut m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    m.uses_left = m.turn_uses(&g.data.cards);
     g.players[p].board.push(m);
 }
 
@@ -219,6 +220,25 @@ fn a_fodder_feeds_on_the_refresh_it_appears_in() {
     assert_eq!(fodder_count(&g, 0), 0);
     assert_eq!(stats(&g.players[0].board[0]), (1 + 2, 3 + 2));
     assert_eq!(g.players[0].shop.len(), 3);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_turn_start_roll_never_takes_queued_fodders() {
+    // unfrozen, so the Tavern changed and the roll counts as a Refresh for
+    // Waveling and Barrage, but Fodders still wait for an explicit one
+    let mut g = game(32);
+    g.players[0].gold = 3;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(1);
+    next_turn(&mut g);
+    assert_eq!(g.players[0].fodder_refreshes.as_slice(), &[1], "still queued");
+    assert_eq!(fodder_count(&g, 0), 0, "the roll made no Fodder");
+    act(&mut g, 0, Action::Roll);
+    assert!(g.players[0].fodder_refreshes.is_empty(), "the explicit one took it");
+    // it fed on the Refresh it appeared in
+    assert_eq!(fodder_count(&g, 0), 0);
     g.check_invariants().unwrap();
 }
 
@@ -1217,11 +1237,38 @@ fn malchezaars_uses_come_back_gold_beats_health_and_golden_doubles() {
     g.players[0].gold = 0;
     put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
     g.players[0].board[0].golden = true;
+    g.players[0].board[0].uses_left = g.players[0].board[0].turn_uses(&g.data.cards);
     assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 4);
     for _ in 0..4 {
         act(&mut g, 0, Action::Roll);
     }
     assert!(!is_legal(&mut g, 0, Action::Roll));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_malchezaar_triple_starts_with_fresh_health_refreshes() {
+    // the copy spent one of its two refreshes; the golden from the triple
+    // has its own four, and they are real uses
+    let mut g = game(36);
+    g.players[0].health = 30;
+    put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
+    g.players[0].gold = 0;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 1);
+    set_shop(&mut g, 0, &["Malchezaar, Prince of Dance", "Malchezaar, Prince of Dance"]);
+    g.players[0].gold = 20;
+    act(&mut g, 0, Action::Buy(0));
+    act(&mut g, 0, Action::Buy(0)); // the second one triples
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    act(&mut g, 0, Action::Play { hand: gold as u8, pos: 0 });
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 4,
+        "the golden starts fresh, the copies' spent use does not count");
+    let health = g.players[0].health;
+    g.players[0].gold = 0;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].health, health - 1, "one of the golden's own uses");
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 3);
     g.check_invariants().unwrap();
 }
 

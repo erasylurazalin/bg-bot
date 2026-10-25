@@ -123,6 +123,12 @@ pub struct Minion {
     /// Whether its Activate was already used this turn. Cleared at the start
     /// of its owner's turn; a copy bought or made later starts unused.
     pub activated: bool,
+    /// Limited uses this minion still has this turn (a Thorned Trailblazer's
+    /// combines, a Magicfin Mycologist's teachings, Malchezaar's Health
+    /// Refreshes; `turn_uses` counts them). They belong to the minion: spent
+    /// left to right, gone when it is sold, and a golden from a triple starts
+    /// fresh while the copies take their leftovers with them.
+    pub uses_left: u8,
     /// Attack and Health this minion has gained from Blood Gems, from every
     /// source (Gem Confiscation steals exactly these). Shop gains persist;
     /// a fight's gems are gone with it unless they were permanent.
@@ -142,6 +148,23 @@ impl Minion {
     /// 2 for a golden minion, else 1: what its card's numbers are multiplied by.
     pub fn mul(&self) -> i32 {
         if self.golden { 2 } else { 1 }
+    }
+
+    /// The limited uses a fresh copy of this minion has each turn: a Thorned
+    /// Trailblazer's combines (the base card; it cannot be Magnetized), a
+    /// Magicfin Mycologist's teachings and a Malchezaar's Health Refreshes
+    /// (an attached part brings its own). A real minion has at most one of
+    /// these effects, so the maximum is its count.
+    pub fn turn_uses(&self, db: &CardDb) -> u8 {
+        let mut uses = db.get(self.card).choose_one_cover.saturating_mul(self.mul() as u8);
+        for (c, golden) in self.parts() {
+            let card = db.get(c);
+            let mul: u8 = if golden { 2 } else { 1 };
+            uses = uses
+                .max(card.health_refreshes.saturating_mul(mul))
+                .max(if card.teaches_spell { mul } else { 0 });
+        }
+        uses
     }
 
     pub fn attached_slice(&self) -> &[Attached] {

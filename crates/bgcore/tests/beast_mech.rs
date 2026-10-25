@@ -313,7 +313,8 @@ fn put_on_board(g: &mut Game, p: usize, name: &str) {
     let c = g.data.cards.by_name(name).unwrap();
     let slot = g.data.cards.get(c).pool_slot as usize;
     g.pool[slot] -= 1;
-    let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    let mut m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    m.uses_left = m.turn_uses(&g.data.cards);
     g.players[p].board.push(m);
 }
 
@@ -485,6 +486,38 @@ fn drone_duplicator_makes_the_next_magnetization_happen_again() {
     assert_eq!(g.players[0].board[0].extra_magnetize, 1);
     act(&mut g, 0, Action::EndTurn);
     assert_eq!(g.players[0].board[0].extra_magnetize, 0);
+}
+
+#[test]
+fn a_drone_duplicator_triple_starts_without_extra_magnetizations() {
+    // the copy Activated and holds a charge; the golden from the triple
+    // starts with none, and Magnetizing into it happens once
+    let mut g = game(11);
+    put_on_board(&mut g, 0, "Drone Duplicator");
+    g.players[0].gold = 20;
+    act(&mut g, 0, Action::Activate(0));
+    assert_eq!(g.players[0].board[0].extra_magnetize, 1);
+    let dd = g.data.cards.by_name("Drone Duplicator").unwrap();
+    for m in g.players[0].shop.drain(..) {
+        let slot = g.data.cards.get(m.card).pool_slot as usize;
+        g.pool[slot] += m.pool_copies;
+    }
+    for _ in 0..2 {
+        let slot = g.data.cards.get(dd).pool_slot as usize;
+        g.pool[slot] -= 1;
+        let m = g.players[0].make_card(&g.data.cards, dd, false, 1);
+        g.players[0].shop.push(m);
+        act(&mut g, 0, Action::Buy(0));
+    }
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    act(&mut g, 0, Action::Play { hand: gold as u8, pos: 0 });
+    assert!(g.players[0].board[0].golden);
+    assert_eq!(g.players[0].board[0].extra_magnetize, 0, "the charge died with the copies");
+    g.give(0, "Annoy-o-Module").unwrap(); // 2/4 Magnetic
+    let h = g.players[0].hand.len() as u8 - 1;
+    act(&mut g, 0, Action::Play { hand: h, pos: 0 });
+    assert_eq!(g.players[0].board[0].magnetizations, 1, "merges once, not twice");
+    g.check_invariants().unwrap();
 }
 
 #[test]

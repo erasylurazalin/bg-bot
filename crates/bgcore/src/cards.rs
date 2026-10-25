@@ -385,8 +385,9 @@ pub enum Effect {
     /// plus the Golden minions the player played this game (Hooktusk).
     BuffOthersPerGolden { tribe: Option<Tribe>, attack: i32, health: i32 },
     /// Add to the player's "after the Tavern is Refreshed this game" amount
-    /// (Waveling, En-Djinn Blazer, Easterly Winds). Every explicit Refresh
-    /// gives the whole amount to one random Tavern minion. Golden doubles it.
+    /// (Waveling, En-Djinn Blazer, Easterly Winds). Every Refresh gives the
+    /// whole amount to one random Tavern minion, the turn-start roll
+    /// included when the Tavern changed. Golden doubles it.
     RefreshBuff { attack: i32, health: i32 },
     /// Gain free Refreshes, which are used before Gold and carry over turns
     /// (Refreshing Anomaly). Golden doubles it.
@@ -3830,6 +3831,7 @@ impl CardDb {
             locked_turns: 0,
             doomed: false,
             activated: false,
+            uses_left: 0,
             gem_attack: 0,
             gem_health: 0,
             both_effects: false,

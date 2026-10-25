@@ -49,7 +49,8 @@ fn put_on_board(g: &mut Game, p: usize, name: &str) {
     let c = id(g, name);
     let slot = g.data.cards.get(c).pool_slot as usize;
     g.pool[slot] -= 1;
-    let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    let mut m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    m.uses_left = m.turn_uses(&g.data.cards);
     g.players[p].board.push(m);
 }
 
@@ -220,10 +221,10 @@ fn scalars_show_player_counters() {
         assert_eq!(tb(f, 0) + tb(f, 2), 0.0);
     }
 
-    // a free roll comes first; used Health Refreshes and Magicfin teachings count down
+    // a free roll comes first; spent uses on the minions count down
     g.players[0].free_rolls = 1;
-    g.players[0].health_refreshes_used = 1;
-    g.players[0].mycologist_uses = 1;
+    g.players[0].board[0].uses_left = 1; // one Health Refresh spent
+    g.players[0].board[1].uses_left = 0; // the teaching spent
     let out = view(&g, 0);
     assert_eq!(out[SCALAR_NEXT_ROLL_HEALTH], 0.0);
     assert_eq!(out[SCALAR_HEALTH_REFRESHES_LEFT], 1.0);
@@ -458,6 +459,35 @@ fn an_opponents_deity_gems_and_spell_power_show_as_last_seen() {
     assert_eq!((o[OPP_GEM_ATTACK], o[OPP_GEM_HEALTH]), (3.0, 4.0));
     assert_eq!((o[OPP_SPELL_ATTACK], o[OPP_SPELL_HEALTH]), (2.0, 2.0));
     assert_eq!((o[OPP_DEITY_ATTACK], o[OPP_DEITY_GOLDEN]), (7.0, 0.0));
+}
+
+#[test]
+fn an_opponents_counters_are_seen_after_start_of_combat() {
+    // the real tracker snapshots the Deity, gem value and spell power at the
+    // first attack, after Start of Combat effects; the bot sees the same
+    let mut g = game_all(17);
+    let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
+    let q = q as usize;
+    let cthun = id(&g, "C'Thun");
+    {
+        let them = &mut g.players[q];
+        them.deity = Some(bgcore::fight::Deity { card: cthun, attack: 7, health: 8, golden: false });
+        them.board.clear();
+    }
+    // Runic Arcanist casts Shiny Ring twice at Start of Combat; each cast is
+    // a spell Vicious Mindslasher reacts to with buff_self_and_deity [1, 2]
+    put_on_board(&mut g, q, "Runic Arcanist");
+    put_on_board(&mut g, q, "Vicious Mindslasher");
+    put_on_board(&mut g, 0, "Flittering Bat"); // a fight needs two non-empty boards
+    let block = |out: &[f32], q: usize| {
+        let start = OWN_END + ((q + PLAYERS - 1) % PLAYERS) * OPP_BLOCK;
+        out[start..start + OPP_BLOCK].to_vec()
+    };
+    next_turn(&mut g);
+    let o = block(&view(&g, 0), q);
+    assert_eq!(o[OPP_SEEN], 1.0);
+    assert_eq!((o[OPP_DEITY_ATTACK], o[OPP_DEITY_HEALTH]), (7.0 + 2.0, 8.0 + 4.0),
+        "the Deity as it stood at the first attack, after Start of Combat");
 }
 
 #[test]

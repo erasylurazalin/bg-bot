@@ -15,7 +15,7 @@ use crate::cards::{
     OnDiscard, OnSell, OnSummonBeast, SpellEffect, SpellTarget, StartOfTurn, TimesRole, Tribe,
     Tribes, how_many_times, pick_one_per_type,
 };
-use crate::fight::{Counters, Deity, SideOutcome, fight_with_hands};
+use crate::fight::{Counters, Deity, SeenCounters, SideOutcome, fight_with_hands};
 use crate::minion::{CardId, Keywords, Minion};
 use crate::rng::Rng;
 use crate::rules::Rules;
@@ -39,31 +39,27 @@ pub struct Seen {
     pub tier: u8,
     /// The turn of that fight, 0 for never.
     pub turn: u32,
-    /// Their Deity as it went into that fight.
+    /// Their Deity at the first attack of that fight, after Start of
+    /// Combat effects.
     pub deity: Option<Deity>,
-    /// Their Blood Gem value as it went into that fight (what the client
-    /// shows during combat, so it is "as last seen").
+    /// Their Blood Gem value at that moment (what the client shows during
+    /// combat, so it is "as last seen").
     pub gem: (i32, i32),
-    /// Their Tavern spell bonus as it went into that fight.
+    /// Their Tavern spell bonus at that moment.
     pub spell: (i32, i32),
 }
 
 impl Seen {
     /// Both sides of a fight as the other player sees it: the board that went
-    /// in and the counters the client shows during combat.
-    fn at_fight(
-        board: ArrayVec<Minion, BOARD>,
-        tier: u8,
-        turn: u32,
-        c: &Counters,
-    ) -> Seen {
+    /// in, and the counters at the first attack, after Start of Combat.
+    fn at_fight(board: ArrayVec<Minion, BOARD>, tier: u8, turn: u32, c: SeenCounters) -> Seen {
         Seen {
             board,
             tier,
             turn,
             deity: c.deity,
-            gem: (c.gem_attack, c.gem_health),
-            spell: (c.spell_attack, c.spell_health),
+            gem: c.gem,
+            spell: c.spell,
         }
     }
 }
@@ -257,8 +253,6 @@ pub struct Player {
     /// Counts of (Beast, Mech, neutral) minions on the player's final board.
     pub final_tribes: [u8; TRIBES],
     pub tavern_buffs: ArrayVec<TavernBuff, MAX_TAVERN_BUFFS>,
-    /// Health Refreshes paid so far this turn.
-    pub health_refreshes_used: u8,
     /// Damage the hero took last, what "rewind it" gives back.
     pub last_damage: i32,
     pub gold: u8,
@@ -303,8 +297,6 @@ pub struct Player {
     pub refresh_buff: (i32, i32),
     pub spell_bonus: (i32, i32),
     pub spell_discount: u8,
-    /// Magicfin Mycologist uses spent this turn. Resets every turn.
-    pub mycologist_uses: u8,
     pub last_spell: Option<CardId>,
     pub shop_spell: Option<CardId>,
     pub shop: ArrayVec<Minion, SHOP>,
@@ -347,12 +339,10 @@ pub struct Player {
     /// give an extra +X/+Y this game". Starts at +1/+1.
     pub gem_attack: i32,
     pub gem_health: i32,
-    /// Blood Gem Barrage casts: every explicit Refresh gives this much, as
-    /// Blood Gems, to every minion in the Tavern.
+    /// Blood Gem Barrage casts: every Refresh gives this much, as Blood
+    /// Gems, to every minion in the Tavern (the turn-start roll included
+    /// when the Tavern changed).
     pub barrage: (i32, i32),
-    /// Choose One cards left this turn that get both effects combined
-    /// (Thorned Trailblazer).
-    pub trailblazer_covers: u8,
     /// Whether the Discover now waiting marks its Choose One pick as having
     /// both effects (Fandral's Fortune).
     pub discover_both: bool,
@@ -376,7 +366,6 @@ impl Player {
             tier_turns: [1, 0, 0, 0, 0, 0],
             final_tribes: [0; TRIBES],
             tavern_buffs: ArrayVec::new(),
-            health_refreshes_used: 0,
             last_damage: 0,
             gold: 0,
             gold_next_turn: 0,
@@ -406,7 +395,6 @@ impl Player {
             refresh_buff: (0, 0),
             spell_bonus: (0, 0),
             spell_discount: 0,
-            mycologist_uses: 0,
             last_spell: None,
             shop_spell: None,
             shop: ArrayVec::new(),
@@ -430,7 +418,6 @@ impl Player {
             gem_attack: 1,
             gem_health: 1,
             barrage: (0, 0),
-            trailblazer_covers: 0,
             deity: None,
             discarded: 0,
             spells_cast: 0,
@@ -529,16 +516,25 @@ impl Player {
         }
     }
 
-    /// Health Refreshes left this turn, from the minions on the board.
+    /// Health Refreshes left this turn, from the uses on the Malchezaars on
+    /// the board. Uses belong to the minion: a golden from a triple starts
+    /// fresh, and sold copies take theirs along.
     pub fn health_refreshes_left(&self, cards: &CardDb) -> u8 {
-        let mut total = 0u8;
-        for m in &self.board {
-            for (card, golden) in m.parts() {
-                let n = cards.get(card).health_refreshes;
-                total = total.saturating_add(n.saturating_mul(if golden { 2 } else { 1 }));
-            }
-        }
-        total.saturating_sub(self.health_refreshes_used)
+        self.board
+            .iter()
+            .filter(|m| m.parts().any(|(c, _)| cards.get(c).health_refreshes > 0))
+            .map(|m| m.uses_left)
+            .fold(0u8, u8::saturating_add)
+    }
+
+    /// Spend one Health Refresh: the first Malchezaar left to right that
+    /// still has one loses it.
+    pub fn spend_health_refresh(&mut self, cards: &CardDb) {
+        let Some(i) = (0..self.board.len()).find(|&i| {
+            self.board[i].uses_left > 0
+                && self.board[i].parts().any(|(c, _)| cards.get(c).health_refreshes > 0)
+        }) else { return };
+        self.board[i].uses_left -= 1;
     }
 
     /// Whether a minion on the board undoes hero damage ("rewind it").
@@ -1507,6 +1503,10 @@ impl Game {
                         m.attack += ba;
                         m.health += bh;
                     }
+                    // A minion landing on the board starts with its limited
+                    // uses for the turn (a Trailblazer's combines, a
+                    // Mycologist's teachings, Malchezaar's Health Refreshes).
+                    m.uses_left = m.turn_uses(&self.data.cards);
                     self.players[p].board.insert(pos, m);
                     let t = self.data.cards.get(m.card).tribes;
                     // The Triple Reward comes before anything the Battlecry
@@ -1514,11 +1514,6 @@ impl Game {
                     if m.golden && !m.no_reward {
                         self.give_triple_reward(p);
                     }
-                    // A Trailblazer just landed: it covers one more Choose
-                    // One card this turn (golden: two more).
-                    let cover = self.data.cards.get(m.card).choose_one_cover * m.mul() as u8;
-                    self.players[p].trailblazer_covers =
-                        self.players[p].trailblazer_covers.saturating_add(cover);
                     choose_one_play = self.data.cards.get(m.card).choose_one.is_some();
                     if t.has(Tribe::Elemental) {
                         self.players[p].elementals_played_turn =
@@ -1572,7 +1567,7 @@ impl Game {
                 if pl.free_rolls > 0 {
                     pl.free_rolls -= 1;
                 } else if pl.can_refresh_with_health(cards, rules) {
-                    pl.health_refreshes_used += 1;
+                    pl.spend_health_refresh(cards);
                     health_paid = rules.health_refresh_cost;
                 } else {
                     pl.gold -= rules.roll_cost;
@@ -1624,8 +1619,9 @@ impl Game {
 
     /// "After the Tavern is Refreshed this game" (Waveling, En-Djinn Blazer,
     /// Easterly Winds): the whole amount goes to one random minion in the
-    /// Tavern. Called by every Refresh except the automatic roll at the start
-    /// of a turn. It draws no random number when there is nothing to give.
+    /// Tavern. Called by every Refresh, the turn-start roll included when
+    /// the Tavern changed (see "Two kinds of Refresh" in DESIGN.md). It
+    /// draws no random number when there is nothing to give.
     fn apply_refresh_buff(pl: &mut Player, cards: &CardDb, rng: &mut Rng) {
         let (a, h) = pl.refresh_buff;
         if a == 0 && h == 0 {
@@ -1642,9 +1638,9 @@ impl Game {
         }
     }
 
-    /// Blood Gem Barrage: after every Refresh (all but the turn-start roll),
-    /// every minion in the Tavern gains the whole amount cast so far, as
-    /// Blood Gem stats.
+    /// Blood Gem Barrage: after every Refresh (the turn-start roll included
+    /// when the Tavern changed), every minion in the Tavern gains the whole
+    /// amount cast so far, as Blood Gem stats.
     fn apply_barrage(pl: &mut Player, cards: &CardDb) {
         let (a, h) = pl.barrage;
         if a == 0 && h == 0 {
@@ -2252,22 +2248,19 @@ impl Game {
     }
 
     /// After buying a Tavern spell, a Magicfin Mycologist on the board
-    /// teaches a 1/1 Murloc token that spell, once per turn each.
+    /// teaches a 1/1 Murloc token that spell, once per turn each: the first
+    /// one left to right that still has its use for this turn.
     fn magicfin_teach(&mut self, p: usize, spell: CardId) {
         let Some(token) = self.data.cards.taught_token else { return };
         let cards = &self.data.cards;
-        let mut limit = 0u8;
-        for m in &self.players[p].board {
-            for (card, golden) in m.parts() {
-                if cards.get(card).teaches_spell {
-                    limit = limit.saturating_add(if golden { 2 } else { 1 });
-                }
-            }
-        }
-        if self.players[p].mycologist_uses >= limit || self.players[p].hand.is_full() {
+        let Some(i) = (0..self.players[p].board.len()).find(|&i| {
+            self.players[p].board[i].uses_left > 0
+                && self.players[p].board[i].parts().any(|(c, _)| cards.get(c).teaches_spell)
+        }) else { return };
+        if self.players[p].hand.is_full() {
             return;
         }
-        self.players[p].mycologist_uses += 1;
+        self.players[p].board[i].uses_left -= 1;
         let mut m = self.players[p].make_card(cards, token, false, 0);
         m.taught_spell = Some(spell);
         self.add_to_hand(p, m);
@@ -2447,14 +2440,16 @@ impl Game {
         })
     }
 
-    /// Spend one Thorned Trailblazer coverage, if any is left this turn.
+    /// Spend one Thorned Trailblazer combine: the first one left to right
+    /// that still has a use this turn, so none is wasted.
     fn take_trailblazer_cover(&mut self, p: usize) -> bool {
-        if self.players[p].trailblazer_covers > 0 {
-            self.players[p].trailblazer_covers -= 1;
-            true
-        } else {
-            false
-        }
+        let cards = &self.data.cards;
+        let Some(i) = (0..self.players[p].board.len()).find(|&i| {
+            self.players[p].board[i].uses_left > 0
+                && cards.get(self.players[p].board[i].card).choose_one_cover > 0
+        }) else { return false };
+        self.players[p].board[i].uses_left -= 1;
+        true
     }
 
     /// A Golden minion played from hand puts a Triple Reward spell in hand,
@@ -5562,6 +5557,12 @@ impl Game {
         if let Some((w, n)) = wild {
             take_from(pl, w, n, false, &mut gold);
         }
+        // An armed Living Prison's arm is a leftover of its copies, not a
+        // progress count: the golden starts unarmed (uses belong to the
+        // minion, "a golden from a triple starts fresh").
+        if matches!(cards.get(x_card).activate, Some(a) if a.effect == Effect::ArmNextBuy) {
+            gold.improvements = 0;
+        }
         self.add_to_hand(p, gold);
         for m in returned {
             give_back(&mut self.pool, &self.data.cards, &m);
@@ -5808,6 +5809,9 @@ impl Game {
             let won = pl.won_last_combat;
             for m in &mut pl.board {
                 m.activated = false;
+                // The limited uses of a new turn: a Trailblazer's combines,
+                // a Mycologist's teachings, Malchezaar's Health Refreshes.
+                m.uses_left = m.turn_uses(&data.cards);
                 // Ichoron's Divine Shield lasts until the next shop phase.
                 if m.temp_shield {
                     m.keywords.clear(Keywords::DIVINE_SHIELD);
@@ -5829,15 +5833,9 @@ impl Game {
             }
             pl.done = false;
             pl.actions = 0;
-            pl.health_refreshes_used = 0;
-            pl.mycologist_uses = 0;
             pl.gold_spent_turn = 0;
             pl.elementals_played_turn = 0;
-            // The Trailblazers on the board now cover this turn's first
-            // Choose One cards (one each, two for a golden one).
-            pl.trailblazer_covers = pl.board.iter().fold(0u8, |acc, m| {
-                acc.saturating_add(data.cards.get(m.card).choose_one_cover * m.mul() as u8)
-            });
+            let was_frozen = pl.frozen;
             if pl.frozen {
                 pl.frozen = false;
             } else {
@@ -5847,9 +5845,19 @@ impl Game {
                 pl.shop_spell = None;
             }
             let size = data.rules.shop_size(pl.tier);
-            // The automatic roll at the start of a turn is not a Refresh for
-            // card purposes, so it leaves queued Fodders for an explicit one.
+            // The roll at the start of a turn counts as a Refresh for
+            // Waveling's amount and Barrage when the Tavern changed: always
+            // when it was not frozen, and for a frozen one only when the roll
+            // had to fill a slot (a bought card, a consumed or stolen one, a
+            // new slot from levelling, an empty spell slot). It is still not
+            // the player's own Refresh, so queued Fodders wait for an
+            // explicit one.
+            let refreshed = !was_frozen || pl.shop.len() < size || pl.shop_spell.is_none();
             Self::fill_shop(pl, pool, &data.cards, size, rng, self.lobby, RefreshKind::TurnStart);
+            if refreshed {
+                Self::apply_refresh_buff(pl, &data.cards, rng);
+                Self::apply_barrage(pl, &data.cards);
+            }
         }
         for p in 0..PLAYERS {
             if self.players[p].alive {
@@ -6050,12 +6058,8 @@ impl Game {
             };
             let me = self.players[p].board.clone();
             let my_counters = self.players[p].counters(cards, self.lobby);
-            // What each side sees of the other: the boards that went in, and
-            // the counters the client shows during combat, as the fight starts.
             let turn = self.turn;
             let my_tier = self.players[p].tier;
-            let their_seen = Seen::at_fight(them.clone(), tier, turn, &their_counters);
-            let my_seen = Seen::at_fight(me.clone(), my_tier, turn, &my_counters);
             let hands: [&[Minion]; 2] = [my_hand, their_hand];
             let out = fight_with_hands(
                 &self.data.cards,
@@ -6067,6 +6071,10 @@ impl Game {
                 &mut self.rng,
                 &mut (),
             );
+            // What each side sees of the other: the boards that went in, and
+            // the counters at the first attack, after Start of Combat.
+            let their_seen = Seen::at_fight(them, tier, turn, out.sides[1].seen);
+            let my_seen = Seen::at_fight(me, my_tier, turn, out.sides[0].seen);
             match self.players[p].opponent.unwrap() {
                 Opponent::Player(q) => {
                     let q = q as usize;

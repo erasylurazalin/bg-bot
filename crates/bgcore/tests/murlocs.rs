@@ -325,6 +325,45 @@ fn magicfin_mycologist_teaches_a_targeted_spell_once_per_turn() {
 }
 
 #[test]
+fn a_mycologist_triple_teaches_with_fresh_uses() {
+    // the copy used up its one teaching this turn; the golden from the
+    // triple comes with its own two
+    let mut g = game(14);
+    put_on_board(&mut g, 0, "Magicfin Mycologist");
+    let fortify = g.data.cards.by_name("Fortify").unwrap();
+    g.players[0].gold = 20;
+    let taught = |g: &Game| {
+        g.players[0].hand.iter().filter(|m| g.data.cards.get(m.card).taught_token).count()
+    };
+    g.players[0].shop_spell = Some(fortify);
+    act(&mut g, 0, Action::BuySpell);
+    g.players[0].shop_spell = Some(fortify);
+    act(&mut g, 0, Action::BuySpell);
+    assert_eq!(taught(&g), 1, "the copy's single use is spent");
+    // buy two more copies: the second one triples
+    let myco = g.data.cards.by_name("Magicfin Mycologist").unwrap();
+    for _ in 0..2 {
+        let slot = g.data.cards.get(myco).pool_slot as usize;
+        g.pool[slot] -= 1;
+        let m = g.players[0].make_card(&g.data.cards, myco, false, 1);
+        let at = g.players[0].shop.len();
+        g.players[0].shop.push(m);
+        act(&mut g, 0, Action::Buy(at as u8));
+    }
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    act(&mut g, 0, Action::Play { hand: gold as u8, pos: 0 });
+    for _ in 0..2 {
+        g.players[0].shop_spell = Some(fortify);
+        act(&mut g, 0, Action::BuySpell);
+    }
+    assert_eq!(taught(&g), 3, "the golden teaches twice more");
+    g.players[0].shop_spell = Some(fortify);
+    act(&mut g, 0, Action::BuySpell);
+    assert_eq!(taught(&g), 3, "and then it is done for this turn");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn bream_counter_grows_in_hand_after_a_murloc_is_played() {
     let mut g = game(14);
     g.give(0, "Bream Counter").unwrap();
@@ -523,7 +562,8 @@ fn put_on_board(g: &mut Game, p: usize, name: &str) {
     let c = g.data.cards.by_name(name).unwrap();
     let slot = g.data.cards.get(c).pool_slot as usize;
     g.pool[slot] -= 1;
-    let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    let mut m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    m.uses_left = m.turn_uses(&g.data.cards);
     g.players[p].board.push(m);
 }
 

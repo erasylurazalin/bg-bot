@@ -142,6 +142,8 @@ struct FileMinion {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     activated: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    uses_left: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     no_reward: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     temp_shield: Option<bool>,
@@ -181,6 +183,7 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         taught_spell: m.taught_spell.map(|c| db.get(c).name.clone()),
         locked_turns: differs(m.locked_turns as u64, 0).map(|v| v as u8),
         activated: m.activated.then_some(true),
+        uses_left: differs(m.uses_left as u64, 0).map(|v| v as u8),
         no_reward: (m.no_reward != base.no_reward).then_some(m.no_reward),
         temp_shield: m.temp_shield.then_some(true),
         doomed: m.doomed.then_some(true),
@@ -240,6 +243,9 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     if let Some(v) = f.activated {
         m.activated = v;
+    }
+    if let Some(v) = f.uses_left {
+        m.uses_left = v;
     }
     if let Some(v) = f.no_reward {
         m.no_reward = v;

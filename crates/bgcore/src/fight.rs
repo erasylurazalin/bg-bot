@@ -169,6 +169,19 @@ pub struct SideOutcome {
     /// slot (Razorfen Vineweaver): the game adds them to the board minion's
     /// stats and Blood Gem stats after the fight.
     pub permanent_gems: [(i32, i32); BOARD],
+    /// The counters the real client shows during combat, captured at the
+    /// first attack, after Start of Combat effects: what the other player
+    /// "last saw" of this one.
+    pub seen: SeenCounters,
+}
+
+/// The Deity, the Blood Gem value and the Tavern spell bonus of one side at
+/// one moment of its fight.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeenCounters {
+    pub deity: Option<Deity>,
+    pub gem: (i32, i32),
+    pub spell: (i32, i32),
 }
 
 impl SideOutcome {
@@ -2718,6 +2731,15 @@ pub fn fight_with_hands(
         rng.coin() as usize
     };
     run_start_of_combat(&mut sides, db, &mut uid, rng, w);
+    // What the client shows during combat: the counters at the first attack,
+    // after Start of Combat effects (the tracker snapshots them then).
+    for s in &mut sides {
+        s.out.seen = SeenCounters {
+            deity: s.counters.deity,
+            gem: (s.counters.gem_attack, s.counters.gem_health),
+            spell: (s.counters.spell_attack, s.counters.spell_health),
+        };
+    }
 
     let mut attacks = 0;
     let mut skips = 0;

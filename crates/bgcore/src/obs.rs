@@ -56,10 +56,10 @@
 //!   lobby holds
 //!   99 gem_attack (what one of this player's Blood Gems gives)
 //!   100 gem_health
-//!   101 barrage_attack (Blood Gem Barrage: Gems every explicit Refresh gives)
+//!   101 barrage_attack (Blood Gem Barrage: Gems every Refresh gives)
 //!   102 barrage_health
 //!   103 refresh_attack (Waveling / En-Djinn / Easterly Winds: what the next
-//!   explicit Refresh gives one Tavern minion, summed)
+//!   Refresh gives one Tavern minion, summed)
 //!   104 refresh_health
 //!   105 baller (Ballers sold this game)
 //!   106 undead_attack (the Undead bonus, this game wherever they are)
@@ -71,7 +71,7 @@
 //!   112 discarded (cards discarded this game)
 //!   113 spells_cast (Tavern spells cast this game)
 //!   114 trailblazer_covers (Choose One cards left this turn that get both
-//!   effects, Thorned Trailblazer)
+//!   effects: the combines still on the board's Trailblazers)
 //!   115 sharing_is_caring (pending Sharing is Caring Start of Combat triggers)
 //!   116 last_damage (damage the hero took last, what a rewind gives back)
 //!   117..122 own Deity, DEITY_FEATURES values: present, C'Thun, Y'Shaarj
@@ -112,10 +112,10 @@
 //!   turns_since (since that fight), next (my opponent this turn, or the ghost
 //!   of this player), last (my opponent last turn), placement (0 while
 //!   alive), the tribe counts of their last seen board (ten values,
-//!   `Tribe::EVERY` order), their Deity as it went into that fight
-//!   (DEITY_FEATURES values, laid out like mine), and their Blood Gem value
-//!   and Tavern spell bonus as they went into it (attack, health each); then
-//!   that board (BOARD = 7 card slots).
+//!   `Tribe::EVERY` order), their Deity at the first attack of that fight,
+//!   after Start of Combat (DEITY_FEATURES values, laid out like mine), and
+//!   their Blood Gem value and Tavern spell bonus at that moment (attack,
+//!   health each); then that board (BOARD = 7 card slots).
 //!
 //! A card slot is SLOT_FEATURES (78) values:
 //!   0  present (1 if occupied)
@@ -245,10 +245,11 @@ pub const LOBBY_TRIBES: usize = Tribe::EVERY.len();
 /// What one of this player's Blood Gems gives.
 pub const SCALAR_GEM_ATTACK: usize = 99;
 pub const SCALAR_GEM_HEALTH: usize = 100;
-/// Blood Gem Barrage: Gems every explicit Refresh gives the Tavern.
+/// Blood Gem Barrage: Gems every Refresh gives the Tavern (the turn-start
+/// roll included when the Tavern changed).
 pub const SCALAR_BARRAGE_ATTACK: usize = 101;
 pub const SCALAR_BARRAGE_HEALTH: usize = 102;
-/// What an explicit Refresh gives one Tavern minion (Waveling, En-Djinn
+/// What a Refresh gives one Tavern minion (Waveling, En-Djinn
 /// Blazer, Easterly Winds), summed.
 pub const SCALAR_REFRESH_ATTACK: usize = 103;
 pub const SCALAR_REFRESH_HEALTH: usize = 104;
@@ -574,18 +575,14 @@ fn choose_option(opt: ChooseOption) -> (usize, (i32, i32)) {
     }
 }
 
-/// Magicfin Mycologist teachings left this turn: one per Mycologist on the
-/// board (two for a golden one), minus the ones used.
+/// Magicfin Mycologist teachings left this turn: the uses on the
+/// Mycologists on the board.
 pub fn magicfin_left(pl: &Player, db: &CardDb) -> u8 {
-    let mut limit = 0u8;
-    for m in &pl.board {
-        for (card, golden) in m.parts() {
-            if db.get(card).teaches_spell {
-                limit = limit.saturating_add(if golden { 2 } else { 1 });
-            }
-        }
-    }
-    limit.saturating_sub(pl.mycologist_uses)
+    pl.board
+        .iter()
+        .filter(|m| m.parts().any(|(c, _)| db.get(c).teaches_spell))
+        .map(|m| m.uses_left)
+        .fold(0u8, u8::saturating_add)
 }
 
 fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
@@ -673,7 +670,12 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     s[SCALAR_GOLD_SPENT] = pl.gold_spent_turn as f32;
     s[SCALAR_DISCARDED] = pl.discarded as f32;
     s[SCALAR_SPELLS_CAST] = pl.spells_cast as f32;
-    s[SCALAR_TRAILBLAZER_COVERS] = pl.trailblazer_covers as f32;
+    s[SCALAR_TRAILBLAZER_COVERS] = pl
+        .board
+        .iter()
+        .filter(|m| db.get(m.card).choose_one_cover > 0)
+        .map(|m| m.uses_left)
+        .fold(0u8, u8::saturating_add) as f32;
     s[SCALAR_SHARING_IS_CARING] = pl.sharing_is_caring as f32;
     s[SCALAR_LAST_DAMAGE] = pl.last_damage as f32;
     write_deity(&mut s[SCALAR_DEITY..], db, pl.deity);

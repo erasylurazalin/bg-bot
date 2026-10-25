@@ -109,14 +109,13 @@ fn gem_slot(g: &Game, p: usize) -> Option<usize> {
     g.players[p].hand.iter().position(|m| m.card == gem)
 }
 
-/// The covers start_turn would count from the board (put_on_board bypasses
-/// the play path).
+/// The uses start_turn would hand the board's Trailblazers (put_on_board
+/// bypasses the play path).
 fn recount_trailblazers(g: &mut Game) {
-    let mut covers = 0u8;
-    for m in &g.players[0].board {
-        covers = covers.saturating_add(g.data.cards.get(m.card).choose_one_cover * m.mul() as u8);
+    let cards = g.data.cards.clone();
+    for m in &mut g.players[0].board {
+        m.uses_left = m.turn_uses(&cards);
     }
-    g.players[0].trailblazer_covers = covers;
 }
 
 fn gems_in_hand(g: &Game, p: usize) -> usize {
@@ -374,6 +373,72 @@ fn blood_gem_barrage_buffs_every_tavern_minion_on_every_explicit_refresh() {
 }
 
 #[test]
+fn barrage_hits_the_tavern_on_the_turn_start_roll_only_when_it_changed() {
+    // unfrozen: the roll is a Refresh, every new Tavern minion gets it
+    let mut g = game(18);
+    g.players[0].barrage = (2, 2);
+    end_all_turns(&mut g);
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        if !c.is_spell() {
+            assert_eq!(stats(m), (c.attack + 2, c.health + 2), "{}", c.name);
+            assert_eq!((m.gem_attack, m.gem_health), (2, 2));
+        }
+    }
+
+    // a fully frozen, full Tavern: neither the spell slot nor a minion slot
+    // was filled, no Barrage
+    let mut g = game(18);
+    g.players[0].barrage = (2, 2);
+    act(&mut g, 0, Action::Freeze);
+    end_all_turns(&mut g);
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        if !c.is_spell() {
+            assert_eq!(stats(m), (c.attack, c.health), "{}", c.name);
+            assert_eq!((m.gem_attack, m.gem_health), (0, 0));
+        }
+    }
+
+    // frozen with one card bought: the roll fills that slot and Barrage hits
+    // every Tavern minion, the frozen ones included; buying one each turn,
+    // the frozen minions stack it twice over two turns
+    let mut g = game(18);
+    g.players[0].barrage = (2, 2);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    act(&mut g, 0, Action::Freeze);
+    end_all_turns(&mut g);
+    assert!(!g.players[0].shop[1..].is_empty(), "cards froze over");
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        if !c.is_spell() {
+            assert_eq!(stats(m), (c.attack + 2, c.health + 2), "{}", c.name);
+        }
+    }
+    // second turn: buy one of the cards frozen over, freeze again
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(1));
+    act(&mut g, 0, Action::Freeze);
+    end_all_turns(&mut g);
+    // what froze over from turn 1 stacked Barrage twice (+4/+4); the card
+    // drawn into the bought slot this turn got it once (+2/+2)
+    let over = |gain: (i32, i32)| {
+        g.players[0]
+            .shop
+            .iter()
+            .filter(|m| {
+                let c = g.data.cards.get(m.card);
+                !c.is_spell() && (m.attack - c.attack, m.health - c.health) == gain
+            })
+            .count()
+    };
+    assert!(over((4, 4)) > 0, "the frozen minions stack Barrage twice");
+    assert!(over((2, 2)) > 0, "the new slot's card got it once");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn barrage_adds_the_gem_bonus_and_spell_power_once_per_cast() {
     let mut g = game(16);
     // gems at +2/+2
@@ -539,6 +604,71 @@ fn two_trailblazers_cover_two_and_a_golden_one_covers_two() {
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 0);
     assert!(g.players[0].pending_choose_one.is_some(), "the third asks");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_trailblazer_triples_into_a_golden_with_its_own_fresh_combines() {
+    // an unused Trailblazer tripled: the golden has exactly its own 2
+    // combines, not 3 (the board copies' leftovers leave with them)
+    let mut g = game(26);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    recount_trailblazers(&mut g);
+    set_shop(&mut g, 0, &["Thorned Trailblazer"]);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0)); // the third copy triples
+    assert_eq!(g.players[0].board.len(), 0, "the copies went into the golden");
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    play(&mut g, 0, gold as u8, 0);
+    for k in 0..2 {
+        put_in_hand(&mut g, 0, "Crater Miner", false);
+        let h = g.players[0].hand.len() as u8 - 1;
+        play(&mut g, 0, h, 0);
+        assert!(g.players[0].pending_choose_one.is_none(), "golden covers two: play {k}");
+    }
+    put_in_hand(&mut g, 0, "Crater Miner", false);
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert!(g.players[0].pending_choose_one.is_some(), "the third asks");
+    act(&mut g, 0, Action::Choose(0));
+
+    // a used-up Trailblazer tripled gives a fresh 2 as well
+    let mut g = game(27);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    recount_trailblazers(&mut g);
+    put_in_hand(&mut g, 0, "Crater Miner", false);
+    play(&mut g, 0, 0, 0);
+    assert!(g.players[0].pending_choose_one.is_none(), "one combine is spent");
+    set_shop(&mut g, 0, &["Thorned Trailblazer"]);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    play(&mut g, 0, gold as u8, 0);
+    for k in 0..2 {
+        put_in_hand(&mut g, 0, "Crater Miner", false);
+        let h = g.players[0].hand.len() as u8 - 1;
+        play(&mut g, 0, h, 0);
+        assert!(g.players[0].pending_choose_one.is_none(), "fresh two: play {k}");
+    }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn selling_a_trailblazer_takes_its_leftover_combines_along() {
+    let mut g = game(28);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    put_on_board(&mut g, 0, "Thorned Trailblazer", false);
+    recount_trailblazers(&mut g);
+    act(&mut g, 0, Action::Sell(0));
+    put_in_hand(&mut g, 0, "Crater Miner", false);
+    play(&mut g, 0, 0, 0);
+    assert!(g.players[0].pending_choose_one.is_none(), "the remaining one covers it");
+    put_in_hand(&mut g, 0, "Crater Miner", false);
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    assert!(g.players[0].pending_choose_one.is_some(), "the sold one's combine is gone");
     g.check_invariants().unwrap();
 }
 

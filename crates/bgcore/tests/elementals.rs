@@ -467,9 +467,24 @@ fn a_golden_blazer_and_a_golden_waveling_add_double() {
 }
 
 #[test]
-fn the_start_of_turn_roll_is_not_a_refresh_for_the_amount() {
+fn the_turn_start_roll_is_a_refresh_only_when_the_tavern_changed() {
+    // an unfrozen Tavern always changed: the amount lands on one random
+    // Tavern minion
     let mut g = game(14);
     g.players[0].refresh_buff = (50, 50);
+    end_all_turns(&mut g);
+    let big = g.players[0].shop.iter().filter(|m| m.attack >= 50).count();
+    assert_eq!(big, 1);
+    // the very next Refresh gives it again
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    let big = g.players[0].shop.iter().filter(|m| m.attack >= 50).count();
+    assert_eq!(big, 1);
+
+    // a fully frozen, full Tavern is not refreshed: no amount
+    let mut g = game(14);
+    g.players[0].refresh_buff = (50, 50);
+    act(&mut g, 0, Action::Freeze);
     end_all_turns(&mut g);
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
@@ -477,11 +492,19 @@ fn the_start_of_turn_roll_is_not_a_refresh_for_the_amount() {
             assert_eq!((m.attack, m.health), (c.attack, c.health), "{}", c.name);
         }
     }
-    // the very next Refresh does give it
+
+    // frozen with one card bought: the roll fills that slot, the amount
+    // lands again (on any Tavern minion, a frozen one included)
+    let mut g = game(14);
+    g.players[0].refresh_buff = (50, 50);
     g.players[0].gold = 10;
-    act(&mut g, 0, Action::Roll);
+    act(&mut g, 0, Action::Buy(0));
+    act(&mut g, 0, Action::Freeze);
+    end_all_turns(&mut g);
+    assert!(!g.players[0].frozen, "the freeze was for that turn only");
     let big = g.players[0].shop.iter().filter(|m| m.attack >= 50).count();
     assert_eq!(big, 1);
+    g.check_invariants().unwrap();
 }
 
 #[test]
@@ -1246,6 +1269,64 @@ fn a_golden_prison_gains_double_and_an_unused_one_is_wasted() {
     act(&mut s, 0, Action::Buy(0));
     assert_eq!(stats(&s.players[0].board[0]), before, "last turn's Activate is gone");
     s.check_invariants().unwrap();
+}
+
+#[test]
+fn a_slab_triple_fires_again_this_turn() {
+    // the copy fired on a buy this turn; the golden from the triple has its
+    // own once-per-turn use back
+    let mut g = game(54);
+    put_on_board(&mut g, 0, "Stone Age Slab", false);
+    set_shop(&mut g, 0, &["Cord Puller", "Stone Age Slab", "Stone Age Slab"]);
+    g.players[0].shop[0].attack = 3;
+    g.players[0].shop[0].health = 3;
+    g.players[0].gold = 20;
+    act(&mut g, 0, Action::Buy(0));
+    let bought = g.players[0].hand.iter().rev().find(|m| name(&g, m) == "Cord Puller").unwrap();
+    assert_eq!(stats(bought), (46, 46), "the copy fired");
+    act(&mut g, 0, Action::Buy(0)); // the second Slab
+    act(&mut g, 0, Action::Buy(0)); // the third triples
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    play(&mut g, 0, gold as u8, 0);
+    // the golden fires again on the very next buy: +20/+20 then triple
+    set_shop(&mut g, 0, &["Cord Puller"]);
+    g.players[0].shop[0].attack = 3;
+    g.players[0].shop[0].health = 3;
+    act(&mut g, 0, Action::Buy(0));
+    let m = g.players[0].hand.iter().rev().find(|m| name(&g, m) == "Cord Puller").unwrap();
+    assert_eq!(stats(m), (69, 69));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_prison_triple_starts_unarmed() {
+    // the copy Activated and armed; the golden from the triple is not armed,
+    // and can arm itself again this turn
+    let mut g = game(55);
+    put_on_board(&mut g, 0, "Living Prison", false);
+    set_shop(&mut g, 0, &["Cord Puller", "Living Prison", "Living Prison"]);
+    g.players[0].shop[0].attack = 5;
+    g.players[0].shop[0].health = 6;
+    g.players[0].gold = 20;
+    act(&mut g, 0, Action::Activate(0));
+    assert_eq!(g.players[0].board[0].improvements, 1, "armed");
+    act(&mut g, 0, Action::Buy(1)); // the second Prison
+    act(&mut g, 0, Action::Buy(1)); // the third triples
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    play(&mut g, 0, gold as u8, 0);
+    assert_eq!(g.players[0].board[0].improvements, 0, "the golden starts unarmed");
+    let base = stats(&g.players[0].board[0]);
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(stats(&g.players[0].board[0]), base, "an unarmed golden gains nothing");
+    // its own Activate is fresh too: arm it, buy, gain double the stats
+    act(&mut g, 0, Action::Activate(0));
+    set_shop(&mut g, 0, &["Cord Puller"]);
+    g.players[0].shop[0].attack = 5;
+    g.players[0].shop[0].health = 6;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(stats(&g.players[0].board[0]), (base.0 + 10, base.1 + 12),
+        "the armed golden takes double the bought stats");
+    g.check_invariants().unwrap();
 }
 
 // ================= Wildfire Elemental =================

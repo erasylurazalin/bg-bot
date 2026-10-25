@@ -57,7 +57,8 @@ fn put_on_board(g: &mut Game, p: usize, name: &str) -> usize {
     let c = id(g, name);
     let slot = g.data.cards.get(c).pool_slot as usize;
     g.pool[slot] -= 1;
-    let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    let mut m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    m.uses_left = m.turn_uses(&g.data.cards);
     g.players[p].board.push(m);
     g.players[p].board.len() - 1
 }
@@ -152,6 +153,30 @@ fn prisonguard_can_buff_a_board_minion() {
     // only target, so it is taken at once.
     act(&mut g, 0, Action::Activate(0));
     assert_eq!(stats(&g.players[0].board[1]), (4, 4));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_prisonguard_triple_starts_with_its_activate_fresh() {
+    // the copy's Activate was used this turn; the golden from the triple
+    // can Activate again right away (uses belong to the minion)
+    let mut g = game(5);
+    g.players[0].gold = 10;
+    put_on_board(&mut g, 0, "Suspicious Prisonguard");
+    put_on_board(&mut g, 0, "Cord Puller");
+    set_shop(&mut g, 0, &[]);
+    act(&mut g, 0, Action::Activate(0)); // Cord Puller is the one target
+    assert!(g.players[0].board[0].activated);
+    set_shop(&mut g, 0, &["Suspicious Prisonguard"]);
+    act(&mut g, 0, Action::Buy(0)); // the second copy
+    set_shop(&mut g, 0, &["Suspicious Prisonguard"]);
+    act(&mut g, 0, Action::Buy(0)); // the third triples
+    assert_eq!(g.players[0].board.len(), 1, "only Cord Puller is left");
+    let gold = g.players[0].hand.iter().position(|m| m.golden).unwrap();
+    act(&mut g, 0, Action::Play { hand: gold as u8, pos: 0 });
+    assert!(g.players[0].board[0].golden);
+    // fresh uses: the golden can Activate again this very turn
+    assert!(is_legal(&mut g, 0, Action::Activate(0)));
     g.check_invariants().unwrap();
 }
 

@@ -88,8 +88,8 @@ The amounts these cards' text hides, as I know them from the game:
    (`tests/lobby.rs`).
 3. ~~A new observation.~~ Done 2026-10-25 (OBS_SIZE 6362, ten tribes,
    gems, Deity, opponents as last seen in combat).
-4. **Extend the card export** to heroes, hero powers, trinkets and Dark
-   Gifts, so every later run starts from the game's own data.
+4. ~~Extend the card export to heroes, hero powers, trinkets and Dark
+   Gifts.~~ Done 2026-10-25 (`ref/bg-meta.json`, see `docs/card-data.md`).
 
 ## Then: the rest of the game
 

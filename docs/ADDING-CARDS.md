@@ -65,7 +65,8 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | After you Discover | `after_discover = {..}` | `fire_after_discover` (end of `resolve_choose`) | Hooktusk |
 | Hero takes damage | `after_hero_damage = [..]`, `DamageHero` | `take_hero_damage`, `take_shop_damage` (can kill), `can_pay_health` | Wrath Weaver |
 | Refresh | `health_refreshes`, `RefreshKind` | `refresh_shop`, `fill_shop`, Roll in `apply` | Malchezaar |
-| After the Tavern is Refreshed | `refresh_buff = [a, h]` (effect and spell effect) | `Player.refresh_buff`, `apply_refresh_buff` (end of `refresh_shop`, `refresh_with_spells`, `refresh_with_tribe`); a fight adds through `SideOutcome::refresh_buff_gain` | Waveling |
+| After the Tavern is Refreshed | `refresh_buff = [a, h]` (effect and spell effect) | `Player.refresh_buff`, `apply_refresh_buff` (end of `refresh_shop`, `refresh_with_spells`, `refresh_with_tribe`, and in `start_turn` when the turn-start roll changed the Tavern); a fight adds through `SideOutcome::refresh_buff_gain` | Waveling |
+| Limited uses per turn | `choose_one_cover` (Trailblazer combines), `health_refreshes` (Malchezaar's Health Refreshes), `teaches_spell` (Mycologist teachings) | `Minion.uses_left`, set from `Minion::turn_uses` at start of turn and when the minion is played; spent by `take_trailblazer_cover`, `spend_health_refresh`, `magicfin_teach`. Uses belong to the minion: sold with it, and a golden from a triple starts fresh | Thorned Trailblazer |
 | Free Refreshes | `free_refreshes = n` | `Player.free_rolls`, used first by Roll | Refreshing Anomaly |
 | Sell, improving a shared count | `on_sell = { effect = { improving_counter = "baller", buff } }` | `Effect::BuffAllImproving`, `Counter::Baller` | Fire Baller |
 | Played minion of a tribe gets Divine Shield | `play_shield = "elemental"` | `give_play_shield` (right after the board insert, before the Battlecry), `Minion.temp_shield`, cleared in `start_turn` | Ichoron the Protector |
@@ -80,7 +81,7 @@ Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 | Activate (N) | `activate = { cost, effect }` | `Action::Activate` in `apply`; legality in `is_legal` (needs_* checks on `Effect`) | Suspicious Prisonguard |
 | Activate with a discard | `activate = { cost, discard = true, effect }` | opens `pending_discard`, answered by `Action::Discard`; needs a discardable card | Mangled Bandit |
 | A Blood Gem cast from hand lands on this | `on_gem_played_on_self = 1` | `Game::roogug_on_gem` (from-hand casts only, never a chain) | Geomagus Roogug |
-| A Choose One card each turn gets both effects | `choose_one_cover = 1` | `Player.trailblazer_covers` (start of turn, plus a Trailblazer played), `resolve_choose_options` | Thorned Trailblazer |
+| A Choose One card each turn gets both effects | `choose_one_cover = 1` | one combine in `Minion.uses_left` per Trailblazer on the board, spent by `take_trailblazer_cover`, `resolve_choose_options` | Thorned Trailblazer |
 | After a Choose One card is played | `after_choose_one_play = 2` | `Player.hogrider_pending`, fired by `Game::resolve_hogrider` once no choice is open (from `step` and `finish_shop`) | Turbo Hogrider |
 | Rally: summon a stat copy that attacks first | `rally = { summon_stat_copy = "Golem" }` | `attack_triggers` + `attack_swings_at` (fight); shop copy summons only | Jailbird Juggernaut |
 | Golden played from hand | `buff_per_golden_played`, `after_discover` scaling | `Action::Play` -> `add_golden_played`, `Player.golden_played` | Maritime Extortionist |
@@ -320,9 +321,10 @@ Triple Reward spell.
   Elemental (`tribes = [..]`).
 - **The Refresh amount.** One `Player.refresh_buff` that Waveling's
   Deathrattle (fight or shop), En-Djinn Blazer and Easterly Winds add into;
-  every Refresh except the turn-start roll gives all of it to one random
-  non-spell, non-`fixed_stats` Tavern minion. No random number is drawn while it is 0,
-  so seeded games without these cards are unchanged.
+  every Refresh gives all of it to one random non-spell, non-`fixed_stats`
+  Tavern minion, the turn-start roll included when the Tavern changed (see
+  DESIGN.md "Two kinds of Refresh"). No random number is drawn while it is
+  0, so seeded games without these cards are unchanged.
 - **A second player counter.** `N_COUNTERS` is 2: `Counter::Baller` is the
   count of Ballers sold. Tests that spell out `improve` arrays need two entries.
 - **Elemental plays.** In `Action::Play`, right after the board insert:
@@ -419,8 +421,9 @@ Triple Reward spell.
   minion plays `gem_casts` times: Balinda sets, each Hot-Air Surveyor adds
   ("Set versus add", `cards::how_many_times`). Roogug
   (`on_gem_played_on_self`) reacts only to gems cast from hand. Blood Gem
-  Barrage adds to `Player.barrage` per cast; every Refresh but the turn-start
-  roll gives it to every Tavern minion (`apply_barrage`).
+  Barrage adds to `Player.barrage` per cast; every Refresh gives it to every
+  Tavern minion (`apply_barrage`), the turn-start roll included when the
+  Tavern changed (see DESIGN.md "Two kinds of Refresh").
 - **Triple Reward as a card.** A golden minion played from hand puts the
   Triple Reward spell in hand (`Game::give_triple_reward`), its Discover tier
   in the copy's `improvements`, fixed when given; it comes before anything the
@@ -437,7 +440,8 @@ Triple Reward spell.
   included), never the Lockbox or a locked minion; a discarded pool minion's
   copy goes back. The "when you discard" hook is the `Discarded` event.
 - **Both effects combined.** Thorned Trailblazer
-  (`choose_one_cover`, counted per turn in `Player.trailblazer_covers`) and
+  (`choose_one_cover`: each Trailblazer on the board holds its own combine
+  in `Minion.uses_left`, spent left to right) and
   Fandral's Fortune (a Discover whose pick gets `Minion.both_effects`) run a
   Choose One's two options in order, through `Player.choose_queue` when the
   first leaves a target prompt open.
