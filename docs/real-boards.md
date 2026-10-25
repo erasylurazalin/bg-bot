@@ -18,6 +18,14 @@ systemctl --user disable --now bg-boards.timer  # stop it
 
 The unit files are `~/.config/systemd/user/bg-boards.{service,timer}`.
 
+**Games on era-laptop.** The laptop's client writes its own `Power.log`
+(`log.config` copied there on 2026-10-25). Its timer `bg-logs.timer` runs
+`~/.local/bin/bg-logs-sync` every 15 minutes: it copies the log folders to
+the laptop's `~/bg-logs/` and, when era-arch answers over ssh, rsyncs them
+to `~/bg-logs-laptop/` here. The collector reads both archives; laptop games
+are named `boards/real/laptop-<log folder>-g<N>.json`. Stop it on the
+laptop with `systemctl --user disable --now bg-logs.timer`.
+
 ## The file
 
 ```json
@@ -36,6 +44,13 @@ The unit files are `~/.config/systemd/user/bg-boards.{service,timer}`.
 - The boards are as they went into the fight, before Start of Combat.
 - `tier`, `health` and `armor` are the player's at the first attack.
 - `hero_card` can be a skin; `hero_base` is the hero's own card id.
+- `hero_power`, `trinkets` and `rewards` (quest rewards) are the side's at
+  the first attack, each with its card id, name and current numbers (the
+  {0} {1} {2} {3} of its text); a trinket also says whether it sits in the
+  greater slot. Not used by training yet.
+- The raw logs stay in `~/bg-logs/`, so anything else the tracker can read
+  can be added later: delete `boards/real/.state.json` and run the script
+  again to rewrite every file.
 - `place` is my final place (0 while the game is still going).
 - No player names are stored.
 

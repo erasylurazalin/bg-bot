@@ -30,6 +30,9 @@ from bg.battlegrounds import Tracker  # noqa: E402
 
 LOGS = Path.home() / "hearthstone-linux/hearthstone/Logs"
 ARCHIVE = Path.home() / "bg-logs"
+# The laptop keeps its own logs and rsyncs them here (~/.local/bin/bg-logs-sync
+# on era-laptop); its boards get a "laptop-" prefix.
+LAPTOP_ARCHIVE = Path.home() / "bg-logs-laptop"
 OUT = Path(__file__).resolve().parent.parent / "boards/real"
 STATE = OUT / ".state.json"
 
@@ -70,6 +73,20 @@ def seat_info(seat):
 FLIP = {"win": "lose", "lose": "win", "tie": "tie", "": ""}
 
 
+def extras(fight, side):
+    """What a side had at the first attack besides its board: hero power,
+    trinkets and quest rewards (side 0 is me, 1 the opponent)."""
+    hp = fight.hero_powers[side]
+    return {
+        "hero_power": {"card_id": hp.card_id, "name": hp.name, "numbers": list(hp.numbers)}
+        if hp else None,
+        "trinkets": [{"card_id": t.card_id, "name": t.name, "greater": t.greater,
+                      "numbers": list(t.numbers)} for t in fight.trinkets[side]],
+        "rewards": [{"card_id": r.card_id, "name": r.name, "numbers": list(r.numbers)}
+                    for r in fight.rewards[side]],
+    }
+
+
 def read_log(path):
     """Yield (game number, game record) for every Battlegrounds game in the log."""
     t = Tracker()
@@ -101,9 +118,9 @@ def read_log(path):
             if not fight.result:
                 continue
             boards.append({"who": "me", "turn": fight.turn, "result": fight.result,
-                           **mine, "minions": minions(fight.mine)})
+                           **mine, **extras(fight, 0), "minions": minions(fight.mine)})
             boards.append({"who": "opp", "turn": fight.turn, "result": FLIP[fight.result],
-                           **theirs, "minions": minions(fight.theirs)})
+                           **theirs, **extras(fight, 1), "minions": minions(fight.theirs)})
         if boards:
             yield gi, {"place": me.place if me else 0, "boards": boards}
 
@@ -115,8 +132,10 @@ def main():
         state = json.loads(STATE.read_text())
     except (OSError, ValueError):
         state = {}
-    for log in sorted(ARCHIVE.glob("Hearthstone_*/Power.log")):
-        name = log.parent.name
+    logs = [("", p) for p in sorted(ARCHIVE.glob("Hearthstone_*/Power.log"))]
+    logs += [("laptop-", p) for p in sorted(LAPTOP_ARCHIVE.glob("Hearthstone_*/Power.log"))]
+    for prefix, log in logs:
+        name = prefix + log.parent.name
         size = log.stat().st_size
         if state.get(name) == size:
             continue

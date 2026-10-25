@@ -114,7 +114,30 @@ fn play_pos(game: &Game, p: usize, pref: Option<Tribe>, m: &Minion) -> Option<u8
 fn first_legal(game: &Game) -> Action {
     let mut mask = [false; N_ACTIONS];
     game.legal_mask(&mut mask);
-    let i = mask.iter().position(|&m| m).expect("no legal action");
+    let Some(i) = mask.iter().position(|&m| m) else {
+        // Training hit this once (2026-10-25) and random play never does:
+        // print the stuck player's state so the cause can be found.
+        let p = game.current_player();
+        if let Some(pl) = p.map(|p| &game.players[p]) {
+            let names = |ms: &[crate::Minion]| -> Vec<String> {
+                ms.iter().map(|m| game.data.cards.get(m.card).name.clone()).collect()
+            };
+            eprintln!(
+                "no legal action: turn {} player {:?} hero {:?} power {:?} gold {} tier {}\n  \
+                 pending_target {:?}\n  pending_shop_target {:?}\n  pending_choose_one {:?}\n  \
+                 pending_discard {:?}\n  discover {:?} queue {}\n  choose_queue {}\n  power_offer {:?}\n  \
+                 board {:?}\n  hand {:?}\n  shop {:?} spell {:?}",
+                game.turn, p, pl.hero.map(|h| game.data.heroes.get(h).name.clone()), pl.power,
+                pl.gold, pl.tier, pl.pending_target, pl.pending_shop_target, pl.pending_choose_one,
+                pl.pending_discard,
+                pl.discover.iter().map(|&c| game.data.cards.get(c).name.clone()).collect::<Vec<_>>(),
+                pl.discover_queue.len(), pl.choose_queue.len(), pl.power_offer,
+                names(&pl.board), names(&pl.hand), names(&pl.shop),
+                pl.shop_spell.map(|c| game.data.cards.get(c).name.clone()),
+            );
+        }
+        panic!("no legal action");
+    };
     Action::from_index(i).unwrap()
 }
 
