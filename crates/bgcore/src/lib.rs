@@ -13,6 +13,7 @@ pub mod game;
 pub mod heroes;
 pub mod minion;
 pub mod obs;
+pub mod real_boards;
 pub mod record;
 pub mod rng;
 pub mod rules;
@@ -23,6 +24,9 @@ pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
 pub use game::{Game, IllegalAction, Opponent, Player, PowerState, Sandbox, SandboxFight};
 pub use heroes::{Hero, HeroDb, HeroPower, PowerEffect};
 pub use minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
+pub use real_boards::{
+    CardIdMap, LATE_TURN, RealBoard, RealBoardSpec, RealBoards, RealMinionSpec, parse_board_files,
+};
 pub use rng::Rng;
 pub use rules::Rules;
 

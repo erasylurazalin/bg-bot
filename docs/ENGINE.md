@@ -23,19 +23,24 @@ crates/
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
+    src/real_boards.rs the boards of Era's real games: file parsing, card id
+                      mapping, the turn buckets a real seat draws from
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
                       heroes.rs (the hero frame: pick, armor, the 14 powers, the two spells),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card),
                       lobby.rs (the 5-tribe lobby and every draw that respects it),
                       core_rules.rs (the generic rules on the real data), fight.rs,
-                      game.rs; parser tests build small TOML strings inline
+                      game.rs, real_boards.rs (real-board seats; its small fixture
+                      folder tests/data/real-boards stands in for boards/real),
+                      sandbox.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
   bgpy/               PyO3 bindings: a batch of games stepped together
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
   model.py            policy and value network
   ppo.py              PPO self-play, evals, checkpoints
+  real_boards.py      loads boards/real for training (card id to name, summary)
   status.py           prints a run's metrics.csv as a table
 ref/                  (git-ignored) Blizzard card data snapshots, see below
 docs/                 concept, pool analysis, mechanics inventory (a snapshot from before
@@ -244,6 +249,42 @@ into the mirror fight (after end-of-turn effects, before the fight's permanent
 gains). Card text on the `?` command comes from `ref/lobby5.tsv` when it
 exists.
 
+## Real-board seats
+
+A seat can play the boards of Era's real games (`boards/real/*.json`, see
+`docs/real-boards.md`) instead of shopping: at the start of each of its turns
+it takes a fresh random board of that turn (the file's attack, health, golden
+and keywords, Dark Gift effects lost) and its turn is over. The boards are
+not pool cards: they hold no pool copies and nothing goes back when they die
+or the seat is knocked out, so pool accounting stays exact.
+
+- **Building one:** `Game::new_random_heroes_real(data, seed, &seats, boards)`
+  marks the seats before the heroes are dealt, so a real seat gets no hero
+  (no power, no hero armor, and it uses up no hero from the deck; the pick
+  phase skips it too) and plays with a flat 30 Health and 10 armor whatever
+  its boards. It takes damage like anyone (armor first) and is knocked out
+  at 0 Health.
+- **The boards:** `RealBoards` (src/real_boards.rs) is built once from specs
+  and shared by every game (`Arc`). A fresh random board each turn from all
+  boards of that turn, Era's and opponents' alike; turn 13 and later draw
+  from every board of turn 13 or later; a turn before 13 with no boards of
+  its own uses the nearest earlier turn that has some. Minions whose name
+  matches no card are dropped (about 1%: Dark Paradox, buddies, timewarped
+  minions).
+- **Loading:** `bgcore::real_boards::parse_board_files` parses the JSON texts
+  and maps card ids through `ref/bg-cards.json` (`CardIdMap`: a golden id,
+  the game's `_G` and `TB_BaconUps_*` forms, maps to the base card). The
+  callers read the files: `train/real_boards.py` for training (it prints the
+  boards per turn and the unmatched minions by name), `bgbench --real-boards
+  DIR [--real-seats N]` for fuzz and games, and the tests use the small
+  fixture folder `crates/bgcore/tests/data/real-boards/`.
+- **In training:** the lineup grows a sixth number,
+  `learner,snapshot,standard,rush,random,real` (default `4,2,1,1,0,0`, so
+  old commands keep working); `bgpy.VecEnv(n, seed, lineup, real_boards=..)`
+  takes the loaded specs, and real seats are played in Rust like the bot
+  seats. `ppo.py` adds a `vs7 real` eval (one learner against 7 real seats,
+  `place_vs_real`) whenever real boards are loaded.
+
 ## Adding a card
 
 See `docs/ADDING-CARDS.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).
@@ -276,6 +317,11 @@ cargo build --release -p bgbench
 cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 ```
 
+`fuzz` and `games` also take `--real-boards DIR [--real-seats N]` (default 2)
+to seat real-board seats playing DIR's boards (docs/real-boards.md); without
+a real boards/ folder, `crates/bgcore/tests/data/real-boards/` is a small
+stand-in. Needs `ref/bg-cards.json` for the card id mapping.
+
 Python side, from the repo root:
 
 ```
@@ -290,7 +336,9 @@ Deleting `.venv` undoes it.
 ## Training notes
 
 - One network plays every learner seat. Seats per game come from
-  `--lineup` (learner, snapshot, standard bot, rush bot, random).
+  `--lineup` (learner, snapshot, standard bot, rush bot, random, real; the
+  real seats play boards from `--real-boards`, default `boards/real` when
+  the lineup has any).
 - Reward is placement only (+1 for 1st to -1 for 8th), minus 0.002 per
   action so it doesn't shuffle its board for free. Discounting is per
   turn, not per action; with per-action discounting nothing learned,
@@ -302,7 +350,9 @@ Deleting `.venv` undoes it.
 - Every eval writes a row to `runs/NAME/metrics.csv`: placement against
   each bot, a curve report (turn reaching tiers 3, 4, 5; share of rush,
   standard, economy rush and slow games), a tribe report, entropy and the
-  action mix.
+  action mix. With real boards loaded (real seats in the lineup, or
+  `--real-boards` given), `place_vs_real` holds the one-learner-vs-7-real-
+  seats eval.
 - `--stop-flat N` stops a run after N minutes without gains, but only when
   it also no longer beats its oldest snapshot.
 - Any change to the action space or observation breaks old checkpoints;
@@ -313,8 +363,9 @@ Deleting `.venv` undoes it.
   heroes (a hero embedding beside the card one), armor, the power state, the
   hero offer during the pick and the `hero_power` action kind (OBS_SIZE to
   6389, SCALARS 173, OPP_SCALARS 30): every checkpoint before it breaks too.
-- Games from `bgpy` play with heroes (`Game::new_heroes`), pick included;
-  learner seats answer the pick and any power Discover with `choose`.
+- Games from `bgpy` play with heroes (`Game::new_random_heroes`, no pick),
+  except real seats which get none; learner seats answer any power Discover
+  with `choose`.
 - `--model` picks the network: `mlp` (default, 3.1M parameters, all slots
   concatenated), `attn` (a 3-layer transformer over the card slots, 0.65M)
   or `pool` (the same slot tokens pooled per zone, 0.76M). The last two

@@ -14,7 +14,9 @@ parameter whose name and shape match, with a fresh optimizer:
         --init-from runs/attn1/best.pt
 
 Each game seats learners (this network, trained), snapshots (older copies of
-it), standard curve bots, rush curve bots, and random bots. Reward is placement
+it), standard curve bots, rush curve bots, random bots and real seats
+(--lineup has all six counts; a real seat plays a board of the current turn
+from Era's games, --real-boards, and never shops). Reward is placement
 only: +1 for 1st down to -1 for 8th, given when the seat is knocked out or the
 game ends, minus a tiny cost per action (--action-cost) so it doesn't shuffle
 its board for free.
@@ -35,6 +37,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
+import real_boards
 from model import MODELS, OPP_BOARDS, build, ck_model, masked, model_opts, warm_start
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
@@ -55,6 +58,9 @@ EVAL_KEYS = [
     "curve_econ_rush", "curve_rush", "curve_standard", "curve_slow",
     *[f"tribe_{t}" for t in REPORT_GROUPS],
     *[f"place_{t}" for t in REPORT_GROUPS],
+    # last, so rows appended to a metrics.csv from before real seats stay
+    # aligned with its header (the extra value just trails the old columns)
+    "place_vs_real",
 ]
 # Columns of bgpy's tribe counts: the ten tribes in bgcore's `Tribe::EVERY`
 # order, then neutral.
@@ -82,8 +88,12 @@ def args():
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--envs", type=int, default=1024)
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
-    a.add_argument("--lineup", default="4,2,1,1,0",
-                   help="learner,snapshot,standard,rush,random seats")
+    a.add_argument("--lineup", default="4,2,1,1,0,0",
+                   help="learner,snapshot,standard,rush,random,real seats")
+    a.add_argument("--real-boards", default=None,
+                   help="folder of real boards for real seats (docs/real-boards.md); "
+                        "default boards/real when the lineup has real seats. Given without "
+                        "real seats it still adds the vs7 real eval")
     a.add_argument("--lr", type=float, default=2.5e-4)
     a.add_argument("--epochs", type=int, default=3)
     a.add_argument("--minibatch", type=int, default=8192)
@@ -131,10 +141,10 @@ def act(net, obs, mask, greedy=False):
 
 
 @torch.no_grad()
-def evaluate(net, n_games, lineup, dev, seed):
+def evaluate(net, n_games, lineup, dev, seed, real_boards=None):
     """Play n_games with `lineup` and return (avg_place, learner_records)."""
     n = min(n_games, 1024)
-    env = bgpy.VecEnv(n, seed, lineup)
+    env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards)
     b = Bufs(n)
     env.kinds(b.kinds)
     records, done = [], 0
@@ -161,7 +171,7 @@ def evaluate(net, n_games, lineup, dev, seed):
 def evaluate_vs(net, other, n_games, dev, seed):
     """4 learner seats against 4 seats of `other`. Learners' average place."""
     n = min(n_games, 1024)
-    env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0])
+    env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0, 0])
     b = Bufs(n)
     env.kinds(b.kinds)
     places, done = [], 0
@@ -254,9 +264,22 @@ def main():
     out = Path("runs") / cfg.name
     out.mkdir(parents=True, exist_ok=True)
     lineup = [int(x) for x in cfg.lineup.split(",")]
+    if len(lineup) != bgpy.SEAT_KINDS:
+        raise SystemExit(f"--lineup needs {bgpy.SEAT_KINDS} numbers "
+                         f"(learner,snapshot,standard,rush,random,real), got {cfg.lineup}")
+    # Real seats need the boards; --real-boards alone still adds the vs7 real
+    # eval, so a run can watch that number without training against them.
+    real = None
+    if lineup[bgpy.REAL] > 0 or cfg.real_boards:
+        folder = cfg.real_boards or real_boards.DEFAULT_DIR
+        real, unknown = real_boards.load(folder)
+        print(f"real boards from {folder}:")
+        real_boards.print_summary(real, unknown)
+        if not real:
+            raise SystemExit(f"no real boards in {folder}")
 
     N, T = cfg.envs, cfg.steps
-    env = bgpy.VecEnv(N, cfg.seed, lineup)
+    env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real)
     names = env.card_names()
     if cfg.compile is None:
         cfg.compile = cfg.model == "attn"
@@ -459,13 +482,17 @@ def main():
         if update % cfg.eval_every == 0 or done:
             net.eval()
             seed = 10_000 + update * 10
-            vs_std, rec_std = evaluate(net, cfg.eval_games, [1, 0, 7, 0, 0], dev, seed)
-            vs_rush, rec_rush = evaluate(net, cfg.eval_games, [1, 0, 0, 7, 0], dev, seed + 1)
-            v4_std, rec_4s = evaluate(net, cfg.eval_games // 2, [4, 0, 4, 0, 0], dev, seed + 2)
-            v4_rush, rec_4r = evaluate(net, cfg.eval_games // 2, [4, 0, 0, 4, 0], dev, seed + 3)
-            v4_mix, rec_4m = evaluate(net, cfg.eval_games // 2, [4, 0, 2, 2, 0], dev, seed + 4)
+            vs_std, rec_std = evaluate(net, cfg.eval_games, [1, 0, 7, 0, 0, 0], dev, seed)
+            vs_rush, rec_rush = evaluate(net, cfg.eval_games, [1, 0, 0, 7, 0, 0], dev, seed + 1)
+            v4_std, rec_4s = evaluate(net, cfg.eval_games // 2, [4, 0, 4, 0, 0, 0], dev, seed + 2)
+            v4_rush, rec_4r = evaluate(net, cfg.eval_games // 2, [4, 0, 0, 4, 0, 0], dev, seed + 3)
+            v4_mix, rec_4m = evaluate(net, cfg.eval_games // 2, [4, 0, 2, 2, 0, 0], dev, seed + 4)
             snap.load_state_dict(pool[0])  # the oldest snapshot kept
             vs_snap = evaluate_vs(net, snap, cfg.eval_games // 2, dev, seed + 5)
+            # One learner against 7 real seats: does it beat real boards?
+            vs_real = float("nan")
+            if real is not None:
+                vs_real, _ = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev, seed + 6, real)
             net.train()
 
             rep = summarize_records(rec_std + rec_rush + rec_4s + rec_4r + rec_4m)
@@ -476,6 +503,7 @@ def main():
                 "place_4v4_rush": v4_rush,
                 "place_4v4_mix": v4_mix,
                 "place_vs_snapshot": vs_snap,
+                "place_vs_real": vs_real,
                 **rep,
             }
             for key, val in eval_vals.items():
@@ -517,7 +545,7 @@ def main():
                 done = True
             print(
                 f"update {update:5d}  {minutes:5.1f} min  {games:7d} games  "
-                f"vs7(std {vs_std:.2f} rush {vs_rush:.2f})  "
+                f"vs7(std {vs_std:.2f} rush {vs_rush:.2f} real {vs_real:.2f})  "
                 f"4v4(std {v4_std:.2f} rush {v4_rush:.2f} mix {v4_mix:.2f} snap {vs_snap:.2f})  "
                 f"t3/4/5 {rep['turn_t3']:.1f}/{rep['turn_t4']:.1f}/{rep['turn_t5']:.1f}  "
                 f"crv(std {rep['curve_standard']:.0%} rush {rep['curve_rush']:.0%} "

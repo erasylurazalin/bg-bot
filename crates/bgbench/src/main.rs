@@ -5,15 +5,84 @@
 //!   bgbench fuzz [games]    games on every core, invariants after every step
 //!   bgbench match [games]   curve bots against random bots, average placement
 //!   bgbench peak [n]        peak board balance matrix (n fights each way per pair)
+//!
+//! `fuzz` and `games` also take --real-boards DIR [--real-seats N] to seat
+//! real-board seats playing the boards of DIR (docs/real-boards.md), the
+//! small fixture crate bgcore/tests/data/real-boards included.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bgcore::bots::{random_action, rush_action, standard_action};
-use bgcore::{Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, Rng, fight, fight_with};
+use bgcore::real_boards::{parse_board_files, CardIdMap, RealBoards};
+use bgcore::{
+    Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, RealBoardSpec, Rng, fight,
+    fight_with,
+};
 use rayon::prelude::*;
 use serde::Deserialize;
+
+/// The boards real seats play, and how many seats of a game are real.
+type Real = Option<(Arc<RealBoards>, usize)>;
+
+/// Read the board files in `dir` (docs/real-boards.md) and resolve them
+/// against the card set, mapping card ids through ref/bg-cards.json. Prints
+/// what was loaded: boards per turn and the unmatched minions by name.
+fn load_real_boards(dir: &str) -> Result<Arc<RealBoards>, String> {
+    let mut files: Vec<(String, String)> = std::fs::read_dir(dir)
+        .map_err(|e| format!("{dir}: {e}"))?
+        .map(|e| e.map_err(|e| format!("{dir}: {e}")))
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            n.ends_with(".json") && !n.starts_with('.')
+        })
+        .map(|e| {
+            let p = e.path();
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            let text = std::fs::read_to_string(&p)
+                .unwrap_or_else(|err| panic!("{}: {err}", p.display()));
+            (name, text)
+        })
+        .collect();
+    files.sort();
+    if files.is_empty() {
+        return Err(format!("{dir}: no board files"));
+    }
+    let ref_json = std::fs::read_to_string("ref/bg-cards.json")
+        .map_err(|e| format!("ref/bg-cards.json (the card id mapping): {e}"))?;
+    let ids = CardIdMap::parse(&ref_json)?;
+    let (specs, unknown): (Vec<RealBoardSpec>, Vec<String>) = parse_board_files(&files, &ids)?;
+    let (boards, unmatched) = RealBoards::build(&specs, &Data::bundled().cards);
+    let mut by_name = unknown;
+    by_name.extend(unmatched);
+    println!(
+        "{} boards from {} games in {dir}",
+        boards.len(),
+        files.len()
+    );
+    let counts = boards.counts_by_turn();
+    let per_turn: Vec<String> = counts[..counts.len() - 1]
+        .iter()
+        .enumerate()
+        .filter(|&(_, &n)| n > 0)
+        .map(|(t, &n)| format!("t{}: {n}", t + 1))
+        .chain(std::iter::once(format!(
+            "{}+: {}",
+            bgcore::LATE_TURN,
+            counts[counts.len() - 1]
+        )))
+        .collect();
+    println!("  boards per turn: {}", per_turn.join(", "));
+    if !by_name.is_empty() {
+        by_name.sort();
+        by_name.dedup();
+        println!("  unmatched minions: {}", by_name.join(", "));
+    }
+    Ok(Arc::new(boards))
+}
 
 fn random_board(data: &Data, rng: &mut Rng) -> Vec<Minion> {
     let n = 1 + rng.below(BOARD as u32) as usize;
@@ -56,9 +125,16 @@ fn bench_fights(n: usize) {
     );
 }
 
-/// Plays one game with random actions. Returns (steps, turns).
-fn play(data: &Arc<Data>, seed: u64, check: bool) -> Result<(u64, u32), String> {
-    let mut g = Game::new_random_heroes(data.clone(), seed);
+/// Plays one game with random actions. Returns (steps, turns). With `real`,
+/// that many seats (players 0..) are real-board seats instead.
+fn play(data: &Arc<Data>, seed: u64, check: bool, real: Real) -> Result<(u64, u32), String> {
+    let mut g = match &real {
+        Some((boards, n)) => {
+            let seats: Vec<usize> = (0..*n).collect();
+            Game::new_random_heroes_real(data.clone(), seed, &seats, boards.clone())
+        }
+        None => Game::new_random_heroes(data.clone(), seed),
+    };
     let mut rng = Rng::new(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
     let mut steps = 0;
     while !g.over {
@@ -73,7 +149,7 @@ fn play(data: &Arc<Data>, seed: u64, check: bool) -> Result<(u64, u32), String> 
     Ok((steps, g.turn))
 }
 
-fn bench_games(secs: u64) {
+fn bench_games(secs: u64, real: Real) {
     let data = Arc::new(Data::bundled());
     // one core first, for the per-game time
     let t = Instant::now();
@@ -81,7 +157,7 @@ fn bench_games(secs: u64) {
     let mut turns = 0;
     let n = 2000;
     for seed in 0..n {
-        let (s, tu) = play(&data, seed, false).unwrap();
+        let (s, tu) = play(&data, seed, false, real.clone()).unwrap();
         steps += s;
         turns += tu as u64;
     }
@@ -102,7 +178,7 @@ fn bench_games(secs: u64) {
     (0..threads as u64).into_par_iter().for_each(|th| {
         let mut seed = th << 40;
         while !stop.load(Ordering::Relaxed) {
-            play(&data, seed, false).unwrap();
+            play(&data, seed, false, real.clone()).unwrap();
             seed += 1;
             games.fetch_add(1, Ordering::Relaxed);
             if t.elapsed() >= deadline {
@@ -115,11 +191,11 @@ fn bench_games(secs: u64) {
     println!("{threads} threads: {g} games in {el:.1} s, {:.0} games per second", g as f64 / el);
 }
 
-fn fuzz(n: u64) {
+fn fuzz(n: u64, real: Real) {
     let data = Arc::new(Data::bundled());
     let t = Instant::now();
     let results: Vec<Result<(u64, u32), String>> =
-        (0..n).into_par_iter().map(|seed| play(&data, seed, true)).collect();
+        (0..n).into_par_iter().map(|seed| play(&data, seed, true, real.clone())).collect();
     let steps: u64 = results.iter().filter_map(|r| r.as_ref().ok()).map(|r| r.0).sum();
     let errors: Vec<&String> = results.iter().filter_map(|r| r.as_ref().err()).collect();
     println!("{n} games, {steps} actions, invariants checked after each, in {:.1?}", t.elapsed());
@@ -377,14 +453,43 @@ fn bench_peak(n: usize) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let num = |default: u64| args.get(2).and_then(|s| s.parse().ok()).unwrap_or(default);
+    // --real-boards DIR [--real-seats N] on fuzz and games: seats that play
+    // boards from DIR instead of shopping.
+    let real: Real = if let Some(k) = args.iter().position(|a| a == "--real-boards") {
+        let Some(dir) = args.get(k + 1) else {
+            eprintln!("--real-boards needs a directory");
+            std::process::exit(2);
+        };
+        let seats = args
+            .iter()
+            .position(|a| a == "--real-seats")
+            .and_then(|k| args.get(k + 1))
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(2);
+        assert!((1..=bgcore::PLAYERS).contains(&seats), "real seats must be 1 to 8");
+        let boards = load_real_boards(dir).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        });
+        Some((boards, seats))
+    } else {
+        if args.iter().any(|a| a == "--real-seats") {
+            eprintln!("--real-seats needs --real-boards DIR");
+            std::process::exit(2);
+        }
+        None
+    };
     match args.get(1).map(String::as_str) {
         Some("fight") => bench_fights(num(1_000_000) as usize),
-        Some("games") => bench_games(num(10)),
-        Some("fuzz") => fuzz(num(10_000)),
+        Some("games") => bench_games(num(10), real),
+        Some("fuzz") => fuzz(num(10_000), real),
         Some("match") => bot_match(num(10_000)),
         Some("peak") => bench_peak(num(10_000) as usize),
         _ => {
-            eprintln!("usage: bgbench fight [n] | games [secs] | fuzz [games] | match [games] | peak [n]");
+            eprintln!(
+                "usage: bgbench fight [n] | games [secs] | fuzz [games] | match [games] | peak [n]\n\
+                 \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N]"
+            );
             std::process::exit(2);
         }
     }

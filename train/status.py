@@ -8,6 +8,7 @@ COLS = [
     ("place_vs_std", "vs7std"), ("place_vs_rush", "vs7rush"),
     ("place_4v4_std", "4v4std"), ("place_4v4_rush", "4v4rush"),
     ("place_4v4_mix", "4v4mix"), ("place_vs_snapshot", "vs_old"),
+    ("place_vs_real", "vs7real"),
     ("turn_t3", "trn@t3"), ("turn_t4", "trn@t4"), ("turn_t5", "trn@t5"),
     ("curve_econ_rush", "c_econ"), ("curve_rush", "c_rush"),
     ("curve_standard", "c_std"), ("curve_slow", "c_slow"),

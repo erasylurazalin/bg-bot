@@ -1909,6 +1909,14 @@ on_cast_spell = { buff_all_and_deity = [3, 3] }
 
 # --- Tokens ---
 
+# A minion from a real board that this game doesn't build (buddies,
+# Timewarped minions): the file's stats and keywords, no effect.
+[[token]]
+name = "Stand-in"
+tier = 1
+tribe = "neutral"
+stats = [1, 1]
+
 [[token]]
 name = "Beetle"
 tier = 1

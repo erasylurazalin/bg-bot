@@ -1,0 +1,161 @@
+{
+ "source": "Hearthstone_2026_10_24_15_25_26",
+ "game": 1,
+ "place": 4,
+ "boards": [
+  {
+   "who": "me",
+   "turn": 1,
+   "result": "win",
+   "hero": "Reno Jackson",
+   "hero_card": "TB_BaconShop_HERO_41",
+   "hero_base": "TB_BaconShop_HERO_41",
+   "tier": 1,
+   "health": 30,
+   "armor": 12,
+   "minions": [
+    {
+     "card_id": "BG20_100",
+     "name": "Razorfen Geomancer",
+     "attack": 2,
+     "health": 1,
+     "golden": false,
+     "keywords": [],
+     "dark_gifts": []
+    }
+   ]
+  },
+  {
+   "who": "opp",
+   "turn": 1,
+   "result": "lose",
+   "hero": "Pyramad",
+   "hero_card": "TB_BaconShop_HERO_39",
+   "hero_base": "TB_BaconShop_HERO_39",
+   "tier": 1,
+   "health": 30,
+   "armor": 14,
+   "minions": [
+    {
+     "card_id": "BG25_001",
+     "name": "Risen Rider",
+     "attack": 2,
+     "health": 1,
+     "golden": false,
+     "keywords": [],
+     "dark_gifts": []
+    }
+   ]
+  },
+  {
+   "who": "me",
+   "turn": 2,
+   "result": "lose",
+   "hero": "Reno Jackson",
+   "hero_card": "TB_BaconShop_HERO_41",
+   "hero_base": "TB_BaconShop_HERO_41",
+   "tier": 2,
+   "health": 30,
+   "armor": 12,
+   "minions": [
+    {
+     "card_id": "BG20_101",
+     "name": "Roadboar",
+     "attack": 2,
+     "health": 4,
+     "golden": false,
+     "keywords": [],
+     "dark_gifts": []
+    },
+    {
+     "card_id": "BG21_015_G",
+     "name": "Tarecgosa",
+     "attack": 8,
+     "health": 8,
+     "golden": true,
+     "keywords": [],
+     "dark_gifts": []
+    }
+   ]
+  },
+  {
+   "who": "opp",
+   "turn": 2,
+   "result": "win",
+   "hero": "Pyramad",
+   "hero_card": "TB_BaconShop_HERO_39",
+   "hero_base": "TB_BaconShop_HERO_39",
+   "tier": 2,
+   "health": 28,
+   "armor": 14,
+   "minions": [
+    {
+     "card_id": "BG19_010",
+     "name": "Sewer Rat",
+     "attack": 3,
+     "health": 2,
+     "golden": false,
+     "keywords": [
+      "TAUNT"
+     ],
+     "dark_gifts": []
+    }
+   ]
+  },
+  {
+   "who": "me",
+   "turn": 3,
+   "result": "win",
+   "hero": "Reno Jackson",
+   "hero_card": "TB_BaconShop_HERO_41",
+   "hero_base": "TB_BaconShop_HERO_41",
+   "tier": 3,
+   "health": 25,
+   "armor": 12,
+   "minions": [
+    {
+     "card_id": "BG24_500",
+     "name": "Amber Guardian",
+     "attack": 3,
+     "health": 2,
+     "golden": false,
+     "keywords": [],
+     "dark_gifts": []
+    },
+    {
+     "card_id": "BG36_360t3",
+     "name": "Dark Paradox",
+     "attack": 6,
+     "health": 6,
+     "golden": false,
+     "keywords": [],
+     "dark_gifts": [
+      "BG36_MidGameEffect_000t3"
+     ]
+    }
+   ]
+  },
+  {
+   "who": "opp",
+   "turn": 3,
+   "result": "lose",
+   "hero": "Pyramad",
+   "hero_card": "TB_BaconShop_HERO_39",
+   "hero_base": "TB_BaconShop_HERO_39",
+   "tier": 2,
+   "health": 28,
+   "armor": 14,
+   "minions": [
+    {
+     "card_id": "BG20_100t",
+     "name": "BG20_100t",
+     "attack": 4,
+     "health": 4,
+     "golden": false,
+     "keywords": [],
+     "dark_gifts": []
+    }
+   ]
+  }
+ ]
+}

@@ -1,8 +1,9 @@
 //! Python bindings: a batch of games stepped together, for training.
 //!
-//! Every seat in a game has a kind. Standard, rush and random seats are played
-//! here in Rust. Learner and snapshot seats are played from Python: after every
-//! call each game is waiting on one of them, and `observe` says which.
+//! Every seat in a game has a kind. Standard, rush, random and real seats are
+//! played here in Rust. Learner and snapshot seats are played from Python:
+//! after every call each game is waiting on one of them, and `observe` says
+//! which.
 //!
 //! Python owns the numpy arrays and passes them in; Rust fills them. Nothing
 //! is allocated per step.
@@ -14,6 +15,7 @@ use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::obs::{self, OBS_SIZE};
+use bgcore::real_boards::{RealBoardSpec, RealBoards, RealMinionSpec};
 use bgcore::{ACTION_KINDS, Action, Data, Game, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES};
 use numpy::{PyReadonlyArray1, PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3};
 use pyo3::exceptions::PyValueError;
@@ -25,7 +27,12 @@ const SNAPSHOT: u8 = 1;
 const STANDARD: u8 = 2;
 const RUSH: u8 = 3;
 const RANDOM: u8 = 4;
-const SEAT_KINDS: usize = 5;
+const REAL: u8 = 5;
+const SEAT_KINDS: usize = 6;
+
+/// One board for `VecEnv(real_boards=..)`, as train/real_boards.py loads it:
+/// (turn, tier, minions), a minion (name, attack, health, golden, keywords).
+type PyBoards = Vec<(u32, u8, Vec<(String, i32, i32, bool, Vec<String>)>)>;
 
 struct Env {
     game: Game,
@@ -36,7 +43,12 @@ struct Env {
 }
 
 impl Env {
-    fn new(data: &Arc<Data>, seed: u64, lineup: &[u8; SEAT_KINDS]) -> Env {
+    fn new(
+        data: &Arc<Data>,
+        seed: u64,
+        lineup: &[u8; SEAT_KINDS],
+        boards: Option<&Arc<RealBoards>>,
+    ) -> Env {
         let mut rng = Rng::new(seed ^ 0x6a09_e667_f3bc_c908);
         let mut kinds = [LEARNER; PLAYERS];
         let mut i = 0;
@@ -47,7 +59,18 @@ impl Env {
             }
         }
         rng.shuffle(&mut kinds);
-        Env { game: Game::new_random_heroes(data.clone(), seed), kinds, rng, reported: [false; PLAYERS] }
+        let real: Vec<usize> = (0..PLAYERS).filter(|&p| kinds[p] == REAL).collect();
+        let game = if real.is_empty() {
+            Game::new_random_heroes(data.clone(), seed)
+        } else {
+            Game::new_random_heroes_real(
+                data.clone(),
+                seed,
+                &real,
+                boards.expect("real seats need real boards").clone(),
+            )
+        };
+        Env { game, kinds, rng, reported: [false; PLAYERS] }
     }
 
     fn is_python(&self, p: usize) -> bool {
@@ -92,13 +115,19 @@ struct VecEnv {
     data: Arc<Data>,
     envs: Vec<Env>,
     lineup: [u8; SEAT_KINDS],
+    boards: Option<Arc<RealBoards>>,
     next_seed: u64,
 }
 
-fn check_lineup(lineup: [u8; SEAT_KINDS]) -> PyResult<[u8; SEAT_KINDS]> {
+fn check_lineup(lineup: [u8; SEAT_KINDS], boards: bool) -> PyResult<[u8; SEAT_KINDS]> {
     if lineup.iter().map(|&n| n as usize).sum::<usize>() != PLAYERS || lineup[0] == 0 {
         return Err(PyValueError::new_err(
-            "lineup is (learner, snapshot, standard, rush, random) seats, 8 in total, at least 1 learner",
+            "lineup is (learner, snapshot, standard, rush, random, real) seats, 8 in total, at least 1 learner",
+        ));
+    }
+    if lineup[REAL as usize] > 0 && !boards {
+        return Err(PyValueError::new_err(
+            "real seats need boards: pass real_boards= (train/real_boards.py loads them)",
         ));
     }
     Ok(lineup)
@@ -107,9 +136,13 @@ fn check_lineup(lineup: [u8; SEAT_KINDS]) -> PyResult<[u8; SEAT_KINDS]> {
 #[pymethods]
 impl VecEnv {
     /// `lineup`: how many seats of each kind (learner, snapshot, standard,
-    /// rush, random) a new game gets, shuffled into random seats.
+    /// rush, random, real) a new game gets, shuffled into random seats.
+    /// `real_boards`: the boards real seats play, as train/real_boards.py
+    /// loads them ((turn, tier, minions) with (name, attack, health, golden,
+    /// keywords) each); required when the lineup has real seats.
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
         seed: u64,
@@ -117,8 +150,8 @@ impl VecEnv {
         cards_toml: Option<&str>,
         rules_toml: Option<&str>,
         heroes_toml: Option<&str>,
+        real_boards: Option<PyBoards>,
     ) -> PyResult<VecEnv> {
-        let lineup = check_lineup(lineup)?;
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
             (Some(c), Some(r), h) => {
@@ -131,16 +164,41 @@ impl VecEnv {
             }
         };
         let data = Arc::new(data);
+        let boards = real_boards.map(|raw| {
+            let specs: Vec<RealBoardSpec> = raw
+                .into_iter()
+                .map(|(turn, tier, minions)| RealBoardSpec {
+                    turn,
+                    tier,
+                    minions: minions
+                        .into_iter()
+                        .map(|(name, attack, health, golden, keywords)| RealMinionSpec {
+                            name,
+                            attack,
+                            health,
+                            golden,
+                            keywords,
+                        })
+                        .collect(),
+                })
+                .collect();
+            // Names that match no card are dropped here; train/real_boards.py
+            // reports them (it knows both stages of the mapping), so this
+            // stays quiet: every eval VecEnv would repeat the line.
+            let (boards, _) = RealBoards::build(&specs, &data.cards);
+            Arc::new(boards)
+        });
+        let lineup = check_lineup(lineup, boards.is_some())?;
         let seed = seed.wrapping_mul(1 << 32);
         let mut envs: Vec<Env> =
-            (0..n as u64).map(|i| Env::new(&data, seed + i, &lineup)).collect();
+            (0..n as u64).map(|i| Env::new(&data, seed + i, &lineup, boards.as_ref())).collect();
         envs.par_iter_mut().for_each(Env::advance);
-        Ok(VecEnv { data, envs, lineup, next_seed: seed + n as u64 })
+        Ok(VecEnv { data, envs, lineup, boards, next_seed: seed + n as u64 })
     }
 
     /// The lineup for games that start from now on.
     fn set_lineup(&mut self, lineup: [u8; SEAT_KINDS]) -> PyResult<()> {
-        self.lineup = check_lineup(lineup)?;
+        self.lineup = check_lineup(lineup, self.boards.is_some())?;
         Ok(())
     }
 
@@ -180,7 +238,7 @@ impl VecEnv {
         {
             return Err(PyValueError::new_err("array sizes don't match the number of games"));
         }
-        let (data, lineup, base) = (&self.data, self.lineup, self.next_seed);
+        let (data, lineup, boards, base) = (&self.data, self.lineup, &self.boards, self.next_seed);
         let envs = &mut self.envs;
         let bad = py.detach(|| {
             envs.par_iter_mut()
@@ -204,7 +262,7 @@ impl VecEnv {
                     env.advance();
                     env.report(places, tier_turns, tribes);
                     if env.game.over {
-                        *env = Env::new(data, base + i as u64, &lineup);
+                        *env = Env::new(data, base + i as u64, &lineup, boards.as_ref());
                         env.advance();
                         *reset = true;
                     }
@@ -529,6 +587,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("STANDARD", STANDARD)?;
     m.add("RUSH", RUSH)?;
     m.add("RANDOM", RANDOM)?;
+    m.add("REAL", REAL)?;
     m.add("SEAT_KINDS", SEAT_KINDS)?;
     Ok(())
 }

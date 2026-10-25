@@ -18,6 +18,7 @@ use crate::cards::{
 use crate::fight::{Counters, Deity, SeenCounters, SideOutcome, fight_with_hands};
 use crate::heroes::PowerEffect;
 use crate::minion::{CardId, Keywords, Minion};
+use crate::real_boards::RealBoards;
 use crate::rng::Rng;
 use crate::rules::Rules;
 use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
@@ -295,6 +296,10 @@ pub struct Player {
     pub trinkets: [u8; 2],
     /// Dark Gift uses. Room for a later run, unused.
     pub dark_gifts: u8,
+    /// A real-board seat (docs/real-boards.md): no hero, no shopping. At the
+    /// start of each of its turns it takes a random board of that turn from
+    /// `Game.real_boards` and its turn is over.
+    pub real: bool,
     /// 1 to 8 once decided, 0 while still playing.
     pub placement: u8,
     /// Turn the player reached each tier (1 to 6), 0 if never reached.
@@ -421,6 +426,7 @@ impl Player {
             power_offer: ArrayVec::new(),
             trinkets: [0; 2],
             dark_gifts: 0,
+            real: false,
             placement: 0,
             tier_turns: [1, 0, 0, 0, 0, 0],
             final_tribes: [0; TRIBES],
@@ -781,6 +787,9 @@ pub struct Game {
     /// Set only by `Game::new_sandbox`: one player, a rigged Tavern and a
     /// fight against a copy of the player's own board. None in a normal game.
     pub sandbox: Option<Sandbox>,
+    /// The boards real seats (`Player.real`) draw from, set with them by
+    /// `Game::new_random_heroes_real`. None in a game without real seats.
+    pub real_boards: Option<Arc<RealBoards>>,
     order: ArrayVec<u8, PLAYERS>,
     cursor: usize,
 }
@@ -986,6 +995,31 @@ impl Game {
         g
     }
 
+    /// The hero game with real-board seats (docs/real-boards.md): every
+    /// player not in `real` gets a random hero as usual; a real seat gets
+    /// none (and uses up no hero from the deck), plays with a flat 30 Health
+    /// and 10 armor whatever its boards, and at the start of each of its
+    /// turns takes a random board of that turn from `boards` instead of
+    /// shopping.
+    pub fn new_random_heroes_real(
+        data: Arc<Data>,
+        seed: u64,
+        real: &[usize],
+        boards: Arc<RealBoards>,
+    ) -> Game {
+        let mut g = Game::unstarted(data, seed, None);
+        for &p in real {
+            assert!(p < PLAYERS, "real seat {p} is not a player");
+            let pl = &mut g.players[p];
+            pl.real = true;
+            pl.health = 30;
+            pl.armor = 10;
+        }
+        g.real_boards = Some(boards);
+        g.deal_random_heroes();
+        g
+    }
+
     /// The hero game with a fixed lobby, for tests and the sandbox.
     pub fn new_heroes_with_lobby(data: Arc<Data>, seed: u64, lobby: Tribes) -> Game {
         let mut g = Game::unstarted(data, seed, Some(lobby));
@@ -1073,7 +1107,7 @@ impl Game {
         let mut at = 0;
         for round in 0..n {
             for p in 0..PLAYERS {
-                if !self.players[p].alive || at >= deck.len() {
+                if !self.players[p].alive || self.players[p].real || at >= deck.len() {
                     continue;
                 }
                 self.players[p].hero_offer[round] = deck[at];
@@ -1092,14 +1126,15 @@ impl Game {
     }
 
     /// Every living player takes a random hero the lobby allows, no two the
-    /// same. Turn 0 then only waits for Finley's power Discover; with none
-    /// open, turn 1 starts right away.
+    /// same. A real seat gets none and uses up no hero from the deck. Turn 0
+    /// then only waits for Finley's power Discover; with none open, turn 1
+    /// starts right away.
     fn deal_random_heroes(&mut self) {
         let mut deck: Vec<u8> = self.data.heroes.lobby_allowed(self.lobby).collect();
         self.rng.shuffle(&mut deck);
         let mut at = 0;
         for p in 0..PLAYERS {
-            if self.players[p].alive && at < deck.len() {
+            if self.players[p].alive && !self.players[p].real && at < deck.len() {
                 self.take_hero(p, deck[at]);
                 at += 1;
             }
@@ -1361,6 +1396,7 @@ impl Game {
             ghost: None,
             over: false,
             sandbox: None,
+            real_boards: None,
             order: ArrayVec::new(),
             cursor: 0,
         }
@@ -6309,8 +6345,25 @@ impl Game {
                 continue;
             }
             let (da, dh) = self.total_spell_bonus(p);
-            let Game { data, rng, players, pool, sandbox, .. } = self;
+            let Game { data, rng, players, pool, sandbox, real_boards, .. } = self;
             let pl = &mut players[p];
+            if pl.real {
+                // A real seat doesn't shop: it takes a fresh random board of
+                // this turn (the file's stats, golden flag and keywords) and
+                // its turn is over. The old board just vanishes: real
+                // minions hold no pool copies, so nothing goes back.
+                let board = real_boards
+                    .as_ref()
+                    .expect("a real seat needs real boards")
+                    .draw(turn, rng);
+                pl.tier = board.tier;
+                pl.board.clear();
+                for m in &board.minions {
+                    let _ = pl.board.try_push(*m);
+                }
+                pl.done = true;
+                continue;
+            }
             if let Some(sb) = sandbox {
                 pl.free_rolls = pl.free_rolls.max(sb.free_rolls);
             }
@@ -6423,14 +6476,22 @@ impl Game {
             }
         }
         for p in 0..PLAYERS {
-            if self.players[p].alive {
+            // A real board's stats already include everything its thresholds
+            // gave it in the real game, so they don't fire here.
+            if self.players[p].alive && !self.players[p].real {
                 self.check_attack_thresholds(p);
             }
         }
         self.pair();
         self.order = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
         self.rng.shuffle(&mut self.order);
-        self.cursor = 0;
+        // Real seats are done the moment the turn starts, so the first player
+        // to act can sit past the cursor; with everyone done the turn goes
+        // straight to the fights.
+        match self.order.iter().position(|&p| !self.players[p as usize].done) {
+            Some(c) => self.cursor = c,
+            None => self.advance(),
+        }
     }
 
     /// Pair the living players at random, avoiding last turn's opponent
