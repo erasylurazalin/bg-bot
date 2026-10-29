@@ -102,6 +102,10 @@ The amounts these cards' text hides, as I know them from the game:
    which).
 3. **Trinkets:** the lesser and greater choices at their set turns.
 4. **Dark Gifts**, and Dark Paradox with them.
+5. **Probably never: ETC's buddies and Timewarped minions.** Both are
+   rare, and the bot can always steer clear of them: pick a hero other
+   than ETC, and a trinket that doesn't give Timewarped minions. If they
+   come at all, they come last, after everything else.
 
 Each season changes some of this; the export and the audit script make
 catching up after a patch cheap.
