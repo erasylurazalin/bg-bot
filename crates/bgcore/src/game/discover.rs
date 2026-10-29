@@ -278,6 +278,15 @@ impl Game {
                     None => break,
                 }
             }
+            if pl.discover.is_empty() {
+                // Nothing was left to offer (the pool or the filters ran
+                // out), so this Discover is lost. Its side flags go with it:
+                // they must not reach the next Discover.
+                pl.discover_damage_from = None;
+                pl.discover_locked = false;
+                pl.discover_doomed = false;
+                pl.discover_both = false;
+            }
         }
     }
 

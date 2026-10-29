@@ -677,7 +677,12 @@ impl Game {
             return matches!(a, Action::Choose(k) if (k as usize) < DISCOVER
                 && pl.hero_offer[k as usize] != u8::MAX);
         }
-        if let Some(pt) = pl.pending_target {
+        // A choice that nothing can answer is no choice: `step` fizzles it,
+        // so the normal actions are legal as if it had never opened (see
+        // `choice_stuck`). The test only runs while a choice is open.
+        if let Some(pt) = pl.pending_target
+            && !self.choice_stuck(p)
+        {
             if pt.kind.takes_shop() {
                 return match a {
                     Action::Target(s) => self.valid_target(p, &pt, s as usize),
@@ -687,13 +692,15 @@ impl Game {
             }
             return matches!(a, Action::Target(s) if self.valid_target(p, &pt, s as usize));
         }
-        if pl.pending_shop_target.is_some() {
+        if pl.pending_shop_target.is_some() && !self.choice_stuck(p) {
             return matches!(a, Action::TargetShop(s) if (s as usize) < pl.shop.len());
         }
-        if pl.pending_discard.is_some() {
+        if pl.pending_discard.is_some() && !self.choice_stuck(p) {
             return matches!(a, Action::Discard(s) if self.valid_discard(p, s as usize));
         }
-        if let Some(pco) = pl.pending_choose_one {
+        if let Some(pco) = pl.pending_choose_one
+            && !self.choice_stuck(p)
+        {
             return matches!(a, Action::Choose(k) if k < 2 && self.can_choose_option(p, pco.options[k as usize]));
         }
         if !pl.discover.is_empty() {
@@ -803,6 +810,59 @@ impl Game {
         }
     }
 
+    /// Whether a pending choice is open with nothing legal to answer it.
+    /// A Discover and a Hero Power offer always have an option, and a target
+    /// prompt is only opened with a legal target (see `offer_target`), but a
+    /// prompt can lose its last answer afterwards, and a Choose One can have
+    /// no option that can be chosen. No card reaches any of these today; a
+    /// card that did would strand the player, so `step` fizzles the choice
+    /// instead (`fizzle_stuck_choice`).
+    fn choice_stuck(&self, p: usize) -> bool {
+        let pl = &self.players[p];
+        if let Some(pt) = pl.pending_target {
+            let board = (0..pl.board.len()).any(|s| self.valid_target(p, &pt, s));
+            let shop = pt.kind.takes_shop()
+                && (0..pl.shop.len()).any(|s| self.valid_shop_target(p, &pt, s));
+            return !board && !shop;
+        }
+        if pl.pending_shop_target.is_some() {
+            // The pick points at a Tavern slot that no longer exists.
+            return pl.shop.is_empty();
+        }
+        if pl.pending_discard.is_some() {
+            return !(0..pl.hand.len()).any(|s| self.valid_discard(p, s));
+        }
+        if let Some(pco) = pl.pending_choose_one {
+            return !(0..2).any(|k| self.can_choose_option(p, pco.options[k]));
+        }
+        false
+    }
+
+    /// Drop a pending choice that no answer can satisfy (see `choice_stuck`):
+    /// the effect is lost and the player's normal actions become legal again.
+    /// Prints a warning because no current card can put a player here.
+    fn fizzle_stuck_choice(&mut self, p: usize) {
+        let pl = &mut self.players[p];
+        let which = if pl.pending_target.is_some() {
+            "target"
+        } else if pl.pending_shop_target.is_some() {
+            "Tavern pick"
+        } else if pl.pending_discard.is_some() {
+            "discard"
+        } else {
+            "Choose One"
+        };
+        eprintln!(
+            "warning: no legal answer to a pending {which} at turn {} for player {p}: \
+             the choice fizzles",
+            self.turn
+        );
+        pl.pending_target = None;
+        pl.pending_shop_target = None;
+        pl.pending_discard = None;
+        pl.pending_choose_one = None;
+    }
+
     /// Fills `mask` with `is_legal` for every action. Only the index ranges
     /// that can be legal in the current state are asked (a slot past the end
     /// of the board, hand or shop never is), which gives the same mask as
@@ -812,11 +872,18 @@ impl Game {
         let Some(p) = self.current_player() else { return };
         let pl = &self.players[p];
         let mut ask = |a: Action| mask[a.index()] = self.is_legal(a);
-        if self.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX) {
+        // A choice that nothing can answer is fizzled by `step`, so the
+        // normal actions are the legal ones then, as in `is_legal`.
+        let pending = pl.pending_target.is_some()
+            || pl.pending_shop_target.is_some()
+            || pl.pending_discard.is_some()
+            || pl.pending_choose_one.is_some();
+        let open = !pending || !self.choice_stuck(p);
+        if open && self.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX) {
             for k in 0..DISCOVER as u8 {
                 ask(Action::Choose(k));
             }
-        } else if let Some(pt) = pl.pending_target {
+        } else if open && let Some(pt) = pl.pending_target {
             for s in 0..BOARD as u8 {
                 ask(Action::Target(s));
             }
@@ -825,23 +892,23 @@ impl Game {
                     ask(Action::TargetShop(s));
                 }
             }
-        } else if pl.pending_shop_target.is_some() {
+        } else if open && pl.pending_shop_target.is_some() {
             for s in 0..pl.shop.len() as u8 {
                 ask(Action::TargetShop(s));
             }
-        } else if pl.pending_discard.is_some() {
+        } else if open && pl.pending_discard.is_some() {
             for s in 0..pl.hand.len() as u8 {
                 ask(Action::Discard(s));
             }
-        } else if pl.pending_choose_one.is_some() {
+        } else if open && pl.pending_choose_one.is_some() {
             for k in 0..2 {
                 ask(Action::Choose(k));
             }
-        } else if !pl.discover.is_empty() {
+        } else if open && !pl.discover.is_empty() {
             for k in 0..pl.discover.len() as u8 {
                 ask(Action::Choose(k));
             }
-        } else if !pl.power_offer.is_empty() {
+        } else if open && !pl.power_offer.is_empty() {
             for k in 0..pl.power_offer.len() as u8 {
                 ask(Action::Choose(k));
             }
@@ -1054,6 +1121,13 @@ impl Game {
 
     /// Take an action for the current player.
     pub fn step(&mut self, a: Action) -> Result<(), IllegalAction> {
+        // A choice nothing can answer fizzles here, before it is answered:
+        // `is_legal` already let the normal actions through on that basis.
+        if let Some(p) = self.current_player()
+            && self.choice_stuck(p)
+        {
+            self.fizzle_stuck_choice(p);
+        }
         if !self.is_legal(a) {
             return Err(IllegalAction);
         }

@@ -29,6 +29,12 @@ use super::effects::buff;
 impl Game {
     pub(super) fn resolve_shop_target(&mut self, p: usize, slot: usize) {
         if let Some(pst) = self.players[p].pending_shop_target.take() {
+            // The Tavern emptied while the pick was open (nothing does that
+            // today): there is nothing to point at, so the pick fizzles.
+            if slot >= self.players[p].shop.len() {
+                self.maybe_start_discover(p);
+                return;
+            }
             match pst.kind {
                 ShopTargetKind::Consume { keywords, remaining, stat_mul } => {
                     self.consume(p, pst.source as usize, slot, keywords, stat_mul);

@@ -46,7 +46,7 @@ legality in mod.rs.
 | Kind | cards.toml field | Fires in | Example |
 |---|---|---|---|
 | Battlecry | `battlecry = {..}` | `Game::battlecry_or_choose_one` (via Play), Brann's `brann_mult` runs, `fire_after_battlecry` after | Southsea Busker |
-| Choose One | `choose_one = [a, b]` | `battlecry_or_choose_one` -> `PendingChooseOne` -> `resolve_choose` | Intrepid Botanist |
+| Choose One | `choose_one = [a, b]` | `battlecry_or_choose_one` -> `PendingChooseOne` -> `resolve_choose`; with no option the state can answer, the minion is played and the choice is skipped (as for a Choose One spell) | Intrepid Botanist |
 | Deathrattle | `deathrattle = {..}` | `Side::fire_deathrattles` (count via `deathrattle_fires`, Titus), called by `Side::resolve` | Locked-up Mutineer |
 | Rally | `rally = {..}` | `attack_triggers` in fight.rs (before the hit); shop copy via `Effect::TriggerRally` | Bigwig Bandit |
 | Start of Combat | `start_of_combat = {..}` | `run_start_of_combat` | Diremuck Forager |

@@ -342,6 +342,15 @@ impl Game {
                 }),
                 other => other,
             });
+            // An option no state can answer (a future card with only targeted
+            // options and no target): the minion is played and the choice is
+            // skipped, the same guard a Choose One spell gets.
+            // An option no state can answer (a future card with only targeted
+            // options and no target): the minion is played and the choice is
+            // skipped, the same guard a Choose One spell gets.
+            if !scaled.iter().any(|&opt| self.can_choose_option(p, opt)) {
+                return;
+            }
             // Both effects combined: the card says so (Fandral's Fortune) or
             // a Trailblazer covers this play.
             let covered = !m.both_effects && self.take_trailblazer_cover(p);
