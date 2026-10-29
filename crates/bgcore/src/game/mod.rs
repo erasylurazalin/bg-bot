@@ -1073,6 +1073,7 @@ impl Game {
         }
         // A hero knocked out by its own effect damage takes no more actions.
         if self.players[p].alive {
+            self.feed_waiting_fodders(p);
             self.check_attack_thresholds(p);
             if self.turn == 0 {
                 // The pick phase: a player who picked a hero and answered

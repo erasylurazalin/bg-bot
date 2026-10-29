@@ -243,7 +243,7 @@ fn the_turn_start_roll_never_takes_queued_fodders() {
 }
 
 #[test]
-fn a_fodder_stays_after_a_demon_is_played_when_none_was_there_at_the_refresh() {
+fn a_waiting_fodder_feeds_as_soon_as_a_demon_lands() {
     let mut g = game(3);
     g.players[0].gold = 10;
     g.players[0].fodder_refreshes.clear();
@@ -251,16 +251,13 @@ fn a_fodder_stays_after_a_demon_is_played_when_none_was_there_at_the_refresh() {
     act(&mut g, 0, Action::Roll);
     assert_eq!(fodder_count(&g, 0), 1, "no Demon on board, so it waits");
     assert!(g.players[0].fodder_refreshes.is_empty());
-    // a Demon landing later does NOT make it feed: it stays a plain 2/2
-    // Demon in the Tavern for the rest of this Refresh
+    let size = g.players[0].shop.len();
+    // a Demon landing later makes it feed at once, and its slot refills
     g.give(0, "Devout Hellcaller").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    assert_eq!(fodder_count(&g, 0), 1);
-    assert_eq!(stats(&g.players[0].board[0]), (4, 4));
-    // the next Refresh clears it without it ever feeding
-    act(&mut g, 0, Action::Roll);
     assert_eq!(fodder_count(&g, 0), 0);
-    assert_eq!(stats(&g.players[0].board[0]), (4, 4));
+    assert_eq!(stats(&g.players[0].board[0]), (4 + 2, 4 + 2));
+    assert_eq!(g.players[0].shop.len(), size);
     g.check_invariants().unwrap();
 }
 
@@ -410,19 +407,17 @@ fn urzul_can_consume_a_waiting_fodder() {
 }
 
 #[test]
-fn a_fodder_can_be_consumed_like_any_tavern_minion() {
+fn a_fodder_next_to_a_demon_feeds_before_the_enforcer_eats() {
     let mut g = game(36);
     put_on_board(&mut g, 0, "Flaming Enforcer");
     set_shop(&mut g, 0, &["Buzzing Vermin"]);
     put_token_in_shop(&mut g, 0, "Demon Fodder", false);
-    let before_pool: u32 = g.pool.iter().map(|&n| n as u32).sum();
     act(&mut g, 0, Action::EndTurn);
-    // the Fodder is 2/2 and wins "highest health", so the Enforcer eats it
-    // like any other Tavern minion; the 1/1 Buzzing Vermin stays
-    assert_eq!(stats(&g.players[0].board[0]), (4 + 2, 5 + 2));
+    // a Demon is on board, so the Fodder feeds the Enforcer (+2/+2) as the
+    // action ends, before the end of turn: it is never there to be eaten
     assert_eq!(fodder_count(&g, 0), 0);
-    assert_eq!(g.players[0].shop.len(), 1);
-    assert_eq!(g.pool.iter().map(|&n| n as u32).sum::<u32>(), before_pool);
+    let (a, h) = stats(&g.players[0].board[0]);
+    assert!(a >= 4 + 2 && h >= 5 + 2, "fed, then ate a Tavern minion: {a}/{h}");
     g.check_invariants().unwrap();
 }
 

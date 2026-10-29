@@ -371,8 +371,9 @@ random one (Waveling's amount).
 
 **Demon Fodder** feeds itself to a random friendly Demon on the Refresh it
 appears in, and its slot refills with a minion (the spell slot too). With
-no Demon on board then, it never feeds: it's a plain 2/2 Demon you can
-buy or consume.
+no Demon on board then, it waits in the Tavern as a plain 2/2 Demon you
+can buy or consume, and the moment any Demon lands on your board (after
+the action that put it there), every waiting Fodder feeds.
 
 **Golden cards** follow their real golden card text.
 

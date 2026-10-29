@@ -315,7 +315,7 @@ impl Game {
         } else {
             pl.shop_spell = None;
         }
-        // Only an explicit Refresh feeds the Fodders it just made.
+        // Only an explicit Refresh makes Fodders; they feed at once.
         if kind == RefreshKind::Explicit {
             Self::feed_fodders(pl, pool, cards, rng, lobby);
         }
@@ -386,13 +386,20 @@ impl Game {
         Self::apply_barrage(pl, cards);
     }
 
-    /// The Fodders that just appeared in a Refresh feed themselves if the
-    /// player has a Demon at that moment: each goes to a random friendly
-    /// Demon, which gains its current stats, and its slot gets a new card
-    /// from the pool. Call this only when the Tavern was just refreshed; a
-    /// Fodder that waits because there was no Demon never feeds later, even
-    /// when a Demon lands, and it is a plain 2/2 Demon until the shop is
-    /// refreshed again.
+    /// After an action: Fodders that waited in the Tavern because there was
+    /// no Demon feed themselves as soon as one is on the board.
+    pub(super) fn feed_waiting_fodders(&mut self, p: usize) {
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let cards = &data.cards;
+        if players[p].shop.iter().any(|m| cards.get(m.card).is_fodder) {
+            Self::feed_fodders(&mut players[p], pool, cards, rng, *lobby);
+        }
+    }
+
+    /// The Fodders in the Tavern feed themselves if the player has a Demon:
+    /// each goes to a random friendly Demon, which gains its current stats,
+    /// and its slot gets a new card from the pool. With no Demon they wait as
+    /// plain 2/2 Demons, and feed once a Demon lands (feed_waiting_fodders).
     fn feed_fodders(pl: &mut Player, pool: &mut [u8], cards: &CardDb, rng: &mut Rng, lobby: Tribes) {
         let is_demon = |m: &Minion| cards.get(m.card).tribes.has(Tribe::Demon);
         if !pl.board.iter().any(is_demon) {
