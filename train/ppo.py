@@ -18,11 +18,12 @@ it), standard curve bots, rush curve bots, random bots and real seats
 (--lineup has all six counts; a real seat plays a board of the current turn
 from Era's games, --real-boards, and never shops). Reward is placement
 only: +1 for 1st down to -1 for 8th, given when the seat is knocked out or the
-game ends, minus a tiny cost per action (--action-cost) so it doesn't shuffle
-its board for free.
+game ends, minus a tiny cost per board move (--action-cost, --cost-kinds) so
+it doesn't shuffle its board for free.
 
 Everything lands in runs/<name>/: metrics.csv (one row per eval), a
-TensorBoard log, ckpt.pt (latest) and best.pt (best eval against curve bots).
+TensorBoard log, ckpt.pt (latest) and best.pt (best eval: vs7 real when the
+run has real boards, else against the curve bots).
 """
 
 import argparse
@@ -104,9 +105,11 @@ def args():
     a.add_argument("--ent", type=float, default=0.01)
     a.add_argument("--vf", type=float, default=0.5)
     a.add_argument("--gamma", type=float, default=0.99, help="discount per turn, not per action")
-    a.add_argument("--lam", type=float, default=0.95)
+    a.add_argument("--lam", type=float, default=0.95, help="per turn, like --gamma")
     a.add_argument("--action-cost", type=float, default=0.002,
-                   help="reward taken off every action, like a turn timer, so it doesn't dither")
+                   help="reward taken off each action of --cost-kinds, so it doesn't dither")
+    a.add_argument("--cost-kinds", default="move",
+                   help="action kinds that pay --action-cost, comma separated, or all")
     a.add_argument("--snapshot-every", type=int, default=250, help="updates")
     a.add_argument("--keep-every", type=float, default=30, help="minutes between weights-only copies in keep/")
     a.add_argument("--stop-flat", type=float, default=0,
@@ -323,17 +326,25 @@ def main():
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     pool = []  # snapshot state dicts, on the CPU
     update, best, t_total = 0, 9.0, 0.0
+    # best.pt and --stop-flat follow vs7 real when there are real boards
+    best_by = "real" if real is not None else "std+rush"
     if ck is not None:
         net.load_state_dict(ck["net"])
         opt.load_state_dict(ck["opt"])
         for g in opt.param_groups:
             g["lr"] = cfg.lr
         pool, update, best, t_total = ck["pool"], ck["update"], ck["best"], ck.get("t_total", 0.0)
+        if ck.get("best_by", "std+rush") != best_by:
+            best = 9.0  # best.pt was chosen by another eval: start over
         print(f"resumed {cfg.resume} at update {update}")
     if not pool:
         pool.append(copy.deepcopy({k: v.cpu() for k, v in net.state_dict().items()}))
     snap = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
     kind_of = KIND_OF.to(dev)
+    cost_kinds = set(KINDS) if cfg.cost_kinds == "all" else set(cfg.cost_kinds.split(","))
+    if cost_kinds - set(KINDS):
+        raise SystemExit(f"--cost-kinds: unknown {sorted(cost_kinds - set(KINDS))}, kinds are {KINDS}")
+    cost_of = torch.tensor([cfg.action_cost if k in cost_kinds else 0.0 for k in KINDS], device=dev)
     print(f"{cfg.model} {opts or ''}: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M "
           f"parameters on {dev}{', compiled' if cfg.compile and cfg.model == 'attn' else ''}")
 
@@ -373,7 +384,7 @@ def main():
     while True:
         snap.load_state_dict(random.choice(pool))
         last.fill(-1)
-        rews.fill_(-cfg.action_cost)
+        rews.zero_()
         dones.zero_()
         t0 = time.time()
         with torch.no_grad():
@@ -388,6 +399,7 @@ def main():
                     sa, _, _, _ = act(snap, o[sn], m[sn])
                     a[sn] = sa
                 obs[t], masks[t], acts[t], logps[t], vals[t] = o, m, a, lp, v
+                rews[t] = -cost_of[kind_of[a]]
                 learn[t] = is_learner
                 seats[t] = torch.from_numpy(b.seat).to(dev)
                 le = np.nonzero(b.kind == LEARNER)[0]
@@ -413,16 +425,18 @@ def main():
             next_a = torch.zeros((N, P), device=dev)
             adv = torch.zeros((T, N), device=dev)
             ar = torch.arange(N, device=dev)
-            # an action that ends the seat's turn moves time on by one turn
+            # an action that ends the seat's turn moves time on by one turn;
+            # gamma and lambda both count turns, not actions
             ends = (acts == END_TURN) | (obs[:, :, ACTIONS_LEFT] <= 1)
             gammas = torch.where(ends, cfg.gamma, 1.0)
+            lams = torch.where(ends, cfg.lam, 1.0)
             for t in reversed(range(T)):
                 s = seats[t]
                 nv, na = next_v[ar, s], next_a[ar, s]
                 nd = 1.0 - dones[t]
                 g = gammas[t]
                 delta = rews[t] + g * nv * nd - vals[t]
-                at = delta + g * cfg.lam * nd * na
+                at = delta + g * lams[t] * nd * na
                 adv[t] = at
                 lm = learn[t]
                 next_v[ar[lm], s[lm]] = vals[t][lm]
@@ -548,9 +562,9 @@ def main():
                 top_buys,
             ])
             csv_file.flush()
-            score = 0.5 * (vs_std + vs_rush)
+            score = vs_real if best_by == "real" else 0.5 * (vs_std + vs_rush)
             ck = {"net": net.state_dict(), "opt": opt.state_dict(), "pool": pool, "update": update,
-                  "best": best, "t_total": minutes, "cfg": vars(cfg), "model": cfg.model,
+                  "best": best, "best_by": best_by, "t_total": minutes, "cfg": vars(cfg), "model": cfg.model,
                   "model_opts": opts, "card_names": names, "hero_names": hero_names}
             if score < best:
                 best = score
