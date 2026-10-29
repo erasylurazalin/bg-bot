@@ -71,42 +71,67 @@ def load(directory=DEFAULT_DIR, ref: Path = REF_CARDS, cards_toml: Path = CARDS_
     """Read every board file in `directory` (dot files like .state.json skip).
 
     Returns (specs, unknown): specs is the list for bgpy.VecEnv(real_boards=..),
-    one (turn, tier, minions) per board, a minion (name, attack, health,
-    golden, keywords); unknown lists every minion that matched no card we
-    have, by name: card ids the ref data doesn't know (buddies, timewarped
-    minions) and cards the engine hasn't built (Dark Paradox). Those minions
-    are dropped; the boards around them stay.
+    one (turn, tier, minions, hand, counters, deity) per board; a minion is
+    (name, attack, health, golden, keywords, numbers), counters is the side's
+    player-level numbers by their file keys (a number the log did not show is
+    left out, and the engine uses the base value), and deity is
+    (name, attack, health, golden) or None. unknown lists every minion that
+    matched no card we have, by name: card ids the ref data doesn't know
+    (buddies, timewarped minions) and cards the engine hasn't built (Dark
+    Paradox). Those minions are dropped; the boards around them stay.
+
+    A file from before the counters and hands were collected still loads: it
+    has no `counters`, `hand`, `deity` or `numbers`, so its boards play with
+    the base values and no hand.
     """
     ids = card_map(ref)
     built = built_cards(cards_toml)
     specs, unknown = [], []
+
+    def minions(rows):
+        out = []
+        for m in rows:
+            # A minion we don't build becomes a Stand-in with its stats and
+            # keywords and no effect (Era, 2026-10-25).
+            hit = ids.get(m["card_id"])
+            if hit is None:
+                unknown.append(m["name"] or m["card_id"])
+                name, id_golden = STAND_IN, False
+            else:
+                name, id_golden = hit
+                name = ALIASES.get(name, name)
+                if name not in built:
+                    unknown.append(name)
+                    name = STAND_IN
+            out.append((name, m["attack"], m["health"],
+                        bool(m["golden"]) or id_golden, list(m["keywords"]),
+                        list(m.get("numbers") or ())))
+        return out
+
+    def deity(d):
+        """(name, attack, health, golden), or None for no Deity (or one whose
+        card we don't build)."""
+        if not d:
+            return None
+        hit = ids.get(d["card_id"])
+        name = ALIASES.get(hit[0], hit[0]) if hit else d.get("name", "")
+        if name not in built:
+            return None
+        return (name, d["attack"], d["health"], bool(hit and hit[1]))
+
     for f in sorted(Path(directory).glob("*.json")):
         if f.name.startswith("."):
             continue
         for b in json.loads(f.read_text())["boards"]:
-            minions = []
-            for m in b["minions"]:
-                # A minion we don't build becomes a Stand-in with its stats
-                # and keywords and no effect (Era, 2026-10-25).
-                hit = ids.get(m["card_id"])
-                if hit is None:
-                    unknown.append(m["name"] or m["card_id"])
-                    name, id_golden = STAND_IN, False
-                else:
-                    name, id_golden = hit
-                    name = ALIASES.get(name, name)
-                    if name not in built:
-                        unknown.append(name)
-                        name = STAND_IN
-                minions.append((name, m["attack"], m["health"],
-                                bool(m["golden"]) or id_golden, list(m["keywords"])))
-            specs.append((b["turn"], b["tier"], minions))
+            specs.append((b["turn"], b["tier"], minions(b["minions"]),
+                          minions(b.get("hand") or ()), dict(b.get("counters") or {}),
+                          deity(b.get("deity"))))
     return specs, unknown
 
 
 def print_summary(specs, unknown) -> None:
     counts: dict[int, int] = {}
-    for turn, _, _ in specs:
+    for turn, *_ in specs:
         t = min(turn, LATE_TURN)
         counts[t] = counts.get(t, 0) + 1
     turns = ", ".join(
@@ -114,7 +139,14 @@ def print_summary(specs, unknown) -> None:
         for t in sorted(set(counts) | set(range(1, LATE_TURN + 1)))
         if counts.get(t, 0) > 0 or t == LATE_TURN
     )
+    # What the collector found for the sides themselves (docs/real-boards.md):
+    # a number the log did not show plays at its base value, so a board
+    # without counters is a board whose player had nothing beyond the base.
+    counted = sum(1 for s in specs if s[4])
+    handed = sum(1 for s in specs if s[3])
+    gods = sum(1 for s in specs if s[5])
     print(f"real boards: {len(specs)} ({turns})")
+    print(f"  with counters: {counted}, with a hand: {handed}, with a Deity: {gods}")
     if unknown:
         names = sorted(set(unknown))
         print(f"unmatched minions ({len(unknown)}): {', '.join(names)}")

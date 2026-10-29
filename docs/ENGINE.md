@@ -76,7 +76,10 @@ rules behind each are in DESIGN.md Part 2.
 - **Choices the player makes mid-action.** `PendingTarget` (a minion on
   the board or in the Tavern), `PendingShopTarget` (a Tavern slot),
   `PendingChooseOne`, and Discover (`DiscoverRequest`). While one is open,
-  the only legal actions answer it.
+  the only legal actions answer it. A choice no answer can satisfy (no card
+  reaches one today) fizzles in `step`, through `Game::choice_stuck`: the
+  effect is lost, the normal actions stay legal, and one warning line goes
+  to stderr.
 - **Activate (N).** Pays gold, once per turn per minion (`Minion.activated`,
   cleared at the start of the owner's turn), with or without a target.
 - **Triggering in the shop.** Rally (Sky-hatch Runaway), Battlecries
@@ -257,9 +260,11 @@ exists.
 A seat can play the boards of Era's real games (`boards/real/*.json`, see
 `docs/real-boards.md`) instead of shopping: at the start of each of its turns
 it takes a fresh random board of that turn (the file's attack, health, golden
-and keywords, Dark Gift effects lost) and its turn is over. The boards are
-not pool cards: they hold no pool copies and nothing goes back when they die
-or the seat is knocked out, so pool accounting stays exact.
+and keywords, Dark Gift effects lost), that player's hand and the side-wide
+numbers it had at the first attack, and its turn is over. The boards are not
+pool cards: they hold no pool copies and nothing goes back when they die or
+the seat is knocked out, so pool accounting stays exact, and neither do the
+minions in the hand.
 
 - **Building one:** `Game::new_random_heroes_real(data, seed, &seats, boards)`
   marks the seats before the heroes are dealt, so a real seat gets no hero
@@ -273,7 +278,23 @@ or the seat is knocked out, so pool accounting stays exact.
   from every board of turn 13 or later; a turn before 13 with no boards of
   its own uses the nearest earlier turn that has some. Minions whose name
   matches no card are dropped (about 1%: Dark Paradox, buddies, timewarped
-  minions).
+  minions, and a few that only sat in a hand).
+- **What a board carries:** `RealBoard` holds the minions, the hand and a
+  `RealCounters` (Blood Gem size, Beetle and Undead bonuses, the Tavern spell
+  bonus, spells cast, Eternal Knight deaths, the `Counter` counts) plus its
+  `Deity`. In `start_turn` the seat's `Player` takes them with
+  `take_real_counters`, which also resets the numbers a fight's outcome can
+  move, so nothing accumulates: a different player is drawn every turn and
+  its numbers replace the last one's. A number the log did not show is the
+  base value (`RealCounters::default`), never "unknown", and Health, armor
+  and tier stay the seat's own (30, 10 and the board's). A minion's current
+  numbers become `Minion.improvements` for the cards whose scaling the
+  engine models that way, and a Tasty Lobster's become the player's
+  `tasty_lobster` count (the list is in `docs/real-boards.md`).
+- **The hand:** a real seat's hand reaches the fight through
+  `fight_with_hands`, which already passes each side's hand whenever a card
+  on either board reads it; the minions come out of it with no pool copies,
+  as the board's do.
 - **Loading:** `bgcore::real_boards::parse_board_files` parses the JSON texts
   and maps card ids through `ref/bg-cards.json` (`CardIdMap`: a golden id,
   the game's `_G` and `TB_BaconUps_*` forms, maps to the base card). The

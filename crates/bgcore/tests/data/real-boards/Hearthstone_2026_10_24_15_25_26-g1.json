@@ -75,8 +75,55 @@
      "golden": true,
      "keywords": [],
      "dark_gifts": []
+    },
+    {
+     "card_id": "BG35_602",
+     "name": "Lurking Leviathan",
+     "attack": 3,
+     "health": 9,
+     "golden": false,
+     "keywords": [],
+     "dark_gifts": [],
+     "numbers": [
+      15,
+      18,
+      0,
+      0
+     ]
     }
-   ]
+   ],
+   "counters": {
+    "gem_attack": 3,
+    "gem_health": 2,
+    "beetle_attack": 2,
+    "beetle_health": 1,
+    "spell_attack": 1,
+    "spells_cast": 4
+   },
+   "hand": [
+    {
+     "card_id": "BG36_202",
+     "name": "Tasty Lobster",
+     "attack": 6,
+     "health": 3,
+     "golden": false,
+     "keywords": [],
+     "dark_gifts": [],
+     "numbers": [
+      10,
+      5,
+      0,
+      0
+     ]
+    }
+   ],
+   "hand_hidden": 1,
+   "deity": {
+    "card_id": "BGFYM_011",
+    "name": "Y'Shaarj",
+    "attack": 4,
+    "health": 6
+   }
   },
   {
    "who": "opp",

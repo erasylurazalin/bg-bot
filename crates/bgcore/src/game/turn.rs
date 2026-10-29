@@ -249,8 +249,12 @@ impl Game {
                     None => self.players[p].pending_discard = None,
                 }
             } else if let Some(pco) = pl.pending_choose_one {
-                let k = (0..2).find(|&k| self.can_choose_option(p, pco.options[k])).unwrap();
-                self.resolve_choose(p, k);
+                // The first option that can be chosen, or none: a Choose One
+                // nothing can answer fizzles rather than panicking.
+                match (0..2).find(|&k| self.can_choose_option(p, pco.options[k])) {
+                    Some(k) => self.resolve_choose(p, k),
+                    None => self.players[p].pending_choose_one = None,
+                }
             } else if !pl.discover.is_empty() || !pl.power_offer.is_empty() {
                 self.resolve_choose(p, 0);
             } else if !pl.choose_queue.is_empty() {
@@ -299,9 +303,13 @@ impl Game {
             let pl = &mut players[p];
             if pl.real {
                 // A real seat doesn't shop: it takes a fresh random board of
-                // this turn (the file's stats, golden flag and keywords) and
-                // its turn is over. The old board just vanishes: real
-                // minions hold no pool copies, so nothing goes back.
+                // this turn (the file's stats, golden flag, keywords and
+                // scaling state), that player's hand, and the side-wide
+                // numbers it had at the first attack (Blood Gem size, Beetle
+                // and Undead bonuses, spell bonus, spells cast, Deity, the
+                // "improve" counts). They replace the last turn's wholesale.
+                // The old board just vanishes: real minions hold no pool
+                // copies, so nothing goes back.
                 let board = real_boards
                     .as_ref()
                     .expect("a real seat needs real boards")
@@ -311,6 +319,11 @@ impl Game {
                 for m in &board.minions {
                     let _ = pl.board.try_push(*m);
                 }
+                pl.hand.clear();
+                for m in &board.hand {
+                    let _ = pl.hand.try_push(*m);
+                }
+                pl.take_real_counters(&board.counters, board.deity);
                 pl.done = true;
                 continue;
             }

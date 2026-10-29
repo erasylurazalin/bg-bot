@@ -127,7 +127,15 @@
      ],
      "dark_gifts": []
     }
-   ]
+   ],
+   "counters": {
+    "undead_attack": 6,
+    "knight_deaths": 2,
+    "baller": 1
+   },
+   "hand": [],
+   "hand_hidden": 0,
+   "deity": null
   }
  ]
 }

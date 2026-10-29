@@ -11,11 +11,12 @@
 // Seat numbers index several per-seat arrays at once.
 #![allow(clippy::needless_range_loop)]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::obs::{self, OBS_SIZE};
-use bgcore::real_boards::{RealBoardSpec, RealBoards, RealMinionSpec};
+use bgcore::real_boards::{RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec};
 use bgcore::{ACTION_KINDS, Action, Data, Game, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES};
 use numpy::{PyReadonlyArray1, PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3};
 use pyo3::exceptions::PyValueError;
@@ -30,9 +31,47 @@ const RANDOM: u8 = 4;
 const REAL: u8 = 5;
 const SEAT_KINDS: usize = 6;
 
-/// One board for `VecEnv(real_boards=..)`, as train/real_boards.py loads it:
-/// (turn, tier, minions), a minion (name, attack, health, golden, keywords).
-type PyBoards = Vec<(u32, u8, Vec<(String, i32, i32, bool, Vec<String>)>)>;
+/// One minion for `VecEnv(real_boards=..)`, as train/real_boards.py loads
+/// it: (name, attack, health, golden, keywords, numbers).
+type PyMinion = (String, i32, i32, bool, Vec<String>, Vec<i32>);
+
+/// One board for `VecEnv(real_boards=..)`:
+/// (turn, tier, minions, hand, counters, deity). `counters` holds the
+/// side-wide numbers the log showed, by the board file's keys (a missing one
+/// is the base value); `deity` is (name, attack, health, golden) or None.
+type PyBoard = (
+    u32,
+    u8,
+    Vec<PyMinion>,
+    Vec<PyMinion>,
+    HashMap<String, i32>,
+    Option<(String, i32, i32, bool)>,
+);
+
+type PyBoards = Vec<PyBoard>;
+
+/// A board's minions (or hand) as `RealBoards::build` takes them.
+fn minion_specs(list: Vec<PyMinion>) -> Vec<RealMinionSpec> {
+    list.into_iter()
+        .map(|(name, attack, health, golden, keywords, numbers)| RealMinionSpec {
+            name,
+            attack,
+            health,
+            golden,
+            keywords,
+            numbers,
+        })
+        .collect()
+}
+
+/// A board's side-wide numbers, by the board file's keys.
+fn real_counters(map: HashMap<String, i32>) -> RealCounters {
+    let mut counters = RealCounters::default();
+    for (key, value) in &map {
+        counters.set(key, *value);
+    }
+    counters
+}
 
 struct Env {
     game: Game,
@@ -138,8 +177,9 @@ impl VecEnv {
     /// `lineup`: how many seats of each kind (learner, snapshot, standard,
     /// rush, random, real) a new game gets, shuffled into random seats.
     /// `real_boards`: the boards real seats play, as train/real_boards.py
-    /// loads them ((turn, tier, minions) with (name, attack, health, golden,
-    /// keywords) each); required when the lineup has real seats.
+    /// loads them ((turn, tier, minions, hand, counters, deity) with
+    /// (name, attack, health, golden, keywords, numbers) each); required
+    /// when the lineup has real seats.
     #[new]
     #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None))]
     #[allow(clippy::too_many_arguments)]
@@ -167,19 +207,18 @@ impl VecEnv {
         let boards = real_boards.map(|raw| {
             let specs: Vec<RealBoardSpec> = raw
                 .into_iter()
-                .map(|(turn, tier, minions)| RealBoardSpec {
+                .map(|(turn, tier, minions, hand, counters, deity)| RealBoardSpec {
                     turn,
                     tier,
-                    minions: minions
-                        .into_iter()
-                        .map(|(name, attack, health, golden, keywords)| RealMinionSpec {
-                            name,
-                            attack,
-                            health,
-                            golden,
-                            keywords,
-                        })
-                        .collect(),
+                    minions: minion_specs(minions),
+                    hand: minion_specs(hand),
+                    counters: real_counters(counters),
+                    deity: deity.map(|(name, attack, health, golden)| RealDeitySpec {
+                        name,
+                        attack,
+                        health,
+                        golden,
+                    }),
                 })
                 .collect();
             // Names that match no card are dropped here; train/real_boards.py

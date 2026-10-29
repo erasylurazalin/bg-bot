@@ -14,7 +14,10 @@ Every fight gives two boards, each marked with `who`:
 
 Player names are not stored. Run it with the tracker's venv:
 
-    ~/projects/bg/.venv/bin/python tools/collect_boards.py
+    ~/projects/bg/.venv/bin/python tools/collect_boards.py [--no-archive]
+
+--no-archive skips copying the client's log folders into ~/bg-logs (it writes
+outside this project), for a rerun from what is already archived.
 
 A systemd user timer (bg-boards.timer) runs it every 15 minutes.
 """
@@ -51,13 +54,24 @@ def archive():
         shutil.copy2(src, dst)
 
 
+def numbers(tags):
+    """A minion's current numbers, the {0} {1} {2} {3} of its text
+    (TAG_SCRIPT_DATA_NUM_1..4), or None when it has none."""
+    sd = [tags.get(f"TAG_SCRIPT_DATA_NUM_{i}", 0) for i in range(1, 5)]
+    return sd if any(sd) else None
+
+
 def minions(board):
-    return [
-        {"card_id": m.card_id, "name": m.name, "attack": m.attack, "health": m.health,
-         "golden": m.golden, "keywords": list(m.keywords),
-         "dark_gifts": list(m.dark_gifts)}
-        for m in board
-    ]
+    out = []
+    for m in board:
+        d = {"card_id": m.card_id, "name": m.name, "attack": m.attack,
+             "health": m.health, "golden": m.golden, "keywords": list(m.keywords),
+             "dark_gifts": list(m.dark_gifts)}
+        sd = numbers(m.tags)
+        if sd is not None:
+            d["numbers"] = sd
+        out.append(d)
+    return out
 
 
 def seat_info(seat):
@@ -87,9 +101,122 @@ def extras(fight, side):
     }
 
 
+# Player enchantments that carry a side-wide number, and what their script
+# numbers are: the TAG_SCRIPT_DATA_NUM_1..4 slots holding attack and health
+# (None for a number the enchant does not have). The log attaches them to the
+# player of both seats (the opponent's to the stand-in player) and only while
+# the number is nonzero, so a missing one means the base value.
+PLAYER_ENCHANTS = {
+    # Beetle Army: "Your Beetles have +{0}/+{1} this game" (Forest Rover,
+    # Runed Progenitor, Turquoise Skitterer).
+    "BG31_808pe": ("beetle_attack", "beetle_health"),
+    # Undead Bonus Attack: "Your Undead have +{0} Attack this game, wherever
+    # they are" (Nerubian Deathswarmer, Plaguerunner, Forsaken Weaver,
+    # Butchering). There is no health one.
+    "BG25_011pe": ("undead_attack", None),
+    # Baller: how many Ballers were sold, the "improve your future Ballers"
+    # count (Counter::Baller).
+    "BG31_816pe": ("baller", None),
+}
+
+
+def enchant_numbers(g, pid, card_id):
+    """The script numbers of one player enchantment `card_id` on player `pid`,
+    or None when it is not there."""
+    xs = [x for x in g.entities.values()
+          if x.card_id == card_id and x["ZONE"] == "PLAY" and x["ATTACHED"] == pid]
+    if not xs:
+        return None
+    x = max(xs, key=lambda x: x.id)
+    return [x[f"TAG_SCRIPT_DATA_NUM_{i}"] for i in range(1, 5)]
+
+
+def side_numbers(g, pid):
+    """What the log shows of one side at the first attack besides its board:
+    the player-level numbers a fight reads (`counters`, a key only when the
+    log shows it) and its Deity (`deity`)."""
+    player = g.player_entity(pid) if pid is not None else None
+    counters = {}
+    if player is not None:
+        # The Tavern spell bonus: TAVERN_SPELL_ATTACK_INCREASE and
+        # TAVERN_SPELL_HEALTH_INCREASE on the player entity.
+        if player["TAVERN_SPELL_ATTACK_INCREASE"]:
+            counters["spell_attack"] = player["TAVERN_SPELL_ATTACK_INCREASE"]
+        if player["TAVERN_SPELL_HEALTH_INCREASE"]:
+            counters["spell_health"] = player["TAVERN_SPELL_HEALTH_INCREASE"]
+        for card_id, (atk_key, hp_key) in PLAYER_ENCHANTS.items():
+            sd = enchant_numbers(g, player.id, card_id)
+            if sd is None:
+                continue
+            if atk_key and sd[0]:
+                counters[atk_key] = sd[0]
+            if hp_key and sd[1]:
+                counters[hp_key] = sd[1]
+    return counters
+
+
+class CollectingTracker(Tracker):
+    """The tracker, plus the side-wide numbers at each snapshot it captures.
+
+    `_capture` runs at the first attack (before any minion's own Start of
+    Combat), which is the state the board files hold.
+    """
+
+    def _capture(self, g):
+        d = super()._capture(g)
+        stand = self._stand_in(g)
+        d["side_numbers"] = (side_numbers(g, self.me), side_numbers(g, stand))
+        return d
+
+
+def counters(fight, side):
+    """A side's player-level numbers at the first attack, the keys the file
+    holds. A number the log does not show is left out: the loader then uses
+    the base value (0 spells cast, no spell bonus, Blood Gems +1/+1)."""
+    out = dict(fight.side_numbers[side])
+    # Blood Gems (BACON_BLOODGEMBUFFATKVALUE / _HEALTHVALUE on the player).
+    ga, gh = fight.gems[side]
+    if ga != 1 or gh != 1:
+        out["gem_attack"] = ga
+        out["gem_health"] = gh
+    # The tracker's counts(): spells cast (NUM_SPELLS_PLAYED_THIS_GAME, mine
+    # only: the stand-in player carries none) and Eternal Knight deaths (the
+    # BG25_008pe player enchantment).
+    if fight.counters[side].get("spells"):
+        out["spells_cast"] = fight.counters[side]["spells"]
+    if fight.counters[side].get("knights"):
+        out["knight_deaths"] = fight.counters[side]["knights"]
+    return out
+
+
+def deity(fight, side):
+    """The side's Deity at the first attack: the minion it awakens and the
+    stats it has now (the tracker reads it off the BG_OldGod in SECRET)."""
+    d = fight.deities[side]
+    if d is None:
+        return None
+    return {"card_id": d.card_id, "name": d.name, "attack": d.attack, "health": d.health}
+
+
+def side(fight, index, seat):
+    """One side's board as the file holds it: the seat's hero, tier, health and
+    armor, its hero power, trinkets and rewards, its minions, and what the log
+    shows of the side itself at the first attack (counters, Deity, hand)."""
+    out = dict(seat)
+    out.update(extras(fight, index))
+    out["minions"] = minions(fight.mine if index == 0 else fight.theirs)
+    if fight.at_attack is not None:
+        hand = fight.hand if index == 0 else fight.their_hand
+        out["counters"] = counters(fight, index)
+        out["deity"] = deity(fight, index)
+        out["hand"] = minions(hand or ())
+        out["hand_hidden"] = fight.hidden[index]
+    return out
+
+
 def read_log(path):
     """Yield (game number, game record) for every Battlegrounds game in the log."""
-    t = Tracker()
+    t = CollectingTracker()
     games = []  # per game: list of (fight, my seat, their seat) snapshots
     current = []
     seen_past = 0
@@ -118,15 +245,16 @@ def read_log(path):
             if not fight.result:
                 continue
             boards.append({"who": "me", "turn": fight.turn, "result": fight.result,
-                           **mine, **extras(fight, 0), "minions": minions(fight.mine)})
+                           **side(fight, 0, mine)})
             boards.append({"who": "opp", "turn": fight.turn, "result": FLIP[fight.result],
-                           **theirs, **extras(fight, 1), "minions": minions(fight.theirs)})
+                           **side(fight, 1, theirs)})
         if boards:
             yield gi, {"place": me.place if me else 0, "boards": boards}
 
 
 def main():
-    archive()
+    if "--no-archive" not in sys.argv:
+        archive()
     OUT.mkdir(parents=True, exist_ok=True)
     try:
         state = json.loads(STATE.read_text())

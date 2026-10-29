@@ -9,12 +9,13 @@ use crate::cards::{
     Tribe,
     Tribes,
 };
-use crate::fight::Counters;
+use crate::fight::{Counters, Deity};
 use crate::heroes::PowerEffect;
 use crate::minion::{
     CardId,
     Minion,
 };
+use crate::real_boards::RealCounters;
 use crate::rules::Rules;
 use crate::{
     DISCOVER,
@@ -334,6 +335,30 @@ impl Player {
             }
         }
         (da, dh)
+    }
+
+    /// Give a real seat the numbers and the Deity of the board it just drew,
+    /// replacing the ones the last turn's board left: nothing accumulates on
+    /// a real seat, and a number the log did not show is the base value
+    /// (`RealCounters::default`). Its Health, armor, tier and hand are the
+    /// seat's own and set elsewhere.
+    pub(super) fn take_real_counters(&mut self, c: &RealCounters, deity: Option<Deity>) {
+        self.gem_attack = c.gem_attack;
+        self.gem_health = c.gem_health;
+        self.beetle_bonus = (c.beetle_attack, c.beetle_health);
+        self.undead_bonus = (c.undead_attack, c.undead_health);
+        self.spell_bonus = (c.spell_attack, c.spell_health);
+        self.spells_cast = c.spells_cast;
+        self.knight_deaths = c.knight_deaths;
+        self.improve = c.improve;
+        self.deity = deity;
+        // A fight's outcome can move these too; they start from the base
+        // again. None of them is read without a shop phase.
+        self.beast_bonus = (0, 0);
+        self.boon_of_beetles = 0;
+        self.brood_of_nozdormu = 0;
+        self.upper_hand = 0;
+        self.sharing_is_caring = 0;
     }
 
     pub fn counters(&self, data: &Data, lobby: Tribes) -> Counters {
