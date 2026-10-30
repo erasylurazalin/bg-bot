@@ -26,6 +26,7 @@ use crate::{
 use super::{
     Player,
     TavernBuff,
+    TrinketPowers,
     TrinketState,
 };
 use super::effects::buff;
@@ -49,6 +50,7 @@ impl Player {
             trinket_offer: ArrayVec::new(),
             trinket_offer_slot: 0,
             trinket_events: 0,
+            tp: TrinketPowers::default(),
             dark_gifts: 0,
             real: false,
             placement: 0,

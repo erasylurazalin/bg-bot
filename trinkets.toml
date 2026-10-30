@@ -18,6 +18,20 @@
 # Effect keys with no card behind them: upgrade_discount, buff_tavern_this_turn,
 # make_golden_random, last_spell_copies.
 
+#
+# Second round (2026-10-31): prices and Gold. `health_price_minions`,
+# `health_price_highest_tier`, `every_nth_buy_health` and `health_price_spell`
+# make a buy cost Health (self damage, never Gold spent); `free_buys` and
+# `free_tribe_buys` make a buy free (still a buy); `gold_on_tier6`,
+# `gold_per_type`, `gold_per_golden` and `golden_when_rich` pay out on their
+# own. The slots: `next_trinket_lesser`, `greater_offer_in` (a turn count from
+# now), `greater_offer_into_lesser` (Trip Vouchers), `offer_replace` (Mystery
+# Cube) and `replace_with_random` (Orb of the Unknown, Quartermaster's Hook).
+# `on_gold_spent` fires once per spending whatever the amount.
+# `grow_value` plus `buff_all_growing`/`buff_leftmost_growing` are the
+# "improve this" cards, and `buff_all_per_golden`/`buff_leftmost_two_per_battlecry`
+# read the game-long counters. `buff_random_other` is done in the shop by the
+# trinket frame (the card path only has the fight version).
 
 [[trinket]]
 name = "Goblin Wallet"
@@ -485,3 +499,148 @@ cost = 6
 tribes = ["quilboar"]
 rule = { event = "cast_spell", every = 5, acts = [{ gems_on_board = 2 }] }
 mechanic = "spells"
+
+
+[[trinket]]
+name = "Pilgrimp Sticker"
+card_id = "BG32_MagicItem_821"
+slot = "lesser"
+cost = 3
+tribes = ["demon"]
+start_of_turn = [{ health_price_minions = ["demon", "1"] }]
+
+[[trinket]]
+name = "Bazaar Sticker"
+card_id = "BG32_MagicItem_822"
+slot = "lesser"
+cost = 1
+tribes = ["demon"]
+start_of_turn = [{ health_price_spell = 1 }]
+
+[[trinket]]
+name = "Demonic Tapestry"
+card_id = "BG35_MagicItem_152"
+slot = "lesser"
+cost = 2
+tribes = ["demon"]
+rule = { event = "refresh", every = 4, acts = [{ health_price_highest_tier = true }] }
+
+[[trinket]]
+name = "The Eye of Sargeras"
+card_id = "BG30_MagicItem_701"
+slot = "greater"
+cost = 5
+tribes = ["demon"]
+on_pick = [{ every_nth_buy_health = 4 }]
+
+[[trinket]]
+name = "Warcry Totem"
+card_id = "BG36_MagicItem_202"
+slot = "lesser"
+cost = 4
+tribes = ["dragon", "murloc"]
+start_of_turn = [{ free_buys = 2 }]
+
+
+[[trinket]]
+name = "Stuffed Coin Purse"
+card_id = "BG35_MagicItem_814"
+slot = "lesser"
+on_pick = [{ gold_on_tier6 = 12 }]
+
+[[trinket]]
+name = "Glowing Crystal"
+card_id = "BG36_MagicItem_220"
+slot = "lesser"
+start_of_turn = [{ gold_per_type = 1 }]
+
+[[trinket]]
+name = "Rascal Sticker"
+card_id = "BG36_MagicItem_424"
+slot = "lesser"
+tribes = ["pirate"]
+start_of_turn = [{ gold_per_golden = 1 }]
+
+[[trinket]]
+name = "Splinter of Aurum"
+card_id = "BG32_MagicItem_350"
+slot = "lesser"
+cost = 2
+tribes = ["pirate"]
+on_pick = [{ golden_when_rich = 5 }]
+
+[[trinket]]
+name = "Mysterious Orb"
+card_id = "BG35_MagicItem_818"
+slot = "lesser"
+on_pick = [{ gold = 10 }, { next_trinket_lesser = true }]
+
+[[trinket]]
+name = "Ornate Clock"
+card_id = "BG32_MagicItem_271"
+slot = "lesser"
+on_pick = [{ gold = 2 }, { greater_offer_in = 1 }]
+
+[[trinket]]
+name = "Trip Vouchers"
+card_id = "BG30_MagicItem_891"
+slot = "lesser"
+cost = 1
+on_pick = [{ greater_offer_into_lesser = 2 }]
+
+[[trinket]]
+name = "Orb of the Unknown"
+card_id = "BG35_MagicItem_816"
+slot = "lesser"
+on_pick = [{ replace_with_random = ["lesser", ""] }]
+
+[[trinket]]
+name = "Orb of the Unknown"
+card_id = "BG35_MagicItem_816t"
+slot = "greater"
+on_pick = [{ gold = 4 }, { replace_with_random = ["greater", ""] }]
+
+[[trinket]]
+name = "Quartermaster's Hook"
+card_id = "BG36_MagicItem_408"
+slot = "lesser"
+tribes = ["pirate"]
+rule = { event = "gold_spent", every = 50, once = true, acts = [{ replace_with_random = ["greater", "pirate"] }] }
+
+[[trinket]]
+name = "Mystery Cube"
+card_id = "BG30_MagicItem_703"
+slot = "lesser"
+cost = 5
+on_pick = [{ offer_replace = 2 }]
+start_of_turn = [{ offer_replace = 2 }]
+
+[[trinket]]
+name = "Booty Bay Brew"
+card_id = "BG30_MagicItem_924"
+slot = "lesser"
+cost = 2
+tribes = ["pirate"]
+on_gold_spent = [{ buff_random_other = [3, 3], tribe = "pirate", count = 2 }]
+
+[[trinket]]
+name = "Booty Bay Brew"
+card_id = "BG30_MagicItem_924t"
+slot = "greater"
+cost = 1
+tribes = ["pirate"]
+on_gold_spent = [{ buff_random_other = [6, 6], tribe = "pirate", count = 2 }]
+
+[[trinket]]
+name = "Shark Cannon"
+card_id = "BG32_MagicItem_232"
+slot = "greater"
+tribes = ["pirate"]
+rule = { event = "gold_spent", every = 4, acts = [{ buff_all_growing = [1, 1], tribe = "pirate" }, { grow_value = 1 }] }
+
+[[trinket]]
+name = "Wand of Divination"
+card_id = "BG36_MagicItem_307"
+slot = "lesser"
+tribes = ["naga", "quilboar"]
+rule = { event = "cast_spell_on_minion", every = 3, acts = [{ gold = 1 }] }

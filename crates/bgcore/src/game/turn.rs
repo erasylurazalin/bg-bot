@@ -625,6 +625,12 @@ impl Game {
             self.players[p].upper_hand = 0;
             self.players[p].sharing_is_caring = 0;
         }
+        // A hero knocked out in this fight takes nothing home: its hand is
+        // already gone (knockouts drained it), and a card given after that
+        // would leave a dead player holding cards.
+        if !self.players[p].alive {
+            return;
+        }
         for &c in so.cards_gained() {
             self.give_generated(p, c);
         }

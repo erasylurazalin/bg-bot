@@ -34,6 +34,14 @@ pub const LESSER_SLOT: usize = 0;
 pub const GREATER_SLOT: usize = 1;
 pub const POWER_SLOT: usize = 2;
 
+/// What a Tavern minion costs this player right now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MinionPrice {
+    Gold(u8),
+    /// Paid in Health: self damage, not Gold spent (DESIGN.md).
+    Health(u8),
+}
+
 /// Which of a trinket's effect lists a hook runs. `Copy`, like `Act`, so the
 /// frame can fetch one act out of the shared `Data`, drop the borrow and run
 /// it: no `Arc<Data>` clone and no `Vec` clone in a per-event path.
@@ -50,6 +58,7 @@ enum Hook {
     OnCastSpell,
     OnCastSpellOnMinion,
     OnDiscard,
+    OnGoldSpent,
     Rule,
 }
 
@@ -101,6 +110,15 @@ impl Game {
         let rules = &self.data.rules;
         let turn = self.turn;
         let (lesser_turn, greater_turn) = (rules.trinket_lesser_turn, rules.trinket_greater_turn);
+        // A trinket can move or add an offer (Ornate Clock, Trip Vouchers).
+        let tp = self.players[p].tp;
+        let greater_turn = if tp.greater_offer_turn != 0 { tp.greater_offer_turn } else { greater_turn };
+        if turn == tp.greater_into_lesser_turn && self.players[p].trinkets[LESSER_SLOT].of != 0 {
+            // Trip Vouchers: a greater offer into the lesser slot, replacing
+            // the trinket that named this turn.
+            self.deal_trinket_offer(p, LESSER_SLOT, Slot::Greater);
+            return;
+        }
         if turn == lesser_turn && self.players[p].trinkets[LESSER_SLOT].of == 0 {
             self.deal_trinket_offer(p, LESSER_SLOT, Slot::Lesser);
             return;
@@ -123,7 +141,11 @@ impl Game {
     /// Deal the four options: one guaranteed tribe trinket when a tribe of
     /// the board reaches the threshold, then three drawn by weight. Each
     /// option carries the price it is sold at.
-    fn deal_trinket_offer(&mut self, p: usize, slot: usize, kind: Slot) {
+    fn deal_trinket_offer(&mut self, p: usize, slot: usize, mut kind: Slot) {
+        // "Your next Trinket is a Lesser Trinket" (Mysterious Orb).
+        if self.players[p].tp.next_lesser {
+            kind = Slot::Lesser;
+        }
         // A field borrow, not an `Arc` clone: this runs twice per player per
         // game, but the shared `Data` is never refcounted in a game path.
         let data = &self.data;
@@ -288,6 +310,7 @@ impl Game {
             Hook::OnCastSpell => &t.on_cast_spell,
             Hook::OnCastSpellOnMinion => &t.on_cast_spell_on_minion,
             Hook::OnDiscard => &t.on_discard,
+            Hook::OnGoldSpent => &t.on_gold_spent,
             Hook::Rule => t.rule.as_ref().map_or(&[], |r| &r.acts),
         }
     }
@@ -308,6 +331,7 @@ impl Game {
                     } else {
                         0
                     },
+                    value: 0,
                     uses_left: t.uses_per_turn.unwrap_or(u8::MAX),
                     done: false,
                 }
@@ -350,6 +374,7 @@ impl Game {
         self.players[p].trinket_offer_slot = 0;
         self.set_trinket(p, slot, Some(of));
         self.players[p].gold = self.players[p].gold.saturating_sub(price);
+        self.players[p].tp.next_lesser = false;
         self.fire_event(p, EventKind::GoldSpent, price as u32);
         self.run_trinket_hook(p, slot, of, Hook::OnPick);
     }
@@ -419,6 +444,9 @@ impl Game {
     /// the event is about (for the tribe and "a spell" filters); `amount`
     /// counts for events that count a number (Gold spent).
     pub(super) fn trinket_event(&mut self, p: usize, event: Event, card: Option<CardId>, amount: u32) {
+        if self.players[p].tp.golden_when_rich != 0 {
+            self.check_golden_when_rich(p);
+        }
         // The hot path: one `u16` on the player says whether any of its
         // trinkets listens for this event. Most of a game, and every game
         // before turn 6, has nothing here.
@@ -445,6 +473,7 @@ impl Game {
                     Event::CastSpell => Some(Hook::OnCastSpell),
                     Event::CastSpellOnMinion => Some(Hook::OnCastSpellOnMinion),
                     Event::Discard if !t.discard_spells_only || card_is_spell => Some(Hook::OnDiscard),
+                    Event::GoldSpent => Some(Hook::OnGoldSpent),
                     _ => None,
                 };
                 let rule = t.rule.as_ref().map(|r| (r.event, r.every, r.once));
@@ -494,7 +523,7 @@ impl Game {
     /// the same `Effect`/`SpellEffect` arm the card path runs, with no host
     /// slot (`pos` 0) and no golden multiplier; the four acts with no card
     /// behind them are done here.
-    fn run_trinket_act(&mut self, p: usize, _slot: usize, act: Act) {
+    fn run_trinket_act(&mut self, p: usize, slot: usize, act: Act) {
         let mut pos = 0usize;
         match act {
             Act::Get { card, count } => {
@@ -644,6 +673,265 @@ impl Game {
             Act::GemsOnBoard(n) => {
                 self.execute_spell_effect(p, SpellEffect::GemsOnBoard(n), false)
             }
+            Act::HealthPriceMinions { tribe, count } => {
+                let tp = &mut self.players[p].tp;
+                tp.health_price_tribe = tribe;
+                tp.health_price_left = count;
+            }
+            Act::HealthPriceHighestTier => self.players[p].tp.highest_tier_health = true,
+            Act::EveryNthBuyHealth(n) => self.players[p].tp.fourth_buy_every = n,
+            Act::HealthPriceSpell(n) => self.players[p].tp.spell_health_left = n,
+            Act::FreeBuys(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.free_buys = tp.free_buys.saturating_add(n);
+            }
+            Act::FreeTribeBuys { tribe, count } => {
+                let tp = &mut self.players[p].tp;
+                tp.free_tribe = Some(tribe);
+                tp.free_tribe_left = count;
+            }
+            Act::GoldOnTier6(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.gold_on_tier6 = tp.gold_on_tier6.saturating_add(n);
+            }
+            Act::GoldPerType(n) => {
+                let mut seen = crate::cards::Tribes::NONE;
+                let cards = &self.data.cards;
+                let mut types = 0u8;
+                for m in &self.players[p].board {
+                    let ts = cards.get(m.card).tribes;
+                    if ts.is_empty() || seen.overlaps(ts) {
+                        continue;
+                    }
+                    seen = seen.with_all(ts);
+                    types = types.saturating_add(1);
+                }
+                self.players[p].gold = self.players[p].gold.saturating_add(n.saturating_mul(types));
+            }
+            Act::GoldPerGolden(n) => {
+                let goldens = self.players[p].board.iter().filter(|m| m.golden).count() as u8;
+                self.players[p].gold = self.players[p].gold.saturating_add(n.saturating_mul(goldens));
+            }
+            Act::GoldenWhenRich(tier) => {
+                // "When you have 15 Gold": a standing flag, checked wherever
+                // the Gold can reach it, and paid once.
+                self.players[p].tp.golden_when_rich = tier;
+                if self.players[p].trinkets[slot].done || self.players[p].gold < 15 {
+                    return;
+                }
+                self.players[p].trinkets[slot].done = true;
+                self.run_effect(p, &mut pos, Effect::GetGoldenMinion { tier, count: 1 }, false, 1);
+                self.players[p].tp.golden_when_rich = 0;
+            }
+            Act::NextTrinketLesser => self.players[p].tp.next_lesser = true,
+            Act::GreaterOfferOnTurn(turn) => self.players[p].tp.greater_offer_turn = turn,
+            Act::GreaterOfferIntoLesser(n) => {
+                self.players[p].tp.greater_into_lesser_turn = self.turn + n as u32;
+            }
+            Act::ReplaceWithRandom { slot: kind, tribe } => {
+                self.replace_trinket_at(p, slot, kind, tribe);
+            }
+            Act::BuffRandomOther { tribe, attack, health, count } => {
+                // `Effect::BuffRandomOther` is a fight effect; in the shop it
+                // is this: up to `count` different friendly minions of the
+                // tribe, at random (Booty Bay Brew).
+                let cards = &self.data.cards;
+                let mut picks: ArrayVec<usize, { crate::BOARD }> = self.players[p]
+                    .board
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| cards.get(m.card).is(tribe) && !cards.get(m.card).fixed_stats)
+                    .map(|(i, _)| i)
+                    .collect();
+                for _ in 0..count {
+                    if picks.is_empty() {
+                        break;
+                    }
+                    let k = self.rng.below(picks.len() as u32) as usize;
+                    let at = picks.swap_remove(k);
+                    buff(&mut self.players[p].board[at], attack, health);
+                }
+            }
+            Act::OfferReplace(n) => {
+                // A free offer of this slot, to replace this trinket with
+                // (Mystery Cube). The pick overwrites the slot.
+                if !self.players[p].trinket_offer.is_empty() {
+                    return;
+                }
+                let kind = self.data.trinkets.get(self.players[p].trinkets[slot].of - 1).slot;
+                self.deal_trinket_offer(p, slot, kind);
+                // Only the first `n` options, all free.
+                while self.players[p].trinket_offer.len() > n as usize {
+                    self.players[p].trinket_offer.pop();
+                }
+                for o in self.players[p].trinket_offer.iter_mut() {
+                    o.1 = 0;
+                }
+            }
+            Act::GrowValue(n) => {
+                let v = &mut self.players[p].trinkets[slot].value;
+                *v = v.saturating_add(n);
+            }
+            Act::BuffAllGrowing { tribe, attack, health } => {
+                let v = self.players[p].trinkets[slot].value as i32;
+                let (a, h) = (attack + v, health + v);
+                self.run_effect(p, &mut pos, Effect::BuffAll { tribe, attack: a, health: h }, false, 1);
+            }
+            Act::BuffLeftmostGrowing { attack, health } => {
+                let v = self.players[p].trinkets[slot].value as i32;
+                let e = SpellEffect::BuffLeftmost { attack: attack + v, health: health + v };
+                self.execute_spell_effect(p, e, false);
+            }
+            Act::BuffAllPerGolden { attack, health } => {
+                let n = self.players[p].golden_played as i32;
+                let e = Effect::BuffAll { tribe: None, attack: attack * n, health: health * n };
+                self.run_effect(p, &mut pos, e, false, 1);
+            }
+            Act::BuffLeftmostTwoPerBattlecry { attack, health } => {
+                let n = self.players[p].tp.battlecries as i32;
+                let e = SpellEffect::BuffLeftmost { attack: attack * n, health: health * n };
+                for _ in 0..2 {
+                    self.execute_spell_effect(p, e, false);
+                }
+            }
+            Act::RandomMostCommonType(n) => {
+                let mut counts = [0u8; Tribe::EVERY.len()];
+                let cards = &self.data.cards;
+                for m in &self.players[p].board {
+                    let ts = cards.get(m.card).tribes;
+                    for (i, t) in Tribe::EVERY.into_iter().enumerate() {
+                        if ts.has(t) {
+                            counts[i] = counts[i].saturating_add(1);
+                        }
+                    }
+                }
+                let Some(best) = counts.iter().max().copied().filter(|&c| c > 0) else { return };
+                let tied: ArrayVec<Tribe, { Tribe::EVERY.len() }> = Tribe::EVERY
+                    .into_iter()
+                    .enumerate()
+                    .filter(|&(i, _)| counts[i] == best)
+                    .map(|(_, t)| t)
+                    .collect();
+                let t = tied[self.rng.below(tied.len() as u32) as usize];
+                for _ in 0..n {
+                    self.run_effect(p, &mut pos, Effect::GetRandomMinion { tribe: t }, false, 1);
+                }
+            }
         }
+    }
+
+    /// What a minion in Tavern slot `s` costs this player right now: Gold
+    /// (0 when a trinket makes it free) or Health (Pilgrimp Sticker, Demonic
+    /// Tapestry, The Eye of Sargeras). DESIGN.md: a Health price is self
+    /// damage, not Gold spent.
+    pub(super) fn minion_price(&self, p: usize, slot: usize) -> MinionPrice {
+        let pl = &self.players[p];
+        let Some(m) = pl.shop.get(slot) else { return MinionPrice::Gold(self.data.rules.buy_cost) };
+        let card = self.data.cards.get(m.card);
+        let tp = pl.tp;
+        if tp.free_buys > 0 || (tp.free_tribe_left > 0 && tp.free_tribe.is_some_and(|t| card.tribes.has(t)))
+        {
+            return MinionPrice::Gold(0);
+        }
+        let by_tribe = tp.health_price_left > 0
+            && tp.health_price_tribe.is_none_or(|t| card.tribes.has(t));
+        let highest = tp.highest_tier_health && self.is_highest_tier_slot(p, slot);
+        let every_nth = tp.fourth_buy_every > 0
+            && (tp.fourth_buy + 1).is_multiple_of(tp.fourth_buy_every);
+        if by_tribe || highest || every_nth {
+            MinionPrice::Health(self.data.rules.buy_cost)
+        } else {
+            MinionPrice::Gold(self.data.rules.buy_cost)
+        }
+    }
+
+    /// Whether this Tavern slot holds one of the highest-Tier minions on
+    /// offer (Demonic Tapestry).
+    fn is_highest_tier_slot(&self, p: usize, slot: usize) -> bool {
+        let cards = &self.data.cards;
+        let tier = self.players[p]
+            .shop
+            .get(slot)
+            .map(|m| cards.get(m.card).tier)
+            .unwrap_or(0);
+        tier > 0
+            && tier
+                == self.players[p]
+                    .shop
+                    .iter()
+                    .map(|m| cards.get(m.card).tier)
+                    .max()
+                    .unwrap_or(0)
+    }
+
+    /// Spend the trinket prices a minion buy used up: a free buy's use, a
+    /// Health price's use, and the every-Nth-buy counter.
+    pub(super) fn note_minion_bought(&mut self, p: usize, price: MinionPrice) {
+        let tp = &mut self.players[p].tp;
+        match price {
+            MinionPrice::Gold(0) => {
+                if tp.free_buys > 0 {
+                    tp.free_buys -= 1;
+                } else if tp.free_tribe_left > 0 {
+                    tp.free_tribe_left -= 1;
+                }
+            }
+            MinionPrice::Health(_) => {
+                if tp.health_price_left > 0 {
+                    tp.health_price_left -= 1;
+                }
+            }
+            MinionPrice::Gold(_) => {}
+        }
+        if tp.fourth_buy_every > 0 {
+            let n = tp.fourth_buy.saturating_add(1);
+            tp.fourth_buy = if n >= tp.fourth_buy_every { 0 } else { n };
+        }
+    }
+
+    /// "When you have 15 Gold, get a random Golden Tier 5 minion"
+    /// (Splinter of Aurum): checked wherever the player's Gold can reach it.
+    pub fn check_golden_when_rich(&mut self, p: usize) {
+        let tier = self.players[p].tp.golden_when_rich;
+        if tier == 0 || self.players[p].gold < 15 {
+            return;
+        }
+        for slot in 0..TRINKET_SLOTS {
+            let of = self.players[p].trinkets[slot].of;
+            if of == 0 || self.players[p].trinkets[slot].done {
+                continue;
+            }
+            if self.data.trinkets.get(of - 1).golden_when_rich() == Some(tier) {
+                self.players[p].trinkets[slot].done = true;
+                let mut pos = 0;
+                self.run_effect(p, &mut pos, Effect::GetGoldenMinion { tier, count: 1 }, false, 1);
+            }
+        }
+    }
+
+    /// Replace the trinket in `slot` with a random one of `kind`, its tribes
+    /// in the lobby (Orb of the Unknown, Quartermaster's Hook): the new one's
+    /// own on-pick does not run, it is placed, not picked.
+    fn replace_trinket_at(&mut self, p: usize, slot: usize, kind: Slot, tribe: Option<Tribe>) {
+        let data = self.data.clone();
+        let mut pool: ArrayVec<u8, 256> = ArrayVec::new();
+        for i in 0..data.trinkets.len() as u8 {
+            let t = data.trinkets.get(i);
+            if t.slot != kind || (!t.tribes.is_empty() && !t.tribes.overlaps(self.lobby)) {
+                continue;
+            }
+            if let Some(w) = tribe
+                && !t.tribes.has(w)
+            {
+                continue;
+            }
+            let _ = pool.try_push(i);
+        }
+        if pool.is_empty() {
+            return;
+        }
+        let k = self.rng.below(pool.len() as u32) as usize;
+        let of = pool[k];
+        self.set_trinket(p, slot, Some(of));
     }
 }

@@ -92,6 +92,11 @@ impl Tribes {
         self.0
     }
 
+    /// This set plus every tribe in `other`.
+    pub fn with_all(self, other: Tribes) -> Tribes {
+        Tribes(self.0 | other.0)
+    }
+
     /// Neutral: no tribe at all.
     pub fn is_neutral(self) -> bool {
         self.0 == 0

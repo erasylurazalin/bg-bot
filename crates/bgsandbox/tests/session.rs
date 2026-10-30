@@ -206,7 +206,10 @@ fn random_play_never_panics_and_undoes_cleanly() {
                 break;
             }
         }
-        assert!(accepted > 100, "{tribe:?}: only {accepted} commands accepted");
+        // How many commands land depends on how long the random player stays
+        // alive (it fights a copy of its own board), and trinkets can make
+        // those fights end sooner.
+        assert!(accepted > 50, "{tribe:?}: only {accepted} commands accepted");
         // undo all the way back, checking each state
         while prints.len() > 1 {
             prints.pop();

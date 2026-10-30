@@ -80,17 +80,10 @@ impl Game {
                 if st.of as usize > self.data.trinkets.len() {
                     return Err(format!("player {i}: trinket slot {slot} holds no trinket"));
                 }
-                let t = self.data.trinkets.get(st.of - 1);
-                let want = match slot {
-                    0 => Some(crate::trinkets::Slot::Lesser),
-                    1 => Some(crate::trinkets::Slot::Greater),
-                    _ => None,
-                };
-                if let Some(want) = want
-                    && t.slot != want
-                {
-                    return Err(format!("player {i}: {} is in the wrong trinket slot", t.name));
-                }
+                // Either slot can hold either kind now: Trip Vouchers puts a
+                // greater offer into the lesser slot, and Mysterious Orb
+                // makes the next offer a lesser one (DESIGN.md, second
+                // round). The power slot holds whatever the power offered.
             }
             {
                 let mut mask = 0;
@@ -126,7 +119,12 @@ impl Game {
                 && pl.board.is_empty()
                 && pl.discover.is_empty());
             if !pl.alive && holds_cards {
-                return Err(format!("player {i}: dead but holds cards"));
+                return Err(format!(
+                    "player {i}: dead but holds cards at turn {} (place {} done {} shop {} hand {} board {} discover {} spell {})",
+                    self.turn, pl.placement, pl.done,
+                    pl.shop.len(), pl.hand.len(), pl.board.len(), pl.discover.len(),
+                    pl.shop_spell.is_some()
+                ));
             }
             if !(1..=MAX_TIER).contains(&pl.tier) {
                 return Err(format!("player {i}: tier {}", pl.tier));

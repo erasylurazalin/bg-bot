@@ -31,6 +31,7 @@ use crate::heroes::PowerEffect;
 use crate::minion::{CardId, Keywords, Minion};
 use crate::real_boards::RealBoards;
 use crate::trinkets::Event;
+use self::trinkets::MinionPrice;
 use crate::rng::Rng;
 use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
 
@@ -285,6 +286,46 @@ impl PowerState {
     }
 }
 
+/// The standing effects of a player's trinkets (see `Act` in trinkets.rs for
+/// which card sets each field). Reset nowhere: a trinket is never removed,
+/// except by a re-offer, which replaces it wholesale.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TrinketPowers {
+    /// Minions that cost Health instead of Gold: a tribe (None for any) and
+    /// how many this turn.
+    pub health_price_tribe: Option<Tribe>,
+    pub health_price_left: u8,
+    /// A Tavern spell that costs Health this turn (Bazaar Sticker).
+    pub spell_health_left: u8,
+    /// The highest-Tier minion in the Tavern costs Health (Demonic Tapestry).
+    pub highest_tier_health: bool,
+    /// Every Nth card bought costs Health; the count so far.
+    pub fourth_buy: u8,
+    pub fourth_buy_every: u8,
+    /// Free minion buys this turn (Warcry Totem) and a free tribe (Grifter).
+    pub free_buys: u8,
+    pub free_tribe: Option<Tribe>,
+    pub free_tribe_left: u8,
+    /// Battlecries the player has triggered this game (Murky Sticker's
+    /// improve step).
+    pub battlecries: u16,
+    /// On reaching Tier 6, gain this much Gold once (Stuffed Coin Purse).
+    pub gold_on_tier6: u8,
+    /// Gold per distinct friendly minion type at the start of the turn
+    /// (Glowing Crystal), per friendly Golden minion (Rascal Sticker).
+    pub gold_per_type: u8,
+    pub gold_per_golden: u8,
+    /// "When you have 15 Gold": get a random Golden Tier 5 minion, once
+    /// (Splinter of Aurum). The tier is the draw; 0 when not held.
+    pub golden_when_rich: u8,
+    /// The next trinket offer is a lesser one (Mysterious Orb).
+    pub next_lesser: bool,
+    /// The turn the greater slot is offered instead of turn 9 (Ornate Clock).
+    pub greater_offer_turn: u32,
+    /// The turn a greater offer goes into the lesser slot (Trip Vouchers).
+    pub greater_into_lesser_turn: u32,
+}
+
 /// One held trinket: which one, its "every N" counter, the uses its hooks
 /// have left this turn, and whether a `once` rule has fired.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -292,6 +333,9 @@ pub struct TrinketState {
     /// Index into `TrinketDb` plus one; 0 for an empty slot.
     pub of: u8,
     pub count: u16,
+    /// A number the trinket improves as it plays ("improve this": Shark
+    /// Cannon, Panpipes).
+    pub value: u8,
     pub uses_left: u8,
     pub done: bool,
 }
@@ -328,6 +372,10 @@ pub struct Player {
     /// A hook reads this one `u16` and leaves the shared trinket table alone
     /// unless the bit matches.
     pub trinket_events: u16,
+    /// What this player's trinkets change for them: prices, the Tavern's
+    /// shape, and the small standing rules. One block, so a trinket effect is
+    /// a field write and the card paths read it without a table lookup.
+    pub tp: TrinketPowers,
     /// Dark Gift uses. Room for a later run, unused.
     pub dark_gifts: u8,
     /// A real-board seat (docs/real-boards.md): no hero, no shopping. At the
@@ -755,14 +803,19 @@ impl Game {
                 }
                 let card = self.data.cards.get(pl.shop[s].card);
                 if card.is_spell() {
-                    if card.pay_health {
+                    if card.pay_health || pl.tp.spell_health_left > 0 {
                         pl.can_pay_health(card.cost as i32, &self.data.cards)
                     } else {
                         let cost = card.cost.saturating_sub(pl.spell_discount);
                         pl.gold >= cost
                     }
                 } else {
-                    pl.gold >= r.buy_cost
+                    match self.minion_price(p, s) {
+                        MinionPrice::Gold(g) => pl.gold >= g,
+                        MinionPrice::Health(h) => {
+                            pl.can_pay_health(h as i32, &self.data.cards)
+                        }
+                    }
                 }
             }
             Action::BuySpell => {
@@ -771,7 +824,7 @@ impl Game {
                 if pl.hand.is_full() {
                     return false;
                 }
-                if card.pay_health {
+                if card.pay_health || pl.tp.spell_health_left > 0 {
                     pl.can_pay_health(card.cost as i32, &self.data.cards)
                 } else {
                     pl.gold >= card.cost.saturating_sub(pl.spell_discount)
@@ -1221,6 +1274,11 @@ impl Game {
             }
         }
         self.advance();
+        // A fight or a hook in `advance` can still hand a knocked-out player
+        // something: one more sweep, so a dead hero never holds cards.
+        for q in 0..PLAYERS {
+            self.settle_dead(q);
+        }
         #[cfg(debug_assertions)]
         self.check_invariants().unwrap();
         Ok(())
@@ -1235,7 +1293,12 @@ impl Game {
                 if c.is_spell() {
                     // A Saloon's Finest slot holds a spell: it is bought at
                     // its own cost, like the spell slot.
-                    let (pay_health, cost) = (c.pay_health, c.cost);
+                    // Bazaar Sticker: one Tavern spell a turn costs Health.
+                    let trinket_health = self.players[p].tp.spell_health_left > 0;
+                    let (pay_health, cost) = (c.pay_health || trinket_health, c.cost);
+                    if trinket_health {
+                        self.players[p].tp.spell_health_left -= 1;
+                    }
                     let m = self.players[p].shop.remove(slot);
                     self.add_to_hand(p, m);
                     self.pay_for_spell(p, pay_health, cost);
@@ -1243,11 +1306,22 @@ impl Game {
                     self.fire_event(p, EventKind::CardsBought, 1);
                     self.trinket_event(p, Event::BuySpell, Some(id), 1);
                 } else {
-                    let buy_cost = self.data.rules.buy_cost;
+                    let price = self.minion_price(p, slot);
+                    let buy_cost = match price {
+                        MinionPrice::Gold(g) => g,
+                        MinionPrice::Health(_) => 0,
+                    };
+                    self.note_minion_bought(p, price);
                     let pl = &mut self.players[p];
                     let m = pl.shop.remove(slot);
                     pl.gold -= buy_cost;
                     self.add_to_hand(p, m);
+                    // A Health price is self damage, not Gold spent
+                    // (DESIGN.md). Paid once the card is in hand, so a buy
+                    // that kills the hero still settles cleanly.
+                    if let MinionPrice::Health(h) = price {
+                        self.take_shop_damage(p, h as i32, None);
+                    }
                     self.after_buy_effects(p);
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
@@ -1266,7 +1340,11 @@ impl Game {
             Action::BuySpell => {
                 let id = self.players[p].shop_spell.take().unwrap();
                 let c = self.data.cards.get(id);
-                let (pay_health, cost) = (c.pay_health, c.cost);
+                let trinket_health = self.players[p].tp.spell_health_left > 0;
+                let (pay_health, cost) = (c.pay_health || trinket_health, c.cost);
+                if trinket_health {
+                    self.players[p].tp.spell_health_left -= 1;
+                }
                 let pl = &mut self.players[p];
                 let m = pl.make_card(&self.data.cards, id, false, 0);
                 self.add_to_hand(p, m);
@@ -1446,6 +1524,12 @@ impl Game {
                     })
                     .unwrap_or(0);
                 self.players[p].gold = self.players[p].gold.saturating_add(gain);
+                // "When you reach Tier 6, gain 12 Gold" (Stuffed Coin Purse).
+                if self.players[p].tier == crate::MAX_TIER && self.players[p].tp.gold_on_tier6 > 0 {
+                    let g = self.players[p].tp.gold_on_tier6;
+                    self.players[p].tp.gold_on_tier6 = 0;
+                    self.players[p].gold = self.players[p].gold.saturating_add(g);
+                }
                 self.refresh_power_unlock(p);
                 self.fire_event(p, EventKind::GoldSpent, cost as u32);
             }

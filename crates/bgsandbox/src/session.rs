@@ -560,6 +560,19 @@ impl Session {
             match arg {
                 Arg::Board(n) | Arg::Tavern(n) => Action::TargetShop(n.saturating_sub(1).min(255) as u8),
             }
+        } else if !pl.trinket_offer.is_empty() {
+            // A trinket offer: `choose 1` .. `choose 4`. A Discover a trinket
+            // opened at the start of the turn is answered first (is_legal
+            // gives it priority), so try that too.
+            let n = match arg {
+                Arg::Board(n) => n.saturating_sub(1).min(255) as u8,
+                Arg::Tavern(_) => return Err("a trinket offer takes a plain number".into()),
+            };
+            if self.game.is_legal(Action::Choose(n)) {
+                Action::Choose(n)
+            } else {
+                Action::ChooseTrinket(n)
+            }
         } else if pl.pending_choose_one.is_some()
             || !pl.discover.is_empty()
             || !pl.power_offer.is_empty()

@@ -561,6 +561,7 @@ impl Game {
         }
         self.fire_event(p, EventKind::MinionsSold, 1);
         self.trinket_event(p, Event::Sell, Some(m.card), 1);
+        self.check_golden_when_rich(p);
         m
     }
 

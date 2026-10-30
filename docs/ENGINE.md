@@ -261,7 +261,12 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   cheapest option for a player who ends the turn with it open. A choice a
   trinket's own start-of-turn effect opened is answered first
   (`Game::other_choice_open`).
-- **The hooks.** A trinket has no host minion, so the frame calls
+- **The hooks.** The lists are the ones in `trinkets.toml`'s header:
+  `on_pick`, `start_of_turn`, `end_of_turn`, `on_buy`, `on_buy_spell`,
+  `on_play`, `on_sell`, `on_refresh`, `on_cast_spell`,
+  `on_cast_spell_on_minion`, `on_discard`, `on_gold_spent` (once per
+  spending, whatever the amount) and `rule` (event, every, once, acts).
+  A trinket has no host minion, so the frame calls
   `Game::trinket_event(p, event, card, amount)` where the card path already
   fires (see the list below). Each hook starts from the player's
   `trinket_events` mask: `Trinket::event_mask` (the events its lists and its

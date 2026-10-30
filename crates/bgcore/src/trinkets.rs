@@ -155,6 +155,65 @@ pub enum Act {
     /// Play this many Blood Gems on every friendly minion: Bloodbound
     /// Earrings, Great Boar Sticker's counterpart (`gems_on_board`).
     GemsOnBoard(u8),
+    // ---- prices, Gold and the trinket slots (DESIGN.md, second round) ----
+    /// Minion buys that cost Health instead of Gold: this many this turn, of
+    /// a tribe or any (Pilgrimp Sticker).
+    HealthPriceMinions { tribe: Option<Tribe>, count: u8 },
+    /// The highest-Tier minion in the Tavern costs Health (Demonic Tapestry).
+    HealthPriceHighestTier,
+    /// Every Nth card bought costs Health (The Eye of Sargeras).
+    EveryNthBuyHealth(u8),
+    /// A Tavern spell costs Health this turn (Bazaar Sticker).
+    HealthPriceSpell(u8),
+    /// This many minion buys are free this turn (Warcry Totem).
+    FreeBuys(u8),
+    /// The first buys of this tribe each turn are free (Doubloon Grifter).
+    FreeTribeBuys { tribe: Tribe, count: u8 },
+    /// Reaching Tier 6 gives this much Gold once (Stuffed Coin Purse).
+    GoldOnTier6(u8),
+    /// Gold for each different friendly minion type at the start of the turn
+    /// (Glowing Crystal).
+    GoldPerType(u8),
+    /// Gold for each friendly Golden minion at the start of the turn (Rascal
+    /// Sticker).
+    GoldPerGolden(u8),
+    /// With 15 Gold or more, a random Golden minion of this tier, once
+    /// (Splinter of Aurum).
+    GoldenWhenRich(u8),
+    /// The next trinket offer is a Lesser one (Mysterious Orb).
+    NextTrinketLesser,
+    /// The Greater offer comes at the start of this turn instead of turn 9
+    /// (Ornate Clock: the turn after the pick).
+    GreaterOfferOnTurn(u32),
+    /// A Greater offer into the lesser slot in this many turns, replacing
+    /// this trinket (Trip Vouchers).
+    GreaterOfferIntoLesser(u8),
+    /// Replace this trinket with a random trinket of a slot (and tribe):
+    /// Quartermaster's Hook, Dragonhead Staff, Ruby Tusk, Soul Battery.
+    ReplaceWithRandom { slot: Slot, tribe: Option<Tribe> },
+    /// Raise this trinket's own counter ("improve this"): Shark Cannon,
+    /// Panpipes.
+    GrowValue(u8),
+    /// Buff every friendly minion of a tribe by the base plus the trinket's
+    /// own counter (Shark Cannon's improving Pirate buff).
+    BuffAllGrowing { tribe: Option<Tribe>, attack: i32, health: i32 },
+    /// Buff the left-most friendly minion by the base plus the trinket's own
+    /// counter (Charming Panpipes).
+    BuffLeftmostGrowing { attack: i32, health: i32 },
+    /// Buff every friendly minion by the base plus this many per Golden
+    /// minion the player has played this game (Gold Mallet).
+    BuffAllPerGolden { attack: i32, health: i32 },
+    /// Buff the two left-most friendly minions by the base plus this many per
+    /// Battlecry the player has triggered this game (Murky Sticker).
+    BuffLeftmostTwoPerBattlecry { attack: i32, health: i32 },
+    /// A random minion of the player's most common type (Charisma).
+    RandomMostCommonType(u8),
+    /// Give this many random friendly minions of a tribe stats (Booty Bay
+    /// Brew).
+    BuffRandomOther { tribe: Option<Tribe>, attack: i32, health: i32, count: u8 },
+    /// Offer this many trinkets of this slot, free, to replace this one
+    /// (Mystery Cube).
+    OfferReplace(u8),
 }
 
 /// "Every N events" / "after N events" / "once N events": one per trinket.
@@ -201,6 +260,9 @@ pub struct Trinket {
     pub on_cast_spell: Vec<Act>,
     pub on_cast_spell_on_minion: Vec<Act>,
     pub on_discard: Vec<Act>,
+    /// Whenever the player spends Gold, once per spending whatever the
+    /// amount (DESIGN.md, second round): Booty Bay Brew.
+    pub on_gold_spent: Vec<Act>,
     /// Only discard events of a spell (Shath'Yar Shrine).
     pub discard_spells_only: bool,
     pub rule: Option<Rule>,
@@ -208,6 +270,18 @@ pub struct Trinket {
 }
 
 impl Trinket {
+    /// The tier this trinket pays out at 15 Gold, if it is that card
+    /// (Splinter of Aurum).
+    pub fn golden_when_rich(&self) -> Option<u8> {
+        self.on_pick
+            .iter()
+            .chain(self.start_of_turn.iter())
+            .find_map(|a| match a {
+                Act::GoldenWhenRich(t) => Some(*t),
+                _ => None,
+            })
+    }
+
     /// The events this trinket listens for, as a bit mask: the player ORs
     /// its trinkets' masks together, so a hook can answer "nothing here"
     /// from one `u16` on the player and never read this table (shared by
@@ -229,6 +303,7 @@ impl Trinket {
         list(!self.on_cast_spell.is_empty(), Event::CastSpell, &mut m, &mut any);
         list(!self.on_cast_spell_on_minion.is_empty(), Event::CastSpellOnMinion, &mut m, &mut any);
         list(!self.on_discard.is_empty(), Event::Discard, &mut m, &mut any);
+        list(!self.on_gold_spent.is_empty(), Event::GoldSpent, &mut m, &mut any);
         list(!self.start_of_turn.is_empty() || self.rule.as_ref().is_some_and(|r| r.event == Event::Turns), Event::Turns, &mut m, &mut any);
         if let Some(r) = &self.rule {
             list(true, r.event, &mut m, &mut any);
@@ -261,7 +336,7 @@ impl Trinket {
             Event::CastSpell => !self.on_cast_spell.is_empty(),
             Event::CastSpellOnMinion => !self.on_cast_spell_on_minion.is_empty(),
             Event::Discard => !self.on_discard.is_empty(),
-            Event::GoldSpent => false,
+            Event::GoldSpent => !self.on_gold_spent.is_empty(),
             Event::Turns => !self.end_of_turn.is_empty() || self.rule.is_some(),
         }
     }
@@ -342,6 +417,30 @@ struct RawAct {
     make_golden_random: Option<u8>,
     last_spell_copies: Option<u8>,
     gems_on_board: Option<u8>,
+    health_price_minions: Option<[String; 2]>,
+    #[serde(default)]
+    health_price_highest_tier: bool,
+    every_nth_buy_health: Option<u8>,
+    health_price_spell: Option<u8>,
+    free_buys: Option<u8>,
+    free_tribe_buys: Option<[String; 2]>,
+    gold_on_tier6: Option<u8>,
+    gold_per_type: Option<u8>,
+    gold_per_golden: Option<u8>,
+    golden_when_rich: Option<u8>,
+    #[serde(default)]
+    next_trinket_lesser: bool,
+    greater_offer_in: Option<u8>,
+    greater_offer_into_lesser: Option<u8>,
+    replace_with_random: Option<[String; 2]>,
+    grow_value: Option<u8>,
+    buff_all_growing: Option<[i32; 2]>,
+    buff_leftmost_growing: Option<[i32; 2]>,
+    buff_all_per_golden: Option<[i32; 2]>,
+    buff_leftmost_two_per_battlecry: Option<[i32; 2]>,
+    random_most_common_type: Option<u8>,
+    buff_random_other: Option<[i32; 2]>,
+    offer_replace: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -401,6 +500,8 @@ struct RawTrinket {
     #[serde(default)]
     on_discard: Vec<RawAct>,
     #[serde(default)]
+    on_gold_spent: Vec<RawAct>,
+    #[serde(default)]
     discard_spells_only: bool,
     #[serde(default)]
     rule: Option<RawRule>,
@@ -437,6 +538,7 @@ impl TrinketDb {
             let card = |n: &str| -> Result<CardId, String> {
                 cards.by_name(n).ok_or_else(|| err(format!("unknown card {n:?}")))
             };
+            let tribe_ = |n: &str| tribe(n);
             let act = |a: &RawAct| -> Result<Act, String> {
                 Ok(if let Some(n) = &a.get {
                     Act::Get { card: card(n)?, count: a.count.unwrap_or(1) }
@@ -507,6 +609,64 @@ impl TrinketDb {
                     Act::LastSpellCopies(n)
                 } else if let Some(n) = a.gems_on_board {
                     Act::GemsOnBoard(n)
+                } else if let Some([tribe, count]) = &a.health_price_minions {
+                    let count = count.parse().map_err(|_| err("health_price_minions count".into()))?;
+                    let tribe = if tribe.is_empty() { None } else { Some(tribe_(tribe).map_err(err)?) };
+                    Act::HealthPriceMinions { tribe, count }
+                } else if a.health_price_highest_tier {
+                    Act::HealthPriceHighestTier
+                } else if let Some(n) = a.every_nth_buy_health {
+                    Act::EveryNthBuyHealth(n)
+                } else if let Some(n) = a.health_price_spell {
+                    Act::HealthPriceSpell(n)
+                } else if let Some(n) = a.free_buys {
+                    Act::FreeBuys(n)
+                } else if let Some([tribe, count]) = &a.free_tribe_buys {
+                    let count = count.parse().map_err(|_| err("free_tribe_buys count".into()))?;
+                    Act::FreeTribeBuys { tribe: tribe_(tribe).map_err(err)?, count }
+                } else if let Some(n) = a.gold_on_tier6 {
+                    Act::GoldOnTier6(n)
+                } else if let Some(n) = a.gold_per_type {
+                    Act::GoldPerType(n)
+                } else if let Some(n) = a.gold_per_golden {
+                    Act::GoldPerGolden(n)
+                } else if let Some(tier) = a.golden_when_rich {
+                    Act::GoldenWhenRich(tier)
+                } else if a.next_trinket_lesser {
+                    Act::NextTrinketLesser
+                } else if let Some(n) = a.greater_offer_in {
+                    Act::GreaterOfferOnTurn(n as u32)
+                } else if let Some(n) = a.greater_offer_into_lesser {
+                    Act::GreaterOfferIntoLesser(n)
+                } else if let Some(n) = a.grow_value {
+                    Act::GrowValue(n)
+                } else if let Some([attack, health]) = a.buff_all_growing {
+                    Act::BuffAllGrowing { tribe: None, attack, health }
+                } else if let Some([attack, health]) = a.buff_leftmost_growing {
+                    Act::BuffLeftmostGrowing { attack, health }
+                } else if let Some([attack, health]) = a.buff_all_per_golden {
+                    Act::BuffAllPerGolden { attack, health }
+                } else if let Some([attack, health]) = a.buff_leftmost_two_per_battlecry {
+                    Act::BuffLeftmostTwoPerBattlecry { attack, health }
+                } else if let Some([attack, health]) = a.buff_random_other {
+                    Act::BuffRandomOther {
+                        tribe: a.tribe.as_deref().map(tribe).transpose().map_err(err)?,
+                        attack,
+                        health,
+                        count: a.count.unwrap_or(1),
+                    }
+                } else if let Some(n) = a.offer_replace {
+                    Act::OfferReplace(n)
+                } else if let Some(n) = a.random_most_common_type {
+                    Act::RandomMostCommonType(n)
+                } else if let Some([slot, tribe]) = &a.replace_with_random {
+                    let slot = match slot.as_str() {
+                        "lesser" => Slot::Lesser,
+                        "greater" => Slot::Greater,
+                        other => return Err(err(format!("unknown slot {other:?}"))),
+                    };
+                    let tribe = if tribe.is_empty() { None } else { Some(tribe_(tribe).map_err(err)?) };
+                    Act::ReplaceWithRandom { slot, tribe }
                 } else {
                     return Err(err(
                         "an act table with no known key (see trinkets.rs `Act`)".into(),
@@ -530,6 +690,12 @@ impl TrinketDb {
             };
             let mut tribes = Tribes::NONE;
             for n in &t.tribes {
+                // Naga left the game (DESIGN.md): a Naga tag is no tag, so a
+                // trinket tagged Naga and something else stays offerable with
+                // that something else.
+                if n.trim().eq_ignore_ascii_case("naga") {
+                    continue;
+                }
                 tribes = tribes.with(tribe(n).map_err(err)?);
             }
             let rule = match &t.rule {
@@ -585,6 +751,7 @@ impl TrinketDb {
                 on_cast_spell: acts(&t.on_cast_spell)?,
                 on_cast_spell_on_minion: acts(&t.on_cast_spell_on_minion)?,
                 on_discard: acts(&t.on_discard)?,
+                on_gold_spent: acts(&t.on_gold_spent)?,
                 discard_spells_only: t.discard_spells_only,
                 rule,
                 soc,

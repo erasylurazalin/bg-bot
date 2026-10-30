@@ -301,6 +301,8 @@ impl Game {
     }
 
     pub(super) fn battlecry_or_choose_one(&mut self, p: usize, mut pos: usize) {
+        // "Battlecries you have triggered this game" (Murky Sticker).
+        self.players[p].tp.battlecries = self.players[p].tp.battlecries.saturating_add(1);
         let m = self.players[p].board[pos];
         let mul = if m.golden { 2 } else { 1 };
         let card = self.data.cards.get(m.card);

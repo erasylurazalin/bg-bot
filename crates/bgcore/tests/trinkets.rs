@@ -842,7 +842,7 @@ fn play_from_hand(g: &mut Game, p: usize, name: &str) {
 #[test]
 fn the_trinket_table_parses() {
     let d = Data::bundled();
-    assert!(d.trinkets.len() >= 50, "only {} trinkets", d.trinkets.len());
+    assert!(d.trinkets.len() >= 76, "only {} trinkets", d.trinkets.len());
     for i in 0..d.trinkets.len() as u8 {
         let t = d.trinkets.get(i);
         assert!(!t.name.is_empty());
@@ -859,6 +859,7 @@ fn the_trinket_table_parses() {
                 + t.on_cast_spell.len()
                 + t.on_cast_spell_on_minion.len()
                 + t.on_discard.len()
+                + t.on_gold_spent.len()
                 + t.soc.iter().count()
                 + t.rule.iter().count()
                 > 0,
@@ -1021,15 +1022,151 @@ fn take_id(g: &mut Game, p: usize, card_id: &str) {
     g.step(Action::ChooseTrinket(0)).unwrap_or_else(|_| panic!("could not take {card_id}"));
 }
 
+
+// ---- the second round: prices, Gold and the trinket slots ----
+
 #[test]
-#[ignore]
-fn dbg_mask() {
-    let mut g = game(0);
-    put_on_board(&mut g, 0, "Southsea Busker");
-    put_on_board(&mut g, 0, "Bilgewater Breakout");
+fn a_health_price_is_self_damage_and_not_gold_spent() {
+    // Pilgrimp Sticker: one Demon a turn costs Health.
+    let mut g = game_lobby(60, &[Tribe::Demon, Tribe::Beast]);
+    to_turn(&mut g, 5);
+    take(&mut g, 0, "Pilgrimp Sticker");
     to_turn(&mut g, 6);
     turn_of(&mut g, 0);
-    eprintln!("offer len {} slot {} board {:?}", g.players[0].trinket_offer.len(),
-        g.players[0].trinket_offer_slot,
-        g.players[0].board.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>());
+    set_shop(&mut g, 0, &["Wrath Weaver"]);
+    g.players[0].gold = 10;
+    g.players[0].health = 30;
+    g.players[0].armor = 0;
+    let gold = g.players[0].gold;
+    let hp = g.players[0].health;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].gold, gold, "Health, not Gold");
+    assert_eq!(g.players[0].health, hp - 3, "three Health of self damage");
+    assert_eq!(g.players[0].gold_spent_turn, 0, "not Gold spent");
+    assert_eq!(hand_of(&g, 0, "Wrath Weaver"), 1, "it is still a buy");
+    // The use is gone: the next Demon is bought with Gold.
+    set_shop(&mut g, 0, &["Ominous Seer"]);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].gold, 7);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_free_buy_spends_no_gold_but_is_a_buy() {
+    // Warcry Totem: two Battlecry minions a turn are free.
+    let mut g = game(61);
+    to_turn(&mut g, 5);
+    take(&mut g, 0, "Warcry Totem");
+    to_turn(&mut g, 6);
+    turn_of(&mut g, 0);
+    set_shop(&mut g, 0, &["Ominous Seer"]);
+    g.players[0].gold = 0;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].gold, 0);
+    assert_eq!(g.players[0].gold_spent_turn, 0, "a free buy spends no Gold");
+    assert_eq!(g.players[0].tp.free_buys, 1, "one left");
+    assert_eq!(hand_of(&g, 0, "Ominous Seer"), 1, "but it is a buy");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_gold_trinkets_pay_out() {
+    // Glowing Crystal: 1 Gold per different friendly type at the start of
+    // the turn.
+    let mut g = game(62);
+    put_on_board(&mut g, 0, "Southsea Busker");
+    put_on_board(&mut g, 0, "Scarlet Survivor");
+    equip(&mut g, 0, 0, "Glowing Crystal");
+    let before = g.players[0].gold;
+    to_turn(&mut g, 2);
+    assert!(g.players[0].gold >= before + 2, "two types paid out");
+    // Splinter of Aurum: with 15 Gold, a Golden Tier 5 minion, once.
+    let mut g = game(63);
+    take(&mut g, 0, "Splinter of Aurum");
+    g.players[0].gold = 15;
+    g.check_golden_when_rich(0);
+    assert_eq!(g.players[0].hand.len(), 1);
+    assert!(g.players[0].hand[0].golden);
+    assert_eq!(g.data.cards.get(g.players[0].hand[0].card).tier, 5);
+    g.players[0].gold = 20;
+    g.check_golden_when_rich(0);
+    assert_eq!(g.players[0].hand.len(), 1, "once per game");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_trinket_slot_trinkets() {
+    // Orb of the Unknown: a random Lesser trinket replaces the slot.
+    let mut g = game(64);
+    take(&mut g, 0, "Orb of the Unknown");
+    assert_ne!(g.players[0].trinkets[0].of, 0, "the slot still holds one");
+    let orb = g.data.trinkets.by_name("Orb of the Unknown").unwrap() + 1;
+    assert_ne!(g.players[0].trinkets[0].of, orb, "it replaced itself");
+    // Mysterious Orb: 10 Gold and the next offer is Lesser.
+    let mut g = game(65);
+    take(&mut g, 0, "Mysterious Orb");
+    assert!(g.players[0].tp.next_lesser);
+    // Trip Vouchers: a greater offer into the lesser slot two turns later,
+    // and the normal turn 9 offer still comes.
+    let mut g = game(66);
+    to_turn(&mut g, 6);
+    turn_of(&mut g, 0);
+    g.players[0].trinket_offer.clear();
+    g.players[0].trinket_offer_slot = 1;
+    let tv = g.data.trinkets.by_card_id("BG30_MagicItem_891").unwrap();
+    let _ = g.players[0].trinket_offer.try_push((tv, 0));
+    g.step(Action::ChooseTrinket(0)).unwrap();
+    assert_eq!(g.players[0].tp.greater_into_lesser_turn, 8);
+    to_turn(&mut g, 8);
+    turn_of(&mut g, 0);
+    assert_eq!(g.players[0].trinket_offer_slot, 1, "into the lesser slot");
+    for &(of, _) in &g.players[0].trinket_offer {
+        assert_eq!(g.data.trinkets.get(of).slot, bgcore::trinkets::Slot::Greater);
+    }
+    act(&mut g, 0, Action::ChooseTrinket(0));
+    to_turn(&mut g, 9);
+    turn_of(&mut g, 0);
+    assert_eq!(g.players[0].trinket_offer_slot, 2, "the normal turn 9 offer still comes");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn mystery_cube_offers_a_free_replacement() {
+    let mut g = game(67);
+    to_turn(&mut g, 6);
+    turn_of(&mut g, 0);
+    let mc = g.data.trinkets.by_card_id("BG30_MagicItem_703").unwrap();
+    g.players[0].trinket_offer.clear();
+    g.players[0].trinket_offer_slot = 1;
+    let _ = g.players[0].trinket_offer.try_push((mc, 0));
+    g.players[0].gold = 10;
+    g.step(Action::ChooseTrinket(0)).unwrap();
+    // Its on-pick deals two free Lesser options; picking one replaces it.
+    assert_eq!(g.players[0].trinket_offer.len(), 2, "two options");
+    assert!(g.players[0].trinket_offer.iter().all(|&(_, p)| p == 0), "free");
+    for &(of, _) in &g.players[0].trinket_offer {
+        assert_eq!(g.data.trinkets.get(of).slot, bgcore::trinkets::Slot::Lesser);
+    }
+    let pick = g.players[0].trinket_offer[0].0;
+    act(&mut g, 0, Action::ChooseTrinket(0));
+    assert_eq!(g.players[0].trinkets[0].of, pick + 1, "the cube was replaced");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn booty_bay_brew_fires_once_per_spending() {
+    let mut g = game(68);
+    put_on_board(&mut g, 0, "Southsea Busker");
+    take(&mut g, 0, "Booty Bay Brew");
+    let before = g.players[0].board[0].attack;
+    // One spending of 3 Gold (a buy) is one firing, not three.
+    set_shop(&mut g, 0, &["Ominous Seer"]);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    eprintln!("mask {:#x} before {before} after {} board {:?}", g.players[0].trinket_events,
+        g.players[0].board[0].attack,
+        g.players[0].board.iter().map(|m| (g.data.cards.get(m.card).name.clone(), m.attack)).collect::<Vec<_>>());
+    assert_eq!(g.players[0].board[0].attack, before + 3, "once, whatever the amount");
+    g.check_invariants().unwrap();
 }
