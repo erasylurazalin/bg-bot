@@ -730,6 +730,30 @@ the same trinket. Every player sees their own trinkets and their
 opponents'. Lesser and greater versions of one trinket are separate
 cards.
 
+**Trinket rules from Era (2026-10-30, second round):**
+- "Whenever you spend Gold" fires once per spending, whatever the amount:
+  a 1 Gold Refresh and a 3 Gold buy each fire it once.
+- Paying with Health is not spending Gold. It is self-damage: it counts for
+  the Demons that care about self-damage, and Soul Rewinder or Ashen
+  Corruptor can rewind it.
+- A free buy (Warcry Totem) costs 0: it spends no Gold, so "spend Gold"
+  triggers don't fire. It is still a buy.
+- Deaths in the shop count for death counters (Butchering, Mutanus...).
+- The Tavern never has more than 7 slots, one of them almost always the
+  spell. Glowing Gauntlet makes it 6 minions and 1 spell, and refills at
+  once: a bought or consumed minion is replaced by a minion, a bought spell
+  by another spell.
+- Orb of the Unknown's random trinket replaces your trinket of that slot.
+- Trip Vouchers bought on turn 6: a greater offer on turn 8, and the
+  normal greater offer on turn 9 still comes.
+- Mystery Cube offers again at the start of every turn for the rest of
+  the game.
+- A copy a trinket gives is an exact copy (buffs included; Transcribing
+  Typewriter): players buff a Tavern minion first, then buy it. A copy of
+  a golden minion is golden and gives its own Triple Reward when played.
+- Trinket numbers the game sets while playing (Shark Cannon, Bewitched
+  Ribbon, Steady Growth) come from Era's logs.
+
 **Dark Gifts.** A gift sits on its minion like an attached card: a triple's
 golden keeps the gifts of its copies, a Magnetized Mech keeps them, and a
 sold minion takes them with it. A gift works the same on a golden minion

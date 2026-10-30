@@ -102,8 +102,8 @@ The amounts these cards' text hides, as I know them from the game:
    which).
 3. **Trinkets:** the lesser and greater choices at their set turns.
 4. **Dark Gifts**, and Dark Paradox with them.
-   Left out of the first trinket run, to add later: the portrait trinkets
-   that rewrite another card (Bronze Czarina, Mindslasher, Flaming,
+   Left out of the first trinket runs, to add later (Era: maybe a run of
+   their own): the portrait trinkets that rewrite another card (Bronze Czarina, Mindslasher, Flaming,
    Azerite and Bronzebeard Portraits, Souvenir Stand), quests and
    Darkmoon Prizes (Denathrius, Tickatus, Corrupted Tome), and Secrets
    (Akazamzarak, Safety Patch's Ice Block).
