@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::cards::{Tribe, Tribes};
+use crate::trinkets::Slot;
 use crate::minion::Keywords;
 
 /// What a hero power does. One variant per shape of effect; the numbers live
@@ -72,6 +73,10 @@ pub enum PowerEffect {
     /// Refresh the Tavern with Tavern spells (Mana Per Minute; the same fill
     /// as Saloon's Finest).
     RefreshWithSpells,
+    /// At the start of this power's unlock turn, offer a trinket of this slot;
+    /// the pick turns the power into the trinket (Fantastic Treasure, Growing
+    /// Collection).
+    TrinketOffer(Slot),
 }
 
 /// A hero power: its button's limits and its effect.
@@ -226,6 +231,8 @@ struct RawPowerEffect {
     get_linked_minions: Option<u8>,
     #[serde(default)]
     refresh_with_spells: bool,
+    #[serde(default)]
+    trinket_offer: Option<String>,
 }
 
 fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
@@ -280,6 +287,12 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
         PowerEffect::GetLinkedMinions(n)
     } else if e.refresh_with_spells {
         PowerEffect::RefreshWithSpells
+    } else if let Some(s) = &e.trinket_offer {
+        PowerEffect::TrinketOffer(match s.as_str() {
+            "lesser" => Slot::Lesser,
+            "greater" => Slot::Greater,
+            other => return Err(format!("unknown trinket slot {other:?}")),
+        })
     } else {
         PowerEffect::None
     })

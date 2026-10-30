@@ -14,6 +14,7 @@ mod shop;
 mod spells;
 mod targets;
 mod triples;
+mod trinkets;
 mod turn;
 
 use std::sync::Arc;
@@ -29,6 +30,7 @@ use crate::fight::{Counters, Deity, SeenCounters, SideOutcome};
 use crate::heroes::PowerEffect;
 use crate::minion::{CardId, Keywords, Minion};
 use crate::real_boards::RealBoards;
+use crate::trinkets::Event;
 use crate::rng::Rng;
 use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
 
@@ -283,6 +285,17 @@ impl PowerState {
     }
 }
 
+/// One held trinket: which one, its "every N" counter, the uses its hooks
+/// have left this turn, and whether a `once` rule has fired.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TrinketState {
+    /// Index into `TrinketDb` plus one; 0 for an empty slot.
+    pub of: u8,
+    pub count: u16,
+    pub uses_left: u8,
+    pub done: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Player {
     pub health: i32,
@@ -302,8 +315,19 @@ pub struct Player {
     /// Powers offered by a Hero Power Discover (indices into `HeroDb`),
     /// answered like a Discover.
     pub power_offer: ArrayVec<u8, DISCOVER>,
-    /// Trinket slots (lesser, greater). Room for a later run, unused.
-    pub trinkets: [u8; 2],
+    /// Trinket slots: lesser, greater, and the trinket a hero power became
+    /// (Marin the Manager, Buttons). See `TrinketState`.
+    pub trinkets: [TrinketState; crate::TRINKET_SLOTS],
+    /// The offer the player has to answer before doing anything else: the
+    /// four options with the price each is sold at, and which slot they fill
+    /// (`trinket_offer_slot` is the slot plus one, 0 for none).
+    pub trinket_offer: ArrayVec<(u8, u8), { crate::TRINKET_CHOICES }>,
+    pub trinket_offer_slot: u8,
+    /// The events this player's trinkets listen for (`Trinket::event_mask`
+    /// ORed over the slots, `crate::trinkets::HAS_TRINKET` when any is held).
+    /// A hook reads this one `u16` and leaves the shared trinket table alone
+    /// unless the bit matches.
+    pub trinket_events: u16,
     /// Dark Gift uses. Room for a later run, unused.
     pub dark_gifts: u8,
     /// A real-board seat (docs/real-boards.md): no hero, no shopping. At the
@@ -678,6 +702,18 @@ impl Game {
             return matches!(a, Action::Choose(k) if (k as usize) < DISCOVER
                 && pl.hero_offer[k as usize] != u8::MAX);
         }
+        // A trinket offer blocks the shopping actions until it is answered,
+        // like a Discover. Passing is not a shopping action: Freeze and End
+        // Turn stay legal, and ending the turn with the offer open buys the
+        // cheapest option (the offer can't be declined). A choice its own
+        // start-of-turn effect opened is answered first.
+        if !pl.trinket_offer.is_empty() && !Self::other_choice_open(pl) {
+            return match a {
+                Action::ChooseTrinket(k) => (k as usize) < pl.trinket_offer.len(),
+                Action::Freeze | Action::EndTurn => true,
+                _ => false,
+            };
+        }
         // A choice that nothing can answer is no choice: `step` fizzles it,
         // so the normal actions are legal as if it had never opened (see
         // `choice_stuck`). The test only runs while a choice is open.
@@ -788,9 +824,11 @@ impl Game {
                     !pl.board.is_full()
                 }
             }
-            Action::Target(_) | Action::TargetShop(_) | Action::Choose(_) | Action::Discard(_) => {
-                false
-            }
+            Action::Target(_)
+            | Action::TargetShop(_)
+            | Action::Choose(_)
+            | Action::Discard(_)
+            | Action::ChooseTrinket(_) => false,
             Action::Move { from, to } => {
                 (from as usize) < pl.board.len() && (to as usize) < pl.board.len() && from != to
             }
@@ -878,6 +916,13 @@ impl Game {
             for k in 0..DISCOVER as u8 {
                 ask(Action::Choose(k));
             }
+        } else if open && !pl.trinket_offer.is_empty() && !Self::other_choice_open(pl) {
+            // A trinket offer: the answers, and passing (see `is_legal`).
+            for k in 0..pl.trinket_offer.len() as u8 {
+                ask(Action::ChooseTrinket(k));
+            }
+            ask(Action::Freeze);
+            ask(Action::EndTurn);
         } else if open && let Some(pt) = pl.pending_target {
             for s in 0..BOARD as u8 {
                 ask(Action::Target(s));
@@ -1196,6 +1241,7 @@ impl Game {
                     self.pay_for_spell(p, pay_health, cost);
                     self.magicfin_teach(p, id);
                     self.fire_event(p, EventKind::CardsBought, 1);
+                    self.trinket_event(p, Event::BuySpell, Some(id), 1);
                 } else {
                     let buy_cost = self.data.rules.buy_cost;
                     let pl = &mut self.players[p];
@@ -1206,6 +1252,7 @@ impl Game {
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
                     self.fire_event(p, EventKind::CardsBought, 1);
+                    self.trinket_event(p, Event::Buy, Some(m.card), 1);
                     // "After you buy a Pirate, gain 1 Gold" (I'm the Cap'n Now).
                     if let Some(st) = self.players[p].power
                         && let PowerEffect::GoldAfterBuyTribe { tribe, gold } =
@@ -1226,6 +1273,7 @@ impl Game {
                 self.pay_for_spell(p, pay_health, cost);
                 self.magicfin_teach(p, id);
                 self.fire_event(p, EventKind::CardsBought, 1);
+                self.trinket_event(p, Event::BuySpell, Some(id), 1);
             }
             Action::Sell(s) => {
                 self.sell_minion(p, s as usize);
@@ -1311,6 +1359,8 @@ impl Game {
                         self.give_play_shield(p, pos);
                     }
                     self.fire_after_play_tribe(p, t, pos);
+                    // A trinket that watches every minion played.
+                    self.trinket_event(p, Event::Play, Some(m.card), 1);
                     if t.has(Tribe::Elemental) {
                         self.fire_event_skipping(p, EventKind::ElementalsPlayed, 1, Some(pos));
                     }
@@ -1370,6 +1420,8 @@ impl Game {
                     gold_spent = rules.roll_cost;
                 }
                 Self::refresh_shop(pl, pool, cards, rules, rng, *lobby, RefreshKind::Explicit);
+                // "After the Tavern is Refreshed": the trinket hook.
+                self.trinket_event(p, Event::Refresh, None, 1);
                 if health_paid > 0 {
                     // A Health cost is not a Demon dealing damage.
                     self.take_hero_damage(p, health_paid, None);
@@ -1398,6 +1450,7 @@ impl Game {
                 self.fire_event(p, EventKind::GoldSpent, cost as u32);
             }
             Action::HeroPower => self.press_power(p),
+            Action::ChooseTrinket(k) => self.pick_trinket(p, k as usize),
             Action::EndTurn => {}
         }
     }

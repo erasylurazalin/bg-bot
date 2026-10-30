@@ -29,9 +29,49 @@ fn game(seed: u64) -> Game {
     Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon, Tribe::Pirate]))
 }
 
+/// Answer whatever the current player has open (a Discover, a target, a
+/// discard, or a trinket offer), so a helper that only wants the next turn
+/// never stalls on a prompt. False when nothing is open.
+fn answer(g: &mut Game) -> bool {
+    let Some(p) = g.current_player() else { return false };
+    let pl = &g.players[p];
+    let mut cands = [Action::EndTurn; 4];
+    let n = if !pl.discover.is_empty()
+        || !pl.power_offer.is_empty()
+        || pl.pending_choose_one.is_some()
+    {
+        cands[0] = Action::Choose(0);
+        1
+    } else if pl.pending_discard.is_some() {
+        cands[0] = Action::Discard(0);
+        1
+    } else if pl.pending_shop_target.is_some() {
+        cands[0] = Action::TargetShop(0);
+        1
+    } else if pl.pending_target.is_some() {
+        cands[0] = Action::Target(0);
+        cands[1] = Action::TargetShop(0);
+        2
+    } else if !pl.trinket_offer.is_empty() {
+        cands[0] = Action::ChooseTrinket(0);
+        1
+    } else {
+        return false;
+    };
+    for &a in &cands[..n] {
+        if g.is_legal(a) {
+            g.step(a).ok();
+            return true;
+        }
+    }
+    false
+}
+
 fn turn_of(g: &mut Game, p: usize) {
     while g.current_player() != Some(p) {
-        g.step(Action::Freeze).unwrap();
+        if !answer(g) {
+            g.step(Action::Freeze).unwrap();
+        }
     }
 }
 
@@ -49,7 +89,9 @@ fn is_legal(g: &mut Game, p: usize, a: Action) -> bool {
 fn next_turn(g: &mut Game) {
     let t = g.turn;
     while g.turn == t && !g.over {
-        g.step(Action::EndTurn).unwrap();
+        if !answer(g) {
+            g.step(Action::EndTurn).unwrap();
+        }
     }
 }
 

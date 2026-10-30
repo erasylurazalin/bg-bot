@@ -127,6 +127,8 @@ impl Game {
         let power = &self.data.heroes.get(st.of).power;
         let pl = &self.players[p];
         if power.passive
+            // A power that became a trinket (Marin, Buttons) has no button.
+            || self.players[p].trinkets[super::trinkets::POWER_SLOT].of != 0
             || !st.unlocked
             || st.uses_left == 0
             || (power.once_per_game && st.used_game > 0)

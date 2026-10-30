@@ -73,6 +73,53 @@ impl Game {
             {
                 return Err(format!("player {i}: pending choose_one source off the board"));
             }
+            for (slot, st) in pl.trinkets.iter().enumerate() {
+                if st.of == 0 {
+                    continue;
+                }
+                if st.of as usize > self.data.trinkets.len() {
+                    return Err(format!("player {i}: trinket slot {slot} holds no trinket"));
+                }
+                let t = self.data.trinkets.get(st.of - 1);
+                let want = match slot {
+                    0 => Some(crate::trinkets::Slot::Lesser),
+                    1 => Some(crate::trinkets::Slot::Greater),
+                    _ => None,
+                };
+                if let Some(want) = want
+                    && t.slot != want
+                {
+                    return Err(format!("player {i}: {} is in the wrong trinket slot", t.name));
+                }
+            }
+            {
+                let mut mask = 0;
+                for st in pl.trinkets.iter() {
+                    if st.of != 0 {
+                        mask |= self.data.trinkets.get(st.of - 1).event_mask();
+                    }
+                }
+                if mask != pl.trinket_events {
+                    return Err(format!(
+                        "player {i}: the trinket event mask is stale ({:#x} not {:#x})",
+                        pl.trinket_events, mask
+                    ));
+                }
+            }
+            if pl.trinket_offer_slot > crate::TRINKET_SLOTS as u8 {
+                return Err(format!("player {i}: trinket offer for no slot"));
+            }
+            for &(of, price) in &pl.trinket_offer {
+                if of as usize >= self.data.trinkets.len() {
+                    return Err(format!("player {i}: a trinket offer holds no trinket"));
+                }
+                if price > self.data.trinkets.get(of).cost {
+                    return Err(format!("player {i}: a trinket offer is dearer than the card"));
+                }
+            }
+            if !pl.trinket_offer.is_empty() && pl.trinket_offer_slot == 0 {
+                return Err(format!("player {i}: a trinket offer with no slot"));
+            }
             let holds_cards = !(pl.shop.is_empty()
                 && pl.shop_spell.is_none()
                 && pl.hand.is_empty()

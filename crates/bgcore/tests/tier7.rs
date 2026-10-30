@@ -133,9 +133,49 @@ fn run(
 
 // ---- game helpers ----
 
+/// Answer whatever the current player has open (a Discover, a target, a
+/// discard, or a trinket offer), so a helper that only wants the next turn
+/// never stalls on a prompt. False when nothing is open.
+fn answer(g: &mut Game) -> bool {
+    let Some(p) = g.current_player() else { return false };
+    let pl = &g.players[p];
+    let mut cands = [Action::EndTurn; 4];
+    let n = if !pl.discover.is_empty()
+        || !pl.power_offer.is_empty()
+        || pl.pending_choose_one.is_some()
+    {
+        cands[0] = Action::Choose(0);
+        1
+    } else if pl.pending_discard.is_some() {
+        cands[0] = Action::Discard(0);
+        1
+    } else if pl.pending_shop_target.is_some() {
+        cands[0] = Action::TargetShop(0);
+        1
+    } else if pl.pending_target.is_some() {
+        cands[0] = Action::Target(0);
+        cands[1] = Action::TargetShop(0);
+        2
+    } else if !pl.trinket_offer.is_empty() {
+        cands[0] = Action::ChooseTrinket(0);
+        1
+    } else {
+        return false;
+    };
+    for &a in &cands[..n] {
+        if g.is_legal(a) {
+            g.step(a).ok();
+            return true;
+        }
+    }
+    false
+}
+
 fn turn_of(g: &mut Game, p: usize) {
     while g.current_player() != Some(p) {
-        g.step(Action::Freeze).unwrap();
+        if !answer(g) {
+            g.step(Action::Freeze).unwrap();
+        }
     }
 }
 
@@ -234,12 +274,21 @@ fn no_tier_7_minion_shows_up_in_games_played_at_random() {
         while let Some(_p) = g.current_player() {
             g.step(random_action(&g, &mut rng)).unwrap();
             for pl in &g.players {
-                let all = pl.shop.iter().chain(&pl.hand).chain(&pl.board);
-                for m in all {
+                // A tier 7 minion can reach a hand or a board only through a
+                // card that names tier 7 (Greedy Conniver, Pagle's Fishing
+                // Rod), never from the Tavern.
+                for m in &pl.shop {
                     assert!(g.data.cards.get(m.card).tier <= 6, "seed {seed}: {}", name(&g, m));
                 }
-                for &c in &pl.discover {
-                    assert!(g.data.cards.get(c).tier <= 6, "seed {seed}: a Discover offered tier 7");
+                // A tier 7 option is fine only when the whole Discover is
+                // tier 7, which is a card that names tier 7 (Greedy
+                // Conniver); every other draw stops at tier 6.
+                let offered: Vec<u8> = pl.discover.iter().map(|&c| g.data.cards.get(c).tier).collect();
+                for &tier in &offered {
+                    assert!(
+                        tier <= 6 || offered.iter().all(|&t| t == 7),
+                        "seed {seed}: a Discover offered tier {tier} beside {offered:?}"
+                    );
                 }
             }
         }

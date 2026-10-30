@@ -87,6 +87,11 @@ impl Tribes {
         self.0 & t.bit() != 0
     }
 
+    /// The raw bit mask (ten bits, `Tribe::EVERY` order).
+    pub fn mask(self) -> u16 {
+        self.0
+    }
+
     /// Neutral: no tribe at all.
     pub fn is_neutral(self) -> bool {
         self.0 == 0

@@ -140,3 +140,21 @@ name = "Time Twister Chromie"
 card_id = "BG34_HERO_001"
 armor = 14
 power = { name = "Mana Per Minute", card_id = "BG34_HERO_001p", effect = { refresh_with_spells = true } }
+
+# ---- the two powers that are a trinket offer (2026-10-30, with the trinket
+# frame). The pick turns the power into the trinket, so it has no button; the
+# normal lesser and greater offers still come on turns 6 and 9.
+
+# On Turn 5, choose a Lesser Trinket to buy.
+[[hero]]
+name = "Marin the Manager"
+card_id = "BG30_HERO_304"
+armor = 12
+power = { name = "Fantastic Treasure", card_id = "BG30_HERO_304p", passive = true, unlock_turn = 5, effect = { trinket_offer = "lesser" } }
+
+# On Turn 8, choose a Greater Trinket to buy.
+[[hero]]
+name = "Buttons"
+card_id = "BG32_HERO_002"
+armor = 16
+power = { name = "Growing Collection", card_id = "BG32_HERO_002p", passive = true, unlock_turn = 8, effect = { trinket_offer = "greater" } }

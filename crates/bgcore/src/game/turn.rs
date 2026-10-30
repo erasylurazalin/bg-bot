@@ -177,6 +177,9 @@ impl Game {
             }
             pos += 1;
         }
+        // Trinkets at the end of the turn: their own end-of-turn effects,
+        // then an "every N turns" rule that has counted up to N.
+        self.trinket_end_of_turn(p);
         // A Lockbox is an end of turn countdown too, so Drakkari doubles it.
         self.tick_lockboxes(p, runs);
     }
@@ -186,6 +189,13 @@ impl Game {
     /// A played Tomb Turning Undead dies once its Battlecry, and whatever it
     /// asked the player to choose or Discover, is done.
     pub(super) fn choice_open(pl: &Player) -> bool {
+        Self::other_choice_open(pl) || !pl.trinket_offer.is_empty()
+    }
+
+    /// A choice open beside the trinket offer (a Discover a trinket's own
+    /// start-of-turn effect opened, a target, a discard): it is answered
+    /// first, then the offer.
+    pub(super) fn other_choice_open(pl: &Player) -> bool {
         pl.pending_target.is_some()
             || pl.pending_shop_target.is_some()
             || pl.pending_choose_one.is_some()
@@ -226,7 +236,9 @@ impl Game {
         self.destroy_in_shop(p, &victims, None);
     }
 
-    pub(super) fn finish_shop(&mut self, p: usize) {
+    /// Answer everything the player left open, taking the first option that
+    /// can be taken (the end of their turn cannot ask).
+    pub(super) fn resolve_open_choices(&mut self, p: usize) {
         loop {
             let pl = &self.players[p];
             if let Some(pt) = pl.pending_target {
@@ -257,6 +269,13 @@ impl Game {
                 }
             } else if !pl.discover.is_empty() || !pl.power_offer.is_empty() {
                 self.resolve_choose(p, 0);
+            } else if !pl.trinket_offer.is_empty() {
+                // The offer can't be declined: ending the turn with it open
+                // buys the cheapest option.
+                let k = (0..pl.trinket_offer.len())
+                    .min_by_key(|&k| pl.trinket_offer[k].1)
+                    .unwrap_or(0);
+                self.pick_trinket(p, k);
             } else if !pl.choose_queue.is_empty() {
                 // Both-effects Choose One options still waiting.
                 self.maybe_start_discover(p);
@@ -264,6 +283,10 @@ impl Game {
                 break;
             }
         }
+    }
+
+    pub(super) fn finish_shop(&mut self, p: usize) {
+        self.resolve_open_choices(p);
         self.resolve_doomed(p);
         self.resolve_hogrider(p);
         // A Tomb Turning Undead that wasn't played this turn is a normal one.
@@ -271,6 +294,10 @@ impl Game {
             m.doomed = false;
         }
         self.run_end_of_turn(p);
+        // An end-of-turn effect can still ask (a Battlecry it triggers may be
+        // a Choose One, Young Murk-Eye's neighbours): answer it now, so no
+        // prompt outlives the turn it was opened in.
+        self.resolve_open_choices(p);
         let cards = &self.data.cards;
         // "This turn" effects end with the turn wherever the minion is: a
         // golden made from a triple holds its copies' in hand.
@@ -436,6 +463,14 @@ impl Game {
             if refreshed {
                 Self::apply_refresh_buff(pl, &data.cards, rng);
                 Self::apply_barrage(pl, &data.cards);
+            }
+        }
+        for p in 0..PLAYERS {
+            // Trinkets at the start of the player's turn: the two offers (and
+            // the one a hero power owes), the counters, the uses back and the
+            // start-of-turn effects.
+            if self.players[p].alive && !self.players[p].real {
+                self.trinket_start_of_turn(p);
             }
         }
         for p in 0..PLAYERS {

@@ -1,7 +1,7 @@
 //! The flat action space: every action has a fixed index, and the engine
 //! gives a legality mask over all of them.
 
-use crate::{BOARD, DISCOVER, HAND, SHOP};
+use crate::{BOARD, DISCOVER, HAND, SHOP, TRINKET_CHOICES};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Action {
@@ -25,6 +25,8 @@ pub enum Action {
     EndTurn,
     /// Press the hero power button.
     HeroPower,
+    /// Pick a trinket from an open offer.
+    ChooseTrinket(u8),
 }
 
 const BUY: usize = 0;
@@ -42,9 +44,10 @@ const FREEZE: usize = ROLL + 1;
 const LEVEL: usize = FREEZE + 1;
 const END_TURN: usize = LEVEL + 1;
 const HERO_POWER: usize = END_TURN + 1;
+const CHOOSE_TRINKET: usize = HERO_POWER + 1;
 
-pub const N_ACTIONS: usize = HERO_POWER + 1;
-pub const N_KINDS: usize = 15;
+pub const N_ACTIONS: usize = CHOOSE_TRINKET + TRINKET_CHOICES;
+pub const N_KINDS: usize = 16;
 pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("buy", SHOP),
     ("buy_spell", 1),
@@ -61,6 +64,7 @@ pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("level", 1),
     ("end", 1),
     ("hero_power", 1),
+    ("choose_trinket", TRINKET_CHOICES),
 ];
 
 impl Action {
@@ -84,6 +88,7 @@ impl Action {
             Action::Level => LEVEL,
             Action::EndTurn => END_TURN,
             Action::HeroPower => HERO_POWER,
+            Action::ChooseTrinket(k) => CHOOSE_TRINKET + k as usize,
         }
     }
 
@@ -113,11 +118,12 @@ impl Action {
             LEVEL => Action::Level,
             END_TURN => Action::EndTurn,
             HERO_POWER => Action::HeroPower,
+            _ if i < N_ACTIONS => Action::ChooseTrinket((i - CHOOSE_TRINKET) as u8),
             _ => return None,
         })
     }
 
-    /// Which of the 15 kinds of action this is, in declaration order.
+    /// Which of the 16 kinds of action this is, in declaration order.
     pub fn kind(self) -> usize {
         match self {
             Action::Buy(_) => 0,
@@ -135,6 +141,7 @@ impl Action {
             Action::Level => 12,
             Action::EndTurn => 13,
             Action::HeroPower => 14,
+            Action::ChooseTrinket(_) => 15,
         }
     }
 }

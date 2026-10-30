@@ -1,0 +1,487 @@
+# The built trinkets (DESIGN.md "Trinkets and Dark Gifts (2026-10-30)",
+# docs/ENGINE.md "Trinkets", how to add one in docs/ADDING-CARDS.md).
+#
+# One entry per trinket: name, card_id, slot ("lesser" or "greater"), cost
+# (0 or left out means free: the game data has no price), the lobby tribes it
+# belongs to (`lobby_subsets` in ref/bg-meta.json; a trinket with a tribe is
+# only offered when that tribe is in the lobby), and its effects. The effect
+# keys are the same keys cards.toml uses wherever a card has the same effect
+# (`get`, `get_gems`, `gem_bonus`, `cast`, ...); `crates/bgcore/src/trinkets.rs`
+# lists every key. The hook lists are where a trinket listens:
+#
+#   on_pick, start_of_turn, end_of_turn   the frame's own clock
+#   on_buy (+ buy_tribe), on_buy_spell, on_play (+ play_tribe), on_sell,
+#   on_refresh, on_cast_spell, on_cast_spell_on_minion, on_discard
+#   (+ discard_spells_only), rule = { event, every, once, acts }
+#   uses_per_turn (caps the hook lists), soc = { tribe, keywords } (in a fight)
+#
+# Effect keys with no card behind them: upgrade_discount, buff_tavern_this_turn,
+# make_golden_random, last_spell_copies.
+
+
+[[trinket]]
+name = "Goblin Wallet"
+card_id = "BG30_MagicItem_847"
+slot = "lesser"
+cost = 1
+end_of_turn = [{ max_gold = 1 }]
+
+[[trinket]]
+name = "Bartend-o-Tron's Oilcan"
+card_id = "BG30_MagicItem_705"
+slot = "lesser"
+cost = 2
+on_pick = [{ upgrade_discount = 3 }]
+start_of_turn = [{ upgrade_discount = 3 }]
+
+[[trinket]]
+name = "Frigid Blossom"
+card_id = "BG36_MagicItem_300"
+slot = "lesser"
+tribes = ["elemental"]
+on_refresh = [{ upgrade_discount = 1 }]
+
+[[trinket]]
+name = "Bloodbound Earrings"
+card_id = "BG32_MagicItem_808"
+slot = "lesser"
+cost = 1
+tribes = ["quilboar"]
+rule = { event = "cast_spell", every = 4, acts = [{ gems_on_board = 1 }] }
+mechanic = "spells"
+
+[[trinket]]
+name = "Book of Medivh"
+card_id = "BG30_MagicItem_420"
+slot = "lesser"
+cost = 1
+on_pick = [{ discover_spell = 1 }]
+start_of_turn = [{ discover_spell = 1 }]
+
+[[trinket]]
+name = "Sellemental Portrait"
+card_id = "BG32_MagicItem_831"
+slot = "lesser"
+cost = 4
+tribes = ["elemental"]
+on_pick = [{ get = "Sellemental" }]
+start_of_turn = [{ get = "Sellemental" }]
+
+[[trinket]]
+name = "Chromatic Tear"
+card_id = "BG35_MagicItem_840"
+slot = "lesser"
+cost = 3
+tribes = ["dragon"]
+on_pick = [{ random_chromadrake = 1 }]
+start_of_turn = [{ random_chromadrake = 1 }]
+
+[[trinket]]
+name = "Sunken Anchor"
+card_id = "BG35_MagicItem_890"
+slot = "lesser"
+cost = 6
+tribes = ["pirate"]
+on_pick = [{ random_bounty = 2 }]
+start_of_turn = [{ random_bounty = 2 }]
+
+[[trinket]]
+name = "Glass of Perspective"
+card_id = "BG36_MagicItem_303"
+slot = "lesser"
+cost = 2
+tribes = ["quilboar"]
+on_pick = [{ random_choose_one = 1 }]
+start_of_turn = [{ random_choose_one = 1 }]
+
+[[trinket]]
+name = "Volumizer Portrait"
+card_id = "BG36_MagicItem_423"
+slot = "lesser"
+cost = 3
+tribes = ["mech"]
+on_pick = [{ random_volumizer = 1 }]
+start_of_turn = [{ random_volumizer = 1 }]
+
+[[trinket]]
+name = "Gold Pendant"
+card_id = "BG32_MagicItem_951"
+slot = "lesser"
+cost = 1
+tribes = ["pirate"]
+on_pick = [{ make_golden_random = 4 }]
+start_of_turn = [{ make_golden_random = 4 }]
+
+[[trinket]]
+name = "Pocket Cyclone"
+card_id = "BG35_MagicItem_850"
+slot = "lesser"
+tribes = ["elemental"]
+on_pick = [{ cast = "Easterly Winds" }]
+start_of_turn = [{ cast = "Easterly Winds" }]
+
+[[trinket]]
+name = "Willbreaker Sticker"
+card_id = "BG36_MagicItem_852"
+slot = "lesser"
+cost = 2
+tribes = ["aberration"]
+on_pick = [{ linked_spells = 2 }]
+start_of_turn = [{ linked_spells = 2 }]
+
+[[trinket]]
+name = "Nerglish Phrasebook"
+card_id = "BG30_MagicItem_914"
+slot = "lesser"
+tribes = ["murloc"]
+on_play = [{ buff_leftmost_hand = [3, 3] }]
+
+[[trinket]]
+name = "Explorer's Binoculars"
+card_id = "BG32_MagicItem_858"
+slot = "lesser"
+cost = 1
+on_pick = [{ random_tier_minion = 4, count = 3 }]
+
+[[trinket]]
+name = "Magician's Top Hat"
+card_id = "BG35_MagicItem_815"
+slot = "lesser"
+cost = 2
+on_pick = [
+  { random_tier_minion = 1, count = 2 },
+  { random_tier_minion = 2, count = 2 },
+  { random_tier_minion = 3, count = 2 },
+]
+
+[[trinket]]
+name = "Lockbox Portrait"
+card_id = "BG36_MagicItem_301"
+slot = "lesser"
+cost = 1
+tribes = ["pirate"]
+on_pick = [{ get_lockbox = 2 }]
+start_of_turn = [{ get_lockbox = 2 }]
+
+[[trinket]]
+name = "Corrupted Coin Portrait"
+card_id = "BG36_MagicItem_400"
+slot = "lesser"
+cost = 3
+tribes = ["aberration"]
+on_pick = [{ get = "Corrupted Coin", count = 2 }]
+
+[[trinket]]
+name = "Cursed Crystal"
+card_id = "BG35_MagicItem_150"
+slot = "lesser"
+cost = 3
+tribes = ["demon"]
+on_refresh = [{ buff_tavern_this_turn = [3, 3] }]
+
+[[trinket]]
+name = "Nomi Sticker"
+card_id = "BG30_MagicItem_544"
+slot = "lesser"
+tribes = ["elemental"]
+on_play = [{ tavern_buff = [3, 2], tribe = "elemental" }]
+play_tribe = "elemental"
+
+[[trinket]]
+name = "Water Wheel"
+card_id = "BG35_MagicItem_851"
+slot = "lesser"
+tribes = ["elemental"]
+uses_per_turn = 2
+on_play = [{ random_spell = 1 }]
+play_tribe = "elemental"
+
+[[trinket]]
+name = "Comfy Coffin"
+card_id = "BG30_MagicItem_547"
+slot = "lesser"
+tribes = ["undead"]
+on_cast_spell = [{ undead_bonus = [1, 0] }]
+mechanic = "spells"
+
+[[trinket]]
+name = "Demonic Bloodletter"
+card_id = "BG36_MagicItem_800"
+slot = "lesser"
+cost = 3
+tribes = ["demon"]
+on_cast_spell = [{ tavern_buff = [1, 1] }]
+mechanic = "spells"
+
+[[trinket]]
+name = "Corrupted Baton"
+card_id = "BG36_MagicItem_404"
+slot = "lesser"
+cost = 2
+tribes = ["aberration"]
+on_cast_spell = [{ buff_deity = [4, 4] }]
+mechanic = "spells"
+
+[[trinket]]
+name = "Enigmatic Headstone"
+card_id = "BG32_MagicItem_276"
+slot = "lesser"
+tribes = ["undead"]
+end_of_turn = [{ undead_bonus = [2, 0] }]
+
+[[trinket]]
+name = "Great Boar Sticker"
+card_id = "BG30_MagicItem_988"
+slot = "lesser"
+tribes = ["quilboar"]
+on_pick = [{ get_gems = 3 }, { gem_bonus = [2, 1] }]
+
+[[trinket]]
+name = "Bob's Tip Jar"
+card_id = "BG30_MagicItem_996"
+slot = "greater"
+on_pick = [{ gold = 4 }, { max_gold = 4 }]
+
+[[trinket]]
+name = "Book of Medivh"
+card_id = "BG30_MagicItem_420t"
+slot = "greater"
+cost = 2
+on_pick = [{ discover_spell = 2 }]
+start_of_turn = [{ discover_spell = 2 }]
+
+[[trinket]]
+name = "Pocket Cyclone"
+card_id = "BG35_MagicItem_850t"
+slot = "greater"
+tribes = ["elemental"]
+on_pick = [{ cast = "Easterly Winds", times = 4 }]
+start_of_turn = [{ cast = "Easterly Winds", times = 2 }]
+
+[[trinket]]
+name = "Sphere of Memory"
+card_id = "BG36_MagicItem_372"
+slot = "greater"
+cost = 2
+end_of_turn = [{ last_spell_copies = 3 }]
+
+[[trinket]]
+name = "Tableware Portrait"
+card_id = "BG36_MagicItem_611"
+slot = "greater"
+cost = 4
+on_pick = [{ get = "Menagerie Tableware" }]
+start_of_turn = [{ get = "Menagerie Tableware" }]
+
+[[trinket]]
+name = "Glass of Perspective"
+card_id = "BG36_MagicItem_303t"
+slot = "greater"
+cost = 3
+tribes = ["quilboar"]
+on_pick = [{ random_choose_one = 2 }]
+start_of_turn = [{ random_choose_one = 2 }]
+
+[[trinket]]
+name = "Volumizer Portrait"
+card_id = "BG36_MagicItem_423t"
+slot = "greater"
+cost = 3
+tribes = ["mech"]
+on_pick = [{ random_volumizer = 2 }]
+start_of_turn = [{ random_volumizer = 2 }]
+
+[[trinket]]
+name = "Nerglish Phrasebook"
+card_id = "BG30_MagicItem_914t"
+slot = "greater"
+cost = 1
+tribes = ["murloc"]
+on_play = [{ buff_leftmost_hand = [6, 6] }]
+
+[[trinket]]
+name = "Secret Schematic"
+card_id = "BG36_MagicItem_840"
+slot = "greater"
+tribes = ["mech"]
+on_buy = [{ random_spell = 1 }]
+buy_tribe = "mech"
+
+[[trinket]]
+name = "Artisanal Urn"
+card_id = "BG30_MagicItem_989t"
+slot = "greater"
+tribes = ["undead"]
+on_pick = [{ undead_bonus = [20, 0] }]
+
+[[trinket]]
+name = "Butcher's Sickle"
+card_id = "BG30_MagicItem_406"
+slot = "greater"
+cost = 1
+tribes = ["undead"]
+on_pick = [{ get = "Butchering" }]
+start_of_turn = [{ get = "Butchering" }]
+
+[[trinket]]
+name = "Surprise Portrait"
+card_id = "BG30_MagicItem_555"
+slot = "greater"
+cost = 5
+tribes = ["elemental"]
+on_pick = [{ get = "Elemental of Surprise" }]
+
+[[trinket]]
+name = "Privateer Portrait"
+card_id = "BG35_MagicItem_712"
+slot = "greater"
+cost = 1
+tribes = ["pirate"]
+on_pick = [{ get = "Proud Privateer" }, { random_bounty = 2 }]
+start_of_turn = [{ random_bounty = 2 }]
+
+[[trinket]]
+name = "Beatboxer Portrait"
+card_id = "BG35_MagicItem_741"
+slot = "greater"
+cost = 6
+tribes = ["mech"]
+on_pick = [{ get = "Polarizing Beatboxer" }]
+
+[[trinket]]
+name = "Pagle's Fishing Rod"
+card_id = "BG30_MagicItem_993"
+slot = "greater"
+cost = 3
+on_pick = [{ random_tier_minion = 7 }]
+start_of_turn = [{ random_tier_minion = 7 }]
+
+[[trinket]]
+name = "Nomi Sticker"
+card_id = "BG30_MagicItem_544t"
+slot = "greater"
+cost = 1
+tribes = ["elemental"]
+on_play = [{ tavern_buff = [5, 5], tribe = "elemental" }]
+play_tribe = "elemental"
+
+[[trinket]]
+name = "Recycling Sticker"
+card_id = "BG32_MagicItem_888"
+slot = "greater"
+cost = 3
+tribes = ["elemental"]
+on_play = [{ free_refreshes = 1 }]
+play_tribe = "elemental"
+
+[[trinket]]
+name = "Ur'zul Sticker"
+card_id = "BG35_MagicItem_154"
+slot = "greater"
+tribes = ["demon"]
+on_play = [{ demons_consume = 1 }]
+play_tribe = "demon"
+
+[[trinket]]
+name = "Cookie's Stirring Rod"
+card_id = "BG36_MagicItem_850"
+slot = "greater"
+tribes = ["murloc"]
+rule = { event = "play_murloc", every = 5, acts = [{ random_spell = 2 }] }
+
+[[trinket]]
+name = "Comfy Coffin"
+card_id = "BG30_MagicItem_547t"
+slot = "greater"
+cost = 4
+tribes = ["undead"]
+on_cast_spell = [{ undead_bonus = [2, 0] }]
+mechanic = "spells"
+
+[[trinket]]
+name = "Heart of the Forest"
+card_id = "BG32_MagicItem_801t"
+slot = "greater"
+cost = 3
+tribes = ["pirate"]
+on_pick = [{ spell_bonus = [1, 1] }]
+rule = { event = "cast_spell", every = 6, acts = [{ spell_bonus = [1, 1] }] }
+mechanic = "spells"
+
+[[trinket]]
+name = "Miniature Ship"
+card_id = "BG35_MagicItem_710"
+slot = "greater"
+cost = 1
+tribes = ["pirate"]
+on_cast_spell = [{ buff_all = [3, 3], tribe = "pirate" }]
+mechanic = "spells"
+
+[[trinket]]
+name = "Corrupted Baton"
+card_id = "BG36_MagicItem_404t"
+slot = "greater"
+cost = 3
+tribes = ["aberration"]
+on_cast_spell = [{ buff_deity = [10, 10] }]
+mechanic = "spells"
+
+[[trinket]]
+name = "Shath'Yar Shrine"
+card_id = "BG36_MagicItem_406"
+slot = "greater"
+cost = 4
+tribes = ["aberration"]
+on_discard = [{ random_minion = "aberration" }]
+discard_spells_only = true
+
+[[trinket]]
+name = "Tome of the Ancients"
+card_id = "BG36_MagicItem_418"
+slot = "greater"
+cost = 2
+tribes = ["aberration"]
+rule = { event = "discard", every = 3, acts = [{ spell_bonus = [1, 1] }] }
+
+[[trinket]]
+name = "Bloodfury Shield"
+card_id = "BG36_MagicItem_830"
+slot = "greater"
+cost = 2
+tribes = ["demon"]
+on_cast_spell = [{ add_fodder_refreshes = 1 }]
+mechanic = "spells"
+
+[[trinket]]
+name = "Sludge Portrait"
+card_id = "BG36_MagicItem_430"
+slot = "greater"
+cost = 5
+tribes = ["aberration"]
+on_pick = [{ get = "Sludge Corrosion" }]
+on_discard = [{ get = "Sludge Corrosion" }]
+discard_spells_only = true
+
+[[trinket]]
+name = "Surveyor Portrait"
+card_id = "BG30_MagicItem_943"
+slot = "greater"
+cost = 1
+tribes = ["quilboar"]
+on_pick = [{ get = "Hot-Air Surveyor" }, { gem_bonus = [6, 6] }]
+
+[[trinket]]
+name = "Great Boar Sticker"
+card_id = "BG30_MagicItem_988t"
+slot = "greater"
+tribes = ["quilboar"]
+on_pick = [{ get_gems = 5 }, { gem_bonus = [3, 3] }]
+
+[[trinket]]
+name = "Bloodbound Earrings"
+card_id = "BG32_MagicItem_808t"
+slot = "greater"
+cost = 6
+tribes = ["quilboar"]
+rule = { event = "cast_spell", every = 5, acts = [{ gems_on_board = 2 }] }
+mechanic = "spells"

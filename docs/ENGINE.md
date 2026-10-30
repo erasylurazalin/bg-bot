@@ -9,15 +9,18 @@ A map of the code for whoever works on it next. The rules themselves are in
 cards.toml            every card: minions, tokens, spells, golden behaviour
 rules.toml            every rule number: gold, costs, pool copies, damage caps, limits
 heroes.toml           the built heroes and their powers (see "Heroes")
+trinkets.toml         the built trinkets, lesser and greater (see "Trinkets")
 peak_boards.toml      hand-made peak boards for `bgbench peak` (guesses, see below)
 crates/
   bgcore/             the rules: no I/O, no Python
     src/cards.rs      card data: TOML parsing into Card, Effect, triggers
     src/heroes.rs     hero data: heroes.toml into Hero, HeroPower, PowerEffect
+    src/trinkets.rs   trinket data: trinkets.toml into Trinket, Act, Rule, Soc
     src/game/          one 8-player game: shop phase, actions, pairing, combat, knockouts;
                       one file per system: mod.rs (types, constructors, step, legality,
                       advance), player.rs, heroes.rs, shop.rs, play.rs, effects.rs,
-                      spells.rs, discover.rs, targets.rs, triples.rs, turn.rs, invariants.rs
+                      spells.rs, discover.rs, targets.rs, triples.rs, trinkets.rs, turn.rs,
+                      invariants.rs
     src/fight.rs      the fight: a pure function of two boards, an RNG and counters
     src/minion.rs     Minion (Copy, fixed size), Keywords, Magnetic attachments
     src/action.rs     the flat action space and its index mapping
@@ -29,7 +32,9 @@ crates/
     src/real_boards.rs the boards of Era's real games: file parsing, card id
                       mapping, the turn buckets a real seat draws from
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
-                      heroes.rs (the hero frame: pick, armor, the 14 powers, the two spells),
+                      heroes.rs (the hero frame: pick, armor, the 22 powers, the two spells),
+                      trinkets.rs (the trinket frame: the two offers, the guarantee and the
+                      discount, the slots, the hooks and the built cards),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card),
                       lobby.rs (the 5-tribe lobby and every draw that respects it),
@@ -199,6 +204,18 @@ build hero-less games so old tests pass unchanged, and
   GoldAfterBuyTribe in `Action::Buy`, GoldNextTurnAfterSell in `sell_minion`,
   SocLeftmost through `Counters.soc_leftmost` at the top of
   `run_start_of_combat` (before any minion's).
+- **Buttons that reuse a card path** (the 2026-10-30 batch): SpellDiscount
+  writes `Player.spell_discount`, the same field Ominous Seer sets and
+  `pay_for_spell` uses up; GetRandomSpell draws through
+  `CardDb::random_spell` and `give_generated` (no pool copy);
+  TriggerBattlecry offers `TargetKind::TriggerBattlecry`, the Kelp Keeper
+  path, and `power_usable` asks `has_battlecry_target` (the same helper an
+  Activate uses); DiscardGetRandomMinion opens `pending_discard` with its
+  reward, the Mangled Bandit path, whose `source` is None for a power;
+  RefreshWithSpells calls `refresh_with_spells`, the Saloon's Finest fill.
+  A power can also give a linked group: GetLinkedMinions draws with
+  `CardDb::random_any_minion` and hands it to `give_linked`, so playing one
+  discards the rest (Dark Ritual).
 - **Discovering a hero power** (Unmasked Identity, Finley's Adventure!):
   `discover_hero_power(p, excludes)`, one engine function taking the source's
   exclusion list (hero card_ids, in cards.toml for the spell, on the hero for
@@ -209,6 +226,81 @@ build hero-less games so old tests pass unchanged, and
 - Bots answer the pick and a power Discover in `answer_pending`, and press a
   legal button with gold that would be left over (Gonna Be Rich! waits for
   turn 8). `bgbench` and `bgpy` games play with heroes.
+
+## Trinkets
+
+`trinkets.toml` (DESIGN.md "Trinkets and Dark Gifts (2026-10-30)") holds the
+built trinkets: card_id, slot, price, the lobby tribes it belongs to and its
+effects, as data (`crates/bgcore/src/trinkets.rs`: the engine never matches a
+trinket by name). Only built trinkets are in the table, so the offer pool is
+exactly what exists; a trinket's tribe must be in the lobby to be offered.
+
+- **The slots.** `Player.trinkets` is `[TrinketState; 3]`: the lesser slot,
+  the greater one, and the trinket a hero power becomes (Marin the Manager,
+  Buttons). A `TrinketState` holds the trinket (index + 1, 0 empty), its "every
+  N" counter, its uses left this turn and a `done` flag for a `once` rule.
+  `Game::set_trinket(p, slot, Some(index) | None)` is the one way to fill a
+  slot (the pick uses it, and so do tests and the sandbox): it sets the state
+  and refreshes `Player.trinket_events`.
+- **The offer.** `open_trinket_offers` runs in `start_turn`: at
+  `trinket_lesser_turn` (6) for an empty lesser slot, at `trinket_greater_turn`
+  (9) for the greater one, and at its `unlock_turn` for a power whose effect is
+  `PowerEffect::TrinketOffer(slot)` (5 and 8). It deals `TRINKET_CHOICES` (4)
+  distinct options into `Player.trinket_offer` as `(trinket, price)` pairs,
+  with `trinket_offer_slot`, answered by `Action::ChooseTrinket(k)`.
+  `deal_trinket_offer` does the guarantee (a tribe with
+  `trinket_lesser_need`/`trinket_greater_need` minions on the board, Murlocs
+  counting in hand too, gets one of its trinkets; one qualifying tribe at
+  random) and the weights of `rules.toml` for the other three, and writes each
+  price: a tribe trinket whose tribe falls short costs `trinket_discount`
+  less. `pick_trinket` pays the price (Gold, so "Gold spent" counters see it),
+  fills the slot, starts an "every N turns" counter at 1 and runs `on_pick`. A
+  power's pick consumes the power (`power_usable` is false afterwards). The
+  offer can't be declined: `is_legal` blocks the shopping actions while it is
+  open but lets Freeze and End Turn through, and `finish_shop` buys the
+  cheapest option for a player who ends the turn with it open. A choice a
+  trinket's own start-of-turn effect opened is answered first
+  (`Game::other_choice_open`).
+- **The hooks.** A trinket has no host minion, so the frame calls
+  `Game::trinket_event(p, event, card, amount)` where the card path already
+  fires (see the list below). Each hook starts from the player's
+  `trinket_events` mask: `Trinket::event_mask` (the events its lists and its
+  rule listen for, `HAS_TRINKET`, `STARTS_TURN`, `ENDS_TURN`) is ORed over the
+  slots by `Game::set_trinket`, so an event that no held trinket wants costs
+  one `u16` test and never touches the shared card table. A matching hook
+  copies each `Act` out of that table by index instead of cloning a `Vec`, and
+  nothing in these paths clones the shared `Arc<Data>`: both were 3x of
+  contention across threads. `check_invariants` re-derives the mask, so a
+  slot written behind `set_trinket` is caught in tests. The call sites are: `Action::Buy` (Buy, BuySpell), `Action::Play` (Play, with the tribe
+  filter), `sell_minion` (Sell), the Refresh sites (Refresh, the same places
+  "after the Tavern is Refreshed this game" fires), `cast_spell` (CastSpell,
+  Tavern spells only), `trigger_on_cast_spell_on_target`
+  (CastSpellOnMinion), `discard_card` (Discard) and `fire_event(GoldSpent)`.
+  The turn flow calls `trinket_start_of_turn` (offers, uses back, the Turns
+  counter, the start-of-turn effects) and `trinket_end_of_turn` (the
+  end-of-turn effects, then an "every N turns" rule that reached N). A hook
+  list with `uses_per_turn` is capped per turn.
+- **The effects.** `Act` mirrors the effect keys of cards.toml (`get`,
+  `get_gems`, `cast`, ...) and `Game::run_trinket_act` runs each through the
+  same `Effect`/`SpellEffect` arm the card path runs, with no host slot (`pos`
+  0) and no golden multiplier. Four keys have no card behind them:
+  `upgrade_discount`, `buff_tavern_this_turn` (Cursed Crystal's per-Refresh
+  buff must not be remembered and stack), `make_golden_random`,
+  `last_spell_copies`.
+- **In a fight.** A trinket's Start of Combat leaves through
+  `Counters.soc_tribe` (`{ tribe, keywords }`, filled by `Player::counters`
+  from a trinket's `soc` table) and `run_start_of_combat` applies it to the
+  friendly minions of those tribes before any minion's own Start of Combat.
+  Other in-fight trinket effects (Avenge, summons) are not built yet.
+- **The observation** carries the three slots (trinket index + 1), their
+  counters, the open offer (its slot and the four options with prices) as own
+  scalars 173 to 188, and each opponent's three slots as their scalars 30 to
+  32. `OBS_SIZE` grew with them and `train/model.py` embeds the trinket ids in
+  a table of their own (`N_TRINKETS`).
+- **Bots** pick a trinket in `answer_pending`: the cheapest one of a tribe the
+  board already has, else the cheapest. Tests: `tests/trinkets.rs`; the shared
+  test helpers answer an open offer (and any Discover a trinket opened) before
+  passing the turn.
 
 ## The sandbox
 

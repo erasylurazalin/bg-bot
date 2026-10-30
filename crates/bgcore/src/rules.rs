@@ -35,6 +35,18 @@ pub struct Rules {
     /// can't take them below this. Combat damage ignores it.
     /// Health a Refresh costs when it is paid in Health.
     pub health_refresh_cost: i32,
+    /// Trinkets: the two offer turns, the tribe counts that guarantee a
+    /// tribe's trinket (and keep its price), the discount for a tribe trinket
+    /// whose tribe falls short, and the draw weights of the other options.
+    pub trinket_lesser_turn: u32,
+    pub trinket_greater_turn: u32,
+    pub trinket_lesser_need: u8,
+    pub trinket_greater_need: u8,
+    pub trinket_discount: u8,
+    pub trinket_offer_neutral: u32,
+    pub trinket_offer_own: u32,
+    pub trinket_offer_other: u32,
+    pub trinket_offer_mechanic: u32,
     /// The keywords "random Bonus Keyword" picks from and "different Bonus
     /// Keywords" counts, by name (see `Keywords::ALL`).
     pub bonus_keywords: Vec<String>,
@@ -66,6 +78,15 @@ impl Rules {
         }
         if r.hero_choices == 0 || r.hero_choices as usize > crate::DISCOVER {
             return Err(format!("rules.toml: hero_choices must be 1 to {}", crate::DISCOVER));
+        }
+        if r.trinket_lesser_turn == 0 || r.trinket_greater_turn <= r.trinket_lesser_turn {
+            return Err("rules.toml: the greater trinket turn must come after the lesser one".into());
+        }
+        if r.trinket_lesser_need == 0 || r.trinket_greater_need < r.trinket_lesser_need {
+            return Err("rules.toml: trinket tribe counts must rise from lesser to greater".into());
+        }
+        if [r.trinket_offer_neutral, r.trinket_offer_own, r.trinket_offer_other].contains(&0) {
+            return Err("rules.toml: every trinket offer weight must be at least 1".into());
         }
         Ok(r)
     }

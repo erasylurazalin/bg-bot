@@ -52,6 +52,10 @@ pub struct Counters {
     /// friendly minion gains before any minion's own Start of Combat runs
     /// (Al'Akir's Swatting Insects). 0 for none.
     pub soc_leftmost: u8,
+    /// A trinket's Start of Combat: every friendly minion of these tribes
+    /// (a bit mask, 0 for every minion) gains these keywords before any
+    /// minion's own Start of Combat. `None` for no such trinket held.
+    pub soc_tribe: Option<(u16, u8)>,
     /// Pending Sharing is Caring Start of Combat triggers.
     pub sharing_is_caring: u8,
     /// The player's Tavern spell bonus, for spells cast inside the fight
@@ -93,6 +97,7 @@ impl Default for Counters {
             brood_of_nozdormu: 0,
             upper_hand: 0,
             soc_leftmost: 0,
+            soc_tribe: None,
             sharing_is_caring: 0,
             spell_attack: 0,
             spell_health: 0,
@@ -2053,6 +2058,20 @@ fn run_start_of_combat(
             && let Some(f) = sides[s].ms.first_mut()
         {
             f.m.keywords.0 |= kw;
+        }
+    }
+    // A trinket's Start of Combat comes at the same step as the hero power's
+    // (DESIGN.md: hero powers, then the lesser trinket, then the greater).
+    for s in 0..2 {
+        let Some((tribes, kw)) = sides[s].counters.soc_tribe else { continue };
+        if kw == 0 {
+            continue;
+        }
+        for i in 0..sides[s].ms.len() {
+            let card = db.get(sides[s].ms[i].m.card);
+            if tribes == 0 || card.tribes.mask() & tribes != 0 {
+                sides[s].ms[i].m.keywords.0 |= kw;
+            }
         }
     }
     // Flighty Scout triggers from the hand, so it comes before the board's

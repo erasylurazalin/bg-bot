@@ -78,6 +78,7 @@ impl Game {
         give_back(&mut self.pool, &self.data.cards, &m);
         self.players[p].discarded = self.players[p].discarded.saturating_add(1);
         self.fire_event(p, EventKind::Discarded, 1);
+        self.trinket_event(p, crate::trinkets::Event::Discard, Some(m.card), 1);
         match self.data.cards.get(m.card).on_discard {
             Some(OnDiscard::CastSpell(times)) => {
                 for _ in 0..times {

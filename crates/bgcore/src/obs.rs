@@ -116,6 +116,13 @@
 //!   168 pending hero pick (the offer before turn 1 is open)
 //!   169 pending power pick (a Hero Power Discover is open)
 //!   170..172 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
+//!   Trinkets (DESIGN.md "Trinkets and Dark Gifts"):
+//!   173..175 the lesser slot, greater slot and hero power trinket (index
+//!   into the trinket table + 1, 0 for empty)
+//!   176..178 their "every N" counters
+//!   179 a trinket offer is open, 180 which slot it fills (1 lesser,
+//!   2 greater, 3 the power's)
+//!   181..188 the four options: trinket index + 1, then the price
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
@@ -190,8 +197,8 @@ use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 pub const SHOP_SPELL: usize = 1;
 pub const SLOT_FEATURES: usize = 78;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
-pub const SCALARS: usize = 173;
-pub const OPP_SCALARS: usize = 30;
+pub const SCALARS: usize = 189;
+pub const OPP_SCALARS: usize = 33;
 
 pub const OWN_SLOTS: usize = SHOP + SHOP_SPELL + HAND + BOARD + DISCOVER;
 pub const OPP_SLOTS: usize = (PLAYERS - 1) * BOARD;
@@ -341,6 +348,20 @@ pub const SCALAR_PENDING_HERO: usize = 168;
 pub const SCALAR_PENDING_POWER: usize = 169;
 /// DISCOVER slots of the hero offer before turn 1, hero index + 1, 0 empty.
 pub const SCALAR_HERO_OFFER: usize = 170;
+/// Trinkets: the lesser slot, the greater slot and the one a hero power
+/// became (Marin the Manager, Buttons), each as an index into the trinket
+/// table plus one (0 for empty), then the "every N" counter of each.
+pub const SCALAR_TRINKET: usize = 173;
+pub const SCALAR_TRINKET_COUNT: usize = SCALAR_TRINKET + crate::TRINKET_SLOTS;
+/// A trinket offer is open, and which slot it is for (1 lesser, 2 greater,
+/// 3 the hero power's).
+pub const SCALAR_PENDING_TRINKET: usize = SCALAR_TRINKET_COUNT + crate::TRINKET_SLOTS;
+pub const SCALAR_TRINKET_OFFER_SLOT: usize = SCALAR_PENDING_TRINKET + 1;
+/// The four options: trinket index + 1 and the price it is sold at.
+pub const SCALAR_TRINKET_OPTION: usize = SCALAR_TRINKET_OFFER_SLOT + 1;
+pub const TRINKET_OPTION_FEATURES: usize = 2;
+pub const SCALAR_TRINKETS_END: usize =
+    SCALAR_TRINKET_OPTION + crate::TRINKET_CHOICES * TRINKET_OPTION_FEATURES;
 
 pub const SLOT_PRESENT: usize = 0;
 pub const SLOT_CARD_ID: usize = 1;
@@ -431,13 +452,16 @@ pub const OPP_SPELL_HEALTH: usize = 27;
 pub const OPP_HERO: usize = 28;
 /// Their armor, live.
 pub const OPP_ARMOR: usize = 29;
+/// Their trinkets (lesser, greater, the hero power's), trinket index + 1.
+pub const OPP_TRINKET: usize = 30;
 
 const _: () = assert!(SCALAR_TAVERN_BUFFS + TAVERN_BUFF_FILTERS * 4 == SCALAR_LAST_SPELL);
 const _: () = assert!(SCALAR_LOBBY + LOBBY_TRIBES == SCALAR_GEM_ATTACK);
 const _: () = assert!(SCALAR_DEITY + DEITY_FEATURES == SCALAR_PENDING_TARGET);
 const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_LEFT);
 const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
-const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALARS);
+const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALAR_TRINKET);
+const _: () = assert!(SCALAR_TRINKETS_END == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
 const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
@@ -445,7 +469,8 @@ const _: () = assert!(SLOT_ATTACHED_GOLDEN + MAX_ATTACHED == SLOT_FEATURES);
 const _: () = assert!(OPP_TRIBES + Tribe::EVERY.len() == OPP_DEITY);
 const _: () = assert!(OPP_DEITY + DEITY_FEATURES == OPP_GEM_ATTACK);
 const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_HERO);
-const _: () = assert!(OPP_HERO + 2 == OPP_SCALARS);
+const _: () = assert!(OPP_HERO + 2 == OPP_TRINKET);
+const _: () = assert!(OPP_TRINKET + crate::TRINKET_SLOTS == OPP_SCALARS);
 
 /// Holy Vanguard's bonus on this minion if its hero is at `health`: +30/+30
 /// (+60 golden) at 15 Health or less, added at the start of a fight.
@@ -783,6 +808,17 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     for (k, &h) in pl.hero_offer.iter().enumerate() {
         s[SCALAR_HERO_OFFER + k] = if h == u8::MAX { 0.0 } else { h as f32 + 1.0 };
     }
+    for slot in 0..crate::TRINKET_SLOTS {
+        let st = pl.trinkets[slot];
+        s[SCALAR_TRINKET + slot] = st.of as f32;
+        s[SCALAR_TRINKET_COUNT + slot] = st.count as f32;
+    }
+    s[SCALAR_PENDING_TRINKET] = (!pl.trinket_offer.is_empty()) as u8 as f32;
+    s[SCALAR_TRINKET_OFFER_SLOT] = pl.trinket_offer_slot as f32;
+    for (k, &(of, price)) in pl.trinket_offer.iter().enumerate() {
+        s[SCALAR_TRINKET_OPTION + k * TRINKET_OPTION_FEATURES] = of as f32 + 1.0;
+        s[SCALAR_TRINKET_OPTION + k * TRINKET_OPTION_FEATURES + 1] = price as f32;
+    }
 }
 
 /// The hero table of the game's data (a shorthand for the hero features).
@@ -847,6 +883,10 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
         o[OPP_SPELL_HEALTH] = seen.spell.1 as f32;
         o[OPP_HERO] = them.hero.map_or(0.0, |h| h as f32 + 1.0);
         o[OPP_ARMOR] = them.armor as f32;
+        // Their trinkets are visible (DESIGN.md: every player sees theirs).
+        for slot in 0..crate::TRINKET_SLOTS {
+            o[OPP_TRINKET + slot] = them.trinkets[slot].of as f32;
+        }
         i += OPP_SCALARS;
         let owner = Owner { health: them.health, beast_bonus: (0, 0) };
         i += write_slots(game, &mut out[i..], BOARD, seen.board.iter(), owner);

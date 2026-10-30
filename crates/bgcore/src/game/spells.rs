@@ -1,6 +1,7 @@
 //! Casting spells, spell triggers and Blood Gems.
 
 use arrayvec::ArrayVec;
+use crate::trinkets::Event;
 use crate::cards::{
     Aura,
     DiscoverKind,
@@ -122,6 +123,8 @@ impl Game {
         if target_pos >= self.players[p].board.len() {
             return;
         }
+        // A trinket that watches spells cast on a friendly minion.
+        self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
         let target_tribes = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
         let len = self.players[p].board.len();
         for i in 0..len {
@@ -291,6 +294,7 @@ impl Game {
             for _ in 0..casts {
                 self.fire_event(p, EventKind::SpellsCast, 1);
             }
+            self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
         }
     }
 

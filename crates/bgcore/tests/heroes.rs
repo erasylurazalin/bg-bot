@@ -41,9 +41,49 @@ fn id(db: &CardDb, name: &str) -> CardId {
     db.by_name(name).expect(name)
 }
 
+/// Answer whatever the current player has open (a Discover, a target, a
+/// discard, or a trinket offer), so a helper that only wants the next turn
+/// never stalls on a prompt. False when nothing is open.
+fn answer(g: &mut Game) -> bool {
+    let Some(p) = g.current_player() else { return false };
+    let pl = &g.players[p];
+    let mut cands = [Action::EndTurn; 4];
+    let n = if !pl.discover.is_empty()
+        || !pl.power_offer.is_empty()
+        || pl.pending_choose_one.is_some()
+    {
+        cands[0] = Action::Choose(0);
+        1
+    } else if pl.pending_discard.is_some() {
+        cands[0] = Action::Discard(0);
+        1
+    } else if pl.pending_shop_target.is_some() {
+        cands[0] = Action::TargetShop(0);
+        1
+    } else if pl.pending_target.is_some() {
+        cands[0] = Action::Target(0);
+        cands[1] = Action::TargetShop(0);
+        2
+    } else if !pl.trinket_offer.is_empty() {
+        cands[0] = Action::ChooseTrinket(0);
+        1
+    } else {
+        return false;
+    };
+    for &a in &cands[..n] {
+        if g.is_legal(a) {
+            g.step(a).ok();
+            return true;
+        }
+    }
+    false
+}
+
 fn turn_of(g: &mut Game, p: usize) {
     while g.current_player() != Some(p) {
-        g.step(Action::Freeze).unwrap();
+        if !answer(g) {
+            g.step(Action::Freeze).unwrap();
+        }
     }
 }
 
@@ -55,7 +95,9 @@ fn act(g: &mut Game, p: usize, a: Action) {
 fn end_all_turns(g: &mut Game) {
     let t = g.turn;
     while g.turn == t {
-        g.step(Action::EndTurn).unwrap();
+        if !answer(g) {
+            g.step(Action::EndTurn).unwrap();
+        }
     }
 }
 
@@ -102,9 +144,9 @@ fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_twenty_heroes() {
+fn heroes_toml_parses_with_the_twenty_two_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 20);
+    assert_eq!(d.heroes.heroes.len(), 22);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),
@@ -127,6 +169,9 @@ fn heroes_toml_parses_with_the_twenty_heroes() {
         ("Kith'ix", "BG36_HERO_002", 8, 0),
         ("Doctor Holli'dae", "BG28_HERO_801", 14, 0),
         ("Time Twister Chromie", "BG34_HERO_001", 14, 0),
+        // The two whose power is a trinket offer (they came with the frame).
+        ("Marin the Manager", "BG30_HERO_304", 12, 0),
+        ("Buttons", "BG32_HERO_002", 16, 0),
     ] {
         let h = d.heroes.by_name(name).expect(name);
         let hero = d.heroes.get(h);
@@ -165,6 +210,11 @@ fn heroes_toml_parses_with_the_twenty_heroes() {
     assert_eq!(pw("Doctor Holli'dae").cost, 1);
     assert_eq!(pw("Time Twister Chromie").cost, 0);
     assert!(!pw("Time Twister Chromie").passive);
+    // The trinket offers: passive, at the turn the card names.
+    assert!(pw("Marin the Manager").passive);
+    assert_eq!(pw("Marin the Manager").unlock_turn, 5);
+    assert!(pw("Buttons").passive);
+    assert_eq!(pw("Buttons").unlock_turn, 8);
 }
 
 #[test]
@@ -299,7 +349,9 @@ fn armor_takes_fight_damage_first_and_never_comes_back() {
     // end everyone's turn and let the fight land
     let t = g.turn;
     while g.turn == t {
-        g.step(Action::EndTurn).unwrap();
+        if !answer(&mut g) {
+            g.step(Action::EndTurn).unwrap();
+        }
     }
     // winner tier 5 -> 5 damage, capped at 5 on turn 1
     assert_eq!(g.players[0].armor, 10, "armor took the 5 first");
@@ -470,6 +522,12 @@ fn alakir_gives_the_leftmost_minion_the_three_keywords() {
 #[test]
 fn wisdom_of_ancients_raises_max_gold_stacking_past_ten() {
     let mut g = hero_game(11, "Forest Lord Cenarius");
+    // Both slots pinned with harmless cards: the turn 6 and 9 offers would
+    // otherwise spend Gold the test counts.
+    let lesser = g.data.trinkets.by_name("Explorer's Binoculars").unwrap();
+    let greater = g.data.trinkets.by_name("Artisanal Urn").unwrap();
+    g.set_trinket(0, 0, Some(lesser));
+    g.set_trinket(0, 1, Some(greater));
     // Turn 1 gold is 3; set to 10 for the press.
     g.players[0].gold = 10;
     act(&mut g, 0, Action::HeroPower);

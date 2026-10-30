@@ -42,9 +42,49 @@ fn wall(dbc: &CardDb) -> Minion {
     w
 }
 
+/// Answer whatever the current player has open (a Discover, a target, a
+/// discard, or a trinket offer), so a helper that only wants the next turn
+/// never stalls on a prompt. False when nothing is open.
+fn answer(g: &mut Game) -> bool {
+    let Some(p) = g.current_player() else { return false };
+    let pl = &g.players[p];
+    let mut cands = [Action::EndTurn; 4];
+    let n = if !pl.discover.is_empty()
+        || !pl.power_offer.is_empty()
+        || pl.pending_choose_one.is_some()
+    {
+        cands[0] = Action::Choose(0);
+        1
+    } else if pl.pending_discard.is_some() {
+        cands[0] = Action::Discard(0);
+        1
+    } else if pl.pending_shop_target.is_some() {
+        cands[0] = Action::TargetShop(0);
+        1
+    } else if pl.pending_target.is_some() {
+        cands[0] = Action::Target(0);
+        cands[1] = Action::TargetShop(0);
+        2
+    } else if !pl.trinket_offer.is_empty() {
+        cands[0] = Action::ChooseTrinket(0);
+        1
+    } else {
+        return false;
+    };
+    for &a in &cands[..n] {
+        if g.is_legal(a) {
+            g.step(a).ok();
+            return true;
+        }
+    }
+    false
+}
+
 fn turn_of(g: &mut Game, p: usize) {
     while g.current_player() != Some(p) {
-        g.step(Action::Freeze).unwrap();
+        if !answer(g) {
+            g.step(Action::Freeze).unwrap();
+        }
     }
 }
 
@@ -57,7 +97,9 @@ fn act(g: &mut Game, p: usize, a: Action) {
 fn end_all_turns(g: &mut Game) {
     let t = g.turn;
     while g.turn == t {
-        g.step(Action::EndTurn).unwrap();
+        if !answer(g) {
+            g.step(Action::EndTurn).unwrap();
+        }
     }
 }
 
@@ -785,6 +827,12 @@ fn snare_trapper_raises_the_maximum_gold_past_ten() {
     play(&mut g, 0, 0, 0);
     act(&mut g, 0, Action::Choose(1));
     assert_eq!(g.players[0].extra_max_gold, 1);
+    // Pin both trinket slots with cards that do nothing on their own, so the
+    // turn 6 and 9 offers do not change the Gold this test counts.
+    let lesser = g.data.trinkets.by_name("Explorer's Binoculars").unwrap();
+    let greater = g.data.trinkets.by_name("Artisanal Urn").unwrap();
+    g.set_trinket(0, 0, Some(lesser));
+    g.set_trinket(0, 1, Some(greater));
     // reach a late turn: the cap is the turn gold plus the extra
     while g.turn < 15 {
         end_all_turns(&mut g);

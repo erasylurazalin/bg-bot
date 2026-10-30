@@ -17,6 +17,7 @@ pub mod real_boards;
 pub mod record;
 pub mod rng;
 pub mod rules;
+pub mod trinkets;
 
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 pub use cards::{Card, CardDb, Effect, Tribe, Tribes};
@@ -29,6 +30,7 @@ pub use real_boards::{
 };
 pub use rng::Rng;
 pub use rules::Rules;
+pub use trinkets::{Trinket, TrinketDb, TRINKET_CHOICES, TRINKET_SLOTS};
 
 pub const PLAYERS: usize = 8;
 pub const BOARD: usize = 7;
@@ -55,6 +57,8 @@ pub struct Data {
     pub rules: Rules,
     /// The built heroes. Empty in a `from_toml` card set (no hero game).
     pub heroes: HeroDb,
+    /// The built trinkets. Empty in a `from_toml` card set (no trinket).
+    pub trinkets: TrinketDb,
 }
 
 impl Data {
@@ -65,11 +69,23 @@ impl Data {
     }
 
     pub fn from_toml_with_heroes(cards: &str, rules: &str, heroes: &str) -> Result<Data, String> {
+        Data::from_toml_all(cards, rules, heroes, "")
+    }
+
+    /// Cards, rules, heroes and trinkets. The trinket names resolve against
+    /// the card set, so a misspelt `get` is a load error.
+    pub fn from_toml_all(
+        cards: &str,
+        rules: &str,
+        heroes: &str,
+        trinkets: &str,
+    ) -> Result<Data, String> {
         let cards = CardDb::from_toml(cards)?;
         if cards.triple_reward.is_none() {
             return Err("cards.toml: no Triple Reward spell: a golden minion played from hand has no reward to give".into());
         }
         Ok(Data {
+            trinkets: crate::trinkets::TrinketDb::from_toml(trinkets, &cards)?,
             cards,
             rules: Rules::from_toml(rules)?,
             heroes: HeroDb::from_toml(heroes)?,
@@ -79,11 +95,12 @@ impl Data {
     /// The cards.toml, rules.toml and heroes.toml at the repo root, built
     /// into the binary.
     pub fn bundled() -> Data {
-        Data::from_toml_with_heroes(
+        Data::from_toml_all(
             include_str!("../../../cards.toml"),
             include_str!("../../../rules.toml"),
             include_str!("../../../heroes.toml"),
+            include_str!("../../../trinkets.toml"),
         )
-        .expect("bundled cards.toml, rules.toml or heroes.toml is broken")
+        .expect("bundled cards.toml, rules.toml, heroes.toml or trinkets.toml is broken")
     }
 }

@@ -19,6 +19,30 @@ fn one(tribe: Tribe) -> Tribes {
     Tribes::of(tribe)
 }
 
+/// Answer whatever the sandbox player has open (a Discover, a trinket
+/// offer), so a loop that only rolls and passes never stalls on a prompt.
+fn answer(g: &mut Game) -> bool {
+    let pl = &g.players[0];
+    let a = if !pl.discover.is_empty() || !pl.power_offer.is_empty() || pl.pending_choose_one.is_some() {
+        Action::Choose(0)
+    } else if pl.pending_discard.is_some() {
+        Action::Discard(0)
+    } else if pl.pending_shop_target.is_some() {
+        Action::TargetShop(0)
+    } else if pl.pending_target.is_some() {
+        Action::Target(0)
+    } else if !pl.trinket_offer.is_empty() {
+        Action::ChooseTrinket(0)
+    } else {
+        return false;
+    };
+    if !g.is_legal(a) {
+        return false;
+    }
+    g.step(a).ok();
+    true
+}
+
 #[test]
 fn a_one_tribe_lobby_shows_only_the_tribe_and_neutrals() {
     for tribe in Tribe::EVERY {
@@ -28,6 +52,9 @@ fn a_one_tribe_lobby_shows_only_the_tribe_and_neutrals() {
         let mut rolls = 0;
         let mut rng = Rng::new(3);
         while !g.over && rolls < 400 {
+            if answer(&mut g) {
+                continue;
+            }
             // level up whenever possible so every tier's Tavern gets rolled
             if g.is_legal(Action::Level) && rng.below(2) == 0 {
                 g.step(Action::Level).unwrap();
@@ -330,6 +357,9 @@ fn a_rolled_sandbox_lobby_keeps_its_tribes() {
     assert_eq!(g.players[0].free_rolls, 0);
     let mut rolls = 0;
     while !g.over && rolls < 300 {
+        if answer(&mut g) {
+            continue;
+        }
         if g.is_legal(Action::Level) {
             g.step(Action::Level).unwrap();
         }

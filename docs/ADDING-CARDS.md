@@ -117,6 +117,12 @@ legality in mod.rs.
 | Hero power that triggers a Battlecry | `effect = { trigger_battlecry = true }` (`PowerEffect::TriggerBattlecry`) | `press_power` offers `TargetKind::TriggerBattlecry` (Kelp Keeper's path); `power_usable` needs a target, `has_battlecry_target` | Snicker-snack |
 | Hero power that gives linked cards | `effect = { get_linked_minions = 2 }` (`PowerEffect::GetLinkedMinions`) | `press_power` draws with `CardDb::random_any_minion` and calls `give_linked`, so playing one discards the rest | Dark Ritual |
 | Hero power that is a card effect | `spell_discount = 1`, `get_random_spell = true`, `refresh_with_spells = true` (`PowerEffect::SpellDiscount`, `GetRandomSpell`, `RefreshWithSpells`) | `press_power` writes the same player field, draws through `CardDb::random_spell` + `give_generated`, or calls `refresh_with_spells` (Saloon's Finest) | Arcane Knowledge, Blessing of the Nine Frogs, Mana Per Minute |
+| Hero power that is a trinket offer | `effect = { trinket_offer = "lesser" }` (`PowerEffect::TrinketOffer(slot)`) | `trinket_start_of_turn` deals the offer at the power's `unlock_turn` into the power slot; the pick turns the power into the trinket and `power_usable` goes false | Fantastic Treasure, Growing Collection |
+| Trinket (the frame) | `trinkets.toml` `[[trinket]]` with `name`, `card_id`, `slot`, `cost`, `tribes`, effects | `trinket_start_of_turn` deals the offers, `Action::ChooseTrinket` picks (`pick_trinket`), the hooks call `Game::trinket_event` | see section 2c |
+| Trinket that runs a card effect | the effect keys of cards.toml inside a hook list (`on_pick`, `start_of_turn`, `end_of_turn`, `on_buy`, `on_play`, `on_cast_spell`, ...) | `Game::run_trinket_act` runs the same `Effect`/`SpellEffect` arm with `pos` 0 and no golden multiplier | Sellemental Portrait (`get`) |
+| Trinket every N events / turns | `rule = { event = "cast_spell", every = 4, acts = [..] }` (or `"turns"`) | the slot's `count` in `TrinketState`; `trinket_event` for the events, `trinket_end_of_turn` for turns (the pick turn counts as 1) | Bloodbound Earrings |
+| Trinket's event mask (the hot path) | `Trinket::event_mask` over the lists and the rule; `Game::set_trinket` writes `Player.trinket_events` | every hook tests one bit of that `u16` first, then copies its `Act`s out of the shared table by index: no `Arc<Data>` clone, no `Vec` clone | Water Wheel (a capped hook that needs the start of the turn) |
+| Trinket in a fight | `soc = { tribe = "undead", keywords = ["taunt"] }` | `Player::counters` -> `Counters.soc_tribe`, applied in `run_start_of_combat` before any minion's Start of Combat | (the frame; nothing built yet) |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -180,6 +186,36 @@ exactly one legal target and drops the effect when there is none.
 4. Update `docs/ENGINE.md` "Heroes" if the frame changed; the pick offers,
    the observation (hero indices are embedded, `N_HEROES` in bgpy) and the
    bots need nothing per hero.
+
+## 2c. Adding a trinket
+
+1. Find it in `ref/bg-meta.json` (`trinkets`): `card_id`, `slot` (LESSER or
+   GREATER from tag 1635), `cost` (null means free), `lobby_subsets`. Add one
+   `[[trinket]]` to `trinkets.toml`. The parser (`TrinketDb::from_toml`)
+   resolves every `get`/`cast` name against the card set and refuses an
+   unknown key, so a typo is a load error, not a card that does nothing.
+2. Write the effects in the hook lists where the card's timing fits: `on_pick`,
+   `start_of_turn`, `end_of_turn`, `on_buy` (+ `buy_tribe`), `on_buy_spell`,
+   `on_play` (+ `play_tribe`), `on_sell`, `on_refresh`, `on_cast_spell`,
+   `on_cast_spell_on_minion`, `on_discard` (+ `discard_spells_only`). The keys
+   are the effect keys of cards.toml (`get`, `get_gems`, `gem_bonus`, `cast`,
+   `tavern_buff`, `undead_bonus`, ...); `crates/bgcore/src/trinkets.rs` lists
+   every key in `Act` with the card it was written for. "Every N events" or
+   "every N turns" is one `rule` per trinket; "twice per turn" is
+   `uses_per_turn`.
+3. Only add a key to `Act` when no `Effect` or `SpellEffect` arm does the job,
+   and then add the arm to `Game::run_trinket_act` calling the same helper the
+   card path calls. A trinket's in-fight Start of Combat goes in `soc` (through
+   `Counters.soc_tribe`), not into `run_trinket_act`: a fight cannot run a shop
+   effect.
+4. Tests in `crates/bgcore/tests/trinkets.rs`: `equip` puts a trinket in a slot
+   without its pick effects (`Game::set_trinket`, which also refreshes the
+   player's event mask), `take` picks it through the real offer (so `on_pick`
+   runs). The shared helpers there answer a prompt before passing the turn,
+   because a trinket can open a Discover at the start of a turn.
+5. Update `docs/ENGINE.md` "Trinkets" if the frame changed. The observation
+   carries the slots by trinket index (an embedding, `N_TRINKETS` in bgpy), so
+   a new trinket needs nothing there.
 
 ## 3. New-tribe checklist
 

@@ -1115,6 +1115,9 @@ impl Game {
         if kind == EventKind::SpellsCast {
             self.players[p].spells_cast = self.players[p].spells_cast.saturating_add(amount);
         }
+        if kind == EventKind::GoldSpent {
+            self.trinket_event(p, crate::trinkets::Event::GoldSpent, None, amount);
+        }
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             if skip == Some(pos) {

@@ -424,8 +424,10 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let _ = rayon::ThreadPoolBuilder::new().stack_size(64 << 20).build_global();
     let n_cards = Data::bundled().cards.cards.len();
     let n_heroes = Data::bundled().heroes.heroes.len();
+    let n_trinkets = Data::bundled().trinkets.len();
     m.add_class::<VecEnv>()?;
     m.add("N_HEROES", n_heroes)?;
+    m.add("N_TRINKETS", n_trinkets)?;
     m.add("OBS_SIZE", OBS_SIZE)?;
     m.add("N_ACTIONS", N_ACTIONS)?;
     m.add("N_CARDS", n_cards)?;
@@ -626,8 +628,17 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SCALAR_PENDING_HERO", obs::SCALAR_PENDING_HERO)?;
     m.add("SCALAR_PENDING_POWER", obs::SCALAR_PENDING_POWER)?;
     m.add("SCALAR_HERO_OFFER", obs::SCALAR_HERO_OFFER)?;
+    m.add("SCALAR_TRINKET", obs::SCALAR_TRINKET)?;
+    m.add("SCALAR_TRINKET_COUNT", obs::SCALAR_TRINKET_COUNT)?;
+    m.add("SCALAR_PENDING_TRINKET", obs::SCALAR_PENDING_TRINKET)?;
+    m.add("SCALAR_TRINKET_OFFER_SLOT", obs::SCALAR_TRINKET_OFFER_SLOT)?;
+    m.add("SCALAR_TRINKET_OPTION", obs::SCALAR_TRINKET_OPTION)?;
+    m.add("TRINKET_OPTION_FEATURES", obs::TRINKET_OPTION_FEATURES)?;
+    m.add("TRINKET_CHOICES", bgcore::TRINKET_CHOICES)?;
+    m.add("TRINKET_SLOTS", bgcore::TRINKET_SLOTS)?;
     m.add("OPP_HERO", obs::OPP_HERO)?;
     m.add("OPP_ARMOR", obs::OPP_ARMOR)?;
+    m.add("OPP_TRINKET", obs::OPP_TRINKET)?;
     m.add("LEARNER", LEARNER)?;
     m.add("SNAPSHOT", SNAPSHOT)?;
     m.add("STANDARD", STANDARD)?;

@@ -12,9 +12,49 @@ fn game(seed: u64) -> Game {
 }
 
 /// Let the other players toggle freeze until it's `p`'s action.
+/// Answer whatever the current player has open (a Discover, a target, a
+/// discard, or a trinket offer), so a helper that only wants the next turn
+/// never stalls on a prompt. False when nothing is open.
+fn answer(g: &mut Game) -> bool {
+    let Some(p) = g.current_player() else { return false };
+    let pl = &g.players[p];
+    let mut cands = [Action::EndTurn; 4];
+    let n = if !pl.discover.is_empty()
+        || !pl.power_offer.is_empty()
+        || pl.pending_choose_one.is_some()
+    {
+        cands[0] = Action::Choose(0);
+        1
+    } else if pl.pending_discard.is_some() {
+        cands[0] = Action::Discard(0);
+        1
+    } else if pl.pending_shop_target.is_some() {
+        cands[0] = Action::TargetShop(0);
+        1
+    } else if pl.pending_target.is_some() {
+        cands[0] = Action::Target(0);
+        cands[1] = Action::TargetShop(0);
+        2
+    } else if !pl.trinket_offer.is_empty() {
+        cands[0] = Action::ChooseTrinket(0);
+        1
+    } else {
+        return false;
+    };
+    for &a in &cands[..n] {
+        if g.is_legal(a) {
+            g.step(a).ok();
+            return true;
+        }
+    }
+    false
+}
+
 fn turn_of(g: &mut Game, p: usize) {
     while g.current_player() != Some(p) {
-        g.step(Action::Freeze).unwrap();
+        if !answer(g) {
+            g.step(Action::Freeze).unwrap();
+        }
     }
 }
 
@@ -27,7 +67,9 @@ fn act(g: &mut Game, p: usize, a: Action) {
 fn next_turn(g: &mut Game) {
     let t = g.turn;
     while g.turn == t && !g.over {
-        g.step(Action::EndTurn).unwrap();
+        if !answer(g) {
+            g.step(Action::EndTurn).unwrap();
+        }
     }
 }
 
@@ -584,6 +626,13 @@ fn gold_spells_delayed_spells_and_strike_oil_cap() {
     // Winner's Bread gave +4/+6 at start of turn 2 after winning combat.
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (7 + 4, 8 + 6));
 
+    // Pin both trinket slots with harmless cards (an `on_pick` that never
+    // runs, no turn hooks) so the turn 6 and 9 offers do not change the Gold
+    // this test is about.
+    let lesser = g.data.trinkets.by_name("Explorer's Binoculars").unwrap();
+    let greater = g.data.trinkets.by_name("Artisanal Urn").unwrap();
+    g.set_trinket(0, 0, Some(lesser));
+    g.set_trinket(0, 1, Some(greater));
     // Advance past turn 8 to verify Strike Oil raises the 10-gold cap to 11.
     while g.turn < 9 {
         // Keep other players alive so the game doesn't end early.
@@ -987,8 +1036,14 @@ fn standard_and_rush_bots_follow_curves_and_play_whole_games() {
             pl.health = 30;
         }
         let p = g_std.current_player().unwrap();
-        let a = if p == 0 { standard_action(&g_std) } else { Action::EndTurn };
-        g_std.step(a).unwrap();
+        // A trinket can hand the other seats a Discover, so they answer it
+        // before passing.
+        let a = if p == 0 {
+            standard_action(&g_std)
+        } else {
+            bgcore::bots::answer_pending(&g_std, p, None).unwrap_or(Action::EndTurn)
+        };
+        g_std.step(a).unwrap_or_else(|_| panic!("turn {} player {p}: {a:?}", g_std.turn));
     }
     assert_eq!(g_std.players[0].tier_turns, [1, 2, 5, 7, 11, 12]);
 
@@ -1006,7 +1061,11 @@ fn standard_and_rush_bots_follow_curves_and_play_whole_games() {
             g_rush.players[0].shop_spell = Some(banana);
         }
         let p = g_rush.current_player().unwrap();
-        let a = if p == 0 { rush_action(&g_rush) } else { Action::EndTurn };
+        let a = if p == 0 {
+            rush_action(&g_rush)
+        } else {
+            bgcore::bots::answer_pending(&g_rush, p, None).unwrap_or(Action::EndTurn)
+        };
         if p == 0 && g_rush.turn == 4 && a == Action::BuySpell {
             bought_spell_t4 = true;
         }

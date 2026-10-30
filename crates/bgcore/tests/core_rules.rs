@@ -23,14 +23,49 @@ fn game(seed: u64) -> Game {
     Game::new_with_lobby(Arc::new(Data::bundled()), seed, lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon, Tribe::Undead]))
 }
 
+/// Answer whatever the current player has open (a trinket offer, or a
+/// Discover a trinket opened at the start of the turn). False when nothing is.
+fn answer(g: &mut Game) -> bool {
+    let Some(p) = g.current_player() else { return false };
+    let pl = &g.players[p];
+    // The same priority `is_legal` gives: another choice first, then the
+    // trinket offer.
+    let a = if !pl.discover.is_empty()
+        || !pl.power_offer.is_empty()
+        || pl.pending_choose_one.is_some()
+    {
+        Action::Choose(0)
+    } else if pl.pending_discard.is_some() {
+        Action::Discard(0)
+    } else if pl.pending_shop_target.is_some() {
+        Action::TargetShop(0)
+    } else if pl.pending_target.is_some() {
+        Action::Target(0)
+    } else if !pl.trinket_offer.is_empty() {
+        Action::ChooseTrinket(0)
+    } else {
+        return false;
+    };
+    g.step(a).unwrap_or_else(|_| panic!("could not answer {a:?}"));
+    true
+}
+
 fn turn_of(g: &mut Game, p: usize) {
     while g.current_player() != Some(p) {
-        g.step(Action::Freeze).unwrap();
+        if !answer(g) {
+            g.step(Action::Freeze).unwrap();
+        }
     }
 }
 
 fn act(g: &mut Game, p: usize, a: Action) {
     turn_of(g, p);
+    // A trinket offer opens at the start of turn 6 and blocks the shopping
+    // actions until it is answered: take the first option and come back.
+    while !g.players[p].trinket_offer.is_empty() {
+        g.step(Action::ChooseTrinket(0)).unwrap();
+        turn_of(g, p);
+    }
     g.step(a).unwrap_or_else(|_| panic!("{a:?} illegal for player {p}"));
 }
 
@@ -38,7 +73,9 @@ fn act(g: &mut Game, p: usize, a: Action) {
 fn next_turn(g: &mut Game) {
     let t = g.turn;
     while g.turn == t && !g.over {
-        g.step(Action::EndTurn).unwrap();
+        if !answer(g) {
+            g.step(Action::EndTurn).unwrap();
+        }
     }
 }
 

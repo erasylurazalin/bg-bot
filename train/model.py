@@ -38,8 +38,15 @@ SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD]
 # the hero offer slots during the pick.
 HERO_IDS = [bgpy.SCALAR_HERO, bgpy.SCALAR_POWER_HERO] + list(
     range(bgpy.SCALAR_HERO_OFFER, bgpy.SCALAR_HERO_OFFER + bgpy.DISCOVER))
+# Trinket ids, embedded with their own table: the three own slots and the
+# four options of an open offer (every option's trinket, not its price).
+TRINKET_IDS = list(range(bgpy.SCALAR_TRINKET, bgpy.SCALAR_TRINKET + bgpy.TRINKET_SLOTS)) + [
+    bgpy.SCALAR_TRINKET_OPTION + k * bgpy.TRINKET_OPTION_FEATURES for k in range(bgpy.TRINKET_CHOICES)
+]
 # Each opponent's hero (always visible), same hero embedding.
 OPP_IDS = [bgpy.OPP_HERO]
+# Their trinkets (visible), same trinket embedding.
+OPP_TRINKET_IDS = list(range(bgpy.OPP_TRINKET, bgpy.OPP_TRINKET + bgpy.TRINKET_SLOTS))
 # The minion's own id, the spell a Magicfin token was taught, and the ids of
 # the effect-carrying cards Magnetized into it.
 SLOT_IDS = [bgpy.SLOT_CARD_ID, bgpy.SLOT_TAUGHT_SPELL] + list(
@@ -112,15 +119,18 @@ assert len(SLOT_SCALE) == SF
 
 
 class Net(nn.Module):
-    def __init__(self, n_cards=bgpy.N_CARDS, n_heroes=bgpy.N_HEROES, emb=32, slot=64, hidden=512):
+    def __init__(self, n_cards=bgpy.N_CARDS, n_heroes=bgpy.N_HEROES,
+                 n_trinkets=bgpy.N_TRINKETS, emb=32, slot=64, hidden=512):
         super().__init__()
         self.card = nn.Embedding(n_cards + 1, emb)  # 0 is an empty slot or no card
         self.hero = nn.Embedding(n_heroes + 1, emb)  # 0 is no hero
+        self.trinket = nn.Embedding(n_trinkets + 1, emb)  # 0 is no trinket
         feats = [i for i in range(SF) if i not in SLOT_IDS]
         self.slot = nn.Sequential(nn.Linear(len(SLOT_IDS) * emb + len(feats), slot), nn.ReLU())
         n_slots = bgpy.TOTAL_SLOTS
-        n_in = (n_slots * slot + bgpy.SCALARS + (len(SCALAR_IDS) + len(HERO_IDS)) * emb
-                + OPP * (bgpy.OPP_SCALARS + emb))
+        n_in = (n_slots * slot + bgpy.SCALARS
+                + (len(SCALAR_IDS) + len(HERO_IDS) + len(TRINKET_IDS)) * emb
+                + OPP * (bgpy.OPP_SCALARS + emb + len(OPP_TRINKET_IDS) * emb))
         self.trunk = nn.Sequential(
             nn.Linear(n_in, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
@@ -133,12 +143,14 @@ class Net(nn.Module):
         keep = torch.ones(bgpy.SCALARS)
         keep[SCALAR_IDS] = 0.0
         keep[HERO_IDS] = 0.0
+        keep[TRINKET_IDS] = 0.0
         self.register_buffer("s_scale", torch.tensor(SCALAR_SCALE, dtype=torch.float32))
         self.register_buffer("s_keep", keep)
         self.register_buffer("s_log", torch.tensor(SCALAR_LOG))
         self.register_buffer("o_scale", torch.tensor(OPP_SCALE, dtype=torch.float32))
         self.register_buffer("o_keep", torch.tensor(
-            [0.0 if i in OPP_IDS else 1.0 for i in range(bgpy.OPP_SCALARS)]))
+            [0.0 if i in OPP_IDS or i in OPP_TRINKET_IDS else 1.0
+             for i in range(bgpy.OPP_SCALARS)]))
         self.register_buffer("o_log", torch.tensor(OPP_LOG))
         self.register_buffer("m_scale", torch.tensor(SLOT_SCALE, dtype=torch.float32)[feats])
         self.register_buffer("feats", torch.tensor(feats, dtype=torch.long))
@@ -151,12 +163,14 @@ class Net(nn.Module):
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
         s_cards = self.card(raw[:, SCALAR_IDS].long()).reshape(b, -1)
         s_heroes = self.hero(raw[:, HERO_IDS].long()).reshape(b, -1)
+        s_trinkets = self.trinket(raw[:, TRINKET_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
         opp = obs[:, OWN_END:].reshape(b, OPP, OPP_BLOCK)
         o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale * self.o_keep
         o[:, :, self.o_log] = torch.log1p(o[:, :, self.o_log].clamp(min=0))
         o_heroes = self.hero(opp[:, :, OPP_IDS].long()).reshape(b, -1)
-        opp_scalars = torch.cat([o.reshape(b, -1), o_heroes], 1)
+        o_trinkets = self.trinket(opp[:, :, OPP_TRINKET_IDS].long()).reshape(b, -1)
+        opp_scalars = torch.cat([o.reshape(b, -1), o_heroes, o_trinkets], 1)
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
         n = slots.shape[1]
@@ -164,7 +178,7 @@ class Net(nn.Module):
         feats = slots[:, :, self.feats] / self.m_scale
         feats[:, :, self.log_cols] = torch.log1p(feats[:, :, self.log_cols].clamp(min=0))
         enc = self.slot(torch.cat([cards, feats], 2)).reshape(b, -1)
-        h = self.trunk(torch.cat([enc, scalars, s_cards, s_heroes, opp_scalars], 1))
+        h = self.trunk(torch.cat([enc, scalars, s_cards, s_heroes, s_trinkets, opp_scalars], 1))
         return self.policy(h), self.value(h).squeeze(1)
 
 
@@ -223,12 +237,14 @@ class SlotInputs(nn.Module):
         keep = torch.ones(bgpy.SCALARS)
         keep[SCALAR_IDS] = 0.0
         keep[HERO_IDS] = 0.0
+        keep[TRINKET_IDS] = 0.0
         self.register_buffer("s_scale", torch.tensor(SCALAR_SCALE, dtype=torch.float32))
         self.register_buffer("s_keep", keep)
         self.register_buffer("s_log", torch.tensor(SCALAR_LOG))
         self.register_buffer("o_scale", torch.tensor(OPP_SCALE, dtype=torch.float32))
         self.register_buffer("o_keep", torch.tensor(
-            [0.0 if i in OPP_IDS else 1.0 for i in range(bgpy.OPP_SCALARS)]))
+            [0.0 if i in OPP_IDS or i in OPP_TRINKET_IDS else 1.0
+             for i in range(bgpy.OPP_SCALARS)]))
         self.register_buffer("o_log", torch.tensor(OPP_LOG))
         self.register_buffer("o_cols", torch.tensor(
             [i for i in range(bgpy.OPP_SCALARS) if i not in OPP_IDS]))
@@ -247,6 +263,7 @@ class SlotInputs(nn.Module):
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
         s_cards = self.card(raw[:, SCALAR_IDS].long()).reshape(b, -1)
         s_heroes = self.hero(raw[:, HERO_IDS].long()).reshape(b, -1)
+        s_trinkets = self.trinket(raw[:, TRINKET_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
         opp = obs[:, OWN_END:].reshape(b, OPP, OPP_BLOCK)
         o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale * self.o_keep

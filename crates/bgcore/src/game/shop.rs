@@ -1,6 +1,7 @@
 //! The Tavern: buying, selling, Refresh, filling the shop, and the pool.
 
 use arrayvec::ArrayVec;
+use crate::trinkets::Event;
 use crate::cards::{
     Card,
     CardDb,
@@ -559,6 +560,7 @@ impl Game {
             }
         }
         self.fire_event(p, EventKind::MinionsSold, 1);
+        self.trinket_event(p, Event::Sell, Some(m.card), 1);
         m
     }
 
@@ -591,17 +593,20 @@ impl Game {
     /// An effect that says "Refresh" is not the player's own Refresh, so it
     /// leaves Fodders queued for upcoming Refreshes alone.
     pub(super) fn refresh_with_fishbait(&mut self, p: usize, card: CardId, golden: bool) {
-        let Game { data, rng, players, pool, lobby, .. } = self;
-        Self::refresh_shop(
-            &mut players[p],
-            pool,
-            &data.cards,
-            &data.rules,
-            rng,
-            *lobby,
-            RefreshKind::Effect,
-        );
-        if !players[p].shop.is_empty() {
+        {
+            let Game { data, rng, players, pool, lobby, .. } = self;
+            Self::refresh_shop(
+                &mut players[p],
+                pool,
+                &data.cards,
+                &data.rules,
+                rng,
+                *lobby,
+                RefreshKind::Effect,
+            );
+        }
+        self.trinket_event(p, Event::Refresh, None, 1);
+        if !self.players[p].shop.is_empty() {
             self.put_fishbait(p, 0, card, golden);
         }
     }

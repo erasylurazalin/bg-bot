@@ -26,8 +26,14 @@ use crate::{
 use super::{
     Player,
     TavernBuff,
+    TrinketState,
 };
 use super::effects::buff;
+
+/// The bit a tribe has in `Tribes` and in the fight's Start of Combat mask.
+fn tribe_bit(t: Tribe) -> u16 {
+    1 << t as u16
+}
 
 impl Player {
     pub(super) fn new(data: &Data) -> Player {
@@ -39,7 +45,10 @@ impl Player {
             power: None,
             hero_offer: [u8::MAX; DISCOVER],
             power_offer: ArrayVec::new(),
-            trinkets: [0; 2],
+            trinkets: [TrinketState::default(); crate::TRINKET_SLOTS],
+            trinket_offer: ArrayVec::new(),
+            trinket_offer_slot: 0,
+            trinket_events: 0,
             dark_gifts: 0,
             real: false,
             placement: 0,
@@ -375,6 +384,14 @@ impl Player {
             boon_of_beetles: self.boon_of_beetles,
             brood_of_nozdormu: self.brood_of_nozdormu,
             upper_hand: self.upper_hand,
+            soc_tribe: (0..crate::TRINKET_SLOTS).find_map(|slot| {
+                let of = self.trinkets[slot].of;
+                if of == 0 {
+                    return None;
+                }
+                let t = data.trinkets.get(of - 1);
+                t.soc.map(|s| (s.tribe.map_or(0, tribe_bit), s.keywords))
+            }),
             soc_leftmost: self.power.map_or(0, |st| {
                 match data.heroes.get(st.of).power.effect {
                     PowerEffect::SocLeftmost { keywords } => keywords,

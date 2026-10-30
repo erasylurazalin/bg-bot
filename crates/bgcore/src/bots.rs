@@ -254,7 +254,7 @@ fn health_ok(game: &Game, p: usize, cost: i32) -> bool {
 }
 
 /// Answer whatever choice is open, or None if nothing is.
-fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Action> {
+pub fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Action> {
     let pl = &game.players[p];
     let legal = |a: Action| game.is_legal(a);
     // The hero pick before turn 1: take the first offered hero (the offers
@@ -340,6 +340,30 @@ fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Action> 
             (a, score)
         });
         return Some(best_of(scored).unwrap_or_else(|| first_legal(game)));
+    }
+    // A trinket offer, once nothing else is open (`is_legal` gives the other
+    // choices priority): the cheapest one of a tribe the board has, else the
+    // cheapest. A simple rule on purpose.
+    if !pl.trinket_offer.is_empty() {
+        let own = |of: usize| {
+            let t = game.data.trinkets.get(of as u8);
+            t.tribes.is_empty()
+                || pl.board.iter().any(|m| game.data.cards.get(m.card).tribes.overlaps(t.tribes))
+        };
+        let pick = (0..pl.trinket_offer.len())
+            .map(|k| Action::ChooseTrinket(k as u8))
+            .filter(|&a| legal(a))
+            .min_by_key(|&a| {
+                let k = match a {
+                    Action::ChooseTrinket(k) => k as usize,
+                    _ => 0,
+                };
+                let (of, price) = pl.trinket_offer[k];
+                (!own(of as usize), price, k)
+            });
+        if let Some(a) = pick {
+            return Some(a);
+        }
     }
     None
 }
