@@ -706,6 +706,44 @@ or is passive.
 goes to hand for free, leaves the pool like a bought copy, and is not a
 buy, so "after you buy" triggers don't fire.
 
+## Trinkets and Dark Gifts (2026-10-30)
+
+**Trinkets.** A lesser trinket is offered at the start of turn 6 and a
+greater one at the start of turn 9: 4 options, pick 1, pay its cost. You
+can't decline, and you can always afford one. A trinket with no cost in
+the game data is free. Tribe trinkets are only offered when their tribe
+is in the lobby. With enough minions of one tribe on your board the offer
+is guaranteed to hold that tribe's trinket: 2 or more for a lesser offer,
+3 or more for a greater one. Murlocs count on the board and in hand
+together: a Murloc on the board plus one in hand is 2 (for example
+Winterfinner on the board and Flighty Scout in hand). Every other tribe
+counts the board only: players keep a second minion of a tribe in hand on
+purpose to avoid its trinkets. When two tribes qualify, one of them (at
+random) is guaranteed. The other options are mostly neutral or of your
+tribes, rarely of a lobby tribe you don't play (Era's logs: about half
+neutral, 42% your tribes, 7% others), and they lean toward trinkets that
+match your board's mechanics (Battlecries, Deathrattles, spells cast).
+**Discount:** a tribe trinket whose tribe doesn't reach the threshold
+costs 2 Gold less (never below 0); a trinket of a qualifying tribe and a
+neutral trinket keep their price (fits 77 of 82 offers in Era's logs). Two players can be offered
+the same trinket. Every player sees their own trinkets and their
+opponents'. Lesser and greater versions of one trinket are separate
+cards.
+
+**Dark Gifts.** A gift sits on its minion like an attached card: a triple's
+golden keeps the gifts of its copies, a Magnetized Mech keeps them, and a
+sold minion takes them with it. A gift works the same on a golden minion
+(it doesn't double).
+
+**Spellcraft.** A Spellcraft spell (handed out by some trinkets and a Dark
+Gift) is a temporary spell: it leaves your hand at the end of the turn if
+you haven't cast it.
+
+**Generated minions outside the pool.** Tide Oracle Morgl, Arcane
+Behemoth, Dr. Boom's Monster, Bassgill, Faceless Manipulator and Doubloon
+Grifter come only from trinkets. They are generated cards with no pool
+copies, like Beetles.
+
 ## Actions
 
 Buy a minion or the spell, sell, play (minion to a position, or cast a

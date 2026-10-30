@@ -102,6 +102,11 @@ The amounts these cards' text hides, as I know them from the game:
    which).
 3. **Trinkets:** the lesser and greater choices at their set turns.
 4. **Dark Gifts**, and Dark Paradox with them.
+   Left out of the first trinket run, to add later: the portrait trinkets
+   that rewrite another card (Bronze Czarina, Mindslasher, Flaming,
+   Azerite and Bronzebeard Portraits, Souvenir Stand), quests and
+   Darkmoon Prizes (Denathrius, Tickatus, Corrupted Tome), and Secrets
+   (Akazamzarak, Safety Patch's Ice Block).
 5. **Probably never: ETC's buddies and Timewarped minions.** Both are
    rare, and the bot can always steer clear of them: pick a hero other
    than ETC, and a trinket that doesn't give Timewarped minions. If they
