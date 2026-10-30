@@ -3749,6 +3749,12 @@ impl CardDb {
         )
     }
 
+    /// A random pool minion of any tribe, of Tier `max_tier` or lower, within
+    /// the lobby (Dark Ritual's two random minions).
+    pub fn random_any_minion(&self, max_tier: u8, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        self.pick_lobby(|c| self.cards[c].tier <= max_tier, lobby, rng)
+    }
+
     pub fn random_spell(&self, max_tier: u8, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
         let max_tier = max_tier.min(crate::MAX_TIER);
         let count = self

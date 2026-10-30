@@ -62,7 +62,10 @@ impl Game {
             return;
         }
         self.discard_card(p, s);
-        let mut pos = pd.source as usize;
+        // A hero power has no board slot: the reward runs with the board's
+        // first slot as its `pos`, and only effects that do not read it are
+        // ever given that way (Incubate).
+        let mut pos = pd.source.unwrap_or(0) as usize;
         self.run_effect(p, &mut pos, pd.reward, pd.golden, 1);
         self.maybe_start_discover(p);
     }

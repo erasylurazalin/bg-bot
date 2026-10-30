@@ -93,3 +93,50 @@ armor = 14
 # Powers his Discover never offers, by hero card_id. Only himself for now.
 power_excludes = ["TB_BaconShop_HERO_40"]
 power = { name = "Adventure!", card_id = "TB_BaconShop_HP_057", passive = true, effect = { discover_power = true } }
+
+# ---- batch of 2026-10-30: the six Easy powers left from
+# docs/briefs/sorting-2026-10-30.md (Marin the Manager and Buttons wait for
+# the trinket frame). Armor and card_id from ref/bg-meta.json.
+
+# The next Tavern spell you buy costs (1) less. (Unlocks on Turn 3.)
+[[hero]]
+name = "Exarch Othaar"
+card_id = "BG31_HERO_006"
+armor = 15
+power = { name = "Arcane Knowledge", card_id = "BG31_HERO_006p", unlock_turn = 3, effect = { spell_discount = 1 } }
+
+# Trigger a friendly minion's Battlecry. (Unlocks on Turn 3.)
+[[hero]]
+name = "Shudderwock"
+card_id = "TB_BaconShop_HERO_23"
+armor = 10
+power = { name = "Snicker-snack", card_id = "TB_BaconShop_HP_022", unlock_turn = 3, effect = { trigger_battlecry = true } }
+
+# Discard a card to get a random Aberration.
+[[hero]]
+name = "Drest'agath"
+card_id = "BG36_HERO_000"
+armor = 12
+tribes = ["aberration"]
+power = { name = "Incubate", card_id = "BG36_HERO_000p", cost = 1, effect = { discard_get_random_minion = "aberration" } }
+
+# Get 2 random minions. When you play one, discard the other.
+[[hero]]
+name = "Kith'ix"
+card_id = "BG36_HERO_002"
+armor = 8
+power = { name = "Dark Ritual", card_id = "BG36_HERO_002p", cost = 2, effect = { get_linked_minions = 2 } }
+
+# Get a random Tavern spell.
+[[hero]]
+name = "Doctor Holli'dae"
+card_id = "BG28_HERO_801"
+armor = 14
+power = { name = "Blessing of the Nine Frogs", card_id = "BG28_HERO_801p", cost = 1, effect = { get_random_spell = true } }
+
+# Refresh the Tavern with Tavern spells.
+[[hero]]
+name = "Time Twister Chromie"
+card_id = "BG34_HERO_001"
+armor = 14
+power = { name = "Mana Per Minute", card_id = "BG34_HERO_001p", effect = { refresh_with_spells = true } }

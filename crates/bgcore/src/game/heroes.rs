@@ -2,20 +2,26 @@
 
 use arrayvec::ArrayVec;
 use crate::cards::{
+    Effect,
     EventKind,
     Tribe,
 };
 use crate::heroes::PowerEffect;
-use crate::minion::Keywords;
+use crate::minion::{
+    CardId,
+    Keywords,
+};
 use crate::{
     BOARD,
     DISCOVER,
+    HAND,
     PLAYERS,
     SHOP,
 };
 use super::{
     DiscoverRequest,
     Game,
+    PendingDiscard,
     PendingTarget,
     PowerState,
     TargetKind,
@@ -138,6 +144,16 @@ impl Game {
                 hand_room && (shop_minion || pl.shop_spell.is_some())
             }
             PowerEffect::StealRandomDoubleHealth => hand_room && shop_minion,
+            PowerEffect::GetRandomSpell => hand_room,
+            // A Battlecry to trigger (Snicker-snack); the minion itself may
+            // be the target, so no slot is excluded.
+            PowerEffect::TriggerBattlecry => self.has_battlecry_target(p, None),
+            // A card to throw away (Incubate): with none the press would do
+            // nothing.
+            PowerEffect::DiscardGetRandomMinion { .. } => self.has_discardable(p),
+            // Both minions must fit in hand to stay a linked pair (Dark
+            // Ritual).
+            PowerEffect::GetLinkedMinions(n) => pl.hand.len() + n as usize <= HAND,
             _ => true,
         }
     }
@@ -200,6 +216,50 @@ impl Game {
             PowerEffect::DiscoverTribe(t) => {
                 let _ = self.players[p].discover_queue.try_push(DiscoverRequest::TribeMinion(t));
                 self.maybe_start_discover(p);
+            }
+            PowerEffect::SpellDiscount(n) => {
+                let pl = &mut self.players[p];
+                pl.spell_discount = pl.spell_discount.saturating_add(n);
+            }
+            PowerEffect::GetRandomSpell => {
+                let tier = self.players[p].tier;
+                if let Some(card) = self.data.cards.random_spell(tier, self.lobby, &mut self.rng) {
+                    self.give_generated(p, card);
+                }
+            }
+            PowerEffect::TriggerBattlecry => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::TriggerBattlecry,
+                    runs: 1,
+                    tavern: true,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            PowerEffect::DiscardGetRandomMinion { tribe: t } => {
+                // The reward runs from `resolve_discard` once a card is gone,
+                // the same path an Activate with `discard = true` takes.
+                self.players[p].pending_discard = Some(PendingDiscard {
+                    source: None,
+                    reward: Effect::GetRandomMinion { tribe: t },
+                    golden: false,
+                });
+            }
+            PowerEffect::GetLinkedMinions(n) => {
+                let tier = self.players[p].tier;
+                let mut got: ArrayVec<CardId, 4> = ArrayVec::new();
+                for _ in 0..n {
+                    let drawn = self.data.cards.random_any_minion(tier, self.lobby, &mut self.rng);
+                    if let Some(card) = drawn {
+                        let _ = got.try_push(card);
+                    }
+                }
+                self.give_linked(p, &got, false);
+            }
+            PowerEffect::RefreshWithSpells => {
+                let Game { data, rng, players, pool, lobby, .. } = self;
+                Self::refresh_with_spells(&mut players[p], &data.cards, &data.rules, rng, pool, *lobby);
             }
             _ => {}
         }

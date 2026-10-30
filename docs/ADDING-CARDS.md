@@ -113,6 +113,10 @@ legality in mod.rs.
 | Discover a new Hero Power | `effect = { discover_hero_power = true, exclude_heroes = [..] }` | `cast_spell_inner` -> `Game::discover_hero_power` (offers in `Player.power_offer`, answered with Choose) | Unmasked Identity |
 | Hero power (button) | `heroes.toml` `power = { cost, uses_per_turn, once_per_game, unlock_tier, unlock_turn, effect }` | `Action::HeroPower` -> `Game::press_power` (`power_usable` is the legality); a targeted power opens the pending-target flow | Lich Baz'hial |
 | Hero power (passive) | `passive = true` + the effect | the trigger it hooks: `FreeRefreshPerTurn` in `start_turn`, `GoldAfterUpgrade` in `Action::Level`, `GoldAfterBuyTribe` in `Action::Buy`, `GoldNextTurnAfterSell` in `sell_minion`, `SocLeftmost` through `Counters.soc_leftmost` (before any minion's Start of Combat) | Nozdormu |
+| Hero power that asks for a card to discard | `effect = { discard_get_random_minion = "<tribe>" }` (`PowerEffect::DiscardGetRandomMinion`) | `press_power` opens `Player.pending_discard` with `source: None` (a power has no board slot), answered by `Action::Discard`; the reward runs in `resolve_discard`, the same path as an Activate with `discard = true` | Incubate |
+| Hero power that triggers a Battlecry | `effect = { trigger_battlecry = true }` (`PowerEffect::TriggerBattlecry`) | `press_power` offers `TargetKind::TriggerBattlecry` (Kelp Keeper's path); `power_usable` needs a target, `has_battlecry_target` | Snicker-snack |
+| Hero power that gives linked cards | `effect = { get_linked_minions = 2 }` (`PowerEffect::GetLinkedMinions`) | `press_power` draws with `CardDb::random_any_minion` and calls `give_linked`, so playing one discards the rest | Dark Ritual |
+| Hero power that is a card effect | `spell_discount = 1`, `get_random_spell = true`, `refresh_with_spells = true` (`PowerEffect::SpellDiscount`, `GetRandomSpell`, `RefreshWithSpells`) | `press_power` writes the same player field, draws through `CardDb::random_spell` + `give_generated`, or calls `refresh_with_spells` (Saloon's Finest) | Arcane Knowledge, Blessing of the Nine Frogs, Mana Per Minute |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -168,7 +172,8 @@ exactly one legal target and drops the effect when there is none.
    make Golden).
 2. A button power with a target opens the pending flow in `press_power`
    (`offer_target`); check its needs in `Game::power_usable` (a target to
-   land on, hand room for a steal).
+   land on, hand room for a steal or for the two linked cards, a card to
+   discard, a Battlecry to trigger).
 3. Tests in `crates/bgcore/tests/heroes.rs`: `hero_game(seed, "Name")` builds
    a game with the hero forced on player 0 (or `Game::new_heroes_with_lobby`
    to play the pick itself), `clear_board` keeps the pool exact.

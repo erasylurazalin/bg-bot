@@ -102,9 +102,9 @@ fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_fourteen_heroes() {
+fn heroes_toml_parses_with_the_twenty_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 14);
+    assert_eq!(d.heroes.heroes.len(), 20);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),
@@ -121,6 +121,12 @@ fn heroes_toml_parses_with_the_fourteen_heroes() {
         ("Death Speaker Blackthorn", "BG20_HERO_103", 18, 0),
         ("Alexstrasza", "TB_BaconShop_HERO_56", 8, 0),
         ("Sir Finley Mrrgglton", "TB_BaconShop_HERO_40", 14, 0),
+        ("Exarch Othaar", "BG31_HERO_006", 15, 0),
+        ("Shudderwock", "TB_BaconShop_HERO_23", 10, 0),
+        ("Drest'agath", "BG36_HERO_000", 12, 0),
+        ("Kith'ix", "BG36_HERO_002", 8, 0),
+        ("Doctor Holli'dae", "BG28_HERO_801", 14, 0),
+        ("Time Twister Chromie", "BG34_HERO_001", 14, 0),
     ] {
         let h = d.heroes.by_name(name).expect(name);
         let hero = d.heroes.get(h);
@@ -135,6 +141,7 @@ fn heroes_toml_parses_with_the_fourteen_heroes() {
         d.heroes.get(d.heroes.by_name("Death Speaker Blackthorn").unwrap()).tribes.has(Tribe::Quilboar)
     );
     assert!(d.heroes.get(d.heroes.by_name("Alexstrasza").unwrap()).tribes.has(Tribe::Dragon));
+    assert!(d.heroes.get(d.heroes.by_name("Drest'agath").unwrap()).tribes.has(Tribe::Aberration));
     // Unmasked Identity's exclusion list holds Finley, A. F. Kay, Faelin
     // and Patchwerk (Era: his power can't come from Unmasked Identity).
     let ui = db().by_name("Unmasked Identity").unwrap();
@@ -149,6 +156,15 @@ fn heroes_toml_parses_with_the_fourteen_heroes() {
     assert_eq!(pw("Death Speaker Blackthorn").uses_per_turn, 2);
     assert!(pw("Reno Jackson").once_per_game);
     assert_eq!(pw("Alexstrasza").unlock_tier, 4);
+    // The 2026-10-30 batch: the two turn-3 unlocks, and the three costs that
+    // are not in the game data (a null cost is 0: two presses are buttons).
+    assert_eq!(pw("Exarch Othaar").unlock_turn, 3);
+    assert_eq!(pw("Shudderwock").unlock_turn, 3);
+    assert_eq!(pw("Drest'agath").cost, 1);
+    assert_eq!(pw("Kith'ix").cost, 2);
+    assert_eq!(pw("Doctor Holli'dae").cost, 1);
+    assert_eq!(pw("Time Twister Chromie").cost, 0);
+    assert!(!pw("Time Twister Chromie").passive);
 }
 
 #[test]
@@ -224,7 +240,11 @@ fn tribe_tied_heroes_need_a_lobby_tribe() {
                 assert!(
                     !matches!(
                         name.as_str(),
-                        "Cap'n Hoggarr" | "Lich Baz'hial" | "Death Speaker Blackthorn" | "Alexstrasza"
+                        "Cap'n Hoggarr"
+                            | "Lich Baz'hial"
+                            | "Death Speaker Blackthorn"
+                            | "Alexstrasza"
+                            | "Drest'agath"
                     ),
                     "seed {seed}: {name} offered without its tribe"
                 );
@@ -624,58 +644,253 @@ fn queen_of_dragons_discovers_a_dragon_once_tier_4() {
     g.check_invariants().unwrap();
 }
 
+// ---- the 2026-10-30 batch: the six Easy powers that were left ----
+
+#[test]
+fn arcane_knowledge_discounts_the_next_tavern_spell_from_turn_3() {
+    let mut g = hero_game(20, "Exarch Othaar");
+    g.players[0].gold = 5;
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower), "it unlocks on turn 3");
+    end_all_turns(&mut g);
+    end_all_turns(&mut g);
+    assert_eq!(g.turn, 3);
+    g.players[0].gold = 5;
+    act(&mut g, 0, Action::HeroPower);
+    assert_eq!(g.players[0].spell_discount, 1);
+    // The next Tavern spell costs 1 less: a 1-cost spell is free, and the
+    // discount is used up by it.
+    let coin = id(&db(), "Tavern Coin");
+    assert_eq!(g.data.cards.get(coin).cost, 1);
+    g.players[0].shop_spell = Some(coin);
+    act(&mut g, 0, Action::BuySpell);
+    assert_eq!(g.players[0].gold, 5, "the 1-cost spell was free");
+    assert_eq!(g.players[0].spell_discount, 0, "the discount was used up");
+    // A second spell in the same turn pays in full.
+    g.players[0].shop_spell = Some(coin);
+    act(&mut g, 0, Action::BuySpell);
+    assert_eq!(g.players[0].gold, 4, "no discount left");
+    // Once per turn (it also costs 0).
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn snicker_snack_triggers_a_chosen_battlecry_from_turn_3() {
+    let mut g = hero_game(21, "Shudderwock");
+    // Razorfen Geomancer gets 2 Blood Gems, Southsea Busker 1 Gold next turn.
+    put_on_board(&mut g, 0, "Razorfen Geomancer");
+    put_on_board(&mut g, 0, "Southsea Busker");
+    g.players[0].gold = 4;
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower), "it unlocks on turn 3");
+    end_all_turns(&mut g);
+    end_all_turns(&mut g);
+    g.players[0].gold = 4;
+    turn_of(&mut g, 0);
+    assert!(g.is_legal(Action::HeroPower), "unlocked on turn 3");
+    act(&mut g, 0, Action::HeroPower);
+    assert_eq!(g.players[0].gold, 4, "the power costs 0");
+    // Two Battlecry minions: the press asks which one.
+    assert!(g.players[0].pending_target.is_some());
+    turn_of(&mut g, 0);
+    assert!(g.is_legal(Action::Target(0)));
+    assert!(g.is_legal(Action::Target(1)));
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!(g.players[0].gold_next_turn, 1, "the Busker's Battlecry ran");
+    let gem = id(&db(), "Blood Gem");
+    assert_eq!(
+        g.players[0].hand.iter().filter(|m| m.card == gem).count(),
+        0,
+        "the Geomancer's Battlecry did not run"
+    );
+    // Once per turn, and nothing to trigger is not legal.
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower));
+    end_all_turns(&mut g);
+    clear_board(&mut g, 0);
+    g.players[0].gold = 4;
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower), "no Battlecry on the board");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn incubate_discards_a_card_for_a_random_aberration() {
+    let lobby = lobby(&[Tribe::Aberration, Tribe::Beast]);
+    let mut g = hero_game_lobby(22, "Drest'agath", lobby);
+    g.players[0].gold = 5;
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower), "nothing in hand to discard");
+    // Buy a minion to throw away.
+    set_shop(&mut g, 0, &["Flittering Bat"]);
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].hand.len(), 1);
+    let gold_before = g.players[0].gold;
+    act(&mut g, 0, Action::HeroPower);
+    assert_eq!(g.players[0].gold, gold_before - 1, "the power costs 1");
+    let pd = g.players[0].pending_discard.expect("the discard prompt is open");
+    assert_eq!(pd.source, None, "a hero power has no board slot");
+    act(&mut g, 0, Action::Discard(0));
+    assert_eq!(g.players[0].discarded, 1, "a real discard");
+    assert_eq!(g.players[0].hand.len(), 1, "one card in, one minion out");
+    let got = g.players[0].hand[0];
+    let card = g.data.cards.get(got.card);
+    assert!(card.tribes.has(Tribe::Aberration), "{} is not an Aberration", card.name);
+    assert!(card.tier <= g.players[0].tier);
+    assert_eq!(got.pool_copies, 0, "generated, not from the pool");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn dark_ritual_gives_a_linked_pair_and_playing_one_discards_the_other() {
+    let mut g = hero_game(23, "Kith'ix");
+    g.players[0].gold = 2;
+    act(&mut g, 0, Action::HeroPower);
+    assert_eq!(g.players[0].gold, 0, "the power costs 2");
+    assert_eq!(g.players[0].hand.len(), 2);
+    let (a, b) = (g.players[0].hand[0], g.players[0].hand[1]);
+    assert!(!g.data.cards.get(a.card).is_spell());
+    assert!(!g.data.cards.get(b.card).is_spell());
+    assert_ne!(a.linked, 0, "the pair is linked");
+    assert_eq!(a.linked & 0x3fff, b.linked & 0x3fff, "one link group");
+    assert_eq!(a.linked & 0xc000, 0, "a plain pair, not a golden four");
+    // Playing one discards the other, as a real discard.
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].board.len(), 1);
+    assert_eq!(g.players[0].hand.len(), 0, "the other one was discarded");
+    assert_eq!(g.players[0].discarded, 1);
+    // Once per turn.
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower));
+    // Both minions must fit in hand.
+    end_all_turns(&mut g);
+    g.players[0].gold = 2;
+    while g.players[0].hand.len() + 2 > 10 {
+        g.players[0].hand.pop();
+    }
+    let filler = {
+        let coin = id(&db(), "Tavern Coin");
+        g.players[0].make_card(&g.data.cards, coin, false, 0)
+    };
+    while g.players[0].hand.len() < 9 {
+        g.players[0].hand.push(filler);
+    }
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower), "one slot short of the pair");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn blessing_of_the_nine_frogs_gets_a_random_tavern_spell() {
+    let mut g = hero_game(24, "Doctor Holli'dae");
+    g.players[0].gold = 1;
+    act(&mut g, 0, Action::HeroPower);
+    assert_eq!(g.players[0].gold, 0, "the power costs 1");
+    assert_eq!(g.players[0].hand.len(), 1);
+    let card = g.data.cards.get(g.players[0].hand[0].card);
+    assert!(card.is_spell(), "{} is not a spell", card.name);
+    assert!(card.tavern_spell, "{} is not a Tavern spell", card.name);
+    assert!(card.tier <= g.players[0].tier, "{} is above the tier", card.name);
+    // Once per turn, and no room in hand means no press.
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower));
+    end_all_turns(&mut g);
+    g.players[0].gold = 1;
+    let filler = g.players[0].hand[0];
+    while g.players[0].hand.len() < 10 {
+        g.players[0].hand.push(filler);
+    }
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower), "a full hand has no room");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn mana_per_minute_refreshes_the_tavern_with_tavern_spells() {
+    let mut g = hero_game(25, "Time Twister Chromie");
+    let size = g.data.rules.shop_size(g.players[0].tier);
+    set_shop(&mut g, 0, &["Flittering Bat", "Lullabot"]);
+    let gold = g.players[0].gold;
+    act(&mut g, 0, Action::HeroPower);
+    assert_eq!(g.players[0].gold, gold, "the power costs 0");
+    assert_eq!(g.players[0].shop.len(), size, "the Tavern is full of spells");
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        assert!(c.is_spell() && c.tavern_spell, "{} is not a Tavern spell", c.name);
+    }
+    let sp = g.players[0].shop_spell.expect("the spell slot is filled");
+    assert!(g.data.cards.get(sp).is_spell());
+    // Once per turn.
+    turn_of(&mut g, 0);
+    assert!(!g.is_legal(Action::HeroPower));
+    g.check_invariants().unwrap();
+}
+
 // ---- Finley and the hero power Discover ----
 
 #[test]
 fn finley_discovers_a_power_right_after_the_pick() {
     let d = data();
-    for seed in 0..10 {
+    // The hero deck is 20 deep now, so a seed may not deal Finley to player 0:
+    // try more of them, and play the whole pick out (the order is shuffled, so
+    // player 0's power Discover may be answered before or after the others).
+    for seed in 0..80 {
         let mut g = Game::new_heroes_with_lobby(
             d.clone(),
             seed,
             lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Murloc, Tribe::Elemental, Tribe::Undead]),
         );
-        // Deal the offers so that player 0 can pick Finley.
+        let mut finley = false;
         while g.turn == 0 {
             let p = g.current_player().unwrap();
-            let k = g.players[p]
-                .hero_offer
-                .iter()
-                .position(|&h| h != u8::MAX && g.data.heroes.get(h).name == "Sir Finley Mrrgglton")
-                .unwrap_or(0);
-            let has_finley = g.players[p]
-                .hero_offer
-                .iter()
-                .any(|&h| h != u8::MAX && g.data.heroes.get(h).name == "Sir Finley Mrrgglton");
-            g.step(Action::Choose(k as u8)).unwrap();
-            if has_finley && p == 0 {
-                break;
+            if !g.players[p].power_offer.is_empty() {
+                if p == 0 && finley {
+                    // His own power Discover, before turn 1.
+                    for &h in &g.players[0].power_offer {
+                        let name = g.data.heroes.get(h).name.clone();
+                        assert_ne!(name, "Sir Finley Mrrgglton", "his own exclusion list");
+                        assert_ne!(
+                            g.data.heroes.get(h).power.card_id, "TB_BaconShop_HP_057",
+                            "Adventure! itself is never offered (it is Finley's own power)"
+                        );
+                    }
+                    let old_power = g.players[0].power.unwrap().of;
+                    g.step(Action::Choose(0)).unwrap();
+                    assert_ne!(g.players[0].power.unwrap().of, old_power, "the power was replaced");
+                    assert_eq!(g.players[0].power.unwrap().used_game, 0);
+                    assert_eq!(g.players[0].power.unwrap().uses_left, power(&g, 0).uses_per_turn);
+                    g.check_invariants().unwrap();
+                    return;
+                }
+                g.step(Action::Choose(0)).unwrap();
+                continue;
             }
+            let offers_finley = g.players[p].hero_offer.iter().any(|&h| {
+                h != u8::MAX && g.data.heroes.get(h).name == "Sir Finley Mrrgglton"
+            });
+            let k = if offers_finley {
+                g.players[p]
+                    .hero_offer
+                    .iter()
+                    .position(|&h| {
+                        h != u8::MAX && g.data.heroes.get(h).name == "Sir Finley Mrrgglton"
+                    })
+                    .unwrap()
+            } else {
+                0
+            };
+            if p == 0 && offers_finley {
+                finley = true;
+            }
+            g.step(Action::Choose(k as u8)).unwrap();
         }
-        if g.players[0].hero.map(|h| g.data.heroes.get(h).name.as_str())
-            != Some("Sir Finley Mrrgglton")
-        {
-            continue; // this seed dealt Finley to someone else; try the next
+        if finley {
+            panic!("seed {seed}: Finley's power Discover never opened");
         }
-        // His power Discover opened instead of turn 1.
-        assert!(!g.players[0].power_offer.is_empty(), "seed {seed}");
-        for &h in &g.players[0].power_offer {
-            let name = g.data.heroes.get(h).name.clone();
-            assert_ne!(name, "Sir Finley Mrrgglton", "his own exclusion list");
-            assert_ne!(
-                g.data.heroes.get(h).power.card_id, "TB_BaconShop_HP_057",
-                "Adventure! itself is never offered (it is Finley's current power too)"
-            );
-        }
-        let old_power = g.players[0].power.unwrap().of;
-        g.step(Action::Choose(0)).unwrap();
-        assert_ne!(g.players[0].power.unwrap().of, old_power, "the power was replaced");
-        assert_eq!(g.players[0].power.unwrap().used_game, 0);
-        assert_eq!(g.players[0].power.unwrap().uses_left, power(&g, 0).uses_per_turn);
-        g.check_invariants().unwrap();
-        return;
     }
-    panic!("Finley was never offered to player 0 in 10 seeds");
+    panic!("Finley was never offered to player 0 in 80 seeds");
 }
 
 #[test]

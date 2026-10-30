@@ -51,6 +51,27 @@ pub enum PowerEffect {
     /// At the start of the game, Discover a new Hero Power that replaces this
     /// one (Adventure!).
     DiscoverPower,
+    /// The next Tavern spell you buy costs this much less (Arcane Knowledge).
+    /// The same player field a card uses (`Effect::SpellDiscount`): the
+    /// discount is used up by the next spell bought.
+    SpellDiscount(u8),
+    /// Get a random Tavern spell, up to your tier (Blessing of the Nine
+    /// Frogs; `Effect::GetRandomSpellUpTo` with no cost limit).
+    GetRandomSpell,
+    /// Trigger a friendly minion's Battlecry, chosen by the player
+    /// (Snicker-snack; the `TargetKind::TriggerBattlecry` path Kelp Keeper
+    /// uses).
+    TriggerBattlecry,
+    /// Discard a card to get a random minion of `tribe` (Incubate). Opens the
+    /// same pending discard as an Activate with `discard = true`.
+    DiscardGetRandomMinion { tribe: Tribe },
+    /// Get this many random minions from the pool. Playing one discards the
+    /// rest of the group (Dark Ritual; the linked cards of Wandering
+    /// Willbreaker).
+    GetLinkedMinions(u8),
+    /// Refresh the Tavern with Tavern spells (Mana Per Minute; the same fill
+    /// as Saloon's Finest).
+    RefreshWithSpells,
 }
 
 /// A hero power: its button's limits and its effect.
@@ -193,6 +214,18 @@ struct RawPowerEffect {
     discover_tribe: Option<String>,
     #[serde(default)]
     discover_power: bool,
+    #[serde(default)]
+    spell_discount: Option<u8>,
+    #[serde(default)]
+    get_random_spell: bool,
+    #[serde(default)]
+    trigger_battlecry: bool,
+    #[serde(default)]
+    discard_get_random_minion: Option<String>,
+    #[serde(default)]
+    get_linked_minions: Option<u8>,
+    #[serde(default)]
+    refresh_with_spells: bool,
 }
 
 fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
@@ -235,6 +268,18 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
         PowerEffect::DiscoverTribe(tribe(t)?)
     } else if e.discover_power {
         PowerEffect::DiscoverPower
+    } else if let Some(d) = e.spell_discount {
+        PowerEffect::SpellDiscount(d)
+    } else if e.get_random_spell {
+        PowerEffect::GetRandomSpell
+    } else if e.trigger_battlecry {
+        PowerEffect::TriggerBattlecry
+    } else if let Some(t) = &e.discard_get_random_minion {
+        PowerEffect::DiscardGetRandomMinion { tribe: tribe(t)? }
+    } else if let Some(n) = e.get_linked_minions {
+        PowerEffect::GetLinkedMinions(n)
+    } else if e.refresh_with_spells {
+        PowerEffect::RefreshWithSpells
     } else {
         PowerEffect::None
     })

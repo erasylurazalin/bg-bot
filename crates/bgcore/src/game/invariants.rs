@@ -62,7 +62,8 @@ impl Game {
                 return Err(format!("player {i}: pending shop target has nothing to act on"));
             }
             if let Some(pd) = pl.pending_discard
-                && pd.source as usize >= pl.board.len()
+                && let Some(src) = pd.source
+                && src as usize >= pl.board.len()
             {
                 return Err(format!("player {i}: pending discard source off the board"));
             }

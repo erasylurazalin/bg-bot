@@ -215,8 +215,9 @@ pub struct QueuedOption {
 /// pick the card in hand to throw away.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PendingDiscard {
-    /// Board slot of the minion whose effect it is.
-    pub source: u8,
+    /// Board slot of the minion whose effect it is, None for a hero power
+    /// (Incubate), which has no minion to run the reward for.
+    pub source: Option<u8>,
     /// What the discard earns, run after the card is gone.
     pub reward: Effect,
     /// Whether the minion with the effect is golden (doubles the reward).
@@ -762,13 +763,7 @@ impl Game {
                                         && m.parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
                                 }))
                             && (!act.effect.needs_battlecry_target()
-                                || pl.board.iter().enumerate().any(|(i, m)| {
-                                    i != s as usize
-                                        && m.parts().any(|(c, _)| {
-                                            let card = self.data.cards.get(c);
-                                            card.battlecry.is_some() || card.choose_one.is_some()
-                                        })
-                                }))
+                                || self.has_battlecry_target(p, Some(s as usize)))
                     })
             }
             Action::Play { hand, pos } => {
@@ -972,6 +967,19 @@ impl Game {
     /// Whether the player holds any card a discard could take.
     fn has_discardable(&self, p: usize) -> bool {
         (0..self.players[p].hand.len()).any(|s| self.valid_discard(p, s))
+    }
+
+    /// Whether a friendly minion's Battlecry can be triggered, skipping the
+    /// minion in slot `except` (an Activate's own host). A Choose One counts:
+    /// it runs through the same `battlecry_or_choose_one` path.
+    fn has_battlecry_target(&self, p: usize, except: Option<usize>) -> bool {
+        self.players[p].board.iter().enumerate().any(|(i, m)| {
+            Some(i) != except
+                && m.parts().any(|(c, _)| {
+                    let card = self.data.cards.get(c);
+                    card.battlecry.is_some() || card.choose_one.is_some()
+                })
+        })
     }
 
     /// The Activate ability of the board minion in slot `s` (the first part
@@ -1229,7 +1237,7 @@ impl Game {
                 if act.discard {
                     // The reward runs once the player has picked the card.
                     self.players[p].pending_discard = Some(PendingDiscard {
-                        source: s,
+                        source: Some(s),
                         reward: act.effect,
                         golden,
                     });
