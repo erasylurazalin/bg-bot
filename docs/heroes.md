@@ -110,6 +110,169 @@ spells: "after you cast a spell" fires for them (Devilish Distractor),
 "after you cast a Tavern spell" doesn't (Forsaken Weaver). See
 `DESIGN.md` "Tavern spells versus other spells".
 
+## Hero batch rules (Era, 2026-11-01)
+
+Era's answers for the plain heroes. Where the rule says "plain" or
+"exact", it is the card's own word: a plain copy has printed stats and no
+buffs; an exact copy keeps everything (buffs, keywords, golden, Dark
+Gifts) and takes nothing from the pool.
+
+**Gold and prices**
+- Pirate Parrrrty!: each Pirate bought takes 1 off the next power press;
+  the discounts stack until you press, never below 0.
+- Lead Explorer: +1 cost per use for the whole game.
+- Piggy Bank: once per game; starts at 2 Gold and grows by 1 each turn you
+  wait.
+- Lucky Roll: a fair die; the power is locked for as many turns as rolled.
+- Reliquary Research: every third Tavern spell bought is free, then the
+  count starts over.
+- Manastorm: minions and Refreshes cost 2; Tavern spells keep their own
+  cost; upgrading costs 1 more at every tier.
+- Swap, Lock & Shop It: your minion goes into the Tavern (buyable), the
+  Tavern minion takes its place on your board; both keep their buffs; not
+  a buy, not a play.
+- The Perfect Crime: steals the Tavern's cards left to right (at most 7,
+  the spell included). When the hand is full, the rest are not added: they
+  disappear. Steals, so no buy triggers.
+- The Galaxy's Lens, The Perfect Crime: the next press costs 1 less at the
+  end of each turn, stacking down to 0. The Lens's copy is made fresh.
+
+**Counters** (all passives repeat; none is once per game unless it says
+so)
+- Sharpen Blades: +1/+1 more every 4 cards bought, all game.
+- For the Horde!: the Tavern buff grows +1/+1 every 3 minions bought;
+  spells don't count.
+- Glaive Ricochet: a plain copy of a random one of the three.
+- Natural Balance: counts the tiers of cards bought (a spell by its tier);
+  each 20 gives a Triple Reward (your tier + 1), and it starts over.
+- Battle Brand: Battlecry minions bought; once per game, as written.
+- Gone Fishing: any sale counts, by effects too; repeats every 5.
+- Verdant Spheres: minions bought across turns, repeats every 3.
+- Avalanche: the discounts stack on the current upgrade price, down to 0.
+- Choose Your Champion: only Gold spent counts, not Health.
+- Upbeat Harmony: with an empty hand nothing happens.
+- Heroic Inspiration: every 15 friendly attacks, a Triple Reward (your
+  tier + 1), repeating.
+
+**Discover and generate**
+- Reclaimed Souls: any minion that died last combat, on either side,
+  tokens included (a Beetle can be found).
+- Tinker: Magnetic Mechs up to your tier, from the pool.
+- Trash for Treasure: removing the minion is not a sale (no Gold, no sell
+  triggers) and its pool copy goes back. The Discover is one tier lower,
+  from the pool; on a Tier 1 minion it Discovers another Tier 1.
+- Three Wishes: 3 wishes per game. Two copies of one plain card (hand or
+  board) make a pair, and the third comes from the pool; goldens don't
+  count. With two pairs, one is picked at random.
+- Puzzle Box: the spell picks a random target and counts as a Tavern
+  spell cast. It never casts destructive spells (Channel the Devourer,
+  Butchering, Unmasked Identity and the like).
+- Stir the Pot: throw a minion from your board or the Tavern (not hand);
+  it is gone for good and doesn't go back to the pool. At 3, Discover with
+  one option per thrown minion's type: a Demon, a Beast and a Mech give one
+  of each; three Mechs give three Mechs.
+- Buried Treasure: digs 1 to 3 give nothing; the 4th gives a golden minion
+  up to your tier.
+- Kel'Thuzad's Kitty: Discovers from the dead player's board as it was at
+  its last moment (not as you saw it), with all buffs and Dark Gifts;
+  goldens can be offered.
+
+**Stats and targets**
+- See the Light: the minion goes to your hand as a 2/2, as a steal.
+- Major and Minor Hymn: the stat switches each turn (Attack, then Health);
+  the bonus is your tier at the press.
+- Reborn Rites, Spirit Swap: any minion, the Tavern's included, until next
+  turn. Spirit Swap: choose one minion, then a different one; they swap
+  Attack at once.
+- Rune of Damnation: a real death (Deathrattles fire), any friendly
+  Undead.
+- Hat Trick: a minion can wear several hats; each stays +1/+1. A sold
+  minion's hats move to a random friendly minion, so hats are only lost
+  when the whole board is sold or a hatted minion is destroyed (Butchering).
+  Hats survive a triple.
+- Cloning Gallery: an exact copy (golden, gifts, everything), summoned
+  (summon triggers fire), no pool copy taken. Not on a full board. The copy
+  counts toward a triple.
+- Double Time: a golden from 2 copies keeps both copies' buffs, gives a
+  Tavern Coin instead of a Triple Reward, and works on pairs already held.
+- Saturday C'Thuns!: one more repeat each turn, all game, each repeat on a
+  random friendly minion; Drakkari doubles the whole power.
+- Tavern Lighting: +1/+1 more every 3 turns, on top of spell power.
+- Devour: works like Channel the Devourer: sells the minion (Gold and sell
+  triggers) and gives its stats, buffs included, to another; only stats,
+  not effects.
+- Arcane Alteration: your board and the Tavern, spells included. A Tavern
+  card's buffs carry to the new card.
+
+**The Tavern**
+- Temporal Tavern: the two higher-tier minions take two normal slots; at
+  most Tier 6.
+- Twice as Nice: after a Refresh (the start-of-turn roll included), it
+  freezes the Tavern's highest-tier minion and adds an exact copy of it to
+  the Tavern, frozen too, outside the normal slots (5 minions and a spell
+  become 6 and a spell). Works with Golden Touch: gild the top minion,
+  freeze it, and next turn the copy is golden too.
+- Bob's Burgles: plain copies of the opponent you last fought, made fresh.
+- Enhancification: a random minion each time (both can land on the same
+  one); skips a minion with every keyword.
+- Imprison: the card goes to your hand without a buy, locked 2 turns, and
+  leaves the pool; like any locked card it can be buffed in hand.
+- Galakrond's Greed: Discover from exactly one tier higher; the old card
+  goes back to the pool; Tavern buffs are lost.
+- Come One, Come All!: a Darkmoon Ticket is a mark on a Tavern minion or
+  spell (assume a 33% chance per card). Buying the card takes the Ticket
+  and adds 1; at 3 you get a spell like a Triple Reward that Discovers a
+  minion of your own tier (a Triple Reward is tier + 1).
+
+**Start of Combat and fights**
+- Wingmen: both minions attack, left then right, before every other Start
+  of Combat; a Start of Combat minion they kill never fires.
+- ALL Will Burn!: every minion on both sides at Start of Combat gets +2
+  Attack and keeps it, the opponent's included; later summons don't get it.
+- Sprout It Out!: a passive, every fight: every minion you summon in
+  combat, Reborn copies and tokens included.
+- Embrace Your Rage: the summon fights that fight only; the card goes to
+  hand even if the board was full; it counts as a summon.
+- Fragrant Phylactery: ties at random; the stats are taken when the
+  minion dies. Best on a minion that grows during the fight (Heroic
+  Underdog). If Start of Combat effects trigger twice (Valdrakken Wind
+  Chimes and the like), the minion gets the Deathrattle twice.
+- Broodmother: the Whelp attacks a random enemy; +1/+1 for the game.
+- Tentacular: once per fight; the growth lasts the game.
+- Rapid Reanimation: the destroyed minion's Deathrattle fires first; the
+  exact copy waits for space.
+- Wax Warband: like Misplaced Tea Set (one minion per type); +1/+1 more per
+  10 Gold spent.
+- Frostwolf Fervor, Stormpike Strength: once per fight, an exact copy; ties
+  at random.
+- Lock and Load: a 0-cost power, once per turn: pick a Tavern minion; next
+  combat it is summoned as soon as you have space and attacks at once,
+  then acts like any summoned minion.
+- Pilot the Shredder: you start with Sneed's New Shredder, a 2/1 with
+  "Deathrattle: Summon the highest-Health minion from your hand and give it
+  Divine Shield for this combat" (golden: the 2 highest, 4/2).
+
+**Kills and counters**
+- I'll Take That!: any kill by your side counts, Deathrattle and Rally
+  damage included; a plain copy.
+- MechGyver: shop deaths and tokens count; repeats every 9.
+- Glory of Combat: only the minion that attacked and killed gets +1.
+- Demon Hunter Training: once it triggers it stays: the first minion each
+  turn is free. A Windfury minion's second attack counts.
+- Bloodfury: the portal gives you 2 random Demons at the start of each
+  turn.
+- Conviction: after each fight choose one of Defensive Stance (+1 Health),
+  Offensive Stance (+1 Attack) or United Stance (one more minion), for the
+  game. United goes up to 7 minions; after that only the other two are
+  offered.
+
+**Other**
+- Power of the Storm: two new powers at the start of every turn, before
+  Gold, each fresh; the same exclusions as Unmasked Identity and Genn.
+- Menagerist, Avatar of N'Zoth: the Amalgam and the Fish are normal
+  minions you start with and can sell.
+- Friendly Wager (Lord Barov): a tied fight gives 1 Gold.
+
 ## Later, or never
 
 - Later: Akazamzarak's Secrets (they are in the game), Denathrius' quests,
