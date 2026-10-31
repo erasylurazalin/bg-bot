@@ -30,7 +30,7 @@ use crate::fight::{Counters, Deity, SeenCounters, SideOutcome};
 use crate::heroes::PowerEffect;
 use crate::minion::{CardId, Keywords, Minion};
 use crate::real_boards::RealBoards;
-use crate::trinkets::Event;
+use crate::trinkets::{CardMod, Event};
 use self::trinkets::MinionPrice;
 use crate::rng::Rng;
 use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
@@ -38,7 +38,9 @@ use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
 /// Upper bound on pool minions, for the fixed-size copy count in
 /// `check_invariants`. The card parser refuses a card list past it.
 pub const MAX_POOL_CARDS: usize = 256;
-
+/// Card rewrites one player can hold at once: the six portraits and the
+/// Trailblazer Sticker fit with room to spare.
+pub const CARD_MODS: usize = 8;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Opponent {
     Player(u8),
@@ -398,6 +400,45 @@ pub struct TrinketPowers {
     /// many each turn starts with (Replica Cathedral).
     pub first_spell_double: u8,
     pub first_spell_double_base: u8,
+    // ---- block 4 ----
+    /// Extra times the first Battlecry each turn triggers (War Drum).
+    pub war_drum: u8,
+    /// Extra times your Dragons' Battlecries trigger (Dragon's Eye).
+    pub dragon_battlecry: u8,
+    /// After a spell on a friendly minion, cast it on another (Lovely
+    /// Locket).
+    pub locket: bool,
+    /// Set while the Locket's own copy is being cast, so it never chains.
+    pub locket_copy: bool,
+    /// A rewrite a portrait gives every copy of a card the player has or
+    /// will have (docs/trinkets.md "Portraits that rewrite a card").
+    pub card_mods: [Option<(CardId, CardMod)>; CARD_MODS],
+    /// Your Choose One cards always have both effects (Trailblazer
+    /// Sticker).
+    pub choose_one_all: bool,
+    /// Your minions have the base, plus the per-card step for every card
+    /// discarded this game (Hammer of Twilight).
+    pub hammer_base: (i32, i32),
+    pub hammer_per: (i32, i32),
+    /// Your Tavern spells give this much more for each different friendly
+    /// minion type (Multilayered Shield).
+    pub spell_bonus_per_type: (i32, i32),
+    /// Your Tavern spells give this much more for this turn only (Honeycomb
+    /// Ring).
+    pub spell_bonus_turn: (i32, i32),
+    /// A friendly Demon's consume also takes Bonus Keywords and this much
+    /// (Consuming Claw).
+    pub consume_claw: (i32, i32),
+    /// The slot (plus one) of a Souvenir Stand that becomes a copy of the
+    /// next Greater trinket picked; 0 when none.
+    pub souvenir: u8,
+    /// The Tavern slot (plus one) a spell was just cast on, for a trinket
+    /// that consumes it (Felsteel Cleaver).
+    pub shop_hit: u8,
+    /// The minion just bought: its stats (Reusable Batteries' Satellite)
+    /// and, for a Tavern spell, its card (Magicfin Sticker).
+    pub bought_stats: (i32, i32),
+    pub bought_spell: Option<CardId>,
 }
 
 /// One held trinket: which one, its "every N" counter, the uses its hooks
@@ -453,9 +494,9 @@ pub struct Player {
     pub trinket_offer_slot: u8,
     /// The events this player's trinkets listen for (`Trinket::event_mask`
     /// ORed over the slots, `crate::trinkets::HAS_TRINKET` when any is held).
-    /// A hook reads this one `u16` and leaves the shared trinket table alone
+    /// A hook reads this one `u32` and leaves the shared trinket table alone
     /// unless the bit matches.
-    pub trinket_events: u16,
+    pub trinket_events: u32,
     /// What this player's trinkets change for them: prices, the Tavern's
     /// shape, and the small standing rules. One block, so a trinket effect is
     /// a field write and the card paths read it without a table lookup.
@@ -514,6 +555,8 @@ pub struct Player {
     /// Elementals played from hand this turn (Conflagration). Resets every
     /// turn.
     pub elementals_played_turn: u16,
+    /// Tavern spells cast this turn (Inductive Gyroblade). Resets every turn.
+    pub spells_cast_turn: u16,
     /// Elementals played from hand this game (Flourishing Frostling's aura:
     /// "wherever this is").
     pub elementals_played: u32,
@@ -1217,6 +1260,7 @@ impl Game {
             // There is no tier above 6, so such a minion is not a target.
             SpellTarget::TransformHigher => c.tier < crate::MAX_TIER,
             SpellTarget::WatchStats => true,
+            SpellTarget::GemKeyword { .. } | SpellTarget::TriggerDeathrattle => true,
         }
     }
 
@@ -1242,6 +1286,27 @@ impl Game {
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } | TargetKind::BecomeCopy => {
                 true
             }
+            TargetKind::Spell(st) => st.can_target_shop() && self.spell_target_ok(st, &pl.shop[s]),
+            _ => false,
+        }
+    }
+
+    /// Whether the pending target may be answered on the Tavern minion in
+    /// slot `s` when a Battlecry picks its target at random (docs/trinkets.md:
+    /// a Tavern minion is allowed). Only a plain "a minion" buff reaches the
+    /// Tavern this way; a Battlecry about your own minions does not.
+    fn valid_battlecry_shop_target(&self, p: usize, pt: &PendingTarget, s: usize) -> bool {
+        let pl = &self.players[p];
+        if s >= pl.shop.len() {
+            return false;
+        }
+        let c = self.data.cards.get(pl.shop[s].card);
+        if c.is_spell() || c.fixed_stats {
+            return false;
+        }
+        match pt.kind {
+            TargetKind::MinionBuff { tribe, .. } => tribe.is_none_or(|t| c.tribes.has(t)),
+            TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
             TargetKind::Spell(st) => st.can_target_shop() && self.spell_target_ok(st, &pl.shop[s]),
             _ => false,
         }
@@ -1412,6 +1477,7 @@ impl Game {
                     self.pay_for_spell(p, pay_health, cost);
                     self.magicfin_teach(p, id);
                     self.fire_event(p, EventKind::CardsBought, 1);
+                    self.players[p].tp.bought_spell = Some(id);
                     self.trinket_event(p, Event::BuySpell, Some(id), 1);
                 } else {
                     let price = self.minion_price(p, slot);
@@ -1448,6 +1514,18 @@ impl Game {
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
                     self.fire_event(p, EventKind::CardsBought, 1);
+                    // A trinket that reads the minion just bought: its stats
+                    // as they stand now (Reusable Batteries) or the Tavern
+                    // spell (Magicfin Sticker).
+                    let bought = self.players[p]
+                        .hand
+                        .iter()
+                        .rev()
+                        .find(|h| h.card == m.card)
+                        .copied();
+                    if let Some(b) = bought {
+                        self.players[p].tp.bought_stats = (b.attack, b.health);
+                    }
                     self.trinket_event(p, Event::Buy, Some(m.card), 1);
                     // "After you buy a Pirate, gain 1 Gold" (I'm the Cap'n Now).
                     if let Some(st) = self.players[p].power
@@ -1475,6 +1553,7 @@ impl Game {
                 self.pay_for_spell(p, pay_health, cost);
                 self.magicfin_teach(p, id);
                 self.fire_event(p, EventKind::CardsBought, 1);
+                self.players[p].tp.bought_spell = Some(id);
                 self.trinket_event(p, Event::BuySpell, Some(id), 1);
             }
             Action::Sell(s) => {
@@ -1519,6 +1598,9 @@ impl Game {
                 let card = self.data.cards.get(m.card);
                 if card.is_spell() {
                     let choose_one = card.choose_one.is_some();
+                    // A card played from the hand, of any kind: Blood Gems
+                    // and Bananas too (Dragonwing Glider).
+                    self.trinket_event(p, Event::CardPlayed, Some(m.card), 1);
                     self.cast_spell(p, m);
                     if choose_one {
                         // Turbo Hogrider reacts once the card is resolved.
@@ -1527,10 +1609,18 @@ impl Game {
                     return;
                 }
                 let pos = pos as usize;
-                let is_merge = m.keywords.has(Keywords::MAGNETIC)
+                let magnetic = m.keywords.has(Keywords::MAGNETIC);
+                let is_merge = magnetic
                     && pos < self.players[p].board.len()
                     && self.can_magnetize(m.card, self.players[p].board[pos].card);
                 let mut choose_one_play = false;
+                self.trinket_event(p, Event::CardPlayed, Some(m.card), 1);
+                // A Magnetic minion played on its own is still a Magnetic
+                // minion played (Spell-powered Wrench); a merge fires it too,
+                // inside `magnetize_to`.
+                if magnetic && !is_merge {
+                    self.trinket_event(p, Event::Magnetize, Some(m.card), 1);
+                }
                 if is_merge {
                     self.magnetize_to(p, pos, m, true);
                     if m.golden && !m.no_reward {
@@ -1571,6 +1661,9 @@ impl Game {
                     self.fire_after_play_tribe(p, t, pos);
                     // A trinket that watches every minion played.
                     self.trinket_event(p, Event::Play, Some(m.card), 1);
+                    // Hammer of Twilight: "your minions have +X" reaches the
+                    // minion that just landed.
+                    self.hammer_on_play(p, pos);
                     if t.has(Tribe::Elemental) {
                         self.fire_event_skipping(p, EventKind::ElementalsPlayed, 1, Some(pos));
                     }
@@ -1588,6 +1681,13 @@ impl Game {
                     self.maybe_start_discover(p);
                     if t.has(Tribe::Murloc) {
                         self.trigger_in_hand_on_play(p, Tribe::Murloc);
+                    }
+                    // "After you play 7 Battlecry minions" (Chromatic Tear's
+                    // greater form). It comes last: its reward can triple the
+                    // board, which moves the slot the minion was played into
+                    // (2026-10-31: a stale slot panicked here).
+                    if self.data.cards.get(m.card).battlecry.is_some() {
+                        self.trinket_event(p, Event::PlayBattlecry, Some(m.card), 1);
                     }
                 }
                 if m.golden {

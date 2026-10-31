@@ -1,6 +1,7 @@
 //! run_effect, the big effect match, and its helpers.
 
 use arrayvec::ArrayVec;
+use crate::trinkets::CardMod;
 use crate::cards::{
     ConsumeBy,
     ConsumePick,
@@ -285,6 +286,21 @@ impl Game {
                 let n = mul * runs as i32;
                 let b = TavernBuff { tribe, attack: attack * n, health: health * n, this_turn };
                 self.players[p].add_tavern_buff(&self.data.cards, b);
+                // Azerite Portrait: the Living Azerites also give the stats
+                // to your Elementals on the board.
+                let also = self
+                    .players[p]
+                    .board
+                    .get(*pos)
+                    .and_then(|m| self.player_card_mod(p, m.card));
+                if let Some(CardMod::AlsoBoard(want)) = also {
+                    let cards = &self.data.cards;
+                    for o in &mut self.players[p].board {
+                        if cards.get(o.card).tribes.has(want) {
+                            buff(o, attack * n, health * n);
+                        }
+                    }
+                }
             }
             Effect::TavernBuffRandomKeyword { attack, health, mask } => {
                 let bits = mask.count_ones();
@@ -1095,6 +1111,10 @@ impl Game {
     /// stats (`stat_mul` times), and its Bonus Keywords if `keywords`. The
     /// copy goes back to the pool (a generated Fodder has no copy to return).
     pub(super) fn consume(&mut self, p: usize, pos: usize, slot: usize, keywords: bool, stat_mul: u8) {
+        let neighbours = matches!(
+            self.players[p].board.get(pos).and_then(|m| self.player_card_mod(p, m.card)),
+            Some(CardMod::AlsoNeighbors)
+        );
         let Game { data, players, pool, .. } = self;
         let pl = &mut players[p];
         if slot >= pl.shop.len() {
@@ -1102,12 +1122,38 @@ impl Game {
         }
         let eaten = pl.shop.remove(slot);
         give_back(pool, &data.cards, &eaten);
+        // Consuming Claw: a friendly Demon's consume also takes Bonus
+        // Keywords and +5/+5.
+        let claw = pl.tp.consume_claw;
+        let by_demon = claw != (0, 0)
+            && data.cards.get(pl.board[pos].card).tribes.has(Tribe::Demon);
         let m = &mut pl.board[pos];
         let k = stat_mul.max(1) as i32;
         buff(m, eaten.attack * k, eaten.health * k);
-        if keywords {
+        if keywords || by_demon {
             m.keywords.0 |= eaten.keywords.0 & data.rules.bonus_mask;
         }
+        if by_demon {
+            buff(m, claw.0, claw.1);
+        }
+        // Flaming Portrait: the Flaming Enforcers' consume also gives the
+        // stats to their neighbours.
+        if neighbours {
+            let (da, dh) = (eaten.attack * k, eaten.health * k);
+            let mut sibs = [usize::MAX; 2];
+            let mut found = 0;
+            for j in [pos.checked_sub(1), Some(pos + 1)].into_iter().flatten() {
+                if j < pl.board.len() {
+                    sibs[found] = j;
+                    found += 1;
+                }
+            }
+            for &j in &sibs[..found] {
+                buff(&mut pl.board[j], da, dh);
+            }
+        }
+        let card = eaten.card;
+        self.trinket_event(p, crate::trinkets::Event::Consume, Some(card), 1);
     }
 
     /// Robust Evolution on a board minion: a random pool minion exactly one
@@ -1211,6 +1257,10 @@ impl Game {
         if kind == EventKind::SpellsCast {
             self.players[p].spells_cast = self.players[p].spells_cast.saturating_add(amount);
         }
+        // EventKind::AllSpellsCast counts every spell but has no player
+        // scalar of its own: it is for the minions that say "spells". The
+        // observation's "Tavern spells cast this game" is the counter above
+        // and stays Tavern-only.
         if kind == EventKind::GoldSpent {
             self.trinket_event(p, crate::trinkets::Event::GoldSpent, None, amount);
         }

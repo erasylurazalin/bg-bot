@@ -360,7 +360,15 @@ impl Game {
                 // and Undead bonuses, spell bonus, spells cast, Deity, the
                 // "improve" counts). They replace the last turn's wholesale.
                 // The old board just vanishes: real minions hold no pool
-                // copies, so nothing goes back.
+                // copies, so nothing goes back. A card an effect put there
+                // (a Lockbox a real seat opened at the end of its turn) does
+                // hold copies, and those go back before the zones are
+                // replaced (2026-10-31: the pool lost three).
+                for m in pl.hand.iter().chain(pl.board.iter()) {
+                    if m.pool_copies > 0 {
+                        give_back(pool, &data.cards, m);
+                    }
+                }
                 let board = real_boards
                     .as_ref()
                     .expect("a real seat needs real boards")
@@ -470,6 +478,9 @@ impl Game {
             pl.actions = 0;
             pl.gold_spent_turn = 0;
             pl.elementals_played_turn = 0;
+            pl.spells_cast_turn = 0;
+            // "This turn only" trinket numbers (Honeycomb Ring).
+            pl.tp.spell_bonus_turn = (0, 0);
             let was_frozen = pl.frozen;
             if pl.frozen {
                 pl.frozen = false;
@@ -568,7 +579,7 @@ impl Game {
     /// Take what a fight (or a Tavern attack, with `after_fight` false)
     /// leaves behind. After a Tavern attack the board is already up to date,
     /// so only the hand and the Tavern take the bonuses.
-    pub(super) fn apply_side_outcome(&mut self, p: usize, so: &SideOutcome, after_fight: bool) {
+    pub fn apply_side_outcome(&mut self, p: usize, so: &SideOutcome, after_fight: bool) {
         if after_fight {
             for (slot, &imp) in so.permanent_improvements.iter().enumerate() {
                 if imp > 0 && slot < self.players[p].board.len() {
@@ -692,6 +703,18 @@ impl Game {
             if n > 0 {
                 let t = crate::cards::Tribe::EVERY[i];
                 self.trinket_event(p, crate::trinkets::Event::SummonTribe(t), None, n as u32);
+            }
+        }
+        if so.friendly_attacks > 0 {
+            self.trinket_event(p, crate::trinkets::Event::Attack, None, so.friendly_attacks as u32);
+        }
+        // Deaths of one named card (Snarky Portrait counts Fishbaits). The
+        // bulk count above covers every other death counter, so a rule with
+        // no card of its own ignores these.
+        for i in 0..so.n_death_cards as usize {
+            let (card, n) = so.death_cards[i];
+            if n > 0 {
+                self.trinket_event(p, crate::trinkets::Event::Death, Some(card), n as u32);
             }
         }
         for (i, &n) in so.death_tribes.iter().enumerate() {

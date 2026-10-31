@@ -585,7 +585,49 @@ impl Game {
         pl.board.clear();
         pl.board.extend(out.board);
         self.apply_side_outcome(p, &out.side, false);
+        // "Whenever you destroy a minion outside combat" (Maw Caster
+        // Portrait, Plaguerunner Portrait).
+        for m in &out.dead {
+            self.trinket_event(p, Event::Destroy, Some(m.card), 1);
+        }
         out.tracked
+    }
+
+    /// Fire the Deathrattles of the `n` left-most friendly minions that have
+    /// one, outside combat (Wolfhead Flail, Floating Candle Set). Nothing
+    /// dies, so each minion keeps its place; a summon its Deathrattle makes
+    /// lands next to it.
+    pub(super) fn trigger_deathrattles_in_shop(&mut self, p: usize, n: u8) {
+        let mut pos = 0;
+        for _ in 0..n {
+            let at = (pos..self.players[p].board.len()).find(|&i| {
+                self.players[p].board[i]
+                    .parts()
+                    .any(|(c, _)| self.data.cards.get(c).deathrattle.is_some())
+            });
+            let Some(at) = at else { return };
+            self.trigger_one_deathrattle(p, at);
+            pos = at + 1;
+        }
+    }
+
+    /// Fire one friendly minion's Deathrattles outside combat.
+    pub(super) fn trigger_one_deathrattle(&mut self, p: usize, at: usize) {
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let pl = &mut players[p];
+        let out = crate::fight::shop_trigger_deathrattles(
+            &data.cards,
+            &pl.board,
+            at,
+            pl.counters(data, *lobby),
+            rng,
+        );
+        for m in &out.dead {
+            give_back(pool, &data.cards, m);
+        }
+        pl.board.clear();
+        pl.board.extend(out.board);
+        self.apply_side_outcome(p, &out.side, false);
     }
 
     /// A minion was just bought into the last hand slot (before it can

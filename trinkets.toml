@@ -11,7 +11,9 @@
 #
 #   on_pick, start_of_turn, end_of_turn   the frame's own clock
 #   on_buy (+ buy_tribe), on_buy_spell, on_play (+ play_tribe), on_sell,
-#   on_refresh, on_cast_spell, on_cast_spell_on_minion, on_discard
+#   on_refresh, on_cast_spell (a Tavern spell), on_any_spell (any spell at
+#   all: a Blood Gem, Gem Day, a Banana, a Spellcraft spell),
+#   on_cast_spell_on_minion, on_discard
 #   (+ discard_spells_only, discard_minions_only), on_get (+ get_tribe,
 #   "whenever you get a <tribe>"), rule = { event, every, once, acts }
 #   uses_per_turn (caps the hook lists), start_every (the start-of-turn list
@@ -38,7 +40,9 @@
 # own. The slots: `next_trinket_lesser`, `greater_offer_in` (a turn count from
 # now), `greater_offer_into_lesser` (Trip Vouchers), `offer_replace` (Mystery
 # Cube) and `replace_with_random` (Orb of the Unknown, Quartermaster's Hook).
-# `on_gold_spent` fires once per spending whatever the amount.
+# `on_gold_spent` fires once per spending whatever the amount. The `rule`
+# events follow the same split: `cast_spell` is a Tavern spell, `spell_cast`
+# is any spell (DESIGN.md "Read the card's exact words, every time").
 # `grow_value` plus `buff_all_growing`/`buff_leftmost_growing` are the
 # "improve this" cards, and `buff_all_per_golden`/`buff_leftmost_two_per_battlecry`
 # read the game-long counters. `buff_random_other` is done in the shop by the
@@ -72,7 +76,8 @@ card_id = "BG32_MagicItem_808"
 slot = "lesser"
 cost = 1
 tribes = ["quilboar"]
-rule = { event = "cast_spell", every = 4, acts = [{ gems_on_board = 1 }] }
+# "After you cast 4 spells": every spell, not only Tavern spells.
+rule = { event = "spell_cast", every = 4, acts = [{ gems_on_board = 1 }] }
 mechanic = "spells"
 
 [[trinket]]
@@ -512,7 +517,8 @@ card_id = "BG32_MagicItem_808t"
 slot = "greater"
 cost = 6
 tribes = ["quilboar"]
-rule = { event = "cast_spell", every = 5, acts = [{ gems_on_board = 2 }] }
+# "After you cast 5 spells": every spell.
+rule = { event = "spell_cast", every = 5, acts = [{ gems_on_board = 2 }] }
 mechanic = "spells"
 
 
@@ -1445,7 +1451,8 @@ card_id = "BG32_MagicItem_922"
 slot = "greater"
 cost = 4
 end_of_turn = [{ buff_leftmost_growing = [3, 3] }]
-on_cast_spell = [{ grow_value = 1 }]
+# "After you cast a spell, improve this": every spell.
+on_any_spell = [{ grow_value = 1 }]
 
 [[trinket]]
 name = "Murky Sticker"
@@ -1489,3 +1496,431 @@ slot = "lesser"
 cost = 3
 on_pick = [{ first_spell_twice = 1 }]
 start_of_turn = [{ first_spell_twice = 1 }]
+
+# ---- block 4: the last trinkets (2026-10-31) ----
+#
+# The events this block added: on_card_play (any card played from hand, a
+# Blood Gem or a Banana included), on_battlecry (once per Battlecry trigger),
+# rule = { event = "play_battlecry" } (a minion with a Battlecry played),
+# rule = { event = "gem" } (a Blood Gem cast from hand), rule = { event =
+# "attack" } and on_attack (a friendly minion's swing in a fight; a Windfury
+# minion's two attacks count 2), on_destroy (+ destroy_card) and rule = { event
+# = "destroy" } (a minion destroyed outside combat), on_magnetize (a Magnetic
+# minion played), on_cast_spell_on_shop (a spell cast on a Tavern minion), and
+# rule = { event = "hero_damage" }. `death_card` narrows a death counter to one
+# card. `alternate` makes the two buy lists take turns; `drakkari_end` runs the
+# end-of-turn list once more per Drakkari.
+
+# ---- A. player-level hooks ----
+
+[[trinket]]
+name = "Dragonwing Glider"
+card_id = "BG30_MagicItem_900"
+slot = "lesser"
+cost = 1
+tribes = ["dragon"]
+# Any card played from the hand counts, Blood Gems and Bananas included
+# (docs/trinkets.md).
+on_card_play = [{ buff_random_other = [4, 4], tribe = "dragon" }]
+
+[[trinket]]
+name = "War Drum"
+card_id = "BG32_MagicItem_416"
+slot = "lesser"
+cost = 2
+tribes = ["dragon", "murloc"]
+uses_per_turn = 1
+on_pick = [{ war_drum = 2 }]
+
+[[trinket]]
+name = "Dragon Skull"
+card_id = "BG36_MagicItem_203"
+slot = "lesser"
+cost = 2
+tribes = ["dragon"]
+on_battlecry = [{ buff_ends = [5, 5] }]
+
+[[trinket]]
+name = "Dragon's Eye"
+card_id = "BG36_MagicItem_215"
+slot = "greater"
+cost = 4
+tribes = ["dragon"]
+on_pick = [{ dragon_battlecry = 1 }]
+
+[[trinket]]
+name = "Bluegill Flippers"
+card_id = "BG32_MagicItem_893"
+slot = "lesser"
+cost = 2
+tribes = ["murloc"]
+on_cast_spell = [{ buff_leftmost_hand = [3, 3] }, { buff_leftmost = [3, 3] }]
+
+[[trinket]]
+name = "Lovely Locket"
+card_id = "BG36_MagicItem_211"
+slot = "lesser"
+on_pick = [{ locket = true }]
+
+[[trinket]]
+name = "Young Murk-Eye Sticker"
+card_id = "BG35_MagicItem_752"
+slot = "greater"
+cost = 4
+tribes = ["murloc"]
+drakkari_end = true
+end_of_turn = [{ trigger_battlecries_ends = true }]
+
+[[trinket]]
+name = "Hackerfin Portrait"
+card_id = "BG32_MagicItem_925"
+slot = "greater"
+cost = 6
+tribes = ["murloc"]
+drakkari_end = true
+on_pick = [{ get = "Hackerfin" }]
+end_of_turn = [{ trigger_battlecries_of = "Hackerfin" }]
+
+[[trinket]]
+name = "Insurrectionist's Blade"
+card_id = "BG36_MagicItem_214"
+slot = "greater"
+cost = 2
+tribes = ["dragon", "quilboar"]
+drakkari_end = true
+end_of_turn = [{ trigger_all_rallies = true }]
+
+[[trinket]]
+name = "Wolfhead Flail"
+card_id = "BG36_MagicItem_212"
+slot = "greater"
+cost = 4
+tribes = ["beast"]
+end_of_turn = [{ trigger_deathrattles_leftmost = 2 }]
+
+[[trinket]]
+name = "Trickster's Sleeve"
+card_id = "BG36_MagicItem_609"
+slot = "lesser"
+cost = 1
+alternate = true
+on_buy = [{ gold = 1 }, { flip_alternate = true }]
+on_buy_spell = [{ gold = 1 }, { flip_alternate = true }]
+
+[[trinket]]
+name = "Emergency Gearblade"
+card_id = "BG36_MagicItem_812"
+slot = "lesser"
+tribes = ["mech"]
+end_of_turn = [{ cast_on_leftmost = true, card = "Repair Job", tribe = "mech" }]
+
+[[trinket]]
+name = "Spell-powered Wrench"
+card_id = "BG32_MagicItem_170"
+slot = "lesser"
+tribes = ["mech"]
+on_magnetize = [{ cast_on_random = true, card = "Repair Job", tribe = "mech" }]
+
+[[trinket]]
+name = "Reusable Batteries"
+card_id = "BG32_MagicItem_278"
+slot = "lesser"
+tribes = ["mech"]
+uses_per_turn = 1
+on_buy = [{ satellite_of_bought = "Satellite" }]
+
+[[trinket]]
+name = "Inductive Gyroblade"
+card_id = "BG36_MagicItem_810"
+slot = "lesser"
+tribes = ["mech"]
+end_of_turn = [{ get_with_stats = "Satellite", stats = [4, 4], per_spell = [4, 4] }]
+
+[[trinket]]
+name = "Inductive Gyroblade"
+card_id = "BG36_MagicItem_810t"
+slot = "greater"
+tribes = ["mech"]
+end_of_turn = [{ get_with_stats = "Satellite", stats = [12, 12], per_spell = [12, 12] }]
+
+[[trinket]]
+name = "Magicfin Sticker"
+card_id = "BG35_MagicItem_750"
+slot = "greater"
+cost = 4
+tribes = ["murloc"]
+uses_per_turn = 2
+on_buy_spell = [{ teach_bought_spell = 1 }]
+
+[[trinket]]
+name = "Plaguerunner Portrait"
+card_id = "BG36_MagicItem_204"
+slot = "greater"
+cost = 2
+tribes = ["undead"]
+destroy_card = "Plaguerunner"
+on_pick = [{ get = "Plaguerunner" }]
+on_destroy = [{ get = "Plaguerunner" }]
+
+[[trinket]]
+name = "Maw Caster Portrait"
+card_id = "BG32_MagicItem_205"
+slot = "greater"
+cost = 5
+tribes = ["undead"]
+on_pick = [{ get = "Maw Caster" }]
+on_destroy = [{ gold = 2 }]
+
+[[trinket]]
+name = "Felsteel Cleaver"
+card_id = "BG36_MagicItem_831"
+slot = "greater"
+tribes = ["demon", "quilboar"]
+on_cast_spell_on_shop = [{ consume_shop_hit = true }]
+
+[[trinket]]
+name = "Consuming Claw"
+card_id = "BG36_MagicItem_801"
+slot = "lesser"
+cost = 2
+tribes = ["demon"]
+on_pick = [{ consume_claw = [5, 5] }]
+
+# ---- B. counters and growing numbers ----
+
+[[trinket]]
+name = "Weighted Gauntlet"
+card_id = "BG36_MagicItem_414"
+slot = "lesser"
+cost = 3
+on_pick = [{ grow_value = 1 }]
+start_of_turn = [{ double_value = true }]
+end_of_turn = [{ buff_all_growing = [0, 0] }]
+
+[[trinket]]
+name = "Hammer of Twilight"
+card_id = "BG36_MagicItem_403"
+slot = "lesser"
+cost = 2
+tribes = ["aberration"]
+on_pick = [{ hammer = [1, 0, 1, 0] }]
+on_discard = [{ hammer_discarded = true }]
+
+[[trinket]]
+name = "Hammer of Twilight"
+card_id = "BG36_MagicItem_403t"
+slot = "greater"
+cost = 3
+tribes = ["aberration"]
+on_pick = [{ hammer = [2, 1, 2, 1] }]
+on_discard = [{ hammer_discarded = true }]
+
+[[trinket]]
+name = "Dalaran Cheese Wheel"
+card_id = "BG30_MagicItem_879t"
+slot = "greater"
+tribes = ["demon"]
+on_pick = [{ tavern_buff = [2, 2] }]
+rule = { event = "refresh", every = 4, acts = [{ tavern_buff = [2, 2] }] }
+
+[[trinket]]
+name = "Nether Pendant"
+card_id = "BG30_MagicItem_541"
+slot = "greater"
+cost = 5
+tribes = ["demon"]
+on_pick = [{ tavern_buff = [2, 2] }]
+rule = { event = "hero_damage", every = 3, acts = [{ tavern_buff = [2, 2] }] }
+
+[[trinket]]
+name = "Bewitched Ribbon"
+card_id = "BG35_MagicItem_923"
+slot = "greater"
+cost = 4
+# "Whenever you cast a spell": every spell, and the in-combat numbers are
+# permanent too (the minions keep them after the fight).
+on_any_spell = [{ buff_all = [1, 1] }]
+fight = [{ when = "cast", pick = "all", buff = [2, 4], permanent = true }]
+
+[[trinket]]
+name = "Honeycomb Ring"
+card_id = "BG36_MagicItem_371"
+slot = "greater"
+cost = 5
+on_pick = [{ spell_bonus = [1, 1] }]
+on_cast_spell_on_minion = [{ spell_bonus_this_turn = [1, 1] }]
+
+[[trinket]]
+name = "Multilayered Shield"
+card_id = "BG36_MagicItem_373"
+slot = "greater"
+cost = 5
+on_pick = [{ spell_bonus_per_type = [1, 2] }]
+
+[[trinket]]
+name = "Chromatic Tear"
+card_id = "BG35_MagicItem_840t"
+slot = "greater"
+cost = 1
+tribes = ["dragon"]
+on_pick = [{ random_chromadrake = 2 }]
+rule = { event = "play_battlecry", every = 7, acts = [{ random_chromadrake = 2 }] }
+
+# ---- C. the portraits that rewrite a card ----
+
+[[trinket]]
+name = "Rewinder Portrait"
+card_id = "BG30_MagicItem_868"
+slot = "lesser"
+cost = 4
+tribes = ["demon"]
+on_pick = [
+    { get = "Soul Rewinder" },
+    { get = "Wrath Weaver" },
+    { card_of_mod = "Soul Rewinder", also_attack = 2 },
+]
+
+[[trinket]]
+name = "Mindslasher Portrait"
+card_id = "BG36_MagicItem_402"
+slot = "lesser"
+cost = 4
+tribes = ["aberration"]
+on_pick = [
+    { get = "Vicious Mindslasher" },
+    { card_of_mod = "Vicious Mindslasher", also_neighbors = true },
+]
+
+# Bronzebeard Portrait (BG30_MagicItem_418) is NOT built: "Your Brann
+# Bronzebeards are both Murlocs and Dragons" needs a per-minion tribe
+# override, which reaches every tribe read in the engine. Half a portrait
+# would mislead the bots, so it stays out of the table (and so out of every
+# offer) until the tribe change is built. Add it back here then:
+#
+# [[trinket]]
+# name = "Bronzebeard Portrait"
+# card_id = "BG30_MagicItem_418"
+# slot = "greater"
+# cost = 3
+# tribes = ["dragon", "murloc"]
+# on_pick = [{ get = "Brann Bronzebeard" }, { random_battlecry = 1 }]
+
+[[trinket]]
+name = "Czarina Portrait"
+card_id = "BG32_MagicItem_283"
+slot = "greater"
+cost = 1
+tribes = ["mech"]
+on_pick = [
+    { get = "Charging Czarina" },
+    { card_of_mod = "Charging Czarina", also_health = true },
+]
+
+[[trinket]]
+name = "Flaming Portrait"
+card_id = "BG35_MagicItem_156"
+slot = "greater"
+cost = 7
+tribes = ["demon", "elemental"]
+on_pick = [
+    { get = "Flaming Enforcer" },
+    { card_of_mod = "Flaming Enforcer", also_neighbors = true },
+]
+
+[[trinket]]
+name = "Azerite Portrait"
+card_id = "BG30_MagicItem_431"
+slot = "greater"
+cost = 5
+tribes = ["elemental"]
+on_pick = [
+    { get = "Living Azerite" },
+    { card_of_mod = "Living Azerite", also_board = "elemental" },
+]
+
+[[trinket]]
+name = "Souvenir Stand"
+card_id = "BG30_MagicItem_888"
+slot = "lesser"
+on_pick = [{ souvenir = true }]
+
+[[trinket]]
+name = "Trailblazer Sticker"
+card_id = "BG36_MagicItem_308"
+slot = "greater"
+cost = 4
+tribes = ["quilboar"]
+on_pick = [{ choose_one_all = true }]
+
+# ---- D. cards and swaps ----
+
+[[trinket]]
+name = "Jewelry Box"
+card_id = "BG35_MagicItem_434"
+slot = "lesser"
+tribes = ["quilboar"]
+on_pick = [{ one_of3 = ["Blood Gem (Taunt)", "Blood Gem (Divine Shield)", "Blood Gem (Reborn)"] }]
+start_of_turn = [{ one_of3 = ["Blood Gem (Taunt)", "Blood Gem (Divine Shield)", "Blood Gem (Reborn)"] }]
+
+[[trinket]]
+name = "Dragonhead Staff"
+card_id = "BG36_MagicItem_407"
+slot = "lesser"
+tribes = ["dragon"]
+rule = { event = "attack", every = 13, acts = [{ replace_with_random = ["greater", "dragon"] }] }
+
+[[trinket]]
+name = "Ruby Tusk"
+card_id = "BG36_MagicItem_409"
+slot = "lesser"
+tribes = ["quilboar"]
+rule = { event = "gem", every = 10, acts = [{ replace_with_random = ["greater", "quilboar"] }] }
+
+[[trinket]]
+name = "Flighty Portrait"
+card_id = "BG36_MagicItem_820"
+slot = "lesser"
+cost = 2
+tribes = ["murloc"]
+on_pick = [{ get = "Flighty Scout" }]
+on_cast_spell = [{ buff_card_hand_and_board = [3, 3], card = "Flighty Scout" }]
+
+# ---- E. block 3's skips ----
+
+[[trinket]]
+name = "Soul Fermenter"
+card_id = "BG35_MagicItem_732"
+slot = "greater"
+cost = 6
+tribes = ["undead"]
+fight = [{ when = "soc", fermenter = 3 }]
+
+[[trinket]]
+name = "Snarky Portrait"
+card_id = "BG36_MagicItem_450"
+slot = "greater"
+cost = 2
+tribes = ["beast"]
+death_card = "Fishbait"
+on_pick = [{ get = "Snarky Shark", count = 2 }, { grow_value = 4 }]
+rule = {
+    event = "death",
+    every = 1,
+    acts = [{ buff_all_growing = [0, 0], tribe = "beast" }, { grow_value = 4 }],
+}
+
+[[trinket]]
+name = "Blood Golem Sticker"
+card_id = "BG30_MagicItem_442"
+slot = "greater"
+cost = 5
+tribes = ["quilboar"]
+fight = [{ when = "death", tribe = "quilboar", gem_golem = "Blood Golem" }]
+
+[[trinket]]
+name = "Floating Candle Set"
+card_id = "BG36_MagicItem_208"
+slot = "lesser"
+cost = 4
+on_pick = [{ get = "Floating Candle" }]
+start_of_turn = [{ get = "Floating Candle" }]

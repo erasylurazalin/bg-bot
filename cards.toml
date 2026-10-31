@@ -1137,7 +1137,9 @@ name = "Felboar"
 tier = 5
 tribes = ["demon", "quilboar"]
 stats = [2, 6]
-on_event = { event = "spells_cast", every = 3, effect = { consume = "random" } }
+# "After you cast 3 spells": every spell, Tavern spell or not (Felboar's
+# text has no "Tavern").
+on_event = { event = "all_spells_cast", every = 3, effect = { consume = "random" } }
 
 [[minion]]
 name = "Eredar Escapist"
@@ -2053,6 +2055,14 @@ tier = 1
 tribe = "neutral"
 stats = [1, 1]
 
+# Blood Golem Sticker: summoned with the Blood Gem stats of the Quilboar
+# that died. A Quilboar, so the trinket carries that tribe.
+[[token]]
+name = "Blood Golem"
+tier = 1
+tribe = "quilboar"
+stats = [1, 1]
+
 [[token]]
 name = "Aberrant Tentacle"
 tier = 1
@@ -2723,6 +2733,36 @@ tavern_spell = false
 blood_gem = true
 effect = { target = "chosen", buff = [1, 1] }
 
+# Jewelry Box's three special Blood Gems (BG20_GEM_Taunt, BG20_GEM_
+# DivineShield, BG20_GEM_Reborn): the player's Gem value, and the keyword
+# only on a Quilboar (docs/trinkets.md). Plain spells, like the Gem.
+[[spell]]
+name = "Blood Gem (Taunt)"
+tier = 0
+cost = 0
+token = true
+tavern_spell = false
+blood_gem = true
+effect = { target = "chosen", gem_keyword = "taunt" }
+
+[[spell]]
+name = "Blood Gem (Divine Shield)"
+tier = 0
+cost = 0
+token = true
+tavern_spell = false
+blood_gem = true
+effect = { target = "chosen", gem_keyword = "divine_shield" }
+
+[[spell]]
+name = "Blood Gem (Reborn)"
+tier = 0
+cost = 0
+token = true
+tavern_spell = false
+blood_gem = true
+effect = { target = "chosen", gem_keyword = "reborn" }
+
 [[spell]]
 name = "Gem Day"
 tier = 0
@@ -2786,6 +2826,17 @@ token = true
 spellcraft = true
 tavern_spell = false
 effect = { target = "chosen", tribe = "undead", destroy_get_random = true, count = 2 }
+
+# Floating Candle Set (BG36_MagicItem_208t): a friendly minion's Deathrattle,
+# triggered outside combat (the minion does not die).
+[[spell]]
+name = "Floating Candle"
+tier = 0
+cost = 0
+token = true
+spellcraft = true
+tavern_spell = false
+effect = { target = "chosen", trigger_deathrattle = true }
 
 # Token of the Old Gods (BG30_MagicItem_416t).
 [[spell]]

@@ -281,8 +281,9 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   contention across threads. `check_invariants` re-derives the mask, so a
   slot written behind `set_trinket` is caught in tests. The call sites are: `Action::Buy` (Buy, BuySpell), `Action::Play` (Play, with the tribe
   filter), `sell_minion` (Sell), the Refresh sites (Refresh, the same places
-  "after the Tavern is Refreshed this game" fires), `cast_spell` (CastSpell,
-  Tavern spells only), `trigger_on_cast_spell_on_target`
+  "after the Tavern is Refreshed this game" fires), `cast_spell` and
+  `cast_spell_on` (SpellCast for every spell, CastSpell for a Tavern spell
+  only: see "Spells versus Tavern spells" below), `trigger_on_cast_spell_on_target`
   (CastSpellOnMinion), `discard_card` (Discard) and `fire_event(GoldSpent)`.
   The turn flow calls `trinket_start_of_turn` (offers, uses back, the Turns
   counter, the start-of-turn effects) and `trinket_end_of_turn` (the
@@ -386,6 +387,92 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   slot counter that carries across turns. A shop destroy counts deaths but
   not Avenge: a trinket's Avenge is Avenge, and its counts start from 0 in
   every fight.
+- **Block 4: the player-level hooks.** The frame grew the events this block
+  needed instead of a field per card: `on_card_play` (any card played from the
+  hand, a Blood Gem or a Banana included), `on_battlecry` (once per Battlecry
+  trigger, so Brann's double fires it twice), `rule` on `play_battlecry` (a
+  minion with a Battlecry played), `on_gem` and `rule` on `gem` (a Blood Gem
+  cast from the hand), `on_attack` and `rule` on `attack` (a friendly swing in
+  a fight, once per swing, so Windfury counts 2: `SideOutcome::friendly_attacks`),
+  `on_destroy` and `rule` on `destroy` (`Game::destroy_in_shop`, one event per
+  dead minion, `destroy_card` narrows it to one card), `on_magnetize`,
+  `on_cast_spell_on_shop` (with `tp.shop_hit` naming the slot the spell hit),
+  `on_consume` and `rule` on `hero_damage`. `death_card` narrows a death
+  counter to one card, `SideOutcome::death_cards` brings those deaths home
+  (the bulk `friendly_deaths` fire carries no card, so a plain death counter
+  never counts them twice), `alternate` makes the two buy lists take turns
+  (`TrinketState.value` is the step, Trickster's Sleeve) and `drakkari_end`
+  runs the end-of-turn list once per Drakkari.
+  `Player.trinket_events` is a `u32` for them; the mask test is still the one
+  thing every hook pays.
+- **Battlecry multipliers (block 4).** One place counts a Battlecry's
+  triggers: `battlecry_or_choose_one`. It is Brann's `brann_mult` (set or add)
+  plus `tp.war_drum` (War Drum's two extra, spent from that trinket's own
+  `uses_left` by `take_war_drum`) plus `tp.dragon_battlecry` for a Dragon
+  (Dragon's Eye). `Game::run_battlecry_at(p, pos, random)` triggers a
+  Battlecry outside a play (Young Murk-Eye Sticker, Hackerfin Portrait), and
+  with `random` it answers the target the Battlecry asked for at random out of
+  the board and the Tavern (`answer_target_at_random`,
+  `valid_battlecry_shop_target`: only a plain "a minion" buff reaches the
+  Tavern that way). A Battlecry never panics on a slot that a hook before it
+  moved: the lookup is a `get` (2026-10-31).
+- **Trinkets that cast and trigger (block 4).** `Game::cast_spell_on` casts a
+  named card on a given friendly minion as a real cast (Emergency Gearblade,
+  Spell-powered Wrench: Repair Job). `trigger_one_deathrattle` and
+  `trigger_deathrattles_in_shop` fire a friendly minion's Deathrattle outside
+  combat through `fight::shop_trigger_deathrattles` (a one-sided `Side`,
+  `outside = true`, Avenge off), so summons land where the minion stands and
+  the gains come back through `apply_side_outcome` (Wolfhead Flail, Floating
+  Candle Set). The Lovely Locket hangs off `apply_target`'s spell arm: after a
+  spell cast on a friendly minion, the same `PendingTarget` runs once on
+  another friendly minion picked at random, ignoring the spell's own target
+  rules, guarded by `tp.locket_copy` so it never chains.
+- **Spells versus Tavern spells (`cast_spell`, fixed 2026-10-31).** Two
+  events, and every card or trinket that reacts to a cast is on the one its
+  own words name (DESIGN.md "Read the card's exact words, every time"):
+  `Event::SpellCast` fires for every spell cast (a Tavern spell, a Blood Gem,
+  Gem Day, a Banana, a Spellcraft spell), `Event::CastSpell` for a
+  `tavern_spell = true` card only. The trinket lists are `on_any_spell` and
+  `on_cast_spell`; the rule events are `spell_cast` and `cast_spell`. A
+  Triple Reward is not cast at all (it is a reward you open) and is skipped in
+  `cast_spell`. The minion side: `Card.on_cast_spell` stays Tavern-only (every
+  card that has it says "Tavern spell"); `EventKind::SpellsCast` and
+  `Player.spells_cast` (the observation's "Tavern spells cast this game", and
+  Faceless Converter's per-Tavern-spell improvement) stay Tavern-only, and
+  `EventKind::AllSpellsCast` is the "after you cast N spells" counter (Felboar)
+  with no player scalar. `on_cast_spell_on_self` and `on_cast_spell_on_tribe`
+  were always any-spell (they fire from `trigger_on_cast_spell_on_target`). In
+  a fight, `Effect::CastSpell` fires the Tavern counter and the Tavern-only
+  minion triggers only for a Tavern spell, and the trinket's `when = "cast"`
+  hook for every spell. Replica Cathedral's "your first spell each turn casts
+  an extra time" covers any spell, a Blood Gem included (`gem_casts`).
+- **The numbers that grow (block 4).** `tp.spell_bonus_per_type`
+  (Multilayered Shield: the bonus per different friendly minion type) and
+  `tp.spell_bonus_turn` (Honeycomb Ring: this turn only, cleared in
+  `start_turn`) are added in `Player::total_spell_bonus`. `Player.discarded`
+  is the Hammer of Twilight's step: `tp.hammer_base` plus `tp.hammer_per` per
+  card discarded, given to the board when a minion lands
+  (`hammer_on_play`, the pick, every discard) and, in a fight, to a minion
+  summoned there through `Counters.aura_attack`/`aura_health`.
+  `Act::DoubleValue` doubles a trinket's own number (Weighted Gauntlet).
+  `Player.spells_cast_turn` is the Inductive Gyroblade's growth step.
+- **The portraits that rewrite a card (block 4).** `TrinketPowers.card_mods`
+  is a small fixed array of `(card, CardMod)`: the trinket's data names the
+  card, and the card's own effect reads the rewrite where it runs. `AlsoAttack`
+  (`after_hero_damage_mods`), `AlsoHealth` and `AlsoNeighbors`
+  (`trigger_on_cast_spell`, and `consume` for Flaming Enforcer) and `AlsoBoard`
+  (the `Effect::TavernBuff` arm). `tp.choose_one_all` is Trailblazer Sticker
+  (every Choose One card has both effects). `tp.souvenir` makes Souvenir Stand
+  copy the next Greater trinket picked (`pick_trinket`).
+- **The fighter's leftovers (block 4).** `fight = [{ when = "soc", fermenter = 3 }]`
+  destroys the left-most minions at Start of Combat and keeps them in
+  `Side.fermenter`; when the side's last minion dies, `Side::resolve` summons
+  them back exactly as they were. `gem_golem` summons a token with the Blood
+  Gem stats of the minion that just died (`Side.last_dead`, `Side.dead_at`).
+  `when = "cast"` fires on a spell cast in the fight, and `permanent = true`
+  on a `buff` act means the minions keep it after the fight
+  (`FightAct::PermanentStats` -> `gain_permanent_at`, Bewitched Ribbon's
+  bigger in-combat numbers).
 - **The observation** carries the three slots (trinket index + 1), their
   counters, the open offer (its slot and the four options with prices) as own
   scalars 173 to 188, and each opponent's three slots as their scalars 30 to

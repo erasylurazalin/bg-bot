@@ -632,7 +632,16 @@ pub struct Activate {
 /// Things a player does that event triggers count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EventKind {
+    /// Tavern spells cast: `tavern_spell = true` only. This is the
+    /// observation's "Tavern spells cast this game" (`Player.spells_cast`)
+    /// and the counter for "improved by each Tavern spell you've cast"
+    /// (Faceless Converter), Living Azerite's trigger and Heart of the
+    /// Forest's.
     SpellsCast,
+    /// Every spell cast: Tavern spells, Blood Gems, Gem Days, Bananas,
+    /// Spellcraft spells (DESIGN.md "Read the card's exact words"). Felboar
+    /// counts these. A Triple Reward is not a spell you cast.
+    AllSpellsCast,
     /// Counts gold, so spending 5 adds 5.
     GoldSpent,
     /// Counts damage, so taking 3 adds 3.
@@ -748,6 +757,13 @@ pub enum SpellTarget {
     /// move all its neighbours' Blood Gem stats onto it: they lose them, it
     /// gains them (Gem Confiscation).
     Confiscation { gems: u8 },
+    /// A Blood Gem that also gives this keyword when its target is a
+    /// Quilboar (Jewelry Box's three special Gems). The stats are the
+    /// player's Gem value.
+    GemKeyword { keyword: u8 },
+    /// Trigger the chosen friendly minion's Deathrattle outside combat
+    /// (Floating Candle Set's Spellcraft spell).
+    TriggerDeathrattle,
     /// Get a plain copy of the chosen minion (board or Tavern) of Tier
     /// `max_tier` or below (Duplicating Lens).
     PlainCopy { max_tier: u8 },
@@ -782,6 +798,7 @@ impl SpellTarget {
                 | SpellTarget::Confiscation { .. }
                 | SpellTarget::PlainCopy { .. }
                 | SpellTarget::TransformHigher
+                | SpellTarget::GemKeyword { .. }
             )
     }
 
@@ -1827,6 +1844,13 @@ struct RawSpellEffect {
     /// Butchering: destroy the chosen friendly Undead, then this much Attack
     /// for every Undead this game.
     butchering: Option<i32>,
+    /// A Blood Gem that also gives this keyword to a Quilboar (Jewelry Box's
+    /// three special Gems).
+    gem_keyword: Option<String>,
+    /// Trigger the chosen friendly minion's Deathrattle outside combat
+    /// (Floating Candle Set).
+    #[serde(default)]
+    trigger_deathrattle: bool,
     /// Tomb Turning: Discover an Undead that dies if played this turn.
     #[serde(default)]
     tomb_turning: bool,
@@ -2354,6 +2378,7 @@ fn card_tribes(one: &Option<String>, many: &Option<Vec<String>>) -> Result<Tribe
 fn parse_event(s: &str) -> Result<EventKind, String> {
     match s {
         "spells_cast" => Ok(EventKind::SpellsCast),
+        "all_spells_cast" => Ok(EventKind::AllSpellsCast),
         "gold_spent" => Ok(EventKind::GoldSpent),
         "hero_damage" => Ok(EventKind::HeroDamage),
         "minions_sold" => Ok(EventKind::MinionsSold),
@@ -2415,6 +2440,12 @@ fn parse_spell_effect(
             }
             if let Some(gems) = e.confiscate {
                 return Ok((Some(SpellTarget::Confiscation { gems }), None));
+            }
+            if let Some(k) = &e.gem_keyword {
+                return Ok((Some(SpellTarget::GemKeyword { keyword: keyword_bit(k)? }), None));
+            }
+            if e.trigger_deathrattle {
+                return Ok((Some(SpellTarget::TriggerDeathrattle), None));
             }
             if let Some(per) = e.per_played_this_turn {
                 let [attack, health] = e.buff.ok_or("per_played_this_turn needs buff")?;

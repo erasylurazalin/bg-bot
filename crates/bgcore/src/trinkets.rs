@@ -57,9 +57,17 @@ pub enum Event {
     /// The player's own Refresh, or one an effect did (the same places
     /// "after the Tavern is Refreshed this game" fires).
     Refresh,
-    /// A Tavern spell cast, wherever the cast comes from.
+    /// Any spell cast at all, wherever the cast comes from: a Tavern spell,
+    /// a Blood Gem, Gem Day, a Banana, a Spellcraft spell. "Whenever you
+    /// cast a spell" / "after you cast N spells" (DESIGN.md "Read the
+    /// card's exact words, every time"): Bewitched Ribbon, Bloodbound
+    /// Earrings, Charming Panpipes.
+    SpellCast,
+    /// A Tavern spell cast (`tavern_spell = true` in cards.toml, a
+    /// BATTLEGROUND_SPELL in the game data). "Cast a Tavern spell" is the
+    /// narrower one: Comfy Coffin, Bluegill Flippers, Flighty Portrait.
     CastSpell,
-    /// A Tavern spell cast on a friendly minion.
+    /// A spell cast on a friendly board minion, of any kind.
     CastSpellOnMinion,
     /// Gold spent, counted by the amount (a 3 Gold buy adds 3).
     GoldSpent,
@@ -77,19 +85,46 @@ pub enum Event {
     /// A card of this tribe entered the player's hand, from anywhere:
     /// bought, generated, Discovered or copied (Trusty Crowbar).
     GetTribe(Tribe),
+    // ---- block 4 ----
+    /// A card played from the hand of any kind: a minion, a Tavern spell, a
+    /// Blood Gem, a Banana (Dragonwing Glider).
+    CardPlayed,
+    /// A Battlecry triggered, once per trigger, so a Brann double counts
+    /// twice (Dragon Skull).
+    Battlecry,
+    /// A minion with a Battlecry played from hand (Chromatic Tear's greater
+    /// form).
+    PlayBattlecry,
+    /// A Blood Gem cast from hand (Ruby Tusk).
+    Gem,
+    /// A friendly minion attacked in a fight, once per swing, so a Windfury
+    /// minion's two attacks count 2 (Dragonhead Staff).
+    Attack,
+    /// You destroyed a minion outside combat (Maw Caster Portrait,
+    /// Plaguerunner Portrait).
+    Destroy,
+    /// A Magnetic minion was played, as a Magnetization or on its own
+    /// (Spell-powered Wrench).
+    Magnetize,
+    /// A spell was cast on a Tavern minion (Felsteel Cleaver).
+    CastSpellOnShop,
+    /// A friendly minion consumed a Tavern minion (Consuming Claw).
+    Consume,
+    /// Your hero took damage outside combat (Nether Pendant).
+    HeroDamage,
 }
 
 /// The player holds a trinket with an effect at all (any hook or rule).
-pub const HAS_TRINKET: u16 = 1 << 15;
+pub const HAS_TRINKET: u32 = 1 << 31;
 /// A trinket wants the start of the turn (a `start_of_turn` list or a
 /// "every N turns" rule, which counts there).
-pub const STARTS_TURN: u16 = 1 << 14;
+pub const STARTS_TURN: u32 = 1 << 30;
 /// A trinket wants the end of the turn (an `end_of_turn` list or a rule).
-pub const ENDS_TURN: u16 = 1 << 13;
+pub const ENDS_TURN: u32 = 1 << 29;
 
 impl Event {
     /// The bit a player's trinket mask uses for this event.
-    pub fn bit(self) -> u16 {
+    pub fn bit(self) -> u32 {
         match self {
             // A rule that counts a tribe's plays is still a Play event.
             Event::PlayTribe(_) => 1 << 4,
@@ -100,6 +135,7 @@ impl Event {
             Event::Play => 1 << 4,
             Event::Refresh => 1 << 5,
             Event::CastSpell => 1 << 6,
+            Event::SpellCast => 1 << 23,
             Event::CastSpellOnMinion => 1 << 7,
             Event::GoldSpent => 1 << 8,
             Event::Discard => 1 << 9,
@@ -108,14 +144,23 @@ impl Event {
             Event::Death | Event::DeathTribe(_) => 1 << 10,
             Event::Summon | Event::SummonTribe(_) => 1 << 11,
             Event::GetTribe(_) => 1 << 12,
+            Event::CardPlayed => 1 << 13,
+            Event::Battlecry => 1 << 14,
+            Event::PlayBattlecry => 1 << 15,
+            Event::Gem => 1 << 16,
+            Event::Attack => 1 << 17,
+            Event::Destroy => 1 << 18,
+            Event::Magnetize => 1 << 19,
+            Event::CastSpellOnShop => 1 << 20,
+            Event::Consume => 1 << 21,
+            Event::HeroDamage => 1 << 22,
         }
     }
 }
 
 /// One thing a trinket does. The doc names the card a key was written for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Act {
-    /// Get `count` generated copies of a card (`get`).
+pub enum Act {    /// Get `count` generated copies of a card (`get`).
     Get { card: CardId, count: u8 },
     /// Gain Gold now (`gold`).
     Gold(u8),
@@ -329,6 +374,102 @@ pub enum Act {
     /// Your first Tavern spell each turn casts this many times in all
     /// (Replica Cathedral: twice), and how many turns start with it.
     FirstSpellTwice(u8),
+    // ---- block 4: player-level hooks (docs/trinkets.md, 2026-10-31) ----
+    /// The first Battlecry each turn triggers this many extra times
+    /// (War Drum); the per-turn use is the trinket's own.
+    WarDrum(u8),
+    /// Your Dragons' Battlecries trigger this many extra times
+    /// (Dragon's Eye).
+    DragonBattlecry(u8),
+    /// After you cast a spell on a friendly minion, the trinket casts the
+    /// same spell on another friendly minion (Lovely Locket).
+    Locket,
+    /// Trigger the Battlecries of your left- and right-most minions
+    /// (Young Murk-Eye Sticker).
+    TriggerBattlecriesEnds,
+    /// Trigger the Battlecries of your minions of a named card (Hackerfin
+    /// Portrait).
+    TriggerBattlecriesOf(CardId),
+    /// Trigger every friendly Rally (Insurrectionist's Blade).
+    TriggerAllRallies,
+    /// Give your left- and right-most minions stats (Dragon Skull).
+    BuffEnds { attack: i32, health: i32 },
+    /// Trigger the Deathrattles of the `n` left-most Deathrattle minions
+    /// (Wolfhead Flail).
+    TriggerDeathrattlesLeftmost(u8),
+    /// Swap the minion buy / Tavern spell buy alternation (Trickster's
+    /// Sleeve).
+    FlipAlternate,
+    /// Cast a named card on the left-most friendly minion of a tribe
+    /// (Emergency Gearblade: a Mech).
+    CastOnLeftmost { card: CardId, tribe: Tribe },
+    /// Cast a named card on a random friendly minion of a tribe
+    /// (Spell-powered Wrench: a Mech).
+    CastOnRandom { card: CardId, tribe: Tribe },
+    /// A Magnetic Satellite with the Attack and Health of the minion just
+    /// bought (Reusable Batteries).
+    SatelliteOfBought(CardId),
+    /// Get a token with these stats, plus this much per Tavern spell cast
+    /// this turn (Inductive Gyroblade).
+    GetWithStats { card: CardId, attack: i32, health: i32, per_spell: (i32, i32) },
+    /// Get `n` 1/1 Murlocs taught the Tavern spell just bought (Magicfin
+    /// Sticker).
+    TeachBoughtSpell(u8),
+    /// A random friendly minion consumes the Tavern minion a spell was just
+    /// cast on (Felsteel Cleaver).
+    ConsumeShopHit,
+    /// A friendly Demon's consume also takes Bonus Keywords and this much
+    /// (Consuming Claw).
+    ConsumeClaw { attack: i32, health: i32 },
+    // ---- block 4: numbers that grow ----
+    /// Double the trinket's own number (Weighted Gauntlet).
+    DoubleValue,
+    /// Your Tavern spells give this much more for each different friendly
+    /// minion type on the board (Multilayered Shield).
+    SpellBonusPerType { attack: i32, health: i32 },
+    /// Your Tavern spells give this much more for this turn only (Honeycomb
+    /// Ring).
+    SpellBonusThisTurn { attack: i32, health: i32 },
+    /// Give the copies of a named card in your hand and on your board stats
+    /// (Flighty Portrait).
+    BuffCardHandAndBoard { card: CardId, attack: i32, health: i32 },
+    /// Your minions have the base, plus this much per card you have
+    /// discarded this game (Hammer of Twilight).
+    Hammer { base: (i32, i32), per: (i32, i32) },
+    /// One more card was discarded: the board gains the Hammer's step
+    /// (Hammer of Twilight).
+    HammerDiscarded,
+    // ---- block 4: the portraits that rewrite a card ----
+    /// Every copy of `card` the player has or will have gets this rewrite.
+    CardMod { card: CardId, kind: CardMod },
+    /// Your Choose One cards always have both effects (Trailblazer
+    /// Sticker).
+    ChooseOneAll,
+    /// This trinket becomes a copy of the next Greater trinket you pick
+    /// (Souvenir Stand).
+    Souvenir,
+    /// Get one of three named cards, at random (Jewelry Box).
+    OneOf3 { a: CardId, b: CardId, c: CardId },
+}
+
+/// A rewrite a portrait applies to every copy of a card the player has or
+/// will have (docs/trinkets.md "Portraits that rewrite a card"). The card's
+/// own effect reads it where that effect runs, so the rules never name a
+/// card: the trinket's data says which card it is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CardMod {
+    /// The card's "after your hero takes damage" reward also gains this much
+    /// Attack (Rewinder Portrait: Soul Rewinder).
+    AlsoAttack(i32),
+    /// A buff the card gives also lands on its two neighbours (Mindslasher
+    /// Portrait, Flaming Portrait).
+    AlsoNeighbors,
+    /// A buff the card gives also gives Health equal to its Attack (Czarina
+    /// Portrait: Charging Czarina).
+    AlsoHealth,
+    /// The card's Tavern buff also lands on your board's minions of this
+    /// tribe (Azerite Portrait: Living Azerite).
+    AlsoBoard(Tribe),
 }
 
 /// "Every N events" / "after N events" / "once N events": one per trinket.
@@ -367,6 +508,9 @@ pub enum When {
     Death,
     /// After a friendly minion is Reborn.
     Reborn,
+    /// The side cast a Tavern spell inside the fight (Bewitched Ribbon's
+    /// in-combat numbers).
+    CastSpell,
     /// After your Deity awakens.
     Awaken,
 }
@@ -481,6 +625,18 @@ pub enum FightAct {
     Improve(u8),
     /// Get a plain copy (base stats) of the picked minions into hand.
     CopyToHand { pick: Pick },
+    /// Give the picked minions stats they keep after the fight (Bewitched
+    /// Ribbon: its in-combat numbers are permanent too). A minion summoned
+    /// during the fight keeps nothing, like any other fight gain.
+    PermanentStats { pick: Pick, attack: i32, health: i32 },
+    // ---- block 4 ----
+    /// Start of Combat: destroy the `count` left-most minions and bring them
+    /// back exactly as they were once this side's last minion dies (Soul
+    /// Fermenter).
+    Fermenter { count: u8 },
+    /// Summon a Golem with the Blood Gem stats of the minion that just died
+    /// (Blood Golem Sticker).
+    GemGolem { card: CardId },
 }
 
 /// One fight effect: when it fires, how often, and what it does.
@@ -532,7 +688,10 @@ pub struct Trinket {
     pub play_tribe: Option<Tribe>,
     pub on_sell: Vec<Act>,
     pub on_refresh: Vec<Act>,
+    /// A Tavern spell cast (Comfy Coffin, Bluegill Flippers).
     pub on_cast_spell: Vec<Act>,
+    /// Any spell cast (Bewitched Ribbon, Charming Panpipes).
+    pub on_any_spell: Vec<Act>,
     pub on_cast_spell_on_minion: Vec<Act>,
     pub on_discard: Vec<Act>,
     /// Whenever a card of `get_tribe` enters the hand (Trusty Crowbar).
@@ -541,6 +700,38 @@ pub struct Trinket {
     /// Whenever the player spends Gold, once per spending whatever the
     /// amount (DESIGN.md, second round): Booty Bay Brew.
     pub on_gold_spent: Vec<Act>,
+    // ---- block 4: the events the block added ----
+    /// A card of any kind played from the hand (Dragonwing Glider).
+    pub on_card_play: Vec<Act>,
+    /// A Battlecry triggered, once per trigger (Dragon Skull).
+    pub on_battlecry: Vec<Act>,
+    /// A Blood Gem cast from hand (Ruby Tusk).
+    pub on_gem: Vec<Act>,
+    /// A friendly minion attacked in a fight (Dragonhead Staff).
+    pub on_attack: Vec<Act>,
+    /// A minion destroyed outside combat (Maw Caster Portrait).
+    pub on_destroy: Vec<Act>,
+    /// A Magnetic minion played (Spell-powered Wrench).
+    pub on_magnetize: Vec<Act>,
+    /// A spell cast on a Tavern minion (Felsteel Cleaver).
+    pub on_cast_spell_on_shop: Vec<Act>,
+    /// A friendly minion consumed a Tavern minion (Consuming Claw's
+    /// counterpart is a field, not a list).
+    pub on_consume: Vec<Act>,
+    /// The hero took damage outside combat (Nether Pendant counts it).
+    pub on_hero_damage: Vec<Act>,
+    /// A Death event only counts when the dead minion's card is this one
+    /// (Snarky Portrait: a Fishbait).
+    pub death_card: Option<CardId>,
+    /// A Destroy event only counts when the destroyed minion's card is this
+    /// one (Plaguerunner Portrait).
+    pub destroy_card: Option<CardId>,
+    /// The two buy lists alternate for the rest of the game: a minion buy,
+    /// then a Tavern spell buy, then a minion (Trickster's Sleeve).
+    pub alternate: bool,
+    /// The end-of-turn list runs once per Drakkari trigger, on top of its
+    /// own count (Young Murk-Eye Sticker, Insurrectionist's Blade).
+    pub drakkari_end: bool,
     /// Only discard events of a spell (Shath'Yar Shrine).
     pub discard_spells_only: bool,
     /// Only discard events of a minion (Writhing Tentacles).
@@ -573,12 +764,12 @@ impl Trinket {
 
     /// The events this trinket listens for, as a bit mask: the player ORs
     /// its trinkets' masks together, so a hook can answer "nothing here"
-    /// from one `u16` on the player and never read this table (shared by
+    /// from one `u32` on the player and never read this table (shared by
     /// every game on every thread) until something matches.
-    pub fn event_mask(&self) -> u16 {
+    pub fn event_mask(&self) -> u32 {
         let mut m = 0;
         let mut any = false;
-        let list = |on: bool, e: Event, m: &mut u16, any: &mut bool| {
+        let list = |on: bool, e: Event, m: &mut u32, any: &mut bool| {
             if on {
                 *m |= e.bit();
                 *any = true;
@@ -590,10 +781,26 @@ impl Trinket {
         list(!self.on_sell.is_empty(), Event::Sell, &mut m, &mut any);
         list(!self.on_refresh.is_empty(), Event::Refresh, &mut m, &mut any);
         list(!self.on_cast_spell.is_empty(), Event::CastSpell, &mut m, &mut any);
+        list(!self.on_any_spell.is_empty(), Event::SpellCast, &mut m, &mut any);
         list(!self.on_cast_spell_on_minion.is_empty(), Event::CastSpellOnMinion, &mut m, &mut any);
         list(!self.on_discard.is_empty(), Event::Discard, &mut m, &mut any);
         list(!self.on_get.is_empty(), Event::GetTribe(Tribe::Beast), &mut m, &mut any);
         list(!self.on_gold_spent.is_empty(), Event::GoldSpent, &mut m, &mut any);
+        list(!self.on_card_play.is_empty(), Event::CardPlayed, &mut m, &mut any);
+        list(!self.on_battlecry.is_empty(), Event::Battlecry, &mut m, &mut any);
+        list(!self.on_gem.is_empty(), Event::Gem, &mut m, &mut any);
+        list(!self.on_attack.is_empty(), Event::Attack, &mut m, &mut any);
+        list(!self.on_destroy.is_empty(), Event::Destroy, &mut m, &mut any);
+        list(!self.on_magnetize.is_empty(), Event::Magnetize, &mut m, &mut any);
+        list(!self.on_cast_spell_on_shop.is_empty(), Event::CastSpellOnShop, &mut m, &mut any);
+        list(!self.on_consume.is_empty(), Event::Consume, &mut m, &mut any);
+        list(!self.on_hero_damage.is_empty(), Event::HeroDamage, &mut m, &mut any);
+        // An alternating trinket listens for both buys, whichever step it is
+        // on (Trickster's Sleeve).
+        if self.alternate {
+            m |= Event::Buy.bit() | Event::BuySpell.bit();
+            any = true;
+        }
         list(!self.start_of_turn.is_empty() || self.rule.as_ref().is_some_and(|r| r.event == Event::Turns), Event::Turns, &mut m, &mut any);
         if let Some(r) = &self.rule {
             list(true, r.event, &mut m, &mut any);
@@ -624,6 +831,7 @@ impl Trinket {
             Event::Play | Event::PlayTribe(_) => !self.on_play.is_empty(),
             Event::Refresh => !self.on_refresh.is_empty(),
             Event::CastSpell => !self.on_cast_spell.is_empty(),
+            Event::SpellCast => !self.on_any_spell.is_empty(),
             Event::CastSpellOnMinion => !self.on_cast_spell_on_minion.is_empty(),
             Event::Discard => !self.on_discard.is_empty(),
             Event::GoldSpent => !self.on_gold_spent.is_empty(),
@@ -636,6 +844,24 @@ impl Trinket {
                 self.rule.as_ref().is_some_and(|r| matches!(r.event, Event::Summon | Event::SummonTribe(_)))
             }
             Event::GetTribe(_) => !self.on_get.is_empty(),
+            Event::CardPlayed => !self.on_card_play.is_empty(),
+            Event::Battlecry => !self.on_battlecry.is_empty(),
+            Event::PlayBattlecry => {
+                self.rule.as_ref().is_some_and(|r| r.event == Event::PlayBattlecry)
+            }
+            Event::Gem => !self.on_gem.is_empty(),
+            Event::Attack => {
+                !self.on_attack.is_empty()
+                    || self.rule.as_ref().is_some_and(|r| r.event == Event::Attack)
+            }
+            Event::Destroy => !self.on_destroy.is_empty(),
+            Event::Magnetize => !self.on_magnetize.is_empty(),
+            Event::CastSpellOnShop => !self.on_cast_spell_on_shop.is_empty(),
+            Event::Consume => !self.on_consume.is_empty(),
+            Event::HeroDamage => {
+                !self.on_hero_damage.is_empty()
+                    || self.rule.as_ref().is_some_and(|r| r.event == Event::HeroDamage)
+            }
         }
     }
 }
@@ -785,6 +1011,55 @@ struct RawAct {
     #[serde(default)]
     end_of_turn_twice: bool,
     first_spell_twice: Option<u8>,
+    // ---- block 4 ----
+    war_drum: Option<u8>,
+    dragon_battlecry: Option<u8>,
+    #[serde(default)]
+    locket: bool,
+    #[serde(default)]
+    trigger_battlecries_ends: bool,
+    trigger_battlecries_of: Option<String>,
+    #[serde(default)]
+    trigger_all_rallies: bool,
+    buff_ends: Option<[i32; 2]>,
+    trigger_deathrattles_leftmost: Option<u8>,
+    #[serde(default)]
+    flip_alternate: bool,
+    #[serde(default)]
+    cast_on_leftmost: bool,
+    #[serde(default)]
+    cast_on_random: bool,
+    satellite_of_bought: Option<String>,
+    get_with_stats: Option<String>,
+    stats: Option<[i32; 2]>,
+    per_spell: Option<[i32; 2]>,
+    teach_bought_spell: Option<u8>,
+    #[serde(default)]
+    consume_shop_hit: bool,
+    consume_claw: Option<[i32; 2]>,
+    #[serde(default)]
+    double_value: bool,
+    spell_bonus_per_type: Option<[i32; 2]>,
+    spell_bonus_this_turn: Option<[i32; 2]>,
+    /// A card the act is about (a Battlecry's card, a buff's card, a cast).
+    card: Option<String>,
+    buff_card_hand_and_board: Option<[i32; 2]>,
+    hammer: Option<[i32; 4]>,
+    #[serde(default)]
+    hammer_discarded: bool,
+    /// The card a portrait rewrites, and which rewrite it gets.
+    card_of_mod: Option<String>,
+    also_attack: Option<i32>,
+    #[serde(default)]
+    also_neighbors: bool,
+    #[serde(default)]
+    also_health: bool,
+    also_board: Option<String>,
+    #[serde(default)]
+    choose_one_all: bool,
+    #[serde(default)]
+    souvenir: bool,
+    one_of3: Option<[String; 3]>,
 }
 
 #[derive(Deserialize)]
@@ -836,6 +1111,8 @@ struct RawTrinket {
     #[serde(default)]
     on_cast_spell: Vec<RawAct>,
     #[serde(default)]
+    on_any_spell: Vec<RawAct>,
+    #[serde(default)]
     on_cast_spell_on_minion: Vec<RawAct>,
     #[serde(default)]
     on_discard: Vec<RawAct>,
@@ -845,6 +1122,33 @@ struct RawTrinket {
     get_tribe: Option<String>,
     #[serde(default)]
     on_gold_spent: Vec<RawAct>,
+    // ---- block 4 ----
+    #[serde(default)]
+    on_card_play: Vec<RawAct>,
+    #[serde(default)]
+    on_battlecry: Vec<RawAct>,
+    #[serde(default)]
+    on_gem: Vec<RawAct>,
+    #[serde(default)]
+    on_attack: Vec<RawAct>,
+    #[serde(default)]
+    on_destroy: Vec<RawAct>,
+    #[serde(default)]
+    on_magnetize: Vec<RawAct>,
+    #[serde(default)]
+    on_cast_spell_on_shop: Vec<RawAct>,
+    #[serde(default)]
+    on_consume: Vec<RawAct>,
+    #[serde(default)]
+    on_hero_damage: Vec<RawAct>,
+    #[serde(default)]
+    death_card: Option<String>,
+    #[serde(default)]
+    destroy_card: Option<String>,
+    #[serde(default)]
+    alternate: bool,
+    #[serde(default)]
+    drakkari_end: bool,
     #[serde(default)]
     discard_spells_only: bool,
     #[serde(default)]
@@ -926,6 +1230,13 @@ struct RawFightAct {
     improve: Option<u8>,
     #[serde(default)]
     copy: bool,
+    // ---- block 4 ----
+    /// A `buff` the minions keep after the fight (Bewitched Ribbon's
+    /// in-combat numbers).
+    #[serde(default)]
+    permanent: bool,
+    fermenter: Option<u8>,
+    gem_golem: Option<String>,
 }
 
 /// The Deathrattle a `dr = { ... }` table gives.
@@ -1173,6 +1484,83 @@ impl TrinketDb {
                     Act::EndOfTurnTwice
                 } else if let Some(n) = a.first_spell_twice {
                     Act::FirstSpellTwice(n)
+                } else if let Some(n) = a.war_drum {
+                    Act::WarDrum(n)
+                } else if let Some(n) = a.dragon_battlecry {
+                    Act::DragonBattlecry(n)
+                } else if a.locket {
+                    Act::Locket
+                } else if a.trigger_battlecries_ends {
+                    Act::TriggerBattlecriesEnds
+                } else if let Some(n) = &a.trigger_battlecries_of {
+                    Act::TriggerBattlecriesOf(card(n)?)
+                } else if a.trigger_all_rallies {
+                    Act::TriggerAllRallies
+                } else if let Some([attack, health]) = a.buff_ends {
+                    Act::BuffEnds { attack, health }
+                } else if let Some(n) = a.trigger_deathrattles_leftmost {
+                    Act::TriggerDeathrattlesLeftmost(n)
+                } else if a.flip_alternate {
+                    Act::FlipAlternate
+                } else if a.cast_on_leftmost || a.cast_on_random {
+                    let name = a.card.as_deref().ok_or_else(|| err("a cast needs a card".into()))?;
+                    let t = a.tribe.as_deref().ok_or_else(|| err("a cast needs a tribe".into()))?;
+                    let card = card(name)?;
+                    let tribe = tribe_(t).map_err(err)?;
+                    if a.cast_on_leftmost {
+                        Act::CastOnLeftmost { card, tribe }
+                    } else {
+                        Act::CastOnRandom { card, tribe }
+                    }
+                } else if let Some(n) = &a.satellite_of_bought {
+                    Act::SatelliteOfBought(card(n)?)
+                } else if let Some(n) = &a.get_with_stats {
+                    let [attack, health] = a.stats.unwrap_or([0, 0]);
+                    Act::GetWithStats {
+                        card: card(n)?,
+                        attack,
+                        health,
+                        per_spell: a.per_spell.unwrap_or([0, 0]).into(),
+                    }
+                } else if let Some(n) = a.teach_bought_spell {
+                    Act::TeachBoughtSpell(n)
+                } else if a.consume_shop_hit {
+                    Act::ConsumeShopHit
+                } else if let Some([attack, health]) = a.consume_claw {
+                    Act::ConsumeClaw { attack, health }
+                } else if a.double_value {
+                    Act::DoubleValue
+                } else if let Some([attack, health]) = a.spell_bonus_per_type {
+                    Act::SpellBonusPerType { attack, health }
+                } else if let Some([attack, health]) = a.spell_bonus_this_turn {
+                    Act::SpellBonusThisTurn { attack, health }
+                } else if let Some([attack, health]) = a.buff_card_hand_and_board {
+                    let name = a.card.as_deref().ok_or_else(|| err("a card buff needs a card".into()))?;
+                    Act::BuffCardHandAndBoard { card: card(name)?, attack, health }
+                } else if let Some([ba, bh, pa, ph]) = a.hammer {
+                    Act::Hammer { base: (ba, bh), per: (pa, ph) }
+                } else if a.hammer_discarded {
+                    Act::HammerDiscarded
+                } else if let Some(name) = &a.card_of_mod {
+                    let card = card(name)?;
+                    let kind = if let Some(n) = a.also_attack {
+                        CardMod::AlsoAttack(n)
+                    } else if a.also_neighbors {
+                        CardMod::AlsoNeighbors
+                    } else if a.also_health {
+                        CardMod::AlsoHealth
+                    } else if let Some(t) = &a.also_board {
+                        CardMod::AlsoBoard(tribe_(t).map_err(err)?)
+                    } else {
+                        return Err(err("a card mod with no rewrite".into()));
+                    };
+                    Act::CardMod { card, kind }
+                } else if a.choose_one_all {
+                    Act::ChooseOneAll
+                } else if a.souvenir {
+                    Act::Souvenir
+                } else if let Some([x, y, z]) = &a.one_of3 {
+                    Act::OneOf3 { a: card(x)?, b: card(y)?, c: card(z)? }
                 } else if a.triple_need_two_pirate {
                     Act::TripleNeedTwoPirate
                 } else if let Some([slot, tribe]) = &a.replace_with_random {
@@ -1204,13 +1592,14 @@ impl TrinketDb {
                     "death" => When::Death,
                     "reborn" => When::Reborn,
                     "awaken" => When::Awaken,
+                    "cast" => When::CastSpell,
                     other => return Err(err(format!("unknown fight when {other:?}"))),
                 };
                 let tribe_ = a.tribe.as_deref().map(tribe).transpose().map_err(err)?;
                 // Start of Combat and Avenge pick minions; every other
                 // trigger reaches the one it is about.
                 let pick = match when {
-                    When::Soc | When::Avenge => match a.pick.as_deref() {
+                    When::Soc | When::Avenge | When::CastSpell => match a.pick.as_deref() {
                         // "your Eternal Knights": one named card.
                         None if a.card.is_some() => Pick::Card(card(a.card.as_deref().unwrap())?),
                         None | Some("all") => match (tribe_, a.neutral) {
@@ -1234,7 +1623,7 @@ impl TrinketDb {
                     },
                 };
                 let trigger = match when {
-                    When::Soc | When::Avenge => Trigger::Any,
+                    When::Soc | When::Avenge | When::CastSpell => Trigger::Any,
                     _ => match (tribe_, a.neutral, a.rally) {
                         (Some(t), _, _) => Trigger::Tribe(t),
                         (None, true, _) => Trigger::Neutral,
@@ -1251,7 +1640,11 @@ impl TrinketDb {
                 } else if !a.keywords.is_empty() {
                     FightAct::Keywords { pick, keywords: keywords(&a.keywords).map_err(err)? }
                 } else if let Some([attack, health]) = a.buff {
-                    FightAct::Stats { pick, attack, health, grow: a.grow.unwrap_or(0) }
+                    if a.permanent {
+                        FightAct::PermanentStats { pick, attack, health }
+                    } else {
+                        FightAct::Stats { pick, attack, health, grow: a.grow.unwrap_or(0) }
+                    }
                 } else if let Some(kind) = &a.scale {
                     let kind = match kind.as_str() {
                         "double" => Scale::Double,
@@ -1300,6 +1693,10 @@ impl TrinketDb {
                     FightAct::Improve(n)
                 } else if a.copy {
                     FightAct::CopyToHand { pick }
+                } else if let Some(n) = a.fermenter {
+                    FightAct::Fermenter { count: n }
+                } else if let Some(n) = &a.gem_golem {
+                    FightAct::GemGolem { card: card(n)? }
                 } else {
                     return Err(err("a fight table with no known key".into()));
                 };
@@ -1352,11 +1749,20 @@ impl TrinketDb {
                         "play" => Event::Play,
                         "refresh" => Event::Refresh,
                         "cast_spell" => Event::CastSpell,
+                        "spell_cast" => Event::SpellCast,
                         "cast_spell_on_minion" => Event::CastSpellOnMinion,
                         "gold_spent" => Event::GoldSpent,
                         "discard" => Event::Discard,
                         "death" => Event::Death,
                         "summon" => Event::Summon,
+                        "play_battlecry" => Event::PlayBattlecry,
+                        "gem" => Event::Gem,
+                        "attack" => Event::Attack,
+                        "destroy" => Event::Destroy,
+                        "magnetize" => Event::Magnetize,
+                        "cast_spell_on_shop" => Event::CastSpellOnShop,
+                        "consume" => Event::Consume,
+                        "hero_damage" => Event::HeroDamage,
                         other => {
                             let prefixed = ["play_", "death_", "summon_"]
                                 .into_iter()
@@ -1403,11 +1809,25 @@ impl TrinketDb {
                 on_sell: acts(&t.on_sell)?,
                 on_refresh: acts(&t.on_refresh)?,
                 on_cast_spell: acts(&t.on_cast_spell)?,
+                on_any_spell: acts(&t.on_any_spell)?,
                 on_cast_spell_on_minion: acts(&t.on_cast_spell_on_minion)?,
                 on_discard: acts(&t.on_discard)?,
                 on_get: acts(&t.on_get)?,
                 get_tribe: t.get_tribe.as_deref().map(tribe).transpose().map_err(err)?,
                 on_gold_spent: acts(&t.on_gold_spent)?,
+                on_card_play: acts(&t.on_card_play)?,
+                on_battlecry: acts(&t.on_battlecry)?,
+                on_gem: acts(&t.on_gem)?,
+                on_attack: acts(&t.on_attack)?,
+                on_destroy: acts(&t.on_destroy)?,
+                on_magnetize: acts(&t.on_magnetize)?,
+                on_cast_spell_on_shop: acts(&t.on_cast_spell_on_shop)?,
+                on_consume: acts(&t.on_consume)?,
+                on_hero_damage: acts(&t.on_hero_damage)?,
+                death_card: t.death_card.as_deref().map(card).transpose()?,
+                destroy_card: t.destroy_card.as_deref().map(card).transpose()?,
+                alternate: t.alternate,
+                drakkari_end: t.drakkari_end,
                 discard_spells_only: t.discard_spells_only,
                 discard_minions_only: t.discard_minions_only,
                 rule,

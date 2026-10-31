@@ -59,8 +59,13 @@ impl Game {
             let mul = if m.golden { 2 } else { 1 };
             self.add_volumizer_bonus(p, da * mul, dh * mul);
         }
+        // A Magnetic minion played as a Magnetization (Spell-powered Wrench
+        // casts Repair Job on a random Mech).
+        if from_play {
+            self.trinket_event(p, crate::trinkets::Event::Magnetize, Some(m.card), 1);
+        }
         // The copy a Beatboxer gets is the Magnetic as it attached, with the
-        // buff the host got from Mechagnome Interpreter and the like.
+        // buff the host got from Mechgnome Interpreter and the like.
         let m1 = self.with_magnetize_buffs(p, m);
         self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
         self.beatboxers_copy(p, Some(pos), m1);
@@ -317,7 +322,9 @@ impl Game {
     pub(super) fn battlecry_or_choose_one(&mut self, p: usize, mut pos: usize) {
         // "Battlecries you have triggered this game" (Murky Sticker).
         self.players[p].tp.battlecries = self.players[p].tp.battlecries.saturating_add(1);
-        let m = self.players[p].board[pos];
+        // A hook that ran just before this can have taken the slot away (a
+        // triple that pulled the minion off the board): nothing to trigger.
+        let Some(&m) = self.players[p].board.get(pos) else { return };
         let mul = if m.golden { 2 } else { 1 };
         let card = self.data.cards.get(m.card);
         if let Some(options) = card.choose_one {
@@ -369,7 +376,8 @@ impl Game {
             }
             // Both effects combined: the card says so (Fandral's Fortune) or
             // a Trailblazer covers this play.
-            let covered = !m.both_effects && self.take_trailblazer_cover(p);
+            let covered = !m.both_effects
+                && (self.players[p].tp.choose_one_all || self.take_trailblazer_cover(p));
             if m.both_effects || covered {
                 self.resolve_choose_options(p, Some(pos as u8), scaled, true, true);
             } else {
@@ -383,9 +391,68 @@ impl Game {
             return;
         }
         let Some(bc) = card.battlecry else { return };
-        let runs = self.brann_mult(p);
+        // How many times the Battlecry triggers: Brann's set-or-add count,
+        // War Drum's two extra on the first Battlecry of the turn and Dragon's
+        // Eye's one more for a Dragon (docs/trinkets.md).
+        let mut runs = self.brann_mult(p);
+        runs = runs.saturating_add(self.take_war_drum(p));
+        if self.players[p].tp.dragon_battlecry > 0
+            && self.data.cards.get(m.card).tribes.has(Tribe::Dragon)
+        {
+            runs = runs.saturating_add(self.players[p].tp.dragon_battlecry);
+        }
         self.run_effect(p, &mut pos, bc, m.golden, runs);
         self.fire_after_battlecry(p, runs);
+        // Dragon Skull: once per Battlecry trigger, so a Brann double fires it
+        // twice.
+        for _ in 0..runs {
+            self.trinket_event(p, crate::trinkets::Event::Battlecry, Some(m.card), 1);
+        }
+    }
+
+    /// Run the Battlecry of the minion in board slot `pos`, for a trigger
+    /// that is not a play (Young Murk-Eye Sticker, Hackerfin Portrait, the
+    /// Snicker-snack power). With `random`, a target the Battlecry asks for
+    /// is answered at random, out of the board and the Tavern
+    /// (docs/trinkets.md: "a Battlecry that needs a target picks one at
+    /// random, and that can be a Tavern minion").
+    pub(super) fn run_battlecry_at(&mut self, p: usize, pos: usize, random: bool) {
+        if pos >= self.players[p].board.len() {
+            return;
+        }
+        self.battlecry_or_choose_one(p, pos);
+        if random {
+            self.answer_target_at_random(p);
+        }
+    }
+
+    /// Answer the target a Battlecry left open with a random legal minion,
+    /// the board or the Tavern. Nothing legal: the target is dropped.
+    fn answer_target_at_random(&mut self, p: usize) {
+        let Some(pt) = self.players[p].pending_target else { return };
+        let mut board: ArrayVec<usize, { crate::BOARD }> = ArrayVec::new();
+        for s in 0..self.players[p].board.len() {
+            if self.valid_target(p, &pt, s) {
+                let _ = board.try_push(s);
+            }
+        }
+        let mut shop: ArrayVec<usize, { crate::SHOP }> = ArrayVec::new();
+        for s in 0..self.players[p].shop.len() {
+            if self.valid_battlecry_shop_target(p, &pt, s) {
+                let _ = shop.try_push(s);
+            }
+        }
+        let total = board.len() + shop.len();
+        if total == 0 {
+            self.players[p].pending_target = None;
+            return;
+        }
+        let k = self.rng.below(total as u32) as usize;
+        if k < board.len() {
+            self.resolve_target(p, board[k]);
+        } else {
+            self.resolve_shop_target(p, shop[k - board.len()]);
+        }
     }
 
     /// "After you trigger a Battlecry" effects (Kalecgos). One trigger per

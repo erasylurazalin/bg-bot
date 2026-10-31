@@ -144,7 +144,16 @@ Darkmoon Prizes exported first), and the Dark Gift trinkets.
 Czarina, Mindslasher, Flaming, Azerite and Bronzebeard Portraits, Rewinder,
 Eternal, Trailblazer, Souvenir Stand: the change applies to every copy of
 that card you have or will have, including the ones already on the board
-and in hand. Not built yet.
+and in hand.
+
+Built 2026-10-31 (block 4): every portrait but Bronzebeard and Eternal (the
+Eternal Portrait's Taunt and Reborn are a Start of Combat effect, built with
+the fight block). The change is data on the player, keyed by card
+(`docs/ENGINE.md` "The portraits that rewrite a card"). Bronzebeard Portrait
+is not built at all and is not in `trinkets.toml`, so it is never offered:
+its "also Murlocs and Dragons" needs a per-minion tribe override, which
+reaches every tribe check in the engine, and half a portrait would mislead
+the bots.
 
 ## Dark Gifts
 

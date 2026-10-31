@@ -61,7 +61,8 @@ legality in mod.rs.
 | After you summon (combat) | `after_summon_give_stats = { times }`, `on_summon_beast` | `Side::summon` | Stalwart Kodo |
 | Summon from hand | `summon_from_hand = "murloc"` | `Side::summon_from_hand`; fight needs the hand (`Card::reads_hand`) | Expert Aviator |
 | Magnetize / Mech played | `on_play_mech`, `on_play_or_magnetize_mech`, `on_cast_spell_on_mech`, `aura = polarizing_beatboxer` | `magnetize_to`, `trigger_mech_played_or_magnetized`, `beatboxers_copy`, `Minion::magnetize` | Spark Snapper |
-| Cast a Tavern spell | `on_cast_spell`, `on_cast_spell_on_self`, `on_cast_spell_on_tribe` | `trigger_on_cast_spell`, `trigger_on_cast_spell_on_target`; one call per cast (a Bounty cast twice calls it twice) | Timecap'n Hooktail |
+| Cast a Tavern spell (the exact words) | `on_cast_spell`, `on_cast_spell_on_self`, `on_cast_spell_on_tribe` | `trigger_on_cast_spell` (Tavern spells only), `trigger_on_cast_spell_on_target` (any spell, one per cast); one call per cast (a Bounty cast twice calls it twice) | Timecap'n Hooktail |
+| Cast any spell, Tavern spell or not | `EventKind::AllSpellsCast` for a minion's `on_event` counter (Felboar), `Event::SpellCast` for a trinket (Bewitched Ribbon, Bloodbound Earrings) | `Game::cast_spell` / `cast_spell_on`, once per spell cast (a Blood Gem, Gem Day, a Banana, a Spellcraft spell; a Triple Reward is not cast); the extra casts of one spell count too (`apply_target`) | Felboar |
 | Spell cast event counter | `on_event = { event = "spells_cast" }` | `cast_spell` -> `fire_event(SpellsCast)` | Felboar |
 | Gold spent / hero damage / sold / bought / Elementals played / discarded | `on_event = { event = "gold_spent" / "hero_damage" / "minions_sold" / "cards_bought" / "elementals_played" / "discarded", every, effect }` | `Game::fire_event` (count in `improvements`, remainder kept, can fire several times; an every-1 trigger leaves `improvements` alone so a self-improving effect can use it) | Gunpowder Courier |
 | Sell | `on_sell = {..}` | `Game::sell_minion` (`OnSell`) | Greedy Conniver |
@@ -141,6 +142,21 @@ legality in mod.rs.
 | Trinket that changes the hero power | `power_triggers = 2` (the effect runs twice per press, once per payment), `power_extra_uses = 1`, `power_gold = 1` | `TrinketPowers::power_*`, read by `press_power` (the effect arms and the passive hooks in `start_turn`, `Action::Level`, `Action::Buy`, `sell_minion`) and the uses refill | Ancient Wishbone, Sous Chef Sticker |
 | Trinket whose effect stays with the slot | `offer_replace = 2` (Mystery Cube): it marks the slot (`TrinketState.cube`) and deals two free Lesser options, at the pick and then at every start of turn, after the held trinket's own start-of-turn list; `cube = false` keeps a trinket out of those offers | `Act::OfferReplace` -> `Game::deal_cube_offer` (`Offer::Cube`: never the held one, never a `cube = false` one); `refresh_trinket_mask` gives the slot `STARTS_TURN`; `pick_trinket` deals a waiting cube offer after another offer is answered (`tp.cube_pending`) | Mystery Cube |
 | Trinket that watches the Deity / makes it Golden | `golden_deity = true` (Mask of the Ancient Ones), a spell `effect = { target = "chosen", watch_stats = true }` (Makeshift Master) | `Act::GoldenDeity` sets `Deity.golden` and doubles its 1/1 base; `SpellTarget::WatchStats` sets `tp.deity_watch`, and `Game::watch_deity_gain` (after every action) gives the Deity whatever the watched minion gained | Mask of the Ancient Ones, Makeshift Master |
+| Trinket on any card played from the hand | `on_card_play` (`Event::CardPlayed` in `Action::Play`, spells and minions both) | `Game::trinket_event` | Dragonwing Glider |
+| Trinket on a Battlecry trigger | `on_battlecry`, once per trigger (Brann's double fires it twice) | `battlecry_or_choose_one`, after `fire_after_battlecry` | Dragon Skull |
+| Trinket that adds Battlecry triggers | `war_drum = 2` (`tp.war_drum`, spent from the trinket's `uses_per_turn` by `Game::take_war_drum`), `dragon_battlecry = 1` (`tp.dragon_battlecry`, Dragons only) | `battlecry_or_choose_one` | War Drum, Dragon's Eye |
+| Trinket that triggers a Battlecry outside a play | `trigger_battlecries_ends` (the two ends), `trigger_battlecries_of = "X"` (every copy of a card); `drakkari_end = true` runs the end-of-turn list once per Drakkari | `Game::run_battlecry_at(p, pos, random)`; `random` answers the target out of the board and the Tavern | Young Murk-Eye Sticker, Hackerfin Portrait |
+| Trinket that triggers Rallies or Deathrattles at the end of the turn | `trigger_all_rallies`, `trigger_deathrattles_leftmost = 2` | the shop runs the Rally's own effect; `Game::trigger_deathrattles_in_shop` -> `fight::shop_trigger_deathrattles` (a one-sided `Side`, nothing dies) | Insurrectionist's Blade, Wolfhead Flail |
+| Trinket that casts a named spell on a minion | `cast_on_leftmost = true` / `cast_on_random = true` with `card` and `tribe` | `Game::cast_spell_on`, a real cast (spell power, cast triggers, Balinda) | Emergency Gearblade, Spell-powered Wrench |
+| Trinket that reads the card just bought | `satellite_of_bought = "Satellite"` (its stats), `teach_bought_spell = 1` (a Tavern spell) | `tp.bought_stats` and `tp.bought_spell`, written in `Action::Buy`/`BuySpell` before the Buy event | Reusable Batteries, Magicfin Sticker |
+| Trinket on a destroy outside combat | `on_destroy`, `rule = { event = "destroy" }`, `destroy_card = "X"` to narrow it | `Game::destroy_in_shop`, one event per dead minion | Maw Caster Portrait, Plaguerunner Portrait |
+| Trinket on a spell cast on a Tavern minion | `on_cast_spell_on_shop`; `tp.shop_hit` is the slot it hit | `apply_target_shop`'s spell arm | Felsteel Cleaver |
+| Trinket on a Demon's consume | `consume_claw = [5, 5]` (`tp.consume_claw`): the Demon also takes the Bonus Keywords and the stats | `Game::consume` | Consuming Claw |
+| Trinket that rewrites a card the player has | `card_of_mod = "X"` with `also_attack = n` / `also_neighbors = true` / `also_health = true` / `also_board = "tribe"` | `TrinketPowers.card_mods`, read by the card's own effect: `after_hero_damage_mods`, `trigger_on_cast_spell`, `consume`, the `Effect::TavernBuff` arm | the six portraits |
+| Trinket that always combines a Choose One | `choose_one_all = true` | `tp.choose_one_all` in `cast_spell_inner` and `battlecry_or_choose_one` | Trailblazer Sticker |
+| Trinket that becomes another one | `souvenir = true` (Souvenir Stand: copies the next Greater pick), `replace_with_random = ["greater", "dragon"]` (Dragonhead Staff, Ruby Tusk) | `pick_trinket`, `Game::replace_trinket_at` | Souvenir Stand |
+| Trinket effect inside a fight that outlives the minions | `fight = [{ when = "soc", fermenter = 3 }]`, `gem_golem = "X"` (the dead minion's Blood Gem stats) | `Side.fermenter` and `Side.last_dead`/`dead_at`, run by `Side::run_fight_act`; the resummon is at the end of `Side::resolve` | Soul Fermenter, Blood Golem Sticker |
+| Trinket that fires on a spell cast in a fight | `fight = [{ when = "cast", pick = "all", buff = [2, 4] }]` | `Side::trinket_hook` from `Effect::CastSpell` | Bewitched Ribbon |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -217,7 +233,13 @@ exactly one legal target and drops the effect when there is none.
    `on_play` (+ `play_tribe`), `on_sell`, `on_refresh`, `on_cast_spell`,
    `on_cast_spell_on_minion`, `on_discard` (+ `discard_spells_only` or
    `discard_minions_only`), `on_get` (+ `get_tribe`, "whenever you get a
-   <tribe>"). The keys
+   <tribe>"), and the block 4 events: `on_card_play`, `on_battlecry`,
+   `on_gem`, `on_attack`, `on_destroy` (+ `destroy_card`), `on_magnetize`,
+   `on_cast_spell_on_shop`, `on_consume`, `on_hero_damage`, and `on_any_spell`
+   for "whenever you cast a spell" (`on_cast_spell` is the "Tavern spell"
+   one); the `rule` events `play_battlecry`, `gem`, `attack`, `destroy`,
+   `hero_damage` and `spell_cast` (with `cast_spell` for Tavern spells); and
+   the flags `alternate` (the two buy lists take turns) and `drakkari_end`. The keys
    are the effect keys of cards.toml (`get`, `get_gems`, `gem_bonus`, `cast`,
    `tavern_buff`, `undead_bonus`, ...); `crates/bgcore/src/trinkets.rs` lists
    every key in `Act` with the card it was written for. "Every N events" or
@@ -234,7 +256,12 @@ exactly one legal target and drops the effect when there is none.
    a reward that goes home travels through `SideOutcome` and
    `apply_side_outcome`. Three slots hold at most `FIGHT_ACTS` (6) acts, which
    the parser checks. A shop action that listens to fight events is a plain
-   `rule` with `event = "death"`, `"summon"` or a tribe of either.
+   `rule` with `event = "death"`, `"summon"`, `"attack"` or a tribe of either.
+   A hook that needs the card the event is about (the minion just bought, the
+   spell just bought, the Tavern slot a spell hit) reads it from
+   `TrinketPowers` (`bought_stats`, `bought_spell`, `shop_hit`), which the
+   card path writes just before firing the event; a `run_trinket_act` has no
+   card argument and never asks the player anything.
 4. Tests in `crates/bgcore/tests/trinkets.rs`: `equip` puts a trinket in a slot
    without its pick effects (`Game::set_trinket`, which also refreshes the
    player's event mask), `take` picks it through the real offer (so `on_pick`
@@ -622,3 +649,50 @@ Triple Reward spell.
   golden one deals two waves) kills known low-health Aberrations in board
   order, which scripts the four deaths an awakening needs without a random
   attacker; two different sleeper tokens make per-minion gains measurable.
+
+## 11. Systems the trinket block 4 added (2026-10-31)
+
+- **Spells versus Tavern spells.** `Event::SpellCast` (trinket list
+  `on_any_spell`, rule event `spell_cast`) is every spell; `Event::CastSpell`
+  (`on_cast_spell`, `cast_spell`) is a `tavern_spell = true` card only, and a
+  Triple Reward is not a cast at all. `EventKind::AllSpellsCast` is a minion's
+  "after you cast N spells" counter; `EventKind::SpellsCast` and
+  `Player.spells_cast` stay Tavern-only. Read each card's words in
+  `ref/hsjson-cards.json` before picking one.
+- **One player-level trigger list per event, not a field per card.** The
+  frame's lists and its mask carry every block 4 hook; see "Block 4: the
+  player-level hooks" in `docs/ENGINE.md`. `Player.trinket_events` is a `u32`
+  (the events take bits 0 to 22, `STARTS_TURN`/`ENDS_TURN`/`HAS_TRINKET` the
+  top three).
+- **Battlecry multipliers in one place.** `battlecry_or_choose_one` counts
+  Brann, War Drum (`take_war_drum` spends the trinket's own use) and Dragon's
+  Eye. `Game::run_battlecry_at` triggers a Battlecry outside a play and can
+  answer its target at random out of the board and the Tavern; that is the
+  only path that reaches `apply_target_shop`'s `TargetKind::MinionBuff` arm.
+- **A Deathrattle outside combat.** `fight::shop_trigger_deathrattles` builds
+  a one-sided `Side` (`outside`, no Avenge), fires one minion's Deathrattles
+  and resolves what they leave, and `Game::trigger_one_deathrattle` puts the
+  board and the outcome back. Nothing dies, so the minion keeps its place.
+- **A destroy is its own event.** `Game::destroy_in_shop` fires `Event::Destroy`
+  per dead minion with its card; Plaguerunner Portrait narrows it with
+  `destroy_card`, Maw Caster Portrait counts every destroy.
+- **Portraits are data.** `card_mods` on `TrinketPowers` is an array of
+  `(card, CardMod)`; the trinket says which card and which rewrite, the
+  card's own effect reads it (`also_attack`, `also_neighbors`, `also_health`,
+  `also_board`). No rules code names a card.
+- **Blood Gems from Jewelry Box.** `Blood Gem (Taunt)`, `(Divine Shield)` and
+  `(Reborn)` are `blood_gem = true` tokens whose `SpellTarget::GemKeyword`
+  gives the player's Gem value and, on a Quilboar only, the keyword. The plain
+  `Blood Gem` stays the canonical one `CardDb.blood_gem` points at.
+- **Stats a fight's spell casts leave behind.** `permanent = true` on a fight
+  `buff` act is `FightAct::PermanentStats`: `Side::gain_permanent_at` buffs the
+  minion and records the gain by start slot, so it comes home after the fight
+  (Bewitched Ribbon's "+2/+4 while in combat", which is permanent too). A
+  minion summoned during the fight keeps nothing.
+- **Two fight leftovers.** `FightAct::Fermenter` (Soul Fermenter) keeps the
+  destroyed minions in `Side.fermenter` and `Side::resolve` brings them back
+  when the side's last minion dies; `FightAct::GemGolem` summons a token with
+  the dead minion's Blood Gem stats (`Side.last_dead`, `Side.dead_at`).
+- **Tests.** `tests/trinkets.rs`, the block 4 section at the end: one test per
+  card, and `apply_side_outcome` is public so a `fight_with` outcome can be
+  applied to a game the way a combat does.

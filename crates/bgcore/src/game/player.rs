@@ -79,6 +79,7 @@ impl Player {
             golden_played: 0,
             gold_spent_turn: 0,
             elementals_played_turn: 0,
+            spells_cast_turn: 0,
             elementals_played: 0,
             magnetizations: 0,
             refresh_buff: (0, 0),
@@ -371,6 +372,26 @@ impl Player {
                 }
             }
         }
+        // Multilayered Shield: so much for each different friendly minion
+        // type, and Honeycomb Ring: what this turn's spells on minions added.
+        let (pa, ph) = self.tp.spell_bonus_per_type;
+        if (pa, ph) != (0, 0) {
+            let mut seen = crate::cards::Tribes::NONE;
+            let mut types = 0i32;
+            for m in &self.board {
+                let ts = cards.get(m.card).tribes;
+                if ts.is_empty() || seen.overlaps(ts) {
+                    continue;
+                }
+                seen = seen.with_all(ts);
+                types += 1;
+            }
+            da += pa * types;
+            dh += ph * types;
+        }
+        let (ta, th) = self.tp.spell_bonus_turn;
+        da += ta;
+        dh += th;
         (da, dh)
     }
 
@@ -469,6 +490,12 @@ impl Player {
             spell_health,
             undead_attack: self.undead_bonus.0,
             undead_health: self.undead_bonus.1,
+            // Hammer of Twilight: the base plus a step per card discarded
+            // this game, for the minions the fight summons.
+            aura_attack: self.tp.hammer_base.0
+                + self.tp.hammer_per.0 * self.discarded as i32,
+            aura_health: self.tp.hammer_base.1
+                + self.tp.hammer_per.1 * self.discarded as i32,
             knight_deaths: self.knight_deaths,
             gem_attack: self.gem_attack,
             gem_health: self.gem_health,

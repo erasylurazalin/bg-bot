@@ -888,7 +888,7 @@ fn play_from_hand(g: &mut Game, p: usize, name: &str) {
 #[test]
 fn the_trinket_table_parses() {
     let d = Data::bundled();
-    assert!(d.trinkets.len() >= 76, "only {} trinkets", d.trinkets.len());
+    assert!(d.trinkets.len() >= 121, "only {} trinkets", d.trinkets.len());
     for i in 0..d.trinkets.len() as u8 {
         let t = d.trinkets.get(i);
         assert!(!t.name.is_empty());
@@ -907,6 +907,15 @@ fn the_trinket_table_parses() {
                 + t.on_discard.len()
                 + t.on_get.len()
                 + t.on_gold_spent.len()
+                + t.on_card_play.len()
+                + t.on_battlecry.len()
+                + t.on_gem.len()
+                + t.on_attack.len()
+                + t.on_destroy.len()
+                + t.on_magnetize.len()
+                + t.on_cast_spell_on_shop.len()
+                + t.on_consume.len()
+                + t.on_hero_damage.len()
                 + t.fight.len()
                 + t.rule.iter().count()
                 > 0,
@@ -3161,5 +3170,1073 @@ fn the_replica_cathedral_doubles_a_spell_with_no_target() {
         act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
         assert_eq!(g.players[0].gold, gold.saturating_add(expected), "cast {cast}");
     }
+    g.check_invariants().unwrap();
+}
+
+// ======================================================================
+// Block 4 (2026-10-31): the player-level hooks, the growing numbers, the
+// portraits that rewrite a card, the swaps and the last four leftovers.
+// ======================================================================
+
+/// Play the first copy of a card the pick put in hand onto the board.
+fn play_named(g: &mut Game, p: usize, name: &str, pos: usize) {
+    turn_of(g, p);
+    let slot = g.players[p]
+        .hand
+        .iter()
+        .position(|m| m.card == id(g, name))
+        .unwrap_or_else(|| panic!("{name} is not in hand"));
+    act(g, p, Action::Play { hand: slot as u8, pos: pos as u8 });
+}
+
+/// Cast a Tavern Coin from the hand, whatever else is in it (the shared
+/// `cast_tavern_spell` plays hand slot 0).
+fn cast_coin(g: &mut Game, p: usize) {
+    let coin = id(g, "Tavern Coin");
+    let m = g.players[p].make_card(&g.data.cards, coin, false, 0);
+    g.players[p].hand.push(m);
+    let h = g.players[p].hand.len() - 1;
+    act(g, p, Action::Play { hand: h as u8, pos: 0 });
+}
+
+fn beasts_attack(g: &Game) -> i32 {
+    g.players[0]
+        .board
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).tribes.has(Tribe::Beast))
+        .map(|m| m.attack)
+        .sum()
+}
+
+#[test]
+fn dragonwing_glider_buffs_a_dragon_for_every_card_played() {
+    let mut g = game(300);
+    take(&mut g, 0, "Dragonwing Glider");
+    put_on_board(&mut g, 0, "Black Chromadrake");
+    let before = g.players[0].board[0].attack;
+    // A minion played from hand.
+    play_from_hand(&mut g, 0, "Southsea Busker");
+    assert_eq!(g.players[0].board[0].attack, before + 4, "a minion counts");
+    // A Blood Gem is a plain spell, and it counts too.
+    let gem = id(&g, "Blood Gem");
+    let m = g.players[0].make_card(&g.data.cards, gem, false, 0);
+    g.players[0].hand.push(m);
+    let h = g.players[0].hand.len() - 1;
+    put_on_board(&mut g, 0, "Lullabot");
+    let other = g.players[0].board.len() - 1;
+    let before = g.players[0].board[0].attack;
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(other as u8));
+    assert_eq!(g.players[0].board[0].attack, before + 4, "a Blood Gem counts");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn war_drum_gives_the_first_battlecry_two_more_triggers() {
+    // Southsea Busker: 1 Gold per trigger, so three triggers in one play.
+    let mut g = game(301);
+    take(&mut g, 0, "War Drum");
+    assert_eq!(g.players[0].trinkets[0].uses_left, 1);
+    // Iron Groundskeeper's Battlecry gets 2 Fortify, so the count is exact.
+    let hand = g.players[0].hand.len();
+    play_from_hand(&mut g, 0, "Iron Groundskeeper");
+    assert_eq!(g.players[0].hand.len(), hand + 6, "the Battlecry ran three times");
+    assert_eq!(g.players[0].trinkets[0].uses_left, 0, "the use is spent");
+    let hand = g.players[0].hand.len();
+    play_from_hand(&mut g, 0, "Iron Groundskeeper");
+    assert_eq!(g.players[0].hand.len(), hand + 2, "the second Battlecry once only");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn dragon_skull_buffs_the_ends_once_per_battlecry_trigger() {
+    let mut g = game(302);
+    equip(&mut g, 0, 0, "Dragon Skull");
+    for _ in 0..4 {
+        put_on_board(&mut g, 0, "Lullabot");
+    }
+    let (left, right) = (
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (g.players[0].board[3].attack, g.players[0].board[3].health),
+    );
+    put_in_hand(&mut g, 0, "Southsea Busker");
+    let h = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 2 });
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (left.0 + 5, left.1 + 5),
+        "the left end"
+    );
+    let last = g.players[0].board.len() - 1;
+    assert_eq!(
+        (g.players[0].board[last].attack, g.players[0].board[last].health),
+        (right.0 + 5, right.1 + 5),
+        "the right end"
+    );
+    // Brann doubles the trigger, so Dragon Skull fires twice.
+    let mut g = game(303);
+    equip(&mut g, 0, 0, "Dragon Skull");
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    put_on_board(&mut g, 0, "Lullabot");
+    let left = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    play_from_hand(&mut g, 0, "Southsea Busker");
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (left.0 + 10, left.1 + 10),
+        "+5/+5 for each of Brann's two triggers"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn dragons_eye_adds_a_dragon_battlecry_trigger() {
+    // Black Chromadrake's Battlecry gets a random Chromadrake: twice with
+    // the Eye in play.
+    let mut g = game(304);
+    take(&mut g, 0, "Dragon's Eye");
+    let before = g.players[0].spell_bonus;
+    // Black Chromadrake's Battlecry is "your Tavern spells give +0/+1".
+    play_from_hand(&mut g, 0, "Black Chromadrake");
+    assert_eq!(
+        g.players[0].spell_bonus,
+        (before.0, before.1 + 2),
+        "the Dragon's Battlecry ran twice"
+    );
+    // A non-Dragon Battlecry still triggers once.
+    let mut g = game(305);
+    take(&mut g, 0, "Dragon's Eye");
+    let hand = g.players[0].hand.len();
+    play_from_hand(&mut g, 0, "Iron Groundskeeper");
+    assert_eq!(g.players[0].hand.len(), hand + 2, "once only");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn bluegill_flippers_buffs_the_left_most_hand_and_board() {
+    let mut g = game(306);
+    equip(&mut g, 0, 0, "Bluegill Flippers");
+    put_in_hand(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Lullabot");
+    let (hand, board) = (g.players[0].hand[0].attack, g.players[0].board[0].attack);
+    cast_coin(&mut g, 0);
+    assert_eq!(g.players[0].hand[0].attack, hand + 3, "the left-most in hand");
+    assert_eq!(g.players[0].board[0].attack, board + 3, "the left-most on the board");
+    assert_eq!(g.players[0].board[1].attack, board, "the other one is untouched");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn lovely_locket_casts_the_spell_on_another_friendly_minion() {
+    let mut g = game(307);
+    take(&mut g, 0, "Lovely Locket");
+    put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Lullabot");
+    let spell = id(&g, "Repair Job");
+    let m = g.players[0].make_card(&g.data.cards, spell, false, 0);
+    g.players[0].hand.push(m);
+    let h = g.players[0].hand.len() - 1;
+    let before: Vec<(i32, i32)> =
+        g.players[0].board.iter().map(|m| (m.attack, m.health)).collect();
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    let after: Vec<(i32, i32)> =
+        g.players[0].board.iter().map(|m| (m.attack, m.health)).collect();
+    assert_eq!(after[0], (before[0].0 + 4, before[0].1 + 8), "the chosen target");
+    assert_eq!(
+        after[1],
+        (before[1].0 + 4, before[1].1 + 8),
+        "the Locket cast it on the other minion too"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_end_of_turn_battlecries_trigger() {
+    // Young Murk-Eye Sticker: the left- and right-most minions' Battlecries.
+    let mut g = game(308);
+    equip(&mut g, 0, 1, "Young Murk-Eye Sticker");
+    put_on_board(&mut g, 0, "Iron Groundskeeper");
+    put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Iron Groundskeeper");
+    let hand = g.players[0].hand.len();
+    next_turn(&mut g);
+    assert_eq!(
+        g.players[0].hand.len(),
+        hand + 4,
+        "the two Groundskeepers at the ends, one Battlecry each"
+    );
+    // Hackerfin Portrait: every Hackerfin.
+    let mut g = game(309);
+    equip(&mut g, 0, 1, "Hackerfin Portrait");
+    put_on_board(&mut g, 0, "Hackerfin");
+    put_on_board(&mut g, 0, "Lullabot");
+    let before = g.players[0].board[1].attack;
+    next_turn(&mut g);
+    assert!(
+        g.players[0].board[1].attack > before,
+        "the Hackerfin's Battlecry gave the other minions its stats"
+    );
+    // Drakkari adds a trigger.
+    let mut g = game(310);
+    equip(&mut g, 0, 1, "Young Murk-Eye Sticker");
+    put_on_board(&mut g, 0, "Iron Groundskeeper");
+    put_on_board(&mut g, 0, "Drakkari Enchanter");
+    let hand = g.players[0].hand.len();
+    next_turn(&mut g);
+    assert_eq!(
+        g.players[0].hand.len(),
+        hand + 4,
+        "the lone end's Battlecry ran twice (2 cards each)"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn insurrectionists_blade_triggers_every_rally() {
+    let mut g = game(311);
+    equip(&mut g, 0, 1, "Insurrectionist's Blade");
+    // Glim Guardian's Rally gives it +2 Attack.
+    put_on_board(&mut g, 0, "Glim Guardian");
+    let before = g.players[0].board[0].attack;
+    next_turn(&mut g);
+    assert!(g.players[0].board[0].attack > before, "the Rally ran in the shop");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn wolfhead_flail_triggers_the_two_left_most_deathrattles() {
+    let mut g = game(312);
+    equip(&mut g, 0, 1, "Wolfhead Flail");
+    // Cord Puller's Deathrattle summons a Beetle.
+    put_on_board(&mut g, 0, "Cord Puller");
+    put_on_board(&mut g, 0, "Cord Puller");
+    put_on_board(&mut g, 0, "Lullabot");
+    next_turn(&mut g);
+    let bots = g.players[0].board.iter().filter(|m| m.card == id(&g, "Microbot")).count();
+    assert_eq!(bots, 2, "both Cord Pullers fired");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn tricksters_sleeve_alternates_minion_and_spell_buys() {
+    let mut g = game(313);
+    take(&mut g, 0, "Trickster's Sleeve");
+    g.players[0].gold = 20;
+    // A minion buy pays 1 Gold back.
+    set_shop(&mut g, 0, &["Lullabot"]);
+    let gold = g.players[0].gold;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].gold, gold - 3 + 1, "bought for 3, +1 back");
+    // Now it waits for a Tavern spell.
+    set_shop(&mut g, 0, &["Lullabot"]);
+    let gold = g.players[0].gold;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].gold, gold - 3, "a minion buy pays nothing now");
+    // A 0-cost Tavern spell, so the Gold the trinket pays is all there is.
+    g.players[0].shop_spell = Some(id(&g, "Blood Gem"));
+    let gold = g.players[0].gold;
+    act(&mut g, 0, Action::BuySpell);
+    assert_eq!(g.players[0].gold, gold + 1, "the Tavern spell buy pays");
+    set_shop(&mut g, 0, &["Lullabot"]);
+    let gold = g.players[0].gold;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].gold, gold - 3 + 1, "a minion again");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_repair_job_blades_cast_on_a_mech() {
+    // Emergency Gearblade: the left-most Mech at the end of the turn.
+    let mut g = game(314);
+    equip(&mut g, 0, 0, "Emergency Gearblade");
+    put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Lullabot");
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    let other = (g.players[0].board[1].attack, g.players[0].board[1].health);
+    next_turn(&mut g);
+    // (The end of the turn also runs the fight, which can leave a minion a
+    // point of Health up, so the Health is a floor.)
+    assert_eq!(g.players[0].board[0].attack, before.0 + 4, "Repair Job on the left-most Mech");
+    assert!(g.players[0].board[0].health >= before.1 + 8, "and its Health");
+    assert_eq!(g.players[0].board[1].attack, other.0, "only one Mech");
+    // Spell-powered Wrench: after you play a Magnetic minion, a random Mech.
+    let mut g = game(315);
+    equip(&mut g, 0, 0, "Spell-powered Wrench");
+    put_on_board(&mut g, 0, "Lullabot");
+    let before = g.players[0].board[0].health;
+    play_from_hand(&mut g, 0, "Satellite");
+    assert_eq!(g.players[0].board[0].health, before + 8, "Repair Job landed");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn reusable_batteries_hands_out_a_satellite_with_the_bought_stats() {
+    let mut g = game(316);
+    take(&mut g, 0, "Reusable Batteries");
+    g.players[0].gold = 20;
+    set_shop(&mut g, 0, &["Lullabot"]);
+    act(&mut g, 0, Action::Buy(0));
+    let sat = g.players[0]
+        .hand
+        .iter()
+        .find(|m| m.card == id(&g, "Satellite"))
+        .copied()
+        .expect("a Satellite");
+    let lulla = g.players[0].hand.iter().find(|m| m.card == id(&g, "Lullabot")).copied().unwrap();
+    assert_eq!((sat.attack, sat.health), (lulla.attack, lulla.health), "its stats");
+    // Only the first buy of the turn.
+    set_shop(&mut g, 0, &["Lullabot"]);
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(
+        g.players[0].hand.iter().filter(|m| m.card == id(&g, "Satellite")).count(),
+        1
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn inductive_gyroblade_grows_with_the_turns_tavern_spells() {
+    for (card, base) in [("BG36_MagicItem_810", 4), ("BG36_MagicItem_810t", 12)] {
+        let mut g = game(317);
+        equip_id(&mut g, 0, 0, card);
+        cast_coin(&mut g, 0);
+        next_turn(&mut g);
+        let sat = g.players[0]
+            .hand
+            .iter()
+            .find(|m| m.card == id(&g, "Satellite"))
+            .copied()
+            .expect("a Satellite");
+        assert_eq!(
+            (sat.attack, sat.health),
+            (base + base, base + base),
+            "{card}: one Tavern spell this turn"
+        );
+    }
+}
+
+#[test]
+fn magicfin_sticker_teaches_a_murloc_the_spell_twice() {
+    let mut g = game(318);
+    take(&mut g, 0, "Magicfin Sticker");
+    g.players[0].gold = 20;
+    for _ in 0..3 {
+        g.players[0].shop_spell = Some(id(&g, "Tavern Coin"));
+        act(&mut g, 0, Action::BuySpell);
+    }
+    let taught: Vec<Minion> = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| m.taught_spell == Some(id(&g, "Tavern Coin")))
+        .copied()
+        .collect();
+    assert_eq!(taught.len(), 2, "twice per turn");
+    assert_eq!((taught[0].attack, taught[0].health), (1, 1), "a 1/1 Murloc");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_two_destroy_portraits() {
+    // Butchering destroys a chosen friendly Undead outside combat.
+    let mut g = game(319);
+    take(&mut g, 0, "Maw Caster Portrait");
+    put_on_board(&mut g, 0, "Plaguerunner");
+    let spell = id(&g, "Butchering");
+    let m = g.players[0].make_card(&g.data.cards, spell, false, 0);
+    g.players[0].hand.push(m);
+    let h = g.players[0].hand.len() - 1;
+    let gold = g.players[0].gold;
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(g.players[0].gold, gold + 2, "2 Gold for the destroy");
+    // Plaguerunner Portrait: a plain copy of the Plaguerunner it destroyed.
+    let mut g = game(320);
+    take(&mut g, 0, "Plaguerunner Portrait");
+    put_on_board(&mut g, 0, "Plaguerunner");
+    let before = hand_of(&g, 0, "Plaguerunner");
+    let m = g.players[0].make_card(&g.data.cards, spell, false, 0);
+    g.players[0].hand.push(m);
+    let h = g.players[0].hand.len() - 1;
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(hand_of(&g, 0, "Plaguerunner"), before + 1, "one more Plaguerunner");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn felsteel_cleaver_has_a_friendly_minion_consume_the_tavern_minion() {
+    let mut g = game(321);
+    equip(&mut g, 0, 1, "Felsteel Cleaver");
+    put_on_board(&mut g, 0, "Lullabot");
+    set_shop(&mut g, 0, &["Sellemental"]);
+    let (a, h) = (g.players[0].shop[0].attack, g.players[0].shop[0].health);
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    // Repair Job is a Tavern spell that targets a Tavern minion.
+    let spell = id(&g, "Repair Job");
+    let m = g.players[0].make_card(&g.data.cards, spell, false, 0);
+    g.players[0].hand.push(m);
+    let hand = g.players[0].hand.len() - 1;
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
+    act(&mut g, 0, Action::TargetShop(0));
+    // The Repair Job lands on the Tavern minion, then a friendly minion
+    // eats it: the board minion gains its stats (the spell's went to the
+    // Tavern minion, which then left).
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0 + a + 4, before.1 + h + 8),
+        "the Tavern minion's stats, Repair Job included"
+    );
+    assert!(g.players[0].shop.is_empty(), "the Tavern minion was eaten");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn consuming_claw_adds_keywords_and_stats_to_a_demon_consume() {
+    let mut g = game(322);
+    take(&mut g, 0, "Consuming Claw");
+    // Soulkeeping Jailer's Activate makes every friendly Demon consume one
+    // Tavern minion.
+    put_on_board(&mut g, 0, "Soulkeeping Jailer");
+    let jailer = g.players[0].board.len() - 1;
+    set_shop(&mut g, 0, &["Lullabot"]);
+    {
+        let fodder = &mut g.players[0].shop[0];
+        fodder.keywords.set(bgcore::minion::Keywords::TAUNT);
+        fodder.attack = 1;
+        fodder.health = 1;
+    }
+    let before = (g.players[0].board[jailer].attack, g.players[0].board[jailer].health);
+    g.players[0].gold = 10;
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Activate(jailer as u8));
+    let after = g.players[0].board[jailer];
+    assert_eq!(
+        (after.attack, after.health),
+        (before.0 + 1 + 5, before.1 + 1 + 5),
+        "its stats and +5/+5"
+    );
+    assert!(after.keywords.has(bgcore::minion::Keywords::TAUNT), "the Bonus Keyword too");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_growing_numbers() {
+    // Weighted Gauntlet: +1/+1 at the end of the turn, doubling each start.
+    let mut g = game(323);
+    take(&mut g, 0, "Weighted Gauntlet");
+    put_on_board(&mut g, 0, "Lullabot");
+    let start = g.players[0].board[0].attack;
+    next_turn(&mut g);
+    assert_eq!(g.players[0].board[0].attack, start + 1, "the pick turn gives +1");
+    next_turn(&mut g);
+    assert_eq!(g.players[0].board[0].attack, start + 1 + 2, "then +2");
+    next_turn(&mut g);
+    assert_eq!(g.players[0].board[0].attack, start + 1 + 2 + 4, "then +4");
+    // Hammer of Twilight: the base, one more step per card discarded.
+    for (card, base) in [("BG36_MagicItem_403", (1, 0)), ("BG36_MagicItem_403t", (2, 1))] {
+        let mut g = game(324);
+        take_id(&mut g, 0, card);
+        // The aura reaches the board when the minion lands.
+        play_from_hand(&mut g, 0, "Lullabot");
+        let printed = g.data.cards.get(id(&g, "Lullabot"));
+        let (pa, ph) = (printed.attack, printed.health);
+        assert_eq!(
+            (g.players[0].board[0].attack, g.players[0].board[0].health),
+            (pa + base.0, ph + base.1),
+            "the base, nothing discarded yet"
+        );
+        // Mangled Bandit's Activate discards a card.
+        play_from_hand(&mut g, 0, "Mangled Bandit");
+        let bandit = g.players[0].board.len() - 1;
+        put_in_hand(&mut g, 0, "Lullabot");
+        turn_of(&mut g, 0);
+        act(&mut g, 0, Action::Activate(bandit as u8));
+        act(&mut g, 0, Action::Discard(0));
+        assert_eq!(g.players[0].discarded, 1);
+        assert_eq!(
+            (g.players[0].board[0].attack, g.players[0].board[0].health),
+            (pa + base.0 * 2, ph + base.1 * 2),
+            "the board gained one step"
+        );
+        // A minion played later carries the same total.
+        play_from_hand(&mut g, 0, "Lullabot");
+        let played = g.players[0].board.last().unwrap();
+        assert_eq!((played.attack, played.health), (pa + base.0 * 2, ph + base.1 * 2));
+    }
+    // Dalaran Cheese Wheel (greater): +2/+2 in the Tavern, and one more step
+    // every 4 Refreshes. A real Refresh fills the Tavern with the buff.
+    let mut g = game(325);
+    take_id(&mut g, 0, "BG30_MagicItem_879t");
+    let tavern_gain = |g: &Game| {
+        g.players[0]
+            .shop
+            .iter()
+            .map(|m| m.attack - g.data.cards.get(m.card).attack)
+            .min()
+            .unwrap_or(0)
+    };
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(tavern_gain(&g), 2, "every Tavern minion +2/+2");
+    for _ in 0..4 {
+        g.players[0].gold = 10;
+        act(&mut g, 0, Action::Roll);
+    }
+    assert_eq!(tavern_gain(&g), 4, "one more +2 after 4 Refreshes");
+    // Nether Pendant: +2/+2 in the Tavern, one more step per 3 hero damage.
+    let mut g = game(326);
+    take(&mut g, 0, "Nether Pendant");
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    // Each Demon played takes the hero 1 damage once, and 3 of them are one
+    // improvement.
+    for _ in 0..3 {
+        play_from_hand(&mut g, 0, "Insatiable Ur'zul");
+    }
+    assert_eq!(g.players[0].trinkets[1].count, 0, "3 damage: the counter reset");
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(tavern_gain(&g), 4, "+2/+2 and one more step");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn bewitched_ribbon_buffs_per_spell_and_more_in_a_fight() {
+    let mut g = game(327);
+    take(&mut g, 0, "Bewitched Ribbon");
+    put_on_board(&mut g, 0, "Lullabot");
+    let before = g.players[0].board[0].attack;
+    cast_coin(&mut g, 0);
+    assert_eq!(g.players[0].board[0].attack, before + 1, "out of combat +1/+1");
+    // The in-combat numbers are a fight effect on the side's spell casts,
+    // and the minions keep them (permanent, so they come home by start
+    // slot). A fight casts Shiny Ring through Runic Arcanist's Deathrattle.
+    let t = g.data.trinkets.by_name("Bewitched Ribbon").unwrap();
+    let fight = g.data.trinkets.get(t).fight.clone();
+    assert!(
+        fight.iter().any(|f| matches!(
+            (f.when, f.act),
+            (
+                bgcore::trinkets::When::CastSpell,
+                bgcore::trinkets::FightAct::PermanentStats { attack: 2, health: 4, .. }
+            )
+        )),
+        "in combat a cast gives +2/+4 and keeps it"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn honeycomb_ring_and_multilayered_shield_raise_the_spell_bonus() {
+    // Honeycomb Ring: +1/+1 for good, +1/+1 more this turn per spell on a
+    // minion.
+    let mut g = game(328);
+    take(&mut g, 0, "Honeycomb Ring");
+    assert_eq!(g.total_spell_bonus(0), (1, 1));
+    put_on_board(&mut g, 0, "Lullabot");
+    let spell = id(&g, "Repair Job");
+    let m = g.players[0].make_card(&g.data.cards, spell, false, 0);
+    g.players[0].hand.push(m);
+    let h = g.players[0].hand.len() - 1;
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(g.total_spell_bonus(0), (2, 2), "this turn only");
+    next_turn(&mut g);
+    assert_eq!(g.total_spell_bonus(0), (1, 1), "it comes off with the turn");
+    // Multilayered Shield: +1/+2 for each different friendly minion type.
+    let mut g = game(329);
+    take(&mut g, 0, "Multilayered Shield");
+    assert_eq!(g.total_spell_bonus(0), (0, 0), "an empty board");
+    put_on_board(&mut g, 0, "Lullabot");
+    assert_eq!(g.total_spell_bonus(0), (1, 2), "one type");
+    put_on_board(&mut g, 0, "Sellemental");
+    assert_eq!(g.total_spell_bonus(0), (2, 4), "two types");
+    put_on_board(&mut g, 0, "Sellemental");
+    assert_eq!(g.total_spell_bonus(0), (2, 4), "the same type again");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_chromatic_tear_greater_pays_per_seventh_battlecry() {
+    let mut g = game(330);
+    take_id(&mut g, 0, "BG35_MagicItem_840t");
+    let drakes = |g: &Game| {
+        g.players[0]
+            .hand
+            .iter()
+            .filter(|m| g.data.cards.get(m.card).name.contains("Chromadrake"))
+            .count()
+    };
+    assert_eq!(drakes(&g), 2, "two Chromadrakes on the pick");
+    // Seven Battlecry minions played: three triples, so the board holds.
+    for _ in 0..7 {
+        play_from_hand(&mut g, 0, "Southsea Busker");
+    }
+    assert!(drakes(&g) >= 2, "two more Chromadrakes at the seventh Battlecry");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_portraits_rewrite_their_card() {
+    // Czarina Portrait: the Charging Czarinas also give Health.
+    let mut g = game(331);
+    take(&mut g, 0, "Czarina Portrait");
+    play_named(&mut g, 0, "Charging Czarina", 0);
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    cast_coin(&mut g, 0);
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0 + 4, before.1 + 4),
+        "+4/+0, and the Health the portrait adds"
+    );
+    // Mindslasher Portrait: the Mindslashers also give stats to their
+    // neighbours.
+    let mut g = game(332);
+    take(&mut g, 0, "Mindslasher Portrait");
+    play_named(&mut g, 0, "Vicious Mindslasher", 0);
+    put_on_board(&mut g, 0, "Lullabot");
+    let before = (g.players[0].board[1].attack, g.players[0].board[1].health);
+    cast_coin(&mut g, 0);
+    assert_eq!(
+        (g.players[0].board[1].attack, g.players[0].board[1].health),
+        (before.0 + 1, before.1 + 2),
+        "the neighbour got the Mindslasher's stats"
+    );
+    // Rewinder Portrait: the Soul Rewinders also gain Attack.
+    let mut g = game(333);
+    take(&mut g, 0, "Rewinder Portrait");
+    play_named(&mut g, 0, "Soul Rewinder", 0);
+    let at = g.players[0].board.iter().position(|m| m.card == id(&g, "Soul Rewinder")).unwrap();
+    // Wrath Weaver on the board: playing a Demon damages the hero, the
+    // Rewinder rewinds it and gains its Health (and Attack, with the
+    // portrait).
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    play_from_hand(&mut g, 0, "Wrath Weaver");
+    let m = g.players[0].board[at];
+    assert_eq!(m.attack, 4 + 2, "the rewind also gained Attack");
+    assert_eq!(m.health, 2 + 2, "and its own Health");
+    // Without the portrait the Rewinder gains Health only.
+    let mut g = game(336);
+    put_on_board(&mut g, 0, "Soul Rewinder");
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    play_from_hand(&mut g, 0, "Wrath Weaver");
+    let m = g.players[0].board[0];
+    assert_eq!((m.attack, m.health), (4, 2 + 2), "Health only");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_azerite_and_flaming_portraits_reach_the_board() {
+    // Azerite Portrait: the Living Azerites also give their Tavern buff to
+    // your Elementals on the board.
+    let mut g = game(334);
+    take(&mut g, 0, "Azerite Portrait");
+    play_named(&mut g, 0, "Living Azerite", 0);
+    put_on_board(&mut g, 0, "Sellemental");
+    let at = g.players[0].board.len() - 1;
+    let before = g.players[0].board[at].attack;
+    cast_coin(&mut g, 0);
+    assert_eq!(
+        g.players[0].board[at].attack,
+        before + 4,
+        "the Elemental took the Tavern buff too"
+    );
+    // Flaming Portrait: the Flaming Enforcers' consume also gives the stats
+    // to their neighbours.
+    let mut g = game(335);
+    take(&mut g, 0, "Flaming Portrait");
+    put_on_board(&mut g, 0, "Lullabot");
+    play_named(&mut g, 0, "Flaming Enforcer", 1);
+    put_on_board(&mut g, 0, "Lullabot");
+    // The Enforcer stands between the two Lullabots.
+    let (left, right) = (0usize, 2usize);
+    let (l0, r0) = (
+        (g.players[0].board[left].attack, g.players[0].board[left].health),
+        (g.players[0].board[right].attack, g.players[0].board[right].health),
+    );
+    set_shop(&mut g, 0, &["Sellemental"]);
+    let eaten = (g.players[0].shop[0].attack, g.players[0].shop[0].health);
+    next_turn(&mut g);
+    // (The fight at the end of the turn can leave Health a point up, so the
+    // Attack is what this checks.)
+    assert_eq!(g.players[0].board[left].attack, l0.0 + eaten.0, "the left neighbour");
+    assert_eq!(g.players[0].board[right].attack, r0.0 + eaten.0, "the right neighbour");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn trailblazer_sticker_combines_every_choose_one() {
+    let mut g = game(336);
+    take(&mut g, 0, "Trailblazer Sticker");
+    // Time Management's two options are both buffs: with the Sticker both
+    // land, so no choice is asked.
+    let spell = id(&g, "Time Management");
+    put_on_board(&mut g, 0, "Lullabot");
+    let m = g.players[0].make_card(&g.data.cards, spell, false, 0);
+    g.players[0].hand.push(m);
+    let h = g.players[0].hand.len() - 1;
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    assert!(g.players[0].pending_choose_one.is_none(), "no choice was asked");
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0 + 2, before.1 + 2),
+        "both options ran"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn souvenir_stand_becomes_the_greater_trinket_you_buy() {
+    let mut g = game(337);
+    take(&mut g, 0, "Souvenir Stand");
+    assert_eq!(g.trinket_of(0, 0), Some(trinket(&g, "Souvenir Stand")));
+    let want = trinket(&g, "Hackerfin Portrait");
+    turn_of(&mut g, 0);
+    g.players[0].trinket_offer.clear();
+    g.players[0].trinket_offer_slot = 2;
+    let _ = g.players[0].trinket_offer.try_push((want, 0));
+    act(&mut g, 0, Action::ChooseTrinket(0));
+    assert_eq!(g.trinket_of(0, 1), Some(want), "the greater slot");
+    assert_eq!(g.trinket_of(0, 0), Some(want), "and the Stand became a copy");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn jewelry_box_hands_out_a_special_blood_gem() {
+    let mut g = game(338);
+    take(&mut g, 0, "Jewelry Box");
+    let gems = ["Blood Gem (Taunt)", "Blood Gem (Divine Shield)", "Blood Gem (Reborn)"];
+    let held = g.players[0]
+        .hand
+        .iter()
+        .find(|m| gems.iter().any(|n| id(&g, n) == m.card))
+        .copied()
+        .expect("one of the three Gems");
+    let name = g.data.cards.get(held.card).name.clone();
+    let key = if name.contains("Taunt") {
+        bgcore::minion::Keywords::TAUNT
+    } else if name.contains("Divine") {
+        bgcore::minion::Keywords::DIVINE_SHIELD
+    } else {
+        bgcore::minion::Keywords::REBORN
+    };
+    // On a minion that is not a Quilboar it is a plain Blood Gem.
+    put_on_board(&mut g, 0, "Lullabot");
+    let target = g.players[0].board.len() - 1;
+    let before = (g.players[0].board[target].attack, g.players[0].board[target].health);
+    let h = g.players[0].hand.iter().position(|m| m.card == held.card).unwrap();
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(target as u8));
+    let m = g.players[0].board[target];
+    assert_eq!((m.attack, m.health), (before.0 + 1, before.1 + 1), "the Gem's value");
+    assert!(!m.keywords.has(key), "not a Quilboar: no keyword");
+    // On a Quilboar it gives its keyword.
+    put_on_board(&mut g, 0, "Prodigious Tusker");
+    let q = g.players[0].board.len() - 1;
+    let m2 = g.players[0].make_card(&g.data.cards, held.card, false, 0);
+    g.players[0].hand.push(m2);
+    let h = g.players[0].hand.len() - 1;
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(q as u8));
+    assert!(g.players[0].board[q].keywords.has(key), "a Quilboar gets the keyword");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn dragonhead_staff_and_ruby_tusk_swap_themselves() {
+    // Dragonhead Staff: after 13 friendly attacks, a random Greater Dragon
+    // trinket replaces it.
+    let mut g = game(339);
+    take(&mut g, 0, "Dragonhead Staff");
+    put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Lullabot");
+    let mut replaced = false;
+    for _ in 0..6 {
+        let out = fight_wall(&g, 7, 0, 400, 40);
+        g.apply_side_outcome(0, &out.sides[0], false);
+        if g.trinket_of(0, 0) != Some(trinket(&g, "Dragonhead Staff")) {
+            replaced = true;
+            break;
+        }
+    }
+    assert!(replaced, "13 attacks replaced it");
+    let held = g.trinket_of(0, 0).unwrap();
+    assert_eq!(g.data.trinkets.get(held).slot, bgcore::trinkets::Slot::Greater);
+    assert!(g.data.trinkets.get(held).tribes.has(Tribe::Dragon));
+    // Ruby Tusk: after 10 Blood Gems played from hand, a Greater Quilboar
+    // trinket.
+    let mut g = game(340);
+    take(&mut g, 0, "Ruby Tusk");
+    put_on_board(&mut g, 0, "Lullabot");
+    let gem = id(&g, "Blood Gem");
+    for _ in 0..10 {
+        let m = g.players[0].make_card(&g.data.cards, gem, false, 0);
+        g.players[0].hand.push(m);
+        let h = g.players[0].hand.len() - 1;
+        turn_of(&mut g, 0);
+        act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+        act(&mut g, 0, Action::Target(0));
+    }
+    let held = g.trinket_of(0, 0).unwrap();
+    assert_ne!(held, trinket(&g, "Ruby Tusk"), "it replaced itself");
+    assert!(g.data.trinkets.get(held).tribes.has(Tribe::Quilboar));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn flighty_portrait_buffs_its_scouts_in_hand_and_on_the_board() {
+    let mut g = game(341);
+    take(&mut g, 0, "Flighty Portrait");
+    assert_eq!(hand_of(&g, 0, "Flighty Scout"), 1, "the pick hands one out");
+    put_in_hand(&mut g, 0, "Flighty Scout");
+    let at = g.players[0].hand.iter().rposition(|m| m.card == id(&g, "Flighty Scout")).unwrap();
+    let before = (g.players[0].hand[at].attack, g.players[0].hand[at].health);
+    cast_coin(&mut g, 0);
+    assert_eq!(
+        (g.players[0].hand[at].attack, g.players[0].hand[at].health),
+        (before.0 + 3, before.1 + 3),
+        "the Scout in hand grew"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn snarky_portrait_grows_per_fishbait_death() {
+    let mut g = game(342);
+    take(&mut g, 0, "Snarky Portrait");
+    assert_eq!(hand_of(&g, 0, "Snarky Shark"), 2, "two Sharks on the pick");
+    // A Fishbait on the board dies in the fight: your Beasts get +4/+4, and
+    // the next death gives +8/+8.
+    put_on_board(&mut g, 0, "Snarky Shark");
+    let before = beasts_attack(&g);
+    let mut fish = g.data.cards.make(id(&g, "Fishbait"), false);
+    fish.attack = 0;
+    fish.health = 1;
+    g.players[0].board.push(fish);
+    let out = fight_wall_watched(&g, 3, 40, 40, 20, &mut Seen::default());
+    assert!(
+        out.sides[0].death_cards.iter().any(|&(c, n)| c == id(&g, "Fishbait") && n == 1),
+        "one Fishbait death came home"
+    );
+    g.apply_side_outcome(0, &out.sides[0], true);
+    assert_eq!(beasts_attack(&g), before + 4, "the Beasts got +4/+4 once");
+}
+
+#[test]
+fn soul_fermenter_brings_its_three_back() {
+    let mut g = game(343);
+    equip(&mut g, 0, 1, "Soul Fermenter");
+    for _ in 0..4 {
+        put_on_board(&mut g, 0, "Lullabot");
+    }
+    let kept: Vec<(i32, i32)> =
+        g.players[0].board.iter().take(3).map(|m| (m.attack, m.health)).collect();
+    let mut seen = Seen::default();
+    let out = fight_wall_watched(&g, 11, 200, 200, 40, &mut seen);
+    // The three left-most died at Start of Combat, and came back when the
+    // last minion died: a 200/200 wall kills everything, and then exactly
+    // the three return.
+    let came_back = &seen.summons;
+    let mine: Vec<(i32, i32)> = came_back
+        .iter()
+        .filter(|(side, m)| *side == 0 && m.card == id(&g, "Lullabot"))
+        .map(|(_, m)| (m.attack, m.health))
+        .collect();
+    assert!(
+        mine.len() >= 3,
+        "the three came back ({} summons on our side, deaths {})",
+        came_back.len(),
+        seen.deaths.len()
+    );
+    assert!(mine.contains(&kept[0]), "exactly as they were at Start of Combat");
+    let _ = out;
+}
+
+#[test]
+fn blood_golem_sticker_summons_a_golem_with_the_gem_stats() {
+    let mut g = game(344);
+    equip(&mut g, 0, 1, "Blood Golem Sticker");
+    // A Quilboar with 3/3 of Blood Gems in it.
+    let mut q = g.data.cards.make(id(&g, "Prodigious Tusker"), false);
+    q.gem_attack = 3;
+    q.gem_health = 3;
+    g.players[0].board.push(q);
+    let mut seen = Seen::default();
+    let _ = fight_wall_watched(&g, 5, 40, 40, 20, &mut seen);
+    let golem = seen
+        .summons
+        .iter()
+        .find(|(side, m)| *side == 0 && m.card == id(&g, "Blood Golem"))
+        .map(|(_, m)| *m)
+        .expect("a Golem for the dead Quilboar");
+    assert_eq!((golem.attack, golem.health), (3, 3), "the Quilboar's Blood Gems");
+}
+
+#[test]
+fn floating_candle_set_triggers_a_deathrattle_in_the_shop() {
+    let mut g = game(345);
+    take(&mut g, 0, "Floating Candle Set");
+    assert_eq!(hand_of(&g, 0, "Floating Candle"), 1);
+    put_on_board(&mut g, 0, "Cord Puller");
+    let candle = g.players[0].hand.iter().position(|m| m.card == id(&g, "Floating Candle")).unwrap();
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: candle as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(
+        g.players[0].board.iter().filter(|m| m.card == id(&g, "Microbot")).count(),
+        1,
+        "the Deathrattle ran outside combat"
+    );
+    g.check_invariants().unwrap();
+}
+
+// ---- the spell versus Tavern spell fix (round of 2026-10-31) ----
+
+/// Cast a Blood Gem from the hand onto the board minion in `target`.
+fn cast_gem_on(g: &mut Game, p: usize, target: usize) {
+    let gem = id(g, "Blood Gem");
+    let m = g.players[p].make_card(&g.data.cards, gem, false, 0);
+    g.players[p].hand.push(m);
+    let h = g.players[p].hand.len() - 1;
+    turn_of(g, p);
+    act(g, p, Action::Play { hand: h as u8, pos: 0 });
+    act(g, p, Action::Target(target as u8));
+}
+
+#[test]
+fn a_blood_gem_is_a_spell_but_not_a_tavern_spell() {
+    // Bewitched Ribbon ("whenever you cast a spell") and Comfy Coffin
+    // ("whenever you cast a Tavern spell") in one game.
+    let mut g = game(350);
+    equip(&mut g, 0, 0, "Comfy Coffin");
+    equip(&mut g, 0, 1, "Bewitched Ribbon");
+    put_on_board(&mut g, 0, "Lullabot");
+    let before = g.players[0].board[0].attack;
+    cast_gem_on(&mut g, 0, 0);
+    assert_eq!(
+        g.players[0].board[0].attack,
+        before + 1 + 1,
+        "the Gem's +1/+1 and the Ribbon's +1/+1"
+    );
+    assert_eq!(g.players[0].undead_bonus, (0, 0), "Comfy Coffin did not fire");
+    // Bloodbound Earrings ("after you cast 4 spells") counts the Gem, and
+    // Corrupted Baton ("after you cast a Tavern spell") does not.
+    let mut g = game(351);
+    equip(&mut g, 0, 0, "Bloodbound Earrings");
+    equip(&mut g, 0, 1, "Corrupted Baton");
+    put_on_board(&mut g, 0, "Lullabot");
+    let deity = g.players[0].deity.map(|d| (d.attack, d.health));
+    assert!(deity.is_some(), "the lobby has the Aberration god");
+    cast_gem_on(&mut g, 0, 0);
+    assert_eq!(g.players[0].trinkets[0].count, 1, "Bloodbound Earrings counted the Gem");
+    assert_eq!(
+        g.players[0].deity.map(|d| (d.attack, d.health)),
+        deity,
+        "Corrupted Baton did not fire"
+    );
+    // A Tavern spell still fires the Tavern-only ones.
+    cast_coin(&mut g, 0);
+    assert_eq!(g.players[0].trinkets[0].count, 2, "Bloodbound Earrings counts it too");
+    assert_eq!(
+        g.players[0].deity.map(|d| (d.attack, d.health)),
+        deity.map(|(a, h)| (a + 4, h + 4)),
+        "Corrupted Baton fired for the Tavern spell"
+    );
+    g.check_invariants().unwrap();
+    let _ = g;
+}
+
+#[test]
+fn devilish_distractor_takes_a_gem_and_forsaken_weaver_does_not() {
+    // Devilish Distractor: "whenever you cast a spell on this" (any spell).
+    let mut g = game(352);
+    put_on_board(&mut g, 0, "Devilish Distractor");
+    cast_gem_on(&mut g, 0, 0);
+    assert_eq!(
+        g.players[0].tavern_buffs.iter().map(|b| b.attack).sum::<i32>(),
+        1,
+        "the Gem in the Tavern buff"
+    );
+    // Forsaken Weaver: "after you cast a Tavern spell" (Tavern spells only).
+    let mut g = game(353);
+    put_on_board(&mut g, 0, "Forsaken Weaver");
+    cast_gem_on(&mut g, 0, 0);
+    assert_eq!(g.players[0].undead_bonus, (0, 0), "a Gem is not a Tavern spell");
+    cast_coin(&mut g, 0);
+    assert_eq!(g.players[0].undead_bonus, (3, 0), "a Tavern spell is");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn replica_cathedral_doubles_the_first_spell_of_the_turn_whichever_it_is() {
+    let mut g = game(354);
+    take(&mut g, 0, "Replica Cathedral");
+    put_on_board(&mut g, 0, "Lullabot");
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    // The first spell is a Blood Gem: it plays twice.
+    cast_gem_on(&mut g, 0, 0);
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0 + 2, before.1 + 2),
+        "the Gem played twice"
+    );
+    // The second spell is a Tavern spell: it casts once now.
+    let gold = g.players[0].gold;
+    cast_coin(&mut g, 0);
+    assert_eq!(g.players[0].gold, gold + 1, "the doubling is spent");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn bewitched_ribbon_keeps_its_in_combat_numbers() {
+    let mut g = game(355);
+    equip(&mut g, 0, 1, "Bewitched Ribbon");
+    // Runic Arcanist casts Shiny Ring twice inside the fight, and Shiny
+    // Ring is a Tavern spell: the Ribbon gives +2/+4 each time, for good.
+    put_on_board(&mut g, 0, "Runic Arcanist");
+    put_on_board(&mut g, 0, "Lullabot");
+    let before = (g.players[0].board[1].attack, g.players[0].board[1].health);
+    let out = fight_wall(&g, 3, 0, 400, 4);
+    let (a, h) = out.sides[0].permanent_stats[1];
+    assert_eq!((a, h), (4, 8), "two casts of +2/+4, kept");
+    g.apply_side_outcome(0, &out.sides[0], true);
+    let m = g.players[0].board[1];
+    // Shiny Ring's own +1/+1 is a combat buff and stays in the fight; the
+    // Ribbon's +2/+4 a cast is kept.
+    assert_eq!(
+        (m.attack, m.health),
+        (before.0 + 4, before.1 + 8),
+        "the Ribbon's in-combat numbers come home"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn hammer_of_twilight_reaches_a_minion_summoned_in_a_fight() {
+    let mut g = game(356);
+    take(&mut g, 0, "Hammer of Twilight");
+    // Cord Puller's Deathrattle summons a 1/1 Microbot, which lands with
+    // "your minions have +1 Attack".
+    put_on_board(&mut g, 0, "Cord Puller");
+    put_on_board(&mut g, 0, "Lullabot");
+    let mut seen = Seen::default();
+    let _ = fight_wall_watched(&g, 5, 40, 40, 20, &mut seen);
+    let bot = seen
+        .summons
+        .iter()
+        .find(|(side, m)| *side == 0 && m.card == id(&g, "Microbot"))
+        .map(|(_, m)| *m)
+        .expect("a Microbot");
+    assert_eq!((bot.attack, bot.health), (1 + 1, 1), "the Hammer's Attack");
     g.check_invariants().unwrap();
 }

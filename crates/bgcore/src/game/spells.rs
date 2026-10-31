@@ -1,7 +1,7 @@
 //! Casting spells, spell triggers and Blood Gems.
 
 use arrayvec::ArrayVec;
-use crate::trinkets::Event;
+use crate::trinkets::{CardMod, Event};
 use crate::cards::{
     Aura,
     DiscoverKind,
@@ -50,9 +50,18 @@ impl Game {
                 match self.data.cards.get(card).on_cast_spell {
                     Some(OnCastSpell::BuffDivineShield { attack, health }) => {
                         let mul = if golden { 2 } else { 1 };
+                        // Czarina Portrait: the Charging Czarinas also give
+                        // Health, as much as their Attack.
+                        let also_health = matches!(
+                            self.player_card_mod(p, card),
+                            Some(CardMod::AlsoHealth)
+                        );
                         for o in &mut self.players[p].board {
                             if o.keywords.has(Keywords::DIVINE_SHIELD) {
                                 buff(o, attack * mul, health * mul);
+                                if also_health {
+                                    buff(o, 0, attack * mul);
+                                }
                             }
                         }
                     }
@@ -63,6 +72,15 @@ impl Game {
                     Some(OnCastSpell::BuffSelfAndDeity { attack, health }) => {
                         let mul = if golden { 2 } else { 1 };
                         buff(&mut self.players[p].board[i], attack * mul, health * mul);
+                        // Mindslasher Portrait: the Vicious Mindslashers also
+                        // give their stats to the minions beside them.
+                        if matches!(self.player_card_mod(p, card), Some(CardMod::AlsoNeighbors)) {
+                            for j in [i.checked_sub(1), Some(i + 1)].into_iter().flatten() {
+                                if j < self.players[p].board.len() {
+                                    buff(&mut self.players[p].board[j], attack * mul, health * mul);
+                                }
+                            }
+                        }
                         if let Some(deity) = &mut self.players[p].deity {
                             deity.attack += attack * mul;
                             deity.health += health * mul;
@@ -153,6 +171,58 @@ impl Game {
         }
     }
 
+    /// Cast a named spell on the friendly minion in board slot `target`,
+    /// for a trinket that casts one itself (Emergency Gearblade,
+    /// Spell-powered Wrench). It is a real cast: it counts for the cast
+    /// triggers, the spell counters and Balinda's extra cast. A card with no
+    /// minion target is cast the ordinary way, so it may open a prompt.
+    pub(super) fn cast_spell_on(&mut self, p: usize, card: CardId, target: usize) {
+        if target >= self.players[p].board.len() {
+            return;
+        }
+        let c = self.data.cards.get(card);
+        let Some(st) = c.spell_target else {
+            let m = self.data.cards.make(card, false);
+            self.cast_spell(p, m);
+            return;
+        };
+        let tavern = c.tavern_spell;
+        self.players[p].last_spell = Some(card);
+        let pt = PendingTarget {
+            source: None,
+            kind: TargetKind::Spell(st),
+            runs: self.balinda_mult(p),
+            tavern,
+            gem: false,
+        };
+        self.apply_target(p, &pt, target);
+        if self.players[p].tp.first_spell_double > 0 {
+            self.players[p].tp.first_spell_double -= 1;
+        }
+        self.fire_event(p, EventKind::AllSpellsCast, 1);
+        self.trinket_event(p, Event::SpellCast, Some(card), 1);
+        if tavern {
+            self.fire_event(p, EventKind::SpellsCast, 1);
+            self.players[p].spells_cast_turn = self.players[p].spells_cast_turn.saturating_add(1);
+            self.trinket_event(p, Event::CastSpell, Some(card), 1);
+        }
+        self.maybe_start_discover(p);
+    }
+
+    /// Get `count` 1/1 Murloc tokens taught `spell` (Magicfin Sticker's
+    /// "get a 1/1 Murloc and teach it that spell").
+    pub(super) fn teach_murloc(&mut self, p: usize, spell: CardId, count: u8) {
+        let Some(token) = self.data.cards.taught_token else { return };
+        for _ in 0..count {
+            if self.players[p].hand.is_full() {
+                return;
+            }
+            let mut m = self.players[p].make_card(&self.data.cards, token, false, 0);
+            m.taught_spell = Some(spell);
+            self.add_to_hand(p, m);
+        }
+    }
+
     /// After buying a Tavern spell, a Magicfin Mycologist on the board
     /// teaches a 1/1 Murloc token that spell, once per turn each: the first
     /// one left to right that still has its use for this turn.
@@ -211,11 +281,14 @@ impl Game {
     /// Balinda sets the count (golden: 3), each Hot-Air Surveyor adds one
     /// (golden: two). Balinda plus one Surveyor: 3 casts.
     fn gem_casts(&self, p: usize) -> u8 {
-        self.times_count(p, |a| match a {
+        let n = self.times_count(p, |a| match a {
             Aura::Balinda => Some(TimesRole::Setter),
             Aura::HotAirSurveyor => Some(TimesRole::Adder),
             _ => None,
-        })
+        });
+        // Replica Cathedral: a Gem is a spell, so the first one of the turn
+        // plays once more.
+        if self.players[p].tp.first_spell_double > 0 { n.saturating_add(1) } else { n }
     }
 
     /// Spend one Thorned Trailblazer combine: the first one left to right
@@ -290,23 +363,34 @@ impl Game {
 
     pub(super) fn cast_spell(&mut self, p: usize, m: Minion) {
         // A Bounty cast again (Proud Privateer) is another spell cast for
-        // every trigger and every "spells cast" counter. Only a Tavern spell
-        // counts as a spell cast at all (DESIGN.md): a Blood Gem, a Gem Day
-        // and a Triple Reward do not.
+        // every trigger and every "spells cast" counter.
         let c = self.data.cards.get(m.card);
         let casts = if c.is_bounty && c.spell_effect.is_some() { self.bounty_mult(p) } else { 1 };
         let tavern = c.tavern_spell;
+        // A Triple Reward is a reward you open, not a spell you cast
+        // (DESIGN.md "Read the card's exact words, every time").
+        let reward = matches!(c.spell_effect, Some(SpellEffect::TripleReward));
         self.cast_spell_inner(p, m);
-        // Replica Cathedral's doubling covers the first Tavern spell of the
-        // turn only: the cast itself read `balinda_mult`, so it is spent
-        // after it.
-        if tavern && self.players[p].tp.first_spell_double > 0 {
+        if reward {
+            return;
+        }
+        // Replica Cathedral: its doubling is spent by the first spell of the
+        // turn, Tavern spell or not: the cast itself read it already.
+        if self.players[p].tp.first_spell_double > 0 {
             self.players[p].tp.first_spell_double -= 1;
         }
+        // Every spell is a spell cast: a Tavern spell, a Blood Gem, a Gem
+        // Day, a Banana, a Spellcraft spell (DESIGN.md). "Tavern spell" is
+        // the narrower one, and only those touch the Tavern spell counters.
+        for _ in 0..if tavern { casts } else { 1 } {
+            self.fire_event(p, EventKind::AllSpellsCast, 1);
+        }
+        self.trinket_event(p, Event::SpellCast, Some(m.card), 1);
         if tavern {
             for _ in 0..casts {
                 self.fire_event(p, EventKind::SpellsCast, 1);
             }
+            self.players[p].spells_cast_turn = self.players[p].spells_cast_turn.saturating_add(1);
             self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
         }
     }
@@ -345,8 +429,9 @@ impl Game {
             if !options.iter().any(|&opt| self.can_choose_option(p, opt)) {
                 return;
             }
-            // A Trailblazer's coverage runs both effects instead of asking.
-            if self.take_trailblazer_cover(p) {
+            // A Trailblazer's coverage runs both effects instead of asking,
+            // and Trailblazer Sticker covers every Choose One card.
+            if self.players[p].tp.choose_one_all || self.take_trailblazer_cover(p) {
                 self.resolve_choose_options(p, None, options, tavern, true);
             } else {
                 self.players[p].pending_choose_one = Some(PendingChooseOne {
@@ -381,7 +466,7 @@ impl Game {
             // target; a targeting or Choose One spell gets it from
             // `balinda_mult` instead.
             let mut casts = if c.is_bounty { self.bounty_mult(p) } else { 1 };
-            if tavern && self.players[p].tp.first_spell_double > 0 {
+            if self.players[p].tp.first_spell_double > 0 {
                 casts = casts.saturating_add(1);
             }
             for _ in 0..casts {

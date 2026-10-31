@@ -73,6 +73,11 @@ pub struct Counters {
     /// the hand already carry it; Undead made in the fight get it.
     pub undead_attack: i32,
     pub undead_health: i32,
+    /// "Your minions have +X/+Y" from a trinket (Hammer of Twilight, its
+    /// base plus a step per card discarded). The board already carries it;
+    /// a minion summoned in the fight gets it from `summon_with`.
+    pub aura_attack: i32,
+    pub aura_health: i32,
     /// Eternal Knights that died this game, which every Knight reads.
     pub knight_deaths: u32,
     /// What one of this side's Blood Gems gives (Sanguine Refiner's Rally
@@ -109,6 +114,8 @@ impl Default for Counters {
             spell_health: 0,
             undead_attack: 0,
             undead_health: 0,
+            aura_attack: 0,
+            aura_health: 0,
             knight_deaths: 0,
             gem_attack: 1,
             gem_health: 1,
@@ -317,12 +324,19 @@ pub struct SideOutcome {
     /// Friendly deaths here, by `Tribe::EVERY` index, for a rule of a tribe
     /// ("after N friendly Beasts die").
     pub death_tribes: [u16; Tribe::EVERY.len()],
+    /// Friendly deaths here of a named card, for a counter that names one
+    /// (Snarky Portrait: a Fishbait).
+    pub death_cards: [(CardId, u16); 4],
+    pub n_death_cards: u8,
     /// Friendly minions summoned here, by `Tribe::EVERY` index, for the
     /// "after N Beasts summoned" counters (Wildfeather Duster).
     pub summon_tribes: [u16; Tribe::EVERY.len()],
     /// Everything summoned here, the neutral ones included, for a counter of
     /// summons whatever their tribe (Soul Battery).
     pub friendly_summons: u16,
+    /// Friendly minions that attacked here, once per swing, so a Windfury
+    /// minion's two attacks count 2 (Dragonhead Staff).
+    pub friendly_attacks: u16,
     /// The counters the real client shows during combat, captured at the
     /// first attack, after Start of Combat effects: what the other player
     /// "last saw" of this one.
@@ -339,6 +353,20 @@ pub struct SeenCounters {
 }
 
 impl SideOutcome {
+    /// One more friendly death of `card` here (Snarky Portrait's Fishbait).
+    pub fn note_death_card(&mut self, card: CardId) {
+        for i in 0..self.n_death_cards as usize {
+            if self.death_cards[i].0 == card {
+                self.death_cards[i].1 = self.death_cards[i].1.saturating_add(1);
+                return;
+            }
+        }
+        if (self.n_death_cards as usize) < self.death_cards.len() {
+            self.death_cards[self.n_death_cards as usize] = (card, 1);
+            self.n_death_cards += 1;
+        }
+    }
+
     pub fn cards_gained(&self) -> &[CardId] {
         &self.cards[..self.n_cards as usize]
     }
@@ -496,6 +524,13 @@ struct Side<'a> {
     /// minions that died this fight, by the Fish's uid. They fire when the
     /// Fish dies, like its own.
     gained_dr: ArrayVec<(u16, Attached), FISH_DR>,
+    /// Minions a Soul Fermenter destroyed at Start of Combat, with the slot
+    /// they stood in, exactly as they were then. They come back when this
+    /// side's last minion dies.
+    fermenter: ArrayVec<(usize, Minion), 3>,
+    /// The minion that died last and where it stood (Blood Golem Sticker).
+    last_dead: Option<Minion>,
+    dead_at: usize,
     out: SideOutcome,
 }
 
@@ -569,6 +604,9 @@ impl<'a> Side<'a> {
             count_avenge: true,
             granted: ArrayVec::new(),
             gained_dr: ArrayVec::new(),
+            fermenter: ArrayVec::new(),
+            last_dead: None,
+            dead_at: 0,
             out: SideOutcome::default(),
         }
     }
@@ -1195,7 +1233,9 @@ impl<'a> Side<'a> {
         if when == When::Avenge && !self.count_avenge {
             return;
         }
-        let trigger_only = !matches!(when, When::Soc | When::Avenge);
+        // Which `when`s need a minion to be about: the per-minion triggers.
+        // Start of Combat, Avenge and a spell cast are the side's own.
+        let trigger_only = !matches!(when, When::Soc | When::Avenge | When::CastSpell);
         for k in 0..self.counters.trinkets.len() {
             let mut e = self.counters.trinkets.acts[k];
             if e.when != when || e.done || e.uses == 0 {
@@ -1369,6 +1409,38 @@ impl<'a> Side<'a> {
                     self.out.push_card(self.ms[i].m.card);
                 }
             }
+            FightAct::PermanentStats { pick, attack, health } => {
+                // Stats the minions keep after the fight (Bewitched
+                // Ribbon's in-combat numbers): the gain goes home by start
+                // slot, like Tarecgosa's.
+                for i in self.pick(db, pick, target, rng) {
+                    self.gain_permanent_at(db, i, attack, health);
+                }
+            }
+            FightAct::Fermenter { count } => {
+                // Soul Fermenter: the `count` left-most minions are
+                // destroyed now and held, exactly as they stand, until this
+                // side's last minion dies (docs/trinkets.md).
+                let n = (count as usize).min(self.ms.len());
+                for k in 0..n {
+                    let m = self.ms[k].m;
+                    let _ = self.fermenter.try_push((k, m));
+                }
+                for k in 0..n {
+                    self.ms[k].m.health = 0;
+                }
+            }
+            FightAct::GemGolem { card } => {
+                // Blood Golem Sticker: a Golem with the Blood Gem stats of
+                // the Quilboar that just died, where it stood.
+                let dead = self.last_dead.unwrap_or_else(|| db.make(card, false));
+                let (ga, gh) = (dead.gem_attack, dead.gem_health);
+                let mut m = db.make(card, false);
+                m.attack = ga.max(1);
+                m.health = gh.max(1);
+                let at = self.dead_at;
+                self.summon(db, side, at, m, uid, rng, w);
+            }
         }
     }
 
@@ -1420,6 +1492,10 @@ impl<'a> Side<'a> {
         let pos = pos.min(self.ms.len());
         let c = db.get(m.card);
         if bonus && !c.fixed_stats {
+            // "Your minions have +X/+Y" (Hammer of Twilight): the board
+            // carries it already, so only a minion summoned here needs it.
+            m.attack += self.counters.aura_attack;
+            m.health += self.counters.aura_health;
             if c.tribes.has(Tribe::Undead) {
                 m.attack += self.counters.undead_attack;
                 m.health += self.counters.undead_health;
@@ -1982,6 +2058,9 @@ impl<'a> Side<'a> {
                     }
                     if cast {
                         self.on_spell_cast(db);
+                        // A trinket's in-fight cast trigger (Bewitched
+                        // Ribbon's +2/+4 while in combat).
+                        self.trinket_hook(db, fx.side, When::CastSpell, None, uid, rng, w);
                     }
                 }
             }
@@ -2447,6 +2526,7 @@ impl<'a> Side<'a> {
             w.death(side, i, &dead);
             if self.counters.trinkets.count_deaths {
                 self.out.friendly_deaths = self.out.friendly_deaths.saturating_add(1);
+                self.out.note_death_card(dead.card);
                 if self.counters.trinkets.count_death_tribes != 0 {
                     let tribes = db.get(dead.card).tribes;
                     for (k, t) in Tribe::EVERY.into_iter().enumerate() {
@@ -2459,6 +2539,8 @@ impl<'a> Side<'a> {
             }
             // A death is what a "whenever a friendly minion dies" trinket
             // waits for, and what Avenge counts (its N runs of deaths).
+            self.last_dead = Some(dead);
+            self.dead_at = i;
             self.trinket_hook(db, side, When::Death, Some((fm.uid, dead)), uid, rng, w);
             self.trinket_hook(db, side, When::Avenge, Some((fm.uid, dead)), uid, rng, w);
             if db.get(dead.card).buff_per_kind_death.is_some() {
@@ -2488,6 +2570,17 @@ impl<'a> Side<'a> {
                     let u = self.ms[i].uid;
                     self.trinket_hook(db, side, When::Reborn, Some((u, plain)), uid, rng, w);
                     i += 1;
+                }
+            }
+        }
+        // Soul Fermenter: once this side's last minion is gone, the ones it
+        // destroyed at Start of Combat come back exactly as they were.
+        if self.ms.is_empty() && !self.fermenter.is_empty() {
+            let held: ArrayVec<(usize, Minion), 3> = std::mem::take(&mut self.fermenter);
+            for (slot, m) in held {
+                let at = slot.min(self.ms.len());
+                if self.summon(db, side, at, m, uid, rng, w) {
+                    changed = true;
                 }
             }
         }
@@ -3170,6 +3263,9 @@ fn attack_swings_at(
             def.ms[di].m.keywords.has(Keywords::DIVINE_SHIELD),
         );
         w.attack(turn, &att.ms[ai].m, &def.ms[di].m);
+        // One count per swing: a Windfury minion's two attacks count 2
+        // (Dragonhead Staff, docs/trinkets.md).
+        att.out.friendly_attacks = att.out.friendly_attacks.saturating_add(1);
         let (dx, dy) = (att.ms[ai].m.attack, def.ms[di].m.attack);
         let def_health_before = def.ms[di].m.health;
         let (xf, yf) = (&mut att.ms[ai], &mut def.ms[di]);
@@ -3534,6 +3630,46 @@ pub fn shop_destroy(
     ShopDestroy {
         board: side.ms.iter().map(|f| f.m).collect(),
         tracked: track_uid.and_then(|u| side.index_of(u)),
+        side: side.out,
+        dead: w.0,
+    }
+}
+
+/// Trigger the Deathrattles of the friendly minion in slot `at` outside
+/// combat (Floating Candle Set, Wolfhead Flail): a summon lands where it
+/// stands, and whatever the Deathrattles give the player comes back in the
+/// outcome. The minion itself does not die.
+pub fn shop_trigger_deathrattles(
+    db: &CardDb,
+    board: &[Minion],
+    at: usize,
+    counters: Counters,
+    rng: &mut Rng,
+) -> ShopDestroy {
+    let mut uid = 0u16;
+    let counters = Counters {
+        health: None,
+        boon_of_beetles: 0,
+        brood_of_nozdormu: 0,
+        upper_hand: 0,
+        sharing_is_caring: 0,
+        ..counters
+    };
+    let mut side = Side::new(db, board, &[], counters, &mut uid);
+    side.outside = true;
+    side.count_avenge = false;
+    let mut w = DeadWatch(ArrayVec::new());
+    let host = side.ms.get(at).map(|f| (f.m, f.uid));
+    if let Some((m, host)) = host {
+        let runs = side.deathrattle_fires(db);
+        side.fire_deathrattles(db, 0, &m, host, None, at + 1, runs, &mut uid, rng, &mut w);
+        // A Deathrattle can destroy a minion (or summon one that comes in
+        // with no Health): resolve those deaths like a shop destroy does.
+        side.resolve(db, 0, &mut uid, rng, &mut w);
+    }
+    ShopDestroy {
+        board: side.ms.iter().map(|f| f.m).collect(),
+        tracked: None,
         side: side.out,
         dead: w.0,
     }

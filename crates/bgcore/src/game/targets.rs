@@ -1,6 +1,7 @@
 //! Pending board and shop targets: offer, apply and resolve.
 
 use arrayvec::ArrayVec;
+use crate::trinkets::Event;
 use crate::cards::{
     ConsumePick,
     Effect,
@@ -89,6 +90,27 @@ impl Game {
                     let m = &mut self.players[p].shop[slot];
                     m.attack = attack;
                     m.health = health;
+                }
+            }
+            // A Battlecry that picks its target at random reaches the Tavern
+            // too (Young Murk-Eye Sticker, Hackerfin Portrait): "a minion"
+            // there is a Tavern minion. No played Battlecry lands here, only
+            // `answer_target_at_random`.
+            TargetKind::MinionBuff { tribe, attack, health, keyword, random_keyword } => {
+                let ok = tribe.is_none_or(|t| {
+                    self.data.cards.get(self.players[p].shop[slot].card).tribes.has(t)
+                });
+                if !ok {
+                    return;
+                }
+                for _ in 0..pt.runs {
+                    buff(&mut self.players[p].shop[slot], attack, health);
+                }
+                if keyword != 0 {
+                    self.players[p].shop[slot].keywords.set(keyword);
+                }
+                if random_keyword {
+                    self.give_random_keyword_in_shop(p, slot);
                 }
             }
             TargetKind::BecomeCopy => {
@@ -285,6 +307,24 @@ impl Game {
                             generated = Some(card);
                             stop_after = true;
                         }
+                        SpellTarget::GemKeyword { keyword } => {
+                            // A special Blood Gem cast on a Tavern minion.
+                            let (ga, gh) =
+                                (self.players[p].gem_attack, self.players[p].gem_health);
+                            let m = &mut self.players[p].shop[target];
+                            m.attack += ga;
+                            m.health += gh;
+                            m.gem_attack += ga;
+                            m.gem_health += gh;
+                            let quilboar =
+                                self.data.cards.get(m.card).tribes.has(Tribe::Quilboar);
+                            if quilboar {
+                                m.keywords.set(keyword);
+                            }
+                        }
+                        // A friendly board minion's Deathrattle: no Tavern
+                        // minion has one to trigger.
+                        SpellTarget::TriggerDeathrattle => {}
                     }
                     if pt.tavern {
                         self.trigger_on_cast_spell(p);
@@ -302,6 +342,18 @@ impl Game {
                     if stop_after {
                         break;
                     }
+                }
+                // A Blood Gem cast from the hand on a Tavern minion counts
+                // for Ruby Tusk too.
+                if pt.gem && pt.source.is_none() {
+                    self.trinket_event(p, Event::Gem, None, 1);
+                }
+                // "After you cast a spell on a Tavern minion" (Felsteel
+                // Cleaver): the slot is remembered so the trinket can
+                // consume the minion the spell hit.
+                if slot < self.players[p].shop.len() {
+                    self.players[p].tp.shop_hit = slot as u8 + 1;
+                    self.trinket_event(p, Event::CastSpellOnShop, None, 1);
                 }
             }
             _ => {}
@@ -343,7 +395,7 @@ impl Game {
         }
     }
 
-    fn apply_target(&mut self, p: usize, pt: &PendingTarget, s: usize) {
+    pub(super) fn apply_target(&mut self, p: usize, pt: &PendingTarget, s: usize) {
         match pt.kind {
             // Never reached: a card steal is a Tavern pick (`apply_target_shop`).
             TargetKind::StealShopCard { .. } => {}
@@ -447,10 +499,15 @@ impl Game {
                     if target_pos >= self.players[p].board.len() {
                         break;
                     }
-                    // Every extra cast (Balinda) is another spell cast. Only a
-                    // Tavern spell counts (a Blood Gem does not).
-                    if k > 0 && pt.tavern {
-                        self.fire_event(p, EventKind::SpellsCast, 1);
+                    // Every extra cast (Balinda) is another spell cast: one
+                    // more for the "every spell" counters always, and one
+                    // more for the Tavern ones only (a Blood Gem does not
+                    // count there).
+                    if k > 0 {
+                        self.fire_event(p, EventKind::AllSpellsCast, 1);
+                        if pt.tavern {
+                            self.fire_event(p, EventKind::SpellsCast, 1);
+                        }
                         if target_pos >= self.players[p].board.len() {
                             break;
                         }
@@ -714,6 +771,33 @@ impl Game {
                             let mut dummy = 0;
                             self.give_generated_tracking(p, card, &mut dummy);
                         }
+                        SpellTarget::GemKeyword { keyword } => {
+                            // Jewelry Box: the player's Gem value, and the
+                            // keyword only when the target is a Quilboar
+                            // (docs/trinkets.md).
+                            let (ga, gh) =
+                                (self.players[p].gem_attack, self.players[p].gem_health);
+                            let m = &mut self.players[p].board[target_pos];
+                            m.attack += ga;
+                            m.health += gh;
+                            m.gem_attack += ga;
+                            m.gem_health += gh;
+                            let quilboar = self
+                                .data
+                                .cards
+                                .get(m.card)
+                                .tribes
+                                .has(Tribe::Quilboar);
+                            if quilboar {
+                                m.keywords.set(keyword);
+                            }
+                        }
+                        SpellTarget::TriggerDeathrattle => {
+                            // Floating Candle Set: the target's Deathrattle,
+                            // fired outside combat (it does not die).
+                            self.trigger_one_deathrattle(p, target_pos);
+                            stop_after = true;
+                        }
                     }
                     if pt.tavern {
                         self.trigger_on_cast_spell(p);
@@ -739,6 +823,32 @@ impl Game {
                     }
                     if stop_after {
                         break;
+                    }
+                }
+                // A Blood Gem cast from the hand (Ruby Tusk counts them).
+                if pt.gem && pt.source.is_none() {
+                    self.trinket_event(p, Event::Gem, None, 1);
+                }
+                // Lovely Locket: the trinket casts the same spell on another
+                // friendly minion, picked at random and ignoring the spell's
+                // own target rules (docs/trinkets.md). The copy is a real
+                // cast, and it never chains.
+                if self.players[p].tp.locket && !self.players[p].tp.locket_copy {
+                    let n = self.players[p].board.len();
+                    let hit = s.min(n.saturating_sub(1));
+                    if n > 1 {
+                        let k = self.rng.below((n - 1) as u32) as usize;
+                        let at = if k < hit { k } else { k + 1 };
+                        self.players[p].tp.locket_copy = true;
+                        let copy = PendingTarget {
+                            source: None,
+                            kind: TargetKind::Spell(st),
+                            runs: 1,
+                            tavern: pt.tavern,
+                            gem: pt.gem,
+                        };
+                        self.apply_target(p, &copy, at);
+                        self.players[p].tp.locket_copy = false;
                     }
                 }
             }

@@ -17,6 +17,7 @@ use crate::heroes::PowerEffect;
 use crate::minion::CardId;
 use crate::trinkets::{
     Act,
+    CardMod,
     Event,
     Mechanic,
     Slot,
@@ -76,14 +77,74 @@ enum Hook {
     OnSell,
     OnRefresh,
     OnCastSpell,
+    OnAnySpell,
     OnCastSpellOnMinion,
     OnDiscard,
     OnGet,
     OnGoldSpent,
+    OnCardPlay,
+    OnBattlecry,
+    OnGem,
+    OnAttack,
+    OnDestroy,
+    OnMagnetize,
+    OnCastSpellOnShop,
+    OnConsume,
+    OnHeroDamage,
     Rule,
 }
 
 impl Game {
+    /// Hammer of Twilight: the minion that just landed gets the base plus
+    /// one step for every card the player has discarded this game.
+    pub(super) fn hammer_on_play(&mut self, p: usize, pos: usize) {
+        let (ba, bh) = self.players[p].tp.hammer_base;
+        let (pa, ph) = self.players[p].tp.hammer_per;
+        if (ba, bh) == (0, 0) && (pa, ph) == (0, 0) {
+            return;
+        }
+        let n = self.players[p].discarded as i32;
+        if let Some(m) = self.players[p].board.get_mut(pos) {
+            buff(m, ba + pa * n, bh + ph * n);
+        }
+    }
+
+    /// The extra triggers War Drum gives one Battlecry, if its once-a-turn
+    /// use is still there (the trinket's own `uses_per_turn`).
+    pub(super) fn take_war_drum(&mut self, p: usize) -> u8 {
+        let extra = self.players[p].tp.war_drum;
+        if extra == 0 {
+            return 0;
+        }
+        for slot in 0..TRINKET_SLOTS {
+            let Some(i) = self.trinket_of(p, slot) else { continue };
+            let has = self
+                .data
+                .trinkets
+                .get(i)
+                .on_pick
+                .iter()
+                .any(|a| matches!(a, Act::WarDrum(_)));
+            if has && self.players[p].trinkets[slot].uses_left > 0 {
+                self.players[p].trinkets[slot].uses_left -= 1;
+                return extra;
+            }
+        }
+        0
+    }
+
+    /// The rewrite a portrait gives this card, if the player holds one
+    /// (docs/trinkets.md "Portraits that rewrite a card").
+    pub fn player_card_mod(&self, p: usize, card: CardId) -> Option<CardMod> {
+        self.players[p]
+            .tp
+            .card_mods
+            .iter()
+            .flatten()
+            .find(|(c, _)| *c == card)
+            .map(|(_, k)| *k)
+    }
+
     /// The trinket in this slot, as an index into `TrinketDb`, if any.
     pub fn trinket_of(&self, p: usize, slot: usize) -> Option<u8> {
         let of = self.players[p].trinkets[slot].of;
@@ -342,10 +403,20 @@ impl Game {
             Hook::OnSell => &t.on_sell,
             Hook::OnRefresh => &t.on_refresh,
             Hook::OnCastSpell => &t.on_cast_spell,
+            Hook::OnAnySpell => &t.on_any_spell,
             Hook::OnCastSpellOnMinion => &t.on_cast_spell_on_minion,
             Hook::OnDiscard => &t.on_discard,
             Hook::OnGet => &t.on_get,
             Hook::OnGoldSpent => &t.on_gold_spent,
+            Hook::OnCardPlay => &t.on_card_play,
+            Hook::OnBattlecry => &t.on_battlecry,
+            Hook::OnGem => &t.on_gem,
+            Hook::OnAttack => &t.on_attack,
+            Hook::OnDestroy => &t.on_destroy,
+            Hook::OnMagnetize => &t.on_magnetize,
+            Hook::OnCastSpellOnShop => &t.on_cast_spell_on_shop,
+            Hook::OnConsume => &t.on_consume,
+            Hook::OnHeroDamage => &t.on_hero_damage,
             Hook::Rule => t.rule.as_ref().map_or(&[], |r| &r.acts),
         }
     }
@@ -428,6 +499,15 @@ impl Game {
         self.players[p].gold = self.players[p].gold.saturating_sub(price);
         self.players[p].tp.next_lesser = false;
         self.fire_event(p, EventKind::GoldSpent, price as u32);
+        // Souvenir Stand: "When you buy a Greater Trinket, this transforms
+        // into a copy of it."
+        let souvenir = self.players[p].tp.souvenir;
+        if souvenir != 0
+            && self.data.trinkets.get(of).slot == Slot::Greater
+            && souvenir as usize - 1 != slot
+        {
+            self.set_trinket(p, souvenir as usize - 1, Some(of));
+        }
         self.run_trinket_hook(p, slot, of, Hook::OnPick);
         // A cube slot's turn-start offer had to wait for this one: deal it
         // now, so the cube never loses a turn to the turn 9 offer.
@@ -525,7 +605,13 @@ impl Game {
         }
         for slot in 0..TRINKET_SLOTS {
             let Some(i) = self.trinket_of(p, slot) else { continue };
-            self.run_trinket_hook(p, slot, i, Hook::EndOfTurn);
+            // "Trigger all your Rallies" and "trigger your minions'
+            // Battlecries" fire once more per Drakkari (DESIGN.md: Drakkari
+            // doubles your end-of-turn effects).
+            let runs = if self.data.trinkets.get(i).drakkari_end { self.drakkari_mult(p) } else { 1 };
+            for _ in 0..runs {
+                self.run_trinket_hook(p, slot, i, Hook::EndOfTurn);
+            }
         }
         for slot in 0..TRINKET_SLOTS {
             let Some(i) = self.trinket_of(p, slot) else { continue };
@@ -562,7 +648,7 @@ impl Game {
         if event == Event::Refresh && self.players[p].tp.refresh_tier6 > 0 {
             self.players[p].tp.refresh_tier6 -= 1;
         }
-        // The hot path: one `u16` on the player says whether any of its
+        // The hot path: one `u32` on the player says whether any of its
         // trinkets listens for this event. Most of a game, and every game
         // before turn 6, has nothing here.
         if self.players[p].trinket_events & event.bit() == 0 {
@@ -573,19 +659,25 @@ impl Game {
         for slot in 0..TRINKET_SLOTS {
             let Some(i) = self.trinket_of(p, slot) else { continue };
             // Which list this event fires, and the rule it counts toward.
-            let (hook, capped, uses_left, rule) = {
+            let (hook, capped, uses_left, rule, death_card) = {
                 let t = self.data.trinkets.get(i);
                 let by_tribe = |want: Option<Tribe>| match want {
                     None => true,
                     Some(w) => card_tribes.is_some_and(|ts| ts.has(w)),
                 };
+                // An alternating trinket listens for one kind of buy at a
+                // time: a minion, then a Tavern spell (Trickster's Sleeve).
+                let step = self.players[p].trinkets[slot].value;
                 let hook = match event {
-                    Event::Buy if by_tribe(t.buy_tribe) => Some(Hook::OnBuy),
-                    Event::BuySpell => Some(Hook::OnBuySpell),
+                    Event::Buy if by_tribe(t.buy_tribe) && !(t.alternate && step != 0) => {
+                        Some(Hook::OnBuy)
+                    }
+                    Event::BuySpell if !(t.alternate && step == 0) => Some(Hook::OnBuySpell),
                     Event::Play if by_tribe(t.play_tribe) => Some(Hook::OnPlay),
                     Event::Sell => Some(Hook::OnSell),
                     Event::Refresh => Some(Hook::OnRefresh),
                     Event::CastSpell => Some(Hook::OnCastSpell),
+                    Event::SpellCast => Some(Hook::OnAnySpell),
                     Event::CastSpellOnMinion => Some(Hook::OnCastSpellOnMinion),
                     Event::Discard
                         if (!t.discard_spells_only || card_is_spell)
@@ -595,11 +687,22 @@ impl Game {
                     }
                     Event::GetTribe(w) if t.get_tribe.is_none_or(|x| x == w) => Some(Hook::OnGet),
                     Event::GoldSpent => Some(Hook::OnGoldSpent),
+                    Event::CardPlayed => Some(Hook::OnCardPlay),
+                    Event::Battlecry => Some(Hook::OnBattlecry),
+                    Event::Gem => Some(Hook::OnGem),
+                    Event::Attack => Some(Hook::OnAttack),
+                    Event::Destroy if t.destroy_card.is_none_or(|c| card == Some(c)) => {
+                        Some(Hook::OnDestroy)
+                    }
+                    Event::Magnetize => Some(Hook::OnMagnetize),
+                    Event::CastSpellOnShop => Some(Hook::OnCastSpellOnShop),
+                    Event::Consume => Some(Hook::OnConsume),
+                    Event::HeroDamage => Some(Hook::OnHeroDamage),
                     _ => None,
                 };
                 let rule = t.rule.as_ref().map(|r| (r.event, r.every, r.once));
                 let uses_left = self.players[p].trinkets[slot].uses_left;
-                (hook, t.uses_per_turn.is_some(), uses_left, rule)
+                (hook, t.uses_per_turn.is_some(), uses_left, rule, t.death_card)
             };
             if let Some(hook) = hook {
                 // An empty list is no hook: it must not spend a capped use.
@@ -619,6 +722,13 @@ impl Game {
             }
             let hit = match rule_event {
                 Event::PlayTribe(w) => event == Event::Play && card_tribes.is_some_and(|ts| ts.has(w)),
+                // A rule that counts one card's deaths only counts that
+                // card's (Snarky Portrait's Fishbait); a plain death counter
+                // takes the bulk count, which carries no card.
+                Event::Death => match death_card {
+                    Some(c) => event == Event::Death && card == Some(c),
+                    None => event == Event::Death && card.is_none(),
+                },
                 other => other == event,
             };
             if !hit {
@@ -1170,6 +1280,189 @@ impl Game {
                         .try_push(super::DiscoverRequest::MinionTier(tier));
                 }
                 self.maybe_start_discover(p);
+            }
+            // ---- block 4 ----
+            Act::WarDrum(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.war_drum = tp.war_drum.max(n);
+            }
+            Act::DragonBattlecry(n) => self.players[p].tp.dragon_battlecry = n,
+            Act::Locket => self.players[p].tp.locket = true,
+            Act::TriggerBattlecriesEnds => {
+                // The left-most minion, then the right-most; a lone minion is
+                // both ends and triggers once. The board can change while a
+                // Battlecry runs, so the right end is found again.
+                if self.players[p].board.is_empty() {
+                    return;
+                }
+                self.run_battlecry_at(p, 0, true);
+                let last = self.players[p].board.len().saturating_sub(1);
+                if last > 0 {
+                    self.run_battlecry_at(p, last, true);
+                }
+            }
+            Act::TriggerBattlecriesOf(card) => {
+                let mut i = 0;
+                while i < self.players[p].board.len() {
+                    if self.players[p].board[i].parts().any(|(c, _)| c == card) {
+                        self.run_battlecry_at(p, i, true);
+                    }
+                    i += 1;
+                }
+            }
+            Act::TriggerAllRallies => {
+                let mut i = 0;
+                while i < self.players[p].board.len() {
+                    let m = self.players[p].board[i];
+                    for (card, golden) in m.parts() {
+                        if let Some(e) = self.data.cards.get(card).rally {
+                            // A Rally that needs the minion it attacks does
+                            // nothing here (docs/trinkets.md).
+                            let mut pos = i;
+                            self.run_effect(p, &mut pos, e, golden, 1);
+                        }
+                    }
+                    i += 1;
+                }
+            }
+            Act::TriggerDeathrattlesLeftmost(n) => self.trigger_deathrattles_in_shop(p, n),
+            Act::BuffEnds { attack, health } => {
+                // The left-most and the right-most minion; a lone minion is
+                // both ends and takes it once.
+                let n = self.players[p].board.len();
+                if n == 0 {
+                    return;
+                }
+                buff(&mut self.players[p].board[0], attack, health);
+                if n > 1 {
+                    buff(&mut self.players[p].board[n - 1], attack, health);
+                }
+            }
+            Act::FlipAlternate => {
+                let v = &mut self.players[p].trinkets[slot].value;
+                *v = u8::from(*v == 0);
+            }
+            Act::CastOnLeftmost { card, tribe } => {
+                let found = self.players[p]
+                    .board
+                    .iter()
+                    .position(|m| self.data.cards.get(m.card).tribes.has(tribe));
+                if let Some(i) = found {
+                    self.cast_spell_on(p, card, i);
+                }
+            }
+            Act::CastOnRandom { card, tribe } => {
+                let picks: ArrayVec<usize, { crate::BOARD }> = self.players[p]
+                    .board
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| self.data.cards.get(m.card).tribes.has(tribe))
+                    .map(|(i, _)| i)
+                    .collect();
+                if picks.is_empty() {
+                    return;
+                }
+                let k = self.rng.below(picks.len() as u32) as usize;
+                let at = picks[k];
+                self.cast_spell_on(p, card, at);
+            }
+            Act::SatelliteOfBought(card) => {
+                let (a, h) = self.players[p].tp.bought_stats;
+                if self.players[p].hand.is_full() {
+                    return;
+                }
+                let mut m = self.players[p].make_card(&self.data.cards, card, false, 0);
+                m.attack = a;
+                m.health = h;
+                self.add_to_hand(p, m);
+            }
+            Act::GetWithStats { card, attack, health, per_spell } => {
+                let n = self.players[p].spells_cast_turn as i32;
+                let (a, h) = (attack + per_spell.0 * n, health + per_spell.1 * n);
+                if self.players[p].hand.is_full() {
+                    return;
+                }
+                let mut m = self.players[p].make_card(&self.data.cards, card, false, 0);
+                m.attack = a;
+                m.health = h;
+                self.add_to_hand(p, m);
+            }
+            Act::TeachBoughtSpell(n) => {
+                let Some(spell) = self.players[p].tp.bought_spell else { return };
+                self.teach_murloc(p, spell, n);
+            }
+            Act::ConsumeShopHit => {
+                let hit = self.players[p].tp.shop_hit;
+                if hit == 0 || self.players[p].board.is_empty() {
+                    return;
+                }
+                let s = hit as usize - 1;
+                if s >= self.players[p].shop.len() {
+                    return;
+                }
+                let k = self.rng.below(self.players[p].board.len() as u32) as usize;
+                self.consume(p, k, s, false, 1);
+            }
+            Act::ConsumeClaw { attack, health } => {
+                let tp = &mut self.players[p].tp;
+                tp.consume_claw = (attack, health);
+            }
+            Act::DoubleValue => {
+                let v = &mut self.players[p].trinkets[slot].value;
+                *v = v.saturating_mul(2);
+            }
+            Act::SpellBonusPerType { attack, health } => {
+                self.players[p].tp.spell_bonus_per_type = (attack, health);
+            }
+            Act::SpellBonusThisTurn { attack, health } => {
+                let b = &mut self.players[p].tp.spell_bonus_turn;
+                b.0 += attack;
+                b.1 += health;
+            }
+            Act::BuffCardHandAndBoard { card, attack, health } => {
+                let pl = &mut self.players[p];
+                for m in pl.board.iter_mut().chain(pl.hand.iter_mut()) {
+                    if m.parts().any(|(c, _)| c == card) {
+                        buff(m, attack, health);
+                    }
+                }
+            }
+            Act::Hammer { base, per } => {
+                let tp = &mut self.players[p].tp;
+                tp.hammer_base = base;
+                tp.hammer_per = per;
+                let n = self.players[p].discarded as i32;
+                let (da, dh) = (base.0 + per.0 * n, base.1 + per.1 * n);
+                for m in &mut self.players[p].board {
+                    buff(m, da, dh);
+                }
+            }
+            Act::HammerDiscarded => {
+                let (pa, ph) = self.players[p].tp.hammer_per;
+                if (pa, ph) == (0, 0) {
+                    return;
+                }
+                for m in &mut self.players[p].board {
+                    buff(m, pa, ph);
+                }
+            }
+            Act::CardMod { card, kind } => {
+                let mods = &mut self.players[p].tp.card_mods;
+                if mods.iter().all(|m| m.map(|(c, _)| c) != Some(card))
+                    && let Some(empty) = mods.iter_mut().find(|m| m.is_none())
+                {
+                    *empty = Some((card, kind));
+                }
+            }
+            Act::ChooseOneAll => self.players[p].tp.choose_one_all = true,
+            Act::Souvenir => self.players[p].tp.souvenir = slot as u8 + 1,
+            Act::OneOf3 { a, b, c } => {
+                let pick = match self.rng.below(3) {
+                    0 => a,
+                    1 => b,
+                    _ => c,
+                };
+                self.give_generated(p, pick);
             }
             Act::RandomMostCommonType(n) => {
                 let mut counts = [0u8; Tribe::EVERY.len()];

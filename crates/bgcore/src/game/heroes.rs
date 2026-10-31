@@ -7,6 +7,7 @@ use crate::cards::{
     Tribe,
 };
 use crate::heroes::PowerEffect;
+use crate::trinkets::{CardMod, Event};
 use crate::minion::{
     CardId,
     Keywords,
@@ -417,6 +418,33 @@ impl Game {
             pos += 1;
         }
         self.fire_event(p, EventKind::HeroDamage, amount as u32);
+        // "Every 3 times your hero takes damage outside combat" (Nether
+        // Pendant): one count per damage, whatever the amount.
+        self.trinket_event(p, Event::HeroDamage, None, 1);
+        // The CardMods a portrait gives the wounded minions are read here.
+        self.after_hero_damage_mods(p);
+    }
+
+    /// A portrait that gives the card's "after your hero takes damage"
+    /// reward more (Rewinder Portrait: your Soul Rewinders also gain Attack).
+    /// The reward itself has just run, so this adds the portrait's share.
+    fn after_hero_damage_mods(&mut self, p: usize) {
+        let cards = &self.data.cards;
+        let mods = self.players[p].tp.card_mods;
+        for m in &mut self.players[p].board {
+            let mut extra = 0;
+            for (c, _) in m.parts() {
+                if cards.get(c).after_hero_damage.is_empty() {
+                    continue;
+                }
+                if let Some(CardMod::AlsoAttack(n)) =
+                    mods.iter().flatten().find(|(card, _)| *card == c).map(|(_, k)| *k)
+                {
+                    extra += n;
+                }
+            }
+            m.attack += extra;
+        }
     }
 
     /// Damage to the hero in the shop phase (Wrath Weaver, Imposing
