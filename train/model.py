@@ -223,17 +223,19 @@ class SlotInputs(nn.Module):
     spell and pending card embedded) and one per opponent's scalars (plus
     that opponent's zone embedding, shared with its board)."""
 
-    def __init__(self, n_cards, d, emb, n_heroes=bgpy.N_HEROES):
+    def __init__(self, n_cards, d, emb, n_heroes=bgpy.N_HEROES, n_trinkets=bgpy.N_TRINKETS):
         super().__init__()
         self.card = nn.Embedding(n_cards + 1, emb)
         self.hero = nn.Embedding(n_heroes + 1, emb)
+        self.trinket = nn.Embedding(n_trinkets + 1, emb)  # 0 is no trinket
         feats = [i for i in range(SF) if i not in SLOT_IDS]
         self.enc = nn.Sequential(nn.Linear(len(SLOT_IDS) * emb + len(feats), d), nn.GELU(),
                                  nn.Linear(d, d))
         self.zone = nn.Embedding(len(ZONES), d)
         self.pos = nn.Embedding(max(ZONES), d)
-        self.me = nn.Linear(bgpy.SCALARS + (len(SCALAR_IDS) + len(HERO_IDS)) * emb, d)
-        self.opp = nn.Linear(bgpy.OPP_SCALARS - len(OPP_IDS) + emb, d)
+        self.me = nn.Linear(bgpy.SCALARS + (len(SCALAR_IDS) + len(HERO_IDS) + len(TRINKET_IDS)) * emb, d)
+        self.opp = nn.Linear(bgpy.OPP_SCALARS - len(OPP_IDS) - len(OPP_TRINKET_IDS)
+                             + emb + len(OPP_TRINKET_IDS) * emb, d)
         keep = torch.ones(bgpy.SCALARS)
         keep[SCALAR_IDS] = 0.0
         keep[HERO_IDS] = 0.0
@@ -247,7 +249,7 @@ class SlotInputs(nn.Module):
              for i in range(bgpy.OPP_SCALARS)]))
         self.register_buffer("o_log", torch.tensor(OPP_LOG))
         self.register_buffer("o_cols", torch.tensor(
-            [i for i in range(bgpy.OPP_SCALARS) if i not in OPP_IDS]))
+            [i for i in range(bgpy.OPP_SCALARS) if i not in OPP_IDS and i not in OPP_TRINKET_IDS]))
         self.register_buffer("m_scale", torch.tensor(SLOT_SCALE, dtype=torch.float32)[feats])
         self.register_buffer("feats", torch.tensor(feats, dtype=torch.long))
         self.register_buffer("log_cols", torch.tensor([feats.index(i) for i in SLOT_LOG]))
@@ -269,7 +271,8 @@ class SlotInputs(nn.Module):
         o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale * self.o_keep
         o[:, :, self.o_log] = torch.log1p(o[:, :, self.o_log].clamp(min=0))
         o_hero = self.hero(opp[:, :, OPP_IDS].long()).squeeze(2)
-        opp_scalars = torch.cat([o[:, :, self.o_cols], o_hero], 2)
+        o_trinkets = self.trinket(opp[:, :, OPP_TRINKET_IDS].long()).reshape(b, OPP, -1)
+        opp_scalars = torch.cat([o[:, :, self.o_cols], o_hero, o_trinkets], 2)
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
         n = slots.shape[1]
@@ -278,7 +281,7 @@ class SlotInputs(nn.Module):
         feats[:, :, self.log_cols] = torch.log1p(feats[:, :, self.log_cols].clamp(min=0))
         tok = self.enc(torch.cat([cards, feats], 2)) + self.zone(self.zone_of) + self.pos(self.pos_of)
         present = slots[:, :, bgpy.SLOT_PRESENT] > 0
-        me = self.me(torch.cat([scalars, s_cards, s_heroes], 1))
+        me = self.me(torch.cat([scalars, s_cards, s_heroes, s_trinkets], 1))
         opp_tok = self.opp(opp_scalars) + self.zone(self.opp_zone)
         return tok, present, me, opp_tok
 
@@ -300,6 +303,7 @@ class ActionHead(nn.Module):
     - move from j to t: a term from board slot j's z, plus a dot product
       of j's query with t's key
     - roll, freeze, level, end turn, hero power: from s
+    - choose_trinket k: from s (the offer's options live in the scalars)
     Plus a per-action bias that starts at the kind prior, with the scoring
     weights small, so the starting policy is about Net's."""
 
@@ -317,8 +321,9 @@ class ActionHead(nn.Module):
         self.gap = nn.Parameter(torch.randn(bgpy.BOARD + 1, qk) * 0.1)
         self.move_q = nn.Linear(hidden, qk)
         self.move_k = nn.Linear(hidden, qk)
-        # roll, freeze, level, end, hero power; then the Choose One columns
-        self.glob = nn.Linear(d, 5 + bgpy.DISCOVER)
+        # roll, freeze, level, end; the Choose One columns; hero power; the
+        # trinket offer's options
+        self.glob = nn.Linear(d, 5 + bgpy.DISCOVER + bgpy.TRINKET_CHOICES)
         self.bias = nn.Parameter(kind_prior())
         for m in (self.ptr, self.play_q, self.move_q, self.glob):
             nn.init.orthogonal_(m.weight, 0.01)
@@ -354,6 +359,7 @@ class ActionHead(nn.Module):
             move.reshape(b, -1),
             g[:, :4],
             g[:, 4 + bgpy.DISCOVER:5 + bgpy.DISCOVER],
+            g[:, 5 + bgpy.DISCOVER:5 + bgpy.DISCOVER + bgpy.TRINKET_CHOICES],
         ], 1)
         return logits + self.bias
 
