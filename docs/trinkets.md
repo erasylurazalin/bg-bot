@@ -79,6 +79,66 @@ always afford one. A trinket with no cost in the game data is free.
 - Numbers a trinket sets while playing (Shark Cannon, Bewitched Ribbon,
   Steady Growth) come from Era's logs.
 
+## Rules for single trinkets (Era, 2026-10-31)
+
+- **Dragonwing Glider:** any card played from hand counts, Blood Gems and
+  Bananas included.
+- **War Drum:** the first Battlecry you trigger each turn triggers two
+  extra times.
+- **Dragon Skull:** fires once per Battlecry trigger, so a Battlecry
+  doubled by Brann fires it twice.
+- **Bluegill Flippers:** two minions: the left-most in hand and the
+  left-most on the board.
+- **Lovely Locket:** after you cast a spell on a friendly minion, it casts
+  the same spell on another friendly minion, picked at random. The copy is
+  a real cast: it counts for cast triggers, and Hot Air Surveyor and
+  Balinda work with it. The random pick ignores the spell's own target
+  rules, which makes it wild: Eyes of the Earth Mother cast on a Tier 4
+  minion can land on a Tier 5 to 7 one and make it golden; Butchering or
+  Channel the Devourer can eat your board; a spell that fills the Tavern
+  with the target's tribe, cast on a Beast, can land on a neutral minion
+  and fill the Tavern with neutrals (a normal cast can't target a neutral
+  there, the Locket can).
+- **Young Murk-Eye Sticker, Hackerfin Portrait** (Battlecries at end of
+  turn): a Battlecry that needs a target picks one at random, and that can
+  be a Tavern minion. Brann and Drakkari both add triggers, so they can
+  fire many times.
+- **Insurrectionist's Blade** (all friendly Rallies at end of turn): a
+  Rally that needs the minion it attacks does nothing in the shop. Drakkari
+  adds a trigger.
+- **Trickster's Sleeve:** keeps alternating for the rest of the game: after
+  a minion buy, then after a Tavern spell buy, then a minion again.
+- **Inductive Gyroblade:** the Satellite grows +4/+4 per Tavern spell cast
+  this turn (Greater: +12/+12).
+- **Dalaran Cheese Wheel, Nether Pendant:** each improvement adds +1/+1
+  (Greater: +2/+2).
+- **Hammer of Twilight:** +1 Attack per card discarded (Greater: +2/+1),
+  counting discards from before you got it.
+- **Weighted Gauntlet:** doubles with no cap (+1, +2, +4...).
+- **Honeycomb Ring:** +1/+1 more this turn per spell cast on a minion.
+  **Multilayered Shield:** +1/+2 per different minion type on your board.
+- **Snarky Portrait:** improves by +4/+4 per Fishbait death.
+- **Soul Fermenter:** the 3 destroyed minions are real deaths: Deathrattles,
+  Reborn and every other death trigger fire. After your last minion dies
+  they come back exactly as they were at Start of Combat.
+- **Jewelry Box:** a random one of the three special Blood Gems (Taunt,
+  Divine Shield, Reborn) each turn. On a minion that isn't a Quilboar it's
+  a plain Blood Gem.
+- **Dragonhead Staff, Ruby Tusk:** a Windfury minion's two attacks count
+  2. The trinket they become is a random Greater trinket of that tribe,
+  free.
+- **Reinvigorating Light:** Discover from 3 random starting powers of the
+  heroes we've built, never your own. Powers that make no sense as a second
+  power are excluded (A. F. Kay's, Faelin's, Kerrigan's and the like); Era
+  will add to the list.
+
+**Not in the game, or later:** Shrine of Evolution (Era thinks it's gone,
+though the data still lists it), Kiri's Double Eclipse (no Kiri hero in
+the data; unclear), Wisdomball Supply, Safety Patch (Secrets), Yogg-Tastic
+Pastry (the Wheel), Putricide Sticker, Mecha-Jaraxxus Sticker (no Demon
+Mechs this patch), Tickatus Sticker and Corrupted Tome (they need the
+Darkmoon Prizes exported first), and the Dark Gift trinkets.
+
 ## Portraits that rewrite a card
 
 Czarina, Mindslasher, Flaming, Azerite and Bronzebeard Portraits, Rewinder,
