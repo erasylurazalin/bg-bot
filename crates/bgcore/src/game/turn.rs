@@ -99,12 +99,7 @@ impl Game {
         for m in pl.shop.drain(..).chain(pl.hand.drain(..)).chain(pl.board.drain(..)) {
             give_back(pool, &data.cards, &m);
         }
-        for c in pl.discover.drain(..) {
-            if !data.cards.get(c).is_spell() {
-                let slot = data.cards.get(c).pool_slot as usize;
-                pool[slot] += 1;
-            }
-        }
+        pl.abandon_discover(pool, &data.cards);
         pl.pending_choose_one = None;
         pl.pending_target = None;
         pl.pending_shop_target = None;
@@ -122,13 +117,34 @@ impl Game {
         let runs = self.drakkari_mult(p);
         let mut pos = 0;
         while pos < self.players[p].board.len() {
-            let m = self.players[p].board[pos];
+            self.run_minion_end_of_turn(p, &mut pos, runs);
+            pos += 1;
+        }
+        // The powers' own end-of-turn effects (Sulfuras gives your ends
+        // +8/+8), then the trinkets'.
+        self.power_end_of_turn(p);
+        // Trinkets at the end of the turn: their own end-of-turn effects,
+        // then an "every N turns" rule that has counted up to N.
+        self.trinket_end_of_turn(p);
+        // A Lockbox is an end of turn countdown too, so Drakkari doubles it.
+        self.tick_lockboxes(p, runs);
+    }
+
+    /// One board minion's end of turn effects, `runs` times. A gift that puts
+    /// its minion's end of turn effects at the start of the turn as well
+    /// (Time Turning) runs the same code from `start_turn`.
+    pub(super) fn run_minion_end_of_turn(&mut self, p: usize, pos: &mut usize, runs: u8) {
+        // `pos` is a `&mut usize`; the shadow keeps the body reading like the
+        // old local variable.
+        let pos = &mut *pos;
+        {
+            let m = self.players[p].board[*pos];
             for _ in 0..runs {
                 for (card, golden) in m.parts() {
                     let mul = if golden { 2 } else { 1 };
                     match self.data.cards.get(card).end_of_turn {
                         Some(EndOfTurn::BuffSelf { attack, health }) => {
-                            buff(&mut self.players[p].board[pos], attack * mul, health * mul);
+                            buff(&mut self.players[p].board[*pos], attack * mul, health * mul);
                         }
                         Some(EndOfTurn::ResourcefulRobot) => {
                             let n = if golden { 2 } else { 1 };
@@ -136,15 +152,15 @@ impl Game {
                                 // getting the Volumizer can change the board
                                 // (a triple, a "when you get a card" trinket),
                                 // so the Robot's slot may be gone (2026-10-31)
-                                if pos >= self.players[p].board.len() {
+                                if *pos >= self.players[p].board.len() {
                                     break;
                                 }
                                 if let Some(v_id) = self.data.cards.random_volumizer(self.lobby, &mut self.rng)
                                 {
                                     let v =
                                         self.players[p].make_card(&self.data.cards, v_id, false, 0);
-                                    self.magnetize_to(p, pos, v, false);
-                                    self.give_generated_tracking(p, v_id, &mut pos);
+                                    self.magnetize_to(p, *pos, v, false);
+                                    self.give_generated_tracking(p, v_id, pos);
                                 }
                             }
                         }
@@ -157,40 +173,67 @@ impl Game {
                             }
                         }
                         Some(EndOfTurn::ImproveTier) => {
-                            let imp = &mut self.players[p].board[pos].improvements;
+                            let imp = &mut self.players[p].board[*pos].improvements;
                             *imp = (*imp + 1).min((MAX_TIER - 1) as u16);
                         }
                         Some(EndOfTurn::GetCard { card: tok, count }) => {
                             let n = count * (mul as u8);
                             for _ in 0..n {
-                                self.give_generated_tracking(p, tok, &mut pos);
+                                self.give_generated_tracking(p, tok, pos);
                             }
                         }
                         Some(EndOfTurn::Effect(e)) => {
-                            self.run_effect(p, &mut pos, e, golden, 1);
+                            self.run_effect(p, pos, e, golden, 1);
                         }
                         Some(EndOfTurn::CopyLastSpell) => {
                             if let Some(sp) = self.players[p].last_spell {
                                 let n = mul as u8;
                                 for _ in 0..n {
-                                    self.give_generated_tracking(p, sp, &mut pos);
+                                    self.give_generated_tracking(p, sp, pos);
                                 }
+                            }
+                        }
+                        // Dark Gifts Echoing Voice: its own Battlecries, now.
+                        Some(EndOfTurn::TriggerOwnBattlecry) => {
+                            let at = *pos;
+                            self.run_battlecry_at(p, at, true);
+                            if self.players[p].board.len() <= at {
+                                return;
+                            }
+                        }
+                        // Dark Gifts Polarization: a random Mech from the
+                        // pool Magnetizes onto it, like Resourceful Robot's
+                        // Volumizer.
+                        Some(EndOfTurn::MagnetizeRandomMech) => {
+                            if *pos >= self.players[p].board.len() {
+                                break;
+                            }
+                            let Some(v_id) = self
+                                .data
+                                .cards
+                                .random_magnetic_mech(self.lobby, &mut self.rng)
+                            else {
+                                break;
+                            };
+                            let v =
+                                self.players[p].make_card(&self.data.cards, v_id, false, 0);
+                            self.magnetize_to(p, *pos, v, false);
+                            self.give_generated_tracking(p, v_id, pos);
+                        }
+                        // Dark Gifts Steady Growth: the +attack/+health the
+                        // turn it landed gives it, read from the counter.
+                        Some(EndOfTurn::GiftBuffSelf) => {
+                            let landed = m.gift_state(card).unwrap_or(0) as u32;
+                            let (a, h) = self.data.gifts.steady_growth.numbers(landed);
+                            if *pos < self.players[p].board.len() {
+                                buff(&mut self.players[p].board[*pos], a, h);
                             }
                         }
                         None => {}
                     }
                 }
             }
-            pos += 1;
         }
-        // The powers' own end-of-turn effects (Sulfuras gives your ends
-        // +8/+8), then the trinkets'.
-        self.power_end_of_turn(p);
-        // Trinkets at the end of the turn: their own end-of-turn effects,
-        // then an "every N turns" rule that has counted up to N.
-        self.trinket_end_of_turn(p);
-        // A Lockbox is an end of turn countdown too, so Drakkari doubles it.
-        self.tick_lockboxes(p, runs);
     }
 
     /// The player is done for this turn. Anything still waiting on a choice
@@ -396,7 +439,7 @@ impl Game {
             let (ba, bh) = std::mem::take(&mut pl.beast_bonus);
             if (ba, bh) != (0, 0) {
                 for m in &mut pl.board {
-                    if data.cards.get(m.card).tribes.has(Tribe::Beast) {
+                    if data.cards.tribes_of(m).has(Tribe::Beast) {
                         m.attack = (m.attack - ba).max(0);
                         m.health = (m.health - bh).max(1);
                     }
@@ -513,6 +556,15 @@ impl Game {
             // start-of-turn effects.
             if self.players[p].alive && !self.players[p].real {
                 self.trinket_start_of_turn(p);
+            }
+        }
+        for p in 0..PLAYERS {
+            // Dark Gifts at the start of the player's turn: the button is
+            // pressable again, a Time Turning minion runs its end of turn
+            // effects, and the countdown gifts tick.
+            if self.players[p].alive && !self.players[p].real {
+                self.players[p].dark_gift_pressed = false;
+                self.dark_gift_start_of_turn(p);
             }
         }
         for p in 0..PLAYERS {
@@ -935,12 +987,7 @@ impl Game {
             for m in pl.shop.drain(..).chain(pl.hand.drain(..)).chain(pl.board.drain(..)) {
                 give_back(pool, &data.cards, &m);
             }
-            for c in pl.discover.drain(..) {
-                if !data.cards.get(c).is_spell() {
-                    let slot = data.cards.get(c).pool_slot as usize;
-                    pool[slot] += 1;
-                }
-            }
+            pl.abandon_discover(pool, &data.cards);
             pl.pending_choose_one = None;
             pl.pending_target = None;
             pl.pending_shop_target = None;

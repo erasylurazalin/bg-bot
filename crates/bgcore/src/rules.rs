@@ -47,6 +47,11 @@ pub struct Rules {
     pub trinket_offer_own: u32,
     pub trinket_offer_other: u32,
     pub trinket_offer_mechanic: u32,
+    /// The Dark Discovery button: the Gold it costs, its uses a game and the
+    /// first turn it can be pressed (docs/darkgifts.md).
+    pub dark_gift_cost: u8,
+    pub dark_gift_uses: u8,
+    pub dark_gift_turn: u8,
     /// The keywords "random Bonus Keyword" picks from and "different Bonus
     /// Keywords" counts, by name (see `Keywords::ALL`).
     pub bonus_keywords: Vec<String>,

@@ -3,6 +3,13 @@ use crate::rng::Rng;
 
 pub type CardId = u16;
 
+/// Maximum number of Dark Gifts one minion holds. A triple brings the gifts
+/// of all three copies, a Magnetized Mech brings its own, and the button, the
+/// four gift trinkets and the two heroes can each add one, so a minion in a
+/// long game can collect a good few. Past this many, a new gift is not
+/// attached (the minion keeps the ones it has; the offer still shows it).
+pub const MAX_GIFTS: usize = 8;
+
 /// Maximum number of effect-carrying Magnetic cards attached to a single host.
 /// Cards without persistent effects (such as Satellites and Volumizers) only
 /// increment `magnetizations` and `volumizers` and take no slot here. When a
@@ -77,6 +84,41 @@ pub struct Attached {
     pub golden: bool,
 }
 
+/// One Dark Gift attached to a minion (docs/darkgifts.md: a gift sits on its
+/// minion like an attached card). Packed into 16 bits so `Minion` stays
+/// small: the low ten bits are the gift's effect card (a token in
+/// cards.toml's Dark Gifts section, ids below 1024) and the top six its own
+/// small counter: a countdown (Incubation, Replication, Affinity), the turn
+/// it landed (Steady Growth), or the hits its Divine Shield has left
+/// (Toreth's Blessing). Every other gift keeps 0 there.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct GiftOn(u16);
+
+/// How many bits of a `GiftOn` hold the card and how many the counter.
+const GIFT_STATE_SHIFT: u32 = 10;
+pub const GIFT_CARD_MAX: u16 = (1 << GIFT_STATE_SHIFT) - 1;
+pub const GIFT_STATE_MAX: u8 = 63;
+
+impl GiftOn {
+    pub fn new(card: CardId, state: u8) -> GiftOn {
+        debug_assert!(card <= GIFT_CARD_MAX, "gift card id {card} is too large");
+        debug_assert!(state <= GIFT_STATE_MAX, "gift state {state} is too large");
+        GiftOn(card | ((state.min(GIFT_STATE_MAX) as u16) << GIFT_STATE_SHIFT))
+    }
+
+    pub fn card(self) -> CardId {
+        self.0 & GIFT_CARD_MAX
+    }
+
+    pub fn state(self) -> u8 {
+        (self.0 >> GIFT_STATE_SHIFT) as u8
+    }
+
+    pub fn with_state(self, state: u8) -> GiftOn {
+        GiftOn::new(self.card(), state)
+    }
+}
+
 /// A minion in a shop, hand, board or fight. Health is current health; in
 /// the shop phase it is also the maximum, since damage never carries over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -149,6 +191,13 @@ pub struct Minion {
     pub linked: u16,
     pub attached: [Attached; MAX_ATTACHED],
     pub n_attached: u8,
+    /// The Dark Gifts on this minion, in the order they landed.
+    pub gifts: [GiftOn; MAX_GIFTS],
+    pub n_gifts: u8,
+    /// A Divine Shield that takes several hits to break: the hits it has
+    /// left, 0 (or 1) for an ordinary one. Set by Toreth's Blessing; it never
+    /// carries out of a fight, like any other shield damage.
+    pub shield_hits: u8,
 }
 
 impl Minion {
@@ -186,6 +235,101 @@ impl Minion {
         }
     }
 
+    pub fn gift_slice(&self) -> &[GiftOn] {
+        &self.gifts[..self.n_gifts as usize]
+    }
+
+    /// Attach a gift. A gift works the same on a golden minion; gifts stack
+    /// (docs/darkgifts.md "Gifts stack"), so the same gift can sit on a
+    /// minion twice and fire twice, except the ones that set a state
+    /// (`Card::gift_unique`), which `push_gift_unique` drops. Returns whether
+    /// it was attached.
+    pub fn push_gift(&mut self, g: GiftOn) -> bool {
+        let n = self.n_gifts as usize;
+        if n < MAX_GIFTS {
+            self.gifts[n] = g;
+            self.n_gifts += 1;
+            return true;
+        }
+        false
+    }
+
+    /// Take the gift whose effect card is `card` off this minion, keeping the
+    /// order of the rest.
+    pub fn remove_gift(&mut self, card: CardId) -> Option<GiftOn> {
+        let n = self.n_gifts as usize;
+        let at = self.gifts[..n].iter().position(|g| g.card() == card)?;
+        let g = self.gifts[at];
+        for k in at..n - 1 {
+            self.gifts[k] = self.gifts[k + 1];
+        }
+        // The vacated slot goes back to a default, so two minions with the
+        // same gifts compare equal however many they had before.
+        self.gifts[n - 1] = GiftOn::default();
+        self.n_gifts -= 1;
+        Some(g)
+    }
+
+    /// Attach a gift that does not stack: false (and nothing attached) when
+    /// the minion already holds it.
+    pub fn push_gift_unique(&mut self, g: GiftOn) -> bool {
+        if self.gift_slice().iter().any(|o| o.card() == g.card()) {
+            return false;
+        }
+        self.push_gift(g)
+    }
+
+    /// Set the counter of the gift at index `k`.
+    pub fn set_gift_state_at(&mut self, k: usize, state: u8) -> bool {
+        if let Some(g) = self.gifts.get(k) {
+            self.gifts[k] = g.with_state(state);
+            return k < self.n_gifts as usize;
+        }
+        false
+    }
+
+    /// Take the gift at index `k` off this minion.
+    pub fn remove_gift_at(&mut self, k: usize) -> Option<GiftOn> {
+        let n = self.n_gifts as usize;
+        if k >= n {
+            return None;
+        }
+        let g = self.gifts[k];
+        for j in k..n - 1 {
+            self.gifts[j] = self.gifts[j + 1];
+        }
+        self.gifts[n - 1] = GiftOn::default();
+        self.n_gifts -= 1;
+        Some(g)
+    }
+
+    /// The counter of the gift on this minion whose effect card is `card`.
+    pub fn gift_state(&self, card: CardId) -> Option<u8> {
+        self.gift_slice().iter().find(|g| g.card() == card).map(|g| g.state())
+    }
+
+    /// Write the counter of the gift whose effect card is `card`. False when
+    /// the minion holds no such gift.
+    pub fn set_gift_state(&mut self, card: CardId, state: u8) -> bool {
+        let n = self.n_gifts as usize;
+        for g in &mut self.gifts[..n] {
+            if g.card() == card {
+                *g = g.with_state(state);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether any gift on this minion has a card property (`pick`), which is
+    /// how the engine asks "does this minion have the Efficiency gift".
+    pub fn has_gift(&self, db: &CardDb, pick: impl Fn(&crate::cards::Card) -> bool) -> bool {
+        if self.n_gifts == 0 {
+            return false;
+        }
+        self.gift_slice().iter().any(|g| pick(db.get(g.card())))
+    }
+
     /// The "(N left!)" of this minion's event trigger, None when no part of
     /// it has one.
     pub fn events_left(&self, db: &CardDb) -> Option<u8> {
@@ -195,10 +339,12 @@ impl Minion {
     }
 
     /// Yields `(card, golden)` for the minion itself followed by every
-    /// effect-carrying card Magnetized into it.
+    /// effect-carrying card Magnetized into it and then every Dark Gift on it.
+    /// A gift never doubles: its pair is always `false`, whatever the host.
     pub fn parts(&self) -> impl Iterator<Item = (CardId, bool)> + '_ {
         std::iter::once((self.card, self.golden))
             .chain(self.attached_slice().iter().map(|a| (a.card, a.golden)))
+            .chain(self.gift_slice().iter().map(|g| (g.card(), false)))
     }
 
     /// Merge `other` into `self` as a Magnetization, recursively bringing all
@@ -218,5 +364,7 @@ impl Minion {
         for &a in other.attached_slice() {
             self.push_attached(a);
         }
+        // A Magnetized Mech keeps its own gifts; the magnetic minion's are
+        // lost (docs/darkgifts.md "Magnetic minions and gifts").
     }
 }

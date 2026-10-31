@@ -201,9 +201,8 @@ use crate::minion::{Keywords, MAX_ATTACHED, Minion};
 use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 
 pub const SHOP_SPELL: usize = 1;
-pub const SLOT_FEATURES: usize = 78;
+pub const SLOT_FEATURES: usize = 86;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
-pub const SCALARS: usize = SCALAR_TRINKETS_END;
 pub const OPP_SCALARS: usize = 33;
 
 pub const OWN_SLOTS: usize = SHOP + SHOP_SPELL + HAND + BOARD + DISCOVER;
@@ -383,6 +382,16 @@ pub const SCALAR_TRINKET_OPTION: usize = SCALAR_TRINKET_OFFER_SLOT + 1;
 pub const TRINKET_OPTION_FEATURES: usize = 2;
 pub const SCALAR_TRINKETS_END: usize =
     SCALAR_TRINKET_OPTION + crate::TRINKET_CHOICES * TRINKET_OPTION_FEATURES;
+/// The Dark Discovery button: the uses it has left this game, whether it was
+/// pressed this turn, and whether it can be pressed now (unlocked, a use
+/// left, not pressed, and the Gold for it).
+pub const SCALAR_DARK_GIFT_USES: usize = SCALAR_TRINKETS_END;
+pub const SCALAR_DARK_GIFT_PRESSED: usize = SCALAR_DARK_GIFT_USES + 1;
+pub const SCALAR_DARK_GIFT_READY: usize = SCALAR_DARK_GIFT_USES + 2;
+/// Whether the open Discover is a Dark Gift offer (its gifts are in the
+/// Discover slots' gift fields, so the bot sees them before it picks).
+pub const SCALAR_DARK_OFFER: usize = SCALAR_DARK_GIFT_USES + 3;
+pub const SCALARS: usize = SCALAR_DARK_OFFER + 1;
 
 pub const SLOT_PRESENT: usize = 0;
 pub const SLOT_CARD_ID: usize = 1;
@@ -443,6 +452,9 @@ pub const SLOT_NO_REWARD: usize = 45;
 pub const SLOT_ATTACHED: usize = 46;
 /// MAX_ATTACHED values: whether each attachment is golden.
 pub const SLOT_ATTACHED_GOLDEN: usize = SLOT_ATTACHED + MAX_ATTACHED;
+/// MAX_GIFTS values: the Dark Gifts on the minion, as the gift's effect card
+/// id + 1 (the model embeds them like card ids), 0 for an empty slot.
+pub const SLOT_GIFTS: usize = SLOT_ATTACHED_GOLDEN + MAX_ATTACHED;
 
 pub const OPP_ALIVE: usize = 0;
 pub const OPP_HEALTH: usize = 1;
@@ -483,11 +495,12 @@ const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_L
 const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
 const _: () = assert!(SCALAR_POWER_OFFER + crate::CHOICES == SCALAR_HERO_OFFER);
 const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALAR_TRINKET);
-const _: () = assert!(SCALAR_TRINKETS_END == SCALARS);
+const _: () = assert!(SCALAR_DARK_OFFER + 1 == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
 const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
-const _: () = assert!(SLOT_ATTACHED_GOLDEN + MAX_ATTACHED == SLOT_FEATURES);
+const _: () = assert!(SLOT_ATTACHED_GOLDEN + MAX_ATTACHED == SLOT_GIFTS);
+const _: () = assert!(SLOT_GIFTS + crate::MAX_GIFTS == SLOT_FEATURES);
 const _: () = assert!(OPP_TRIBES + Tribe::EVERY.len() == OPP_DEITY);
 const _: () = assert!(OPP_DEITY + DEITY_FEATURES == OPP_GEM_ATTACK);
 const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_HERO);
@@ -584,6 +597,9 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     for (j, a) in m.attached_slice().iter().enumerate() {
         o[SLOT_ATTACHED + j] = a.card as f32 + 1.0;
         o[SLOT_ATTACHED_GOLDEN + j] = a.golden as u8 as f32;
+    }
+    for (j, g) in m.gift_slice().iter().enumerate() {
+        o[SLOT_GIFTS + j] = g.card() as f32 + 1.0;
     }
 }
 
@@ -846,6 +862,17 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
         s[SCALAR_TRINKET_OPTION + k * TRINKET_OPTION_FEATURES] = of as f32 + 1.0;
         s[SCALAR_TRINKET_OPTION + k * TRINKET_OPTION_FEATURES + 1] = price as f32;
     }
+    // The Dark Discovery button: uses left, pressed this turn, and whether it
+    // can be pressed now (its legality is `is_legal`'s, asked the same way the
+    // action mask asks it).
+    s[SCALAR_DARK_GIFT_USES] = pl.dark_gift_uses as f32;
+    s[SCALAR_DARK_GIFT_PRESSED] = pl.dark_gift_pressed as u8 as f32;
+    s[SCALAR_DARK_GIFT_READY] = (game.turn >= r.dark_gift_turn as u32
+        && pl.dark_gift_uses > 0
+        && !pl.dark_gift_pressed
+        && pl.gold >= r.dark_gift_cost
+        && !game.data.gifts.is_empty()) as u8 as f32;
+    s[SCALAR_DARK_OFFER] = pl.dark_offer as u8 as f32;
 }
 
 /// The hero table of the game's data (a shorthand for the hero features).
@@ -874,7 +901,12 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
     out[i..i + DISCOVER * SLOT_FEATURES].fill(0.0);
     for (k, &c) in pl.discover.iter().take(DISCOVER).enumerate() {
         let pool_copies = u8::from(!db.get(c).is_spell());
-        let m = pl.make_card(db, c, false, pool_copies);
+        let mut m = pl.make_card(db, c, false, pool_copies);
+        // A Dark Gift offer: the gift it comes with, so the pick is made from
+        // what the offer shows (the gift lands when the minion is taken).
+        if pl.dark_offer && let Some(g) = pl.discover_gifts.get(k) {
+            m.push_gift(*g);
+        }
         let o = &mut out[i + k * SLOT_FEATURES..i + (k + 1) * SLOT_FEATURES];
         write_slot(game, o, &m, off_board);
     }

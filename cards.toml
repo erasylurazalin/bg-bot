@@ -2895,3 +2895,351 @@ tier = 1
 tribe = "elemental"
 stats = [1, 1]
 golden_stats = [2, 2]
+
+# --- Dark Gifts ---
+#
+# The 47 gift cards of the game data, one token each (darkgifts.toml says
+# which gift is which, when it can be offered and which hosts it fits). A
+# gift token is never drawn, summoned or played: it is the card whose effect
+# the host runs, so a gift whose text matches a card's runs through exactly
+# the same code. Two of its numbers mean something special:
+# - `stats` is what the gift adds to the host when it lands (+10 Attack is
+#   `stats = [10, 0]`), not a minion's printed stats.
+# - a gift never doubles, so every effect here ignores the host's golden.
+
+[[token]]
+name = "Gift: Offensive Sacrifice"
+tier = 1
+tribe = "neutral"
+stats = [10, 0]
+deathrattle = { give_own_attack = true }
+
+[[token]]
+name = "Gift: Defensive Sacrifice"
+tier = 1
+tribe = "neutral"
+stats = [0, 10]
+deathrattle = { give_own_health = true }
+
+[[token]]
+name = "Gift: Charisma"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+rally = { get_most_common_type_minion = true }
+
+[[token]]
+name = "Gift: Incubation"
+tier = 1
+tribe = "neutral"
+stats = [4, 4]
+countdown = { turns = 2, effect = "double_stats" }
+
+[[token]]
+name = "Gift: Mystic Essence"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+deathrattle = { effect = { get_any_tavern_spell = true } }
+
+[[token]]
+name = "Gift: Resistance"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+start_of_combat = { double_health = true }
+
+[[token]]
+name = "Gift: Admiration"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+start_of_combat = { gain_left_attack = true }
+
+[[token]]
+name = "Gift: Echoing Voice"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+end_of_turn = { trigger_own_battlecry = true }
+
+[[token]]
+name = "Gift: Double Vision"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+acquire_copies = 1
+
+[[token]]
+name = "Gift: Persisting Horror"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+keywords = ["reborn"]
+reborn_full = true
+
+[[token]]
+name = "Gift: Harpy's Talons"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+keywords = ["divine_shield", "windfury"]
+gift_unique = true
+
+[[token]]
+name = "Gift: Gilding"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+makes_golden = true
+gift_unique = true
+
+[[token]]
+name = "Gift: Toreth's Blessing"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+keywords = ["divine_shield"]
+shield_hits = 3
+gift_unique = true
+
+[[token]]
+name = "Gift: Jaws of Death"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+start_of_combat = { trigger_own_deathrattles = true }
+
+[[token]]
+name = "Gift: Replication"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+countdown = { turns = 2, effect = "plain_copy" }
+
+[[token]]
+name = "Gift: Time Turning"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+end_of_turn_at_start = true
+
+[[token]]
+name = "Gift: Amalgamation"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+all_types = true
+gift_unique = true
+
+[[token]]
+name = "Gift: Battle Scars"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+buff_per_battlecry = [3, 3]
+
+[[token]]
+name = "Gift: Battle Scars strong"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+buff_per_battlecry = [2, 2]
+
+[[token]]
+name = "Gift: Death's Embrace"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+buff_per_deathrattle = [2, 2]
+
+[[token]]
+name = "Gift: Death's Embrace strong"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+buff_per_deathrattle = [1, 1]
+
+[[token]]
+name = "Gift: Spell Siphon"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+buff_per_tavern_spell = [3, 3]
+
+[[token]]
+name = "Gift: Spell Siphon strong"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+buff_per_tavern_spell = [2, 2]
+
+[[token]]
+name = "Gift: Tarecgosa's Blessing"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+permanent_keep = "self"
+
+[[token]]
+name = "Gift: Steady Growth"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+end_of_turn = { gift_buff_self = true }
+
+[[token]]
+name = "Gift: Fresh Perspective"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+deathrattle = { effect = { free_refreshes = 2 } }
+
+[[token]]
+name = "Gift: Invulnerability"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+immune_attacking = true
+
+[[token]]
+name = "Gift: Golemancy"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+deathrattle = { summon_shaped = "Golem" }
+
+# Sunken Persistence ("this minion's Spellcrafts are permanent") has no
+# effect yet: no built minion gives its owner a Spellcraft spell, so nothing
+# can read the flag (docs/ENGINE.md "Dark Gifts").
+[[token]]
+name = "Gift: Sunken Persistence"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+
+[[token]]
+name = "Gift: Dexterity"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+on_card_play = [2, 2]
+
+[[token]]
+name = "Gift: Dexterity strong"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+on_card_play = [4, 4]
+
+[[token]]
+name = "Gift: Polarization"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+end_of_turn = { magnetize_random_mech = true }
+
+[[token]]
+name = "Gift: Demonology"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+rally = { add_fodder_refreshes = 3 }
+
+[[token]]
+name = "Gift: Toxicity"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+keywords = ["venomous"]
+gift_unique = true
+
+[[token]]
+name = "Gift: Hostility"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+start_of_combat = { double_attack = true }
+
+[[token]]
+name = "Gift: Titanic Strength"
+tier = 1
+tribe = "neutral"
+stats = [1000, 0]
+
+[[token]]
+name = "Gift: Fortitude"
+tier = 1
+tribe = "neutral"
+stats = [5, 5]
+
+[[token]]
+name = "Gift: Sharpened Sword"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+on_card_play = [3, 0]
+
+[[token]]
+name = "Gift: Toughened Shield"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+on_card_play = [0, 3]
+
+[[token]]
+name = "Gift: Efficiency"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+activate_twice = true
+
+[[token]]
+name = "Gift: Furtiveness"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+keywords = ["stealth"]
+gift_unique = true
+
+[[token]]
+name = "Gift: Consanguinity"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+rally = { get_gems = 2 }
+
+[[token]]
+name = "Gift: Transcendence"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+start_of_combat = { triple_stats = true }
+
+[[token]]
+name = "Gift: Affinity"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+countdown = { turns = 2, effect = "random_minion_of_type" }
+
+[[token]]
+name = "Gift: Desecration"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+buff_per_discard = [3, 3]
+
+[[token]]
+name = "Gift: Worship"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+start_of_combat = { gain_deity_stats = true }
+
+[[token]]
+name = "Gift: Doppelganger"
+tier = 1
+tribe = "neutral"
+stats = [0, 0]
+start_of_combat = { summon_own_copy = true }

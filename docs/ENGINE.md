@@ -10,17 +10,20 @@ cards.toml            every card: minions, tokens, spells, golden behaviour
 rules.toml            every rule number: gold, costs, pool copies, damage caps, limits
 heroes.toml           the built heroes and their powers (see "Heroes")
 trinkets.toml         the built trinkets, lesser and greater (see "Trinkets")
+darkgifts.toml        the 47 Dark Gifts: windows, weights, host conditions, the
+                      offer tiers by turn (see "Dark Gifts")
 peak_boards.toml      hand-made peak boards for `bgbench peak` (guesses, see below)
 crates/
   bgcore/             the rules: no I/O, no Python
     src/cards.rs      card data: TOML parsing into Card, Effect, triggers
     src/heroes.rs     hero data: heroes.toml into Hero, HeroPower, PowerEffect
     src/trinkets.rs   trinket data: trinkets.toml into Trinket, Act, Rule, Soc
+    src/darkgifts.rs  gift data: darkgifts.toml into Gift, GiftCond, the offer table
     src/game/          one 8-player game: shop phase, actions, pairing, combat, knockouts;
                       one file per system: mod.rs (types, constructors, step, legality,
                       advance), player.rs, heroes.rs, shop.rs, play.rs, effects.rs,
                       spells.rs, discover.rs, targets.rs, triples.rs, trinkets.rs, turn.rs,
-                      invariants.rs
+                      darkgifts.rs, invariants.rs
     src/fight.rs      the fight: a pure function of two boards, an RNG and counters
     src/minion.rs     Minion (Copy, fixed size), Keywords, Magnetic attachments
     src/action.rs     the flat action space and its index mapping
@@ -35,6 +38,8 @@ crates/
                       heroes.rs (the hero frame: pick, armor, the 22 powers, the two spells),
                       trinkets.rs (the trinket frame: the two offers, the guarantee and the
                       discount, the slots, the hooks and the built cards),
+                      darkgifts.rs (the gift table, the button, the offers, the landing,
+                      the countdowns and the gift hooks),
                       tier7.rs (tier 7 in the engine and its seven minions),
                       deathrattles.rs (a loop over every Deathrattle card),
                       lobby.rs (the 5-tribe lobby and every draw that respects it),
@@ -527,6 +532,97 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   test helpers answer an open offer (and any Discover a trinket opened) before
   passing the turn.
 
+## Dark Gifts
+
+`darkgifts.toml` (docs/darkgifts.md; DESIGN.md "Trinkets and Dark Gifts")
+holds the 47 gift cards of the game data: each gift's card_id, its turn
+window (tags 4853/4854), its weight (4856, 50 half as likely) and the
+condition its host has to meet. What a gift *does* is a token in cards.toml
+(the "Dark Gifts" section), so a gift whose text matches a card's runs
+through exactly that card's code. The engine never matches a gift by name:
+`crate::darkgifts::GiftDb` is the table, `game/darkgifts.rs` the rules.
+
+- **A gift on a minion.** `Minion.gifts` is a fixed `[GiftOn; MAX_GIFTS]` (8)
+  with a count, so `Minion` stays `Copy`; `GiftOn` packs the gift's effect
+  card in ten bits and a six-bit counter (a countdown, the turn Steady Growth
+  landed). `Minion::parts()` yields the minion, its attachments and then its
+  gifts (always as `golden: false`, so a gift never doubles), which is what
+  makes the fight and the shop run a gift's Start of Combat, Deathrattle,
+  Rally and end of turn effects with no code of their own. Gifts stack
+  (docs/darkgifts.md): `push_gift` attaches a second copy, which fires a
+  second time, except for the gifts that set a state (`Card::gift_unique`:
+  the keyword gifts, Amalgamation, Toreth's Blessing's hits and Gilding),
+  which `push_gift_unique` drops. Past `MAX_GIFTS` a new gift is not attached.
+  A triple takes the gifts of all three copies, a Magnetized Mech keeps its
+  own (the magnetic minion's are lost) and a sold minion's go with it.
+  `CardDb::tribes_of(&Minion)` is the one tribe read that knows about
+  Amalgamation ("has all minion types").
+- **The landing** is `game::darkgifts::land_gift`: the effect card's stats
+  (its `stats` are what the gift adds), its keywords, `shield_hits` for
+  Toreth's Blessing, Gilding's `golden_up`, the "for each ... this game"
+  counts taken now, and the counter. Everything else the gift does is read
+  later from its card by the existing paths; `Minion::has_gift` is the one
+  flag test a fight pays for a gift with no trigger.
+- **The button.** `Action::DarkGift` (the last action, `N_ACTIONS` grew by
+  one); `dark_gift_usable` is the rule (rules.toml's `dark_gift_cost`,
+  `_uses` and `_turn`, once a turn, 3 uses a game, locked until turn 3).
+  A press pays, opens `DiscoverRequest::DarkGift(DarkGiftPlan)`, and
+  `deal_dark_gift_offer` draws the three offers. The plan is the source's:
+  the button and Xavius use this turn's row of `[[offer]]`, Ominous Stone a
+  fixed tier of the player's type, Wax Lance tier 7, Sinister Invitation the
+  button's tiers Golden, Void Power tier 5 with its gifts picked as turn 7
+  and the pick locked in hand until turn 7. Each offer takes a pool copy
+  (`Player.discover_copies`, three for a Golden offer, none for the Dagger's
+  copies), gives the rest back on the pick, and `pl.discover_gifts` carries
+  each offer's gift so the observation shows it before the pick.
+- **The pool the offers come from** is `GiftDb::pool_allows`: never a spell
+  or a token, never a Magnetic minion, one with "when you sell this" or one
+  whose effect works in hand, no Battlecry or Choose One minion before turn
+  5, and darkgifts.toml's `exclude` list (Leeroy the Reckless, Deadly
+  Spore).
+- **Who gets a gift.** `GiftDb::pick` chooses at random among the gifts whose
+  window holds the turn and whose condition the host meets, never one already
+  on another offer of the press; the four weight-50 gifts count half.
+- **Countdowns.** `dark_gift_start_of_turn` (called from `start_turn`) ticks
+  Incubation, Replication and Affinity and runs the countdown's effect at 0
+  (the gift then comes off), and gives every Time Turning minion its end of
+  turn effects again (`run_minion_end_of_turn`, the same code the end of the
+  turn runs).
+- **The other hooks.** `dark_gift_card_played` ("whenever you play a card":
+  Dexterity, Sharpened Sword, Toughened Shield) runs from `Action::Play`;
+  `dark_gift_count` grows the "for each Battlecry / Tavern spell / discard"
+  gifts from `battlecry_or_choose_one`, the Tavern-spell branch of
+  `cast_spell` and `discard_card` (Death's Embrace rides the existing
+  `buff_per_deathrattle`); `dark_gift_on_acquire` gives Double Vision's plain
+  copy in `add_to_hand`; Efficiency doubles an Activate in `Action::Activate`.
+- **In a fight.** New `StartOfCombat` arms: Resistance, Hostility,
+  Transcendence, Admiration, Worship (reads `Counters.deity`), Jaws of Death,
+  Doppelganger. `deal_damage`/`hit` spend `Minion.shield_hits` for Toreth's
+  Blessing, the attack loop reads Invulnerability, the reborn path rebuilds
+  Persisting Horror's copy with its stats, Bonus Keywords and gifts, and
+  `Counters.bonus_keywords` is rules.toml's mask for it.
+- **Sources.** The four gift trinkets are `Act::DarkGift { tier, yours,
+  golden }` and `Act::DarkGiftCopies` (Maldraxxus Dagger: plain copies of
+  three of your own minions, gifted or not, each with a gift picked fresh for
+  it by the normal rules, the one offer that may copy a Magnetic minion); the
+  two heroes are
+  `PowerEffect::DarkGiftStart` (Void Power) and `DarkGiftEvery { turns }`
+  (Feel Devastation, counted in the power's `progress`).
+- **Sunken Persistence** ("this minion's Spellcrafts are permanent") has no
+  effect: no built minion hands its owner a Spellcraft spell, so nothing can
+  read the flag.
+- **The observation** writes each minion's gifts as effect card id + 1 in the
+  eight `SLOT_GIFTS` slots after the attachments (the model embeds them in
+  the card table, `SLOT_IDS` in `train/model.py`), the button's uses,
+  whether it was pressed this turn, whether it can be pressed and whether the
+  open Discover is a gift offer as four own scalars after the trinket block.
+  `SLOT_FEATURES` went 78 to 86.
+- **Real-board seats** carry the `dark_gifts` the files record: the loader
+  attaches them (their stats are already in the file's attack and health),
+  with the counter set as if the gift had landed on that board's turn.
+- **Bots** press the button in `curve_action` when 3 Gold is left over.
+  Tests: `tests/darkgifts.rs`.
+
 ## The sandbox
 
 `Game::new_sandbox(data, seed, lobby, free_rolls)` is a one-player game for
@@ -556,6 +652,9 @@ TEXT`, `--seed N` (random and printed by default), `--free-rolls N` (default
 0), `--boards DIR`. The screen shows your hero, armor and power (both powers
 once a second one is held), and a power that is a chooser or a Discover
 lists what it offers; `hp` presses the main button, `hp2` the second one.
+`dg` presses the Dark Discovery button and a Discover shows each offer's
+Dark Gift; `gift 2 fort` gives board minion 2 the gift whose name holds
+"fort" (the command is not an action, so `undo` does not take it back).
 Commands are read from stdin (`help` lists them). Every
 end of turn rewrites the recording from the game's history, so `undo` (which
 replays the seed and all actions but the last) also removes an undone turn

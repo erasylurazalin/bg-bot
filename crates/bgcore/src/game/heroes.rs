@@ -330,6 +330,7 @@ impl Game {
                 // The reward runs from `resolve_discard` once a card is gone,
                 // the same path an Activate with `discard = true` takes.
                 self.players[p].pending_discard = Some(PendingDiscard {
+                    runs: 1,
                     source: None,
                     reward: Effect::GetRandomMinion { tribe: t },
                     golden: false,
@@ -441,6 +442,41 @@ impl Game {
                             continue;
                         }
                         self.give_bananas(q, others, big_percent, banana, big);
+                    }
+                }
+                // Void Power: at the start of the game (turn 1 here), a
+                // Tier 5 minion with a Dark Gift, locked in hand until turn
+                // 7, its gifts picked as if it were turn 7.
+                PowerEffect::DarkGiftStart => {
+                    if turn == 1 {
+                        let plan = crate::darkgifts::DarkGiftPlan {
+                            slots: [crate::darkgifts::OfferSlot { tiers: 1 << 5, yours: false };
+                                crate::DISCOVER],
+                            gift_turn: crate::darkgifts::VOID_POWER_TURN,
+                            golden: false,
+                            locked_turns: (crate::darkgifts::VOID_POWER_TURN as u8).saturating_sub(1),
+                        };
+                        let _ = self.players[p]
+                            .discover_queue
+                            .try_push(DiscoverRequest::DarkGift(plan));
+                        self.maybe_start_discover(p);
+                    }
+                }
+                // Feel Devastation: every `turns` turns, a Dark Gift offer of
+                // the button's tiers for that turn.
+                PowerEffect::DarkGiftEvery { turns } => {
+                    let done = {
+                        let Some(sl) = self.players[p].power_at_mut(second) else { continue };
+                        sl.progress += 1;
+                        if sl.progress >= turns as u32 {
+                            sl.progress = 0;
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if done {
+                        self.open_dark_gift_offer(p);
                     }
                 }
                 PowerEffect::TurnDiscovers { turn: at, tiers } => {

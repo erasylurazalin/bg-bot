@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use bgcore::cards::Card;
+use bgcore::cards::{Card, EndOfTurn};
 use bgcore::game::{PendingTarget, TargetKind};
 use bgcore::{Action, CardDb, CardId, Game, Keywords, Minion, Tribe, Tribes};
 
@@ -99,7 +99,8 @@ fn card_tribes(c: &Card) -> String {
     Tribe::EVERY.iter().filter(|&&t| c.tribes.has(t)).map(|&t| tribe_name(t)).collect::<Vec<_>>().join("/")
 }
 
-fn tags(m: &Minion, db: &CardDb) -> String {
+fn tags(m: &Minion, g: &Game) -> String {
+    let db = &g.data.cards;
     let mut out = String::new();
     let mut add = |s: &str| {
         out.push(' ');
@@ -133,6 +134,28 @@ fn tags(m: &Minion, db: &CardDb) -> String {
     if m.locked_tier > 0 {
         add(&format!("T{}", m.locked_tier));
     }
+    // The Dark Gifts on it, by the gift's short name ("Fortitude" is "F!"),
+    // each with the counter it carries when it has one (a countdown in turns,
+    // a countdown and its numbers for Steady Growth).
+    for gift_on in m.gift_slice() {
+        let g_state = gift_on.state();
+        let card = db.get(gift_on.card());
+        let name = &card.name;
+        let short: String = name
+            .strip_prefix("Gift: ")
+            .unwrap_or(name)
+            .split_whitespace()
+            .map(|w| w.chars().next().unwrap_or('?'))
+            .collect();
+        if card.countdown.is_some() && g_state > 0 {
+            add(&format!("{short}{g_state}"));
+        } else if matches!(card.end_of_turn, Some(EndOfTurn::GiftBuffSelf)) {
+            let (a, h) = g.data.gifts.steady_growth.numbers(g_state as u32);
+            add(&format!("{short}+{a}/+{h}"));
+        } else {
+            add(&short);
+        }
+    }
     out
 }
 
@@ -159,7 +182,7 @@ pub fn label(g: &Game, m: &Minion) -> String {
     if c.is_spell() {
         return format!("{} ({})", c.name, spell_cost(g, m.card));
     }
-    format!("{} {}/{}{}", c.name, m.attack, m.health, tags(m, db))
+    format!("{} {}/{}{}", c.name, m.attack, m.health, tags(m, g))
 }
 
 fn numbered(g: &Game, list: &[Minion]) -> String {
@@ -244,6 +267,23 @@ pub fn state(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> String {
     );
     if pl.frozen {
         out.push_str("  [Frozen]");
+    }
+    // The Dark Discovery button: uses left and whether it can be pressed now.
+    if !g.data.gifts.is_empty() {
+        let ready = if g.is_legal(bgcore::Action::DarkGift) {
+            "ready"
+        } else if pl.dark_gift_pressed {
+            "used this turn"
+        } else if g.turn < g.data.rules.dark_gift_turn as u32 {
+            "locked"
+        } else if pl.dark_gift_uses == 0 {
+            "spent"
+        } else if pl.gold < g.data.rules.dark_gift_cost {
+            "needs Gold"
+        } else {
+            "not now"
+        };
+        let _ = write!(out, "  Dark Gift {}/{} ({ready}, dg)", pl.dark_gift_uses, g.data.rules.dark_gift_uses);
     }
     out.push('\n');
     let heroes = &g.data.heroes;
@@ -419,10 +459,20 @@ pub fn prompt(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> Option<String> 
             .enumerate()
             .map(|(i, &id)| {
                 let c = db.get(id);
+                // A Dark Gift offer shows the gift it comes with, the way the
+                // client does before the pick.
+                let gift = pl.discover_gifts.get(i).map_or(String::new(), |g| {
+                    if pl.dark_offer {
+                        let name = &db.get(g.card()).name;
+                        format!(" with Dark Gift: {}", name.strip_prefix("Gift: ").unwrap_or(name))
+                    } else {
+                        String::new()
+                    }
+                });
                 if c.is_spell() {
-                    format!("{} {} (spell, tier {}, {})", i + 1, c.name, c.tier, spell_cost(g, id))
+                    format!("{} {} (spell, tier {}, {}){gift}", i + 1, c.name, c.tier, spell_cost(g, id))
                 } else {
-                    format!("{} {} {}/{} (tier {}, {})", i + 1, c.name, c.attack, c.health, c.tier, card_tribes(c))
+                    format!("{} {} {}/{} (tier {}, {}){gift}", i + 1, c.name, c.attack, c.health, c.tier, card_tribes(c))
                 }
             })
             .collect();

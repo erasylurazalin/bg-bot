@@ -275,7 +275,11 @@ fn a_scripted_session_through_the_binary_writes_the_file() {
 fn the_default_game_is_unrigged_with_no_free_rolls() {
     let dir = tmp("default");
     let d = dir.to_str().unwrap();
-    let (status, out) = run_binary(&["--seed", "9", "--boards", d], "1
+    // Seed 10: the first two heroes of the pick are ordinary ones, so the
+    // scripted Refresh on turn 1 is legal (a skipped turn or a power's
+    // Discover would block it; the hero table moved when the Dark Gift
+    // heroes came in).
+    let (status, out) = run_binary(&["--seed", "10", "--boards", d], "1
 r
 e
 ");
@@ -285,12 +289,12 @@ e
     // no free Refreshes and no tribe prompt: the first Refresh costs gold
     assert!(out.contains("Free rolls 0"), "{out}");
     assert!(out.contains("Gold 2/3"), "{out}");
-    assert_eq!(boards_in(&dir), ["unlabeled-9.toml"], "piped input keeps 'unlabeled'");
-    let rec = record::load_file(&Data::bundled().cards, &dir.join("unlabeled-9.toml")).unwrap();
+    assert_eq!(boards_in(&dir), ["unlabeled-10.toml"], "piped input keeps 'unlabeled'");
+    let rec = record::load_file(&Data::bundled().cards, &dir.join("unlabeled-10.toml")).unwrap();
     assert_eq!((rec.tribe, rec.label.as_str(), rec.free_rolls), (None, "unlabeled", 0));
-    let text = std::fs::read_to_string(dir.join("unlabeled-9.toml")).unwrap();
+    let text = std::fs::read_to_string(dir.join("unlabeled-10.toml")).unwrap();
     assert!(text.contains("rigged = false") && !text.contains("tribe"), "{text}");
-    let s = open_session(9, None, &dir);
+    let s = open_session(10, None, &dir);
     assert_eq!(s.game().lobby.len(), 5);
     let (status, out) = run_binary(&["--tribe", "nope"], "");
     assert!(!status.success());

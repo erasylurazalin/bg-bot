@@ -25,10 +25,17 @@ impl Game {
                     held[slot] += m.pool_copies as u32;
                 }
             }
-            for &c in &pl.discover {
-                if !cards.get(c).is_spell() {
+            for (i, &c) in pl.discover.iter().enumerate() {
+                if !cards.get(c).is_spell() && !cards.get(c).token {
                     let slot = cards.get(c).pool_slot as usize;
-                    held[slot] += 1;
+                    // A Dark Gift offer holds one copy, three for a Golden one
+                    // and none for a Dagger copy.
+                    let n = if pl.dark_offer {
+                        pl.discover_copies.get(i).copied().unwrap_or(1)
+                    } else {
+                        1
+                    };
+                    held[slot] += n as u32;
                 }
             }
             // A Tavern minion may be above the player's tier: Robust

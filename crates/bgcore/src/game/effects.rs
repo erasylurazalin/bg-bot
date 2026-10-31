@@ -123,7 +123,7 @@ impl Game {
         pl.deathrattles_triggered = pl.deathrattles_triggered.saturating_add(n);
         let on_board = if board { &mut pl.board[..] } else { &mut [] };
         for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(on_board) {
-            for (card, golden) in m.parts().collect::<ArrayVec<_, { crate::MAX_ATTACHED + 1 }>>() {
+            for (card, golden) in m.parts().collect::<ArrayVec<_, { crate::MAX_ATTACHED + crate::MAX_GIFTS + 1 }>>() {
                 if let Some((a, h)) = cards.get(card).buff_per_deathrattle {
                     let k = n as i32 * if golden { 2 } else { 1 };
                     m.attack += a * k;
@@ -296,7 +296,7 @@ impl Game {
                 if let Some(CardMod::AlsoBoard(want)) = also {
                     let cards = &self.data.cards;
                     for o in &mut self.players[p].board {
-                        if cards.get(o.card).tribes.has(want) {
+                        if cards.tribes_of(o).has(want) {
                             buff(o, attack * n, health * n);
                         }
                     }
@@ -350,7 +350,7 @@ impl Game {
                     .board
                     .iter()
                     .enumerate()
-                    .filter(|(_, m)| cards.get(m.card).tribes.has(Tribe::Demon))
+                    .filter(|(_, m)| cards.tribes_of(m).has(Tribe::Demon))
                     .map(|(i, _)| i)
                     .collect();
                 for i in demons {
@@ -510,6 +510,30 @@ impl Game {
                     }
                 }
             }
+            // Dark Gifts Charisma, triggered in the shop (a Rally an
+            // Activate triggers): a random minion of the board's most common
+            // type.
+            Effect::GetMostCommonTypeMinion => {
+                let tribes: ArrayVec<crate::cards::Tribes, { crate::BOARD }> =
+                    self.players[p].board.iter().map(|m| self.data.cards.tribes_of(m)).collect();
+                if let Some(t) = crate::darkgifts::most_common_type(&tribes, &mut self.rng) {
+                    let tier = self.players[p].tier;
+                    if let Some(c) = self.data.cards.random_pool_minion(
+                        t,
+                        tier,
+                        self.lobby,
+                        &mut self.rng,
+                    ) {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
+            // Dark Gifts Mystic Essence: a random Tavern spell of any cost.
+            Effect::GetAnyTavernSpell => {
+                if let Some(c) = self.data.cards.random_spell(crate::MAX_TIER, self.lobby, &mut self.rng) {
+                    self.give_generated_tracking(p, c, pos);
+                }
+            }
             Effect::GetRandomSpell { cost, count } => {
                 let total = count as i32 * mul * runs as i32;
                 for _ in 0..total {
@@ -616,12 +640,12 @@ impl Game {
                 let n = mul * runs as i32;
                 let cards = &self.data.cards;
                 for o in &mut self.players[p].board {
-                    if cards.get(o.card).tribes.has(tribe) {
+                    if cards.tribes_of(o).has(tribe) {
                         buff(o, attack * n, health * n);
                     }
                 }
                 for o in &mut self.players[p].hand {
-                    if cards.get(o.card).tribes.has(tribe) {
+                    if cards.tribes_of(o).has(tribe) {
                         buff(o, attack * n, health * n);
                     }
                 }
@@ -633,7 +657,7 @@ impl Game {
                     .board
                     .iter()
                     .enumerate()
-                    .any(|(i, m)| i != *pos && cards.get(m.card).tribes.has(tribe));
+                    .any(|(i, m)| i != *pos && cards.tribes_of(m).has(tribe));
                 if another {
                     for _ in 0..n {
                         let _ = self.players[p]
@@ -692,7 +716,7 @@ impl Game {
                     let cards = &self.data.cards;
                     let board = &mut self.players[p].board;
                     let tribes: ArrayVec<Tribes, BOARD> =
-                        board.iter().map(|m| cards.get(m.card).tribes).collect();
+                        board.iter().map(|m| cards.tribes_of(m)).collect();
                     for i in pick_one_per_type(&tribes, &mut self.rng) {
                         if !cards.get(board[i].card).fixed_stats {
                             buff(&mut board[i], attack, health);
@@ -1126,7 +1150,7 @@ impl Game {
         // Keywords and +5/+5.
         let claw = pl.tp.consume_claw;
         let by_demon = claw != (0, 0)
-            && data.cards.get(pl.board[pos].card).tribes.has(Tribe::Demon);
+            && data.cards.tribes_of(&pl.board[pos]).has(Tribe::Demon);
         let m = &mut pl.board[pos];
         let k = stat_mul.max(1) as i32;
         buff(m, eaten.attack * k, eaten.health * k);

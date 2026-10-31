@@ -71,13 +71,18 @@ How to play (numbers are what the screen shows, counting from 1):
   u         upgrade the Tavern           e        end turn
   hp        press your hero power (a target prompt follows if it needs one)
   hp2       press your second hero power (Genn, Reinvigorating Light)
+  dg        press the Dark Discovery button (3 Gold, 3 uses a game, turn 3 on)
+  gift 2 f  give board minion 2 the Dark Gift whose name holds an 'f'
+            (Fortitude, Furtiveness); a name one gift alone matches works
   ? 3       full card text: Tavern 3     ?s spell slot   ?h1 hand 1   ?b2 board 2   ?d1 Discover option 1
   undo      take back the last action (works across turns, even an e)
   label X   set or change the label of this game (the build you play, e.g. lobster)
   quit      save and exit                help     this list
 Tags: T taunt, DS divine shield, W windfury, V venomous, R reborn, S stealth, G golden,
 M magnetic, A1 Activate ready (cost 1), L2 locked in hand 2 more turns,
-T4 locked in hand until the Tavern is Tier 4.
+T4 locked in hand until the Tavern is Tier 4, and a Dark Gift's short name
+(F for Fortitude, SG3 for Steady Growth with +3/+4, I2 for Incubation with 2
+turns left).
 A Magnetic minion merges into the Mech at the position you give; to put it on the board
 unmerged, play it at the right end (plain p1).
 The pool is this game's 5-tribe lobby (with --tribe it is the tribes you named). Every turn
@@ -471,7 +476,7 @@ impl Session {
     }
 
     /// The engine actions for a command, or why it can't be done now.
-    fn plan(&self, cmd: Cmd) -> Result<Vec<Action>, String> {
+    fn plan(&mut self, cmd: Cmd) -> Result<Vec<Action>, String> {
         let g = &self.game;
         let pl = &g.players[0];
         let open = pl.pending_target.is_some()
@@ -509,6 +514,30 @@ impl Session {
             Cmd::Roll => one(Action::Roll),
             Cmd::Power => one(Action::HeroPower),
             Cmd::Power2 => one(Action::HeroPower2),
+            Cmd::DarkGift => one(Action::DarkGift),
+            Cmd::Gift { slot, name } => {
+                // A gift lands now: the sandbox is how a build tries one out.
+                let pos = idx(slot, pl.board.len(), "board minion")? as usize;
+                let turn = g.turn.max(1);
+                let names: Vec<String> = g
+                    .data
+                    .gifts
+                    .gifts
+                    .iter()
+                    .map(|x| x.name.clone())
+                    .filter(|x| x.to_lowercase().contains(&name))
+                    .collect();
+                let mut game = self.game.clone();
+                if !names.iter().any(|x| game.give_gift(0, pos, x, turn)) {
+                    return Err(if names.is_empty() {
+                        format!("no Dark Gift matches {name:?}")
+                    } else {
+                        format!("{name:?} matches {} gifts: {}", names.len(), names.join(", "))
+                    });
+                }
+                self.game = game;
+                Ok(Vec::new())
+            }
             Cmd::Freeze => one(Action::Freeze),
             Cmd::Upgrade => one(Action::Level),
             Cmd::End => one(Action::EndTurn),

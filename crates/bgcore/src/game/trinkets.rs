@@ -160,7 +160,7 @@ impl Game {
         let mut out = [[0u32; Tribe::EVERY.len()]; 2];
         let cards = &self.data.cards;
         for m in &self.players[p].board {
-            let ts = cards.get(m.card).tribes;
+            let ts = cards.tribes_of(m);
             for (i, t) in Tribe::EVERY.into_iter().enumerate() {
                 if ts.has(t) {
                     out[0][i] += 1;
@@ -169,7 +169,7 @@ impl Game {
             }
         }
         for m in &self.players[p].hand {
-            let ts = cards.get(m.card).tribes;
+            let ts = cards.tribes_of(m);
             for (i, t) in Tribe::EVERY.into_iter().enumerate() {
                 if ts.has(t) {
                     out[1][i] += 1;
@@ -766,6 +766,15 @@ impl Game {
             Act::Get { card, count } => {
                 self.run_effect(p, &mut pos, Effect::GetCard { card, count }, false, 1)
             }
+            Act::DarkGift { tier, yours, golden, use_table } => {
+                self.open_dark_gift_trinket(p, tier, yours, golden, use_table);
+            }
+            Act::DarkGiftCopies => {
+                let _ = self.players[p]
+                    .discover_queue
+                    .try_push(super::DiscoverRequest::DarkGiftCopies);
+                self.maybe_start_discover(p);
+            }
             Act::Gold(n) => self.execute_spell_effect(p, SpellEffect::GainGold(n), false),
             Act::MaxGold(n) => self.execute_spell_effect(p, SpellEffect::MaxGold(n), false),
             Act::UpgradeDiscount(n) => {
@@ -943,7 +952,7 @@ impl Game {
                 let cards = &self.data.cards;
                 let mut types = 0u8;
                 for m in &self.players[p].board {
-                    let ts = cards.get(m.card).tribes;
+                    let ts = cards.tribes_of(m);
                     if ts.is_empty() || seen.overlaps(ts) {
                         continue;
                     }
@@ -1087,7 +1096,7 @@ impl Game {
                         .board
                         .iter()
                         .enumerate()
-                        .filter(|(_, m)| cards.get(m.card).tribes.has(t))
+                        .filter(|(_, m)| cards.tribes_of(m).has(t))
                         .map(|(i, _)| i)
                         .collect();
                     if of.is_empty() {
@@ -1354,7 +1363,7 @@ impl Game {
                 let found = self.players[p]
                     .board
                     .iter()
-                    .position(|m| self.data.cards.get(m.card).tribes.has(tribe));
+                    .position(|m| self.data.cards.tribes_of(m).has(tribe));
                 if let Some(i) = found {
                     self.cast_spell_on(p, card, i);
                 }
@@ -1364,7 +1373,7 @@ impl Game {
                     .board
                     .iter()
                     .enumerate()
-                    .filter(|(_, m)| self.data.cards.get(m.card).tribes.has(tribe))
+                    .filter(|(_, m)| self.data.cards.tribes_of(m).has(tribe))
                     .map(|(i, _)| i)
                     .collect();
                 if picks.is_empty() {
@@ -1476,7 +1485,7 @@ impl Game {
                 let mut counts = [0u8; Tribe::EVERY.len()];
                 let cards = &self.data.cards;
                 for m in &self.players[p].board {
-                    let ts = cards.get(m.card).tribes;
+                    let ts = cards.tribes_of(m);
                     for (i, t) in Tribe::EVERY.into_iter().enumerate() {
                         if ts.has(t) {
                             counts[i] = counts[i].saturating_add(1);

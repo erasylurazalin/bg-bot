@@ -1,8 +1,10 @@
 # How Dark Gifts work
 
 Era's rules and sources for Dark Gifts. Same weight as `DESIGN.md` Part 2.
-Not built yet. The evidence from the game data and Era's logs is in
-`docs/briefs/darkgift-facts.md`.
+Built 2026-10-31 (the table is `darkgifts.toml`, the code is
+`crates/bgcore/src/darkgifts.rs` and `crates/bgcore/src/game/darkgifts.rs`,
+see `docs/ENGINE.md` "Dark Gifts"; Dark Paradox stays out). The evidence from
+the game data and Era's logs is in `docs/briefs/darkgift-facts.md`.
 
 ## What a gift is
 
@@ -85,3 +87,16 @@ The pool the offers come from:
   Maldraxxus Dagger, Tras'tath, Xavius) use the same gift rules, with the
   minion rules from their own text. Tras'tath's Discover of a Tier 5
   minion picks its gifts as if it were turn 7.
+- **Gifts stack.** A triple's golden keeps every copy's gifts, duplicates
+  included: three copies with Toughened Shield, Fresh Perspective and
+  Toughened Shield give a golden with two Toughened Shields and one Fresh
+  Perspective, and both Toughened Shields fire. Assume every gift stacks
+  (two Jaws of Death trigger the Deathrattles twice) unless stacking means
+  nothing: keyword gifts (Harpy's Talons, Furtiveness, Toxicity,
+  Amalgamation) and gifts that set a state (Toreth's Blessing's three
+  hits, Gilding) don't add up.
+- **Magnetic minions and gifts.** A Magnetic minion is never offered with a
+  gift. The only way one gets a gift is Maldraxxus Dagger (a copy of a
+  friendly minion). When a gifted Magnetic minion is Magnetized onto a
+  Mech, its gift is lost (Era thinks so). The Mech it lands on keeps its
+  own gifts.

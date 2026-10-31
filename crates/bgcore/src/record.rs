@@ -161,8 +161,26 @@ struct FileMinion {
     both_effects: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     linked: Option<u16>,
+    /// Toreth's Blessing's hits left on the shield, when above one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shield_hits: Option<u8>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attached: Vec<FileAttached>,
+    /// The Dark Gifts on the minion, and the small counter each one carries
+    /// (a countdown, the turn Steady Growth landed, Toreth's shield hits).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    gifts: Vec<FileGift>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct FileGift {
+    card: String,
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    state: u8,
+}
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
 }
 
 fn keyword_names(k: Keywords) -> Vec<String> {
@@ -196,10 +214,16 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         gem_health: differs(m.gem_health as u64, 0).map(|v| v as i32),
         both_effects: m.both_effects.then_some(true),
         linked: differs(m.linked as u64, 0).map(|v| v as u16),
+        shield_hits: differs(m.shield_hits as u64, 0).map(|v| v as u8),
         attached: m
             .attached_slice()
             .iter()
             .map(|a| FileAttached { card: db.get(a.card).name.clone(), golden: a.golden })
+            .collect(),
+        gifts: m
+            .gift_slice()
+            .iter()
+            .map(|g| FileGift { card: db.get(g.card()).name.clone(), state: g.state() })
             .collect(),
     }
 }
@@ -278,6 +302,12 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     for a in &f.attached {
         m.push_attached(Attached { card: card_id(db, &a.card)?, golden: a.golden });
+    }
+    for g in &f.gifts {
+        m.push_gift(crate::minion::GiftOn::new(card_id(db, &g.card)?, g.state));
+    }
+    if let Some(v) = f.shield_hits {
+        m.shield_hits = v;
     }
     Ok(m)
 }

@@ -143,7 +143,7 @@ impl Game {
         }
         // A trinket that watches spells cast on a friendly minion.
         self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
-        let target_tribes = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+        let target_tribes = self.data.cards.tribes_of(&self.players[p].board[target_pos]);
         let len = self.players[p].board.len();
         for i in 0..len {
             if i >= self.players[p].board.len() {
@@ -392,6 +392,9 @@ impl Game {
             }
             self.players[p].spells_cast_turn = self.players[p].spells_cast_turn.saturating_add(1);
             self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
+            // Dark Gifts Spell Siphon counts Tavern spells, never a Blood
+            // Gem or a Banana (DESIGN.md "Spells versus Tavern spells").
+            self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
         }
     }
 
@@ -574,7 +577,7 @@ impl Game {
                     for o in &mut self.players[p].board {
                         let ok = match pass {
                             0 => true,
-                            1 => cards.get(o.card).tribes.has(Tribe::Dragon),
+                            1 => cards.tribes_of(o).has(Tribe::Dragon),
                             _ => o.keywords.has(Keywords::DIVINE_SHIELD),
                         };
                         if ok {
@@ -624,7 +627,7 @@ impl Game {
                 let cards = &self.data.cards;
                 let types = Tribe::EVERY
                     .iter()
-                    .filter(|t| self.players[p].board.iter().any(|m| cards.get(m.card).tribes.has(**t)))
+                    .filter(|t| self.players[p].board.iter().any(|m| cards.tribes_of(m).has(**t)))
                     .count();
                 let times = 1 + types;
                 for _ in 0..times {
@@ -651,7 +654,7 @@ impl Game {
                 let cards = &self.data.cards;
                 let board = &mut self.players[p].board;
                 let tribes: ArrayVec<Tribes, BOARD> =
-                    board.iter().map(|m| cards.get(m.card).tribes).collect();
+                    board.iter().map(|m| cards.tribes_of(m)).collect();
                 for i in pick_one_per_type(&tribes, &mut self.rng) {
                     buff(&mut board[i], attack + da, health + dh);
                 }
@@ -660,7 +663,7 @@ impl Game {
                 let cards = &self.data.cards;
                 let mut counts = [0u8; Tribe::EVERY.len()];
                 for m in &self.players[p].board {
-                    let t = cards.get(m.card).tribes;
+                    let t = cards.tribes_of(m);
                     for (k, tribe) in Tribe::EVERY.iter().enumerate() {
                         // only a lobby tribe can be discovered from, so only
                         // lobby tribes count toward the most common one
@@ -734,7 +737,7 @@ impl Game {
                 let cards = &self.data.cards;
                 let mut counts = [0u8; Tribe::EVERY.len()];
                 for m in &self.players[p].board {
-                    let t = cards.get(m.card).tribes;
+                    let t = cards.tribes_of(m);
                     for (k, tribe) in Tribe::EVERY.iter().enumerate() {
                         // only a lobby tribe can be drawn from, so only lobby
                         // tribes count toward the most common one

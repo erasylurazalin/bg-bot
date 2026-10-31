@@ -55,7 +55,8 @@ fn load_real_boards(dir: &str) -> Result<Arc<RealBoards>, String> {
         .map_err(|e| format!("ref/bg-cards.json (the card id mapping): {e}"))?;
     let ids = CardIdMap::parse(&ref_json)?;
     let (specs, unknown): (Vec<RealBoardSpec>, Vec<String>) = parse_board_files(&files, &ids)?;
-    let (boards, unmatched) = RealBoards::build(&specs, &Data::bundled().cards);
+    let data = Data::bundled();
+    let (boards, unmatched) = RealBoards::build(&specs, &data.cards, &data.gifts);
     let mut by_name = unknown;
     by_name.extend(unmatched);
     println!(

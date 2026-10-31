@@ -72,7 +72,7 @@ def load(directory=DEFAULT_DIR, ref: Path = REF_CARDS, cards_toml: Path = CARDS_
 
     Returns (specs, unknown): specs is the list for bgpy.VecEnv(real_boards=..),
     one (turn, tier, minions, hand, counters, deity) per board; a minion is
-    (name, attack, health, golden, keywords, numbers), counters is the side's
+    (name, attack, health, golden, keywords, numbers, dark_gifts), counters is the side's
     player-level numbers by their file keys (a number the log did not show is
     left out, and the engine uses the base value), and deity is
     (name, attack, health, golden) or None. unknown lists every minion that
@@ -105,7 +105,8 @@ def load(directory=DEFAULT_DIR, ref: Path = REF_CARDS, cards_toml: Path = CARDS_
                     name = STAND_IN
             out.append((name, m["attack"], m["health"],
                         bool(m["golden"]) or id_golden, list(m["keywords"]),
-                        list(m.get("numbers") or ())))
+                        list(m.get("numbers") or ()),
+                        list(m.get("dark_gifts") or ())))
         return out
 
     def deity(d):

@@ -1,7 +1,7 @@
 use arrayvec::ArrayVec;
 use serde::Deserialize;
 
-use crate::minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
+use crate::minion::{Attached, CardId, GiftOn, Keywords, MAX_ATTACHED, Minion};
 use crate::rng::Rng;
 use crate::BOARD;
 
@@ -490,6 +490,11 @@ pub enum Effect {
     /// before this minion's own swing (Jailbird Juggernaut). Fights only;
     /// the shop copy just summons it.
     SummonStatCopyAttacker { card: CardId },
+    /// Get one random Tavern spell of any cost (Dark Gifts Mystic Essence).
+    GetAnyTavernSpell,
+    /// Rally (Dark Gifts Charisma): get a random minion of the player's most
+    /// common type on the board. Nothing when the board has no type.
+    GetMostCommonTypeMinion,
 }
 
 impl Effect {
@@ -607,6 +612,9 @@ impl Effect {
             | Effect::GemBonus { .. }
             | Effect::GetRandomChooseOne(_)
             | Effect::SummonStatCopyAttacker { .. }
+            | Effect::GetAnyTavernSpell
+            | Effect::GetMostCommonTypeMinion
+            | Effect::FreeRefreshes(_)
             | Effect::DamageTargetAndNeighbor => true,
             _ => false,
         }
@@ -958,6 +966,16 @@ pub enum Deathrattle {
         health: i32,
         per_improvement: (i32, i32),
     },
+    /// Dark Gifts Golemancy: summon a `card` token with the dead minion's
+    /// current stats, next to where it stood.
+    SummonShaped { card: CardId },
+    /// Dark Gifts Offensive Sacrifice: give the dead minion's Attack to one
+    /// other friendly minion picked at random. The gift never doubles, so a
+    /// golden host gives the same.
+    GiveOwnAttack,
+    /// Dark Gifts Defensive Sacrifice: give the dead minion's maximum Health
+    /// to one other friendly minion picked at random.
+    GiveOwnHealth,
 }
 
 /// "After you play a minion of `tribe`, ..." for the minion that has it.
@@ -983,6 +1001,15 @@ pub enum EndOfTurn {
     CopyLastSpell,
     /// Any generic effect (one that needs no choice).
     Effect(Effect),
+    /// Dark Gifts Echoing Voice: trigger this minion's own Battlecries now.
+    TriggerOwnBattlecry,
+    /// Dark Gifts Polarization: Magnetize a random Mech from the pool to it.
+    MagnetizeRandomMech,
+    /// Dark Gifts Steady Growth: gain the +attack/+health fixed when the gift
+    /// landed, which lives in the gift's own counter on the minion as two
+    /// nibbles (attack low, health high). The card data names the numbers it
+    /// starts from; the counter is what the landing wrote.
+    GiftBuffSelf,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1006,6 +1033,23 @@ pub enum StartOfCombat {
     /// Gain the stats of every minion in your hand, for this combat (Choral
     /// Mrrrglr). A golden one counts the hand twice.
     GainHandStats,
+    /// Dark Gifts Resistance: double this minion's Health.
+    DoubleHealth,
+    /// Dark Gifts Hostility: double this minion's Attack.
+    DoubleAttack,
+    /// Dark Gifts Transcendence: triple this minion's Attack and Health.
+    TripleStats,
+    /// Dark Gifts Admiration: gain the Attack of the minion to its left (of
+    /// its own side, as it stands now). Nothing when it is left-most.
+    GainLeftAttack,
+    /// Dark Gifts Worship: gain the stats of your Deity. Nothing when you
+    /// have none.
+    GainDeityStats,
+    /// Dark Gifts Jaws of Death: trigger this minion's own Deathrattles.
+    TriggerOwnDeathrattles,
+    /// Dark Gifts Doppelganger: summon a copy of this minion (no gift
+    /// doubling; the copy is plain stats and keeps the keywords it has).
+    SummonOwnCopy,
 }
 
 /// "While this is in your hand, after you play a minion of a tribe, ...".
@@ -1401,6 +1445,69 @@ pub struct Card {
     /// spell never offers (Unmasked Identity's exclusion list). Data only;
     /// the game resolves them against the hero table.
     pub exclude_heroes: Vec<String>,
+    /// Whenever its owner plays a card (a Blood Gem and a Banana included),
+    /// this minion on the board gains this much (Dark Gifts Dexterity,
+    /// Sharpened Sword, Toughened Shield). A gift, never on a pool card.
+    pub on_card_play: Option<(i32, i32)>,
+    /// Gets this much for every Battlecry its owner has triggered this game,
+    /// wherever it is (Dark Gifts Battle Scars).
+    pub buff_per_battlecry: Option<(i32, i32)>,
+    /// Gets this much for every Tavern spell its owner has cast this game
+    /// (Dark Gifts Spell Siphon).
+    pub buff_per_tavern_spell: Option<(i32, i32)>,
+    /// Gets this much for every card its owner has discarded this game
+    /// (Dark Gifts Desecration).
+    pub buff_per_discard: Option<(i32, i32)>,
+    /// Its owner gets this many extra plain copies of it when it enters the
+    /// hand (Dark Gifts Double Vision). The copies carry no gifts.
+    pub acquire_copies: u8,
+    /// While its owner plays an Activate, the effect runs this many times in
+    /// all (Dark Gifts Efficiency: 2).
+    pub activate_twice: bool,
+    /// Its Divine Shield takes this many hits to break (Dark Gifts Toreth's
+    /// Blessing: 3). The landing sets the host's `shield_hits`.
+    pub shield_hits: u8,
+    /// Immune while attacking, in a fight (Dark Gifts Invulnerability).
+    pub immune_attacking: bool,
+    /// Has all ten minion types (Dark Gifts Amalgamation). Every tribe check
+    /// on the minion reads it through `CardDb::tribes_of`.
+    pub all_types: bool,
+    /// Reborn with full stats and its Bonus Keywords (Dark Gifts Persisting
+    /// Horror). Fights only.
+    pub reborn_full: bool,
+    /// Land on the host as a Golden minion (Dark Gifts Gilding).
+    pub makes_golden: bool,
+    /// A gift that does not stack: a second copy of it on the same minion
+    /// changes nothing (docs/darkgifts.md "Gifts stack": the keyword gifts,
+    /// Amalgamation, Toreth's Blessing's hits and Gilding, which set a state
+    /// instead of firing again). Every other gift stacks.
+    pub gift_unique: bool,
+    /// Its end of turn effects also trigger at the start of its owner's turn
+    /// (Dark Gifts Time Turning).
+    pub end_of_turn_at_start: bool,
+    /// A countdown the gift runs at the start of its owner's turn (Dark Gifts
+    /// Incubation, Replication, Affinity).
+    pub countdown: Option<Countdown>,
+}
+
+/// "Count down N turns at the start of your turn, then do this" (Dark Gifts
+/// Incubation, Replication, Affinity). The turns left live in the gift's own
+/// counter on the minion (`GiftOn::state`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Countdown {
+    pub turns: u8,
+    pub effect: CountdownEffect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CountdownEffect {
+    /// Double the minion's Attack and Health (Incubation).
+    DoubleStats,
+    /// Get a plain copy of the minion (Replication).
+    PlainCopy,
+    /// Get a random minion of the minion's own type (Affinity). None when it
+    /// has no type.
+    RandomMinionOfType,
 }
 
 impl Card {
@@ -1677,6 +1784,38 @@ struct RawCard {
     after_choose_one_play: Option<u8>,
     deity: Option<String>,
     on_card_added: Option<RawBuff>,
+    /// Dark Gifts: see the same names on `Card`.
+    on_card_play: Option<[i32; 2]>,
+    buff_per_battlecry: Option<[i32; 2]>,
+    buff_per_tavern_spell: Option<[i32; 2]>,
+    buff_per_discard: Option<[i32; 2]>,
+    #[serde(default)]
+    acquire_copies: u8,
+    #[serde(default)]
+    activate_twice: bool,
+    #[serde(default)]
+    shield_hits: u8,
+    #[serde(default)]
+    immune_attacking: bool,
+    #[serde(default)]
+    all_types: bool,
+    #[serde(default)]
+    reborn_full: bool,
+    #[serde(default)]
+    makes_golden: bool,
+    #[serde(default)]
+    gift_unique: bool,
+    #[serde(default)]
+    end_of_turn_at_start: bool,
+    countdown: Option<RawCountdown>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCountdown {
+    turns: u8,
+    /// "double_stats", "plain_copy" or "random_minion_of_type".
+    effect: String,
 }
 
 #[derive(Deserialize)]
@@ -2078,6 +2217,12 @@ struct RawEffect {
     /// Add to the "after the Tavern is Refreshed this game" amount.
     refresh_buff: Option<[i32; 2]>,
     free_refreshes: Option<u8>,
+    /// Dark Gifts: one random Tavern spell of any cost.
+    #[serde(default)]
+    get_any_tavern_spell: bool,
+    /// Dark Gifts: a random minion of the player's most common type.
+    #[serde(default)]
+    get_most_common_type_minion: bool,
     /// Multiply a buff by one plus the named counter, then raise it.
     #[serde(default)]
     improving_counter: Option<String>,
@@ -2176,6 +2321,13 @@ struct RawDeathrattle {
     /// minion's `improvements`.
     tavern_buff: Option<[i32; 2]>,
     per_improvement: Option<[i32; 2]>,
+    /// Dark Gifts Golemancy: a token summoned with the dead minion's stats.
+    summon_shaped: Option<String>,
+    /// Dark Gifts Offensive Sacrifice, Defensive Sacrifice.
+    #[serde(default)]
+    give_own_attack: bool,
+    #[serde(default)]
+    give_own_health: bool,
 }
 
 #[derive(Deserialize)]
@@ -2195,6 +2347,12 @@ struct RawEndOfTurn {
     count: Option<u8>,
     copy_last_spell: Option<bool>,
     effect: Option<RawEffect>,
+    #[serde(default)]
+    trigger_own_battlecry: bool,
+    #[serde(default)]
+    magnetize_random_mech: bool,
+    #[serde(default)]
+    gift_buff_self: bool,
 }
 
 #[derive(Deserialize)]
@@ -2213,6 +2371,21 @@ struct RawStartOfCombat {
     gain_hand_attack: bool,
     #[serde(default)]
     gain_hand_stats: bool,
+    /// Dark Gifts.
+    #[serde(default)]
+    double_health: bool,
+    #[serde(default)]
+    double_attack: bool,
+    #[serde(default)]
+    triple_stats: bool,
+    #[serde(default)]
+    gain_left_attack: bool,
+    #[serde(default)]
+    gain_deity_stats: bool,
+    #[serde(default)]
+    trigger_own_deathrattles: bool,
+    #[serde(default)]
+    summon_own_copy: bool,
 }
 
 #[derive(Deserialize)]
@@ -2824,6 +2997,10 @@ impl CardDb {
                 Effect::GetRandomChooseOne(n)
             } else if let Some(name) = &b.summon_stat_copy {
                 Effect::SummonStatCopyAttacker { card: minion_id(name)? }
+            } else if b.get_any_tavern_spell {
+                Effect::GetAnyTavernSpell
+            } else if b.get_most_common_type_minion {
+                Effect::GetMostCommonTypeMinion
             } else if let Some([attack, health]) = b.refresh_buff {
                 Effect::RefreshBuff { attack, health }
             } else if let Some(n) = b.free_refreshes {
@@ -3220,6 +3397,13 @@ impl CardDb {
                 } else if let Some(name) = &d.get {
                     let card = generated_id(name).map_err(&err)?;
                     Deathrattle::GetCard { card, count: d.count.unwrap_or(1) }
+                } else if let Some(name) = &d.summon_shaped {
+                    let card = token_id(name).map_err(&err)?;
+                    Deathrattle::SummonShaped { card }
+                } else if d.give_own_attack {
+                    Deathrattle::GiveOwnAttack
+                } else if d.give_own_health {
+                    Deathrattle::GiveOwnHealth
                 } else if let Some([attack, health]) = d.tavern_buff {
                     Deathrattle::TavernBuff {
                         attack,
@@ -3254,6 +3438,12 @@ impl CardDb {
                     EndOfTurn::GetCard { card, count: e.count.unwrap_or(1) }
                 } else if e.copy_last_spell == Some(true) {
                     EndOfTurn::CopyLastSpell
+                } else if e.trigger_own_battlecry {
+                    EndOfTurn::TriggerOwnBattlecry
+                } else if e.magnetize_random_mech {
+                    EndOfTurn::MagnetizeRandomMech
+                } else if e.gift_buff_self {
+                    EndOfTurn::GiftBuffSelf
                 } else if let Some(eff) = &e.effect {
                     let effect = parse_effect(eff).map_err(&err)?;
                     if effect.needs_choice() {
@@ -3285,6 +3475,20 @@ impl CardDb {
                     StartOfCombat::GainHighestHandAttack
                 } else if s.gain_hand_stats {
                     StartOfCombat::GainHandStats
+                } else if s.double_health {
+                    StartOfCombat::DoubleHealth
+                } else if s.double_attack {
+                    StartOfCombat::DoubleAttack
+                } else if s.triple_stats {
+                    StartOfCombat::TripleStats
+                } else if s.gain_left_attack {
+                    StartOfCombat::GainLeftAttack
+                } else if s.gain_deity_stats {
+                    StartOfCombat::GainDeityStats
+                } else if s.trigger_own_deathrattles {
+                    StartOfCombat::TriggerOwnDeathrattles
+                } else if s.summon_own_copy {
+                    StartOfCombat::SummonOwnCopy
                 } else if let Some(eff) = &s.effect {
                     let effect = parse_effect(eff).map_err(&err)?;
                     if !effect.runs_in_fights() {
@@ -3601,6 +3805,31 @@ impl CardDb {
                 choose_one_cover: c.choose_one_cover.unwrap_or(0),
                 after_choose_one_play: c.after_choose_one_play,
                 exclude_heroes: Vec::new(),
+                on_card_play: c.on_card_play.map(|[a, h]| (a, h)),
+                buff_per_battlecry: c.buff_per_battlecry.map(|[a, h]| (a, h)),
+                buff_per_tavern_spell: c.buff_per_tavern_spell.map(|[a, h]| (a, h)),
+                buff_per_discard: c.buff_per_discard.map(|[a, h]| (a, h)),
+                acquire_copies: c.acquire_copies,
+                activate_twice: c.activate_twice,
+                shield_hits: c.shield_hits,
+                immune_attacking: c.immune_attacking,
+                all_types: c.all_types,
+                reborn_full: c.reborn_full,
+                makes_golden: c.makes_golden,
+                gift_unique: c.gift_unique,
+                end_of_turn_at_start: c.end_of_turn_at_start,
+                countdown: match &c.countdown {
+                    None => None,
+                    Some(cd) => Some(Countdown {
+                        turns: cd.turns,
+                        effect: match cd.effect.as_str() {
+                            "double_stats" => CountdownEffect::DoubleStats,
+                            "plain_copy" => CountdownEffect::PlainCopy,
+                            "random_minion_of_type" => CountdownEffect::RandomMinionOfType,
+                            other => return Err(err(format!("unknown countdown {other:?}"))),
+                        },
+                    }),
+                },
             });
         }
 
@@ -3751,6 +3980,20 @@ impl CardDb {
                 choose_one_cover: 0,
                 after_choose_one_play: None,
                 exclude_heroes: sp.effect.as_ref().map_or(Vec::new(), |e| e.exclude_heroes.clone()),
+                on_card_play: None,
+                buff_per_battlecry: None,
+                buff_per_tavern_spell: None,
+                buff_per_discard: None,
+                acquire_copies: 0,
+                activate_twice: false,
+                shield_hits: 0,
+                immune_attacking: false,
+                all_types: false,
+                reborn_full: false,
+                makes_golden: false,
+                gift_unique: false,
+                end_of_turn_at_start: false,
+                countdown: None,
             });
         }
 
@@ -3809,6 +4052,16 @@ impl CardDb {
         &self.cards[id as usize]
     }
 
+    /// The types of a minion: its card's, or all ten when a Dark Gift gives
+    /// it every type (Amalgamation). Every tribe question about a minion on a
+    /// board, in a hand or in a fight goes through here.
+    pub fn tribes_of(&self, m: &Minion) -> Tribes {
+        if m.n_gifts != 0 && m.has_gift(self, |c| c.all_types) {
+            return Tribes::ALL;
+        }
+        self.get(m.card).tribes
+    }
+
     pub fn by_name(&self, name: &str) -> Option<CardId> {
         if let Some(i) = self.cards.iter().position(|c| c.name == name) {
             return Some(i as CardId);
@@ -3819,6 +4072,19 @@ impl CardDb {
             _ => return None,
         };
         self.cards.iter().position(|c| c.name == alt).map(|i| i as CardId)
+    }
+
+    /// A random Magnetic Mech from the pool (Dark Gifts Polarization). The
+    /// minion that gets it is generated, so no pool copy moves.
+    pub fn random_magnetic_mech(&self, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        self.pick_lobby(
+            |c| {
+                self.cards[c].keywords.has(Keywords::MAGNETIC)
+                    && self.cards[c].tribes.has(Tribe::Mech)
+            },
+            lobby,
+            rng,
+        )
     }
 
     pub fn random_volumizer(&self, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
@@ -4152,6 +4418,9 @@ impl CardDb {
             linked: 0,
             attached: [Attached::default(); MAX_ATTACHED],
             n_attached: 0,
+            gifts: [GiftOn::default(); crate::MAX_GIFTS],
+            n_gifts: 0,
+            shield_hits: 0,
         }
     }
 }

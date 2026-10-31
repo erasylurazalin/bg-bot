@@ -56,6 +56,12 @@ trinket_offer_own = 42
 trinket_offer_other = 7
 trinket_offer_mechanic = 20
 
+# The Dark Discovery button (docs/darkgifts.md): 3 Gold, once a turn, 3 uses
+# a game, locked until turn 3.
+dark_gift_cost = 3
+dark_gift_uses = 3
+dark_gift_turn = 3
+
 # The Bonus Keywords: what "gain a random Bonus Keyword" picks from and what
 # "different Bonus Keywords in your warband" counts. Magnetic is a keyword
 # but not a Bonus Keyword.

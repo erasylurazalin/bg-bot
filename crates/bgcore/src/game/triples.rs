@@ -161,6 +161,19 @@ impl Game {
                 for &a in m.attached_slice() {
                     gold.push_attached(a);
                 }
+                // A triple's golden keeps the gifts of all three copies
+                // (docs/darkgifts.md), and gifts stack: two copies with the
+                // same gift give two of it, except a gift that sets a state.
+                for &g in m.gift_slice() {
+                    if cards.get(g.card()).gift_unique {
+                        gold.push_gift_unique(g);
+                    } else {
+                        gold.push_gift(g);
+                    }
+                }
+                // Toreth's Blessing's shield hits come along; the highest of
+                // the copies is what the golden shield has.
+                gold.shield_hits = gold.shield_hits.max(m.shield_hits);
                 if same {
                     gold.keywords.0 |= m.keywords.0;
                     gold.pool_copies = gold.pool_copies.saturating_add(m.pool_copies);

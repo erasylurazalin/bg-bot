@@ -109,6 +109,15 @@ impl Player {
             discover_locked_tier: 0,
             discover_doomed: false,
             discover_both: false,
+            discover_gifts: ArrayVec::new(),
+            discover_copies: ArrayVec::new(),
+            dark_offer: false,
+            dark_offer_turn: 0,
+            dark_offer_golden: false,
+            dark_offer_locked: 0,
+            dark_gift_uses: data.rules.dark_gift_uses,
+            dark_gift_pressed: false,
+            battlecries_triggered: 0,
             undead_bonus: (0, 0),
             knight_deaths: 0,
             fodder_refreshes: ArrayVec::new(),
@@ -155,7 +164,7 @@ impl Player {
     pub fn board_tribes(&self, cards: &CardDb) -> [u8; TRIBES] {
         let mut out = [0u8; TRIBES];
         for m in &self.board {
-            let t = cards.get(m.card).tribes;
+            let t = cards.tribes_of(m);
             if t.is_neutral() {
                 out[Tribe::EVERY.len()] += 1;
             }
@@ -301,6 +310,38 @@ impl Player {
         self.tavern_buffs.retain(|b| !b.this_turn);
     }
 
+    /// Give back the pool copies an open Discover held, then clear it: the
+    /// one place a Discover is abandoned (a stuck choice, a knockout). A
+    /// Dark Gift offer holds one copy per offer, three for a Golden one and
+    /// none for a Dagger copy.
+    pub(super) fn abandon_discover(&mut self, pool: &mut [u8], cards: &CardDb) {
+        let dark = self.dark_offer;
+        let copies: ArrayVec<u8, DISCOVER> = std::mem::take(&mut self.discover_copies);
+        for (i, c) in self.discover.drain(..).enumerate() {
+            if cards.get(c).is_spell() {
+                continue;
+            }
+            let n = if dark { copies.get(i).copied().unwrap_or(0) } else { 1 };
+            if n == 0 {
+                // A Dagger copy holds no pool copy at all.
+                continue;
+            }
+            let slot = cards.get(c).pool_slot as usize;
+            pool[slot] += n;
+        }
+        self.clear_dark_offer();
+    }
+
+    /// The open Dark Gift offer is gone: its gifts and copies clear with it.
+    pub fn clear_dark_offer(&mut self) {
+        self.discover_gifts.clear();
+        self.discover_copies.clear();
+        self.dark_offer = false;
+        self.dark_offer_turn = 0;
+        self.dark_offer_golden = false;
+        self.dark_offer_locked = 0;
+    }
+
     /// Create a copy of `id` with this player's current Volumizer and Beetle
     /// bonuses applied.
     pub fn make_card(&self, cards: &CardDb, id: CardId, golden: bool, pool_copies: u8) -> Minion {
@@ -386,7 +427,7 @@ impl Player {
             let mut seen = crate::cards::Tribes::NONE;
             let mut types = 0i32;
             for m in &self.board {
-                let ts = cards.get(m.card).tribes;
+                let ts = cards.tribes_of(m);
                 if ts.is_empty() || seen.overlaps(ts) {
                     continue;
                 }
@@ -496,6 +537,7 @@ impl Player {
         let (spell_attack, spell_health) = self.total_spell_bonus(cards);
         Counters {
             health: Some(self.health),
+            bonus_keywords: data.rules.bonus_mask,
             beetle_attack: self.beetle_bonus.0,
             beetle_health: self.beetle_bonus.1,
             improve: self.improve,

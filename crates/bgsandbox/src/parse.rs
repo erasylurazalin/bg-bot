@@ -37,6 +37,11 @@ pub enum Cmd {
     Power,
     /// Press the SECOND hero power button (Genn, Reinvigorating Light).
     Power2,
+    /// Press the Dark Discovery button.
+    DarkGift,
+    /// Give board minion `slot` the Dark Gift whose name starts with `name`
+    /// (`gift 2 fort` for Fortitude), as if it landed now.
+    Gift { slot: usize, name: String },
     End,
     Info(Look),
     Undo,
@@ -160,6 +165,15 @@ pub fn parse(line: &str) -> Result<Cmd, String> {
         "hp" | "power" if args.as_slice() == ["2"] => Ok(Cmd::Power2),
         "hero_power2" => none(Cmd::Power2),
         "hp" | "power" | "hero_power" => none(Cmd::Power),
+        // "dg" is the Dark Discovery button.
+        "dg" | "dark_gift" | "gift" if args.is_empty() => Ok(Cmd::DarkGift),
+        "gift" | "g" => match args.as_slice() {
+            [slot, name @ ..] if !name.is_empty() => Ok(Cmd::Gift {
+                slot: need(slot, "a board minion")?,
+                name: name.join(" "),
+            }),
+            _ => Err("gift needs a board minion and a gift name, for example: gift 2 fort".into()),
+        },
         "f" | "freeze" | "unfreeze" => none(Cmd::Freeze),
         "u" | "up" | "upgrade" | "level" => none(Cmd::Upgrade),
         "e" | "end" => none(Cmd::End),

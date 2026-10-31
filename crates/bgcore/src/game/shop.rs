@@ -532,7 +532,7 @@ impl Game {
     /// and its slot gets a new card from the pool. With no Demon they wait as
     /// plain 2/2 Demons, and feed once a Demon lands (feed_waiting_fodders).
     fn feed_fodders(pl: &mut Player, pool: &mut [u8], cards: &CardDb, rng: &mut Rng, lobby: Tribes) {
-        let is_demon = |m: &Minion| cards.get(m.card).tribes.has(Tribe::Demon);
+        let is_demon = |m: &Minion| cards.tribes_of(m).has(Tribe::Demon);
         if !pl.board.iter().any(is_demon) {
             return;
         }
@@ -738,7 +738,7 @@ impl Game {
         // the text sits on a minion that stays on the board, so it gains the
         // sold minion's stats, doubled for a golden one. Two copies of the
         // text on the same minion do not stack.
-        let sold_tribes = self.data.cards.get(m.card).tribes;
+        let sold_tribes = self.data.cards.tribes_of(&m);
         let cards = &self.data.cards;
         for o in &mut self.players[p].board {
             let mul = o
@@ -816,7 +816,7 @@ impl Game {
     fn tavern_attack(&mut self, p: usize, slot: usize) {
         let Game { data, rng, players, lobby, .. } = self;
         let pl = &mut players[p];
-        let Some(ai) = pl.board.iter().position(|m| data.cards.get(m.card).tribes.has(Tribe::Beast))
+        let Some(ai) = pl.board.iter().position(|m| data.cards.tribes_of(m).has(Tribe::Beast))
         else {
             return;
         };

@@ -38,6 +38,11 @@ pub struct RealMinionSpec {
     /// Spark Snapper's Satellite size, Tasty Lobster's buff. Empty when the
     /// log showed none.
     pub numbers: Vec<i32>,
+    /// The Dark Gifts on it, by the gift's own card_id
+    /// (`BG36_MidGameEffect_000t` and its kin, the file's `dark_gifts`).
+    /// Their stats are already in attack and health; the effect is attached
+    /// here, with the counter the log does not show set to the board's turn.
+    pub dark_gifts: Vec<String>,
 }
 
 /// A real board's Deity: the minion it awakens and the stats it has now.
@@ -206,10 +211,14 @@ impl RealBoards {
     /// stand for (`Minion.improvements`, the Tasty Lobster count). A minion
     /// whose name matches no card becomes a Stand-in with those stats and
     /// keywords and no effect (Era, 2026-10-25), and its name is returned.
-    pub fn build(specs: &[RealBoardSpec], db: &CardDb) -> (RealBoards, Vec<String>) {
+    pub fn build(
+        specs: &[RealBoardSpec],
+        db: &CardDb,
+        gifts: &crate::darkgifts::GiftDb,
+    ) -> (RealBoards, Vec<String>) {
         let mut by_turn = vec![Vec::new(); LATE_TURN as usize];
         let mut unmatched = Vec::new();
-        let make = |m: &RealMinionSpec, unmatched: &mut Vec<String>| {
+        let make = |m: &RealMinionSpec, turn: u32, unmatched: &mut Vec<String>| {
             let id = match db.by_name(&m.name) {
                 Some(id) => id,
                 None => {
@@ -226,6 +235,22 @@ impl RealBoards {
                 set_keyword(&mut keywords, kw);
             }
             minion.keywords = keywords;
+            // A Dark Gift the board carried: the landing's stats are already
+            // in the file's attack and health, so only the gift itself comes
+            // along. The counter the log does not carry is set as if the gift
+            // had landed on this board's turn.
+            for gift_id in &m.dark_gifts {
+                let Some(i) = gifts.gifts.iter().position(|g| &g.id == gift_id) else {
+                    continue;
+                };
+                let card = gifts.gifts[i].card;
+                let c = db.get(card);
+                let state = match c.countdown {
+                    Some(cd) => cd.turns,
+                    None => turn.min(crate::minion::GIFT_STATE_MAX as u32) as u8,
+                };
+                minion.push_gift(crate::minion::GiftOn::new(card, state));
+            }
             minion
         };
         for spec in specs {
@@ -240,7 +265,7 @@ impl RealBoards {
                 if m.name == LOBSTER {
                     lobster = lobster.max(lobster_count(&m.numbers, m.golden));
                 }
-                minions.push(make(m, &mut unmatched));
+                minions.push(make(m, spec.turn, &mut unmatched));
             }
             let mut hand = ArrayVec::new();
             for m in &spec.hand {
@@ -250,7 +275,7 @@ impl RealBoards {
                 if m.name == LOBSTER {
                     lobster = lobster.max(lobster_count(&m.numbers, m.golden));
                 }
-                hand.push(make(m, &mut unmatched));
+                hand.push(make(m, spec.turn, &mut unmatched));
             }
             let mut counters = spec.counters;
             // Every Lobster shares one count: the log's numbers on any of
@@ -375,6 +400,9 @@ struct RawDeity {
 #[derive(Deserialize)]
 struct RawMinion {
     card_id: String,
+    /// The Dark Gifts on it, as gift card_ids.
+    #[serde(default)]
+    dark_gifts: Vec<String>,
     #[serde(default)]
     name: String,
     attack: i32,
@@ -481,6 +509,7 @@ pub fn parse_board_files(
                         golden: m.golden || id_golden,
                         keywords: m.keywords,
                         numbers: m.numbers,
+                        dark_gifts: m.dark_gifts,
                     });
                 }
                 out

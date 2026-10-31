@@ -30,6 +30,8 @@ pub enum Action {
     HeroPower2,
     /// Pick a trinket from an open offer.
     ChooseTrinket(u8),
+    /// Press the Dark Discovery button (every player has it).
+    DarkGift,
 }
 
 const BUY: usize = 0;
@@ -49,9 +51,10 @@ const END_TURN: usize = LEVEL + 1;
 const HERO_POWER: usize = END_TURN + 1;
 const HERO_POWER2: usize = HERO_POWER + 1;
 const CHOOSE_TRINKET: usize = HERO_POWER2 + 1;
+const DARK_GIFT: usize = CHOOSE_TRINKET + TRINKET_CHOICES;
 
-pub const N_ACTIONS: usize = CHOOSE_TRINKET + TRINKET_CHOICES;
-pub const N_KINDS: usize = 17;
+pub const N_ACTIONS: usize = DARK_GIFT + 1;
+pub const N_KINDS: usize = 18;
 pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("buy", SHOP),
     ("buy_spell", 1),
@@ -70,6 +73,7 @@ pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("hero_power", 1),
     ("hero_power2", 1),
     ("choose_trinket", TRINKET_CHOICES),
+    ("dark_gift", 1),
 ];
 
 impl Action {
@@ -95,6 +99,7 @@ impl Action {
             Action::HeroPower => HERO_POWER,
             Action::HeroPower2 => HERO_POWER2,
             Action::ChooseTrinket(k) => CHOOSE_TRINKET + k as usize,
+            Action::DarkGift => DARK_GIFT,
         }
     }
 
@@ -125,7 +130,8 @@ impl Action {
             END_TURN => Action::EndTurn,
             HERO_POWER => Action::HeroPower,
             HERO_POWER2 => Action::HeroPower2,
-            _ if i < N_ACTIONS => Action::ChooseTrinket((i - CHOOSE_TRINKET) as u8),
+            _ if i < DARK_GIFT => Action::ChooseTrinket((i - CHOOSE_TRINKET) as u8),
+            DARK_GIFT => Action::DarkGift,
             _ => return None,
         })
     }
@@ -150,6 +156,7 @@ impl Action {
             Action::HeroPower => 14,
             Action::HeroPower2 => 15,
             Action::ChooseTrinket(_) => 16,
+            Action::DarkGift => 17,
         }
     }
 }

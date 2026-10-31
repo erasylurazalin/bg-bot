@@ -353,6 +353,43 @@ passes the slot through.
    carries the slots by trinket index (an embedding, `N_TRINKETS` in bgpy), so
    a new trinket needs nothing there.
 
+## 2d. Adding a Dark Gift
+
+1. Find it in `ref/bg-meta.json` (`dark_gifts`): its `card_id`, the turn
+   window (tags 4853 and 4854) and the weight (4856). Add one `[[gift]]` to
+   `darkgifts.toml`: `name`, `id` (the game data's card_id, for the real-board
+   files and the docs), `card` (the token that does the work, see step 2),
+   `window = [first, last]` (one number for "no last turn" left out),
+   `weight = 50` if it is one of the half-as-likely ones, and `condition`
+   (`any`, `battlecry`, `deathrattle`, `tribe:<name>`, `typeless`,
+   `end_of_turn`, `murloc_not_venomous`, `activate`, `deity`, `spellcraft`,
+   `not_dragon`, `not_typeless`, `not_taunt_or_typeless`).
+2. Add its effect as a `[[token]]` in cards.toml's "--- Dark Gifts" section,
+   named `Gift: <name>`, using the same keys a card uses. Two of its numbers
+   mean something special: `stats` is what the gift adds when it lands, and
+   the gift never doubles on a golden host. Reach for an existing field
+   first (`keywords`, `deathrattle`, `start_of_combat`, `end_of_turn`,
+   `rally`, `permanent_keep`, `buff_per_*`, `on_card_play`, `countdown`,
+   `shield_hits`, `immune_attacking`, `all_types`, `reborn_full`,
+   `makes_golden`, `acquire_copies`, `activate_twice`,
+   `end_of_turn_at_start`). A gift that needs new timing earns a new
+   `Effect`, `StartOfCombat`, `EndOfTurn` or `Deathrattle` arm plus its parse
+   key, and `Minion::has_gift` (a card flag) is how a fight asks "does this
+   minion have that gift". `Sunken Persistence` shows a gift with no arm yet:
+   its token is plain and only the test that walks the table knows why.
+3. A gift can only be offered from turn 1 or its window, and only on a host
+   its condition fits (`GiftCond::fits`). A source with its own tiers calls
+   `Game::open_dark_gift_trinket` (trinkets) or pushes a
+   `DiscoverRequest::DarkGift(DarkGiftPlan)` itself (a hero power).
+4. Tests in `crates/bgcore/tests/darkgifts.rs`: `board_with_gift` gives a
+   board minion a gift through `Game::give_gift`, `gifted` builds one for a
+   fight (`bgcore::game::darkgifts::land_gift`), and `every_gift_effect_card_
+   runs_somewhere` fails a gift whose token has nothing the engine reads. The
+   shared `act` helper returns the turn's cursor first: every action moves it.
+5. Update `docs/ENGINE.md` "Dark Gifts" if a mechanism changed; the
+   observation carries the gifts as effect card ids in `SLOT_GIFTS`, so a new
+   gift needs nothing there.
+
 ## 3. New-tribe checklist
 
 1. `cards.rs`: add the variant to `Tribe`, add it to `Tribe::EVERY` (rules use this) and

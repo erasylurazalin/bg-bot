@@ -4,6 +4,7 @@
 //! action at a time, in a random order that changes every turn, until each
 //! has ended their turn. `current_player` says whose action is next.
 
+pub mod darkgifts;
 mod discover;
 mod effects;
 mod heroes;
@@ -28,7 +29,8 @@ use crate::cards::{
 };
 use crate::fight::{Counters, Deity, SeenCounters, SideOutcome};
 use crate::heroes::PowerEffect;
-use crate::minion::{CardId, Keywords, Minion};
+use crate::darkgifts::DarkGiftPlan;
+use crate::minion::{CardId, GiftOn, Keywords, Minion};
 use crate::real_boards::RealBoards;
 use crate::trinkets::{CardMod, Event};
 use self::trinkets::MinionPrice;
@@ -232,6 +234,8 @@ pub struct PendingDiscard {
     pub reward: Effect,
     /// Whether the minion with the effect is golden (doubles the reward).
     pub golden: bool,
+    /// Times the reward runs (Dark Gifts Efficiency doubles an Activate).
+    pub runs: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -262,6 +266,13 @@ pub enum DiscoverRequest {
     /// A minion of exactly this tier, locked in hand until the Tavern reaches
     /// that tier (Procrastinate, Expedition Plans).
     TierLockedMinion(u8),
+    /// A Dark Gift offer: one minion per slot with a gift each (the Dark
+    /// Discovery button, Ominous Stone, Wax Lance, Sinister Invitation,
+    /// Xavius, Void Power).
+    DarkGift(DarkGiftPlan),
+    /// A Dark Gift offer of plain copies of the player's own gifted minions
+    /// (Maldraxxus Dagger).
+    DarkGiftCopies,
 }
 
 /// Why the Tavern is filled. Only the player's own Refresh action (paid with
@@ -637,6 +648,25 @@ pub struct Player {
     /// Whether the Discover now waiting marks its minion to die when played
     /// this turn (Tomb Turning).
     pub discover_doomed: bool,
+    /// The Dark Gift each offer of the open Discover carries (index
+    /// `discover`), the pool copies each offer holds, and whether the open
+    /// Discover is a Dark Gift offer at all.
+    pub discover_gifts: ArrayVec<GiftOn, DISCOVER>,
+    pub discover_copies: ArrayVec<u8, DISCOVER>,
+    pub dark_offer: bool,
+    /// The turn the open offer's gifts were picked as.
+    pub dark_offer_turn: u32,
+    /// Every offer of the open Discover is Golden (Sinister Invitation).
+    pub dark_offer_golden: bool,
+    /// Turns the open offer's pick stays locked in hand (Void Power).
+    pub dark_offer_locked: u8,
+    /// The Dark Discovery button: uses left this game, and whether it was
+    /// pressed this turn (docs/darkgifts.md: once a turn, 3 uses a game).
+    pub dark_gift_uses: u8,
+    pub dark_gift_pressed: bool,
+    /// Battlecries this player has triggered this game, which Dark Gifts
+    /// Battle Scars reads.
+    pub battlecries_triggered: u32,
     /// Your Undead's Attack and Health "this game, wherever they are". Every
     /// Undead you own carries it in its stats (board, hand, Tavern), and
     /// every Undead made later gets it.
@@ -1082,6 +1112,7 @@ impl Game {
             Action::Level => pl.tier < MAX_TIER && pl.gold >= pl.upgrade_cost,
             Action::HeroPower => self.power_usable(p),
             Action::HeroPower2 => self.power_usable2(p),
+            Action::DarkGift => self.dark_gift_usable(p),
         }
     }
 
@@ -1224,6 +1255,7 @@ impl Game {
             ask(Action::Level);
             ask(Action::HeroPower);
             ask(Action::HeroPower2);
+            ask(Action::DarkGift);
             ask(Action::EndTurn);
         }
         // A skipped turn can freeze or end whatever else is open (the End
@@ -1249,7 +1281,7 @@ impl Game {
         let board = &self.players[p].board;
         let cards = &self.data.cards;
         board.iter().enumerate().any(|(i, m)| {
-            i != s && m.card != board[s].card && cards.get(m.card).tribes.has(tribe)
+            i != s && m.card != board[s].card && cards.tribes_of(m).has(tribe)
         })
     }
 
@@ -1438,11 +1470,11 @@ impl Game {
                 !b[s].golden && c.tier <= max_tier && c.is(tribe)
             }
             TargetKind::DestroyDiscover { tribe, .. } | TargetKind::DestroyCopy { tribe, .. } => {
-                self.data.cards.get(b[s].card).tribes.has(tribe)
+                self.data.cards.tribes_of(&b[s]).has(tribe)
             }
             TargetKind::RebornDestroy { tribe, .. } => {
                 let host = pt.source.map(|src| b[src as usize].card);
-                self.data.cards.get(b[s].card).tribes.has(tribe) && Some(b[s].card) != host
+                self.data.cards.tribes_of(&b[s]).has(tribe) && Some(b[s].card) != host
             }
             TargetKind::TriggerRally => {
                 b[s].parts().any(|(c, _)| self.data.cards.get(c).rally.is_some())
@@ -1606,7 +1638,7 @@ impl Game {
                         .collect();
                     for effect in effects {
                         if let PowerEffect::GoldAfterBuyTribe { tribe, gold } = effect
-                            && self.data.cards.get(m.card).tribes.has(tribe)
+                            && self.data.cards.tribes_of(&m).has(tribe)
                         {
                             let runs = self.players[p].tp.power_triggers.max(1);
                             let gold = gold.saturating_mul(runs);
@@ -1640,6 +1672,14 @@ impl Game {
             }
             Action::Activate(s) => {
                 let (act, golden) = self.activate_of(p, s as usize).unwrap();
+                // Dark Gifts Efficiency: the Activate triggers twice.
+                let runs = if self.players[p].board[s as usize]
+                    .has_gift(&self.data.cards, |c| c.activate_twice)
+                {
+                    2
+                } else {
+                    1
+                };
                 self.players[p].gold -= act.cost;
                 self.players[p].board[s as usize].activated = true;
                 if act.discard {
@@ -1648,10 +1688,11 @@ impl Game {
                         source: Some(s),
                         reward: act.effect,
                         golden,
+                        runs,
                     });
                 } else {
                     let mut pos = s as usize;
-                    self.run_effect(p, &mut pos, act.effect, golden, 1);
+                    self.run_effect(p, &mut pos, act.effect, golden, runs);
                     self.maybe_start_discover(p);
                 }
                 self.fire_event(p, EventKind::GoldSpent, act.cost as u32);
@@ -1680,6 +1721,9 @@ impl Game {
                     // A card played from the hand, of any kind: Blood Gems
                     // and Bananas too (Dragonwing Glider).
                     self.trinket_event(p, Event::CardPlayed, Some(m.card), 1);
+                    // Dark Gifts "whenever you play a card" (Dexterity,
+                    // Sharpened Sword, Toughened Shield).
+                    self.dark_gift_card_played(p);
                     self.cast_spell(p, m);
                     if choose_one {
                         // Turbo Hogrider reacts once the card is resolved.
@@ -1688,6 +1732,8 @@ impl Game {
                     return;
                 }
                 let pos = pos as usize;
+                // Dark Gifts "whenever you play a card".
+                self.dark_gift_card_played(p);
                 let magnetic = m.keywords.has(Keywords::MAGNETIC);
                 let is_merge = magnetic
                     && pos < self.players[p].board.len()
@@ -1707,7 +1753,7 @@ impl Game {
                     }
                 } else {
                     let mut m = m;
-                    if self.data.cards.get(m.card).tribes.has(Tribe::Beast) {
+                    if self.data.cards.tribes_of(&m).has(Tribe::Beast) {
                         let (ba, bh) = self.players[p].beast_bonus;
                         m.attack += ba;
                         m.health += bh;
@@ -1724,7 +1770,7 @@ impl Game {
                         let b = &mut self.players[p].board[pos];
                         b.keywords.set(Keywords::DIVINE_SHIELD);
                     }
-                    let t = self.data.cards.get(m.card).tribes;
+                    let t = self.data.cards.tribes_of(&m);
                     // The Triple Reward comes before anything the Battlecry
                     // adds to the hand (and is lost on a full hand).
                     if m.golden && !m.no_reward {
@@ -1852,6 +1898,7 @@ impl Game {
             Action::HeroPower => self.press_power(p, false),
             Action::HeroPower2 => self.press_power(p, true),
             Action::ChooseTrinket(k) => self.pick_trinket(p, k as usize),
+            Action::DarkGift => self.press_dark_gift(p),
             Action::EndTurn => {}
         }
     }
@@ -1869,7 +1916,7 @@ impl Game {
         // "Whenever you get a Pirate" (Doubloon Grifter's event trigger, and a
         // trinket's `on_get`): a card of that tribe entered the hand, from
         // anywhere (bought, generated, Discovered, copied).
-        let tribes = self.data.cards.get(m.card).tribes;
+        let tribes = self.data.cards.tribes_of(&m);
         if !tribes.is_empty() {
             for t in Tribe::EVERY {
                 if !tribes.has(t) {
@@ -1891,6 +1938,9 @@ impl Game {
                 }
             }
         }
+        // Dark Gifts Double Vision: the minion brings a plain copy of itself
+        // along. The copy carries no gift, so this never chains.
+        self.dark_gift_on_acquire(p, &m);
         true
     }
 

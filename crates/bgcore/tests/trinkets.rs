@@ -73,7 +73,20 @@ fn turn_of(g: &mut Game, p: usize) {
 }
 
 fn act(g: &mut Game, p: usize, a: Action) {
-    turn_of(g, p);
+    // A Dark Gift trinket (Ominous Stone and its kin) opens a Discover on the
+    // pick, which blocks the next trinket offer: answer it first. Every
+    // action moves the turn's cursor on, so the turn comes back around.
+    loop {
+        turn_of(g, p);
+        if matches!(a, Action::ChooseTrinket(_))
+            && !g.players[p].discover.is_empty()
+            && g.is_legal(Action::Choose(0))
+        {
+            g.step(Action::Choose(0)).unwrap();
+            continue;
+        }
+        break;
+    }
     g.step(a).unwrap_or_else(|_| panic!("{a:?} illegal for player {p}"));
 }
 
@@ -832,6 +845,7 @@ fn the_end_of_turn_and_discard_trinkets() {
         source: None,
         reward: bgcore::Effect::GoldNextTurn(0),
         golden: false,
+        runs: 1,
     });
     act(&mut g, 0, Action::Discard(0));
     assert_eq!(g.players[0].hand.len(), 1);
@@ -846,6 +860,7 @@ fn the_end_of_turn_and_discard_trinkets() {
             source: None,
             reward: bgcore::Effect::GoldNextTurn(0),
             golden: false,
+            runs: 1,
         });
         act(&mut g, 0, Action::Discard(0));
     }
@@ -1265,7 +1280,16 @@ fn the_mystery_cube_keeps_offering_every_turn() {
     turn_of(&mut g, 0);
     assert_eq!(g.players[0].trinket_offer.len(), 4, "the turn 9 offer");
     assert_eq!(g.players[0].trinket_offer_slot, 2, "into the Greater slot");
-    act(&mut g, 0, Action::ChooseTrinket(0));
+    // Pick an ordinary trinket: the one-time and self-replacing ones deal an
+    // offer of their own instead of letting the held cube's offer come.
+    let mc = g.data.trinkets.by_card_id("BG30_MagicItem_703").unwrap();
+    let k = (0..g.players[0].trinket_offer.len())
+        .find(|&k| {
+            let of = g.players[0].trinket_offer[k].0;
+            of != mc && g.data.trinkets.get(of).cube
+        })
+        .expect("an ordinary option");
+    act(&mut g, 0, Action::ChooseTrinket(k as u8));
     let held = g.players[0].trinkets[0].of - 1;
     assert_eq!(g.players[0].trinket_offer.len(), 2, "then the cube's two");
     assert!(g.players[0].trinket_offer.iter().all(|&(of, _)| of != held));
@@ -2346,6 +2370,7 @@ fn writhing_tentacles_copies_the_first_discarded_minion_doubled() {
         source: None,
         reward: bgcore::Effect::GoldNextTurn(0),
         golden: false,
+        runs: 1,
     });
     act(&mut g, 0, Action::Discard(0));
     assert_eq!(g.players[0].hand.len(), 1, "the copy arrived");
@@ -2359,6 +2384,7 @@ fn writhing_tentacles_copies_the_first_discarded_minion_doubled() {
         source: None,
         reward: bgcore::Effect::GoldNextTurn(0),
         golden: false,
+        runs: 1,
     });
     act(&mut g, 0, Action::Discard(slot as u8));
     assert_eq!(g.players[0].hand.len(), 1, "no second copy this turn");

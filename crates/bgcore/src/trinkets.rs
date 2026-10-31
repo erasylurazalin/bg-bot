@@ -300,6 +300,14 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     GetRemembered(u8),
     /// Get this many random minions with a Battlecry (Rockin' Music Box).
     RandomBattlecry(u8),
+    /// A Dark Gift offer (Ominous Stone, Wax Lance, Sinister Invitation): a
+    /// fixed tier or, with `use_table`, the Dark Discovery button's tiers for
+    /// this turn; `yours` wants minions of the player's most common type and
+    /// `golden` makes every offer Golden.
+    DarkGift { tier: Option<u8>, yours: bool, golden: bool, use_table: bool },
+    /// A Dark Gift offer of plain copies of three of the player's own
+    /// minions, each with a fresh gift picked for it (Maldraxxus Dagger).
+    DarkGiftCopies,
     /// Get a plain copy of a random friendly minion (Reflective Pendant).
     PlainCopyRandomFriendly(u8),
     /// Get a copy of the last card discarded, its stats doubled (Writhing
@@ -534,8 +542,8 @@ impl Trigger {
     pub fn fits(self, cards: &CardDb, m: &crate::minion::Minion) -> bool {
         match self {
             Trigger::Any => true,
-            Trigger::Tribe(t) => cards.get(m.card).tribes.has(t),
-            Trigger::Neutral => cards.get(m.card).tribes.is_empty(),
+            Trigger::Tribe(t) => cards.tribes_of(m).has(t),
+            Trigger::Neutral => cards.tribes_of(m).is_empty(),
             Trigger::Rally => m.parts().any(|(c, _)| cards.get(c).rally.is_some()),
         }
     }
@@ -908,6 +916,18 @@ struct RawFile {
     trinket: Vec<RawTrinket>,
 }
 
+/// A trinket's Dark Gift offer (Ominous Stone, Wax Lance, Sinister
+/// Invitation): `tier` left out means the button's tiers for the turn.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawDarkGift {
+    tier: Option<u8>,
+    #[serde(default)]
+    yours: bool,
+    #[serde(default)]
+    golden: bool,
+}
+
 #[derive(Deserialize, Default)]
 struct RawAct {
     get: Option<String>,
@@ -976,6 +996,9 @@ struct RawAct {
     copy_buys: Option<u8>,
     get_remembered: Option<u8>,
     random_battlecry: Option<u8>,
+    dark_gift: Option<RawDarkGift>,
+    #[serde(default)]
+    dark_gift_copies: bool,
     plain_copy_random_friendly: Option<u8>,
     #[serde(default)]
     copy_last_discarded: bool,
@@ -1425,6 +1448,15 @@ impl TrinketDb {
                     Act::CopyBuys(n)
                 } else if let Some(n) = a.get_remembered {
                     Act::GetRemembered(n)
+                } else if let Some(g) = &a.dark_gift {
+                    Act::DarkGift {
+                        tier: g.tier,
+                        yours: g.yours,
+                        golden: g.golden,
+                        use_table: g.tier.is_none(),
+                    }
+                } else if a.dark_gift_copies {
+                    Act::DarkGiftCopies
                 } else if let Some(n) = a.random_battlecry {
                     Act::RandomBattlecry(n)
                 } else if let Some(n) = a.plain_copy_random_friendly {

@@ -22,8 +22,10 @@ use crate::{BOARD, HAND};
 
 /// Deathrattles one Fish of N'Zoth can gain in one fight. A fight offers at
 /// most seven friendly Deathrattle minions at a time and they can be
-/// summoned again, so this is well past any real board.
-pub const FISH_DR: usize = 24;
+/// summoned again, so this is well past any real board. It also holds a dead
+/// minion's own parts (its card, its attachments and its Dark Gifts) when it
+/// fires its Deathrattles.
+pub const FISH_DR: usize = 40;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Deity {
@@ -105,6 +107,9 @@ pub struct Counters {
     /// random Chromadrake, random spells) stays inside it. `Tribes::ALL`
     /// (a fight without a game behind it) draws from everything.
     pub lobby: crate::cards::Tribes,
+    /// rules.toml's Bonus Keyword mask, which "is Reborn with full stats and
+    /// Bonus Keywords" (Dark Gifts Persisting Horror) reads.
+    pub bonus_keywords: u8,
 }
 
 /// Every player's Blood Gems start at +1/+1, so a fight without the player's
@@ -143,6 +148,12 @@ impl Default for Counters {
             deity: None,
             spells_cast: 0,
             lobby: crate::cards::Tribes::ALL,
+            bonus_keywords: Keywords::TAUNT
+                | Keywords::DIVINE_SHIELD
+                | Keywords::WINDFURY
+                | Keywords::VENOMOUS
+                | Keywords::REBORN
+                | Keywords::STEALTH,
         }
     }
 }
@@ -563,7 +574,7 @@ fn has_taunt(db: &CardDb, m: &Minion) -> bool {
 }
 
 fn filter_ok(db: &CardDb, f: AttackFilter, attacker: &Minion) -> bool {
-    f.tribe.is_none_or(|t| db.get(attacker.card).tribes.has(t))
+    f.tribe.is_none_or(|t| db.tribes_of(attacker).has(t))
         && (!f.rally || attacker.parts().any(|(c, _)| db.get(c).rally.is_some()))
 }
 
@@ -652,7 +663,7 @@ impl<'a> Side<'a> {
         for (i, m) in self.hand.iter().enumerate() {
             if self.hand_taken(i)
                 || db.get(m.card).is_spell()
-                || !db.get(m.card).tribes.has(tribe)
+                || !db.tribes_of(m).has(tribe)
                 // A card locked in hand until a Tavern tier (Faelin's
                 // Expedition Plans) cannot be summoned either, not even by a
                 // Battlecry or a Start of Combat that reaches into the hand.
@@ -778,7 +789,7 @@ impl<'a> Side<'a> {
                 mul = mul.max(if golden { 2 } else { 1 });
             }
         }
-        if db.get(m.card).tribes.has(Tribe::Dragon) {
+        if db.tribes_of(m).has(Tribe::Dragon) {
             for j in [i.checked_sub(1), Some(i + 1)].into_iter().flatten() {
                 if j >= self.ms.len() || self.ms[j].m.health <= 0 {
                     continue;
@@ -888,7 +899,7 @@ impl<'a> Side<'a> {
                 }
                 let ok = match pass {
                     0 => true,
-                    1 => db.get(self.ms[i].m.card).tribes.has(Tribe::Dragon),
+                    1 => db.tribes_of(&self.ms[i].m).has(Tribe::Dragon),
                     _ => self.ms[i].m.keywords.has(Keywords::DIVINE_SHIELD),
                 };
                 if ok {
@@ -945,7 +956,7 @@ impl<'a> Side<'a> {
         self.out.undead_gain.0 += da;
         self.out.undead_gain.1 += dh;
         for i in 0..self.ms.len() {
-            if self.ms[i].m.health > 0 && db.get(self.ms[i].m.card).tribes.has(Tribe::Undead) {
+            if self.ms[i].m.health > 0 && db.tribes_of(&self.ms[i].m).has(Tribe::Undead) {
                 self.gain_at(db, i, da, dh);
             }
         }
@@ -1053,7 +1064,7 @@ impl<'a> Side<'a> {
                 }
                 OnReborn::Phantom => {
                     let last = self.ms.iter().rposition(|f| {
-                        f.m.health > 0 && db.get(f.m.card).tribes.has(Tribe::Undead)
+                        f.m.health > 0 && db.tribes_of(&f.m).has(Tribe::Undead)
                     });
                     if let Some(j) = last {
                         self.gain_at(db, j, rb_attack * mul, rb_attack * mul);
@@ -1109,7 +1120,7 @@ impl<'a> Side<'a> {
         self.out.beast_bonus_gain.0 += da;
         self.out.beast_bonus_gain.1 += dh;
         for i in 0..self.ms.len() {
-            if self.ms[i].m.health > 0 && db.get(self.ms[i].m.card).tribes.has(Tribe::Beast) {
+            if self.ms[i].m.health > 0 && db.tribes_of(&self.ms[i].m).has(Tribe::Beast) {
                 self.gain_at(db, i, da, dh);
             }
         }
@@ -1144,7 +1155,7 @@ impl<'a> Side<'a> {
     ) -> ArrayVec<usize, BOARD> {
         let mut out: ArrayVec<usize, BOARD> = ArrayVec::new();
         let alive = |i: usize| self.ms[i].m.health > 0;
-        let of_tribe = |i: usize, t: Tribe| db.get(self.ms[i].m.card).tribes.has(t);
+        let of_tribe = |i: usize, t: Tribe| db.tribes_of(&self.ms[i].m).has(t);
         match pick {
             Pick::Itself => {
                 if let Some(i) = target.and_then(|t| self.index_of(t))
@@ -1169,7 +1180,7 @@ impl<'a> Side<'a> {
             }
             Pick::Neutral => {
                 for i in 0..self.ms.len() {
-                    if alive(i) && db.get(self.ms[i].m.card).tribes.is_empty() {
+                    if alive(i) && db.tribes_of(&self.ms[i].m).is_empty() {
                         out.push(i);
                     }
                 }
@@ -1347,7 +1358,9 @@ impl<'a> Side<'a> {
                     }
                     let (m, host) = (self.ms[i].m, u);
                     let runs = self.deathrattle_fires(db);
-                    self.fire_deathrattles(db, side, &m, host, None, i + 1, runs, uid, rng, w);
+                    self.fire_deathrattles(
+                        db, side, &m, m.health, host, None, i + 1, runs, uid, rng, w,
+                    );
                 }
             }
             FightAct::GrantDr { pick, dr } => {
@@ -1625,7 +1638,7 @@ impl<'a> Side<'a> {
         // test watching the summon sees what the fight sees.
         if self.counters.trinkets.count_summons {
             self.out.friendly_summons = self.out.friendly_summons.saturating_add(1);
-            let tribes = db.get(m.card).tribes;
+            let tribes = db.tribes_of(&m);
             for (i, t) in Tribe::EVERY.into_iter().enumerate() {
                 if tribes.has(t) {
                     self.out.summon_tribes[i] = self.out.summon_tribes[i].saturating_add(1);
@@ -1871,6 +1884,32 @@ impl<'a> Side<'a> {
                     }
                 }
             }
+            Effect::GetMostCommonTypeMinion => {
+                // Dark Gifts Charisma: the player's most common type among the
+                // minions this side has in the fight (its board).
+                let tribes: ArrayVec<crate::cards::Tribes, 64> =
+                    self.ms.iter().map(|f| db.tribes_of(&f.m)).collect();
+                if let Some(t) = crate::darkgifts::most_common_type(&tribes, rng)
+                    && let Some(c) =
+                        db.random_pool_minion(t, self.counters.tier, self.counters.lobby, rng)
+                {
+                    self.out.push_card(c);
+                }
+            }
+            Effect::FreeRefreshes(n) => {
+                // A Free Refresh a Deathrattle gives comes home with the
+                // fight's gains (Dark Gifts Fresh Perspective, Herding Horn).
+                self.out.free_refresh_gain = self
+                    .out
+                    .free_refresh_gain
+                    .saturating_add(n.saturating_mul(mul as u8));
+            }
+            Effect::GetAnyTavernSpell => {
+                // Dark Gifts Mystic Essence: any Tavern spell, cost and all.
+                if let Some(c) = db.random_spell(crate::MAX_TIER, self.counters.lobby, rng) {
+                    self.out.push_card(c);
+                }
+            }
             Effect::AddFodderRefreshes(n) => {
                 self.out.push_fodder_refreshes(mul as u8, n as u32);
             }
@@ -1892,7 +1931,9 @@ impl<'a> Side<'a> {
                     };
                     let (m, host) = (self.ms[idx].m, self.ms[idx].uid);
                     let runs = self.deathrattle_fires(db);
-                    let n = self.fire_deathrattles(db, fx.side, &m, host, None, idx + 1, runs, uid, rng, w);
+                    let n = self.fire_deathrattles(
+                        db, fx.side, &m, m.health, host, None, idx + 1, runs, uid, rng, w,
+                    );
                     if idx < *at {
                         *at += n;
                     }
@@ -1966,7 +2007,7 @@ impl<'a> Side<'a> {
                 let mut without: ArrayVec<usize, BOARD> = ArrayVec::new();
                 let mut with: ArrayVec<usize, BOARD> = ArrayVec::new();
                 for (i, f) in self.ms.iter().enumerate() {
-                    if f.m.health <= 0 || !db.get(f.m.card).tribes.has(Tribe::Dragon) {
+                    if f.m.health <= 0 || !db.tribes_of(&f.m).has(Tribe::Dragon) {
                         continue;
                     }
                     if f.m.keywords.has(Keywords::DIVINE_SHIELD) {
@@ -2047,7 +2088,7 @@ impl<'a> Side<'a> {
                 for _ in 0..mul {
                     let mut tribes: ArrayVec<Tribes, BOARD> = ArrayVec::new();
                     for f in &self.ms {
-                        let t = if f.m.health > 0 { db.get(f.m.card).tribes } else { Tribes::NONE };
+                        let t = if f.m.health > 0 { db.tribes_of(&f.m) } else { Tribes::NONE };
                         tribes.push(t);
                     }
                     for i in pick_one_per_type(&tribes, rng) {
@@ -2099,7 +2140,7 @@ impl<'a> Side<'a> {
                     for (i, f) in self.ms.iter().enumerate() {
                         if f.m.health > 0
                             && f.uid != fx.host
-                            && db.get(f.m.card).tribes.has(tribe)
+                            && db.tribes_of(&f.m).has(tribe)
                             && !f.m.keywords.has(Keywords::REBORN)
                             && Some(f.m.card) != self.dr_card
                         {
@@ -2271,6 +2312,9 @@ impl<'a> Side<'a> {
         db: &CardDb,
         side: usize,
         dead: &Minion,
+        // The dead minion's maximum Health (its current Health plus the
+        // damage it took this fight), for Defensive Sacrifice.
+        dead_max: i32,
         host: u16,
         killer: Option<u16>,
         at: usize,
@@ -2352,6 +2396,38 @@ impl<'a> Side<'a> {
                         let dh = (health + per_improvement.1 * n) * mul;
                         self.out.tavern_buff_gain.0 += da;
                         self.out.tavern_buff_gain.1 += dh;
+                    }
+                    Deathrattle::SummonShaped { card: tok } => {
+                        // Dark Gifts Golemancy: a Golem with the dead
+                        // minion's stats.
+                        let mut m = db.make(tok, false);
+                        m.attack = dead.attack;
+                        m.health = dead.health;
+                        if self.summon(db, side, pos, m, uid, rng, w) {
+                            pos += 1;
+                        }
+                    }
+                    Deathrattle::GiveOwnAttack => {
+                        // Dark Gifts Offensive Sacrifice: the whole Attack to
+                        // one other friendly minion, at random.
+                        let alive: ArrayVec<usize, 32> = (0..self.ms.len())
+                            .filter(|&i| self.ms[i].m.health > 0)
+                            .collect();
+                        if !alive.is_empty() {
+                            let i = alive[rng.below(alive.len() as u32) as usize];
+                            self.gain_at(db, i, dead.attack, 0);
+                        }
+                    }
+                    Deathrattle::GiveOwnHealth => {
+                        // Dark Gifts Defensive Sacrifice: the maximum Health,
+                        // the damage it had taken included.
+                        let alive: ArrayVec<usize, 32> = (0..self.ms.len())
+                            .filter(|&i| self.ms[i].m.health > 0)
+                            .collect();
+                        if !alive.is_empty() {
+                            let i = alive[rng.below(alive.len() as u32) as usize];
+                            self.gain_at(db, i, 0, dead_max);
+                        }
                     }
                     Deathrattle::Effect(e) => {
                         let fx = Fx { side, host, killer, attacker: None, skip_ptr: false };
@@ -2553,7 +2629,7 @@ impl<'a> Side<'a> {
                 self.out.friendly_deaths = self.out.friendly_deaths.saturating_add(1);
                 self.out.note_death_card(dead.card);
                 if self.counters.trinkets.count_death_tribes != 0 {
-                    let tribes = db.get(dead.card).tribes;
+                    let tribes = db.tribes_of(&dead);
                     for (k, t) in Tribe::EVERY.into_iter().enumerate() {
                         if tribes.has(t) {
                             self.out.death_tribes[k] =
@@ -2576,7 +2652,10 @@ impl<'a> Side<'a> {
             // rest of the fight.
             self.gain_deathrattles(db, fm.uid, &dead);
             let runs = self.deathrattle_fires(db);
-            i += self.fire_deathrattles(db, side, &dead, fm.uid, fm.killer, i, runs, uid, rng, w);
+            let dead_max = dead.health + fm.taken;
+            i += self.fire_deathrattles(
+                db, side, &dead, dead_max, fm.uid, fm.killer, i, runs, uid, rng, w,
+            );
             self.note_deity_death(db, side, fm, uid, rng, w);
             if self.count_avenge {
                 self.avenge_tick(db, side, uid, rng, w);
@@ -2588,6 +2667,20 @@ impl<'a> Side<'a> {
                 let full = m.health;
                 m.health = 1;
                 m.keywords.clear(Keywords::REBORN);
+                // Dark Gifts Persisting Horror: it comes back with full
+                // stats and its Bonus Keywords, and with the gifts it had.
+                if dead.has_gift(db, |c| c.reborn_full) {
+                    m.attack = dead.attack;
+                    m.health = dead.health.max(1);
+                    // Reborn itself is spent: the copy does not come back
+                    // a second time.
+                    let bonus = self.counters.bonus_keywords & !Keywords::REBORN;
+                    m.keywords.0 |= dead.keywords.0 & bonus;
+                    for &g in dead.gift_slice() {
+                        m.push_gift(g);
+                    }
+                    m.shield_hits = dead.shield_hits;
+                }
                 if self.summon(db, side, i, m, uid, rng, w) {
                     self.ms[i].taken = (full - 1).max(0);
                     self.note_reborn(db, i);
@@ -2620,7 +2713,14 @@ fn deal_damage(target: &mut Minion, dmg: i32) -> i32 {
         return 0;
     }
     if target.keywords.has(Keywords::DIVINE_SHIELD) {
+        // A Toreth's Blessing shield takes several hits before it breaks
+        // (Dark Gifts).
+        if target.shield_hits > 1 {
+            target.shield_hits -= 1;
+            return 0;
+        }
         target.keywords.clear(Keywords::DIVINE_SHIELD);
+        target.shield_hits = 0;
         return 0;
     }
     target.health -= dmg;
@@ -2635,7 +2735,12 @@ fn hit(target: &mut Minion, dmg: i32, source: &mut Minion) -> i32 {
         return 0;
     }
     if target.keywords.has(Keywords::DIVINE_SHIELD) {
+        if target.shield_hits > 1 {
+            target.shield_hits -= 1;
+            return 0;
+        }
         target.keywords.clear(Keywords::DIVINE_SHIELD);
+        target.shield_hits = 0;
         return 0;
     }
     target.health -= dmg;
@@ -3017,6 +3122,58 @@ fn run_start_of_combat(
                     }
                     sides[turn].gain_at(db, mi, da * mul, dh * mul);
                 }
+                // The Dark Gift ones. A gift never doubles, so `mul` is not
+                // used here (its part is never golden).
+                Some(StartOfCombat::DoubleHealth) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let h = sides[turn].ms[mi].m.health;
+                    // Through `gain_at`, so a keeper (Tarecgosa's Blessing)
+                    // keeps what it gains.
+                    sides[turn].gain_at(db, mi, 0, h);
+                }
+                Some(StartOfCombat::DoubleAttack) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let a = sides[turn].ms[mi].m.attack;
+                    sides[turn].gain_at(db, mi, a, 0);
+                }
+                Some(StartOfCombat::TripleStats) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let (a, h) = (sides[turn].ms[mi].m.attack, sides[turn].ms[mi].m.health);
+                    sides[turn].gain_at(db, mi, a * 2, h * 2);
+                }
+                Some(StartOfCombat::GainLeftAttack) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let a = mi
+                        .checked_sub(1)
+                        .map(|j| sides[turn].ms[j].m.attack)
+                        .unwrap_or(0);
+                    sides[turn].gain_at(db, mi, a, 0);
+                }
+                Some(StartOfCombat::GainDeityStats) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let (a, h) = sides[turn]
+                        .counters
+                        .deity
+                        .map_or((0, 0), |d| (d.attack, d.health));
+                    sides[turn].gain_at(db, mi, a, h);
+                }
+                Some(StartOfCombat::TriggerOwnDeathrattles) => {
+                    // Treats the living minion as the source, the way a
+                    // trinket's "trigger a friendly Deathrattle" does.
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let (m, host) = (sides[turn].ms[mi].m, me);
+                    let runs = sides[turn].deathrattle_fires(db);
+                    sides[turn].fire_deathrattles(
+                        db, turn, &m, m.health, host, None, mi + 1, runs, uid, rng, w,
+                    );
+                }
+                Some(StartOfCombat::SummonOwnCopy) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let mut m = sides[turn].ms[mi].m;
+                    // A summoned copy is generated: no pool copies travel.
+                    m.pool_copies = 0;
+                    sides[turn].summon(db, turn, mi + 1, m, uid, rng, w);
+                }
                 None => {}
             }
         }
@@ -3079,7 +3236,7 @@ fn rally_damage(
             yf.killer = Some(xf.uid);
         }
         let shield_lost = was_shielded && !yf.m.keywords.has(Keywords::DIVINE_SHIELD);
-        let demon = db.get(xf.m.card).tribes.has(Tribe::Demon);
+        let demon = db.tribes_of(&xf.m).has(Tribe::Demon);
         att.count_damage(db, turn, hi, dealt, uid, rng, w);
         if dealt > 0 && demon {
             att.note_demon_damage(db, host);
@@ -3374,10 +3531,13 @@ fn attack_swings_at(
         // (Dragonhead Staff, docs/trinkets.md).
         att.out.friendly_attacks = att.out.friendly_attacks.saturating_add(1);
         let (dx, dy) = (att.ms[ai].m.attack, def.ms[di].m.attack);
+        // Dark Gifts Invulnerability: the attacker takes nothing back. The
+        // check is one flag test on a minion without gifts.
+        let immune = attacker.has_gift(db, |c| c.immune_attacking);
         let def_health_before = def.ms[di].m.health;
         let (xf, yf) = (&mut att.ms[ai], &mut def.ms[di]);
         let dealt_x = hit(&mut yf.m, dx, &mut xf.m);
-        let dealt_y = hit(&mut xf.m, dy, &mut yf.m);
+        let dealt_y = if immune { 0 } else { hit(&mut xf.m, dy, &mut yf.m) };
         yf.taken += dealt_x;
         xf.taken += dealt_y;
         let x_lost = x_shielded && !xf.m.keywords.has(Keywords::DIVINE_SHIELD);
@@ -3503,7 +3663,7 @@ fn attack_swings_at(
         // Devout Hellcaller: another friendly Demon dealt damage. The
         // attacker's tribe is a cheap check, so a side without Demons pays
         // nothing extra here.
-        if dealt_x > 0 && db.get(attacker.card).tribes.has(Tribe::Demon) {
+        if dealt_x > 0 && db.tribes_of(&attacker).has(Tribe::Demon) {
             sides[turn].note_demon_damage(db, me);
         }
         // "Whenever this takes damage" (Very Hungry Winterfinner). It fires
@@ -3769,7 +3929,7 @@ pub fn shop_trigger_deathrattles(
     let host = side.ms.get(at).map(|f| (f.m, f.uid));
     if let Some((m, host)) = host {
         let runs = side.deathrattle_fires(db);
-        side.fire_deathrattles(db, 0, &m, host, None, at + 1, runs, &mut uid, rng, &mut w);
+        side.fire_deathrattles(db, 0, &m, m.health, host, None, at + 1, runs, &mut uid, rng, &mut w);
         // A Deathrattle can destroy a minion (or summon one that comes in
         // with no Health): resolve those deaths like a shop destroy does.
         side.resolve(db, 0, &mut uid, rng, &mut w);

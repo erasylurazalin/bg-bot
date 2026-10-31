@@ -128,6 +128,13 @@ pub enum PowerEffect {
     /// player `others` of them; each is the plain one or, `big_percent` of the
     /// time, the big one (Bananarama).
     Bananarama { mine: u8, others: u8, big_percent: u8, banana: CardId, big: CardId },
+    /// At the start of the game, Discover a Tier 5 minion with a Dark Gift,
+    /// locked in hand until turn 7 (Void Power). The gifts are picked as if
+    /// it were turn 7 (docs/darkgifts.md).
+    DarkGiftStart,
+    /// Every `turns` turns, Discover a minion with a Dark Gift (Feel
+    /// Devastation). The count lives in the power's `progress`.
+    DarkGiftEvery { turns: u8 },
 }
 
 /// A hero power: its button's limits and its effect.
@@ -457,6 +464,10 @@ struct RawPowerEffect {
     turn_discovers: Option<RawTurnDiscovers>,
     #[serde(default)]
     bananas: Option<RawBananas>,
+    #[serde(default)]
+    dark_gift_start: bool,
+    #[serde(default)]
+    dark_gift_every: Option<u8>,
 }
 
 /// Parse one power effect. The two effects whose card names need the card
@@ -564,6 +575,10 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
             banana: 0,
             big: 0,
         }
+    } else if e.dark_gift_start {
+        PowerEffect::DarkGiftStart
+    } else if let Some(n) = e.dark_gift_every {
+        PowerEffect::DarkGiftEvery { turns: n.max(1) }
     } else {
         PowerEffect::None
     })

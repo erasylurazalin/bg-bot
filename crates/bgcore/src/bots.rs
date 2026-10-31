@@ -92,7 +92,7 @@ fn board_value(game: &Game, pref: Option<Tribe>, m: &Minion) -> i32 {
 }
 
 fn is_mech(game: &Game, m: &Minion) -> bool {
-    game.data.cards.get(m.card).tribes.has(Tribe::Mech)
+    game.data.cards.tribes_of(m).has(Tribe::Mech)
 }
 
 fn play_pos(game: &Game, p: usize, pref: Option<Tribe>, m: &Minion) -> Option<u8> {
@@ -217,7 +217,7 @@ fn activate_worth(game: &Game, p: usize, s: usize) -> u8 {
         return 0;
     };
     let others = || pl.board.iter().enumerate().filter(move |&(i, _)| i != s).map(|(_, m)| m);
-    let has_tribe = |t: Tribe| pl.board.iter().any(|m| cards.get(m.card).tribes.has(t));
+    let has_tribe = |t: Tribe| pl.board.iter().any(|m| cards.tribes_of(m).has(t));
     let shop_minion = pl.shop.iter().any(|m| !cards.get(m.card).is_spell());
     match act.effect {
         Effect::BuffAnyMinion { .. } => 2,
@@ -348,7 +348,7 @@ pub fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Acti
         let own = |of: usize| {
             let t = game.data.trinkets.get(of as u8);
             t.tribes.is_empty()
-                || pl.board.iter().any(|m| game.data.cards.get(m.card).tribes.overlaps(t.tribes))
+                || pl.board.iter().any(|m| game.data.cards.tribes_of(m).overlaps(t.tribes))
         };
         let pick = (0..pl.trinket_offer.len())
             .map(|k| Action::ChooseTrinket(k as u8))
@@ -516,7 +516,7 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
     if legal(Action::Roll) {
         let pays_health = pl.free_rolls == 0 && pl.can_refresh_with_health(cards, r);
         let fodder = pl.fodder_refreshes.first().is_some_and(|&n| n > 0)
-            && pl.board.iter().any(|m| cards.get(m.card).tribes.has(Tribe::Demon));
+            && pl.board.iter().any(|m| cards.tribes_of(m).has(Tribe::Demon));
         let roll = if pl.free_rolls > 0 {
             true
         } else if pays_health {
@@ -553,6 +553,13 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
                 return action;
             }
         }
+    }
+
+    // The Dark Discovery button costs 3 Gold and has 3 uses a game: press it
+    // while there is 3 Gold to spare (after every buy and Refresh has had its
+    // turn), so a curve bot is not weaker than a learner that uses it.
+    if legal(Action::DarkGift) && pl.gold >= r.dark_gift_cost {
+        return Action::DarkGift;
     }
 
     Action::EndTurn

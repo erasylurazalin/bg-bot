@@ -8,7 +8,7 @@ use crate::cards::{
     Tribe,
 };
 use crate::minion::Minion;
-use crate::BOARD;
+use crate::{BOARD, DISCOVER};
 use super::{
     DiscoverRequest,
     Game,
@@ -42,7 +42,7 @@ impl Game {
             let times = count * (if golden { 2 } else { 1 });
             let (ga, gh) = (self.players[p].gem_attack, self.players[p].gem_health);
             for m in &mut self.players[p].board {
-                if cards.get(m.card).tribes.has(Tribe::Quilboar) {
+                if cards.tribes_of(m).has(Tribe::Quilboar) {
                     m.attack += ga * times as i32;
                     m.health += gh * times as i32;
                     m.gem_attack += ga * times as i32;
@@ -65,7 +65,7 @@ impl Game {
         // first slot as its `pos`, and only effects that do not read it are
         // ever given that way (Incubate).
         let mut pos = pd.source.unwrap_or(0) as usize;
-        self.run_effect(p, &mut pos, pd.reward, pd.golden, 1);
+        self.run_effect(p, &mut pos, pd.reward, pd.golden, pd.runs.max(1));
         self.maybe_start_discover(p);
     }
 
@@ -77,6 +77,8 @@ impl Game {
         give_back(&mut self.pool, &self.data.cards, &m);
         self.players[p].discarded = self.players[p].discarded.saturating_add(1);
         self.players[p].last_discarded = Some(m);
+        // Dark Gifts Desecration grows on every discard.
+        self.dark_gift_count(p, 1, |c| c.buff_per_discard);
         self.fire_event(p, EventKind::Discarded, 1);
         self.trinket_event(p, crate::trinkets::Event::Discard, Some(m.card), 1);
         match self.data.cards.get(m.card).on_discard {
@@ -205,6 +207,19 @@ impl Game {
                 return;
             }
             let req = self.players[p].discover_queue.remove(0);
+            // A Dark Gift offer draws its own minions and gifts, one per
+            // slot, so it fills the Discover itself and lets the loop go on.
+            if let DiscoverRequest::DarkGift(plan) = req {
+                let turn = plan.gift_turn;
+                self.deal_dark_gift_offer(p, plan);
+                let _ = turn;
+                continue;
+            }
+            if matches!(req, DiscoverRequest::DarkGiftCopies) {
+                let turn = self.turn;
+                self.deal_dark_gift_copies(p, turn);
+                continue;
+            }
             let damage_from = match req {
                 DiscoverRequest::DemonMinion { source, .. } => Some(source),
                 _ => None,
@@ -282,6 +297,8 @@ impl Game {
                         *lobby,
                         |c| !c.tribes.is_neutral(),
                     ),
+                    // Handled above, before the pool draws.
+                    DiscoverRequest::DarkGift(_) | DiscoverRequest::DarkGiftCopies => None,
                     DiscoverRequest::DemonMinion { max_tier: max_t, .. } => draw_filtered(
                         pool,
                         &data.cards,
@@ -339,13 +356,28 @@ impl Game {
         let doomed = std::mem::take(&mut pl.discover_doomed);
         let both = std::mem::take(&mut pl.discover_both);
         let c = pl.discover[k];
+        // A Dark Gift offer: the gift on the pick, the pool copies each offer
+        // held (a Golden offer holds three, a Dagger copy none).
+        let dark = pl.dark_offer;
+        let gift = pl.discover_gifts.get(k).copied();
+        let gift_turn = pl.dark_offer_turn;
+        let golden_offer = pl.dark_offer_golden
+            || gift.is_some_and(|g| data.cards.get(g.card()).makes_golden);
+        let locked_turns = pl.dark_offer_locked;
+        let mut copies = [1u8; DISCOVER];
         for (i, &o) in pl.discover.iter().enumerate() {
-            if i != k && !data.cards.get(o).is_spell() {
+            if dark {
+                copies[i] = pl.discover_copies.get(i).copied().unwrap_or(0);
+            } else if data.cards.get(o).is_spell() {
+                copies[i] = 0;
+            }
+            if i != k && copies[i] > 0 && !data.cards.get(o).is_spell() {
                 let slot = data.cards.get(o).pool_slot as usize;
-                pool[slot] += 1;
+                pool[slot] += copies[i];
             }
         }
         pl.discover.clear();
+        pl.clear_dark_offer();
         // Imposing Percussionist: the hero takes damage equal to the Tier of
         // the Demon chosen.
         let damage = pl
@@ -367,10 +399,11 @@ impl Game {
                 pl.board[slot] = m;
                 give_back(pool, &data.cards, &old);
                 self.check_triple(p, c);
-            } else {
-                // Nothing to transform (the board moved): the copy goes back.
+            } else if !is_spell && copies[k] > 0 {
+                // Nothing to transform (the board moved, or the Discover was
+                // a spell's): the copy goes back.
                 let slot = data.cards.get(c).pool_slot as usize;
-                self.pool[slot] += 1;
+                self.pool[slot] += copies[k];
             }
             self.maybe_start_discover(p);
             return;
@@ -385,8 +418,27 @@ impl Game {
             _ => None,
         };
         if !pl.hand.is_full() {
-            let pool_copies = if is_spell { 0 } else { 1 };
-            let mut m = pl.make_card(&data.cards, c, false, pool_copies);
+            let pool_copies = if is_spell {
+                0
+            } else if dark {
+                copies[k]
+            } else {
+                1
+            };
+            let mut m = pl.make_card(&data.cards, c, golden_offer, pool_copies);
+            if golden_offer {
+                // Gilding and Sinister Invitation: no Triple Reward.
+                m.no_reward = true;
+            }
+            if let Some(gift) = gift
+                && !is_spell
+                && let Some(index) = data.gifts.gift_of_card(gift.card())
+            {
+                super::darkgifts::land_gift(data, pl, &mut m, index, gift_turn);
+            }
+            if locked_turns > 0 && !is_spell {
+                m.locked_turns = locked_turns;
+            }
             if let Some((a, h)) = set_stats {
                 m.attack = a;
                 m.health = h;
@@ -407,9 +459,12 @@ impl Game {
             if !is_spell {
                 self.check_triple(p, c);
             }
-        } else if !is_spell {
+        } else if !is_spell && copies[k] > 0 {
             let slot = self.data.cards.get(c).pool_slot as usize;
-            self.pool[slot] += 1;
+            // A full hand loses the pick, and every pool copy it held goes
+            // back (three for a Golden Dark Gift offer, none for a token or a
+            // Dagger copy).
+            self.pool[slot] += copies[k];
         }
         if let Some((source, d)) = damage {
             self.take_shop_damage(p, d, Some(source as usize));

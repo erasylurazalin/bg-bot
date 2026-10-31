@@ -33,7 +33,7 @@ const SEAT_KINDS: usize = 6;
 
 /// One minion for `VecEnv(real_boards=..)`, as train/real_boards.py loads
 /// it: (name, attack, health, golden, keywords, numbers).
-type PyMinion = (String, i32, i32, bool, Vec<String>, Vec<i32>);
+type PyMinion = (String, i32, i32, bool, Vec<String>, Vec<i32>, Vec<String>);
 
 /// One board for `VecEnv(real_boards=..)`:
 /// (turn, tier, minions, hand, counters, deity). `counters` holds the
@@ -53,13 +53,14 @@ type PyBoards = Vec<PyBoard>;
 /// A board's minions (or hand) as `RealBoards::build` takes them.
 fn minion_specs(list: Vec<PyMinion>) -> Vec<RealMinionSpec> {
     list.into_iter()
-        .map(|(name, attack, health, golden, keywords, numbers)| RealMinionSpec {
+        .map(|(name, attack, health, golden, keywords, numbers, dark_gifts)| RealMinionSpec {
             name,
             attack,
             health,
             golden,
             keywords,
             numbers,
+            dark_gifts,
         })
         .collect()
 }
@@ -224,7 +225,7 @@ impl VecEnv {
             // Names that match no card are dropped here; train/real_boards.py
             // reports them (it knows both stages of the mapping), so this
             // stays quiet: every eval VecEnv would repeat the line.
-            let (boards, _) = RealBoards::build(&specs, &data.cards);
+            let (boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
             Arc::new(boards)
         });
         let lineup = check_lineup(lineup, boards.is_some())?;
@@ -598,6 +599,12 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SLOT_ATTACHED", obs::SLOT_ATTACHED)?;
     m.add("SLOT_ATTACHED_GOLDEN", obs::SLOT_ATTACHED_GOLDEN)?;
     m.add("ATTACHED_SLOTS", bgcore::minion::MAX_ATTACHED)?;
+    m.add("SLOT_GIFTS", obs::SLOT_GIFTS)?;
+    m.add("GIFT_SLOTS", bgcore::MAX_GIFTS)?;
+    m.add("SCALAR_DARK_GIFT_USES", obs::SCALAR_DARK_GIFT_USES)?;
+    m.add("SCALAR_DARK_GIFT_PRESSED", obs::SCALAR_DARK_GIFT_PRESSED)?;
+    m.add("SCALAR_DARK_GIFT_READY", obs::SCALAR_DARK_GIFT_READY)?;
+    m.add("SCALAR_DARK_OFFER", obs::SCALAR_DARK_OFFER)?;
     m.add("OPP_ALIVE", obs::OPP_ALIVE)?;
     m.add("OPP_HEALTH", obs::OPP_HEALTH)?;
     m.add("OPP_TIER", obs::OPP_TIER)?;

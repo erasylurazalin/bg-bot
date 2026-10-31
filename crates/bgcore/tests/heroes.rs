@@ -144,9 +144,9 @@ fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_thirty_heroes() {
+fn heroes_toml_parses_with_the_thirty_two_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 30);
+    assert_eq!(d.heroes.heroes.len(), 32);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),
@@ -181,6 +181,9 @@ fn heroes_toml_parses_with_the_thirty_heroes() {
         ("A. F. Kay", "TB_BaconShop_HERO_16", 15, 0),
         ("Ambassador Faelin", "BG22_HERO_201", 14, 0),
         ("King Mukla", "TB_BaconShop_HERO_38", 16, 0),
+        // The two Dark Gift heroes (docs/darkgifts.md).
+        ("Tras'tath, Soul Parasite", "BG36_HERO_101", 15, 0),
+        ("Nightmare Lord Xavius", "BG36_HERO_105", 6, 0),
     ] {
         let h = d.heroes.by_name(name).expect(name);
         let hero = d.heroes.get(h);

@@ -1934,3 +1934,46 @@ name = "Reinvigorating Light"
 card_id = "BG36_MagicItem_411"
 slot = "lesser"
 on_pick = [{ second_power = true }, { gold = 3 }]
+
+# --- The Dark Gift trinkets (docs/darkgifts.md) ---
+#
+# Each opens a Dark Gift offer: one minion per offer with a gift on it, the
+# same offer the Dark Discovery button deals (the gifts follow the same
+# windows, conditions and weights; `dark_gift = { tier = 4, yours = true }`
+# is a fixed tier of the player's most common type, and a `dark_gift` with no
+# tier uses the button's tiers for this turn, which is what Sinister
+# Invitation's plain "a Golden minion of your most common type" needs).
+
+[[trinket]]
+name = "Ominous Stone"
+card_id = "BG36_MagicItem_206"
+slot = "lesser"
+cost = 3
+on_pick = [{ dark_gift = { tier = 4, yours = true } }]
+
+[[trinket]]
+name = "Wax Lance"
+card_id = "BG36_MagicItem_309"
+slot = "greater"
+cost = 3
+on_pick = [{ dark_gift = { tier = 7 } }]
+
+[[trinket]]
+name = "Sinister Invitation"
+card_id = "BG36_MagicItem_610"
+slot = "greater"
+cost = 4
+# A Golden offer gives no Triple Reward.
+on_pick = [{ dark_gift = { yours = true, golden = true } }]
+
+# Plain copies of three of your own minions, each with a NEW Dark Gift picked
+# for it by the normal rules. This is the one gift source that may copy a
+# Magnetic minion (they are your minions, not the pool's).
+[[trinket]]
+name = "Maldraxxus Dagger"
+card_id = "BG36_MagicItem_370"
+slot = "greater"
+cost = 6
+on_pick = [{ dark_gift_copies = true }]
+start_every = 2
+start_of_turn = [{ dark_gift_copies = true }]

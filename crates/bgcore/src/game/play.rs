@@ -30,7 +30,7 @@ impl Game {
         let pl = &mut self.players[p];
         pl.golden_played = pl.golden_played.saturating_add(n);
         for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(&mut pl.board) {
-            for (card, golden) in m.parts().collect::<ArrayVec<_, { crate::MAX_ATTACHED + 1 }>>() {
+            for (card, golden) in m.parts().collect::<ArrayVec<_, { crate::MAX_ATTACHED + crate::MAX_GIFTS + 1 }>>() {
                 if let Some((a, h)) = cards.get(card).buff_per_golden_played {
                     let k = n as i32 * if golden { 2 } else { 1 };
                     m.attack += a * k;
@@ -296,7 +296,7 @@ impl Game {
     /// stays) or the minion already had one.
     pub(super) fn give_play_shield(&mut self, p: usize, pos: usize) {
         let cards = &self.data.cards;
-        let tribes = cards.get(self.players[p].board[pos].card).tribes;
+        let tribes = cards.tribes_of(&self.players[p].board[pos]);
         let mut any = false;
         let mut for_good = false;
         for m in &self.players[p].board {
@@ -320,8 +320,13 @@ impl Game {
     }
 
     pub(super) fn battlecry_or_choose_one(&mut self, p: usize, mut pos: usize) {
-        // "Battlecries you have triggered this game" (Murky Sticker).
+        // "Battlecries you have triggered this game" (Murky Sticker), and
+        // the same count for the Dark Gift Battle Scars, wherever the
+        // minion with it is.
         self.players[p].tp.battlecries = self.players[p].tp.battlecries.saturating_add(1);
+        self.players[p].battlecries_triggered =
+            self.players[p].battlecries_triggered.saturating_add(1);
+        self.dark_gift_count(p, 1, |c| c.buff_per_battlecry);
         // A hook that ran just before this can have taken the slot away (a
         // triple that pulled the minion off the board): nothing to trigger.
         let Some(&m) = self.players[p].board.get(pos) else { return };
@@ -397,7 +402,7 @@ impl Game {
         let mut runs = self.brann_mult(p);
         runs = runs.saturating_add(self.take_war_drum(p));
         if self.players[p].tp.dragon_battlecry > 0
-            && self.data.cards.get(m.card).tribes.has(Tribe::Dragon)
+            && self.data.cards.tribes_of(&m).has(Tribe::Dragon)
         {
             runs = runs.saturating_add(self.players[p].tp.dragon_battlecry);
         }

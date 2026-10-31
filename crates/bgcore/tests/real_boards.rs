@@ -32,6 +32,7 @@ fn spec(turn: u32, tier: u8, minions: &[(&str, i32, i32, bool, &[&str])]) -> Rea
                 golden,
                 keywords: keywords.iter().map(|s| s.to_string()).collect(),
                 numbers: Vec::new(),
+                dark_gifts: Vec::new(),
             })
             .collect(),
         ..RealBoardSpec::default()
@@ -60,7 +61,7 @@ fn name(db: &bgcore::CardDb, m: &Minion) -> String {
 }
 
 fn build(specs: &[RealBoardSpec]) -> Arc<RealBoards> {
-    let (boards, unmatched) = RealBoards::build(specs, &data().cards);
+    let (boards, unmatched) = RealBoards::build(specs, &data().cards, &data().gifts);
     assert!(unmatched.is_empty(), "unexpected unmatched: {unmatched:?}");
     Arc::new(boards)
 }
@@ -92,7 +93,7 @@ fn build_resolves_minions_and_stands_in_for_the_unknown() {
         spec(3, 1, &[("Sewer Rat", 3, 2, false, &["TAUNT"])]),
         spec(14, 6, &[("Tarecgosa", 9, 10, true, &["POISONOUS", "CLEARE", "STEALTH"])]),
     ];
-    let (boards, unmatched) = RealBoards::build(&specs, &d.cards);
+    let (boards, unmatched) = RealBoards::build(&specs, &d.cards, &d.gifts);
     assert_eq!(unmatched, ["Dark Paradox", "No Such Card"]);
     let t3 = boards.boards_at(3);
     assert_eq!(t3.len(), 2);
@@ -130,7 +131,7 @@ fn turns_13_and_up_share_a_pool_and_empty_turns_fall_back() {
         spec(14, 6, &[("Bonker", 2, 7, false, &[])]),
         spec(LATE_TURN + 6, 6, &[("Eternal Summoner", 8, 1, false, &["STEALTH"])]),
     ];
-    let (boards, _) = RealBoards::build(&specs, &d.cards);
+    let (boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
     assert_eq!(boards.len(), 5);
     assert_eq!(boards.boards_at(1).len(), 1);
     assert_eq!(boards.boards_at(4).len(), 2);
@@ -169,7 +170,7 @@ fn a_real_seat_gets_its_board_each_turn_and_never_shops() {
         spec(3, 3, &[("Amber Guardian", 3, 2, false, &["DIVINE_SHIELD"])]),
         spec(4, 4, &[("Bonker", 2, 7, false, &["WINDFURY"])]),
     ];
-    let (boards, unmatched) = RealBoards::build(&specs, &d.cards);
+    let (boards, unmatched) = RealBoards::build(&specs, &d.cards, &d.gifts);
     assert!(unmatched.is_empty());
     let boards = Arc::new(boards);
     let mut g = Game::new_random_heroes_real(d.clone(), 42, &[0], boards.clone());
@@ -300,7 +301,7 @@ fn the_fixture_folder_loads_through_the_shared_parser() {
     assert_eq!(t4opp.counters.knight_deaths, 2);
     assert_eq!(t4opp.counters.improve[Counter::Baller.index()], 1);
     assert!(t4opp.deity.is_none());
-    let (boards, unmatched) = RealBoards::build(&specs, &d.cards);
+    let (boards, unmatched) = RealBoards::build(&specs, &d.cards, &d.gifts);
     // Dark Paradox: the id is known, the card is not built here.
     assert_eq!(unmatched, ["Dark Paradox"]);
     // The hand's Lobster is the player's improve count (10 / 2 - 1), and the
@@ -343,7 +344,7 @@ power = { name = \"Everbloom\", card_id = \"TB_BaconShop_HP_082\", passive = tru
         heroes,
     )
     .unwrap());
-    let (boards, _) = RealBoards::build(&folder_like(), &d.cards);
+    let (boards, _) = RealBoards::build(&folder_like(), &d.cards, &d.gifts);
     let real: Vec<usize> = (2..PLAYERS).collect();
     let g = Game::new_random_heroes_real(d, 5, &real, Arc::new(boards));
     assert_eq!(g.players[0].hero.unwrap(), 0);
@@ -411,6 +412,7 @@ fn a_real_seat_takes_the_boards_numbers() {
         golden: false,
         keywords: Vec::new(),
         numbers: vec![14, 7, 0, 0],
+        dark_gifts: Vec::new(),
     }];
     b.counters.set("gem_attack", 5);
     b.counters.set("gem_health", 4);
@@ -520,6 +522,7 @@ fn a_real_seat_hand_reaches_the_fight() {
         golden: false,
         keywords: Vec::new(),
         numbers: Vec::new(),
+        dark_gifts: Vec::new(),
     }];
     let boards = single_board_folder(&b);
     let mut g = Game::new_random_heroes_real(d.clone(), 11, &[0], boards);
@@ -613,7 +616,7 @@ fn an_old_file_loads_with_the_base_values() {
         assert_eq!(s.deity, None);
         assert!(s.minions.iter().all(|m| m.numbers.is_empty()));
     }
-    let (boards, _) = RealBoards::build(&specs, &data().cards);
+    let (boards, _) = RealBoards::build(&specs, &data().cards, &data().gifts);
     let b = &boards.boards_at(4)[0];
     assert_eq!((b.counters.gem_attack, b.counters.gem_health), (1, 1));
     assert_eq!(b.counters.improve, [0; 2]);
@@ -639,7 +642,7 @@ fn the_loaded_cards_carry_their_scaling_state() {
         with_numbers(spec(5, 3, &[("Tasty Lobster", 6, 3, false, &[])]), 0, &[10, 5, 0, 0]),
         with_numbers(spec(5, 3, &[("Tasty Lobster", 12, 6, true, &[])]), 0, &[20, 10, 0, 0]),
     ];
-    let (boards, unmatched) = RealBoards::build(&specs, &d.cards);
+    let (boards, unmatched) = RealBoards::build(&specs, &d.cards, &d.gifts);
     assert!(unmatched.is_empty());
     let imp = |turn: &[bgcore::real_boards::RealBoard]| turn[0].minions[0].improvements;
     let at5 = boards.boards_at(5);
@@ -689,8 +692,8 @@ fn the_numbers_make_real_boards_stronger() {
     let (new_specs, _) = parse_board_files(&read("../../boards/real"), &ids).unwrap();
     let (old_specs, _) =
         parse_board_files(&read("../../boards/real-before-counters"), &ids).unwrap();
-    let new = RealBoards::build(&new_specs, &d.cards).0;
-    let old = RealBoards::build(&old_specs, &d.cards).0;
+    let new = RealBoards::build(&new_specs, &d.cards, &d.gifts).0;
+    let old = RealBoards::build(&old_specs, &d.cards, &d.gifts).0;
     // Every board of a turn plays the next eight boards of that turn, loaded
     // the old way (no numbers, no hand) both times: the opponents are the
     // same, only the board in front of them changes.
@@ -741,3 +744,27 @@ fn the_numbers_make_real_boards_stronger() {
     );
 }
 
+
+#[test]
+fn a_board_file_s_dark_gifts_load_onto_its_minions() {
+    // The log carries the gifts each minion had (`dark_gifts`, the gift's own
+    // card_id). Their stats are already in the file's attack and health; the
+    // effect comes along.
+    let text = r#"{"boards": [
+      {"who": "me", "turn": 6, "tier": 4, "minions": [
+        {"card_id": "BG36_202", "name": "Tasty Lobster", "attack": 2, "health": 1,
+         "golden": false, "keywords": [],
+         "dark_gifts": ["BG36_MidGameEffect_000t73", "BG36_MidGameEffect_000t51"]}]}]}"#;
+    // 000t73 is Fortitude, 000t51 Steady Growth.
+    let ids = CardIdMap::parse(&std::fs::read_to_string("../../ref/bg-cards.json").unwrap())
+        .unwrap();
+    let (specs, _) =
+        parse_board_files(&[("gifted.json".to_string(), text.to_string())], &ids).unwrap();
+    assert_eq!(specs[0].minions[0].dark_gifts.len(), 2);
+    let d = data();
+    let (boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
+    let m = &boards.boards_at(6)[0].minions[0];
+    let names: Vec<String> =
+        m.gift_slice().iter().map(|g| d.cards.get(g.card()).name.clone()).collect();
+    assert_eq!(names, ["Gift: Fortitude", "Gift: Steady Growth"]);
+}

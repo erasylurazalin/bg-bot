@@ -55,8 +55,11 @@ OPP_IDS = [bgpy.OPP_HERO]
 OPP_TRINKET_IDS = list(range(bgpy.OPP_TRINKET, bgpy.OPP_TRINKET + bgpy.TRINKET_SLOTS))
 # The minion's own id, the spell a Magicfin token was taught, and the ids of
 # the effect-carrying cards Magnetized into it.
+# ... and the Dark Gifts on it, which are effect card ids and ride in the
+# same table.
 SLOT_IDS = [bgpy.SLOT_CARD_ID, bgpy.SLOT_TAUGHT_SPELL] + list(
-    range(bgpy.SLOT_ATTACHED, bgpy.SLOT_ATTACHED + bgpy.ATTACHED_SLOTS))
+    range(bgpy.SLOT_ATTACHED, bgpy.SLOT_ATTACHED + bgpy.ATTACHED_SLOTS)) + list(
+    range(bgpy.SLOT_GIFTS, bgpy.SLOT_GIFTS + bgpy.GIFT_SLOTS))
 # Stats can run into the hundreds late (Holy Vanguard, Tyrael's 50/50, Blood
 # Gems on a big Quilboar), so these are log-scaled after the division.
 SLOT_LOG = [bgpy.SLOT_ATTACK, bgpy.SLOT_HEALTH, bgpy.SLOT_FIGHT_ATTACK, bgpy.SLOT_FIGHT_HEALTH,
@@ -190,6 +193,9 @@ class Net(nn.Module):
 
 
 KIND_SIZES = [n for _, n in bgpy.ACTION_KINDS]
+# The global actions after the trinket offer's options, which come from `s`
+# alone: the Dark Discovery button (`ACTION_KINDS`'s last kind).
+GLOBALS_AFTER = bgpy.ACTION_KINDS[-1][1]
 assert sum(KIND_SIZES) == bgpy.N_ACTIONS
 
 
@@ -330,8 +336,9 @@ class ActionHead(nn.Module):
         self.move_k = nn.Linear(hidden, qk)
         # roll, freeze, level, end; the Choose One and power-choice columns
         # (CHOICES: a chooser offers up to four, a Discover three); the two
-        # hero power buttons; the trinket offer's options
-        self.glob = nn.Linear(d, 6 + bgpy.CHOICES + bgpy.TRINKET_CHOICES)
+        # hero power buttons; the trinket offer's options; the Dark Discovery
+        # button
+        self.glob = nn.Linear(d, 6 + bgpy.CHOICES + bgpy.TRINKET_CHOICES + GLOBALS_AFTER)
         self.bias = nn.Parameter(kind_prior())
         for m in (self.ptr, self.play_q, self.move_q, self.glob):
             nn.init.orthogonal_(m.weight, 0.01)
@@ -376,6 +383,8 @@ class ActionHead(nn.Module):
             g[:, 4 + bgpy.CHOICES:5 + bgpy.CHOICES],
             g[:, 5 + bgpy.CHOICES:6 + bgpy.CHOICES],
             g[:, 6 + bgpy.CHOICES:6 + bgpy.CHOICES + bgpy.TRINKET_CHOICES],
+            # the Dark Discovery button, the last action of all
+            g[:, 6 + bgpy.CHOICES + bgpy.TRINKET_CHOICES:],
         ], 1)
         return logits + self.bias
 

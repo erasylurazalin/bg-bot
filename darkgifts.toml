@@ -1,0 +1,430 @@
+# The Dark Gifts (docs/darkgifts.md, Era's rules). One [[gift]] per gift card
+# of the game data (`ref/bg-meta.json` `dark_gifts`): its card_id, its name,
+# the turn window it can be offered in (game tags 4853 and 4854), its weight
+# (4856, 50 means half as likely to be picked for an offer) and the condition
+# its host has to meet. What a gift *does* is a token in cards.toml's
+# "Dark Gifts" section (`card = "<token name>"`), so a gift whose text matches
+# a card's runs through exactly the same code as that card.
+#
+# The engine never matches a gift by name. Windows, weights and conditions
+# are read here; `crates/bgcore/src/darkgifts.rs` holds the loader and the
+# offer rules.
+
+# The pool the Dark Discovery draws its minions from (docs/darkgifts.md).
+# On top of these: never a Magnetic minion, never one with a "when you sell
+# this", never one whose effect works in hand. Those are flags on the card,
+# not names here.
+[pool]
+# No Battlecry and no Choose One minion before this turn.
+no_battlecry_before = 5
+no_choose_one_before = 5
+# Left out for balance, by card name (cards.toml names).
+exclude = ["Leeroy the Reckless", "Deadly Spore"]
+
+# The tiers of the three offers by turn, and whether that slot wants a minion
+# of the player's most common type. Several tiers in one slot ("4,5") are
+# picked among at random. The last entry covers every later turn. Before the
+# first entry the button is locked.
+[[offer]]
+turn = 3
+tiers = ["2", "2", "2"]
+yours = [false, false, false]
+
+[[offer]]
+turn = 4
+tiers = ["2", "2", "3"]
+yours = [false, false, false]
+
+[[offer]]
+turn = 5
+tiers = ["3", "3", "3"]
+yours = [false, false, false]
+
+[[offer]]
+turn = 6
+tiers = ["3", "4", "4"]
+yours = [true, false, false]
+
+[[offer]]
+turn = 7
+tiers = ["4", "4", "4"]
+yours = [true, false, false]
+
+[[offer]]
+turn = 8
+tiers = ["4", "5", "5"]
+yours = [true, false, false]
+
+[[offer]]
+turn = 9
+tiers = ["4,5", "5", "6"]
+yours = [true, false, false]
+
+[[offer]]
+turn = 10
+tiers = ["5", "5,6", "5,6"]
+yours = [true, true, false]
+
+# --- Steady Growth's numbers -------------------------------------------
+# "At the end of your turn, gain +{1}/+{2}": both are fixed when the gift
+# lands, by the turn it was offered. The log shows +2/+2 on turn 3, +2/+3 on
+# turn 4 and +3/+4 on turn 5 (docs/briefs/darkgift-facts.md section 3k), so
+# Attack goes up by one every two turns from turn 3 and Health by one every
+# turn. Past turn 5 that is extrapolated one step per turn (6: +3/+5,
+# 7: +4/+6, 8: +4/+7) and capped at +10/+20.
+[steady_growth]
+base_attack = 2
+base_health = 2
+base_turn = 3
+attack_every = 2
+health_every = 1
+max_attack = 10
+max_health = 20
+
+# --- The 47 gifts ------------------------------------------------------
+# `window = [first, last]`, `last` absent for "no last turn". `weight` left
+# out for the gifts with no 4856 tag. A gift with no window can be offered
+# from turn 1 (Harpy's Talons only).
+
+[[gift]]
+name = "Offensive Sacrifice"
+id = "BG36_MidGameEffect_000t"
+card = "Gift: Offensive Sacrifice"
+window = [6, 9]
+condition = "any"
+
+[[gift]]
+name = "Defensive Sacrifice"
+id = "BG36_MidGameEffect_000t2"
+card = "Gift: Defensive Sacrifice"
+window = [6, 9]
+condition = "any"
+
+[[gift]]
+name = "Charisma"
+id = "BG36_MidGameEffect_000t3"
+card = "Gift: Charisma"
+window = [7, 11]
+condition = "any"
+
+[[gift]]
+name = "Incubation"
+id = "BG36_MidGameEffect_000t4"
+card = "Gift: Incubation"
+window = [6, 8]
+condition = "any"
+
+[[gift]]
+name = "Mystic Essence"
+id = "BG36_MidGameEffect_000t5"
+card = "Gift: Mystic Essence"
+window = [5, 8]
+condition = "any"
+
+[[gift]]
+name = "Resistance"
+id = "BG36_MidGameEffect_000t7"
+card = "Gift: Resistance"
+window = [7, 10]
+condition = "any"
+
+[[gift]]
+name = "Admiration"
+id = "BG36_MidGameEffect_000t9"
+card = "Gift: Admiration"
+window = [7]
+condition = "not_dragon"
+
+[[gift]]
+name = "Echoing Voice"
+id = "BG36_MidGameEffect_000t10"
+card = "Gift: Echoing Voice"
+window = [6]
+condition = "battlecry"
+
+[[gift]]
+name = "Double Vision"
+id = "BG36_MidGameEffect_000t11"
+card = "Gift: Double Vision"
+window = [5]
+condition = "any"
+
+[[gift]]
+name = "Persisting Horror"
+id = "BG36_MidGameEffect_000t12"
+card = "Gift: Persisting Horror"
+window = [10]
+weight = 50
+condition = "not_typeless"
+
+[[gift]]
+name = "Harpy's Talons"
+id = "BG36_MidGameEffect_000t13"
+card = "Gift: Harpy's Talons"
+condition = "any"
+
+[[gift]]
+name = "Gilding"
+id = "BG36_MidGameEffect_000t14"
+card = "Gift: Gilding"
+window = [4, 8]
+condition = "any"
+
+[[gift]]
+name = "Toreth's Blessing"
+id = "BG36_MidGameEffect_000t15"
+card = "Gift: Toreth's Blessing"
+window = [5]
+weight = 200
+condition = "any"
+
+[[gift]]
+name = "Jaws of Death"
+id = "BG36_MidGameEffect_000t16"
+card = "Gift: Jaws of Death"
+window = [5]
+weight = 200
+condition = "deathrattle"
+
+[[gift]]
+name = "Replication"
+id = "BG36_MidGameEffect_000t18"
+card = "Gift: Replication"
+window = [4, 7]
+condition = "any"
+
+[[gift]]
+name = "Time Turning"
+id = "BG36_MidGameEffect_000t21"
+card = "Gift: Time Turning"
+window = [5, 8]
+weight = 200
+condition = "end_of_turn"
+
+[[gift]]
+name = "Amalgamation"
+id = "BG36_MidGameEffect_000t22"
+card = "Gift: Amalgamation"
+window = [8]
+weight = 200
+condition = "typeless"
+
+[[gift]]
+name = "Battle Scars"
+id = "BG36_MidGameEffect_000t28"
+card = "Gift: Battle Scars"
+window = [7, 10]
+condition = "any"
+
+[[gift]]
+name = "Battle Scars (strong)"
+id = "BG36_MidGameEffect_000t28t"
+card = "Gift: Battle Scars strong"
+window = [4, 6]
+condition = "any"
+
+[[gift]]
+name = "Death's Embrace"
+id = "BG36_MidGameEffect_000t29"
+card = "Gift: Death's Embrace"
+window = [7, 10]
+condition = "any"
+
+[[gift]]
+name = "Death's Embrace (strong)"
+id = "BG36_MidGameEffect_000t29t"
+card = "Gift: Death's Embrace strong"
+window = [4, 6]
+condition = "any"
+
+[[gift]]
+name = "Spell Siphon"
+id = "BG36_MidGameEffect_000t30"
+card = "Gift: Spell Siphon"
+window = [7, 10]
+condition = "any"
+
+[[gift]]
+name = "Spell Siphon (strong)"
+id = "BG36_MidGameEffect_000t30t"
+card = "Gift: Spell Siphon strong"
+window = [5, 6]
+condition = "any"
+
+[[gift]]
+name = "Tarecgosa's Blessing"
+id = "BG36_MidGameEffect_000t50"
+card = "Gift: Tarecgosa's Blessing"
+window = [6]
+weight = 200
+condition = "tribe:dragon"
+
+[[gift]]
+name = "Steady Growth"
+id = "BG36_MidGameEffect_000t51"
+card = "Gift: Steady Growth"
+window = [3, 5]
+condition = "any"
+
+[[gift]]
+name = "Fresh Perspective"
+id = "BG36_MidGameEffect_000t52"
+card = "Gift: Fresh Perspective"
+window = [3, 5]
+condition = "any"
+
+[[gift]]
+name = "Invulnerability"
+id = "BG36_MidGameEffect_000t60"
+card = "Gift: Invulnerability"
+window = [12]
+weight = 50
+condition = "not_taunt_or_typeless"
+
+[[gift]]
+name = "Golemancy"
+id = "BG36_MidGameEffect_000t61"
+card = "Gift: Golemancy"
+window = [9, 11]
+condition = "any"
+
+[[gift]]
+name = "Sunken Persistence"
+id = "BG36_MidGameEffect_000t62"
+card = "Gift: Sunken Persistence"
+window = [3]
+weight = 200
+condition = "spellcraft"
+
+[[gift]]
+name = "Dexterity"
+id = "BG36_MidGameEffect_000t64"
+card = "Gift: Dexterity"
+window = [7, 8]
+condition = "any"
+
+[[gift]]
+name = "Dexterity (strong)"
+id = "BG36_MidGameEffect_000t64t"
+card = "Gift: Dexterity strong"
+window = [9, 10]
+condition = "any"
+
+[[gift]]
+name = "Polarization"
+id = "BG36_MidGameEffect_000t65"
+card = "Gift: Polarization"
+window = [5, 9]
+weight = 200
+condition = "tribe:mech"
+
+[[gift]]
+name = "Demonology"
+id = "BG36_MidGameEffect_000t66"
+card = "Gift: Demonology"
+window = [5, 8]
+weight = 200
+condition = "tribe:demon"
+
+[[gift]]
+name = "Toxicity"
+id = "BG36_MidGameEffect_000t69"
+card = "Gift: Toxicity"
+window = [9]
+condition = "murloc_not_venomous"
+
+[[gift]]
+name = "Hostility"
+id = "BG36_MidGameEffect_000t71"
+card = "Gift: Hostility"
+window = [7, 10]
+condition = "any"
+
+[[gift]]
+name = "Titanic Strength"
+id = "BG36_MidGameEffect_000t72"
+card = "Gift: Titanic Strength"
+window = [11]
+weight = 50
+condition = "not_dragon"
+
+[[gift]]
+name = "Fortitude"
+id = "BG36_MidGameEffect_000t73"
+card = "Gift: Fortitude"
+window = [3, 3]
+condition = "any"
+
+[[gift]]
+name = "Sharpened Sword"
+id = "BG36_MidGameEffect_000t74"
+card = "Gift: Sharpened Sword"
+window = [3, 6]
+condition = "any"
+
+[[gift]]
+name = "Toughened Shield"
+id = "BG36_MidGameEffect_000t75"
+card = "Gift: Toughened Shield"
+window = [3, 6]
+condition = "any"
+
+[[gift]]
+name = "Efficiency"
+id = "BG36_MidGameEffect_000t78"
+card = "Gift: Efficiency"
+window = [5]
+weight = 200
+condition = "activate"
+
+[[gift]]
+name = "Furtiveness"
+id = "BG36_MidGameEffect_000t79"
+card = "Gift: Furtiveness"
+window = [4]
+condition = "any"
+
+[[gift]]
+name = "Consanguinity"
+id = "BG36_MidGameEffect_000t80"
+card = "Gift: Consanguinity"
+window = [3, 5]
+weight = 200
+condition = "tribe:quilboar"
+
+[[gift]]
+name = "Transcendence"
+id = "BG36_MidGameEffect_000t81"
+card = "Gift: Transcendence"
+window = [8]
+weight = 200
+condition = "any"
+
+[[gift]]
+name = "Affinity"
+id = "BG36_MidGameEffect_000t82"
+card = "Gift: Affinity"
+window = [3, 4]
+condition = "any"
+
+[[gift]]
+name = "Desecration"
+id = "BG36_MidGameEffect_000t88"
+card = "Gift: Desecration"
+window = [5, 7]
+condition = "any"
+
+[[gift]]
+name = "Worship"
+id = "BG36_MidGameEffect_000t89"
+card = "Gift: Worship"
+window = [12]
+weight = 50
+condition = "deity"
+
+[[gift]]
+name = "Doppelganger"
+id = "BG36_MidGameEffect_000t90"
+card = "Gift: Doppelganger"
+window = [6, 8]
+condition = "any"

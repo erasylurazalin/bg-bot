@@ -8,6 +8,7 @@
 pub mod action;
 pub mod bots;
 pub mod cards;
+pub mod darkgifts;
 pub mod fight;
 pub mod game;
 pub mod heroes;
@@ -21,10 +22,11 @@ pub mod trinkets;
 
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 pub use cards::{Card, CardDb, Effect, Tribe, Tribes};
+pub use darkgifts::{Gift, GiftCond, GiftDb};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
 pub use game::{Game, IllegalAction, Opponent, Player, PowerState, Sandbox, SandboxFight};
 pub use heroes::{Hero, HeroDb, HeroPower, PowerEffect};
-pub use minion::{Attached, CardId, Keywords, MAX_ATTACHED, Minion};
+pub use minion::{Attached, CardId, GiftOn, Keywords, MAX_ATTACHED, MAX_GIFTS, Minion};
 pub use real_boards::{
     CardIdMap, LATE_TURN, RealBoard, RealBoardSpec, RealBoards, RealMinionSpec, parse_board_files,
 };
@@ -62,6 +64,8 @@ pub struct Data {
     pub heroes: HeroDb,
     /// The built trinkets. Empty in a `from_toml` card set (no trinket).
     pub trinkets: TrinketDb,
+    /// The built Dark Gifts. Empty in a `from_toml` card set (no gift).
+    pub gifts: GiftDb,
 }
 
 impl Data {
@@ -76,12 +80,25 @@ impl Data {
     }
 
     /// Cards, rules, heroes and trinkets. The trinket names resolve against
-    /// the card set, so a misspelt `get` is a load error.
+    /// the card set, so a misspelt `get` is a load error. No Dark Gifts: a
+    /// test that wants them passes darkgifts.toml to `from_toml_gifts`.
     pub fn from_toml_all(
         cards: &str,
         rules: &str,
         heroes: &str,
         trinkets: &str,
+    ) -> Result<Data, String> {
+        Data::from_toml_gifts(cards, rules, heroes, trinkets, "")
+    }
+
+    /// As `from_toml_all`, with the Dark Gift table too. Every gift names a
+    /// card in the card set, so a misspelt gift card is a load error.
+    pub fn from_toml_gifts(
+        cards: &str,
+        rules: &str,
+        heroes: &str,
+        trinkets: &str,
+        gifts: &str,
     ) -> Result<Data, String> {
         let cards = CardDb::from_toml(cards)?;
         if cards.triple_reward.is_none() {
@@ -89,18 +106,20 @@ impl Data {
         }
         let trinkets = crate::trinkets::TrinketDb::from_toml(trinkets, &cards)?;
         let heroes = HeroDb::from_toml(heroes, &cards)?;
-        Ok(Data { trinkets, cards, rules: Rules::from_toml(rules)?, heroes })
+        let gifts = GiftDb::from_toml(gifts, &cards)?;
+        Ok(Data { trinkets, cards, rules: Rules::from_toml(rules)?, heroes, gifts })
     }
 
-    /// The cards.toml, rules.toml and heroes.toml at the repo root, built
-    /// into the binary.
+    /// The cards.toml, rules.toml, heroes.toml, trinkets.toml and
+    /// darkgifts.toml at the repo root, built into the binary.
     pub fn bundled() -> Data {
-        Data::from_toml_all(
+        Data::from_toml_gifts(
             include_str!("../../../cards.toml"),
             include_str!("../../../rules.toml"),
             include_str!("../../../heroes.toml"),
             include_str!("../../../trinkets.toml"),
+            include_str!("../../../darkgifts.toml"),
         )
-        .expect("bundled cards.toml, rules.toml, heroes.toml or trinkets.toml is broken")
+        .expect("bundled cards.toml, rules.toml, heroes.toml, trinkets.toml or darkgifts.toml is broken")
     }
 }

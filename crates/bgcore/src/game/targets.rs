@@ -98,7 +98,7 @@ impl Game {
             // `answer_target_at_random`.
             TargetKind::MinionBuff { tribe, attack, health, keyword, random_keyword } => {
                 let ok = tribe.is_none_or(|t| {
-                    self.data.cards.get(self.players[p].shop[slot].card).tribes.has(t)
+                    self.data.cards.tribes_of(&self.players[p].shop[slot]).has(t)
                 });
                 if !ok {
                     return;
@@ -181,14 +181,14 @@ impl Game {
                             }
                         }
                         SpellTarget::BuffSameTribe { attack, health } => {
-                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            let t = self.data.cards.tribes_of(&self.players[p].shop[target]);
                             if let Some(tribe) = t.random_type(&mut self.rng) {
                                 for o in &mut self.players[p].board {
-                                    if self.data.cards.get(o.card).tribes.has(tribe) {
+                                    if self.data.cards.tribes_of(o).has(tribe) {
                                         buff(o, attack + da, health + dh);
                                     }
                                 }
-                                if self.data.cards.get(self.players[p].shop[target].card).tribes.has(tribe) {
+                                if self.data.cards.tribes_of(&self.players[p].shop[target]).has(tribe) {
                                     buff(&mut self.players[p].shop[target], attack + da, health + dh);
                                 }
                             }
@@ -218,7 +218,7 @@ impl Game {
                             stop_after = true;
                         }
                         SpellTarget::TavernBuffType { attack, health } => {
-                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            let t = self.data.cards.tribes_of(&self.players[p].shop[target]);
                             if let Some(tribe) = t.random_type(&mut self.rng) {
                                 let b = TavernBuff {
                                     tribe: Some(tribe),
@@ -230,7 +230,7 @@ impl Game {
                             }
                         }
                         SpellTarget::RefreshWithType => {
-                            let t = self.data.cards.get(self.players[p].shop[target].card).tribes;
+                            let t = self.data.cards.tribes_of(&self.players[p].shop[target]);
                             if let Some(tribe) = t.random_type(&mut self.rng) {
                                 let Game { data, rng, players, pool, lobby, .. } = self;
                                 Self::refresh_with_tribe(
@@ -317,7 +317,7 @@ impl Game {
                             m.gem_attack += ga;
                             m.gem_health += gh;
                             let quilboar =
-                                self.data.cards.get(m.card).tribes.has(Tribe::Quilboar);
+                                self.data.cards.tribes_of(m).has(Tribe::Quilboar);
                             if quilboar {
                                 m.keywords.set(keyword);
                             }
@@ -331,7 +331,7 @@ impl Game {
                     }
                     if !stop_after
                         && target < self.players[p].shop.len()
-                        && self.data.cards.get(self.players[p].shop[target].card).tribes.has(Tribe::Mech)
+                        && self.data.cards.tribes_of(&self.players[p].shop[target]).has(Tribe::Mech)
                     {
                         self.glambot_on_shop_mech(p, target);
                     }
@@ -567,12 +567,12 @@ impl Game {
                             }
                         }
                         SpellTarget::BuffSameTribe { attack, health } => {
-                            let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+                            let t = self.data.cards.tribes_of(&self.players[p].board[target_pos]);
                             // DESIGN.md "Types": a dual or all-type minion
                             // uses one of its types, picked at random.
                             if let Some(tribe) = t.random_type(&mut self.rng) {
                                 for o in &mut self.players[p].board {
-                                    if self.data.cards.get(o.card).tribes.has(tribe) {
+                                    if self.data.cards.tribes_of(o).has(tribe) {
                                         buff(o, attack + da, health + dh);
                                     }
                                 }
@@ -625,7 +625,7 @@ impl Game {
                             self.robust_evolution_board(p, target_pos);
                         }
                         SpellTarget::TavernBuffType { attack, health } => {
-                            let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+                            let t = self.data.cards.tribes_of(&self.players[p].board[target_pos]);
                             if let Some(tribe) = t.random_type(&mut self.rng) {
                                 let b = TavernBuff {
                                     tribe: Some(tribe),
@@ -637,7 +637,7 @@ impl Game {
                             }
                         }
                         SpellTarget::RefreshWithType => {
-                            let t = self.data.cards.get(self.players[p].board[target_pos].card).tribes;
+                            let t = self.data.cards.tribes_of(&self.players[p].board[target_pos]);
                             if let Some(tribe) = t.random_type(&mut self.rng) {
                                 let Game { data, rng, players, pool, lobby, .. } = self;
                                 Self::refresh_with_tribe(
