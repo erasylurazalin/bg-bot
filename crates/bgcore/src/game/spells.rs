@@ -186,7 +186,10 @@ impl Game {
     }
 
     pub(super) fn drakkari_mult(&self, p: usize) -> u8 {
-        self.times_count(p, |a| (a == Aura::Drakkari).then_some(TimesRole::Setter))
+        let n = self.times_count(p, |a| (a == Aura::Drakkari).then_some(TimesRole::Setter));
+        // Ghastly Sticker: one more time for the player's end-of-turn
+        // effects, on top of a Drakkari (they add, unlike two setters).
+        if self.players[p].tp.end_of_turn_ghastly { n.saturating_add(1) } else { n }
     }
 
     /// How many times the player's Bounties cast: once, twice with a Proud
@@ -197,7 +200,11 @@ impl Game {
     }
 
     pub(super) fn balinda_mult(&self, p: usize) -> u8 {
-        self.times_count(p, |a| (a == Aura::Balinda).then_some(TimesRole::Setter))
+        let n = self.times_count(p, |a| (a == Aura::Balinda).then_some(TimesRole::Setter));
+        // Replica Cathedral: the first Tavern spell of the turn casts one
+        // more time, on top of a Balinda (as its own extra cast, not a
+        // setter: two Balindas still cast twice).
+        if self.players[p].tp.first_spell_double > 0 { n.saturating_add(1) } else { n }
     }
 
     /// How many times a Blood Gem cast from hand on a friendly minion plays:
@@ -290,6 +297,12 @@ impl Game {
         let casts = if c.is_bounty && c.spell_effect.is_some() { self.bounty_mult(p) } else { 1 };
         let tavern = c.tavern_spell;
         self.cast_spell_inner(p, m);
+        // Replica Cathedral's doubling covers the first Tavern spell of the
+        // turn only: the cast itself read `balinda_mult`, so it is spent
+        // after it.
+        if tavern && self.players[p].tp.first_spell_double > 0 {
+            self.players[p].tp.first_spell_double -= 1;
+        }
         if tavern {
             for _ in 0..casts {
                 self.fire_event(p, EventKind::SpellsCast, 1);
@@ -364,7 +377,13 @@ impl Game {
                 return;
             }
             // Proud Privateer: a Bounty casts again, each cast a spell cast.
-            let casts = if c.is_bounty { self.bounty_mult(p) } else { 1 };
+            // Replica Cathedral's extra cast lands here for a spell with no
+            // target; a targeting or Choose One spell gets it from
+            // `balinda_mult` instead.
+            let mut casts = if c.is_bounty { self.bounty_mult(p) } else { 1 };
+            if tavern && self.players[p].tp.first_spell_double > 0 {
+                casts = casts.saturating_add(1);
+            }
             for _ in 0..casts {
                 if tavern {
                     self.trigger_on_cast_spell(p);
@@ -589,6 +608,21 @@ impl Game {
             SpellEffect::SaloonFinest => {
                 let Game { data, rng, players, pool, lobby, .. } = self;
                 Self::refresh_with_spells(&mut players[p], &data.cards, &data.rules, rng, pool, *lobby);
+            }
+            SpellEffect::RefreshWithBattlecries(price) => {
+                let Game { data, rng, players, pool, lobby, .. } = self;
+                Self::refresh_with_battlecries(
+                    &mut players[p],
+                    pool,
+                    &data.cards,
+                    &data.rules,
+                    rng,
+                    *lobby,
+                    price,
+                );
+                // An effect that says "Refresh" is one for the cards that
+                // count Refreshes (DESIGN.md, "Two kinds of Refresh").
+                self.trinket_event(p, crate::trinkets::Event::Refresh, None, 1);
             }
             SpellEffect::GetCard { card, count } => {
                 for _ in 0..count {

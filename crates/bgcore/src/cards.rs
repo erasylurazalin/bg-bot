@@ -687,6 +687,11 @@ pub enum SpellTarget {
         keyword: u8,
         times: u8,
         if_win_next_turn_buff: Option<(i32, i32)>,
+        /// The target must be of this tribe ("Give a Murloc...", "Give a
+        /// Beast...": the Spellcraft spells).
+        tribe: Option<Tribe>,
+        /// Give it a random Bonus Keyword it does not have (Vibrant Bubble).
+        random_keyword: bool,
     },
     BuffSameTribe {
         attack: i32,
@@ -746,6 +751,15 @@ pub enum SpellTarget {
     /// Get a plain copy of the chosen minion (board or Tavern) of Tier
     /// `max_tier` or below (Duplicating Lens).
     PlainCopy { max_tier: u8 },
+    /// Destroy the chosen friendly minion of a tribe, then get `count`
+    /// random minions of it (Jailer Sticker's Spellcraft spell).
+    DestroyGetRandom { tribe: Tribe, count: u8 },
+    /// Transform the chosen minion into one from a Tier higher, which the
+    /// player picks from three (Token of the Old Gods).
+    TransformHigher,
+    /// Watch the chosen friendly minion: whatever stats it gains outside
+    /// combat this turn, the Deity gains too (Makeshift Master).
+    WatchStats,
 }
 
 impl SpellTarget {
@@ -767,6 +781,7 @@ impl SpellTarget {
                 | SpellTarget::BuffPerTribePlayed { .. }
                 | SpellTarget::Confiscation { .. }
                 | SpellTarget::PlainCopy { .. }
+                | SpellTarget::TransformHigher
             )
     }
 
@@ -830,6 +845,9 @@ pub enum SpellEffect {
     DiscoverLockedMinion,
     /// Refresh the Tavern with Tavern spells (Saloon's Finest).
     SaloonFinest,
+    /// Refresh the Tavern with Battlecry minions, which cost this much while
+    /// they stay (Chillmere Mosaic's Spellcraft spell).
+    RefreshWithBattlecries(u8),
     /// Get `count` copies of a card (Weapons Forge).
     GetCard { card: CardId, count: u8 },
     /// An unplayable Lockbox that counts down from this many turns (its
@@ -1347,6 +1365,9 @@ pub struct Card {
     /// The Blood Gem itself (BG20_GEM): a plain 0-cost spell whose buff is
     /// the player's current Blood Gem value.
     pub blood_gem: bool,
+    /// A Spellcraft spell: it leaves the hand at the end of the turn if it
+    /// was not cast (DESIGN.md "Spellcraft").
+    pub spellcraft: bool,
     /// Whenever a Blood Gem is cast from hand on this minion, this plays this
     /// many Blood Gems on a random different friendly minion (Geomagus
     /// Roogug). Golden doubles the count. The Gems it plays are not from
@@ -1690,6 +1711,9 @@ struct RawSpell {
     /// The Blood Gem itself.
     #[serde(default)]
     blood_gem: bool,
+    /// A Spellcraft spell: it leaves the hand at the end of the turn.
+    #[serde(default)]
+    spellcraft: bool,
     on_discard: Option<String>,
     effect: Option<RawSpellEffect>,
     choose_one: Option<[RawSpellEffect; 2]>,
@@ -1719,6 +1743,9 @@ struct RawSpellEffect {
     tribe: Option<String>,
     buff: Option<[i32; 2]>,
     keyword: Option<String>,
+    /// A random Bonus Keyword the target does not have yet (Vibrant Bubble).
+    #[serde(default)]
+    random_keyword: bool,
     times: Option<u8>,
     count: Option<u8>,
     #[serde(default)]
@@ -1764,6 +1791,9 @@ struct RawSpellEffect {
     discover_locked_minion: bool,
     #[serde(default)]
     saloon_finest: bool,
+    /// Refresh the Tavern with Battlecry minions at this price (Chillmere
+    /// Mosaic).
+    refresh_with_battlecries: Option<u8>,
     /// Get `count` copies of this generated card.
     get: Option<String>,
     /// The chosen minion: toggle Taunt with these stats.
@@ -1808,6 +1838,18 @@ struct RawSpellEffect {
     /// Heroes whose powers that Discover never offers, by hero card_id.
     #[serde(default)]
     exclude_heroes: Vec<String>,
+    /// Destroy the chosen friendly minion of `tribe`, then get `count`
+    /// random minions of it (Jailer Sticker).
+    #[serde(default)]
+    destroy_get_random: bool,
+    /// Transform the chosen minion into one from a Tier higher (Token of the
+    /// Old Gods).
+    #[serde(default)]
+    transform_higher: bool,
+    /// Watch the chosen minion's stat gains for the Deity (Makeshift
+    /// Master).
+    #[serde(default)]
+    watch_stats: bool,
     /// Gem Confiscation: play `confiscate` Blood Gems on the chosen minion
     /// and steal its neighbours' Blood Gem stats.
     confiscate: Option<u8>,
@@ -2405,6 +2447,21 @@ fn parse_spell_effect(
                     None,
                 ));
             }
+            if e.random_keyword && e.buff.is_none() {
+                // "Give a Murloc a random Bonus Keyword" (Vibrant Bubble).
+                return Ok((
+                    Some(SpellTarget::Buff {
+                        attack: 0,
+                        health: 0,
+                        keyword: 0,
+                        times: 1,
+                        if_win_next_turn_buff: None,
+                        tribe: e.tribe.as_deref().map(tribe).transpose()?,
+                        random_keyword: true,
+                    }),
+                    None,
+                ));
+            }
             if let Some([attack, health]) = e.buff {
                 if e.per_bonus_keyword {
                     return Ok((Some(SpellTarget::BuffPerBonusKeyword { attack, health }), None));
@@ -2417,6 +2474,8 @@ fn parse_spell_effect(
                         keyword: kw,
                         times,
                         if_win_next_turn_buff: if_win,
+                        tribe: e.tribe.as_deref().map(tribe).transpose()?,
+                        random_keyword: e.random_keyword,
                     }),
                     None,
                 ));
@@ -2447,6 +2506,22 @@ fn parse_spell_effect(
             }
             if e.devourer {
                 return Ok((Some(SpellTarget::Devourer), None));
+            }
+            if e.destroy_get_random {
+                let t = e.tribe.as_deref().ok_or("destroy_get_random needs a tribe")?;
+                return Ok((
+                    Some(SpellTarget::DestroyGetRandom {
+                        tribe: tribe(t)?,
+                        count: e.count.unwrap_or(1),
+                    }),
+                    None,
+                ));
+            }
+            if e.transform_higher {
+                return Ok((Some(SpellTarget::TransformHigher), None));
+            }
+            if e.watch_stats {
+                return Ok((Some(SpellTarget::WatchStats), None));
             }
             Err("invalid chosen spell effect".into())
         }
@@ -2515,6 +2590,8 @@ fn parse_spell_effect(
                 SpellEffect::DiscoverHeroPower
             } else if e.saloon_finest {
                 SpellEffect::SaloonFinest
+            } else if let Some(price) = e.refresh_with_battlecries {
+                SpellEffect::RefreshWithBattlecries(price)
             } else if let Some([attack, health]) = e.refresh_buff {
                 SpellEffect::RefreshBuff { attack, health }
             } else if let Some(n) = e.lockbox {
@@ -3483,6 +3560,7 @@ impl CardDb {
                 on_discard: None,
                 tavern_spell: false,
                 blood_gem: false,
+                spellcraft: false,
                 on_gem_played_on_self: c.on_gem_played_on_self,
                 choose_one_cover: c.choose_one_cover.unwrap_or(0),
                 after_choose_one_play: c.after_choose_one_play,
@@ -3632,6 +3710,7 @@ impl CardDb {
                 }).transpose().map_err(&err)?,
                 tavern_spell: sp.tavern_spell,
                 blood_gem: sp.blood_gem,
+                spellcraft: sp.spellcraft,
                 on_gem_played_on_self: None,
                 choose_one_cover: 0,
                 after_choose_one_play: None,

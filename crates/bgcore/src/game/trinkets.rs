@@ -34,6 +34,26 @@ pub const LESSER_SLOT: usize = 0;
 pub const GREATER_SLOT: usize = 1;
 pub const POWER_SLOT: usize = 2;
 
+/// What a deal of options is for: one of the two standard offers (or the one
+/// a hero power owes), or the Mystery Cube's free replacement of the trinket
+/// its slot holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Offer {
+    Standalone,
+    /// `choices` options, all free and all Lesser, never the trinket the
+    /// slot holds and never a one-time effect (DESIGN.md).
+    Cube { exclude: u8, choices: u8 },
+}
+
+impl Offer {
+    fn choices(self) -> usize {
+        match self {
+            Offer::Standalone => TRINKET_CHOICES,
+            Offer::Cube { choices, .. } => (choices as usize).min(TRINKET_CHOICES),
+        }
+    }
+}
+
 /// What a Tavern minion costs this player right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MinionPrice {
@@ -117,15 +137,15 @@ impl Game {
         if turn == tp.greater_into_lesser_turn && self.players[p].trinkets[LESSER_SLOT].of != 0 {
             // Trip Vouchers: a greater offer into the lesser slot, replacing
             // the trinket that named this turn.
-            self.deal_trinket_offer(p, LESSER_SLOT, Slot::Greater);
+            self.deal_trinket_offer(p, LESSER_SLOT, Slot::Greater, Offer::Standalone);
             return;
         }
         if turn == lesser_turn && self.players[p].trinkets[LESSER_SLOT].of == 0 {
-            self.deal_trinket_offer(p, LESSER_SLOT, Slot::Lesser);
+            self.deal_trinket_offer(p, LESSER_SLOT, Slot::Lesser, Offer::Standalone);
             return;
         }
         if turn == greater_turn && self.players[p].trinkets[GREATER_SLOT].of == 0 {
-            self.deal_trinket_offer(p, GREATER_SLOT, Slot::Greater);
+            self.deal_trinket_offer(p, GREATER_SLOT, Slot::Greater, Offer::Standalone);
             return;
         }
         // A power that becomes a trinket: one extra offer, the same rules,
@@ -136,15 +156,19 @@ impl Game {
         if turn < power.unlock_turn || self.players[p].trinkets[POWER_SLOT].of != 0 {
             return;
         }
-        self.deal_trinket_offer(p, POWER_SLOT, slot);
+        self.deal_trinket_offer(p, POWER_SLOT, slot, Offer::Standalone);
     }
 
     /// Deal the four options: one guaranteed tribe trinket when a tribe of
     /// the board reaches the threshold, then three drawn by weight. Each
-    /// option carries the price it is sold at.
-    fn deal_trinket_offer(&mut self, p: usize, slot: usize, mut kind: Slot) {
+    /// option carries the price it is sold at. A Mystery Cube offer is two
+    /// free Lesser options instead, with neither the guarantee nor a price.
+    fn deal_trinket_offer(&mut self, p: usize, slot: usize, mut kind: Slot, offer: Offer) {
         // "Your next Trinket is a Lesser Trinket" (Mysterious Orb).
         if self.players[p].tp.next_lesser {
+            kind = Slot::Lesser;
+        }
+        if let Offer::Cube { .. } = offer {
             kind = Slot::Lesser;
         }
         // A field borrow, not an `Arc` clone: this runs twice per player per
@@ -160,6 +184,13 @@ impl Game {
         for i in 0..data.trinkets.len() as u8 {
             let t = data.trinkets.get(i);
             if t.slot != kind || (!t.tribes.is_empty() && !t.tribes.overlaps(self.lobby)) {
+                continue;
+            }
+            // The cube can't offer what the slot already holds (you can't
+            // keep the current one) and never offers a one-time effect.
+            if let Offer::Cube { exclude, .. } = offer
+                && (i == exclude || !t.cube)
+            {
                 continue;
             }
             let _ = eligible.try_push(i);
@@ -184,7 +215,7 @@ impl Game {
                 let _ = qualifying.try_push(t);
             }
         }
-        if !qualifying.is_empty() {
+        if !qualifying.is_empty() && offer == Offer::Standalone {
             let t = qualifying[self.rng.below(qualifying.len() as u32) as usize];
             let mut of_tribe: ArrayVec<u8, 256> = ArrayVec::new();
             for &i in &eligible {
@@ -200,7 +231,7 @@ impl Game {
         // The rest by weight. The draw order is the offer's own RNG path, so
         // it stays exactly as it was: candidate order and one draw per slot.
         let leans = self.mechanic_leans(p);
-        while options.len() < TRINKET_CHOICES {
+        while options.len() < offer.choices() {
             let mut total = 0u32;
             for &i in &eligible {
                 if options.contains(&i) {
@@ -240,7 +271,9 @@ impl Game {
         for i in options {
             let t = data.trinkets.get(i);
             let mut price = t.cost;
-            if !t.tribes.is_empty() {
+            if offer != Offer::Standalone {
+                price = 0;
+            } else if !t.tribes.is_empty() {
                 let qualified = Tribe::EVERY
                     .into_iter()
                     .enumerate()
@@ -322,6 +355,9 @@ impl Game {
     /// pick uses it; tests and the sandbox use it to hold a trinket without
     /// its pick effects.
     pub fn set_trinket(&mut self, p: usize, slot: usize, i: Option<u8>) {
+        // A Mystery Cube's effect stays with the slot: putting another trinket
+        // in it keeps the flag, emptying the slot drops it.
+        let cube = i.is_some() && self.players[p].trinkets[slot].cube;
         let state = match i {
             None => TrinketState::default(),
             Some(i) => {
@@ -337,6 +373,12 @@ impl Game {
                     uses_left: t.uses_per_turn.unwrap_or(u8::MAX),
                     done: false,
                     card: None,
+                    cube,
+                    cube_choices: if cube {
+                        self.players[p].trinkets[slot].cube_choices
+                    } else {
+                        0
+                    },
                 }
             }
         };
@@ -344,14 +386,21 @@ impl Game {
         self.refresh_trinket_mask(p);
     }
 
-    /// Recompute the player's trinket event mask from the slots it holds.
+    /// Recompute the player's trinket event mask from the slots it holds. A
+    /// cube slot always wants the start of the turn, whatever trinket it
+    /// holds (its own turn-start effect runs, then the new offer).
     fn refresh_trinket_mask(&mut self, p: usize) {
         let mut mask = 0;
+        let mut cube = false;
         for slot in 0..TRINKET_SLOTS {
-            let of = self.players[p].trinkets[slot].of;
-            if of != 0 {
-                mask |= self.data.trinkets.get(of - 1).event_mask();
+            let st = self.players[p].trinkets[slot];
+            cube |= st.cube;
+            if st.of != 0 {
+                mask |= self.data.trinkets.get(st.of - 1).event_mask();
             }
+        }
+        if cube {
+            mask |= crate::trinkets::STARTS_TURN | crate::trinkets::HAS_TRINKET;
         }
         self.players[p].trinket_events = mask;
     }
@@ -380,6 +429,31 @@ impl Game {
         self.players[p].tp.next_lesser = false;
         self.fire_event(p, EventKind::GoldSpent, price as u32);
         self.run_trinket_hook(p, slot, of, Hook::OnPick);
+        // A cube slot's turn-start offer had to wait for this one: deal it
+        // now, so the cube never loses a turn to the turn 9 offer.
+        let pending = self.players[p].tp.cube_pending;
+        if pending != 0 && self.players[p].trinket_offer.is_empty() {
+            self.players[p].tp.cube_pending = 0;
+            self.deal_cube_offer(p, (pending as usize - 1).min(TRINKET_SLOTS - 1));
+        }
+    }
+
+    /// The Mystery Cube's turn-start offer: two free Lesser trinkets to
+    /// replace the one the slot holds (DESIGN.md). Nothing is dealt while
+    /// another offer is open, and `cube_pending` remembers the slot until
+    /// that offer is answered.
+    fn deal_cube_offer(&mut self, p: usize, slot: usize) {
+        let Some(held) = self.trinket_of(p, slot) else {
+            // The slot lost its trinket (nothing empties a slot today), so
+            // the cube has nothing to replace.
+            return;
+        };
+        if !self.players[p].trinket_offer.is_empty() {
+            self.players[p].tp.cube_pending = slot as u8 + 1;
+            return;
+        }
+        let choices = self.players[p].trinkets[slot].cube_choices;
+        self.deal_trinket_offer(p, slot, Slot::Lesser, Offer::Cube { exclude: held, choices });
     }
 
     /// The trinket hooks that fire at the start of the player's own turn: the
@@ -424,12 +498,21 @@ impl Game {
         // Sticker): a fresh count every turn.
         let tp = &mut self.players[p].tp;
         tp.discover_copies = tp.discover_copies_base;
+        tp.cube_pending = 0;
         for slot in 0..TRINKET_SLOTS {
             if !fires[slot] {
                 continue;
             }
             let Some(i) = self.trinket_of(p, slot) else { continue };
             self.run_trinket_hook(p, slot, i, Hook::StartOfTurn);
+        }
+        // The Mystery Cube: the trinket the slot holds has had its own
+        // start-of-turn effect, so now two new free Lesser trinkets replace
+        // it (the one held is never offered back).
+        for slot in 0..TRINKET_SLOTS {
+            if self.players[p].trinkets[slot].cube {
+                self.deal_cube_offer(p, slot);
+            }
         }
     }
 
@@ -473,6 +556,11 @@ impl Game {
     pub(super) fn trinket_event(&mut self, p: usize, event: Event, card: Option<CardId>, amount: u32) {
         if self.players[p].tp.golden_when_rich != 0 {
             self.check_golden_when_rich(p);
+        }
+        // Guiding Candle: this Refresh is over, so one of the turn's two
+        // Tier 6 Refreshes is spent (the fill already read the count).
+        if event == Event::Refresh && self.players[p].tp.refresh_tier6 > 0 {
+            self.players[p].tp.refresh_tier6 -= 1;
         }
         // The hot path: one `u16` on the player says whether any of its
         // trinkets listens for this event. Most of a game, and every game
@@ -799,20 +887,13 @@ impl Game {
                 }
             }
             Act::OfferReplace(n) => {
-                // A free offer of this slot, to replace this trinket with
-                // (Mystery Cube). The pick overwrites the slot.
-                if !self.players[p].trinket_offer.is_empty() {
-                    return;
-                }
-                let kind = self.data.trinkets.get(self.players[p].trinkets[slot].of - 1).slot;
-                self.deal_trinket_offer(p, slot, kind);
-                // Only the first `n` options, all free.
-                while self.players[p].trinket_offer.len() > n as usize {
-                    self.players[p].trinket_offer.pop();
-                }
-                for o in self.players[p].trinket_offer.iter_mut() {
-                    o.1 = 0;
-                }
+                // The Mystery Cube: this slot now offers `n` free Lesser
+                // trinkets to replace whatever it holds, at the pick and at
+                // the start of every turn after it (DESIGN.md).
+                self.players[p].trinkets[slot].cube = true;
+                self.players[p].trinkets[slot].cube_choices = n;
+                self.refresh_trinket_mask(p);
+                self.deal_cube_offer(p, slot);
             }
             Act::GrowValue(n) => {
                 let v = &mut self.players[p].trinkets[slot].value;
@@ -829,7 +910,10 @@ impl Game {
                 self.execute_spell_effect(p, e, false);
             }
             Act::BuffAllPerGolden { attack, health } => {
-                let n = self.players[p].golden_played as i32;
+                // "At the end of your turn, give your minions +1/+1.
+                // (Improved by Golden minions you've played this game!)": the
+                // base plus one more for each.
+                let n = 1 + self.players[p].golden_played as i32;
                 let e = Effect::BuffAll { tribe: None, attack: attack * n, health: health * n };
                 self.run_effect(p, &mut pos, e, false, 1);
             }
@@ -960,6 +1044,133 @@ impl Game {
                 self.players[p].free_rolls = self.players[p].free_rolls.saturating_add(1);
             }
             Act::TripleNeedTwoPirate => self.players[p].tp.pirate_triple = true,
+            Act::PowerTriggers(n) => self.players[p].tp.power_triggers = n,
+            Act::PowerExtraUses(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.power_extra_uses = tp.power_extra_uses.saturating_add(n);
+                // The extra use counts this turn too, not only from the next.
+                if let Some(st) = self.players[p].power.as_mut() {
+                    st.uses_left = st.uses_left.saturating_add(n);
+                }
+            }
+            Act::PowerGold(n) => self.players[p].tp.power_gold = n,
+            Act::Gauntlet => self.players[p].tp.gauntlet = true,
+            Act::ExtraHighTier => self.players[p].tp.extra_high_tier = true,
+            Act::ExtraMagnetic => self.players[p].tp.extra_magnetic = true,
+            Act::MagneticCost(n) => self.players[p].tp.magnetic_cost = n,
+            Act::Tier6Refreshes(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.refresh_tier6_base = n;
+                tp.refresh_tier6 = n;
+            }
+            Act::MinTier(n) => self.players[p].tp.min_tier = n,
+            Act::GoldenDeity => {
+                if let Some(deity) = &mut self.players[p].deity
+                    && !deity.golden
+                {
+                    // A Golden minion doubles its printed stats: the Deity's
+                    // base is 1/1, and the buffs it already carries stay
+                    // (`golden_up`'s rule).
+                    deity.golden = true;
+                    deity.attack += 1;
+                    deity.health += 1;
+                }
+            }
+            Act::RandomMagnetic(n) => {
+                let tier = self.players[p].tier;
+                for _ in 0..n {
+                    match self.data.cards.random_magnetic_minion(tier, self.lobby, &mut self.rng) {
+                        Some(c) => self.give_generated(p, c),
+                        None => break,
+                    }
+                }
+            }
+            Act::FirstPlayShield(n) => self.players[p].tp.play_shields = n,
+            Act::DoubleHighestTavern => {
+                // Upstart Embers: the highest-Health minion in the Tavern
+                // doubles its stats (ties at random; fixed-stat tokens such as
+                // a Fodder are left alone).
+                let cards = &self.data.cards;
+                let mut best: ArrayVec<usize, { crate::SHOP }> = ArrayVec::new();
+                for (i, m) in self.players[p].shop.iter().enumerate() {
+                    if cards.get(m.card).is_spell() || cards.get(m.card).fixed_stats {
+                        continue;
+                    }
+                    match best.first() {
+                        Some(&b) if self.players[p].shop[b].health > m.health => {}
+                        Some(&b) if self.players[p].shop[b].health == m.health => best.push(i),
+                        _ => {
+                            best.clear();
+                            best.push(i);
+                        }
+                    }
+                }
+                if best.is_empty() {
+                    return;
+                }
+                let k = self.rng.below(best.len() as u32) as usize;
+                let at = best[k];
+                let m = &mut self.players[p].shop[at];
+                m.attack *= 2;
+                m.health *= 2;
+            }
+            Act::StealHighestTierTavern => {
+                // Rendle Sticker: the highest-Tier card of the Tavern (the
+                // spell slot too), ties at random. A steal, so it leaves the
+                // pool like a bought copy but fires no buy trigger.
+                let cards = &self.data.cards;
+                let mut best: ArrayVec<usize, { crate::SHOP }> = ArrayVec::new();
+                let mut best_tier = 0u8;
+                for (i, m) in self.players[p].shop.iter().enumerate() {
+                    let t = cards.get(m.card).tier;
+                    if t > best_tier {
+                        best_tier = t;
+                        best.clear();
+                        best.push(i);
+                    } else if t == best_tier {
+                        best.push(i);
+                    }
+                }
+                let spells = self
+                    .players[p]
+                    .shop_spell
+                    .map(|c| cards.get(c).tier)
+                    .unwrap_or(0);
+                if spells > best_tier {
+                    best.clear();
+                    best.push(self.players[p].shop.len());
+                } else if spells == best_tier && spells > 0 {
+                    best.push(self.players[p].shop.len());
+                }
+                if best.is_empty() {
+                    return;
+                }
+                let k = self.rng.below(best.len() as u32) as usize;
+                let slot = best[k];
+                // A slot at the shop's length is the spell slot
+                // (`steal_shop_card` reads it that way).
+                self.steal_shop_card(p, slot);
+            }
+            Act::EndOfTurnTwice => {
+                // Ghastly Sticker: the player's end-of-turn effects run one
+                // more time in all, on top of any Drakkari (`drakkari_mult`
+                // reads it).
+                self.players[p].tp.end_of_turn_ghastly = true;
+            }
+            Act::FirstSpellTwice(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.first_spell_double_base = n;
+                tp.first_spell_double = n;
+            }
+            Act::DiscoverTierStats { tier, count, attack, health } => {
+                self.players[p].tp.discover_stats = Some((attack, health, count));
+                for _ in 0..count {
+                    let _ = self.players[p]
+                        .discover_queue
+                        .try_push(super::DiscoverRequest::MinionTier(tier));
+                }
+                self.maybe_start_discover(p);
+            }
             Act::RandomMostCommonType(n) => {
                 let mut counts = [0u8; Tribe::EVERY.len()];
                 let cards = &self.data.cards;
@@ -1006,6 +1217,17 @@ impl Game {
             && (tp.fourth_buy + 1).is_multiple_of(tp.fourth_buy_every);
         if by_tribe || highest || every_nth {
             MinionPrice::Health(self.data.rules.buy_cost)
+        } else if tp.tavern_price > 0 {
+            // Chillmere Mosaic: the Tavern cards its Refresh put there cost
+            // this much (they keep it until the Tavern is filled again).
+            MinionPrice::Gold(tp.tavern_price)
+        } else if tp.magnetic_cost > 0
+            && card.keywords.has(crate::minion::Keywords::MAGNETIC)
+            && card.tribes.has(Tribe::Mech)
+        {
+            // "Magnetic Mechs cost (2)": a set price, not a discount
+            // (Electrode Attractor).
+            MinionPrice::Gold(tp.magnetic_cost)
         } else {
             MinionPrice::Gold(self.data.rules.buy_cost)
         }
@@ -1079,25 +1301,28 @@ impl Game {
     /// in the lobby (Orb of the Unknown, Quartermaster's Hook): the new one's
     /// own on-pick does not run, it is placed, not picked.
     fn replace_trinket_at(&mut self, p: usize, slot: usize, kind: Slot, tribe: Option<Tribe>) {
-        let data = self.data.clone();
-        let mut pool: ArrayVec<u8, 256> = ArrayVec::new();
-        for i in 0..data.trinkets.len() as u8 {
-            let t = data.trinkets.get(i);
-            if t.slot != kind || (!t.tribes.is_empty() && !t.tribes.overlaps(self.lobby)) {
-                continue;
-            }
-            if let Some(w) = tribe
-                && !t.tribes.has(w)
-            {
-                continue;
-            }
-            let _ = pool.try_push(i);
-        }
-        if pool.is_empty() {
+        // Two passes over the shared table and no `Arc` clone: this runs on a
+        // slot swap, and a clone would bump the refcount of the table every
+        // game shares.
+        let fits = |t: &crate::trinkets::Trinket, lobby: Tribes| {
+            t.slot == kind
+                && (t.tribes.is_empty() || t.tribes.overlaps(lobby))
+                && tribe.is_none_or(|w| t.tribes.has(w))
+        };
+        let lobby = self.lobby;
+        let n = (0..self.data.trinkets.len() as u8)
+            .filter(|&i| fits(self.data.trinkets.get(i), lobby))
+            .count();
+        if n == 0 {
             return;
         }
-        let k = self.rng.below(pool.len() as u32) as usize;
-        let of = pool[k];
+        let k = self.rng.below(n as u32) as usize;
+        let Some(of) = (0..self.data.trinkets.len() as u8)
+            .filter(|&i| fits(self.data.trinkets.get(i), lobby))
+            .nth(k)
+        else {
+            return;
+        };
         self.set_trinket(p, slot, Some(of));
     }
 }

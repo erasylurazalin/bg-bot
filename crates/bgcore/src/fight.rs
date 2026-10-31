@@ -320,6 +320,9 @@ pub struct SideOutcome {
     /// Friendly minions summoned here, by `Tribe::EVERY` index, for the
     /// "after N Beasts summoned" counters (Wildfeather Duster).
     pub summon_tribes: [u16; Tribe::EVERY.len()],
+    /// Everything summoned here, the neutral ones included, for a counter of
+    /// summons whatever their tribe (Soul Battery).
+    pub friendly_summons: u16,
     /// The counters the real client shows during combat, captured at the
     /// first attack, after Start of Combat effects: what the other player
     /// "last saw" of this one.
@@ -1520,6 +1523,7 @@ impl<'a> Side<'a> {
         // count it for the shop. They run before the watcher sees it, so a
         // test watching the summon sees what the fight sees.
         if self.counters.trinkets.count_summons {
+            self.out.friendly_summons = self.out.friendly_summons.saturating_add(1);
             let tribes = db.get(m.card).tribes;
             for (i, t) in Tribe::EVERY.into_iter().enumerate() {
                 if tribes.has(t) {

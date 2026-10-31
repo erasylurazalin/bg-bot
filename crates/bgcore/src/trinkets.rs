@@ -22,6 +22,9 @@ use crate::minion::{CardId, Keywords};
 pub const TRINKET_SLOTS: usize = 3;
 /// Options in one offer (Era's logs: always exactly 4).
 pub const TRINKET_CHOICES: usize = 4;
+/// Options the Mystery Cube offers each turn ("choose from 2 new Lesser
+/// Trinkets").
+pub const CUBE_CHOICES: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Slot {
@@ -219,7 +222,7 @@ pub enum Act {
     /// Buff the left-most friendly minion by the base plus the trinket's own
     /// counter (Charming Panpipes).
     BuffLeftmostGrowing { attack: i32, health: i32 },
-    /// Buff every friendly minion by the base plus this many per Golden
+    /// Buff every friendly minion by the base, once more for each Golden
     /// minion the player has played this game (Gold Mallet).
     BuffAllPerGolden { attack: i32, health: i32 },
     /// Buff the two left-most friendly minions by the base plus this many per
@@ -230,8 +233,9 @@ pub enum Act {
     /// Give this many random friendly minions of a tribe stats (Booty Bay
     /// Brew).
     BuffRandomOther { tribe: Option<Tribe>, attack: i32, health: i32, count: u8 },
-    /// Offer this many trinkets of this slot, free, to replace this one
-    /// (Mystery Cube).
+    /// The Mystery Cube: deal this many free Lesser trinkets to replace the
+    /// one in this slot, and mark the slot as a cube slot, so the offer comes
+    /// back at the start of every turn for the rest of the game.
     OfferReplace(u8),
     // ---- getting cards and Discover (block 2) ----
     /// Discover a minion of exactly this tier, of any type or, when `typed`,
@@ -275,6 +279,56 @@ pub enum Act {
     WarbandWhistle,
     /// Two copies of a Pirate make it Golden (Designer Eyepatch).
     TripleNeedTwoPirate,
+    // ---- the hero power (Ancient Wishbone, Sous Chef Sticker) ----
+    /// The Hero Power's effect runs this many times per press and per
+    /// passive tick (Ancient Wishbone: twice). It still costs once.
+    PowerTriggers(u8),
+    /// Extra Hero Power uses each turn (Sous Chef Sticker).
+    PowerExtraUses(u8),
+    /// Gold after each Hero Power press (Sous Chef Sticker).
+    PowerGold(u8),
+    // ---- the Tavern's shape (block 3) ----
+    /// The Tavern always holds six minions and one spell, and refills a
+    /// bought or consumed card at once (Glowing Gauntlet).
+    Gauntlet,
+    /// The Tavern offers one extra minion, of the tier above yours, whenever
+    /// it is Refreshed (Innkeeper's Stein).
+    ExtraHighTier,
+    /// The Tavern offers one extra Magnetic Mech whenever it is Refreshed
+    /// (Electrode Attractor).
+    ExtraMagnetic,
+    /// Magnetic Mechs cost this much (Electrode Attractor: 2).
+    MagneticCost(u8),
+    /// Each turn, the first this many Refreshes hold only Tier 6 minions
+    /// (Guiding Candle).
+    Tier6Refreshes(u8),
+    /// The Tavern no longer offers cards below this tier (Bob-blehead: 3).
+    MinTier(u8),
+    // ---- the leftovers (block 3) ----
+    /// Make the player's Deity Golden for the rest of the game (Mask of the
+    /// Ancient Ones).
+    GoldenDeity,
+    /// Discover `count` minions of exactly `tier` and set the picks' stats to
+    /// this much (Innkeeper's Hearth: two Tier 6 minions at 30/30).
+    DiscoverTierStats { tier: u8, count: u8, attack: i32, health: i32 },
+    // ---- the cheap leftovers ----
+    /// Get `count` random Magnetic minions (Scraper Sticker).
+    RandomMagnetic(u8),
+    /// The first minion played each turn gains Divine Shield (Defensive
+    /// Shell): how many such shields this turn.
+    FirstPlayShield(u8),
+    /// Double the stats of the highest-Health minion in the Tavern (Upstart
+    /// Embers).
+    DoubleHighestTavern,
+    /// Steal the highest-Tier card from the Tavern, ties at random (Rendle
+    /// Sticker).
+    StealHighestTierTavern,
+    /// Your end-of-turn effects trigger this many times in all (Ghastly
+    /// Sticker: twice).
+    EndOfTurnTwice,
+    /// Your first Tavern spell each turn casts this many times in all
+    /// (Replica Cathedral: twice), and how many turns start with it.
+    FirstSpellTwice(u8),
 }
 
 /// "Every N events" / "after N events" / "once N events": one per trinket.
@@ -497,6 +551,11 @@ pub struct Trinket {
     /// "Your first Deathrattle each combat triggers an extra time"
     /// (Deathly Phylactery).
     pub first_deathrattle: bool,
+    /// Whether the Mystery Cube may offer it. `cube = false` in
+    /// trinkets.toml keeps out a one-time effect (whose whole point is spent
+    /// when it is picked) and the trinkets that replace themselves on the
+    /// pick (Orb of the Unknown, Quartermaster's Hook).
+    pub cube: bool,
 }
 
 impl Trinket {
@@ -702,6 +761,30 @@ struct RawAct {
     warband_whistle: bool,
     #[serde(default)]
     triple_need_two_pirate: bool,
+    power_triggers: Option<u8>,
+    power_extra_uses: Option<u8>,
+    power_gold: Option<u8>,
+    #[serde(default)]
+    gauntlet: bool,
+    #[serde(default)]
+    extra_high_tier: bool,
+    #[serde(default)]
+    extra_magnetic: bool,
+    magnetic_cost: Option<u8>,
+    tier6_refreshes: Option<u8>,
+    min_tier: Option<u8>,
+    #[serde(default)]
+    golden_deity: bool,
+    discover_tier_stats: Option<[i32; 4]>,
+    random_magnetic: Option<u8>,
+    first_play_shield: Option<u8>,
+    #[serde(default)]
+    double_highest_tavern: bool,
+    #[serde(default)]
+    steal_highest_tier_tavern: bool,
+    #[serde(default)]
+    end_of_turn_twice: bool,
+    first_spell_twice: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -772,6 +855,14 @@ struct RawTrinket {
     fight: Vec<RawFightAct>,
     #[serde(default)]
     first_deathrattle: bool,
+    /// `cube = false` keeps this trinket out of the Mystery Cube's offers.
+    #[serde(default = "yes")]
+    cube: bool,
+}
+
+/// The default of a `cube` flag: every trinket is offered unless it says not.
+fn yes() -> bool {
+    true
 }
 
 /// One `fight = [{ ... }]` table. Which key carries the payload decides the
@@ -1043,6 +1134,45 @@ impl TrinketDb {
                     Act::OneOf { a: card(a1)?, b: card(b1)? }
                 } else if a.warband_whistle {
                     Act::WarbandWhistle
+                } else if let Some(n) = a.power_triggers {
+                    Act::PowerTriggers(n)
+                } else if let Some(n) = a.power_extra_uses {
+                    Act::PowerExtraUses(n)
+                } else if let Some(n) = a.power_gold {
+                    Act::PowerGold(n)
+                } else if a.gauntlet {
+                    Act::Gauntlet
+                } else if a.extra_high_tier {
+                    Act::ExtraHighTier
+                } else if a.extra_magnetic {
+                    Act::ExtraMagnetic
+                } else if let Some(n) = a.magnetic_cost {
+                    Act::MagneticCost(n)
+                } else if let Some(n) = a.tier6_refreshes {
+                    Act::Tier6Refreshes(n)
+                } else if let Some(n) = a.min_tier {
+                    Act::MinTier(n)
+                } else if a.golden_deity {
+                    Act::GoldenDeity
+                } else if let Some([tier, count, attack, health]) = a.discover_tier_stats {
+                    Act::DiscoverTierStats {
+                        tier: tier.clamp(0, 255) as u8,
+                        count: count.clamp(0, 255) as u8,
+                        attack,
+                        health,
+                    }
+                } else if let Some(n) = a.random_magnetic {
+                    Act::RandomMagnetic(n)
+                } else if let Some(n) = a.first_play_shield {
+                    Act::FirstPlayShield(n)
+                } else if a.double_highest_tavern {
+                    Act::DoubleHighestTavern
+                } else if a.steal_highest_tier_tavern {
+                    Act::StealHighestTierTavern
+                } else if a.end_of_turn_twice {
+                    Act::EndOfTurnTwice
+                } else if let Some(n) = a.first_spell_twice {
+                    Act::FirstSpellTwice(n)
                 } else if a.triple_need_two_pirate {
                     Act::TripleNeedTwoPirate
                 } else if let Some([slot, tribe]) = &a.replace_with_random {
@@ -1283,6 +1413,7 @@ impl TrinketDb {
                 rule,
                 fight,
                 first_deathrattle: t.first_deathrattle,
+                cube: t.cube,
             };
             if db.by_card_id.insert(t.card_id, db.trinkets.len() as u8).is_some() {
                 return Err(format!("trinkets.toml: {} twice", trinket.name));

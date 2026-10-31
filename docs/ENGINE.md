@@ -317,6 +317,40 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `magnetize_ends` Magnetizes a card to the two ends of a tribe's minions
   (Accord-o-Tron Portrait) and `lockbox_sooner` takes turns off every Lockbox
   the player gets.
+- **Spellcraft (block 3).** A Spellcraft spell is a `[[spell]]` with
+  `spellcraft = true` and `token = true`: a Tavern spell (its cast counts for
+  every spell counter) that leaves the hand at the end of the turn if it was
+  not cast, dropped in `finish_shop` without firing a discard. The trinket
+  hands it out with `on_pick` and `start_of_turn` `get` lists, so it comes
+  back every turn. Floating Candle Set is not built: triggering a Deathrattle
+  outside combat is a shop system the engine does not have (docs/KNOWN-GAPS.md).
+- **The Tavern's shape (block 3).** `Player::shop_size` is the one Tavern
+  size: `rules.shop_size(tier)`, or six with Glowing Gauntlet, plus one for
+  Innkeeper's Stein (`extra_high_tier`: a minion of the tier above, none at
+  tier 6) and one for Electrode Attractor (`extra_magnetic`), never past
+  `SHOP - 1` minions because the seventh slot is the spell (DESIGN.md).
+  `fill_shop` draws the extra slots and takes its tier bounds from
+  `tavern_tiers` (Bob-blehead's `min_tier`, Guiding Candle's
+  `tier6_refreshes`, which the turn-start roll counts down too when the
+  Tavern changed). `Game::refill_tavern` runs after every action and tops a
+  Gauntlet Tavern back up: a bought, consumed or stolen minion by a minion,
+  the spell by a spell. `minion_price` reads the set prices
+  (`magnetic_cost`, `tavern_price`).
+- **The hero power (block 3).** `tp.power_triggers` runs a press's effect
+  twice and a passive power's tick twice (one payment); `power_extra_uses`
+  raises the per-turn uses (`start_turn` adds it, the pick adds one at once);
+  `power_gold` pays Gold after each press. The `uses_left` invariant allows
+  the extra uses.
+- **The Mystery Cube.** Its effect belongs to the slot: `TrinketState.cube`
+  (plus `cube_choices`) is set by the `offer_replace` act and kept when
+  another trinket takes the slot. `Game::deal_cube_offer` deals the two free
+  Lesser options, never the trinket the slot holds and never one marked
+  `cube = false` (the one-time effects and the self-replacing ones);
+  `refresh_trinket_mask` then gives the slot `STARTS_TURN`, so
+  `trinket_start_of_turn` runs the held trinket's own start-of-turn list
+  first and the new offer after it. An offer that has to wait for another
+  one (the turn 9 Greater offer) is remembered in `tp.cube_pending` and dealt
+  when that one is answered.
 - **In a fight.** A trinket has no host minion, so its in-fight effects are a
   bundle the fight owns: `Counters.trinkets` is a `FightTrinkets`
   (`crates/bgcore/src/fight.rs`), `Copy`, allocation-free, with no pointer

@@ -161,6 +161,8 @@ impl Game {
     }
 
     /// The hero power button is pressed: pay, spend a use, run the effect.
+    /// "Your Hero Power triggers twice" (Ancient Wishbone) runs the effect
+    /// twice for the one press and the one payment.
     pub(super) fn press_power(&mut self, p: usize) {
         let (of, cost) = {
             let st = self.players[p].power.unwrap();
@@ -171,8 +173,10 @@ impl Game {
         st.uses_left = st.uses_left.saturating_sub(1);
         st.used_game += 1;
         self.players[p].gold -= cost;
+        let runs = self.players[p].tp.power_triggers.max(1);
         match effect {
             PowerEffect::ExtraMaxGold(n) => {
+                let n = n.saturating_mul(runs);
                 self.players[p].extra_max_gold = self.players[p].extra_max_gold.saturating_add(n);
             }
             PowerEffect::GiveDivineShield => {
@@ -185,7 +189,7 @@ impl Game {
                         keyword: Keywords::DIVINE_SHIELD,
                         random_keyword: false,
                     },
-                    runs: 1,
+                    runs,
                     tavern: false,
                     gem: false,
                 };
@@ -195,45 +199,54 @@ impl Game {
                 let pt = PendingTarget {
                     source: None,
                     kind: TargetKind::StealShopCard { damage },
-                    runs: 1,
+                    runs,
                     tavern: false,
                     gem: false,
                 };
                 self.offer_target(p, pt);
             }
             PowerEffect::StealRandomDoubleHealth => {
-                self.steal_random_shop_double_health(p);
+                for _ in 0..runs {
+                    if !self.steal_random_shop_double_health(p) {
+                        break;
+                    }
+                }
             }
             PowerEffect::MakeGolden => {
                 let pt = PendingTarget {
                     source: None,
                     kind: TargetKind::MakeGolden { tribe: None, max_tier: crate::CARD_MAX_TIER },
-                    runs: 1,
+                    runs,
                     tavern: false,
                     gem: false,
                 };
                 self.offer_target(p, pt);
             }
-            PowerEffect::GetGems(n) => self.give_gems(p, n),
+            PowerEffect::GetGems(n) => self.give_gems(p, n.saturating_mul(runs)),
             PowerEffect::DiscoverTribe(t) => {
-                let _ = self.players[p].discover_queue.try_push(DiscoverRequest::TribeMinion(t));
+                for _ in 0..runs {
+                    let _ = self.players[p].discover_queue.try_push(DiscoverRequest::TribeMinion(t));
+                }
                 self.maybe_start_discover(p);
             }
             PowerEffect::SpellDiscount(n) => {
+                let n = n.saturating_mul(runs);
                 let pl = &mut self.players[p];
                 pl.spell_discount = pl.spell_discount.saturating_add(n);
             }
             PowerEffect::GetRandomSpell => {
                 let tier = self.players[p].tier;
-                if let Some(card) = self.data.cards.random_spell(tier, self.lobby, &mut self.rng) {
-                    self.give_generated(p, card);
+                for _ in 0..runs {
+                    if let Some(card) = self.data.cards.random_spell(tier, self.lobby, &mut self.rng) {
+                        self.give_generated(p, card);
+                    }
                 }
             }
             PowerEffect::TriggerBattlecry => {
                 let pt = PendingTarget {
                     source: None,
                     kind: TargetKind::TriggerBattlecry,
-                    runs: 1,
+                    runs,
                     tavern: true,
                     gem: false,
                 };
@@ -250,6 +263,7 @@ impl Game {
             }
             PowerEffect::GetLinkedMinions(n) => {
                 let tier = self.players[p].tier;
+                let n = n.saturating_mul(runs);
                 let mut got: ArrayVec<CardId, 4> = ArrayVec::new();
                 for _ in 0..n {
                     let drawn = self.data.cards.random_any_minion(tier, self.lobby, &mut self.rng);
@@ -260,27 +274,44 @@ impl Game {
                 self.give_linked(p, &got, false);
             }
             PowerEffect::RefreshWithSpells => {
-                let Game { data, rng, players, pool, lobby, .. } = self;
-                Self::refresh_with_spells(&mut players[p], &data.cards, &data.rules, rng, pool, *lobby);
+                for _ in 0..runs {
+                    let Game { data, rng, players, pool, lobby, .. } = self;
+                    Self::refresh_with_spells(
+                        &mut players[p], &data.cards, &data.rules, rng, pool, *lobby,
+                    );
+                }
             }
             _ => {}
+        }
+        // "After you use your Hero Power, gain (1) Gold" (Sous Chef Sticker):
+        // once per press, after the press's own cost.
+        let back = self.players[p].tp.power_gold;
+        if back > 0 {
+            self.players[p].gold = self.players[p].gold.saturating_add(back);
         }
         self.fire_event(p, EventKind::GoldSpent, cost as u32);
     }
 
     /// Steal a random minion from the Tavern into hand and double its Health
-    /// (Brick by Brick). The pool copy leaves with the card, like a buy.
-    fn steal_random_shop_double_health(&mut self, p: usize) {
+    /// (Brick by Brick). The pool copy leaves with the card, like a buy, and
+    /// goes back where it stood when the hand is full (a press that triggers
+    /// twice can fill it). False when nothing was stolen.
+    fn steal_random_shop_double_health(&mut self, p: usize) -> bool {
         let slots: ArrayVec<usize, SHOP> = (0..self.players[p].shop.len())
             .filter(|&s| !self.data.cards.get(self.players[p].shop[s].card).is_spell())
             .collect();
         if slots.is_empty() {
-            return;
+            return false;
         }
         let k = self.rng.below(slots.len() as u32) as usize;
-        let mut m = self.players[p].shop.remove(slots[k]);
+        let slot = slots[k];
+        let mut m = self.players[p].shop.remove(slot);
         m.health *= 2;
-        self.add_to_hand(p, m);
+        if self.add_to_hand(p, m) {
+            return true;
+        }
+        self.players[p].shop.insert(slot, m);
+        false
     }
 
     /// Steal the Tavern card the player picked into hand: a shop slot (any

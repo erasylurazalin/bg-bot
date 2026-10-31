@@ -42,12 +42,11 @@ impl Game {
             }
             // The minion slots plus the spell slot, which a Fodder can take
             // (and fill with a minion once it feeds).
-            if pl.shop.len() > self.data.rules.shop_size(pl.tier) + 1 {
+            let size = pl.shop_size(&self.data.rules);
+            if pl.shop.len() > size + 1 {
                 return Err(format!("player {i}: shop too big"));
             }
-            if pl.shop.len() == self.data.rules.shop_size(pl.tier) + 1
-                && pl.shop_spell.is_some()
-            {
+            if pl.shop.len() == size + 1 && pl.shop_spell.is_some() {
                 return Err(format!("player {i}: shop spell in a taken slot"));
             }
             if let Some(pt) = pl.pending_target
@@ -103,10 +102,17 @@ impl Game {
             }
             {
                 let mut mask = 0;
+                let mut cube = false;
                 for st in pl.trinkets.iter() {
+                    cube |= st.cube;
                     if st.of != 0 {
                         mask |= self.data.trinkets.get(st.of - 1).event_mask();
                     }
+                }
+                // A cube slot wants the start of the turn whatever it holds
+                // (see `refresh_trinket_mask`).
+                if cube {
+                    mask |= crate::trinkets::STARTS_TURN | crate::trinkets::HAS_TRINKET;
                 }
                 // The fight bundle holds every held trinket's fight acts at
                 // once (`FIGHT_ACTS`); a table that outgrows it would drop
@@ -177,7 +183,7 @@ impl Game {
                     return Err(format!("player {i}: power of hero {}", st.of));
                 }
                 let power = &self.data.heroes.get(st.of).power;
-                if st.uses_left > power.uses_per_turn {
+                if st.uses_left > power.uses_per_turn.saturating_add(pl.tp.power_extra_uses) {
                     return Err(format!("player {i}: {} uses left", st.uses_left));
                 }
             }

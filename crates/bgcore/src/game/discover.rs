@@ -354,9 +354,44 @@ impl Game {
             .take()
             .map(|source| (source, data.cards.get(c).tier as i32));
         let is_spell = data.cards.get(c).is_spell();
+        // Token of the Old Gods: this Discover does not put the card in hand,
+        // it turns the minion the spell chose into it (printed stats, no
+        // buffs, and the new minion holds the pool copy).
+        let transform = pl.tp.transform_slot;
+        if transform != 0 {
+            pl.tp.transform_slot = 0;
+            let slot = (transform as usize - 1).min(crate::BOARD.saturating_sub(1));
+            if !is_spell && slot < pl.board.len() {
+                let old = pl.board[slot];
+                let mut m = pl.make_card(&data.cards, c, false, 1);
+                m.uses_left = m.turn_uses(&data.cards);
+                pl.board[slot] = m;
+                give_back(pool, &data.cards, &old);
+                self.check_triple(p, c);
+            } else {
+                // Nothing to transform (the board moved): the copy goes back.
+                let slot = data.cards.get(c).pool_slot as usize;
+                self.pool[slot] += 1;
+            }
+            self.maybe_start_discover(p);
+            return;
+        }
+        // Innkeeper's Hearth: this pick's stats are set, buffs included, for
+        // each of the picks the trinket dealt.
+        let set_stats = match pl.tp.discover_stats {
+            Some((a, h, left)) if left > 0 => {
+                pl.tp.discover_stats = if left > 1 { Some((a, h, left - 1)) } else { None };
+                Some((a, h))
+            }
+            _ => None,
+        };
         if !pl.hand.is_full() {
             let pool_copies = if is_spell { 0 } else { 1 };
             let mut m = pl.make_card(&data.cards, c, false, pool_copies);
+            if let Some((a, h)) = set_stats {
+                m.attack = a;
+                m.health = h;
+            }
             if locked && !is_spell {
                 m.locked_turns = 1;
             }

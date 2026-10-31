@@ -348,6 +348,56 @@ pub struct TrinketPowers {
     pub pirate_triple: bool,
     /// Turns sooner every Lockbox opens (Escapee Portrait).
     pub lockbox_sooner: u8,
+    /// A Mystery Cube slot's turn-start offer had to wait for another offer
+    /// to be answered; the slot (plus one), 0 when nothing waits.
+    pub cube_pending: u8,
+    /// Times the hero power's effect runs per press and per passive tick
+    /// (Ancient Wishbone: twice). 0 means once.
+    pub power_triggers: u8,
+    /// Extra Hero Power uses each turn (Sous Chef Sticker).
+    pub power_extra_uses: u8,
+    /// Gold each Hero Power press pays back (Sous Chef Sticker).
+    pub power_gold: u8,
+    /// The Tavern always holds six minions and one spell, and refills a
+    /// bought, consumed or stolen card at once (Glowing Gauntlet).
+    pub gauntlet: bool,
+    /// One extra Tavern minion of the tier above yours (Innkeeper's Stein).
+    pub extra_high_tier: bool,
+    /// One extra Magnetic Mech in the Tavern (Electrode Attractor).
+    pub extra_magnetic: bool,
+    /// What a Magnetic Mech costs, 0 for its own price (Electrode Attractor).
+    pub magnetic_cost: u8,
+    /// Tier 6 Refreshes left this turn that draw only Tier 6 minions, and
+    /// how many each turn starts with (Guiding Candle).
+    pub refresh_tier6: u8,
+    pub refresh_tier6_base: u8,
+    /// The lowest Tavern tier on offer, 0 for tier 1 (Bob-blehead).
+    pub min_tier: u8,
+    /// Makeshift Master: the board slot (plus one) whose stat gains this
+    /// turn the Deity copies, the card that was there, and the stats it had
+    /// when the watching started. 0 when nothing is watched.
+    pub deity_watch: u8,
+    pub deity_watch_card: Option<CardId>,
+    pub deity_watch_stats: (i32, i32),
+    /// The price of the minions a Refresh put in the Tavern (Chillmere
+    /// Mosaic: they cost 1), 0 for their own price. It ends with the next
+    /// fill of the Tavern.
+    pub tavern_price: u8,
+    /// Token of the Old Gods: the board slot (plus one) a Discover's pick
+    /// transforms, 0 when none.
+    pub transform_slot: u8,
+    /// The stats a Discover's pick is set to instead of the card's own
+    /// (Innkeeper's Hearth), and how many picks are left to set.
+    pub discover_stats: Option<(i32, i32, u8)>,
+    /// Minions still to be played this turn that gain Divine Shield
+    /// (Defensive Shell).
+    pub play_shields: u8,
+    /// The player's end-of-turn effects run one more time (Ghastly Sticker).
+    pub end_of_turn_ghastly: bool,
+    /// Tavern spells this game whose cast is doubled by a trinket, and how
+    /// many each turn starts with (Replica Cathedral).
+    pub first_spell_double: u8,
+    pub first_spell_double_base: u8,
 }
 
 /// One held trinket: which one, its "every N" counter, the uses its hooks
@@ -365,6 +415,13 @@ pub struct TrinketState {
     /// The card this trinket remembers from a Discover, so it can hand out
     /// another copy each turn (Portable Factory).
     pub card: Option<CardId>,
+    /// The Mystery Cube's effect belongs to the slot and not to the trinket
+    /// in it: while this is set, the start of every turn offers new free
+    /// Lesser trinkets to replace whatever the slot holds (DESIGN.md).
+    pub cube: bool,
+    /// How many options a cube slot offers ("choose from 2"), kept on the
+    /// slot with the flag.
+    pub cube_choices: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1139,8 +1196,8 @@ impl Game {
             return false;
         }
         match st {
-            SpellTarget::Buff { .. }
-            | SpellTarget::BuffPerBonusKeyword { .. }
+            SpellTarget::Buff { tribe, .. } => tribe.is_none_or(|t| c.tribes.has(t)),
+            SpellTarget::BuffPerBonusKeyword { .. }
             | SpellTarget::SetStats { .. }
             | SpellTarget::TrickyTrousers { .. }
             | SpellTarget::RobustEvolution => true,
@@ -1156,6 +1213,10 @@ impl Game {
             SpellTarget::Butchering { .. } => c.tribes.has(Tribe::Undead),
             SpellTarget::Confiscation { .. } => true,
             SpellTarget::PlainCopy { max_tier } => c.tier <= max_tier,
+            SpellTarget::DestroyGetRandom { tribe, .. } => c.tribes.has(tribe),
+            // There is no tier above 6, so such a minion is not a target.
+            SpellTarget::TransformHigher => c.tier < crate::MAX_TIER,
+            SpellTarget::WatchStats => true,
         }
     }
 
@@ -1294,6 +1355,12 @@ impl Game {
         }
         // A hero knocked out by its own effect damage takes no more actions.
         if self.players[p].alive {
+            // Makeshift Master: whatever the watched minion gained while the
+            // action ran, the Deity gains too.
+            self.watch_deity_gain(p);
+            // Glowing Gauntlet: a Tavern card that just left is replaced at
+            // once, a minion by a minion and the spell by a spell.
+            self.refill_tavern(p);
             self.feed_waiting_fodders(p);
             self.check_attack_thresholds(p);
             if self.turn == 0 {
@@ -1388,6 +1455,8 @@ impl Game {
                             self.data.heroes.get(st.of).power.effect
                         && self.data.cards.get(m.card).tribes.has(tribe)
                     {
+                        let runs = self.players[p].tp.power_triggers.max(1);
+                        let gold = gold.saturating_mul(runs);
                         self.players[p].gold = self.players[p].gold.saturating_add(gold);
                     }
                 }
@@ -1479,6 +1548,13 @@ impl Game {
                     // Mycologist's teachings, Malchezaar's Health Refreshes).
                     m.uses_left = m.turn_uses(&self.data.cards);
                     self.players[p].board.insert(pos, m);
+                    // Defensive Shell: the first minion played each turn
+                    // gains Divine Shield.
+                    if self.players[p].tp.play_shields > 0 {
+                        self.players[p].tp.play_shields -= 1;
+                        let b = &mut self.players[p].board[pos];
+                        b.keywords.set(Keywords::DIVINE_SHIELD);
+                    }
                     let t = self.data.cards.get(m.card).tribes;
                     // The Triple Reward comes before anything the Battlecry
                     // adds to the hand (and is lost on a full hand).
@@ -1573,12 +1649,14 @@ impl Game {
                 pl.tier_turns[pl.tier as usize - 1] = turn;
                 // "After you upgrade the Tavern, gain 2 Gold" (Everbloom), and
                 // an unlock condition may just be met (Queen of Dragons).
+                let runs = self.players[p].tp.power_triggers.max(1);
                 let gain = self.players[p].power
                     .and_then(|st| match self.data.heroes.get(st.of).power.effect {
                         PowerEffect::GoldAfterUpgrade(g) => Some(g),
                         _ => None,
                     })
-                    .unwrap_or(0);
+                    .unwrap_or(0)
+                    .saturating_mul(runs);
                 self.players[p].gold = self.players[p].gold.saturating_add(gain);
                 // "When you reach Tier 6, gain 12 Gold" (Stuffed Coin Purse).
                 if self.players[p].tier == crate::MAX_TIER && self.players[p].tp.gold_on_tier6 > 0 {

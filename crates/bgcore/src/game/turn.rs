@@ -304,6 +304,24 @@ impl Game {
         // a Choose One, Young Murk-Eye's neighbours): answer it now, so no
         // prompt outlives the turn it was opened in.
         self.resolve_open_choices(p);
+        // Spellcraft: a spell a trinket handed out that was not cast leaves
+        // the hand now (DESIGN.md "Spellcraft"). Leaving is not a discard, so
+        // no discard trigger fires.
+        {
+            let cards = &self.data.cards;
+            let pl = &mut self.players[p];
+            let mut k = 0;
+            while k < pl.hand.len() {
+                if cards.get(pl.hand[k].card).spellcraft {
+                    pl.hand.remove(k);
+                } else {
+                    k += 1;
+                }
+            }
+            // A Makeshift Master's watch lasts this turn only.
+            pl.tp.deity_watch = 0;
+            pl.tp.deity_watch_card = None;
+        }
         let cards = &self.data.cards;
         // "This turn" effects end with the turn wherever the minion is: a
         // golden made from a triple holds its copies' in hand.
@@ -386,11 +404,16 @@ impl Game {
                 let power = &data.heroes.get(st.of).power;
                 let (uses, unlock_tier, unlock_turn, effect) =
                     (power.uses_per_turn, power.unlock_tier, power.unlock_turn, power.effect);
+                // "An extra time each turn" (Sous Chef Sticker), and "your
+                // Hero Power triggers twice" (Ancient Wishbone), which runs a
+                // passive's start-of-turn effect twice as well.
+                let runs = pl.tp.power_triggers.max(1);
+                let uses = uses.saturating_add(pl.tp.power_extra_uses);
                 pl.power.as_mut().unwrap().uses_left = uses;
                 pl.power.as_mut().unwrap().unlocked =
                     pl.tier >= unlock_tier && turn >= unlock_turn;
                 if let PowerEffect::FreeRefreshPerTurn(n) = effect {
-                    pl.free_rolls = pl.free_rolls.saturating_add(n);
+                    pl.free_rolls = pl.free_rolls.saturating_add(n.saturating_mul(runs));
                 }
             }
             if turn > 1 {
@@ -456,7 +479,13 @@ impl Game {
                 }
                 pl.shop_spell = None;
             }
-            let size = data.rules.shop_size(pl.tier);
+            // Guiding Candle's two Tier 6 Refreshes come back each turn, and
+            // the roll here is the first of them when the Tavern changed
+            // (DESIGN.md, "Two kinds of Refresh").
+            pl.tp.refresh_tier6 = pl.tp.refresh_tier6_base;
+            // Replica Cathedral: a fresh "first spell" each turn.
+            pl.tp.first_spell_double = pl.tp.first_spell_double_base;
+            let size = pl.shop_size(&data.rules);
             // The roll at the start of a turn counts as a Refresh for
             // Waveling's amount and Barrage when the Tavern changed: always
             // when it was not frozen, and for a frozen one only when the roll
@@ -465,10 +494,13 @@ impl Game {
             // the player's own Refresh, so queued Fodders wait for an
             // explicit one.
             let refreshed = !was_frozen || pl.shop.len() < size || pl.shop_spell.is_none();
-            Self::fill_shop(pl, pool, &data.cards, size, rng, self.lobby, RefreshKind::TurnStart);
+            Self::fill_shop(
+                pl, pool, &data.cards, &data.rules, size, rng, self.lobby, RefreshKind::TurnStart,
+            );
             if refreshed {
                 Self::apply_refresh_buff(pl, &data.cards, rng);
                 Self::apply_barrage(pl, &data.cards);
+                pl.tp.refresh_tier6 = pl.tp.refresh_tier6.saturating_sub(1);
             }
         }
         for p in 0..PLAYERS {
@@ -652,6 +684,9 @@ impl Game {
         }
         if so.friendly_deaths > 0 {
             self.trinket_event(p, crate::trinkets::Event::Death, None, so.friendly_deaths as u32);
+        }
+        if so.friendly_summons > 0 {
+            self.trinket_event(p, crate::trinkets::Event::Summon, None, so.friendly_summons as u32);
         }
         for (i, &n) in so.summon_tribes.iter().enumerate() {
             if n > 0 {

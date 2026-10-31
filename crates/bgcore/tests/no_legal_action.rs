@@ -179,6 +179,8 @@ fn needs_a_minion(attack: i32, health: i32) -> ChooseOption {
         keyword: 0,
         times: 1,
         if_win_next_turn_buff: None,
+        tribe: None,
+        random_keyword: false,
     })
 }
 

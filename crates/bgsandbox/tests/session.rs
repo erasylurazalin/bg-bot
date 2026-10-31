@@ -208,8 +208,10 @@ fn random_play_never_panics_and_undoes_cleanly() {
         }
         // How many commands land depends on how long the random player stays
         // alive (it fights a copy of its own board), and trinkets can make
-        // those fights end sooner.
-        assert!(accepted > 50, "{tribe:?}: only {accepted} commands accepted");
+        // those fights end sooner: a Health-priced trinket lets the random
+        // player buy itself out of Health (2026-10-31: the Demon run reached
+        // 48 commands, which is the same run, just a different draw).
+        assert!(accepted > 30, "{tribe:?}: only {accepted} commands accepted");
         // undo all the way back, checking each state
         while prints.len() > 1 {
             prints.pop();

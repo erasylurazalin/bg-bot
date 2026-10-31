@@ -2741,3 +2741,71 @@ cost = 0
 token = true
 tavern_spell = false
 effect = { triple_reward = true }
+
+# --- Spellcraft spells ---
+# A Spellcraft spell (DESIGN.md "Spellcraft") is a Tavern spell a trinket hands
+# out again at the start of every turn; it leaves the hand at the end of the
+# turn if it was not cast. Never in the Tavern's spell draw.
+
+# Vibrant Bubble (BG32_MagicItem_892t).
+[[spell]]
+name = "Vibrant Bubble"
+tier = 0
+cost = 0
+token = true
+spellcraft = true
+effect = { target = "chosen", tribe = "murloc", random_keyword = true }
+
+# Ophidian Staff (BG35_MagicItem_872t).
+[[spell]]
+name = "Ophidian Staff"
+tier = 0
+cost = 0
+token = true
+spellcraft = true
+effect = { target = "chosen", tribe = "beast", buff = [2, 2], keyword = "reborn" }
+
+# Jailer Sticker (BG35_MagicItem_306t): one random Undead.
+[[spell]]
+name = "Jailer Sticker"
+tier = 0
+cost = 0
+token = true
+spellcraft = true
+effect = { target = "chosen", tribe = "undead", destroy_get_random = true, count = 1 }
+
+# Jailer Sticker (BG35_MagicItem_733t): two.
+[[spell]]
+name = "Jailer Sticker (Greater)"
+tier = 0
+cost = 0
+token = true
+spellcraft = true
+effect = { target = "chosen", tribe = "undead", destroy_get_random = true, count = 2 }
+
+# Token of the Old Gods (BG30_MagicItem_416t).
+[[spell]]
+name = "Token of the Old Gods"
+tier = 0
+cost = 0
+token = true
+spellcraft = true
+effect = { target = "chosen", transform_higher = true }
+
+# Chillmere Mosaic (BG35_MagicItem_755t).
+[[spell]]
+name = "Chillmere Mosaic"
+tier = 0
+cost = 0
+token = true
+spellcraft = true
+effect = { refresh_with_battlecries = 1 }
+
+# Makeshift Master (BG36_MagicItem_417t).
+[[spell]]
+name = "Makeshift Master"
+tier = 0
+cost = 0
+token = true
+spellcraft = true
+effect = { target = "chosen", watch_stats = true }

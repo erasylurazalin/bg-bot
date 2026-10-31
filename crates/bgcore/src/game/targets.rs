@@ -3,6 +3,7 @@
 use arrayvec::ArrayVec;
 use crate::cards::{
     ConsumePick,
+    Effect,
     EventKind,
     SpellTarget,
     Tribe,
@@ -109,7 +110,15 @@ impl Game {
                     let mut generated: Option<CardId> = None;
                     let mut stop_after = false;
                     match st {
-                        SpellTarget::Buff { attack, health, keyword, times, if_win_next_turn_buff } => {
+                        SpellTarget::Buff {
+                            attack,
+                            health,
+                            keyword,
+                            times,
+                            if_win_next_turn_buff,
+                            random_keyword,
+                            ..
+                        } => {
                             if pt.gem {
                                 // A Blood Gem on a Tavern minion: one cast,
                                 // the player's Gem value, tracked as Blood
@@ -135,6 +144,9 @@ impl Game {
                                     m.winners_bread = m.winners_bread.saturating_add(1);
                                     self.players[p].winners_bread_buff = (wb_a, wb_h);
                                 }
+                            }
+                            if random_keyword {
+                                self.give_random_keyword_in_shop(p, target);
                             }
                         }
                         SpellTarget::BuffPerBonusKeyword { attack, health } => {
@@ -210,6 +222,12 @@ impl Game {
                                 );
                             }
                             stop_after = true;
+                        }
+                        SpellTarget::DestroyGetRandom { .. }
+                        | SpellTarget::TransformHigher
+                        | SpellTarget::WatchStats => {
+                            // Friendly minions only: none of them reaches the
+                            // Tavern (`SpellTarget::can_target_shop`).
                         }
                         SpellTarget::Confiscation { gems } => {
                             // 3 Gems on the Tavern minion, then its
@@ -450,6 +468,8 @@ impl Game {
                             keyword,
                             times,
                             if_win_next_turn_buff,
+                            random_keyword,
+                            ..
                         } => {
                             if pt.gem {
                                 // A Blood Gem: the player's Gem value, no
@@ -475,6 +495,9 @@ impl Game {
                                     m.winners_bread = m.winners_bread.saturating_add(1);
                                     self.players[p].winners_bread_buff = (wb_a, wb_h);
                                 }
+                            }
+                            if random_keyword {
+                                self.give_random_keyword(p, target_pos);
                             }
                         }
                         SpellTarget::BuffPerBonusKeyword { attack, health } => {
@@ -606,6 +629,47 @@ impl Game {
                             self.destroy_in_shop(p, &[target_pos], None);
                             stop_after = true;
                             target_removed = true;
+                        }
+                        SpellTarget::DestroyGetRandom { tribe, count } => {
+                            // Jailer Sticker: the Undead dies (a real death
+                            // in the shop), then the player gets `count`
+                            // random Undead.
+                            self.destroy_in_shop(p, &[target_pos], None);
+                            let mut pos = 0usize;
+                            for _ in 0..count {
+                                self.run_effect(
+                                    p,
+                                    &mut pos,
+                                    Effect::GetRandomMinion { tribe },
+                                    false,
+                                    1,
+                                );
+                            }
+                            stop_after = true;
+                            target_removed = true;
+                        }
+                        SpellTarget::TransformHigher => {
+                            // Token of the Old Gods: three cards of the tier
+                            // above the chosen one; the pick transforms it
+                            // (`resolve_choose`).
+                            let tier = self.data.cards.get(self.players[p].board[target_pos].card).tier;
+                            if tier < crate::MAX_TIER {
+                                self.players[p].tp.transform_slot = target_pos as u8 + 1;
+                                let _ = self.players[p]
+                                    .discover_queue
+                                    .try_push(DiscoverRequest::MinionTier(tier + 1));
+                            }
+                            stop_after = true;
+                            target_removed = true;
+                        }
+                        SpellTarget::WatchStats => {
+                            // Makeshift Master: from now on, whatever stats
+                            // this minion gains this turn the Deity gains.
+                            let m = self.players[p].board[target_pos];
+                            let tp = &mut self.players[p].tp;
+                            tp.deity_watch = target_pos as u8 + 1;
+                            tp.deity_watch_card = Some(m.card);
+                            tp.deity_watch_stats = (m.attack, m.health);
                         }
                         SpellTarget::Confiscation { gems } => {
                             // 3 Gems on the target, then the neighbours'

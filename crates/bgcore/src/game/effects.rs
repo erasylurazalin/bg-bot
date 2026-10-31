@@ -984,6 +984,38 @@ impl Game {
         }
     }
 
+    /// Makeshift Master: the stats the watched minion gained since the last
+    /// action go to the Deity too. A board that moved (a triple, a death, a
+    /// different card in the slot) ends the watch rather than crediting the
+    /// wrong minion.
+    pub(super) fn watch_deity_gain(&mut self, p: usize) {
+        let tp = self.players[p].tp;
+        if tp.deity_watch == 0 {
+            return;
+        }
+        let slot = (tp.deity_watch as usize - 1).min(crate::BOARD - 1);
+        let Some(m) = self.players[p].board.get(slot).copied() else {
+            self.players[p].tp.deity_watch = 0;
+            self.players[p].tp.deity_watch_card = None;
+            return;
+        };
+        if Some(m.card) != tp.deity_watch_card {
+            self.players[p].tp.deity_watch = 0;
+            self.players[p].tp.deity_watch_card = None;
+            return;
+        }
+        let (a0, h0) = tp.deity_watch_stats;
+        let (da, dh) = ((m.attack - a0).max(0), (m.health - h0).max(0));
+        self.players[p].tp.deity_watch_stats = (m.attack, m.health);
+        if da == 0 && dh == 0 {
+            return;
+        }
+        if let Some(deity) = &mut self.players[p].deity {
+            deity.attack += da;
+            deity.health += dh;
+        }
+    }
+
     /// Scarlet Survivor: once its Attack reaches the threshold, it gains the
     /// keyword (once; `improvements` records that it fired).
     pub(super) fn check_attack_thresholds(&mut self, p: usize) {
@@ -1007,6 +1039,16 @@ impl Game {
     pub(super) fn give_random_keyword(&mut self, p: usize, pos: usize) {
         let mask = self.data.rules.bonus_mask;
         let Some(m) = self.players[p].board.get_mut(pos) else { return };
+        if let Some(k) = m.keywords.random_missing(mask, &mut self.rng) {
+            m.keywords.set(k);
+        }
+    }
+
+    /// A random Bonus Keyword the Tavern minion in `slot` does not have yet
+    /// (Vibrant Bubble cast on the Tavern).
+    pub(super) fn give_random_keyword_in_shop(&mut self, p: usize, slot: usize) {
+        let mask = self.data.rules.bonus_mask;
+        let Some(m) = self.players[p].shop.get_mut(slot) else { return };
         if let Some(k) = m.keywords.random_missing(mask, &mut self.rng) {
             m.keywords.set(k);
         }

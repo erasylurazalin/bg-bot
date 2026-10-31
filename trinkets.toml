@@ -17,6 +17,12 @@
 #   uses_per_turn (caps the hook lists), start_every (the start-of-turn list
 #   only every N turns), fight = [{ when, ... }] (in a fight)
 #
+# `cube = false` keeps a trinket out of the Mystery Cube's offers: the ones
+# whose whole effect is spent when you get it (a card or two into the hand, a
+# payout of Gold, one moved offer) and the ones that replace themselves on the
+# pick (Orb of the Unknown, Quartermaster's Hook). The list is a guess until
+# Era rules on it (DESIGN.md "Some trinkets are never offered by the cube").
+#
 # Effect keys with no card behind them: upgrade_discount, buff_tavern_this_turn,
 # make_golden_random, last_spell_copies, discover_deathrattle, discover_tier,
 # discover_remember / get_remembered, copy_buys, gems_each_type,
@@ -157,6 +163,7 @@ on_play = [{ buff_leftmost_hand = [3, 3] }]
 
 [[trinket]]
 name = "Explorer's Binoculars"
+cube = false
 card_id = "BG32_MagicItem_858"
 slot = "lesser"
 cost = 1
@@ -184,6 +191,7 @@ start_of_turn = [{ get_lockbox = 2 }]
 
 [[trinket]]
 name = "Corrupted Coin Portrait"
+cube = false
 card_id = "BG36_MagicItem_400"
 slot = "lesser"
 cost = 3
@@ -344,6 +352,7 @@ start_of_turn = [{ get = "Butchering" }]
 
 [[trinket]]
 name = "Surprise Portrait"
+cube = false
 card_id = "BG30_MagicItem_555"
 slot = "greater"
 cost = 5
@@ -361,6 +370,7 @@ start_of_turn = [{ random_bounty = 2 }]
 
 [[trinket]]
 name = "Beatboxer Portrait"
+cube = false
 card_id = "BG35_MagicItem_741"
 slot = "greater"
 cost = 6
@@ -549,6 +559,7 @@ start_of_turn = [{ free_buys = 2 }]
 
 [[trinket]]
 name = "Stuffed Coin Purse"
+cube = false
 card_id = "BG35_MagicItem_814"
 slot = "lesser"
 on_pick = [{ gold_on_tier6 = 12 }]
@@ -568,6 +579,7 @@ start_of_turn = [{ gold_per_golden = 1 }]
 
 [[trinket]]
 name = "Splinter of Aurum"
+cube = false
 card_id = "BG32_MagicItem_350"
 slot = "lesser"
 cost = 2
@@ -576,18 +588,21 @@ on_pick = [{ golden_when_rich = 5 }]
 
 [[trinket]]
 name = "Mysterious Orb"
+cube = false
 card_id = "BG35_MagicItem_818"
 slot = "lesser"
 on_pick = [{ gold = 10 }, { next_trinket_lesser = true }]
 
 [[trinket]]
 name = "Ornate Clock"
+cube = false
 card_id = "BG32_MagicItem_271"
 slot = "lesser"
 on_pick = [{ gold = 2 }, { greater_offer_in = 1 }]
 
 [[trinket]]
 name = "Trip Vouchers"
+cube = false
 card_id = "BG30_MagicItem_891"
 slot = "lesser"
 cost = 1
@@ -595,18 +610,21 @@ on_pick = [{ greater_offer_into_lesser = 2 }]
 
 [[trinket]]
 name = "Orb of the Unknown"
+cube = false
 card_id = "BG35_MagicItem_816"
 slot = "lesser"
 on_pick = [{ replace_with_random = ["lesser", ""] }]
 
 [[trinket]]
 name = "Orb of the Unknown"
+cube = false
 card_id = "BG35_MagicItem_816t"
 slot = "greater"
 on_pick = [{ gold = 4 }, { replace_with_random = ["greater", ""] }]
 
 [[trinket]]
 name = "Quartermaster's Hook"
+cube = false
 card_id = "BG36_MagicItem_408"
 slot = "lesser"
 tribes = ["pirate"]
@@ -617,8 +635,10 @@ name = "Mystery Cube"
 card_id = "BG30_MagicItem_703"
 slot = "lesser"
 cost = 5
+# The offer keeps coming back at the start of every turn: `offer_replace` also
+# marks the slot as a cube slot, and the frame deals the two free Lesser
+# trinkets again there, after the held trinket's own start-of-turn effect.
 on_pick = [{ offer_replace = 2 }]
-start_of_turn = [{ offer_replace = 2 }]
 
 [[trinket]]
 name = "Booty Bay Brew"
@@ -988,6 +1008,7 @@ fight = [{ when = "awaken", keywords = ["reborn"] }]
 
 [[trinket]]
 name = "Morgl Portrait"
+cube = false
 card_id = "BG32_MagicItem_926"
 slot = "greater"
 cost = 1
@@ -996,6 +1017,7 @@ on_pick = [{ get = "Tide Oracle Morgl" }]
 
 [[trinket]]
 name = "Behemoth Portrait"
+cube = false
 card_id = "BG32_MagicItem_998"
 slot = "greater"
 tribes = ["elemental"]
@@ -1029,6 +1051,7 @@ fight = [{ when = "summon", tribe = "murloc", keywords = ["divine_shield"] }]
 
 [[trinket]]
 name = "Manipulator Portrait"
+cube = false
 card_id = "BG30_MagicItem_876"
 slot = "greater"
 cost = 1
@@ -1036,6 +1059,7 @@ on_pick = [{ get = "Faceless Manipulator" }]
 
 [[trinket]]
 name = "Fish Portrait"
+cube = false
 card_id = "BG30_MagicItem_821"
 slot = "lesser"
 cost = 1
@@ -1149,6 +1173,7 @@ on_get = [{ buff_leftmost = [16, 16] }]
 
 [[trinket]]
 name = "Warband Whistle"
+cube = false
 card_id = "BG35_MagicItem_930"
 slot = "greater"
 cost = 2
@@ -1212,3 +1237,255 @@ slot = "greater"
 cost = 7
 tribes = ["pirate"]
 on_pick = [{ get_golden = "Enterprising Escapee" }, { lockbox_sooner = 1 }]
+
+#
+# Hero power trinkets (block 3). They change the existing `PowerState`: the
+# effect runs more than once per press (which still costs once), the button
+# gets extra uses each turn, and a press pays Gold back. A passive power's
+# start-of-turn effect runs twice too (Ancient Wishbone).
+#
+
+[[trinket]]
+name = "Ancient Wishbone"
+card_id = "BG30_MagicItem_804"
+slot = "lesser"
+on_pick = [{ power_triggers = 2 }]
+
+[[trinket]]
+name = "Sous Chef Sticker"
+card_id = "BG35_MagicItem_801"
+slot = "lesser"
+cost = 2
+on_pick = [{ power_extra_uses = 1 }, { power_gold = 1 }]
+
+#
+# The Tavern's shape (block 3). DESIGN.md: the Tavern never has more than 7
+# slots, one of them almost always the spell. `gauntlet` fixes it at six
+# minions and one spell and refills a bought or consumed card at once;
+# `extra_high_tier` and `extra_magnetic` add one slot each (never past six
+# minions); `tier6_refreshes` makes the first Refreshes of a turn hold only
+# Tier 6 cards (the turn-start roll counts, as it does for the other Refresh
+# counters); `min_tier` is the lowest tier the Tavern still offers;
+# `magnetic_cost` is a set price for Magnetic Mechs.
+#
+
+[[trinket]]
+name = "Glowing Gauntlet"
+card_id = "BG30_MagicItem_841"
+slot = "lesser"
+on_pick = [{ tavern_buff = [3, 3] }, { gauntlet = true }]
+
+[[trinket]]
+name = "Innkeeper's Stein"
+card_id = "BG30_MagicItem_423"
+slot = "lesser"
+on_pick = [{ extra_high_tier = true }]
+
+[[trinket]]
+name = "Electrode Attractor"
+card_id = "BG35_MagicItem_743"
+slot = "greater"
+cost = 1
+tribes = ["mech"]
+on_pick = [{ extra_magnetic = true }, { magnetic_cost = 2 }]
+
+[[trinket]]
+name = "Guiding Candle"
+card_id = "BG32_MagicItem_366"
+slot = "greater"
+cost = 1
+on_pick = [{ tier6_refreshes = 2 }]
+
+[[trinket]]
+name = "Bob-blehead"
+card_id = "BG30_MagicItem_998"
+slot = "lesser"
+on_pick = [{ gold = 2 }, { min_tier = 3 }]
+
+#
+# Spellcraft (block 3). A Spellcraft trinket hands its spell out when it is
+# picked and again at the start of every turn; the spell is a Tavern spell and
+# leaves the hand at the end of the turn if it was not cast (DESIGN.md
+# "Spellcraft"). Floating Candle Set is not built: triggering a Deathrattle
+# outside combat is a system the shop does not have (docs/KNOWN-GAPS.md).
+#
+
+[[trinket]]
+name = "Vibrant Bubble"
+card_id = "BG32_MagicItem_892"
+slot = "lesser"
+cost = 3
+tribes = ["murloc"]
+on_pick = [{ get = "Vibrant Bubble" }]
+start_of_turn = [{ get = "Vibrant Bubble" }]
+
+[[trinket]]
+name = "Ophidian Staff"
+card_id = "BG35_MagicItem_872"
+slot = "lesser"
+cost = 4
+tribes = ["beast"]
+on_pick = [{ get = "Ophidian Staff" }]
+start_of_turn = [{ get = "Ophidian Staff" }]
+
+[[trinket]]
+name = "Jailer Sticker"
+card_id = "BG35_MagicItem_306"
+slot = "lesser"
+cost = 2
+tribes = ["undead"]
+on_pick = [{ get = "Jailer Sticker" }]
+start_of_turn = [{ get = "Jailer Sticker" }]
+
+[[trinket]]
+name = "Jailer Sticker"
+card_id = "BG35_MagicItem_733"
+slot = "greater"
+cost = 2
+tribes = ["undead"]
+on_pick = [{ get = "Jailer Sticker (Greater)" }]
+start_of_turn = [{ get = "Jailer Sticker (Greater)" }]
+
+[[trinket]]
+name = "Token of the Old Gods"
+card_id = "BG30_MagicItem_416"
+slot = "lesser"
+cost = 2
+on_pick = [{ get = "Token of the Old Gods" }]
+start_of_turn = [{ get = "Token of the Old Gods" }]
+
+[[trinket]]
+name = "Chillmere Mosaic"
+card_id = "BG35_MagicItem_755"
+slot = "greater"
+cost = 5
+tribes = ["dragon", "murloc"]
+on_pick = [{ get = "Chillmere Mosaic" }]
+start_of_turn = [{ get = "Chillmere Mosaic" }]
+
+[[trinket]]
+name = "Makeshift Master"
+card_id = "BG36_MagicItem_417"
+slot = "greater"
+cost = 3
+tribes = ["aberration"]
+on_pick = [{ get = "Makeshift Master" }]
+start_of_turn = [{ get = "Makeshift Master" }]
+
+#
+# The leftovers (block 3).
+#
+
+# "After you sell 6 minions, get a random Elemental": a sell counter.
+[[trinket]]
+name = "Lava Lamp"
+card_id = "BG30_MagicItem_951"
+slot = "greater"
+cost = 2
+tribes = ["elemental"]
+rule = { event = "sell", every = 6, acts = [{ random_minion = "elemental" }] }
+
+# "After you summon 25 minions, replace this with a random Greater Undead
+# Trinket": the summons a fight reports home count (docs/ENGINE.md).
+[[trinket]]
+name = "Soul Battery"
+card_id = "BG36_MagicItem_410"
+slot = "lesser"
+tribes = ["undead"]
+rule = { event = "summon", every = 25, once = true, acts = [{ replace_with_random = ["greater", "undead"] }] }
+
+[[trinket]]
+name = "Mask of Ancient Ones"
+card_id = "BG36_MagicItem_602"
+slot = "greater"
+cost = 4
+tribes = ["aberration"]
+on_pick = [{ golden_deity = true }]
+
+[[trinket]]
+name = "Innkeeper's Hearth"
+card_id = "BG32_MagicItem_362t"
+slot = "greater"
+on_pick = [{ discover_tier_stats = [6, 2, 30, 30] }]
+
+# ---- the cheap leftovers ----
+
+[[trinket]]
+name = "Worn Treasure Map"
+card_id = "BG32_MagicItem_428"
+slot = "lesser"
+rule = { event = "turns", every = 2, once = true, acts = [{ gold = 10 }] }
+
+[[trinket]]
+name = "Scraper Sticker"
+card_id = "BG35_MagicItem_301"
+slot = "lesser"
+cost = 1
+tribes = ["mech"]
+on_pick = [{ random_magnetic = 1 }]
+start_of_turn = [{ random_magnetic = 1 }]
+
+[[trinket]]
+name = "Gold Mallet"
+card_id = "BG36_MagicItem_302"
+slot = "lesser"
+cost = 2
+end_of_turn = [{ buff_all_per_golden = [1, 1] }]
+
+[[trinket]]
+name = "Gold Mallet"
+card_id = "BG36_MagicItem_302t"
+slot = "greater"
+cost = 2
+end_of_turn = [{ buff_all_per_golden = [4, 2] }]
+
+[[trinket]]
+name = "Charming Panpipes"
+card_id = "BG32_MagicItem_922"
+slot = "greater"
+cost = 4
+end_of_turn = [{ buff_leftmost_growing = [3, 3] }]
+on_cast_spell = [{ grow_value = 1 }]
+
+[[trinket]]
+name = "Murky Sticker"
+card_id = "BG35_MagicItem_753"
+slot = "greater"
+rule = { event = "turns", every = 1, acts = [{ buff_leftmost_two_per_battlecry = [1, 2] }] }
+
+[[trinket]]
+name = "Defensive Shell"
+card_id = "BG36_MagicItem_811"
+slot = "lesser"
+cost = 1
+on_pick = [{ first_play_shield = 1 }]
+start_of_turn = [{ first_play_shield = 1 }]
+
+[[trinket]]
+name = "Upstart Embers"
+card_id = "BG35_MagicItem_862"
+slot = "greater"
+cost = 6
+on_refresh = [{ double_highest_tavern = true }]
+
+[[trinket]]
+name = "Rendle Sticker"
+card_id = "BG32_MagicItem_817"
+slot = "lesser"
+on_pick = [{ steal_highest_tier_tavern = true }]
+end_of_turn = [{ steal_highest_tier_tavern = true }]
+
+[[trinket]]
+name = "Ghastly Sticker"
+card_id = "BG32_MagicItem_367"
+slot = "greater"
+cost = 4
+on_pick = [{ end_of_turn_twice = true }]
+
+[[trinket]]
+name = "Replica Cathedral"
+card_id = "BG30_MagicItem_434"
+slot = "lesser"
+cost = 3
+on_pick = [{ first_spell_twice = 1 }]
+start_of_turn = [{ first_spell_twice = 1 }]

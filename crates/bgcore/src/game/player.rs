@@ -339,6 +339,24 @@ impl Player {
         m
     }
 
+    /// The minion slots this player's Tavern has right now. `SHOP` holds the
+    /// spell slot too, so a Tavern never offers more than `SHOP - 1` minions
+    /// at once (DESIGN.md: never more than 7 slots, one almost always the
+    /// spell). Glowing Gauntlet fixes it at six (six plus the spell is the
+    /// seven it promises); Innkeeper's Stein and Electrode Attractor add one
+    /// each, and Stein's needs a tier above yours to draw from.
+    pub fn shop_size(&self, rules: &Rules) -> usize {
+        let base = if self.tp.gauntlet { 6 } else { rules.shop_size(self.tier) };
+        let mut extra = 0;
+        if self.tp.extra_high_tier && self.tier < crate::MAX_TIER {
+            extra += 1;
+        }
+        if self.tp.extra_magnetic {
+            extra += 1;
+        }
+        (base + extra).min(crate::SHOP - 1)
+    }
+
     /// The player's Tavern spell stat bonus: permanent gains plus board
     /// auras (Enchanted Sentinel, including when Magnetized into a host,
     /// and Humon'gozz).

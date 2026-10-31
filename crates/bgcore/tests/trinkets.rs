@@ -177,6 +177,31 @@ fn take(g: &mut Game, p: usize, name: &str) {
     g.step(Action::ChooseTrinket(0)).unwrap_or_else(|_| panic!("could not take {name}"));
 }
 
+/// The Gold a trinket's pick pays out (its on-pick `gold` acts).
+fn pick_gold(g: &Game, of: u8) -> u8 {
+    g.data
+        .trinkets
+        .get(of)
+        .on_pick
+        .iter()
+        .map(|a| match a {
+            bgcore::trinkets::Act::Gold(n) => *n,
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Whether a trinket replaces itself on the pick (Orb of the Unknown), so
+/// the slot ends up holding a different one.
+fn replaces_itself(g: &Game, of: u8) -> bool {
+    g.data
+        .trinkets
+        .get(of)
+        .on_pick
+        .iter()
+        .any(|a| matches!(a, bgcore::trinkets::Act::ReplaceWithRandom { .. }))
+}
+
 fn hand_of(g: &Game, p: usize, name: &str) -> usize {
     let c = id(g, name);
     g.players[p].hand.iter().filter(|m| m.card == c).count()
@@ -208,11 +233,19 @@ fn the_offers_come_on_turn_6_and_9_with_four_distinct_options() {
     assert!(!g.is_legal(Action::Buy(0)));
     assert!(g.is_legal(Action::Freeze));
     assert!(g.is_legal(Action::EndTurn));
-    // The price is paid at the pick.
-    let (of, price) = offer[1];
+    // The price is paid at the pick (an option that pays Gold back, or one
+    // that replaces itself, is left for the counts above).
+    let k = (0..offer.len())
+        .find(|&k| !replaces_itself(&g, offer[k].0))
+        .expect("an option that keeps the slot");
+    let (of, price) = offer[k];
     let gold = g.players[0].gold;
-    act(&mut g, 0, Action::ChooseTrinket(1));
-    assert_eq!(g.players[0].gold, gold.saturating_sub(price), "the price was paid");
+    act(&mut g, 0, Action::ChooseTrinket(k as u8));
+    assert_eq!(
+        g.players[0].gold,
+        gold.saturating_sub(price).saturating_add(pick_gold(&g, of)),
+        "the price was paid"
+    );
     assert_eq!(g.players[0].trinkets[0].of, of + 1, "the lesser slot holds it");
     assert!(g.players[0].trinket_offer.is_empty());
     // Not offered again on turn 7.
@@ -235,11 +268,21 @@ fn an_unanswered_offer_is_bought_on_the_way_out() {
     let mut g = game(2);
     to_turn(&mut g, 6);
     turn_of(&mut g, 0);
-    let cheapest = g.players[0].trinket_offer.iter().map(|&(_, price)| price).min().unwrap();
-    let gold = g.players[0].gold;
+    // Two known options, so the cheapest is not a matter of the draw.
+    let dear = trinket(&g, "Frigid Blossom");
+    let cheap = trinket(&g, "Bob's Tip Jar");
+    g.players[0].trinket_offer.clear();
+    g.players[0].trinket_offer_slot = 1;
+    let _ = g.players[0].trinket_offer.try_push((dear, 2));
+    let _ = g.players[0].trinket_offer.try_push((cheap, 1));
+    g.players[0].gold = 10;
     act(&mut g, 0, Action::EndTurn);
-    assert_ne!(g.players[0].trinkets[0].of, 0, "not declined");
-    assert_eq!(g.players[0].gold, gold.saturating_sub(cheapest), "the cheapest one");
+    assert_eq!(g.players[0].trinkets[0].of, cheap + 1, "the cheapest, bought");
+    assert_eq!(
+        g.players[0].gold,
+        10 - 1 + pick_gold(&g, cheap),
+        "its price, and the 4 Gold it pays"
+    );
 }
 
 #[test]
@@ -1161,6 +1204,87 @@ fn mystery_cube_offers_a_free_replacement() {
     act(&mut g, 0, Action::ChooseTrinket(k as u8));
     assert_ne!(g.players[0].trinkets[0].of, mc + 1, "the cube was replaced");
     assert_ne!(g.players[0].trinkets[0].of, 0, "and the slot is not empty");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_mystery_cube_keeps_offering_every_turn() {
+    let mut g = game(167);
+    to_turn(&mut g, 6);
+    turn_of(&mut g, 0);
+    let mc = g.data.trinkets.by_card_id("BG30_MagicItem_703").unwrap();
+    g.players[0].trinket_offer.clear();
+    g.players[0].trinket_offer_slot = 1;
+    let _ = g.players[0].trinket_offer.try_push((mc, 0));
+    g.players[0].gold = 10;
+    g.step(Action::ChooseTrinket(0)).unwrap();
+    let k = (0..g.players[0].trinket_offer.len())
+        .find(|&k| g.players[0].trinket_offer[k].0 != mc)
+        .expect("an option");
+    let first = g.players[0].trinket_offer[k].0;
+    act(&mut g, 0, Action::ChooseTrinket(k as u8));
+    assert!(g.players[0].trinkets[0].cube, "the slot is a cube slot");
+    // Every turn after it: a fresh free offer of two Lesser trinkets, never
+    // the one the slot holds.
+    let mut held_before = vec![first];
+    for turn in 7..9 {
+        to_turn(&mut g, turn);
+        turn_of(&mut g, 0);
+        let held = g.players[0].trinkets[0].of - 1;
+        assert!(g.players[0].trinkets[0].cube, "still a cube slot on turn {turn}");
+        let offer: Vec<(u8, u8)> = g.players[0].trinket_offer.to_vec();
+        assert_eq!(offer.len(), 2, "two options on turn {turn}");
+        assert!(offer.iter().all(|&(_, p)| p == 0), "free on turn {turn}");
+        assert!(offer.iter().all(|&(of, _)| of != held), "never the held one");
+        assert!(
+            offer.iter().all(|&(of, _)| g.data.trinkets.get(of).slot
+                == bgcore::trinkets::Slot::Lesser),
+            "Lesser only"
+        );
+        assert!(
+            offer.iter().all(|&(of, _)| g.data.trinkets.get(of).cube),
+            "a one-time effect is never offered"
+        );
+        act(&mut g, 0, Action::ChooseTrinket(0));
+        assert!(g.players[0].trinkets[0].cube, "the flag stays with the slot");
+        held_before.push(g.players[0].trinkets[0].of - 1);
+        g.check_invariants().unwrap();
+    }
+    // Turn 9: the normal Greater offer goes first, and the cube's offer comes
+    // straight after it is answered.
+    to_turn(&mut g, 9);
+    turn_of(&mut g, 0);
+    assert_eq!(g.players[0].trinket_offer.len(), 4, "the turn 9 offer");
+    assert_eq!(g.players[0].trinket_offer_slot, 2, "into the Greater slot");
+    act(&mut g, 0, Action::ChooseTrinket(0));
+    let held = g.players[0].trinkets[0].of - 1;
+    assert_eq!(g.players[0].trinket_offer.len(), 2, "then the cube's two");
+    assert!(g.players[0].trinket_offer.iter().all(|&(of, _)| of != held));
+    assert_ne!(held, held_before[1], "the slot moved on every turn");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_mystery_cube_offers_after_the_held_trinkets_own_start_of_turn() {
+    // A trinket with a start-of-turn effect in a cube slot does its own work
+    // first, then the cube replaces it (DESIGN.md).
+    let mut g = game(168);
+    let cube = trinket(&g, "Mystery Cube");
+    g.set_trinket(0, 0, Some(cube));
+    g.players[0].trinkets[0].cube = true;
+    g.players[0].trinkets[0].cube_choices = 2;
+    // Gold Pendant: makes a random Tier 4 or below minion Golden each turn.
+    put_on_board(&mut g, 0, "Sellemental");
+    let pendant = trinket(&g, "Gold Pendant");
+    g.set_trinket(0, 0, Some(pendant));
+    assert!(g.players[0].trinkets[0].cube, "the slot kept the cube flag");
+    g.players[0].gold = 10;
+    // End the turn with nothing answered, so the next start of turn is what
+    // the test sees.
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    assert!(g.players[0].board[0].golden, "the Pendant fired before the swap");
+    assert_eq!(g.players[0].trinket_offer.len(), 2, "then the cube offered");
     g.check_invariants().unwrap();
 }
 
@@ -2453,4 +2577,589 @@ fn escapee_portrait_gives_a_golden_escapee_and_earlier_lockboxes() {
         .find(|m| m.card == id(&g, "Lockbox"))
         .expect("the Lockbox Portrait gave one");
     assert_eq!(lockbox.improvements, 4, "5 turns minus the 1");
+}
+
+// ---- the hero power trinkets ----
+
+#[test]
+fn the_ancient_wishbone_runs_the_hero_power_twice() {
+    // Bloodbound: 2 Blood Gems a press, twice a turn. With the Wishbone one
+    // press gives 4, and it still costs its 1 Gold once.
+    let mut g = game(170);
+    let h = g.data.heroes.by_name("Death Speaker Blackthorn").unwrap();
+    g.assign_hero(0, h);
+    take(&mut g, 0, "Ancient Wishbone");
+    g.players[0].gold = 10;
+    let before = g.players[0].hand.iter().filter(|m| g.data.cards.get(m.card).blood_gem).count();
+    act(&mut g, 0, Action::HeroPower);
+    let after = g.players[0].hand.iter().filter(|m| g.data.cards.get(m.card).blood_gem).count();
+    assert_eq!(after - before, 4, "twice the Gems");
+    assert_eq!(g.players[0].gold, 9, "the press costs once");
+    // A passive power fires twice too: Clairvoyance's free Refresh.
+    let mut g = game(171);
+    let h = g.data.heroes.by_name("Nozdormu").unwrap();
+    g.assign_hero(0, h);
+    take(&mut g, 0, "Ancient Wishbone");
+    let rolls = g.players[0].free_rolls;
+    next_turn(&mut g);
+    assert_eq!(g.players[0].free_rolls, rolls + 2, "two free Refreshes");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_sous_chef_sticker_gives_a_second_press_and_a_gold_back() {
+    let mut g = game(172);
+    let h = g.data.heroes.by_name("Death Speaker Blackthorn").unwrap();
+    g.assign_hero(0, h);
+    take(&mut g, 0, "Sous Chef Sticker");
+    assert_eq!(g.players[0].power.unwrap().uses_left, 3, "two a turn plus one");
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::HeroPower);
+    assert_eq!(g.players[0].gold, 10, "1 Gold paid, 1 back");
+    turn_of(&mut g, 0);
+    assert!(g.is_legal(Action::HeroPower), "a third press");
+    act(&mut g, 0, Action::HeroPower);
+    assert!(!g.is_legal(Action::HeroPower), "and no fourth");
+    // The next turn starts with the extra use again.
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    assert_eq!(g.players[0].power.unwrap().uses_left, 3);
+    g.check_invariants().unwrap();
+}
+
+// ---- the Tavern's shape ----
+
+#[test]
+fn the_glowing_gauntlet_makes_six_minions_and_a_spell_that_refill() {
+    let mut g = game(180);
+    take(&mut g, 0, "Glowing Gauntlet");
+    g.players[0].tier = 1;
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    assert_eq!(g.players[0].shop.len(), 6, "six minions at tier 1");
+    assert!(g.players[0].shop_spell.is_some(), "and the spell");
+    for m in &g.players[0].shop {
+        // +3/+3 from the Gauntlet's Tavern buff.
+        let c = g.data.cards.get(m.card);
+        assert_eq!((m.attack, m.health), (c.attack + 3, c.health + 3), "{}", c.name);
+    }
+    // A bought minion is replaced by a minion.
+    g.players[0].gold = 10;
+    let bought = g.players[0].shop[0].card;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].shop.len(), 6, "a minion took the slot");
+    assert!(g.players[0].shop_spell.is_some(), "the spell slot keeps its spell");
+    g.check_invariants().unwrap();
+    // A bought spell is replaced by a spell.
+    let spell = g.players[0].shop_spell;
+    act(&mut g, 0, Action::BuySpell);
+    assert!(g.players[0].shop_spell.is_some(), "another spell");
+    assert_ne!(g.players[0].shop_spell, spell, "a different one is fine too");
+    assert_eq!(g.players[0].shop.len(), 6);
+    assert!(!g.players[0].hand.is_empty(), "the bought cards are in hand");
+    let _ = bought;
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_innkeepers_stein_offers_a_minion_of_a_higher_tier() {
+    let mut g = game(181);
+    g.players[0].tier = 2;
+    take(&mut g, 0, "Innkeeper's Stein");
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    let size = g.data.rules.shop_size(2);
+    assert_eq!(g.players[0].shop.len(), size + 1, "one extra slot");
+    let high = g.players[0]
+        .shop
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).tier == 3)
+        .count();
+    assert_eq!(high, 1, "and it is one tier above");
+    // At tier 6 there is no higher tier, so the slot does not appear.
+    g.players[0].tier = 6;
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    assert_eq!(g.players[0].shop.len(), 6, "six is all a Tavern has");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_electrode_attractor_offers_a_magnetic_mech_and_prices_them_at_two() {
+    let mut g = game(182);
+    g.players[0].tier = 3;
+    take(&mut g, 0, "Electrode Attractor");
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    let size = g.data.rules.shop_size(3);
+    assert_eq!(g.players[0].shop.len(), size + 1, "one extra slot");
+    let mechs = g.players[0]
+        .shop
+        .iter()
+        .filter(|m| {
+            let c = g.data.cards.get(m.card);
+            c.tribes.has(Tribe::Mech) && c.keywords.has(bgcore::Keywords::MAGNETIC)
+        })
+        .count();
+    assert_eq!(mechs, 1, "a Magnetic Mech");
+    let slot = (0..g.players[0].shop.len())
+        .find(|&s| {
+            let c = g.data.cards.get(g.players[0].shop[s].card);
+            c.tribes.has(Tribe::Mech) && c.keywords.has(bgcore::Keywords::MAGNETIC)
+        })
+        .unwrap();
+    g.players[0].gold = 2;
+    act(&mut g, 0, Action::Buy(slot as u8));
+    assert_eq!(g.players[0].gold, 0, "2 Gold, not 3");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_guiding_candle_draws_tier_six_for_two_refreshes() {
+    let mut g = game(183);
+    g.players[0].tier = 2;
+    take(&mut g, 0, "Guiding Candle");
+    g.players[0].gold = 30;
+    g.players[0].free_rolls = 10;
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    // The roll at the start of the turn is the first of the two.
+    assert!(
+        g.players[0].shop.iter().all(|m| g.data.cards.get(m.card).tier == 6),
+        "the turn-start roll holds Tier 6"
+    );
+    act(&mut g, 0, Action::Roll);
+    assert!(
+        g.players[0].shop.iter().all(|m| g.data.cards.get(m.card).tier == 6),
+        "the second Refresh too: {:?}",
+        g.players[0].shop.iter().map(|m| g.data.cards.get(m.card).tier).collect::<Vec<_>>()
+    );
+    act(&mut g, 0, Action::Roll);
+    assert!(
+        g.players[0].shop.iter().any(|m| g.data.cards.get(m.card).tier <= 2),
+        "the third Refresh draws normally again"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn bob_blehead_takes_tier_one_and_two_out_of_the_tavern() {
+    let mut g = game(184);
+    g.players[0].tier = 4;
+    let gold = g.players[0].gold;
+    take(&mut g, 0, "Bob-blehead");
+    assert_eq!(g.players[0].gold, gold.saturating_add(2), "2 Gold");
+    g.players[0].free_rolls = 10;
+    act(&mut g, 0, Action::Roll);
+    assert!(
+        g.players[0].shop.iter().all(|m| g.data.cards.get(m.card).tier >= 3),
+        "no Tier 1 or 2"
+    );
+    g.check_invariants().unwrap();
+}
+
+// ---- Spellcraft ----
+//
+// A Spellcraft trinket hands its spell out at the pick and again at the start
+// of every turn; the spell is a Tavern spell, and one that is not cast leaves
+// the hand at the end of the turn.
+
+fn cast_from_hand(g: &mut Game, p: usize, name: &str) {
+    turn_of(g, p);
+    let c = id(g, name);
+    let h = (0..g.players[p].hand.len())
+        .find(|&h| g.players[p].hand[h].card == c)
+        .unwrap_or_else(|| panic!("{name} is not in hand"));
+    g.step(Action::Play { hand: h as u8, pos: 0 })
+        .unwrap_or_else(|_| panic!("could not cast {name}"));
+}
+
+#[test]
+fn a_spellcraft_spell_leaves_the_hand_at_the_end_of_the_turn() {
+    let mut g = game(190);
+    take(&mut g, 0, "Ophidian Staff");
+    assert_eq!(hand_of(&g, 0, "Ophidian Staff"), 1, "it comes with the pick");
+    // Not cast: gone with the turn. Cast: gone too, and back next turn.
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    assert_eq!(hand_of(&g, 0, "Ophidian Staff"), 1, "a new one each turn");
+    put_on_board(&mut g, 0, "Forest Rover");
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    cast_from_hand(&mut g, 0, "Ophidian Staff");
+    act(&mut g, 0, Action::Target(0));
+    let m = g.players[0].board[0];
+    assert_eq!((m.attack, m.health), (before.0 + 2, before.1 + 2), "+2/+2");
+    assert!(m.keywords.has(bgcore::Keywords::REBORN), "and Reborn");
+    assert_eq!(hand_of(&g, 0, "Ophidian Staff"), 0, "the cast one is used up");
+    assert_eq!(g.players[0].spells_cast, 1, "a Spellcraft cast is a spell cast");
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    assert_eq!(hand_of(&g, 0, "Ophidian Staff"), 1, "and comes back");
+    // Leaving the hand is not a discard. Only player 0's turn ends here, so
+    // the next turn's new copy is not in hand yet.
+    let discarded = g.players[0].discarded;
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(hand_of(&g, 0, "Ophidian Staff"), 0, "gone with the turn");
+    assert_eq!(g.players[0].discarded, discarded, "not a discard");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_vibrant_bubble_gives_a_murloc_a_bonus_keyword() {
+    let mut g = game(191);
+    take(&mut g, 0, "Vibrant Bubble");
+    put_on_board(&mut g, 0, "Bubble Gunner");
+    let before = g.players[0].board[0].keywords.0;
+    cast_from_hand(&mut g, 0, "Vibrant Bubble");
+    act(&mut g, 0, Action::Target(0));
+    let mask = g.data.rules.bonus_mask;
+    assert_ne!(g.players[0].board[0].keywords.0 & mask, before & mask, "a keyword");
+}
+
+#[test]
+fn the_jailer_sticker_trades_an_undead_for_a_random_one() {
+    let mut g = game(192);
+    take(&mut g, 0, "Jailer Sticker");
+    put_on_board(&mut g, 0, "Harmless Bonehead");
+    cast_from_hand(&mut g, 0, "Jailer Sticker");
+    act(&mut g, 0, Action::Target(0));
+    let undead = id(&g, "Harmless Bonehead");
+    assert!(
+        !g.players[0].board.iter().any(|m| m.card == undead),
+        "the Undead is destroyed"
+    );
+    assert!(
+        g.players[0]
+            .hand
+            .iter()
+            .any(|m| g.data.cards.get(m.card).tribes.has(Tribe::Undead)),
+        "a random Undead is in hand"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_token_of_the_old_gods_transforms_into_a_higher_tier() {
+    let mut g = game(193);
+    take(&mut g, 0, "Token of the Old Gods");
+    put_on_board(&mut g, 0, "Bubble Gunner");
+    cast_from_hand(&mut g, 0, "Token of the Old Gods");
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(g.players[0].discover.len(), 3, "three cards of the tier above");
+    for &c in &g.players[0].discover {
+        assert_eq!(g.data.cards.get(c).tier, 2, "one tier above the tier 1 minion");
+    }
+    act(&mut g, 0, Action::Choose(0));
+    let m = g.players[0].board[0];
+    assert_ne!(m.card, id(&g, "Bubble Gunner"), "the old card is gone");
+    
+    let c = g.data.cards.get(m.card);
+    assert_eq!(c.tier, 2, "the new minion is the one picked");
+    assert_eq!((m.attack, m.health), (c.attack, c.health), "at its printed stats");
+    assert_eq!(g.players[0].hand.len(), 0, "and not in hand");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_chillmere_mosaic_refreshes_with_battlecry_minions_at_one_gold() {
+    let mut g = game(194);
+    take(&mut g, 0, "Chillmere Mosaic");
+    g.players[0].gold = 10;
+    cast_from_hand(&mut g, 0, "Chillmere Mosaic");
+    assert!(!g.players[0].shop.is_empty(), "the Tavern was refilled");
+    for m in &g.players[0].shop {
+        assert!(g.data.cards.get(m.card).battlecry.is_some(), "Battlecry minions only");
+    }
+    let slot = 0u8;
+    act(&mut g, 0, Action::Buy(slot));
+    assert_eq!(g.players[0].gold, 9, "they cost 1");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_makeshift_master_gives_the_deity_what_its_minion_gains() {
+    let mut g = game(195);
+    assert!(g.players[0].deity.is_some(), "an Aberration lobby has a Deity");
+    take(&mut g, 0, "Makeshift Master");
+    put_on_board(&mut g, 0, "Lullabot");
+    cast_from_hand(&mut g, 0, "Makeshift Master");
+    act(&mut g, 0, Action::Target(0));
+    let before = g.players[0].deity.unwrap();
+    // A Tavern spell cast on the watched minion (+2/+2).
+    let c = id(&g, "Tavern Dish Banana");
+    let m = g.players[0].make_card(&g.data.cards, c, false, 0);
+    g.players[0].hand.push(m);
+    turn_of(&mut g, 0);
+    let h = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    let after = g.players[0].deity.unwrap();
+    assert_eq!(
+        (after.attack - before.attack, after.health - before.health),
+        (2, 2),
+        "the Deity gained what the watched minion gained"
+    );
+    g.check_invariants().unwrap();
+}
+
+// ---- the leftovers ----
+
+#[test]
+fn the_lava_lamp_pays_after_six_sells() {
+    let mut g = game(200);
+    take(&mut g, 0, "Lava Lamp");
+    for i in 0..6 {
+        put_on_board(&mut g, 0, "Buzzing Vermin");
+        let _ = i;
+        act(&mut g, 0, Action::Sell(0));
+    }
+    let elementals = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).tribes.has(Tribe::Elemental))
+        .count();
+    assert_eq!(elementals, 1, "one random Elemental after 6 sells");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_fight_reports_the_minions_it_summoned() {
+    // The counter Soul Battery reads: every friendly summon, the neutral ones
+    // included (a Beetle is a Beast, a Skeleton is neutral).
+    let mut g = game(204);
+    equip(&mut g, 0, 0, "Soul Battery");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Harmless Bonehead");
+    let out = fight_wall_watched(&g, 7, 50, 500, 40, &mut ());
+    eprintln!("summons {} tribes {:?} deaths {}", out.sides[0].friendly_summons, out.sides[0].summon_tribes, out.sides[0].friendly_deaths);
+    assert!(out.sides[0].friendly_summons >= 2, "a Beetle and a Skeleton");
+}
+
+#[test]
+fn the_soul_battery_swaps_itself_after_a_fights_summons() {
+    // The counter is the minions a fight summons, which come home with the
+    // fight's outcome (docs/ENGINE.md).
+    let mut g = game(201);
+    to_turn(&mut g, 4);
+    take(&mut g, 0, "Soul Battery");
+    assert_eq!(g.players[0].trinkets[0].of - 1, trinket(&g, "Soul Battery"));
+    // One summon short: a fight's Deathrattle summons finish it. The other
+    // seats hold a wall, so player 0's minions die and summon.
+    let battery = trinket(&g, "Soul Battery") + 1;
+    let _ = battery;
+    g.players[0].trinkets[0].count = 24;
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Harmless Bonehead");
+    for q in 1..bgcore::PLAYERS {
+        let mut m = g.data.cards.make(id(&g, "Lullabot"), false);
+        m.attack = 50;
+        m.health = 500;
+        let _ = g.players[q].board.try_push(m);
+    }
+    next_turn(&mut g);
+    let of = g.players[0].trinkets[0].of;
+    assert_ne!(of, 0, "something holds the slot");
+    assert_ne!(of - 1, trinket(&g, "Soul Battery"), "the Battery replaced itself");
+    let t = g.data.trinkets.get(of - 1);
+    assert_eq!(t.slot, bgcore::trinkets::Slot::Greater, "a Greater trinket");
+    assert!(t.tribes.has(Tribe::Undead), "of the Undead");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_mask_of_ancient_ones_makes_the_deity_golden() {
+    let mut g = game(202);
+    let before = g.players[0].deity.unwrap();
+    take(&mut g, 0, "Mask of Ancient Ones");
+    let after = g.players[0].deity.unwrap();
+    assert!(after.golden, "Golden");
+    assert_eq!((after.attack, after.health), (before.attack + 1, before.health + 1));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_innkeepers_hearth_discovers_two_tier_six_minions_at_thirty() {
+    let mut g = game(203);
+    g.players[0].tier = 6;
+    take(&mut g, 0, "Innkeeper's Hearth");
+    assert_eq!(g.players[0].discover.len(), 3, "a Discover of Tier 6");
+    for &c in &g.players[0].discover {
+        assert_eq!(g.data.cards.get(c).tier, 6);
+    }
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].discover.len(), 3, "and a second one");
+    act(&mut g, 0, Action::Choose(0));
+    let got: Vec<(i32, i32)> = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).tier == 6)
+        .map(|m| (m.attack, m.health))
+        .collect();
+    assert_eq!(got, vec![(30, 30), (30, 30)], "both set to 30/30");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_cheap_leftovers_do_their_part() {
+    // Worn Treasure Map: 10 Gold two turns after the pick, once. The Gold is
+    // read at the end of the turn it lands in, before the next one resets it.
+    let mut g = game(210);
+    take(&mut g, 0, "Worn Treasure Map");
+    act(&mut g, 0, Action::EndTurn);
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    g.players[0].gold = 0;
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(g.players[0].gold, 10, "10 Gold two turns in");
+    assert!(g.players[0].trinkets[0].done, "and it is spent");
+    for _ in 0..2 {
+        next_turn(&mut g);
+        turn_of(&mut g, 0);
+        g.players[0].gold = 0;
+        act(&mut g, 0, Action::EndTurn);
+        assert_eq!(g.players[0].gold, 0, "once per game");
+    }
+    // Scraper Sticker: a Magnetic Mech now and each turn.
+    let mut g = game(211);
+    let magnets = |g: &Game| {
+        g.players[0]
+            .hand
+            .iter()
+            .filter(|m| {
+                let c = g.data.cards.get(m.card);
+                c.tribes.has(Tribe::Mech) && c.keywords.has(bgcore::Keywords::MAGNETIC)
+            })
+            .count()
+    };
+    take(&mut g, 0, "Scraper Sticker");
+    assert_eq!(magnets(&g), 1, "one on the pick");
+    next_turn(&mut g);
+    assert_eq!(magnets(&g), 2, "and another each turn");
+    // Gold Mallet: +1/+1 at the end of the turn, once more per Golden minion
+    // played.
+    let mut g = game(212);
+    put_on_board(&mut g, 0, "Lullabot");
+    equip(&mut g, 0, 0, "Gold Mallet");
+    g.players[0].golden_played = 2;
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0 + 3, before.1 + 4),
+        "+1/+1 plus one more for each of the two Golden minions, and Lullabot's own +0/+1"
+    );
+    // Defensive Shell: the first minion played each turn gets Divine Shield.
+    let mut g = game(213);
+    take(&mut g, 0, "Defensive Shell");
+    put_in_hand(&mut g, 0, "Buzzing Vermin");
+    put_in_hand(&mut g, 0, "Harmless Bonehead");
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    let shielded: Vec<bool> = g.players[0]
+        .board
+        .iter()
+        .map(|m| m.keywords.has(bgcore::Keywords::DIVINE_SHIELD))
+        .collect();
+    assert_eq!(shielded.iter().filter(|&&b| b).count(), 1, "one shield a turn");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn rendle_steals_the_dearest_card_and_ghastly_doubles_the_end_of_turn() {
+    // Rendle Sticker: the highest-Tier card in the Tavern, on the pick and at
+    // the end of each turn.
+    let mut g = game(214);
+    g.players[0].tier = 4;
+    let dear = "Banana Slamma";
+    set_shop(&mut g, 0, &["Buzzing Vermin", dear, "Flittering Bat"]);
+    take(&mut g, 0, "Rendle Sticker");
+    assert_eq!(hand_of(&g, 0, dear), 1, "the dearest card is in hand");
+    assert_eq!(g.players[0].shop.len(), 2, "and left the Tavern");
+    g.check_invariants().unwrap();
+    // Ghastly Sticker: the end of turn runs twice.
+    let mut g = game(215);
+    put_on_board(&mut g, 0, "Lullabot");
+    take(&mut g, 0, "Ghastly Sticker");
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0, before.1 + 2),
+        "Lullabot's +0/+1 twice"
+    );
+}
+
+#[test]
+fn the_upstart_embers_double_the_healthiest_tavern_minion() {
+    let mut g = game(216);
+    g.players[0].tier = 3;
+    g.players[0].free_rolls = 4;
+    take(&mut g, 0, "Upstart Embers");
+    // Every Refresh doubles the highest-Health minion it dealt, so exactly
+    // one card of the new Tavern has twice its printed stats.
+    for _ in 0..3 {
+        act(&mut g, 0, Action::Roll);
+        let doubled = g.players[0]
+            .shop
+            .iter()
+            .filter(|m| {
+                let c = g.data.cards.get(m.card);
+                !c.is_spell() && m.attack == c.attack * 2 && m.health == c.health * 2
+            })
+            .count();
+        assert_eq!(doubled, 1, "one doubled minion");
+    }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_replica_cathedral_casts_the_first_spell_twice() {
+    let mut g = game(217);
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    take(&mut g, 0, "Replica Cathedral");
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    let c = id(&g, "Tavern Dish Banana");
+    let m = g.players[0].make_card(&g.data.cards, c, false, 0);
+    g.players[0].hand.push(m);
+    turn_of(&mut g, 0);
+    let h = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0 + 4, before.1 + 4),
+        "+2/+2 twice"
+    );
+    // The second spell of the turn casts once.
+    let m = g.players[0].make_card(&g.data.cards, c, false, 0);
+    g.players[0].hand.push(m);
+    turn_of(&mut g, 0);
+    let h = g.players[0].hand.len() - 1;
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (before.0 + 2, before.1 + 2),
+        "+2/+2 once"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_replica_cathedral_doubles_a_spell_with_no_target() {
+    // Tavern Coin: 1 Gold a cast, twice on the first spell of the turn.
+    let mut g = game(218);
+    take(&mut g, 0, "Replica Cathedral");
+    let c = id(&g, "Tavern Coin");
+    for (expected, cast) in [(2u8, 1u8), (1, 2)] {
+        let m = g.players[0].make_card(&g.data.cards, c, false, 0);
+        g.players[0].hand.push(m);
+        turn_of(&mut g, 0);
+        let h = g.players[0].hand.len() - 1;
+        let gold = g.players[0].gold;
+        act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+        assert_eq!(g.players[0].gold, gold.saturating_add(expected), "cast {cast}");
+    }
+    g.check_invariants().unwrap();
 }

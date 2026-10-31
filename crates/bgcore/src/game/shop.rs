@@ -216,7 +216,8 @@ impl Game {
             give_back(pool, cards, &m);
         }
         pl.shop_spell = None;
-        Self::fill_shop(pl, pool, cards, rules.shop_size(pl.tier), rng, lobby, kind);
+        let size = pl.shop_size(rules);
+        Self::fill_shop(pl, pool, cards, rules, size, rng, lobby, kind);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
     }
@@ -271,6 +272,7 @@ impl Game {
         pl: &mut Player,
         pool: &mut [u8],
         cards: &CardDb,
+        rules: &Rules,
         size: usize,
         rng: &mut Rng,
         lobby: Tribes,
@@ -280,9 +282,19 @@ impl Game {
             RefreshKind::Explicit => pl.take_fodder_for_refresh(),
             RefreshKind::TurnStart | RefreshKind::Effect => 0,
         };
+        // A price a Refresh gave the Tavern lasts only as long as those
+        // cards do (Chillmere Mosaic).
+        pl.tp.tavern_price = 0;
         let slots = size + 1;
         let fodders = (fodders as usize).min(slots);
-        let normal = size.saturating_sub(fodders);
+        // The tier's own size: the extra slots below fill whatever the
+        // player's shape adds on top of it.
+        let base = if pl.tp.gauntlet { 6 } else { rules.shop_size(pl.tier) };
+        let normal = base.saturating_sub(fodders);
+        // The tier bounds this Refresh draws in: Bob-blehead's floor, and
+        // Guiding Candle's first Refreshes of a turn, which hold Tier 6 cards
+        // only (free access to the tier, as the card says).
+        let (lo, hi) = Self::tavern_tiers(pl);
         if pl.tp.whistle && !pl.board.is_empty() {
             // Warband Whistle: this Refresh holds plain copies of the
             // warband, each minion once while there are enough of them.
@@ -304,7 +316,7 @@ impl Game {
             }
         } else {
             while pl.shop.len() < normal {
-                match draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |_| true) {
+                match draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |_| true) {
                     Some(c) => {
                         let mut m = pl.make_card(cards, c, false, 1);
                         pl.apply_tavern_buffs(cards, &mut m);
@@ -312,6 +324,28 @@ impl Game {
                     }
                     None => break,
                 }
+            }
+        }
+        // The extra slots (Innkeeper's Stein, Electrode Attractor): one
+        // Magnetic Mech, then one minion of the tier above. `size` already
+        // counts them, so a slot only appears when the size allows it.
+        if pl.tp.extra_magnetic && pl.shop.len() < size {
+            let mech = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |c| {
+                c.keywords.has(crate::minion::Keywords::MAGNETIC) && c.tribes.has(Tribe::Mech)
+            });
+            if let Some(c) = mech {
+                let mut m = pl.make_card(cards, c, false, 1);
+                pl.apply_tavern_buffs(cards, &mut m);
+                pl.shop.push(m);
+            }
+        }
+        if pl.tp.extra_high_tier && pl.tier < crate::MAX_TIER && pl.shop.len() < size {
+            let up = (pl.tier + 1).max(lo);
+            let drawn = draw_filtered(pool, cards, rng, up, up, &[], lobby, |_| true);
+            if let Some(c) = drawn {
+                let mut m = pl.make_card(cards, c, false, 1);
+                pl.apply_tavern_buffs(cards, &mut m);
+                pl.shop.push(m);
             }
         }
         if let Some(tok) = cards.fodder_token {
@@ -343,6 +377,44 @@ impl Game {
         }
     }
 
+    /// The tier range the Tavern draws minions from right now: Bob-blehead's
+    /// floor, or Tier 6 alone during one of Guiding Candle's Refreshes.
+    pub(super) fn tavern_tiers(pl: &Player) -> (u8, u8) {
+        if pl.tp.refresh_tier6 > 0 {
+            (crate::MAX_TIER, crate::MAX_TIER)
+        } else {
+            (pl.tp.min_tier.max(1), pl.tier)
+        }
+    }
+
+    /// Glowing Gauntlet: the Tavern always holds seven cards, six minions and
+    /// the spell, so a bought, consumed or stolen minion is replaced by a
+    /// minion, and a bought spell by a spell (DESIGN.md). Called after every
+    /// action; a player without the trinket returns on one flag.
+    pub(super) fn refill_tavern(&mut self, p: usize) {
+        if !self.players[p].tp.gauntlet {
+            return;
+        }
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let cards = &data.cards;
+        let pl = &mut players[p];
+        let size = pl.shop_size(&data.rules);
+        let (lo, hi) = Self::tavern_tiers(pl);
+        while pl.shop.len() < size {
+            match draw_filtered(pool, cards, rng, lo, hi, &[], *lobby, |_| true) {
+                Some(c) => {
+                    let mut m = pl.make_card(cards, c, false, 1);
+                    pl.apply_tavern_buffs(cards, &mut m);
+                    pl.shop.push(m);
+                }
+                None => break,
+            }
+        }
+        if pl.shop.len() <= size && pl.shop_spell.is_none() {
+            pl.shop_spell = cards.random_spell(pl.tier, *lobby, rng);
+        }
+    }
+
     /// Saloon's Finest: every Tavern slot becomes a Tavern spell up to the
     /// player's tier. Spells have no pool, so repeats are allowed. This is a
     /// card effect, not the player's own Refresh, so no Fodders.
@@ -359,7 +431,7 @@ impl Game {
             give_back(pool, cards, &m);
         }
         pl.shop_spell = None;
-        let size = rules.shop_size(pl.tier);
+        let size = pl.shop_size(rules);
         for _ in 0..size {
             match cards.random_spell(pl.tier, lobby, rng) {
                 Some(id) => {
@@ -370,6 +442,43 @@ impl Game {
             }
         }
         pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
+        Self::apply_refresh_buff(pl, cards, rng);
+        Self::apply_barrage(pl, cards);
+    }
+
+    /// Chillmere Mosaic's Spellcraft spell: refresh the Tavern with Battlecry
+    /// minions, which cost `price` while they stay. The draw comes from the
+    /// pool like any other, so a small pool can leave slots empty; it is an
+    /// effect, so no Fodders feed it.
+    pub(super) fn refresh_with_battlecries(
+        pl: &mut Player,
+        pool: &mut [u8],
+        cards: &CardDb,
+        rules: &Rules,
+        rng: &mut Rng,
+        lobby: Tribes,
+        price: u8,
+    ) {
+        pl.frozen = false;
+        for m in pl.shop.drain(..) {
+            give_back(pool, cards, &m);
+        }
+        pl.shop_spell = None;
+        let size = pl.shop_size(rules);
+        while pl.shop.len() < size {
+            let drawn =
+                draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |c| c.battlecry.is_some());
+            match drawn {
+                Some(c) => {
+                    let mut m = pl.make_card(cards, c, false, 1);
+                    pl.apply_tavern_buffs(cards, &mut m);
+                    pl.shop.push(m);
+                }
+                None => break,
+            }
+        }
+        pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
+        pl.tp.tavern_price = price;
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
     }
@@ -392,7 +501,7 @@ impl Game {
             give_back(pool, cards, &m);
         }
         pl.shop_spell = None;
-        let size = rules.shop_size(pl.tier);
+        let size = pl.shop_size(rules);
         while pl.shop.len() < size {
             match draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |c| c.tribes.has(tribe)) {
                 Some(c) => {
@@ -546,8 +655,9 @@ impl Game {
             && let PowerEffect::GoldNextTurnAfterSell(g) =
                 self.data.heroes.get(st.of).power.effect
         {
+            let runs = self.players[p].tp.power_triggers.max(1);
             let pl = &mut self.players[p];
-            pl.gold_next_turn = pl.gold_next_turn.saturating_add(g);
+            pl.gold_next_turn = pl.gold_next_turn.saturating_add(g.saturating_mul(runs));
         }
         give_back(&mut self.pool, &self.data.cards, &m);
         for (card, golden) in m.parts() {
