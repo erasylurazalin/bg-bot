@@ -63,3 +63,25 @@ The pool the offers come from:
 - No minions whose effect works while they sit in hand.
 - Some minions are left out for balance, for example Leeroy the Reckless
   and Deadly Spore.
+
+## Era's rules (2026-10-31)
+
+- The offered minions come from the shared pool, like any Discover: each
+  takes a pool copy, and the two not picked go back.
+- How a gift is picked for an offered minion: at random among the gifts
+  whose turn window holds this turn and whose condition the minion meets,
+  never a gift already on another offer of the same press. The four gifts
+  with weight 50 in the game data (Persisting Horror, Invulnerability,
+  Titanic Strength, Worship) are half as likely as the rest. The other
+  weights (200) are not used.
+- Conditions of the gifts that never showed up in Era's logs: Toxicity on
+  Murlocs that aren't Venomous; Efficiency on Activate minions; Worship
+  only when you have a Deity; Sunken Persistence on Spellcraft minions;
+  Titanic Strength never on Dragons; Persisting Horror never on minions
+  with no type; Invulnerability never on Taunt minions or minions with no
+  type; Desecration on any minion. Admiration is probably never on
+  Dragons (Era isn't sure).
+- The other sources (Sinister Invitation, Ominous Stone, Wax Lance,
+  Maldraxxus Dagger, Tras'tath, Xavius) use the same gift rules, with the
+  minion rules from their own text. Tras'tath's Discover of a Tier 5
+  minion picks its gifts as if it were turn 7.
