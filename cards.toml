@@ -2754,6 +2754,7 @@ tier = 0
 cost = 0
 token = true
 spellcraft = true
+tavern_spell = false
 effect = { target = "chosen", tribe = "murloc", random_keyword = true }
 
 # Ophidian Staff (BG35_MagicItem_872t).
@@ -2763,6 +2764,7 @@ tier = 0
 cost = 0
 token = true
 spellcraft = true
+tavern_spell = false
 effect = { target = "chosen", tribe = "beast", buff = [2, 2], keyword = "reborn" }
 
 # Jailer Sticker (BG35_MagicItem_306t): one random Undead.
@@ -2772,6 +2774,7 @@ tier = 0
 cost = 0
 token = true
 spellcraft = true
+tavern_spell = false
 effect = { target = "chosen", tribe = "undead", destroy_get_random = true, count = 1 }
 
 # Jailer Sticker (BG35_MagicItem_733t): two.
@@ -2781,6 +2784,7 @@ tier = 0
 cost = 0
 token = true
 spellcraft = true
+tavern_spell = false
 effect = { target = "chosen", tribe = "undead", destroy_get_random = true, count = 2 }
 
 # Token of the Old Gods (BG30_MagicItem_416t).
@@ -2790,6 +2794,7 @@ tier = 0
 cost = 0
 token = true
 spellcraft = true
+tavern_spell = false
 effect = { target = "chosen", transform_higher = true }
 
 # Chillmere Mosaic (BG35_MagicItem_755t).
@@ -2799,6 +2804,7 @@ tier = 0
 cost = 0
 token = true
 spellcraft = true
+tavern_spell = false
 effect = { refresh_with_battlecries = 1 }
 
 # Makeshift Master (BG36_MagicItem_417t).
@@ -2808,4 +2814,5 @@ tier = 0
 cost = 0
 token = true
 spellcraft = true
+tavern_spell = false
 effect = { target = "chosen", watch_stats = true }

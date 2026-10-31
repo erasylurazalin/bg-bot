@@ -529,6 +529,14 @@ Only Tavern spells count where a card says "Tavern spell" (Living Azerite,
 Forsaken Weaver, spell counters like Felboar's), and only they get spell
 power (the Tavern spell bonus).
 
+**Read the card's exact words, every time.** "After you cast a spell"
+fires for EVERY spell: Tavern spells, Blood Gems, Gem Day, Mukla's
+Bananas, Spellcraft spells. "After you cast a Tavern spell" fires only for
+Tavern spells. Devilish Distractor (Tier 5 Demon) works with a Blood Gem
+or a Mukla Banana; Forsaken Weaver (Tier 6 Undead) doesn't. The engine
+already tells the two apart (built with Blood Gems); keep it that way for
+every new card and every new spell.
+
 **Quilboar (2026-10-24).**
 - **Blood Gem:** a 0-cost plain spell, "Give a minion +1/+1", generated,
   takes a hand slot. What one Gem gives is a player value starting at
@@ -702,46 +710,9 @@ unless its text says otherwise ("Twice per turn", "Once per game", "Unlocks
 at Tier N", "Unlocks on Turn N"). A power with no cost in the data costs 0
 or is passive.
 
-**Hero rules from Era (2026-10-31):**
-- Uses per power vary and the text says so: some are once per game, some
-  twice per turn.
-- **Two hero powers.** Genn (King of Duality) ends with two buttons. The
-  first power picked becomes the SECOND power, the second one picked
-  becomes the MAIN power. Unmasked Identity changes only the main power;
-  nothing changes or disables the second one. A trinket that gives a hero
-  power adds it as a second power the same way.
-- **A. F. Kay** does nothing on turns 1 and 2: the Gold is wasted, but the
-  player may freeze the Tavern, and still fights and takes damage. Turn 3
-  starts with two cards in hand, "Discover a Tier 3 minion" and "Discover
-  a Tier 4 minion". Players freeze a 2-Gold spell on turns 1 and 2 so the
-  2 Gold left after leveling on turn 3 isn't wasted.
-- **Faelin (Expedition Plans)** skips turn 1 the same way, then makes one
-  Discover per tier (6, 4 and 2): three minions, each locked in hand until
-  the Tavern reaches its tier. Locked minions can be buffed in hand (for
-  example by Winterfinner) but can't be played or summoned until then.
-- **Mukla (Bananarama)** gives Bananas to everyone, every turn: 2 to Mukla,
-  1 to each other player. Each Banana is +1/+1, or a Big Banana +2/+2 with
-  a 33% chance (the same chance for every player). These are not the
-  Tavern spell Banana and not Tavern spells, so they don't count for
-  spell effects.
-- **Stay Frosty** is still in the game.
-- **Ysera's extra Dragon** replaces a minion slot. The spell slot is always
-  there; the only exceptions known are Whistle Band and a Tavern full of 7
-  Fodders.
-- **Lord Barov:** pick one of the two heroes about to fight each other and
-  guess the winner. Never your own fight, unless only 2 players are left.
-- **Murloc Holmes** guesses a minion that was in the warband at the start
-  of the turn; if that board was empty, one option is "empty".
-- **I Spy** Discovers a plain copy from the next opponent's warband as it
-  was at the start of the turn. The button can't be pressed if that board
-  was empty.
-- **Rewrite portraits** (Czarina, Mindslasher, Flaming, Azerite,
-  Bronzebeard...) change every copy of the card you have or will have,
-  including ones already on the board.
-- Later, not in the first hero batches: Secrets (Akazamzarak; they are in
-  the game), Denathrius' quests, Putricide's Build-An-Undead. Probably
-  never: the StarCraft heroes. Tickatus' Darkmoon Prizes stay in (a trinket
-  gives them too).
+**Heroes with rules beyond their text** (two powers, skipped turns,
+powers that change, guessing, Bananas): `docs/heroes.md`. It carries the
+same weight as this file.
 
 **Getting a card from the Tavern without buying it** ("steal"): the card
 goes to hand for free, leaves the pool like a bought copy, and is not a
@@ -749,71 +720,10 @@ buy, so "after you buy" triggers don't fire.
 
 ## Trinkets and Dark Gifts (2026-10-30)
 
-**Trinkets.** A lesser trinket is offered at the start of turn 6 and a
-greater one at the start of turn 9: 4 options, pick 1, pay its cost. You
-can't decline, and you can always afford one. A trinket with no cost in
-the game data is free. Tribe trinkets are only offered when their tribe
-is in the lobby. With enough minions of one tribe on your board the offer
-is guaranteed to hold that tribe's trinket: 2 or more for a lesser offer,
-3 or more for a greater one. Murlocs count on the board and in hand
-together: a Murloc on the board plus one in hand is 2 (for example
-Winterfinner on the board and Flighty Scout in hand). Every other tribe
-counts the board only: players keep a second minion of a tribe in hand on
-purpose to avoid its trinkets. When two tribes qualify, one of them (at
-random) is guaranteed. The other options are mostly neutral or of your
-tribes, rarely of a lobby tribe you don't play (Era's logs: about half
-neutral, 42% your tribes, 7% others), and they lean toward trinkets that
-match your board's mechanics (Battlecries, Deathrattles, spells cast).
-**Discount:** a tribe trinket whose tribe doesn't reach the threshold
-costs 2 Gold less (never below 0); a trinket of a qualifying tribe and a
-neutral trinket keep their price (fits 77 of 82 offers in Era's logs). Two players can be offered
-the same trinket. Every player sees their own trinkets and their
-opponents'. Lesser and greater versions of one trinket are separate
-cards.
-
-**Trinket rules from Era (2026-10-30, second round):**
-- "Whenever you spend Gold" fires once per spending, whatever the amount:
-  a 1 Gold Refresh and a 3 Gold buy each fire it once.
-- Paying with Health is not spending Gold. It is self-damage: it counts for
-  the Demons that care about self-damage, and Soul Rewinder or Ashen
-  Corruptor can rewind it.
-- A free buy (Warcry Totem) costs 0: it spends no Gold, so "spend Gold"
-  triggers don't fire. It is still a buy.
-- Deaths in the shop count for death counters (Butchering, Mutanus...).
-- The Tavern never has more than 7 slots, one of them almost always the
-  spell. Glowing Gauntlet makes it 6 minions and 1 spell, and refills at
-  once: a bought or consumed minion is replaced by a minion, a bought spell
-  by another spell.
-- Orb of the Unknown's random trinket replaces your trinket of that slot.
-- Trip Vouchers bought on turn 6: a greater offer on turn 8, and the
-  normal greater offer on turn 9 still comes.
-- Mystery Cube: when you get it, choose 1 of 2 random lesser trinkets
-  (free) to replace it. The cube's effect stays with the slot: at the start
-  of every turn for the rest of the game you choose 1 of 2 new lesser
-  trinkets to replace the one you hold, and you can't keep the current one.
-  The held trinket's own start-of-turn effect fires first (for example
-  the Pendant), then the swap happens. Some trinkets are never offered by
-  the cube (one-time effects, Orb of the Unknown and the like); the exact
-  list is still open.
-- A copy a trinket gives is an exact copy (buffs included; Transcribing
-  Typewriter): players buff a Tavern minion first, then buy it. A copy of
-  a golden minion is golden and gives its own Triple Reward when played.
-- Trinket numbers the game sets while playing (Shark Cannon, Bewitched
-  Ribbon, Steady Growth) come from Era's logs.
-
-**Dark Gifts.** A gift sits on its minion like an attached card: a triple's
-golden keeps the gifts of its copies, a Magnetized Mech keeps them, and a
-sold minion takes them with it. A gift works the same on a golden minion
-(it doesn't double).
-
-**Spellcraft.** A Spellcraft spell (handed out by some trinkets and a Dark
-Gift) is a temporary spell: it leaves your hand at the end of the turn if
-you haven't cast it.
-
-**Generated minions outside the pool.** Tide Oracle Morgl, Arcane
-Behemoth, Dr. Boom's Monster, Bassgill, Faceless Manipulator and Doubloon
-Grifter come only from trinkets. They are generated cards with no pool
-copies, like Beetles.
+The offer (turns, guarantee, discount), Gold and Tavern rules, Mystery
+Cube, copies, Spellcraft, trinket-only minions, rewrite portraits and what
+we know of Dark Gifts: `docs/trinkets.md`. It carries the same weight as
+this file.
 
 ## Actions
 
@@ -825,5 +735,5 @@ has the layout. A turn is capped at 60 actions.
 
 ## Not in this game yet
 
-Most hero powers (they come in batches), trinkets, quests, Dark Gifts,
+Most hero powers (they come in batches), about 40 trinkets, quests, Dark Gifts,
 Duos. Naga are gone from the real game.

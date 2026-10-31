@@ -318,8 +318,9 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   (Accord-o-Tron Portrait) and `lockbox_sooner` takes turns off every Lockbox
   the player gets.
 - **Spellcraft (block 3).** A Spellcraft spell is a `[[spell]]` with
-  `spellcraft = true` and `token = true`: a Tavern spell (its cast counts for
-  every spell counter) that leaves the hand at the end of the turn if it was
+  `spellcraft = true`, `token = true` and `tavern_spell = false`: a plain
+  spell like a Blood Gem (type SPELL in the game data, so "after you cast a
+  spell" counts it and "Tavern spell" counters don't) that leaves the hand at the end of the turn if it was
   not cast, dropped in `finish_shop` without firing a discard. The trinket
   hands it out with `on_pick` and `start_of_turn` `get` lists, so it comes
   back every turn. Floating Candle Set is not built: triggering a Deathrattle

@@ -2791,7 +2791,7 @@ fn a_spellcraft_spell_leaves_the_hand_at_the_end_of_the_turn() {
     assert_eq!((m.attack, m.health), (before.0 + 2, before.1 + 2), "+2/+2");
     assert!(m.keywords.has(bgcore::Keywords::REBORN), "and Reborn");
     assert_eq!(hand_of(&g, 0, "Ophidian Staff"), 0, "the cast one is used up");
-    assert_eq!(g.players[0].spells_cast, 1, "a Spellcraft cast is a spell cast");
+    assert_eq!(g.players[0].spells_cast, 0, "a Spellcraft spell is a plain spell, not a Tavern spell");
     next_turn(&mut g);
     turn_of(&mut g, 0);
     assert_eq!(hand_of(&g, 0, "Ophidian Staff"), 1, "and comes back");
