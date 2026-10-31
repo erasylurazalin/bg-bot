@@ -14,6 +14,7 @@
 #
 # The lineup is read from runs/<RUN>-lineup.txt if it exists, otherwise
 # 3,1,1,1,0,2 (3 learner, 1 snapshot, 1 standard, 1 rush, 0 random, 2 real).
+# Extra ppo.py flags come from runs/<RUN>-args.txt if it exists.
 set -u
 hours=${1:?usage: go.sh HOURS [RUN]}
 run=${2:-r1025-attn}
@@ -34,17 +35,21 @@ start=$(t_total)
 until=$(( start + hours * 60 ))
 lineup=3,1,1,1,0,2
 [ -f "runs/$run-lineup.txt" ] && lineup=$(cat "runs/$run-lineup.txt")
+# extra ppo.py flags for this run, one line (a resume takes them from the
+# command line, not the checkpoint), e.g. "--low-penalty 0.02"
+extra=""
+[ -f "runs/$run-args.txt" ] && extra=$(cat "runs/$run-args.txt")
 
 (
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-  echo "$(date '+%F %T') go $hours h: $run from $start to $until min, lineup $lineup" >> $log
+  echo "$(date '+%F %T') go $hours h: $run from $start to $until min, lineup $lineup $extra" >> $log
   for try in 1 2 3 4 5; do
     t=$(t_total)
     [ "$t" -ge "$until" ] && break
     out=runs/$run-$(date +%Y%m%d-%H%M).out
     echo "$(date '+%F %T')   start at $t min, log $out" >> $log
     $py ppo.py --name $run --minutes $until --compile --snapshot-every 50 \
-      --lineup $lineup --resume $ck > $out 2>&1
+      --lineup $lineup $extra --resume $ck > $out 2>&1
     rc=$?
     echo "$(date '+%F %T')   exit $rc" >> $log
     grep -q 'no legal action' $out && echo "$(date '+%F %T')   NOTE: 'no legal action' state dump in $out" >> $log

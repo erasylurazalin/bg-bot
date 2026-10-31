@@ -108,6 +108,12 @@ def args():
     a.add_argument("--lam", type=float, default=0.95, help="per turn, like --gamma")
     a.add_argument("--action-cost", type=float, default=0.002,
                    help="reward taken off each action of --cost-kinds, so it doesn't dither")
+    a.add_argument("--force-turn2-level", action="store_true",
+                   help="a tier 1 seat that can level on turn 2 must level (learner and snapshots)")
+    a.add_argument("--low-penalty", type=float, default=0.0,
+                   help="reward taken off at each turn end per tier below the standard curve")
+    a.add_argument("--low-penalty-fade", type=float, default=240,
+                   help="run minutes over which --low-penalty fades linearly to 0")
     a.add_argument("--cost-kinds", default="move",
                    help="action kinds that pay --action-cost, comma separated, or all")
     a.add_argument("--snapshot-every", type=int, default=250, help="updates")
@@ -137,6 +143,27 @@ class Bufs:
         self.tribes = np.zeros((n, P, bgpy.TRIBES), np.int8)
         self.reset = np.zeros(n, bool)
         self.kinds = np.zeros((n, P), np.int64)
+
+
+# --force-turn2-level: on turn 2 a tier 1 seat that can level must level
+# (the curve every beginner is taught). Set from the flag in main().
+FORCE_TURN2 = False
+LEVEL = int(np.nonzero(KIND_OF.numpy() == KINDS.index("level"))[0][0])
+
+
+def force_mask(obs, mask):
+    """The legal-action mask with the turn 2 level forced, if the flag is on.
+    The forced mask is the one stored for the update, so a forced action has
+    log-probability 0 and no gradient."""
+    if not FORCE_TURN2:
+        return mask
+    rows = (obs[:, bgpy.SCALAR_TURN] == 2) & (obs[:, bgpy.SCALAR_TIER] == 1) & mask[:, LEVEL]
+    if not rows.any():
+        return mask
+    mask = mask.clone()
+    mask[rows] = False
+    mask[rows, LEVEL] = True
+    return mask
 
 
 def act(net, obs, mask, greedy=False):
@@ -176,7 +203,8 @@ def evaluate(net, n_games, lineup, dev, seed, real_boards=None):
     records, done = [], 0
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
-        a, _, _, _ = act(net, torch.from_numpy(b.obs).to(dev), torch.from_numpy(b.mask).to(dev))
+        o = torch.from_numpy(b.obs).to(dev)
+        a, _, _, _ = act(net, o, force_mask(o, torch.from_numpy(b.mask).to(dev)))
         kinds = b.kinds.copy()
         env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
         for e, s in zip(*np.nonzero(b.places)):
@@ -204,6 +232,7 @@ def evaluate_vs(net, other, n_games, dev, seed):
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
         o, m = torch.from_numpy(b.obs).to(dev), torch.from_numpy(b.mask).to(dev)
+        m = force_mask(o, m)
         a, _, _, _ = act(net, o, m)
         sn = torch.from_numpy(b.kind == SNAPSHOT).to(dev)
         if sn.any():
@@ -260,7 +289,9 @@ def summarize_records(records):
 
 
 def main():
+    global FORCE_TURN2
     cfg = args()
+    FORCE_TURN2 = cfg.force_turn2_level
     torch.manual_seed(cfg.seed)
     random.seed(cfg.seed)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -345,6 +376,8 @@ def main():
     if cost_kinds - set(KINDS):
         raise SystemExit(f"--cost-kinds: unknown {sorted(cost_kinds - set(KINDS))}, kinds are {KINDS}")
     cost_of = torch.tensor([cfg.action_cost if k in cost_kinds else 0.0 for k in KINDS], device=dev)
+    # the standard curve bots.rs levels on: the tier it wants by turn 1..12+
+    curve = torch.tensor([1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6], device=dev, dtype=torch.float32)
     print(f"{cfg.model} {opts or ''}: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M "
           f"parameters on {dev}{', compiled' if cfg.compile and cfg.model == 'attn' else ''}")
 
@@ -387,12 +420,17 @@ def main():
         rews.zero_()
         dones.zero_()
         t0 = time.time()
+        # a shove off the low line, not a goal: it fades to 0 so placement
+        # alone decides in the end (docs/briefs/training-strategy.md)
+        run_min = t_total + (t0 - start) / 60
+        low_pen = cfg.low_penalty * max(0.0, 1.0 - run_min / cfg.low_penalty_fade) if cfg.low_penalty_fade > 0 else cfg.low_penalty
         with torch.no_grad():
             for t in range(T):
                 env.observe(b.obs, b.mask, b.seat, b.kind)
                 o = torch.from_numpy(b.obs).to(dev, non_blocking=True)
                 m = torch.from_numpy(b.mask).to(dev, non_blocking=True)
                 is_learner = torch.from_numpy(b.kind == LEARNER).to(dev)
+                m = force_mask(o, m)
                 a, lp, v, _ = act(net, o, m)
                 sn = ~is_learner
                 if sn.any():
@@ -400,6 +438,11 @@ def main():
                     a[sn] = sa
                 obs[t], masks[t], acts[t], logps[t], vals[t] = o, m, a, lp, v
                 rews[t] = -cost_of[kind_of[a]]
+                if low_pen > 0:
+                    ends_turn = (a == END_TURN) | (o[:, ACTIONS_LEFT] <= 1)
+                    turn_i = o[:, bgpy.SCALAR_TURN].long().clamp(1, len(curve)) - 1
+                    behind = (curve[turn_i] - o[:, bgpy.SCALAR_TIER]).clamp(min=0)
+                    rews[t] -= low_pen * behind * ends_turn
                 learn[t] = is_learner
                 seats[t] = torch.from_numpy(b.seat).to(dev)
                 le = np.nonzero(b.kind == LEARNER)[0]
