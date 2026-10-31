@@ -104,10 +104,12 @@ The amounts these cards' text hides, as I know them from the game:
 4. **Dark Gifts**, and Dark Paradox with them.
    Left out of the first trinket runs, to add later (Era: maybe a run of
    their own): the portrait trinkets that rewrite another card (Bronze Czarina, Mindslasher, Flaming,
-   Azerite and Bronzebeard Portraits, Souvenir Stand), quests and
-   Darkmoon Prizes (Denathrius, Tickatus, Corrupted Tome), and Secrets
-   (Akazamzarak, Safety Patch's Ice Block).
-5. **Probably never: ETC's buddies and Timewarped minions.** Both are
+   Azerite and Bronzebeard Portraits, Souvenir Stand), quests
+   (Denathrius), Darkmoon Prizes (Tickatus, Corrupted Tome: these are
+   wanted), Secrets (Akazamzarak, Safety Patch's Ice Block; they are in
+   the game) and Putricide's Build-An-Undead.
+5. **Probably never: ETC's buddies, Timewarped minions and the StarCraft
+   heroes (Raynor, Artanis, Kerrigan).** All are
    rare, and the bot can always steer clear of them: pick a hero other
    than ETC, and a trinket that doesn't give Timewarped minions. If they
    come at all, they come last, after everything else.

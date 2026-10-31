@@ -702,6 +702,47 @@ unless its text says otherwise ("Twice per turn", "Once per game", "Unlocks
 at Tier N", "Unlocks on Turn N"). A power with no cost in the data costs 0
 or is passive.
 
+**Hero rules from Era (2026-10-31):**
+- Uses per power vary and the text says so: some are once per game, some
+  twice per turn.
+- **Two hero powers.** Genn (King of Duality) ends with two buttons. The
+  first power picked becomes the SECOND power, the second one picked
+  becomes the MAIN power. Unmasked Identity changes only the main power;
+  nothing changes or disables the second one. A trinket that gives a hero
+  power adds it as a second power the same way.
+- **A. F. Kay** does nothing on turns 1 and 2: the Gold is wasted, but the
+  player may freeze the Tavern, and still fights and takes damage. Turn 3
+  starts with two cards in hand, "Discover a Tier 3 minion" and "Discover
+  a Tier 4 minion". Players freeze a 2-Gold spell on turns 1 and 2 so the
+  2 Gold left after leveling on turn 3 isn't wasted.
+- **Faelin (Expedition Plans)** skips turn 1 the same way, then makes one
+  Discover per tier (6, 4 and 2): three minions, each locked in hand until
+  the Tavern reaches its tier. Locked minions can be buffed in hand (for
+  example by Winterfinner) but can't be played or summoned until then.
+- **Mukla (Bananarama)** gives Bananas to everyone, every turn: 2 to Mukla,
+  1 to each other player. Each Banana is +1/+1, or a Big Banana +2/+2 with
+  a 33% chance (the same chance for every player). These are not the
+  Tavern spell Banana and not Tavern spells, so they don't count for
+  spell effects.
+- **Stay Frosty** is still in the game.
+- **Ysera's extra Dragon** replaces a minion slot. The spell slot is always
+  there; the only exceptions known are Whistle Band and a Tavern full of 7
+  Fodders.
+- **Lord Barov:** pick one of the two heroes about to fight each other and
+  guess the winner. Never your own fight, unless only 2 players are left.
+- **Murloc Holmes** guesses a minion that was in the warband at the start
+  of the turn; if that board was empty, one option is "empty".
+- **I Spy** Discovers a plain copy from the next opponent's warband as it
+  was at the start of the turn. The button can't be pressed if that board
+  was empty.
+- **Rewrite portraits** (Czarina, Mindslasher, Flaming, Azerite,
+  Bronzebeard...) change every copy of the card you have or will have,
+  including ones already on the board.
+- Later, not in the first hero batches: Secrets (Akazamzarak; they are in
+  the game), Denathrius' quests, Putricide's Build-An-Undead. Probably
+  never: the StarCraft heroes. Tickatus' Darkmoon Prizes stay in (a trinket
+  gives them too).
+
 **Getting a card from the Tavern without buying it** ("steal"): the card
 goes to hand for free, leaves the pool like a bought copy, and is not a
 buy, so "after you buy" triggers don't fire.
