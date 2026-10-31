@@ -12,11 +12,16 @@
 #   on_pick, start_of_turn, end_of_turn   the frame's own clock
 #   on_buy (+ buy_tribe), on_buy_spell, on_play (+ play_tribe), on_sell,
 #   on_refresh, on_cast_spell, on_cast_spell_on_minion, on_discard
-#   (+ discard_spells_only), rule = { event, every, once, acts }
-#   uses_per_turn (caps the hook lists), soc = { tribe, keywords } (in a fight)
+#   (+ discard_spells_only, discard_minions_only), on_get (+ get_tribe,
+#   "whenever you get a <tribe>"), rule = { event, every, once, acts }
+#   uses_per_turn (caps the hook lists), start_every (the start-of-turn list
+#   only every N turns), fight = [{ when, ... }] (in a fight)
 #
 # Effect keys with no card behind them: upgrade_discount, buff_tavern_this_turn,
-# make_golden_random, last_spell_copies.
+# make_golden_random, last_spell_copies, discover_deathrattle, discover_tier,
+# discover_remember / get_remembered, copy_buys, gems_each_type,
+# buff_leftmost, get_golden, lockbox_sooner, magnetize_ends, one_of,
+# warband_whistle, triple_need_two_pirate.
 
 #
 # Second round (2026-10-31): prices and Gold. `health_price_minions`,
@@ -644,3 +649,566 @@ card_id = "BG36_MagicItem_307"
 slot = "lesser"
 tribes = ["naga", "quilboar"]
 rule = { event = "cast_spell_on_minion", every = 3, acts = [{ gold = 1 }] }
+
+#
+# Fight-side trinkets (block 1). A trinket has no host minion, so these are
+# the `fight = [{ when = ..., ... }]` tables: the fight builds a small bundle
+# from the slots (`Player::counters` -> `Counters.trinkets`,
+# `crates/bgcore/src/fight.rs`) and runs the acts at its own hook points.
+# `when` is "soc" (Start of Combat), "avenge", "summon", "attack", "death",
+# "reborn" or "awaken"; `tribe`/`neutral`/`rally` filter the minion a trigger
+# is about, and pick the minions a Start of Combat or Avenge effect reaches
+# (`pick = "all" | "ends" | "random" | "lowest_attack" | "rally" | "card"`).
+# A rule whose event is "death", "summon", "death_<tribe>" or "summon_<tribe>"
+# counts those fight events in the shop counter as well (DESIGN.md: shop
+# deaths count for death counters).
+
+# ---- the frame's proof: one Avenge, one Start of Combat, one summon ----
+
+[[trinket]]
+name = "Quilligraphy Set"
+card_id = "BG30_MagicItem_410"
+slot = "lesser"
+tribes = ["quilboar"]
+fight = [{ when = "avenge", every = 3, gem_bonus = [0, 1] }]
+
+[[trinket]]
+name = "Quilligraphy Set"
+card_id = "BG30_MagicItem_410t2"
+slot = "greater"
+tribes = ["quilboar"]
+fight = [{ when = "avenge", every = 4, gem_bonus = [1, 1] }]
+
+[[trinket]]
+name = "Holy Mallet"
+card_id = "BG30_MagicItem_902"
+slot = "lesser"
+tribes = ["dragon"]
+fight = [{ when = "soc", pick = "ends", keywords = ["divine_shield"] }]
+
+[[trinket]]
+name = "Mama Bear Sticker"
+card_id = "BG35_MagicItem_871"
+slot = "lesser"
+tribes = ["beast"]
+fight = [{ when = "summon", tribe = "beast", buff = [6, 6] }]
+
+# ---- the rest of the Avenge trinkets, and a death trigger ----
+
+[[trinket]]
+name = "Staff of the Scourge"
+card_id = "BG30_MagicItem_437"
+slot = "lesser"
+cost = 3
+tribes = ["undead"]
+fight = [{ when = "avenge", every = 5, pick = "random", tribe = "undead", count = 1, keywords = ["reborn"] }]
+
+[[trinket]]
+name = "Beetle Band"
+card_id = "BG32_MagicItem_860"
+slot = "lesser"
+tribes = ["beast"]
+fight = [{ when = "avenge", every = 5, summon = "Beetle", count = 1, keywords = ["taunt"] }]
+
+[[trinket]]
+name = "Beetle Band"
+card_id = "BG32_MagicItem_860t"
+slot = "greater"
+cost = 5
+tribes = ["beast"]
+fight = [{ when = "avenge", every = 7, summon = "Beetle", count = 2, keywords = ["taunt"] }]
+
+[[trinket]]
+name = "Fridge Magnet"
+card_id = "BG30_MagicItem_545"
+slot = "greater"
+tribes = ["mech"]
+fight = [{ when = "avenge", every = 3, random_magnetic = 1 }]
+
+[[trinket]]
+name = "Wicked Tome"
+card_id = "BG32_MagicItem_270t"
+slot = "greater"
+cost = 5
+tribes = ["undead"]
+fight = [{ when = "avenge", every = 4, spell_bonus = [1, 1] }]
+
+[[trinket]]
+name = "The Eye of Dalaran"
+card_id = "BG30_MagicItem_981"
+slot = "lesser"
+cost = 2
+fight = [{ when = "death", neutral = true, random_spell = 1 }]
+
+# ---- counters fed by a fight (and by shop deaths, per DESIGN.md) ----
+
+[[trinket]]
+name = "Bleeding Heart"
+card_id = "BG30_MagicItem_713"
+slot = "lesser"
+cost = 2
+tribes = ["undead"]
+rule = { event = "death", every = 8, acts = [{ random_minion = "undead" }] }
+
+[[trinket]]
+name = "Lucky Tabby"
+card_id = "BG30_MagicItem_931"
+slot = "lesser"
+tribes = ["beast"]
+rule = { event = "death", every = 7, acts = [{ random_minion = "beast" }] }
+
+[[trinket]]
+name = "Stormcoil Sticker"
+card_id = "BG35_MagicItem_302"
+slot = "lesser"
+tribes = ["mech"]
+rule = { event = "death", every = 6, acts = [{ random_minion = "mech" }] }
+
+[[trinket]]
+name = "Wildfeather Duster"
+card_id = "BG35_MagicItem_700"
+slot = "greater"
+cost = 1
+tribes = ["beast"]
+rule = { event = "summon_beast", every = 6, acts = [{ random_minion = "beast" }] }
+
+[[trinket]]
+name = "Deathly Phylactery"
+card_id = "BG30_MagicItem_700"
+slot = "lesser"
+tribes = ["beast", "undead"]
+on_pick = [{ discover_deathrattle = 1 }]
+first_deathrattle = true
+
+# ---- Start of Combat ----
+
+[[trinket]]
+name = "Hoggy Bank"
+card_id = "BG30_MagicItem_411"
+slot = "lesser"
+tribes = ["quilboar"]
+fight = [{ when = "soc", tribe = "quilboar", dr = { gems = 2 } }]
+
+[[trinket]]
+name = "Eternal Portrait"
+card_id = "BG30_MagicItem_301"
+slot = "lesser"
+cost = 6
+tribes = ["undead"]
+on_pick = [{ get = "Eternal Knight" }]
+fight = [{ when = "soc", card = "Eternal Knight", keywords = ["taunt", "reborn"] }]
+
+[[trinket]]
+name = "Baleful Incense"
+card_id = "BG32_MagicItem_360"
+slot = "lesser"
+cost = 3
+tribes = ["undead"]
+fight = [{ when = "soc", pick = "ends", tribe = "undead", keywords = ["reborn"] }]
+
+[[trinket]]
+name = "Training Certificate"
+card_id = "BG30_MagicItem_962"
+slot = "lesser"
+cost = 3
+tribes = ["dragon"]
+fight = [{ when = "soc", pick = "lowest_attack", count = 2, scale = "double" }]
+
+[[trinket]]
+name = "Rivendare Portrait"
+card_id = "BG30_MagicItem_310"
+slot = "greater"
+cost = 3
+tribes = ["beast"]
+on_pick = [{ get = "Titus Rivendare" }]
+fight = [{ when = "soc", card = "Titus Rivendare", scale = "health" }]
+
+[[trinket]]
+name = "Ironforge Anvil"
+card_id = "BG30_MagicItem_403"
+slot = "greater"
+cost = 1
+fight = [{ when = "soc", neutral = true, scale = "triple" }]
+
+[[trinket]]
+name = "Bronze Timepiece"
+card_id = "BG30_MagicItem_995"
+slot = "greater"
+cost = 5
+tribes = ["dragon"]
+fight = [{ when = "soc", half_attack_health = true }]
+
+[[trinket]]
+name = "Herald Sticker"
+card_id = "BG32_MagicItem_306"
+slot = "greater"
+cost = 3
+tribes = ["beast"]
+fight = [{ when = "soc", trigger_deathrattles = true }]
+
+[[trinket]]
+name = "Fang Anklet"
+card_id = "BG35_MagicItem_701"
+slot = "greater"
+cost = 3
+tribes = ["beast"]
+fight = [
+    { when = "soc", tribe = "beast", buff = [1, 1], grow = 1 },
+    { when = "summon", tribe = "beast", improve = 1 },
+]
+
+[[trinket]]
+name = "Protective Ring"
+card_id = "BG35_MagicItem_711"
+slot = "greater"
+cost = 2
+tribes = ["pirate"]
+fight = [{ when = "soc", pick = "random", tribe = "pirate", count = 4, keywords = ["divine_shield"] }]
+
+[[trinket]]
+name = "Sky Golem Portrait"
+card_id = "BG35_MagicItem_740"
+slot = "greater"
+cost = 3
+tribes = ["mech"]
+on_pick = [{ get = "Falling Sky Golem" }]
+fight = [{ when = "soc", dr = { buff_all = [2, 2] } }]
+
+[[trinket]]
+name = "Dramaloc Sticker"
+card_id = "BG35_MagicItem_754"
+slot = "greater"
+cost = 6
+tribes = ["murloc"]
+fight = [{ when = "soc", tribe = "murloc", hand_attack = true }]
+
+[[trinket]]
+name = "Lightfeather Sticker"
+card_id = "BG36_MagicItem_213"
+slot = "greater"
+tribes = ["beast"]
+fight = [{ when = "soc", pick = "rally", keywords = ["divine_shield"] }]
+
+[[trinket]]
+name = "Converter Portrait"
+card_id = "BG36_MagicItem_600"
+slot = "greater"
+cost = 6
+tribes = ["aberration"]
+on_pick = [{ get = "Faceless Converter" }]
+fight = [{ when = "soc", card = "Faceless Converter", keywords = ["reborn"] }]
+
+# ---- attacks, summons and Reborn ----
+
+[[trinket]]
+name = "Herding Horn"
+card_id = "BG36_MagicItem_200"
+slot = "lesser"
+cost = 3
+tribes = ["beast"]
+fight = [{ when = "attack", rally = true, free_refreshes = 1 }]
+
+[[trinket]]
+name = "Lionfish Portrait"
+card_id = "BG36_MagicItem_201"
+slot = "lesser"
+cost = 1
+tribes = ["beast"]
+on_pick = [{ get = "Lurking Lionfish" }]
+fight = [{ when = "attack", tribe = "beast", buff = [4, 2] }]
+
+[[trinket]]
+name = "All-Purpose Kibble"
+card_id = "BG32_MagicItem_200"
+slot = "greater"
+cost = 2
+tribes = ["beast"]
+fight = [
+    { when = "attack", tribe = "beast", buff = [3, 0], grow = 1 },
+    { when = "attack", tribe = "beast", improve = 1 },
+]
+
+[[trinket]]
+name = "Slamma Sticker"
+card_id = "BG30_MagicItem_540"
+slot = "greater"
+cost = 5
+tribes = ["beast"]
+fight = [{ when = "summon", tribe = "beast", scale = "attack" }]
+
+[[trinket]]
+name = "Reinforced Shield"
+card_id = "BG30_MagicItem_886"
+slot = "greater"
+cost = 1
+tribes = ["undead"]
+fight = [{ when = "summon", keywords = ["divine_shield"], cap = 5 }]
+
+[[trinket]]
+name = "Faerie Dragon Scale"
+card_id = "BG32_MagicItem_363"
+slot = "greater"
+cost = 4
+tribes = ["dragon"]
+fight = [{ when = "attack", tribe = "dragon", keywords = ["divine_shield"], cap = 3 }]
+
+[[trinket]]
+name = "Funeral Wreath"
+card_id = "BG36_MagicItem_217"
+slot = "greater"
+cost = 3
+tribes = ["undead"]
+fight = [{ when = "reborn", copy = true, cap = 3 }]
+
+[[trinket]]
+name = "Jar o' Gems"
+card_id = "BG30_MagicItem_546"
+slot = "greater"
+tribes = ["quilboar"]
+fight = [{ when = "attack", every = 2, once = true, gems = { count = 1, tribe = "quilboar" } }]
+
+[[trinket]]
+name = "Evil Experiment"
+card_id = "BG36_MagicItem_416"
+slot = "greater"
+cost = 4
+tribes = ["aberration"]
+fight = [{ when = "awaken", keywords = ["reborn"] }]
+
+#
+# Third round (2026-10-31, block 2): the trinket-only minions and the trinkets
+# that hand out cards. The minions themselves are tokens in cards.toml ("---
+# Trinket-only minions"); each one's text is a card field, so a real card can
+# reuse it: `on_kill`, `on_sell = { gain_sold_stats }`,
+# `buff_per_magnetize`, `buff_per_elemental_played`, `on_event` with
+# `got_<tribe>`, a `summon_from_hand` Deathrattle and
+# `gains_friendly_deathrattles`.
+
+# ---- the trinkets that hand out a trinket-only minion ----
+
+[[trinket]]
+name = "Morgl Portrait"
+card_id = "BG32_MagicItem_926"
+slot = "greater"
+cost = 1
+tribes = ["murloc"]
+on_pick = [{ get = "Tide Oracle Morgl" }]
+
+[[trinket]]
+name = "Behemoth Portrait"
+card_id = "BG32_MagicItem_998"
+slot = "greater"
+tribes = ["elemental"]
+on_pick = [{ get = "Arcane Behemoth" }]
+
+[[trinket]]
+name = "Boom's Monster Portrait"
+card_id = "BG32_MagicItem_172"
+slot = "greater"
+cost = 6
+tribes = ["mech"]
+on_pick = [{ get = "Dr. Boom's Monster" }]
+start_of_turn = [{ get = "Dr. Boom's Monster" }]
+
+[[trinket]]
+name = "Grifter Portrait"
+card_id = "BG32_MagicItem_957"
+slot = "lesser"
+cost = 2
+tribes = ["pirate"]
+on_pick = [{ get = "Doubloon Grifter" }, { free_tribe_buys = ["pirate", "1"] }]
+
+[[trinket]]
+name = "Bassgill Portrait"
+card_id = "BG32_MagicItem_301"
+slot = "greater"
+cost = 1
+tribes = ["murloc"]
+on_pick = [{ get = "Bassgill" }]
+fight = [{ when = "summon", tribe = "murloc", keywords = ["divine_shield"] }]
+
+[[trinket]]
+name = "Manipulator Portrait"
+card_id = "BG30_MagicItem_876"
+slot = "greater"
+cost = 1
+on_pick = [{ get = "Faceless Manipulator" }]
+
+[[trinket]]
+name = "Fish Portrait"
+card_id = "BG30_MagicItem_821"
+slot = "lesser"
+cost = 1
+# The game data tags it Beast and Undead; the Fish it hands out is a Beast,
+# and a generated card has to fit the lobby it is made in, so the offer
+# follows the token's tribe.
+tribes = ["beast"]
+on_pick = [{ get = "Fish of N'Zoth" }]
+
+[[trinket]]
+name = "Accord-o-Tron Portrait"
+card_id = "BG35_MagicItem_742"
+slot = "greater"
+cost = 3
+tribes = ["mech"]
+end_of_turn = [{ magnetize_ends = "Accord-o-Tron", tribe = "mech" }]
+
+[[trinket]]
+name = "Jarred Frostling"
+card_id = "BG30_MagicItem_952"
+slot = "greater"
+cost = 2
+tribes = ["elemental"]
+fight = [{ when = "soc", tribe = "elemental", pick = "random", count = 3, dr = { summon = "Flourishing Frostling" } }]
+
+# ---- getting cards and Discover ----
+
+[[trinket]]
+name = "Portable Factory"
+card_id = "BG32_MagicItem_361"
+slot = "lesser"
+cost = 5
+on_pick = [{ discover_remember = 4, discover_remember_typed = true }]
+start_of_turn = [{ get_remembered = 1 }]
+
+[[trinket]]
+name = "Portable Factory"
+card_id = "BG32_MagicItem_361t"
+slot = "greater"
+on_pick = [{ discover_remember = 5, discover_remember_typed = true }]
+start_of_turn = [{ get_remembered = 1 }]
+
+[[trinket]]
+name = "Azeroth Model Globe"
+card_id = "BG30_MagicItem_425"
+slot = "lesser"
+start_every = 2
+start_of_turn = [{ gold = 2 }, { discover_tier = 6 }]
+
+[[trinket]]
+name = "Rockin' Music Box"
+card_id = "BG30_MagicItem_430"
+slot = "lesser"
+cost = 1
+on_pick = [{ random_battlecry = 1 }]
+start_of_turn = [{ random_battlecry = 1 }]
+
+[[trinket]]
+name = "Reflective Pendant"
+card_id = "BG30_MagicItem_706"
+slot = "lesser"
+cost = 6
+on_pick = [{ plain_copy_random_friendly = 1 }]
+start_of_turn = [{ plain_copy_random_friendly = 1 }]
+
+[[trinket]]
+name = "Transcribing Typewriter"
+card_id = "BG35_MagicItem_931"
+slot = "lesser"
+cost = 1
+on_pick = [{ copy_buys = 2 }]
+
+[[trinket]]
+name = "Transcribing Typewriter"
+card_id = "BG35_MagicItem_931t"
+slot = "greater"
+cost = 4
+on_pick = [{ copy_buys = 4 }]
+
+[[trinket]]
+name = "Writhing Tentacles"
+card_id = "BG36_MagicItem_606"
+slot = "greater"
+tribes = ["aberration"]
+uses_per_turn = 1
+discard_minions_only = true
+on_discard = [{ copy_last_discarded = true }]
+
+[[trinket]]
+name = "Aggem Sticker"
+card_id = "BG32_MagicItem_284"
+slot = "greater"
+cost = 2
+tribes = ["quilboar"]
+end_of_turn = [{ gems_each_type = 7 }]
+
+[[trinket]]
+name = "Sinstone Sticker"
+card_id = "BG30_MagicItem_801"
+slot = "greater"
+cost = 3
+on_pick = [{ discover_copy_bonus = 2 }]
+
+[[trinket]]
+name = "Trusty Crowbar"
+card_id = "BG35_MagicItem_713"
+slot = "greater"
+tribes = ["pirate"]
+get_tribe = "pirate"
+on_get = [{ buff_leftmost = [16, 16] }]
+
+[[trinket]]
+name = "Warband Whistle"
+card_id = "BG35_MagicItem_930"
+slot = "greater"
+cost = 2
+on_pick = [{ warband_whistle = true }]
+
+[[trinket]]
+name = "Designer Eyepatch"
+card_id = "BG30_MagicItem_439"
+slot = "greater"
+cost = 7
+tribes = ["pirate"]
+on_pick = [{ triple_need_two_pirate = true }]
+
+[[trinket]]
+name = "Goldenizer Supply"
+card_id = "BG30_MagicItem_435"
+slot = "lesser"
+rule = { event = "turns", every = 3, acts = [{ get = "The Goldenizer" }] }
+
+[[trinket]]
+name = "Conch Portrait"
+card_id = "BG35_MagicItem_305"
+slot = "lesser"
+cost = 5
+tribes = ["murloc"]
+start_every = 2
+on_pick = [{ get = "Cloning Conch" }]
+start_of_turn = [{ get = "Cloning Conch" }]
+
+[[trinket]]
+name = "Lens Case"
+card_id = "BG35_MagicItem_817"
+slot = "lesser"
+cost = 3
+start_every = 2
+on_pick = [{ get = "Duplicating Lens" }]
+start_of_turn = [{ get = "Duplicating Lens" }]
+
+[[trinket]]
+name = "Baller Portrait"
+card_id = "BG36_MagicItem_390"
+slot = "lesser"
+cost = 2
+tribes = ["elemental"]
+on_pick = [{ one_of = ["Fire Baller", "Snow Baller"] }]
+start_of_turn = [{ one_of = ["Fire Baller", "Snow Baller"] }]
+
+[[trinket]]
+name = "Baller Portrait"
+card_id = "BG35_MagicItem_861"
+slot = "greater"
+cost = 5
+tribes = ["elemental"]
+on_pick = [{ get = "Temperature Shift" }]
+rule = { event = "play_elemental", every = 11, acts = [{ get = "Temperature Shift" }] }
+
+[[trinket]]
+name = "Escapee Portrait"
+card_id = "BG36_MagicItem_363"
+slot = "greater"
+cost = 7
+tribes = ["pirate"]
+on_pick = [{ get_golden = "Enterprising Escapee" }, { lockbox_sooner = 1 }]

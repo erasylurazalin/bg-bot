@@ -624,8 +624,9 @@ fn target_kind(k: TargetKind) -> (usize, (i32, i32)) {
         // buff slot.
         TargetKind::DestroyDiscover { .. } | TargetKind::DestroyCopy { .. } => (1, (0, 0)),
         TargetKind::RebornDestroy { attack, health, .. } => (0, (attack, health)),
-        // A Tavern card steal shares the any-buff slot (a shop pick).
-        TargetKind::StealShopCard { .. } => (5, (0, 0)),
+        // A Tavern card steal shares the any-buff slot (a shop pick), and so
+        // does becoming a copy of one.
+        TargetKind::StealShopCard { .. } | TargetKind::BecomeCopy => (5, (0, 0)),
     }
 }
 

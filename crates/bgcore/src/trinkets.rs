@@ -62,6 +62,18 @@ pub enum Event {
     GoldSpent,
     /// A card discarded.
     Discard,
+    /// A friendly minion died, in the shop or in a fight (DESIGN.md: shop
+    /// deaths count for death counters).
+    Death,
+    /// A friendly minion of this tribe died.
+    DeathTribe(Tribe),
+    /// A minion was summoned, which only happens inside a fight today.
+    Summon,
+    /// A minion of this tribe was summoned.
+    SummonTribe(Tribe),
+    /// A card of this tribe entered the player's hand, from anywhere:
+    /// bought, generated, Discovered or copied (Trusty Crowbar).
+    GetTribe(Tribe),
 }
 
 /// The player holds a trinket with an effect at all (any hook or rule).
@@ -88,6 +100,11 @@ impl Event {
             Event::CastSpellOnMinion => 1 << 7,
             Event::GoldSpent => 1 << 8,
             Event::Discard => 1 << 9,
+            // A rule that counts a tribe's deaths or summons is still a
+            // Death or a Summon event.
+            Event::Death | Event::DeathTribe(_) => 1 << 10,
+            Event::Summon | Event::SummonTribe(_) => 1 << 11,
+            Event::GetTribe(_) => 1 << 12,
         }
     }
 }
@@ -111,6 +128,8 @@ pub enum Act {
     SpellBonus { attack: i32, health: i32 },
     /// Discover this many Tavern spells (`discover_spell`).
     DiscoverSpell(u8),
+    /// Discover this many minions with a Deathrattle (`discover_deathrattle`).
+    DiscoverDeathrattle(u8),
     RandomChromadrake(u8),
     RandomVolumizer(u8),
     RandomBounty(u8),
@@ -214,6 +233,48 @@ pub enum Act {
     /// Offer this many trinkets of this slot, free, to replace this one
     /// (Mystery Cube).
     OfferReplace(u8),
+    // ---- getting cards and Discover (block 2) ----
+    /// Discover a minion of exactly this tier, of any type or, when `typed`,
+    /// of one with a type, and remember the pick in this trinket's slot
+    /// (Portable Factory).
+    DiscoverRemember { tier: u8, typed: bool },
+    /// Discover a minion of exactly this tier (Azeroth Model Globe).
+    DiscoverTier(u8),
+    /// The next `n` minions bought also come as an exact copy (Transcribing
+    /// Typewriter).
+    CopyBuys(u8),
+    /// Get this many copies of the card this trinket remembers (Portable
+    /// Factory's every turn).
+    GetRemembered(u8),
+    /// Get this many random minions with a Battlecry (Rockin' Music Box).
+    RandomBattlecry(u8),
+    /// Get a plain copy of a random friendly minion (Reflective Pendant).
+    PlainCopyRandomFriendly(u8),
+    /// Get a copy of the last card discarded, its stats doubled (Writhing
+    /// Tentacles).
+    CopyLastDiscarded,
+    /// Play this many Blood Gems on one friendly minion of each type on the
+    /// board (Aggem Sticker).
+    GemsEachType(u8),
+    /// The first `n` Discovers each turn also give a copy of the pick
+    /// (Sinstone Sticker).
+    DiscoverCopyBonus(u8),
+    /// Buff the left-most friendly minion (Trusty Crowbar).
+    BuffLeftmostBoard { attack: i32, health: i32 },
+    /// Get a Golden copy of a named card (Escapee Portrait).
+    GetGolden { card: CardId },
+    /// Your Lockboxes open this many turns sooner (Escapee Portrait).
+    LockboxSooner(u8),
+    /// Magnetize a copy of a named card to the left- and right-most minions
+    /// of a tribe (Accord-o-Tron Portrait).
+    MagnetizeEnds { card: CardId, tribe: Option<Tribe> },
+    /// Get one of two named cards, at random (the lesser Baller Portrait).
+    OneOf { a: CardId, b: CardId },
+    /// Gain a free Refresh that holds plain copies of the warband (Warband
+    /// Whistle).
+    WarbandWhistle,
+    /// Two copies of a Pirate make it Golden (Designer Eyepatch).
+    TripleNeedTwoPirate,
 }
 
 /// "Every N events" / "after N events" / "once N events": one per trinket.
@@ -226,12 +287,169 @@ pub struct Rule {
     pub acts: Vec<Act>,
 }
 
-/// "Start of Combat: give your minions of a tribe these keywords". The fight
-/// has no trinket entity, so this leaves through `Counters`.
+// ---- a trinket's effects inside a fight ----
+
+/// The fight effects one side can hold at once: three trinket slots with at
+/// most two acts each. `check_invariants` catches a table that outgrows it.
+pub const FIGHT_ACTS: usize = 6;
+/// A `uses` that is not a cap.
+pub const NO_CAP: u8 = u8::MAX;
+
+/// When one of a trinket's fight effects fires. A trinket has no host
+/// minion, so these are the side's own hook points in `fight.rs`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Soc {
-    pub tribe: Option<Tribe>,
-    pub keywords: u8,
+pub enum When {
+    /// Start of Combat, in the trinket step (the lesser trinket, then the
+    /// greater one), before any minion's own.
+    Soc,
+    /// Avenge (`every`): after every `every` friendly deaths this fight.
+    Avenge,
+    /// Whenever you summon a minion.
+    Summon,
+    /// Whenever a friendly minion attacks, once per swing (a Windfury swing
+    /// counts twice).
+    Attack,
+    /// Whenever a friendly minion dies.
+    Death,
+    /// After a friendly minion is Reborn.
+    Reborn,
+    /// After your Deity awakens.
+    Awaken,
+}
+
+/// What the minion a trigger is about must be (the summoned one, the
+/// attacker, the one that died or was Reborn).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Trigger {
+    Any,
+    Tribe(Tribe),
+    /// A minion with no type at all.
+    Neutral,
+    /// A minion with a Rally.
+    Rally,
+}
+
+impl Trigger {
+    pub fn fits(self, cards: &CardDb, m: &crate::minion::Minion) -> bool {
+        match self {
+            Trigger::Any => true,
+            Trigger::Tribe(t) => cards.get(m.card).tribes.has(t),
+            Trigger::Neutral => cards.get(m.card).tribes.is_empty(),
+            Trigger::Rally => m.parts().any(|(c, _)| cards.get(c).rally.is_some()),
+        }
+    }
+}
+
+/// Which friendly minions a fight effect reaches. Start of Combat and Avenge
+/// acts pick here; a trigger act reaches the minion the trigger is about
+/// (`Itself`) unless it names its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Pick {
+    /// The minion the trigger is about.
+    Itself,
+    All,
+    Tribe(Tribe),
+    /// Minions with no type at all.
+    Neutral,
+    /// The left-most and the right-most of a tribe (of every minion when
+    /// `None`); a lone minion gets it once, not twice.
+    Ends { tribe: Option<Tribe> },
+    /// `count` different random minions of a tribe (of any when `None`).
+    Random { tribe: Option<Tribe>, count: u8 },
+    /// The `count` minions with the lowest Attack; ties at random.
+    LowestAttack(u8),
+    /// Minions that have a Rally.
+    Rally,
+    /// Minions whose card, or a Magnetized part of it, is this one.
+    Card(CardId),
+}
+
+/// How a fight effect multiplies the stats of the minions it picks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Scale {
+    /// Attack and Health, as they stand.
+    Double,
+    Triple,
+    /// Health only.
+    Health,
+    /// Attack only.
+    Attack,
+}
+
+/// A Deathrattle a trinket gives minions for the fight (Hoggy Bank, Jarred
+/// Frostling, Sky Golem Portrait). It fires when they die, once per Deathrattle
+/// like any other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GrantedDr {
+    /// Get `n` Blood Gems in hand.
+    Gems(u8),
+    /// Summon `count` plain copies of a token where the minion stood.
+    Summon { card: CardId, count: u8 },
+    /// Give every friendly minion stats they keep after the fight.
+    BuffAll { attack: i32, health: i32 },
+}
+
+/// One thing a trinket does inside a fight. Every variant with a `Pick` runs
+/// on the side it belongs to. `grow` adds the trinket's own "improve this"
+/// number to each number the act gives that is not 0, so a +3/+0 stays +0
+/// Health however often it improves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FightAct {
+    /// Give the picked minions keywords.
+    Keywords { pick: Pick, keywords: u8 },
+    /// Give the picked minions stats for the fight.
+    Stats { pick: Pick, attack: i32, health: i32, grow: i32 },
+    /// Multiply the picked minions' stats.
+    Scale { pick: Pick, kind: Scale },
+    /// Give each picked minion Health equal to half its Attack (rounded up).
+    HalfAttackToHealth { pick: Pick },
+    /// Fire the Deathrattles of the picked minions, in board order.
+    TriggerDeathrattles { pick: Pick },
+    /// Give the picked minions a Deathrattle for this fight.
+    GrantDr { pick: Pick, dr: GrantedDr },
+    /// Give the picked minions the Attack of the highest-Attack minion in
+    /// hand.
+    HighestHandAttack { pick: Pick },
+    /// Play Blood Gems on the picked minions.
+    Gems { pick: Pick, count: u8 },
+    /// Summon `count` copies of a card at the right end, with keywords.
+    Summon { card: CardId, count: u8, keywords: u8 },
+    /// Raise your Blood Gem and Tavern spell bonuses for the rest of the
+    /// game.
+    Bonus { gem: (i32, i32), spell: (i32, i32) },
+    /// Get `n` random Tavern spells.
+    RandomSpell(u8),
+    /// Get `n` random Magnetic minions.
+    RandomMagnetic(u8),
+    /// Gain `n` free Refreshes.
+    FreeRefreshes(u8),
+    /// Raise the trinket's own "improve this" number for good.
+    Improve(u8),
+    /// Get a plain copy (base stats) of the picked minions into hand.
+    CopyToHand { pick: Pick },
+}
+
+/// One fight effect: when it fires, how often, and what it does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FightEntry {
+    pub when: When,
+    /// Fire on every Nth event (Avenge N, "after 2 attacks"); 0 and 1 mean
+    /// every event.
+    pub every: u8,
+    /// Fire once per fight and stop.
+    pub once: bool,
+    /// Uses per fight, `NO_CAP` when the card sets no limit.
+    pub uses: u8,
+    /// What the minion the trigger is about must be.
+    pub trigger: Trigger,
+    pub act: FightAct,
+}
+
+impl FightEntry {
+    /// A plain entry: every event, no limit, any minion.
+    pub fn new(when: When, act: FightAct) -> FightEntry {
+        FightEntry { when, every: 1, once: false, uses: NO_CAP, trigger: Trigger::Any, act }
+    }
 }
 
 /// One trinket: its price, its tags and the hooks it listens on.
@@ -247,6 +465,9 @@ pub struct Trinket {
     pub mechanic: Option<Mechanic>,
     /// Caps the hook lists per turn ("Twice per turn").
     pub uses_per_turn: Option<u8>,
+    /// The start-of-turn list fires only every this many turns ("At the start
+    /// of every two turns": Azeroth Model Globe, Lens Case).
+    pub start_every: Option<u8>,
     pub on_pick: Vec<Act>,
     pub start_of_turn: Vec<Act>,
     pub end_of_turn: Vec<Act>,
@@ -260,13 +481,22 @@ pub struct Trinket {
     pub on_cast_spell: Vec<Act>,
     pub on_cast_spell_on_minion: Vec<Act>,
     pub on_discard: Vec<Act>,
+    /// Whenever a card of `get_tribe` enters the hand (Trusty Crowbar).
+    pub on_get: Vec<Act>,
+    pub get_tribe: Option<Tribe>,
     /// Whenever the player spends Gold, once per spending whatever the
     /// amount (DESIGN.md, second round): Booty Bay Brew.
     pub on_gold_spent: Vec<Act>,
     /// Only discard events of a spell (Shath'Yar Shrine).
     pub discard_spells_only: bool,
+    /// Only discard events of a minion (Writhing Tentacles).
+    pub discard_minions_only: bool,
     pub rule: Option<Rule>,
-    pub soc: Option<Soc>,
+    /// The effects it has inside a fight, in the order they run.
+    pub fight: Vec<FightEntry>,
+    /// "Your first Deathrattle each combat triggers an extra time"
+    /// (Deathly Phylactery).
+    pub first_deathrattle: bool,
 }
 
 impl Trinket {
@@ -303,6 +533,7 @@ impl Trinket {
         list(!self.on_cast_spell.is_empty(), Event::CastSpell, &mut m, &mut any);
         list(!self.on_cast_spell_on_minion.is_empty(), Event::CastSpellOnMinion, &mut m, &mut any);
         list(!self.on_discard.is_empty(), Event::Discard, &mut m, &mut any);
+        list(!self.on_get.is_empty(), Event::GetTribe(Tribe::Beast), &mut m, &mut any);
         list(!self.on_gold_spent.is_empty(), Event::GoldSpent, &mut m, &mut any);
         list(!self.start_of_turn.is_empty() || self.rule.as_ref().is_some_and(|r| r.event == Event::Turns), Event::Turns, &mut m, &mut any);
         if let Some(r) = &self.rule {
@@ -320,7 +551,7 @@ impl Trinket {
             if !r.acts.is_empty() { m |= ENDS_TURN; }
         }
         if !self.on_pick.is_empty() { any = true; }
-        if self.soc.is_some() { any = true; }
+        if !self.fight.is_empty() || self.first_deathrattle { any = true; }
         if any { m | HAS_TRINKET } else { m }
     }
 
@@ -338,6 +569,14 @@ impl Trinket {
             Event::Discard => !self.on_discard.is_empty(),
             Event::GoldSpent => !self.on_gold_spent.is_empty(),
             Event::Turns => !self.end_of_turn.is_empty() || self.rule.is_some(),
+            // The shop-side rules count these; the fight reports them home.
+            Event::Death | Event::DeathTribe(_) => {
+                self.rule.as_ref().is_some_and(|r| matches!(r.event, Event::Death | Event::DeathTribe(_)))
+            }
+            Event::Summon | Event::SummonTribe(_) => {
+                self.rule.as_ref().is_some_and(|r| matches!(r.event, Event::Summon | Event::SummonTribe(_)))
+            }
+            Event::GetTribe(_) => !self.on_get.is_empty(),
         }
     }
 }
@@ -392,6 +631,7 @@ struct RawAct {
     gem_bonus: Option<[i32; 2]>,
     spell_bonus: Option<[i32; 2]>,
     discover_spell: Option<u8>,
+    discover_deathrattle: Option<u8>,
     random_chromadrake: Option<u8>,
     random_volumizer: Option<u8>,
     random_bounty: Option<u8>,
@@ -441,6 +681,27 @@ struct RawAct {
     random_most_common_type: Option<u8>,
     buff_random_other: Option<[i32; 2]>,
     offer_replace: Option<u8>,
+    discover_remember: Option<u8>,
+    #[serde(default)]
+    discover_remember_typed: bool,
+    discover_tier: Option<u8>,
+    copy_buys: Option<u8>,
+    get_remembered: Option<u8>,
+    random_battlecry: Option<u8>,
+    plain_copy_random_friendly: Option<u8>,
+    #[serde(default)]
+    copy_last_discarded: bool,
+    gems_each_type: Option<u8>,
+    discover_copy_bonus: Option<u8>,
+    buff_leftmost: Option<[i32; 2]>,
+    get_golden: Option<String>,
+    lockbox_sooner: Option<u8>,
+    magnetize_ends: Option<String>,
+    one_of: Option<[String; 2]>,
+    #[serde(default)]
+    warband_whistle: bool,
+    #[serde(default)]
+    triple_need_two_pirate: bool,
 }
 
 #[derive(Deserialize)]
@@ -453,12 +714,6 @@ struct RawRule {
     acts: Vec<RawAct>,
 }
 
-#[derive(Deserialize)]
-struct RawSoc {
-    #[serde(default)]
-    tribe: Option<String>,
-    keywords: Vec<String>,
-}
 
 #[derive(Deserialize)]
 struct RawTrinket {
@@ -473,6 +728,8 @@ struct RawTrinket {
     mechanic: Option<String>,
     #[serde(default)]
     uses_per_turn: Option<u8>,
+    #[serde(default)]
+    start_every: Option<u8>,
     #[serde(default)]
     on_pick: Vec<RawAct>,
     #[serde(default)]
@@ -500,13 +757,105 @@ struct RawTrinket {
     #[serde(default)]
     on_discard: Vec<RawAct>,
     #[serde(default)]
+    on_get: Vec<RawAct>,
+    #[serde(default)]
+    get_tribe: Option<String>,
+    #[serde(default)]
     on_gold_spent: Vec<RawAct>,
     #[serde(default)]
     discard_spells_only: bool,
     #[serde(default)]
+    discard_minions_only: bool,
+    #[serde(default)]
     rule: Option<RawRule>,
     #[serde(default)]
-    soc: Option<RawSoc>,
+    fight: Vec<RawFightAct>,
+    #[serde(default)]
+    first_deathrattle: bool,
+}
+
+/// One `fight = [{ ... }]` table. Which key carries the payload decides the
+/// `FightAct`; `when` says where it fires.
+#[derive(Deserialize, Default)]
+struct RawFightAct {
+    when: String,
+    #[serde(default)]
+    every: Option<u8>,
+    #[serde(default)]
+    once: bool,
+    #[serde(default)]
+    cap: Option<u8>,
+    /// The trigger's filter (a trigger act) or the pick's tribe (Start of
+    /// Combat and Avenge).
+    #[serde(default)]
+    tribe: Option<String>,
+    #[serde(default)]
+    neutral: bool,
+    #[serde(default)]
+    rally: bool,
+    /// A pick of one named card ("your Eternal Knights").
+    #[serde(default)]
+    card: Option<String>,
+    /// "all" (the default), "ends", "random" or "lowest_attack".
+    #[serde(default)]
+    pick: Option<String>,
+    #[serde(default)]
+    count: Option<u8>,
+    #[serde(default)]
+    keywords: Vec<String>,
+    #[serde(default)]
+    buff: Option<[i32; 2]>,
+    #[serde(default)]
+    grow: Option<i32>,
+    #[serde(default)]
+    scale: Option<String>,
+    #[serde(default)]
+    half_attack_health: bool,
+    #[serde(default)]
+    trigger_deathrattles: bool,
+    #[serde(default)]
+    dr: Option<RawDr>,
+    #[serde(default)]
+    hand_attack: bool,
+    #[serde(default)]
+    gems: Option<RawGems>,
+    #[serde(default)]
+    summon: Option<String>,
+    #[serde(default)]
+    gem_bonus: Option<[i32; 2]>,
+    #[serde(default)]
+    spell_bonus: Option<[i32; 2]>,
+    #[serde(default)]
+    random_spell: Option<u8>,
+    #[serde(default)]
+    random_magnetic: Option<u8>,
+    #[serde(default)]
+    free_refreshes: Option<u8>,
+    #[serde(default)]
+    improve: Option<u8>,
+    #[serde(default)]
+    copy: bool,
+}
+
+/// The Deathrattle a `dr = { ... }` table gives.
+#[derive(Deserialize, Default)]
+struct RawDr {
+    #[serde(default)]
+    gems: Option<u8>,
+    #[serde(default)]
+    summon: Option<String>,
+    #[serde(default)]
+    count: Option<u8>,
+    #[serde(default)]
+    buff_all: Option<[i32; 2]>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawGems {
+    #[serde(default)]
+    count: u8,
+    #[serde(default)]
+    tribe: Option<String>,
 }
 
 fn tribe(name: &str) -> Result<Tribe, String> {
@@ -556,6 +905,8 @@ impl TrinketDb {
                     Act::SpellBonus { attack, health }
                 } else if let Some(n) = a.discover_spell {
                     Act::DiscoverSpell(n)
+                } else if let Some(n) = a.discover_deathrattle {
+                    Act::DiscoverDeathrattle(n)
                 } else if let Some(n) = a.random_chromadrake {
                     Act::RandomChromadrake(n)
                 } else if let Some(n) = a.random_volumizer {
@@ -659,6 +1010,41 @@ impl TrinketDb {
                     Act::OfferReplace(n)
                 } else if let Some(n) = a.random_most_common_type {
                     Act::RandomMostCommonType(n)
+                } else if let Some(tier) = a.discover_remember {
+                    Act::DiscoverRemember { tier, typed: a.discover_remember_typed }
+                } else if let Some(tier) = a.discover_tier {
+                    Act::DiscoverTier(tier)
+                } else if let Some(n) = a.copy_buys {
+                    Act::CopyBuys(n)
+                } else if let Some(n) = a.get_remembered {
+                    Act::GetRemembered(n)
+                } else if let Some(n) = a.random_battlecry {
+                    Act::RandomBattlecry(n)
+                } else if let Some(n) = a.plain_copy_random_friendly {
+                    Act::PlainCopyRandomFriendly(n)
+                } else if a.copy_last_discarded {
+                    Act::CopyLastDiscarded
+                } else if let Some(n) = a.gems_each_type {
+                    Act::GemsEachType(n)
+                } else if let Some(n) = a.discover_copy_bonus {
+                    Act::DiscoverCopyBonus(n)
+                } else if let Some([attack, health]) = a.buff_leftmost {
+                    Act::BuffLeftmostBoard { attack, health }
+                } else if let Some(n) = &a.get_golden {
+                    Act::GetGolden { card: card(n)? }
+                } else if let Some(n) = a.lockbox_sooner {
+                    Act::LockboxSooner(n)
+                } else if let Some(n) = &a.magnetize_ends {
+                    Act::MagnetizeEnds {
+                        card: card(n)?,
+                        tribe: a.tribe.as_deref().map(tribe).transpose().map_err(err)?,
+                    }
+                } else if let Some([a1, b1]) = &a.one_of {
+                    Act::OneOf { a: card(a1)?, b: card(b1)? }
+                } else if a.warband_whistle {
+                    Act::WarbandWhistle
+                } else if a.triple_need_two_pirate {
+                    Act::TripleNeedTwoPirate
                 } else if let Some([slot, tribe]) = &a.replace_with_random {
                     let slot = match slot.as_str() {
                         "lesser" => Slot::Lesser,
@@ -675,6 +1061,133 @@ impl TrinketDb {
             };
             let acts = |v: &[RawAct]| -> Result<Vec<Act>, String> {
                 v.iter().map(act).collect()
+            };
+            // One `fight = [{ ... }]` table: `when` plus whichever payload key
+            // it carries. A trigger act reaches the minion the trigger is
+            // about unless its payload names its own pick.
+            let fight_entry = |a: &RawFightAct| -> Result<FightEntry, String> {
+                let when = match a.when.as_str() {
+                    "soc" => When::Soc,
+                    "avenge" => When::Avenge,
+                    "summon" => When::Summon,
+                    "attack" => When::Attack,
+                    "death" => When::Death,
+                    "reborn" => When::Reborn,
+                    "awaken" => When::Awaken,
+                    other => return Err(err(format!("unknown fight when {other:?}"))),
+                };
+                let tribe_ = a.tribe.as_deref().map(tribe).transpose().map_err(err)?;
+                // Start of Combat and Avenge pick minions; every other
+                // trigger reaches the one it is about.
+                let pick = match when {
+                    When::Soc | When::Avenge => match a.pick.as_deref() {
+                        // "your Eternal Knights": one named card.
+                        None if a.card.is_some() => Pick::Card(card(a.card.as_deref().unwrap())?),
+                        None | Some("all") => match (tribe_, a.neutral) {
+                            (Some(t), _) => Pick::Tribe(t),
+                            (None, true) => Pick::Neutral,
+                            (None, false) => Pick::All,
+                        },
+                        Some("ends") => Pick::Ends { tribe: tribe_ },
+                        Some("random") => Pick::Random { tribe: tribe_, count: a.count.unwrap_or(1) },
+                        Some("lowest_attack") => Pick::LowestAttack(a.count.unwrap_or(1)),
+                        Some("rally") => Pick::Rally,
+                        Some("card") => match &a.card {
+                            Some(n) => Pick::Card(card(n)?),
+                            None => return Err(err("a card pick needs a card".into())),
+                        },
+                        Some(other) => return Err(err(format!("unknown pick {other:?}"))),
+                    },
+                    _ => match &a.card {
+                        Some(n) => Pick::Card(card(n)?),
+                        None => Pick::Itself,
+                    },
+                };
+                let trigger = match when {
+                    When::Soc | When::Avenge => Trigger::Any,
+                    _ => match (tribe_, a.neutral, a.rally) {
+                        (Some(t), _, _) => Trigger::Tribe(t),
+                        (None, true, _) => Trigger::Neutral,
+                        (None, false, true) => Trigger::Rally,
+                        (None, false, false) => Trigger::Any,
+                    },
+                };
+                let act = if let Some(n) = &a.summon {
+                    FightAct::Summon {
+                        card: card(n)?,
+                        count: a.count.unwrap_or(1),
+                        keywords: keywords(&a.keywords).map_err(err)?,
+                    }
+                } else if !a.keywords.is_empty() {
+                    FightAct::Keywords { pick, keywords: keywords(&a.keywords).map_err(err)? }
+                } else if let Some([attack, health]) = a.buff {
+                    FightAct::Stats { pick, attack, health, grow: a.grow.unwrap_or(0) }
+                } else if let Some(kind) = &a.scale {
+                    let kind = match kind.as_str() {
+                        "double" => Scale::Double,
+                        "triple" => Scale::Triple,
+                        "health" => Scale::Health,
+                        "attack" => Scale::Attack,
+                        other => return Err(err(format!("unknown scale {other:?}"))),
+                    };
+                    FightAct::Scale { pick, kind }
+                } else if a.half_attack_health {
+                    FightAct::HalfAttackToHealth { pick }
+                } else if a.trigger_deathrattles {
+                    FightAct::TriggerDeathrattles { pick }
+                } else if let Some(dr) = &a.dr {
+                    let dr = if let Some(n) = dr.gems {
+                        GrantedDr::Gems(n)
+                    } else if let Some(n) = &dr.summon {
+                        GrantedDr::Summon { card: card(n)?, count: dr.count.unwrap_or(1) }
+                    } else if let Some([attack, health]) = dr.buff_all {
+                        GrantedDr::BuffAll { attack, health }
+                    } else {
+                        return Err(err("a dr table with no known key".into()));
+                    };
+                    FightAct::GrantDr { pick, dr }
+                } else if a.hand_attack {
+                    FightAct::HighestHandAttack { pick }
+                } else if let Some(g) = &a.gems {
+                    let tribe_ = g.tribe.as_deref().map(tribe).transpose().map_err(err)?;
+                    let pick = match tribe_ {
+                        Some(t) => Pick::Tribe(t),
+                        None => pick,
+                    };
+                    FightAct::Gems { pick, count: g.count }
+                } else if a.gem_bonus.is_some() || a.spell_bonus.is_some() {
+                    FightAct::Bonus {
+                        gem: a.gem_bonus.unwrap_or([0, 0]).into(),
+                        spell: a.spell_bonus.unwrap_or([0, 0]).into(),
+                    }
+                } else if let Some(n) = a.random_spell {
+                    FightAct::RandomSpell(n)
+                } else if let Some(n) = a.random_magnetic {
+                    FightAct::RandomMagnetic(n)
+                } else if let Some(n) = a.free_refreshes {
+                    FightAct::FreeRefreshes(n)
+                } else if let Some(n) = a.improve {
+                    FightAct::Improve(n)
+                } else if a.copy {
+                    FightAct::CopyToHand { pick }
+                } else {
+                    return Err(err("a fight table with no known key".into()));
+                };
+                let every = match when {
+                    When::Avenge => match a.every {
+                        Some(0) | None => return Err(err("Avenge needs every >= 1".into())),
+                        Some(n) => n,
+                    },
+                    _ => a.every.unwrap_or(1),
+                };
+                Ok(FightEntry {
+                    when,
+                    every,
+                    once: a.once,
+                    uses: a.cap.unwrap_or(NO_CAP),
+                    trigger,
+                    act,
+                })
             };
             let slot = match t.slot.as_str() {
                 "lesser" => Slot::Lesser,
@@ -712,10 +1225,23 @@ impl TrinketDb {
                         "cast_spell_on_minion" => Event::CastSpellOnMinion,
                         "gold_spent" => Event::GoldSpent,
                         "discard" => Event::Discard,
-                        other => match other.strip_prefix("play_") {
-                            Some(t) => Event::PlayTribe(tribe(t).map_err(err)?),
-                            None => return Err(err(format!("unknown event {other:?}"))),
-                        },
+                        "death" => Event::Death,
+                        "summon" => Event::Summon,
+                        other => {
+                            let prefixed = ["play_", "death_", "summon_"]
+                                .into_iter()
+                                .find_map(|p| other.strip_prefix(p).map(|t| (p, t)));
+                            match prefixed {
+                                Some(("play_", t)) => Event::PlayTribe(tribe(t).map_err(err)?),
+                                Some(("death_", t)) => {
+                                    Event::DeathTribe(tribe(t).map_err(err)?)
+                                }
+                                Some(("summon_", t)) => {
+                                    Event::SummonTribe(tribe(t).map_err(err)?)
+                                }
+                                _ => return Err(err(format!("unknown event {other:?}"))),
+                            }
+                        }
                     };
                     if r.every == 0 {
                         return Err(err("a rule needs every >= 1".into()));
@@ -723,13 +1249,10 @@ impl TrinketDb {
                     Some(Rule { event, every: r.every, once: r.once, acts: acts(&r.acts)? })
                 }
             };
-            let soc = match &t.soc {
-                None => None,
-                Some(s) => Some(Soc {
-                    tribe: s.tribe.as_deref().map(tribe).transpose().map_err(err)?,
-                    keywords: keywords(&s.keywords).map_err(err)?,
-                }),
-            };
+            let fight = t.fight.iter().map(fight_entry).collect::<Result<Vec<_>, String>>()?;
+            if fight.len() > FIGHT_ACTS {
+                return Err(err(format!("more than {FIGHT_ACTS} fight effects")));
+            }
             let trinket = Trinket {
                 name: t.name,
                 card_id: t.card_id.clone(),
@@ -738,6 +1261,7 @@ impl TrinketDb {
                 tribes,
                 mechanic,
                 uses_per_turn: t.uses_per_turn,
+                start_every: t.start_every,
                 on_pick: acts(&t.on_pick)?,
                 start_of_turn: acts(&t.start_of_turn)?,
                 end_of_turn: acts(&t.end_of_turn)?,
@@ -751,10 +1275,14 @@ impl TrinketDb {
                 on_cast_spell: acts(&t.on_cast_spell)?,
                 on_cast_spell_on_minion: acts(&t.on_cast_spell_on_minion)?,
                 on_discard: acts(&t.on_discard)?,
+                on_get: acts(&t.on_get)?,
+                get_tribe: t.get_tribe.as_deref().map(tribe).transpose().map_err(err)?,
                 on_gold_spent: acts(&t.on_gold_spent)?,
                 discard_spells_only: t.discard_spells_only,
+                discard_minions_only: t.discard_minions_only,
                 rule,
-                soc,
+                fight,
+                first_deathrattle: t.first_deathrattle,
             };
             if db.by_card_id.insert(t.card_id, db.trinkets.len() as u8).is_some() {
                 return Err(format!("trinkets.toml: {} twice", trinket.name));

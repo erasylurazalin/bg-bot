@@ -450,6 +450,8 @@ impl Game {
                     DiscoverKind::BattlecryMinion => DiscoverRequest::BattlecryMinion(tier),
                     DiscoverKind::Tier7Minion => DiscoverRequest::MinionTier(crate::CARD_MAX_TIER),
                     DiscoverKind::ChooseOneMinion => DiscoverRequest::ChooseOneMinion,
+                    DiscoverKind::TierMinion(t) => DiscoverRequest::MinionTier(t),
+                    DiscoverKind::TierMinionWithType(t) => DiscoverRequest::TypedMinionTier(t),
                 };
                 let _ = self.players[p].discover_queue.try_push(req);
             }

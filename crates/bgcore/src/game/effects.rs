@@ -752,6 +752,46 @@ impl Game {
                     }
                 }
             }
+            Effect::MaxGold(n) => {
+                let pl = &mut self.players[p];
+                pl.extra_max_gold = pl.extra_max_gold.saturating_add(n.saturating_mul(mul as u8).saturating_mul(runs));
+            }
+            Effect::BecomeCopyChosen => {
+                let pt = PendingTarget {
+                    source: Some(*pos as u8),
+                    kind: TargetKind::BecomeCopy,
+                    runs,
+                    tavern: true,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            Effect::PlainCopyRandomFriendly => {
+                let n = (mul as u8).saturating_mul(runs);
+                for _ in 0..n {
+                    let len = self.players[p].board.len();
+                    if len == 0 {
+                        break;
+                    }
+                    let k = self.rng.below(len as u32) as usize;
+                    let card = self.players[p].board[k].card;
+                    self.give_generated(p, card);
+                }
+            }
+            Effect::CopyLastDiscarded => {
+                let Some(m) = self.players[p].last_discarded else { return };
+                for _ in 0..runs {
+                    if self.players[p].hand.is_full() {
+                        break;
+                    }
+                    // "a copy of it with double stats": the doubling is the
+                    // card's own, and a golden one doubles it again.
+                    let mut c = self.players[p].make_card(&self.data.cards, m.card, m.golden, 0);
+                    c.attack = m.attack.saturating_mul(2 * mul);
+                    c.health = m.health.saturating_mul(2 * mul);
+                    self.add_to_hand(p, c);
+                }
+            }
             Effect::BuffOthersPerGolden { tribe, attack, health } => {
                 let k = 1 + self.players[p].golden_played as i32;
                 let cards = &self.data.cards;
@@ -1093,6 +1133,20 @@ impl Game {
         }
         let k = self.rng.below(n as u32) as usize;
         buff(&mut self.players[p].board[k], stats.0, stats.1);
+    }
+
+    /// Faceless Manipulator: the minion in board slot `src` becomes `copy`,
+    /// exactly as it stands (buffs, keywords, Golden status, attachments),
+    /// but it holds no pool copy and gives no Triple Reward: it is a copy
+    /// that was never played.
+    pub(super) fn become_copy_of(&mut self, p: usize, src: usize, copy: Minion) {
+        if src >= self.players[p].board.len() {
+            return;
+        }
+        let mut m = copy;
+        m.pool_copies = 0;
+        m.no_reward = true;
+        self.players[p].board[src] = m;
     }
 
     /// Run every event trigger of `kind` on the player's board. Each adds

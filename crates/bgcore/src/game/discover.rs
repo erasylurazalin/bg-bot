@@ -77,6 +77,7 @@ impl Game {
         let m = self.players[p].hand.remove(s);
         give_back(&mut self.pool, &self.data.cards, &m);
         self.players[p].discarded = self.players[p].discarded.saturating_add(1);
+        self.players[p].last_discarded = Some(m);
         self.fire_event(p, EventKind::Discarded, 1);
         self.trinket_event(p, crate::trinkets::Event::Discard, Some(m.card), 1);
         match self.data.cards.get(m.card).on_discard {
@@ -266,6 +267,16 @@ impl Game {
                             c.tribes.has(t)
                         })
                     }
+                    DiscoverRequest::TypedMinionTier(t) => draw_filtered(
+                        pool,
+                        &data.cards,
+                        rng,
+                        t,
+                        t,
+                        &pl.discover,
+                        *lobby,
+                        |c| !c.tribes.is_neutral(),
+                    ),
                     DiscoverRequest::DemonMinion { max_tier: max_t, .. } => draw_filtered(
                         pool,
                         &data.cards,
@@ -290,6 +301,7 @@ impl Game {
                 pl.discover_locked = false;
                 pl.discover_doomed = false;
                 pl.discover_both = false;
+                pl.tp.remember_in = 0;
             }
         }
     }
@@ -365,6 +377,19 @@ impl Game {
         if let Some((source, d)) = damage {
             self.take_shop_damage(p, d, Some(source as usize));
         }
+        // Portable Factory remembers the card it Discovered, so it can hand
+        // out another copy each turn.
+        let remember = std::mem::take(&mut self.players[p].tp.remember_in);
+        if remember != 0 {
+            let slot = (remember as usize - 1).min(crate::TRINKET_SLOTS - 1);
+            self.players[p].trinkets[slot].card = Some(c);
+        }
+        // Sinstone Sticker: the first N Discovers each turn also give a copy
+        // of the pick (a generated copy, no pool copy).
+        if self.players[p].tp.discover_copies > 0 {
+            self.players[p].tp.discover_copies -= 1;
+            self.give_generated(p, c);
+        }
         self.fire_after_discover(p);
         self.maybe_start_discover(p);
     }
@@ -408,7 +433,20 @@ impl Game {
         if pl.hand.is_full() {
             return;
         }
-        let m = pl.make_card(cards, id, false, 0);
+        let mut m = pl.make_card(cards, id, false, 0);
+        // Escapee Portrait: every Lockbox opens one turn sooner.
+        let sooner = self.players[p].tp.lockbox_sooner;
+        if sooner > 0 {
+            m.improvements = m.improvements.saturating_sub(sooner as u16);
+            if m.improvements == 0 {
+                // Already due: it opens at once, like a card given with no
+                // turns left on it.
+                let i = self.players[p].hand.len();
+                self.add_to_hand(p, m);
+                self.open_lockbox(p, i);
+                return;
+            }
+        }
         self.add_to_hand(p, m);
     }
 

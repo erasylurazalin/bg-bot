@@ -15,9 +15,15 @@ use crate::cards::{
     PermanentKeep, OnCastSpell, OnReborn, SpellEffect, StartOfCombat, TimesRole, Tribe, Tribes, how_many_times,
     pick_one_per_type,
 };
-use crate::minion::{CardId, Keywords, Minion};
+use crate::minion::{Attached, CardId, Keywords, Minion};
+use crate::trinkets::{FIGHT_ACTS, FightAct, FightEntry, GrantedDr, NO_CAP, Pick, Scale, Trigger, When};
 use crate::rng::Rng;
 use crate::{BOARD, HAND};
+
+/// Deathrattles one Fish of N'Zoth can gain in one fight. A fight offers at
+/// most seven friendly Deathrattle minions at a time and they can be
+/// summoned again, so this is well past any real board.
+pub const FISH_DR: usize = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Deity {
@@ -52,10 +58,10 @@ pub struct Counters {
     /// friendly minion gains before any minion's own Start of Combat runs
     /// (Al'Akir's Swatting Insects). 0 for none.
     pub soc_leftmost: u8,
-    /// A trinket's Start of Combat: every friendly minion of these tribes
-    /// (a bit mask, 0 for every minion) gains these keywords before any
-    /// minion's own Start of Combat. `None` for no such trinket held.
-    pub soc_tribe: Option<(u16, u8)>,
+    /// The owner's trinkets' effects inside the fight, as a small `Copy`
+    /// bundle built from the trinket slots (`Player::counters`). Empty for a
+    /// board without one, which every hook answers from one field.
+    pub trinkets: FightTrinkets,
     /// Pending Sharing is Caring Start of Combat triggers.
     pub sharing_is_caring: u8,
     /// The player's Tavern spell bonus, for spells cast inside the fight
@@ -97,7 +103,7 @@ impl Default for Counters {
             brood_of_nozdormu: 0,
             upper_hand: 0,
             soc_leftmost: 0,
-            soc_tribe: None,
+            trinkets: FightTrinkets::default(),
             sharing_is_caring: 0,
             spell_attack: 0,
             spell_health: 0,
@@ -110,6 +116,127 @@ impl Default for Counters {
             spells_cast: 0,
             lobby: crate::cards::Tribes::ALL,
         }
+    }
+}
+
+/// One of a side's trinket effects in a fight: what it does, when, and the
+/// counters the fight keeps for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FightAction {
+    pub act: FightAct,
+    pub when: When,
+    /// What the minion the trigger is about must be.
+    pub trigger: Trigger,
+    /// Fire on every Nth event (Avenge N).
+    pub every: u8,
+    /// Fire once per fight.
+    pub once: bool,
+    /// Uses left this fight, `NO_CAP` for no limit.
+    pub uses: u8,
+    /// Events counted this fight.
+    pub count: u16,
+    /// The trinket's own "improve this" number when the fight started.
+    pub value: i16,
+    /// The trinket slot it came from, for gains that go home.
+    pub slot: u8,
+    pub done: bool,
+}
+
+const NO_ACTION: FightAction = FightAction {
+    act: FightAct::Improve(0),
+    when: When::Soc,
+    trigger: Trigger::Any,
+    every: 1,
+    once: false,
+    uses: NO_CAP,
+    count: 0,
+    value: 0,
+    slot: 0,
+    done: false,
+};
+
+/// One side's trinkets, as the fight sees them: `Copy`, no allocation, and
+/// no pointer into the shared card table, so a fight (and every hook in it)
+/// pays nothing for trinkets it does not have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FightTrinkets {
+    acts: [FightAction; FIGHT_ACTS],
+    n: u8,
+    /// "Your first Deathrattle each combat triggers an extra time"
+    /// (Deathly Phylactery).
+    first_deathrattle: bool,
+    first_deathrattle_used: bool,
+    /// The owner's trinkets count friendly deaths and summons for their
+    /// shop-side "after N" rules, so the fight has to report them.
+    pub count_deaths: bool,
+    pub count_summons: bool,
+    /// The tribes a death has to be counted by (`death_<tribe>` rules), as a
+    /// `Tribes` mask; 0 when none.
+    pub count_death_tribes: u16,
+}
+
+impl Default for FightTrinkets {
+    fn default() -> FightTrinkets {
+        FightTrinkets {
+            acts: [NO_ACTION; FIGHT_ACTS],
+            n: 0,
+            first_deathrattle: false,
+            first_deathrattle_used: false,
+            count_deaths: false,
+            count_summons: false,
+            count_death_tribes: 0,
+        }
+    }
+}
+
+impl FightTrinkets {
+    pub fn is_empty(&self) -> bool {
+        self.n == 0 && !self.count_deaths && !self.count_summons
+    }
+
+    pub fn len(&self) -> usize {
+        self.n as usize
+    }
+
+    /// Add one trinket effect, from `slot`, with the slot's own "improve
+    /// this" number. Past `FIGHT_ACTS` the act is dropped; the table check in
+    /// `check_invariants` keeps that from happening.
+    pub fn push(&mut self, e: &FightEntry, slot: u8, value: i16) {
+        let n = self.n as usize;
+        if n >= FIGHT_ACTS {
+            return;
+        }
+        self.acts[n] = FightAction {
+            act: e.act,
+            when: e.when,
+            trigger: e.trigger,
+            every: e.every.max(1),
+            once: e.once,
+            uses: e.uses,
+            count: 0,
+            value,
+            slot,
+            done: false,
+        };
+        self.n += 1;
+    }
+
+    pub fn first_deathrattle(self) -> bool {
+        self.first_deathrattle
+    }
+
+    pub fn set_first_deathrattle(&mut self, on: bool) {
+        self.first_deathrattle = on;
+    }
+
+    /// The first Deathrattle of the fight gets one extra run; the rest do
+    /// not (Deathly Phylactery).
+    fn take_first_deathrattle(&mut self) -> bool {
+        if !self.first_deathrattle || self.first_deathrattle_used {
+            return false;
+        }
+        self.first_deathrattle_used = true;
+        true
     }
 }
 
@@ -179,6 +306,20 @@ pub struct SideOutcome {
     /// slot (Razorfen Vineweaver): the game adds them to the board minion's
     /// stats and Blood Gem stats after the fight.
     pub permanent_gems: [(i32, i32); BOARD],
+    /// Free Refreshes a trinket gave in this fight (Herding Horn).
+    pub free_refresh_gain: u8,
+    /// Increase to each trinket slot's own "improve this" number, by slot
+    /// (All-Purpose Kibble, Fang Anklet).
+    pub trinket_improve: [u8; crate::TRINKET_SLOTS],
+    /// Friendly minions that died here, for the trinkets whose "after N
+    /// friendly minions die" counter carries across turns (Bleeding Heart).
+    pub friendly_deaths: u16,
+    /// Friendly deaths here, by `Tribe::EVERY` index, for a rule of a tribe
+    /// ("after N friendly Beasts die").
+    pub death_tribes: [u16; Tribe::EVERY.len()],
+    /// Friendly minions summoned here, by `Tribe::EVERY` index, for the
+    /// "after N Beasts summoned" counters (Wildfeather Duster).
+    pub summon_tribes: [u16; Tribe::EVERY.len()],
     /// The counters the real client shows during combat, captured at the
     /// first attack, after Start of Combat effects: what the other player
     /// "last saw" of this one.
@@ -345,6 +486,13 @@ struct Side<'a> {
     /// Whether deaths count for Avenge. A shop destroy doesn't: its counts
     /// would start from 0 every time.
     count_avenge: bool,
+    /// Deathrattles trinkets gave this side's minions for the fight, by the
+    /// uid of the minion that carries them.
+    granted: ArrayVec<(u16, GrantedDr), 8>,
+    /// Deathrattles a Fish of N'Zoth gained from the friendly Deathrattle
+    /// minions that died this fight, by the Fish's uid. They fire when the
+    /// Fish dies, like its own.
+    gained_dr: ArrayVec<(u16, Attached), FISH_DR>,
     out: SideOutcome,
 }
 
@@ -416,6 +564,8 @@ impl<'a> Side<'a> {
             dead_aberrations: ArrayVec::new(),
             outside: false,
             count_avenge: true,
+            granted: ArrayVec::new(),
+            gained_dr: ArrayVec::new(),
             out: SideOutcome::default(),
         }
     }
@@ -435,7 +585,7 @@ impl<'a> Side<'a> {
 
     /// The hand minion with the highest Attack of a tribe that is still in
     /// hand; ties go to the left-most. Spells are not minions.
-    fn best_in_hand(&self, db: &CardDb, tribe: Tribe) -> Option<usize> {
+    fn best_in_hand(&self, db: &CardDb, tribe: Tribe, by_health: bool) -> Option<usize> {
         let mut best: Option<usize> = None;
         for (i, m) in self.hand.iter().enumerate() {
             if self.hand_taken(i)
@@ -444,10 +594,16 @@ impl<'a> Side<'a> {
             {
                 continue;
             }
-            let attack = m.attack + self.hand_bonus[i].0;
-            if best.is_none_or(|b| {
-                attack > self.hand[b].attack + self.hand_bonus[b].0
-            }) {
+            // The best is the highest Attack, or the highest Health for
+            // Bassgill; a tie keeps the earlier one (the lower hand slot).
+            let stat = |k: usize| {
+                if by_health {
+                    self.hand[k].health + self.hand_bonus[k].1
+                } else {
+                    self.hand[k].attack + self.hand_bonus[k].0
+                }
+            };
+            if best.is_none_or(|b| stat(i) > stat(b)) {
                 best = Some(i);
             }
         }
@@ -464,18 +620,20 @@ impl<'a> Side<'a> {
         at: &mut usize,
         n: u32,
         tribe: Tribe,
+        by_health: bool,
         skip_ptr: bool,
         uid: &mut u16,
+        rng: &mut Rng,
         w: &mut impl Watch,
     ) {
         for _ in 0..n {
             if self.ms.is_full() {
                 break;
             }
-            let Some(i) = self.best_in_hand(db, tribe) else { break };
+            let Some(i) = self.best_in_hand(db, tribe, by_health) else { break };
             let m = self.hand_at(i);
             self.hand_taken |= 1 << i;
-            if !self.summon_baked(db, side, *at, m, uid, w) {
+            if !self.summon_baked(db, side, *at, m, uid, rng, w) {
                 self.hand_taken &= !(1 << i);
                 break;
             }
@@ -908,6 +1066,310 @@ impl<'a> Side<'a> {
         }
     }
 
+    /// The living friendly minions an act reaches, as board indices. `target`
+    /// is the uid of the minion the trigger is about; a dead or missing one
+    /// reaches nobody.
+    fn pick(
+        &self,
+        db: &CardDb,
+        pick: Pick,
+        target: Option<u16>,
+        rng: &mut Rng,
+    ) -> ArrayVec<usize, BOARD> {
+        let mut out: ArrayVec<usize, BOARD> = ArrayVec::new();
+        let alive = |i: usize| self.ms[i].m.health > 0;
+        let of_tribe = |i: usize, t: Tribe| db.get(self.ms[i].m.card).tribes.has(t);
+        match pick {
+            Pick::Itself => {
+                if let Some(i) = target.and_then(|t| self.index_of(t))
+                    && alive(i)
+                {
+                    out.push(i);
+                }
+            }
+            Pick::All => {
+                for i in 0..self.ms.len() {
+                    if alive(i) {
+                        out.push(i);
+                    }
+                }
+            }
+            Pick::Tribe(t) => {
+                for i in 0..self.ms.len() {
+                    if alive(i) && of_tribe(i, t) {
+                        out.push(i);
+                    }
+                }
+            }
+            Pick::Neutral => {
+                for i in 0..self.ms.len() {
+                    if alive(i) && db.get(self.ms[i].m.card).tribes.is_empty() {
+                        out.push(i);
+                    }
+                }
+            }
+            Pick::Ends { tribe } => {
+                let ok = |i: usize| alive(i) && tribe.is_none_or(|t| of_tribe(i, t));
+                if let Some(i) = (0..self.ms.len()).find(|&i| ok(i)) {
+                    out.push(i);
+                }
+                if let Some(i) = (0..self.ms.len()).rev().find(|&i| ok(i))
+                    && out.first() != Some(&i)
+                {
+                    out.push(i);
+                }
+            }
+            Pick::Random { tribe, count } => {
+                let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
+                for i in 0..self.ms.len() {
+                    if alive(i) && tribe.is_none_or(|t| of_tribe(i, t)) {
+                        ok.push(i);
+                    }
+                }
+                for _ in 0..count {
+                    if ok.is_empty() {
+                        break;
+                    }
+                    let k = rng.below(ok.len() as u32) as usize;
+                    out.push(ok.remove(k));
+                }
+            }
+            Pick::LowestAttack(count) => {
+                let mut ok: ArrayVec<usize, BOARD> =
+                    (0..self.ms.len()).filter(|&i| alive(i)).collect();
+                for _ in 0..count {
+                    if ok.is_empty() {
+                        break;
+                    }
+                    let low = ok.iter().map(|&i| self.ms[i].m.attack).min().unwrap_or(0);
+                    let ties: ArrayVec<usize, BOARD> = ok
+                        .iter()
+                        .copied()
+                        .filter(|&i| self.ms[i].m.attack == low)
+                        .collect();
+                    let i = ties[rng.below(ties.len() as u32) as usize];
+                    ok.retain(|j| *j != i);
+                    out.push(i);
+                }
+            }
+            Pick::Rally => {
+                for i in 0..self.ms.len() {
+                    if alive(i) && self.ms[i].m.parts().any(|(c, _)| db.get(c).rally.is_some()) {
+                        out.push(i);
+                    }
+                }
+            }
+            Pick::Card(want) => {
+                for i in 0..self.ms.len() {
+                    if alive(i) && self.ms[i].m.parts().any(|(c, _)| c == want) {
+                        out.push(i);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// A friendly minion died, a minion was summoned, a minion attacked, a
+    /// minion was Reborn or the Deity awakened: run the trinket effects that
+    /// listen for it. A side without trinket effects answers from one field.
+    #[allow(clippy::too_many_arguments)]
+    fn trinket_hook(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        when: When,
+        target: Option<(u16, Minion)>,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        if self.counters.trinkets.n == 0 {
+            return;
+        }
+        // A shop destroy's deaths count toward nothing (its Avenge counts
+        // would start from 0 every time, and a trinket's Avenge is Avenge).
+        if when == When::Avenge && !self.count_avenge {
+            return;
+        }
+        let trigger_only = !matches!(when, When::Soc | When::Avenge);
+        for k in 0..self.counters.trinkets.len() {
+            let mut e = self.counters.trinkets.acts[k];
+            if e.when != when || e.done || e.uses == 0 {
+                continue;
+            }
+            match target {
+                Some((_, m)) if e.trigger.fits(db, &m) => {}
+                Some(_) => continue,
+                None if trigger_only => continue,
+                None => {}
+            }
+            e.count = e.count.saturating_add(1);
+            if !e.count.is_multiple_of(e.every.max(1) as u16) {
+                self.counters.trinkets.acts[k] = e;
+                continue;
+            }
+            if e.uses != NO_CAP {
+                e.uses -= 1;
+            }
+            if e.once {
+                e.done = true;
+            }
+            self.counters.trinkets.acts[k] = e;
+            self.run_fight_act(db, side, k, target.map(|t| t.0), uid, rng, w);
+        }
+    }
+
+    /// Run one of the side's trinket effects (entry `k` of the bundle).
+    #[allow(clippy::too_many_arguments)]
+    fn run_fight_act(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        k: usize,
+        target: Option<u16>,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        let e = self.counters.trinkets.acts[k];
+        let value = e.value as i32;
+        match e.act {
+            FightAct::Keywords { pick, keywords } => {
+                for i in self.pick(db, pick, target, rng) {
+                    self.gain_keyword_at(db, i, keywords);
+                }
+            }
+            FightAct::Stats { pick, attack, health, grow } => {
+                // "Improve this" grows each number the act gives, so a
+                // +3/+0 stays +0 Health however often it improves.
+                let grown = |n: i32| if n == 0 { 0 } else { grow * value };
+                let (da, dh) = (attack + grown(attack), health + grown(health));
+                for i in self.pick(db, pick, target, rng) {
+                    self.gain_at(db, i, da, dh);
+                }
+            }
+            FightAct::Scale { pick, kind } => {
+                for i in self.pick(db, pick, target, rng) {
+                    let (a, h) = (self.ms[i].m.attack, self.ms[i].m.health);
+                    let (da, dh) = match kind {
+                        Scale::Double => (a, h),
+                        Scale::Triple => (2 * a, 2 * h),
+                        Scale::Health => (0, h),
+                        Scale::Attack => (a, 0),
+                    };
+                    self.gain_at(db, i, da, dh);
+                }
+            }
+            FightAct::HalfAttackToHealth { pick } => {
+                for i in self.pick(db, pick, target, rng) {
+                    let a = self.ms[i].m.attack;
+                    // "Half" rounds up (DESIGN.md).
+                    let h = if a > 0 { (a + 1) / 2 } else { 0 };
+                    self.gain_at(db, i, 0, h);
+                }
+            }
+            FightAct::TriggerDeathrattles { pick } => {
+                let uids: ArrayVec<u16, BOARD> =
+                    self.pick(db, pick, target, rng).iter().map(|&i| self.ms[i].uid).collect();
+                for u in uids {
+                    let Some(i) = self.index_of(u) else { continue };
+                    if self.ms[i].m.health <= 0 {
+                        continue;
+                    }
+                    let (m, host) = (self.ms[i].m, u);
+                    let runs = self.deathrattle_fires(db);
+                    self.fire_deathrattles(db, side, &m, host, None, i + 1, runs, uid, rng, w);
+                }
+            }
+            FightAct::GrantDr { pick, dr } => {
+                for i in self.pick(db, pick, target, rng) {
+                    let u = self.ms[i].uid;
+                    let _ = self.granted.try_push((u, dr));
+                }
+            }
+            FightAct::HighestHandAttack { pick } => {
+                let mut best = 0;
+                for (i, m) in self.hand.iter().enumerate() {
+                    if !self.hand_taken(i) && !db.get(m.card).is_spell() {
+                        best = best.max(m.attack + self.hand_bonus[i].0);
+                    }
+                }
+                for i in self.pick(db, pick, target, rng) {
+                    self.gain_at(db, i, best, 0);
+                }
+            }
+            FightAct::Gems { pick, count } => {
+                for i in self.pick(db, pick, target, rng) {
+                    self.gem_at(db, i, count as i32, false);
+                }
+            }
+            FightAct::Summon { card, count, keywords } => {
+                // A trinket has no source minion, so its summons go to the
+                // right end (DESIGN.md).
+                let mut at = self.ms.len();
+                for _ in 0..count {
+                    if !self.summon(db, side, at, db.make(card, false), uid, rng, w) {
+                        break;
+                    }
+                    self.ms[at].m.keywords.set(keywords);
+                    at += 1;
+                }
+            }
+            FightAct::Bonus { gem, spell } => {
+                if gem != (0, 0) {
+                    self.counters.gem_attack += gem.0;
+                    self.counters.gem_health += gem.1;
+                    self.out.gem_gain.0 += gem.0;
+                    self.out.gem_gain.1 += gem.1;
+                }
+                if spell != (0, 0) {
+                    self.counters.spell_attack += spell.0;
+                    self.counters.spell_health += spell.1;
+                    self.out.spell_bonus_gain.0 += spell.0;
+                    self.out.spell_bonus_gain.1 += spell.1;
+                }
+            }
+            FightAct::RandomSpell(n) => {
+                for _ in 0..n {
+                    if let Some(c) = db.random_spell(self.counters.tier, self.counters.lobby, rng) {
+                        self.out.push_card(c);
+                    }
+                }
+            }
+            FightAct::RandomMagnetic(n) => {
+                for _ in 0..n {
+                    if let Some(c) =
+                        db.random_magnetic_minion(self.counters.tier, self.counters.lobby, rng)
+                    {
+                        self.out.push_card(c);
+                    }
+                }
+            }
+            FightAct::FreeRefreshes(n) => {
+                self.out.free_refresh_gain = self.out.free_refresh_gain.saturating_add(n);
+            }
+            FightAct::Improve(amount) => {
+                let slot = e.slot;
+                let n = self.counters.trinkets.len();
+                for a in self.counters.trinkets.acts[..n].iter_mut() {
+                    if a.slot == slot {
+                        a.value = a.value.saturating_add(amount as i16);
+                    }
+                }
+                let s = slot as usize % crate::TRINKET_SLOTS;
+                self.out.trinket_improve[s] =
+                    self.out.trinket_improve[s].saturating_add(amount);
+            }
+            FightAct::CopyToHand { pick } => {
+                for i in self.pick(db, pick, target, rng) {
+                    self.out.push_card(self.ms[i].m.card);
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn summon(
         &mut self,
         db: &CardDb,
@@ -915,13 +1377,15 @@ impl<'a> Side<'a> {
         pos: usize,
         m: Minion,
         uid: &mut u16,
+        rng: &mut Rng,
         w: &mut impl Watch,
     ) -> bool {
-        self.summon_with(db, side, pos, m, uid, w, true)
+        self.summon_with(db, side, pos, m, uid, rng, w, true)
     }
 
     /// Summon a minion that already carries the player's bonuses (a hand
     /// minion, an exact copy): the Undead and Knight bonuses are not added.
+    #[allow(clippy::too_many_arguments)]
     fn summon_baked(
         &mut self,
         db: &CardDb,
@@ -929,9 +1393,10 @@ impl<'a> Side<'a> {
         pos: usize,
         m: Minion,
         uid: &mut u16,
+        rng: &mut Rng,
         w: &mut impl Watch,
     ) -> bool {
-        self.summon_with(db, side, pos, m, uid, w, false)
+        self.summon_with(db, side, pos, m, uid, rng, w, false)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -942,6 +1407,7 @@ impl<'a> Side<'a> {
         pos: usize,
         mut m: Minion,
         uid: &mut u16,
+        rng: &mut Rng,
         w: &mut impl Watch,
         bonus: bool,
     ) -> bool {
@@ -1048,6 +1514,21 @@ impl<'a> Side<'a> {
                 }
             }
         }
+        // The trinkets that listen for a summon (Mama Bear Sticker, Reinforced
+        // Shield, Slamma Sticker) run on the minion as it now stands, and the
+        // ones whose "after N Beasts summoned" counter carries across turns
+        // count it for the shop. They run before the watcher sees it, so a
+        // test watching the summon sees what the fight sees.
+        if self.counters.trinkets.count_summons {
+            let tribes = db.get(m.card).tribes;
+            for (i, t) in Tribe::EVERY.into_iter().enumerate() {
+                if tribes.has(t) {
+                    self.out.summon_tribes[i] = self.out.summon_tribes[i].saturating_add(1);
+                }
+            }
+        }
+        let new = self.ms[pos].m;
+        self.trinket_hook(db, side, When::Summon, Some((self.ms[pos].uid, new)), uid, rng, w);
         w.summon(side, pos, &self.ms[pos].m);
         true
     }
@@ -1057,6 +1538,7 @@ impl<'a> Side<'a> {
         db: &CardDb,
         side: usize,
         uid: &mut u16,
+        rng: &mut Rng,
         w: &mut impl Watch,
     ) {
         if self.counters.boon_of_beetles == 0 || self.ms.is_full() {
@@ -1067,7 +1549,7 @@ impl<'a> Side<'a> {
             let mut m = db.make(tok, false);
             m.keywords.set(Keywords::TAUNT);
             let pos = self.ms.len();
-            if self.summon(db, side, pos, m, uid, w) {
+            if self.summon(db, side, pos, m, uid, rng, w) {
                 self.counters.boon_of_beetles -= 1;
                 self.out.boon_of_beetles_used = self.out.boon_of_beetles_used.saturating_add(1);
             } else {
@@ -1080,9 +1562,50 @@ impl<'a> Side<'a> {
     /// for each Titus Rivendare and two for a golden one ("an extra time"
     /// stacks). Every path that fires a Deathrattle asks here, so a new way
     /// to repeat them (trinkets, quest rewards) is added in this one place.
-    fn deathrattle_fires(&self, db: &CardDb) -> u32 {
-        let parts = self.ms.iter().filter(|f| f.m.health > 0).flat_map(|f| f.m.parts());
-        how_many_times(db, parts, |a| (a == Aura::Titus).then_some(TimesRole::Adder)) as u32
+    /// Fish of N'Zoth: the minion with uid `dead_uid` died with these
+    /// Deathrattles, so each friendly minion that gains Deathrattles this way
+    /// takes a copy of each (twice when the Fish is golden). It fires them
+    /// when it dies, and each one only once: the Fish takes only the dead
+    /// minion's own Deathrattles, not the ones it had already gained.
+    fn gain_deathrattles(&mut self, db: &CardDb, dead_uid: u16, dead: &Minion) {
+        let mut got: ArrayVec<Attached, 8> = ArrayVec::new();
+        for (card, golden) in dead.parts() {
+            if db.get(card).deathrattle.is_some() {
+                let _ = got.try_push(Attached { card, golden });
+            }
+        }
+        if got.is_empty() {
+            return;
+        }
+        for i in 0..self.ms.len() {
+            let uid = self.ms[i].uid;
+            if uid == dead_uid || self.ms[i].m.health <= 0 {
+                continue;
+            }
+            let times = self.ms[i]
+                .m
+                .parts()
+                .filter(|&(c, _)| db.get(c).gains_friendly_deathrattles)
+                .map(|(_, golden)| if golden { 2 } else { 1 })
+                .max()
+                .unwrap_or(0);
+            for _ in 0..times {
+                for &a in &got {
+                    let _ = self.gained_dr.try_push((uid, a));
+                }
+            }
+        }
+    }
+
+    fn deathrattle_fires(&mut self, db: &CardDb) -> u32 {
+        let n = {
+            let parts = self.ms.iter().filter(|f| f.m.health > 0).flat_map(|f| f.m.parts());
+            how_many_times(db, parts, |a| (a == Aura::Titus).then_some(TimesRole::Adder)) as u32
+        };
+        // Deathly Phylactery: the first Deathrattle of the fight fires once
+        // more than it otherwise would ("each combat": a shop destroy is not
+        // one).
+        n + u32::from(!self.outside && self.counters.trinkets.take_first_deathrattle())
     }
 
     /// Play `times` Blood Gems on the minion in slot `i`: its stats for this
@@ -1146,7 +1669,7 @@ impl<'a> Side<'a> {
                     (count, golden)
                 };
                 for _ in 0..n {
-                    if self.summon(db, fx.side, *at, db.make(card, g), uid, w) {
+                    if self.summon(db, fx.side, *at, db.make(card, g), uid, rng, w) {
                         *at += 1;
                     }
                 }
@@ -1161,7 +1684,7 @@ impl<'a> Side<'a> {
                     .take((count as i32 * mul) as usize).copied().collect();
                 for dead in dead {
                     let (attack, health) = (dead.attack, dead.health);
-                    if !self.summon(db, fx.side, *at, dead, uid, w) {
+                    if !self.summon(db, fx.side, *at, dead, uid, rng, w) {
                         break;
                     }
                     self.ms[*at].m.attack = attack;
@@ -1178,7 +1701,7 @@ impl<'a> Side<'a> {
                 };
                 for _ in 0..n {
                     let m = db.make(card, g);
-                    if self.summon(db, fx.side, *at, m, uid, w) {
+                    if self.summon(db, fx.side, *at, m, uid, rng, w) {
                         if fx.skip_ptr && *at == self.ptr {
                             self.ptr += 1;
                         }
@@ -1250,7 +1773,7 @@ impl<'a> Side<'a> {
                 for _ in 0..count as i32 * mul {
                     let Some(c) = db.random_deathrattle_minion(self.counters.tier, self.counters.lobby, rng) else { break };
                     let m = db.make(c, false);
-                    if self.summon(db, fx.side, *at, m, uid, w) {
+                    if self.summon(db, fx.side, *at, m, uid, rng, w) {
                         *at += 1;
                     }
                 }
@@ -1327,9 +1850,9 @@ impl<'a> Side<'a> {
                     }
                 }
             }
-            Effect::SummonFromHand { tribe, count } => {
+            Effect::SummonFromHand { tribe, count, by_health } => {
                 let n = count as u32 * mul as u32;
-                self.summon_from_hand(db, fx.side, at, n, tribe, fx.skip_ptr, uid, w);
+                self.summon_from_hand(db, fx.side, at, n, tribe, by_health, fx.skip_ptr, uid, rng, w);
             }
             Effect::ShieldDragons { count } => {
                 // Dragons without Divine Shield come first; once every one
@@ -1484,7 +2007,7 @@ impl<'a> Side<'a> {
             }
             Effect::SummonAttacker { card } => {
                 let m = db.make(card, golden);
-                if self.summon(db, fx.side, *at, m, uid, w) {
+                if self.summon(db, fx.side, *at, m, uid, rng, w) {
                     let new = *uid - 1;
                     let _ = self.immediate.try_push(new);
                     if fx.skip_ptr && *at == self.ptr {
@@ -1515,7 +2038,7 @@ impl<'a> Side<'a> {
             Effect::SummonHeld => {
                 while let Some(&c) = self.held.first() {
                     let m = db.make(c, false);
-                    if !self.summon(db, fx.side, *at, m, uid, w) {
+                    if !self.summon(db, fx.side, *at, m, uid, rng, w) {
                         break;
                     }
                     self.held.remove(0);
@@ -1559,7 +2082,7 @@ impl<'a> Side<'a> {
                     if host != fx.host {
                         continue;
                     }
-                    if self.summon_baked(db, fx.side, *at, copy, uid, w) {
+                    if self.summon_baked(db, fx.side, *at, copy, uid, rng, w) {
                         if fx.skip_ptr && *at == self.ptr {
                             self.ptr += 1;
                         }
@@ -1619,7 +2142,7 @@ impl<'a> Side<'a> {
                 let mut m = db.make(card, false);
                 m.attack = self.ms[hi].m.attack.saturating_mul(mul);
                 m.health = self.ms[hi].m.health.saturating_mul(mul);
-                if self.summon(db, fx.side, *at, m, uid, w) {
+                if self.summon(db, fx.side, *at, m, uid, rng, w) {
                     if fx.skip_ptr && *at == self.ptr {
                         self.ptr += 1;
                     }
@@ -1650,9 +2173,26 @@ impl<'a> Side<'a> {
     ) -> usize {
         let mut pos = at;
         self.dr_card = Some(dead.card);
+        // The Deathrattles this minion gained from the Fish of N'Zoth's text
+        // fire with its own, once each: they are taken out of the side's
+        // list here, so a Reborn Fish (a new uid) does not fire them again.
+        let mut parts: ArrayVec<Attached, FISH_DR> = ArrayVec::new();
+        for (card, golden) in dead.parts() {
+            let _ = parts.try_push(Attached { card, golden });
+        }
+        let mut k = 0;
+        while k < self.gained_dr.len() {
+            if self.gained_dr[k].0 == host {
+                let (_, a) = self.gained_dr.remove(k);
+                let _ = parts.try_push(a);
+            } else {
+                k += 1;
+            }
+        }
         for _ in 0..runs {
-            for (card, golden) in dead.parts() {
+            for &Attached { card, golden } in &parts {
                 let Some(dr) = db.get(card).deathrattle else { continue };
+                self.dr_card = Some(card);
                 self.note_deathrattle(db);
                 let mul = if golden { 2 } else { 1 };
                 match dr {
@@ -1667,7 +2207,7 @@ impl<'a> Side<'a> {
                         };
                         for _ in 0..n {
                             let m = db.make(tok, tok_golden);
-                            if self.summon(db, side, pos, m, uid, w) {
+                            if self.summon(db, side, pos, m, uid, rng, w) {
                                 pos += 1;
                             }
                         }
@@ -1676,7 +2216,7 @@ impl<'a> Side<'a> {
                         let n = dead.attack.max(0) as usize;
                         for _ in 0..n {
                             let m = db.make(tok, golden);
-                            if self.summon(db, side, pos, m, uid, w) {
+                            if self.summon(db, side, pos, m, uid, rng, w) {
                                 pos += 1;
                             }
                         }
@@ -1708,6 +2248,36 @@ impl<'a> Side<'a> {
                     Deathrattle::Effect(e) => {
                         let fx = Fx { side, host, killer, attacker: None, skip_ptr: false };
                         self.run_effect(db, e, golden, fx, &mut pos, uid, rng, w);
+                    }
+                }
+            }
+            // A Deathrattle a trinket gave this minion for the fight (Hoggy
+            // Bank, Jarred Frostling, Sky Golem Portrait). It fires with the
+            // minion's own, once per run, whether or not the card has one.
+            if let Some(dr) = self.granted.iter().find(|(u, _)| *u == host).map(|&(_, dr)| dr) {
+                self.note_deathrattle(db);
+                match dr {
+                    GrantedDr::Gems(n) => {
+                        if let Some(gem) = db.blood_gem {
+                            for _ in 0..n {
+                                self.out.push_card(gem);
+                            }
+                        }
+                    }
+                    GrantedDr::Summon { card: tok, count } => {
+                        for _ in 0..count {
+                            let m = db.make(tok, false);
+                            if self.summon(db, side, pos, m, uid, rng, w) {
+                                pos += 1;
+                            }
+                        }
+                    }
+                    GrantedDr::BuffAll { attack, health } => {
+                        for i in 0..self.ms.len() {
+                            if self.ms[i].m.health > 0 {
+                                self.gain_permanent_at(db, i, attack, health);
+                            }
+                        }
                     }
                 }
             }
@@ -1792,10 +2362,12 @@ impl<'a> Side<'a> {
         god.attack = deity.attack;
         god.health = deity.health.max(1);
         let at = self.ms.len();
-        if !self.summon(db, side, at, god, uid, w) {
+        if !self.summon(db, side, at, god, uid, rng, w) {
             return;
         }
         self.deity_awakened = true;
+        let god = self.ms[at].m;
+        self.trinket_hook(db, side, When::Awaken, Some((self.ms[at].uid, god)), uid, rng, w);
         if db.get(deity.card).deity != Some(DeityKind::Cthun) {
             return;
         }
@@ -1869,9 +2441,29 @@ impl<'a> Side<'a> {
             let fm = self.remove(i);
             let dead = fm.m;
             w.death(side, i, &dead);
+            if self.counters.trinkets.count_deaths {
+                self.out.friendly_deaths = self.out.friendly_deaths.saturating_add(1);
+                if self.counters.trinkets.count_death_tribes != 0 {
+                    let tribes = db.get(dead.card).tribes;
+                    for (k, t) in Tribe::EVERY.into_iter().enumerate() {
+                        if tribes.has(t) {
+                            self.out.death_tribes[k] =
+                                self.out.death_tribes[k].saturating_add(1);
+                        }
+                    }
+                }
+            }
+            // A death is what a "whenever a friendly minion dies" trinket
+            // waits for, and what Avenge counts (its N runs of deaths).
+            self.trinket_hook(db, side, When::Death, Some((fm.uid, dead)), uid, rng, w);
+            self.trinket_hook(db, side, When::Avenge, Some((fm.uid, dead)), uid, rng, w);
             if db.get(dead.card).buff_per_kind_death.is_some() {
                 self.note_knight_death(db);
             }
+            // Fish of N'Zoth: a different friendly Deathrattle minion died,
+            // so every minion with that text gains its Deathrattle for the
+            // rest of the fight.
+            self.gain_deathrattles(db, fm.uid, &dead);
             let runs = self.deathrattle_fires(db);
             i += self.fire_deathrattles(db, side, &dead, fm.uid, fm.killer, i, runs, uid, rng, w);
             self.note_deity_death(db, side, fm, uid, rng, w);
@@ -1885,9 +2477,12 @@ impl<'a> Side<'a> {
                 let full = m.health;
                 m.health = 1;
                 m.keywords.clear(Keywords::REBORN);
-                if self.summon(db, side, i, m, uid, w) {
+                if self.summon(db, side, i, m, uid, rng, w) {
                     self.ms[i].taken = (full - 1).max(0);
                     self.note_reborn(db, i);
+                    let plain = self.ms[i].m;
+                    let u = self.ms[i].uid;
+                    self.trinket_hook(db, side, When::Reborn, Some((u, plain)), uid, rng, w);
                     i += 1;
                 }
             }
@@ -2036,8 +2631,8 @@ fn resolve_deaths(
         }
     }
     let (att, def) = pair(sides, first_side);
-    att.spawn_boon_of_beetles(db, first_side, uid, w);
-    def.spawn_boon_of_beetles(db, first_side ^ 1, uid, w);
+    att.spawn_boon_of_beetles(db, first_side, uid, rng, w);
+    def.spawn_boon_of_beetles(db, first_side ^ 1, uid, rng, w);
 }
 
 fn run_start_of_combat(
@@ -2048,7 +2643,7 @@ fn run_start_of_combat(
     w: &mut impl Watch,
 ) {
     for s in 0..2 {
-        sides[s].spawn_boon_of_beetles(db, s, uid, w);
+        sides[s].spawn_boon_of_beetles(db, s, uid, rng, w);
     }
     // A hero power's Start of Combat goes before any minion's (DESIGN.md
     // "Order of events"): Al'Akir's left-most minion gains its keywords.
@@ -2062,17 +2657,10 @@ fn run_start_of_combat(
     }
     // A trinket's Start of Combat comes at the same step as the hero power's
     // (DESIGN.md: hero powers, then the lesser trinket, then the greater).
+    // The bundle holds the slots in order, so a lesser trinket's effect runs
+    // before a greater one's.
     for s in 0..2 {
-        let Some((tribes, kw)) = sides[s].counters.soc_tribe else { continue };
-        if kw == 0 {
-            continue;
-        }
-        for i in 0..sides[s].ms.len() {
-            let card = db.get(sides[s].ms[i].m.card);
-            if tribes == 0 || card.tribes.mask() & tribes != 0 {
-                sides[s].ms[i].m.keywords.0 |= kw;
-            }
-        }
+        sides[s].trinket_hook(db, s, When::Soc, None, uid, rng, w);
     }
     // Flighty Scout triggers from the hand, so it comes before the board's
     // Start of Combat effects. One copy each, in hand order, if there is
@@ -2089,7 +2677,7 @@ fn run_start_of_combat(
             }
             let m = sides[s].hand_at(i);
             let at = sides[s].ms.len();
-            sides[s].summon_baked(db, s, at, m, uid, w);
+            sides[s].summon_baked(db, s, at, m, uid, rng, w);
         }
     }
     for s in 0..2 {
@@ -2428,7 +3016,7 @@ fn attack_triggers(
                         golem.attack = a.saturating_mul(k);
                         golem.health = h.saturating_mul(k);
                         let at = hi + 1;
-                        if sides[turn].summon(db, turn, at, golem, uid, w)
+                        if sides[turn].summon(db, turn, at, golem, uid, rng, w)
                             && let Some(&t) = target.as_ref()
                         {
                             let golem_uid = sides[turn].ms[at].uid;
@@ -2469,6 +3057,11 @@ fn attack_triggers(
                 sides[turn].run_effect(db, t.effect, golden, fx, &mut at, uid, rng, w);
             }
         }
+    }
+    // A trinket's "whenever a friendly Beast attacks" comes after the
+    // minions' own triggers for the same attack, once per swing.
+    if !after {
+        sides[turn].trinket_hook(db, turn, When::Attack, Some((me, *attacker)), uid, rng, w);
     }
 }
 
@@ -2671,6 +3264,31 @@ fn attack_swings_at(
                         def.note_shield_lost(db);
                     }
                 }
+            }
+        }
+        // Tide Oracle Morgl: after it attacks and kills a minion, that
+        // minion's maximum stats (its Attack and its maximum Health) go to a
+        // random card in its owner's hand. A golden one gives double.
+        if dealt_x > 0
+            && y_alive
+            && let Some(di) = def.index_of(def_uid)
+            && def.ms[di].m.health <= 0
+        {
+            // Maximum Health: the Health it had before the hit plus the
+            // damage it had already taken. (Its `taken` after the hit counts
+            // only the damage dealt, so a Venomous kill, which does not need
+            // to deal its Health, would undercount.)
+            let killed = def.ms[di].m;
+            let taken_before = def.ms[di].taken - dealt_x;
+            let max_health = def_health_before + taken_before;
+            let mult = attacker
+                .parts()
+                .filter(|&(c, _)| db.get(c).on_kill.is_some())
+                .map(|(_, golden)| if golden { 2 } else { 1 })
+                .max()
+                .unwrap_or(0);
+            if mult > 0 {
+                att.buff_random_hand(db, killed.attack * mult, max_health * mult, rng);
             }
         }
         let Some(di) = def.index_of(def_uid) else { continue };
@@ -3017,7 +3635,7 @@ mod tests {
 
         // a second Lobster, made plain, now gives +4/+2
         let lobster = db.make(db.by_name("Tasty Lobster").unwrap(), false);
-        s.summon(&db, 0, 0, lobster, &mut uid, &mut ());
+        s.summon(&db, 0, 0, lobster, &mut uid, &mut rng, &mut ());
         assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (2, 1));
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
@@ -3099,7 +3717,7 @@ mod tests {
         assert!(!has_taunt(&db, &deflector(&s)));
         for k in 1..=3 {
             let m = db.make(db.by_name("Microbot").unwrap(), false);
-            s.summon(&db, 0, 1, m, &mut uid, &mut ());
+            s.summon(&db, 0, 1, m, &mut uid, &mut rng, &mut ());
             s.ms[1].m.health = 0;
             s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
             assert_eq!(deflector(&s).keywords.has(Keywords::DIVINE_SHIELD), k == 3, "after death {}", k + 3);

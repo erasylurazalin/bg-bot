@@ -383,7 +383,9 @@ fn the_label_is_asked_when_the_game_ends() {
     // 40 turns is the turn limit: the game ends and asks without a quit
     let dir = tmp("game-end");
     let mut s = open_session(8, None, &dir);
-    let script = "e\n".repeat(40) + "grind\nquit\n";
+    // "1" answers a Discover a trinket can open at the start of a turn (it
+    // is refused, and harmless, when nothing is open); "e" ends the turn.
+    let script = "1\ne\n".repeat(40) + "grind\nquit\n";
     let out = play_script(&mut s, &script);
     assert!(out.contains("GAME OVER"), "{out}");
     assert!(out.contains("Label this game"), "{out}");

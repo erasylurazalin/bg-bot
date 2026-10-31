@@ -58,6 +58,7 @@ enum Hook {
     OnCastSpell,
     OnCastSpellOnMinion,
     OnDiscard,
+    OnGet,
     OnGoldSpent,
     Rule,
 }
@@ -310,6 +311,7 @@ impl Game {
             Hook::OnCastSpell => &t.on_cast_spell,
             Hook::OnCastSpellOnMinion => &t.on_cast_spell_on_minion,
             Hook::OnDiscard => &t.on_discard,
+            Hook::OnGet => &t.on_get,
             Hook::OnGoldSpent => &t.on_gold_spent,
             Hook::Rule => t.rule.as_ref().map_or(&[], |r| &r.acts),
         }
@@ -334,6 +336,7 @@ impl Game {
                     value: 0,
                     uses_left: t.uses_per_turn.unwrap_or(u8::MAX),
                     done: false,
+                    card: None,
                 }
             }
         };
@@ -388,19 +391,43 @@ impl Game {
         if self.players[p].trinket_events & crate::trinkets::STARTS_TURN == 0 {
             return;
         }
+        // Whether each slot's start-of-turn list runs this turn (a trinket
+        // that fires only every N turns skips the ones between).
+        let mut fires = [true; TRINKET_SLOTS];
         for slot in 0..TRINKET_SLOTS {
             let Some(i) = self.trinket_of(p, slot) else { continue };
-            let (uses, ticks) = {
+            let (uses, ticks, start_every) = {
                 let t = self.data.trinkets.get(i);
-                (t.uses_per_turn.unwrap_or(u8::MAX), t.rule.as_ref().is_some_and(|r| r.event == Event::Turns))
+                (
+                    t.uses_per_turn.unwrap_or(u8::MAX),
+                    t.rule.as_ref().is_some_and(|r| r.event == Event::Turns),
+                    t.start_every,
+                )
             };
             let st = &mut self.players[p].trinkets[slot];
             st.uses_left = uses;
             if ticks && !st.done {
                 st.count = st.count.saturating_add(1);
             }
+            // "At the start of every two turns": the count runs the turns
+            // since the pick (the pick turn's own start has passed).
+            if let Some(n) = start_every {
+                st.count = st.count.saturating_add(1);
+                if st.count >= n as u16 {
+                    st.count = 0;
+                } else {
+                    fires[slot] = false;
+                }
+            }
         }
+        // "The first N times you Discover a card each turn" (Sinstone
+        // Sticker): a fresh count every turn.
+        let tp = &mut self.players[p].tp;
+        tp.discover_copies = tp.discover_copies_base;
         for slot in 0..TRINKET_SLOTS {
+            if !fires[slot] {
+                continue;
+            }
             let Some(i) = self.trinket_of(p, slot) else { continue };
             self.run_trinket_hook(p, slot, i, Hook::StartOfTurn);
         }
@@ -472,7 +499,13 @@ impl Game {
                     Event::Refresh => Some(Hook::OnRefresh),
                     Event::CastSpell => Some(Hook::OnCastSpell),
                     Event::CastSpellOnMinion => Some(Hook::OnCastSpellOnMinion),
-                    Event::Discard if !t.discard_spells_only || card_is_spell => Some(Hook::OnDiscard),
+                    Event::Discard
+                        if (!t.discard_spells_only || card_is_spell)
+                            && (!t.discard_minions_only || !card_is_spell) =>
+                    {
+                        Some(Hook::OnDiscard)
+                    }
+                    Event::GetTribe(w) if t.get_tribe.is_none_or(|x| x == w) => Some(Hook::OnGet),
                     Event::GoldSpent => Some(Hook::OnGoldSpent),
                     _ => None,
                 };
@@ -511,11 +544,17 @@ impl Game {
             if st.count < every as u16 {
                 continue;
             }
-            st.count = 0;
+            // A bulk event (the 8 deaths of one shop destroy, the Beasts of
+            // one fight) can cross the threshold more than once, and what is
+            // left over counts toward the next one.
+            let fires = (st.count / every as u16).min(8);
+            st.count -= fires * every as u16;
             if once {
                 st.done = true;
             }
-            self.run_trinket_hook(p, slot, i, Hook::Rule);
+            for _ in 0..fires {
+                self.run_trinket_hook(p, slot, i, Hook::Rule);
+            }
         }
     }
 
@@ -549,6 +588,13 @@ impl Game {
                 }
                 // The queue is started by the cast path; a trinket is not a
                 // cast, so start it here.
+                self.maybe_start_discover(p);
+            }
+            Act::DiscoverDeathrattle(n) => {
+                for _ in 0..n {
+                    let se = SpellEffect::Discover(DiscoverKind::DeathrattleMinion);
+                    self.execute_spell_effect(p, se, false);
+                }
                 self.maybe_start_discover(p);
             }
             Act::RandomChromadrake(n) => {
@@ -794,6 +840,126 @@ impl Game {
                     self.execute_spell_effect(p, e, false);
                 }
             }
+            Act::DiscoverRemember { tier, typed } => {
+                let req = if typed {
+                    super::DiscoverRequest::TypedMinionTier(tier)
+                } else {
+                    super::DiscoverRequest::MinionTier(tier)
+                };
+                let _ = self.players[p].discover_queue.try_push(req);
+                self.players[p].tp.remember_in = slot as u8 + 1;
+                self.maybe_start_discover(p);
+            }
+            Act::DiscoverTier(tier) => {
+                let _ = self.players[p].discover_queue.try_push(super::DiscoverRequest::MinionTier(tier));
+                self.maybe_start_discover(p);
+            }
+            Act::CopyBuys(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.copy_buys = tp.copy_buys.saturating_add(n);
+            }
+            Act::GetRemembered(n) => {
+                let Some(card) = self.players[p].trinkets[slot].card else { return };
+                for _ in 0..n {
+                    self.give_generated(p, card);
+                }
+            }
+            Act::RandomBattlecry(n) => {
+                let tier = self.players[p].tier;
+                for _ in 0..n {
+                    match self.data.cards.random_battlecry_minion(tier, self.lobby, &mut self.rng) {
+                        Some(c) => self.give_generated(p, c),
+                        None => break,
+                    }
+                }
+            }
+            Act::PlainCopyRandomFriendly(n) => self.run_effect(
+                p,
+                &mut pos,
+                Effect::PlainCopyRandomFriendly,
+                false,
+                n,
+            ),
+            Act::CopyLastDiscarded => {
+                self.run_effect(p, &mut pos, Effect::CopyLastDiscarded, false, 1)
+            }
+            Act::GemsEachType(n) => {
+                // One friendly minion of each type on the board, picked at
+                // random when several share a type (Aggem Sticker).
+                let cards = &self.data.cards;
+                let mut picked: ArrayVec<usize, { Tribe::EVERY.len() }> = ArrayVec::new();
+                for t in Tribe::EVERY {
+                    let mut of: ArrayVec<usize, { crate::BOARD }> = self.players[p]
+                        .board
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, m)| cards.get(m.card).tribes.has(t))
+                        .map(|(i, _)| i)
+                        .collect();
+                    if of.is_empty() {
+                        continue;
+                    }
+                    let k = self.rng.below(of.len() as u32) as usize;
+                    let _ = picked.try_push(of.swap_remove(k));
+                }
+                for at in picked {
+                    self.play_gems_on_board(p, at, n);
+                }
+            }
+            Act::DiscoverCopyBonus(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.discover_copies_base = n;
+                tp.discover_copies = n;
+            }
+            Act::BuffLeftmostBoard { attack, health } => {
+                self.execute_spell_effect(p, SpellEffect::BuffLeftmost { attack, health }, false)
+            }
+            Act::GetGolden { card } => {
+                if self.players[p].hand.is_full() {
+                    return;
+                }
+                let m = self.players[p].make_card(&self.data.cards, card, true, 0);
+                self.add_to_hand(p, m);
+            }
+            Act::LockboxSooner(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.lockbox_sooner = tp.lockbox_sooner.saturating_add(n);
+            }
+            Act::MagnetizeEnds { card, tribe } => {
+                // A copy of the card is Magnetized to the left-most and the
+                // right-most minion of the tribe (Accord-o-Tron Portrait). A
+                // lone minion is both ends and takes it once, like the
+                // "ends" picks of the Start of Combat trinkets. The right end
+                // is found again after the first Magnetization: its triggers
+                // can change the board (2026-10-31: a stale index panicked).
+                let find_left = |g: &Self| {
+                    g.players[p].board.iter().position(|m| g.data.cards.get(m.card).is(tribe))
+                };
+                if let Some(l) = find_left(self) {
+                    let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+                    self.magnetize_to(p, l, m, false);
+                    let r = self.players[p]
+                        .board
+                        .iter()
+                        .rposition(|m| self.data.cards.get(m.card).is(tribe));
+                    if let Some(r) = r
+                        && r != l
+                    {
+                        let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+                        self.magnetize_to(p, r, m, false);
+                    }
+                }
+            }
+            Act::OneOf { a, b } => {
+                let pick = if self.rng.below(2) == 0 { a } else { b };
+                self.give_generated(p, pick);
+            }
+            Act::WarbandWhistle => {
+                let tp = &mut self.players[p].tp;
+                tp.whistle = true;
+                self.players[p].free_rolls = self.players[p].free_rolls.saturating_add(1);
+            }
+            Act::TripleNeedTwoPirate => self.players[p].tp.pirate_triple = true,
             Act::RandomMostCommonType(n) => {
                 let mut counts = [0u8; Tribe::EVERY.len()];
                 let cards = &self.data.cards;

@@ -2075,6 +2075,95 @@ stats = [1, 1]
 deity = "yshaarj"
 deathrattle = { effect = { summon_dead_aberrations = 2 } }
 
+# --- Trinket-only minions (generated, no pool copies) ---
+# DESIGN.md "Generated minions outside the pool": these come only from a
+# trinket, like Beetles. Stats and text are the game data's.
+
+# Morgl Portrait (BG32_MagicItem_926). Poisonous, and the minion it attacks
+# and kills gives its maximum stats to a card in its owner's hand.
+[[token]]
+name = "Tide Oracle Morgl"
+tier = 7
+tribe = "murloc"
+stats = [1, 10]
+golden_stats = [2, 20]
+keywords = ["venomous"]
+on_kill = "max_stats_to_hand"
+
+# Behemoth Portrait (BG32_MagicItem_998).
+[[token]]
+name = "Arcane Behemoth"
+tier = 7
+tribe = "elemental"
+stats = [4, 8]
+golden_stats = [8, 16]
+keywords = ["taunt"]
+on_sell = { gain_sold_stats = "elemental" }
+
+# Boom's Monster Portrait (BG32_MagicItem_172), the Greater one: an extra
+# copy every turn.
+[[token]]
+name = "Dr. Boom's Monster"
+tier = 6
+tribe = "mech"
+stats = [2, 2]
+golden_stats = [4, 4]
+keywords = ["magnetic"]
+buff_per_magnetize = [2, 2]
+
+# Grifter Portrait (BG32_MagicItem_957).
+[[token]]
+name = "Doubloon Grifter"
+tier = 4
+tribe = "pirate"
+stats = [6, 6]
+golden_stats = [12, 12]
+on_event = { event = "got_pirate", every = 4, effect = { max_gold = 1 } }
+
+# Bassgill Portrait (BG32_MagicItem_301): the highest-Health Murloc from
+# hand, for this combat only (the fight's summon from hand puts it back after
+# the fight).
+[[token]]
+name = "Bassgill"
+tier = 3
+tribe = "murloc"
+stats = [5, 2]
+golden_stats = [10, 4]
+deathrattle = { effect = { summon_from_hand = "murloc", by_health = true } }
+
+# Manipulator Portrait (BG30_MagicItem_876). The game data marks it an
+# Aberration (BG_EX1_564), but that trinket is neutral (no lobby_subsets), so
+# it hands the token out in every lobby; a token has to fit the lobby it is
+# generated in, and the minion becomes a copy of another one on the turn it
+# is played anyway, so it is neutral here.
+[[token]]
+name = "Faceless Manipulator"
+tier = 1
+tribe = "neutral"
+stats = [3, 3]
+golden_stats = [6, 6]
+battlecry = { become_copy = true }
+
+# Jarred Frostling (BG30_MagicItem_952) gives 3 friendly Elementals a
+# Deathrattle that summons this.
+[[token]]
+name = "Flourishing Frostling"
+tier = 5
+tribe = "elemental"
+stats = [2, 1]
+golden_stats = [4, 2]
+buff_per_elemental_played = [2, 1]
+
+# Fish Portrait (BG30_MagicItem_821). The game data's card is the token of
+# N'Zoth's hero power (TB_BaconShop_HP_105t), never in the pool.
+[[token]]
+name = "Fish of N'Zoth"
+tier = 1
+tribe = "beast"
+stats = [2, 2]
+golden_stats = [4, 4]
+gains_friendly_deathrattles = true
+
 # --- Spells: Tier 1 ---
 
 [[spell]]
@@ -2275,6 +2364,22 @@ lobby = "murloc"
 tier = 3
 cost = 2
 effect = { target = "chosen", buff = [1, 1], per_bonus_keyword = true }
+
+# Given by Lens Case (BG35_MagicItem_817) only, never in the Tavern.
+[[spell]]
+name = "Duplicating Lens"
+tier = 0
+cost = 0
+token = true
+effect = { target = "chosen", plain_copy = 3 }
+
+# Given by Goldenizer Supply (BG30_MagicItem_435) only.
+[[spell]]
+name = "The Goldenizer"
+tier = 0
+cost = 0
+token = true
+effect = { target = "chosen", make_golden_max_tier = 6 }
 
 [[spell]]
 name = "Cloning Conch"

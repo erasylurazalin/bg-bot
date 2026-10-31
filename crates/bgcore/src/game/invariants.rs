@@ -84,6 +84,22 @@ impl Game {
                 // greater offer into the lesser slot, and Mysterious Orb
                 // makes the next offer a lesser one (DESIGN.md, second
                 // round). The power slot holds whatever the power offered.
+                // The card a trinket remembers (Portable Factory) is a real
+                // card of the table.
+                if let Some(c) = st.card
+                    && c as usize >= cards.cards.len()
+                {
+                    return Err(format!("player {i}: trinket slot {slot} remembers card {c}"));
+                }
+            }
+            // A Discover waiting to be remembered belongs to a held slot.
+            if pl.tp.remember_in != 0 {
+                let slot = pl.tp.remember_in as usize - 1;
+                if slot >= crate::TRINKET_SLOTS || pl.trinkets[slot].of == 0 {
+                    return Err(format!(
+                        "player {i}: a Discover would be remembered by an empty slot"
+                    ));
+                }
             }
             {
                 let mut mask = 0;
@@ -91,6 +107,21 @@ impl Game {
                     if st.of != 0 {
                         mask |= self.data.trinkets.get(st.of - 1).event_mask();
                     }
+                }
+                // The fight bundle holds every held trinket's fight acts at
+                // once (`FIGHT_ACTS`); a table that outgrows it would drop
+                // one silently in `fight_trinkets`.
+                let acts: usize = pl
+                    .trinkets
+                    .iter()
+                    .filter(|st| st.of != 0)
+                    .map(|st| self.data.trinkets.get(st.of - 1).fight.len())
+                    .sum();
+                if acts > crate::trinkets::FIGHT_ACTS {
+                    return Err(format!(
+                        "player {i}: {acts} fight acts held, the bundle holds {}",
+                        crate::trinkets::FIGHT_ACTS
+                    ));
                 }
                 if mask != pl.trinket_events {
                     return Err(format!(

@@ -51,6 +51,10 @@ impl Game {
         }
         let extra = std::mem::take(&mut self.players[p].board[pos].extra_magnetize);
         self.players[p].board[pos].magnetize(cards, m);
+        {
+            let pl = &mut self.players[p];
+            pl.magnetizations = pl.magnetizations.saturating_add(1);
+        }
         if let Some((da, dh)) = cards.get(m.card).volumizer_buff {
             let mul = if m.golden { 2 } else { 1 };
             self.add_volumizer_bonus(p, da * mul, dh * mul);
@@ -67,9 +71,17 @@ impl Game {
                 break;
             }
             self.players[p].board[pos].magnetize(&self.data.cards, m);
+            self.note_magnetized(p);
             self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
             self.beatboxers_copy(p, Some(pos), m1);
         }
+    }
+
+    /// Count one Magnetization for good: Dr. Boom's Monster's "for each time
+    /// you've Magnetized this game" reads it.
+    pub(super) fn note_magnetized(&mut self, p: usize) {
+        let pl = &mut self.players[p];
+        pl.magnetizations = pl.magnetizations.saturating_add(1);
     }
 
     /// `m` plus what "whenever you play or Magnetize a Mech" cards on the
@@ -110,6 +122,7 @@ impl Game {
                 .sum();
             for _ in 0..copies {
                 self.players[p].board[j].magnetize(&self.data.cards, m);
+                self.note_magnetized(p);
                 if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
                     let mul = if m.golden { 2 } else { 1 };
                     self.add_volumizer_bonus(p, da * mul, dh * mul);
@@ -140,6 +153,7 @@ impl Game {
             sat.attack = attack;
             sat.health = health;
             self.players[p].shop[slot].magnetize(&self.data.cards, sat);
+            self.note_magnetized(p);
             self.beatboxers_copy(p, None, sat);
         }
     }

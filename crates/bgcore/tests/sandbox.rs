@@ -172,6 +172,11 @@ fn mirror_fight_never_changes_health() {
     for _ in 0..12 {
         // a weak board that can lose to its own mirror
         put(&mut g, &["Glim Guardian", "Blue Whelp"]);
+        // A trinket picked on the way out of a turn can open a Discover at
+        // the start of the next one, and that has to be answered first.
+        while !g.is_legal(Action::EndTurn) {
+            assert!(answer(&mut g), "EndTurn is illegal with nothing to answer");
+        }
         g.step(Action::EndTurn).unwrap();
         assert_eq!(g.players[0].health, 30);
     }

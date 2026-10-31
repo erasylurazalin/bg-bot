@@ -105,6 +105,13 @@ legality in mod.rs.
 | Spell effect (needs a minion) | `effect = { target = "chosen", .. }` | `cast_spell_inner` -> `PendingTarget` -> `apply_target` (`SpellTarget`) | Tavern Dish Banana |
 | A card is discarded, any source | `on_event = { event = "discarded" }`; on the discarded spell itself `on_discard = "cast_twice"` / `"max_gold_2"` | `Game::discard_card` (Activates, linked cards, Mysterious K'Thir): pool copy back, the `Discarded` event, then `OnDiscard` (two real Tavern spell casts, or maximum Gold) | Cutthroat K'Thir |
 | A card is added to your hand | `on_card_added = { buff }` | `Game::add_to_hand`, the one path into a hand (buys, Gems, Triple Rewards, Discover picks, generated, Lockbox, `Game::give`) | The Shadow of Doubt |
+| You get a card of a tribe | `on_event = { event = "got_pirate", every = 4, effect }` (the event is `got_<tribe>`); a trinket listens with `get_tribe` + `on_get` | `Game::add_to_hand` fires `EventKind::CardGot(tribe)` and `trinkets::Event::GetTribe(tribe)` for every tribe the added card has | Doubloon Grifter, Trusty Crowbar |
+| After this attacks and kills | `on_kill = "max_stats_to_hand"` (`KillReward`) | `attack_swings` in fight.rs, at the hit that takes the defender below 1 Health; "maximum stats" are its Attack and its Health before the hit plus what it had already taken, so a Venomous kill reads right | Tide Oracle Morgl |
+| Stats for every Elemental played / time Magnetized this game | `buff_per_elemental_played`, `buff_per_magnetize` (`[a, h]`, doubled when golden) | `Player::make_card` reads `Player.elementals_played` (the play path) and `Player.magnetizations` (`Game::note_magnetized`, every `Minion::magnetize` the shop does) | Flourishing Frostling, Dr. Boom's Monster |
+| Selling a minion of a tribe gives its stats to the ones that stay | `on_sell = { gain_sold_stats = "<tribe>" }` (empty string for any) | `Game::sell_minion` after the sell: the minion with the text is still on the board, so it is scanned there, not on the sold card | Arcane Behemoth |
+| Gain the Deathrattle of a friendly Deathrattle minion that dies | `gains_friendly_deathrattles = true` | `Side::gain_deathrattles` (from `Side::resolve`) fills `Side.gained_dr` by uid; `Side::fire_deathrattles` fires them with the minion's own, once each | Fish of N'Zoth |
+| Choose a minion and become a copy of it | `battlecry = { become_copy = true }` | `Effect::BecomeCopyChosen` -> `TargetKind::BecomeCopy` (board or Tavern) -> `Game::become_copy_of`: an exact copy, no pool copy, no Triple Reward | Faceless Manipulator |
+| Get a plain copy of a minion | `Effect::PlainCopyRandomFriendly` (`plain_copy_random_friendly`), a spell `effect = { target = "chosen", plain_copy = 3 }` (`SpellTarget::PlainCopy`) | a plain copy is `give_generated` (the card at its printed stats, no pool copy): the same shape Disguised Graverobber's copies use | Reflective Pendant, Duplicating Lens |
 | Give your Deity stats | `buff_deity` (+`per_spell`), `buff_self_and_deity`, `buff_deity_and_improve`, spell `buff_deity`, `on_cast_spell = { buff_self_and_deity / buff_all_and_deity }` | `Game::run_effect` / `execute_spell_effect` / `trigger_on_cast_spell`; in a fight `Side::buff_deity`, the gain leaves through `SideOutcome::deity_gain` | Joyous |
 | Linked cards | `linked_spells = 2`, `linked_minions = "aberration"` (golden links four) | `Game::give_linked`, `Minion.linked`; `Action::Play` discards the rest of the group (a golden four after two plays) | Wandering Willbreaker |
 | The god tokens | token `deity = "cthun"` / `"yshaarj"` | `Game::unstarted` picks one god per lobby onto `Player.deity`; fights: `Side::note_deity_death`, `try_awaken`, C'Thun's split, `Effect::SummonDeadAberrations` | C'Thun |
@@ -122,7 +129,13 @@ legality in mod.rs.
 | Trinket that runs a card effect | the effect keys of cards.toml inside a hook list (`on_pick`, `start_of_turn`, `end_of_turn`, `on_buy`, `on_play`, `on_cast_spell`, ...) | `Game::run_trinket_act` runs the same `Effect`/`SpellEffect` arm with `pos` 0 and no golden multiplier | Sellemental Portrait (`get`) |
 | Trinket every N events / turns | `rule = { event = "cast_spell", every = 4, acts = [..] }` (or `"turns"`) | the slot's `count` in `TrinketState`; `trinket_event` for the events, `trinket_end_of_turn` for turns (the pick turn counts as 1) | Bloodbound Earrings |
 | Trinket's event mask (the hot path) | `Trinket::event_mask` over the lists and the rule; `Game::set_trinket` writes `Player.trinket_events` | every hook tests one bit of that `u16` first, then copies its `Act`s out of the shared table by index: no `Arc<Data>` clone, no `Vec` clone | Water Wheel (a capped hook that needs the start of the turn) |
-| Trinket in a fight | `soc = { tribe = "undead", keywords = ["taunt"] }` | `Player::counters` -> `Counters.soc_tribe`, applied in `run_start_of_combat` before any minion's Start of Combat | (the frame; nothing built yet) |
+| Trinket in a fight | `fight = [{ when = "soc", tribe = "undead", keywords = ["taunt"] }]` (or `when = "avenge"`, `"summon"`, `"attack"`, `"death"`, `"reborn"`, `"awaken"`) | `Player::counters` -> `Counters.trinkets` (a `Copy` `FightTrinkets`), run by `Side::trinket_hook` at the fight's own hook points | Holy Mallet, Quilligraphy Set, Mama Bear Sticker |
+| Trinket whose reward is a shop action after N fight deaths / summons | `rule = { event = "death", every = 8, acts = [..] }` (`death_<tribe>`, `summon`, `summon_<tribe>`) | the fight reports `SideOutcome::friendly_deaths` / `summon_tribes`; `apply_side_outcome` fires `trinket_event`, and a shop destroy counts its dead the same way | Bleeding Heart, Wildfeather Duster |
+| Trinket that counts something inside a fight | `{ when = "avenge", every = 5, ... }`, `cap = N` (per fight), `once = true`, `grow` (adds the trinket's `value`) | the bundle entry's own `count`/`uses`, reset every fight | Quilligraphy Set, Reinforced Shield, All-Purpose Kibble |
+| Trinket that hands out a card | `get = "X"`, `get_golden = "X"`, `one_of = ["X", "Y"]`, `random_battlecry = n`, `plain_copy_random_friendly = n`, `copy_last_discarded = true`, `discover_tier = N` | `Game::run_trinket_act`; a minion no card has yet is a `[[token]]` in cards.toml ("--- Trinket-only minions") | Morgl Portrait, Baller Portrait, Rockin' Music Box |
+| Trinket that remembers a Discover | `discover_remember = 4` (+ `discover_remember_typed = true`) and `get_remembered = 1` in a later list | `Act::DiscoverRemember` sets `tp.remember_in`; `resolve_choose` writes the pick into `TrinketState.card` | Portable Factory |
+| Trinket every N turns at the start of the turn | `start_every = 2` (the start-of-turn list only) | `trinket_start_of_turn` counts the slot's `count` and skips the list between (a `rule` with `event = "turns"` still fires at the end of the turn it reaches N) | Azeroth Model Globe, Lens Case |
+| Trinket that changes how another rule works | `copy_buys = n` (Transcribing Typewriter), `warband_whistle = true`, `triple_need_two_pirate = true`, `magnetize_ends = "X"` + `tribe`, `lockbox_sooner = n`, `discover_copy_bonus = n`, `gems_each_type = n` | `TrinketPowers` on `Player` (`copy_buys`, `whistle`, `pirate_triple`, `lockbox_sooner`, `discover_copies`), read by `Action::Buy`, `fill_shop`, `check_triple_tracking`, `give_lockbox`, `resolve_choose` | Transcribing Typewriter, Designer Eyepatch, Accord-o-Tron Portrait |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -197,23 +210,39 @@ exactly one legal target and drops the effect when there is none.
 2. Write the effects in the hook lists where the card's timing fits: `on_pick`,
    `start_of_turn`, `end_of_turn`, `on_buy` (+ `buy_tribe`), `on_buy_spell`,
    `on_play` (+ `play_tribe`), `on_sell`, `on_refresh`, `on_cast_spell`,
-   `on_cast_spell_on_minion`, `on_discard` (+ `discard_spells_only`). The keys
+   `on_cast_spell_on_minion`, `on_discard` (+ `discard_spells_only` or
+   `discard_minions_only`), `on_get` (+ `get_tribe`, "whenever you get a
+   <tribe>"). The keys
    are the effect keys of cards.toml (`get`, `get_gems`, `gem_bonus`, `cast`,
    `tavern_buff`, `undead_bonus`, ...); `crates/bgcore/src/trinkets.rs` lists
    every key in `Act` with the card it was written for. "Every N events" or
    "every N turns" is one `rule` per trinket; "twice per turn" is
-   `uses_per_turn`.
+   `uses_per_turn`; "at the start of every N turns" is `start_every`, which
+   gates the `start_of_turn` list (a `rule` on `turns` fires at the end of the
+   turn it reaches N, which is wrong for Gold, so use `start_every` there).
 3. Only add a key to `Act` when no `Effect` or `SpellEffect` arm does the job,
    and then add the arm to `Game::run_trinket_act` calling the same helper the
-   card path calls. A trinket's in-fight Start of Combat goes in `soc` (through
-   `Counters.soc_tribe`), not into `run_trinket_act`: a fight cannot run a shop
-   effect.
+   card path calls. A trinket's in-fight effects go in `fight`, not into
+   `run_trinket_act`: a fight cannot run a shop effect. Each `fight` table is
+   one `FightAct` (`crates/bgcore/src/trinkets.rs`) and one hook in
+   `Side::trinket_hook` / `Side::run_fight_act` (`crates/bgcore/src/fight.rs`);
+   a reward that goes home travels through `SideOutcome` and
+   `apply_side_outcome`. Three slots hold at most `FIGHT_ACTS` (6) acts, which
+   the parser checks. A shop action that listens to fight events is a plain
+   `rule` with `event = "death"`, `"summon"` or a tribe of either.
 4. Tests in `crates/bgcore/tests/trinkets.rs`: `equip` puts a trinket in a slot
    without its pick effects (`Game::set_trinket`, which also refreshes the
    player's event mask), `take` picks it through the real offer (so `on_pick`
    runs). The shared helpers there answer a prompt before passing the turn,
    because a trinket can open a Discover at the start of a turn.
-5. Update `docs/ENGINE.md` "Trinkets" if the frame changed. The observation
+5. A trinket that hands out a minion no card has yet needs a `[[token]]` in
+   cards.toml (the "--- Trinket-only minions" block): stats, `golden_stats` and
+   the text's mechanic as a card field, so a real card could reuse it. A token
+   has no pool copy, and it must fit the lobby it is made in: if the trinket is
+   neutral, the token has to be neutral too, and if the token has a tribe the
+   trinket carries that tribe (otherwise
+   `nothing_outside_the_lobby_ever_shows_up_in_whole_games` fails).
+6. Update `docs/ENGINE.md` "Trinkets" if the frame changed. The observation
    carries the slots by trinket index (an embedding, `N_TRINKETS` in bgpy), so
    a new trinket needs nothing there.
 

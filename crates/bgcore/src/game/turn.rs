@@ -133,6 +133,12 @@ impl Game {
                         Some(EndOfTurn::ResourcefulRobot) => {
                             let n = if golden { 2 } else { 1 };
                             for _ in 0..n {
+                                // getting the Volumizer can change the board
+                                // (a triple, a "when you get a card" trinket),
+                                // so the Robot's slot may be gone (2026-10-31)
+                                if pos >= self.players[p].board.len() {
+                                    break;
+                                }
                                 if let Some(v_id) = self.data.cards.random_volumizer(self.lobby, &mut self.rng)
                                 {
                                     let v =
@@ -631,6 +637,34 @@ impl Game {
         if !self.players[p].alive {
             return;
         }
+        // Trinket gains from the fight: free Refreshes (Herding Horn), the
+        // trinket's own "improve this" numbers, and the deaths and summons
+        // its shop-side "after N" counters are following (Bleeding Heart,
+        // Wildfeather Duster). DESIGN.md: shop deaths count for these too, so
+        // a shop destroy reports its dead the same way.
+        let pl = &mut self.players[p];
+        pl.free_rolls = pl.free_rolls.saturating_add(so.free_refresh_gain);
+        for (slot, &n) in so.trinket_improve.iter().enumerate() {
+            if n > 0 {
+                let v = &mut pl.trinkets[slot].value;
+                *v = v.saturating_add(n);
+            }
+        }
+        if so.friendly_deaths > 0 {
+            self.trinket_event(p, crate::trinkets::Event::Death, None, so.friendly_deaths as u32);
+        }
+        for (i, &n) in so.summon_tribes.iter().enumerate() {
+            if n > 0 {
+                let t = crate::cards::Tribe::EVERY[i];
+                self.trinket_event(p, crate::trinkets::Event::SummonTribe(t), None, n as u32);
+            }
+        }
+        for (i, &n) in so.death_tribes.iter().enumerate() {
+            if n > 0 {
+                let t = crate::cards::Tribe::EVERY[i];
+                self.trinket_event(p, crate::trinkets::Event::DeathTribe(t), None, n as u32);
+            }
+        }
         for &c in so.cards_gained() {
             self.give_generated(p, c);
         }
@@ -664,7 +698,10 @@ impl Game {
             let (them, tier, their_counters, their_hand) = match self.players[p].opponent {
                 Some(Opponent::Player(q)) if p < q as usize => {
                     let q = &self.players[q as usize];
-                    let hand: &[Minion] = if reads_board(&q.board) || reads_hand(&q.hand) {
+                    let hand: &[Minion] = if reads_board(&q.board)
+                        || reads_hand(&q.hand)
+                        || q.trinket_reads_hand(&self.data)
+                    {
                         &q.hand
                     } else {
                         &[]
@@ -679,6 +716,7 @@ impl Game {
             };
             let my_hand: &[Minion] = if reads_board(&self.players[p].board)
                 || reads_hand(&self.players[p].hand)
+                || self.players[p].trinket_reads_hand(&self.data)
             {
                 &self.players[p].hand
             } else {
@@ -778,8 +816,14 @@ impl Game {
         let reads_board =
             |b: &[Minion]| b.iter().any(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()));
         let reads_hand = |h: &[Minion]| h.iter().any(|m| cards.get(m.card).reads_hand());
-        let hand: &[Minion] =
-            if reads_board(&pl.board) || reads_hand(&pl.hand) { &pl.hand } else { &[] };
+        let hand: &[Minion] = if reads_board(&pl.board)
+            || reads_hand(&pl.hand)
+            || pl.trinket_reads_hand(&self.data)
+        {
+            &pl.hand
+        } else {
+            &[]
+        };
         let me = pl.board.clone();
         let counters = pl.counters(&self.data, self.lobby);
         let out = fight_with_hands(

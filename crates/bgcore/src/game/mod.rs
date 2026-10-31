@@ -126,13 +126,18 @@ pub enum TargetKind {
     /// included, a spell in a minion slot too), then the hero takes `damage`
     /// (Graveyard Shift).
     StealShopCard { damage: i32 },
+    /// Become an exact copy of the chosen minion, on the board or in the
+    /// Tavern (Faceless Manipulator).
+    BecomeCopy,
 }
 
 impl TargetKind {
     /// Whether the player may pick a minion in the Tavern for this target.
     pub fn takes_shop(self) -> bool {
         match self {
-            TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
+            TargetKind::AnyBuff { .. }
+            | TargetKind::AnySetStats { .. }
+            | TargetKind::BecomeCopy => true,
             TargetKind::Spell(st) => st.can_target_shop(),
             TargetKind::StealShopCard { .. } => true,
             _ => false,
@@ -249,6 +254,9 @@ pub enum DiscoverRequest {
     /// A Choose One minion, any tribe, up to the tier; the pick has both
     /// effects combined (Fandral's Fortune).
     ChooseOneMinion,
+    /// A minion of exactly this tier that has a type, so no neutral
+    /// (Portable Factory).
+    TypedMinionTier(u8),
 }
 
 /// Why the Tavern is filled. Only the player's own Refresh action (paid with
@@ -324,6 +332,22 @@ pub struct TrinketPowers {
     pub greater_offer_turn: u32,
     /// The turn a greater offer goes into the lesser slot (Trip Vouchers).
     pub greater_into_lesser_turn: u32,
+    /// Minion buys still to be copied into hand, bought ones only
+    /// (Transcribing Typewriter).
+    pub copy_buys: u8,
+    /// Discovers left this turn that also give a copy of the pick (Sinstone
+    /// Sticker), and how many each turn starts with.
+    pub discover_copies: u8,
+    pub discover_copies_base: u8,
+    /// The slot (plus one) of a trinket waiting for the card a Discover
+    /// picked (Portable Factory); 0 when none.
+    pub remember_in: u8,
+    /// The next Refresh holds plain copies of the warband (Warband Whistle).
+    pub whistle: bool,
+    /// Two copies of a Pirate make it Golden (Designer Eyepatch).
+    pub pirate_triple: bool,
+    /// Turns sooner every Lockbox opens (Escapee Portrait).
+    pub lockbox_sooner: u8,
 }
 
 /// One held trinket: which one, its "every N" counter, the uses its hooks
@@ -338,6 +362,9 @@ pub struct TrinketState {
     pub value: u8,
     pub uses_left: u8,
     pub done: bool,
+    /// The card this trinket remembers from a Discover, so it can hand out
+    /// another copy each turn (Portable Factory).
+    pub card: Option<CardId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -430,6 +457,12 @@ pub struct Player {
     /// Elementals played from hand this turn (Conflagration). Resets every
     /// turn.
     pub elementals_played_turn: u16,
+    /// Elementals played from hand this game (Flourishing Frostling's aura:
+    /// "wherever this is").
+    pub elementals_played: u32,
+    /// Times this player has Magnetized a card this game (Dr. Boom's
+    /// Monster's aura).
+    pub magnetizations: u32,
     /// What "after the Tavern is Refreshed this game" gives: the sum of every
     /// Waveling, En-Djinn Blazer and Easterly Winds so far. Each explicit
     /// Refresh gives the whole amount to one random Tavern minion.
@@ -487,6 +520,9 @@ pub struct Player {
     pub discover_both: bool,
     pub deity: Option<Deity>,
     pub discarded: u32,
+    /// The last card this player discarded, for a reward that copies it
+    /// (Writhing Tentacles). One minion, so it costs nothing per discard.
+    pub last_discarded: Option<Minion>,
     pub spells_cast: u32,
     pub next_link: u16,
     pub actions: u16,
@@ -1119,6 +1155,7 @@ impl Game {
             SpellTarget::BuffPerTribePlayed { .. } => true,
             SpellTarget::Butchering { .. } => c.tribes.has(Tribe::Undead),
             SpellTarget::Confiscation { .. } => true,
+            SpellTarget::PlainCopy { max_tier } => c.tier <= max_tier,
         }
     }
 
@@ -1141,7 +1178,9 @@ impl Game {
             return false;
         }
         match pt.kind {
-            TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
+            TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } | TargetKind::BecomeCopy => {
+                true
+            }
             TargetKind::Spell(st) => st.can_target_shop() && self.spell_target_ok(st, &pl.shop[s]),
             _ => false,
         }
@@ -1222,6 +1261,8 @@ impl Game {
                     let card = self.data.cards.get(c);
                     card.battlecry.is_some() || card.choose_one.is_some()
                 }),
+            // Any minion will do: the effect becomes a copy of it.
+            TargetKind::BecomeCopy => true,
         }
     }
 
@@ -1323,6 +1364,20 @@ impl Game {
                         self.take_shop_damage(p, h as i32, None);
                     }
                     self.after_buy_effects(p);
+                    // Transcribing Typewriter: an exact copy of the minion
+                    // bought (buffs included), so the bought one keeps the
+                    // buffs it was bought with and gains any "after you buy"
+                    // ones before the copy is taken.
+                    if self.players[p].tp.copy_buys > 0
+                        && let Some(&bought) = self.players[p].hand.last()
+                        && bought.card == m.card
+                        && !self.players[p].hand.is_full()
+                    {
+                        self.players[p].tp.copy_buys -= 1;
+                        let mut copy = bought;
+                        copy.pool_copies = 0;
+                        self.add_to_hand(p, copy);
+                    }
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
                     self.fire_event(p, EventKind::CardsBought, 1);
@@ -1432,8 +1487,9 @@ impl Game {
                     }
                     choose_one_play = self.data.cards.get(m.card).choose_one.is_some();
                     if t.has(Tribe::Elemental) {
-                        self.players[p].elementals_played_turn =
-                            self.players[p].elementals_played_turn.saturating_add(1);
+                        let pl = &mut self.players[p];
+                        pl.elementals_played_turn = pl.elementals_played_turn.saturating_add(1);
+                        pl.elementals_played = pl.elementals_played.saturating_add(1);
                         self.give_play_shield(p, pos);
                     }
                     self.fire_after_play_tribe(p, t, pos);
@@ -1549,6 +1605,19 @@ impl Game {
             return false;
         }
         self.players[p].hand.push(m);
+        // "Whenever you get a Pirate" (Doubloon Grifter's event trigger, and a
+        // trinket's `on_get`): a card of that tribe entered the hand, from
+        // anywhere (bought, generated, Discovered, copied).
+        let tribes = self.data.cards.get(m.card).tribes;
+        if !tribes.is_empty() {
+            for t in Tribe::EVERY {
+                if !tribes.has(t) {
+                    continue;
+                }
+                self.fire_event(p, EventKind::CardGot(t), 1);
+                self.trinket_event(p, crate::trinkets::Event::GetTribe(t), Some(m.card), 1);
+            }
+        }
         for i in 0..self.players[p].board.len() {
             let board = self.players[p].board[i];
             for (card, golden) in board.parts() {

@@ -263,7 +263,15 @@ impl RealBoards {
             });
             // Turn 13 and later all draw from one bucket.
             let t = spec.turn.clamp(1, LATE_TURN) as usize;
-            by_turn[t - 1].push(RealBoard { tier: spec.tier, minions, hand, counters, deity });
+            // A board whose log gave no Tavern tier (0) takes the highest
+            // tier among its minions, at least 1 (2026-10-31: three such
+            // boards made a real seat's shop checks index tier 0).
+            let tier = if spec.tier > 0 {
+                spec.tier.min(crate::MAX_TIER)
+            } else {
+                minions.iter().map(|m| db.get(m.card).tier).max().unwrap_or(1).clamp(1, crate::MAX_TIER)
+            };
+            by_turn[t - 1].push(RealBoard { tier, minions, hand, counters, deity });
         }
         (RealBoards { by_turn }, unmatched)
     }

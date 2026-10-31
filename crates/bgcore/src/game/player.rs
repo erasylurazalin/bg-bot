@@ -31,11 +31,6 @@ use super::{
 };
 use super::effects::buff;
 
-/// The bit a tribe has in `Tribes` and in the fight's Start of Combat mask.
-fn tribe_bit(t: Tribe) -> u16 {
-    1 << t as u16
-}
-
 impl Player {
     pub(super) fn new(data: &Data) -> Player {
         Player {
@@ -84,6 +79,8 @@ impl Player {
             golden_played: 0,
             gold_spent_turn: 0,
             elementals_played_turn: 0,
+            elementals_played: 0,
+            magnetizations: 0,
             refresh_buff: (0, 0),
             spell_bonus: (0, 0),
             spell_discount: 0,
@@ -112,6 +109,7 @@ impl Player {
             barrage: (0, 0),
             deity: None,
             discarded: 0,
+            last_discarded: None,
             spells_cast: 0,
             next_link: 1,
             actions: 0,
@@ -319,6 +317,16 @@ impl Player {
             m.attack += a * n;
             m.health += h * n;
         }
+        if let Some((a, h)) = c.buff_per_elemental_played {
+            let n = self.elementals_played as i32 * m.mul();
+            m.attack += a * n;
+            m.health += h * n;
+        }
+        if let Some((a, h)) = c.buff_per_magnetize {
+            let n = self.magnetizations as i32 * m.mul();
+            m.attack += a * n;
+            m.health += h * n;
+        }
         if c.tribes.has(Tribe::Undead) && !c.fixed_stats {
             m.attack += self.undead_bonus.0;
             m.health += self.undead_bonus.1;
@@ -372,6 +380,51 @@ impl Player {
         self.sharing_is_caring = 0;
     }
 
+    /// The trinkets' effects inside a fight, as the fight's small `Copy`
+    /// bundle: the slots in order (lesser, greater, a power's), each act with
+    /// the slot's own "improve this" number. Allocation-free, and empty for
+    /// a player with no trinket, which is one check in the fight.
+    pub fn fight_trinkets(&self, data: &Data) -> crate::fight::FightTrinkets {
+        let mut ft = crate::fight::FightTrinkets::default();
+        // Nobody holds a trinket before turn 6: one check, no table read.
+        if self.trinket_events & crate::trinkets::HAS_TRINKET == 0 {
+            return ft;
+        }
+        for slot in 0..crate::TRINKET_SLOTS {
+            let st = &self.trinkets[slot];
+            if st.of == 0 {
+                continue;
+            }
+            let t = data.trinkets.get(st.of - 1);
+            for e in &t.fight {
+                ft.push(e, slot as u8, st.value as i16);
+            }
+            if t.first_deathrattle {
+                ft.set_first_deathrattle(true);
+            }
+            if let Some(r) = &t.rule
+                && let crate::trinkets::Event::DeathTribe(w) = r.event
+            {
+                ft.count_death_tribes |= crate::cards::Tribes::of(w).mask();
+            }
+        }
+        ft.count_deaths = self.trinket_events & crate::trinkets::Event::Death.bit() != 0;
+        ft.count_summons = self.trinket_events & crate::trinkets::Event::Summon.bit() != 0;
+        ft
+    }
+
+    /// Whether one of this player's trinkets reads the hand inside a fight
+    /// (Dramaloc Sticker), so the fight has to be given the hand at all.
+    pub fn trinket_reads_hand(&self, data: &Data) -> bool {
+        (0..crate::TRINKET_SLOTS).any(|slot| {
+            let of = self.trinkets[slot].of;
+            of != 0
+                && data.trinkets.get(of - 1).fight.iter().any(|e| {
+                    matches!(e.act, crate::trinkets::FightAct::HighestHandAttack { .. })
+                })
+        })
+    }
+
     pub fn counters(&self, data: &Data, lobby: Tribes) -> Counters {
         let cards = &data.cards;
         let (spell_attack, spell_health) = self.total_spell_bonus(cards);
@@ -386,14 +439,7 @@ impl Player {
             boon_of_beetles: self.boon_of_beetles,
             brood_of_nozdormu: self.brood_of_nozdormu,
             upper_hand: self.upper_hand,
-            soc_tribe: (0..crate::TRINKET_SLOTS).find_map(|slot| {
-                let of = self.trinkets[slot].of;
-                if of == 0 {
-                    return None;
-                }
-                let t = data.trinkets.get(of - 1);
-                t.soc.map(|s| (s.tribe.map_or(0, tribe_bit), s.keywords))
-            }),
+            trinkets: self.fight_trinkets(data),
             soc_leftmost: self.power.map_or(0, |st| {
                 match data.heroes.get(st.of).power.effect {
                     PowerEffect::SocLeftmost { keywords } => keywords,

@@ -111,7 +111,10 @@ rules behind each are in DESIGN.md Part 2.
 - **Tavern buffs** "this game" and "this turn", consuming Tavern minions,
   stealing them, Fishbait and Demon Fodder as generated Tavern cards.
 - **Generated cards** (`pool_copies = 0`): tokens, Chromadrakes, Fodder,
-  Fishbait. They never touch the pool.
+  Fishbait, and the trinket-only minions of DESIGN.md ("Generated minions
+  outside the pool": Tide Oracle Morgl and the rest, in the
+  "--- Trinket-only minions" block of cards.toml). They never touch the
+  pool.
 - **Golden stats** that aren't double the base use `golden_stats`.
 - **Tier 7.** `CARD_MAX_TIER` (7) is the highest card tier, `MAX_TIER` (6)
   the highest Tavern tier: the Tavern, leveling and every "up to your
@@ -288,15 +291,66 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
 - **The effects.** `Act` mirrors the effect keys of cards.toml (`get`,
   `get_gems`, `cast`, ...) and `Game::run_trinket_act` runs each through the
   same `Effect`/`SpellEffect` arm the card path runs, with no host slot (`pos`
-  0) and no golden multiplier. Four keys have no card behind them:
+  0) and no golden multiplier. Five keys have no card behind them:
   `upgrade_discount`, `buff_tavern_this_turn` (Cursed Crystal's per-Refresh
   buff must not be remembered and stack), `make_golden_random`,
-  `last_spell_copies`.
-- **In a fight.** A trinket's Start of Combat leaves through
-  `Counters.soc_tribe` (`{ tribe, keywords }`, filled by `Player::counters`
-  from a trinket's `soc` table) and `run_start_of_combat` applies it to the
-  friendly minions of those tribes before any minion's own Start of Combat.
-  Other in-fight trinket effects (Avenge, summons) are not built yet.
+  `last_spell_copies` and `discover_deathrattle` (Deathly Phylactery; a
+  `SpellEffect::Discover(DiscoverKind::DeathrattleMinion)`).
+- **Getting cards (block 2).** `on_get` is the hook for "whenever you get a
+  <tribe>": `add_to_hand` is the one place a card enters the hand (a buy, a
+  generated card, a Discover, a copy), so it fires `Event::GetTribe(t)` there
+  and a `get_tribe` filter names the tribe (Trusty Crowbar). The same place
+  fires the card-side `EventKind::CardGot(t)`, which a minion's `on_event`
+  counts ("Whenever you get 4 Pirates": Doubloon Grifter).
+  `discover_tier` is a Discover of one fixed tier;
+  `discover_remember` plus `get_remembered` are Portable Factory: the pick's
+  card id is kept in `TrinketState.card` (written in `resolve_choose`, which
+  also gives Sinstone Sticker's extra copy for the first N Discovers of a
+  turn, `tp.discover_copies`, refilled from `discover_copies_base` at the
+  start of each turn). `copy_buys` is Transcribing Typewriter's count of
+  exact copies of the next minions bought, spent in `Action::Buy`.
+  `start_every` runs a start-of-turn list only every N turns (Azeroth Model
+  Globe, Lens Case, Conch Portrait); `rule = { event = "turns", every = N }`
+  still fires at the end of the turn it reaches N. `warband_whistle` makes the
+  next Refresh hold plain copies of the warband (`fill_shop`),
+  `triple_need_two_pirate` lowers a Pirate triple to two (`check_triple_tracking`),
+  `magnetize_ends` Magnetizes a card to the two ends of a tribe's minions
+  (Accord-o-Tron Portrait) and `lockbox_sooner` takes turns off every Lockbox
+  the player gets.
+- **In a fight.** A trinket has no host minion, so its in-fight effects are a
+  bundle the fight owns: `Counters.trinkets` is a `FightTrinkets`
+  (`crates/bgcore/src/fight.rs`), `Copy`, allocation-free, with no pointer
+  into the shared table, built by `Player::counters` (`fight_trinkets`) from
+  the three slots in order. `trinkets.toml` holds the vocabulary as data
+  (`fight = [{ when = ..., ... }]`): `when` is `soc` (Start of Combat, the
+  trinket step, lesser before greater, before any minion's own), `avenge`
+  (`every = N` friendly deaths this fight), `summon`, `attack` (once per
+  swing), `death`, `reborn` or `awaken` (the Deity). `tribe`/`neutral`/`rally`
+  filter the minion a trigger is about; `pick` (`all`, `ends`, `random`,
+  `lowest_attack`, `rally`, a bare `card`) picks the minions a Start of
+  Combat or Avenge effect reaches. `cap` is a per-fight use limit, `once`
+  fires it once, `grow` adds the trinket's own "improve this" number, and
+  `improve` raises that number for good. The hooks are `Side::trinket_hook`
+  at the fight's own points (`run_start_of_combat`, `Side::resolve` for
+  deaths/Avenge/Reborn, `summon_with`, `attack_triggers`, `try_awaken`), and
+  a side without trinkets answers each of them from one `u8` (the bundle's
+  length). A Deathrattle a trinket grants for the fight (Hoggy Bank, Sky
+  Golem Portrait) is kept by uid in `Side.granted` and fires with the
+  minion's own in `fire_deathrattles`; `first_deathrattle` (Deathly
+  Phylactery) adds one run in `deathrattle_fires`, combat only.
+- **What comes back.** `SideOutcome` carries the fight's trinket gains the way
+  every other fight gain travels: `gem_gain` and `spell_bonus_gain` (Avenge
+  rewards), `free_refresh_gain` (Herding Horn), `trinket_improve` by slot
+  ("improve this"), and `friendly_deaths`, `death_tribes` and `summon_tribes`
+  for the shop-side "after N friendly minions die / Beasts die / Beasts
+  summoned" counters.
+  `apply_side_outcome` applies them and fires `trinket_event` with the new
+  shop events `Event::Death` (and `death_<tribe>`) and `Event::Summon` (and
+  `summon_<tribe>`), so those counters count fight deaths, fight summons and
+  shop destroys (DESIGN.md: shop deaths count for death counters) in one
+  slot counter that carries across turns. A shop destroy counts deaths but
+  not Avenge: a trinket's Avenge is Avenge, and its counts start from 0 in
+  every fight.
 - **The observation** carries the three slots (trinket index + 1), their
   counters, the open offer (its slot and the four options with prices) as own
   scalars 173 to 188, and each opponent's three slots as their scalars 30 to

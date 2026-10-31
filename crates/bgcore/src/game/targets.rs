@@ -90,6 +90,11 @@ impl Game {
                     m.health = health;
                 }
             }
+            TargetKind::BecomeCopy => {
+                let Some(src) = pt.source.map(|x| x as usize) else { return };
+                let copy = self.players[p].shop[slot];
+                self.become_copy_of(p, src, copy);
+            }
             TargetKind::Spell(st) => {
                 let target = slot;
                 // A Tavern minion is not a friendly minion, so Balinda's
@@ -257,6 +262,11 @@ impl Game {
                                 health + per.1 * n + dh,
                             );
                         }
+                        SpellTarget::PlainCopy { .. } => {
+                            let card = self.players[p].shop[target].card;
+                            generated = Some(card);
+                            stop_after = true;
+                        }
                     }
                     if pt.tavern {
                         self.trigger_on_cast_spell(p);
@@ -364,8 +374,11 @@ impl Game {
                 let host = pt.source.map(|x| x as usize);
                 self.players[p].board[s].keywords.set(Keywords::REBORN);
                 let tracked = self.destroy_in_shop(p, &[s], host);
-                if let Some(h) = tracked {
-                    buff(&mut self.players[p].board[h], attack, health);
+                // The destroy's Deathrattles can hand over a card that
+                // completes a triple, and a triple takes its copies off the
+                // board: the tracked position can then be gone.
+                if let Some(m) = tracked.and_then(|h| self.players[p].board.get_mut(h)) {
+                    buff(m, attack, health);
                 }
             }
             TargetKind::AnySetStats { attack, health } => {
@@ -373,6 +386,12 @@ impl Game {
                     let m = &mut self.players[p].board[s];
                     m.attack = attack;
                     m.health = health;
+                }
+            }
+            TargetKind::BecomeCopy => {
+                if let Some(src) = pt.source.map(|x| x as usize) {
+                    let copy = self.players[p].board[s];
+                    self.become_copy_of(p, src, copy);
                 }
             }
             TargetKind::Consume { pick, keywords, count, stat_mul, .. } => {
@@ -623,6 +642,13 @@ impl Game {
                                 m.gem_attack += sa;
                                 m.gem_health += sh;
                             }
+                        }
+                        SpellTarget::PlainCopy { .. } => {
+                            // A generated copy: it takes no pool copy, like
+                            // Disguised Graverobber's copies.
+                            let card = self.players[p].board[target_pos].card;
+                            let mut dummy = 0;
+                            self.give_generated_tracking(p, card, &mut dummy);
                         }
                     }
                     if pt.tavern {

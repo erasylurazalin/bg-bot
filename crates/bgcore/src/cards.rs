@@ -298,7 +298,7 @@ pub enum Effect {
     /// Summon the `count` highest-Attack minions of a tribe from hand, for
     /// this combat only (Expert Aviator, Diremuck Forager). The copies leave
     /// the hand for the rest of the fight and are back in it afterwards.
-    SummonFromHand { tribe: Tribe, count: u8 },
+    SummonFromHand { tribe: Tribe, count: u8, by_health: bool },
     /// Give a random minion in hand stats, permanently (Very Hungry
     /// Winterfinner). Fights only.
     BuffRandomHand { attack: i32, health: i32 },
@@ -391,6 +391,18 @@ pub enum Effect {
     /// Get `count` random Golden minions of exactly this tier from the pool;
     /// they give no Triple Reward (Silent Deliverer). Golden doubles it.
     GetGoldenMinion { tier: u8, count: u8 },
+    /// Raise the player's maximum Gold for good (Doubloon Grifter: "increase
+    /// your maximum Gold by 1"). Golden doubles it.
+    MaxGold(u8),
+    /// Become an exact copy of a minion the player picks, on the board or in
+    /// the Tavern (Faceless Manipulator). The copy takes no pool copy.
+    BecomeCopyChosen,
+    /// Get a plain copy of a random friendly minion (Reflective Pendant): the
+    /// card at its printed stats, its buffs left behind.
+    PlainCopyRandomFriendly,
+    /// Get a copy of the last card the player discarded, with double stats
+    /// (Writhing Tentacles). Nothing when nothing was discarded.
+    CopyLastDiscarded,
     /// Give the other friendly minions of a tribe +attack/+health, times one
     /// plus the Golden minions the player played this game (Hooktusk).
     BuffOthersPerGolden { tribe: Option<Tribe>, attack: i32, health: i32 },
@@ -500,6 +512,7 @@ impl Effect {
                 | Effect::DestroyChosenDiscover { .. }
                 | Effect::DestroyChosenGetCopy { .. }
                 | Effect::GiveRebornDestroy { .. }
+                | Effect::BecomeCopyChosen
         )
     }
 
@@ -631,6 +644,9 @@ pub enum EventKind {
     /// Cards discarded (Mangled Bandit's Activate). The hook "when you
     /// discard" triggers read.
     Discarded,
+    /// A card of this tribe entered the player's hand, from anywhere: bought,
+    /// generated, Discovered or copied (Doubloon Grifter, Trusty Crowbar).
+    CardGot(Tribe),
 }
 
 /// "After N events, do the effect (N left!)". The count lives in the
@@ -654,6 +670,12 @@ pub enum DiscoverKind {
     Tier7Minion,
     /// A Choose One minion with both effects combined (Fandral's Fortune).
     ChooseOneMinion,
+    /// A minion of exactly this tier, whatever its type (Azeroth Model
+    /// Globe).
+    TierMinion(u8),
+    /// A minion of exactly this tier with a type, so no neutral (Portable
+    /// Factory).
+    TierMinionWithType(u8),
 }
 
 /// A Tavern spell (or Choose One spell option) that targets a friendly minion.
@@ -721,6 +743,9 @@ pub enum SpellTarget {
     /// move all its neighbours' Blood Gem stats onto it: they lose them, it
     /// gains them (Gem Confiscation).
     Confiscation { gems: u8 },
+    /// Get a plain copy of the chosen minion (board or Tavern) of Tier
+    /// `max_tier` or below (Duplicating Lens).
+    PlainCopy { max_tier: u8 },
 }
 
 impl SpellTarget {
@@ -741,6 +766,7 @@ impl SpellTarget {
                 | SpellTarget::RefreshWithType
                 | SpellTarget::BuffPerTribePlayed { .. }
                 | SpellTarget::Confiscation { .. }
+                | SpellTarget::PlainCopy { .. }
             )
     }
 
@@ -1075,6 +1101,9 @@ pub enum OnSell {
     /// If the minion is Golden when sold, Discover a Tier 7 minion (Greedy
     /// Conniver).
     DiscoverTier7IfGolden,
+    /// Gain the stats of the minion sold when it is of `tribe` (Arcane
+    /// Behemoth). Golden doubles them.
+    GainSoldStats { tribe: Option<Tribe> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1097,6 +1126,15 @@ pub enum Aura {
     /// Your Blood Gems played from your hand cast an extra time (two when
     /// golden). Hot-Air Surveyor.
     HotAirSurveyor,
+}
+
+/// What a minion does after it attacks and kills a minion (Tide Oracle
+/// Morgl). A golden minion doubles the numbers the reward carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KillReward {
+    /// Give the killed minion's Attack and maximum Health to a random card in
+    /// the owner's hand.
+    MaxStatsToHand,
 }
 
 /// A card's role in a "how many times" count (DESIGN.md "Set versus add, as
@@ -1263,6 +1301,17 @@ pub struct Card {
     /// Gets this much for every Golden minion its owner played this game,
     /// wherever it is (Maritime Extortionist).
     pub buff_per_golden_played: Option<(i32, i32)>,
+    /// Gets this much for every Elemental its owner played this game,
+    /// wherever it is (Flourishing Frostling).
+    pub buff_per_elemental_played: Option<(i32, i32)>,
+    /// Gets this much for every time its owner Magnetized this game, wherever
+    /// it is (Dr. Boom's Monster).
+    pub buff_per_magnetize: Option<(i32, i32)>,
+    /// After this attacks and kills a minion, the reward (Tide Oracle Morgl).
+    pub on_kill: Option<KillReward>,
+    /// After a different friendly Deathrattle minion dies in combat, this
+    /// gains its Deathrattle for the rest of the fight (Fish of N'Zoth).
+    pub gains_friendly_deathrattles: bool,
     /// After its owner Discovers a card (Hooktusk).
     pub after_discover: Option<Effect>,
     /// One of the five Bounties, which share one slot of the spell draw.
@@ -1378,6 +1427,10 @@ impl Card {
     pub fn reads_hand(&self) -> bool {
         self.when_damaged.is_some()
             || matches!(
+                self.deathrattle,
+                Some(Deathrattle::Effect(Effect::SummonFromHand { .. }))
+            )
+            || matches!(
                 self.start_of_combat,
                 Some(
                     StartOfCombat::FlightyScout
@@ -1428,6 +1481,7 @@ impl Card {
             || self.on_gem_played_on_self.is_some()
             || self.choose_one_cover > 0
             || self.after_choose_one_play.is_some()
+            || self.gains_friendly_deathrattles
     }
 }
 
@@ -1550,6 +1604,14 @@ struct RawCard {
     #[serde(default)]
     cleave: bool,
     buff_per_golden_played: Option<[i32; 2]>,
+    buff_per_elemental_played: Option<[i32; 2]>,
+    buff_per_magnetize: Option<[i32; 2]>,
+    /// What this minion gets after it attacks and kills a minion.
+    on_kill: Option<String>,
+    /// Gains the Deathrattle of a friendly Deathrattle minion that dies in
+    /// combat (Fish of N'Zoth).
+    #[serde(default)]
+    gains_friendly_deathrattles: bool,
     after_discover: Option<RawEffect>,
     #[serde(default)]
     overkill: bool,
@@ -1666,6 +1728,9 @@ struct RawSpellEffect {
     same_tribe_minion: Option<bool>,
     set_stats: Option<[i32; 2]>,
     make_golden_max_tier: Option<u8>,
+    /// Get a plain copy of the target, a minion of this tier or below
+    /// (Duplicating Lens).
+    plain_copy: Option<u8>,
     gold: Option<u8>,
     gold_next_turn: Option<u8>,
     max_gold: Option<u8>,
@@ -1793,6 +1858,8 @@ struct RawEffect {
     magnetize_volumizer: bool,
     beetle_buff: Option<[i32; 2]>,
     gold_next_turn: Option<u8>,
+    /// Raise the player's maximum Gold (Doubloon Grifter).
+    max_gold: Option<u8>,
     random_volumizer: Option<bool>,
     spell_discount: Option<u8>,
     /// Raise the player's Tavern spell bonus this game.
@@ -1823,11 +1890,24 @@ struct RawEffect {
     keyword: Option<String>,
     get: Option<String>,
     count: Option<u8>,
+    /// Become an exact copy of a minion the player picks (Faceless
+    /// Manipulator).
+    #[serde(default)]
+    become_copy: bool,
+    /// Get a plain copy of a random friendly minion (Reflective Pendant).
+    #[serde(default)]
+    plain_copy_random_friendly: bool,
+    /// Get a copy of the last card discarded with double stats (Writhing
+    /// Tentacles).
+    #[serde(default)]
+    copy_last_discarded: bool,
     /// Summon a card (token or pool minion) next to the minion.
     summon: Option<String>,
     /// Summon the highest-Attack minions of this tribe from hand, for this
-    /// combat only.
+    /// combat only; with `by_health`, the highest-Health ones (Bassgill).
     summon_from_hand: Option<String>,
+    #[serde(default)]
+    by_health: bool,
     #[serde(default)]
     golden_doubles_count: bool,
     /// Get a random pool minion of this tribe.
@@ -2183,6 +2263,9 @@ struct RawOnSell {
     discover_by_tier: Option<bool>,
     gold_if_lost: Option<u8>,
     effect: Option<RawEffect>,
+    /// Gain the stats of the sold minion when it is of this tribe (Arcane
+    /// Behemoth); an empty string is any minion.
+    gain_sold_stats: Option<String>,
 }
 
 pub(crate) fn tribe(s: &str) -> Result<Tribe, String> {
@@ -2235,7 +2318,12 @@ fn parse_event(s: &str) -> Result<EventKind, String> {
         "cards_bought" => Ok(EventKind::CardsBought),
         "elementals_played" => Ok(EventKind::ElementalsPlayed),
         "discarded" => Ok(EventKind::Discarded),
-        other => Err(format!("unknown event {other:?}")),
+        // "Whenever you get a Pirate" and the like: a card of the tribe
+        // entering the hand.
+        other => match other.strip_prefix("got_") {
+            Some(t) => Ok(EventKind::CardGot(tribe(t)?)),
+            None => Err(format!("unknown event {other:?}")),
+        },
     }
 }
 
@@ -2341,6 +2429,9 @@ fn parse_spell_effect(
             }
             if let Some(max_tier) = e.make_golden_max_tier {
                 return Ok((Some(SpellTarget::MakeGolden { max_tier }), None));
+            }
+            if let Some(max_tier) = e.plain_copy {
+                return Ok((Some(SpellTarget::PlainCopy { max_tier }), None));
             }
             if let Some([attack, health]) = e.tricky_trousers {
                 return Ok((Some(SpellTarget::TrickyTrousers { attack, health }), None));
@@ -2686,7 +2777,17 @@ impl CardDb {
                     golden_doubles_count: b.golden_doubles_count,
                 }
             } else if let Some(name) = &b.summon_from_hand {
-                Effect::SummonFromHand { tribe: tribe(name)?, count: b.count.unwrap_or(1) }
+                Effect::SummonFromHand {
+                    tribe: tribe(name)?,
+                    count: b.count.unwrap_or(1),
+                    by_health: b.by_health,
+                }
+            } else if b.become_copy {
+                Effect::BecomeCopyChosen
+            } else if b.plain_copy_random_friendly {
+                Effect::PlainCopyRandomFriendly
+            } else if b.copy_last_discarded {
+                Effect::CopyLastDiscarded
             } else if let Some([attack, health]) = b.buff_random_hand {
                 Effect::BuffRandomHand { attack, health }
             } else if let Some([attack, health]) = b.buff_leftmost_hand {
@@ -2762,6 +2863,8 @@ impl CardDb {
                 Effect::BeetleBuff { attack, health }
             } else if let Some(g) = b.gold_next_turn {
                 Effect::GoldNextTurn(g)
+            } else if let Some(g) = b.max_gold {
+                Effect::MaxGold(g)
             } else if b.random_volumizer == Some(true) {
                 Effect::RandomVolumizer
             } else if let Some(d) = b.spell_discount {
@@ -3236,6 +3339,9 @@ impl CardDb {
                     OnSell::GoldIfLost(g)
                 } else if let Some(e) = &s.effect {
                     OnSell::Effect(parse_effect(e).map_err(&err)?)
+                } else if let Some(t) = &s.gain_sold_stats {
+                    let tribe = if t.is_empty() { None } else { Some(tribe(t)?) };
+                    OnSell::GainSoldStats { tribe }
                 } else {
                     return Err(err("invalid on_sell".into()));
                 }),
@@ -3341,6 +3447,14 @@ impl CardDb {
                 always_golden: c.always_golden,
                 cleave: c.cleave,
                 buff_per_golden_played: c.buff_per_golden_played.map(|[a, h]| (a, h)),
+                buff_per_elemental_played: c.buff_per_elemental_played.map(|[a, h]| (a, h)),
+                buff_per_magnetize: c.buff_per_magnetize.map(|[a, h]| (a, h)),
+                on_kill: match c.on_kill.as_deref() {
+                    None => None,
+                    Some("max_stats_to_hand") => Some(KillReward::MaxStatsToHand),
+                    Some(other) => return Err(err(format!("unknown on_kill {other:?}"))),
+                },
+                gains_friendly_deathrattles: c.gains_friendly_deathrattles,
                 after_discover,
                 is_bounty: false,
                 overkill: c.overkill,
@@ -3496,6 +3610,10 @@ impl CardDb {
                 always_golden: false,
                 cleave: false,
                 buff_per_golden_played: None,
+                buff_per_elemental_played: None,
+                buff_per_magnetize: None,
+                on_kill: None,
+                gains_friendly_deathrattles: false,
                 after_discover: None,
                 is_bounty: sp.bounty,
                 overkill: false,
@@ -3624,6 +3742,38 @@ impl CardDb {
         let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
         self.pick_lobby(
             |c| self.cards[c].deathrattle.is_some() && self.cards[c].tier <= max_tier,
+            lobby,
+            rng,
+        )
+    }
+
+    /// A random pool minion with a Battlecry, of Tier `max_tier` or lower (0
+    /// means any Tier). The lobby filters it.
+    pub fn random_battlecry_minion(
+        &self,
+        max_tier: u8,
+        lobby: Tribes,
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
+        self.pick_lobby(
+            |c| self.cards[c].battlecry.is_some() && self.cards[c].tier <= max_tier,
+            lobby,
+            rng,
+        )
+    }
+
+    /// A random pool minion that is Magnetic, of Tier `max_tier` or lower (0
+    /// means any Tier). The lobby filters it.
+    pub fn random_magnetic_minion(
+        &self,
+        max_tier: u8,
+        lobby: Tribes,
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        let max_tier = if max_tier == 0 { crate::MAX_TIER } else { max_tier };
+        self.pick_lobby(
+            |c| self.cards[c].keywords.has(Keywords::MAGNETIC) && self.cards[c].tier <= max_tier,
             lobby,
             rng,
         )

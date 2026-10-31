@@ -96,34 +96,45 @@ fn to_turn(g: &mut Game, turn: u32) {
     }
 }
 
-fn put_on_board(g: &mut Game, p: usize, name: &str) {
-    let c = id(g, name);
+/// The pool copies a card taken by a test holds: one, or none for a token
+/// (a token is generated, so the pool is not touched).
+fn pool_copies(g: &mut Game, c: CardId) -> u8 {
+    if g.data.cards.get(c).token {
+        return 0;
+    }
     let slot = g.data.cards.get(c).pool_slot as usize;
     g.pool[slot] -= 1;
-    let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    1
+}
+
+fn put_on_board(g: &mut Game, p: usize, name: &str) {
+    let c = id(g, name);
+    let n = pool_copies(g, c);
+    let m = g.players[p].make_card(&g.data.cards, c, false, n);
     g.players[p].board.push(m);
 }
 
 /// Put a pool minion in hand (a second Murloc for the guarantee, say).
 fn put_in_hand(g: &mut Game, p: usize, name: &str) {
     let c = id(g, name);
-    let slot = g.data.cards.get(c).pool_slot as usize;
-    g.pool[slot] -= 1;
-    let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+    let n = pool_copies(g, c);
+    let m = g.players[p].make_card(&g.data.cards, c, false, n);
     g.players[p].hand.push(m);
 }
 
 fn set_shop(g: &mut Game, p: usize, names: &[&str]) {
     let old: Vec<Minion> = g.players[p].shop.drain(..).collect();
     for m in old {
+        if m.pool_copies == 0 {
+            continue;
+        }
         let slot = g.data.cards.get(m.card).pool_slot as usize;
         g.pool[slot] += m.pool_copies;
     }
     for n in names {
         let c = id(g, n);
-        let slot = g.data.cards.get(c).pool_slot as usize;
-        g.pool[slot] -= 1;
-        let m = g.players[p].make_card(&g.data.cards, c, false, 1);
+        let k = pool_copies(g, c);
+        let m = g.players[p].make_card(&g.data.cards, c, false, k);
         g.players[p].shop.push(m);
     }
     g.players[p].shop_spell = None;
@@ -224,18 +235,11 @@ fn an_unanswered_offer_is_bought_on_the_way_out() {
     let mut g = game(2);
     to_turn(&mut g, 6);
     turn_of(&mut g, 0);
-    let cheapest = g.players[0]
-        .trinket_offer
-        .iter()
-        .map(|&(of, price)| (price, of))
-        .min()
-        .unwrap()
-        .1;
+    let cheapest = g.players[0].trinket_offer.iter().map(|&(_, price)| price).min().unwrap();
     let gold = g.players[0].gold;
-    let price = g.players[0].trinket_offer.iter().find(|&&(of, _)| of == cheapest).unwrap().1;
     act(&mut g, 0, Action::EndTurn);
-    assert_eq!(g.players[0].trinkets[0].of, cheapest + 1, "the cheapest one, not declined");
-    assert_eq!(g.players[0].gold, gold.saturating_sub(price));
+    assert_ne!(g.players[0].trinkets[0].of, 0, "not declined");
+    assert_eq!(g.players[0].gold, gold.saturating_sub(cheapest), "the cheapest one");
 }
 
 #[test]
@@ -456,13 +460,13 @@ rule = { event = "turns", every = 3, acts = [{ get = "Tavern Coin" }] }
 #[test]
 fn a_start_of_combat_trinket_runs_in_a_fight() {
     // A synthetic trinket: "Start of Combat: your Undead gain Taunt and
-    // Reborn". None of the built ones has a Start of Combat yet.
+    // Reborn".
     let toml = r#"
 [[trinket]]
 name = "Test Banner"
 card_id = "TEST_Trinket_2"
 slot = "lesser"
-soc = { tribe = "undead", keywords = ["taunt", "reborn"] }
+fight = [{ when = "soc", tribe = "undead", keywords = ["taunt", "reborn"] }]
 "#;
     let d = Arc::new(
         Data::from_toml_all(
@@ -478,8 +482,7 @@ soc = { tribe = "undead", keywords = ["taunt", "reborn"] }
     put_on_board(&mut g, 0, "Eternal Knight");
     put_on_board(&mut g, 0, "Scarlet Survivor");
     let counters = [g.players[0].counters(&g.data, g.lobby), bgcore::Counters::default()];
-    let kw = counters[0].soc_tribe.expect("the trinket's Start of Combat reaches the fight");
-    assert_eq!(kw.1, bgcore::Keywords::TAUNT | bgcore::Keywords::REBORN);
+    assert_eq!(counters[0].trinkets.len(), 1, "the trinket's Start of Combat reaches the fight");
     #[derive(Default)]
     struct Seen(Vec<(CardId, u8)>);
     impl bgcore::fight::Watch for Seen {
@@ -859,8 +862,9 @@ fn the_trinket_table_parses() {
                 + t.on_cast_spell.len()
                 + t.on_cast_spell_on_minion.len()
                 + t.on_discard.len()
+                + t.on_get.len()
                 + t.on_gold_spent.len()
-                + t.soc.iter().count()
+                + t.fight.len()
                 + t.rule.iter().count()
                 > 0,
             "{} does nothing",
@@ -1148,9 +1152,15 @@ fn mystery_cube_offers_a_free_replacement() {
     for &(of, _) in &g.players[0].trinket_offer {
         assert_eq!(g.data.trinkets.get(of).slot, bgcore::trinkets::Slot::Lesser);
     }
-    let pick = g.players[0].trinket_offer[0].0;
-    act(&mut g, 0, Action::ChooseTrinket(0));
-    assert_eq!(g.players[0].trinkets[0].of, pick + 1, "the cube was replaced");
+    // The cube is gone afterwards. (An option that replaces itself on the
+    // pick, Orb of the Unknown, is replaced again, so only the cube leaving
+    // is checked.)
+    let k = (0..g.players[0].trinket_offer.len())
+        .find(|&k| g.players[0].trinket_offer[k].0 != mc)
+        .expect("an option that is not the cube again");
+    act(&mut g, 0, Action::ChooseTrinket(k as u8));
+    assert_ne!(g.players[0].trinkets[0].of, mc + 1, "the cube was replaced");
+    assert_ne!(g.players[0].trinkets[0].of, 0, "and the slot is not empty");
     g.check_invariants().unwrap();
 }
 
@@ -1169,4 +1179,1278 @@ fn booty_bay_brew_fires_once_per_spending() {
         g.players[0].board.iter().map(|m| (g.data.cards.get(m.card).name.clone(), m.attack)).collect::<Vec<_>>());
     assert_eq!(g.players[0].board[0].attack, before + 3, "once, whatever the amount");
     g.check_invariants().unwrap();
+}
+
+// ---- the fight-side trinkets ----
+//
+// A trinket has no host minion, so its fight effects leave through
+// `Counters.trinkets` (a small `Copy` bundle built from the slots) and come
+// back through `SideOutcome`. These tests fight player 0's board against a
+// wall with the real `fight_with`, so the counters they build are the ones a
+// real combat builds.
+
+/// A minion with `attack` and `health` that soaks a fight (Lullabot's card).
+fn wall(g: &Game, attack: i32, health: i32) -> Minion {
+    let mut m = g.data.cards.make(id(g, "Lullabot"), false);
+    m.attack = attack;
+    m.health = health;
+    m
+}
+
+/// Fight player 0's board against one wall, with player 0's trinkets.
+fn fight_wall(g: &Game, seed: u64, attack: i32, health: i32, max_attacks: u32) -> bgcore::fight::Outcome {
+    fight_wall_watched(g, seed, attack, health, max_attacks, &mut ())
+}
+
+fn fight_wall_watched(
+    g: &Game,
+    seed: u64,
+    attack: i32,
+    health: i32,
+    max_attacks: u32,
+    watch: &mut impl bgcore::fight::Watch,
+) -> bgcore::fight::Outcome {
+    let board = g.players[0].board.clone();
+    let counters = [g.players[0].counters(&g.data, g.lobby), bgcore::Counters::default()];
+    fight_with(
+        &g.data.cards,
+        &board,
+        &[wall(g, attack, health)],
+        counters,
+        max_attacks,
+        &mut Rng::new(seed),
+        watch,
+    )
+}
+
+/// What a fight did to the minions, for the tests that cannot read the board
+/// afterwards through `Outcome`.
+#[derive(Default)]
+struct Seen {
+    attacks: Vec<(usize, Minion)>,
+    deaths: Vec<(usize, Minion)>,
+    summons: Vec<(usize, Minion)>,
+}
+
+impl bgcore::fight::Watch for Seen {
+    fn attack(&mut self, side: usize, attacker: &Minion, _defender: &Minion) {
+        self.attacks.push((side, *attacker));
+    }
+    fn death(&mut self, side: usize, _pos: usize, m: &Minion) {
+        self.deaths.push((side, *m));
+    }
+    fn summon(&mut self, side: usize, _pos: usize, m: &Minion) {
+        self.summons.push((side, *m));
+    }
+}
+
+impl Seen {
+    /// The first time player 0 attacked with a minion whose card is `name`.
+    fn attacker(&self, g: &Game, name: &str) -> Option<Minion> {
+        self.attacks
+            .iter()
+            .find(|(s, m)| *s == 0 && g.data.cards.get(m.card).name == name)
+            .map(|&(_, m)| m)
+    }
+
+    /// The first minion player 0 summoned with this card.
+    fn summoned(&self, g: &Game, name: &str) -> Option<Minion> {
+        self.summons
+            .iter()
+            .find(|(s, m)| *s == 0 && g.data.cards.get(m.card).name == name)
+            .map(|&(_, m)| m)
+    }
+
+    /// The first minion of player 0 that died with this card.
+    fn dead(&self, g: &Game, name: &str) -> Option<Minion> {
+        self.deaths
+            .iter()
+            .find(|(s, m)| *s == 0 && g.data.cards.get(m.card).name == name)
+            .map(|&(_, m)| m)
+    }
+
+    /// Every minion player 0 summoned with this card.
+    fn summoned_all(&self, g: &Game, name: &str) -> Vec<Minion> {
+        self.summons
+            .iter()
+            .filter(|(s, m)| *s == 0 && g.data.cards.get(m.card).name == name)
+            .map(|&(_, m)| m)
+            .collect()
+    }
+
+    /// Every minion of player 0 that died with this card.
+    fn dead_all(&self, g: &Game, name: &str) -> Vec<Minion> {
+        self.deaths
+            .iter()
+            .filter(|(s, m)| *s == 0 && g.data.cards.get(m.card).name == name)
+            .map(|&(_, m)| m)
+            .collect()
+    }
+}
+
+/// Put `count` copies of a minion on player 0's board at 1 Health, so a fight
+/// kills them one attack at a time.
+fn weak_board(g: &mut Game, p: usize, name: &str, count: usize) {
+    for _ in 0..count {
+        put_on_board(g, p, name);
+        let m = g.players[p].board.last_mut().unwrap();
+        m.health = 1;
+    }
+}
+
+#[test]
+fn an_avenge_trinket_fires_after_its_third_friendly_death() {
+    // Quilligraphy Set: Avenge (3): your Blood Gems give an extra +1 Health.
+    let mut g = game(11);
+    equip(&mut g, 0, 0, "Quilligraphy Set");
+    assert_eq!(g.players[0].counters(&g.data, g.lobby).trinkets.len(), 1, "the bundle holds it");
+    // Two deaths are not three.
+    weak_board(&mut g, 0, "Southsea Busker", 2);
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    assert_eq!(out.sides[0].gem_gain, (0, 0), "two deaths: no fire");
+    // The count starts again in the next fight (DESIGN.md: Avenge resets).
+    g.players[0].board.clear();
+    weak_board(&mut g, 0, "Southsea Busker", 2);
+    let out = fight_wall(&g, 2, 10, 500, 60);
+    assert_eq!(out.sides[0].gem_gain, (0, 0), "two more, still no fire");
+    // Three in one fight does fire, once.
+    g.players[0].board.clear();
+    weak_board(&mut g, 0, "Southsea Busker", 3);
+    let out = fight_wall(&g, 3, 10, 500, 60);
+    assert_eq!(out.sides[0].gem_gain, (0, 1), "Avenge (3): +1 Health on the Gems");
+}
+
+#[test]
+fn a_start_of_combat_trinket_shields_the_two_ends() {
+    // Holy Mallet: Start of Combat: give your left and right-most minions
+    // Divine Shield.
+    let mut g = game(12);
+    equip(&mut g, 0, 0, "Holy Mallet");
+    put_on_board(&mut g, 0, "Eternal Knight");
+    put_on_board(&mut g, 0, "Southsea Busker");
+    put_on_board(&mut g, 0, "Scarlet Survivor");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    let ds = |name: &str| {
+        seen.attacker(&g, name).map(|m| m.keywords.has(bgcore::Keywords::DIVINE_SHIELD))
+    };
+    assert_eq!(ds("Eternal Knight"), Some(true), "the left end is shielded");
+    assert_eq!(ds("Southsea Busker"), Some(false), "the middle one is not");
+    assert_eq!(ds("Scarlet Survivor"), Some(true), "the right end is shielded");
+    // One minion is both ends, and gets one shield.
+    g.players[0].board.clear();
+    put_on_board(&mut g, 0, "Eternal Knight");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    assert_eq!(
+        seen.attacker(&g, "Eternal Knight").map(|m| m.keywords.has(bgcore::Keywords::DIVINE_SHIELD)),
+        Some(true)
+    );
+}
+
+#[test]
+fn summoning_a_beast_buffs_it() {
+    // Mama Bear Sticker: whenever you summon a Beast, give it +6/+6.
+    let mut g = game(13);
+    equip(&mut g, 0, 0, "Mama Bear Sticker");
+    // Buzzing Vermin's Deathrattle summons a 2/2 Beetle, a Beast.
+    weak_board(&mut g, 0, "Buzzing Vermin", 1);
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    let beetle = seen.summoned(&g, "Beetle").expect("the Vermin's Beast was summoned");
+    assert_eq!((beetle.attack, beetle.health), (2 + 6, 2 + 6), "the sticker buffed it");
+    // The same fight with no trinket leaves the Beetle alone.
+    g.players[0].board.clear();
+    g.players[0].trinkets[0] = Default::default();
+    weak_board(&mut g, 0, "Buzzing Vermin", 1);
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    let beetle = seen.summoned(&g, "Beetle").expect("summoned without the trinket");
+    assert_eq!((beetle.attack, beetle.health), (2, 2), "no trinket, no buff");
+}
+
+#[test]
+fn an_avenge_trinket_gives_a_random_undead_reborn() {
+    // Staff of the Scourge: Avenge (5): give a random friendly Undead Reborn.
+    let mut g = game(14);
+    equip(&mut g, 0, 0, "Staff of the Scourge");
+    weak_board(&mut g, 0, "Southsea Busker", 5);
+    put_on_board(&mut g, 0, "Eternal Knight");
+    g.players[0].board.last_mut().unwrap().health = 100;
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    let knight = seen.attacker(&g, "Eternal Knight").expect("the Knight attacked");
+    assert!(
+        knight.keywords.has(bgcore::Keywords::REBORN),
+        "five deaths gave the Undead Reborn"
+    );
+}
+
+#[test]
+fn beetle_band_summons_taunt_beetles_at_the_right_end() {
+    // Beetle Band: Avenge (5): summon a 2/2 Beetle, give it Taunt.
+    let mut g = game(15);
+    equip(&mut g, 0, 0, "Beetle Band");
+    weak_board(&mut g, 0, "Southsea Busker", 5);
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    assert_eq!(seen.summoned(&g, "Beetle").map(|m| (m.attack, m.health)), Some((2, 2)));
+    // The Beetle is the side's only minion by then, so it attacks and dies:
+    // its death shows the Taunt it was given.
+    let dead = seen.dead(&g, "Beetle").expect("the Beetle fought and died");
+    assert!(dead.keywords.has(bgcore::Keywords::TAUNT), "it has Taunt");
+    // The greater one is Avenge (7) and summons two.
+    let mut g = game(16);
+    equip_id(&mut g, 0, 1, "BG32_MagicItem_860t");
+    weak_board(&mut g, 0, "Southsea Busker", 7);
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    let summoned: Vec<Minion> = seen.summoned_all(&g, "Beetle");
+    assert_eq!(summoned.len(), 2, "two Beetles");
+    for m in &summoned {
+        assert_eq!((m.attack, m.health), (2, 2));
+    }
+    let dead: Vec<Minion> = seen.dead_all(&g, "Beetle");
+    assert_eq!(dead.len(), 2, "both fought");
+    for m in dead {
+        assert!(m.keywords.has(bgcore::Keywords::TAUNT), "both got Taunt");
+    }
+}
+
+#[test]
+fn fridge_magnet_gets_a_random_magnetic_minion_after_three_deaths() {
+    let mut g = game(17);
+    equip(&mut g, 0, 1, "Fridge Magnet");
+    weak_board(&mut g, 0, "Southsea Busker", 3);
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    let gained = out.sides[0].cards_gained();
+    assert_eq!(gained.len(), 1, "one card");
+    assert!(
+        g.data.cards.get(gained[0]).keywords.has(bgcore::Keywords::MAGNETIC),
+        "a Magnetic minion"
+    );
+}
+
+#[test]
+fn wicked_tome_raises_the_tavern_spell_bonus() {
+    // Wicked Tome (greater): Avenge (4): your Tavern spells give +1/+1.
+    let mut g = game(19);
+    equip_id(&mut g, 0, 1, "BG32_MagicItem_270t");
+    weak_board(&mut g, 0, "Southsea Busker", 4);
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    assert_eq!(out.sides[0].spell_bonus_gain, (1, 1));
+    // Three deaths are not enough for Avenge (4).
+    let mut g = game(18);
+    equip_id(&mut g, 0, 1, "BG32_MagicItem_270t");
+    weak_board(&mut g, 0, "Southsea Busker", 3);
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    assert_eq!(out.sides[0].spell_bonus_gain, (0, 0));
+}
+
+#[test]
+fn the_eye_of_dalaran_gives_a_spell_when_a_typeless_minion_dies() {
+    let mut g = game(20);
+    equip(&mut g, 0, 0, "The Eye of Dalaran");
+    weak_board(&mut g, 0, "Patient Scout", 1);
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    let gained = out.sides[0].cards_gained();
+    assert_eq!(gained.len(), 1, "a Tavern spell");
+    assert!(g.data.cards.get(gained[0]).is_spell(), "and it is a spell");
+    // A minion with a type dying gives nothing.
+    let mut g = game(21);
+    equip(&mut g, 0, 0, "The Eye of Dalaran");
+    weak_board(&mut g, 0, "Southsea Busker", 1);
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    assert!(out.sides[0].cards_gained().is_empty(), "a Pirate is not typeless");
+}
+
+/// A one-player game that fights a copy of its own board at the end of every
+/// turn, so a fight's gains can be read from the player afterwards.
+fn sandbox(seed: u64, lobby: &[Tribe]) -> Game {
+    let tribes = lobby.iter().copied().fold(Tribes::NONE, |m, t| m.with(t));
+    Game::new_sandbox(data(), seed, Some(tribes), 0)
+}
+
+/// Put `count` copies of a minion on player 0's board without pool copies
+/// (a sandbox fixture, cleared at the end of every turn), at 1 Health.
+fn fixture(g: &mut Game, p: usize, name: &str, count: usize) {
+    let c = id(g, name);
+    for _ in 0..count {
+        let mut m = g.data.cards.make(c, false);
+        m.health = 1;
+        g.players[p].board.push(m);
+    }
+}
+
+/// End the sandbox's turn once, answering nothing (its board is the fixture).
+fn sandbox_turn(g: &mut Game) {
+    g.step(Action::EndTurn).unwrap();
+}
+
+fn count_in_hand(g: &Game, p: usize, tribe: Tribe) -> usize {
+    g.players[p]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).tribes.has(tribe))
+        .count()
+}
+
+#[test]
+fn a_death_counter_takes_shop_and_fight_deaths_and_carries_across_fights() {
+    // Bleeding Heart: after 8 friendly minions die, get a random Undead.
+    let mut g = sandbox(31, &[Tribe::Undead, Tribe::Beast]);
+    equip(&mut g, 0, 0, "Bleeding Heart");
+    // Three 1/1s on both sides: every fight kills all three of ours.
+    for _ in 0..2 {
+        g.players[0].board.clear();
+        fixture(&mut g, 0, "Patient Scout", 3);
+        sandbox_turn(&mut g);
+    }
+    assert_eq!(g.players[0].trinkets[0].count, 6, "two fights of three deaths");
+    assert_eq!(count_in_hand(&g, 0, Tribe::Undead), 0, "not eight yet");
+    g.players[0].board.clear();
+    fixture(&mut g, 0, "Patient Scout", 3);
+    sandbox_turn(&mut g);
+    assert_eq!(g.players[0].trinkets[0].count, 1, "nine deaths: fired at eight, one over");
+    assert_eq!(count_in_hand(&g, 0, Tribe::Undead), 1, "a random Undead");
+    // A shop death counts too (DESIGN.md: shop deaths count for death
+    // counters). Butchering destroys an Undead in the shop; the counter was
+    // at 1 after nine deaths and goes to 2.
+    let before = g.players[0].trinkets[0].count;
+    put_on_board(&mut g, 0, "Eternal Knight");
+    let knight = g.players[0].board.len() as u8 - 1;
+    g.give(0, "Butchering").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    act(&mut g, 0, Action::Play { hand: h, pos: 0 });
+    act(&mut g, 0, Action::Target(knight));
+    assert_eq!(g.players[0].trinkets[0].count, before + 1, "the shop death counted");
+}
+
+#[test]
+fn a_summon_counter_counts_the_beasts_a_fight_summons() {
+    // Wildfeather Duster: after 6 Beasts are summoned, get a random Beast.
+    let mut g = sandbox(32, &[Tribe::Beast, Tribe::Undead]);
+    equip_id(&mut g, 0, 1, "BG35_MagicItem_700");
+    // Six 1/1 Beasts whose Deathrattles each summon a Beetle: six summons.
+    for _ in 0..6 {
+        put_on_board(&mut g, 0, "Buzzing Vermin");
+    }
+    sandbox_turn(&mut g);
+    assert_eq!(count_in_hand(&g, 0, Tribe::Beast), 1, "a random Beast after six summons");
+}
+
+#[test]
+fn the_death_counters_name_their_tribe() {
+    // The three "after N friendly minions die" trinkets, from the table.
+    let g = game(33);
+    for (name, tribe, every) in [
+        ("Bleeding Heart", Tribe::Undead, 8),
+        ("Lucky Tabby", Tribe::Beast, 7),
+        ("Stormcoil Sticker", Tribe::Mech, 6),
+    ] {
+        let t = g.data.trinkets.get(trinket(&g, name));
+        let rule = t.rule.as_ref().unwrap_or_else(|| panic!("{name}: no rule"));
+        assert_eq!(rule.event, bgcore::trinkets::Event::Death, "{name}");
+        assert_eq!(rule.every, every, "{name}");
+        assert_eq!(
+            rule.acts,
+            vec![bgcore::trinkets::Act::RandomMinion { tribe, count: 1 }],
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn the_first_deathrattle_of_a_fight_fires_an_extra_time() {
+    // Deathly Phylactery: your first Deathrattle each combat triggers twice.
+    let mut g = game(34);
+    equip(&mut g, 0, 0, "Deathly Phylactery");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    assert_eq!(seen.summoned_all(&g, "Beetle").len(), 2, "the first one fired twice");
+    // Only the first: two Vermin give three Beetles, not four.
+    let mut g = game(35);
+    equip(&mut g, 0, 0, "Deathly Phylactery");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    assert_eq!(seen.summoned_all(&g, "Beetle").len(), 3, "one extra, once");
+    // Without it the same board summons two.
+    let mut g = game(36);
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    assert_eq!(seen.summoned_all(&g, "Beetle").len(), 2);
+}
+
+/// The stats of player 0's minion with this card, the first time it attacked.
+fn attack_stats(seen: &Seen, g: &Game, name: &str) -> (i32, i32) {
+    let m = seen.attacker(g, name).unwrap_or_else(|| panic!("{name} never attacked"));
+    (m.attack, m.health)
+}
+
+#[test]
+fn training_certificate_doubles_the_two_lowest_attack_minions() {
+    let mut g = game(41);
+    equip(&mut g, 0, 0, "Training Certificate");
+    put_on_board(&mut g, 0, "Eternal Knight"); // 4/2, the highest
+    put_on_board(&mut g, 0, "Patient Scout"); // 1/1
+    put_on_board(&mut g, 0, "Deadly Spore"); // 1/1
+    let mut seen = Seen::default();
+    // A wall that hits nothing back: the shields and stats stay as they were.
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    assert_eq!(attack_stats(&seen, &g, "Patient Scout"), (2, 2), "doubled");
+    assert_eq!(attack_stats(&seen, &g, "Deadly Spore"), (2, 2), "doubled");
+    assert_eq!(attack_stats(&seen, &g, "Eternal Knight"), (4, 2), "the highest is left alone");
+}
+
+#[test]
+fn ironforge_anvil_triples_the_minions_with_no_type() {
+    let mut g = game(42);
+    equip_id(&mut g, 0, 1, "BG30_MagicItem_403");
+    put_on_board(&mut g, 0, "Patient Scout"); // neutral 1/1
+    put_on_board(&mut g, 0, "Southsea Busker"); // pirate 3/1
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    assert_eq!(attack_stats(&seen, &g, "Patient Scout"), (3, 3), "tripled");
+    assert_eq!(attack_stats(&seen, &g, "Southsea Busker"), (3, 1), "a Pirate keeps its stats");
+}
+
+#[test]
+fn bronze_timepiece_adds_half_the_attack_as_health() {
+    let mut g = game(43);
+    equip_id(&mut g, 0, 1, "BG30_MagicItem_995");
+    put_on_board(&mut g, 0, "Eternal Knight"); // 4/2: +2 Health
+    put_on_board(&mut g, 0, "Southsea Busker"); // 3/1: +2 Health (3 halves up)
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    assert_eq!(attack_stats(&seen, &g, "Eternal Knight"), (4, 4));
+    assert_eq!(attack_stats(&seen, &g, "Southsea Busker"), (3, 3), "half of 3 rounds up");
+}
+
+#[test]
+fn protective_ring_shields_four_random_pirates() {
+    let mut g = game(44);
+    equip_id(&mut g, 0, 1, "BG35_MagicItem_711");
+    for _ in 0..5 {
+        put_on_board(&mut g, 0, "Southsea Busker");
+    }
+    let mut seen = Seen::default();
+    // Five swings, so each Pirate attacks exactly once and shows the shield
+    // it got (nothing takes it away: the wall has no Attack).
+    fight_wall_watched(&g, 1, 0, 500, 5, &mut seen);
+    assert_eq!(seen.attacks.len(), 5);
+    let shielded = seen
+        .attacks
+        .iter()
+        .filter(|(s, _)| *s == 0)
+        .filter(|(_, m)| m.keywords.has(bgcore::Keywords::DIVINE_SHIELD))
+        .count();
+    assert_eq!(shielded, 4, "four of the five Pirates, each once");
+}
+
+#[test]
+fn lightfeather_sticker_shields_the_rally_minions() {
+    let mut g = game(45);
+    equip_id(&mut g, 0, 1, "BG36_MagicItem_213");
+    put_on_board(&mut g, 0, "Flittering Bat"); // a Rally minion
+    put_on_board(&mut g, 0, "Southsea Busker"); // no Rally
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    let bat = seen.attacker(&g, "Flittering Bat").expect("the Bat attacked");
+    assert!(bat.keywords.has(bgcore::Keywords::DIVINE_SHIELD), "a Rally minion is shielded");
+    let pirate = seen.attacker(&g, "Southsea Busker").expect("the Pirate attacked");
+    assert!(!pirate.keywords.has(bgcore::Keywords::DIVINE_SHIELD), "and a plain one is not");
+}
+
+#[test]
+fn baleful_incense_gives_the_end_undead_reborn() {
+    let mut g = game(46);
+    equip(&mut g, 0, 0, "Baleful Incense");
+    put_on_board(&mut g, 0, "Eternal Knight"); // Undead, the left end
+    put_on_board(&mut g, 0, "Southsea Busker"); // a Pirate in the middle
+    put_on_board(&mut g, 0, "Scarlet Survivor"); // a Dragon, the right end
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    let knight = seen.attacker(&g, "Eternal Knight").expect("the Knight attacked");
+    assert!(knight.keywords.has(bgcore::Keywords::REBORN), "the left-most Undead has it");
+    let dragon = seen.attacker(&g, "Scarlet Survivor").expect("the Dragon attacked");
+    assert!(!dragon.keywords.has(bgcore::Keywords::REBORN), "the right end is not an Undead");
+}
+
+#[test]
+fn eternal_and_converter_portraits_give_their_own_cards_keywords() {
+    // Eternal Portrait: Taunt and Reborn on your Eternal Knights.
+    let mut g = game(47);
+    equip(&mut g, 0, 0, "Eternal Portrait");
+    put_on_board(&mut g, 0, "Eternal Knight");
+    put_on_board(&mut g, 0, "Flittering Bat");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    let knight = seen.attacker(&g, "Eternal Knight").expect("the Knight attacked");
+    assert!(knight.keywords.has(bgcore::Keywords::TAUNT | bgcore::Keywords::REBORN));
+    let bat = seen.attacker(&g, "Flittering Bat").expect("the Bat attacked");
+    assert!(!bat.keywords.has(bgcore::Keywords::REBORN), "another card gets nothing");
+    // Converter Portrait: Reborn on your Faceless Converters.
+    let mut g = game(48);
+    equip(&mut g, 0, 1, "Converter Portrait");
+    put_on_board(&mut g, 0, "Faceless Converter");
+    put_on_board(&mut g, 0, "Flittering Bat");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    let conv = seen.attacker(&g, "Faceless Converter").expect("the Converter attacked");
+    assert!(conv.keywords.has(bgcore::Keywords::REBORN));
+}
+
+#[test]
+fn rivendare_portrait_doubles_the_health_of_your_titus() {
+    let mut g = game(49);
+    equip_id(&mut g, 0, 1, "BG30_MagicItem_310");
+    put_on_board(&mut g, 0, "Titus Rivendare"); // 1/7
+    put_on_board(&mut g, 0, "Southsea Busker"); // 3/1
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    assert_eq!(attack_stats(&seen, &g, "Titus Rivendare"), (1, 14), "Health doubled");
+    assert_eq!(attack_stats(&seen, &g, "Southsea Busker"), (3, 1), "nothing else changed");
+}
+
+#[test]
+fn hoggy_bank_gives_your_quilboar_a_deathrattle() {
+    let mut g = game(50);
+    equip(&mut g, 0, 0, "Hoggy Bank");
+    weak_board(&mut g, 0, "Crater Miner", 1); // a Quilboar at 1 Health
+    put_on_board(&mut g, 0, "Southsea Busker");
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    let gems = out.sides[0].cards_gained();
+    assert_eq!(gems.len(), 2, "two Blood Gems");
+    assert_eq!(Some(gems[0]), g.data.cards.blood_gem, "and they are Blood Gems");
+    // A minion that is not a Quilboar gets no Deathrattle.
+    let mut g = game(51);
+    equip(&mut g, 0, 0, "Hoggy Bank");
+    weak_board(&mut g, 0, "Southsea Busker", 1);
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    assert!(out.sides[0].cards_gained().is_empty(), "no Quilboar, no Gems");
+}
+
+#[test]
+fn herald_sticker_triggers_every_friendly_deathrattle() {
+    let mut g = game(52);
+    equip_id(&mut g, 0, 1, "BG32_MagicItem_306");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    // Both Deathrattles fire at the start of combat, with no death at all.
+    let mut seen = Seen::default();
+    let out = fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    assert_eq!(seen.summoned_all(&g, "Beetle").len(), 2, "both, at Start of Combat");
+    assert_eq!(out.sides[0].deathrattles_triggered, 2, "and they count as triggers");
+    // And each Vermin's own Deathrattle still fires when it dies: two more.
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    assert_eq!(out.sides[0].deathrattles_triggered, 4);
+}
+
+#[test]
+fn sky_golem_portrait_grants_a_deathrattle_that_buffs_the_rest_for_good() {
+    let mut g = game(53);
+    equip_id(&mut g, 0, 1, "BG35_MagicItem_740");
+    weak_board(&mut g, 0, "Southsea Busker", 1); // dies first
+    put_on_board(&mut g, 0, "Eternal Knight"); // survives
+    g.players[0].board.last_mut().unwrap().health = 100;
+    // Five swings: one death, and the Knight is still there at the end.
+    let out = fight_wall(&g, 1, 3, 500, 5);
+    // Every minion got "Deathrattle: give your minions +2/+2 permanently",
+    // so the Knight's stats are kept through the outcome.
+    assert_eq!(out.sides[0].permanent_stats[1], (2, 2), "the survivor keeps +2/+2");
+    assert_eq!(out.sides[0].deathrattles_triggered, 1, "the dead one's Deathrattle fired");
+}
+
+#[test]
+fn fang_anklet_buffs_your_beasts_and_improves_with_every_beast_summoned() {
+    let mut g = game(54);
+    equip_id(&mut g, 0, 1, "BG35_MagicItem_701");
+    put_on_board(&mut g, 0, "Flittering Bat"); // a Beast 1/4
+    put_on_board(&mut g, 0, "Southsea Busker"); // a Pirate, untouched
+    let mut seen = Seen::default();
+    let out = fight_wall_watched(&g, 1, 0, 500, 60, &mut seen);
+    assert_eq!(attack_stats(&seen, &g, "Flittering Bat"), (2, 5), "Beasts have +1/+1");
+    assert_eq!(attack_stats(&seen, &g, "Southsea Busker"), (3, 1), "Pirates do not");
+    assert_eq!(out.sides[0].summon_tribes[0], 0, "no Beast was summoned");
+    // A Beast summoned during the fight improves the anklet for good.
+    let mut g = game(55);
+    equip_id(&mut g, 0, 1, "BG35_MagicItem_701");
+    weak_board(&mut g, 0, "Buzzing Vermin", 1); // its Beetle is a summon
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    assert_eq!(out.sides[0].trinket_improve[1], 1, "one Beast summon");
+}
+
+#[test]
+fn dramaloc_sticker_gives_your_murlocs_the_hand_attack() {
+    let mut g = game(56);
+    equip_id(&mut g, 0, 1, "BG35_MagicItem_754");
+    put_on_board(&mut g, 0, "Bubble Gunner"); // a Murloc 2/3
+    put_on_board(&mut g, 0, "Southsea Busker"); // a Pirate
+    // The hand: the game only passes it to a fight that reads it.
+    g.players[0].board.clear();
+    let mut murloc = g.data.cards.make(id(&g, "Bubble Gunner"), false);
+    murloc.attack = 2;
+    g.players[0].board.push(murloc);
+    let mut strong = g.data.cards.make(id(&g, "Eternal Knight"), false);
+    strong.attack = 9;
+    g.players[0].hand.push(strong);
+    assert!(g.players[0].trinket_reads_hand(&g.data), "the fight is given the hand");
+    let board = g.players[0].board.clone();
+    let hand = g.players[0].hand.clone();
+    let counters = [g.players[0].counters(&g.data, g.lobby), bgcore::Counters::default()];
+    let mut seen = Seen::default();
+    bgcore::fight::fight_with_hands(
+        &g.data.cards,
+        &board,
+        &[wall(&g, 0, 500)],
+        [&hand, &[]],
+        counters,
+        60,
+        &mut Rng::new(1),
+        &mut seen,
+    );
+    let bubble = seen.attacker(&g, "Bubble Gunner").expect("the Murloc attacked");
+    assert_eq!(bubble.attack, 2 + 9, "it gained the hand minion's Attack");
+}
+
+/// Every attack a minion of player 0 made with this card, in order, as
+/// `(attack, health)` at the moment it swung.
+fn swings(seen: &Seen, g: &Game, name: &str) -> Vec<(i32, i32)> {
+    seen.attacks
+        .iter()
+        .filter(|(s, m)| *s == 0 && g.data.cards.get(m.card).name == name)
+        .map(|(_, m)| (m.attack, m.health))
+        .collect()
+}
+
+#[test]
+fn herding_horn_gives_a_free_refresh_for_every_rally_swing() {
+    let mut g = game(61);
+    equip(&mut g, 0, 0, "Herding Horn");
+    put_on_board(&mut g, 0, "Flittering Bat"); // has a Rally
+    put_on_board(&mut g, 0, "Southsea Busker"); // and one without
+    // Two swings: the Bat's and the Pirate's.
+    let out = fight_wall(&g, 1, 0, 500, 2);
+    assert_eq!(out.sides[0].free_refresh_gain, 1, "one free Refresh per Rally swing");
+    // A Windfury Rally minion swings twice and gives two.
+    let mut g = game(62);
+    equip(&mut g, 0, 0, "Herding Horn");
+    put_on_board(&mut g, 0, "Flittering Bat");
+    g.players[0].board[0].keywords.set(bgcore::Keywords::WINDFURY);
+    // Two attacks, each a Windfury pair of swings: four.
+    let out = fight_wall(&g, 1, 0, 500, 2);
+    assert_eq!(out.sides[0].free_refresh_gain, 4, "every swing counts");
+}
+
+#[test]
+fn lionfish_portrait_buffs_every_attacking_beast() {
+    let mut g = game(63);
+    take(&mut g, 0, "Lionfish Portrait");
+    assert_eq!(hand_of(&g, 0, "Lurking Lionfish"), 1, "the pick hands one over");
+    put_on_board(&mut g, 0, "Flittering Bat"); // Beast 1/4
+    put_on_board(&mut g, 0, "Southsea Busker"); // Pirate 3/1
+    let mut seen = Seen::default();
+    let out = fight_wall_watched(&g, 1, 0, 500, 2, &mut seen);
+    assert_eq!(swings(&seen, &g, "Flittering Bat"), [(5, 6)], "+4/+2 on the Beast");
+    assert_eq!(swings(&seen, &g, "Southsea Busker"), [(3, 1)], "not on the Pirate");
+    assert!(out.sides[0].cards_gained().is_empty(), "the fight itself gives no card");
+}
+
+#[test]
+fn all_purpose_kibble_grows_with_every_beast_attack() {
+    let mut g = game(64);
+    equip_id(&mut g, 0, 1, "BG32_MagicItem_200");
+    put_on_board(&mut g, 0, "Flittering Bat"); // 1/4
+    let mut seen = Seen::default();
+    let out = fight_wall_watched(&g, 1, 0, 500, 2, &mut seen);
+    assert_eq!(
+        swings(&seen, &g, "Flittering Bat"),
+        [(1 + 3, 4), (1 + 3 + 4, 4)],
+        "+3, then +4: it improved"
+    );
+    assert_eq!(out.sides[0].trinket_improve[1], 2, "two attacks improved it twice");
+}
+
+#[test]
+fn slamma_sticker_doubles_the_attack_of_a_summoned_beast() {
+    let mut g = game(65);
+    equip_id(&mut g, 0, 1, "BG30_MagicItem_540");
+    weak_board(&mut g, 0, "Buzzing Vermin", 1);
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 20, &mut seen);
+    let beetle = seen.summoned(&g, "Beetle").expect("the Beetle was summoned");
+    assert_eq!((beetle.attack, beetle.health), (4, 2), "Attack doubled");
+}
+
+#[test]
+fn reinforced_shield_shields_the_first_five_summons() {
+    let mut g = game(66);
+    equip_id(&mut g, 0, 1, "BG30_MagicItem_886");
+    weak_board(&mut g, 0, "Buzzing Vermin", 6);
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 40, &mut seen);
+    let beetles = seen.summoned_all(&g, "Beetle");
+    assert_eq!(beetles.len(), 6, "six Vermin, six Beetles");
+    let shielded = beetles
+        .iter()
+        .filter(|m| m.keywords.has(bgcore::Keywords::DIVINE_SHIELD))
+        .count();
+    assert_eq!(shielded, 5, "five times per combat, then no more");
+}
+
+#[test]
+fn faerie_dragon_scale_shields_three_attacks() {
+    let mut g = game(67);
+    equip_id(&mut g, 0, 1, "BG32_MagicItem_363");
+    put_on_board(&mut g, 0, "Scarlet Survivor"); // a Dragon
+    g.players[0].board[0].health = 100;
+    let mut seen = Seen::default();
+    // The wall hits back for 1, which takes each new shield off, so every
+    // swing shows whether it got a fresh one.
+    fight_wall_watched(&g, 1, 1, 500, 12, &mut seen);
+    let ds: Vec<bool> = seen
+        .attacks
+        .iter()
+        .filter(|(s, m)| *s == 0 && g.data.cards.get(m.card).name == "Scarlet Survivor")
+        .map(|(_, m)| m.keywords.has(bgcore::Keywords::DIVINE_SHIELD))
+        .collect();
+    assert!(ds.len() >= 4, "the Dragon swung enough times");
+    assert_eq!(&ds[..4], [true, true, true, false], "three times per combat, then no more");
+}
+
+#[test]
+fn funeral_wreath_gives_a_plain_copy_of_a_reborn_minion() {
+    let mut g = game(68);
+    equip_id(&mut g, 0, 1, "BG36_MagicItem_217");
+    weak_board(&mut g, 0, "Risen Rider", 4); // 2/1, Reborn
+    let out = fight_wall(&g, 1, 10, 500, 40);
+    let gained = out.sides[0].cards_gained();
+    assert_eq!(gained.len(), 3, "three times per combat");
+    for &c in gained {
+        assert_eq!(c, id(&g, "Risen Rider"), "a plain copy of the card");
+    }
+}
+
+#[test]
+fn jar_o_gems_plays_a_blood_gem_on_your_quilboar_after_two_attacks() {
+    let mut g = game(69);
+    equip_id(&mut g, 0, 1, "BG30_MagicItem_546");
+    put_on_board(&mut g, 0, "Crater Miner"); // Quilboar 2/2
+    put_on_board(&mut g, 0, "Southsea Busker"); // Pirate
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 0, 500, 4, &mut seen);
+    // The Gem lands after the second friendly attack: from then on the
+    // Quilboar swings at +1/+1.
+    assert_eq!(
+        swings(&seen, &g, "Crater Miner"),
+        [(2, 2), (3, 3)],
+        "a Gem after the second attack, once"
+    );
+    assert_eq!(swings(&seen, &g, "Southsea Busker"), [(3, 1), (3, 1)], "Pirates get nothing");
+}
+
+#[test]
+fn evil_experiment_gives_the_deity_reborn_when_it_awakens() {
+    let mut g = game(70);
+    equip_id(&mut g, 0, 1, "BG36_MagicItem_416");
+    // Four Aberrations die, and the fifth death... the fourth does it: the
+    // Deity awakens with `deity_left` at 0.
+    weak_board(&mut g, 0, "Joyous", 4);
+    let mut seen = Seen::default();
+    let mut counters = g.players[0].counters(&g.data, g.lobby);
+    counters.deity = Some(bgcore::fight::Deity {
+        card: id(&g, "C'Thun"),
+        attack: 10,
+        health: 10,
+        golden: false,
+    });
+    let board = g.players[0].board.clone();
+    bgcore::fight::fight_with(
+        &g.data.cards,
+        &board,
+        &[wall(&g, 10, 500)],
+        [counters, bgcore::Counters::default()],
+        60,
+        &mut Rng::new(1),
+        &mut seen,
+    );
+    let god = seen.attacker(&g, "C'Thun").expect("the Deity woke up and swung");
+    assert!(god.keywords.has(bgcore::Keywords::REBORN), "and it has Reborn");
+}
+
+#[test]
+fn a_death_counter_can_name_a_tribe() {
+    // The vocabulary a later "after N friendly Beasts die" trinket needs: a
+    // tribe on the death event. No built card uses it yet.
+    let toml = r#"
+[[trinket]]
+name = "Test Muster"
+card_id = "TEST_Trinket_3"
+slot = "lesser"
+tribes = ["beast"]
+rule = { event = "death_beast", every = 2, acts = [{ gold = 1 }] }
+"#;
+    let d = Arc::new(
+        Data::from_toml_all(
+            include_str!("../../../cards.toml"),
+            include_str!("../../../rules.toml"),
+            include_str!("../../../heroes.toml"),
+            toml,
+        )
+        .unwrap(),
+    );
+    let mut g = Game::new_with_lobby(d, 71, all_tribes());
+    g.set_trinket(0, 0, Some(0));
+    weak_board(&mut g, 0, "Buzzing Vermin", 1); // a Beast that leaves a Beast behind
+    weak_board(&mut g, 0, "Patient Scout", 1); // no type
+    let out = fight_wall(&g, 1, 10, 500, 60);
+    let beast = Tribe::Beast as usize;
+    assert_eq!(out.sides[0].death_tribes[beast], 2, "the Vermin and its Beetle");
+    assert_eq!(out.sides[0].friendly_deaths, 3, "and the neutral one counts overall");
+    let neutral = out.sides[0].friendly_deaths - out.sides[0].death_tribes[beast];
+    assert_eq!(neutral, 1, "one death that is not a Beast");
+}
+
+// ---- block 2: the minions only trinkets hand out, and getting cards ----
+
+#[test]
+fn the_minion_portraits_hand_out_their_token() {
+    let cases: [(&str, &str); 7] = [
+        ("Morgl Portrait", "Tide Oracle Morgl"),
+        ("Behemoth Portrait", "Arcane Behemoth"),
+        ("Boom's Monster Portrait", "Dr. Boom's Monster"),
+        ("Grifter Portrait", "Doubloon Grifter"),
+        ("Bassgill Portrait", "Bassgill"),
+        ("Manipulator Portrait", "Faceless Manipulator"),
+        ("Fish Portrait", "Fish of N'Zoth"),
+    ];
+    for (name, card) in cases {
+        let mut g = game(80);
+        take(&mut g, 0, name);
+        assert_eq!(hand_of(&g, 0, card), 1, "{name} hands out a {card}");
+        // A token: no pool copy, so selling it gives nothing back.
+        let m = g.players[0].hand[hand_of(&g, 0, card) - 1];
+        assert_eq!(m.pool_copies, 0, "{card} is generated, not a pool card");
+    }
+}
+
+#[test]
+fn booms_monster_portrait_hands_out_another_copy_each_turn() {
+    let mut g = game(81);
+    take(&mut g, 0, "Boom's Monster Portrait");
+    assert_eq!(hand_of(&g, 0, "Dr. Boom's Monster"), 1, "one on the pick");
+    to_turn(&mut g, 6);
+    assert_eq!(hand_of(&g, 0, "Dr. Boom's Monster"), 2, "another at the start of turn 6");
+}
+
+#[test]
+fn grifter_portrait_makes_the_first_pirate_buy_of_the_turn_free() {
+    let mut g = game(82);
+    take(&mut g, 0, "Grifter Portrait");
+    assert_eq!(g.players[0].tp.free_tribe_left, 1);
+    set_shop(&mut g, 0, &["Southsea Busker", "Microbot"]);
+    g.players[0].gold = 10;
+    let gold = g.players[0].gold;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].gold, gold, "the first Pirate was free");
+    set_shop(&mut g, 0, &["Southsea Busker"]);
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].gold, gold - 3, "the second Pirate costs Gold");
+}
+
+#[test]
+fn accord_o_tron_portrait_magnetizes_both_ends_of_the_mechs() {
+    let mut g = game(83);
+    put_on_board(&mut g, 0, "Auto Accelerator");
+    put_on_board(&mut g, 0, "Microbot");
+    equip(&mut g, 0, 1, "Accord-o-Tron Portrait");
+    let before: Vec<(i32, i32)> =
+        g.players[0].board.iter().map(|m| (m.attack, m.health)).collect();
+    let next = g.turn + 1;
+    to_turn(&mut g, next);
+    let after: Vec<(i32, i32)> =
+        g.players[0].board.iter().map(|m| (m.attack, m.health)).collect();
+    let accord = id(&g, "Accord-o-Tron");
+    for i in 0..2 {
+        assert_eq!(
+            after[i],
+            (before[i].0 + 3, before[i].1 + 3),
+            "minion {i} took the Accord-o-Tron's 3/3"
+        );
+        assert!(
+            g.players[0].board[i].parts().any(|(c, _)| c == accord),
+            "and as a Magnetized card, not a plain buff"
+        );
+    }
+    assert_eq!(g.players[0].board.len(), 2, "Magnetizing adds no minion");
+}
+
+#[test]
+fn bassgill_portrait_shields_a_murloc_summoned_in_combat() {
+    let mut g = game(84);
+    equip(&mut g, 0, 1, "Bassgill Portrait");
+    let murloc = id(&g, "Bassgill");
+    let m = g.players[0].make_card(&g.data.cards, murloc, false, 0);
+    g.players[0].hand.push(m);
+    weak_board(&mut g, 0, "Bassgill", 1);
+    let mut w = Seen::default();
+    let board = g.players[0].board.clone();
+    let hand = g.players[0].hand.clone();
+    let counters = [g.players[0].counters(&g.data, g.lobby), bgcore::Counters::default()];
+    let _ = bgcore::fight::fight_with_hands(
+        &g.data.cards,
+        &board,
+        &[wall(&g, 10, 900)],
+        [&hand, &[]],
+        counters,
+        60,
+        &mut Rng::new(1),
+        &mut w,
+    );
+    let out = w.summoned_all(&g, "Bassgill");
+    assert_eq!(out.len(), 1, "the hand's Bassgill came out on its death");
+    assert_eq!(
+        out[0].keywords.0 & bgcore::Keywords::DIVINE_SHIELD,
+        bgcore::Keywords::DIVINE_SHIELD,
+        "the summoned Murloc got Divine Shield"
+    );
+}
+
+#[test]
+fn portable_factory_remembers_its_discover_and_copies_it_each_turn() {
+    let mut g = game(85);
+    take(&mut g, 0, "Portable Factory");
+    assert!(!g.players[0].discover.is_empty(), "a Discover is open on the pick");
+    for &c in &g.players[0].discover {
+        assert_eq!(g.data.cards.get(c).tier, 4, "a tier 4 minion");
+        assert!(!g.data.cards.get(c).tribes.is_neutral(), "with a type");
+    }
+    let picked = g.players[0].discover[0];
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].trinkets[0].card, Some(picked), "the trinket remembers it");
+    to_turn(&mut g, 6);
+    let same = g.players[0].hand.iter().filter(|m| m.card == picked).count();
+    assert_eq!(same, 2, "another copy at the start of the next turn");
+}
+
+#[test]
+fn azeroth_model_globe_pays_every_two_turns() {
+    let mut g = game(86);
+    to_turn(&mut g, 5);
+    turn_of(&mut g, 0);
+    equip(&mut g, 0, 0, "Azeroth Model Globe");
+    let hands = g.players[0].hand.len();
+    to_turn(&mut g, 6);
+    assert_eq!(g.players[0].hand.len(), hands, "turn 6 is the first turn counted: no pay");
+    to_turn(&mut g, 7);
+    assert_eq!(g.players[0].gold, g.data.rules.gold(7) + 2, "2 Gold on turn 7");
+    assert!(!g.players[0].discover.is_empty(), "and a Discover is open");
+    for &c in &g.players[0].discover {
+        assert_eq!(g.data.cards.get(c).tier, 6, "of tier 6 minions");
+    }
+    turn_of(&mut g, 0);
+    let hands = g.players[0].hand.len();
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].hand.len(), hands + 1, "the pick is in hand");
+}
+
+#[test]
+fn rockin_music_box_gets_a_battlecry_minion_each_turn() {
+    let mut g = game(87);
+    to_turn(&mut g, 5);
+    let before = g.players[0].hand.len();
+    take(&mut g, 0, "Rockin' Music Box");
+    assert_eq!(g.players[0].hand.len(), before + 1, "one on the pick");
+    for m in &g.players[0].hand {
+        assert!(g.data.cards.get(m.card).battlecry.is_some(), "a Battlecry minion");
+    }
+    to_turn(&mut g, 6);
+    assert_eq!(g.players[0].hand.len(), before + 2, "another at the start of the turn");
+}
+
+#[test]
+fn reflective_pendant_copies_a_friendly_minion_plain() {
+    let mut g = game(88);
+    put_on_board(&mut g, 0, "Lullabot");
+    g.players[0].board[0].attack += 5;
+    take(&mut g, 0, "Reflective Pendant");
+    let copy = g.players[0].hand[0];
+    assert_eq!(copy.card, id(&g, "Lullabot"));
+    let base = g.data.cards.get(copy.card);
+    assert_eq!((copy.attack, copy.health), (base.attack, base.health), "plain: no buffs");
+    assert_eq!(copy.pool_copies, 0, "a generated copy");
+}
+
+#[test]
+fn transcribing_typewriter_copies_the_next_two_minions_bought() {
+    let mut g = game(89);
+    take(&mut g, 0, "Transcribing Typewriter");
+    assert_eq!(g.players[0].tp.copy_buys, 2);
+    set_shop(&mut g, 0, &["Lullabot", "Southsea Busker"]);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(hand_of(&g, 0, "Lullabot"), 2, "an extra copy of the first buy");
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(hand_of(&g, 0, "Southsea Busker"), 2, "and of the second");
+    assert_eq!(g.players[0].tp.copy_buys, 0, "both uses spent");
+    set_shop(&mut g, 0, &["Clever Castaway"]);
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(hand_of(&g, 0, "Clever Castaway"), 1, "no third copy");
+}
+
+#[test]
+fn writhing_tentacles_copies_the_first_discarded_minion_doubled() {
+    let mut g = game(90);
+    equip(&mut g, 0, 1, "Writhing Tentacles");
+    put_in_hand(&mut g, 0, "Lullabot");
+    let m = g.players[0].hand[0];
+    g.players[0].pending_discard = Some(bgcore::game::PendingDiscard {
+        source: None,
+        reward: bgcore::Effect::GoldNextTurn(0),
+        golden: false,
+    });
+    act(&mut g, 0, Action::Discard(0));
+    assert_eq!(g.players[0].hand.len(), 1, "the copy arrived");
+    let copy = g.players[0].hand[0];
+    assert_eq!(copy.card, m.card);
+    assert_eq!((copy.attack, copy.health), (m.attack * 2, m.health * 2));
+    // Only the first minion each turn.
+    put_in_hand(&mut g, 0, "Microbot");
+    let slot = g.players[0].hand.len() - 1;
+    g.players[0].pending_discard = Some(bgcore::game::PendingDiscard {
+        source: None,
+        reward: bgcore::Effect::GoldNextTurn(0),
+        golden: false,
+    });
+    act(&mut g, 0, Action::Discard(slot as u8));
+    assert_eq!(g.players[0].hand.len(), 1, "no second copy this turn");
+}
+
+#[test]
+fn aggem_sticker_plays_gems_on_one_minion_of_each_type() {
+    let mut g = game(91);
+    put_on_board(&mut g, 0, "Accord-o-Tron"); // mech
+    put_on_board(&mut g, 0, "Southsea Busker"); // pirate
+    put_on_board(&mut g, 0, "Accord-o-Tron"); // mech again
+    equip(&mut g, 0, 1, "Aggem Sticker");
+    let before: Vec<(i32, i32)> =
+        g.players[0].board.iter().map(|m| (m.attack, m.health)).collect();
+    let next = g.turn + 1;
+    to_turn(&mut g, next);
+    let after: Vec<(i32, i32)> =
+        g.players[0].board.iter().map(|m| (m.attack, m.health)).collect();
+    let (gem_a, gem_h) = (g.players[0].gem_attack, g.players[0].gem_health);
+    let grown: Vec<bool> = (0..3).map(|i| after[i] != before[i]).collect();
+    assert_eq!(
+        grown.iter().filter(|&&b| b).count(),
+        2,
+        "the Pirate and one of the two Mechs: one minion per type"
+    );
+    for i in 0..3 {
+        if grown[i] {
+            assert_eq!(
+                (after[i].0 - before[i].0, after[i].1 - before[i].1),
+                (gem_a * 7, gem_h * 7),
+                "seven Gems on minion {i}"
+            );
+        }
+    }
+}
+
+#[test]
+fn sinstone_sticker_copies_the_first_two_discovers_each_turn() {
+    let mut g = game(92);
+    take(&mut g, 0, "Sinstone Sticker");
+    assert_eq!(g.players[0].tp.discover_copies, 2);
+    for n in 0..2 {
+        let book = id(&g, "Boundless Potential");
+        g.players[0].hand.push(g.players[0].make_card(&g.data.cards, book, false, 0));
+        let slot = g.players[0].hand.len() - 1;
+        act(&mut g, 0, Action::Play { hand: slot as u8, pos: 0 });
+        // Boundless Potential is a Choose One: the minion half first.
+        if g.players[0].pending_choose_one.is_some() {
+            act(&mut g, 0, Action::Choose(0));
+        }
+        assert!(!g.players[0].discover.is_empty(), "discover {n}");
+        let picked = g.players[0].discover[0];
+        act(&mut g, 0, Action::Choose(0));
+        let got = g.players[0].hand.iter().filter(|m| m.card == picked).count();
+        assert_eq!(got, 2, "the pick and its copy ({n})");
+    }
+    assert_eq!(g.players[0].tp.discover_copies, 0, "two is the cap");
+}
+
+#[test]
+fn trusty_crowbar_buffs_the_left_most_on_every_pirate() {
+    let mut g = game(93);
+    put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Microbot");
+    equip(&mut g, 0, 1, "Trusty Crowbar");
+    let first = g.players[0].board[0];
+    let second = g.players[0].board[1];
+    assert!(g.give(0, "Southsea Busker").is_some());
+    let now = g.players[0].board[0];
+    assert_eq!(
+        (now.attack, now.health),
+        (first.attack + 16, first.health + 16),
+        "the left-most minion got +16/+16"
+    );
+    assert_eq!(g.players[0].board[1].attack, second.attack, "nobody else did");
+    // A non-Pirate does nothing.
+    assert!(g.give(0, "Microbot").is_some());
+    assert_eq!(g.players[0].board[0].attack, now.attack);
+}
+
+#[test]
+fn warband_whistle_gives_a_free_refresh_of_the_warband() {
+    let mut g = game(94);
+    put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Microbot");
+    let free = g.players[0].free_rolls;
+    take(&mut g, 0, "Warband Whistle");
+    assert_eq!(g.players[0].free_rolls, free + 1, "a free Refresh");
+    act(&mut g, 0, Action::Roll);
+    let warband: Vec<CardId> = g.players[0].board.iter().map(|m| m.card).collect();
+    assert!(!g.players[0].shop.is_empty());
+    for m in &g.players[0].shop {
+        assert!(warband.contains(&m.card), "the Tavern holds warband copies");
+        assert_eq!(m.pool_copies, 0, "plain copies, no pool copy");
+    }
+}
+
+#[test]
+fn designer_eyepatch_makes_two_pirates_golden() {
+    let mut g = game(95);
+    take(&mut g, 0, "Designer Eyepatch");
+    put_in_hand(&mut g, 0, "Southsea Busker");
+    set_shop(&mut g, 0, &["Southsea Busker"]);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(hand_of(&g, 0, "Southsea Busker"), 1, "two copies became one");
+    let busker = *g.players[0].hand.iter().find(|m| m.card == id(&g, "Southsea Busker")).unwrap();
+    assert!(busker.golden, "and it is Golden");
+    // Two copies of something that is not a Pirate do not triple.
+    put_in_hand(&mut g, 0, "Lullabot");
+    set_shop(&mut g, 0, &["Lullabot"]);
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(hand_of(&g, 0, "Lullabot"), 2, "still two Lullabots");
+}
+
+#[test]
+fn goldenizer_supply_hands_out_the_spell_every_three_turns() {
+    let mut g = game(96);
+    to_turn(&mut g, 5);
+    turn_of(&mut g, 0);
+    equip(&mut g, 0, 0, "Goldenizer Supply");
+    let start = g.turn;
+    for _ in 0..3 {
+        let next = g.turn + 1;
+    to_turn(&mut g, next);
+    }
+    assert_eq!(hand_of(&g, 0, "The Goldenizer"), 1, "one after three turns (from {start})");
+    // The Goldenizer makes a minion Golden without a Triple Reward.
+    put_on_board(&mut g, 0, "Lullabot");
+    let slot = g.players[0].hand.iter().position(|m| m.card == id(&g, "The Goldenizer")).unwrap();
+    act(&mut g, 0, Action::Play { hand: slot as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert!(g.players[0].board[0].golden);
+    assert_eq!(g.players[0].golden_played, 0, "not a Golden played");
+}
+
+#[test]
+fn the_two_turn_portraits_hand_out_their_spell_again() {
+    for (name, card) in [("Conch Portrait", "Cloning Conch"), ("Lens Case", "Duplicating Lens")] {
+        let mut g = game(97);
+        to_turn(&mut g, 5);
+        turn_of(&mut g, 0);
+        take(&mut g, 0, name);
+        assert_eq!(hand_of(&g, 0, card), 1, "{name} on the pick");
+        to_turn(&mut g, 6);
+        assert_eq!(hand_of(&g, 0, card), 1, "{name}: not on the first turn after");
+        to_turn(&mut g, 7);
+        assert_eq!(hand_of(&g, 0, card), 2, "{name}: again two turns later");
+    }
+}
+
+#[test]
+fn lens_case_spell_copies_a_small_minion_plain() {
+    let mut g = game(98);
+    put_on_board(&mut g, 0, "Lullabot");
+    g.players[0].board[0].attack += 4;
+    put_on_board(&mut g, 0, "Captain Sanders"); // tier 5: too big to copy
+    take(&mut g, 0, "Lens Case");
+    let slot = g.players[0].hand.iter().position(|m| m.card == id(&g, "Duplicating Lens")).unwrap();
+    act(&mut g, 0, Action::Play { hand: slot as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    let copy = *g.players[0].hand.last().unwrap();
+    assert_eq!(copy.card, id(&g, "Lullabot"));
+    let base = g.data.cards.get(copy.card);
+    assert_eq!((copy.attack, copy.health), (base.attack, base.health), "plain");
+}
+
+#[test]
+fn the_lesser_baller_portrait_hands_out_one_baller_each_turn() {
+    let mut g = game(99);
+    to_turn(&mut g, 5);
+    take(&mut g, 0, "Baller Portrait");
+    let ballers = |g: &Game| hand_of(g, 0, "Fire Baller") + hand_of(g, 0, "Snow Baller");
+    assert_eq!(ballers(&g), 1, "one of the two");
+    to_turn(&mut g, 6);
+    assert_eq!(ballers(&g), 2, "another at the start of the turn");
+}
+
+#[test]
+fn the_greater_baller_portrait_repeats_after_eleven_elementals() {
+    let mut g = game(100);
+    let i = g.data.trinkets.by_card_id("BG35_MagicItem_861").unwrap();
+    g.set_trinket(0, 1, Some(i));
+    // Its pick effect: a Temperature Shift. (Equipped, so run it by hand.)
+    let shift = id(&g, "Temperature Shift");
+    g.players[0].hand.push(g.players[0].make_card(&g.data.cards, shift, false, 0));
+    let elementals: Vec<CardId> = ["Water Droplet", "Maelstrom Portal"]
+        .iter()
+        .filter_map(|n| g.data.cards.by_name(n))
+        .collect();
+    assert!(!elementals.is_empty(), "an Elemental token to play");
+    for _ in 0..11 {
+        let m = g.players[0].make_card(&g.data.cards, elementals[0], false, 0);
+        g.players[0].hand.push(m);
+        let slot = g.players[0].hand.len() - 1;
+        let pos = g.players[0].board.len();
+        act(&mut g, 0, Action::Play { hand: slot as u8, pos: pos as u8 });
+        // Keep the board from filling up: the Elemental is the effect's
+        // concern, not the board's.
+        if g.players[0].board.len() >= 7 {
+            g.players[0].board.clear();
+        }
+    }
+    assert_eq!(hand_of(&g, 0, "Temperature Shift"), 2, "eleven Elementals repeated it");
+}
+
+#[test]
+fn escapee_portrait_gives_a_golden_escapee_and_earlier_lockboxes() {
+    let mut g = game(102);
+    take(&mut g, 0, "Escapee Portrait");
+    let escapee = id(&g, "Enterprising Escapee");
+    let m = *g.players[0].hand.iter().find(|m| m.card == escapee).expect("the Escapee");
+    assert!(m.golden, "Golden");
+    assert_eq!((m.attack, m.health), (12, 12), "the golden stats");
+    assert_eq!(g.players[0].tp.lockbox_sooner, 1);
+    // A Lockbox this player gets opens one turn sooner: Lockbox Portrait
+    // hands one out at the start of the turn.
+    let lockbox_portrait = trinket(&g, "Lockbox Portrait");
+    g.set_trinket(0, 0, Some(lockbox_portrait));
+    to_turn(&mut g, 6);
+    let lockbox = g
+        .players[0]
+        .hand
+        .iter()
+        .find(|m| m.card == id(&g, "Lockbox"))
+        .expect("the Lockbox Portrait gave one");
+    assert_eq!(lockbox.improvements, 4, "5 turns minus the 1");
 }

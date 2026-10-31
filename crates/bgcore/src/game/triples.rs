@@ -69,36 +69,52 @@ impl Game {
         let can_stand_in = |w: CardId, x: CardId| {
             w != x && wild_of(w).is_some_and(|t| cards.get(x).tribes.has(t))
         };
+        // Designer Eyepatch: two copies of a Pirate make it Golden.
+        let need = if pl.tp.pirate_triple && cards.get(card).tribes.has(Tribe::Pirate) {
+            2
+        } else {
+            3
+        };
         let mut plan: Option<TriplePlan> = None;
-        if copies(card) >= 3 {
-            plan = Some((card, 3, None));
+        if copies(card) >= need {
+            plan = Some((card, need, None));
         } else if wild_of(card).is_none() {
-            // Two of the card plus one stand-in, or one plus two stand-ins.
+            // One copy short of the need plus one stand-in, or two short plus
+            // two stand-ins (the second needs a card of three).
             let n = copies(card);
             let ids = 0..cards.cards.len() as CardId;
-            if n >= 2
+            if n + 1 >= need
                 && let Some(w) = ids.clone().find(|&w| can_stand_in(w, card) && stand_ins(w) >= 1)
             {
-                plan = Some((card, 2, Some((w, 1))));
-            } else if n >= 1
+                plan = Some((card, need - 1, Some((w, 1))));
+            } else if need >= 3
+                && n + 2 >= need
                 && let Some(w) = ids.clone().find(|&w| can_stand_in(w, card) && stand_ins(w) >= 2)
             {
-                plan = Some((card, 1, Some((w, 2))));
+                plan = Some((card, need - 2, Some((w, 2))));
             }
         } else {
             // The new card is a wildcard: find a card it completes. Two of
             // the card plus this wildcard first, then one plus two wildcards.
             let n_w = stand_ins(card);
             let pool_ids = 0..cards.cards.len() as CardId;
+            let need = if pl.tp.pirate_triple && cards.get(card).tribes.has(Tribe::Pirate) {
+                2usize
+            } else {
+                3usize
+            };
             let x = pool_ids
                 .clone()
-                .find(|&x| can_stand_in(card, x) && copies(x) >= 2 && n_w >= 1)
-                .map(|x| (x, 2usize, 1usize))
+                .find(|&x| can_stand_in(card, x) && copies(x) + 1 >= need && n_w >= 1)
+                .map(|x| (x, need - 1, 1usize))
                 .or_else(|| {
+                    if need < 3 {
+                        return None;
+                    }
                     pool_ids
                         .clone()
-                        .find(|&x| can_stand_in(card, x) && copies(x) >= 1 && n_w >= 2)
-                        .map(|x| (x, 1usize, 2usize))
+                        .find(|&x| can_stand_in(card, x) && copies(x) + 2 >= need && n_w >= 2)
+                        .map(|x| (x, need - 2, 2usize))
                 });
             if let Some((x, nx, nw)) = x {
                 plan = Some((x, nx, Some((card, nw))));

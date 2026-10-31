@@ -477,6 +477,7 @@ fn describe_target(pt: &PendingTarget) -> String {
         TargetKind::StealShopCard { damage } => {
             format!("steal a Tavern card (any card, the spell slot too), take {damage} damage")
         }
+        TargetKind::BecomeCopy => "become a copy of a minion".into(),
         TargetKind::Spell(st) => format!("{st:?}"),
     }
 }

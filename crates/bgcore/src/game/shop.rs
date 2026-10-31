@@ -283,14 +283,35 @@ impl Game {
         let slots = size + 1;
         let fodders = (fodders as usize).min(slots);
         let normal = size.saturating_sub(fodders);
-        while pl.shop.len() < normal {
-            match draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |_| true) {
-                Some(c) => {
-                    let mut m = pl.make_card(cards, c, false, 1);
-                    pl.apply_tavern_buffs(cards, &mut m);
-                    pl.shop.push(m);
+        if pl.tp.whistle && !pl.board.is_empty() {
+            // Warband Whistle: this Refresh holds plain copies of the
+            // warband, each minion once while there are enough of them.
+            pl.tp.whistle = false;
+            let mut order: ArrayVec<usize, { crate::BOARD }> = (0..pl.board.len()).collect();
+            rng.shuffle(&mut order);
+            let mut next = 0;
+            while pl.shop.len() < normal {
+                let card = if next < order.len() {
+                    let k = order[next];
+                    next += 1;
+                    pl.board[k].card
+                } else {
+                    pl.board[rng.below(pl.board.len() as u32) as usize].card
+                };
+                let mut m = pl.make_card(cards, card, false, 0);
+                pl.apply_tavern_buffs(cards, &mut m);
+                pl.shop.push(m);
+            }
+        } else {
+            while pl.shop.len() < normal {
+                match draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |_| true) {
+                    Some(c) => {
+                        let mut m = pl.make_card(cards, c, false, 1);
+                        pl.apply_tavern_buffs(cards, &mut m);
+                        pl.shop.push(m);
+                    }
+                    None => break,
                 }
-                None => break,
             }
         }
         if let Some(tok) = cards.fodder_token {
@@ -556,7 +577,33 @@ impl Game {
                         self.discover_tier7_minion(p);
                     }
                 }
-                Some(OnSell::GoldIfLost(_)) | None => {}
+                // Handled below: the minion with this text is on the board,
+                // not the one being sold.
+                Some(OnSell::GainSoldStats { .. }) | Some(OnSell::GoldIfLost(_)) | None => {}
+            }
+        }
+        // "After you sell an Elemental, gain its stats" (Arcane Behemoth):
+        // the text sits on a minion that stays on the board, so it gains the
+        // sold minion's stats, doubled for a golden one. Two copies of the
+        // text on the same minion do not stack.
+        let sold_tribes = self.data.cards.get(m.card).tribes;
+        let cards = &self.data.cards;
+        for o in &mut self.players[p].board {
+            let mul = o
+                .parts()
+                .filter_map(|(c, golden)| match cards.get(c).on_sell {
+                    Some(OnSell::GainSoldStats { tribe })
+                        if tribe.is_none_or(|t| sold_tribes.has(t)) =>
+                    {
+                        Some(if golden { 2 } else { 1 })
+                    }
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0);
+            if mul > 0 {
+                o.attack = o.attack.saturating_add(m.attack * mul);
+                o.health = o.health.saturating_add(m.health * mul);
             }
         }
         self.fire_event(p, EventKind::MinionsSold, 1);
