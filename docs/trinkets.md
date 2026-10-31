@@ -157,8 +157,4 @@ the bots.
 
 ## Dark Gifts
 
-Not built yet. What we know: a gift sits on its minion like an attached
-card. A triple's golden keeps the gifts of its copies, a Magnetized Mech
-keeps them, and a sold minion takes them with it. A gift works the same on
-a golden minion (it doesn't double). Era has a source that explains the
-rest.
+See `docs/darkgifts.md`.
