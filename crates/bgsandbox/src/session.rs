@@ -70,12 +70,14 @@ How to play (numbers are what the screen shows, counting from 1):
   r         Refresh (free ones first)    f        freeze / unfreeze the Tavern
   u         upgrade the Tavern           e        end turn
   hp        press your hero power (a target prompt follows if it needs one)
+  hp2       press your second hero power (Genn, Reinvigorating Light)
   ? 3       full card text: Tavern 3     ?s spell slot   ?h1 hand 1   ?b2 board 2   ?d1 Discover option 1
   undo      take back the last action (works across turns, even an e)
   label X   set or change the label of this game (the build you play, e.g. lobster)
   quit      save and exit                help     this list
 Tags: T taunt, DS divine shield, W windfury, V venomous, R reborn, S stealth, G golden,
-M magnetic, A1 Activate ready (cost 1), L2 locked in hand 2 more turns.
+M magnetic, A1 Activate ready (cost 1), L2 locked in hand 2 more turns,
+T4 locked in hand until the Tavern is Tier 4.
 A Magnetic minion merges into the Mech at the position you give; to put it on the board
 unmerged, play it at the right end (plain p1).
 The pool is this game's 5-tribe lobby (with --tribe it is the tribes you named). Every turn
@@ -506,6 +508,7 @@ impl Session {
             }
             Cmd::Roll => one(Action::Roll),
             Cmd::Power => one(Action::HeroPower),
+            Cmd::Power2 => one(Action::HeroPower2),
             Cmd::Freeze => one(Action::Freeze),
             Cmd::Upgrade => one(Action::Level),
             Cmd::End => one(Action::EndTurn),
@@ -658,11 +661,12 @@ impl Session {
                 }
             },
             Action::Roll => format!("not enough gold: a Refresh costs {}, you have {} and no free Refreshes left", r.roll_cost, pl.gold),
-            Action::HeroPower => {
-                let (Some(st), pl) = (pl.power, pl) else {
-                    return "you have no hero power".into();
+            Action::HeroPower | Action::HeroPower2 => {
+                let second = a == Action::HeroPower2;
+                let Some(st) = pl.power_at(second) else {
+                    return if second { "you have no second hero power".into() } else { "you have no hero power".into() };
                 };
-                let power = &g.data.heroes.get(st.of).power;
+                let power = g.data.heroes.power(st.of);
                 if power.passive {
                     format!("{} is passive: it has no button", power.name)
                 } else if !st.unlocked {
@@ -689,6 +693,8 @@ impl Session {
                 let c = db.get(m.card);
                 if m.locked_turns > 0 {
                     format!("{} is locked in your hand for {} more turns", c.name, m.locked_turns)
+                } else if m.locked_tier > pl.tier {
+                    format!("{} is locked in your hand until your Tavern is Tier {}", c.name, m.locked_tier)
                 } else if c.is_spell() {
                     "that spell has no valid target right now".into()
                 } else {

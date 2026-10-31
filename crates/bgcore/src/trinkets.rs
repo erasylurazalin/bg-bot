@@ -178,6 +178,9 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     DiscoverSpell(u8),
     /// Discover this many minions with a Deathrattle (`discover_deathrattle`).
     DiscoverDeathrattle(u8),
+    /// Discover a SECOND Hero Power, into the player's second slot
+    /// (`second_power`): Reinvigorating Light.
+    SecondPower,
     RandomChromadrake(u8),
     RandomVolumizer(u8),
     RandomBounty(u8),
@@ -991,6 +994,8 @@ struct RawAct {
     power_extra_uses: Option<u8>,
     power_gold: Option<u8>,
     #[serde(default)]
+    second_power: bool,
+    #[serde(default)]
     gauntlet: bool,
     #[serde(default)]
     extra_high_tier: bool,
@@ -1451,6 +1456,8 @@ impl TrinketDb {
                     Act::PowerExtraUses(n)
                 } else if let Some(n) = a.power_gold {
                     Act::PowerGold(n)
+                } else if a.second_power {
+                    Act::SecondPower
                 } else if a.gauntlet {
                     Act::Gauntlet
                 } else if a.extra_high_tier {

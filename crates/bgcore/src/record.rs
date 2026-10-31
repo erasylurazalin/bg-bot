@@ -139,6 +139,10 @@ struct FileMinion {
     taught_spell: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     locked_turns: Option<u8>,
+    /// A Tavern tier the minion waits for in hand (Faelin's Expedition
+    /// Plans), 0 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    locked_tier: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     activated: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -182,6 +186,7 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         extra_magnetize: differs(m.extra_magnetize as u64, 0).map(|v| v as u8),
         taught_spell: m.taught_spell.map(|c| db.get(c).name.clone()),
         locked_turns: differs(m.locked_turns as u64, 0).map(|v| v as u8),
+        locked_tier: differs(m.locked_tier as u64, 0).map(|v| v as u8),
         activated: m.activated.then_some(true),
         uses_left: differs(m.uses_left as u64, 0).map(|v| v as u8),
         no_reward: (m.no_reward != base.no_reward).then_some(m.no_reward),
@@ -240,6 +245,9 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     if let Some(v) = f.locked_turns {
         m.locked_turns = v;
+    }
+    if let Some(v) = f.locked_tier {
+        m.locked_tier = v;
     }
     if let Some(v) = f.activated {
         m.activated = v;

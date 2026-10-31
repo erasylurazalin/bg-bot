@@ -25,6 +25,7 @@ use crate::{
 };
 use super::{
     Player,
+    PowerState,
     TavernBuff,
     TrinketPowers,
     TrinketState,
@@ -39,6 +40,11 @@ impl Player {
             hero: None,
             armor: 0,
             power: None,
+            power2: None,
+            power_offer_left: 0,
+            skipped: false,
+            power_excludes: ArrayVec::new(),
+            power_offer_second: false,
             hero_offer: [u8::MAX; DISCOVER],
             power_offer: ArrayVec::new(),
             trinkets: [TrinketState::default(); crate::TRINKET_SLOTS],
@@ -100,6 +106,7 @@ impl Player {
             discover_queue: ArrayVec::new(),
             discover_damage_from: None,
             discover_locked: false,
+            discover_locked_tier: 0,
             discover_doomed: false,
             discover_both: false,
             undead_bonus: (0, 0),
@@ -464,6 +471,26 @@ impl Player {
         })
     }
 
+    /// The player's MAIN power's state, or their SECOND one.
+    pub fn power_at(&self, second: bool) -> Option<PowerState> {
+        if second { self.power2 } else { self.power }
+    }
+
+    pub fn power_at_mut(&mut self, second: bool) -> Option<&mut PowerState> {
+        if second { self.power2.as_mut() } else { self.power.as_mut() }
+    }
+
+    /// The largest number the player's two powers give for one Start of Combat
+    /// hook, 0 when neither has it.
+    fn power_effect(&self, data: &Data, f: impl Fn(PowerEffect) -> u8) -> u8 {
+        [self.power, self.power2]
+            .iter()
+            .flatten()
+            .map(|st| f(data.heroes.power(st.of).effect))
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn counters(&self, data: &Data, lobby: Tribes) -> Counters {
         let cards = &data.cards;
         let (spell_attack, spell_health) = self.total_spell_bonus(cards);
@@ -479,12 +506,47 @@ impl Player {
             brood_of_nozdormu: self.brood_of_nozdormu,
             upper_hand: self.upper_hand,
             trinkets: self.fight_trinkets(data),
-            soc_leftmost: self.power.map_or(0, |st| {
-                match data.heroes.get(st.of).power.effect {
-                    PowerEffect::SocLeftmost { keywords } => keywords,
-                    _ => 0,
-                }
+            // Both of the player's powers can carry a Start of Combat effect
+            // (`soc_leftmost` is Al'Akir's, the rest are Bru'kan's Elements).
+            soc_leftmost: self.power_effect(data, |e| match e {
+                PowerEffect::SocLeftmost { keywords } => keywords,
+                _ => 0,
             }),
+            soc_rightmost: self.power_effect(data, |e| match e {
+                PowerEffect::SocRightmost { keywords } => keywords,
+                _ => 0,
+            }),
+            soc_double_left: self.power_effect(data, |e| match e {
+                PowerEffect::SocDoubleLeftAttack(n) => n,
+                _ => 0,
+            }),
+            soc_earth: self.power_effect(data, |e| match e {
+                PowerEffect::SocGrantDeathrattle { count, .. } => count,
+                _ => 0,
+            }),
+            soc_earth_card: [false, true]
+                .iter()
+                .find_map(|&second| {
+                    let st = self.power_at(second)?;
+                    match data.heroes.power(st.of).effect {
+                        PowerEffect::SocGrantDeathrattle { card, .. } => Some(card),
+                        _ => None,
+                    }
+                })
+                .unwrap_or(0),
+            soc_lightning: self.power_effect(data, |e| match e {
+                PowerEffect::SocDamageEnemies { hits, .. } => hits,
+                _ => 0,
+            }),
+            soc_lightning_damage: [self.power, self.power2]
+                .iter()
+                .flatten()
+                .map(|st| match data.heroes.power(st.of).effect {
+                    PowerEffect::SocDamageEnemies { damage, .. } => damage,
+                    _ => 0,
+                })
+                .max()
+                .unwrap_or(0),
             sharing_is_caring: self.sharing_is_caring,
             spell_attack,
             spell_health,

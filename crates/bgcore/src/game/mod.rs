@@ -33,7 +33,7 @@ use crate::real_boards::RealBoards;
 use crate::trinkets::{CardMod, Event};
 use self::trinkets::MinionPrice;
 use crate::rng::Rng;
-use crate::{BOARD, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
+use crate::{BOARD, CHOICES, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
 
 /// Upper bound on pool minions, for the fixed-size copy count in
 /// `check_invariants`. The card parser refuses a card list past it.
@@ -259,6 +259,9 @@ pub enum DiscoverRequest {
     /// A minion of exactly this tier that has a type, so no neutral
     /// (Portable Factory).
     TypedMinionTier(u8),
+    /// A minion of exactly this tier, locked in hand until the Tavern reaches
+    /// that tier (Procrastinate, Expedition Plans).
+    TierLockedMinion(u8),
 }
 
 /// Why the Tavern is filled. Only the player's own Refresh action (paid with
@@ -272,13 +275,14 @@ enum RefreshKind {
     Effect,
 }
 
-/// A player's hero power: which hero's power it is and everything the game
-/// tracks about using it. Replacing the power (Unmasked Identity, Finley's
-/// Discover) builds a fresh one: the old one's progress is lost.
+/// A player's hero power: which power it is (`HeroDb::powers`, not a hero) and
+/// everything the game tracks about using it. Replacing the power (Unmasked
+/// Identity, Finley's Discover, a power that turns into another) builds a
+/// fresh one: the old one's progress is lost.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PowerState {
-    /// Index into `HeroDb` of the hero whose power this is (the player's own
-    /// hero, or the one whose power was Discovered).
+    /// Index into `HeroDb::powers` (the player's hero's starting power, or one
+    /// Discovered or turned into since).
     pub of: u8,
     /// Button presses left this turn.
     pub uses_left: u8,
@@ -286,13 +290,26 @@ pub struct PowerState {
     pub used_game: u32,
     /// Whether an unlock condition ("Unlocks at Tier 4") has been met.
     pub unlocked: bool,
-    /// One generic progress counter, for later powers ("(N left!)").
+    /// One generic progress counter: the cards bought towards a milestone
+    /// (BUY, INSECT! counts to 12), or the turns a chosen power has counted
+    /// down (a flightpath's "In 2 turns").
     pub progress: u32,
+    /// The power this one completed into its chooser, plus one: the chooser
+    /// never offers that one straight after (Galewing's flightpaths). 0 when
+    /// there is none.
+    pub last_pick: u8,
 }
 
 impl PowerState {
     fn fresh(of: u8, power: &crate::heroes::HeroPower) -> PowerState {
-        PowerState { of, uses_left: power.uses_per_turn, used_game: 0, unlocked: true, progress: 0 }
+        PowerState {
+            of,
+            uses_left: power.uses_per_turn,
+            used_game: 0,
+            unlocked: true,
+            progress: 0,
+            last_pick: 0,
+        }
     }
 }
 
@@ -475,15 +492,33 @@ pub struct Player {
     /// Armor: every damage to the hero takes it first, and it never comes
     /// back unless a card says so.
     pub armor: i32,
-    /// The hero power and its state. None without a hero; replaced whole by
-    /// a Discovered power.
+    /// The MAIN hero power and its state. None without a hero; replaced whole
+    /// by a Discovered power (Unmasked Identity changes only this one).
     pub power: Option<PowerState>,
+    /// The SECOND hero power, from Genn's King of Duality or the
+    /// Reinvigorating Light trinket. Nothing changes or disables it, and it
+    /// has its own uses, cost and state (docs/heroes.md "Two hero powers").
+    pub power2: Option<PowerState>,
     /// Heroes offered before turn 1 (indices into `HeroDb`), `u8::MAX` for an
     /// empty offer slot. While one is open the only legal action answers it.
     pub hero_offer: [u8; DISCOVER],
-    /// Powers offered by a Hero Power Discover (indices into `HeroDb`),
-    /// answered like a Discover.
-    pub power_offer: ArrayVec<u8, DISCOVER>,
+    /// Powers offered by a Hero Power Discover or a chooser (indices into
+    /// `HeroDb::powers`), answered like a Discover.
+    pub power_offer: ArrayVec<u8, CHOICES>,
+    /// Whether the open power offer answers into the SECOND slot (Genn's
+    /// first pick, the Reinvigorating Light trinket) instead of the main one.
+    pub power_offer_second: bool,
+    /// Power Discovers this press still owes after the open one: King of
+    /// Duality deals two, so the power is not spent until both are answered.
+    pub power_offer_left: u8,
+    /// Whether this turn is skipped (Procrastinate, Expedition Plans): only
+    /// Freeze and End Turn are legal. Set at the start of each of the
+    /// player's turns from their powers, so the legality check is one read.
+    pub skipped: bool,
+    /// The heroes a power offer never names, by hero index (a card's
+    /// `exclude_heroes`, or a hero's own list), kept while the offer and any
+    /// pick after it are dealt.
+    pub power_excludes: ArrayVec<u8, 8>,
     /// Trinket slots: lesser, greater, and the trinket a hero power became
     /// (Marin the Manager, Buttons). See `TrinketState`.
     pub trinkets: [TrinketState; crate::TRINKET_SLOTS],
@@ -595,6 +630,10 @@ pub struct Player {
     /// Whether the Discover now waiting locks its minion in hand for a turn
     /// (Search Through Time).
     pub discover_locked: bool,
+    /// A Tavern tier a Discovered minion stays locked in hand until (Faelin's
+    /// Expedition Plans), 0 for none. A locked minion can be buffed in hand
+    /// but not played, discarded or pulled into a fight from the hand.
+    pub discover_locked_tier: u8,
     /// Whether the Discover now waiting marks its minion to die when played
     /// this turn (Tomb Turning).
     pub discover_doomed: bool,
@@ -927,9 +966,15 @@ impl Game {
         if !pl.discover.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.discover.len());
         }
-        // A Hero Power Discover (Unmasked Identity, Finley): like a Discover.
+        // A Hero Power Discover (Unmasked Identity, Finley) or a chooser's
+        // list (Bru'kan's Elements, Galewing's flightpaths): like a Discover.
         if !pl.power_offer.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.power_offer.len());
+        }
+        // A skipped turn (Procrastinate, Expedition Plans): only Freeze and
+        // End Turn, and the fight still happens.
+        if pl.skipped {
+            return matches!(a, Action::Freeze | Action::EndTurn);
         }
         match a {
             Action::Buy(s) => {
@@ -998,7 +1043,7 @@ impl Game {
                     return false;
                 }
                 let card_id = pl.hand[h].card;
-                if pl.hand[h].locked_turns > 0 {
+                if pl.hand[h].locked_turns > 0 || pl.hand[h].locked_tier > pl.tier {
                     false
                 } else if self.data.cards.get(card_id).is_spell() {
                     pos == 0 && self.can_cast_spell(p, card_id)
@@ -1029,6 +1074,7 @@ impl Game {
             Action::Freeze | Action::EndTurn => true,
             Action::Level => pl.tier < MAX_TIER && pl.gold >= pl.upgrade_cost,
             Action::HeroPower => self.power_usable(p),
+            Action::HeroPower2 => self.power_usable2(p),
         }
     }
 
@@ -1141,6 +1187,10 @@ impl Game {
             for k in 0..pl.power_offer.len() as u8 {
                 ask(Action::Choose(k));
             }
+        } else if open && self.turn_skipped(p) {
+            // A skipped turn: Freeze and End Turn only.
+            ask(Action::Freeze);
+            ask(Action::EndTurn);
         } else {
             for s in 0..pl.shop.len() as u8 {
                 ask(Action::Buy(s));
@@ -1150,8 +1200,10 @@ impl Game {
                 ask(Action::Sell(s));
                 ask(Action::Activate(s));
             }
+            // A minion goes in a slot from 0 to the board's length, and a
+            // spell only at 0: no position past the board can be legal.
             for hand in 0..pl.hand.len() as u8 {
-                for pos in 0..=BOARD as u8 {
+                for pos in 0..=pl.board.len() as u8 {
                     ask(Action::Play { hand, pos });
                 }
             }
@@ -1164,6 +1216,7 @@ impl Game {
             ask(Action::Freeze);
             ask(Action::Level);
             ask(Action::HeroPower);
+            ask(Action::HeroPower2);
             ask(Action::EndTurn);
         }
     }
@@ -1477,6 +1530,9 @@ impl Game {
                     self.pay_for_spell(p, pay_health, cost);
                     self.magicfin_teach(p, id);
                     self.fire_event(p, EventKind::CardsBought, 1);
+                    // A bought card counts towards BUY, INSECT!, the Tavern
+                    // spells included.
+                    self.power_bought_card(p);
                     self.players[p].tp.bought_spell = Some(id);
                     self.trinket_event(p, Event::BuySpell, Some(id), 1);
                 } else {
@@ -1514,6 +1570,7 @@ impl Game {
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
                     self.fire_event(p, EventKind::CardsBought, 1);
+                    self.power_bought_card(p);
                     // A trinket that reads the minion just bought: its stats
                     // as they stand now (Reusable Batteries) or the Tavern
                     // spell (Magicfin Sticker).
@@ -1527,15 +1584,21 @@ impl Game {
                         self.players[p].tp.bought_stats = (b.attack, b.health);
                     }
                     self.trinket_event(p, Event::Buy, Some(m.card), 1);
-                    // "After you buy a Pirate, gain 1 Gold" (I'm the Cap'n Now).
-                    if let Some(st) = self.players[p].power
-                        && let PowerEffect::GoldAfterBuyTribe { tribe, gold } =
-                            self.data.heroes.get(st.of).power.effect
-                        && self.data.cards.get(m.card).tribes.has(tribe)
-                    {
-                        let runs = self.players[p].tp.power_triggers.max(1);
-                        let gold = gold.saturating_mul(runs);
-                        self.players[p].gold = self.players[p].gold.saturating_add(gold);
+                    // "After you buy a Pirate, gain 1 Gold" (I'm the Cap'n
+                    // Now), and BUY, INSECT!'s count of bought cards.
+                    let effects: ArrayVec<PowerEffect, 2> = [self.players[p].power, self.players[p].power2]
+                        .iter()
+                        .flatten()
+                        .map(|st| self.data.heroes.power(st.of).effect)
+                        .collect();
+                    for effect in effects {
+                        if let PowerEffect::GoldAfterBuyTribe { tribe, gold } = effect
+                            && self.data.cards.get(m.card).tribes.has(tribe)
+                        {
+                            let runs = self.players[p].tp.power_triggers.max(1);
+                            let gold = gold.saturating_mul(runs);
+                            self.players[p].gold = self.players[p].gold.saturating_add(gold);
+                        }
                     }
                 }
             }
@@ -1553,6 +1616,9 @@ impl Game {
                 self.pay_for_spell(p, pay_health, cost);
                 self.magicfin_teach(p, id);
                 self.fire_event(p, EventKind::CardsBought, 1);
+                // A bought card counts towards BUY, INSECT!, the Tavern
+                // spells included.
+                self.power_bought_card(p);
                 self.players[p].tp.bought_spell = Some(id);
                 self.trinket_event(p, Event::BuySpell, Some(id), 1);
             }
@@ -1750,11 +1816,14 @@ impl Game {
                 // "After you upgrade the Tavern, gain 2 Gold" (Everbloom), and
                 // an unlock condition may just be met (Queen of Dragons).
                 let runs = self.players[p].tp.power_triggers.max(1);
-                let gain = self.players[p].power
-                    .and_then(|st| match self.data.heroes.get(st.of).power.effect {
+                let gain = [self.players[p].power, self.players[p].power2]
+                    .iter()
+                    .flatten()
+                    .filter_map(|st| match self.data.heroes.power(st.of).effect {
                         PowerEffect::GoldAfterUpgrade(g) => Some(g),
                         _ => None,
                     })
+                    .max()
                     .unwrap_or(0)
                     .saturating_mul(runs);
                 self.players[p].gold = self.players[p].gold.saturating_add(gain);
@@ -1767,7 +1836,8 @@ impl Game {
                 self.refresh_power_unlock(p);
                 self.fire_event(p, EventKind::GoldSpent, cost as u32);
             }
-            Action::HeroPower => self.press_power(p),
+            Action::HeroPower => self.press_power(p, false),
+            Action::HeroPower2 => self.press_power(p, true),
             Action::ChooseTrinket(k) => self.pick_trinket(p, k as usize),
             Action::EndTurn => {}
         }
@@ -1853,6 +1923,13 @@ impl Game {
             return;
         }
         self.combat();
+        // A power chosen for the next Start of Combat has fired: the chooser
+        // it came from is back (Bru'kan's Elements).
+        for p in 0..PLAYERS {
+            if self.players[p].alive {
+                self.power_after_fight(p);
+            }
+        }
         if !self.over {
             self.start_turn();
         }

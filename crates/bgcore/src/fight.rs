@@ -58,6 +58,21 @@ pub struct Counters {
     /// friendly minion gains before any minion's own Start of Combat runs
     /// (Al'Akir's Swatting Insects). 0 for none.
     pub soc_leftmost: u8,
+    /// The keyword mask the RIGHT-most friendly minion gains (Bru'kan's Water
+    /// Invocation).
+    pub soc_rightmost: u8,
+    /// How many times the left-most minion's Attack is doubled (Fire
+    /// Invocation: once).
+    pub soc_double_left: u8,
+    /// How many random friendly minions get "Deathrattle: summon
+    /// `soc_earth_card`" for this fight (Earth Invocation).
+    pub soc_earth: u8,
+    /// The token Earth Invocation's Deathrattle summons, 0 for none.
+    pub soc_earth_card: CardId,
+    /// How many random enemy minions take `soc_lightning_damage` damage
+    /// (Lightning Invocation).
+    pub soc_lightning: u8,
+    pub soc_lightning_damage: i32,
     /// The owner's trinkets' effects inside the fight, as a small `Copy`
     /// bundle built from the trinket slots (`Player::counters`). Empty for a
     /// board without one, which every hook answers from one field.
@@ -108,6 +123,12 @@ impl Default for Counters {
             brood_of_nozdormu: 0,
             upper_hand: 0,
             soc_leftmost: 0,
+            soc_rightmost: 0,
+            soc_double_left: 0,
+            soc_earth: 0,
+            soc_earth_card: 0,
+            soc_lightning: 0,
+            soc_lightning_damage: 0,
             trinkets: FightTrinkets::default(),
             sharing_is_caring: 0,
             spell_attack: 0,
@@ -632,6 +653,10 @@ impl<'a> Side<'a> {
             if self.hand_taken(i)
                 || db.get(m.card).is_spell()
                 || !db.get(m.card).tribes.has(tribe)
+                // A card locked in hand until a Tavern tier (Faelin's
+                // Expedition Plans) cannot be summoned either, not even by a
+                // Battlecry or a Start of Combat that reaches into the hand.
+                || (m.locked_tier > 0 && m.locked_tier > self.counters.tier)
             {
                 continue;
             }
@@ -2743,13 +2768,76 @@ fn run_start_of_combat(
         sides[s].spawn_boon_of_beetles(db, s, uid, rng, w);
     }
     // A hero power's Start of Combat goes before any minion's (DESIGN.md
-    // "Order of events"): Al'Akir's left-most minion gains its keywords.
+    // "Order of events"): Al'Akir's left-most minion gains its keywords,
+    // Bru'kan's Water Invocation the right-most one's.
     for s in 0..2 {
         let kw = sides[s].counters.soc_leftmost;
         if kw != 0
             && let Some(f) = sides[s].ms.first_mut()
         {
             f.m.keywords.0 |= kw;
+        }
+        let kw = sides[s].counters.soc_rightmost;
+        if kw != 0
+            && let Some(f) = sides[s].ms.last_mut()
+        {
+            f.m.keywords.0 |= kw;
+        }
+        // Fire Invocation: double the left-most minion's Attack, buffs
+        // included.
+        let n = sides[s].counters.soc_double_left;
+        if n > 0
+            && let Some(f) = sides[s].ms.first_mut()
+        {
+            for _ in 0..n {
+                f.m.attack *= 2;
+            }
+        }
+        // Earth Invocation: this many random friendly minions get a
+        // Deathrattle that summons the 1/1 Elemental, each of them once.
+        let n = sides[s].counters.soc_earth;
+        let token = sides[s].counters.soc_earth_card;
+        if n > 0 && token != 0 {
+            let mut slots: ArrayVec<u16, BOARD> = sides[s].ms.iter().map(|f| f.uid).collect();
+            for _ in 0..n {
+                if slots.is_empty() {
+                    break;
+                }
+                let k = rng.below(slots.len() as u32) as usize;
+                let u = slots.remove(k);
+                if sides[s].granted.len() < sides[s].granted.capacity() {
+                    let _ = sides[s].granted.try_push((u, GrantedDr::Summon { card: token, count: 1 }));
+                }
+            }
+        }
+    }
+    // Lightning Invocation: one damage to a different random enemy minion
+    // each time, so no minion takes it twice unless there are fewer than the
+    // hits. Both sides' hits are chosen first, then applied.
+    let mut struck: [ArrayVec<u16, 8>; 2] = [ArrayVec::new(), ArrayVec::new()];
+    for s in 0..2 {
+        let n = sides[s].counters.soc_lightning;
+        let dmg = sides[s].counters.soc_lightning_damage;
+        if n == 0 || dmg == 0 {
+            continue;
+        }
+        let opp = s ^ 1;
+        let mut slots: ArrayVec<u16, BOARD> = sides[opp].ms.iter().map(|f| f.uid).collect();
+        for _ in 0..n {
+            if slots.is_empty() {
+                break;
+            }
+            let k = rng.below(slots.len() as u32) as usize;
+            let _ = struck[s].try_push(slots.remove(k));
+        }
+    }
+    for s in 0..2 {
+        let opp = s ^ 1;
+        let dmg = sides[s].counters.soc_lightning_damage;
+        for &u in &struck[s] {
+            if let Some(i) = sides[opp].ms.iter().position(|f| f.uid == u) {
+                sides[opp].ms[i].m.health -= dmg;
+            }
         }
     }
     // A trinket's Start of Combat comes at the same step as the hero power's

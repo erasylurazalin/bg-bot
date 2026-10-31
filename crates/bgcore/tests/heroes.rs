@@ -138,15 +138,15 @@ fn set_shop(g: &mut Game, p: usize, names: &[&str]) {
 }
 
 fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
-    &g.data.heroes.get(g.players[p].power.expect("no power").of).power
+    g.data.heroes.power(g.players[p].power.expect("no power").of)
 }
 
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_twenty_two_heroes() {
+fn heroes_toml_parses_with_the_thirty_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 22);
+    assert_eq!(d.heroes.heroes.len(), 30);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),
@@ -172,6 +172,15 @@ fn heroes_toml_parses_with_the_twenty_two_heroes() {
         // The two whose power is a trinket offer (they came with the frame).
         ("Marin the Manager", "BG30_HERO_304", 12, 0),
         ("Buttons", "BG32_HERO_002", 16, 0),
+        // Hero frame 2 (docs/briefs/heroes-frame2.md).
+        ("Genn, Worgen King", "BG35_HERO_001", 7, 0),
+        ("Ragnaros the Firelord", "TB_BaconShop_HERO_11", 15, 0),
+        ("Bru'kan", "BG22_HERO_001", 15, 0),
+        ("Galewing", "BG20_HERO_283", 10, 0),
+        ("The Rat King", "TB_BaconShop_HERO_12", 14, 0),
+        ("A. F. Kay", "TB_BaconShop_HERO_16", 15, 0),
+        ("Ambassador Faelin", "BG22_HERO_201", 14, 0),
+        ("King Mukla", "TB_BaconShop_HERO_38", 16, 0),
     ] {
         let h = d.heroes.by_name(name).expect(name);
         let hero = d.heroes.get(h);
@@ -196,7 +205,7 @@ fn heroes_toml_parses_with_the_twenty_two_heroes() {
     }
     // Smart Savings is a passive whatever the data's cost says, Bloodbound is
     // twice a turn, Gonna Be Rich! once a game, Queen of Dragons tier 4.
-    let pw = |n: &str| d.heroes.get(d.heroes.by_name(n).unwrap()).power.clone();
+    let pw = |n: &str| d.heroes.hero_power(d.heroes.by_name(n).unwrap()).clone();
     assert!(pw("Trade Prince Gallywix").passive);
     assert_eq!(pw("Death Speaker Blackthorn").uses_per_turn, 2);
     assert!(pw("Reno Jackson").once_per_game);
@@ -219,13 +228,14 @@ fn heroes_toml_parses_with_the_twenty_two_heroes() {
 
 #[test]
 fn a_bad_heroes_toml_is_refused() {
-    assert!(bgcore::heroes::HeroDb::from_toml("nonsense").is_err());
+    let cards = db();
+    assert!(bgcore::heroes::HeroDb::from_toml("nonsense", &cards).is_err());
     let dupe = "[[hero]]\nname = 'A'\ncard_id = 'X'\npower = { name = 'p', card_id = 'q' }\n\
          [[hero]]\nname = 'B'\ncard_id = 'X'\npower = { name = 'r', card_id = 's' }";
-    assert!(bgcore::heroes::HeroDb::from_toml(dupe).unwrap_err().contains("twice"));
+    assert!(bgcore::heroes::HeroDb::from_toml(dupe, &cards).unwrap_err().contains("twice"));
     let bad_kw = "[[hero]]\nname = 'A'\ncard_id = 'X'\n\
                   power = { name = 'p', card_id = 'q', passive = true, effect = { soc_leftmost = ['flying'] } }";
-    assert!(bgcore::heroes::HeroDb::from_toml(bad_kw).unwrap_err().contains("keyword"));
+    assert!(bgcore::heroes::HeroDb::from_toml(bad_kw, &cards).unwrap_err().contains("keyword"));
 }
 
 // ---- the pick ----
@@ -906,11 +916,9 @@ fn finley_discovers_a_power_right_after_the_pick() {
             if !g.players[p].power_offer.is_empty() {
                 if p == 0 && finley {
                     // His own power Discover, before turn 1.
-                    for &h in &g.players[0].power_offer {
-                        let name = g.data.heroes.get(h).name.clone();
-                        assert_ne!(name, "Sir Finley Mrrgglton", "his own exclusion list");
+                    for &of in &g.players[0].power_offer {
                         assert_ne!(
-                            g.data.heroes.get(h).power.card_id, "TB_BaconShop_HP_057",
+                            g.data.heroes.power(of).card_id, "TB_BaconShop_HP_057",
                             "Adventure! itself is never offered (it is Finley's own power)"
                         );
                     }
@@ -969,9 +977,9 @@ fn unmasked_identity_replaces_the_power_and_respects_its_lists() {
     assert!(!g.players[0].power_offer.is_empty(), "the Discover opened");
     // Never the current power, never an excluded hero, never out of lobby.
     let current = g.players[0].power.unwrap().of;
-    for &h in &g.players[0].power_offer {
-        assert_ne!(h, current, "the current power is not offered");
-        let hero = g.data.heroes.get(h);
+    for &of in &g.players[0].power_offer {
+        assert_ne!(of, current, "the current power is not offered");
+        let hero = g.data.heroes.heroes.iter().find(|h| h.power == of).expect("a starting power");
         assert_ne!(hero.card_id, "TB_BaconShop_HERO_40", "Finley is excluded");
         assert!(
             hero.tribes.is_neutral() || hero.tribes.overlaps(g.lobby),
@@ -985,7 +993,7 @@ fn unmasked_identity_replaces_the_power_and_respects_its_lists() {
     let st = g.players[0].power.unwrap();
     assert_ne!(st.of, current);
     assert_eq!(st.used_game, 0, "progress lost");
-    assert_eq!(st.uses_left, g.data.heroes.get(offered[0]).power.uses_per_turn);
+    assert_eq!(st.uses_left, g.data.heroes.power(offered[0]).uses_per_turn);
     assert!(offered.len() <= 3);
     g.check_invariants().unwrap();
 }

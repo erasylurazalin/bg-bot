@@ -740,3 +740,4 @@ fn the_numbers_make_real_boards_stronger() {
         100.0 * total.2 as f64 / total.0 as f64
     );
 }
+

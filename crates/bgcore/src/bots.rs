@@ -425,6 +425,12 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
         return a;
     }
 
+    // A skipped turn (Procrastinate, Expedition Plans): freeze the Tavern, so
+    // a cheap card is still there when the turns come back, then end.
+    if game.turn_skipped(p) {
+        return if pl.frozen { Action::EndTurn } else { Action::Freeze };
+    }
+
     let want = curve[(game.turn as usize - 1).min(curve.len() - 1)];
     if pl.tier < want && legal(Action::Level) {
         return Action::Level;
@@ -537,13 +543,15 @@ fn curve_action(game: &Game, curve: &[u8]) -> Action {
     // The hero power button: any gold left here would be left over, so a
     // legal press is worth it. Gonna Be Rich! waits for a strong minion
     // (turn 8 on): it is once per game.
-    if legal(Action::HeroPower) {
-        let waits = pl.power.is_some_and(|st| {
-            matches!(game.data.heroes.get(st.of).power.effect, PowerEffect::MakeGolden)
-                && game.turn < 8
-        });
-        if !waits {
-            return Action::HeroPower;
+    for (action, second) in [(Action::HeroPower, false), (Action::HeroPower2, true)] {
+        if legal(action) {
+            let waits = pl.power_at(second).is_some_and(|st| {
+                matches!(game.data.heroes.power(st.of).effect, PowerEffect::MakeGolden)
+                    && game.turn < 8
+            });
+            if !waits {
+                return action;
+            }
         }
     }
 

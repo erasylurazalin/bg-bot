@@ -11,7 +11,6 @@ use crate::fight::{
     SideOutcome,
     fight_with_hands,
 };
-use crate::heroes::PowerEffect;
 use crate::minion::{
     Keywords,
     Minion,
@@ -113,6 +112,7 @@ impl Game {
         pl.choose_queue.clear();
         pl.discover_damage_from = None;
         pl.discover_locked = false;
+        pl.discover_locked_tier = 0;
         pl.discover_queue.clear();
         pl.tavern_buffs.clear();
         pl.power_offer.clear();
@@ -183,6 +183,9 @@ impl Game {
             }
             pos += 1;
         }
+        // The powers' own end-of-turn effects (Sulfuras gives your ends
+        // +8/+8), then the trinkets'.
+        self.power_end_of_turn(p);
         // Trinkets at the end of the turn: their own end-of-turn effects,
         // then an "every N turns" rule that has counted up to N.
         self.trinket_end_of_turn(p);
@@ -405,25 +408,6 @@ impl Game {
             let base_gold = base_turn_gold.saturating_add(pl.extra_max_gold);
             pl.gold = base_gold.saturating_add(pl.gold_next_turn);
             pl.gold_next_turn = 0;
-            // The power button's uses come back, an unlock condition may be
-            // met, and "at the start of your turn" passives run (Clairvoyance:
-            // a free Refresh that stacks with any saved).
-            if let Some(st) = pl.power {
-                let power = &data.heroes.get(st.of).power;
-                let (uses, unlock_tier, unlock_turn, effect) =
-                    (power.uses_per_turn, power.unlock_tier, power.unlock_turn, power.effect);
-                // "An extra time each turn" (Sous Chef Sticker), and "your
-                // Hero Power triggers twice" (Ancient Wishbone), which runs a
-                // passive's start-of-turn effect twice as well.
-                let runs = pl.tp.power_triggers.max(1);
-                let uses = uses.saturating_add(pl.tp.power_extra_uses);
-                pl.power.as_mut().unwrap().uses_left = uses;
-                pl.power.as_mut().unwrap().unlocked =
-                    pl.tier >= unlock_tier && turn >= unlock_turn;
-                if let PowerEffect::FreeRefreshPerTurn(n) = effect {
-                    pl.free_rolls = pl.free_rolls.saturating_add(n.saturating_mul(runs));
-                }
-            }
             if turn > 1 {
                 if pl.won_last_combat {
                     pl.gold = pl.gold.saturating_add(pl.overconfidence_win);
@@ -512,6 +496,15 @@ impl Game {
                 Self::apply_refresh_buff(pl, &data.cards, rng);
                 Self::apply_barrage(pl, &data.cards);
                 pl.tp.refresh_tier6 = pl.tp.refresh_tier6.saturating_sub(1);
+            }
+        }
+        for p in 0..PLAYERS {
+            // The two hero powers at the start of the player's turn: the uses
+            // back, the unlock conditions, and what a passive does now
+            // (Clairvoyance's free Refresh, A Tale of Kings' new tribe, a
+            // flightpath's countdown, Bananarama's Bananas).
+            if self.players[p].alive && !self.players[p].real {
+                self.power_start_of_turn(p);
             }
         }
         for p in 0..PLAYERS {

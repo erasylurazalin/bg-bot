@@ -140,6 +140,8 @@ impl Game {
                 return Err(format!("player {i}: trinket offer for no slot"));
             }
             for &(of, price) in &pl.trinket_offer {
+                // A trinket offer holds a plain index into the table, while a
+                // slot's `of` is that index plus one.
                 if of as usize >= self.data.trinkets.len() {
                     return Err(format!("player {i}: a trinket offer holds no trinket"));
                 }
@@ -178,11 +180,11 @@ impl Game {
                     return Err(format!("player {i}: a hero without a power"));
                 }
             }
-            if let Some(st) = pl.power {
-                if st.of as usize >= self.data.heroes.heroes.len() {
-                    return Err(format!("player {i}: power of hero {}", st.of));
+            for st in [pl.power, pl.power2].into_iter().flatten() {
+                if st.of as usize >= self.data.heroes.powers.len() {
+                    return Err(format!("player {i}: power {}", st.of));
                 }
-                let power = &self.data.heroes.get(st.of).power;
+                let power = self.data.heroes.power(st.of);
                 if st.uses_left > power.uses_per_turn.saturating_add(pl.tp.power_extra_uses) {
                     return Err(format!("player {i}: {} uses left", st.uses_left));
                 }

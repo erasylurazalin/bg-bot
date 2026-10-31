@@ -197,16 +197,50 @@ build hero-less games so old tests pass unchanged, and
   Every hero damage takes armor first (`take_hero_damage`, the combat damage
   in `combat`, Health costs via `can_pay_health`); a rewind gives back what
   was taken, armor as armor (`last_damage_armor`). Armor Stash sets armor.
-- **The power**: `Player.power` is a `PowerState` (whose power, uses left
-  this turn, used this game, unlocked, one progress counter) reset each turn
-  in `start_turn`. `Action::HeroPower` presses a button power
-  (`Game::power_usable` is the legality, `press_power` pays and runs it);
-  targeted powers open the pending-target flow like spells (`offer_target`).
-  Passives hook into the existing triggers: FreeRefreshPerTurn and the
-  uses/unlock reset in `start_turn`, GoldAfterUpgrade in `Action::Level`,
+- **Powers are their own table.** `HeroDb.powers` holds every built power and
+  `PowerState.of` indexes it: a hero's `power` is the index of the power it
+  starts with (its own number, since the starting powers come first), and a
+  `[[power]]` entry is a power no hero starts with (Sulfuras, the four
+  Invocations, Galewing's flightpaths, the King of X family). That is what
+  lets one power turn into another without the engine knowing any hero by
+  name. `HeroDb::power_by_card_id` finds one by the game data's
+  `hero_powers` id; `becomes`, `returns_to` and `choose` in heroes.toml name
+  powers by card_id and are resolved to indexes at load.
+- **The two powers**: `Player.power` is the MAIN `PowerState` (which power,
+  uses left this turn, used this game, unlocked, one progress counter, the
+  power it last completed into its chooser) and `Player.power2` the SECOND
+  one, held after Genn's King of Duality or the Reinvigorating Light trinket.
+  `Action::HeroPower` presses the main button and `Action::HeroPower2` the
+  second (`power_usable` / `power_usable2`, `press_power(p, second)`); each
+  has its own uses, cost and state, and Unmasked Identity changes only the
+  main one. Both are reset at the start of the player's turn in
+  `power_start_of_turn`.
+- **Powers that change**: `BuyMilestone` counts bought cards in
+  `power_bought_card` (the two buy paths; a steal never comes through them)
+  and swaps the power past its count; `EndOfTurnEnds` runs in
+  `power_end_of_turn`; a chooser (`ChooseSubPowers`, its `options`) fills
+  `power_offer` on a press, and `pick_power` puts the pick in the slot the
+  offer names. A chosen power with a `parent` completes after
+  `complete_turns` turns (counted in `power_start_of_turn`) or after the next
+  fight (`power_after_fight`) and then goes back to its chooser, which
+  remembers it in `PowerState.last_pick` so Galewing cannot offer it again.
+  A power in a family (`family` in heroes.toml, the ten King powers) rotates
+  in `rotate_family_power` to a random other power of the family whose tribe
+  is in the lobby, never the tribe it has now.
+- **Skipped turns**: a power with `skip_turns` leaves only Freeze and End
+  Turn legal for the player's first turns (`Player.skipped`, kept by
+  `refresh_skip`, read by `turn_skipped` in `is_legal` and `legal_mask`); the
+  fight still happens. `TurnDiscovers` queues a `TierLockedMinion` Discover
+  per tier at the start of that turn, and the pick lands in hand with
+  `Minion.locked_tier` set: it can be buffed in hand but not played or
+  discarded until the Tavern reaches that tier.
+- **Passives hook into the existing triggers**: FreeRefreshPerTurn and
+  Bananarama in `power_start_of_turn`, GoldAfterUpgrade in `Action::Level`,
   GoldAfterBuyTribe in `Action::Buy`, GoldNextTurnAfterSell in `sell_minion`,
-  SocLeftmost through `Counters.soc_leftmost` at the top of
-  `run_start_of_combat` (before any minion's).
+  and the four Start of Combat effects through `Counters` (`soc_leftmost`,
+  `soc_rightmost`, `soc_double_left`, `soc_earth` with its token card,
+  `soc_lightning`) at the top of `run_start_of_combat`, before any minion's.
+  `Player::counters` reads both held powers.
 - **Buttons that reuse a card path** (the 2026-10-30 batch): SpellDiscount
   writes `Player.spell_discount`, the same field Ominous Seer sets and
   `pay_for_spell` uses up; GetRandomSpell draws through
@@ -219,16 +253,21 @@ build hero-less games so old tests pass unchanged, and
   A power can also give a linked group: GetLinkedMinions draws with
   `CardDb::random_any_minion` and hands it to `give_linked`, so playing one
   discards the rest (Dark Ritual).
-- **Discovering a hero power** (Unmasked Identity, Finley's Adventure!):
-  `discover_hero_power(p, excludes)`, one engine function taking the source's
-  exclusion list (hero card_ids, in cards.toml for the spell, on the hero for
-  Finley). Offers are `Player.power_offer`, answered with `Choose`; the pick
-  replaces the power with a fresh `PowerState`. Finley's runs right after his
-  pick, before turn 1. Room for trinkets and Dark Gifts sits on Player
-  (`trinkets`, `dark_gifts`), unused.
+- **Discovering a hero power** (Unmasked Identity, Finley's Adventure!, King
+  of Duality, the Reinvigorating Light trinket): `discover_hero_power(p,
+  excludes, to_second, count)`, one engine function taking the source's
+  exclusion list as hero indexes (`HeroDb::hero_indices`, from cards.toml's
+  `exclude_heroes` for the spell, from `HeroDb::hero_power_excludes` for a
+  power, from `power_excludes` on the hero for Finley). Offers are
+  `Player.power_offer` (power indexes), answered with `Choose`; the pick
+  lands in the main slot or, with `power_offer_second`, in the second one,
+  as a fresh `PowerState`. `count` of 2 is King of Duality: the first pick is
+  the second power, the second pick the main one. Finley's runs right after
+  his pick, before turn 1.
 - Bots answer the pick and a power Discover in `answer_pending`, and press a
-  legal button with gold that would be left over (Gonna Be Rich! waits for
-  turn 8). `bgbench` and `bgpy` games play with heroes.
+  legal button (either one) with gold that would be left over (Gonna Be
+  Rich! waits for turn 8). A skipped turn gets a Freeze and then an End Turn.
+  `bgbench` and `bgpy` games play with heroes.
 
 ## Trinkets
 
@@ -340,9 +379,9 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   (`magnetic_cost`, `tavern_price`).
 - **The hero power (block 3).** `tp.power_triggers` runs a press's effect
   twice and a passive power's tick twice (one payment); `power_extra_uses`
-  raises the per-turn uses (`start_turn` adds it, the pick adds one at once);
-  `power_gold` pays Gold after each press. The `uses_left` invariant allows
-  the extra uses.
+  raises the per-turn uses (`power_start_of_turn` adds it to both held
+  powers, the pick adds one at once); `power_gold` pays Gold after each press.
+  The `uses_left` invariant allows the extra uses, on either power.
 - **The Mystery Cube.** Its effect belongs to the slot: `TrinketState.cube`
   (plus `cube_choices`) is set by the `offer_replace` act and kept when
   another trinket takes the slot. `Game::deal_cube_offer` deals the two free
@@ -509,8 +548,10 @@ cargo run --release -p bgsandbox -- --tribe beast,mech,dragon,murloc,demon
 Flags: `--tribe A[,B,...]` (1 to 5 distinct tribes: the lobby), `--hero
 NAME` (play that built hero instead of picking from the offer), `--label
 TEXT`, `--seed N` (random and printed by default), `--free-rolls N` (default
-0), `--boards DIR`. The screen shows your hero, armor and power; `hp` presses
-the button. Commands are read from stdin (`help` lists them). Every
+0), `--boards DIR`. The screen shows your hero, armor and power (both powers
+once a second one is held), and a power that is a chooser or a Discover
+lists what it offers; `hp` presses the main button, `hp2` the second one.
+Commands are read from stdin (`help` lists them). Every
 end of turn rewrites the recording from the game's history, so `undo` (which
 replays the seed and all actions but the last) also removes an undone turn
 from the file.
@@ -665,6 +706,12 @@ Deleting `.venv` undoes it.
   heroes (a hero embedding beside the card one), armor, the power state, the
   hero offer during the pick and the `hero_power` action kind (OBS_SIZE to
   6389, SCALARS 173, OPP_SCALARS 30): every checkpoint before it breaks too.
+  Hero frame 2 (2026-10-31) added the second power to the observation (six
+  scalars right after the main power's, SCALARS to 195), a fourth `choose`
+  slot (a chooser offers up to four: Bru'kan's Elements) and the
+  `hero_power2` action kind (N_ACTIONS 182): every checkpoint before it
+  breaks as well. A hero id and a power id share the model's one id
+  embedding, so its table is `max(N_HEROES, N_POWERS)` wide.
 - Games from `bgpy` play with heroes (`Game::new_random_heroes`, no pick),
   except real seats which get none; learner seats answer any power Discover
   with `choose`.

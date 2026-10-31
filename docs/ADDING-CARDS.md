@@ -221,6 +221,78 @@ exactly one legal target and drops the effect when there is none.
    the observation (hero indices are embedded, `N_HEROES` in bgpy) and the
    bots need nothing per hero.
 
+### A power a hero only reaches later
+
+A power that is not a starting power (Sulfuras, an Invocation, a flightpath,
+a King of X) is its own `[[power]]` entry, keyed by the game data's
+`hero_powers` card_id, and the starting power points at it. Nothing is
+matched by name: heroes.toml names powers by card_id and the parser turns
+them into indexes at load.
+
+```toml
+[[hero]]
+name = "Ragnaros the Firelord"
+power = { name = "BUY, INSECT!", card_id = "TB_BaconShop_HP_087", passive = true,
+          effect = { buy_milestone = 12, becomes = "TB_BaconShop_HP_087t" } }
+
+[[power]]
+name = "Sulfuras"
+card_id = "TB_BaconShop_HP_087t"
+passive = true
+effect = { end_of_turn_ends = [8, 8] }
+```
+
+The keys that make a power change into another:
+
+- `becomes = "<card_id>"` (with `buy_milestone = N`): after N bought cards the
+  power is that one. `power_bought_card` counts them in both buy paths; a
+  steal does not count.
+- `choose = ["<card_id>", ...]` plus `effect = { choose = true }`: a press
+  offers that fixed list (up to `CHOICES` = 4) in `power_offer`; the pick
+  lands in the slot that was pressed (`pick_power`).
+- `returns_to = "<card_id>"` on the chosen power: when it completes the
+  chooser comes back, and the chooser remembers it (`PowerState.last_pick`) so
+  the next offer can leave it out.
+- `complete_turns = N`: the chosen power completes after N of your turns
+  (0 means after the next fight's Start of Combat, which is how the
+  Invocations work). Its own `effect` is the one-shot bonus it gives then
+  (`gold`, `get_random_spell_cost`, `discover_my_tier`, or a Start of Combat
+  effect through `Counters`).
+- `family = "name"`: powers in one family rotate into each other at the start
+  of each turn (`rotate_family_power`), among the ones whose tribe is in the
+  lobby and never the tribe held now. The King of X powers are the example.
+
+### A second hero power
+
+`Player.power` is the main power and `Player.power2` the second; both are
+ordinary `PowerState`s with their own uses, cost and effect, they both get
+the turn-start reset in `power_start_of_turn`, and `Action::HeroPower2`
+presses the second. Two things hand one out, and a new one should reuse them:
+
+- `discover_hero_power(p, excludes, to_second, count)`: a Hero Power
+  Discover, offered from `PowerDb::powers`' starting powers. `to_second`
+  puts the pick in the second slot; `count = 2` deals two picks (the first
+  into the second slot, the second into the main one: King of Duality).
+  `excludes` is hero indexes; `HeroDb::hero_power_excludes` is the list from
+  cards.toml's `exclude_heroes`, which every power-only Discover shares.
+- A trinket act `second_power = true` (Reinvigorating Light) opens the same
+  Discover into the second slot on the pick.
+
+Only Unmasked Identity and Finley change the MAIN power: nothing changes or
+disables the second one. Both are in the observation (`SCALAR_POWER2_*`) and
+`Player::counters` reads both, so a Start of Combat power works in either
+slot. A hero-power chooser belongs on either button: `press_power(p, second)`
+passes the slot through.
+
+### Skipped turns and cards locked in hand
+
+- `skip_turns = N` on a hero's power: the player's first N turns allow only
+  Freeze and End Turn (`Player.skipped`, `turn_skipped`), and the fights
+  still happen. `effect = { turn_discovers = { turn = T, tiers = [..] } }`
+  queues a Discover per tier at the start of turn T, and those picks land
+  with `Minion.locked_tier` set: the card cannot be played or discarded until
+  the Tavern reaches that tier, but it can still be buffed in hand.
+
 ## 2c. Adding a trinket
 
 1. Find it in `ref/bg-meta.json` (`trinkets`): `card_id`, `slot` (LESSER or

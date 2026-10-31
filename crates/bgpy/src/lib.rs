@@ -424,9 +424,11 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let _ = rayon::ThreadPoolBuilder::new().stack_size(64 << 20).build_global();
     let n_cards = Data::bundled().cards.cards.len();
     let n_heroes = Data::bundled().heroes.heroes.len();
+    let n_powers = Data::bundled().heroes.powers.len();
     let n_trinkets = Data::bundled().trinkets.len();
     m.add_class::<VecEnv>()?;
     m.add("N_HEROES", n_heroes)?;
+    m.add("N_POWERS", n_powers)?;
     m.add("N_TRINKETS", n_trinkets)?;
     m.add("OBS_SIZE", OBS_SIZE)?;
     m.add("N_ACTIONS", N_ACTIONS)?;
@@ -438,6 +440,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("HAND", bgcore::HAND)?;
     m.add("SHOP", bgcore::SHOP)?;
     m.add("DISCOVER", bgcore::DISCOVER)?;
+    m.add("CHOICES", bgcore::CHOICES)?;
     // every layout constant of the observation, by its name in obs.rs
     m.add("SHOP_SPELL", obs::SHOP_SPELL)?;
     m.add("SLOT_FEATURES", obs::SLOT_FEATURES)?;
@@ -617,6 +620,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ACTION_KINDS", ACTION_KINDS.to_vec())?;
     m.add("END_TURN", Action::EndTurn.index())?;
     m.add("HERO_POWER", Action::HeroPower.index())?;
+    m.add("HERO_POWER2", Action::HeroPower2.index())?;
     m.add("SCALAR_ARMOR", obs::SCALAR_ARMOR)?;
     m.add("SCALAR_HERO", obs::SCALAR_HERO)?;
     m.add("SCALAR_POWER_HERO", obs::SCALAR_POWER_HERO)?;
@@ -625,6 +629,12 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SCALAR_POWER_USED_GAME", obs::SCALAR_POWER_USED_GAME)?;
     m.add("SCALAR_POWER_UNLOCKED", obs::SCALAR_POWER_UNLOCKED)?;
     m.add("SCALAR_POWER_USABLE", obs::SCALAR_POWER_USABLE)?;
+    m.add("SCALAR_POWER2_HERO", obs::SCALAR_POWER2_HERO)?;
+    m.add("SCALAR_POWER2_COST", obs::SCALAR_POWER2_COST)?;
+    m.add("SCALAR_POWER2_USES_LEFT", obs::SCALAR_POWER2_USES_LEFT)?;
+    m.add("SCALAR_POWER2_USED_GAME", obs::SCALAR_POWER2_USED_GAME)?;
+    m.add("SCALAR_POWER2_UNLOCKED", obs::SCALAR_POWER2_UNLOCKED)?;
+    m.add("SCALAR_POWER2_USABLE", obs::SCALAR_POWER2_USABLE)?;
     m.add("SCALAR_PENDING_HERO", obs::SCALAR_PENDING_HERO)?;
     m.add("SCALAR_PENDING_POWER", obs::SCALAR_PENDING_POWER)?;
     m.add("SCALAR_HERO_OFFER", obs::SCALAR_HERO_OFFER)?;

@@ -130,6 +130,9 @@ fn tags(m: &Minion, db: &CardDb) -> String {
     if m.locked_turns > 0 {
         add(&format!("L{}", m.locked_turns));
     }
+    if m.locked_tier > 0 {
+        add(&format!("T{}", m.locked_tier));
+    }
     out
 }
 
@@ -244,34 +247,42 @@ pub fn state(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> String {
     }
     out.push('\n');
     let heroes = &g.data.heroes;
+    let power_line = |second: bool| -> String {
+        let Some(st) = pl.power_at(second) else { return String::new() };
+        let pw = heroes.power(st.of);
+        let state = if pw.passive {
+            String::new()
+        } else {
+            format!(
+                " ({}, {}/{} uses{}{})",
+                if pw.cost == 0 { "free".into() } else { format!("{}g", pw.cost) },
+                st.uses_left,
+                pw.uses_per_turn,
+                if st.unlocked { "" } else { ", locked" },
+                if pw.once_per_game && st.used_game > 0 { ", used" } else { "" },
+            )
+        };
+        format!(
+            "{}{} [{}]{}{}",
+            pw.name,
+            if second { " (second)" } else { "" },
+            if second { "hp2" } else { "hp" },
+            if state.is_empty() { "" } else { " " },
+            state
+        )
+    };
     let hero_line = match pl.hero {
         Some(h) => {
             let hero = heroes.get(h);
-            let power = match &pl.power {
-                Some(st) => {
-                    let pw = &heroes.get(st.of).power;
-                    let state = if pw.passive {
-                        String::new()
-                    } else {
-                        format!(
-                            " ({}, {}/{} uses{}{})",
-                            if pw.cost == 0 { "free".into() } else { format!("{}g", pw.cost) },
-                            st.uses_left,
-                            pw.uses_per_turn,
-                            if st.unlocked { "" } else { ", locked" },
-                            if pw.once_per_game && st.used_game > 0 { ", used" } else { "" },
-                        )
-                    };
-                    format!("{}: {}{}{}", hero.name, pw.name, if state.is_empty() { "" } else { " " }, state)
-                }
-                None => String::new(),
-            };
-            format!("Hero: {} (armor {}) {}", hero.name, pl.armor, power)
+            format!("Hero: {} (armor {}) {}", hero.name, pl.armor, power_line(false))
         }
         None => String::new(),
     };
     if !hero_line.is_empty() {
         let _ = writeln!(out, "{hero_line}");
+    }
+    if pl.power2.is_some() {
+        let _ = writeln!(out, "Second power: {}", power_line(true));
     }
     let _ = writeln!(out, "Lobby: {}", lobby_names(g.lobby));
     let c = counters_line(g);
@@ -372,7 +383,7 @@ pub fn prompt(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> Option<String> 
                     "{} (armor {}, {}, {})",
                     hero.name,
                     hero.armor,
-                    power_text(heroes, h),
+                    power_text(heroes, hero.power),
                     if hero.tribes.is_neutral() {
                         "any lobby".to_string()
                     } else {
@@ -392,12 +403,14 @@ pub fn prompt(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> Option<String> 
         let opts: Vec<String> = pl
             .power_offer
             .iter()
-            .map(|&h| format!("{} {}", heroes.get(h).name, power_text(heroes, h)))
+            .map(|&of| power_text(heroes, of))
             .collect();
-        return Some(format!(
-            "CHOICE: pick a Hero Power. It replaces your current one.\n  {}",
-            opts.join("\n  ")
-        ));
+        let slot = if pl.power_offer_second {
+            "It becomes your SECOND power, beside the one you have"
+        } else {
+            "It replaces your current one"
+        };
+        return Some(format!("CHOICE: pick a Hero Power. {slot}.\n  {}", opts.join("\n  ")));
     }
     if !pl.discover.is_empty() {
         let opts: Vec<String> = pl
@@ -430,9 +443,9 @@ pub fn prompt(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> Option<String> 
 }
 
 /// A hero power as one short line: name, button cost and limits.
-fn power_text(heroes: &bgcore::heroes::HeroDb, h: u8) -> String {
-    let pw = &heroes.get(h).power;
-    let mut out = String::new();
+fn power_text(heroes: &bgcore::heroes::HeroDb, of: u8) -> String {
+    let pw = heroes.power(of);
+    let mut out = format!("{} (", pw.name);
     if !pw.passive {
         out.push_str(&format!(
             "power {}g{}",
@@ -448,6 +461,7 @@ fn power_text(heroes: &bgcore::heroes::HeroDb, h: u8) -> String {
     } else {
         out.push_str("passive");
     }
+    out.push(')');
     out
 }
 
@@ -550,6 +564,9 @@ pub fn card_info(g: &Game, texts: &CardTexts, m: &Minion) -> String {
     }
     if m.locked_turns > 0 {
         state.push(format!("locked in hand for {} more turns", m.locked_turns));
+    }
+    if m.locked_tier > 0 {
+        state.push(format!("locked in hand until the Tavern is Tier {}", m.locked_tier));
     }
     if let Some(n) = m.events_left(db) {
         state.push(format!("{n} left"));

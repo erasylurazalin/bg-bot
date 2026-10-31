@@ -4,6 +4,7 @@ use arrayvec::ArrayVec;
 use crate::cards::{
     Effect,
     EventKind,
+    SpellEffect,
     Tribe,
 };
 use crate::heroes::PowerEffect;
@@ -14,6 +15,7 @@ use crate::minion::{
 };
 use crate::{
     BOARD,
+    CHOICES,
     DISCOVER,
     HAND,
     PLAYERS,
@@ -98,38 +100,101 @@ impl Game {
     /// power Discover if the hero's power is one.
     fn take_hero(&mut self, p: usize, hero: u8) {
         let h = self.data.heroes.get(hero);
-        let (extra_health, armor, discovers, excludes) =
-            (h.extra_health, h.armor, h.power.effect == PowerEffect::DiscoverPower, h.power_excludes.clone());
+        let (extra_health, armor, starting, excludes) =
+            (h.extra_health, h.armor, h.power, h.power_excludes.clone());
+        let effect = self.data.heroes.power(starting).effect;
         self.players[p].health += extra_health;
         self.players[p].armor = armor as i32;
         self.players[p].hero = Some(hero);
-        self.players[p].power = Some(PowerState::fresh(hero, &self.data.heroes.get(hero).power));
+        self.players[p].power2 = None;
+        let power = self.data.heroes.power(starting).clone();
+        self.players[p].power = Some(PowerState::fresh(starting, &power));
         self.refresh_power_unlock(p);
-        if discovers {
-            self.discover_hero_power(p, &excludes);
+        self.refresh_skip(p);
+        if effect == PowerEffect::DiscoverPower {
+            let excludes = self.data.heroes.hero_indices(&excludes);
+            self.discover_hero_power(p, &excludes, false, 1);
+        } else {
+            // A power that is a rotating family (A Tale of Kings) starts on a
+            // random tribe of the lobby, before turn 1.
+            self.rotate_family_power(p, false);
         }
     }
 
-    /// Set the power's unlock flag from the player's tier and the turn
+    /// Set each held power's unlock flag from the player's tier and the turn
     /// ("Unlocks at Tier N", "Unlocks on Turn N").
     pub(super) fn refresh_power_unlock(&mut self, p: usize) {
-        let Some(st) = self.players[p].power else { return };
-        let power = &self.data.heroes.get(st.of).power;
-        let pl = &self.players[p];
-        let unlocked = pl.tier >= power.unlock_tier && self.turn >= power.unlock_turn;
-        self.players[p].power.as_mut().unwrap().unlocked = unlocked;
+        let (tier, turn) = (self.players[p].tier, self.turn);
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let power = self.data.heroes.power(st.of);
+            let unlocked = tier >= power.unlock_tier && turn >= power.unlock_turn;
+            if let Some(st) = self.players[p].power_at_mut(second) {
+                st.unlocked = unlocked;
+            }
+        }
     }
 
-    /// Whether the player's power button may be pressed right now: a button,
-    /// unlocked, uses left, not past its once-per-game, the Gold for it, and
-    /// whatever its effect needs to land on something.
+    /// Put this power in the given slot, its state fresh. `None` clears it.
+    pub(super) fn set_power(&mut self, p: usize, second: bool, of: Option<u8>) {
+        let state = of.map(|of| {
+            let power = self.data.heroes.power(of).clone();
+            PowerState::fresh(of, &power)
+        });
+        if second {
+            self.players[p].power2 = state;
+        } else {
+            self.players[p].power = state;
+        }
+        self.refresh_power_unlock(p);
+        self.refresh_skip(p);
+    }
+
+    /// Whether this power is one of the player's own (the Discover of a Hero
+    /// Power never offers one the player already holds).
+    fn holds_power(&self, p: usize, of: u8) -> bool {
+        self.players[p].power.is_some_and(|st| st.of == of)
+            || self.players[p].power2.is_some_and(|st| st.of == of)
+    }
+
+    /// A rotating power (A Tale of Kings) becomes a random other power of its
+    /// family whose tribe is in the lobby, never the same tribe twice
+    /// (docs/heroes.md "King of Beasts, Rat King").
+    pub(super) fn rotate_family_power(&mut self, p: usize, second: bool) {
+        let Some(st) = self.players[p].power_at(second) else { return };
+        let power = self.data.heroes.power(st.of);
+        if power.family == 0 {
+            return;
+        }
+        let options =
+            self.data.heroes.family_options(power.family, self.lobby, power.tribe_of());
+        if options.is_empty() {
+            return;
+        }
+        let k = self.rng.below(options.len() as u32) as usize;
+        self.set_power(p, second, Some(options[k]));
+    }
+
+    /// Whether the player's MAIN power button may be pressed right now.
     pub fn power_usable(&self, p: usize) -> bool {
-        let Some(st) = self.players[p].power else { return false };
-        let power = &self.data.heroes.get(st.of).power;
+        self.power_usable_at(p, false)
+    }
+
+    /// Whether the player's SECOND power button may be pressed right now.
+    pub fn power_usable2(&self, p: usize) -> bool {
+        self.power_usable_at(p, true)
+    }
+
+    /// Whether one of the player's two power buttons may be pressed right
+    /// now: a button, unlocked, uses left, not past its once-per-game, the
+    /// Gold for it, and whatever its effect needs to land on something.
+    pub fn power_usable_at(&self, p: usize, second: bool) -> bool {
+        let Some(st) = self.players[p].power_at(second) else { return false };
+        let power = self.data.heroes.power(st.of);
         let pl = &self.players[p];
         if power.passive
             // A power that became a trinket (Marin, Buttons) has no button.
-            || self.players[p].trinkets[super::trinkets::POWER_SLOT].of != 0
+            || pl.trinkets[super::trinkets::POWER_SLOT].of != 0
             || !st.unlocked
             || st.uses_left == 0
             || (power.once_per_game && st.used_game > 0)
@@ -157,20 +222,21 @@ impl Game {
             // Both minions must fit in hand to stay a linked pair (Dark
             // Ritual).
             PowerEffect::GetLinkedMinions(n) => pl.hand.len() + n as usize <= HAND,
+            // A press that only completes a chooser's pick needs nothing.
             _ => true,
         }
     }
 
-    /// The hero power button is pressed: pay, spend a use, run the effect.
-    /// "Your Hero Power triggers twice" (Ancient Wishbone) runs the effect
-    /// twice for the one press and the one payment.
-    pub(super) fn press_power(&mut self, p: usize) {
+    /// One of the hero power buttons is pressed: pay, spend a use, run the
+    /// effect. "Your Hero Power triggers twice" (Ancient Wishbone) runs the
+    /// effect twice for the one press and the one payment.
+    pub(super) fn press_power(&mut self, p: usize, second: bool) {
         let (of, cost) = {
-            let st = self.players[p].power.unwrap();
-            (st.of, self.data.heroes.get(st.of).power.cost)
+            let st = self.players[p].power_at(second).unwrap();
+            (st.of, self.data.heroes.power(st.of).cost)
         };
-        let effect = self.data.heroes.get(of).power.effect;
-        let st = self.players[p].power.as_mut().unwrap();
+        let effect = self.data.heroes.power(of).effect;
+        let st = self.players[p].power_at_mut(second).unwrap();
         st.uses_left = st.uses_left.saturating_sub(1);
         st.used_game += 1;
         self.players[p].gold -= cost;
@@ -282,6 +348,28 @@ impl Game {
                     );
                 }
             }
+            // King of Duality: two Hero Power Discovers, the first into the
+            // second slot and the second into the main one.
+            PowerEffect::DiscoverPowers(n) => {
+                self.players[p].power_offer_left = n;
+                // The first pick is the second power (docs/heroes.md).
+                self.players[p].power_offer_second = !second;
+                self.deal_power_offer(p);
+            }
+            // Embrace the Elements, Dungar's Gryphon: a fixed choice of
+            // powers, never the one that just completed.
+            PowerEffect::ChooseSubPowers => {
+                let last = self.players[p].power_at(second).map_or(0, |st| st.last_pick);
+                let mut picks: ArrayVec<u8, CHOICES> = ArrayVec::new();
+                for &o in &self.data.heroes.power(of).options {
+                    if o as u16 + 1 != last as u16 {
+                        let _ = picks.try_push(o);
+                    }
+                }
+                let pl = &mut self.players[p];
+                pl.power_offer = picks;
+                pl.power_offer_second = second;
+            }
             _ => {}
         }
         // "After you use your Hero Power, gain (1) Gold" (Sous Chef Sticker):
@@ -291,6 +379,193 @@ impl Game {
             self.players[p].gold = self.players[p].gold.saturating_add(back);
         }
         self.fire_event(p, EventKind::GoldSpent, cost as u32);
+    }
+
+    /// Everything a player's two powers do at the start of their turn: the
+    /// uses come back, an unlock condition may be met, a start-of-turn passive
+    /// runs, a rotating power turns to another tribe, a chosen power counts
+    /// down (or completes), and the powers that hand out cards do it.
+    pub(super) fn power_start_of_turn(&mut self, p: usize) {
+        let turn = self.turn;
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            // Only the Copy numbers of the power are read here, so nothing is
+            // cloned or allocated on the start of every turn.
+            let power = self.data.heroes.power(st.of);
+            let (uses_per_turn, complete_turns) = (power.uses_per_turn, power.complete_turns);
+            let counts_down = power.parent.is_some() && complete_turns > 0;
+            let runs = self.players[p].tp.power_triggers.max(1);
+            let uses = uses_per_turn.saturating_add(self.players[p].tp.power_extra_uses);
+            if let Some(sl) = self.players[p].power_at_mut(second) {
+                sl.uses_left = uses;
+            }
+            // A power chosen from a chooser counts down; when it completes,
+            // its bonus runs and the chooser comes back.
+            if counts_down {
+                let done = {
+                    let sl = self.players[p].power_at_mut(second).unwrap();
+                    sl.progress += 1;
+                    sl.progress >= complete_turns as u32
+                };
+                if done {
+                    self.complete_power(p, second);
+                    continue;
+                }
+            }
+            self.refresh_power_unlock(p);
+            // A power that is part of a family (A Tale of Kings) swaps its
+            // tribe at the start of every turn.
+            self.rotate_family_power(p, second);
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let effect = self.data.heroes.power(st.of).effect;
+            match effect {
+                PowerEffect::FreeRefreshPerTurn(n) => {
+                    let n = n.saturating_mul(runs);
+                    let pl = &mut self.players[p];
+                    pl.free_rolls = pl.free_rolls.saturating_add(n);
+                }
+                PowerEffect::Bananarama { mine, others, big_percent, banana, big } => {
+                    let n = mine.saturating_mul(runs);
+                    self.give_bananas(p, n, big_percent, banana, big);
+                    for q in 0..PLAYERS {
+                        // A real seat is a logged board, not a shopper: its
+                        // hand is the file's, so it takes no Banana.
+                        if q == p || !self.players[q].alive || self.players[q].real {
+                            continue;
+                        }
+                        self.give_bananas(q, others, big_percent, banana, big);
+                    }
+                }
+                PowerEffect::TurnDiscovers { turn: at, tiers } => {
+                    if turn == at {
+                        for &t in tiers.iter().filter(|&&t| t != 0) {
+                            let _ = self.players[p]
+                                .discover_queue
+                                .try_push(DiscoverRequest::TierLockedMinion(t));
+                        }
+                        self.maybe_start_discover(p);
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Procrastinate and Expedition Plans: is this turn spent?
+        self.refresh_skip(p);
+    }
+
+    /// Hand `n` Bananas to one player, each the plain one or, `percent` of the
+    /// time, the big one (Bananarama). A hand with no room simply misses it.
+    fn give_bananas(&mut self, p: usize, n: u8, percent: u8, banana: CardId, big: CardId) {
+        for _ in 0..n {
+            let card = if percent > 0 && self.rng.below(100) < percent as u32 { big } else { banana };
+            let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+            self.add_to_hand(p, m);
+        }
+    }
+
+    /// A chosen power completes: its effect runs once, then the chooser it
+    /// came from is back, remembering what just completed so it is not
+    /// offered straight away (Galewing).
+    fn complete_power(&mut self, p: usize, second: bool) {
+        let Some(st) = self.players[p].power_at(second) else { return };
+        let power = self.data.heroes.power(st.of);
+        let Some(parent) = power.parent else { return };
+        let effect = power.effect;
+        let mut pos = 0usize;
+        match effect {
+            PowerEffect::Gold(n) => {
+                self.execute_spell_effect(p, SpellEffect::GainGold(n), false)
+            }
+            PowerEffect::GetRandomSpellOfCost(c) => self.run_effect(
+                p,
+                &mut pos,
+                Effect::GetRandomSpellUpTo { cost: Some(c), count: 1 },
+                false,
+                1,
+            ),
+            PowerEffect::DiscoverMyTier => {
+                let tier = self.players[p].tier;
+                let _ = self.players[p].discover_queue.try_push(DiscoverRequest::MinionTier(tier));
+                self.maybe_start_discover(p);
+            }
+            _ => {}
+        }
+        self.set_power(p, second, Some(parent));
+        if let Some(sl) = self.players[p].power_at_mut(second) {
+            sl.last_pick = st.of + 1;
+        }
+    }
+
+    /// The end-of-turn effects of the player's two powers (Sulfuras).
+    pub(super) fn power_end_of_turn(&mut self, p: usize) {
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let effect = self.data.heroes.power(st.of).effect;
+            let runs = self.players[p].tp.power_triggers.max(1);
+            if let PowerEffect::EndOfTurnEnds { attack, health } = effect {
+                for _ in 0..runs {
+                    let n = self.players[p].board.len();
+                    if n == 0 {
+                        continue;
+                    }
+                    buff(&mut self.players[p].board[0], attack, health);
+                    // With one minion it is both ends, so it gets both buffs.
+                    buff(&mut self.players[p].board[n - 1], attack, health);
+                }
+            }
+        }
+    }
+
+    /// A card was bought (BUY, INSECT! counts them): the power may become
+    /// another one. Free buys and Tavern spells count; a steal does not, as it
+    /// never comes through here.
+    pub(super) fn power_bought_card(&mut self, p: usize) {
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let effect = self.data.heroes.power(st.of).effect;
+            if let PowerEffect::BuyMilestone { count, becomes } = effect {
+                let sl = self.players[p].power_at_mut(second).unwrap();
+                sl.progress = sl.progress.saturating_add(1);
+                if sl.progress >= count as u32 {
+                    self.set_power(p, second, Some(becomes));
+                }
+            }
+        }
+    }
+
+    /// A fight is over: a power chosen for the next Start of Combat has fired,
+    /// and the chooser it came from is back (Bru'kan's Elements).
+    pub(super) fn power_after_fight(&mut self, p: usize) {
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let power = self.data.heroes.power(st.of);
+            if power.parent.is_some() && power.complete_turns == 0 {
+                self.complete_power(p, second);
+            }
+        }
+    }
+
+    /// Whether this player's turn is skipped (Procrastinate, Expedition
+    /// Plans): only Freeze and End Turn are legal, and the fight still
+    /// happens. `refresh_skip` keeps the flag, so this is one read on the
+    /// legality path.
+    pub fn turn_skipped(&self, p: usize) -> bool {
+        self.players[p].skipped
+    }
+
+    /// Work out whether this player's turn is skipped now and keep it on the
+    /// player, so the legality check stays one read. A hero's first turns are
+    /// counted from turn 1, so the pick phase (turn 0) is never skipped.
+    fn refresh_skip(&mut self, p: usize) {
+        let turn = self.turn;
+        let skipped = turn > 0
+            && [false, true].iter().any(|&second| {
+                self.players[p].power_at(second).is_some_and(|st| {
+                    let skip = self.data.heroes.power(st.of).skip_turns;
+                    skip > 0 && turn <= skip as u32
+                })
+            });
+        self.players[p].skipped = skipped;
     }
 
     /// Steal a random minion from the Tavern into hand and double its Health
@@ -344,24 +619,46 @@ impl Game {
         false
     }
 
-    /// Offer the player a choice of hero powers, the one engine function
-    /// Unmasked Identity and Finley's Adventure! share (DESIGN.md
-    /// "Discovering a hero power"): three starting powers of built heroes,
-    /// never the player's current power, never a hero on `excludes` (hero
-    /// card_ids), never a hero tied only to tribes outside the lobby.
-    pub(super) fn discover_hero_power(&mut self, p: usize, excludes: &[String]) {
-        let current = self.players[p].power.map(|st| st.of);
+    /// Open one Hero Power Discover for the player: `count` picks in all, the
+    /// first of them into the slot `to_second` says (the first of King of
+    /// Duality's two is the second power, the second pick the main one).
+    pub(super) fn discover_hero_power(
+        &mut self,
+        p: usize,
+        excludes: &[u8],
+        to_second: bool,
+        count: u8,
+    ) {
+        self.players[p].power_offer_left = count;
+        self.players[p].power_offer_second = to_second;
+        let list = &mut self.players[p].power_excludes;
+        list.clear();
+        for &h in excludes {
+            let _ = list.try_push(h);
+        }
+        self.deal_power_offer(p);
+    }
+
+    /// Deal the open Hero Power Discover: three starting powers of built
+    /// heroes, never one the player already holds, never a hero on the
+    /// exclusion list, never a hero tied only to tribes outside the lobby
+    /// (DESIGN.md "Discovering a hero power"). The slot it answers into is
+    /// the player's `power_offer_second`.
+    fn deal_power_offer(&mut self, p: usize) {
         let options: Vec<u8> = self
             .data
             .heroes
             .lobby_allowed(self.lobby)
-            .filter(|&h| Some(h) != current && !excludes.contains(&self.data.heroes.get(h).card_id))
+            .filter(|&h| !self.players[p].power_excludes.contains(&h))
+            .map(|h| self.data.heroes.get(h).power)
+            .filter(|&of| !self.holds_power(p, of))
             .collect();
         if options.is_empty() {
+            self.players[p].power_offer_left = 0;
             return;
         }
         // Draw three distinct ones (a reservoir sample over the candidates).
-        let mut picks: ArrayVec<u8, DISCOVER> = ArrayVec::new();
+        let mut picks: ArrayVec<u8, CHOICES> = ArrayVec::new();
         let mut left = options.len() as u32;
         for &h in &options {
             let want = (DISCOVER - picks.len()) as u32;
@@ -371,6 +668,35 @@ impl Game {
             left -= 1;
         }
         self.players[p].power_offer = picks;
+    }
+
+    /// The player answered an open Hero Power offer: the power lands in the
+    /// slot the offer named, and King of Duality's second pick is dealt next.
+    pub(super) fn pick_power(&mut self, p: usize, k: usize) {
+        let Some(&of) = self.players[p].power_offer.get(k) else { return };
+        let second = self.players[p].power_offer_second;
+        self.players[p].power_offer.clear();
+        self.set_power(p, second, Some(of));
+        // A start-of-game power picked before turn 1 (Finley's Discover
+        // finding All Patched Up) still does its part: the extra Health.
+        if self.turn == 0 {
+            self.players[p].health += self.power_extra_health(of);
+        }
+        let left = self.players[p].power_offer_left.saturating_sub(1);
+        self.players[p].power_offer_left = left;
+        if left > 0 {
+            // The next pick goes to the main power (Genn's second pick).
+            self.players[p].power_offer_second = false;
+            self.deal_power_offer(p);
+        } else {
+            self.players[p].power_offer_second = false;
+        }
+    }
+
+    /// The Health a power gives the hero for good when it is picked (All
+    /// Patched Up), 0 for every other power.
+    fn power_extra_health(&self, of: u8) -> i32 {
+        self.data.heroes.heroes.iter().find(|h| h.power == of).map_or(0, |h| h.extra_health)
     }
 
     /// The player picked a hero from the offer (turn 0): the offer closes,

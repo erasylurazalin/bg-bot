@@ -40,6 +40,9 @@ pub const HAND: usize = 10;
 /// more minion than the tier's shop size.
 pub const SHOP: usize = 7;
 pub const DISCOVER: usize = 3;
+/// Answer slots of one `Action::Choose`: a Discover offers DISCOVER options,
+/// a chooser a fixed list (Bru'kan's four Elements is the longest).
+pub const CHOICES: usize = 4;
 /// The highest Tavern tier: the most a player can level to, and the most any
 /// "up to your tier" draw can reach.
 pub const MAX_TIER: u8 = 6;
@@ -84,12 +87,9 @@ impl Data {
         if cards.triple_reward.is_none() {
             return Err("cards.toml: no Triple Reward spell: a golden minion played from hand has no reward to give".into());
         }
-        Ok(Data {
-            trinkets: crate::trinkets::TrinketDb::from_toml(trinkets, &cards)?,
-            cards,
-            rules: Rules::from_toml(rules)?,
-            heroes: HeroDb::from_toml(heroes)?,
-        })
+        let trinkets = crate::trinkets::TrinketDb::from_toml(trinkets, &cards)?;
+        let heroes = HeroDb::from_toml(heroes, &cards)?;
+        Ok(Data { trinkets, cards, rules: Rules::from_toml(rules)?, heroes })
     }
 
     /// The cards.toml, rules.toml and heroes.toml at the repo root, built

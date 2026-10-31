@@ -2867,3 +2867,31 @@ token = true
 spellcraft = true
 tavern_spell = false
 effect = { target = "chosen", watch_stats = true }
+
+# Bananarama (King Mukla, TB_BaconShop_HERO_38's power). Plain spells, not
+# Tavern spells: "after you cast a spell" counts them, "after you cast a
+# Tavern spell" does not (DESIGN.md "Tavern spells versus other spells").
+[[spell]]
+name = "Bananas"
+tier = 0
+cost = 1
+token = true
+tavern_spell = false
+effect = { target = "chosen", buff = [1, 1] }
+
+[[spell]]
+name = "Big Banana"
+tier = 0
+cost = 1
+token = true
+tavern_spell = false
+effect = { target = "chosen", buff = [2, 2] }
+
+# The 1/1 Elemental Earth Invocation's Deathrattle summons
+# (BG22_HERO_001p_t1et).
+[[token]]
+name = "Stone Elemental"
+tier = 1
+tribe = "elemental"
+stats = [1, 1]
+golden_stats = [2, 2]

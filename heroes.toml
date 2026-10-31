@@ -158,3 +158,211 @@ name = "Buttons"
 card_id = "BG32_HERO_002"
 armor = 16
 power = { name = "Growing Collection", card_id = "BG32_HERO_002p", passive = true, unlock_turn = 8, effect = { trinket_offer = "greater" } }
+
+# ---- batch of 2026-10-31: hero frame 2 (docs/briefs/heroes-frame2.md): the
+# two powers, the powers that turn into others, and the skipped turns. A power
+# a hero only reaches later is a `[[power]]` entry of its own, and a `[[hero]]`
+# power can name the powers it turns into (`choose`, `becomes`).
+
+# King of Duality: on turn 4, Discover two Hero Powers. The first pick is the
+# SECOND power and the second pick the MAIN one (docs/heroes.md).
+[[hero]]
+name = "Genn, Worgen King"
+card_id = "BG35_HERO_001"
+armor = 7
+power = { name = "King of Duality", card_id = "BG35_HERO_001p", cost = 0, once_per_game = true, unlock_turn = 4, effect = { discover_powers = 2 } }
+
+# BUY, INSECT!: after 12 bought cards the power becomes Sulfuras, which fires
+# at the end of that same turn.
+[[hero]]
+name = "Ragnaros the Firelord"
+card_id = "TB_BaconShop_HERO_11"
+armor = 15
+power = { name = "BUY, INSECT!", card_id = "TB_BaconShop_HP_087", passive = true, effect = { buy_milestone = 12, becomes = "TB_BaconShop_HP_087t" } }
+
+[[power]]
+name = "Sulfuras"
+card_id = "TB_BaconShop_HP_087t"
+passive = true
+effect = { end_of_turn_ends = [8, 8] }
+
+# Embrace the Elements: choose one of the four Invocations; it fires at the
+# next Start of Combat and then the chooser comes back.
+[[hero]]
+name = "Bru'kan"
+card_id = "BG22_HERO_001"
+armor = 15
+power = { name = "Embrace the Elements", card_id = "BG22_HERO_001p", effect = { choose = true }, choose = [
+    "BG22_HERO_001p_t1",
+    "BG22_HERO_001p_t2",
+    "BG22_HERO_001p_t3",
+    "BG22_HERO_001p_t4",
+] }
+
+[[power]]
+name = "Earth Invocation"
+card_id = "BG22_HERO_001p_t1"
+passive = true
+returns_to = "BG22_HERO_001p"
+effect = { soc_grant_deathrattle = 4, card = "Stone Elemental" }
+
+[[power]]
+name = "Fire Invocation"
+card_id = "BG22_HERO_001p_t2"
+passive = true
+returns_to = "BG22_HERO_001p"
+effect = { soc_double_left_attack = 1 }
+
+[[power]]
+name = "Water Invocation"
+card_id = "BG22_HERO_001p_t3"
+passive = true
+returns_to = "BG22_HERO_001p"
+effect = { soc_rightmost = ["divine_shield", "taunt"] }
+
+[[power]]
+name = "Lightning Invocation"
+card_id = "BG22_HERO_001p_t4"
+passive = true
+returns_to = "BG22_HERO_001p"
+effect = { soc_damage_enemies = { hits = 5, damage = 1 } }
+
+# Dungar's Gryphon: choose one of three flightpaths; each completes after the
+# turns its card names, gives its bonus, and the chooser comes back without the
+# one just completed.
+[[hero]]
+name = "Galewing"
+card_id = "BG20_HERO_283"
+armor = 10
+power = { name = "Dungar's Gryphon", card_id = "BG20_HERO_283p", effect = { choose = true }, choose = [
+    "BG20_HERO_283p_t1",
+    "BG20_HERO_283p_t2",
+    "BG20_HERO_283p_t3",
+] }
+
+[[power]]
+name = "Westfall"
+card_id = "BG20_HERO_283p_t1"
+passive = true
+returns_to = "BG20_HERO_283p"
+complete_turns = 1
+effect = { get_random_spell_cost = 1 }
+
+[[power]]
+name = "Ironforge"
+card_id = "BG20_HERO_283p_t2"
+passive = true
+returns_to = "BG20_HERO_283p"
+complete_turns = 2
+effect = { gold = 2 }
+
+[[power]]
+name = "Eastern Plaguelands"
+card_id = "BG20_HERO_283p_t3"
+passive = true
+returns_to = "BG20_HERO_283p"
+complete_turns = 3
+effect = { discover_my_tier = true }
+
+# A Tale of Kings: Discover a minion of the current tribe, and the tribe swaps
+# every turn to a random different one in the lobby. The family is every power
+# that says `family = "king"`, one per tribe.
+[[hero]]
+name = "The Rat King"
+card_id = "TB_BaconShop_HERO_12"
+armor = 14
+power = { name = "A Tale of Kings", card_id = "TB_BaconShop_HP_041", cost = 2, family = "king" }
+
+[[power]]
+name = "King of Beasts"
+card_id = "TB_BaconShop_HP_041a"
+cost = 2
+family = "king"
+effect = { discover_tribe = "beast" }
+
+[[power]]
+name = "King of Mechs"
+card_id = "TB_BaconShop_HP_041b"
+cost = 2
+family = "king"
+effect = { discover_tribe = "mech" }
+
+[[power]]
+name = "King of Murlocs"
+card_id = "TB_BaconShop_HP_041c"
+cost = 2
+family = "king"
+effect = { discover_tribe = "murloc" }
+
+[[power]]
+name = "King of Demons"
+card_id = "TB_BaconShop_HP_041d"
+cost = 2
+family = "king"
+effect = { discover_tribe = "demon" }
+
+[[power]]
+name = "King of Dragons"
+card_id = "TB_BaconShop_HP_041f"
+cost = 2
+family = "king"
+effect = { discover_tribe = "dragon" }
+
+[[power]]
+name = "King of Pirates"
+card_id = "TB_BaconShop_HP_041g"
+cost = 2
+family = "king"
+effect = { discover_tribe = "pirate" }
+
+[[power]]
+name = "King of Elementals"
+card_id = "TB_BaconShop_HP_041h"
+cost = 2
+family = "king"
+effect = { discover_tribe = "elemental" }
+
+[[power]]
+name = "King of Quilboar"
+card_id = "TB_BaconShop_HP_041i"
+cost = 2
+family = "king"
+effect = { discover_tribe = "quilboar" }
+
+[[power]]
+name = "King of Undead"
+card_id = "TB_BaconShop_HP_041k"
+cost = 2
+family = "king"
+effect = { discover_tribe = "undead" }
+
+[[power]]
+name = "King of Aberrations"
+card_id = "TB_BaconShop_HP_041l"
+cost = 2
+family = "king"
+effect = { discover_tribe = "aberration" }
+
+# Procrastinate: turns 1 and 2 are skipped (only Freeze and End Turn), and
+# turn 3 starts with a Tier 3 and a Tier 4 minion Discovered.
+[[hero]]
+name = "A. F. Kay"
+card_id = "TB_BaconShop_HERO_16"
+armor = 15
+power = { name = "Procrastinate", card_id = "TB_BaconShop_HP_044", passive = true, skip_turns = 2, effect = { turn_discovers = { turn = 3, tiers = [3, 4] } } }
+
+# Expedition Plans: turn 1 is skipped, then three minions from Tiers 6, 4 and
+# 2, each locked in hand until the Tavern reaches its tier.
+[[hero]]
+name = "Ambassador Faelin"
+card_id = "BG22_HERO_201"
+armor = 14
+power = { name = "Expedition Plans", card_id = "BG22_HERO_201p", passive = true, skip_turns = 1, effect = { turn_discovers = { turn = 2, tiers = [2, 4, 6] } } }
+
+# Bananarama: 2 Bananas to Mukla and 1 to every other player at the start of
+# his turn; each is a Big Banana a third of the time (docs/heroes.md).
+[[hero]]
+name = "King Mukla"
+card_id = "TB_BaconShop_HERO_38"
+armor = 16
+power = { name = "Bananarama", card_id = "TB_BaconShop_HP_038", passive = true, effect = { bananas = { mine = 2, others = 1, big_percent = 33, banana = "Bananas", big = "Big Banana" } } }

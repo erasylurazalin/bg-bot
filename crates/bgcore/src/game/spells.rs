@@ -454,11 +454,11 @@ impl Game {
             if matches!(se, SpellEffect::DiscoverHeroPower) {
                 // The exclusion list lives on the card, so the intercept runs
                 // here where the card is known.
-                let excludes = c.exclude_heroes.clone();
+                let excludes = self.data.heroes.hero_indices(&c.exclude_heroes);
                 if tavern {
                     self.trigger_on_cast_spell(p);
                 }
-                self.discover_hero_power(p, &excludes);
+                self.discover_hero_power(p, &excludes, false, 1);
                 return;
             }
             // Proud Privateer: a Bounty casts again, each cast a spell cast.

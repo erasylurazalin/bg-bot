@@ -1551,6 +1551,11 @@ pub struct CardDb {
     pub blood_gem: Option<CardId>,
     /// The generated Triple Reward spell.
     pub triple_reward: Option<CardId>,
+    /// Every hero a card says a Hero Power Discover never offers (cards.toml
+    /// `exclude_heroes`, by hero card_id, deduplicated). A Hero Power Discover
+    /// that no card opens (Genn's King of Duality, the Reinvigorating Light
+    /// trinket) uses the same list: one place for Era to add to.
+    pub hero_power_excludes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -3749,6 +3754,14 @@ impl CardDb {
             });
         }
 
+        let mut hero_power_excludes: Vec<String> = Vec::new();
+        for c in &cards {
+            for id in &c.exclude_heroes {
+                if !hero_power_excludes.contains(id) {
+                    hero_power_excludes.push(id.clone());
+                }
+            }
+        }
         let lockbox = cards
             .iter()
             .position(|c| matches!(c.spell_effect, Some(SpellEffect::Lockbox(_))))
@@ -3777,6 +3790,7 @@ impl CardDb {
             lockbox,
             blood_gem,
             triple_reward,
+            hero_power_excludes,
         })
     }
 
@@ -4128,6 +4142,7 @@ impl CardDb {
             extra_magnetize: 0,
             taught_spell: None,
             locked_turns: 0,
+            locked_tier: 0,
             doomed: false,
             activated: false,
             uses_left: 0,

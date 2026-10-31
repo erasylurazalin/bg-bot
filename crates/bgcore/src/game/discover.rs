@@ -14,7 +14,6 @@ use super::{
     Game,
     PendingChooseOne,
     PendingTarget,
-    PowerState,
     QueuedOption,
     TargetKind,
 };
@@ -211,18 +210,24 @@ impl Game {
                 _ => None,
             };
             let locked = matches!(req, DiscoverRequest::SearchMinionTier(_));
+            let locked_tier = match req {
+                DiscoverRequest::TierLockedMinion(t) => t,
+                _ => 0,
+            };
             let doomed = matches!(req, DiscoverRequest::DoomedTribeMinion(_));
             let both = matches!(req, DiscoverRequest::ChooseOneMinion);
             let Game { data, rng, players, pool, lobby, .. } = self;
             let pl = &mut players[p];
             pl.discover_damage_from = damage_from;
             pl.discover_locked = locked;
+            pl.discover_locked_tier = locked_tier;
             pl.discover_doomed = doomed;
             pl.discover_both = both;
             while !pl.discover.is_full() {
                 let next = match req {
                     DiscoverRequest::MinionTier(t)
-                    | DiscoverRequest::SearchMinionTier(t) => {
+                    | DiscoverRequest::SearchMinionTier(t)
+                    | DiscoverRequest::TierLockedMinion(t) => {
                         draw_filtered(pool, &data.cards, rng, t, t, &pl.discover, *lobby, |_| true)
                     }
                     DiscoverRequest::SpellTier(t) => {
@@ -299,6 +304,7 @@ impl Game {
                 // they must not reach the next Discover.
                 pl.discover_damage_from = None;
                 pl.discover_locked = false;
+                pl.discover_locked_tier = 0;
                 pl.discover_doomed = false;
                 pl.discover_both = false;
                 pl.tp.remember_in = 0;
@@ -316,20 +322,12 @@ impl Game {
             self.maybe_start_discover(p);
             return;
         }
-        // A Hero Power pick (Unmasked Identity, Finley's Discover): the
-        // chosen power replaces the current one with a fresh state; the
-        // offers left standing are simply dropped (powers are not pool cards).
+        // A Hero Power pick (Unmasked Identity, Finley's Discover, King of
+        // Duality, a chooser): the chosen power replaces the one in the slot
+        // the offer named with a fresh state; the offers left standing are
+        // simply dropped (powers are not pool cards).
         if !self.players[p].power_offer.is_empty() {
-            let of = self.players[p].power_offer[k];
-            self.players[p].power_offer.clear();
-            let power = self.data.heroes.get(of).power.clone();
-            self.players[p].power = Some(PowerState::fresh(of, &power));
-            // A start-of-game power picked before turn 1 (Finley's Discover
-            // finding All Patched Up) still does its part: the extra Health.
-            if self.turn == 0 {
-                self.players[p].health += self.data.heroes.get(of).extra_health;
-            }
-            self.refresh_power_unlock(p);
+            self.pick_power(p, k);
             self.maybe_start_discover(p);
             return;
         }
@@ -337,6 +335,7 @@ impl Game {
         let pl = &mut players[p];
         let locked = pl.discover_locked;
         pl.discover_locked = false;
+        let locked_tier = std::mem::take(&mut pl.discover_locked_tier);
         let doomed = std::mem::take(&mut pl.discover_doomed);
         let both = std::mem::take(&mut pl.discover_both);
         let c = pl.discover[k];
@@ -394,6 +393,9 @@ impl Game {
             }
             if locked && !is_spell {
                 m.locked_turns = 1;
+            }
+            if locked_tier > 0 && !is_spell {
+                m.locked_tier = locked_tier;
             }
             if doomed && !is_spell {
                 m.doomed = true;

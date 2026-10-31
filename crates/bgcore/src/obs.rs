@@ -113,16 +113,19 @@
 //!   166 power unlocked
 //!   167 power usable (a button, unlocked, uses left, the Gold for it, and a
 //!   target for target powers)
-//!   168 pending hero pick (the offer before turn 1 is open)
-//!   169 pending power pick (a Hero Power Discover is open)
-//!   170..172 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
+//!   168..173 the SECOND power the same way (whose power it is, cost, uses
+//!   left, used this game, unlocked, usable), Genn's and the Reinvigorating
+//!   Light trinket's
+//!   174 pending hero pick (the offer before turn 1 is open)
+//!   175 pending power pick (a Hero Power Discover is open)
+//!   176..178 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
 //!   Trinkets (DESIGN.md "Trinkets and Dark Gifts"):
-//!   173..175 the lesser slot, greater slot and hero power trinket (index
+//!   179..181 the lesser slot, greater slot and hero power trinket (index
 //!   into the trinket table + 1, 0 for empty)
-//!   176..178 their "every N" counters
-//!   179 a trinket offer is open, 180 which slot it fills (1 lesser,
+//!   182..184 their "every N" counters
+//!   185 a trinket offer is open, 186 which slot it fills (1 lesser,
 //!   2 greater, 3 the power's)
-//!   181..188 the four options: trinket index + 1, then the price
+//!   187..194 the four options: trinket index + 1, then the price
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
@@ -197,7 +200,7 @@ use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 pub const SHOP_SPELL: usize = 1;
 pub const SLOT_FEATURES: usize = 78;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
-pub const SCALARS: usize = 189;
+pub const SCALARS: usize = SCALAR_TRINKETS_END;
 pub const OPP_SCALARS: usize = 33;
 
 pub const OWN_SLOTS: usize = SHOP + SHOP_SPELL + HAND + BOARD + DISCOVER;
@@ -344,14 +347,25 @@ pub const SCALAR_POWER_USES_LEFT: usize = 164;
 pub const SCALAR_POWER_USED_GAME: usize = 165;
 pub const SCALAR_POWER_UNLOCKED: usize = 166;
 pub const SCALAR_POWER_USABLE: usize = 167;
-pub const SCALAR_PENDING_HERO: usize = 168;
-pub const SCALAR_PENDING_POWER: usize = 169;
+/// The second power, laid out like the main one: whose power it is (index
+/// into the power table + 1), cost, uses left, used this game, unlocked,
+/// usable.
+pub const SCALAR_POWER2: usize = 168;
+pub const POWER_FEATURES: usize = 6;
+pub const SCALAR_POWER2_HERO: usize = SCALAR_POWER2;
+pub const SCALAR_POWER2_COST: usize = SCALAR_POWER2 + 1;
+pub const SCALAR_POWER2_USES_LEFT: usize = SCALAR_POWER2 + 2;
+pub const SCALAR_POWER2_USED_GAME: usize = SCALAR_POWER2 + 3;
+pub const SCALAR_POWER2_UNLOCKED: usize = SCALAR_POWER2 + 4;
+pub const SCALAR_POWER2_USABLE: usize = SCALAR_POWER2 + 5;
+pub const SCALAR_PENDING_HERO: usize = SCALAR_POWER2 + POWER_FEATURES;
+pub const SCALAR_PENDING_POWER: usize = SCALAR_PENDING_HERO + 1;
 /// DISCOVER slots of the hero offer before turn 1, hero index + 1, 0 empty.
-pub const SCALAR_HERO_OFFER: usize = 170;
+pub const SCALAR_HERO_OFFER: usize = SCALAR_PENDING_POWER + 1;
 /// Trinkets: the lesser slot, the greater slot and the one a hero power
 /// became (Marin the Manager, Buttons), each as an index into the trinket
 /// table plus one (0 for empty), then the "every N" counter of each.
-pub const SCALAR_TRINKET: usize = 173;
+pub const SCALAR_TRINKET: usize = SCALAR_HERO_OFFER + DISCOVER;
 pub const SCALAR_TRINKET_COUNT: usize = SCALAR_TRINKET + crate::TRINKET_SLOTS;
 /// A trinket offer is open, and which slot it is for (1 lesser, 2 greater,
 /// 3 the hero power's).
@@ -794,14 +808,15 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
 
     s[SCALAR_ARMOR] = pl.armor as f32;
     s[SCALAR_HERO] = pl.hero.map_or(0.0, |h| h as f32 + 1.0);
-    if let Some(st) = pl.power {
-        let power = &db_heroes(game).get(st.of).power;
-        s[SCALAR_POWER_HERO] = st.of as f32 + 1.0;
-        s[SCALAR_POWER_COST] = power.cost as f32;
-        s[SCALAR_POWER_USES_LEFT] = st.uses_left as f32;
-        s[SCALAR_POWER_USED_GAME] = st.used_game as f32;
-        s[SCALAR_POWER_UNLOCKED] = st.unlocked as u8 as f32;
-        s[SCALAR_POWER_USABLE] = game.power_usable(p) as u8 as f32;
+    for (second, base) in [(false, SCALAR_POWER_HERO), (true, SCALAR_POWER2_HERO)] {
+        let Some(st) = pl.power_at(second) else { continue };
+        let power = db_heroes(game).power(st.of);
+        s[base] = st.of as f32 + 1.0;
+        s[base + 1] = power.cost as f32;
+        s[base + 2] = st.uses_left as f32;
+        s[base + 3] = st.used_game as f32;
+        s[base + 4] = st.unlocked as u8 as f32;
+        s[base + 5] = game.power_usable_at(p, second) as u8 as f32;
     }
     s[SCALAR_PENDING_HERO] =
         (game.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX)) as u8 as f32;

@@ -1924,3 +1924,13 @@ slot = "lesser"
 cost = 4
 on_pick = [{ get = "Floating Candle" }]
 start_of_turn = [{ get = "Floating Candle" }]
+
+# Hero frame 2 (docs/briefs/heroes-frame2.md). The Discover is the same one
+# Unmasked Identity opens (starting powers of built heroes, never one the
+# player holds, never a hero on cards.toml's `exclude_heroes`), and the pick
+# lands in the player's SECOND power slot: the main power is untouched.
+[[trinket]]
+name = "Reinvigorating Light"
+card_id = "BG36_MagicItem_411"
+slot = "lesser"
+on_pick = [{ second_power = true }, { gold = 3 }]

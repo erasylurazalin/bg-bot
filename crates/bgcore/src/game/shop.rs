@@ -695,7 +695,7 @@ impl Game {
         // "After you sell a minion, gain 1 Gold next turn" (Smart Savings).
         if let Some(st) = self.players[p].power
             && let PowerEffect::GoldNextTurnAfterSell(g) =
-                self.data.heroes.get(st.of).power.effect
+                self.data.heroes.power(st.of).effect
         {
             let runs = self.players[p].tp.power_triggers.max(1);
             let pl = &mut self.players[p];

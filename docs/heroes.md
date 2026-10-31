@@ -5,6 +5,12 @@ weight as `DESIGN.md` Part 2. The general hero frame (the pick, health and
 armor, what a power costs) is in `DESIGN.md` "Heroes". Rules we are still
 guessing at are in `docs/UNSURE.md`.
 
+**Built 2026-10-31 (hero frame 2):** everything on this page except the
+guessing powers (Barov, Holmes, I Spy): the two powers (Genn, the
+Reinvigorating Light trinket), the powers that change (Ragnaros, Bru'kan,
+Galewing, the Rat King), the skipped turns (A. F. Kay, Faelin) and Mukla's
+Bananas.
+
 ## Powers in general
 
 - A button power works once per turn unless its text says otherwise. Uses

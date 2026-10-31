@@ -302,9 +302,15 @@ e
 fn a_rigged_game_records_the_tribe_in_header_and_name() {
     let dir = tmp("rigged");
     let d = dir.to_str().unwrap();
-    let (status, out) = run_binary(&["--tribe", "beast", "--label", "lobster", "--seed", "4", "--boards", d], "1
+    // "1" answers the hero pick and then whatever choice it opens (a hero
+    // power Discover, which blocks End Turn), "e" ends the turn.
+    let (status, out) = run_binary(
+        &["--tribe", "beast", "--label", "lobster", "--seed", "4", "--boards", d],
+        "1
+1
 e
-");
+",
+    );
     assert!(status.success(), "{out}");
     assert_eq!(boards_in(&dir), ["beast-lobster-4.toml"]);
     let text = std::fs::read_to_string(dir.join("beast-lobster-4.toml")).unwrap();
@@ -384,10 +390,34 @@ fn the_label_command_sets_and_changes_it_any_time() {
 fn the_label_is_asked_when_the_game_ends() {
     // 40 turns is the turn limit: the game ends and asks without a quit
     let dir = tmp("game-end");
+    // The lines that play the game to that end, worked out on a throwaway
+    // session with the same seed: "1" answers whatever choice is open (End
+    // Turn is not legal while a Discover or a power offer is), "e" ends the
+    // turn. The end-of-game question then reads the line after them.
+    let probe_dir = tmp("game-end-probe");
+    let mut probe = open_session(8, None, &probe_dir);
+    let mut script = String::new();
+    for _ in 0..1000 {
+        if probe.game().over {
+            break;
+        }
+        let pl = &probe.game().players[0];
+        let open = pl.pending_target.is_some()
+            || pl.pending_shop_target.is_some()
+            || pl.pending_choose_one.is_some()
+            || pl.pending_discard.is_some()
+            || !pl.discover.is_empty()
+            || !pl.power_offer.is_empty()
+            || !pl.trinket_offer.is_empty();
+        let line = if open { "1" } else { "e" };
+        probe.exec(line);
+        script.push_str(line);
+        script.push('\n');
+    }
+    assert!(probe.game().over, "the probe never reached the turn limit");
+    let _ = std::fs::remove_dir_all(&probe_dir);
     let mut s = open_session(8, None, &dir);
-    // "1" answers a Discover a trinket can open at the start of a turn (it
-    // is refused, and harmless, when nothing is open); "e" ends the turn.
-    let script = "1\ne\n".repeat(40) + "grind\nquit\n";
+    script.push_str("grind\nquit\n");
     let out = play_script(&mut s, &script);
     assert!(out.contains("GAME OVER"), "{out}");
     assert!(out.contains("Label this game"), "{out}");
@@ -430,7 +460,7 @@ fn the_hero_pick_and_power_button_work() {
     assert!(r.text.contains("Hero: Sir Finley Mrrgglton"), "{}", r.text);
     let power = finley.game().players[0].power.unwrap();
     assert_ne!(
-        finley.game().data.heroes.get(power.of).power.card_id,
+        finley.game().data.heroes.power(power.of).card_id,
         "TB_BaconShop_HP_057",
         "Adventure! is replaced by the pick"
     );

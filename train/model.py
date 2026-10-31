@@ -32,11 +32,15 @@ OPP = bgpy.PLAYERS - 1
 OPP_BLOCK = bgpy.OPP_BLOCK
 OWN_END = bgpy.OWN_END
 
+# A hero id and a power id share one embedding table (`HeroDb::powers` holds
+# more entries than there are heroes: the powers a hero only reaches later).
+N_HERO_IDS = max(bgpy.N_HEROES, bgpy.N_POWERS)
 # Card ids, embedded rather than scaled.
 SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD]
-# Hero ids, embedded with their own table: own hero, the power's hero, and
-# the hero offer slots during the pick.
-HERO_IDS = [bgpy.SCALAR_HERO, bgpy.SCALAR_POWER_HERO] + list(
+# Hero ids, embedded with their own table: own hero, the power's hero (the
+# first power and the second one, both indices into the power table), and the
+# hero offer slots during the pick.
+HERO_IDS = [bgpy.SCALAR_HERO, bgpy.SCALAR_POWER_HERO, bgpy.SCALAR_POWER2_HERO] + list(
     range(bgpy.SCALAR_HERO_OFFER, bgpy.SCALAR_HERO_OFFER + bgpy.DISCOVER))
 # Trinket ids, embedded with their own table: the three own slots and the
 # four options of an open offer (every option's trinket, not its price).
@@ -98,6 +102,7 @@ SCALAR_SCALE = _scales(bgpy.SCALARS, "SCALAR_", {
     "PENDING_SOURCE": 7, "PENDING_RUNS": 2, "PENDING_ATTACK": 20, "PENDING_HEALTH": 20,
     "SHOP_CONSUME_LEFT": 3, "DISCOVER_QUEUE": 3,
     "ARMOR": 25, "POWER_COST": 3, "POWER_USES_LEFT": 2, "POWER_USED_GAME": 5,
+    "POWER2_COST": 3, "POWER2_USES_LEFT": 2, "POWER2_USED_GAME": 5,
     **{(bgpy.SCALAR_CHOOSE_ONE + j * bgpy.CHOOSE_FEATURES + 4, 2): 10 for j in range(2)},
 })
 OPP_SCALE = _scales(bgpy.OPP_SCALARS, "OPP_", {
@@ -119,7 +124,7 @@ assert len(SLOT_SCALE) == SF
 
 
 class Net(nn.Module):
-    def __init__(self, n_cards=bgpy.N_CARDS, n_heroes=bgpy.N_HEROES,
+    def __init__(self, n_cards=bgpy.N_CARDS, n_heroes=N_HERO_IDS,
                  n_trinkets=bgpy.N_TRINKETS, emb=32, slot=64, hidden=512):
         super().__init__()
         self.card = nn.Embedding(n_cards + 1, emb)  # 0 is an empty slot or no card
@@ -223,7 +228,7 @@ class SlotInputs(nn.Module):
     spell and pending card embedded) and one per opponent's scalars (plus
     that opponent's zone embedding, shared with its board)."""
 
-    def __init__(self, n_cards, d, emb, n_heroes=bgpy.N_HEROES, n_trinkets=bgpy.N_TRINKETS):
+    def __init__(self, n_cards, d, emb, n_heroes=N_HERO_IDS, n_trinkets=bgpy.N_TRINKETS):
         super().__init__()
         self.card = nn.Embedding(n_cards + 1, emb)
         self.hero = nn.Embedding(n_heroes + 1, emb)
@@ -302,7 +307,7 @@ class ActionHead(nn.Module):
     - discard k: from hand slot k's z
     - move from j to t: a term from board slot j's z, plus a dot product
       of j's query with t's key
-    - roll, freeze, level, end turn, hero power: from s
+    - roll, freeze, level, end turn, the two hero power buttons: from s
     - choose_trinket k: from s (the offer's options live in the scalars)
     Plus a per-action bias that starts at the kind prior, with the scoring
     weights small, so the starting policy is about Net's."""
@@ -321,9 +326,10 @@ class ActionHead(nn.Module):
         self.gap = nn.Parameter(torch.randn(bgpy.BOARD + 1, qk) * 0.1)
         self.move_q = nn.Linear(hidden, qk)
         self.move_k = nn.Linear(hidden, qk)
-        # roll, freeze, level, end; the Choose One columns; hero power; the
-        # trinket offer's options
-        self.glob = nn.Linear(d, 5 + bgpy.DISCOVER + bgpy.TRINKET_CHOICES)
+        # roll, freeze, level, end; the Choose One and power-choice columns
+        # (CHOICES: a chooser offers up to four, a Discover three); the two
+        # hero power buttons; the trinket offer's options
+        self.glob = nn.Linear(d, 6 + bgpy.CHOICES + bgpy.TRINKET_CHOICES)
         self.bias = nn.Parameter(kind_prior())
         for m in (self.ptr, self.play_q, self.move_q, self.glob):
             nn.init.orthogonal_(m.weight, 0.01)
@@ -346,6 +352,13 @@ class ActionHead(nn.Module):
         move = p[:, BOARD_R, 9, None] + torch.einsum(
             "bfq,btq->bft", self.move_q(board), self.move_k(board)) * self.scale
         move = move.gather(2, self.move_to.expand(b, -1, -1))
+        # A Discover's options sit in the Discover slots; a chooser's fourth
+        # one (Bru'kan's Elements) has no slot, so it is the global column
+        # after the three.
+        choose = torch.cat([
+            p[:, DISC_R, 6] + g[:, 4:4 + bgpy.DISCOVER],
+            g[:, 4 + bgpy.DISCOVER:4 + bgpy.CHOICES],
+        ], 1)
         logits = torch.cat([
             p[:, SHOP_R, 0],
             p[:, SPELL_T, 1:2],
@@ -354,12 +367,13 @@ class ActionHead(nn.Module):
             play.reshape(b, -1),
             p[:, BOARD_R, 4],
             p[:, SHOP_R, 5],
-            p[:, DISC_R, 6] + g[:, 4:4 + bgpy.DISCOVER],
+            choose,
             p[:, HAND_R, 8],
             move.reshape(b, -1),
             g[:, :4],
-            g[:, 4 + bgpy.DISCOVER:5 + bgpy.DISCOVER],
-            g[:, 5 + bgpy.DISCOVER:5 + bgpy.DISCOVER + bgpy.TRINKET_CHOICES],
+            g[:, 4 + bgpy.CHOICES:5 + bgpy.CHOICES],
+            g[:, 5 + bgpy.CHOICES:6 + bgpy.CHOICES],
+            g[:, 6 + bgpy.CHOICES:6 + bgpy.CHOICES + bgpy.TRINKET_CHOICES],
         ], 1)
         return logits + self.bias
 
@@ -606,7 +620,7 @@ SELL_A = slice(bgpy.SHOP + 1, bgpy.SHOP + 1 + bgpy.BOARD)
 def _sample_obs(n=512, steps=300, seed=3):
     """Real observations from random legal play."""
     import numpy as np
-    env = bgpy.VecEnv(n, seed, [4, 2, 1, 1, 0])
+    env = bgpy.VecEnv(n, seed, [4, 2, 1, 1, 0, 0])
     obs = np.zeros((n, bgpy.OBS_SIZE), np.float32)
     mask = np.zeros((n, bgpy.N_ACTIONS), bool)
     seat, kind = np.zeros(n, np.int64), np.zeros(n, np.int64)

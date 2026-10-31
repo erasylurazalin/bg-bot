@@ -212,7 +212,7 @@ impl Game {
         // A power that becomes a trinket: one extra offer, the same rules,
         // one turn early for the slot it names.
         let Some(st) = self.players[p].power else { return };
-        let power = &self.data.heroes.get(st.of).power;
+        let power = self.data.heroes.power(st.of);
         let PowerEffect::TrinketOffer(slot) = power.effect else { return };
         if turn < power.unlock_turn || self.players[p].trinkets[POWER_SLOT].of != 0 {
             return;
@@ -1164,6 +1164,14 @@ impl Game {
                 }
             }
             Act::PowerGold(n) => self.players[p].tp.power_gold = n,
+            Act::SecondPower => {
+                // The same exclusion list as Unmasked Identity (cards.toml
+                // `exclude_heroes`), and a slot of its own: the main power
+                // stays.
+                let excludes =
+                    self.data.heroes.hero_indices(&self.data.cards.hero_power_excludes);
+                self.discover_hero_power(p, &excludes, true, 1);
+            }
             Act::Gauntlet => self.players[p].tp.gauntlet = true,
             Act::ExtraHighTier => self.players[p].tp.extra_high_tier = true,
             Act::ExtraMagnetic => self.players[p].tp.extra_magnetic = true,
