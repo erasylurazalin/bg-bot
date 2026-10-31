@@ -70,7 +70,10 @@ fn a_fixed_lobby_is_respected_by_the_pool() {
         if card.pool_slot as usize != c {
             continue;
         }
-        if card.lobby_ok(g.lobby) {
+        // Dark Paradox: only the one version this game picked is in the pool
+        // (every version is an all-type minion, so all five are lobby-ok).
+        let in_pool = card.lobby_ok(g.lobby) && (!card.paradox || g.paradox == Some(c as u16));
+        if in_pool {
             // the first Tavern may hold some of them: the exact accounting is
             // check_invariants' job, this asserts the card is in the pool
             assert!(g.pool[c] > 0, "{} has no copies in the pool", card.name);

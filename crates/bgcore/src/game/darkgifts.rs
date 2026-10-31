@@ -518,14 +518,20 @@ impl Game {
         let cards = &self.data.cards;
         for i in 0..self.players[p].board.len() {
             let m = self.players[p].board[i];
-            if m.n_gifts == 0 {
+            // A minion whose own card fires on a play (Dark Paradox t3)
+            // counts as much as one with a gift that does.
+            if m.n_gifts == 0 && cards.get(m.card).on_card_play.is_none() {
                 continue;
             }
             let (mut da, mut dh) = (0, 0);
-            for g in m.gift_slice() {
-                if let Some((a, h)) = cards.get(g.card()).on_card_play {
-                    da += a;
-                    dh += h;
+            // Every part: the minion's own card (Dark Paradox t3, whose
+            // golden gives +6) and any gift that fires on a play. `parts`
+            // yields a gift as `golden: false`, so a gift never doubles.
+            for (card, golden) in m.parts() {
+                if let Some((a, h)) = cards.get(card).on_card_play {
+                    let mul = if golden { 2 } else { 1 };
+                    da += a * mul;
+                    dh += h * mul;
                 }
             }
             if da != 0 || dh != 0 {
@@ -550,14 +556,18 @@ impl Game {
         let cards = &self.data.cards;
         let pl = &mut self.players[p];
         for m in pl.board.iter_mut().chain(pl.hand.iter_mut()) {
-            if m.n_gifts == 0 {
+            // The minion's own card counts too (Dark Paradox t6, whose golden
+            // gets +6/+6 per Battlecry); a gift part is never golden, so a
+            // gift never doubles.
+            if m.n_gifts == 0 && pick(cards.get(m.card)).is_none() {
                 continue;
             }
             let (mut da, mut dh) = (0, 0);
-            for k in 0..m.n_gifts as usize {
-                if let Some((a, h)) = pick(cards.get(m.gifts[k].card())) {
-                    da += a * n;
-                    dh += h * n;
+            for (card, golden) in m.parts() {
+                if let Some((a, h)) = pick(cards.get(card)) {
+                    let mul = if golden { 2 } else { 1 };
+                    da += a * n * mul;
+                    dh += h * n * mul;
                 }
             }
             if da != 0 || dh != 0 {

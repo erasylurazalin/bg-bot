@@ -700,7 +700,12 @@ struct Seen {
     /// Every (side, card, attack, health) at the moment of a swing, both the
     /// attacker's and the defender's, in the order they were seen.
     at_attacks: Vec<(usize, CardId, i32, i32)>,
+    /// A minion's shield before each swing it is in, attacker or defender:
+    /// (side, card, hits left, has a Divine Shield).
+    shields: Vec<(usize, CardId, u8, bool)>,
     summons: Vec<(usize, CardId)>,
+    /// Every summon with its stats, for the Golem tests.
+    summoned: Vec<(usize, CardId, i32, i32)>,
     deaths: Vec<(usize, CardId)>,
 }
 
@@ -718,9 +723,22 @@ impl bgcore::fight::Watch for Seen {
     fn attack(&mut self, side: usize, attacker: &Minion, defender: &Minion) {
         self.at_attacks.push((side, attacker.card, attacker.attack, attacker.health));
         self.at_attacks.push((side ^ 1, defender.card, defender.attack, defender.health));
+        self.shields.push((
+            side,
+            attacker.card,
+            attacker.shield_hits,
+            attacker.keywords.has(Keywords::DIVINE_SHIELD),
+        ));
+        self.shields.push((
+            side ^ 1,
+            defender.card,
+            defender.shield_hits,
+            defender.keywords.has(Keywords::DIVINE_SHIELD),
+        ));
     }
     fn summon(&mut self, side: usize, _pos: usize, m: &Minion) {
         self.summons.push((side, m.card));
+        self.summoned.push((side, m.card, m.attack, m.health));
     }
     fn death(&mut self, side: usize, _pos: usize, m: &Minion) {
         self.deaths.push((side, m.card));
@@ -1302,4 +1320,292 @@ fn the_gift_heroes_open_their_offers() {
     to_turn(&mut g, 4);
     turn_of(&mut g, 0);
     assert_eq!(g.players[0].discover.len(), 3, "the turn 4 offer");
+}
+
+// ---- Dark Paradox (BG36_360) ----
+
+const PARADOX: [&str; 5] =
+    ["Dark Paradox t3", "Dark Paradox t4", "Dark Paradox t5", "Dark Paradox t6", "Dark Paradox t9"];
+
+fn paradox_cards(g: &Game) -> Vec<CardId> {
+    PARADOX.iter().map(|n| id(g, n)).collect()
+}
+
+/// A game whose pool holds the named Dark Paradox version (the pick comes
+/// from the seed, so this scans).
+fn game_with_paradox(version: &str) -> Game {
+    let want = id(&game(0), version);
+    for seed in 0..500u64 {
+        let g = game(seed);
+        if g.paradox == Some(want) {
+            return g;
+        }
+    }
+    panic!("no seed in 0..500 gives {version}");
+}
+
+#[test]
+fn one_paradox_version_per_game_with_its_tier_s_copies() {
+    let mut seen_versions = std::collections::BTreeSet::new();
+    for seed in 0..60u64 {
+        let g = game(seed);
+        let cards = paradox_cards(&g);
+        let with_copies: Vec<CardId> =
+            cards.iter().copied().filter(|&c| g.pool[c as usize] > 0).collect();
+        assert_eq!(with_copies.len(), 1, "seed {seed}: {with_copies:?}");
+        assert_eq!(g.paradox, Some(with_copies[0]), "seed {seed}");
+        let card = g.data.cards.get(with_copies[0]);
+        assert_eq!(
+            g.pool[with_copies[0] as usize],
+            g.data.rules.copies(card.tier),
+            "seed {seed}: {} is Tier {}",
+            card.name,
+            card.tier
+        );
+        // Every version has every type, so it is in every lobby like any
+        // other card.
+        for t in Tribe::EVERY {
+            assert!(card.tribes.has(t), "{} misses {t:?}", card.name);
+        }
+        seen_versions.insert(with_copies[0]);
+        g.check_invariants().unwrap();
+    }
+    assert_eq!(seen_versions.len(), 5, "60 seeds should pick every version once or more");
+    // One tribe's lobby still has it.
+    let one = Tribe::EVERY.into_iter().fold(Tribes::NONE, |m, t| m.with(t));
+    let mut single = Tribes::NONE;
+    single = single.with(Tribe::Murloc);
+    let _ = one;
+    let g = Game::new_with_lobby(data(), 3, single);
+    let p = g.paradox.expect("a Dark Paradox in a one-tribe lobby");
+    assert!(g.pool[p as usize] > 0);
+}
+
+#[test]
+fn every_player_sees_only_the_games_version() {
+    let mut g = game_with_paradox("Dark Paradox t5");
+    let chosen = g.paradox.unwrap();
+    let others: Vec<CardId> =
+        paradox_cards(&g).into_iter().filter(|&c| c != chosen).collect();
+    for _ in 0..4 {
+        for p in 0..8usize {
+            for m in g.players[p].shop.iter().chain(&g.players[p].hand).chain(&g.players[p].board) {
+                for &o in &others {
+                    assert_ne!(m.card, o, "player {p} holds a version outside the pool");
+                }
+            }
+        }
+        next_turn(&mut g);
+        if g.over {
+            break;
+        }
+    }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn dark_discovery_never_offers_the_paradox() {
+    let mut g = game(42);
+    let cards = paradox_cards(&g);
+    for &c in &cards {
+        for turn in 3..=12u32 {
+            assert!(
+                !g.data.gifts.pool_allows(g.data.cards.get(c), c, turn),
+                "{} offered on turn {turn}",
+                g.data.cards.get(c).name
+            );
+        }
+    }
+    // And in real presses: no offer is one of them.
+    let mut presses = 0;
+    for turn in 3..=12u32 {
+        to_turn(&mut g, turn);
+        settle(&mut g, 0);
+        g.players[0].gold = 10;
+        if g.players[0].dark_gift_uses == 0 || !g.is_legal(Action::DarkGift) {
+            continue;
+        }
+        act(&mut g, 0, Action::DarkGift);
+        presses += 1;
+        for &c in &g.players[0].discover {
+            assert!(!cards.contains(&c), "an offer was {}", g.data.cards.get(c).name);
+        }
+        while !g.players[0].discover.is_empty() {
+            act(&mut g, 0, Action::Choose(0));
+        }
+    }
+    assert!(presses >= 2, "only {presses} presses");
+}
+
+#[test]
+fn a_triple_of_the_tier_five_version_makes_its_golden() {
+    let mut g = game_with_paradox("Dark Paradox t4");
+    let version = g.paradox.unwrap();
+    let name = g.data.cards.get(version).name.clone();
+    let plain = g.data.cards.get(version);
+    assert_eq!((plain.attack, plain.health, plain.tier), (8, 4, 5));
+    // Three copies from the Tavern: the golden is the game data's BG36_360_Gt4.
+    set_shop(&mut g, 0, &[&name, &name, &name]);
+    g.players[0].gold = 20;
+    for _ in 0..3 {
+        act(&mut g, 0, Action::Buy(0));
+        // A triple can open a Discover (a pick from the Tavern), so settle.
+        settle(&mut g, 0);
+    }
+    let golden = g
+        .players[0]
+        .hand
+        .iter()
+        .chain(&g.players[0].board)
+        .find(|m| m.card == version && m.golden)
+        .copied()
+        .expect("the triple is golden");
+    assert_eq!((golden.attack, golden.health), (16, 8), "the golden's printed stats");
+    assert!(golden.keywords.has(Keywords::DIVINE_SHIELD));
+    // The Tier 5 golden's shield takes 4 hits, not double 3.
+    assert_eq!(golden.shield_hits, 4);
+    let plain = g.players[0]
+        .hand
+        .iter()
+        .chain(&g.players[0].board)
+        .find(|m| m.card == version && !m.golden)
+        .copied();
+    if let Some(p) = plain {
+        assert_eq!(p.shield_hits, 3);
+    }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_tier_five_golden_shield_takes_four_hits() {
+    let data = Data::bundled();
+    let db = &data.cards;
+    let g = game_with_paradox("Dark Paradox t4");
+    let version = g.paradox.unwrap();
+    // Five hits on the guard each way; a plain one's shield breaks on the
+    // third, the Tier 5 golden's on the fourth.
+    for (golden, want, breaks_at) in
+        [(false, vec![3u8, 2, 1, 0, 0], 3usize), (true, vec![4u8, 3, 2, 1, 0], 4usize)]
+    {
+        let mut host = db.make(version, golden);
+        // Five 1/1 attackers: one hit each, all of them die to the guard.
+        let mut attackers = Vec::new();
+        for _ in 0..5 {
+            let mut m = db.make(db.by_name("Microbot").unwrap(), false);
+            m.attack = 1;
+            attackers.push(m);
+        }
+        let mut seen = Seen::default();
+        let mut rng = Rng::new(11);
+        let out = host_fight(db, &mut host, &attackers, &mut seen, &mut rng);
+        assert_eq!(out.attacks, 5, "five attackers, one swing each");
+        let mine: Vec<(u8, bool)> = seen
+            .shields
+            .iter()
+            .filter(|&&(s, c, _, _)| s == 0 && c == version)
+            .map(|&(_, _, n, ds)| (n, ds))
+            .collect();
+        // One entry per hit the guard takes: the hits it has left before that
+        // hit, and whether the shield is still up for it.
+        let hits: Vec<u8> = mine.iter().map(|&(n, _)| n).collect();
+        let shields: Vec<bool> = mine.iter().map(|&(_, ds)| ds).collect();
+        assert_eq!(hits, want, "golden {golden}");
+        // The shield is up for the first hits and gone from the one that
+        // breaks it on.
+        let breaks = shields.iter().position(|&ds| !ds).expect("the shield broke");
+        assert_eq!(breaks, breaks_at, "golden {golden}: {shields:?}");
+        assert!(shields[..breaks].iter().all(|&ds| ds), "golden {golden}: {shields:?}");
+        assert!(shields[breaks..].iter().all(|&ds| !ds), "golden {golden}: {shields:?}");
+    }
+}
+
+/// `host` alone against `attackers`, both sides watched.
+fn host_fight(
+    db: &bgcore::CardDb,
+    host: &mut Minion,
+    attackers: &[Minion],
+    seen: &mut Seen,
+    rng: &mut Rng,
+) -> bgcore::fight::Outcome {
+    fight_with(db, &[*host], attackers, [Counters::default(); 2], 40, rng, seen)
+}
+
+#[test]
+fn the_tier_six_golden_summons_one_golem_with_double_stats() {
+    let data = Data::bundled();
+    let db = &data.cards;
+    let g = game_with_paradox("Dark Paradox t9");
+    let version = g.paradox.unwrap();
+    let golem = db.by_name("Golem").unwrap();
+    // The plain card summons one Golem at its own 10/2; the golden one (a
+    // 20/4 card) summons one at double that, 40/8, not two 20/4 Golems.
+    for (golden, want) in [(false, (10, 2)), (true, (40, 8))] {
+        let host = db.make(version, golden);
+        let mut killer = db.make(db.by_name("Microbot").unwrap(), false);
+        killer.attack = 50;
+        killer.health = 500;
+        let mut seen = Seen::default();
+        let mut rng = Rng::new(12);
+        let _ = fight_with(
+            db,
+            &[host],
+            &[killer],
+            [Counters::default(); 2],
+            40,
+            &mut rng,
+            &mut seen,
+        );
+        let golems: Vec<(i32, i32)> = seen
+            .summoned
+            .iter()
+            .filter(|&&(s, c, _, _)| s == 0 && c == golem)
+            .map(|&(_, _, a, h)| (a, h))
+            .collect();
+        // ONE Golem, and a golden minion's has double its stats.
+        assert_eq!(golems, vec![want], "golden {golden}");
+    }
+}
+
+#[test]
+fn the_tier_six_golden_grows_twice_as_fast_per_battlecry() {
+    let mut g = game_with_paradox("Dark Paradox t6");
+    let version = g.paradox.unwrap();
+    g.players[0].battlecries_triggered = 2;
+    let plain = g.players[0].make_card(&g.data.cards, version, false, 0);
+    let golden = g.players[0].make_card(&g.data.cards, version, true, 0);
+    let printed = g.data.cards.get(version);
+    assert_eq!(
+        (plain.attack, plain.health),
+        (printed.attack + 6, printed.health + 6),
+        "+3/+3 for each of 2 Battlecries"
+    );
+    assert_eq!(
+        (golden.attack, golden.health),
+        (printed.attack * 2 + 12, printed.health * 2 + 12),
+        "a golden one doubles the printed stats and the +6/+6 per Battlecry"
+    );
+    // And it grows on the event, both of them.
+    g.players[0].board.push(plain);
+    g.players[0].board.push(golden);
+    let before = (g.players[0].board[0].attack, g.players[0].board[1].attack);
+    g.dark_gift_count(0, 1, |c| c.buff_per_battlecry);
+    assert_eq!(g.players[0].board[0].attack, before.0 + 3);
+    assert_eq!(g.players[0].board[1].attack, before.1 + 6);
+}
+
+#[test]
+fn the_tier_two_version_gains_attack_on_every_card_played() {
+    let mut g = game_with_paradox("Dark Paradox t3");
+    let version = g.paradox.unwrap();
+    let mut plain = g.players[0].make_card(&g.data.cards, version, false, 0);
+    plain.pool_copies = 0;
+    let mut golden = g.players[0].make_card(&g.data.cards, version, true, 0);
+    golden.pool_copies = 0;
+    g.players[0].board.push(plain);
+    g.players[0].board.push(golden);
+    let before = (g.players[0].board[0].attack, g.players[0].board[1].attack);
+    assert_eq!(before.1 - before.0, 2, "the golden is twice the card");
+    g.dark_gift_card_played(0);
+    assert_eq!(g.players[0].board[0].attack, before.0 + 3, "+3 Attack per card played");
+    assert_eq!(g.players[0].board[1].attack, before.1 + 6, "the golden gets +6");
 }

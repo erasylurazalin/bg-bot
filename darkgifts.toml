@@ -19,7 +19,17 @@
 no_battlecry_before = 5
 no_choose_one_before = 5
 # Left out for balance, by card name (cards.toml names).
-exclude = ["Leeroy the Reckless", "Deadly Spore"]
+# The five Dark Paradox versions are left out too (docs/darkgifts.md "Dark
+# Paradox"): the card the pool does hold never shows up with a gift.
+exclude = [
+    "Leeroy the Reckless",
+    "Deadly Spore",
+    "Dark Paradox t3",
+    "Dark Paradox t4",
+    "Dark Paradox t5",
+    "Dark Paradox t6",
+    "Dark Paradox t9",
+]
 
 # The tiers of the three offers by turn, and whether that slot wants a minion
 # of the player's most common type. Several tiers in one slot ("4,5") are

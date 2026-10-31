@@ -723,6 +723,9 @@ pub struct Game {
     pub players: [Player; PLAYERS],
     /// Copies left of each pool card, indexed by card `pool_slot`.
     pub pool: Vec<u8>,
+    /// The Dark Paradox version in this game's pool: one per game, the same
+    /// for every player, None for a card set without the card.
+    pub paradox: Option<CardId>,
     /// Pool copies permanently consumed into hosts via Magnetize, indexed by
     /// card `pool_slot`.
     pub consumed: Vec<u32>,
@@ -891,7 +894,7 @@ impl Game {
     fn unstarted(data: Arc<Data>, seed: u64, fixed: Option<Tribes>) -> Game {
         let mut rng = Rng::new(seed);
         let lobby = fixed.unwrap_or_else(|| Tribes::random_lobby(5, &mut rng));
-        let pool = (0..data.cards.pool_cards)
+        let mut pool: Vec<u8> = (0..data.cards.pool_cards)
             .map(|c| {
                 let card = &data.cards.cards[c];
                 if card.pool_slot as usize == c && card.lobby_ok(lobby) {
@@ -901,6 +904,28 @@ impl Game {
                 }
             })
             .collect();
+        // Dark Paradox: one of its five versions is in this game's pool, the
+        // same for every player, and the other four are not (docs/darkgifts.md
+        // "Dark Paradox"). The pick has an RNG of its own, seeded from the
+        // game seed, so every draw the rest of the game makes stays what it
+        // was before the card existed.
+        let paradox = Self::paradox_versions(&data, lobby);
+        let paradox = if paradox.is_empty() {
+            None
+        } else {
+            let mut pick = Rng::new(seed ^ 0x5041_5241_444f_5800);
+            Some(paradox[pick.below(paradox.len() as u32) as usize])
+        };
+        for c in 0..data.cards.pool_cards {
+            if !data.cards.cards[c].paradox {
+                continue;
+            }
+            pool[c] = if Some(c as CardId) == paradox {
+                data.rules.copies(data.cards.cards[c].tier)
+            } else {
+                0
+            };
+        }
         let consumed = vec![0u32; data.cards.pool_cards];
         let mut players: [Player; PLAYERS] = std::array::from_fn(|_| Player::new(&data));
         let gods: ArrayVec<CardId, 2> = data.cards.cards.iter().enumerate()
@@ -923,6 +948,7 @@ impl Game {
             players,
             pool,
             consumed,
+            paradox,
             ghost: None,
             over: false,
             sandbox: None,
@@ -930,6 +956,18 @@ impl Game {
             order: ArrayVec::new(),
             cursor: 0,
         }
+    }
+
+    /// The Dark Paradox versions that could be in this lobby's pool (they all
+    /// have every minion type, so an all-type card is in every lobby). Empty
+    /// for a card set without them.
+    fn paradox_versions(data: &Data, lobby: Tribes) -> ArrayVec<CardId, 8> {
+        (0..data.cards.pool_cards as CardId)
+            .filter(|&c| {
+                let card = data.cards.get(c);
+                card.paradox && card.pool_slot == c && card.lobby_ok(lobby)
+            })
+            .collect()
     }
 
     /// Whose action is next, None once the game is over.

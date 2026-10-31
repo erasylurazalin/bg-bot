@@ -516,14 +516,19 @@ impl Game {
             Effect::GetMostCommonTypeMinion => {
                 let tribes: ArrayVec<crate::cards::Tribes, { crate::BOARD }> =
                     self.players[p].board.iter().map(|m| self.data.cards.tribes_of(m)).collect();
-                if let Some(t) = crate::darkgifts::most_common_type(&tribes, &mut self.rng) {
-                    let tier = self.players[p].tier;
-                    if let Some(c) = self.data.cards.random_pool_minion(
-                        t,
-                        tier,
-                        self.lobby,
-                        &mut self.rng,
-                    ) {
+                let tier = self.players[p].tier;
+                // A golden minion gets one per `mul`, and a triggered Rally
+                // repeats with `runs`.
+                let times = mul * runs as i32;
+                for _ in 0..times {
+                    if let Some(t) = crate::darkgifts::most_common_type(&tribes, &mut self.rng)
+                        && let Some(c) = self.data.cards.random_pool_minion(
+                            t,
+                            tier,
+                            self.lobby,
+                            &mut self.rng,
+                        )
+                    {
                         self.give_generated_tracking(p, c, pos);
                     }
                 }

@@ -1886,14 +1886,17 @@ impl<'a> Side<'a> {
             }
             Effect::GetMostCommonTypeMinion => {
                 // Dark Gifts Charisma: the player's most common type among the
-                // minions this side has in the fight (its board).
+                // minions this side has in the fight (its board). Dark
+                // Paradox t5's golden Rally gets two.
                 let tribes: ArrayVec<crate::cards::Tribes, 64> =
                     self.ms.iter().map(|f| db.tribes_of(&f.m)).collect();
-                if let Some(t) = crate::darkgifts::most_common_type(&tribes, rng)
-                    && let Some(c) =
-                        db.random_pool_minion(t, self.counters.tier, self.counters.lobby, rng)
-                {
-                    self.out.push_card(c);
+                for _ in 0..mul {
+                    if let Some(t) = crate::darkgifts::most_common_type(&tribes, rng)
+                        && let Some(c) =
+                            db.random_pool_minion(t, self.counters.tier, self.counters.lobby, rng)
+                    {
+                        self.out.push_card(c);
+                    }
                 }
             }
             Effect::FreeRefreshes(n) => {
@@ -2399,10 +2402,16 @@ impl<'a> Side<'a> {
                     }
                     Deathrattle::SummonShaped { card: tok } => {
                         // Dark Gifts Golemancy: a Golem with the dead
-                        // minion's stats.
+                        // minion's stats. A golden minion's own Deathrattle
+                        // doubles them (Dark Paradox t9's golden: ONE Golem
+                        // with double its stats); a gift part is never
+                        // golden, so Golemancy never doubles.
                         let mut m = db.make(tok, false);
-                        m.attack = dead.attack;
-                        m.health = dead.health;
+                        m.attack = dead.attack * mul;
+                        // Its maximum Health, at least 1: the stats it had
+                        // before the killing blow (the owner's reference
+                        // engine reads the same).
+                        m.health = dead_max.max(1) * mul;
                         if self.summon(db, side, pos, m, uid, rng, w) {
                             pos += 1;
                         }

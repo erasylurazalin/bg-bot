@@ -605,6 +605,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SCALAR_DARK_GIFT_PRESSED", obs::SCALAR_DARK_GIFT_PRESSED)?;
     m.add("SCALAR_DARK_GIFT_READY", obs::SCALAR_DARK_GIFT_READY)?;
     m.add("SCALAR_DARK_OFFER", obs::SCALAR_DARK_OFFER)?;
+    m.add("SCALAR_PARADOX", obs::SCALAR_PARADOX)?;
     m.add("OPP_ALIVE", obs::OPP_ALIVE)?;
     m.add("OPP_HEALTH", obs::OPP_HEALTH)?;
     m.add("OPP_TIER", obs::OPP_TIER)?;

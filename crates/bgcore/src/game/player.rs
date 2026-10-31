@@ -361,6 +361,24 @@ impl Player {
             m.attack += a * n;
             m.health += h * n;
         }
+        // The Dark Gift counters too: a card like Dark Paradox t6 ("+3/+3 for
+        // each Battlecry you have triggered this game, wherever this is")
+        // takes its count when it is made, a golden one double.
+        if let Some((a, h)) = c.buff_per_battlecry {
+            let n = self.battlecries_triggered as i32 * m.mul();
+            m.attack += a * n;
+            m.health += h * n;
+        }
+        if let Some((a, h)) = c.buff_per_tavern_spell {
+            let n = self.spells_cast as i32 * m.mul();
+            m.attack += a * n;
+            m.health += h * n;
+        }
+        if let Some((a, h)) = c.buff_per_discard {
+            let n = self.discarded as i32 * m.mul();
+            m.attack += a * n;
+            m.health += h * n;
+        }
         if let Some((a, h)) = c.buff_per_golden_played {
             let n = self.golden_played as i32 * m.mul();
             m.attack += a * n;

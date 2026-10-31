@@ -1251,8 +1251,9 @@ fn undead_are_a_tribe_of_the_pool_and_all_types_include_them() {
         .filter(|&c| db.cards[c].tribes.has(Tribe::Undead))
         .map(|c| db.cards[c].name.as_str())
         .collect();
-    // the 21 Undead, Prosthetic Hand, and the three all-type minions
-    assert_eq!(undead.len(), 25, "{undead:?}");
+    // the 21 Undead, Prosthetic Hand, the three all-type minions, and the
+    // five Dark Paradox versions (all-type too)
+    assert_eq!(undead.len(), 30, "{undead:?}");
     assert!(!undead.contains(&"Rot Hide Gnoll"));
     assert!(db.by_name("Rot Hide Gnoll").is_none());
     assert!(db.by_name("Skeleton").is_some());

@@ -1,5 +1,6 @@
 //! The exact pool and state accounting the fuzzer checks.
 
+use crate::minion::CardId;
 use crate::{
     MAX_TIER,
     PLAYERS,
@@ -208,7 +209,11 @@ impl Game {
             let card = &cards.cards[c];
             // A card outside the lobby holds no copies anywhere: it was never
             // in this game's pool.
-            let want = if card.pool_slot as usize == c && card.lobby_ok(self.lobby) {
+            // Dark Paradox: only the one version this game picked is in the
+            // pool, with its tier's usual copies.
+            let want = if card.paradox && self.paradox != Some(c as CardId) {
+                0
+            } else if card.pool_slot as usize == c && card.lobby_ok(self.lobby) {
                 self.data.rules.copies(card.tier) as u32
             } else {
                 0

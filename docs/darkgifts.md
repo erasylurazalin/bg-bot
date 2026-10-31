@@ -100,3 +100,18 @@ The pool the offers come from:
   friendly minion). When a gifted Magnetic minion is Magnetized onto a
   Mech, its gift is lost (Era thinks so). The Mech it lands on keeps its
   own gifts.
+- **Dark Paradox** (`BG36_360`, "This has a different Dark Gift, stats,
+  and Tier each game!") is never offered by Dark Discovery. Built
+  2026-10-31 as five pool cards, "Dark Paradox t3/t4/t5/t6/t9" in
+  cards.toml (the game data's own card-id suffixes; `Game::paradox` is the
+  version this game's pool holds, and `crates/bgcore/tests/darkgifts.rs`
+  covers it). The game data has five versions, each a minion of every type
+  with a built-in gift: Tier 2 2/6 (+3 Attack per card played), Tier 3 3/3
+  (+3/+3 per Battlecry triggered), Tier 4 2/6 (Rally: a minion of your most
+  common type), Tier 5 8/4 (Divine Shield that takes 3 hits), Tier 6 10/2
+  (Deathrattle: a Golem with its stats). Era's logs show all five.
+  Era (2026-10-31): one version per game, the same for every player; a
+  normal Tavern minion of its version's tier with the usual pool copies;
+  in every lobby. The golden versions are in the game data: Tier 5 golden's
+  Divine Shield takes 4 hits (not double 3), and Tier 6 golden summons one
+  Golem with double its stats (not two Golems).

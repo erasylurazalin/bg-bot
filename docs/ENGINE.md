@@ -611,6 +611,24 @@ through exactly that card's code. The engine never matches a gift by name:
 - **Sunken Persistence** ("this minion's Spellcrafts are permanent") has no
   effect: no built minion hands its owner a Spellcraft spell, so nothing can
   read the flag.
+- **Dark Paradox** ("a different Dark Gift, stats and Tier each game") is
+  five pool cards in cards.toml (`paradox = true`, named after the game
+  data's card-id suffixes: t3 Tier 2, t4 Tier 5, t5 Tier 4, t6 Tier 3, t9
+  Tier 6, all-type so in every lobby). Their gift is the card's own text,
+  not a gift attached by the gift machinery: `on_card_play` reads the card
+  itself (a golden one doubles it), `shield_hits`/`golden_shield_hits` set
+  `Minion.shield_hits` in `CardDb::make` (the Tier 5 golden takes 4 hits,
+  not 6), `buff_per_battlecry` is applied by `Player::make_card` and grown by
+  `dark_gift_count` (the golden gets +6/+6), the Rally reuses
+  `Effect::GetMostCommonTypeMinion` once per `mul` (the golden gets two), and
+  the Deathrattle reuses `Deathrattle::SummonShaped` with the dead minion's
+  maximum Health times `mul` (the Tier 6 golden's ONE Golem has double
+  stats). `Game::unstarted` puts exactly ONE of the five in the pool, with
+  its tier's usual copies, the same for every player; `Game.paradox` holds
+  it, `check_invariants` reads the same field, and the pick uses its own RNG
+  seeded from the game seed so no other draw moves. Dark Discovery never
+  offers any of them (darkgifts.toml's `exclude`). The observation's
+  `SCALAR_PARADOX` is that card id + 1.
 - **The observation** writes each minion's gifts as effect card id + 1 in the
   eight `SLOT_GIFTS` slots after the attachments (the model embeds them in
   the card table, `SLOT_IDS` in `train/model.py`), the button's uses,
@@ -695,7 +713,8 @@ minions in the hand.
   boards of that turn, Era's and opponents' alike; turn 13 and later draw
   from every board of turn 13 or later; a turn before 13 with no boards of
   its own uses the nearest earlier turn that has some. Minions whose name
-  matches no card are dropped (about 1%: Dark Paradox, buddies, timewarped
+  matches no card are dropped (about 1%: Dark Paradox, which the files name
+  without saying which of its five versions it was, buddies, timewarped
   minions, and a few that only sat in a hand).
 - **What a board carries:** `RealBoard` holds the minions, the hand and a
   `RealCounters` (Blood Gem size, Beetle and Undead bonuses, the Tavern spell

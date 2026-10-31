@@ -1909,6 +1909,75 @@ tribe = "aberration"
 stats = [10, 13]
 on_cast_spell = { buff_all_and_deity = [3, 3] }
 
+# --- Dark Paradox (BG36_360) ---
+#
+# "This has a different Dark Gift, stats, and Tier each game!": the game data
+# has five versions, and ONE of them is in a game's pool, the same for every
+# player (docs/darkgifts.md "Dark Paradox", `Game::unstarted`). Every version
+# has all ten minion types, so it is in every lobby like any other card, and
+# its Dark Gift is the card's own text rather than a gift attached by the
+# gift machinery: the effects reuse the arms the gifts were built with.
+# Dark Discovery never offers any of them (darkgifts.toml's `exclude`).
+#
+# The golden versions are the game data's BG36_360_Gt3...Gt9 and are not
+# simple doubles of the gift: the Tier 5 golden's shield takes 4 hits and the
+# Tier 6 golden's Golem has double stats (one Golem, not two). The `t3`,
+# `t4`, `t5`, `t6` and `t9` here are the game's card ids' own suffixes; the
+# tiers are 2, 5, 4, 3 and 6.
+
+# BG36_360t3: Tier 2, 2/6. Golden BG36_360_Gt3: 4/12, +6 Attack per card.
+[[minion]]
+name = "Dark Paradox t3"
+tier = 2
+tribe = "all"
+stats = [2, 6]
+paradox = true
+on_card_play = [3, 0]
+
+# BG36_360t4: Tier 5, 8/4, Divine Shield that takes 3 hits. Golden
+# BG36_360_Gt4: 16/8, and its shield takes 4 hits.
+[[minion]]
+name = "Dark Paradox t4"
+tier = 5
+tribe = "all"
+stats = [8, 4]
+keywords = ["divine_shield"]
+shield_hits = 3
+golden_shield_hits = 4
+paradox = true
+
+# BG36_360t5: Tier 4, 2/6, Rally: a minion of your most common type. Golden
+# BG36_360_Gt5: 4/12, two of them.
+[[minion]]
+name = "Dark Paradox t5"
+tier = 4
+tribe = "all"
+stats = [2, 6]
+paradox = true
+rally = { get_most_common_type_minion = true }
+
+# BG36_360t6: Tier 3, 3/3, +3/+3 for each Battlecry. Golden BG36_360_Gt6:
+# 6/6, +6/+6 for each.
+[[minion]]
+name = "Dark Paradox t6"
+tier = 3
+tribe = "all"
+stats = [3, 3]
+paradox = true
+buff_per_battlecry = [3, 3]
+
+# BG36_360t9: Tier 6, 10/2, Deathrattle: a Golem with its stats. Golden
+# BG36_360_Gt9: 20/4, and the ONE Golem it summons has double its stats
+# (the deathrattle's own doubling, not two Golems).
+[[minion]]
+name = "Dark Paradox t9"
+tier = 6
+tribe = "all"
+stats = [10, 2]
+paradox = true
+deathrattle = { summon_shaped = "Golem" }
+
+
 # --- Tokens ---
 
 # A minion from a real board that this game doesn't build (buddies,

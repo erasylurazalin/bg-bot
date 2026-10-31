@@ -36,7 +36,7 @@ OWN_END = bgpy.OWN_END
 # more entries than there are heroes: the powers a hero only reaches later).
 N_HERO_IDS = max(bgpy.N_HEROES, bgpy.N_POWERS)
 # Card ids, embedded rather than scaled.
-SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD]
+SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD, bgpy.SCALAR_PARADOX]
 # Hero and power ids, embedded with their own table: own hero, the power's
 # hero (the first power and the second one, both indices into the power
 # table), the powers an open Hero Power Discover or chooser offers (so a pick

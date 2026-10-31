@@ -1465,8 +1465,17 @@ pub struct Card {
     /// all (Dark Gifts Efficiency: 2).
     pub activate_twice: bool,
     /// Its Divine Shield takes this many hits to break (Dark Gifts Toreth's
-    /// Blessing: 3). The landing sets the host's `shield_hits`.
+    /// Blessing: 3; Dark Paradox t4: 3). The landing sets the host's
+    /// `shield_hits` for a gift; a pool card sets it in `CardDb::make`.
     pub shield_hits: u8,
+    /// The hits a GOLDEN version of this card's shield takes, when that is
+    /// not double `shield_hits` (Dark Paradox's Tier 5 golden: 4, not 6). 0
+    /// means the double.
+    pub golden_shield_hits: u8,
+    /// One of the Dark Paradox versions (`BG36_360t3` and its kin): a pool
+    /// card, but only ONE of them is in a game's pool, the same for every
+    /// player (docs/darkgifts.md "Dark Paradox").
+    pub paradox: bool,
     /// Immune while attacking, in a fight (Dark Gifts Invulnerability).
     pub immune_attacking: bool,
     /// Has all ten minion types (Dark Gifts Amalgamation). Every tribe check
@@ -1795,6 +1804,12 @@ struct RawCard {
     activate_twice: bool,
     #[serde(default)]
     shield_hits: u8,
+    #[serde(default)]
+    golden_shield_hits: u8,
+    /// This is one of the Dark Paradox versions: `Game::unstarted` puts
+    /// exactly one of them in a game's pool.
+    #[serde(default)]
+    paradox: bool,
     #[serde(default)]
     immune_attacking: bool,
     #[serde(default)]
@@ -3812,6 +3827,8 @@ impl CardDb {
                 acquire_copies: c.acquire_copies,
                 activate_twice: c.activate_twice,
                 shield_hits: c.shield_hits,
+                golden_shield_hits: c.golden_shield_hits,
+                paradox: c.paradox,
                 immune_attacking: c.immune_attacking,
                 all_types: c.all_types,
                 reborn_full: c.reborn_full,
@@ -3987,6 +4004,8 @@ impl CardDb {
                 acquire_copies: 0,
                 activate_twice: false,
                 shield_hits: 0,
+                golden_shield_hits: 0,
+                paradox: false,
                 immune_attacking: false,
                 all_types: false,
                 reborn_full: false,
@@ -4420,7 +4439,20 @@ impl CardDb {
             n_attached: 0,
             gifts: [GiftOn::default(); crate::MAX_GIFTS],
             n_gifts: 0,
-            shield_hits: 0,
+            // A card whose Divine Shield takes several hits (Dark Paradox's
+            // Tier 5 version, and its golden with one hit more).
+            shield_hits: if c.shield_hits > 1 {
+                if golden {
+                    match c.golden_shield_hits {
+                        0 => c.shield_hits * 2,
+                        n => n,
+                    }
+                } else {
+                    c.shield_hits
+                }
+            } else {
+                0
+            },
         }
     }
 }

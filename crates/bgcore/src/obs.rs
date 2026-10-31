@@ -391,7 +391,12 @@ pub const SCALAR_DARK_GIFT_READY: usize = SCALAR_DARK_GIFT_USES + 2;
 /// Whether the open Discover is a Dark Gift offer (its gifts are in the
 /// Discover slots' gift fields, so the bot sees them before it picks).
 pub const SCALAR_DARK_OFFER: usize = SCALAR_DARK_GIFT_USES + 3;
-pub const SCALARS: usize = SCALAR_DARK_OFFER + 1;
+/// The Dark Paradox version in this game's pool, card id + 1 (0 when the
+/// card set has none). The five versions are one card each and only one is
+/// in a game's pool, so the id tells the bot which Tier, stats and gift the
+/// card has even when no copy is in sight.
+pub const SCALAR_PARADOX: usize = SCALAR_DARK_OFFER + 1;
+pub const SCALARS: usize = SCALAR_PARADOX + 1;
 
 pub const SLOT_PRESENT: usize = 0;
 pub const SLOT_CARD_ID: usize = 1;
@@ -495,7 +500,7 @@ const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_L
 const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
 const _: () = assert!(SCALAR_POWER_OFFER + crate::CHOICES == SCALAR_HERO_OFFER);
 const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALAR_TRINKET);
-const _: () = assert!(SCALAR_DARK_OFFER + 1 == SCALARS);
+const _: () = assert!(SCALAR_PARADOX + 1 == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
 const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
@@ -873,6 +878,7 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
         && pl.gold >= r.dark_gift_cost
         && !game.data.gifts.is_empty()) as u8 as f32;
     s[SCALAR_DARK_OFFER] = pl.dark_offer as u8 as f32;
+    s[SCALAR_PARADOX] = game.paradox.map_or(0.0, |c| c as f32 + 1.0);
 }
 
 /// The hero table of the game's data (a shorthand for the hero features).
