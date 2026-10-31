@@ -1292,6 +1292,8 @@ impl Game {
         // and stays Tavern-only.
         if kind == EventKind::GoldSpent {
             self.trinket_event(p, crate::trinkets::Event::GoldSpent, None, amount);
+            // The hero powers' own Gold count (Choose Your Champion).
+            self.power_gold_spent(p, amount);
         }
         let mut pos = 0;
         while pos < self.players[p].board.len() {

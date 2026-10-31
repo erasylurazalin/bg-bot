@@ -11,6 +11,11 @@ Reinvigorating Light trinket), the powers that change (Ragnaros, Bru'kan,
 Galewing, the Rat King), the skipped turns (A. F. Kay, Faelin) and Mukla's
 Bananas.
 
+**Built 2026-11-01 (hero batch 1):** the 28 heroes of
+`docs/briefs/heroes-batch1.md` and the rules under "Hero batch rules (Era,
+2026-11-01)" that are theirs; the rest of that section waits for later
+batches.
+
 ## Powers in general
 
 - A button power works once per turn unless its text says otherwise. Uses
@@ -149,7 +154,9 @@ so)
 - Gone Fishing: any sale counts, by effects too; repeats every 5.
 - Verdant Spheres: minions bought across turns, repeats every 3.
 - Avalanche: the discounts stack on the current upgrade price, down to 0.
-- Choose Your Champion: only Gold spent counts, not Health.
+- Choose Your Champion: the Tier 7 minion is Discovered at the start of
+  the game and sits in hand locked (`DESIGN.md` "Cards locked in hand")
+  until you have spent 60 Gold; only Gold counts, not Health.
 - Upbeat Harmony: with an empty hand nothing happens.
 - Heroic Inspiration: every 15 friendly attacks, a Triple Reward (your
   tier + 1), repeating.
@@ -168,14 +175,17 @@ so)
   spell cast. It never casts destructive spells (Channel the Devourer,
   Butchering, Unmasked Identity and the like).
 - Stir the Pot: throw a minion from your board or the Tavern (not hand);
-  it is gone for good and doesn't go back to the pool. At 3, Discover with
+  it is gone for good and doesn't go back to the pool. A neutral minion (no
+  type) can't be thrown. At 3, Discover with
   one option per thrown minion's type: a Demon, a Beast and a Mech give one
   of each; three Mechs give three Mechs.
 - Buried Treasure: digs 1 to 3 give nothing; the 4th gives a golden minion
   up to your tier.
 - Kel'Thuzad's Kitty: Discovers from the dead player's board as it was at
   its last moment (not as you saw it), with all buffs and Dark Gifts;
-  goldens can be offered.
+  goldens can be offered. Heroes die at the end of a fight, so
+  when several die in one round, you get one Discover per dead hero, back
+  to back, at the start of the next turn.
 
 **Stats and targets**
 - See the Light: the minion goes to your hand as a 2/2, as a steal.

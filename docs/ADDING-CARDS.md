@@ -119,8 +119,13 @@ legality in mod.rs.
 | A neutral or spell tied to one tribe | `lobby = "<tribe>"` (the export's `lobby_subsets`) | `Card.lobby_ok` filters it into the pool and every draw; it only exists in lobbies with that tribe | Butchering |
 | Set your Armor to N | `effect = { set_armor = N }` | `cast_spell_inner` -> `SpellEffect::SetArmor` | Armor Stash |
 | Discover a new Hero Power | `effect = { discover_hero_power = true, exclude_heroes = [..] }` | `cast_spell_inner` -> `Game::discover_hero_power` (offers in `Player.power_offer`, answered with Choose) | Unmasked Identity |
-| Hero power (button) | `heroes.toml` `power = { cost, uses_per_turn, once_per_game, unlock_tier, unlock_turn, effect }` | `Action::HeroPower` -> `Game::press_power` (`power_usable` is the legality); a targeted power opens the pending-target flow | Lich Baz'hial |
-| Hero power (passive) | `passive = true` + the effect | the trigger it hooks: `FreeRefreshPerTurn` in `start_turn`, `GoldAfterUpgrade` in `Action::Level`, `GoldAfterBuyTribe` in `Action::Buy`, `GoldNextTurnAfterSell` in `sell_minion`, `SocLeftmost` through `Counters.soc_leftmost` (before any minion's Start of Combat) | Nozdormu |
+| Hero power (button) | `heroes.toml` `power = { cost, uses_per_turn, once_per_game, uses_per_game, unlock_tier, unlock_turn, cheaper_each_turn, effect }` | `Action::HeroPower` -> `Game::press_power` (`power_usable` is the legality, `Game::power_cost` the price); a targeted power opens the pending-target flow | Lich Baz'hial |
+| Hero power (passive) | `passive = true` + the effect | the trigger it hooks: `FreeRefreshPerTurn` in `start_turn`, `GoldAfterUpgrade` in `Action::Level`, `GoldAfterBuyTribe`/`GetTribeCutCost`/`CardAfterBuys`/`TripleRewardAfterTiers`/`TavernBuffAfterBuys`/`CopyBuyAfterMinions` in `power_bought_card`, `GoldNextTurnAfterSell` and `RandomTribeAfterSells` in `sell_minion`, `UpgradeDiscountAfterElementals` where an Elemental is played, `TripleRewardAfterAttacks` in `apply_side_outcome`, `Champion`/`KittyDiscover` at a death, `HandCopyEvery` in `power_end_of_turn`, `CastRandomSpell` in `power_start_of_turn`, `SocLeftmost` through `Counters.soc_leftmost` (before any minion's Start of Combat) | Nozdormu |
+| Hero power that sets the Tavern's prices | `effect = { prices = { minion, refresh, upgrade_extra } }` (`PowerEffect::Prices`) | `Game::power_prices`, read by `minion_price`, `Game::refresh_cost` (Roll), `Game::upgrade_price` (Level), the observation and the sandbox | Millhouse Manastorm |
+| Hero power that counts what the player does | `Player.counts` (`HeroCounts`) grown by `power_bought_card`, `power_sold_minion`, `power_elemental_played`, `power_attacks`, `power_gold_spent`; a per-cycle count lives in `PowerState.progress` | Sharpen Blades reads the shared count at its press, the rest keep their own cycle | Edwin VanCleef |
+| Hero power that presses for more or less | `PowerState.cost_delta` + `Game::power_cost`; `cheaper_each_turn = true` for the -1 a turn ones | Lead Explorer's `discover_my_tier_costs_more`, Pirate Parrrrty!'s `get_tribe_cut_cost`, The Perfect Crime and The Galaxy's Lens | Elise Starseeker |
+| Hero power that Discovers from something that is not the pool | a `DiscoverRequest` dealt by `maybe_start_discover` itself: `MagneticMinion`, `PotTypes([u8; 3])`, `DeadWarband`, `DeadLastFight`, `Champion` | `deal_pot_offer`, `deal_dead_warband`, `deal_dead_last_fight`, `deal_champion`; the last three fill `Player.discover_minions` (ready-made minions, no pool copy) | Tinker, Stir the Pot, Kel'Thuzad's Kitty |
+| Hero power that casts a random spell | `effect = { cast_random_spell = true }` (`PowerEffect::CastRandomSpell`) | `Game::cast_random_spell`: `CardDb::random_castable_spell` (no destructive spell), `Game::spell_castable`, then a random target and a random Choose One option | Puzzle Box |
 | Hero power that asks for a card to discard | `effect = { discard_get_random_minion = "<tribe>" }` (`PowerEffect::DiscardGetRandomMinion`) | `press_power` opens `Player.pending_discard` with `source: None` (a power has no board slot), answered by `Action::Discard`; the reward runs in `resolve_discard`, the same path as an Activate with `discard = true` | Incubate |
 | Hero power that triggers a Battlecry | `effect = { trigger_battlecry = true }` (`PowerEffect::TriggerBattlecry`) | `press_power` offers `TargetKind::TriggerBattlecry` (Kelp Keeper's path); `power_usable` needs a target, `has_battlecry_target` | Snicker-snack |
 | Hero power that gives linked cards | `effect = { get_linked_minions = 2 }` (`PowerEffect::GetLinkedMinions`) | `press_power` draws with `CardDb::random_any_minion` and calls `give_linked`, so playing one discards the rest | Dark Ritual |
@@ -219,7 +224,11 @@ exactly one legal target and drops the effect when there is none.
    to play the pick itself), `clear_board` keeps the pool exact.
 4. Update `docs/ENGINE.md` "Heroes" if the frame changed; the pick offers,
    the observation (hero indices are embedded, `N_HEROES` in bgpy) and the
-   bots need nothing per hero.
+   bots need nothing per hero. A power that counts something needs no new
+   observation value either: `obs::power_progress` fills that slot's
+   `SCALAR_POWER_PROGRESS`/`SCALAR_POWER_LEFT` from its own
+   `PowerState.progress` and the shared counters, so add a match arm there
+   when the new count does not fit one of the shapes it knows.
 
 ### A power a hero only reaches later
 
@@ -808,3 +817,68 @@ Triple Reward spell.
 - **Tests.** `tests/trinkets.rs`, the block 4 section at the end: one test per
   card, and `apply_side_outcome` is public so a `fight_with` outcome can be
   applied to a game the way a combat does.
+
+## 12. Systems the hero batch 1 added (2026-11-01)
+
+- **The counters are one block.** `Player.counts` (`HeroCounts`) is where a
+  hero power counts what the player does; a new counter is a field there, not
+  a field per hero. The growth points are `power_bought_card` (both buy paths
+  and the spell slot, which is also where a power's own per-cycle count in
+  `PowerState.progress` is bumped), `power_sold_minion` in `sell_minion`,
+  `power_elemental_played` in the play path, `power_attacks` in
+  `apply_side_outcome` (the fight's `friendly_attacks`), and
+  `power_gold_spent` from `fire_event(EventKind::GoldSpent)`. A Health price
+  is never Gold spent.
+- **`power_bought_card(p, &Minion)`** takes the bought card itself: it needs
+  its Tier (Natural Balance counts Tiers, a spell by its Tier) and whether
+  it is a Battlecry minion (Battle Brand). It also runs the powers that watch
+  a count, so a card bought outside these paths (a steal) counts for nothing.
+- **A press price that moves.** `PowerState.cost_delta` plus
+  `Game::power_cost(p, second)`; never read `HeroPower::cost` directly for a
+  press, the price or the observation. `cheaper_each_turn = true` on a power
+  takes 1 off at every end of turn.
+- **Presses a game.** `HeroPower.uses_per_game` (0 no limit); the old
+  `once_per_game = true` key still parses and sets it to 1. A passive checks
+  it before it counts.
+- **Ready-made Discover options.** `Player.discover_minions` holds the
+  minions an open Discover offers as they stand, one per `discover` slot, and
+  no pool copy moves for them (`resolve_choose` and `abandon_discover` both
+  handle it). Kel'Thuzad's Kitty fills it from `Game.kitty_warbands`: every
+  warband of a round is kept there with the round it died in
+  (`Game::kitty_watch` from `knockouts` and `knock_out_mid_turn`), and each
+  holder queues one `DeadWarband(i)` per warband at the start of its next
+  turn, so several heroes dying in one fight give several Discovers back to
+  back. Reclaimed Souls fills it with plain copies of
+  `Player.dead_last_fight` (both sides' dead from `SideOutcome.dead_cards`,
+  tokens included, which have no pool copy to take).
+- **Cards that lock a card in hand** (Faelin's tier, Thorim's Gold) all use
+  `Minion::locked_in_hand(tier, gold_spent)` over `locked_turns`,
+  `locked_tier` and `locked_gold`; `discover_locked_tier` and
+  `discover_locked_gold` mark the open Discover's pick. Nothing to hold
+  outside the hand, nothing for `check_invariants` or `settle_dead`: the card
+  is a hand slot, and the observation's `SLOT_LOCKED` and the action mask
+  both read the lock.
+- **Gone for good.** A minion that leaves the game without being sold (Stir
+  the Pot's throw, The Perfect Crime's leftovers) has its `pool_copies` added
+  to `Game.consumed` by `Game::consume_copies`; without that the pool
+  invariant fails, and it is the one place that says "this copy is not
+  coming back".
+- **Three new target kinds.** `RemoveTierBelow` (remove a friendly minion,
+  no sale, the pool copy back, then a Discover one Tier below it),
+  `SwapWithShop` (the picked non-Golden minion and a random Tavern minion
+  trade places, nothing triggers) and `ThrowInPot { count }` (board or
+  Tavern, gone for good; a neutral minion is no target at all, and
+  `Game::has_throwable` is the press's legality). The first two are board
+  picks, so
+  `TargetKind::takes_shop` does not list them.
+- **A random cast.** `Game::cast_random_spell` is Puzzle Box: a random
+  Tavern spell (`CardDb::random_castable_spell`, which skips the destructive
+  ones by effect shape, see `destructive_at_random` in cards.rs), a random
+  target (`answer_target_at_random`) and a random Choose One option. A spell
+  with nothing to land on is skipped through `Game::spell_castable`, which
+  `cast_spell_inner` shares.
+- **Tests.** `tests/heroes_batch1.rs`, one test per hero. Players shop at the
+  same time and the cursor moves on after every action, so a test walks the
+  turn back to its player (`turn_of`) before pressing or answering; a power
+  pressed twice in one turn needs its use given back (`again`). `duel` leaves
+  two players paired with each other for the fight-driven powers.

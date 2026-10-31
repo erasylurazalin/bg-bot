@@ -133,6 +133,15 @@ pub enum TargetKind {
     /// Become an exact copy of the chosen minion, on the board or in the
     /// Tavern (Faceless Manipulator).
     BecomeCopy,
+    /// Throw the chosen minion, on the board or in the Tavern, in the pot: it
+    /// is gone for good, and `count` throws make the Discover (Stir the Pot).
+    ThrowInPot { count: u8 },
+    /// Remove the chosen friendly minion and Discover one from the Tier below
+    /// it (Trash for Treasure).
+    RemoveTierBelow,
+    /// Swap the chosen friendly non-Golden minion with a random Tavern
+    /// minion (Swap, Lock, & Shop It).
+    SwapWithShop,
 }
 
 impl TargetKind {
@@ -143,7 +152,7 @@ impl TargetKind {
             | TargetKind::AnySetStats { .. }
             | TargetKind::BecomeCopy => true,
             TargetKind::Spell(st) => st.can_target_shop(),
-            TargetKind::StealShopCard { .. } => true,
+            TargetKind::StealShopCard { .. } | TargetKind::ThrowInPot { .. } => true,
             _ => false,
         }
     }
@@ -273,6 +282,21 @@ pub enum DiscoverRequest {
     /// A Dark Gift offer of plain copies of the player's own gifted minions
     /// (Maldraxxus Dagger).
     DarkGiftCopies,
+    /// A Magnetic Mech up to the player's tier, from the pool (Tinker).
+    MagneticMinion,
+    /// One minion per thrown type, in order (Stir the Pot): the thrown
+    /// minions' tribes, up to `count` of them, 0 for an empty slot.
+    PotTypes([u8; 3]),
+    /// A minion from the warband of the `i`th hero that died in the round
+    /// (`Game.kitty_warbands`), exactly as it stood there (Kel'Thuzad's
+    /// Kitty).
+    DeadWarband(u8),
+    /// A minion that died in the last fight, either side, from the pool
+    /// (Reclaimed Souls).
+    DeadLastFight,
+    /// A Tier 7 minion, locked in hand until this much Gold has been spent
+    /// this game (Choose Your Champion).
+    Champion(u16),
 }
 
 /// Why the Tavern is filled. Only the player's own Refresh action (paid with
@@ -309,6 +333,11 @@ pub struct PowerState {
     /// never offers that one straight after (Galewing's flightpaths). 0 when
     /// there is none.
     pub last_pick: u8,
+    /// A change to this power's press price that lasts: +1 for every Lead
+    /// Explorer press, -1 for each Pirate bought (Pirate Parrrrty!) or for
+    /// each turn waited (The Perfect Crime, The Galaxy's Lens). The price
+    /// never drops below 0.
+    pub cost_delta: i8,
 }
 
 impl PowerState {
@@ -320,6 +349,7 @@ impl PowerState {
             unlocked: true,
             progress: 0,
             last_pick: 0,
+            cost_delta: 0,
         }
     }
 }
@@ -493,6 +523,32 @@ pub struct TrinketState {
     pub cube_choices: u8,
 }
 
+/// The counters hero powers keep: one block, so a power that counts
+/// something adds a field here instead of a power's own. All of them last the
+/// whole game; the per-turn counts live in the power's `progress`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct HeroCounts {
+    /// Cards bought, Tavern spells and free buys included (Sharpen Blades).
+    pub cards_bought: u32,
+    /// Minions bought (For the Horde!, Verdant Spheres, Glaive Ricochet).
+    pub minions_bought: u32,
+    /// Tiers' worth of cards bought: a card's Tier, a spell by its Tier
+    /// (Natural Balance).
+    pub tiers_bought: u32,
+    /// Minions sold, by an effect too (Gone Fishing).
+    pub minions_sold: u32,
+    /// Friendly minions that attacked in a fight, once per swing (Heroic
+    /// Inspiration).
+    pub attacks: u32,
+    /// Gold spent this game; a Health price is not Gold (Choose Your
+    /// Champion).
+    pub gold_spent: u32,
+    /// Tavern spells bought (Reliquary Research).
+    pub tavern_spells_bought: u32,
+    /// Battlecry minions bought (Battle Brand).
+    pub battlecry_bought: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Player {
     pub health: i32,
@@ -587,6 +643,16 @@ pub struct Player {
     /// How many times each "improve your future ..." effect has triggered
     /// this game (Tasty Lobster).
     pub improve: [u16; N_COUNTERS],
+    /// The counters the hero powers keep (see `HeroCounts`).
+    pub counts: HeroCounts,
+    /// The tribes of the minions thrown into Stir the Pot, and the minion
+    /// cards bought this turn that Glaive Ricochet may copy. Both are hero
+    /// power odds and ends that fit no counter.
+    pub pot: ArrayVec<u8, 3>,
+    pub recent_buys: ArrayVec<CardId, 3>,
+    /// Minions that died in the last fight, either side, for Reclaimed Souls.
+    /// Tokens are in it like any other minion.
+    pub dead_last_fight: ArrayVec<CardId, 16>,
     /// Beast bonus until next turn (Goldrinn triggered in the shop). Every
     /// Beast on the board carries it in its stats and it comes off at the
     /// start of the next turn.
@@ -653,6 +719,10 @@ pub struct Player {
     /// Discover is a Dark Gift offer at all.
     pub discover_gifts: ArrayVec<GiftOn, DISCOVER>,
     pub discover_copies: ArrayVec<u8, DISCOVER>,
+    /// The minions an open Discover offers as they stand, one per `discover`
+    /// slot, when its options are ready-made rather than pool cards
+    /// (Kel'Thuzad's Kitty). Empty for every other Discover.
+    pub discover_minions: ArrayVec<Minion, DISCOVER>,
     pub dark_offer: bool,
     /// The turn the open offer's gifts were picked as.
     pub dark_offer_turn: u32,
@@ -687,6 +757,9 @@ pub struct Player {
     /// Whether the Discover now waiting marks its Choose One pick as having
     /// both effects (Fandral's Fortune).
     pub discover_both: bool,
+    /// Gold the open Discover's pick stays locked in hand for (Choose Your
+    /// Champion): 0 for none.
+    pub discover_locked_gold: u16,
     pub deity: Option<Deity>,
     pub discarded: u32,
     /// The last card this player discarded, for a reward that copies it
@@ -737,6 +810,12 @@ pub struct Game {
     /// The boards real seats (`Player.real`) draw from, set with them by
     /// `Game::new_random_heroes_real`. None in a game without real seats.
     pub real_boards: Option<Arc<RealBoards>>,
+    /// The warband of every hero that died in a round, as it stood at its last
+    /// moment, with the round it died in: Kel'Thuzad's Kitty offers one
+    /// Discover per warband, back to back, at the start of the holder's next
+    /// turn, so the warbands stay for the round after the deaths. Dropped once
+    /// that round has started for everyone.
+    pub kitty_warbands: ArrayVec<(u32, ArrayVec<Minion, BOARD>), { PLAYERS - 1 }>,
     order: ArrayVec<u8, PLAYERS>,
     cursor: usize,
 }
@@ -953,6 +1032,7 @@ impl Game {
             over: false,
             sandbox: None,
             real_boards: None,
+            kitty_warbands: ArrayVec::new(),
             order: ArrayVec::new(),
             cursor: 0,
         }
@@ -1057,12 +1137,13 @@ impl Game {
                 if s >= pl.shop.len() || pl.hand.is_full() {
                     return false;
                 }
-                let card = self.data.cards.get(pl.shop[s].card);
+                let card_id = pl.shop[s].card;
+                let card = self.data.cards.get(card_id);
                 if card.is_spell() {
                     if card.pay_health || pl.tp.spell_health_left > 0 {
                         pl.can_pay_health(card.cost as i32, &self.data.cards)
                     } else {
-                        let cost = card.cost.saturating_sub(pl.spell_discount);
+                        let cost = self.spell_price(p, card_id).saturating_sub(pl.spell_discount);
                         pl.gold >= cost
                     }
                 } else {
@@ -1083,7 +1164,7 @@ impl Game {
                 if card.pay_health || pl.tp.spell_health_left > 0 {
                     pl.can_pay_health(card.cost as i32, &self.data.cards)
                 } else {
-                    pl.gold >= card.cost.saturating_sub(pl.spell_discount)
+                    pl.gold >= self.spell_price(p, id).saturating_sub(pl.spell_discount)
                 }
             }
             Action::Sell(s) => (s as usize) < pl.board.len(),
@@ -1118,7 +1199,7 @@ impl Game {
                     return false;
                 }
                 let card_id = pl.hand[h].card;
-                if pl.hand[h].locked_turns > 0 || pl.hand[h].locked_tier > pl.tier {
+                if pl.hand[h].locked_in_hand(pl.tier, pl.counts.gold_spent) {
                     false
                 } else if self.data.cards.get(card_id).is_spell() {
                     pos == 0 && self.can_cast_spell(p, card_id)
@@ -1144,10 +1225,10 @@ impl Game {
             Action::Roll => {
                 pl.free_rolls > 0
                     || pl.can_refresh_with_health(&self.data.cards, r)
-                    || pl.gold >= r.roll_cost
+                    || pl.gold >= self.refresh_cost(p)
             }
             Action::Freeze | Action::EndTurn => true,
-            Action::Level => pl.tier < MAX_TIER && pl.gold >= pl.upgrade_cost,
+            Action::Level => pl.tier < MAX_TIER && pl.gold >= self.upgrade_price(p),
             Action::HeroPower => self.power_usable(p),
             Action::HeroPower2 => self.power_usable2(p),
             Action::DarkGift => self.dark_gift_usable(p),
@@ -1327,8 +1408,11 @@ impl Game {
     /// (a Blood Gem included), never an unplayable one (the Lockbox) or a
     /// minion locked in hand.
     fn valid_discard(&self, p: usize, s: usize) -> bool {
-        let Some(m) = self.players[p].hand.get(s) else { return false };
-        if m.locked_turns > 0 {
+        let pl = &self.players[p];
+        let Some(m) = pl.hand.get(s) else { return false };
+        // A locked card is a real card in hand, but it can't be thrown away
+        // (DESIGN.md "Cards locked in hand").
+        if m.locked_in_hand(pl.tier, pl.counts.gold_spent) {
             return false;
         }
         !matches!(self.data.cards.get(m.card).spell_effect, Some(SpellEffect::Lockbox(_)))
@@ -1362,6 +1446,15 @@ impl Game {
 
     /// Whether the Tavern holds a minion (not a spell) for an effect that
     /// needs one.
+    /// Whether the player has a minion Stir the Pot could throw: a typed
+    /// minion of the board or the Tavern (a neutral one cannot be thrown).
+    fn has_throwable(&self, p: usize) -> bool {
+        let typed = |m: &Minion| !self.data.cards.tribes_of(m).is_neutral();
+        let pl = &self.players[p];
+        pl.board.iter().any(typed)
+            || pl.shop.iter().any(|m| !self.data.cards.get(m.card).is_spell() && typed(m))
+    }
+
     fn shop_has_minion(&self, p: usize) -> bool {
         self.players[p]
             .shop
@@ -1423,6 +1516,11 @@ impl Game {
                 true
             }
             TargetKind::Spell(st) => st.can_target_shop() && self.spell_target_ok(st, &pl.shop[s]),
+            // A Tavern minion may go in the pot when it has a type (Stir the
+            // Pot).
+            TargetKind::ThrowInPot { .. } => {
+                !self.data.cards.tribes_of(&pl.shop[s]).is_neutral()
+            }
             _ => false,
         }
     }
@@ -1525,6 +1623,13 @@ impl Game {
                 }),
             // Any minion will do: the effect becomes a copy of it.
             TargetKind::BecomeCopy => true,
+            // Any friendly minion may be removed for the Discover from the
+            // Tier below it; only a typed one may go in the pot (a neutral
+            // minion cannot be thrown, docs/heroes.md).
+            TargetKind::RemoveTierBelow => true,
+            TargetKind::ThrowInPot { .. } => !self.data.cards.tribes_of(&b[s]).is_neutral(),
+            // Only a non-Golden minion may be swapped out.
+            TargetKind::SwapWithShop => !b[s].golden,
         }
     }
 
@@ -1604,7 +1709,8 @@ impl Game {
                     // its own cost, like the spell slot.
                     // Bazaar Sticker: one Tavern spell a turn costs Health.
                     let trinket_health = self.players[p].tp.spell_health_left > 0;
-                    let (pay_health, cost) = (c.pay_health || trinket_health, c.cost);
+                    let pay_health = c.pay_health || trinket_health;
+                    let cost = if pay_health { c.cost } else { self.spell_price(p, id) };
                     if trinket_health {
                         self.players[p].tp.spell_health_left -= 1;
                     }
@@ -1615,7 +1721,7 @@ impl Game {
                     self.fire_event(p, EventKind::CardsBought, 1);
                     // A bought card counts towards BUY, INSECT!, the Tavern
                     // spells included.
-                    self.power_bought_card(p);
+                    self.power_bought_card(p, &m);
                     self.players[p].tp.bought_spell = Some(id);
                     self.trinket_event(p, Event::BuySpell, Some(id), 1);
                 } else {
@@ -1653,7 +1759,7 @@ impl Game {
                     self.check_triple(p, m.card);
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
                     self.fire_event(p, EventKind::CardsBought, 1);
-                    self.power_bought_card(p);
+                    self.power_bought_card(p, &m);
                     // A trinket that reads the minion just bought: its stats
                     // as they stand now (Reusable Batteries) or the Tavern
                     // spell (Magicfin Sticker).
@@ -1667,29 +1773,14 @@ impl Game {
                         self.players[p].tp.bought_stats = (b.attack, b.health);
                     }
                     self.trinket_event(p, Event::Buy, Some(m.card), 1);
-                    // "After you buy a Pirate, gain 1 Gold" (I'm the Cap'n
-                    // Now), and BUY, INSECT!'s count of bought cards.
-                    let effects: ArrayVec<PowerEffect, 2> = [self.players[p].power, self.players[p].power2]
-                        .iter()
-                        .flatten()
-                        .map(|st| self.data.heroes.power(st.of).effect)
-                        .collect();
-                    for effect in effects {
-                        if let PowerEffect::GoldAfterBuyTribe { tribe, gold } = effect
-                            && self.data.cards.tribes_of(&m).has(tribe)
-                        {
-                            let runs = self.players[p].tp.power_triggers.max(1);
-                            let gold = gold.saturating_mul(runs);
-                            self.players[p].gold = self.players[p].gold.saturating_add(gold);
-                        }
-                    }
                 }
             }
             Action::BuySpell => {
                 let id = self.players[p].shop_spell.take().unwrap();
                 let c = self.data.cards.get(id);
                 let trinket_health = self.players[p].tp.spell_health_left > 0;
-                let (pay_health, cost) = (c.pay_health || trinket_health, c.cost);
+                let pay_health = c.pay_health || trinket_health;
+                let cost = if pay_health { c.cost } else { self.spell_price(p, id) };
                 if trinket_health {
                     self.players[p].tp.spell_health_left -= 1;
                 }
@@ -1701,7 +1792,7 @@ impl Game {
                 self.fire_event(p, EventKind::CardsBought, 1);
                 // A bought card counts towards BUY, INSECT!, the Tavern
                 // spells included.
-                self.power_bought_card(p);
+                self.power_bought_card(p, &m);
                 self.players[p].tp.bought_spell = Some(id);
                 self.trinket_event(p, Event::BuySpell, Some(id), 1);
             }
@@ -1820,6 +1911,8 @@ impl Game {
                         pl.elementals_played_turn = pl.elementals_played_turn.saturating_add(1);
                         pl.elementals_played = pl.elementals_played.saturating_add(1);
                         self.give_play_shield(p, pos);
+                        // Avalanche: 3 off the upgrade every third Elemental.
+                        self.power_elemental_played(p);
                     }
                     self.fire_after_play_tribe(p, t, pos);
                     // A trinket that watches every minion played.
@@ -1878,6 +1971,7 @@ impl Game {
                 pl.board.insert(to as usize, m);
             }
             Action::Roll => {
+                let refresh_cost = self.refresh_cost(p);
                 let Game { data, rng, players, pool, lobby, .. } = self;
                 let (cards, rules) = (&data.cards, &data.rules);
                 let pl = &mut players[p];
@@ -1889,8 +1983,8 @@ impl Game {
                     pl.spend_health_refresh(cards);
                     health_paid = rules.health_refresh_cost;
                 } else {
-                    pl.gold -= rules.roll_cost;
-                    gold_spent = rules.roll_cost;
+                    pl.gold -= refresh_cost;
+                    gold_spent = refresh_cost;
                 }
                 Self::refresh_shop(pl, pool, cards, rules, rng, *lobby, RefreshKind::Explicit);
                 // "After the Tavern is Refreshed": the trinket hook.
@@ -1904,8 +1998,8 @@ impl Game {
             Action::Freeze => self.players[p].frozen = !self.players[p].frozen,
             Action::Level => {
                 let turn = self.turn as u8;
+                let cost = self.upgrade_price(p);
                 let pl = &mut self.players[p];
-                let cost = pl.upgrade_cost;
                 pl.gold -= cost;
                 pl.tier += 1;
                 pl.upgrade_cost = self.data.rules.upgrade_cost(pl.tier);

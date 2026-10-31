@@ -1862,6 +1862,21 @@ struct RawAttackThreshold {
     keyword: String,
 }
 
+/// Whether casting this spell at a random target, as Puzzle Box does, would
+/// destroy or transform something: those are never offered
+/// (docs/heroes.md). Channel the Devourer sells a minion, Butchering
+/// destroys one, Corrupted Cupcakes eats the Tavern's minions and Unmasked
+/// Identity replaces the hero power.
+fn destructive_at_random(c: &Card) -> bool {
+    match c.spell_target {
+        Some(SpellTarget::Devourer)
+        | Some(SpellTarget::Butchering { .. })
+        | Some(SpellTarget::Consume { .. })
+        | Some(SpellTarget::DestroyGetRandom { .. }) => true,
+        _ => matches!(c.spell_effect, Some(SpellEffect::DiscoverHeroPower)),
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawSpell {
@@ -4348,6 +4363,27 @@ impl CardDb {
         Some(self.resolve_bounty(id, &[], rng))
     }
 
+    /// A random Tavern spell of Tier `max_tier` or lower for Puzzle Box to
+    /// cast: never one of the destructive ones (docs/heroes.md). Spells have
+    /// no pool, so nothing is taken.
+    pub fn random_castable_spell(&self, max_tier: u8, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
+        let max_tier = max_tier.min(crate::MAX_TIER);
+        let ok = |id: CardId| {
+            let c = &self.cards[id as usize];
+            c.tier <= max_tier
+                && c.tavern_spell
+                && c.lobby_ok(lobby)
+                && !destructive_at_random(c)
+        };
+        let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
+        if count == 0 {
+            return None;
+        }
+        let k = rng.below(count) as usize;
+        let id = self.spells.iter().copied().filter(|&id| ok(id)).nth(k)?;
+        Some(self.resolve_bounty(id, &[], rng))
+    }
+
     /// A random Tavern spell of Tier `max_tier` or lower, other than the
     /// cards in `exclude`. The lobby filters every spell draw.
     pub fn random_spell_up_to(
@@ -4428,6 +4464,7 @@ impl CardDb {
             taught_spell: None,
             locked_turns: 0,
             locked_tier: 0,
+            locked_gold: 0,
             doomed: false,
             activated: false,
             uses_left: 0,

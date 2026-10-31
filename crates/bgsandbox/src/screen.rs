@@ -259,7 +259,11 @@ pub fn state(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> String {
     let db = &g.data.cards;
     let mut out = String::new();
     let max_gold = g.data.rules.gold(g.turn).saturating_add(pl.extra_max_gold);
-    let up = if pl.tier < bgcore::MAX_TIER { format!(" (up {}g)", pl.upgrade_cost) } else { String::new() };
+    let up = if pl.tier < bgcore::MAX_TIER {
+        format!(" (up {}g)", g.upgrade_price(0))
+    } else {
+        String::new()
+    };
     let _ = write!(
         out,
         "Turn {}  Tier {}{}  Gold {}/{}  Health {}  Armor {}  Free rolls {}",
@@ -299,7 +303,11 @@ pub fn state(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> String {
                 st.uses_left,
                 pw.uses_per_turn,
                 if st.unlocked { "" } else { ", locked" },
-                if pw.once_per_game && st.used_game > 0 { ", used" } else { "" },
+                if pw.uses_per_game > 0 && st.used_game >= pw.uses_per_game as u32 {
+                    ", used"
+                } else {
+                    ""
+                },
             )
         };
         format!(
@@ -505,8 +513,10 @@ fn power_text(heroes: &bgcore::heroes::HeroDb, of: u8) -> String {
         if pw.unlock_tier > 0 {
             out.push_str(&format!(", unlocks at Tier {}", pw.unlock_tier));
         }
-        if pw.once_per_game {
+        if pw.uses_per_game == 1 {
             out.push_str(", once per game");
+        } else if pw.uses_per_game > 1 {
+            out.push_str(&format!(", {} uses a game", pw.uses_per_game));
         }
     } else {
         out.push_str("passive");
@@ -517,6 +527,9 @@ fn power_text(heroes: &bgcore::heroes::HeroDb, of: u8) -> String {
 
 fn describe_target(pt: &PendingTarget) -> String {
     match pt.kind {
+        TargetKind::ThrowInPot { .. } | TargetKind::RemoveTierBelow | TargetKind::SwapWithShop => {
+            "one of your minions".into()
+        }
         TargetKind::MinionBuff { tribe, attack, health, keyword, .. } => {
             let who = tribe.map_or("a minion", |t| tribe_name(t));
             format!("{who} gets +{attack}/+{health}{}", kw_suffix(keyword))

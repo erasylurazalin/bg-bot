@@ -35,7 +35,8 @@ OWN_END = bgpy.OWN_END
 # A hero id and a power id share one embedding table (`HeroDb::powers` holds
 # more entries than there are heroes: the powers a hero only reaches later).
 N_HERO_IDS = max(bgpy.N_HEROES, bgpy.N_POWERS)
-# Card ids, embedded rather than scaled.
+# Card ids, embedded rather than scaled: the last spell, the card a pending
+# choice names, and the Dark Paradox version in the pool.
 SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD, bgpy.SCALAR_PARADOX]
 # Hero and power ids, embedded with their own table: own hero, the power's
 # hero (the first power and the second one, both indices into the power
@@ -67,7 +68,8 @@ SLOT_LOG = [bgpy.SLOT_ATTACK, bgpy.SLOT_HEALTH, bgpy.SLOT_FIGHT_ATTACK, bgpy.SLO
 # The same for scalars that grow without bound over a game.
 SCALAR_LOG = [bgpy.SCALAR_DEATHRATTLES, bgpy.SCALAR_KNIGHT_DEATHS, bgpy.SCALAR_DISCARDED,
               bgpy.SCALAR_SPELLS_CAST, bgpy.SCALAR_UNDEAD_ATTACK, bgpy.SCALAR_UNDEAD_HEALTH,
-              bgpy.SCALAR_DEITY_ATTACK, bgpy.SCALAR_DEITY_HEALTH, bgpy.SCALAR_LAST_DAMAGE]
+              bgpy.SCALAR_DEITY_ATTACK, bgpy.SCALAR_DEITY_HEALTH, bgpy.SCALAR_LAST_DAMAGE,
+              bgpy.SCALAR_POWER_PROGRESS, bgpy.SCALAR_POWER2_PROGRESS]
 
 
 def _scales(n, prefix, table):
@@ -108,6 +110,11 @@ SCALAR_SCALE = _scales(bgpy.SCALARS, "SCALAR_", {
     "SHOP_CONSUME_LEFT": 3, "DISCOVER_QUEUE": 3,
     "ARMOR": 25, "POWER_COST": 3, "POWER_USES_LEFT": 2, "POWER_USED_GAME": 5,
     "POWER2_COST": 3, "POWER2_USES_LEFT": 2, "POWER2_USED_GAME": 5,
+    # A power's own count toward its next trigger and what is left of it: the
+    # level of a growing one (Sharpen Blades, Choose Your Champion's Gold) and
+    # the handful a counting one needs.
+    "POWER_PROGRESS": 10, "POWER_LEFT": 20,
+    "POWER2_PROGRESS": 10, "POWER2_LEFT": 20,
     **{(bgpy.SCALAR_CHOOSE_ONE + j * bgpy.CHOOSE_FEATURES + 4, 2): 10 for j in range(2)},
 })
 OPP_SCALE = _scales(bgpy.OPP_SCALARS, "OPP_", {

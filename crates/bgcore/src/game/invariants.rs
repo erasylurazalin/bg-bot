@@ -27,7 +27,9 @@ impl Game {
                 }
             }
             for (i, &c) in pl.discover.iter().enumerate() {
-                if !cards.get(c).is_spell() && !cards.get(c).token {
+                // A Discover whose options are ready-made minions
+                // (Kel'Thuzad's Kitty) took no pool copy at all.
+                if pl.discover_minions.is_empty() && !cards.get(c).is_spell() && !cards.get(c).token {
                     let slot = cards.get(c).pool_slot as usize;
                     // A Dark Gift offer holds one copy, three for a Golden one
                     // and none for a Dagger copy.

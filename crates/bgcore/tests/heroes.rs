@@ -144,9 +144,9 @@ fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_thirty_two_heroes() {
+fn heroes_toml_parses_with_the_sixty_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 32);
+    assert_eq!(d.heroes.heroes.len(), 60);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),
@@ -211,7 +211,7 @@ fn heroes_toml_parses_with_the_thirty_two_heroes() {
     let pw = |n: &str| d.heroes.hero_power(d.heroes.by_name(n).unwrap()).clone();
     assert!(pw("Trade Prince Gallywix").passive);
     assert_eq!(pw("Death Speaker Blackthorn").uses_per_turn, 2);
-    assert!(pw("Reno Jackson").once_per_game);
+    assert_eq!(pw("Reno Jackson").uses_per_game, 1);
     assert_eq!(pw("Alexstrasza").unlock_tier, 4);
     // The 2026-10-30 batch: the two turn-3 unlocks, and the three costs that
     // are not in the game data (a null cost is 0: two presses are buttons).
@@ -252,8 +252,9 @@ fn the_pick_offers_two_heroes_no_repeats_and_starts_turn_1() {
         // Every player answers their offer with Choose; nothing else is legal.
         while g.turn == 0 {
             let p = g.current_player().unwrap();
-            // Finley's power Discover waits before his turn 1 starts.
-            if !g.players[p].power_offer.is_empty() {
+            // Finley's power Discover waits before his turn 1 starts, and
+            // Choose Your Champion's Tier 7 Discover opens at the pick.
+            if !g.players[p].power_offer.is_empty() || !g.players[p].discover.is_empty() {
                 g.step(Action::Choose(0)).unwrap();
                 continue;
             }
@@ -291,7 +292,7 @@ fn tribe_tied_heroes_need_a_lobby_tribe() {
         let mut g = Game::new_heroes_with_lobby(data(), seed, no_ties);
         while g.turn == 0 {
             let p = g.current_player().unwrap();
-            if !g.players[p].power_offer.is_empty() {
+            if !g.players[p].power_offer.is_empty() || !g.players[p].discover.is_empty() {
                 g.step(Action::Choose(0)).unwrap();
                 continue;
             }
@@ -1087,10 +1088,13 @@ fn random_hero_games_deal_everyone_a_different_hero_without_a_pick() {
             seen.push(h);
             assert!(g.players[p].hero_offer.iter().all(|&o| o == u8::MAX), "no pick");
         }
-        // Turn 0 only waits for Finley's power Discover.
+        // Turn 0 only waits for a power Discover or Choose Your Champion's.
         while g.turn == 0 {
             let p = g.current_player().unwrap();
-            assert!(!g.players[p].power_offer.is_empty(), "seed {seed}");
+            assert!(
+                !g.players[p].power_offer.is_empty() || !g.players[p].discover.is_empty(),
+                "seed {seed}"
+            );
             g.step(Action::Choose(0)).unwrap();
         }
         assert_eq!(g.turn, 1);

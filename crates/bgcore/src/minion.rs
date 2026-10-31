@@ -165,6 +165,10 @@ pub struct Minion {
     /// may be buffed in hand, but not played or summoned until the Tavern
     /// reaches that tier. 0 for none.
     pub locked_tier: u8,
+    /// Gold the player must have spent this game before it unlocks (Thorim's
+    /// Choose Your Champion: a Tier 7 minion in hand until 60 Gold is in).
+    /// 0 for none.
+    pub locked_gold: u16,
     /// A Tomb Turning Undead that dies right after it is played, as long as
     /// that happens in the turn it was Discovered (the flag comes off in
     /// hand at the end of the turn).
@@ -202,6 +206,17 @@ pub struct Minion {
 
 impl Minion {
     /// 2 for a golden minion, else 1: what its card's numbers are multiplied by.
+    /// Whether it is locked in hand right now, for any of the locks
+    /// (DESIGN.md "Cards locked in hand"): for a turn or two, until the Tavern
+    /// reaches its tier, or until enough Gold has been spent this game. A
+    /// locked card takes a hand slot, can't be played, sold, discarded or
+    /// summoned from the hand, and hand buffs still reach it.
+    pub fn locked_in_hand(&self, tier: u8, gold_spent: u32) -> bool {
+        self.locked_turns > 0
+            || (self.locked_tier > 0 && self.locked_tier > tier)
+            || (self.locked_gold > 0 && gold_spent < self.locked_gold as u32)
+    }
+
     pub fn mul(&self) -> i32 {
         if self.golden { 2 } else { 1 }
     }

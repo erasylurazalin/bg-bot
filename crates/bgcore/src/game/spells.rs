@@ -398,20 +398,66 @@ impl Game {
         }
     }
 
+    /// Whether a spell has anything to land on right now. A spell cast
+    /// outside `Action::Play` (a taught spell, Puzzle Box's random one) can
+    /// have no legal target, so it fizzles instead of waiting on a choice
+    /// that could never be made.
+    pub(super) fn spell_castable(&self, p: usize, card: CardId) -> bool {
+        let c = self.data.cards.get(card);
+        // A Choose One spell with no option the player could pick would open
+        // a choice nothing can answer.
+        if let Some(options) = c.choose_one
+            && !options.iter().any(|&opt| self.can_choose_option(p, opt))
+        {
+            return false;
+        }
+        let Some(st) = c.spell_target else { return true };
+        (0..self.players[p].board.len()).any(|s| self.valid_spell_target(p, st, s))
+            || (st.can_target_shop()
+                && (0..self.players[p].shop.len())
+                    .any(|s| self.spell_target_ok(st, &self.players[p].shop[s])))
+    }
+
+    /// Puzzle Box: cast a random Tavern spell, at a random target when it
+    /// needs one. A spell with nothing to land on is not picked, and the
+    /// destructive ones are never cast (docs/heroes.md).
+    pub(super) fn cast_random_spell(&mut self, p: usize) {
+        let tier = self.players[p].tier;
+        let mut picked = None;
+        for _ in 0..8 {
+            let Some(c) = self.data.cards.random_castable_spell(tier, self.lobby, &mut self.rng) else {
+                return;
+            };
+            if self.spell_castable(p, c) {
+                picked = Some(c);
+                break;
+            }
+        }
+        let Some(card) = picked else { return };
+        let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+        self.cast_spell(p, m);
+        if self.players[p].pending_target.is_some() {
+            self.answer_target_at_random(p);
+        }
+        // A Choose One spell picks its option at random too (Era: the spell
+        // picks a random target).
+        if let Some(pco) = self.players[p].pending_choose_one {
+            let ok: ArrayVec<usize, 2> = (0..2)
+                .filter(|&k| self.can_choose_option(p, pco.options[k]))
+                .collect();
+            if !ok.is_empty() {
+                let k = ok[self.rng.below(ok.len() as u32) as usize];
+                self.resolve_choose(p, k);
+            }
+        }
+    }
+
     fn cast_spell_inner(&mut self, p: usize, m: Minion) {
         self.players[p].last_spell = Some(m.card);
         let c = self.data.cards.get(m.card);
         let tavern = c.tavern_spell;
         if let Some(st) = c.spell_target {
-            // A spell cast outside `Action::Play` (a taught spell) can have no
-            // legal target; it fizzles instead of waiting on a choice that
-            // could never be made.
-            let castable =
-                (0..self.players[p].board.len()).any(|s| self.valid_spell_target(p, st, s))
-                    || (st.can_target_shop()
-                        && (0..self.players[p].shop.len())
-                            .any(|s| self.spell_target_ok(st, &self.players[p].shop[s])));
-            if !castable {
+            if !self.spell_castable(p, m.card) {
                 return;
             }
             // A Blood Gem plays once per cast: Balinda sets the count and

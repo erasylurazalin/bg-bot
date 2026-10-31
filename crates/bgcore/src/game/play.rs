@@ -433,7 +433,7 @@ impl Game {
 
     /// Answer the target a Battlecry left open with a random legal minion,
     /// the board or the Tavern. Nothing legal: the target is dropped.
-    fn answer_target_at_random(&mut self, p: usize) {
+    pub(super) fn answer_target_at_random(&mut self, p: usize) {
         let Some(pt) = self.players[p].pending_target else { return };
         let mut board: ArrayVec<usize, { crate::BOARD }> = ArrayVec::new();
         for s in 0..self.players[p].board.len() {

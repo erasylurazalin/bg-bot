@@ -3,7 +3,7 @@
 //! Card ids are written as id + 1 (0 for none); the model embeds them.
 //!
 //! Layout, in order:
-//! - SCALARS own values (160):
+//! - SCALARS own values (208):
 //!   0  gold
 //!   1  tier
 //!   2  upgrade_cost
@@ -113,22 +113,26 @@
 //!   166 power unlocked
 //!   167 power usable (a button, unlocked, uses left, the Gold for it, and a
 //!   target for target powers)
-//!   168..173 the SECOND power the same way (whose power it is, cost, uses
-//!   left, used this game, unlocked, usable), Genn's and the Reinvigorating
-//!   Light trinket's
-//!   174 pending hero pick (the offer before turn 1 is open)
-//!   175 pending power pick (a Hero Power Discover or a chooser is open)
-//!   176..179 the powers it offers, one per Choose slot (CHOICES = 4, power
+//!   168 power progress: how far it has counted toward its next trigger (the
+//!   level reached for the growing ones, the Gold spent for Choose Your
+//!   Champion, the lock left for Lucky Roll)
+//!   169 power left: how many more it needs (or has left, counting down)
+//!   170..177 the SECOND power the same way (whose power it is, cost, uses
+//!   left, used this game, unlocked, usable, progress, left): Genn's and the
+//!   Reinvigorating Light trinket's
+//!   178 pending hero pick (the offer before turn 1 is open)
+//!   179 pending power pick (a Hero Power Discover or a chooser is open)
+//!   180..183 the powers it offers, one per Choose slot (CHOICES = 4, power
 //!   index + 1, 0 for an empty slot): a Hero Power Discover offers three,
 //!   Bru'kan's Elements four, so the bot picks a power and not blind
-//!   180..182 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
+//!   184..186 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
 //!   Trinkets (DESIGN.md "Trinkets and Dark Gifts"):
-//!   183..185 the lesser slot, greater slot and hero power trinket (index
+//!   187..189 the lesser slot, greater slot and hero power trinket (index
 //!   into the trinket table + 1, 0 for empty)
-//!   186..188 their "every N" counters
-//!   189 a trinket offer is open, 190 which slot it fills (1 lesser,
+//!   190..192 their "every N" counters
+//!   193 a trinket offer is open, 194 which slot it fills (1 lesser,
 //!   2 greater, 3 the power's)
-//!   191..198 the four options: trinket index + 1, then the price
+//!   195..202 the four options: trinket index + 1, then the price
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
@@ -170,7 +174,9 @@
 //!   30 from_pool (1 if backed by pool copies, 0 if generated, token or spell)
 //!   31 winners_bread (pending Winner's Bread stacks)
 //!   32 taught_spell (card id + 1 of the spell a Magicfin token casts, 0 if none)
-//!   33 locked_turns (turns it stays locked in hand, Search Through Time)
+//!   33 locked (turns it stays locked in hand for, Search Through Time; 1
+//!      while a Tavern tier or a Gold count holds it, DESIGN.md "Cards
+//!      locked in hand")
 //!   34 activate_cost (Gold of its Activate, 0 if it has none or it was
 //!      already used this turn: once per turn per minion)
 //!   35 extra_magnetize (extra times the next Magnetization to it happens, Drone Duplicator)
@@ -196,7 +202,8 @@
 
 use crate::cards::{Aura, CardDb, ChooseOption, Counter, DeityKind, SpellEffect, SpellTarget, Tribe};
 use crate::fight::Deity;
-use crate::game::{Game, Opponent, Player, ShopTargetKind, TargetKind};
+use crate::game::{Game, Opponent, Player, PowerState, ShopTargetKind, TargetKind};
+use crate::heroes::PowerEffect;
 use crate::minion::{Keywords, MAX_ATTACHED, Minion};
 use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 
@@ -349,17 +356,25 @@ pub const SCALAR_POWER_USES_LEFT: usize = 164;
 pub const SCALAR_POWER_USED_GAME: usize = 165;
 pub const SCALAR_POWER_UNLOCKED: usize = 166;
 pub const SCALAR_POWER_USABLE: usize = 167;
+/// How far the power has counted toward its next trigger (the level it has
+/// grown to for the growing ones, the Gold spent for Choose Your Champion),
+/// and how many more it needs (or has left, counting down).
+pub const SCALAR_POWER_PROGRESS: usize = 168;
+pub const SCALAR_POWER_LEFT: usize = 169;
 /// The second power, laid out like the main one: whose power it is (index
 /// into the power table + 1), cost, uses left, used this game, unlocked,
-/// usable.
-pub const SCALAR_POWER2: usize = 168;
-pub const POWER_FEATURES: usize = 6;
+/// usable, its own count and what is left of it. Every power fills these two
+/// from its own `PowerState`, so a new power needs no new scalar.
+pub const SCALAR_POWER2: usize = SCALAR_POWER_HERO + POWER_FEATURES;
+pub const POWER_FEATURES: usize = 8;
 pub const SCALAR_POWER2_HERO: usize = SCALAR_POWER2;
 pub const SCALAR_POWER2_COST: usize = SCALAR_POWER2 + 1;
 pub const SCALAR_POWER2_USES_LEFT: usize = SCALAR_POWER2 + 2;
 pub const SCALAR_POWER2_USED_GAME: usize = SCALAR_POWER2 + 3;
 pub const SCALAR_POWER2_UNLOCKED: usize = SCALAR_POWER2 + 4;
 pub const SCALAR_POWER2_USABLE: usize = SCALAR_POWER2 + 5;
+pub const SCALAR_POWER2_PROGRESS: usize = SCALAR_POWER2 + 6;
+pub const SCALAR_POWER2_LEFT: usize = SCALAR_POWER2 + 7;
 pub const SCALAR_PENDING_HERO: usize = SCALAR_POWER2 + POWER_FEATURES;
 pub const SCALAR_PENDING_POWER: usize = SCALAR_PENDING_HERO + 1;
 /// The powers an open Hero Power Discover or chooser offers, one per Choose
@@ -533,6 +548,11 @@ struct Owner {
     health: i32,
     /// Bonus a Beast gets when played (0 for a minion already on a board).
     beast_bonus: (i32, i32),
+    /// The owner's Tavern tier and the Gold it has spent this game, which a
+    /// card locked in hand reads (a locked card never leaves the hand, so an
+    /// opponent's slots always read unlocked).
+    tier: u8,
+    gold_spent: u32,
 }
 
 /// A Deity block, `DEITY_FEATURES` values starting at `base`: present, which
@@ -587,7 +607,13 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     o[SLOT_FROM_POOL] = (m.pool_copies > 0) as u8 as f32;
     o[SLOT_WINNERS_BREAD] = m.winners_bread as f32;
     o[SLOT_TAUGHT_SPELL] = m.taught_spell.map_or(0.0, |s| s as f32 + 1.0);
-    o[SLOT_LOCKED] = m.locked_turns as f32;
+    // Locked in hand (DESIGN.md "Cards locked in hand"): the turns it stays
+    // locked, or 1 while a condition holds it (a Tavern tier, Gold spent).
+    o[SLOT_LOCKED] = if m.locked_turns > 0 {
+        m.locked_turns as f32
+    } else {
+        m.locked_in_hand(owner.tier, owner.gold_spent) as u8 as f32
+    };
     // zero once used this turn, so the slot reads as "nothing to activate"
     o[SLOT_ACTIVATE_COST] = if m.activated {
         0.0
@@ -670,6 +696,10 @@ fn target_kind(k: TargetKind) -> (usize, (i32, i32)) {
         // A Tavern card steal shares the any-buff slot (a shop pick), and so
         // does becoming a copy of one.
         TargetKind::StealShopCard { .. } | TargetKind::BecomeCopy => (5, (0, 0)),
+        // Stir the Pot's throw is a pick on the board or the Tavern, like a
+        // Tavern steal; the swap is a board pick of its own.
+        TargetKind::ThrowInPot { .. } | TargetKind::SwapWithShop => (5, (0, 0)),
+        TargetKind::RemoveTierBelow => (1, (0, 0)),
     }
 }
 
@@ -692,6 +722,70 @@ pub fn magicfin_left(pl: &Player, db: &CardDb) -> u8 {
         .fold(0u8, u8::saturating_add)
 }
 
+/// How far a power has counted toward its next trigger, and how many more it
+/// needs: `(progress, left)`. One pair for every power, so a power that counts
+/// something needs no scalar of its own:
+/// - the counting ones report the count and what is left of it (Natural
+///   Balance's Tiers, Glaive Ricochet, Verdant Spheres, Gone Fishing, Heroic
+///   Inspiration, For the Horde!, Buried Treasure's digs, Stir the Pot,
+///   Upbeat Harmony, BUY, INSECT!, Reliquary Research's every third spell);
+/// - the growing ones report the level reached and the cards left to the next
+///   step (Sharpen Blades), or the Gold they pay now (Piggy Bank);
+/// - Choose Your Champion reports the Gold spent and the Gold still to go;
+/// - a chosen power counting down to its bonus reports the count and what is
+///   left (Galewing's flightpaths), and Lucky Roll's lock is in both.
+///
+/// A power with no count reports (0, 0).
+fn power_progress(game: &Game, p: usize, st: &PowerState) -> (f32, f32) {
+    let power = game.data.heroes.power(st.of);
+    let counts = game.players[p].counts;
+    let pair = |done: u32, every: u32| (done as f32, every.saturating_sub(done) as f32);
+    // A chosen power counting down to its bonus (a flightpath's "In 2 turns").
+    if power.parent.is_some() && power.complete_turns > 0 {
+        return pair(st.progress, power.complete_turns as u32);
+    }
+    match power.effect {
+        // The level the buff has grown to, and the cards to the next one.
+        PowerEffect::BuffPerBuys { every, .. } => {
+            let every = every.max(1) as u32;
+            let level = counts.cards_bought / every;
+            let left = every - counts.cards_bought % every;
+            (level as f32, left as f32)
+        }
+        PowerEffect::BuyMilestone { count, .. } => pair(st.progress, count as u32),
+        PowerEffect::RandomTribeAfterSells { every, .. }
+        | PowerEffect::CardAfterBuys { every, .. }
+        | PowerEffect::UpgradeDiscountAfterElementals { every, .. }
+        | PowerEffect::TavernBuffAfterBuys { every, .. }
+        | PowerEffect::DigForGolden { digs: every }
+        | PowerEffect::StirThePot { count: every }
+        | PowerEffect::HandCopyEvery { turns: every }
+        | PowerEffect::CopyBuyAfterMinions { every } => pair(st.progress, every as u32),
+        PowerEffect::TripleRewardAfterTiers { every }
+        | PowerEffect::TripleRewardAfterAttacks { every }
+        | PowerEffect::Champion { gold: every } => {
+            // Choose Your Champion counts the Gold spent, not its own count.
+            let done = if matches!(power.effect, PowerEffect::Champion { .. }) {
+                counts.gold_spent
+            } else {
+                st.progress
+            };
+            pair(done, every)
+        }
+        // The Gold it would pay now, and no count of its own.
+        PowerEffect::GrowingGold { base } => {
+            (base.saturating_add(st.progress.min(u8::MAX as u32) as u8) as f32, 0.0)
+        }
+        // The lock the die left, in both.
+        PowerEffect::LuckyRoll => (st.progress as f32, st.progress as f32),
+        // Every third Tavern spell bought is free.
+        PowerEffect::FreeThirdSpell => {
+            pair(counts.tavern_spells_bought % 3, 3)
+        }
+        _ => (0.0, 0.0),
+    }
+}
+
 fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     let pl = &game.players[p];
     let db = &game.data.cards;
@@ -700,7 +794,7 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     s.fill(0.0);
     s[SCALAR_GOLD] = pl.gold as f32;
     s[SCALAR_TIER] = pl.tier as f32;
-    s[SCALAR_UPGRADE_COST] = pl.upgrade_cost as f32;
+    s[SCALAR_UPGRADE_COST] = game.upgrade_price(p) as f32;
     s[SCALAR_HEALTH] = pl.health as f32;
     s[SCALAR_TURN] = game.turn as f32;
     s[SCALAR_FROZEN] = pl.frozen as u8 as f32;
@@ -839,13 +933,16 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     s[SCALAR_HERO] = pl.hero.map_or(0.0, |h| h as f32 + 1.0);
     for (second, base) in [(false, SCALAR_POWER_HERO), (true, SCALAR_POWER2_HERO)] {
         let Some(st) = pl.power_at(second) else { continue };
-        let power = db_heroes(game).power(st.of);
         s[base] = st.of as f32 + 1.0;
-        s[base + 1] = power.cost as f32;
+        // What the press costs right now, its running changes included.
+        s[base + 1] = game.power_cost(p, second) as f32;
         s[base + 2] = st.uses_left as f32;
         s[base + 3] = st.used_game as f32;
         s[base + 4] = st.unlocked as u8 as f32;
         s[base + 5] = game.power_usable_at(p, second) as u8 as f32;
+        let (progress, left) = power_progress(game, p, &st);
+        s[base + 6] = progress;
+        s[base + 7] = left;
     }
     s[SCALAR_PENDING_HERO] =
         (game.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX)) as u8 as f32;
@@ -881,19 +978,24 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     s[SCALAR_PARADOX] = game.paradox.map_or(0.0, |c| c as f32 + 1.0);
 }
 
-/// The hero table of the game's data (a shorthand for the hero features).
-fn db_heroes(game: &Game) -> &crate::heroes::HeroDb {
-    &game.data.heroes
-}
-
 /// Write player `p`'s view into `out`, which must hold OBS_SIZE values.
 pub fn write(game: &Game, p: usize, out: &mut [f32]) {
     assert_eq!(out.len(), OBS_SIZE);
     let pl = &game.players[p];
     let db = &game.data.cards;
     write_scalars(game, p, &mut out[..SCALARS]);
-    let on_board = Owner { health: pl.health, beast_bonus: (0, 0) };
-    let off_board = Owner { health: pl.health, beast_bonus: pl.beast_bonus };
+    let on_board = Owner {
+        health: pl.health,
+        beast_bonus: (0, 0),
+        tier: pl.tier,
+        gold_spent: pl.counts.gold_spent,
+    };
+    let off_board = Owner {
+        health: pl.health,
+        beast_bonus: pl.beast_bonus,
+        tier: pl.tier,
+        gold_spent: pl.counts.gold_spent,
+    };
     let mut i = SCALARS;
     i += write_slots(game, &mut out[i..], SHOP, pl.shop.iter(), off_board);
     out[i..i + SHOP_SPELL * SLOT_FEATURES].fill(0.0);
@@ -953,7 +1055,9 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
             o[OPP_TRINKET + slot] = them.trinkets[slot].of as f32;
         }
         i += OPP_SCALARS;
-        let owner = Owner { health: them.health, beast_bonus: (0, 0) };
+        // A locked card stays in its owner's hand, so their board slots are
+        // never locked; their tier is the one we last saw.
+        let owner = Owner { health: them.health, beast_bonus: (0, 0), tier: seen.tier, gold_spent: 0 };
         i += write_slots(game, &mut out[i..], BOARD, seen.board.iter(), owner);
     }
     debug_assert_eq!(i, OBS_SIZE);

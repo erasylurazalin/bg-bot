@@ -53,6 +53,10 @@ pub struct Counters {
     /// The owner's Tavern tier (Ghastcoiler picks Deathrattles up to it).
     /// 0 means unknown, which allows any tier.
     pub tier: u8,
+    /// Gold the owner has spent this game, which a card locked in hand until
+    /// a Gold count (Choose Your Champion) reads before it may be summoned
+    /// from the hand.
+    pub gold_spent: u32,
     pub boon_of_beetles: u8,
     pub brood_of_nozdormu: u8,
     pub upper_hand: u8,
@@ -124,6 +128,7 @@ impl Default for Counters {
             beast_attack: 0,
             beast_health: 0,
             tier: 0,
+            gold_spent: 0,
             boon_of_beetles: 0,
             brood_of_nozdormu: 0,
             upper_hand: 0,
@@ -360,6 +365,11 @@ pub struct SideOutcome {
     /// (Snarky Portrait: a Fishbait).
     pub death_cards: [(CardId, u16); 4],
     pub n_death_cards: u8,
+    /// Every minion that died on this side, tokens and summoned ones
+    /// included, in the order they died: Reclaimed Souls picks from both
+    /// sides' lists.
+    pub dead_cards: [CardId; DEAD_CARDS],
+    pub n_dead_cards: u8,
     /// Friendly minions summoned here, by `Tribe::EVERY` index, for the
     /// "after N Beasts summoned" counters (Wildfeather Duster).
     pub summon_tribes: [u16; Tribe::EVERY.len()],
@@ -384,7 +394,19 @@ pub struct SeenCounters {
     pub spell: (i32, i32),
 }
 
+/// The minions one side may record as dead for Reclaimed Souls.
+pub const DEAD_CARDS: usize = 16;
+
 impl SideOutcome {
+    /// One more minion died here, whatever its side: a token and a summoned
+    /// minion count (Reclaimed Souls can find a Beetle).
+    pub fn note_dead_card(&mut self, card: CardId) {
+        if (self.n_dead_cards as usize) < DEAD_CARDS {
+            self.dead_cards[self.n_dead_cards as usize] = card;
+            self.n_dead_cards += 1;
+        }
+    }
+
     /// One more friendly death of `card` here (Snarky Portrait's Fishbait).
     pub fn note_death_card(&mut self, card: CardId) {
         for i in 0..self.n_death_cards as usize {
@@ -664,10 +686,11 @@ impl<'a> Side<'a> {
             if self.hand_taken(i)
                 || db.get(m.card).is_spell()
                 || !db.tribes_of(m).has(tribe)
-                // A card locked in hand until a Tavern tier (Faelin's
-                // Expedition Plans) cannot be summoned either, not even by a
-                // Battlecry or a Start of Combat that reaches into the hand.
+                // A card locked in hand (Faelin's Tier, Thorim's Gold) cannot
+                // be summoned either, not even by a Battlecry or a Start of
+                // Combat that reaches into the hand.
                 || (m.locked_tier > 0 && m.locked_tier > self.counters.tier)
+                || (m.locked_gold > 0 && self.counters.gold_spent < m.locked_gold as u32)
             {
                 continue;
             }
@@ -2634,6 +2657,7 @@ impl<'a> Side<'a> {
             let fm = self.remove(i);
             let dead = fm.m;
             w.death(side, i, &dead);
+            self.out.note_dead_card(dead.card);
             if self.counters.trinkets.count_deaths {
                 self.out.friendly_deaths = self.out.friendly_deaths.saturating_add(1);
                 self.out.note_death_card(dead.card);

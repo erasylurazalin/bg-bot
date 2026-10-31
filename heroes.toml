@@ -384,3 +384,230 @@ name = "Nightmare Lord Xavius"
 card_id = "BG36_HERO_105"
 armor = 6
 power = { name = "Feel Devastation", card_id = "BG36_HERO_105p", passive = true, effect = { dark_gift_every = 4 } }
+
+# ---- hero batch 1 (2026-11-01): gold and prices, counters, Discover and
+# generate. Armor, card_ids and the powers' own numbers are from
+# ref/bg-meta.json, matched by card_id. The rules for each of them are in
+# docs/heroes.md "Hero batch rules (Era, 2026-11-01)".
+
+# Sharpen Blades: +2/+2, and +1/+1 more for every 4 cards bought this game.
+[[hero]]
+name = "Edwin VanCleef"
+card_id = "TB_BaconShop_HERO_01"
+armor = 15
+tribes = ["elemental", "murloc", "pirate"]
+power = { name = "Sharpen Blades", card_id = "TB_BaconShop_HP_001", cost = 1, effect = { buff_per_buys = [2, 2, 4] } }
+
+# Tinker: Discover a Magnetic Mech up to the player's Tier, from the pool.
+[[hero]]
+name = "Millificent Manastorm"
+card_id = "TB_BaconShop_HERO_17"
+armor = 15
+tribes = ["mech"]
+power = { name = "Tinker", card_id = "TB_BaconShop_HP_015", cost = 1, unlock_tier = 4, effect = { discover_magnetic = true } }
+
+# Pirate Parrrrty!: a random Pirate, and every Pirate bought takes 1 off the
+# next press, stacking until the press.
+[[hero]]
+name = "Patches the Pirate"
+card_id = "TB_BaconShop_HERO_18"
+armor = 19
+tribes = ["pirate"]
+power = { name = "Pirate Parrrrty!", card_id = "TB_BaconShop_HP_072", cost = 3, effect = { get_tribe_cut_cost = { tribe = "pirate", gold = 1 } } }
+
+# Puzzle Box: a random Tavern spell at a random target at the start of each
+# turn, once the power unlocks on turn 3.
+[[hero]]
+name = "Yogg-Saron, Hope's End"
+card_id = "TB_BaconShop_HERO_35"
+armor = 10
+power = { name = "Puzzle Box", card_id = "TB_BaconShop_HP_039t", passive = true, unlock_turn = 3, effect = { cast_random_spell = true } }
+
+# Lead Explorer: Discover a minion of the player's own Tier; every press costs
+# 1 more for the rest of the game.
+[[hero]]
+name = "Elise Starseeker"
+card_id = "TB_BaconShop_HERO_42"
+armor = 15
+power = { name = "Lead Explorer", card_id = "TB_BaconShop_HP_047", cost = 1, effect = { discover_my_tier_costs_more = 1 } }
+
+# Battle Brand: after 4 Battlecry minions bought, a Brann Bronzebeard, once a
+# game.
+[[hero]]
+name = "Dinotamer Brann"
+card_id = "TB_BaconShop_HERO_43"
+armor = 18
+power = { name = "Battle Brand", card_id = "TB_BaconShop_HP_048", passive = true, once_per_game = true, effect = { card_after_buys = { every = 4, of = "battlecry", card = "Brann Bronzebeard" } } }
+
+# Manastorm: minions and Refreshes cost 2, Tavern spells keep their own cost,
+# and upgrading costs 1 more at every tier.
+[[hero]]
+name = "Millhouse Manastorm"
+card_id = "TB_BaconShop_HERO_49"
+armor = 16
+power = { name = "Manastorm", card_id = "TB_BaconShop_HP_054", passive = true, effect = { prices = { minion = 2, refresh = 2, upgrade_extra = 1 } } }
+
+# Gone Fishing: a random Murloc after every 5 minions sold, by an effect too.
+[[hero]]
+name = "Fungalmancer Flurgl"
+card_id = "TB_BaconShop_HERO_55"
+armor = 12
+tribes = ["murloc"]
+power = { name = "Gone Fishing", card_id = "TB_BaconShop_HP_056", passive = true, effect = { random_tribe_after_sells = { every = 5, tribe = "murloc" } } }
+
+# Verdant Spheres: a Tavern Coin after every 3 minions bought.
+[[hero]]
+name = "Kael'thas Sunstrider"
+card_id = "TB_BaconShop_HERO_60"
+armor = 18
+power = { name = "Verdant Spheres", card_id = "TB_BaconShop_HP_066", passive = true, effect = { card_after_buys = { every = 3, of = "minions", card = "Tavern Coin" } } }
+
+# Buried Treasure: digs 1 to 3 give nothing, the 4th a Golden minion up to the
+# player's Tier, and the digging starts over.
+[[hero]]
+name = "Captain Eudora"
+card_id = "TB_BaconShop_HERO_64"
+armor = 14
+power = { name = "Buried Treasure", card_id = "TB_BaconShop_HP_074", cost = 1, effect = { dig_for_golden = 4 } }
+
+# Trash for Treasure: remove a friendly minion (not a sale, its pool copy
+# back), then Discover one from the Tier below it.
+[[hero]]
+name = "Captain Hooktusk"
+card_id = "TB_BaconShop_HERO_67"
+armor = 14
+power = { name = "Trash for Treasure", card_id = "TB_BaconShop_HP_075", effect = { discover_below = true } }
+
+# Piggy Bank: 2 Gold, one more for every turn waited, once a game.
+[[hero]]
+name = "Skycap'n Kragg"
+card_id = "TB_BaconShop_HERO_68"
+armor = 14
+power = { name = "Piggy Bank", card_id = "TB_BaconShop_HP_076", once_per_game = true, effect = { growing_gold = 2 } }
+
+# Kel'Thuzad's Kitty: Discover a minion from the warband of the last hero to
+# die, exactly as it stood (buffs, Dark Gifts, Golden included).
+[[hero]]
+name = "Mr. Bigglesworth"
+card_id = "TB_BaconShop_HERO_70"
+armor = 19
+power = { name = "Kel'Thuzad's Kitty", card_id = "TB_BaconShop_HP_080", passive = true, effect = { kitty_discover = true } }
+
+# Swap, Lock, & Shop It: a friendly non-Golden minion and a random Tavern
+# minion trade places, buffs and all; not a buy and not a play.
+[[hero]]
+name = "Jandice Barov"
+card_id = "TB_BaconShop_HERO_71"
+armor = 18
+power = { name = "Swap, Lock, & Shop It", card_id = "TB_BaconShop_HP_084", effect = { swap_with_shop = true } }
+
+# Avalanche: 3 off the upgrade, on the price it stands at now, down to 0, for
+# every 3 Elementals played.
+[[hero]]
+name = "Chenvaala"
+card_id = "TB_BaconShop_HERO_78"
+armor = 15
+tribes = ["elemental"]
+power = { name = "Avalanche", card_id = "TB_BaconShop_HP_088", passive = true, effect = { upgrade_discount_elements = [3, 3] } }
+
+# Three Wishes: the third copy of a pair of minions, from the pool, 3 times a
+# game.
+[[hero]]
+name = "Zephrys, the Great"
+card_id = "TB_BaconShop_HERO_91"
+armor = 17
+power = { name = "Three Wishes", card_id = "TB_BaconShop_HP_102", cost = 3, uses_per_game = 3, effect = { three_wishes = true } }
+
+# Natural Balance: a Triple Reward for every 20 Tiers' worth of cards bought.
+[[hero]]
+name = "Guff Runetotem"
+card_id = "BG20_HERO_242"
+armor = 12
+power = { name = "Natural Balance", card_id = "BG20_HERO_242p", passive = true, effect = { triple_reward_after_tiers = 20 } }
+
+# For the Horde!: the Tavern has +1/+1, one more of each for every 3 minions
+# bought.
+[[hero]]
+name = "Overlord Saurfang"
+card_id = "BG20_HERO_102"
+armor = 15
+tribes = ["demon", "elemental", "mech"]
+power = { name = "For the Horde!", card_id = "BG20_HERO_102p", passive = true, effect = { tavern_buff_after_buys = [1, 1, 3] } }
+
+# Glaive Ricochet: once a turn, after 3 minions bought, a plain copy of a
+# random one of them.
+[[hero]]
+name = "Kurtrus Ashfallen"
+card_id = "BG20_HERO_280"
+armor = 16
+power = { name = "Glaive Ricochet", card_id = "BG20_HERO_280p5", passive = true, effect = { copy_buy_after_minions = 3 } }
+
+# Stir the Pot: throw a minion of the board or the Tavern into the pot (gone
+# for good), and the third throw Discovers one minion per thrown type.
+[[hero]]
+name = "Cookie the Cook"
+card_id = "BG21_HERO_020"
+armor = 8
+power = { name = "Stir the Pot", card_id = "BG21_HERO_020p", effect = { stir_the_pot = 3 } }
+
+# The Perfect Crime: steal every card in the Tavern, and each turn the next
+# press costs 1 less, down to 0.
+[[hero]]
+name = "Heistbaron Togwaggle"
+card_id = "BG23_HERO_305"
+armor = 16
+power = { name = "The Perfect Crime", card_id = "BG23_HERO_305p", cost = 11, cheaper_each_turn = true, effect = { steal_all_tavern = true } }
+
+# Reclaimed Souls: Discover a plain copy, from the pool, of a minion that died
+# in the last fight, either side.
+[[hero]]
+name = "Sylvanas Windrunner"
+card_id = "BG23_HERO_306"
+armor = 10
+power = { name = "Reclaimed Souls", card_id = "BG23_HERO_306p", cost = 2, unlock_turn = 3, effect = { discover_dead_minion = true } }
+
+# Upbeat Harmony: a plain copy of the left-most card in hand at the end of
+# every 3 turns.
+[[hero]]
+name = "Rock Master Voone"
+card_id = "BG26_HERO_104"
+armor = 15
+power = { name = "Upbeat Harmony", card_id = "BG26_HERO_104p", passive = true, effect = { hand_copy_every = 3 } }
+
+# Choose Your Champion: a Tier 7 minion Discovered at the start of the game
+# and held next to the hero until 60 Gold has been spent.
+[[hero]]
+name = "Thorim, Stormlord"
+card_id = "BG27_HERO_801"
+armor = 18
+power = { name = "Choose Your Champion", card_id = "BG27_HERO_801p2", passive = true, effect = { champion = 60 } }
+
+# Lucky Roll: a fair six-sided die, that much Gold, and the button locked for
+# that many turns.
+[[hero]]
+name = "Snake Eyes"
+card_id = "BG28_HERO_400"
+armor = 8
+power = { name = "Lucky Roll", card_id = "BG28_HERO_400p", cost = 1, effect = { lucky_roll = true } }
+
+# Reliquary Research: every third Tavern spell bought costs 0.
+[[hero]]
+name = "Tae'thelan Bloodwatcher"
+card_id = "BG28_HERO_800"
+armor = 18
+power = { name = "Reliquary Research", card_id = "BG28_HERO_800p", passive = true, effect = { free_third_spell = true } }
+
+# The Galaxy's Lens: a fresh copy of the last Tavern spell cast, and each turn
+# the next press costs 1 less, down to 0.
+[[hero]]
+name = "Farseer Nobundo"
+card_id = "BG31_HERO_003"
+armor = 15
+power = { name = "The Galaxy's Lens", card_id = "BG31_HERO_003p", cost = 3, cheaper_each_turn = true, effect = { copy_last_spell = true } }
+
+# Heroic Inspiration: a Triple Reward for every 15 friendly attacks in fights.
+[[hero]]
+name = "Loh, the Living Legend"
+card_id = "BG33_HERO_001"
+armor = 19
+power = { name = "Heroic Inspiration", card_id = "BG33_HERO_001p_ALT", passive = true, effect = { triple_reward_after_attacks = 15 } }

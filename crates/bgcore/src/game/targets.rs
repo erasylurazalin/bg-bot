@@ -25,7 +25,7 @@ use super::{
     TargetKind,
     TavernBuff,
 };
-use super::shop::golden_up;
+use super::shop::{give_back, golden_up};
 use super::effects::buff;
 
 impl Game {
@@ -117,6 +117,12 @@ impl Game {
                 let Some(src) = pt.source.map(|x| x as usize) else { return };
                 let copy = self.players[p].shop[slot];
                 self.become_copy_of(p, src, copy);
+            }
+            // Stir the Pot: a thrown Tavern minion is gone for good, so its
+            // pool copy is not given back.
+            TargetKind::ThrowInPot { count } => {
+                let m = self.players[p].shop.remove(slot);
+                self.stir_the_pot(p, m, count);
             }
             TargetKind::Spell(st) => {
                 let target = slot;
@@ -463,6 +469,26 @@ impl Game {
                     let copy = self.players[p].board[s];
                     self.become_copy_of(p, src, copy);
                 }
+            }
+            // Trash for Treasure: the minion is removed (not sold: no Gold,
+            // no sell triggers, its pool copy back) and the Discover is one
+            // Tier below it, never below 1.
+            TargetKind::RemoveTierBelow => {
+                let tier = self.data.cards.get(self.players[p].board[s].card).tier;
+                let m = self.players[p].board.remove(s);
+                give_back(&mut self.pool, &self.data.cards, &m);
+                let lower = tier.saturating_sub(1).max(1);
+                let _ = self.players[p].discover_queue.try_push(DiscoverRequest::MinionTier(lower));
+                self.maybe_start_discover(p);
+            }
+            // Swap, Lock, & Shop It: the picked minion goes into the Tavern
+            // and a random Tavern minion takes its place on the board.
+            TargetKind::SwapWithShop => self.swap_with_shop(p, s),
+            // Stir the Pot: the minion is gone for good, so its pool copy is
+            // not given back.
+            TargetKind::ThrowInPot { count } => {
+                let m = self.players[p].board.remove(s);
+                self.stir_the_pot(p, m, count);
             }
             TargetKind::Consume { pick, keywords, count, stat_mul, .. } => {
                 self.start_consume(p, s, pick, keywords, count, stat_mul);

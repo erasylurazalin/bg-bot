@@ -21,15 +21,18 @@ use crate::{
     PLAYERS,
     SHOP,
 };
+use crate::heroes::BuyKind;
 use super::{
     DiscoverRequest,
     Game,
     PendingDiscard,
     PendingTarget,
     PowerState,
+    TavernBuff,
     TargetKind,
 };
 use super::effects::buff;
+use crate::minion::Minion;
 
 impl Game {
     /// Deal the hero offers and start the pick phase (turn 0): the living
@@ -126,6 +129,27 @@ impl Game {
             // random tribe of the lobby, before turn 1.
             self.rotate_family_power(p, false);
         }
+        // What a power does at the start of the game: For the Horde!'s Tavern
+        // buff, and Choose Your Champion's Tier 7 Discover.
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            match self.data.heroes.power(st.of).effect {
+                PowerEffect::TavernBuffAfterBuys { attack, health, .. } => {
+                    self.players[p].add_tavern_buff(
+                        &self.data.cards,
+                        TavernBuff { tribe: None, attack, health, this_turn: false },
+                    );
+                }
+                PowerEffect::Champion { gold } => {
+                    let gold = gold.min(u16::MAX as u32) as u16;
+                    let _ = self.players[p]
+                        .discover_queue
+                        .try_push(DiscoverRequest::Champion(gold));
+                    self.maybe_start_discover(p);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Set each held power's unlock flag from the player's tier and the turn
@@ -182,6 +206,58 @@ impl Game {
         self.set_power(p, second, Some(options[k]));
     }
 
+    /// What the player's power button costs right now: its card cost plus the
+    /// running change every press leaves behind (Lead Explorer's +1) or a
+    /// buy takes off (Pirate Parrrrty!) or the end of a turn takes off (The
+    /// Perfect Crime, The Galaxy's Lens), never below 0.
+    pub fn power_cost(&self, p: usize, second: bool) -> u8 {
+        let Some(st) = self.players[p].power_at(second) else { return 0 };
+        let base = self.data.heroes.power(st.of).cost as i32;
+        (base + st.cost_delta as i32).max(0) as u8
+    }
+
+    /// The Tavern prices a power sets (Manastorm): what a minion and a
+    /// Refresh cost, and what upgrading costs on top of the tier's price.
+    pub(super) fn power_prices(&self, p: usize) -> Option<(u8, u8, u8)> {
+        for second in [false, true] {
+            if let Some(st) = self.players[p].power_at(second)
+                && let PowerEffect::Prices { minion, refresh, upgrade_extra } =
+                    self.data.heroes.power(st.of).effect
+            {
+                return Some((minion, refresh, upgrade_extra));
+            }
+        }
+        None
+    }
+
+    /// What a Refresh costs this player: the rules' price, or a power's own.
+    pub fn refresh_cost(&self, p: usize) -> u8 {
+        match self.power_prices(p) {
+            Some((_, refresh, _)) => refresh,
+            None => self.data.rules.roll_cost,
+        }
+    }
+
+    /// What upgrading the Tavern costs this player: the tier's price as it
+    /// stands (the turns and Avalanche take from it) plus a power's extra.
+    pub fn upgrade_price(&self, p: usize) -> u8 {
+        let extra = self.power_prices(p).map_or(0, |(_, _, e)| e);
+        self.players[p].upgrade_cost.saturating_add(extra)
+    }
+
+    /// What a Tavern spell costs this player before its discount: 0 when a
+    /// power makes this one free (Reliquary Research's every third spell).
+    /// A spell paid with Health still costs Health: the free one is free of
+    /// Gold.
+    pub(super) fn spell_price(&self, p: usize, card: CardId) -> u8 {
+        let every_third =
+            self.power_slot(p, |e| matches!(e, PowerEffect::FreeThirdSpell)).is_some();
+        if every_third && (self.players[p].counts.tavern_spells_bought + 1).is_multiple_of(3) {
+            return 0;
+        }
+        self.data.cards.get(card).cost
+    }
+
     /// Whether the player's MAIN power button may be pressed right now.
     pub fn power_usable(&self, p: usize) -> bool {
         self.power_usable_at(p, false)
@@ -204,8 +280,8 @@ impl Game {
             || pl.trinkets[super::trinkets::POWER_SLOT].of != 0
             || !st.unlocked
             || st.uses_left == 0
-            || (power.once_per_game && st.used_game > 0)
-            || pl.gold < power.cost
+            || (power.uses_per_game > 0 && st.used_game >= power.uses_per_game as u32)
+            || pl.gold < self.power_cost(p, second)
         {
             return false;
         }
@@ -229,6 +305,23 @@ impl Game {
             // Both minions must fit in hand to stay a linked pair (Dark
             // Ritual).
             PowerEffect::GetLinkedMinions(n) => pl.hand.len() + n as usize <= HAND,
+            // A minion to buff, to remove, or to throw in the pot.
+            PowerEffect::BuffPerBuys { .. } | PowerEffect::DiscoverBelow => !pl.board.is_empty(),
+            // A typed minion of the board or the Tavern to throw.
+            PowerEffect::StirThePot { .. } => self.has_throwable(p),
+            // A non-Golden minion of the board and a minion in the Tavern.
+            PowerEffect::SwapWithShop => {
+                shop_minion && pl.board.iter().any(|m| !m.golden)
+            }
+            // Two plain copies to make a pair, and room for the third.
+            PowerEffect::ThreeWishes => hand_room && !self.three_wishes_pairs(p).is_empty(),
+            // A Tavern spell to copy.
+            PowerEffect::CopyLastSpell => {
+                hand_room
+                    && pl.last_spell.is_some_and(|c| self.data.cards.get(c).tavern_spell)
+            }
+            // The fourth dig hands out a Golden minion.
+            PowerEffect::DigForGolden { .. } => hand_room,
             // A press that only completes a chooser's pick needs nothing.
             _ => true,
         }
@@ -240,7 +333,7 @@ impl Game {
     pub(super) fn press_power(&mut self, p: usize, second: bool) {
         let (of, cost) = {
             let st = self.players[p].power_at(second).unwrap();
-            (st.of, self.data.heroes.power(st.of).cost)
+            (st.of, self.power_cost(p, second))
         };
         let effect = self.data.heroes.power(of).effect;
         let st = self.players[p].power_at_mut(second).unwrap();
@@ -378,6 +471,162 @@ impl Game {
                 pl.power_offer = picks;
                 pl.power_offer_second = second;
             }
+            // Sharpen Blades: the buff grows by 1 for every `every` cards
+            // bought this game (docs/heroes.md).
+            PowerEffect::BuffPerBuys { attack, health, every } => {
+                let grown = (self.players[p].counts.cards_bought / every.max(1) as u32) as i32;
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::MinionBuff {
+                        tribe: None,
+                        attack: attack + grown,
+                        health: health + grown,
+                        keyword: 0,
+                        random_keyword: false,
+                    },
+                    runs,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            PowerEffect::DiscoverMagnetic => {
+                for _ in 0..runs {
+                    let _ = self.players[p].discover_queue.try_push(DiscoverRequest::MagneticMinion);
+                }
+                self.maybe_start_discover(p);
+            }
+            // Pirate Parrrrty!: a random Pirate, and the price goes back to
+            // the card's own: the discount is for the next press only.
+            PowerEffect::GetTribeCutCost { tribe, .. } => {
+                let mut pos = 0;
+                for _ in 0..runs {
+                    self.run_effect(p, &mut pos, Effect::GetRandomMinion { tribe }, false, 1);
+                }
+                if let Some(st) = self.players[p].power_at_mut(second) {
+                    st.cost_delta = 0;
+                }
+            }
+            // Lead Explorer: a minion of the player's own Tier, and every
+            // press costs more from here on.
+            PowerEffect::DiscoverMyTierCostsMore { more } => {
+                let tier = self.players[p].tier;
+                for _ in 0..runs {
+                    let _ = self.players[p].discover_queue.try_push(DiscoverRequest::MinionTier(tier));
+                }
+                self.maybe_start_discover(p);
+                if let Some(st) = self.players[p].power_at_mut(second) {
+                    st.cost_delta = st.cost_delta.saturating_add((more as i16 * runs as i16) as i8);
+                }
+            }
+            // Buried Treasure: one dig a press; the fourth is a Golden minion
+            // up to the player's Tier and the digging starts over.
+            PowerEffect::DigForGolden { digs } => {
+                let mut found = 0;
+                for _ in 0..runs {
+                    let Some(st) = self.players[p].power_at_mut(second) else { break };
+                    st.progress += 1;
+                    if st.progress >= digs as u32 {
+                        st.progress = 0;
+                        found += 1;
+                    }
+                }
+                let tier = self.players[p].tier;
+                for _ in 0..found {
+                    self.give_golden_minion(p, 1, tier, false, false);
+                }
+            }
+            // Trash for Treasure: remove a friendly minion, then Discover one
+            // from the Tier below it.
+            PowerEffect::DiscoverBelow => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::RemoveTierBelow,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // Piggy Bank: the Gold it holds, once a game.
+            PowerEffect::GrowingGold { base } => {
+                let waited = self.players[p].power_at(second).map_or(0, |st| st.progress);
+                let gold = base.saturating_add(waited.min(u8::MAX as u32) as u8);
+                self.players[p].gold = self.players[p].gold.saturating_add(gold);
+            }
+            PowerEffect::SwapWithShop => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::SwapWithShop,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // Three Wishes: the third copy of a pair, from the pool.
+            PowerEffect::ThreeWishes => {
+                let pairs = self.three_wishes_pairs(p);
+                let pick = if pairs.is_empty() {
+                    None
+                } else {
+                    Some(pairs[self.rng.below(pairs.len() as u32) as usize])
+                };
+                if let Some(card) = pick {
+                    let slot = self.data.cards.get(card).pool_slot as usize;
+                    if self.pool[slot] > 0 && !self.players[p].hand.is_full() {
+                        self.pool[slot] -= 1;
+                        let m = self.players[p].make_card(&self.data.cards, card, false, 1);
+                        self.add_to_hand(p, m);
+                        self.check_triple(p, card);
+                    }
+                }
+            }
+            // Stir the Pot: one throw a press.
+            PowerEffect::StirThePot { count } => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::ThrowInPot { count },
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            PowerEffect::StealAllTavern => {
+                for _ in 0..runs {
+                    self.steal_all_tavern(p);
+                }
+            }
+            // Reclaimed Souls: up to three plain copies of minions that died
+            // in the last fight, either side.
+            PowerEffect::DiscoverDeadMinion => {
+                for _ in 0..runs {
+                    let _ = self.players[p].discover_queue.try_push(DiscoverRequest::DeadLastFight);
+                }
+                self.maybe_start_discover(p);
+            }
+            // The Galaxy's Lens: a fresh copy of the last Tavern spell cast.
+            PowerEffect::CopyLastSpell => {
+                if let Some(card) = self.players[p].last_spell
+                    && self.data.cards.get(card).tavern_spell
+                {
+                    for _ in 0..runs {
+                        self.give_generated(p, card);
+                    }
+                }
+            }
+            // Lucky Roll: a fair six-sided die, and the power is locked for
+            // that many turns.
+            PowerEffect::LuckyRoll => {
+                for _ in 0..runs {
+                    let roll = self.rng.below(6) as u8 + 1;
+                    self.players[p].gold = self.players[p].gold.saturating_add(roll);
+                    let Some(st) = self.players[p].power_at_mut(second) else { break };
+                    st.progress = st.progress.saturating_add(roll as u32);
+                    st.uses_left = 0;
+                }
+            }
             _ => {}
         }
         // "After you use your Hero Power, gain (1) Gold" (Sous Chef Sticker):
@@ -489,6 +738,61 @@ impl Game {
                         self.maybe_start_discover(p);
                     }
                 }
+                // Puzzle Box: cast a random Tavern spell, once unlocked.
+                PowerEffect::CastRandomSpell => {
+                    if self.players[p].power_at(second).is_some_and(|st| st.unlocked) {
+                        for _ in 0..runs {
+                            self.cast_random_spell(p);
+                        }
+                    }
+                }
+                // Piggy Bank: one more Gold for every turn waited.
+                PowerEffect::GrowingGold { .. } => {
+                    if turn > 1
+                        && let Some(st) = self.players[p].power_at_mut(second)
+                    {
+                        st.progress = st.progress.saturating_add(1);
+                    }
+                }
+                // Lucky Roll: a turn of the cooldown the die set comes off,
+                // and the button stays locked while any is left.
+                PowerEffect::LuckyRoll => {
+                    if let Some(st) = self.players[p].power_at_mut(second)
+                        && st.progress > 0
+                    {
+                        st.progress -= 1;
+                        st.uses_left = 0;
+                    }
+                }
+                // Glaive Ricochet: "once per turn" starts over, and the three
+                // minions it copies are this turn's.
+                // Kel'Thuzad's Kitty: one Discover per hero that died in the
+                // round before this one, back to back.
+                PowerEffect::KittyDiscover => {
+                    let n = self.kitty_warbands.len();
+                    let mut queued = 0;
+                    for i in 0..n {
+                        // Only the round that just ended: a warband stays for
+                        // its offers, which the holder may answer later in the
+                        // turn.
+                        if self.kitty_warbands[i].0 + 1 != turn {
+                            continue;
+                        }
+                        let _ = self.players[p]
+                            .discover_queue
+                            .try_push(DiscoverRequest::DeadWarband(i as u8));
+                        queued += 1;
+                    }
+                    if queued > 0 {
+                        self.maybe_start_discover(p);
+                    }
+                }
+                PowerEffect::CopyBuyAfterMinions { .. } => {
+                    if let Some(st) = self.players[p].power_at_mut(second) {
+                        st.progress = 0;
+                    }
+                    self.players[p].recent_buys.clear();
+                }
                 _ => {}
             }
         }
@@ -556,24 +860,277 @@ impl Game {
                     buff(&mut self.players[p].board[n - 1], attack, health);
                 }
             }
-        }
-    }
-
-    /// A card was bought (BUY, INSECT! counts them): the power may become
-    /// another one. Free buys and Tavern spells count; a steal does not, as it
-    /// never comes through here.
-    pub(super) fn power_bought_card(&mut self, p: usize) {
-        for second in [false, true] {
-            let Some(st) = self.players[p].power_at(second) else { continue };
-            let effect = self.data.heroes.power(st.of).effect;
-            if let PowerEffect::BuyMilestone { count, becomes } = effect {
-                let sl = self.players[p].power_at_mut(second).unwrap();
-                sl.progress = sl.progress.saturating_add(1);
-                if sl.progress >= count as u32 {
-                    self.set_power(p, second, Some(becomes));
+            // The Perfect Crime and The Galaxy's Lens: the next press costs 1
+            // less, down to 0.
+            if self.data.heroes.power(st.of).cheaper_each_turn
+                && let Some(st) = self.players[p].power_at_mut(second)
+            {
+                st.cost_delta = st.cost_delta.saturating_sub(1);
+            }
+            // Upbeat Harmony: a plain copy of the left-most card in hand
+            // every `turns` turns.
+            if let PowerEffect::HandCopyEvery { turns } = effect {
+                let done = {
+                    let Some(st) = self.players[p].power_at_mut(second) else { continue };
+                    st.progress += 1;
+                    if st.progress >= turns as u32 {
+                        st.progress = 0;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if done
+                    && let Some(&card) = self.players[p].hand.first()
+                {
+                    for _ in 0..runs {
+                        self.give_generated(p, card.card);
+                    }
                 }
             }
         }
+    }
+
+    /// A card was bought: the shared hero-power counters grow (`HeroCounts`),
+    /// and every power that watches a buy runs. Free buys and Tavern spells
+    /// count; a steal does not, as it never comes through here.
+    pub(super) fn power_bought_card(&mut self, p: usize, bought: &Minion) {
+        let card = self.data.cards.get(bought.card);
+        let is_spell = card.is_spell();
+        let (tier, tavern_spell, battlecry) =
+            (card.tier, is_spell && card.tavern_spell, card.battlecry.is_some());
+        let tribes = self.data.cards.tribes_of(bought);
+        {
+            let c = &mut self.players[p].counts;
+            c.cards_bought = c.cards_bought.saturating_add(1);
+            c.tiers_bought = c.tiers_bought.saturating_add(tier as u32);
+            if tavern_spell {
+                c.tavern_spells_bought = c.tavern_spells_bought.saturating_add(1);
+            }
+            if !is_spell {
+                c.minions_bought = c.minions_bought.saturating_add(1);
+                if battlecry {
+                    c.battlecry_bought = c.battlecry_bought.saturating_add(1);
+                }
+            }
+        }
+        // Glaive Ricochet copies one of the three minions it has seen.
+        if !is_spell {
+            let r = &mut self.players[p].recent_buys;
+            if r.is_full() {
+                r.remove(0);
+            }
+            let _ = r.try_push(bought.card);
+        }
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let power = self.data.heroes.power(st.of);
+            let effect = power.effect;
+            // A passive that works once (or a few times) a game is used up.
+            if power.passive
+                && power.uses_per_game > 0
+                && st.used_game >= power.uses_per_game as u32
+            {
+                continue;
+            }
+            match effect {
+                PowerEffect::BuyMilestone { count, becomes } => {
+                    if self.power_count_up(p, second, count as u32) {
+                        self.set_power(p, second, Some(becomes));
+                    }
+                }
+                // "After you buy a Pirate, gain 1 Gold" (I'm the Cap'n Now).
+                PowerEffect::GoldAfterBuyTribe { tribe, gold } => {
+                    if tribes.has(tribe) && !is_spell {
+                        let runs = self.players[p].tp.power_triggers.max(1);
+                        let gold = gold.saturating_mul(runs);
+                        self.players[p].gold = self.players[p].gold.saturating_add(gold);
+                    }
+                }
+                // "After you buy a Pirate, your next Hero Power costs (1)
+                // less" (Pirate Parrrrty!), stacking until the next press.
+                PowerEffect::GetTribeCutCost { tribe, gold } => {
+                    if tribes.has(tribe) && !is_spell
+                        && let Some(st) = self.players[p].power_at_mut(second)
+                    {
+                        st.cost_delta = st.cost_delta.saturating_sub(gold as i8);
+                    }
+                }
+                // Verdant Spheres' Tavern Coin, Battle Brand's Brann.
+                PowerEffect::CardAfterBuys { every, of, card: prize } => {
+                    let counted = match of {
+                        BuyKind::Cards => true,
+                        BuyKind::Minions => !is_spell,
+                        BuyKind::Battlecry => !is_spell && battlecry,
+                    };
+                    if counted && self.power_count_up(p, second, every as u32) {
+                        self.give_generated(p, prize);
+                        if let Some(st) = self.players[p].power_at_mut(second) {
+                            st.used_game += 1;
+                        }
+                    }
+                }
+                // Natural Balance: 20 Tiers' worth of cards is a Triple
+                // Reward, and the count starts over.
+                PowerEffect::TripleRewardAfterTiers { every } => {
+                    let Some(st) = self.players[p].power_at_mut(second) else { break };
+                    st.progress += tier as u32;
+                    if st.progress >= every {
+                        st.progress -= every;
+                        self.give_triple_reward(p);
+                    }
+                }
+                // For the Horde!: the Tavern has +1/+1, and one more of each
+                // every 3 minions bought.
+                PowerEffect::TavernBuffAfterBuys { attack, health, every } => {
+                    if !is_spell && self.power_count_up(p, second, every as u32) {
+                        self.players[p].add_tavern_buff(
+                            &self.data.cards,
+                            TavernBuff { tribe: None, attack, health, this_turn: false },
+                        );
+                    }
+                }
+                // Glaive Ricochet: once a turn, after 3 minions bought, a
+                // plain copy of a random one of them.
+                PowerEffect::CopyBuyAfterMinions { every } => {
+                    let ready = {
+                        let Some(st) = self.players[p].power_at_mut(second) else { break };
+                        if is_spell {
+                            false
+                        } else {
+                            st.progress += 1;
+                            st.progress == every as u32
+                        }
+                    };
+                    if ready {
+                        let n = self.players[p].recent_buys.len();
+                        if n > 0 {
+                            let k = self.rng.below(n as u32) as usize;
+                            let copy = self.players[p].recent_buys[k];
+                            self.give_generated(p, copy);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Add 1 to the power's own count and say whether it reached `every`,
+    /// starting the count over when it does.
+    fn power_count_up(&mut self, p: usize, second: bool, every: u32) -> bool {
+        let Some(st) = self.players[p].power_at_mut(second) else { return false };
+        st.progress += 1;
+        if st.progress >= every {
+            st.progress = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// A minion was sold (by any effect too): the count grows and a power
+    /// that watches it runs (Gone Fishing).
+    pub(super) fn power_sold_minion(&mut self, p: usize) {
+        self.players[p].counts.minions_sold = self.players[p].counts.minions_sold.saturating_add(1);
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let PowerEffect::RandomTribeAfterSells { every, tribe } =
+                self.data.heroes.power(st.of).effect
+            else {
+                continue;
+            };
+            if !self.power_count_up(p, second, every as u32) {
+                continue;
+            }
+            let mut pos = 0;
+            self.run_effect(p, &mut pos, Effect::GetRandomMinion { tribe }, false, 1);
+        }
+    }
+
+    /// An Elemental was played from hand: Avalanche takes 3 off the upgrade
+    /// every third one, on top of the price it has now, down to 0.
+    pub(super) fn power_elemental_played(&mut self, p: usize) {
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let PowerEffect::UpgradeDiscountAfterElementals { every, discount } =
+                self.data.heroes.power(st.of).effect
+            else {
+                continue;
+            };
+            if !self.power_count_up(p, second, every as u32) {
+                continue;
+            }
+            let runs = self.players[p].tp.power_triggers.max(1);
+            let pl = &mut self.players[p];
+            pl.upgrade_cost = pl.upgrade_cost.saturating_sub(discount.saturating_mul(runs));
+        }
+    }
+
+    /// My minions attacked `n` times in the fight that just ended: Heroic
+    /// Inspiration gives a Triple Reward for every 15.
+    pub(super) fn power_attacks(&mut self, p: usize, n: u32) {
+        if n == 0 {
+            return;
+        }
+        self.players[p].counts.attacks = self.players[p].counts.attacks.saturating_add(n);
+        for second in [false, true] {
+            let Some(st) = self.players[p].power_at(second) else { continue };
+            let PowerEffect::TripleRewardAfterAttacks { every } =
+                self.data.heroes.power(st.of).effect
+            else {
+                continue;
+            };
+            // The count carries over the fight: a 15th attack in a fight of
+            // 8 and 7 swings fires once.
+            let mut due = 0;
+            {
+                let Some(st) = self.players[p].power_at_mut(second) else { continue };
+                st.progress = st.progress.saturating_add(n);
+                while st.progress >= every {
+                    st.progress -= every;
+                    due += 1;
+                }
+            }
+            for _ in 0..due {
+                self.give_triple_reward(p);
+            }
+        }
+    }
+
+    /// Gold was spent (never a Health price): Choose Your Champion's count
+    /// grows, and a card locked in hand until a Gold count unlocks itself
+    /// (the lock reads the count, so nothing else has to happen).
+    pub(super) fn power_gold_spent(&mut self, p: usize, amount: u32) {
+        if amount == 0 {
+            return;
+        }
+        self.players[p].counts.gold_spent =
+            self.players[p].counts.gold_spent.saturating_add(amount);
+    }
+
+    /// Another hero died: their warband as it stood is what Kel'Thuzad's Kitty
+    /// picks from. Heroes die at the end of a fight, so several can die in one
+    /// round: the warbands wait on the game, and every holder gets one
+    /// Discover per warband, back to back, at the start of its next turn
+    /// (docs/heroes.md).
+    pub(super) fn kitty_watch(&mut self, who: usize, board: &[Minion], dying: &[u8]) {
+        let holds = (0..PLAYERS).any(|p| {
+            p != who
+                && !dying.contains(&(p as u8))
+                && self.players[p].alive
+                && !self.players[p].real
+                && self.power_slot(p, |e| matches!(e, PowerEffect::KittyDiscover)).is_some()
+        });
+        if !holds || self.kitty_warbands.is_full() {
+            return;
+        }
+        let mut warband: ArrayVec<Minion, BOARD> = ArrayVec::new();
+        for &m in board {
+            let _ = warband.try_push(m);
+        }
+        let round = self.turn;
+        let _ = self.kitty_warbands.try_push((round, warband));
     }
 
     /// A fight is over: a power chosen for the next Start of Combat has fired,
@@ -825,6 +1382,132 @@ impl Game {
         if self.players[p].alive && self.players[p].health <= 0 {
             self.knock_out_mid_turn(p);
         }
+    }
+
+    /// Every minion this player holds two plain copies of, in hand or on the
+    /// board, for Three Wishes: a Golden copy never counts as one of a pair
+    /// (docs/heroes.md).
+    pub(super) fn three_wishes_pairs(&self, p: usize) -> ArrayVec<CardId, 4> {
+        let pl = &self.players[p];
+        let mut pairs: ArrayVec<CardId, 4> = ArrayVec::new();
+        for m in pl.hand.iter().chain(&pl.board) {
+            let c = self.data.cards.get(m.card);
+            // A token (a Beetle, a Pointy Arrow) has no pool copy to find.
+            if m.golden || c.is_spell() || c.token || pairs.contains(&m.card) {
+                continue;
+            }
+            let copies = pl
+                .hand
+                .iter()
+                .chain(&pl.board)
+                .filter(|o| o.card == m.card && !o.golden)
+                .count();
+            if copies >= 2 && !pairs.is_full() {
+                pairs.push(m.card);
+            }
+        }
+        pairs
+    }
+
+    /// A minion that leaves the game for good: its pool copies are spent
+    /// with it (Stir the Pot, The Perfect Crime's leftovers).
+    fn consume_copies(&mut self, m: &Minion) {
+        let c = self.data.cards.get(m.card);
+        if m.pool_copies > 0 && !c.token && !c.is_spell() {
+            self.consumed[c.pool_slot as usize] += m.pool_copies as u32;
+        }
+    }
+
+    /// The Perfect Crime: steal every card in the Tavern, left to right. A
+    /// hand with no room loses the rest (docs/heroes.md).
+    fn steal_all_tavern(&mut self, p: usize) {
+        while self.steal_shop_card(p, 0) {
+            if self.players[p].hand.is_full() {
+                break;
+            }
+        }
+        // Whatever is left when the hand is full is gone for good.
+        while !self.players[p].shop.is_empty() {
+            let m = self.players[p].shop.remove(0);
+            self.consume_copies(&m);
+        }
+        self.players[p].shop_spell = None;
+    }
+
+    /// Stir the Pot: a thrown minion (already out of the board or the Tavern,
+    /// its pool copy spent) adds its type to the pot, and the `count`th throw
+    /// Discovers one minion per type gathered. A slot holds the tribe plus
+    /// one, so 0 is an empty one (Beast is 0).
+    pub(super) fn stir_the_pot(&mut self, p: usize, thrown: Minion, count: u8) {
+        // A thrown minion is gone for good: its pool copy is spent with it.
+        self.consume_copies(&thrown);
+        let tribes = self.data.cards.tribes_of(&thrown);
+        // DESIGN.md "Types": a dual or all-type minion counts as one of its
+        // types, picked at random.
+        let some = tribes.random_type(&mut self.rng);
+        if let Some(t) = some
+            && !self.players[p].pot.is_full()
+        {
+            let _ = self.players[p].pot.try_push(t as u8 + 1);
+        }
+        let Some(second) = self.power_slot(p, |e| matches!(e, PowerEffect::StirThePot { .. }))
+        else {
+            return;
+        };
+        let full = {
+            let Some(st) = self.players[p].power_at_mut(second) else { return };
+            st.progress += 1;
+            if st.progress >= count as u32 {
+                st.progress = 0;
+                true
+            } else {
+                false
+            }
+        };
+        if !full {
+            return;
+        }
+        let mut types = [0u8; 3];
+        for (i, &t) in self.players[p].pot.iter().enumerate() {
+            types[i] = t;
+        }
+        self.players[p].pot.clear();
+        if types.iter().any(|&t| t != 0) {
+            let _ = self.players[p].discover_queue.try_push(DiscoverRequest::PotTypes(types));
+            self.maybe_start_discover(p);
+        }
+    }
+
+    /// Which slot holds a power whose effect matches: the main one first.
+    fn power_slot(&self, p: usize, want: impl Fn(PowerEffect) -> bool) -> Option<bool> {
+        for second in [false, true] {
+            if let Some(st) = self.players[p].power_at(second)
+                && want(self.data.heroes.power(st.of).effect)
+            {
+                return Some(second);
+            }
+        }
+        None
+    }
+
+    /// Swap, Lock, & Shop It: the picked minion goes into the Tavern where a
+    /// random Tavern minion stood, and that one takes its place on the board.
+    /// Both keep their buffs, and nothing triggers: it is not a buy and not a
+    /// play (docs/heroes.md).
+    pub(super) fn swap_with_shop(&mut self, p: usize, s: usize) {
+        let slots: ArrayVec<usize, SHOP> = (0..self.players[p].shop.len())
+            .filter(|&i| !self.data.cards.get(self.players[p].shop[i].card).is_spell())
+            .collect();
+        if s >= self.players[p].board.len() || slots.is_empty() {
+            return;
+        }
+        let k = self.rng.below(slots.len() as u32) as usize;
+        let slot = slots[k];
+        let mine = self.players[p].board[s];
+        let mut theirs = self.players[p].shop[slot];
+        theirs.uses_left = theirs.turn_uses(&self.data.cards);
+        self.players[p].board[s] = theirs;
+        self.players[p].shop[slot] = mine;
     }
 
     /// A friendly Demon dealt damage in the shop phase: every other friendly

@@ -24,6 +24,7 @@ use crate::{
     TRIBES,
 };
 use super::{
+    HeroCounts,
     Player,
     PowerState,
     TavernBuff,
@@ -80,6 +81,10 @@ impl Player {
             volumizer_bonus: (0, 0),
             beetle_bonus: (0, 0),
             improve: [0; N_COUNTERS],
+            counts: HeroCounts::default(),
+            pot: ArrayVec::new(),
+            recent_buys: ArrayVec::new(),
+            dead_last_fight: ArrayVec::new(),
             beast_bonus: (0, 0),
             deathrattles_triggered: 0,
             golden_played: 0,
@@ -109,8 +114,10 @@ impl Player {
             discover_locked_tier: 0,
             discover_doomed: false,
             discover_both: false,
+            discover_locked_gold: 0,
             discover_gifts: ArrayVec::new(),
             discover_copies: ArrayVec::new(),
+            discover_minions: ArrayVec::new(),
             dark_offer: false,
             dark_offer_turn: 0,
             dark_offer_golden: false,
@@ -315,10 +322,15 @@ impl Player {
     /// Dark Gift offer holds one copy per offer, three for a Golden one and
     /// none for a Dagger copy.
     pub(super) fn abandon_discover(&mut self, pool: &mut [u8], cards: &CardDb) {
+        // A Discover whose options are ready-made minions (Kel'Thuzad's Kitty)
+        // took no pool copy at all, so nothing goes back for it.
+        let ready = !self.discover_minions.is_empty();
+        self.discover_minions.clear();
+        self.discover_locked_gold = 0;
         let dark = self.dark_offer;
         let copies: ArrayVec<u8, DISCOVER> = std::mem::take(&mut self.discover_copies);
         for (i, c) in self.discover.drain(..).enumerate() {
-            if cards.get(c).is_spell() {
+            if ready || cards.get(c).is_spell() {
                 continue;
             }
             let n = if dark { copies.get(i).copied().unwrap_or(0) } else { 1 };
@@ -562,6 +574,7 @@ impl Player {
             beast_attack: self.beast_bonus.0,
             beast_health: self.beast_bonus.1,
             tier: self.tier,
+            gold_spent: self.counts.gold_spent,
             boon_of_beetles: self.boon_of_beetles,
             brood_of_nozdormu: self.brood_of_nozdormu,
             upper_hand: self.upper_hand,

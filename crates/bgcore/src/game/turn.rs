@@ -12,6 +12,7 @@ use crate::fight::{
     fight_with_hands,
 };
 use crate::minion::{
+    CardId,
     Keywords,
     Minion,
 };
@@ -39,6 +40,10 @@ impl Game {
     /// the ghost, and the players still alive are paired again without it.
     pub(super) fn knock_out_mid_turn(&mut self, p: usize) {
         let place = self.alive() as u8;
+        // Kel'Thuzad's Kitty picks from the warband as it stands now: the
+        // cards go back below.
+        let board = self.players[p].board.clone();
+        self.kitty_watch(p, &board, &[p as u8]);
         {
             let Game { data, players, ghost, lobby, .. } = self;
             let pl = &mut players[p];
@@ -550,6 +555,11 @@ impl Game {
                 self.power_start_of_turn(p);
             }
         }
+        // Every turn of the new round has started, so Kel'Thuzad's Kitty has
+        // queued its Discover for each warband of the round before it: the
+        // warbands of older rounds are done with.
+        let turn = self.turn;
+        self.kitty_warbands.retain(|(died, _)| *died + 1 >= turn);
         for p in 0..PLAYERS {
             // Trinkets at the start of the player's turn: the two offers (and
             // the one a hero power owes), the counters, the uses back and the
@@ -752,6 +762,8 @@ impl Game {
         }
         if so.friendly_attacks > 0 {
             self.trinket_event(p, crate::trinkets::Event::Attack, None, so.friendly_attacks as u32);
+            // Heroic Inspiration: 15 friendly attacks are a Triple Reward.
+            self.power_attacks(p, so.friendly_attacks as u32);
         }
         // Deaths of one named card (Snarky Portrait counts Fishbaits). The
         // bulk count above covers every other death counter, so a rule with
@@ -840,6 +852,14 @@ impl Game {
                 &mut self.rng,
                 &mut (),
             );
+            // Reclaimed Souls: every minion that died in this fight, either
+            // side, in the order they died. Both players get the same list.
+            let mut dead_last: ArrayVec<CardId, 16> = ArrayVec::new();
+            for so in &out.sides {
+                for &c in &so.dead_cards[..so.n_dead_cards as usize] {
+                    let _ = dead_last.try_push(c);
+                }
+            }
             // What each side sees of the other: the boards that went in, and
             // the counters at the first attack, after Start of Combat.
             let their_seen = Seen::at_fight(them, tier, turn, out.sides[1].seen);
@@ -873,6 +893,8 @@ impl Game {
                     }
                     self.apply_side_outcome(p, &out.sides[0], true);
                     self.apply_side_outcome(q, &out.sides[1], true);
+                    self.players[p].dead_last_fight = dead_last.clone();
+                    self.players[q].dead_last_fight = dead_last;
                 }
                 Opponent::Ghost(g) => {
                     self.players[p].seen[g as usize] = their_seen;
@@ -892,6 +914,7 @@ impl Game {
                         }
                     }
                     self.apply_side_outcome(p, &out.sides[0], true);
+                    self.players[p].dead_last_fight = dead_last;
                 }
             }
         }
@@ -969,6 +992,12 @@ impl Game {
         self.rng.shuffle(&mut dead);
         dead.sort_by_key(|&p| std::cmp::Reverse(self.players[p as usize].health));
         let first_place = alive - dead.len() + 1;
+        // Kel'Thuzad's Kitty picks from the dead warbands before they are
+        // given back, and the players dying in this round get nothing.
+        for &p in &dead {
+            let board = self.players[p as usize].board.clone();
+            self.kitty_watch(p as usize, &board, &dead);
+        }
         for (k, &p) in dead.iter().enumerate() {
             let Game { data, players, pool, ghost, lobby, .. } = self;
             let pl = &mut players[p as usize];

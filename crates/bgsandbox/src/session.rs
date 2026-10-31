@@ -689,7 +689,11 @@ impl Session {
                     if c.pay_health { "not enough health to pay for it".into() } else { gold(c.cost.saturating_sub(pl.spell_discount)) }
                 }
             },
-            Action::Roll => format!("not enough gold: a Refresh costs {}, you have {} and no free Refreshes left", r.roll_cost, pl.gold),
+            Action::Roll => format!(
+                "not enough gold: a Refresh costs {}, you have {} and no free Refreshes left",
+                g.refresh_cost(0),
+                pl.gold
+            ),
             Action::HeroPower | Action::HeroPower2 => {
                 let second = a == Action::HeroPower2;
                 let Some(st) = pl.power_at(second) else {
@@ -702,9 +706,11 @@ impl Session {
                     format!("{} unlocks at Tier {}", power.name, power.unlock_tier)
                 } else if st.uses_left == 0 {
                     "no uses of the power left this turn".into()
-                } else if power.once_per_game && st.used_game > 0 {
+                } else if power.uses_per_game > 0
+                    && st.used_game >= power.uses_per_game as u32
+                {
                     "the power was already used this game".into()
-                } else if pl.gold < power.cost {
+                } else if pl.gold < g.power_cost(0, second) {
                     gold(power.cost)
                 } else {
                     "there is nothing for the power to target right now".into()
@@ -714,7 +720,7 @@ impl Session {
                 if pl.tier >= bgcore::MAX_TIER {
                     "the Tavern is already at the top tier".into()
                 } else {
-                    gold(pl.upgrade_cost)
+                    gold(g.upgrade_price(0))
                 }
             }
             Action::Play { hand, .. } => {

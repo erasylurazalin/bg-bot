@@ -7,7 +7,7 @@ use crate::cards::{
     OnDiscard,
     Tribe,
 };
-use crate::minion::Minion;
+use crate::minion::{Keywords, Minion};
 use crate::{BOARD, DISCOVER};
 use super::{
     DiscoverRequest,
@@ -220,6 +220,26 @@ impl Game {
                 self.deal_dark_gift_copies(p, turn);
                 continue;
             }
+            // Offers whose options are not one filtered pool draw each.
+            match req {
+                DiscoverRequest::PotTypes(types) => {
+                    self.deal_pot_offer(p, types);
+                    continue;
+                }
+                DiscoverRequest::DeadWarband(i) => {
+                    self.deal_dead_warband(p, i as usize);
+                    continue;
+                }
+                DiscoverRequest::DeadLastFight => {
+                    self.deal_dead_last_fight(p);
+                    continue;
+                }
+                DiscoverRequest::Champion(gold) => {
+                    self.deal_champion(p, gold);
+                    continue;
+                }
+                _ => {}
+            }
             let damage_from = match req {
                 DiscoverRequest::DemonMinion { source, .. } => Some(source),
                 _ => None,
@@ -287,6 +307,17 @@ impl Game {
                             c.tribes.has(t)
                         })
                     }
+                    // Tinker: a Magnetic Mech up to the player's Tier.
+                    DiscoverRequest::MagneticMinion => draw_filtered(
+                        pool,
+                        &data.cards,
+                        rng,
+                        1,
+                        pl.tier,
+                        &pl.discover,
+                        *lobby,
+                        |c| c.keywords.has(Keywords::MAGNETIC) && c.tribes.has(Tribe::Mech),
+                    ),
                     DiscoverRequest::TypedMinionTier(t) => draw_filtered(
                         pool,
                         &data.cards,
@@ -298,7 +329,12 @@ impl Game {
                         |c| !c.tribes.is_neutral(),
                     ),
                     // Handled above, before the pool draws.
-                    DiscoverRequest::DarkGift(_) | DiscoverRequest::DarkGiftCopies => None,
+                    DiscoverRequest::DarkGift(_)
+                    | DiscoverRequest::DarkGiftCopies
+                    | DiscoverRequest::PotTypes(_)
+                    | DiscoverRequest::DeadWarband(_)
+                    | DiscoverRequest::DeadLastFight
+                    | DiscoverRequest::Champion(_) => None,
                     DiscoverRequest::DemonMinion { max_tier: max_t, .. } => draw_filtered(
                         pool,
                         &data.cards,
@@ -348,11 +384,29 @@ impl Game {
             self.maybe_start_discover(p);
             return;
         }
+        // A Discover whose options are ready-made minions (Kel'Thuzad's
+        // Kitty): the pick lands as it stands, and no pool copy moves.
+        if !self.players[p].discover_minions.is_empty() {
+            let mut m = self.players[p].discover_minions[k];
+            self.players[p].discover_minions.clear();
+            self.players[p].discover.clear();
+            if !self.players[p].hand.is_full() {
+                m.pool_copies = 0;
+                m.no_reward = false;
+                let card = m.card;
+                self.add_to_hand(p, m);
+                self.check_triple(p, card);
+            }
+            self.fire_after_discover(p);
+            self.maybe_start_discover(p);
+            return;
+        }
         let Game { data, players, pool, .. } = self;
         let pl = &mut players[p];
         let locked = pl.discover_locked;
         pl.discover_locked = false;
         let locked_tier = std::mem::take(&mut pl.discover_locked_tier);
+        let locked_gold = std::mem::take(&mut pl.discover_locked_gold);
         let doomed = std::mem::take(&mut pl.discover_doomed);
         let both = std::mem::take(&mut pl.discover_both);
         let c = pl.discover[k];
@@ -449,6 +503,9 @@ impl Game {
             if locked_tier > 0 && !is_spell {
                 m.locked_tier = locked_tier;
             }
+            if locked_gold > 0 && !is_spell {
+                m.locked_gold = locked_gold;
+            }
             if doomed && !is_spell {
                 m.doomed = true;
             }
@@ -484,6 +541,89 @@ impl Game {
         }
         self.fire_after_discover(p);
         self.maybe_start_discover(p);
+    }
+
+    /// Stir the Pot: one minion per thrown type, each drawn from the pool up
+    /// to the player's Tier and all different, so a Demon, a Beast and a Mech
+    /// give one of each and three Mechs give three Mechs (docs/heroes.md).
+    /// The slots hold the tribe plus one, 0 for an empty slot.
+    fn deal_pot_offer(&mut self, p: usize, types: [u8; 3]) {
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let pl = &mut players[p];
+        let tier = pl.tier;
+        for &slot in types.iter() {
+            if slot == 0 || pl.discover.is_full() {
+                continue;
+            }
+            let Some(tribe) = Tribe::EVERY.get(slot as usize - 1).copied() else { continue };
+            if let Some(c) = draw_filtered(pool, &data.cards, rng, 1, tier, &pl.discover, *lobby, |c| {
+                c.tribes.has(tribe)
+            }) {
+                pl.discover.push(c);
+            }
+        }
+    }
+
+    /// Kel'Thuzad's Kitty: up to three of the dead hero's minions, exactly as
+    /// they stood (buffs, keywords, Dark Gifts, Golden included), none of them
+    /// taking a pool copy (docs/heroes.md). The warband is the `i`th hero
+    /// that died in the round.
+    fn deal_dead_warband(&mut self, p: usize, i: usize) {
+        let Game { kitty_warbands, rng, players, .. } = self;
+        let Some((_, board)) = kitty_warbands.get(i) else { return };
+        let pl = &mut players[p];
+        pl.discover_minions.clear();
+        // A copy, so the warband stays for the other holders.
+        let mut left: ArrayVec<Minion, BOARD> = board.clone();
+        while !pl.discover.is_full() && !left.is_empty() {
+            let k = rng.below(left.len() as u32) as usize;
+            let m = left.remove(k);
+            if pl.discover.contains(&m.card) {
+                continue;
+            }
+            pl.discover.push(m.card);
+            pl.discover_minions.push(m);
+        }
+    }
+
+    /// Reclaimed Souls: up to three different minions that died in the last
+    /// fight, either side, tokens and summoned ones included, each offered as
+    /// a plain copy (printed stats, no buffs, no pool copy: a Beetle can be
+    /// found).
+    fn deal_dead_last_fight(&mut self, p: usize) {
+        let Game { data, rng, players, .. } = self;
+        let pl = &mut players[p];
+        let mut tried = 0;
+        while !pl.discover.is_full() && tried < pl.dead_last_fight.len() * 2 + 1 {
+            tried += 1;
+            if pl.dead_last_fight.is_empty() {
+                break;
+            }
+            let k = rng.below(pl.dead_last_fight.len() as u32) as usize;
+            let c = pl.dead_last_fight[k];
+            if pl.discover.contains(&c) {
+                continue;
+            }
+            pl.discover.push(c);
+            let m = pl.make_card(&data.cards, c, false, 0);
+            pl.discover_minions.push(m);
+        }
+    }
+
+    /// Choose Your Champion: three Tier 7 minions from the pool, the pick
+    /// landing in hand locked until `gold` Gold has been spent this game
+    /// (docs/heroes.md, DESIGN.md "Cards locked in hand").
+    fn deal_champion(&mut self, p: usize, gold: u16) {
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let pl = &mut players[p];
+        while !pl.discover.is_full() {
+            let tier = crate::CARD_MAX_TIER;
+            match draw_filtered(pool, &data.cards, rng, tier, tier, &pl.discover, *lobby, |_| true) {
+                Some(c) => pl.discover.push(c),
+                None => break,
+            }
+        }
+        pl.discover_locked_gold = gold;
     }
 
     /// Draw a Golden minion for the player (from the pool, three copies) and

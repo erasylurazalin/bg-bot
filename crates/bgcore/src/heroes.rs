@@ -135,6 +135,96 @@ pub enum PowerEffect {
     /// Every `turns` turns, Discover a minion with a Dark Gift (Feel
     /// Devastation). The count lives in the power's `progress`.
     DarkGiftEvery { turns: u8 },
+    // ---- hero batch 1 (2026-11-01) ----
+    /// Give a minion +`attack`/+`health`, and +1 more of each for every
+    /// `every` cards bought this game (Sharpen Blades).
+    BuffPerBuys { attack: i32, health: i32, every: u8 },
+    /// Discover a Magnetic Mech up to your tier (Tinker).
+    DiscoverMagnetic,
+    /// Get a random minion of `tribe`. Every buy of that tribe takes `gold`
+    /// off the next press, and a press uses the discount up (Pirate
+    /// Parrrrty!).
+    GetTribeCutCost { tribe: Tribe, gold: u8 },
+    /// Discover a minion of your own tier; each press costs `more` more for
+    /// the rest of the game (Lead Explorer).
+    DiscoverMyTierCostsMore { more: u8 },
+    /// At the start of your turn, cast a random Tavern spell at a random
+    /// target (Puzzle Box).
+    CastRandomSpell,
+    /// The Tavern's prices: a minion and a Refresh cost this, and upgrading
+    /// costs `upgrade_extra` more at every tier (Manastorm).
+    Prices { minion: u8, refresh: u8, upgrade_extra: u8 },
+    /// After every `every` minions sold, get a random minion of `tribe`
+    /// (Gone Fishing).
+    RandomTribeAfterSells { every: u8, tribe: Tribe },
+    /// After every `every` buys of the kind `of`, get this card (Verdant
+    /// Spheres' Tavern Coin, Battle Brand's Brann).
+    CardAfterBuys { every: u8, of: BuyKind, card: CardId },
+    /// Every press is one dig, and the `digs`th gives a Golden minion up to
+    /// your tier (Buried Treasure).
+    DigForGolden { digs: u8 },
+    /// Remove a friendly minion and Discover one from the Tier below it
+    /// (Trash for Treasure).
+    DiscoverBelow,
+    /// Gain Gold that has grown by 1 for every turn waited (Piggy Bank);
+    /// `base` on the first turn.
+    GrowingGold { base: u8 },
+    /// After another hero dies, Discover a minion from their last warband
+    /// (Kel'Thuzad's Kitty).
+    KittyDiscover,
+    /// Swap a friendly non-Golden minion with a random one in the Tavern
+    /// (Swap, Lock, & Shop It).
+    SwapWithShop,
+    /// After every `every` Elementals played, the upgrade costs `discount`
+    /// less, down to 0 (Avalanche).
+    UpgradeDiscountAfterElementals { every: u8, discount: u8 },
+    /// Find the third copy of a pair of minions, three times a game (Three
+    /// Wishes).
+    ThreeWishes,
+    /// After `every` Tiers' worth of cards bought, get a Triple Reward
+    /// (Natural Balance).
+    TripleRewardAfterTiers { every: u32 },
+    /// Minions in the Tavern have +`attack`/+`health`, one more of each after
+    /// every `every` minions bought (For the Horde!).
+    TavernBuffAfterBuys { attack: i32, health: i32, every: u8 },
+    /// Once a turn, after every `every` minions bought, get a plain copy of
+    /// a random one of them (Glaive Ricochet).
+    CopyBuyAfterMinions { every: u8 },
+    /// Throw a minion in the pot; at `count` thrown, Discover one minion per
+    /// thrown type (Stir the Pot).
+    StirThePot { count: u8 },
+    /// Steal every card in the Tavern, left to right (The Perfect Crime).
+    StealAllTavern,
+    /// Discover a plain copy of a minion that died last combat (Reclaimed
+    /// Souls).
+    DiscoverDeadMinion,
+    /// At the end of every `turns` turns, get a plain copy of the left-most
+    /// card in hand (Upbeat Harmony).
+    HandCopyEvery { turns: u8 },
+    /// At the start of the game, Discover a Tier 7 minion to get once `gold`
+    /// Gold has been spent (Choose Your Champion).
+    Champion { gold: u32 },
+    /// Roll a six-sided die and gain that much Gold; the power is then locked
+    /// for that many turns (Lucky Roll).
+    LuckyRoll,
+    /// Every third Tavern spell bought costs 0 (Reliquary Research).
+    FreeThirdSpell,
+    /// Get a copy of the last Tavern spell cast (The Galaxy's Lens).
+    CopyLastSpell,
+    /// After every `every` friendly attacks, get a Triple Reward (Heroic
+    /// Inspiration).
+    TripleRewardAfterAttacks { every: u32 },
+}
+
+/// What a power's buy counter counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BuyKind {
+    /// Any card, a Tavern spell included.
+    Cards,
+    /// Minions only.
+    Minions,
+    /// Minions with a Battlecry.
+    Battlecry,
 }
 
 /// A hero power: its button's limits and its effect.
@@ -148,8 +238,9 @@ pub struct HeroPower {
     pub passive: bool,
     /// Presses per turn ("Twice per turn").
     pub uses_per_turn: u8,
-    /// The whole power works once per game ("Once per game").
-    pub once_per_game: bool,
+    /// Presses a game: 1 for "Once per game", 3 for Three Wishes, 0 for no
+    /// limit. The old `once_per_game` key in heroes.toml sets it to 1.
+    pub uses_per_game: u8,
     /// Unlocks at this Tavern tier, 0 for no lock.
     pub unlock_tier: u8,
     /// Unlocks at this turn, 0 for no lock.
@@ -162,6 +253,9 @@ pub struct HeroPower {
     /// Turns this power takes to complete once it is chosen ("In 2 turns,
     /// gain 2 Gold"): 0 means it completes at the end of the next fight.
     pub complete_turns: u8,
+    /// Each turn's end takes 1 off the next press's cost, down to 0 (The
+    /// Perfect Crime, The Galaxy's Lens).
+    pub cheaper_each_turn: bool,
     /// Powers that rotate into each other (the King of X family), grouped
     /// under one number; 0 for a power outside a family.
     pub family: u8,
@@ -316,6 +410,10 @@ struct RawExtraPower {
     #[serde(default)]
     once_per_game: bool,
     #[serde(default)]
+    uses_per_game: u8,
+    #[serde(default)]
+    cheaper_each_turn: bool,
+    #[serde(default)]
     unlock_tier: u8,
     #[serde(default)]
     unlock_turn: u32,
@@ -347,6 +445,10 @@ struct RawPower {
     uses_per_turn: u8,
     #[serde(default)]
     once_per_game: bool,
+    #[serde(default)]
+    uses_per_game: u8,
+    #[serde(default)]
+    cheaper_each_turn: bool,
     #[serde(default)]
     unlock_tier: u8,
     #[serde(default)]
@@ -468,6 +570,100 @@ struct RawPowerEffect {
     dark_gift_start: bool,
     #[serde(default)]
     dark_gift_every: Option<u8>,
+    // ---- hero batch 1 (2026-11-01) ----
+    /// `[attack, health, every]`: the buff and its improve step (Sharpen
+    /// Blades).
+    #[serde(default)]
+    buff_per_buys: Option<[i32; 3]>,
+    #[serde(default)]
+    discover_magnetic: bool,
+    #[serde(default)]
+    get_tribe_cut_cost: Option<RawTribeCut>,
+    /// The extra cost of each press (Lead Explorer).
+    #[serde(default)]
+    discover_my_tier_costs_more: Option<u8>,
+    #[serde(default)]
+    cast_random_spell: bool,
+    #[serde(default)]
+    prices: Option<RawPrices>,
+    #[serde(default)]
+    random_tribe_after_sells: Option<RawEveryTribe>,
+    #[serde(default)]
+    card_after_buys: Option<RawCardAfterBuys>,
+    #[serde(default)]
+    dig_for_golden: Option<u8>,
+    #[serde(default)]
+    discover_below: bool,
+    #[serde(default)]
+    growing_gold: Option<u8>,
+    #[serde(default)]
+    kitty_discover: bool,
+    #[serde(default)]
+    swap_with_shop: bool,
+    /// `[every, discount]` (Avalanche).
+    #[serde(default)]
+    upgrade_discount_elements: Option<[u8; 2]>,
+    #[serde(default)]
+    three_wishes: bool,
+    #[serde(default)]
+    triple_reward_after_tiers: Option<u32>,
+    /// `[attack, health, every]` (For the Horde!).
+    #[serde(default)]
+    tavern_buff_after_buys: Option<[i32; 3]>,
+    #[serde(default)]
+    copy_buy_after_minions: Option<u8>,
+    #[serde(default)]
+    stir_the_pot: Option<u8>,
+    #[serde(default)]
+    steal_all_tavern: bool,
+    #[serde(default)]
+    discover_dead_minion: bool,
+    #[serde(default)]
+    hand_copy_every: Option<u8>,
+    /// The Gold to spend before the champion arrives (Choose Your Champion).
+    #[serde(default)]
+    champion: Option<u32>,
+    #[serde(default)]
+    lucky_roll: bool,
+    #[serde(default)]
+    free_third_spell: bool,
+    #[serde(default)]
+    copy_last_spell: bool,
+    #[serde(default)]
+    triple_reward_after_attacks: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTribeCut {
+    tribe: String,
+    gold: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPrices {
+    minion: u8,
+    refresh: u8,
+    #[serde(default)]
+    upgrade_extra: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEveryTribe {
+    every: u8,
+    tribe: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCardAfterBuys {
+    every: u8,
+    /// "cards" (the default), "minions" or "battlecry".
+    #[serde(default)]
+    of: Option<String>,
+    card: String,
 }
 
 /// Parse one power effect. The two effects whose card names need the card
@@ -579,6 +775,66 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
         PowerEffect::DarkGiftStart
     } else if let Some(n) = e.dark_gift_every {
         PowerEffect::DarkGiftEvery { turns: n.max(1) }
+    } else if let Some([attack, health, every]) = e.buff_per_buys {
+        PowerEffect::BuffPerBuys { attack, health, every: every.max(1) as u8 }
+    } else if e.discover_magnetic {
+        PowerEffect::DiscoverMagnetic
+    } else if let Some(c) = &e.get_tribe_cut_cost {
+        PowerEffect::GetTribeCutCost { tribe: tribe(&c.tribe)?, gold: c.gold }
+    } else if let Some(more) = e.discover_my_tier_costs_more {
+        PowerEffect::DiscoverMyTierCostsMore { more }
+    } else if e.cast_random_spell {
+        PowerEffect::CastRandomSpell
+    } else if let Some(p) = &e.prices {
+        PowerEffect::Prices { minion: p.minion, refresh: p.refresh, upgrade_extra: p.upgrade_extra }
+    } else if let Some(s) = &e.random_tribe_after_sells {
+        PowerEffect::RandomTribeAfterSells { every: s.every.max(1), tribe: tribe(&s.tribe)? }
+    } else if let Some(b) = &e.card_after_buys {
+        let of = match b.of.as_deref() {
+            None | Some("cards") => BuyKind::Cards,
+            Some("minions") => BuyKind::Minions,
+            Some("battlecry") => BuyKind::Battlecry,
+            Some(other) => return Err(format!("unknown card_after_buys kind {other:?}")),
+        };
+        PowerEffect::CardAfterBuys { every: b.every.max(1), of, card: 0 }
+    } else if let Some(n) = e.dig_for_golden {
+        PowerEffect::DigForGolden { digs: n.max(1) }
+    } else if e.discover_below {
+        PowerEffect::DiscoverBelow
+    } else if let Some(base) = e.growing_gold {
+        PowerEffect::GrowingGold { base }
+    } else if e.kitty_discover {
+        PowerEffect::KittyDiscover
+    } else if e.swap_with_shop {
+        PowerEffect::SwapWithShop
+    } else if let Some([every, discount]) = e.upgrade_discount_elements {
+        PowerEffect::UpgradeDiscountAfterElementals { every: every.max(1), discount }
+    } else if e.three_wishes {
+        PowerEffect::ThreeWishes
+    } else if let Some(every) = e.triple_reward_after_tiers {
+        PowerEffect::TripleRewardAfterTiers { every: every.max(1) }
+    } else if let Some([attack, health, every]) = e.tavern_buff_after_buys {
+        PowerEffect::TavernBuffAfterBuys { attack, health, every: every.max(1) as u8 }
+    } else if let Some(n) = e.copy_buy_after_minions {
+        PowerEffect::CopyBuyAfterMinions { every: n.max(1) }
+    } else if let Some(n) = e.stir_the_pot {
+        PowerEffect::StirThePot { count: n.max(1) }
+    } else if e.steal_all_tavern {
+        PowerEffect::StealAllTavern
+    } else if e.discover_dead_minion {
+        PowerEffect::DiscoverDeadMinion
+    } else if let Some(n) = e.hand_copy_every {
+        PowerEffect::HandCopyEvery { turns: n.max(1) }
+    } else if let Some(gold) = e.champion {
+        PowerEffect::Champion { gold }
+    } else if e.lucky_roll {
+        PowerEffect::LuckyRoll
+    } else if e.free_third_spell {
+        PowerEffect::FreeThirdSpell
+    } else if e.copy_last_spell {
+        PowerEffect::CopyLastSpell
+    } else if let Some(every) = e.triple_reward_after_attacks {
+        PowerEffect::TripleRewardAfterAttacks { every: every.max(1) }
     } else {
         PowerEffect::None
     })
@@ -606,6 +862,16 @@ fn resolve_effect(
         }
         PowerEffect::SocGrantDeathrattle { count, .. } => {
             PowerEffect::SocGrantDeathrattle { count, card: card(&e.card, "card")? }
+        }
+        PowerEffect::CardAfterBuys { every, of, .. } => {
+            let b = e.card_after_buys.as_ref().unwrap();
+            PowerEffect::CardAfterBuys {
+                every,
+                of,
+                card: cards
+                    .by_name(&b.card)
+                    .ok_or_else(|| format!("{who}: no card {:?}", b.card))?,
+            }
         }
         PowerEffect::Bananarama { mine, others, big_percent, .. } => {
             let b = e.bananas.as_ref().unwrap();
@@ -666,12 +932,13 @@ impl HeroDb {
                 cost: h.power.cost,
                 passive: h.power.passive,
                 uses_per_turn: h.power.uses_per_turn,
-                once_per_game: h.power.once_per_game,
+                uses_per_game: if h.power.once_per_game { 1 } else { h.power.uses_per_game },
                 unlock_tier: h.power.unlock_tier,
                 unlock_turn: h.power.unlock_turn,
                 effect,
                 parent: None,
                 complete_turns: 0,
+                cheaper_each_turn: h.power.cheaper_each_turn,
                 family: 0,
                 skip_turns: h.power.skip_turns,
                 options: Vec::new(),
@@ -709,12 +976,13 @@ impl HeroDb {
                 cost: h.cost,
                 passive: h.passive,
                 uses_per_turn: h.uses_per_turn,
-                once_per_game: h.once_per_game,
+                uses_per_game: if h.once_per_game { 1 } else { h.uses_per_game },
                 unlock_tier: h.unlock_tier,
                 unlock_turn: h.unlock_turn,
                 effect,
                 parent: None,
                 complete_turns: h.complete_turns,
+                cheaper_each_turn: h.cheaper_each_turn,
                 family: 0,
                 skip_turns: h.skip_turns,
                 options: Vec::new(),

@@ -273,6 +273,90 @@ build hero-less games so old tests pass unchanged, and
   as a fresh `PowerState`. `count` of 2 is King of Duality: the first pick is
   the second power, the second pick the main one. Finley's runs right after
   his pick, before turn 1.
+- **Hero batch 1 (2026-11-01)**, the gold and price, counter, Discover and
+  generate powers (docs/briefs/heroes-batch1.md, the rules in docs/heroes.md
+  "Hero batch rules (Era, 2026-11-01)"):
+  - **The press price is not the card's.** `PowerState.cost_delta` is a
+    running change to it and `Game::power_cost(p, second)` is the one read
+    (legality, payment, the observation's `SCALAR_POWER_COST`): Lead Explorer
+    takes +1 per press, Pirate Parrrrty! takes 1 off per Pirate bought and
+    spends the discount on the press, and a power with `cheaper_each_turn`
+    (The Perfect Crime, The Galaxy's Lens) drops 1 at every end of turn. It
+    never goes below 0.
+  - **The bot sees every power's count.** Each power slot now carries
+    `SCALAR_POWER_PROGRESS`/`SCALAR_POWER_LEFT` (and the same pair for the
+    second slot): `obs::power_progress` fills them from the power's own
+    `PowerState` and the shared counters, so a power that counts something
+    adds no scalar. A counting power reports the count and what is left of it
+    (Natural Balance, Glaive Ricochet, Verdant Spheres, Gone Fishing, Heroic
+    Inspiration, For the Horde!, Buried Treasure, Stir the Pot, Upbeat
+    Harmony, BUY, INSECT!, Reliquary Research's every third spell), the
+    growing ones the level reached (Sharpen Blades) or the Gold they pay
+    (Piggy Bank), Choose Your Champion the Gold spent and the Gold to go, a
+    chosen power its countdown (Galewing), Lucky Roll its lock in both. A card
+    a power hands out locked in hand is a hand slot like any other: the
+    slot's `SLOT_LOCKED` says it is locked (see below).
+  - **Presses a game.** `HeroPower.uses_per_game` is 1 for "Once per game"
+    (heroes.toml's `once_per_game = true` still parses, and sets it) and 3
+    for Three Wishes; `uses_per_game = 0` means no limit. A passive whose
+    count is used up stops counting.
+  - **The prices a power sets.** `PowerEffect::Prices` (Manastorm) is read by
+    `Game::power_prices`, and from there by `minion_price`, `refresh_cost`
+    (Roll's legality and payment) and `upgrade_price` (the tier's price as it
+    stands plus the extra: Level's legality and payment, the observation, the
+    sandbox). Tavern spells keep their own cost.
+  - **One counter block.** `Player.counts` (`HeroCounts`) holds what a power
+    counts over the game: cards bought, minions bought, Tiers bought (a spell
+    by its Tier), minions sold, friendly attacks, Gold spent this game and
+    Tavern spells bought. The counters grow at the hooks that already exist:
+    `power_bought_card` (both buy paths and the spell slot, `Action::Buy` and
+    `Action::BuySpell`), `power_sold_minion` in `sell_minion`,
+    `power_elemental_played` where `elementals_played` grows, `power_attacks`
+    in `apply_side_outcome` (the fight's `friendly_attacks`), and
+    `power_gold_spent` from `fire_event(GoldSpent)` (never a Health price).
+    A power reads the counter it needs at its press (`BuffPerBuys`) or keeps
+    its own cycle in `PowerState.progress` (`RandomTribeAfterSells`,
+    `CardAfterBuys`, `TripleRewardAfterTiers`, `TavernBuffAfterBuys`,
+    `CopyBuyAfterMinions`).
+  - **Offers that are not one pool draw.** `maybe_start_discover` deals three
+    new requests itself: `PotTypes` (Stir the Pot: one minion per thrown
+    type), `DeadWarband` (Kel'Thuzad's Kitty) and `DeadLastFight` (Reclaimed
+    Souls, plain copies). The last two fill `Player.discover_minions`, the
+    ready-made minions `resolve_choose` hands over (`discover_minions`, with
+    no pool copy moving; `abandon_discover` returns none). `Champion` deals
+    three Tier 7 minions and the pick lands in hand with
+    `Minion.locked_gold` set (`discover_locked_gold`), the shared lock of
+    DESIGN.md "Cards locked in hand". `MagneticMinion` is a plain draw with a
+    filter (Tinker).
+  - **The last fight's dead** are `SideOutcome.dead_cards` (one list per
+    side, in death order, tokens included); `combat` puts both sides' into
+    `Player.dead_last_fight`. A hero's death hands its warband to
+    `Game::kitty_watch` from `knockouts` and `knock_out_mid_turn`, before the
+    cards go back: `Game.kitty_warbands` keeps every warband of the round with
+    the round it died in, and at the start of the next round each holder
+    queues one `DeadWarband(i)` per warband, back to back (heroes die at the
+    end of a fight, so several can die at once). The warbands are dropped once
+    that round has started for everyone.
+  - **A random Tavern spell** (Puzzle Box): `Game::cast_random_spell` draws
+    with `CardDb::random_castable_spell` (never a destructive one), skips a
+    spell with nothing to land on (`Game::spell_castable`, which
+    `cast_spell_inner` shares), casts it, and answers its target and its
+    Choose One at random.
+  - **Buttons that pick a minion**: `TargetKind::RemoveTierBelow` (Trash for
+    Treasure: not a sale, the pool copy goes back), `SwapWithShop` (Swap,
+    Lock, & Shop It: the Tavern minion takes the board slot, no buy and no
+    play) and `ThrowInPot { count }` (Stir the Pot: the minion is gone for
+    good, its copies go to `Game.consumed`). The Perfect Crime's leftovers go
+    the same way.
+  - Reliquary Research reads `Game::spell_price` (0 for every third Tavern
+    spell bought) in both spell buy paths, and The Galaxy's Lens hands over a
+    fresh copy of `Player.last_spell`.
+  - **Cards locked in hand** (DESIGN.md) are one lock in the engine:
+    `Minion.locked_in_hand(tier, gold_spent)` over `locked_turns`,
+    `locked_tier` and `locked_gold`, read by `is_legal` (Play),
+    `valid_discard`, the fight's summon-from-hand (`Counters.gold_spent`) and
+    the observation's `SLOT_LOCKED` (the turn count, or 1 while a tier or
+    Gold lock holds it). Every card that locks reuses it.
 - Bots answer the pick and a power Discover in `answer_pending`, and press a
   legal button (either one) with gold that would be left over (Gonna Be
   Rich! waits for turn 8). A skipped turn gets a Freeze and then an End Turn.

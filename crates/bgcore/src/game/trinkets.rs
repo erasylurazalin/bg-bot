@@ -1527,6 +1527,10 @@ impl Game {
             && (tp.fourth_buy + 1).is_multiple_of(tp.fourth_buy_every);
         if by_tribe || highest || every_nth {
             MinionPrice::Health(self.data.rules.buy_cost)
+        } else if let Some((price, _, _)) = self.power_prices(p) {
+            // Manastorm: minions cost 2 (a trinket's own set price still
+            // wins, it names the very cards it puts there).
+            MinionPrice::Gold(tp.tavern_price.max(price))
         } else if tp.tavern_price > 0 {
             // Chillmere Mosaic: the Tavern cards its Refresh put there cost
             // this much (they keep it until the Tavern is filled again).
