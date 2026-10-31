@@ -746,8 +746,14 @@ cards.
 - Orb of the Unknown's random trinket replaces your trinket of that slot.
 - Trip Vouchers bought on turn 6: a greater offer on turn 8, and the
   normal greater offer on turn 9 still comes.
-- Mystery Cube offers again at the start of every turn for the rest of
-  the game.
+- Mystery Cube: when you get it, choose 1 of 2 random lesser trinkets
+  (free) to replace it. The cube's effect stays with the slot: at the start
+  of every turn for the rest of the game you choose 1 of 2 new lesser
+  trinkets to replace the one you hold, and you can't keep the current one.
+  The held trinket's own start-of-turn effect fires first (for example
+  the Pendant), then the swap happens. Some trinkets are never offered by
+  the cube (one-time effects, Orb of the Unknown and the like); the exact
+  list is still open.
 - A copy a trinket gives is an exact copy (buffs included; Transcribing
   Typewriter): players buff a Tavern minion first, then buy it. A copy of
   a golden minion is golden and gives its own Triple Reward when played.
