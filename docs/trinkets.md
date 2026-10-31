@@ -132,12 +132,42 @@ always afford one. A trinket with no cost in the game data is free.
   power are excluded (A. F. Kay's, Faelin's, Kerrigan's and the like); Era
   will add to the list.
 
+**Rules for the last trinket batch (Era, 2026-11-01):**
+- **Eternal Portrait (Greater):** "+4/+2 this game" reaches every Eternal
+  Knight you have or will have, in hand too.
+- **Bronzebeard Portrait:** your Branns count as Murlocs and Dragons
+  everywhere (board, hand, "your most common type", tribe synergies, a
+  golden Brann), except Dark Discovery's "your type" slot.
+- **Curator Sticker:** Golden Mishmash ("Whenever your Amalgam gains
+  stats, this gains them twice") and a 10/10 Venomous Amalgam. Mishmash is
+  a trinket-only token tagged as a buddy, for when buddies come.
+- **Safety Patch:** Ice Block, "When your hero takes fatal damage, prevent
+  it and become Immune this turn", once. Tagged as a Secret for
+  Akazamzarak later. Not hidden: everyone sees everyone's trinkets live.
+- **Darkmoon Prizes:** 32 cards in the game data, 4 tiers
+  (`battlegroundsDarkmoonPrizeTurn` in `ref/hsjson-cards.json`). A Triple
+  Prize (Corrupted Tome) is "Discover a Tier 3 Darkmoon Prize", nothing
+  more. Tickatus Sticker: a Tier 3 Prize, every 3 turns. Tickatus' hero
+  power Prize Wall: Tier 1 on turn 4, Tier 2 on turn 8, Tier 3 on turn 12,
+  Tier 4 on turn 16 and every 4 turns after (a guess past 16, games rarely
+  get there).
+- **Surprise Portrait** ("More appear when you least expect them..."):
+  nobody knows the real odds. Model: every buy, sell and Refresh has a 5%
+  chance of a surprise, never twice in a row. On a buy or a sell, you get
+  an Elemental of Surprise. On a Refresh, either one Elemental of Surprise
+  is added to the Tavern, or all 7 slots are filled with them.
+- **Yogg Wheel:** its results are cards in the data (`TB_BaconShop_HERO_35_Buddy_t*`).
+  Mysterybox there is "a random Tavern minion turns golden" (the other
+  Mysterybox, "your Hero Power triggers an extra time", isn't on the
+  Wheel). Yogg-Tastic Pastry stays unbuilt (Era: not worth it).
+
 **Not in the game, or later:** Shrine of Evolution (Era thinks it's gone,
-though the data still lists it), Kiri's Double Eclipse (no Kiri hero in
-the data; unclear), Wisdomball Supply, Safety Patch (Secrets), Yogg-Tastic
+though the data still lists it), Kiri's Double Eclipse (never seen in
+Era's games or pro play, though the data lists it in the pool: never
+build it), Wisdomball Supply, Safety Patch (Secrets), Yogg-Tastic
 Pastry (the Wheel), Putricide Sticker, Mecha-Jaraxxus Sticker (no Demon
 Mechs this patch), Tickatus Sticker and Corrupted Tome (they need the
-Darkmoon Prizes exported first), and the Dark Gift trinkets.
+Darkmoon Prizes exported first), and the Dark Gift trinkets (built since).
 
 ## Portraits that rewrite a card
 

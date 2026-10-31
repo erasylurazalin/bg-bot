@@ -413,6 +413,26 @@ turn 1, and opens at the end of turn 5, before that turn's fight. Its
 minion can't be played that turn, but it is in hand for the fight, so
 anything that summons from hand can summon it.
 
+**Cards locked in hand (Era, 2026-11-01).** Several cards put a card in
+your hand locked: it takes a hand slot, can't be played, sold or
+discarded, but it is a real card in hand: effects that buff cards in hand
+(Winterfinner and the like) reach it, and a locked minion counts for
+anything that looks at your hand. It unlocks on a condition, then plays
+normally. Every one of these uses the same lock:
+
+| Card | Locked until |
+|---|---|
+| Faelin, Expedition Plans | the Tavern reaches the minion's tier (2, 4, 6) |
+| Tras'tath, Void Power | turn 7 |
+| Thorim, Choose Your Champion | you have spent 60 Gold (the Tier 7 is Discovered at the start of the game and sits in hand locked) |
+| Maiev, Imprison | 2 turns |
+| Search Through Time (Tier 2 spell, 2 Gold) | 1 turn |
+| Lockbox | its countdown (below; it opens into a golden minion) |
+
+Kaleidoscope (2 turns) and Double Stitch Needle (1 turn) lock the same
+way, but the game data has them out of the current trinket pool.
+Timewarped Beanstalk locks too, but Timewarp is out.
+
 **A spell cast twice counts twice everywhere.** Proud Privateer's second
 Bounty cast is a second spell for every trigger and every "spells cast"
 counter.
