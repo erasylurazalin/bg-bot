@@ -43,8 +43,9 @@ minion" and "Discover a Tier 4 minion". On turn 3 the player has 5 Gold
 and always levels to Tier 2 (cost 3), so players freeze a 2-Gold spell on
 turns 1 and 2 to spend the 2 Gold left over.
 
-**Faelin (Expedition Plans)** skips turn 1 the same way and loses that
-fight. Then three Discovers, one each from Tiers 2, 4 and 6. Each minion
+**Faelin (Expedition Plans)** skips turn 1 the same way and usually loses
+that fight. Its three Discovers, one each from Tiers 2, 4 and 6, happen at the start
+of the game (the start of turn 1). Each minion
 is locked in hand until the Tavern reaches its tier. A locked minion can
 be buffed in hand (Winterfinner, for example) but can't be played or
 summoned. The usual line: level to Tier 2 on turn 2, play the Tier 2
@@ -66,7 +67,8 @@ and then the button comes back: choose again, a different Element if you
 like, for the next fight. The first choice can be made on turn 1. Earth
 Invocation picks 4 different random friendly minions (one Deathrattle
 each). Lightning Invocation hits 5 different random enemy minions, never
-the same one twice. Fire Invocation doubles the left-most minion's Attack at Start of Combat, buffs
+the same one twice, and a minion with 1 Health dies at once (like any
+Start of Combat damage). Fire Invocation doubles the left-most minion's Attack at Start of Combat, buffs
 included.
 
 **Galewing (Dungar's Gryphon):** choose one of three flightpaths and

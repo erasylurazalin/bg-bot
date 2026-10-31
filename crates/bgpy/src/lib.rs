@@ -637,6 +637,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SCALAR_POWER2_USABLE", obs::SCALAR_POWER2_USABLE)?;
     m.add("SCALAR_PENDING_HERO", obs::SCALAR_PENDING_HERO)?;
     m.add("SCALAR_PENDING_POWER", obs::SCALAR_PENDING_POWER)?;
+    m.add("SCALAR_POWER_OFFER", obs::SCALAR_POWER_OFFER)?;
     m.add("SCALAR_HERO_OFFER", obs::SCALAR_HERO_OFFER)?;
     m.add("SCALAR_TRINKET", obs::SCALAR_TRINKET)?;
     m.add("SCALAR_TRINKET_COUNT", obs::SCALAR_TRINKET_COUNT)?;

@@ -351,13 +351,14 @@ card_id = "TB_BaconShop_HERO_16"
 armor = 15
 power = { name = "Procrastinate", card_id = "TB_BaconShop_HP_044", passive = true, skip_turns = 2, effect = { turn_discovers = { turn = 3, tiers = [3, 4] } } }
 
-# Expedition Plans: turn 1 is skipped, then three minions from Tiers 6, 4 and
-# 2, each locked in hand until the Tavern reaches its tier.
+# Expedition Plans: turn 1 is skipped, and it starts the game with three
+# Discovers, one each from Tiers 6, 4 and 2, each locked in hand until the
+# Tavern reaches its tier (docs/heroes.md).
 [[hero]]
 name = "Ambassador Faelin"
 card_id = "BG22_HERO_201"
 armor = 14
-power = { name = "Expedition Plans", card_id = "BG22_HERO_201p", passive = true, skip_turns = 1, effect = { turn_discovers = { turn = 2, tiers = [2, 4, 6] } } }
+power = { name = "Expedition Plans", card_id = "BG22_HERO_201p", passive = true, skip_turns = 1, effect = { turn_discovers = { turn = 1, tiers = [2, 4, 6] } } }
 
 # Bananarama: 2 Bananas to Mukla and 1 to every other player at the start of
 # his turn; each is a Big Banana a third of the time (docs/heroes.md).

@@ -287,11 +287,14 @@ passes the slot through.
 ### Skipped turns and cards locked in hand
 
 - `skip_turns = N` on a hero's power: the player's first N turns allow only
-  Freeze and End Turn (`Player.skipped`, `turn_skipped`), and the fights
-  still happen. `effect = { turn_discovers = { turn = T, tiers = [..] } }`
-  queues a Discover per tier at the start of turn T, and those picks land
-  with `Minion.locked_tier` set: the card cannot be played or discarded until
-  the Tavern reaches that tier, but it can still be buffed in hand.
+  Freeze and End Turn (`Player.skipped`, `turn_skipped`), the fights still
+  happen, and a Discover such a turn opened can still be answered (Choose is
+  legal beside Freeze and End Turn, which resolves it).
+  `effect = { turn_discovers = { turn = T, tiers = [..] } }` queues a
+  Discover per tier at the start of turn T (`turn = 1` is the start of the
+  game), and those picks land with `Minion.locked_tier` set: the card cannot
+  be played, discarded or summoned from the hand until the Tavern reaches
+  that tier, but it can still be buffed in hand.
 
 ## 2c. Adding a trinket
 

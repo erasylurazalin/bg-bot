@@ -920,6 +920,12 @@ impl Game {
         let Some(p) = self.current_player() else { return false };
         let pl = &self.players[p];
         let r = &self.data.rules;
+        // A skipped turn (Procrastinate, Expedition Plans) can always freeze
+        // or end, even with a choice open: End Turn answers it (Faelin's
+        // Discovers open on turn 1, which is the turn he skips).
+        if pl.skipped && matches!(a, Action::Freeze | Action::EndTurn) {
+            return true;
+        }
         // The hero pick (turn 0): only answering the offer is legal.
         if self.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX) {
             return matches!(a, Action::Choose(k) if (k as usize) < DISCOVER
@@ -971,10 +977,11 @@ impl Game {
         if !pl.power_offer.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.power_offer.len());
         }
-        // A skipped turn (Procrastinate, Expedition Plans): only Freeze and
-        // End Turn, and the fight still happens.
+        // A skipped turn (Procrastinate, Expedition Plans): Freeze and End
+        // Turn (already answered above) and the answers to whatever choice the
+        // turn opened, nothing else; the fight still happens.
         if pl.skipped {
-            return matches!(a, Action::Freeze | Action::EndTurn);
+            return false;
         }
         match a {
             Action::Buy(s) => {
@@ -1217,6 +1224,12 @@ impl Game {
             ask(Action::Level);
             ask(Action::HeroPower);
             ask(Action::HeroPower2);
+            ask(Action::EndTurn);
+        }
+        // A skipped turn can freeze or end whatever else is open (the End
+        // Turn answers it), which the branches above do not all ask for.
+        if pl.skipped {
+            ask(Action::Freeze);
             ask(Action::EndTurn);
         }
     }

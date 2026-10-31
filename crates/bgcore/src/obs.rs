@@ -117,15 +117,18 @@
 //!   left, used this game, unlocked, usable), Genn's and the Reinvigorating
 //!   Light trinket's
 //!   174 pending hero pick (the offer before turn 1 is open)
-//!   175 pending power pick (a Hero Power Discover is open)
-//!   176..178 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
+//!   175 pending power pick (a Hero Power Discover or a chooser is open)
+//!   176..179 the powers it offers, one per Choose slot (CHOICES = 4, power
+//!   index + 1, 0 for an empty slot): a Hero Power Discover offers three,
+//!   Bru'kan's Elements four, so the bot picks a power and not blind
+//!   180..182 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
 //!   Trinkets (DESIGN.md "Trinkets and Dark Gifts"):
-//!   179..181 the lesser slot, greater slot and hero power trinket (index
+//!   183..185 the lesser slot, greater slot and hero power trinket (index
 //!   into the trinket table + 1, 0 for empty)
-//!   182..184 their "every N" counters
-//!   185 a trinket offer is open, 186 which slot it fills (1 lesser,
+//!   186..188 their "every N" counters
+//!   189 a trinket offer is open, 190 which slot it fills (1 lesser,
 //!   2 greater, 3 the power's)
-//!   187..194 the four options: trinket index + 1, then the price
+//!   191..198 the four options: trinket index + 1, then the price
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
@@ -360,8 +363,12 @@ pub const SCALAR_POWER2_UNLOCKED: usize = SCALAR_POWER2 + 4;
 pub const SCALAR_POWER2_USABLE: usize = SCALAR_POWER2 + 5;
 pub const SCALAR_PENDING_HERO: usize = SCALAR_POWER2 + POWER_FEATURES;
 pub const SCALAR_PENDING_POWER: usize = SCALAR_PENDING_HERO + 1;
+/// The powers an open Hero Power Discover or chooser offers, one per Choose
+/// slot: `CHOICES` values, power index (into `HeroDb::powers`) + 1, 0 for an
+/// empty slot. The model embeds them with the same table as the power ids.
+pub const SCALAR_POWER_OFFER: usize = SCALAR_PENDING_POWER + 1;
 /// DISCOVER slots of the hero offer before turn 1, hero index + 1, 0 empty.
-pub const SCALAR_HERO_OFFER: usize = SCALAR_PENDING_POWER + 1;
+pub const SCALAR_HERO_OFFER: usize = SCALAR_POWER_OFFER + crate::CHOICES;
 /// Trinkets: the lesser slot, the greater slot and the one a hero power
 /// became (Marin the Manager, Buttons), each as an index into the trinket
 /// table plus one (0 for empty), then the "every N" counter of each.
@@ -474,6 +481,7 @@ const _: () = assert!(SCALAR_LOBBY + LOBBY_TRIBES == SCALAR_GEM_ATTACK);
 const _: () = assert!(SCALAR_DEITY + DEITY_FEATURES == SCALAR_PENDING_TARGET);
 const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_LEFT);
 const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
+const _: () = assert!(SCALAR_POWER_OFFER + crate::CHOICES == SCALAR_HERO_OFFER);
 const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALAR_TRINKET);
 const _: () = assert!(SCALAR_TRINKETS_END == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
@@ -821,6 +829,9 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     s[SCALAR_PENDING_HERO] =
         (game.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX)) as u8 as f32;
     s[SCALAR_PENDING_POWER] = (!pl.power_offer.is_empty()) as u8 as f32;
+    for (k, &of) in pl.power_offer.iter().enumerate() {
+        s[SCALAR_POWER_OFFER + k] = of as f32 + 1.0;
+    }
     for (k, &h) in pl.hero_offer.iter().enumerate() {
         s[SCALAR_HERO_OFFER + k] = if h == u8::MAX { 0.0 } else { h as f32 + 1.0 };
     }

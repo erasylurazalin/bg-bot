@@ -230,10 +230,14 @@ build hero-less games so old tests pass unchanged, and
 - **Skipped turns**: a power with `skip_turns` leaves only Freeze and End
   Turn legal for the player's first turns (`Player.skipped`, kept by
   `refresh_skip`, read by `turn_skipped` in `is_legal` and `legal_mask`); the
-  fight still happens. `TurnDiscovers` queues a `TierLockedMinion` Discover
-  per tier at the start of that turn, and the pick lands in hand with
-  `Minion.locked_tier` set: it can be buffed in hand but not played or
-  discarded until the Tavern reaches that tier.
+  fight still happens, and a choice the skipped turn opened can still be
+  answered (Choose stays legal beside Freeze and End Turn, which resolves
+  it). `TurnDiscovers` queues a `TierLockedMinion` Discover per tier at the
+  start of that turn (Faelin's at the start of turn 1), and the pick lands
+  in hand with `Minion.locked_tier` set: it can be buffed in hand but not
+  played, discarded or pulled into a fight from the hand until the Tavern
+  reaches that tier. `assign_hero` runs the current turn's power work when a
+  test forces a hero into a game that has already started.
 - **Passives hook into the existing triggers**: FreeRefreshPerTurn and
   Bananarama in `power_start_of_turn`, GoldAfterUpgrade in `Action::Level`,
   GoldAfterBuyTribe in `Action::Buy`, GoldNextTurnAfterSell in `sell_minion`,
@@ -514,9 +518,10 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   bigger in-combat numbers).
 - **The observation** carries the three slots (trinket index + 1), their
   counters, the open offer (its slot and the four options with prices) as own
-  scalars 173 to 188, and each opponent's three slots as their scalars 30 to
-  32. `OBS_SIZE` grew with them and `train/model.py` embeds the trinket ids in
-  a table of their own (`N_TRINKETS`).
+  scalars, and each opponent's three slots as their scalars 30 to 32.
+  `OBS_SIZE` grew with them and `train/model.py` embeds the trinket ids in a
+  table of their own (`N_TRINKETS`). Hero frame 2 put the offered powers just
+  before the hero offer, so the trinket block moved from 173 to 183.
 - **Bots** pick a trinket in `answer_pending`: the cheapest one of a tribe the
   board already has, else the cheapest. Tests: `tests/trinkets.rs`; the shared
   test helpers answer an open offer (and any Discover a trinket opened) before
@@ -707,11 +712,14 @@ Deleting `.venv` undoes it.
   hero offer during the pick and the `hero_power` action kind (OBS_SIZE to
   6389, SCALARS 173, OPP_SCALARS 30): every checkpoint before it breaks too.
   Hero frame 2 (2026-10-31) added the second power to the observation (six
-  scalars right after the main power's, SCALARS to 195), a fourth `choose`
-  slot (a chooser offers up to four: Bru'kan's Elements) and the
-  `hero_power2` action kind (N_ACTIONS 182): every checkpoint before it
-  breaks as well. A hero id and a power id share the model's one id
-  embedding, so its table is `max(N_HEROES, N_POWERS)` wide.
+  scalars right after the main power's), the powers an open Hero Power
+  Discover or chooser offers (one per Choose slot, power index + 1, so the
+  bot picks a power it can see; four for Bru'kan's Elements, three for a
+  Discover), a fourth `choose` slot and the `hero_power2` action kind
+  (SCALARS 195 to 199, N_ACTIONS 182): every checkpoint before it breaks as
+  well. A hero id and a power id share the model's one id embedding, so its
+  table is `max(N_HEROES, N_POWERS)` wide and the offer slots are embedded
+  from it too (`HERO_IDS` in train/model.py), not scaled as numbers.
 - Games from `bgpy` play with heroes (`Game::new_random_heroes`, no pick),
   except real seats which get none; learner seats answer any power Discover
   with `choose`.

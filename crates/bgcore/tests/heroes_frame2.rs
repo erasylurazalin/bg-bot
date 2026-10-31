@@ -220,7 +220,8 @@ fn heroes_toml_parses_with_the_thirty_heroes_and_the_later_powers() {
     assert_eq!(faelin.skip_turns, 1);
     assert_eq!(
         faelin.effect,
-        bgcore::PowerEffect::TurnDiscovers { turn: 2, tiers: [2, 4, 6] }
+        bgcore::PowerEffect::TurnDiscovers { turn: 1, tiers: [2, 4, 6] },
+        "the game starts with his three Discovers, before turn 1 does anything"
     );
     // Mukla's Bananas are plain spells, not the Tavern dish Banana.
     let mukla = d.heroes.hero_power(d.heroes.by_name("King Mukla").unwrap());
@@ -523,16 +524,39 @@ fn the_lightning_invocation_hits_five_different_minions() {
     }];
     let enemy: Vec<Minion> = (0..5).map(|_| mk("Mechagnome Interpreter")).collect();
     let bolt = Counters { soc_lightning: 5, soc_lightning_damage: 1, ..Counters::default() };
-    // All five take a damage and die at 1 Health: the first swing is followed
-    // by nothing, because the enemy side is empty.
+    // All five take a damage and die at 1 Health, right then: the fight is
+    // over before a single attack.
     let mut rng = bgcore::Rng::new(34);
     let out = fight_with(db, &mine, &enemy, [bolt, Counters::default()], 40, &mut rng, &mut ());
     assert_eq!(out.winner, Some(0));
-    assert_eq!(out.attacks, 1, "one swing, then no enemy is left");
+    assert_eq!(out.attacks, 0, "they die at Start of Combat, not at the next attack");
     // Without it, five 1/1s have to be killed one at a time.
     let mut rng = bgcore::Rng::new(34);
     let out = fight_with(db, &mine, &enemy, [Counters::default(); 2], 40, &mut rng, &mut ());
     assert!(out.attacks > 1, "{}", out.attacks);
+}
+
+#[test]
+fn the_lightning_invocations_kill_is_a_real_death_with_deathrattles() {
+    let db = &Data::bundled().cards;
+    let mk = |name: &str| db.make(db.by_name(name).expect(name), false);
+    // The enemy's Lightning hits my 2/1 Rescue Bot, whose Deathrattle gives a
+    // Repair Job: at 0 attacks the fight is over, so the card can only be
+    // there if the minion died at Start of Combat.
+    let mine = [mk("Rescue Bot")];
+    let enemy = [mk("Clever Castaway")];
+    let bolt = Counters { soc_lightning: 1, soc_lightning_damage: 1, ..Counters::default() };
+    let mut rng = bgcore::Rng::new(35);
+    let out = fight_with(db, &mine, &enemy, [Counters::default(), bolt], 0, &mut rng, &mut ());
+    assert_eq!(out.attacks, 0);
+    assert_eq!(out.sides[0].n_cards, 1, "the Deathrattle ran: {:?}", out.sides[0].cards);
+    assert_eq!(db.get(out.sides[0].cards[0]).name, "Repair Job");
+    assert_eq!(out.winner, Some(1), "my board is gone");
+    // Without the Invocation nothing dies and no card is given.
+    let mut rng = bgcore::Rng::new(35);
+    let out = fight_with(db, &mine, &enemy, [Counters::default(); 2], 0, &mut rng, &mut ());
+    assert_eq!(out.sides[0].n_cards, 0);
+    assert_eq!(out.winner, None);
 }
 
 #[test]
@@ -678,10 +702,19 @@ fn faelin_skips_turn_one_and_his_tier_minions_wait_for_their_tier() {
     let mut g = hero_game(13, "Ambassador Faelin");
     assert_eq!(power_name(&g, 0), "Expedition Plans");
     turn_of(&mut g, 0);
+    assert_eq!(g.turn, 1);
     assert!(!g.is_legal(Action::Roll), "turn 1 is skipped");
-    end_all_turns(&mut g);
-    assert_eq!(g.turn, 2);
-    turn_of(&mut g, 0);
+    // The three Discovers are open on that skipped turn, and all three ways
+    // out are legal: answer them, or freeze, or end the turn.
+    assert!(!g.players[0].discover.is_empty(), "the Discovers open on turn 1");
+    assert!(g.is_legal(Action::Choose(0)), "a Discover is answerable on a skipped turn");
+    assert!(g.is_legal(Action::Freeze));
+    assert!(g.is_legal(Action::EndTurn), "which answers the Discovers");
+    let mut mask = [false; bgcore::N_ACTIONS];
+    g.legal_mask(&mut mask);
+    assert!(mask[Action::Choose(0).index()] && mask[Action::Freeze.index()]);
+    assert!(mask[Action::EndTurn.index()]);
+    assert!(!mask[Action::Roll.index()] && !mask[Action::Level.index()]);
     // Three Discovers, from Tiers 2, 4 and 6.
     let mut tiers: Vec<u8> = Vec::new();
     let mut guard = 0;
@@ -697,8 +730,12 @@ fn faelin_skips_turn_one_and_his_tier_minions_wait_for_their_tier() {
     for m in &g.players[0].hand {
         assert!(m.locked_tier > 0, "every one of them waits for its tier");
     }
-    // At Tier 1 none of them can be played.
+    // Turn 1 is still spent: no shopping with them yet.
+    assert!(!g.is_legal(Action::Play { hand: 0, pos: 0 }), "turn 1 is skipped");
+    end_all_turns(&mut g);
+    assert_eq!(g.turn, 2);
     turn_of(&mut g, 0);
+    // At Tier 1 none of them can be played.
     assert!(!g.is_legal(Action::Play { hand: 0, pos: 0 }), "the Tier 3 card waits");
     // A locked card can be buffed in hand: Twilight Tidehunter's spell.
     put_on_board(&mut g, 0, "Twilight Tidehunter");
@@ -761,10 +798,12 @@ fn mukla_gives_two_bananas_to_himself_and_one_to_everyone_else() {
         end_all_turns(&mut g);
         for p in 0..8 {
             for m in &g.players[p].hand {
-                if g.data.cards.get(m.card).name == "Big Banana" {
-                    big += 1;
-                } else {
-                    small += 1;
+                // Only the Bananas count: from turn 6 on a trinket can hand a
+                // player a card of its own.
+                match g.data.cards.get(m.card).name.as_str() {
+                    "Big Banana" => big += 1,
+                    "Bananas" => small += 1,
+                    _ => {}
                 }
             }
         }
@@ -800,6 +839,48 @@ fn a_skipped_player_still_fights_and_takes_damage() {
 }
 
 // ---- the observation and the action space ----
+
+#[test]
+fn the_observation_shows_the_powers_on_offer() {
+    let mut g = hero_game(19, "Bru'kan");
+    let mut out = vec![0f32; bgcore::obs::OBS_SIZE];
+    turn_of(&mut g, 0);
+    bgcore::obs::write(&g, 0, &mut out);
+    for k in 0..bgcore::CHOICES {
+        assert_eq!(out[bgcore::obs::SCALAR_POWER_OFFER + k], 0.0, "nothing on offer yet");
+    }
+    assert_eq!(out[bgcore::obs::SCALAR_PENDING_POWER], 0.0);
+    // The chooser offers its four Elements: each is in the observation, power
+    // index + 1, one per Choose slot.
+    act(&mut g, 0, Action::HeroPower);
+    let offered: Vec<u8> = g.players[0].power_offer.to_vec();
+    assert_eq!(offered.len(), bgcore::CHOICES);
+    bgcore::obs::write(&g, 0, &mut out);
+    assert_eq!(out[bgcore::obs::SCALAR_PENDING_POWER], 1.0);
+    for k in 0..bgcore::CHOICES {
+        assert_eq!(
+            out[bgcore::obs::SCALAR_POWER_OFFER + k] as u8 as usize,
+            offered[k] as usize + 1,
+            "slot {k}"
+        );
+    }
+    // A Discover offers three, so the fourth slot stays empty.
+    let mut g = hero_game(20, "George the Fallen");
+    put_on_board(&mut g, 0, "Clever Castaway");
+    let ui = id(&g, "Unmasked Identity");
+    g.players[0].hand.push(g.players[0].make_card(&g.data.cards, ui, false, 0));
+    g.players[0].gold = 6;
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].power_offer.len(), bgcore::DISCOVER);
+    bgcore::obs::write(&g, 0, &mut out);
+    for k in 0..bgcore::DISCOVER {
+        assert_eq!(
+            out[bgcore::obs::SCALAR_POWER_OFFER + k] as u8 as usize,
+            g.players[0].power_offer[k] as usize + 1
+        );
+    }
+    assert_eq!(out[bgcore::obs::SCALAR_POWER_OFFER + bgcore::DISCOVER], 0.0, "an empty slot");
+}
 
 #[test]
 fn the_observation_carries_the_second_power() {

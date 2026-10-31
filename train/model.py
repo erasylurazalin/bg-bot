@@ -37,10 +37,12 @@ OWN_END = bgpy.OWN_END
 N_HERO_IDS = max(bgpy.N_HEROES, bgpy.N_POWERS)
 # Card ids, embedded rather than scaled.
 SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD]
-# Hero ids, embedded with their own table: own hero, the power's hero (the
-# first power and the second one, both indices into the power table), and the
-# hero offer slots during the pick.
+# Hero and power ids, embedded with their own table: own hero, the power's
+# hero (the first power and the second one, both indices into the power
+# table), the powers an open Hero Power Discover or chooser offers (so a pick
+# is made from what it can see), and the hero offer slots during the pick.
 HERO_IDS = [bgpy.SCALAR_HERO, bgpy.SCALAR_POWER_HERO, bgpy.SCALAR_POWER2_HERO] + list(
+    range(bgpy.SCALAR_POWER_OFFER, bgpy.SCALAR_POWER_OFFER + bgpy.CHOICES)) + list(
     range(bgpy.SCALAR_HERO_OFFER, bgpy.SCALAR_HERO_OFFER + bgpy.DISCOVER))
 # Trinket ids, embedded with their own table: the three own slots and the
 # four options of an open offer (every option's trinket, not its price).

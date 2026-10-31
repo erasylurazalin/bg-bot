@@ -410,18 +410,18 @@ fn a_rewind_gives_armor_back_as_armor() {
 #[test]
 fn clairvoyance_gains_a_free_refresh_each_turn_and_stacks() {
     let mut g = hero_game(5, "Nozdormu");
-    assert_eq!(g.players[0].free_rolls, 0, "turn 1 has not started its turn loop");
+    assert_eq!(g.players[0].free_rolls, 1, "turn 1's free Refresh");
     end_all_turns(&mut g);
     assert_eq!(g.turn, 2);
-    assert_eq!(g.players[0].free_rolls, 1, "one free Refresh per turn");
-    // A free Refresh saved: it carries over and the next turn's adds on top.
+    assert_eq!(g.players[0].free_rolls, 2, "one free Refresh per turn, and they stack");
+    // A free Refresh spent goes back to 1, and the next turn's adds on top.
     act(&mut g, 0, Action::Roll);
-    // (the roll just spent one; back to 0)
-    end_all_turns(&mut g);
     assert_eq!(g.players[0].free_rolls, 1);
-    // two turns of powers stack when none is spent
     end_all_turns(&mut g);
-    assert!(g.players[0].free_rolls >= 1);
+    assert_eq!(g.players[0].free_rolls, 2);
+    // Two turns of powers stack when none is spent.
+    end_all_turns(&mut g);
+    assert_eq!(g.players[0].free_rolls, 3);
     g.check_invariants().unwrap();
 }
 

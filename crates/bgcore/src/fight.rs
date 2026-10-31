@@ -2831,14 +2831,33 @@ fn run_start_of_combat(
             let _ = struck[s].try_push(slots.remove(k));
         }
     }
+    let mut hit: Option<usize> = None;
     for s in 0..2 {
         let opp = s ^ 1;
         let dmg = sides[s].counters.soc_lightning_damage;
         for &u in &struck[s] {
-            if let Some(i) = sides[opp].ms.iter().position(|f| f.uid == u) {
-                sides[opp].ms[i].m.health -= dmg;
+            let Some(i) = sides[opp].ms.iter().position(|f| f.uid == u) else { continue };
+            // One point of damage each, Divine Shields and all, the way any
+            // other damage in a fight lands.
+            let had = sides[opp].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD);
+            let dealt = deal_damage(&mut sides[opp].ms[i].m, dmg);
+            sides[opp].ms[i].taken += dealt;
+            if had && !sides[opp].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD) {
+                sides[opp].note_shield_lost(db);
             }
+            if dealt > 0 && sides[opp].damage_trigger && i < sides[opp].ms.len() {
+                sides[opp].when_damaged(db, opp, i, uid, rng, w);
+            }
+            hit = Some(opp);
         }
+    }
+    // It kills at once, Deathrattles and all, like any other Start of Combat
+    // damage: a 1-Health minion is gone before the minions' own Start of
+    // Combat runs.
+    if let Some(opp) = hit
+        && sides.iter().any(|side| side.ms.iter().any(|f| f.m.health <= 0))
+    {
+        resolve_deaths(sides, opp, db, uid, rng, w);
     }
     // A trinket's Start of Combat comes at the same step as the hero power's
     // (DESIGN.md: hero powers, then the lesser trinket, then the greater).

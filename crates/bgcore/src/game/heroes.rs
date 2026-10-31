@@ -90,10 +90,17 @@ impl Game {
 
     /// Give player `p` this hero outright, no offer: the pick phase's
     /// effects (armor, extra Health, the power, Finley's Discover when
-    /// `discover`, which the pick phase runs by itself). For tests and the
-    /// sandbox's --hero.
+    /// `discover`, which the pick phase runs by itself). For tests (the
+    /// sandbox's --hero goes through the pick at turn 0).
+    ///
+    /// A hero given this way while a later turn is already being played is
+    /// the hero the game started with, so that turn's power work runs now:
+    /// Faelin's Discovers open on turn 1, Clairvoyance's free Refresh lands.
     pub fn assign_hero(&mut self, p: usize, hero: u8) {
         self.take_hero(p, hero);
+        if self.turn > 0 {
+            self.power_start_of_turn(p);
+        }
     }
 
     /// The player takes the hero: health, armor, power state, and Finley's
