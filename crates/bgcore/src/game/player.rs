@@ -527,6 +527,91 @@ impl Player {
         (da, dh)
     }
 
+    /// A player holding one real board as it went into its fight
+    /// (docs/real-boards.md "The fight check"): the board, the hand, the
+    /// Tavern tier, the side-wide numbers and the Deity, plus the Health and
+    /// armor it had then. Everything a fight reads off the player is here and
+    /// nothing a shop phase would be, so a fight can be fought straight from
+    /// this player's `counters` and `board`. The hero power and the trinkets
+    /// need the hero and trinket tables, so they are seated after (see
+    /// `crate::fight_check`).
+    pub fn from_real_board(data: &Data, board: &crate::real_boards::RealBoard) -> Player {
+        let mut pl = Player::new(data);
+        pl.health = if board.health > 0 { board.health } else { data.rules.starting_health };
+        pl.armor = board.armor;
+        pl.tier = board.tier;
+        for m in &board.minions {
+            let _ = pl.board.try_push(*m);
+        }
+        for m in &board.hand {
+            let _ = pl.hand.try_push(*m);
+        }
+        pl.take_real_counters(&board.counters, board.deity);
+        pl
+    }
+
+    /// Give the player the hero power `i` of the hero table with the numbers
+    /// the file showed, as a power they hold at the first attack.
+    pub fn hold_power(&mut self, data: &Data, i: u8, progress: u32, turn: u32) {
+        let power = data.heroes.power(i);
+        self.power = Some(PowerState {
+            of: i,
+            uses_left: power.uses_per_turn,
+            used_game: 0,
+            // The same lock the turn start applies (`game/heroes.rs`): a power
+            // that unlocks on a later turn or tier does nothing before it.
+            unlocked: self.tier >= power.unlock_tier && turn >= power.unlock_turn,
+            progress,
+            last_pick: 0,
+            cost_delta: 0,
+            // A power whose fight effect only runs when it is pressed before
+            // the fight (I'll Take That!, Embrace Your Rage, Rapid
+            // Reanimation) is played as pressed: whoever holds it and can pay
+            // for it presses it before a fight.
+            armed: power.effect.fires_only_when_pressed(),
+        });
+    }
+
+    /// Put a trinket of the trinket table in one of the player's slots, with
+    /// its current "improve this" number, as a board that went into the fight
+    /// carried it. Its pick effects never ran, so nothing but the trinket and
+    /// the events it listens for is set here.
+    pub fn hold_trinket(&mut self, data: &Data, slot: usize, i: u8, value: u8) {
+        let t = data.trinkets.get(i);
+        self.trinkets[slot] = TrinketState {
+            of: i + 1,
+            count: 0,
+            value,
+            uses_left: t.uses_per_turn.unwrap_or(u8::MAX),
+            done: false,
+            card: None,
+            tribe: None,
+            cube: false,
+            cube_choices: 0,
+        };
+        self.trinket_events |= t.event_mask();
+        // The one trinket rule the fight reads besides its own effects: a
+        // power's fight effect runs twice (Valdrakken Wind Chimes, Ancient
+        // Wishbone). Its pick effects never ran here, so it is set from the
+        // trinket's own data.
+        for a in &t.on_pick {
+            match a {
+                crate::trinkets::Act::PowerTriggers(n) => {
+                    self.tp.power_triggers = self.tp.power_triggers.max(*n);
+                }
+                // Hammer of Twilight's "your minions have +X/+Y": the board
+                // already carries it, and a minion the fight summons gets it
+                // from these. How many cards were discarded (its steps) is not
+                // in the file, so only the base is set.
+                crate::trinkets::Act::Hammer { base, per } => {
+                    self.tp.hammer_base = *base;
+                    self.tp.hammer_per = *per;
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Give a real seat the numbers and the Deity of the board it just drew,
     /// replacing the ones the last turn's board left: nothing accumulates on
     /// a real seat, and a number the log did not show is the base value

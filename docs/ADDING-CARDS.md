@@ -22,6 +22,10 @@ trigger enums), `game/` (shop phase, one file per system, see `docs/ENGINE.md`),
 4. Test with the real card (section 4), then `cargo test --workspace`,
    `cargo clippy --workspace --all-targets`, `cargo build --release -p bgbench`,
    `./target/release/bgbench fuzz 20000`, `./target/release/bgbench games 10`.
+   `./target/release/bgbench fightcheck` plays the real fights the card was in
+   (docs/real-boards.md "The fight check"); a card whose size comes from a
+   number in the log needs its line in `real_boards.rs`'s `improvements`, or
+   the check plays it at the wrong size and flags its fights.
 5. Never `cargo fmt` (the repo is not rustfmt-formatted).
 
 The owner's tracker sim `~/projects/bg/bg/engine.py` is a good reference for how a

@@ -373,6 +373,20 @@ pub enum BuyKind {
     Battlecry,
 }
 
+impl PowerEffect {
+    /// Whether the power's fight effect only runs when the power was pressed
+    /// in the same turn (the fight reads the press as `PowerState.armed`):
+    /// I'll Take That!, Embrace Your Rage and Rapid Reanimation.
+    pub fn fires_only_when_pressed(self) -> bool {
+        matches!(
+            self,
+            PowerEffect::TakeFirstKilled
+                | PowerEffect::EmbraceYourRage
+                | PowerEffect::RapidReanimation
+        )
+    }
+}
+
 /// A hero power: its button's limits and its effect.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HeroPower {

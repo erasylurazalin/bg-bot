@@ -5,6 +5,8 @@
 //!   bgbench fuzz [games]    games on every core, invariants after every step
 //!   bgbench match [games]   curve bots against random bots, average placement
 //!   bgbench peak [n]        peak board balance matrix (n fights each way per pair)
+//!   bgbench fightcheck      play Era's real fights N times each, write boards/checks/
+//!                           [--boards DIR] [--runs N] [--out DIR] [--flag PCT]
 //!
 //! `fuzz` and `games` also take --real-boards DIR [--real-seats N] to seat
 //! real-board seats playing the boards of DIR (docs/real-boards.md), the
@@ -15,7 +17,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bgcore::bots::{random_action, rush_action, standard_action};
-use bgcore::real_boards::{parse_board_files, CardIdMap, RealBoards};
+use bgcore::fight_check::{CheckOptions, CheckReport, check_fight};
+use bgcore::real_boards::{CardIdMap, RealBoards, pair_fights, parse_board_files};
 use bgcore::{
     Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, RealBoardSpec, Rng, fight,
     fight_with,
@@ -26,10 +29,8 @@ use serde::Deserialize;
 /// The boards real seats play, and how many seats of a game are real.
 type Real = Option<(Arc<RealBoards>, usize)>;
 
-/// Read the board files in `dir` (docs/real-boards.md) and resolve them
-/// against the card set, mapping card ids through ref/bg-cards.json. Prints
-/// what was loaded: boards per turn and the unmatched minions by name.
-fn load_real_boards(dir: &str) -> Result<Arc<RealBoards>, String> {
+/// The board files of `dir`: (name, text) per game, in name order.
+fn read_board_files(dir: &str) -> Result<Vec<(String, String)>, String> {
     let mut files: Vec<(String, String)> = std::fs::read_dir(dir)
         .map_err(|e| format!("{dir}: {e}"))?
         .map(|e| e.map_err(|e| format!("{dir}: {e}")))
@@ -51,6 +52,14 @@ fn load_real_boards(dir: &str) -> Result<Arc<RealBoards>, String> {
     if files.is_empty() {
         return Err(format!("{dir}: no board files"));
     }
+    Ok(files)
+}
+
+/// Read the board files in `dir` (docs/real-boards.md) and resolve them
+/// against the card set, mapping card ids through ref/bg-cards.json. Prints
+/// what was loaded: boards per turn and the unmatched minions by name.
+fn load_real_boards(dir: &str) -> Result<Arc<RealBoards>, String> {
+    let files = read_board_files(dir)?;
     let ref_json = std::fs::read_to_string("ref/bg-cards.json")
         .map_err(|e| format!("ref/bg-cards.json (the card id mapping): {e}"))?;
     let ids = CardIdMap::parse(&ref_json)?;
@@ -451,6 +460,101 @@ fn bench_peak(n: usize) {
     }
 }
 
+/// `bgbench fightcheck`: play every paired fight of Era's real games `runs`
+/// times, on every core, and write `fights.tsv`, `cards.tsv` and `report.md`
+/// to the output folder (docs/real-boards.md "The fight check"). Nothing is
+/// fixed here: the output says which real results the engine finds unlikely.
+fn fight_check(boards: &str, runs: u32, out: &str, flag_below: f64) {
+    let t = Instant::now();
+    let files = read_board_files(boards).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    let ids = CardIdMap::parse(
+        &std::fs::read_to_string("ref/bg-cards.json")
+            .unwrap_or_else(|e| panic!("ref/bg-cards.json (the card id mapping): {e}")),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    let (specs, unknown) = parse_board_files(&files, &ids).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    let boards_count = specs.len();
+    let (fights, unpaired) = pair_fights(specs);
+    println!(
+        "{} boards from {} games in {boards}, {} paired fights, {} boards with no opponent",
+        boards_count,
+        files.len(),
+        fights.len(),
+        unpaired.len()
+    );
+    let data = Data::bundled();
+    let opts = CheckOptions { runs, flag_below, ..CheckOptions::default() };
+    let entries: Vec<_> = fights
+        .par_iter()
+        .enumerate()
+        .map(|(i, f)| check_fight(&data, f, opts.runs, opts.seed.wrapping_add(i as u64)))
+        .collect();
+    let mut report = CheckReport::new(&data, entries, opts);
+    report.unpaired = unpaired;
+    report.unknown_minions = unknown;
+    let el = t.elapsed();
+
+    std::fs::create_dir_all(out).unwrap_or_else(|e| panic!("{out}: {e}"));
+    for (name, text) in [
+        ("fights.tsv", report.fights_tsv()),
+        ("cards.tsv", report.cards_tsv()),
+        ("report.md", report.report_md(&data)),
+    ] {
+        let path = format!("{out}/{name}");
+        std::fs::write(&path, text).unwrap_or_else(|e| panic!("{path}: {e}"));
+    }
+
+    let total = report.entries.len();
+    let complete = report.complete();
+    println!(
+        "{total} fights, {complete} complete, {} flagged (complete, real result under {flag_below:.1}%)",
+        report.flagged()
+    );
+    let mut reasons: Vec<(String, u32)> = Vec::new();
+    for e in &report.entries {
+        for line in &e.check.missing {
+            let head = bgcore::fight_check::missing_kind(line);
+            match reasons.iter_mut().find(|(r, _)| r == head) {
+                Some((_, c)) => *c += 1,
+                None => reasons.push((head.to_string(), 1)),
+            }
+        }
+    }
+    reasons.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    println!("why incomplete, most common first:");
+    for (name, count) in reasons.iter().take(8) {
+        println!("  {count:5}  {name}");
+    }
+    if !report.unknown_minions.is_empty() {
+        let mut names = report.unknown_minions.clone();
+        names.sort();
+        names.dedup();
+        println!("card ids no source knows, {} distinct: {}", names.len(), names.join(", "));
+    }
+    println!("the 15 most suspicious cards (flagged / complete fights):");
+    for t in report.pieces.iter().filter(|t| t.flagged > 0).take(15) {
+        println!(
+            "  {:>4}/{:<4} {:>5.1}%  {} ({})",
+            t.flagged,
+            t.complete,
+            t.ratio(),
+            t.name,
+            t.kind.map_or("?", bgcore::fight_check::PieceKind::name)
+        );
+    }
+    println!("{el:.1?} for {total} fights x {runs} runs on {} cores", rayon::current_num_threads());
+    println!("wrote {out}/fights.tsv, {out}/cards.tsv, {out}/report.md");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let num = |default: u64| args.get(2).and_then(|s| s.parse().ok()).unwrap_or(default);
@@ -482,6 +586,26 @@ fn main() {
     };
     match args.get(1).map(String::as_str) {
         Some("fight") => bench_fights(num(1_000_000) as usize),
+        Some("fightcheck") => {
+            let opt = |name: &str, default: &str| {
+                args.iter()
+                    .position(|a| a == name)
+                    .and_then(|k| args.get(k + 1))
+                    .cloned()
+                    .unwrap_or_else(|| default.to_string())
+            };
+            let boards = opt("--boards", "boards/real");
+            let out = opt("--out", "boards/checks");
+            let runs: u32 = opt("--runs", "1000").parse().unwrap_or_else(|_| {
+                eprintln!("--runs needs a number");
+                std::process::exit(2);
+            });
+            let flag_below: f64 = opt("--flag", "2.0").parse().unwrap_or_else(|_| {
+                eprintln!("--flag needs a percent, like 2 or 0.5");
+                std::process::exit(2);
+            });
+            fight_check(&boards, runs.max(1), &out, flag_below);
+        }
         Some("games") => bench_games(num(10), real),
         Some("fuzz") => fuzz(num(10_000), real),
         Some("match") => bot_match(num(10_000)),
@@ -489,6 +613,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: bgbench fight [n] | games [secs] | fuzz [games] | match [games] | peak [n]\n\
+                 \x20      bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]\n\
                  \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N]"
             );
             std::process::exit(2);

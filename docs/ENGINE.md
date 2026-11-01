@@ -35,7 +35,12 @@ crates/
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
     src/real_boards.rs the boards of Era's real games: file parsing, card id
-                      mapping, the turn buckets a real seat draws from
+                      mapping, the turn buckets a real seat draws from, the
+                      paired fights of one turn
+    src/fight_check.rs the fight check: one real fight seated in the engine
+                      (power and trinkets included), played many times, and
+                      the three files it writes (docs/real-boards.md "The
+                      fight check")
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
                       heroes.rs (the hero frame: pick, armor, the 22 powers, the two spells),
                       trinkets.rs (the trinket frame: the two offers, the guarantee and the
@@ -54,6 +59,8 @@ crates/
                       core_rules.rs (the generic rules on the real data), fight.rs,
                       game.rs, real_boards.rs (real-board seats; its small fixture
                       folder tests/data/real-boards stands in for boards/real),
+                      fight_check.rs (one real fight seated and played, the
+                      fixture folder through the checker, the three files),
                       sandbox.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
   bgpy/               PyO3 bindings: a batch of games stepped together
@@ -1126,6 +1133,14 @@ minions in the hand.
   numbers become `Minion.improvements` for the cards whose scaling the
   engine models that way, and a Tasty Lobster's become the player's
   `tasty_lobster` count (the list is in `docs/real-boards.md`).
+- **One side as it went into a fight:** `RealBoard` also holds the Health,
+  armor, hero power, trinkets and quest rewards the file carries, and
+  `Player::from_real_board` seats the board, the hand, the tier, the numbers
+  and the Deity on a player. The fight check
+  (`src/fight_check.rs`) adds the power and the trinkets
+  (`Player::hold_power`, `Player::hold_trinket`) on top; a real seat takes
+  none of that yet (no hero, flat 30 Health and 10 armor). This is the seam a
+  real seat would use to play with its hero power and trinkets later.
 - **The hand:** a real seat's hand reaches the fight through
   `fight_with_hands`, which already passes each side's hand whenever a card
   on either board reads it; the minions come out of it with no pool copies,
@@ -1173,6 +1188,7 @@ cargo build --release -p bgbench
 ./target/release/bgbench fuzz [games]   # random play, invariants after every action
 ./target/release/bgbench match [games]  # bots against each other
 ./target/release/bgbench peak [n]       # peak boards of each build against each other
+./target/release/bgbench fightcheck      # play Era's real fights, write boards/checks/
 cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 ```
 
@@ -1180,6 +1196,12 @@ cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 to seat real-board seats playing DIR's boards (docs/real-boards.md); without
 a real boards/ folder, `crates/bgcore/tests/data/real-boards/` is a small
 stand-in. Needs `ref/bg-cards.json` for the card id mapping.
+
+`fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]` plays every
+paired fight of DIR `--runs` times on every core and writes `fights.tsv`,
+`cards.tsv` and `report.md` to `--out` (docs/real-boards.md "The fight
+check"). It only reads the engine: nothing in a fight changes. Needs
+`ref/bg-cards.json` for the card id mapping, like `--real-boards`.
 
 `games 10` on this machine (release, 32 threads, five-tribe lobbies with
 heroes) was about 13,300 games a second after hero batch 3: one core 1.04 ms

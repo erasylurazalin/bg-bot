@@ -279,3 +279,75 @@ every eval then also plays one learner against 7 real seats
 (`place_vs_real`). Without a `boards/` folder, the small fixture folder
 `crates/bgcore/tests/data/real-boards/` plays the same role for tests,
 `bgbench fuzz|games N --real-boards <folder>` and smoke runs.
+
+## The fight check
+
+`bgbench fightcheck` plays Era's real fights through the engine many times and
+says which real results the engine finds unlikely, and which cards those
+fights share. It is a bug finder: it fixes nothing (docs/briefs/fight-check.md).
+
+```
+./target/release/bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]
+```
+
+Defaults: `boards/real`, 1000 runs, `boards/checks` (git-ignored, under
+`boards/`), a 2% flag cut. Needs `ref/bg-cards.json` for the card id map, as
+`--real-boards` does. Every core is used: 558 fights x 1000 runs takes about
+0.2 s on 32 cores.
+
+- **The fights:** a board is paired with the other side's board of the same
+  turn of the same game (`pair_fights`). The result is the one the game
+  recorded on Era's board (`win`, `lose` or `tie`). The damage a fight did is
+  the drop in Health plus armor from this turn's board to the next turn's
+  board of the same game.
+- **Setting it up:** `bgcore::fight_check::prepare` seats both sides exactly
+  as they went in, through the same code a real seat uses
+  (`RealBoard::build_one`, `Player::from_real_board`), then adds the hero
+  power and the trinkets, which a real seat still ignores:
+  - the minions with the file's attack, health, golden flag, keywords, Dark
+    Gifts (their stats already in attack and health) and the scaling numbers
+    the loader maps, the hand, the counters, the Deity, the Tavern tier,
+    Health and armor;
+  - the hero power (`HeroDb::power_by_card_id`) with the one number a fight
+    reads off its text (Onyxia's Broodmother bonus). The three powers whose
+    fight effect only runs when the power was pressed in the same turn (I'll
+    Take That!, Embrace Your Rage, Rapid Reanimation) are played as pressed:
+    whoever holds one and can pay for it presses it before a fight;
+  - the trinkets (`TrinketDb::by_card_id`) in the slot the file marks, with
+    their "improve this" number from the printed stats where a fight effect
+    grows them (Fang Anklet, All-Purpose Kibble) and the small standing rules
+    the fight reads (a power's fight effect running twice, the Hammer of
+    Twilight aura on minions the fight summons).
+- **Incomplete:** a fight is incomplete when the engine does not build
+  something it carried, and its missing pieces are listed: a minion (it
+  keeps its stats and keywords as a Stand-in, Era's rule for the loader), a
+  hero power, a trinket, a Dark Gift, a quest reward (no quest is modelled),
+  a hand card the log does not name. Two gaps that come from the file itself
+  count too: a power whose fight effect reads a number the file does not
+  carry (Ozumat's Tentacles grow with minions sold, Tavish's Lock and Load
+  needs the minion it locked), and Prestidigitation, because a Secret zone is
+  not in the file. An incomplete fight is never flagged.
+- **Flags and calibration:** a complete fight is **flagged** when the engine
+  gives the recorded result less than `--flag` percent. Complete fights are
+  also grouped by the engine's predicted win % in ten buckets with the real
+  win rate of each, so a systematic skew shows up as a bucket whose real rate
+  does not follow the engine's.
+- **Output** (`boards/checks/`):
+  - `fights.tsv`: one row per fight: the file, game and turn, the real
+    result, our win, tie and loss %, the chance we give the real result,
+    complete or not and why, our damage when Era loses (mean, p10, p50, p90),
+    the damage the file shows Era took, and the share of runs that hit the
+    attack cap;
+  - `cards.tsv`: per minion, hero power, trinket, Dark Gift and quest reward:
+    the fights it was in, how many of those were complete, how many were
+    flagged, and the ratio, most suspicious first;
+  - `report.md`: the summary, why fights were incomplete, the calibration
+    table, the damage comparison, and the 30 most surprising complete fights
+    with both boards written out.
+
+What the check cannot see, because the file does not carry it, and so cannot
+blame on the engine: the game's lobby (a card that draws a random card inside
+the fight draws from every tribe), the shop-phase numbers a fight reads
+(Goldrinn's Beast bonus, Boon of Beetles, Gold spent, minions sold), a trinket
+aura's per-card steps (Hammer of Twilight's discards), and the Ice Block a
+Safety Patch gives (it moves Health between turns, not a fight's result).

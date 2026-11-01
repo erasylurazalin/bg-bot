@@ -220,6 +220,10 @@ impl VecEnv {
                         health,
                         golden,
                     }),
+                    // The rest of the file's board (the game it came from, its
+                    // side and result, Health, armor, power, trinkets, quest
+                    // rewards) is for the fight check, not for a seat.
+                    ..RealBoardSpec::default()
                 })
                 .collect();
             // Names that match no card are dropped here; train/real_boards.py

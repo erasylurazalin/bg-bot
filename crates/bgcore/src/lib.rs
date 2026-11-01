@@ -10,6 +10,7 @@ pub mod bots;
 pub mod cards;
 pub mod darkgifts;
 pub mod fight;
+pub mod fight_check;
 pub mod game;
 pub mod heroes;
 pub mod minion;
@@ -29,7 +30,9 @@ pub use game::{Game, IllegalAction, Opponent, Player, PowerState, Sandbox, Sandb
 pub use heroes::{Hero, HeroDb, HeroPower, PowerEffect};
 pub use minion::{Attached, CardId, GiftOn, Keywords, MAX_ATTACHED, MAX_GIFTS, Minion};
 pub use real_boards::{
-    CardIdMap, LATE_TURN, RealBoard, RealBoardSpec, RealBoards, RealMinionSpec, parse_board_files,
+    CardIdMap, LATE_TURN, RealBoard, RealBoardSpec, RealBoards, RealFightSpec, RealMinionSpec,
+    RealPowerSpec, RealResult, RealRewardSpec, RealSide, RealTrinketSpec, pair_fights,
+    parse_board_files,
 };
 pub use rng::Rng;
 pub use rules::Rules;
