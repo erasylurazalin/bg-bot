@@ -28,10 +28,12 @@ What a turn holds (docs/real-boards.md, "The action file", has the shape):
   (`cost`, the card's or button's COST tag, when it has one) and what it
   actually took (`paid`: the Gold and the Health the log shows leaving), where
   its card went (`moved`: a Tavern slot to the hand, the hand to a board
-  position, off the board), and what it changed: the cards that entered or
-  left my hand and board with the card that made them, the cards whose numbers
-  moved (a random buff's target), a Refresh's new offers, a Discover's options
-  and the card picked.
+  position, off the board), what it changed (the cards that entered or left my
+  hand and board with the card that made them, the cards whose numbers moved,
+  a Refresh's new offers, a Discover's options and the card picked), and what
+  else it did: the Health it took and what gave it back (`health_cost`,
+  `rewound`), the Gold it gained (`gold_gain`), the free Refreshes it used or
+  that came in (`free_from`, `free_refreshes`).
 - `end`: my hand, board and Gold when the turn ended, before the fight.
 
 A step is measured against the state the step before it left, not against the
@@ -56,6 +58,15 @@ the turn gave me, plus what a sell or a Gold effect put in the temporary pool,
 minus what I have spent this turn. Health is my hero's `HEALTH - DAMAGE + ARMOR`
 together, because a card priced in Health is paid out of Armor first (the log
 says so with `META_DATA SPEND_HEALTH`, and the Armor is what drops).
+
+Three things a step can do besides spend Gold are read from the tags inside it,
+and named by the card of the block they happen in: my hero's Damage or Armor
+coming back (a Soul Rewinder or an Ashen Corruptor), my Gold going up (the
+Minion it came from, a spell, a trinket), and the free Refresh count moving
+(`BACON_FREE_REFRESH_COUNT` on `Bacon_Free_Refresh_Player_Ench`), which keeps
+the cards that filled the pool so a free reroll can name one. A card that
+enters my hand with no CREATOR is a card stolen out of the Tavern: it keeps its
+entity id, so the step it entered in carries the Tavern slot it came from.
 
 The entity references an options dump prints carry a stale zone and position
 (the dump is printed before the client applies the last change), so a step's
@@ -114,6 +125,18 @@ COSTED = ("buy", "roll", "level", "hero_power", "dark_discovery")
 SYSTEM = ("TB_BaconShop_8P_PlayerE", "Bacon_TagTransferPlayerE", "PET_")
 # Card types that are never a card of mine in hand during a shop phase.
 NOT_IN_HAND = ("ENCHANTMENT", "PLAYER", "HERO", "GAME", "HERO_POWER")
+# The player enchantment that holds my free Refreshes (BACON_FREE_REFRESH_COUNT
+# on it and on the Refresh button; the button's own tag is the same number, so
+# only the enchantment is followed to avoid counting a grant twice).
+FREE_REFRESH = "Bacon_Free_Refresh_Player_Ench"
+# The card types a block's entity can have and still be the card that did
+# something: an effect's own card, not a player or the game.
+SOURCES = ("MINION", "SPELL", "BATTLEGROUND_SPELL", "BATTLEGROUND_TRINKET",
+           "HERO_POWER", "ENCHANTMENT", "WEAPON")
+# The tags above: a free Refresh changing hands, my hero taking or getting back
+# Health, my Gold moving.
+WATCHED = ("BACON_FREE_REFRESH_COUNT", "HEALTH", "DAMAGE", "ARMOR", "RESOURCES",
+           "TEMP_RESOURCES", "RESOURCES_USED")
 
 # A card the log names, e.g. "[entityName=Wrath Weaver id=434 zone=PLAY
 # zonePos=2 cardId=BGS_004 player=15]". A name can hold brackets of its own
@@ -210,6 +233,12 @@ class ActionTracker(Tracker):
         self.last = None       # the state the last step left
         self.last_gold = 0      # the Gold the last step left
         self.last_health = 0    # and my hero's Health
+        self.free = 0           # free Refreshes I have
+        self.pool = []          # who put them there: [{"count": n, "card": {...}}]
+        self.stats = None       # what the step being resolved did besides spend
+        self.damage = None      # my hero's DAMAGE at the last look
+        self.armor_now = None   # and its Armor
+        self.gold_live = None   # and my Gold
 
     # -- games ------------------------------------------------------------
 
@@ -254,6 +283,7 @@ class ActionTracker(Tracker):
 
     def _on_tag(self, g, e, tag, value):
         super()._on_tag(g, e, tag, value)
+        self.watch(e, tag, value)
         if e is not g.game_entity:
             return
         if tag == "TURN":
@@ -264,6 +294,76 @@ class ActionTracker(Tracker):
             self.close_step()
             self.ended = True
             self.open_step({"step": "end_turn"})
+
+    def watch(self, e, tag, value):
+        """Follow, tag by tag, the things a step can do besides take Gold and
+        spend it: free Refreshes coming in, Health taken and given back, Gold
+        gained. The log says which card did each one by the block it is in."""
+        if tag not in WATCHED:
+            return
+        if tag == "BACON_FREE_REFRESH_COUNT" and e.card_id.startswith(FREE_REFRESH):
+            self.free_refreshes(value)
+            return
+        hero, me = self.hero_entity(), self.player()
+        if hero is not None and e.id == hero.id and tag in ("HEALTH", "DAMAGE", "ARMOR"):
+            if tag == "DAMAGE":
+                # damage undone shows as my hero's DAMAGE going back down
+                if self.damage is not None and value < self.damage and self.stats is not None:
+                    self.add_restore(self.damage - value)
+                self.damage = value
+            elif tag == "ARMOR":
+                # and, when the Armor took it (a Health price is paid out of
+                # Armor first), as the Armor coming back
+                if self.armor_now is not None and value > self.armor_now and self.stats is not None:
+                    self.add_restore(value - self.armor_now)
+                self.armor_now = value
+            if self.stats is not None:
+                # the deepest the Health ever went in this step: what it cost
+                # before anything gave it back
+                self.stats["floor"] = min(self.stats["floor"], self.health())
+        elif me is not None and e.id == me.id and tag in ("RESOURCES", "TEMP_RESOURCES",
+                                                          "RESOURCES_USED"):
+            now = self.gold()
+            if self.gold_live is not None and now > self.gold_live and self.stats is not None:
+                self.stats["gold_gain"] += now - self.gold_live
+                self.stats["gold_by"] = self.source() or self.stats["gold_by"]
+            self.gold_live = now
+
+    def add_restore(self, health):
+        """My hero got Health or Armor back inside a step: remember how much and
+        the card whose block did it (Soul Rewinder, Ashen Corruptor)."""
+        self.stats["restored"] += health
+        self.stats["restore_by"] = self.source() or self.stats["restore_by"]
+
+    def free_refreshes(self, count):
+        """The free Refresh count changed: remember who put the new ones there,
+        and drop the ones I have spent (the log keeps only the total)."""
+        gain = count - self.free
+        self.free = count
+        if gain > 0:
+            self.pool.append({"count": gain, "card": self.source()})
+        else:
+            # the log only keeps the total, so the ones I spend come off the
+            # oldest grant first
+            spend = -gain
+            while spend > 0 and self.pool:
+                take = min(spend, self.pool[0]["count"])
+                self.pool[0]["count"] -= take
+                spend -= take
+                if not self.pool[0]["count"]:
+                    self.pool.pop(0)
+        if not count:
+            self.pool = []
+
+    def source(self):
+        """The card behind what is happening now: the innermost open block whose
+        entity is an effect's own card."""
+        for _, e in reversed(self._blocks):
+            if e is None or not e.card_id or e.card_id.startswith(SYSTEM):
+                continue
+            if e["CARDTYPE"] in SOURCES:
+                return {"card_id": e.card_id, "name": card_name(e.card_id)}
+        return None
 
     def _on_block_start(self, g, kind, e):
         super()._on_block_start(g, kind, e)
@@ -574,10 +674,17 @@ class ActionTracker(Tracker):
         if step["step"] in ("buy", "sell") and step.get("target"):
             ent = step["target"].get("id")
         step["paid"] = None
+        health = self.last_health if self.last is not None else self.health()
         self.pending = {"step": step, "entity": ent,
                         "gold": self.last_gold if self.last is not None else self.gold(),
-                        "health": self.last_health if self.last is not None else self.health(),
-                        "before": before}
+                        "health": health, "before": before,
+                        "free": self.free, "pool": self.pool_cards()}
+        hero = self.hero_entity()
+        self.damage = hero["DAMAGE"] if hero is not None else None
+        self.armor_now = hero["ARMOR"] if hero is not None else None
+        self.gold_live = self.gold()
+        self.stats = {"floor": health, "restored": 0, "restore_by": None,
+                      "gold_gain": 0, "gold_by": None}
         if ent is not None and step["step"] in ("buy", "play", "sell", "activate", "board"):
             step.update(self.place(ent, before))
             self.pending["entity"] = ent
@@ -634,6 +741,7 @@ class ActionTracker(Tracker):
         step = p["step"]
         step["paid"] = {"gold": p["gold"] - self.gold(),
                         "health": p["health"] - self.health()}
+        self.finish_watch(step, p)
         if step["step"] == "other" and step.get("target") is None:
             step.pop("target", None)
         if p.get("entity") is not None:
@@ -685,11 +793,49 @@ class ActionTracker(Tracker):
     def canceled(self, step):
         """A click that took nothing and changed nothing: picking a minion up
         and putting it back, inspecting one, or the like. It is not a step, so
-        it is counted apart rather than replayed."""
-        if step["step"] not in ("buy", "sell", "play", "activate", "discover",
+        it is counted apart rather than replayed. A card that is still in the
+        Tavern when the click is over is one of those: only a card that reached
+        my hand was bought."""
+        if step["step"] == "buy":
+            to = (step.get("moved") or {}).get("to") or {}
+            if to.get("where") == "hand" or "entered" in step:
+                return False   # it reached my hand, or a triple took it
+            return step["paid"] == {"gold": 0, "health": 0} and not step.get("gold_gain")
+        if step["step"] not in ("sell", "play", "activate", "discover",
                                 "trinket_pick", "dark_discovery"):
             return False
         return not self.changed(step)
+
+    def finish_watch(self, step, p):
+        """Write what the step did besides take Gold and spend it: the Health it
+        cost and what gave it back, the Gold it gained, the free Refreshes it
+        used, each with the card the log names."""
+        st = self.stats or {}
+        net = step["paid"]["health"]
+        peak = round(p["health"] - st.get("floor", p["health"]))
+        given_back = peak - max(net, 0)
+        if peak > 0 and given_back > 0:
+            # Health went down and came back: what it cost, and what gave it
+            # back (Soul Rewinder, Ashen Corruptor)
+            step["health_cost"] = peak
+            step["rewound"] = {"health": given_back, "by": st.get("restore_by")}
+            if st.get("restore_by") is None:
+                self.unread["Health given back by no card I can name"] += 1
+        if st.get("gold_gain") and step["step"] != "sell":
+            step["gold_gain"] = {"gold": st["gold_gain"], "by": st.get("gold_by")}
+        if self.free != p.get("free"):
+            step["free_refreshes"] = {"before": p.get("free"), "after": self.free}
+            if step["step"] == "roll" and not step["paid"]["gold"] and p.get("pool"):
+                step["free_from"] = p["pool"]
+        self.stats = None
+
+    def pool_cards(self):
+        """The cards that put the free Refreshes I hold in the pool, in order."""
+        cards = []
+        for g in self.pool:
+            if g["card"] and g["card"] not in cards:
+                cards.append(g["card"])
+        return cards
 
     def move_of(self, step, ent, before, after):
         """Where the card the step acted on went, when it went anywhere: a bought
@@ -729,7 +875,13 @@ class ActionTracker(Tracker):
                 continue
             d = self.brief(c, "hand" if cid in a_hand else "board")
             if "from" not in d:
-                self.unread["a card came in with no card behind it"] += 1
+                # a card stolen out of the Tavern keeps its entity, so its
+                # CREATOR is empty and its Tavern slot says where it came from
+                slot = next((t["slot"] for t in before["tavern"] if t["id"] == cid), None)
+                if slot is not None:
+                    d["stolen"] = {"where": "tavern", "slot": slot}
+                else:
+                    self.unread["a card came in with no card behind it"] += 1
             entered.append(d)
         for cid, c in b_all.items():
             if cid in a_all:
@@ -792,6 +944,7 @@ class ActionTracker(Tracker):
                   "health": self.hero_health(), "armor": self.armor(),
                   "hero_powers": self.hero_powers(),
                   "trinkets": self.trinket_list(),
+                  "free_refreshes": self.free,
                   "frozen": self.frozen()})
         return s
 

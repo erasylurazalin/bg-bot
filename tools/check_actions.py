@@ -10,20 +10,21 @@ things are checked for every turn, with nothing from our engine:
 - **The Gold.** What every step took (`paid.gold`, plus any Gold the game took
   with no step of mine, `late_gold`) and gave back (a sell), against the Gold
   the turn started and ended with. A turn with Health paid for a card is
-  checked the same way against Health.
+  checked the same way against Health and Armor together.
 - **The cards.** My hand and board at the start, plus everything a step says it
-  moved, brought in (`entered`, a Discover's pick, a buy) or took away (`left`,
-  a sell, a play), against my hand and board at the end. Cards are followed by
-  the game's own entity id, which a card keeps as it goes from the Tavern to
-  the hand to the board and when it turns golden.
+  moved, brought in (`entered`, a Discover's pick, a buy, a steal out of the
+  Tavern) or took away (`left`, a sell, a play), against my hand and board at
+  the end. Cards are followed by the game's own entity id, which a card keeps
+  as it goes from the Tavern to the hand to the board and when it turns golden.
 
-A turn balances when both add up. On top of that, every step the client puts a
-price on (`cost`, the card's or button's COST tag) is compared with what it
-actually took; that is a diagnostic, not a balance: a card can be free, priced
-in Health, or carry a COST tag that is not the Tavern's price.
+A turn balances when both add up. After that, the checker names the steps whose
+price is not the price the client printed (`cost`), because the file says what
+happened instead: a card priced in Health, one whose Health a Soul Rewinder
+gave back, a reroll paid from a pool of free ones, a price offset by a Gold
+gain. Every one of those is read out of the file; anything the file does not
+name is listed with its game, turn and card.
 
-`--verbose` lists every turn that does not balance with all its reasons. The
-default lists each one with the first reasons, and counts the classes.
+`--verbose` lists every turn that does not balance with all its reasons.
 """
 
 import json
@@ -45,10 +46,10 @@ def cards(state):
 
 def walk(turn):
     """The cards in my hand and board that the turn's steps account for, the
-    hidden hand count, and the cards that came in with no card named behind
-    them."""
+    hidden hand count, the cards stolen out of the Tavern, and the ones that
+    came in with nothing named behind them."""
     have, hidden = cards(turn["start"])
-    unnamed = []        # (step number, step, card id) with no card behind it
+    unnamed = []
     for i, a in enumerate(turn["actions"]):
         ent = id_of(a)
         mv = a.get("moved")
@@ -63,7 +64,7 @@ def walk(turn):
                 have.pop(ent, None)
         for c in a.get("entered") or ():
             have[c["id"]] = c
-            if not c.get("from"):
+            if not c.get("from") and not c.get("stolen"):
                 unnamed.append((i, a["step"], c["card_id"]))
         for c in a.get("left") or ():
             have.pop(c["id"], None)
@@ -79,6 +80,13 @@ def id_of(a):
             or (a.get("target") or {}).get("id") or (a.get("picked") or {}).get("id"))
 
 
+def name(card):
+    """A card of a step as `card id (name)`."""
+    if not card or not card.get("card_id"):
+        return "no card"
+    return f"{card['card_id']} ({card.get('name')})"
+
+
 def ledger(turn):
     """What the turn's steps took, in Gold and in Health, and what the client's
     own numbers say the turn took."""
@@ -90,35 +98,56 @@ def ledger(turn):
             start["health"] + start.get("armor", 0) - end["health"] - end.get("armor", 0))
 
 
-def prices(turn):
-    """Every step whose COST tag is not what it took, named by what it looks
-    like: a card priced in Health, one bought for nothing, a free reroll."""
+def features(turn):
+    """Everything the turn's steps name: what a price was paid in, what gave
+    Gold or Health back, where a free reroll came from, what the Tavern gave
+    up. Each as (what it is, the card or slot it says)."""
+    out = []
+    for a in turn["actions"]:
+        gain = a.get("gold_gain")
+        if gain and gain.get("gold"):
+            out.append(("a Gold gain inside a step", name(gain.get("by"))))
+        if a.get("rewound"):
+            out.append(("a price paid in Health, given back", name(a["rewound"].get("by"))))
+        elif a.get("cost") and a["paid"]["health"]:
+            out.append(("a price paid in Health", name(a.get("target") or a.get("card"))))
+        if a.get("free_from"):
+            out.append(("a free reroll from free Refreshes",
+                        ", ".join(name(c) for c in a["free_from"])))
+        for c in a.get("entered") or ():
+            if c.get("stolen"):
+                out.append(("a card stolen out of the Tavern", name(a.get("card"))))
+    return out
+
+
+def unexplained(turn):
+    """The steps whose price is not what the client printed and that the file
+    does not explain, and the cards that came in with nothing behind them."""
     out = []
     for a in turn["actions"]:
         cost, paid = a.get("cost"), a["paid"]
+        note = f"{a['step']} priced {cost}, paid {paid['gold']} Gold and {paid['health']} Health"
         if a["step"] == "sell":
             if paid["gold"] >= 0:
-                out.append(("a sell that did not give Gold", f"sell took {paid['gold']}"))
+                out.append(note)
             continue
         if a["step"] not in PRICED or not cost or cost == paid["gold"]:
             continue
-        note = f"{a['step']} priced {cost}, paid {paid['gold']} Gold and {paid['health']} Health"
-        if paid["health"]:
-            out.append(("priced in Health", note))
-        elif not paid["gold"] and a["step"] == "roll":
-            out.append(("a free reroll" + (" from a pool of them" if a.get("free") else ""), note))
-        elif not paid["gold"]:
-            out.append((f"a free {a['step']}", note))
-        else:
-            out.append(("a price its COST tag does not give", note))
+        gain = (a.get("gold_gain") or {}).get("gold") or 0
+        if cost == paid["gold"] + gain or a.get("rewound") or paid["health"]:
+            continue
+        if a.get("free_from") or a.get("free_refreshes"):
+            continue
+        out.append(note)
     return out
 
 
 def check(path):
-    """One file: the turns that balance, the ones that do not with their
-    reasons, and the classes of everything found."""
+    """One file: the turns that balance, the ones that do not, and how the
+    steps name what their price tags do not."""
     rec = json.loads(path.read_text())
-    ok, bad, counts, price, notes = 0, [], Counter(), Counter(), []
+    ok, bad = 0, []
+    counts, named, sources, unnamed = Counter(), Counter(), Counter(), []
     for turn in rec["turns"]:
         counts["turns"] += 1
         reasons = []
@@ -133,10 +162,17 @@ def check(path):
             if health != hurt:
                 reasons.append(f"Health: the steps took {health}, the turn lost {hurt}")
                 counts["Health"] += 1
-            for kind, note in prices(turn):
-                price[kind] += 1
-                notes.append((turn["turn"], kind, note))
-        have, hidden, unnamed = walk(turn)
+            for kind, by in features(turn):
+                named[kind] += 1
+                if by:
+                    sources[(kind, by)] += 1
+            for note in unexplained(turn):
+                unnamed.append((turn["turn"], note))
+                counts["a price with nothing behind it"] += 1
+        have, hidden, no_card = walk(turn)
+        for i, step, card_id in no_card:
+            unnamed.append((turn["turn"], f"{step} brought in {card_id} with nothing behind it"))
+            counts["a card with nothing behind it"] += 1
         if turn["end"] is not None:
             end, end_hidden = cards(turn["end"])
             missing = [c for cid, c in end.items() if cid not in have]
@@ -150,13 +186,11 @@ def check(path):
                     ([f"{end_hidden - hidden:+d} hidden hand cards"] if hidden != end_hidden else [])
                 ))
                 counts["cards"] += 1
-        for i, kind, cid in unnamed:
-            price[f"a card came in with no card behind it ({kind})"] += 1
         if reasons:
             bad.append((turn["turn"], reasons))
         else:
             ok += 1
-    return ok, bad, counts, price, notes
+    return ok, bad, counts, named, sources, unnamed
 
 
 def main():
@@ -165,14 +199,16 @@ def main():
     pattern = args[0] if args else "*-g*.json"
     files = sorted(OUT.glob(pattern))
     turns = ok = 0
-    counts, price = Counter(), Counter()
+    counts, named, sources, unnamed = Counter(), Counter(), Counter(), []
     bad_turns = []
     for path in files:
-        good, bad, c, p, notes = check(path)
+        good, bad, c, n, s, u = check(path)
         turns += c["turns"]
         ok += good
         counts.update({k: v for k, v in c.items() if k != "turns"})
-        price.update(p)
+        named.update(n)
+        sources.update(s)
+        unnamed += [(path.name, t, why) for t, why in u]
         print(f"{path.name}: {good}/{c['turns']} turns balance"
               + (f", {'does' if len(bad) == 1 else 'do'} not: "
                  + ", ".join(f"turn {t}" for t, _ in bad) if bad else ""))
@@ -181,19 +217,28 @@ def main():
                 print(f"   turn {turn}:")
                 for r in reasons:
                     print(f"      {r}")
-        if verbose:
-            for turn, kind, note in notes:
-                print(f"   turn {turn}: {kind}: {note}")
+            for turn, why in u:
+                print(f"   turn {turn}: unnamed: {why}")
         bad_turns += [(path.name, t, r) for t, r in bad]
     print()
     print(f"{len(files)} files, {turns} turns, {ok} balance"
           + (f" ({ok / turns:.1%})" if turns else ""))
     print("what did not balance:", dict(counts) or "nothing")
-    print("diagnostics (these turns still balance):", dict(price) or "nothing")
+    print("what the steps name instead of a price or a creator:")
+    for kind, count in named.most_common():
+        print(f"  {kind}: {count}")
+        rows = [(n, by) for (k, by), n in sources.most_common() if k == kind]
+        for n, by in rows[:8]:
+            print(f"      {n:5d}  {by}")
+        if len(rows) > 8:
+            print(f"      and {len(rows) - 8} more kinds of source")
+    print(f"left unnamed: {len(unnamed)}")
+    for f, turn, why in unnamed:
+        print(f"  {f} turn {turn}: {why}")
     if bad_turns and not verbose:
         print("\nthe turns that do not balance:")
-        for name, turn, reasons in bad_turns:
-            print(f"  {name} turn {turn}: " + "; ".join(reasons[:3]))
+        for name_, turn, reasons in bad_turns:
+            print(f"  {name_} turn {turn}: " + "; ".join(reasons[:3]))
 
 
 if __name__ == "__main__":

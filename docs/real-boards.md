@@ -108,7 +108,7 @@ minute. No player names are stored.
  "turns": [
   {"turn": 1,
    "start": {"gold": 3, "gold_max": 3, "tier": 1, "upgrade_cost": 5,
-             "health": 30, "armor": 13, "frozen": false,
+             "health": 30, "armor": 13, "free_refreshes": 0, "frozen": false,
              "hero_powers": [{"card_id": "TB_BaconShop_HP_063",
                               "name": "Clairvoyance", "numbers": [0, 0, 0, 0],
                               "cost": 0, "used_this_turn": 0}],
@@ -162,7 +162,7 @@ Every step says what it was and, where there is one, on which card or slot:
 | `play` | `index`, `card`, `target` (a Battlecry's or spell's target), `sub_option` |
 | `activate` | `position`, `card`, `target`: a minion's own Activate (it costs Gold) |
 | `move` | `position`, `to`, `card`: a minion dragged on my board |
-| `roll` | `cost`, `free` when a pool of free rerolls paid for it, `tavern` after |
+| `roll` | `cost`, `free` (free Refreshes left when the button showed a price), `free_from` (the cards that filled the pool), `tavern` after |
 | `freeze` | `on` |
 | `level` | `cost`, `tier_after` |
 | `hero_power` | `which` (main or second), `cost`, `target` |
@@ -188,27 +188,49 @@ Every step says what it was and, where there is one, on which card or slot:
   whose numbers, keywords or gifts moved: a random buff's target, and the card
   id when three copies turned one golden), `tavern` (the Tavern's offers after
   a step that changed them) and `hand_hidden`.
+- A card that comes into my hand with no CREATOR is a card stolen out of the
+  Tavern (Enchanted Lasso, Decoy Conjurer's Activate): it keeps its entity id,
+  so the `entered` entry says `stolen: {where: tavern, slot: N}`, the slot it
+  came from.
+- A step that took Health and got it back says `health_cost` (what it took,
+  the deepest dip) and `rewound: {health, by}` with the card that gave it back.
+  A Soul Rewinder or an Ashen Corruptor on my board undoes the damage a Health
+  price does, so `paid.health` is the net and the rewind is apart. The Health
+  price itself is paid out of Armor first.
+- A step that gained Gold says `gold_gain: {gold, by}` with the card that gave
+  it (a Tavern spell, Stuffed Coin Purse reaching Tier 6, a trinket), so
+  `paid.gold` stays the net.
+- A step that used or was given free Refreshes says `free_refreshes: {before,
+  after}`, and a reroll the pool paid for says `free_from`, the cards that
+  filled it (Leaf Through the Pages, Wolf Pup, Warband Whistle and the like).
+  The count is `BACON_FREE_REFRESH_COUNT` on `Bacon_Free_Refresh_Player_Ench`;
+  the turn's start shows it as `free_refreshes`.
 - `entered`/`left` follow the game's own entity ids: a card keeps one as it goes
   from the Tavern to the hand to the board, so a replay can follow it.
 - A click that took and changed nothing (a minion picked up and put back, one
-  inspected) is not a step: it is counted in the turn as `canceled`.
-- `unread` counts what the log could not tell, per game. It is empty in 32 of
-  the 47 games. Across all of them: 24 cards that came into my hand or board
-  with no card behind them (18 from a minion's Activate, 6 from a card I
-  played: the log's CREATOR is empty for those), one turn I took no step in,
-  and one change the game made after my last step.
+  inspected, a Tavern card clicked and left there) is not a step: it is counted
+  in the turn as `canceled`.
+- `unread` counts what the log could not tell, per game. It is empty in every
+  game but two: one turn I took no step in, and one change the game made after
+  my last step.
 
 `tools/check_actions.py` reads the files back with nothing from our engine and
 adds every turn up: the Gold the steps took against the Gold the turn started
 and ended with (and Health the same way), and my hand and board at the end
 against the start plus everything the steps moved. On the 47 games it finds
 546 of 548 turns balancing (99.6%); the two that do not are turns the log ends
-inside, before the fight. It also compares each price the client prints with
-what the step took: 13 cards were priced in Health, 13 Tavern spells were
-bought for no Gold at all, 10 rerolls were free, and one level up gained a Gold
-instead of taking its button's price (a Gold gain resolved in the same step).
-A card that came in with no card behind it is counted apart: the cards still
-add up, only the log does not say what made it (24 of them).
+inside, before the fight.
+
+Every price the client printed that the steps did not pay as printed is named
+by the file, and nothing is left unnamed:
+
+| what happened | how many | by |
+|---|---|---|
+| a free reroll from free Refreshes | 541 | Leaf Through the Pages 91, Refreshing Anomaly 77+36 goldens, Sly Infiltrator 51, Underrot Spawn 27, Clairvoyance 21, Decoy Conjurer 20, Eternal Knight 17 and 49 more kinds |
+| a Gold gain inside a step | 262 | Wand of Divination 75, Tavern Coin 51, Wealthy Bounty 34, Snare Trapper 23, Corrupted Coin 22, Hasty Excavation 22, Stuffed Coin Purse 1 and 10 more |
+| a price paid in Health and given back | 60 | Soul Rewinder 51, Ashen Corruptor 9 |
+| a card stolen out of the Tavern | 24 | Decoy Conjurer 17 (+1 golden), Enchanted Lasso 6 |
+| a price paid in Health | 13 | Hasty Excavation |
 
 ## How the boards are used
 
