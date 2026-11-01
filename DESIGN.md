@@ -388,6 +388,14 @@ Captain Sanders up to Tier 6, never Tier 7) work on any friendly minion
 within their limit, tokens included: a Sneed's Shredder or a Beetle can be
 made golden this way, even though a token never triples.
 
+**Exact copies (Era, 2026-11-01).** "An exact copy" copies the minion's
+state right now, everything included: buffs, keywords, golden, Dark Gifts,
+damage taken (a 10/10 that took 6 damage gives a 10/4 copy), and keywords it
+has lost (a popped Divine Shield stays popped). This holds for every card
+that says it: Cloning Gallery, Rapid Reanimation, Frostwolf Fervor,
+Stormpike Strength, Stitched Salvager, Archlich Kel'Thuzad and the rest.
+Pack Tactics is an exact copy whose stats are then set to 3/3.
+
 **"Twice" versus "an extra time".** "Your X trigger twice" or "cast twice"
 (Brann, Drakkari, Balinda, Proud Privateer) sets a fixed count: two copies
 don't stack, and a golden copy sets its own count from its golden text.

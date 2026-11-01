@@ -1219,7 +1219,7 @@ fn rapid_reanimation_destroys_the_chosen_minion_and_resummons_it_when_there_is_s
 }
 
 
-// ---- Exact copies in a fight (docs/heroes.md, 2026-11-01) ----
+// ---- Exact copies (DESIGN.md "Exact copies (Era, 2026-11-01)") ----
 //
 // Frostwolf Fervor, Stormpike Strength and Rapid Reanimation copy the minion
 // as it stands: the damage it has taken comes along, and a keyword it has
@@ -1305,7 +1305,7 @@ fn an_exact_copys_maximum_health_is_the_originals() {
     // copy stand at 10/4. Tide Oracle Morgl kills both, and each kill hands
     // the killed minion's Attack and maximum Health to my hand: 10/10 for
     // each, so the copy's maximum Health is 10 too, not the 4 it shows
-    // (docs/heroes.md "Exact copies in a fight").
+    // (DESIGN.md "Exact copies").
     let mut t = db.make(db.by_name("Microbot").unwrap(), false);
     t.attack = 10;
     t.health = 10;
@@ -1341,4 +1341,36 @@ fn an_exact_copys_maximum_health_is_the_originals() {
         (20, 20),
         "both kills gave 10/10: the copy's maximum Health is the original's"
     );
+}
+
+#[test]
+fn a_stitched_salvagers_copy_is_the_minion_as_it_stands() {
+    let db = cards();
+    // Stitched Salvager destroys the minion to its left at Start of Combat
+    // and its Deathrattle summons an exact copy of it. The enemy's Lightning
+    // Invocation hits both of my minions first (two hits, so both take it):
+    // the victim is 10/4 when the Salvager takes it, and the copy comes back
+    // at 10/4, not at its full 10/10 (DESIGN.md "Exact copies").
+    let mut victim = db.make(db.by_name("Microbot").unwrap(), false);
+    victim.attack = 10;
+    victim.health = 10;
+    let mut salvager = db.make(db.by_name("Stitched Salvager").unwrap(), false);
+    // The shield takes the Salvager's own share of the Lightning: it has to
+    // live long enough to copy, then die so its Deathrattle summons.
+    salvager.keywords.set(Keywords::DIVINE_SHIELD);
+    let mut enemy = board(&db, &["Microbot"]);
+    enemy[0].attack = 6;
+    enemy[0].health = 300;
+    let mut counters = [Counters::default(); 2];
+    counters[1].soc_lightning = 2;
+    counters[1].soc_lightning_damage = 6;
+    let mut log = Log::new(&db);
+    fight_with(&db, &[victim, salvager], &enemy, counters, 10, &mut Rng::new(60), &mut log);
+    let copy = log
+        .summons
+        .iter()
+        .find(|s| s.1 == "Microbot")
+        .cloned()
+        .expect("the salvaged copy was summoned");
+    assert_eq!((copy.2, copy.3), (10, 4), "the damage it had taken came along");
 }

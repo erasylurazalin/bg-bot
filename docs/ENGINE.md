@@ -459,8 +459,10 @@ build hero-less games so old tests pass unchanged, and
     `Side::exact_copy` is the copy: the minion as it stands, buffs, keywords
     and gifts kept, its damage carried over (a 10/10 at 4 Health copies as
     10/4, and `Side::summon_exact_copy` keeps the original's `taken` so its
-    maximum Health stays 10), no pool copy (docs/heroes.md "Exact copies in a
-    fight").
+    maximum Health stays 10), no pool copy (DESIGN.md "Exact copies").
+    `Side::summon_saved_copy` is the one summon path for a saved copy, so
+    Frostwolf Fervor, Stormpike Strength, Rapid Reanimation and Stitched
+    Salvager all copy the same way.
   - **A power's token.** Menagerist's Amalgam, Avatar of N'Zoth's Fish and
     Pilot the Shredder's Sneed's New Shredder are cards.toml `[[token]]`s and
     a `start_minion = "Name"` power puts one on the board when the hero is

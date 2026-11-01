@@ -620,8 +620,9 @@ struct Side<'a> {
     /// by a Deathrattle.
     held: ArrayVec<CardId, 8>,
     /// What Stitched Salvagers destroyed: the host's uid and an exact copy
-    /// of the minion, for the Deathrattle to summon.
-    salvage: ArrayVec<(u16, Minion), 4>,
+    /// of the minion as it stood, with the damage it had taken, for the
+    /// Deathrattle to summon.
+    salvage: ArrayVec<(u16, Minion, i32), 4>,
     /// Minions waiting to attack as soon as the current attack is over
     /// (Eternal Tycoon's Knight), by uid.
     immediate: ArrayVec<u16, 8>,
@@ -1982,20 +1983,45 @@ impl<'a> Side<'a> {
     }
 
     /// An exact copy of the friendly minion in slot `i` as it stands right
-    /// now (docs/heroes.md "Exact copies in a fight"): buffs, keywords and
-    /// gifts included, the damage it has taken carried over and any keyword
-    /// it has lost in this fight gone from the copy too, and no pool copy
-    /// taken (Frostwolf Fervor, Stormpike Strength, Rapid Reanimation).
-    fn exact_copy(&self, i: usize) -> Minion {
+    /// now (DESIGN.md "Exact copies"): buffs, keywords and gifts included,
+    /// the damage it has taken carried over and any keyword it has lost in
+    /// this fight gone from the copy too, and no pool copy taken. The damage
+    /// it has taken comes back beside the copy, so a copy summoned later
+    /// keeps the original's maximum Health.
+    fn exact_copy(&self, i: usize) -> (Minion, i32) {
         let mut copy = self.ms[i].m;
         copy.pool_copies = 0;
-        copy
+        (copy, self.ms[i].taken)
     }
 
-    /// Summon an exact copy of the minion in slot `i` at `pos`. The copy is
-    /// the minion as it stands, so it keeps the damage it has taken: a 10/10
-    /// at 4 Health copies as 10/4, and its maximum Health is still 10 (its
-    /// `taken` is the original's, like the Reborn copy's).
+    /// Summon an exact copy the fight made earlier, carrying the damage the
+    /// original had taken: a 10/10 at 4 Health comes back as 10/4 whose
+    /// maximum Health is still 10 (its `taken` is the original's, like the
+    /// Reborn copy's). Rapid Reanimation and Stitched Salvager go through it
+    /// too, so there is one exact-copy path in the fight.
+    #[allow(clippy::too_many_arguments)]
+    fn summon_saved_copy(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        pos: usize,
+        copy: Minion,
+        damage: i32,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) -> bool {
+        if !self.summon_baked(db, side, pos, copy, uid, rng, w) {
+            return false;
+        }
+        // `summon_baked` clamps `pos` to the end of the board, which is where
+        // a copy from the last slot goes anyway.
+        let at = pos.min(self.ms.len() - 1);
+        self.ms[at].taken = damage;
+        true
+    }
+
+    /// `summon_saved_copy` for a copy taken from the board right now.
     #[allow(clippy::too_many_arguments)]
     fn summon_exact_copy(
         &mut self,
@@ -2007,16 +2033,8 @@ impl<'a> Side<'a> {
         rng: &mut Rng,
         w: &mut impl Watch,
     ) -> bool {
-        let m = self.exact_copy(i);
-        let damage = self.ms[i].taken;
-        if !self.summon_baked(db, side, pos, m, uid, rng, w) {
-            return false;
-        }
-        // `summon_baked` clamps `pos` to the end of the board, which is where
-        // a copy from the last slot goes anyway.
-        let at = pos.min(self.ms.len() - 1);
-        self.ms[at].taken = damage;
-        true
+        let (copy, damage) = self.exact_copy(i);
+        self.summon_saved_copy(db, side, pos, copy, damage, uid, rng, w)
     }
 
     /// Summon anything waiting for a board slot (`Rapid Reanimation`, `Lock
@@ -2662,10 +2680,8 @@ impl<'a> Side<'a> {
                     let is_salvager = db.get(f.m.card).deathrattle
                         == Some(Deathrattle::Effect(Effect::SummonSalvaged));
                     if !is_salvager {
-                        let mut copy = f.m;
-                        copy.health = f.m.health + f.taken;
-                        copy.pool_copies = 0;
-                        let _ = self.salvage.try_push((fx.host, copy));
+                        let (copy, damage) = self.exact_copy(t);
+                        let _ = self.salvage.try_push((fx.host, copy, damage));
                     }
                     let _ = self.self_destroyed.try_push(f.uid);
                     self.ms[t].m.health = 0;
@@ -2674,11 +2690,11 @@ impl<'a> Side<'a> {
             }
             Effect::SummonSalvaged => {
                 for k in 0..self.salvage.len() {
-                    let (host, copy) = self.salvage[k];
+                    let (host, copy, damage) = self.salvage[k];
                     if host != fx.host {
                         continue;
                     }
-                    if self.summon_baked(db, fx.side, *at, copy, uid, rng, w) {
+                    if self.summon_saved_copy(db, fx.side, *at, copy, damage, uid, rng, w) {
                         if fx.skip_ptr && *at == self.ptr {
                             self.ptr += 1;
                         }
@@ -3573,9 +3589,8 @@ fn run_start_of_combat(
         }
         for i in 0..sides[s].ms.len() {
             if sides[s].ms[i].m.reanimate && sides[s].ms[i].m.health > 0 {
-                let mut copy = sides[s].exact_copy(i);
+                let (mut copy, damage) = sides[s].exact_copy(i);
                 copy.reanimate = false;
-                let damage = sides[s].ms[i].taken;
                 for _ in 0..n {
                     let _ = sides[s].reanimate.try_push((i, copy, damage));
                 }

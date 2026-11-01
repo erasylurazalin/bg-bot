@@ -929,8 +929,10 @@ Triple Reward spell.
   as it stands right now (buffs, keywords and gifts kept, the damage it has
   taken carried over, `pool_copies = 0`), and `Side::summon_exact_copy` puts
   it on the board with the original's `taken`, so a 10/10 at 4 Health copies
-  as a 10/4 whose maximum Health is still 10 (docs/heroes.md "Exact copies in
-  a fight"). A hero
+  as a 10/4 whose maximum Health is still 10 (DESIGN.md "Exact copies").
+  `Side::summon_saved_copy` summons a copy the fight saved earlier (Rapid
+  Reanimation's queue, Stitched Salvager's), so all four cards copy the same
+  way. A hero
   power's token is a cards.toml `[[token]]` and the power is
   `effect = { start_minion = "Name" }`: the board gets it when the hero is
   taken (`take_hero`) and when such a power is picked at turn 0

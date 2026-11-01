@@ -1315,8 +1315,7 @@ on_pick = [{ gold = 2 }, { min_tier = 3 }]
 # Spellcraft (block 3). A Spellcraft trinket hands its spell out when it is
 # picked and again at the start of every turn; the spell is a Tavern spell and
 # leaves the hand at the end of the turn if it was not cast (DESIGN.md
-# "Spellcraft"). Floating Candle Set is not built: triggering a Deathrattle
-# outside combat is a system the shop does not have (docs/KNOWN-GAPS.md).
+# "Spellcraft").
 #
 
 [[trinket]]
