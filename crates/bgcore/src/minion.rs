@@ -222,6 +222,16 @@ pub struct Minion {
     /// destroyed at Start of Combat and resummoned as an exact copy when
     /// space opens. Cleared at the start of the next turn.
     pub reanimate: bool,
+    /// What this minion gains at the end of its owner's turn, for good: a
+    /// Prize gave it "At the end of your turn, gain +4/+4" (Gruul Rules).
+    /// (0, 0) for none.
+    pub end_turn_gain: (i32, i32),
+    /// Tribes a portrait gave every copy of this card its owner has or will
+    /// have (Bronzebeard Portrait: a Brann counts as a Murloc and a Dragon).
+    /// `CardDb::tribes_of` adds them, so every tribe check in the engine
+    /// sees them: board, hand, the most common type, tribe synergies and a
+    /// fight.
+    pub extra_tribes: crate::cards::Tribes,
 }
 
 impl Minion {
@@ -387,6 +397,9 @@ impl Minion {
     pub fn magnetize(&mut self, db: &CardDb, other: Minion) {
         self.attack += other.attack;
         self.health += other.health;
+        self.extra_tribes = self.extra_tribes.with_all(other.extra_tribes);
+        self.end_turn_gain.0 += other.end_turn_gain.0;
+        self.end_turn_gain.1 += other.end_turn_gain.1;
         self.keywords.0 |= other.keywords.0;
         self.winners_bread = self.winners_bread.saturating_add(other.winners_bread);
         self.magnetizations = self.magnetizations.saturating_add(other.magnetizations).saturating_add(1);

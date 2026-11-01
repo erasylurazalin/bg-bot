@@ -362,7 +362,10 @@ card_id = "BG30_MagicItem_555"
 slot = "greater"
 cost = 5
 tribes = ["elemental"]
-on_pick = [{ get = "Elemental of Surprise" }]
+# "More appear when you least expect them..." (docs/trinkets.md, Era's
+# model): every buy, sell and Refresh has a 5% chance of a surprise, never
+# twice in a row.
+on_pick = [{ get = "Elemental of Surprise" }, { surprise = 5 }]
 
 [[trinket]]
 name = "Privateer Portrait"
@@ -1791,19 +1794,23 @@ on_pick = [
     { card_of_mod = "Vicious Mindslasher", also_neighbors = true },
 ]
 
-# Bronzebeard Portrait (BG30_MagicItem_418) is NOT built: "Your Brann
-# Bronzebeards are both Murlocs and Dragons" needs a per-minion tribe
-# override, which reaches every tribe read in the engine. Half a portrait
-# would mislead the bots, so it stays out of the table (and so out of every
-# offer) until the tribe change is built. Add it back here then:
-#
-# [[trinket]]
-# name = "Bronzebeard Portrait"
-# card_id = "BG30_MagicItem_418"
-# slot = "greater"
-# cost = 3
-# tribes = ["dragon", "murloc"]
-# on_pick = [{ get = "Brann Bronzebeard" }, { random_battlecry = 1 }]
+# Bronzebeard Portrait: built with block 5. "Your Brann Bronzebeards are both
+# Murlocs and Dragons" is a card modifier like the other portraits'
+# (`also_tribes`), and `CardDb::tribes_of` reads it, so every tribe check in
+# the engine sees it: board, hand, the most common type, tribe synergies, a
+# golden Brann and a fight. The Dark Discovery's "your type" slot is the one
+# exception (docs/trinkets.md).
+[[trinket]]
+name = "Bronzebeard Portrait"
+card_id = "BG30_MagicItem_418"
+slot = "greater"
+cost = 3
+tribes = ["dragon", "murloc"]
+on_pick = [
+    { get = "Brann Bronzebeard" },
+    { random_battlecry = 1 },
+    { card_of_mod = "Brann Bronzebeard", also_tribes = ["murloc", "dragon"] },
+]
 
 [[trinket]]
 name = "Czarina Portrait"
@@ -1977,3 +1984,106 @@ cost = 6
 on_pick = [{ dark_gift_copies = true }]
 start_every = 2
 start_of_turn = [{ dark_gift_copies = true }]
+
+# ---- Block 5 (2026-11-01): the Darkmoon Prizes and the last trinkets ----
+# Rules: docs/trinkets.md, "Rules for the last trinket batch (Era,
+# 2026-11-01)". A Prize Discover offers three different Prizes of one tier
+# from `CardDb.prizes`; no pool copy is involved, since a Prize is never in
+# the pool.
+
+# Get a Triple Prize, and every Triple Reward becomes a Triple Prize
+# ("Discover a Tier 3 Darkmoon Prize", nothing more).
+[[trinket]]
+name = "Corrupted Tome"
+card_id = "BG35_MagicItem_812"
+slot = "greater"
+cost = 2
+on_pick = [{ triple_prize = "Triple Prize" }]
+
+# Discover a Tier 3 Darkmoon Prize, and again at the start of every three
+# turns (the pick is on turn 6, so the next one is turn 9).
+[[trinket]]
+name = "Tickatus Sticker"
+card_id = "BG30_MagicItem_707"
+slot = "lesser"
+cost = 2
+start_every = 3
+on_pick = [{ discover_prize = 3 }]
+start_of_turn = [{ discover_prize = 3 }]
+
+# A Golden Mishmash (a trinket-only token, tagged as a buddy for when buddies
+# come) and a 10/10 Venomous Amalgam.
+[[trinket]]
+name = "Curator Sticker"
+card_id = "BG32_MagicItem_807"
+slot = "greater"
+cost = 4
+on_pick = [
+    { get_golden = "Mishmash" },
+    { get_with_stats = "Amalgam", stats = [10, 10] },
+]
+
+# Cast Ice Block (one save from fatal damage, plus Immunity for the rest of
+# that turn) and gain 5 Gold. Tagged as a Secret for Akazamzarak later; not
+# hidden: everyone sees everyone's trinkets live.
+[[trinket]]
+name = "Safety Patch"
+card_id = "BG35_MagicItem_820"
+slot = "greater"
+cost = 0
+# Tagged as a Secret for Akazamzarak later; not hidden.
+secret = true
+on_pick = [{ ice_block = true }, { gold = 5 }]
+
+# Get a Golden Eternal Knight; after a friendly Undead dies, your Eternal
+# Knights have +4/+2 this game, in hand and on the board.
+[[trinket]]
+name = "Eternal Portrait (Greater)"
+card_id = "BG36_MagicItem_216"
+slot = "greater"
+cost = 5
+tribes = ["undead"]
+on_pick = [{ get_golden = "Eternal Knight" }]
+rule = { event = "death_undead", every = 1, acts = [
+    { card = "Eternal Knight", buff_card_hand_and_board = [4, 2] },
+] }
+
+# Spin the Wheel of Yogg-Saron on the pick and at the start of every turn.
+# Its six results are the game data's own cards (TB_BaconShop_HERO_35_Buddy_*,
+# the other Mysterybox left out), each equally likely (docs/trinkets.md): the
+# `wheel` list below is one entry per result, in data order.
+[[trinket]]
+name = "Yogg-Tastic Pastry"
+card_id = "BG30_MagicItem_994"
+slot = "lesser"
+cost = 5
+on_pick = [{ yogg_wheel = true }]
+start_of_turn = [{ yogg_wheel = true }]
+wheel = [
+    # Hand of Fate: 2 random Darkmoon Prizes.
+    { random_prize = 2 },
+    # Curse of Flesh: a random friendly minion gains another one's stats.
+    { curse_of_flesh = true },
+    # Devouring Hunger: consume the Tavern, give its stats to your minions,
+    # then Refresh.
+    { devouring_hunger = true },
+    # Rod of Roasting: Pyrobuff at random until one lands on Bob or your
+    # hero.
+    { rod_of_roasting = [10, 10] },
+    # Mysterybox: a random minion in the Tavern turns Golden.
+    { golden_tavern = true },
+    # Mindflayer Goggles: 4 random Tavern spells.
+    { cast_random_spells = 4 },
+]
+
+# Get 2 random Magnetic Mecha-Demons, and 2 more at the start of each turn.
+# The four tokens (BG25_807t to t4, with their goldens) can Magnetize to Mechs
+# and to Demons.
+[[trinket]]
+name = "Mecha-Jaraxxus Sticker"
+card_id = "BG30_MagicItem_942"
+slot = "greater"
+cost = 3
+tribes = ["demon", "mech"]
+on_pick = [{ mecha_demon = 2 }]
+start_of_turn = [{ mecha_demon = 2 }]

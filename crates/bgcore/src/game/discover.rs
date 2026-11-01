@@ -242,6 +242,10 @@ impl Game {
                     self.deal_ispy_offer(p);
                     continue;
                 }
+                DiscoverRequest::LastOpponentWarband => {
+                    self.deal_last_opponent_offer(p);
+                    continue;
+                }
                 _ => {}
             }
             let damage_from = match req {
@@ -311,6 +315,9 @@ impl Game {
                             c.tribes.has(t)
                         })
                     }
+                    // Three different Darkmoon Prizes of one tier: the list
+                    // is the card data's, never the pool.
+                    DiscoverRequest::Prize(t) => data.cards.random_prize(t, &pl.discover, rng),
                     // Tinker: a Magnetic Mech up to the player's Tier.
                     DiscoverRequest::MagneticMinion => draw_filtered(
                         pool,
@@ -339,7 +346,8 @@ impl Game {
                     | DiscoverRequest::DeadWarband(_)
                     | DiscoverRequest::DeadLastFight
                     | DiscoverRequest::Champion(_)
-                    | DiscoverRequest::IspyNextOpponent => None,
+                    | DiscoverRequest::IspyNextOpponent
+                    | DiscoverRequest::LastOpponentWarband => None,
                     DiscoverRequest::DemonMinion { max_tier: max_t, .. } => draw_filtered(
                         pool,
                         &data.cards,
@@ -445,7 +453,7 @@ impl Game {
         for (i, &o) in pl.discover.iter().enumerate() {
             if dark {
                 copies[i] = pl.discover_copies.get(i).copied().unwrap_or(0);
-            } else if data.cards.get(o).is_spell() {
+            } else if data.cards.get(o).is_spell() || data.cards.get(o).prize.is_some() {
                 copies[i] = 0;
             }
             if i != k && copies[i] > 0 && !data.cards.get(o).is_spell() {
@@ -513,13 +521,10 @@ impl Game {
             _ => None,
         };
         if !pl.hand.is_full() {
-            let pool_copies = if is_spell {
-                0
-            } else if dark {
-                copies[k]
-            } else {
-                1
-            };
+            // A normal minion offer holds one pool copy; a Golden Dark Gift
+            // offer, a token-free offer (a Prize's minion) and a spell hold
+            // what `copies` says.
+            let pool_copies = if is_spell { 0 } else { copies[k] };
             let mut m = pl.make_card(&data.cards, c, golden_offer, pool_copies);
             if golden_offer {
                 // Gilding and Sinister Invitation: no Triple Reward.
@@ -658,6 +663,31 @@ impl Game {
         let Game { data, rng, players, .. } = self;
         let pl = &mut players[p];
         let mut left = pl.next_board.clone();
+        pl.discover_minions.clear();
+        let mut tried = 0;
+        while !pl.discover.is_full() && !left.is_empty() && tried < left.len() * 4 + 1 {
+            tried += 1;
+            let k = rng.below(left.len() as u32) as usize;
+            let m = left.remove(k);
+            if pl.discover.contains(&m.card) {
+                continue;
+            }
+            pl.discover.push(m.card);
+            let copy = pl.make_card(&data.cards, m.card, false, 0);
+            pl.discover_minions.push(copy);
+        }
+    }
+
+    /// Time Thief: a plain copy of a minion from the last opponent's warband,
+    /// as this player last saw it (a generated copy, like I Spy's).
+    fn deal_last_opponent_offer(&mut self, p: usize) {
+        let Game { data, rng, players, .. } = self;
+        let pl = &mut players[p];
+        let mut left = match pl.last_opponent {
+            Some(super::Opponent::Player(q)) => pl.seen[q as usize].board.clone(),
+            Some(super::Opponent::Ghost(g)) => pl.seen[g as usize].board.clone(),
+            None => ArrayVec::new(),
+        };
         pl.discover_minions.clear();
         let mut tried = 0;
         while !pl.discover.is_full() && !left.is_empty() && tried < left.len() * 4 + 1 {

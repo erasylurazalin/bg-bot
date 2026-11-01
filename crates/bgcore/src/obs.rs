@@ -3,7 +3,7 @@
 //! Card ids are written as id + 1 (0 for none); the model embeds them.
 //!
 //! Layout, in order:
-//! - SCALARS own values (224):
+//! - SCALARS own values (228):
 //!   0  gold
 //!   1  tier
 //!   2  upgrade_cost
@@ -139,6 +139,10 @@
 //!   212..214 Lock and Load: stored minion card id + 1, Attack, Health
 //!   215..218 Friendly Wager: offer open, 2 offered opponents, picked opponent
 //!   219..223 Detective for Hire: offer open, 2 offered card ids + 1, 2 empty flags
+//!   224 Ice Block held (Safety Patch: the save is still there)
+//!   225 Immune this turn
+//!   226 the Prize tier the open Discover offers (0 if it is not a Prize one)
+//!   227 Triple Prizes replace Triple Rewards (Corrupted Tome)
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
@@ -445,7 +449,16 @@ pub const SCALAR_WAGER_PICK: usize = SCALAR_WAGER_OFFER + 2;
 pub const SCALAR_PENDING_HOLMES: usize = SCALAR_WAGER_PICK + 1;
 pub const SCALAR_HOLMES_OFFER: usize = SCALAR_PENDING_HOLMES + 1;
 pub const SCALAR_HOLMES_EMPTY: usize = SCALAR_HOLMES_OFFER + 2;
-pub const SCALARS: usize = SCALAR_HOLMES_EMPTY + 2;
+/// Block 5: a Safety Patch's Ice Block held and unspent (the trinket slot
+/// says the trinket is held; this says the save is still there), whether the
+/// hero is Immune this turn, the Prize tier a Prize Discover is offering (0
+/// when the open Discover is not a Prize Discover), and whether Triple
+/// Rewards have become Triple Prizes (Corrupted Tome).
+pub const SCALAR_ICE_BLOCK: usize = SCALAR_HOLMES_EMPTY + 2;
+pub const SCALAR_IMMUNE: usize = SCALAR_ICE_BLOCK + 1;
+pub const SCALAR_PRIZE_OFFER_TIER: usize = SCALAR_IMMUNE + 1;
+pub const SCALAR_TRIPLE_PRIZE: usize = SCALAR_PRIZE_OFFER_TIER + 1;
+pub const SCALARS: usize = SCALAR_TRIPLE_PRIZE + 1;
 
 pub const SLOT_PRESENT: usize = 0;
 pub const SLOT_CARD_ID: usize = 1;
@@ -560,7 +573,7 @@ const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_L
 const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
 const _: () = assert!(SCALAR_POWER_OFFER + crate::CHOICES == SCALAR_HERO_OFFER);
 const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALAR_TRINKET);
-const _: () = assert!(SCALAR_HOLMES_EMPTY + 2 == SCALARS);
+const _: () = assert!(SCALAR_TRIPLE_PRIZE + 1 == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
 const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
@@ -873,6 +886,19 @@ fn power_progress(game: &Game, p: usize, st: &PowerState) -> (f32, f32) {
             (10 - counts.gold_spent % 10) as f32,
         ),
         PowerEffect::FreeFirstMinion => (game.players[p].free_minion_left as f32, 0.0),
+        // Prize Wall: the Prize tier the next Prize turn offers, and the turns
+        // to it (0 on a Prize turn, when the Discover is already open).
+        PowerEffect::PrizeWall { every } => {
+            let every = every.max(1) as u32;
+            let turn = game.turn;
+            let to = st.progress;
+            let tier = if to == 0 {
+                (turn / every).clamp(1, 4)
+            } else {
+                ((turn + to) / every).clamp(1, 4)
+            };
+            (tier as f32, to as f32)
+        }
         PowerEffect::TakeFirstKilled
         | PowerEffect::EmbraceYourRage
         | PowerEffect::RapidReanimation => (st.armed as u8 as f32, 0.0),
@@ -1103,6 +1129,18 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
             }
         }
     }
+    // Block 5: a held Ice Block and this turn's Immunity, the Prize tier the
+    // open Discover is offering (the prizes themselves are in the Discover's
+    // own card ids, like every other option) and Corrupted Tome's Triple
+    // Prize tier.
+    s[SCALAR_ICE_BLOCK] = pl.ice_block as u8 as f32;
+    s[SCALAR_IMMUNE] = pl.immune as u8 as f32;
+    s[SCALAR_PRIZE_OFFER_TIER] = pl
+        .discover
+        .iter()
+        .find_map(|&c| db.get(c).prize)
+        .unwrap_or(0) as f32;
+    s[SCALAR_TRIPLE_PRIZE] = pl.tp.triple_prize.map_or(0.0, |_| 1.0);
 }
 
 /// Write player `p`'s view into `out`, which must hold OBS_SIZE values.

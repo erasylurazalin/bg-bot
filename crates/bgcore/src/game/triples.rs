@@ -25,6 +25,13 @@ impl Game {
     /// a 0-cost plain spell whose Discover tier is fixed now: one above the
     /// player's tier, tier 6 at most. Lost on a full hand.
     pub(super) fn give_triple_reward(&mut self, p: usize) {
+        // Corrupted Tome: "Whenever you would get a Triple Reward, get a
+        // Triple Prize instead" (docs/trinkets.md: nothing more than its own
+        // Discover a Tier 3 Darkmoon Prize).
+        if let Some(prize) = self.players[p].tp.triple_prize {
+            self.give_generated(p, prize);
+            return;
+        }
         let id = self
             .data
             .cards
@@ -173,6 +180,10 @@ impl Game {
                 gold.health += m.health - bonus.1 - base.health;
                 gold.hats = gold.hats.saturating_add(m.hats);
                 gold.winners_bread = gold.winners_bread.saturating_add(m.winners_bread);
+                // A "gain +X/+X at the end of your turn" a Prize gave the
+                // copies adds up, like any other buff.
+                gold.end_turn_gain.0 = gold.end_turn_gain.0.saturating_add(m.end_turn_gain.0);
+                gold.end_turn_gain.1 = gold.end_turn_gain.1.saturating_add(m.end_turn_gain.1);
                 gold.magnetizations = gold.magnetizations.saturating_add(m.magnetizations);
                 gold.volumizers =
                     gold.volumizers.saturating_add(m.volumizers.saturating_sub(base.volumizers));

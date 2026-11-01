@@ -1061,6 +1061,48 @@ impl Game {
         }
     }
 
+    /// Mishmash: "Whenever your Amalgam gains stats, this gains them twice."
+    /// Run after every action, the way Makeshift Master's watch is: the stats
+    /// each board slot held after the last action are on the player, so
+    /// whatever a friendly Amalgam gained while this one ran lands on every
+    /// Mishmash. One pass over the board, and only while one is held.
+    pub(super) fn note_amalgam_gains(&mut self, p: usize) {
+        let cards = &self.data.cards;
+        let has = self.players[p].board.iter().any(|m| cards.get(m.card).amalgam_gain_copy > 0);
+        if !has {
+            if self.players[p].amalgam_seen != [(0, 0, 0); crate::BOARD] {
+                self.players[p].amalgam_seen = [(0, 0, 0); crate::BOARD];
+            }
+            return;
+        }
+        let mut gain = (0i32, 0i32);
+        let mut seen = [(0, 0i32, i32::MIN); crate::BOARD];
+        for i in 0..self.players[p].board.len() {
+            let m = self.players[p].board[i];
+            seen[i] = (m.card, m.attack, m.health);
+            if !cards.get(m.card).amalgam {
+                continue;
+            }
+            // A slot whose minion changed is a new minion, not a gain.
+            let (c0, a0, h0) = self.players[p].amalgam_seen[i];
+            if c0 != m.card {
+                continue;
+            }
+            gain.0 += (m.attack - a0).max(0);
+            gain.1 += (m.health - h0).max(0);
+        }
+        self.players[p].amalgam_seen = seen;
+        if gain == (0, 0) {
+            return;
+        }
+        for m in &mut self.players[p].board {
+            let n = cards.get(m.card).amalgam_gain_copy as i32 * m.mul();
+            if n > 0 {
+                buff(m, gain.0 * n, gain.1 * n);
+            }
+        }
+    }
+
     /// Scarlet Survivor: once its Attack reaches the threshold, it gains the
     /// keyword (once; `improvements` records that it fired).
     pub(super) fn check_attack_thresholds(&mut self, p: usize) {

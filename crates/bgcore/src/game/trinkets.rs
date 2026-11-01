@@ -14,7 +14,7 @@ use crate::cards::{
 };
 use crate::game::effects::buff;
 use crate::heroes::PowerEffect;
-use crate::minion::CardId;
+use crate::minion::{CardId, Minion};
 use crate::trinkets::{
     Act,
     CardMod,
@@ -647,6 +647,13 @@ impl Game {
         // Tier 6 Refreshes is spent (the fill already read the count).
         if event == Event::Refresh && self.players[p].tp.refresh_tier6 > 0 {
             self.players[p].tp.refresh_tier6 -= 1;
+        }
+        // The Surprise Portrait's hidden part: its roll comes before the
+        // lists, so an Elemental of Surprise can arrive with this action.
+        if self.players[p].tp.surprise != 0
+            && matches!(event, Event::Buy | Event::BuySpell | Event::Sell | Event::Refresh)
+        {
+            self.surprise_roll(p, event);
         }
         // The hot path: one `u32` on the player says whether any of its
         // trinkets listens for this event. Most of a game, and every game
@@ -1468,6 +1475,17 @@ impl Game {
                 }
             }
             Act::CardMod { card, kind } => {
+                // A tribe change reaches the copies the player already has:
+                // "the change applies to every copy of that card you have or
+                // will have" (docs/trinkets.md), the ones already on the
+                // board and in hand. A later copy gets it in `make_card`.
+                if let CardMod::AlsoTribes(t) = kind {
+                    for m in self.players[p].board.iter_mut().chain(self.players[p].hand.iter_mut()) {
+                        if m.parts().any(|(c, _)| c == card) {
+                            m.extra_tribes = m.extra_tribes.with_all(t);
+                        }
+                    }
+                }
                 let mods = &mut self.players[p].tp.card_mods;
                 if mods.iter().all(|m| m.map(|(c, _)| c) != Some(card))
                     && let Some(empty) = mods.iter_mut().find(|m| m.is_none())
@@ -1477,6 +1495,113 @@ impl Game {
             }
             Act::ChooseOneAll => self.players[p].tp.choose_one_all = true,
             Act::Souvenir => self.players[p].tp.souvenir = slot as u8 + 1,
+            // ---- block 5: the Darkmoon Prizes and the last trinkets ----
+            Act::TriplePrize(card) => {
+                // Corrupted Tome: the card in hand now, and every later
+                // Triple Reward becomes one (`give_triple_reward`).
+                self.players[p].tp.triple_prize = Some(card);
+                self.give_generated(p, card);
+            }
+            Act::DiscoverPrize(tier) => {
+                let _ = self.players[p].discover_queue.try_push(super::DiscoverRequest::Prize(tier));
+                self.maybe_start_discover(p);
+            }
+            Act::RandomPrize(n) => {
+                for _ in 0..n {
+                    let Some(card) = self.data.cards.random_prize_any(&mut self.rng) else {
+                        break;
+                    };
+                    self.give_generated(p, card);
+                }
+            }
+            Act::IceBlock => self.players[p].ice_block = true,
+            Act::Surprise(percent) => self.players[p].tp.surprise = percent,
+            Act::YoggWheel => {
+                // The Wheel's six results are the trinket's own `wheel` list:
+                // one of them, each equally likely.
+                let of = self.players[p].trinkets[slot].of;
+                if of == 0 {
+                    return;
+                }
+                let wheel = &self.data.trinkets.get(of - 1).wheel;
+                if wheel.is_empty() {
+                    return;
+                }
+                let k = self.rng.below(wheel.len() as u32) as usize;
+                let picked = wheel[k];
+                self.run_trinket_act(p, slot, picked);
+            }
+            Act::CurseOfFlesh => {
+                // A random friendly minion gains the stats of another one.
+                let n = self.players[p].board.len();
+                if n < 2 {
+                    return;
+                }
+                let a = self.rng.below(n as u32) as usize;
+                let mut b = self.rng.below((n - 1) as u32) as usize;
+                if b >= a {
+                    b += 1;
+                }
+                let (sa, sh) = (self.players[p].board[b].attack, self.players[p].board[b].health);
+                buff(&mut self.players[p].board[a], sa, sh);
+            }
+            Act::DevouringHunger => {
+                // Consume every minion in the Tavern (a real consume, so the
+                // pool and every consume trigger are honours) and give its
+                // stats to a random friendly minion, then Refresh.
+                let mut guard = 0;
+                while !self.players[p].shop.is_empty() && guard < crate::SHOP + 2 {
+                    guard += 1;
+                    if self.players[p].board.is_empty() {
+                        break;
+                    }
+                    let k = self.rng.below(self.players[p].board.len() as u32) as usize;
+                    self.consume(p, k, 0, false, 1);
+                }
+                self.refresh_tavern_now(p);
+            }
+            Act::RodOfRoasting { attack, health } => {
+                // The most Pyrobuff casts one Rod of Roasting may throw; the
+                // second target in three ends the run, so this is only a
+                // guard.
+                const ROD_OF_ROASTING_CASTS: u32 = 25;
+                // Pyrobuff at random: a minion in play (your board or the
+                // Tavern) takes it, or the bartender or your hero is hit and
+                // the casting stops. Each target is equally likely, and the
+                // loop is capped so a bad run cannot go on forever.
+                for _ in 0..ROD_OF_ROASTING_CASTS {
+                    let board = self.players[p].board.len();
+                    let shop = self.players[p].shop.len();
+                    if board + shop == 0 {
+                        break;
+                    }
+                    let k = self.rng.below((board + shop + 2) as u32) as usize;
+                    if k >= board + shop {
+                        break;
+                    }
+                    if k < board {
+                        buff(&mut self.players[p].board[k], attack, health);
+                    } else {
+                        buff(&mut self.players[p].shop[k - board], attack, health);
+                    }
+                }
+            }
+            Act::GoldenTavern => {
+                self.execute_spell_effect(p, SpellEffect::GoldenTouch, false)
+            }
+            Act::CastRandomSpells(n) => {
+                for _ in 0..n {
+                    self.cast_random_spell(p);
+                }
+            }
+            Act::MechaDemon(n) => {
+                for _ in 0..n {
+                    let Some(card) = self.data.cards.random_mecha_demon(&mut self.rng) else {
+                        break;
+                    };
+                    self.give_generated(p, card);
+                }
+            }
             Act::OneOf3 { a, b, c } => {
                 let pick = match self.rng.below(3) {
                     0 => a,
@@ -1511,6 +1636,59 @@ impl Game {
         }
     }
 
+    /// The Surprise Portrait's hidden part (docs/trinkets.md, Era's model):
+    /// every buy, sell and Refresh has a 5% chance of a surprise, never twice
+    /// in a row. A buy or a sell gets an Elemental of Surprise; a Refresh
+    /// gets one in the Tavern or has every Tavern slot filled with them.
+    /// Every Elemental made this way is generated, with no pool copy.
+    fn surprise_roll(&mut self, p: usize, event: Event) {
+        let chance = self.players[p].tp.surprise as u32;
+        let last = self.players[p].tp.surprise_last;
+        let roll = self.rng.below(100) < chance && !last;
+        self.players[p].tp.surprise_last = roll;
+        if !roll {
+            return;
+        }
+        let Some(card) = self.data.cards.by_name("Elemental of Surprise") else { return };
+        match event {
+            Event::Refresh => {
+                // Two ways a surprise shows up on a Refresh, picked evenly
+                // (Era's rule names both and no odds).
+                if self.rng.below(2) == 0 {
+                    // One joins the Tavern, in a free slot or the spell slot.
+                    // A Tavern can hold one card more than its size (Twice as
+                    // Nice's copy), so the array's own bound is the guard.
+                    let size = self.players[p].shop_size(&self.data.rules);
+                    let room = self.players[p].shop.len() < size
+                        || (self.players[p].shop.len() == size
+                            && self.players[p].shop_spell.is_none());
+                    if room && self.players[p].shop.len() < crate::SHOP {
+                        let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+                        self.players[p].shop.push(m);
+                    }
+                } else {
+                    // Every Tavern slot fills with them, replacing what was
+                    // there (the old cards' pool copies go back).
+                    let Game { data, rng, players, pool, lobby, .. } = self;
+                    let _ = (rng, lobby);
+                    let size = players[p].shop_size(&data.rules);
+                    let old: ArrayVec<Minion, { crate::SHOP }> = players[p].shop.drain(..).collect();
+                    for m in old {
+                        super::shop::give_back(pool, &data.cards, &m);
+                    }
+                    players[p].shop_spell = None;
+                    for _ in 0..size.min(crate::SHOP) {
+                        let m = players[p].make_card(&data.cards, card, false, 0);
+                        players[p].shop.push(m);
+                    }
+                }
+            }
+            // A buy or a sell: the Elemental arrives in hand if it fits, and
+            // is lost to a full hand like any other generated card.
+            _ => self.give_generated(p, card),
+        }
+    }
+
     /// What a minion in Tavern slot `s` costs this player right now: Gold
     /// (0 when a trinket makes it free) or Health (Pilgrimp Sticker, Demonic
     /// Tapestry, The Eye of Sargeras). DESIGN.md: a Health price is self
@@ -1541,6 +1719,10 @@ impl Game {
             // Chillmere Mosaic: the Tavern cards its Refresh put there cost
             // this much (they keep it until the Tavern is filled again).
             MinionPrice::Gold(tp.tavern_price)
+        } else if pl.prize.minion_price > 0 {
+            // Friends and Family Discount: minions in the Tavern cost this
+            // much for the rest of the game.
+            MinionPrice::Gold(pl.prize.minion_price)
         } else if tp.magnetic_cost > 0
             && card.keywords.has(crate::minion::Keywords::MAGNETIC)
             && card.tribes.has(Tribe::Mech)

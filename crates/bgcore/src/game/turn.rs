@@ -133,6 +133,11 @@ impl Game {
         self.trinket_end_of_turn(p);
         // A Lockbox is an end of turn countdown too, so Drakkari doubles it.
         self.tick_lockboxes(p, runs);
+        // The Unlimited Coin comes back to hand at the end of every turn (a
+        // generated copy, no pool copy), whatever became of the old one.
+        if let Some(card) = self.players[p].prize.returns_each_turn {
+            self.give_generated(p, card);
+        }
     }
 
     /// One board minion's end of turn effects, `runs` times. A gift that puts
@@ -235,6 +240,15 @@ impl Game {
                             }
                         }
                         None => {}
+                    }
+                }
+                // Gruul Rules: what a Prize gave this minion to gain at the
+                // end of every turn (its own card, not a part). An earlier
+                // part can have taken the slot away, so it is read again.
+                if let Some(m) = self.players[p].board.get_mut(*pos) {
+                    let (ga, gh) = m.end_turn_gain;
+                    if (ga, gh) != (0, 0) {
+                        buff(m, ga, gh);
                     }
                 }
             }
@@ -541,6 +555,14 @@ impl Game {
             pl.spells_cast_turn = 0;
             // "This turn only" trinket numbers (Honeycomb Ring).
             pl.tp.spell_bonus_turn = (0, 0);
+            // The Ice Block's Immunity covered the rest of that turn only.
+            pl.immune = false;
+            // The Prizes' per-turn numbers, and the free Refreshes Rocking
+            // and Rolling and Open Bar give at every start of turn.
+            let rolls = pl.prize.free_rolls_per_turn;
+            pl.free_rolls = pl.free_rolls.saturating_add(rolls);
+            pl.prize.spell_discount_turn = 0;
+            pl.prize.battlecry_extra_turn = 0;
             let was_frozen = pl.frozen;
             let had_frozen = pl.shop.iter().any(|m| m.frozen);
             if pl.frozen {
@@ -1000,6 +1022,21 @@ impl Game {
             // damage event count. The hero just loses the Health (armor
             // first), and `knockouts` settles any that reach 0.
             let pl = &mut self.players[p];
+            // A Safety Patch's Ice Block: the hit that would knock the hero
+            // out is prevented and the hero is Immune for the rest of the
+            // turn, once (docs/trinkets.md).
+            if !pl.immune && pl.ice_block && d >= pl.health + pl.armor {
+                pl.ice_block = false;
+                pl.immune = true;
+                pl.last_damage = 0;
+                pl.last_damage_armor = 0;
+                pl.last_opponent = pl.opponent.take();
+                continue;
+            }
+            if pl.immune {
+                pl.last_opponent = pl.opponent.take();
+                continue;
+            }
             let to_armor = pl.armor.min(d);
             pl.armor -= to_armor;
             pl.health -= d - to_armor;

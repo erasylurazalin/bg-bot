@@ -461,6 +461,46 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     Souvenir,
     /// Get one of three named cards, at random (Jewelry Box).
     OneOf3 { a: CardId, b: CardId, c: CardId },
+    // ---- block 5: the Darkmoon Prizes and the last trinkets ----
+    /// Every Triple Reward becomes this card instead, and one is put in hand
+    /// now (Corrupted Tome's Triple Prize).
+    TriplePrize(CardId),
+    /// Discover a Darkmoon Prize of this Prize tier (the Triple Prize itself,
+    /// Tickatus Sticker).
+    DiscoverPrize(u8),
+    /// Get this many random Darkmoon Prizes, any tier (Hand of Fate, a Wheel
+    /// result).
+    RandomPrize(u8),
+    /// A Safety Patch's Ice Block: the next fatal damage to the hero is
+    /// prevented and the hero is Immune for the rest of the turn, once
+    /// (docs/trinkets.md).
+    IceBlock,
+    /// The hidden part of the Surprise Portrait: this chance out of 100 of a
+    /// surprise on every buy, sell and Refresh, never twice in a row. On a
+    /// buy or a sell an Elemental of Surprise arrives; on a Refresh one joins
+    /// the Tavern, or every Tavern slot fills with them.
+    Surprise(u8),
+    /// Spin the Wheel of Yogg-Saron: one of the trinket's `wheel` acts, each
+    /// equally likely (Yogg-Tastic Pastry).
+    YoggWheel,
+    /// A Wheel result, Curse of Flesh: a random friendly minion gains the
+    /// stats of another friendly minion.
+    CurseOfFlesh,
+    /// A Wheel result, Devouring Hunger: consume every minion in the Tavern,
+    /// give their stats to your minions, then Refresh.
+    DevouringHunger,
+    /// A Wheel result, Rod of Roasting: cast Pyrobuff at random, which gives
+    /// a minion this much, until one lands on the bartender or the hero.
+    RodOfRoasting { attack: i32, health: i32 },
+    /// A Wheel result, Mysterybox: a random minion in the Tavern turns
+    /// Golden.
+    GoldenTavern,
+    /// A Wheel result, Mindflayer Goggles: cast this many random Tavern
+    /// spells (Puzzle Box's own random cast).
+    CastRandomSpells(u8),
+    /// Get this many random Magnetic Mecha-Demons (Mecha-Jaraxxus Sticker):
+    /// the tokens `CardDb.mecha_demons` holds, generated.
+    MechaDemon(u8),
 }
 
 /// A rewrite a portrait applies to every copy of a card the player has or
@@ -481,6 +521,10 @@ pub enum CardMod {
     /// The card's Tavern buff also lands on your board's minions of this
     /// tribe (Azerite Portrait: Living Azerite).
     AlsoBoard(Tribe),
+    /// Every copy of the card counts as these tribes too, wherever a tribe
+    /// is read (Bronzebeard Portrait: your Branns are Murlocs and Dragons).
+    /// `CardDb::tribes_of` adds it, which reaches every tribe check.
+    AlsoTribes(Tribes),
 }
 
 /// "Every N events" / "after N events" / "once N events": one per trinket.
@@ -751,6 +795,13 @@ pub struct Trinket {
     /// Only discard events of a minion (Writhing Tentacles).
     pub discard_minions_only: bool,
     pub rule: Option<Rule>,
+    /// The Wheel of Yogg-Saron's results, one picked at random by a
+    /// `YoggWheel` act (Yogg-Tastic Pastry).
+    pub wheel: Vec<Act>,
+    /// A trinket that is a Secret (Safety Patch's Ice Block), tagged for
+    /// Akazamzarak later. Not hidden: everyone sees everyone's trinkets live
+    /// (docs/trinkets.md). Nothing reads it yet.
+    pub secret: bool,
     /// The effects it has inside a fight, in the order they run.
     pub fight: Vec<FightEntry>,
     /// "Your first Deathrattle each combat triggers an extra time"
@@ -1091,6 +1142,27 @@ struct RawAct {
     #[serde(default)]
     souvenir: bool,
     one_of3: Option<[String; 3]>,
+    // ---- block 5 ----
+    triple_prize: Option<String>,
+    discover_prize: Option<u8>,
+    random_prize: Option<u8>,
+    #[serde(default)]
+    ice_block: bool,
+    surprise: Option<u8>,
+    #[serde(default)]
+    yogg_wheel: bool,
+    #[serde(default)]
+    curse_of_flesh: bool,
+    #[serde(default)]
+    devouring_hunger: bool,
+    rod_of_roasting: Option<[i32; 2]>,
+    #[serde(default)]
+    golden_tavern: bool,
+    cast_random_spells: Option<u8>,
+    mecha_demon: Option<u8>,
+    /// The tribes a portrait adds to a card (Bronzebeard Portrait).
+    #[serde(default)]
+    also_tribes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -1186,6 +1258,14 @@ struct RawTrinket {
     discard_minions_only: bool,
     #[serde(default)]
     rule: Option<RawRule>,
+    /// The Wheel of Yogg-Saron's six results, in data order (Yogg-Tastic
+    /// Pastry): one picked at random by a `yogg_wheel` act.
+    #[serde(default)]
+    wheel: Vec<RawAct>,
+    /// A trinket that is a Secret (Safety Patch), tagged for Akazamzarak
+    /// later.
+    #[serde(default)]
+    secret: bool,
     #[serde(default)]
     fight: Vec<RawFightAct>,
     #[serde(default)]
@@ -1593,6 +1673,12 @@ impl TrinketDb {
                         CardMod::AlsoHealth
                     } else if let Some(t) = &a.also_board {
                         CardMod::AlsoBoard(tribe_(t).map_err(err)?)
+                    } else if !a.also_tribes.is_empty() {
+                        let mut ts = Tribes::NONE;
+                        for n in &a.also_tribes {
+                            ts = ts.with(tribe_(n).map_err(err)?);
+                        }
+                        CardMod::AlsoTribes(ts)
                     } else {
                         return Err(err("a card mod with no rewrite".into()));
                     };
@@ -1603,6 +1689,30 @@ impl TrinketDb {
                     Act::Souvenir
                 } else if let Some([x, y, z]) = &a.one_of3 {
                     Act::OneOf3 { a: card(x)?, b: card(y)?, c: card(z)? }
+                } else if let Some(n) = &a.triple_prize {
+                    Act::TriplePrize(card(n)?)
+                } else if let Some(tier) = a.discover_prize {
+                    Act::DiscoverPrize(tier)
+                } else if let Some(n) = a.random_prize {
+                    Act::RandomPrize(n)
+                } else if a.ice_block {
+                    Act::IceBlock
+                } else if let Some(pct) = a.surprise {
+                    Act::Surprise(pct)
+                } else if a.yogg_wheel {
+                    Act::YoggWheel
+                } else if a.curse_of_flesh {
+                    Act::CurseOfFlesh
+                } else if a.devouring_hunger {
+                    Act::DevouringHunger
+                } else if let Some([attack, health]) = a.rod_of_roasting {
+                    Act::RodOfRoasting { attack, health }
+                } else if a.golden_tavern {
+                    Act::GoldenTavern
+                } else if let Some(n) = a.cast_random_spells {
+                    Act::CastRandomSpells(n)
+                } else if let Some(n) = a.mecha_demon {
+                    Act::MechaDemon(n)
                 } else if a.triple_need_two_pirate {
                     Act::TripleNeedTwoPirate
                 } else if let Some([slot, tribe]) = &a.replace_with_random {
@@ -1873,6 +1983,8 @@ impl TrinketDb {
                 discard_spells_only: t.discard_spells_only,
                 discard_minions_only: t.discard_minions_only,
                 rule,
+                wheel: acts(&t.wheel)?,
+                secret: t.secret,
                 fight,
                 first_deathrattle: t.first_deathrattle,
                 cube: t.cube,

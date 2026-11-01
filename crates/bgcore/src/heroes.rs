@@ -349,6 +349,12 @@ pub enum PowerEffect {
     /// Choose a friendly minion; Start of Combat: destroy it, and once you
     /// have space resummon an exact copy (Rapid Reanimation).
     RapidReanimation,
+    // ---- trinkets block 5 (2026-11-01) ----
+    /// Prize Wall: on turn `every` (4), twice that, and so on, Discover a
+    /// Darkmoon Prize of the tier the turn names: turn 4 is Tier 1, turn 8
+    /// Tier 2, turn 12 Tier 3, turn 16 Tier 4, and Tier 4 every four turns
+    /// after (a guess past 16, docs/trinkets.md).
+    PrizeWall { every: u8 },
 }
 
 /// What a power's buy counter counts.
@@ -881,6 +887,9 @@ struct RawPowerEffect {
     tentacular: bool,
     #[serde(default)]
     rapid_reanimation: bool,
+    // ---- trinkets block 5 (2026-11-01) ----
+    /// The turns between Prizes (Prize Wall: 4).
+    prize_wall: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -1185,6 +1194,8 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
         PowerEffect::Tentacular { card: 0 }
     } else if e.rapid_reanimation {
         PowerEffect::RapidReanimation
+    } else if let Some(n) = e.prize_wall {
+        PowerEffect::PrizeWall { every: n.max(1) }
     } else {
         PowerEffect::None
     })

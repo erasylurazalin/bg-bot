@@ -694,6 +694,20 @@ pub enum DiscoverKind {
     /// A minion of exactly this tier with a type, so no neutral (Portable
     /// Factory).
     TierMinionWithType(u8),
+    /// A minion of one Tier higher than the player's, up to Tier 7 (Top
+    /// Shelf).
+    HigherTierMinion,
+    /// A plain copy of a minion from the last opponent's warband, as it was
+    /// last seen (Time Thief).
+    LastOpponentMinion,
+}
+
+/// Which stat a "then double it" spell doubles (I'm Still Just a Rat in a
+/// Cage doubles Attack, The Bouncer doubles Health).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DoubleStat {
+    Attack,
+    Health,
 }
 
 /// A Tavern spell (or Choose One spell option) that targets a friendly minion.
@@ -785,6 +799,16 @@ pub enum SpellTarget {
     /// Watch the chosen friendly minion: whatever stats it gains outside
     /// combat this turn, the Deity gains too (Makeshift Master).
     WatchStats,
+    /// Give the minion stats and a keyword, then multiply one of its stats
+    /// (I'm Still Just a Rat in a Cage, The Bouncer).
+    BuffThenDouble { attack: i32, health: i32, keyword: u8, stat: DoubleStat },
+    /// Return the minion to hand, with these stats added (Repeat Customer).
+    ReturnToHand { attack: i32, health: i32 },
+    /// Make the minion Golden and return it to hand (Raise the Stakes).
+    MakeGoldenReturn,
+    /// Give the minion "At the end of your turn, gain this much" for the
+    /// rest of the game (Gruul Rules).
+    GrantEndOfTurn { attack: i32, health: i32 },
 }
 
 impl SpellTarget {
@@ -889,6 +913,10 @@ pub enum SpellEffect {
     /// Your Blood Gems give an extra +attack/+health this game (Gem Day, a
     /// Choose One option).
     GemBonus { attack: i32, health: i32 },
+    /// Your Tavern spells give an extra +attack/+health this game
+    /// (Crystallization): the same player field a minion's `spell_bonus`
+    /// raises.
+    SpellBonus { attack: i32, health: i32 },
     /// Play `count` Blood Gems on every friendly minion (Veteran Brigand's
     /// Choose One option).
     GemsOnBoard(u8),
@@ -917,6 +945,45 @@ pub enum SpellEffect {
     /// Discover a new Hero Power (Unmasked Identity). `exclude_heroes` (on
     /// the Card) lists heroes whose powers are never offered.
     DiscoverHeroPower,
+    // ---- the Darkmoon Prizes (block 5) ----
+    /// Discover a Darkmoon Prize of exactly this Prize tier (the Triple
+    /// Prize, Tickatus Sticker).
+    DiscoverPrize(u8),
+    /// Discover a Darkmoon Prize from each Prize tier below this one: one
+    /// from every tier up to and including this number (Big Winner!).
+    DiscoverPrizesBelow(u8),
+    /// Get this many random Darkmoon Prizes, any tier (Hand of Fate).
+    RandomPrize(u8),
+    /// Fill the hand with copies of a card (B.A.N.A.N.A.S.).
+    FillHand { card: CardId },
+    /// Fill the hand with random Tavern spells (Gorgeous Goblet).
+    FillHandSpells,
+    /// Gain 1 Gold, and get this card back at the end of every turn (The
+    /// Unlimited Coin). One flag: the card it gives back.
+    ReturnEachTurn { card: CardId },
+    /// Replace every card in the Tavern with a random one from the Tier
+    /// above (Evolving Tavern).
+    EvolvingTavern,
+    /// Steal every card in the Tavern, then Refresh it (Mindflayer Goggles).
+    StealAllTavern,
+    /// The Tavern offers one more minion, with these stats, for the rest of
+    /// the game (New Recruit).
+    ExtraShopMinion { attack: i32, health: i32 },
+    /// Gain this many free Refreshes now and this many at the start of every
+    /// turn for the rest of the game (Rocking and Rolling: `[0, 1]`, Open
+    /// Bar: `[5, 5]`).
+    FreeRollsPerTurn { now: u8, per_turn: u8 },
+    /// Get a random Tavern spell costing at least this much (Unfurled
+    /// Codex).
+    RandomSpellAtLeast(u8),
+    /// Tavern spells cost this much less this turn (Reserve Prices).
+    SpellDiscountThisTurn(u8),
+    /// Minions in the Tavern cost this much for the rest of the game
+    /// (Friends and Family Discount).
+    MinionPrice(u8),
+    /// Your Battlecries trigger this many extra times this turn (Big Brann
+    /// Play).
+    BattlecryExtraThisTurn(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1016,6 +1083,9 @@ pub enum EndOfTurn {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StartOfCombat {
     CombatBeastBuff { attack: i32, health: i32 },
+    /// Gain the Attack of your left-most minion and the Health of your
+    /// right-most minion (All-Seeing Elder). Golden doubles both.
+    GainEndsStats,
     DamageAllOthers(i32),
     /// Any effect a fight can run (Electric Synthesizer, Amber Guardian,
     /// Runic Arcanist).
@@ -1291,6 +1361,25 @@ pub struct Card {
     /// Golden stats, when the data doesn't double the printed ones.
     pub golden_stats: Option<(i32, i32)>,
     pub keywords: Keywords,
+    /// A Darkmoon Prize: its Prize tier, 1 to 4 (the game data's
+    /// `battlegroundsDarkmoonPrizeTurn`). Prizes are never in the pool; a
+    /// Prize Discover offers three of one tier (`CardDb.prizes`).
+    pub prize: Option<u8>,
+    /// The card is an Amalgam, whose stat gains Mishmash copies.
+    pub amalgam: bool,
+    /// Whenever a friendly Amalgam gains stats, this gains them this many
+    /// times (Mishmash: 1, twice when golden). 0 for every other card.
+    pub amalgam_gain_copy: u8,
+    /// The tribes a Magnetic card can Magnetize onto: Mech for all but the
+    /// Mecha-Demons, which take Mechs and Demons.
+    pub magnetize_tribes: Tribes,
+    /// One of the four Magnetic Mecha-Demons the Mecha-Jaraxxus Sticker hands
+    /// out (`CardDb.mecha_demons`).
+    pub mecha_demon: bool,
+    /// A buddy card (the game data's `isBattlegroundsBuddy`), tagged for when
+    /// buddies come: Mishmash, which the Curator Sticker hands out. Nothing
+    /// reads it yet.
+    pub buddy: bool,
     pub token: bool,
     pub spell: bool,
     /// Bought with Health instead of Gold (Hasty Excavation).
@@ -1414,9 +1503,6 @@ pub struct Card {
     /// After another friendly minion is Reborn (Barrier Banshee, Snazzy
     /// Phantom).
     pub on_reborn: Option<OnReborn>,
-    /// A Magnetic minion that can Magnetize to an Undead as well as a Mech
-    /// (Prosthetic Hand).
-    pub magnetize_to_undead: bool,
     pub deity: Option<DeityKind>,
     pub on_card_added: Option<(i32, i32)>,
     pub on_discard: Option<OnDiscard>,
@@ -1673,6 +1759,14 @@ pub struct CardDb {
     /// that no card opens (Genn's King of Duality, the Reinvigorating Light
     /// trinket) uses the same list: one place for Era to add to.
     pub hero_power_excludes: Vec<String>,
+    /// The 32 Darkmoon Prizes by Prize tier (index 0 is tier 1): the list a
+    /// Prize Discover offers three different cards from, and the one a random
+    /// Prize is drawn from. Nothing else ever draws them: they are not in the
+    /// Tavern's spell pool.
+    pub prizes: [Vec<CardId>; 4],
+    /// The four Magnetic Mecha-Demons the Mecha-Jaraxxus Sticker hands out,
+    /// in card order so a seed replays.
+    pub mecha_demons: Vec<CardId>,
 }
 
 #[derive(Deserialize)]
@@ -1782,8 +1876,28 @@ struct RawCard {
     after_buy: Option<RawAfterBuy>,
     buff_per_kind_death: Option<[i32; 2]>,
     on_reborn: Option<RawOnReborn>,
+    /// A Magnetic minion that can Magnetize to an Undead as well as a Mech
+    /// (Prosthetic Hand).
     #[serde(default)]
     magnetize_to_undead: bool,
+    /// The tribes this Magnetic card Magnetizes onto, when they are not just
+    /// Mech (Mecha-Jaraxxus's Mecha-Demons).
+    #[serde(default)]
+    magnetize_to_tribes: Vec<String>,
+    /// A Darkmoon Prize's tier, 1 to 4 (All-Seeing Elder).
+    prize: Option<u8>,
+    /// One of the four Magnetic Mecha-Demons (Mecha-Jaraxxus Sticker).
+    #[serde(default)]
+    mecha_demon: bool,
+    /// A buddy card, tagged for when buddies come (Mishmash).
+    #[serde(default)]
+    buddy: bool,
+    /// The card is an Amalgam (the Curator's token).
+    #[serde(default)]
+    amalgam: bool,
+    /// Whenever a friendly Amalgam gains stats, this gains them this many
+    /// times (Mishmash). Golden doubles it.
+    amalgam_gain_copy: Option<u8>,
     /// Blood Gems this plays on a random different friendly minion when a
     /// Gem lands on it (Roogug).
     on_gem_played_on_self: Option<u8>,
@@ -1906,6 +2020,10 @@ struct RawSpell {
     /// A Spellcraft spell: it leaves the hand at the end of the turn.
     #[serde(default)]
     spellcraft: bool,
+    /// A Darkmoon Prize's tier, 1 to 4 (the game data's
+    /// `battlegroundsDarkmoonPrizeTurn`). A Prize is a plain spell that is
+    /// never in the pool: only a Prize Discover offers it.
+    prize: Option<u8>,
     on_discard: Option<String>,
     effect: Option<RawSpellEffect>,
     choose_one: Option<[RawSpellEffect; 2]>,
@@ -2056,6 +2174,8 @@ struct RawSpellEffect {
     get_gems: Option<u8>,
     /// Your Blood Gems give this much extra this game (a Choose One option).
     gem_bonus: Option<[i32; 2]>,
+    /// Your Tavern spells give this much extra this game (Crystallization).
+    spell_bonus: Option<[i32; 2]>,
     /// Play this many Blood Gems on every friendly minion (a Choose One
     /// option).
     gems_on_board: Option<u8>,
@@ -2069,6 +2189,59 @@ struct RawSpellEffect {
     /// given.
     #[serde(default)]
     triple_reward: bool,
+    // ---- the Darkmoon Prizes (block 5) ----
+    /// Discover a Darkmoon Prize of this Prize tier (the Triple Prize,
+    /// Tickatus Sticker).
+    discover_prize: Option<u8>,
+    /// Discover a Darkmoon Prize from each Prize tier below this one (Big
+    /// Winner!).
+    discover_prizes: Option<u8>,
+    /// Get this many random Darkmoon Prizes, any tier (Hand of Fate).
+    random_prize: Option<u8>,
+    /// Fill the hand with copies of this card (B.A.N.A.N.A.S.).
+    fill_hand: Option<String>,
+    /// Fill the hand with random Tavern spells (Gorgeous Goblet).
+    #[serde(default)]
+    fill_hand_spells: bool,
+    /// Gain 1 Gold, and get this card back at the end of every turn (The
+    /// Unlimited Coin).
+    #[serde(default)]
+    return_each_turn: bool,
+    /// Replace every card in the Tavern with one from a Tier higher
+    /// (Evolving Tavern).
+    #[serde(default)]
+    evolving_tavern: bool,
+    /// Steal every card in the Tavern, then Refresh it (Mindflayer Goggles).
+    #[serde(default)]
+    steal_all_tavern: bool,
+    /// The Tavern offers one more minion, with these stats, for the rest of
+    /// the game (New Recruit).
+    extra_shop_minion: Option<[i32; 2]>,
+    /// Free Refreshes now and at the start of every turn for the rest of the
+    /// game, `[now, per_turn]` (Rocking and Rolling, Open Bar).
+    free_rolls_per_turn: Option<[u8; 2]>,
+    /// A random Tavern spell costing at least this much (Unfurled Codex).
+    random_spell_at_least: Option<u8>,
+    /// Tavern spells cost this much less this turn (Reserve Prices).
+    spell_discount_turn: Option<u8>,
+    /// Minions in the Tavern cost this much for the rest of the game
+    /// (Friends and Family Discount).
+    minion_price: Option<u8>,
+    /// Your Battlecries trigger this many extra times this turn (Big Brann
+    /// Play).
+    battlecry_extra_turn: Option<u8>,
+    /// A "then double it" buff: "attack" or "health" (I'm Still Just a Rat in
+    /// a Cage, The Bouncer).
+    then_double: Option<String>,
+    /// Return the chosen minion to hand with these stats (Repeat Customer).
+    return_to_hand: Option<[i32; 2]>,
+    /// Make the chosen minion Golden and return it to hand (Raise the
+    /// Stakes).
+    #[serde(default)]
+    make_golden_return: bool,
+    /// Give the chosen minion "At the end of your turn, gain this" (Gruul
+    /// Rules).
+    grant_end_of_turn: Option<[i32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -2413,6 +2586,10 @@ struct RawStartOfCombat {
     triple_stats: bool,
     #[serde(default)]
     gain_left_attack: bool,
+    /// All-Seeing Elder: the left-most minion's Attack and the right-most
+    /// one's Health.
+    #[serde(default)]
+    gain_ends: bool,
     #[serde(default)]
     gain_deity_stats: bool,
     #[serde(default)]
@@ -2605,12 +2782,23 @@ fn parse_event(s: &str) -> Result<EventKind, String> {
     }
 }
 
+/// One keyword's bit, or several written with commas ("Give a Dog a Bone":
+/// `divine_shield,windfury`).
 fn keyword_bit(s: &str) -> Result<u8, String> {
-    Keywords::ALL
-        .iter()
-        .find(|(_, n)| *n == s)
-        .map(|(b, _)| *b)
-        .ok_or_else(|| format!("unknown keyword {s:?}"))
+    let mut mask = 0u8;
+    for part in s.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let bit = Keywords::ALL
+            .iter()
+            .find(|(_, n)| *n == part)
+            .map(|(b, _)| *b)
+            .ok_or_else(|| format!("unknown keyword {part:?}"))?;
+        mask |= bit;
+    }
+    Ok(mask)
 }
 
 fn parse_discover(s: &str) -> Result<DiscoverKind, String> {
@@ -2622,6 +2810,8 @@ fn parse_discover(s: &str) -> Result<DiscoverKind, String> {
         "battlecry" => Ok(DiscoverKind::BattlecryMinion),
         "tier_7_minion" => Ok(DiscoverKind::Tier7Minion),
         "choose_one_minion" => Ok(DiscoverKind::ChooseOneMinion),
+        "tier_above_minion" => Ok(DiscoverKind::HigherTierMinion),
+        "last_opponent_minion" => Ok(DiscoverKind::LastOpponentMinion),
         other => Err(format!("unknown discover {other:?}")),
     }
 }
@@ -2704,6 +2894,21 @@ fn parse_spell_effect(
                     None,
                 ));
             }
+            // "Give a minion +2 Attack, then double its Attack" (I'm Still
+            // Just a Rat in a Cage, The Bouncer): before the plain buff, which
+            // would swallow its `buff`.
+            if let Some(how) = &e.then_double {
+                let stat = match how.as_str() {
+                    "attack" => DoubleStat::Attack,
+                    "health" => DoubleStat::Health,
+                    other => return Err(format!("unknown then_double {other:?}")),
+                };
+                let [attack, health] = e.buff.unwrap_or([0, 0]);
+                return Ok((
+                    Some(SpellTarget::BuffThenDouble { attack, health, keyword: kw, stat }),
+                    None,
+                ));
+            }
             if let Some([attack, health]) = e.buff {
                 if e.per_bonus_keyword {
                     return Ok((Some(SpellTarget::BuffPerBonusKeyword { attack, health }), None));
@@ -2764,6 +2969,15 @@ fn parse_spell_effect(
             }
             if e.watch_stats {
                 return Ok((Some(SpellTarget::WatchStats), None));
+            }
+            if let Some([attack, health]) = e.return_to_hand {
+                return Ok((Some(SpellTarget::ReturnToHand { attack, health }), None));
+            }
+            if e.make_golden_return {
+                return Ok((Some(SpellTarget::MakeGoldenReturn), None));
+            }
+            if let Some([attack, health]) = e.grant_end_of_turn {
+                return Ok((Some(SpellTarget::GrantEndOfTurn { attack, health }), None));
             }
             Err("invalid chosen spell effect".into())
         }
@@ -2848,12 +3062,38 @@ fn parse_spell_effect(
                 SpellEffect::GetGems(n)
             } else if let Some([attack, health]) = e.gem_bonus {
                 SpellEffect::GemBonus { attack, health }
+            } else if let Some([attack, health]) = e.spell_bonus {
+                SpellEffect::SpellBonus { attack, health }
             } else if let Some(n) = e.gems_on_board {
                 SpellEffect::GemsOnBoard(n)
             } else if let Some([attack, health]) = e.barrage {
                 SpellEffect::Barrage { attack, health }
             } else if let Some(name) = &e.random_tribe_minion {
                 SpellEffect::RandomTribeMinion { tribe: tribe(name)?, count: e.count.unwrap_or(1) }
+            } else if let Some(tier) = e.discover_prize {
+                SpellEffect::DiscoverPrize(tier)
+            } else if let Some(tier) = e.discover_prizes {
+                SpellEffect::DiscoverPrizesBelow(tier)
+            } else if let Some(n) = e.random_prize {
+                SpellEffect::RandomPrize(n)
+            } else if e.fill_hand_spells {
+                SpellEffect::FillHandSpells
+            } else if e.evolving_tavern {
+                SpellEffect::EvolvingTavern
+            } else if e.steal_all_tavern {
+                SpellEffect::StealAllTavern
+            } else if let Some([attack, health]) = e.extra_shop_minion {
+                SpellEffect::ExtraShopMinion { attack, health }
+            } else if let Some([now, per_turn]) = e.free_rolls_per_turn {
+                SpellEffect::FreeRollsPerTurn { now, per_turn }
+            } else if let Some(n) = e.random_spell_at_least {
+                SpellEffect::RandomSpellAtLeast(n)
+            } else if let Some(n) = e.spell_discount_turn {
+                SpellEffect::SpellDiscountThisTurn(n)
+            } else if let Some(n) = e.minion_price {
+                SpellEffect::MinionPrice(n)
+            } else if let Some(n) = e.battlecry_extra_turn {
+                SpellEffect::BattlecryExtraThisTurn(n)
             } else if e.triple_reward {
                 SpellEffect::TripleReward
             } else if let Some(b) = e.boon_of_beetles {
@@ -3515,6 +3755,8 @@ impl CardDb {
                     StartOfCombat::DoubleAttack
                 } else if s.triple_stats {
                     StartOfCombat::TripleStats
+                } else if s.gain_ends {
+                    StartOfCombat::GainEndsStats
                 } else if s.gain_left_attack {
                     StartOfCombat::GainLeftAttack
                 } else if s.gain_deity_stats {
@@ -3734,6 +3976,20 @@ impl CardDb {
                 }),
             };
 
+            let magnetize_tribes = if c.magnetize_to_tribes.is_empty() {
+                let mut t = Tribes::NONE.with(Tribe::Mech);
+                if c.magnetize_to_undead {
+                    t = t.with(Tribe::Undead);
+                }
+                t
+            } else {
+                let mut t = Tribes::NONE;
+                for n in &c.magnetize_to_tribes {
+                    t = t.with(tribe(n).map_err(&err)?);
+                }
+                t
+            };
+
             cards.push(Card {
                 name: c.name.clone(),
                 tier: c.tier,
@@ -3743,6 +3999,12 @@ impl CardDb {
                 health: c.stats[1],
                 golden_stats: c.golden_stats.map(|[a, h]| (a, h)),
                 keywords,
+                prize: c.prize,
+                amalgam: c.amalgam,
+                amalgam_gain_copy: c.amalgam_gain_copy.unwrap_or(0),
+                magnetize_tribes,
+                mecha_demon: c.mecha_demon,
+                buddy: c.buddy,
                 token: *token,
                 spell: false,
                 pay_health: false,
@@ -3824,7 +4086,6 @@ impl CardDb {
                 }),
                 buff_per_kind_death: c.buff_per_kind_death.map(|[a, h]| (a, h)),
                 on_reborn,
-                magnetize_to_undead: c.magnetize_to_undead,
                 deity: c.deity.as_deref().map(|s| match s {
                     "cthun" => Ok(DeityKind::Cthun),
                     "yshaarj" => Ok(DeityKind::Yshaarj),
@@ -3899,6 +4160,16 @@ impl CardDb {
                         Some(SpellEffect::CastSpell { card, times: e.count.unwrap_or(1) }),
                     )
                 }
+                // Fill the hand with a card no pool holds (a Banana).
+                Some(e) if e.fill_hand.is_some() => {
+                    let card = generated_id(e.fill_hand.as_deref().unwrap()).map_err(&err)?;
+                    (None, Some(SpellEffect::FillHand { card }))
+                }
+                // The spell comes back to hand at the end of every turn: it
+                // names itself.
+                Some(e) if e.return_each_turn => {
+                    (None, Some(SpellEffect::ReturnEachTurn { card: id }))
+                }
                 Some(e) => parse_spell_effect(e).map_err(&err)?,
                 None => (None, None),
             };
@@ -3937,6 +4208,12 @@ impl CardDb {
                 health: 0,
                 golden_stats: None,
                 keywords: Keywords::default(),
+                prize: sp.prize,
+                amalgam: false,
+                amalgam_gain_copy: 0,
+                magnetize_tribes: Tribes::NONE.with(Tribe::Mech),
+                mecha_demon: false,
+                buddy: false,
                 token: sp.token,
                 spell: true,
                 pay_health: sp.pay_health,
@@ -4001,7 +4278,6 @@ impl CardDb {
                 after_buy: None,
                 buff_per_kind_death: None,
                 on_reborn: None,
-                magnetize_to_undead: false,
                 deity: None,
                 on_card_added: None,
                 on_discard: sp.on_discard.as_deref().map(|s| match s {
@@ -4043,6 +4319,22 @@ impl CardDb {
                 }
             }
         }
+        let mecha_demons: Vec<CardId> = cards
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.mecha_demon)
+            .map(|(i, _)| i as CardId)
+            .collect();
+        // The Darkmoon Prizes by tier, in card order so a seed replays.
+        let mut prizes: [Vec<CardId>; 4] = Default::default();
+        for (i, c) in cards.iter().enumerate() {
+            if let Some(tier) = c.prize {
+                if tier == 0 || tier > 4 {
+                    return Err(format!("cards.toml {}: prize tier {tier}", c.name));
+                }
+                prizes[tier as usize - 1].push(i as CardId);
+            }
+        }
         let lockbox = cards
             .iter()
             .position(|c| matches!(c.spell_effect, Some(SpellEffect::Lockbox(_))))
@@ -4072,6 +4364,8 @@ impl CardDb {
             blood_gem,
             triple_reward,
             hero_power_excludes,
+            prizes,
+            mecha_demons,
         })
     }
 
@@ -4097,7 +4391,10 @@ impl CardDb {
         if m.n_gifts != 0 && m.has_gift(self, |c| c.all_types) {
             return Tribes::ALL;
         }
-        self.get(m.card).tribes
+        // A portrait can give a card more tribes (Bronzebeard Portrait:
+        // your Branns are Murlocs and Dragons too), and that reaches every
+        // tribe check through this one function.
+        self.get(m.card).tribes.with_all(m.extra_tribes)
     }
 
     pub fn by_name(&self, name: &str) -> Option<CardId> {
@@ -4436,6 +4733,68 @@ impl CardDb {
         Some(self.resolve_bounty(id, exclude, rng))
     }
 
+    /// A random Tavern spell of `cost` Gold or more, up to `tier` (Unfurled
+    /// Codex). The pool's own filter, so no tier 7 spell and no Bounty.
+    pub fn random_spell_at_least(
+        &self,
+        cost: u8,
+        tier: u8,
+        lobby: Tribes,
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        let ok = |id: CardId| {
+            self.cards[id as usize].cost >= cost
+                && self.cards[id as usize].tier <= tier
+                && self.cards[id as usize].lobby_ok(lobby)
+        };
+        let count = self.spells.iter().filter(|&&id| ok(id)).count() as u32;
+        if count == 0 {
+            return None;
+        }
+        let k = rng.below(count) as usize;
+        self.spells.iter().copied().filter(|&id| ok(id)).nth(k)
+    }
+
+    /// A Darkmoon Prize of one Prize tier that is not in `exclude`, picked
+    /// evenly. Prizes are never in the pool, so nothing is taken from it.
+    pub fn random_prize(&self, tier: u8, exclude: &[CardId], rng: &mut Rng) -> Option<CardId> {
+        let list = self.prizes.get(tier.checked_sub(1)? as usize)?;
+        let open = list.iter().filter(|id| !exclude.contains(id)).count() as u32;
+        if open == 0 {
+            return None;
+        }
+        let k = rng.below(open) as usize;
+        list.iter().copied().filter(|id| !exclude.contains(id)).nth(k)
+    }
+
+    /// A random one of the four Mecha-Demons, which the Mecha-Jaraxxus
+    /// Sticker hands out as generated copies ("random" is one of the four,
+    /// equally likely: docs/trinkets.md).
+    pub fn random_mecha_demon(&self, rng: &mut Rng) -> Option<CardId> {
+        if self.mecha_demons.is_empty() {
+            return None;
+        }
+        let k = rng.below(self.mecha_demons.len() as u32) as usize;
+        Some(self.mecha_demons[k])
+    }
+
+    /// Every Darkmoon Prize of any tier, uniformly: what "a random Darkmoon
+    /// Prize" means when no tier is named (Hand of Fate).
+    pub fn random_prize_any(&self, rng: &mut Rng) -> Option<CardId> {
+        let total: usize = self.prizes.iter().map(|l| l.len()).sum();
+        if total == 0 {
+            return None;
+        }
+        let mut k = rng.below(total as u32) as usize;
+        for list in &self.prizes {
+            if k < list.len() {
+                return Some(list[k]);
+            }
+            k -= list.len();
+        }
+        None
+    }
+
     /// A fresh generated copy of a card (`pool_copies = 0`).
     pub fn make(&self, id: CardId, golden: bool) -> Minion {
         let c = self.get(id);
@@ -4500,6 +4859,8 @@ impl CardDb {
             temp_attack: 0,
             frozen: false,
             reanimate: false,
+            end_turn_gain: (0, 0),
+            extra_tribes: crate::cards::Tribes::NONE,
         }
     }
 }

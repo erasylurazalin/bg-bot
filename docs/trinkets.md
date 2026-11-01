@@ -171,9 +171,14 @@ always afford one. A trinket with no cost in the game data is free.
 **Not in the game, or later:** Shrine of Evolution (Era thinks it's gone,
 though the data still lists it), Kiri's Double Eclipse (never seen in
 Era's games or pro play, though the data lists it in the pool: never
-build it), Wisdomball Supply, Safety Patch (Secrets), Yogg-Tastic
-Putricide Sticker, Tickatus Sticker and Corrupted Tome (they need the
-Darkmoon Prizes exported first), and the Dark Gift trinkets (built since).
+build it), Wisdomball Supply and Putricide Sticker.
+
+Built in block 5 (2026-11-01): the Darkmoon Prizes (31 Prize spells and the
+Prize minion All-Seeing Elder, `CardDb.prizes` and a `prize` tier on each
+card), Corrupted Tome, Tickatus Sticker, Tickatus and his Prize Wall, the
+greater Eternal Portrait, the Curator Sticker, Safety Patch (tagged as a
+Secret), the Bronzebeard Portrait with its tribe change, the Surprise
+Portrait's hidden part, Yogg-Tastic Pastry and the Mecha-Jaraxxus Sticker.
 
 ## Portraits that rewrite a card
 
@@ -185,12 +190,35 @@ and in hand.
 Built 2026-10-31 (block 4): every portrait but Bronzebeard and Eternal (the
 Eternal Portrait's Taunt and Reborn are a Start of Combat effect, built with
 the fight block). The change is data on the player, keyed by card
-(`docs/ENGINE.md` "The portraits that rewrite a card"). Bronzebeard Portrait
-is not built at all and is not in `trinkets.toml`, so it is never offered:
-its "also Murlocs and Dragons" needs a per-minion tribe override, which
-reaches every tribe check in the engine, and half a portrait would mislead
-the bots.
+(`docs/ENGINE.md` "The portraits that rewrite a card").
+
+Built 2026-11-01 (block 5): the Bronzebeard Portrait's "also Murlocs and
+Dragons" is a card modifier like the others, `also_tribes`, and it is read by
+`CardDb::tribes_of` through a `Minion.extra_tribes` field: every tribe check
+in the engine sees it (board, hand, the most common type, tribe synergies, a
+golden Brann, a fight), with the one exception Era named, the Dark
+Discovery's "your type" slot. The Eternal Portrait (Greater) is the greater
+card (BG36_MagicItem_216), with a Golden Eternal Knight and +4/+2 for every
+friendly Undead death.
 
 ## Dark Gifts
 
 See `docs/darkgifts.md`.
+
+## Block 5 corrections (Era, 2026-11-01)
+
+- **Rat in a Cage and The Bouncer** are spells that target a friendly minion, so Balinda Stonehearth casts them twice: the doubling happens twice, which quadruples the stat.
+- **New Recruit**'s +2/+2 is the same buff Waveling and Easterly Winds give (after each Refresh, a random Tavern minion gets it). They share one buff, so they stack. The extra Tavern slot stays for good.
+- **Evolving Tavern** replaces every card in the Tavern, the spell included, with one a Tier higher, capped at Tier 6.
+- **Golden Mishmash** also copies what the Amalgam gains in combat. Like any combat gain, it's gone by the next shop phase, unless Mishmash is next to a Persistent Poet: Mishmash is every type, so it counts as a Dragon and keeps them.
+
+## Block 6 rules (Era, 2026-11-01)
+
+- **Colorful Compass:** the Lesser one gives 1 random minion of its type on pick and at the start of each turn, and the Greater one gives 2.
+- **The type is fixed at the pick.** It's your most common minion type at the moment you pick the trinket, and it never changes after. Take the compass on a board of Mechs, rebuild into Demons, and you still get Mechs. Gold-plated Compass works the same way.
+- **Gold-plated Compass:** the type in "the next {type} you buy" is your most common minion type.
+- **Minion Bait:** the {type} would be your most common type too, but the trinket never appears in Era's 47 logged games, so it's left out.
+- **Poet Portrait:** gives a Timewarped Poet, a trinket-only token. It works like Persistent Poet, but for all your Dragons.
+- **Wisdomball Supply and Putricide Sticker:** out for now.
+- The game data has `92` (the Naga race id) in these cards' text slot. The live game rewrites it while the trinket is offered: logs show 17 (Mech), 43 (Quilboar), 126 and 0.
+

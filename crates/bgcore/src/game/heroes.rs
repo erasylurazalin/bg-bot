@@ -464,7 +464,12 @@ impl Game {
         if every_third && (self.players[p].counts.tavern_spells_bought + 1).is_multiple_of(3) {
             return 0;
         }
-        self.data.cards.get(card).cost
+        // Reserve Prices: Tavern spells cost less this turn.
+        self.data
+            .cards
+            .get(card)
+            .cost
+            .saturating_sub(self.players[p].prize.spell_discount_turn)
     }
 
     /// Whether the player's MAIN power button may be pressed right now.
@@ -1334,6 +1339,32 @@ impl Game {
                 }
                 self.players[p].recent_buys.clear();
             }
+            // Prize Wall: on turn 4, 8, 12, 16 and every four turns after,
+            // Discover a Darkmoon Prize of that turn's Prize tier (turn 4 is
+            // Tier 1); Tier 4 from turn 16 on (docs/trinkets.md).
+            PowerEffect::PrizeWall { every } => {
+                let every = every.max(1) as u32;
+                let on_prize = turn >= every && turn.is_multiple_of(every);
+                // The turns to the next Prize, 0 on a Prize turn, so the
+                // observation can carry it.
+                let next = if on_prize {
+                    turn
+                } else if turn < every {
+                    every
+                } else {
+                    (turn / every + 1) * every
+                };
+                if let Some(st) = self.players[p].power_at_mut(second) {
+                    st.progress = next - turn;
+                }
+                if on_prize {
+                    let tier = (turn / every).min(4) as u8;
+                    let _ = self.players[p]
+                        .discover_queue
+                        .try_push(DiscoverRequest::Prize(tier));
+                    self.maybe_start_discover(p);
+                }
+            }
             // Nether Portal (Bloodfury): random Demons at the start of each
             // turn.
             PowerEffect::RandomMinionsEachTurn { count, tribe } => {
@@ -2199,6 +2230,15 @@ impl Game {
         if amount <= 0 {
             return;
         }
+        // Safety Patch: Immune for the rest of the turn, or the Ice Block
+        // eats the one hit that would kill (docs/trinkets.md).
+        if pl.immune {
+            return;
+        }
+        if pl.ice_block && amount >= pl.health + pl.armor {
+            Self::use_ice_block(pl);
+            return;
+        }
         // Armor takes it first (DESIGN.md "Health and armor").
         let to_armor = pl.armor.min(amount);
         pl.armor -= to_armor;
@@ -2226,6 +2266,16 @@ impl Game {
         self.trinket_event(p, Event::HeroDamage, None, 1);
         // The CardMods a portrait gives the wounded minions are read here.
         self.after_hero_damage_mods(p);
+    }
+
+    /// A Safety Patch's Ice Block goes off: the fatal damage is prevented (it
+    /// never happened, so nothing reacts to it) and the hero is Immune for
+    /// the rest of the turn. Once.
+    fn use_ice_block(pl: &mut super::Player) {
+        pl.ice_block = false;
+        pl.immune = true;
+        pl.last_damage = 0;
+        pl.last_damage_armor = 0;
     }
 
     /// A portrait that gives the card's "after your hero takes damage"
@@ -2297,7 +2347,7 @@ impl Game {
 
     /// The Perfect Crime: steal every card in the Tavern, left to right. A
     /// hand with no room loses the rest (docs/heroes.md).
-    fn steal_all_tavern(&mut self, p: usize) {
+    pub(super) fn steal_all_tavern(&mut self, p: usize) {
         while self.steal_shop_card(p, 0) {
             if self.players[p].hand.is_full() {
                 break;

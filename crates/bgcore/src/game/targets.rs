@@ -4,6 +4,7 @@ use arrayvec::ArrayVec;
 use crate::trinkets::Event;
 use crate::cards::{
     ConsumePick,
+    DoubleStat,
     Effect,
     EventKind,
     SpellTarget,
@@ -407,6 +408,12 @@ impl Game {
                         // A friendly board minion's Deathrattle: no Tavern
                         // minion has one to trigger.
                         SpellTarget::TriggerDeathrattle => {}
+                        // The Prizes' four "a friendly minion" effects never
+                        // reach a Tavern minion (`can_target_shop` says so).
+                        SpellTarget::BuffThenDouble { .. }
+                        | SpellTarget::ReturnToHand { .. }
+                        | SpellTarget::MakeGoldenReturn
+                        | SpellTarget::GrantEndOfTurn { .. } => {}
                     }
                     if pt.tavern {
                         self.trigger_on_cast_spell(p);
@@ -1003,6 +1010,48 @@ impl Game {
                             // fired outside combat (it does not die).
                             self.trigger_one_deathrattle(p, target_pos);
                             stop_after = true;
+                        }
+                        SpellTarget::BuffThenDouble { attack, health, keyword, stat } => {
+                            // I'm Still Just a Rat in a Cage (+2 Attack, then
+                            // double the Attack) and The Bouncer (Taunt, then
+                            // double the Health). The spell bonus lands before
+                            // the doubling, so it doubles too.
+                            let m = &mut self.players[p].board[target_pos];
+                            buff(m, attack + da, health + dh);
+                            if keyword != 0 {
+                                m.keywords.set(keyword);
+                            }
+                            match stat {
+                                DoubleStat::Attack => m.attack = m.attack.saturating_mul(2),
+                                DoubleStat::Health => m.health = m.health.saturating_mul(2),
+                            }
+                        }
+                        SpellTarget::ReturnToHand { attack, health } => {
+                            // Repeat Customer: the minion goes back to hand
+                            // with the stats, its pool copy with it.
+                            let mut m = self.players[p].board.remove(target_pos);
+                            buff(&mut m, attack + da, health + dh);
+                            self.add_to_hand(p, m);
+                            stop_after = true;
+                            target_removed = true;
+                        }
+                        SpellTarget::MakeGoldenReturn => {
+                            // Raise the Stakes: Golden where it stands, then
+                            // back to hand.
+                            let mut m = self.players[p].board.remove(target_pos);
+                            if !m.golden {
+                                super::shop::golden_up(&self.data.cards, &mut m);
+                            }
+                            self.add_to_hand(p, m);
+                            stop_after = true;
+                            target_removed = true;
+                        }
+                        SpellTarget::GrantEndOfTurn { attack, health } => {
+                            // Gruul Rules: "At the end of your turn, gain
+                            // +4/+4", for good.
+                            let m = &mut self.players[p].board[target_pos];
+                            m.end_turn_gain.0 += attack + da;
+                            m.end_turn_gain.1 += health + dh;
                         }
                     }
                     if pt.tavern {

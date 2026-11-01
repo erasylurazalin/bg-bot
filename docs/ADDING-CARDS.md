@@ -170,6 +170,17 @@ legality in mod.rs.
 | Trinket that becomes another one | `souvenir = true` (Souvenir Stand: copies the next Greater pick), `replace_with_random = ["greater", "dragon"]` (Dragonhead Staff, Ruby Tusk) | `pick_trinket`, `Game::replace_trinket_at` | Souvenir Stand |
 | Trinket effect inside a fight that outlives the minions | `fight = [{ when = "soc", fermenter = 3 }]`, `gem_golem = "X"` (the dead minion's Blood Gem stats) | `Side.fermenter` and `Side.last_dead`/`dead_at`, run by `Side::run_fight_act`; the resummon is at the end of `Side::resolve` | Soul Fermenter, Blood Golem Sticker |
 | Trinket that fires on a spell cast in a fight | `fight = [{ when = "cast", pick = "all", buff = [2, 4] }]` | `Side::trinket_hook` from `Effect::CastSpell` | Bewitched Ribbon |
+| A Darkmoon Prize (block 5) | `prize = 1` to `4` on a `[[spell]]` or a `[[token]]`, `tier = 0`, `token = true`, `tavern_spell = false` | `CardDb.prizes` holds the four lists; `DiscoverRequest::Prize(tier)` deals three different ones (`CardDb::random_prize`), the pick lands with no pool copy. `SpellEffect::DiscoverPrize` / `DiscoverPrizesBelow` / `RandomPrize` and the trinket `Act`s of the same name open them | Banana Bunch |
+| A Prize's standing rule | `Player.prize` (`PrizePowers`): `extra_shop`, `free_rolls_per_turn`, `spell_discount_turn`, `minion_price`, `battlecry_extra_turn`, `return_each_turn` | read by `Player::shop_size`, `fill_shop`, `start_turn`, `spell_price`/`spell_cost`, `Game::minion_price`, `battlecry_or_choose_one` and `run_end_of_turn`. `extra_shop_minion = [2, 2]` sets the flag and adds to `Player.refresh_buff`, the after-Refresh buff Waveling and Easterly Winds share | New Recruit |
+| A minion that gains stats at the end of every turn | a spell `effect = { target = "chosen", grant_end_of_turn = [4, 4] }` writes `Minion.end_turn_gain` | `run_minion_end_of_turn` (a triple sums it, `magnetize` adds it) | Gruul Rules |
+| Trinket that brings every Triple Reward back as another card | `on_pick = [{ triple_prize = "Triple Prize" }]` sets `tp.triple_prize` | `give_triple_reward`, the one place a Triple Reward is made (a Golden minion, Natural Balance, Heroic Inspiration) | Corrupted Tome |
+| Trinket every N turns that Discovers a Prize | `start_every = 3` with `start_of_turn = [{ discover_prize = 3 }]` | `trinket_start_of_turn` | Tickatus Sticker |
+| Trinket that saves the hero once | `on_pick = [{ ice_block = true }]` sets `Player.ice_block` | the fight damage loop in `finish_fights` and `take_hero_damage` prevent the fatal hit and set `Player.immune` for the turn (cleared in `start_turn`); `SCALAR_ICE_BLOCK`/`SCALAR_IMMUNE` show both | Safety Patch |
+| Trinket with a hidden random trigger | `on_pick = [{ surprise = 5 }]` sets `tp.surprise`, a chance out of 100 per buy, sell and Refresh, never twice in a row | `Game::surprise_roll`, called at the top of `trinket_event`; the cards it makes are generated | Surprise Portrait |
+| Trinket with a random wheel | `wheel = [..]` (a list of acts) and `yogg_wheel = true` in a hook | `Act::YoggWheel` picks one entry of `Trinket.wheel` and runs it | Yogg-Tastic Pastry |
+| Magnetic minions that merge onto more than a Mech | `magnetize_to_tribes = ["mech", "demon"]` on the card (`Card.magnetize_tribes`, Mech by default) | `can_magnetize`, `is_legal(Play)` and the bots' `play_pos` | Rusted Reggie |
+| A portrait that gives a card more tribes | `card_of_mod = "X", also_tribes = ["murloc", "dragon"]` (`CardMod::AlsoTribes`) writes `Minion.extra_tribes` on the copies the player has (the pick) and on every later one (`Player::make_card`) | `CardDb::tribes_of` ORs it in, so every tribe check sees it; `most_common_card_type` reads the cards alone for the Dark Discovery's "your type" slot | Bronzebeard Portrait |
+| Hero power that Discovers a Prize on a turn count | `heroes.toml` `effect = { prize_wall = 4 }` (`PowerEffect::PrizeWall`) | `power_start_of_turn`: turn 4, 8, 12, 16 and every four after, the Prize tier being turn / 4 (at most 4); the power's `progress` holds the turns to the next one and `obs::power_progress` reports it | Tickatus |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -941,3 +952,55 @@ Triple Reward spell.
   test with several games alive at once (or a fresh local per section) must
   reuse one binding through a `reset` helper, or it overflows the stack in a
   debug build before any assertion runs.
+
+## 14. Systems the trinket block 5 added (2026-11-01)
+
+- **The Darkmoon Prizes.** A Prize is a card with `prize = <tier 1 to 4>`
+  (`Card.prize`), tier 0, a token and never a Tavern spell; the 31 spells and
+  the one Prize minion (All-Seeing Elder) are in cards.toml's "Darkmoon
+  Prizes" block. `CardDb.prizes` is the four lists a `DiscoverRequest::Prize`
+  deals three different cards from, and a Prize offer holds no pool copy
+  (`resolve_choose` and `abandon_discover` both read `prize`/`token` for
+  that). Their effects are the ordinary `SpellEffect`/`SpellTarget` arms:
+  `DiscoverPrize`, `DiscoverPrizesBelow` (Big Winner!), `RandomPrize`,
+  `FillHand`, `FillHandSpells`, `ReturnEachTurn`, `EvolvingTavern`,
+  `StealAllTavern`, `ExtraShopMinion`, `FreeRollsPerTurn { now, per_turn }`,
+  `RandomSpellAtLeast`, `SpellDiscountThisTurn`, `MinionPrice`,
+  `BattlecryExtraThisTurn`, `SpellBonus`, and the targets `BuffThenDouble`
+  (a "then double it" buff), `ReturnToHand`, `MakeGoldenReturn` and
+  `GrantEndOfTurn`. Two Discover kinds are theirs too
+  (`HigherTierMinion` for Top Shelf, `LastOpponentMinion` for Time Thief,
+  which fills `discover_minions` with plain copies of `Player.seen`).
+- **What outlasts the cast.** `Player.prize` (`PrizePowers`) is a second small
+  block beside `TrinketPowers` for the Prizes' standing rules; its per-turn
+  fields are cleared in `start_turn`. A "gain at the end of your turn" a spell
+  gives one minion is `Minion.end_turn_gain` (recorded in `record.rs`, summed
+  by a triple, added by a Magnetization). A standing Tavern buff a Prize adds
+  is no new mechanism: New Recruit's +2/+2 goes into `Player.refresh_buff`,
+  which Waveling, Easterly Winds, `apply_refresh_buff` and the turn-start roll
+  already give, so the two stack (Era's rule).
+- **Balinda Stonehearth and the Prizes.** A Prize is a spell, so a Prize that
+  targets a friendly minion gets `PendingTarget.runs = balinda_mult(p)` like
+  any other: with Balinda the whole effect runs twice (three times golden),
+  and a "then double it" buff doubles on each cast. Nothing on that path asks
+  whether the spell is a Tavern spell. `evolve_tavern` replaces the Tavern
+  spell with one Tier higher as well; `check_invariants` only asks the spell
+  slot to hold a spell, the way it only asks a Tavern minion to be a minion
+  for Robust Evolution's above-tier card.
+- **The last trinkets.** Their acts are `TriplePrize`, `DiscoverPrize`,
+  `RandomPrize`, `IceBlock`, `Surprise`, `YoggWheel` (with the trinket's
+  `wheel` list), `CurseOfFlesh`, `DevouringHunger`, `RodOfRoasting`,
+  `GoldenTavern`, `CastRandomSpells` and `MechaDemon`. Two card-level games
+  came with them: `Card.magnetize_tribes` (which tribes a Magnetic card
+  merges onto, Mech by default) and `Minion.extra_tribes` (the Bronzebeard
+  Portrait's tribe change, read by `CardDb::tribes_of` and written by
+  `Player::make_card` and by the pick's sweep over the board and hand).
+  Mishmash's stat copy is `Game::note_amalgam_gains`, run after every action
+  beside `watch_deity_gain`, with a per-slot snapshot on the player.
+- **Two tags nothing reads yet.** `Card.buddy` (Mishmash, for when buddies
+  come) and `Trinket.secret` (Safety Patch, for Akazamzarak later).
+- **Tests.** `tests/prizes.rs`, one test per Prize plus the Discover, the
+  Triple Prize and Balinda's extra casts (plain and golden); the block 5 section at the end of `tests/trinkets.rs`, one
+  test per trinket and token; `tests/heroes_batch4.rs` for Tickatus. The
+  Yogg wheel is random, so its test hunts seeds until each of the six results
+  has been seen.

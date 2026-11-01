@@ -400,6 +400,7 @@ impl Game {
         // War Drum's two extra on the first Battlecry of the turn and Dragon's
         // Eye's one more for a Dragon (docs/trinkets.md).
         let mut runs = self.brann_mult(p);
+        runs = runs.saturating_add(self.players[p].prize.battlecry_extra_turn);
         runs = runs.saturating_add(self.take_war_drum(p));
         if self.players[p].tp.dragon_battlecry > 0
             && self.data.cards.tribes_of(&m).has(Tribe::Dragon)

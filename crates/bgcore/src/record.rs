@@ -176,6 +176,9 @@ struct FileMinion {
     /// Marked by Rapid Reanimation (Teron Gorefiend) for the next combat.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reanimate: Option<bool>,
+    /// A "gain this at the end of your turn" a Prize gave it (Gruul Rules).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end_turn_gain: Option<[i32; 2]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attached: Vec<FileAttached>,
     /// The Dark Gifts on the minion, and the small counter each one carries
@@ -231,6 +234,8 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         temp_reborn: m.temp_reborn.then_some(true),
         temp_attack: differs(m.temp_attack as i64 as u64, 0).map(|v| v as i32),
         reanimate: m.reanimate.then_some(true),
+        end_turn_gain: (m.end_turn_gain != (0, 0))
+            .then_some([m.end_turn_gain.0, m.end_turn_gain.1]),
         attached: m
             .attached_slice()
             .iter()
@@ -291,6 +296,9 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     if let Some(v) = f.hats {
         m.hats = v;
+    }
+    if let Some([a, h]) = f.end_turn_gain {
+        m.end_turn_gain = (a, h);
     }
     if let Some(v) = f.temp_reborn {
         m.temp_reborn = v;

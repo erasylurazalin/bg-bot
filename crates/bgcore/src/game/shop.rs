@@ -391,6 +391,8 @@ impl Game {
         // player's shape adds on top of it.
         let base = if pl.tp.gauntlet { 6 } else { rules.shop_size(pl.tier) };
         let base = base.saturating_sub(pl.shop_fewer as usize);
+        // New Recruit: the extra slot is drawn with the rest of them.
+        let base = base + u8::from(pl.prize.extra_shop) as usize;
         let normal = base.saturating_sub(fodders);
         // The tier bounds this Refresh draws in: Bob-blehead's floor, and
         // Guiding Candle's first Refreshes of a turn, which hold Tier 6 cards
@@ -450,6 +452,16 @@ impl Game {
                 pl.apply_tavern_buffs(cards, &mut m);
                 pl.shop.push(m);
             }
+        }
+        // New Recruit: the extra slot is drawn like any other. Its +2/+2 is
+        // the after-Refresh buff below, the one Waveling gives.
+        if pl.prize.extra_shop
+            && pl.shop.len() < size
+            && let Some(c) = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |_| true)
+        {
+            let mut m = pl.make_card(cards, c, false, 1);
+            pl.apply_tavern_buffs(cards, &mut m);
+            pl.shop.push(m);
         }
         if pl.tp.extra_high_tier && pl.tier < crate::MAX_TIER && pl.shop.len() < size {
             let up = (pl.tier + 1).max(lo);

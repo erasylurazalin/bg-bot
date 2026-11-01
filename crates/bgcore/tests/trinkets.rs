@@ -4277,3 +4277,451 @@ fn hammer_of_twilight_reaches_a_minion_summoned_in_a_fight() {
     assert_eq!((bot.attack, bot.health), (1 + 1, 1), "the Hammer's Attack");
     g.check_invariants().unwrap();
 }
+
+// ---- block 5: the Darkmoon Prizes and the last trinkets (2026-11-01) ----
+
+/// Play the spell in hand slot `h` (and answer one target on board slot
+/// `target`, or none with `None`).
+fn cast_hand(g: &mut Game, p: usize, h: usize, target: Option<usize>) {
+    turn_of(g, p);
+    act(g, p, Action::Play { hand: h as u8, pos: 0 });
+    if let Some(t) = target
+        && g.players[p].pending_target.is_some()
+    {
+        act(g, p, Action::Target(t as u8));
+    }
+}
+
+#[test]
+fn tickatus_sticker_discovers_a_tier_3_prize_and_again_every_three_turns() {
+    let mut g = game(401);
+    to_turn(&mut g, 6);
+    take(&mut g, 0, "Tickatus Sticker");
+    assert_eq!(g.players[0].discover.len(), 3, "the pick's Discover");
+    for &c in g.players[0].discover.clone().iter() {
+        assert_eq!(g.data.cards.get(c).prize, Some(3));
+    }
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].trinkets[0].count, 0, "the count starts now");
+    // Three turns later the Discover comes back, and not before.
+    for turn in 7..=9 {
+        to_turn(&mut g, turn);
+        turn_of(&mut g, 0);
+        let open = !g.players[0].discover.is_empty();
+        assert_eq!(open, turn == 9, "turn {turn}");
+        if open {
+            for &c in g.players[0].discover.clone().iter() {
+                assert_eq!(g.data.cards.get(c).prize, Some(3));
+            }
+            act(&mut g, 0, Action::Choose(0));
+        }
+    }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn curator_sticker_gets_a_golden_mishmash_and_a_ten_ten_amalgam() {
+    let mut g = game(402);
+    take(&mut g, 0, "Curator Sticker");
+    let mishmash = g.players[0].hand.iter().find(|m| m.card == id(&g, "Mishmash")).copied();
+    let mishmash = mishmash.expect("a Mishmash in hand");
+    assert!(mishmash.golden, "it is Golden");
+    assert_eq!((mishmash.attack, mishmash.health), (8, 8), "the golden 8/8");
+    let amalgam = g.players[0].hand.iter().find(|m| m.card == id(&g, "Amalgam")).copied();
+    let amalgam = amalgam.expect("an Amalgam in hand");
+    assert_eq!((amalgam.attack, amalgam.health), (10, 10), "10/10");
+    assert!(amalgam.keywords.has(bgcore::minion::Keywords::VENOMOUS), "and Venomous");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn mishmash_is_tagged_as_a_buddy_and_safety_patch_as_a_secret() {
+    // Tags for later (docs/trinkets.md): nothing reads them yet.
+    let g = game(411);
+    let mishmash = g.data.cards.get(id(&g, "Mishmash"));
+    assert!(mishmash.buddy, "Mishmash is a buddy");
+    let i = trinket(&g, "Safety Patch");
+    assert!(g.data.trinkets.get(i).secret, "Safety Patch is a Secret");
+}
+
+#[test]
+fn mishmash_gains_twice_what_its_amalgam_gains() {
+    let mut g = game(403);
+    take(&mut g, 0, "Curator Sticker");
+    // The Golden Mishmash on the board, next to an Amalgam.
+    let mish = g.players[0].hand.iter().position(|m| m.card == id(&g, "Mishmash")).unwrap();
+    let m = g.players[0].hand.remove(mish);
+    g.players[0].board.push(m);
+    let amal = g.players[0].hand.iter().position(|m| m.card == id(&g, "Amalgam")).unwrap();
+    let a = g.players[0].hand.remove(amal);
+    g.players[0].board.push(a);
+    let before = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    // A Banana on the Amalgam (+2/+2).
+    g.give(0, "Tavern Dish Banana");
+    let h = g.players[0].hand.len() - 1;
+    cast_hand(&mut g, 0, h, Some(1));
+    let after = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    assert_eq!(after, (before.0 + 4, before.1 + 4), "twice the Amalgam's +2/+2");
+    g.check_invariants().unwrap();
+}
+
+/// Records the last stats an attacking minion of a named card had, and the
+/// stats at the first attack.
+struct WatchCard {
+    card: CardId,
+    first: Option<(i32, i32)>,
+    last: Option<(i32, i32)>,
+}
+
+impl bgcore::fight::Watch for WatchCard {
+    fn attack(&mut self, _side: usize, attacker: &Minion, _defender: &Minion) {
+        if attacker.card == self.card {
+            let s = (attacker.attack, attacker.health);
+            if self.first.is_none() {
+                self.first = Some(s);
+            }
+            self.last = Some(s);
+        }
+    }
+}
+
+/// One fight with a Golden Mishmash next to an Amalgam and a Wolf Pup whose
+/// Rally gives every other friendly minion +4/+1, against two walls that deal
+/// no damage. Returns the Mishmash's starting stats, the stats it had the last
+/// time it attacked, and the outcome. `poet` puts a Persistent Poet next to
+/// it.
+fn mishmash_fight(seed: u64, poet: bool) -> ((i32, i32), (i32, i32), bgcore::fight::Outcome) {
+    let mut g = game(seed);
+    put_on_board(&mut g, 0, "Wolf Pup");
+    put_on_board(&mut g, 0, "Amalgam");
+    let mish = g.players[0].make_card(&g.data.cards, id(&g, "Mishmash"), true, 0);
+    g.players[0].board.push(mish);
+    if poet {
+        put_on_board(&mut g, 0, "Persistent Poet");
+    }
+    let before = (g.players[0].board[2].attack, g.players[0].board[2].health);
+    for _ in 0..2 {
+        let mut wall = g.players[1].make_card(&g.data.cards, id(&g, "Microbot"), false, 0);
+        wall.attack = 0;
+        wall.health = 500;
+        g.players[1].board.push(wall);
+    }
+    let mut rng = bgcore::Rng::new(seed);
+    let mut watch = WatchCard { card: id(&g, "Mishmash"), first: None, last: None };
+    let out = bgcore::fight::fight_with(
+        &g.data.cards,
+        &g.players[0].board,
+        &g.players[1].board,
+        [bgcore::fight::Counters::default(); 2],
+        200,
+        &mut rng,
+        &mut watch,
+    );
+    let last = watch.last.expect("Mishmash attacked");
+    (before, last, out)
+}
+
+#[test]
+fn mishmash_gains_in_combat_what_its_amalgam_gains_there() {
+    let (before, last, out) = mishmash_fight(412, false);
+    assert!(
+        last.0 > before.0 + 4 && last.1 > before.1 + 1,
+        "the Rally's +4/+1 and the Amalgam's gain on top of it ({last:?})"
+    );
+    assert_eq!(
+        out.sides[0].permanent_stats[2],
+        (0, 0),
+        "a combat gain, gone when the fight ends"
+    );
+}
+
+#[test]
+fn a_persistent_poet_keeps_the_stats_mishmash_gains_in_combat() {
+    let (before, last, out) = mishmash_fight(412, true);
+    assert!(last.0 > before.0 + 4, "it gained stats in the fight");
+    // Mishmash is every type, so it counts as a Dragon for the Poet, and
+    // every gain it made in the fight is kept.
+    assert_eq!(
+        out.sides[0].permanent_stats[2],
+        (last.0 - before.0, last.1 - before.1),
+        "the Poet keeps everything it gained"
+    );
+    // And the game puts them on the board afterwards, like any kept gain.
+    let mut g = game(412);
+    put_on_board(&mut g, 0, "Wolf Pup");
+    put_on_board(&mut g, 0, "Amalgam");
+    let mish = g.players[0].make_card(&g.data.cards, id(&g, "Mishmash"), true, 0);
+    g.players[0].board.push(mish);
+    put_on_board(&mut g, 0, "Persistent Poet");
+    g.apply_side_outcome(0, &out.sides[0], true);
+    let m = g.players[0].board[2];
+    assert_eq!(
+        (m.attack, m.health),
+        (last.0, last.1),
+        "the shop phase has them"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn safety_patch_gives_five_gold_and_saves_the_hero_once() {
+    let mut g = game(404);
+    // Turn 4, so there is an opponent and a fight at the end of the turn.
+    to_turn(&mut g, 4);
+    let gold = g.players[0].gold;
+    take(&mut g, 0, "Safety Patch");
+    assert_eq!(g.players[0].gold, gold + 5, "the 5 Gold");
+    assert!(g.players[0].ice_block, "the Ice Block is held");
+    // The fight the player loses at 1 Health.
+    turn_of(&mut g, 0);
+    let opp = match g.players[0].opponent.expect("an opponent") {
+        bgcore::game::Opponent::Player(q) => q as usize,
+        bgcore::game::Opponent::Ghost(_) => {
+            // A ghost fight: the player still takes damage when they lose.
+            g.players[0].health = 1;
+            g.players[0].armor = 0;
+            g.players[0].board.clear();
+            next_turn(&mut g);
+            assert_eq!(g.players[0].health, 1, "the fatal hit was prevented");
+            assert!(!g.players[0].ice_block, "the Ice Block is spent");
+            assert!(g.players[0].alive);
+            return;
+        }
+    };
+    g.players[0].board.clear();
+    put_on_board(&mut g, opp, "Microbot");
+    let k = g.players[opp].board.len() - 1;
+    g.players[opp].board[k].attack = 50;
+    g.players[opp].board[k].health = 100;
+    g.players[0].health = 1;
+    g.players[0].armor = 0;
+    next_turn(&mut g);
+    assert_eq!(g.players[0].health, 1, "the fatal hit was prevented");
+    assert!(!g.players[0].ice_block, "the Ice Block is spent");
+    assert!(g.players[0].alive);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn eternal_portrait_greater_gives_a_golden_knight_and_grows_on_undead_deaths() {
+    let mut g = game(405);
+    to_turn(&mut g, 4);
+    take(&mut g, 0, "Eternal Portrait (Greater)");
+    let knight = g.players[0].hand.iter().find(|m| m.card == id(&g, "Eternal Knight")).copied();
+    let knight = knight.expect("a Golden Eternal Knight");
+    assert!(knight.golden);
+    let hand_before = (knight.attack, knight.health);
+    // An Undead of the board dies in the fight.
+    put_on_board(&mut g, 0, "Eternal Knight");
+    let opp = match g.players[0].opponent.expect("an opponent") {
+        bgcore::game::Opponent::Player(q) => q as usize,
+        bgcore::game::Opponent::Ghost(_) => 1,
+    };
+    g.players[0].board.truncate(1);
+    put_on_board(&mut g, opp, "Microbot");
+    let k = g.players[opp].board.len() - 1;
+    g.players[opp].board[k].attack = 50;
+    g.players[opp].board[k].health = 100;
+    next_turn(&mut g);
+    let after = g
+        .players[0]
+        .hand
+        .iter()
+        .find(|m| m.card == id(&g, "Eternal Knight"))
+        .copied()
+        .expect("the Knight is still in hand");
+    // An Eternal Knight brings a copy back when it dies, so the fight can
+    // count more than one Undead death: every one of them is +4/+2.
+    let (da, dh) = (after.attack - hand_before.0, after.health - hand_before.1);
+    assert!(da >= 4 && dh >= 2, "the Undead deaths gave every Knight +4/+2 ({da}/{dh})");
+    assert_eq!(da % 4, 0, "in +4 steps");
+    assert_eq!(dh % 2, 0, "in +2 steps");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn bronzebeard_portrait_makes_every_brann_a_murloc_and_a_dragon() {
+    let mut g = game(406);
+    take(&mut g, 0, "Bronzebeard Portrait");
+    let brann = id(&g, "Brann Bronzebeard");
+    let m = g.players[0].hand.iter().find(|m| m.card == brann).copied();
+    let m = m.expect("a Brann in hand");
+    let tribes = g.data.cards.tribes_of(&m);
+    assert!(tribes.has(Tribe::Murloc) && tribes.has(Tribe::Dragon), "both tribes");
+    // A copy made later has them too.
+    let later = g.players[0].make_card(&g.data.cards, brann, false, 0);
+    let tribes = g.data.cards.tribes_of(&later);
+    assert!(tribes.has(Tribe::Murloc) && tribes.has(Tribe::Dragon));
+    // "Your most common type" counts it, but the Dark Discovery's "your
+    // type" slot does not.
+    g.players[0].board.clear();
+    g.players[0].board.push(later);
+    assert!(g.most_common_board_type(0).is_some(), "a Murloc or a Dragon for the board");
+    let base = g.data.cards.get(brann).tribes;
+    assert!(base.is_neutral(), "the card itself is neutral");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn surprise_portrait_can_surprise_a_buy_but_never_twice_in_a_row() {
+    let mut g = game(407);
+    take(&mut g, 0, "Surprise Portrait");
+    assert_eq!(g.players[0].tp.surprise, 5, "a 5% chance");
+    // Certain, so the test does not depend on a die.
+    g.players[0].tp.surprise = 100;
+    // The pick itself got one ("Get an Elemental of Surprise").
+    let picked = hand_of(&g, 0, "Elemental of Surprise");
+    assert_eq!(picked, 1, "the pick's own Elemental");
+    set_shop(&mut g, 0, &["Microbot", "Microbot"]);
+    turn_of(&mut g, 0);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(hand_of(&g, 0, "Elemental of Surprise"), picked + 1, "a surprise");
+    // The very next buy cannot surprise again.
+    turn_of(&mut g, 0);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(hand_of(&g, 0, "Elemental of Surprise"), picked + 1, "never twice in a row");
+    // But the one after it can: that is the third plain Elemental of
+    // Surprise, so the three of them triple into a Golden one.
+    set_shop(&mut g, 0, &["Microbot"]);
+    turn_of(&mut g, 0);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(hand_of(&g, 0, "Elemental of Surprise"), picked, "three became one");
+    assert!(
+        g.players[0]
+            .hand
+            .iter()
+            .any(|m| m.card == id(&g, "Elemental of Surprise") && m.golden),
+        "a Golden Elemental of Surprise"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn yogg_tastic_pastry_spins_a_six_result_wheel() {
+    let g = game(408);
+    let i = trinket(&g, "Yogg-Tastic Pastry");
+    let t = g.data.trinkets.get(i);
+    assert_eq!(t.wheel.len(), 6, "six results, each equally likely");
+    use bgcore::trinkets::Act;
+    assert!(matches!(t.wheel[0], Act::RandomPrize(2)), "Hand of Fate");
+    assert!(matches!(t.wheel[1], Act::CurseOfFlesh));
+    assert!(matches!(t.wheel[2], Act::DevouringHunger));
+    assert!(matches!(t.wheel[3], Act::RodOfRoasting { .. }), "Rod of Roasting");
+    assert!(matches!(t.wheel[4], Act::GoldenTavern), "Mysterybox");
+    assert!(matches!(t.wheel[5], Act::CastRandomSpells(4)), "Mindflayer Goggles");
+    // The spin happens on the pick and at the start of every turn.
+    assert!(!t.on_pick.is_empty());
+    assert!(!t.start_of_turn.is_empty());
+}
+
+#[test]
+fn the_yogg_wheel_can_reach_each_of_its_six_results() {
+    // The wheel is random, so each result is hunted over fresh seeds.
+    let mut hand_of_fate = false;
+    let mut curse = false;
+    let mut devouring = false;
+    let mut rod = false;
+    let mut mysterybox = false;
+    let mut goggles = false;
+    for seed in 0..400u64 {
+        let mut g = game(500 + seed);
+        g.players[0].tier = 4;
+        // Two plain Mechs on the board and three in the Tavern, so every
+        // result has something to work on.
+        put_on_board(&mut g, 0, "Microbot");
+        put_on_board(&mut g, 0, "Microbot");
+        set_shop(&mut g, 0, &["Microbot", "Microbot", "Microbot"]);
+        let hand_before = g.players[0].hand.len();
+        take(&mut g, 0, "Yogg-Tastic Pastry");
+        let pl = &g.players[0];
+        let prize = pl.hand.iter().any(|m| g.data.cards.get(m.card).prize.is_some());
+        // Mindflayer Goggles casts its four spells: Tavern spells cast.
+        let spells = pl.spells_cast_turn as usize;
+        let golden = pl.shop.iter().any(|m| m.golden);
+        let big = pl.shop.iter().any(|m| m.attack >= 11);
+        let eaten = pl.board.iter().map(|m| m.attack).sum::<i32>() > 2;
+        let board_changed = pl.board.len() == 2
+            && pl.board.iter().map(|m| m.attack).sum::<i32>() == 6
+            && pl.hand.len() == hand_before;
+        hand_of_fate |= prize;
+        goggles |= spells >= 4;
+        mysterybox |= golden;
+        rod |= big;
+        devouring |= eaten;
+        curse |= board_changed;
+        g.check_invariants().unwrap();
+        if hand_of_fate && curse && devouring && rod && mysterybox && goggles {
+            break;
+        }
+    }
+    assert!(hand_of_fate, "Hand of Fate");
+    assert!(curse, "Curse of Flesh");
+    assert!(devouring, "Devouring Hunger");
+    assert!(rod, "Rod of Roasting");
+    assert!(mysterybox, "Mysterybox");
+    assert!(goggles, "Mindflayer Goggles");
+}
+
+#[test]
+fn mecha_jaraxxus_sticker_hands_out_magnetic_mecha_demons() {
+    let mut g = game(409);
+    take(&mut g, 0, "Mecha-Jaraxxus Sticker");
+    let mechs: Vec<Minion> = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).mecha_demon)
+        .copied()
+        .collect();
+    assert_eq!(mechs.len(), 2, "two on the pick");
+    for m in &mechs {
+        assert!(m.keywords.has(bgcore::minion::Keywords::MAGNETIC));
+        let tribes = g.data.cards.tribes_of(m);
+        assert!(tribes.has(Tribe::Mech) && tribes.has(Tribe::Demon), "Mech and Demon");
+    }
+    // The next turn hands out two more.
+    let t = g.turn;
+    while g.turn == t && !g.over {
+        if !answer(&mut g) {
+            g.step(Action::EndTurn).unwrap();
+        }
+    }
+    let n = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).mecha_demon)
+        .count();
+    assert!(n >= 2, "two more at the start of the turn");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_mecha_demon_magnetizes_onto_a_demon_as_well_as_a_mech() {
+    let mut g = game(410);
+    take(&mut g, 0, "Mecha-Jaraxxus Sticker");
+    // A Demon on the board, and a Mecha-Demon in hand to merge onto it.
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    let demon = (g.players[0].board[0].attack, g.players[0].board[0].health);
+    let at = g.players[0]
+        .hand
+        .iter()
+        .position(|m| g.data.cards.get(m.card).mecha_demon)
+        .unwrap();
+    let md = g.players[0].hand.remove(at);
+    let md_stats = (md.attack, md.health);
+    g.players[0].hand.push(md);
+    let h = g.players[0].hand.len() - 1;
+    turn_of(&mut g, 0);
+    assert!(g.is_legal(Action::Play { hand: h as u8, pos: 0 }), "the merge is legal");
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    assert_eq!(g.players[0].board.len(), 1, "it merged");
+    let after = g.players[0].board[0];
+    assert_eq!(
+        (after.attack, after.health),
+        (demon.0 + md_stats.0, demon.1 + md_stats.1),
+        "the Demon took its stats"
+    );
+    g.check_invariants().unwrap();
+}

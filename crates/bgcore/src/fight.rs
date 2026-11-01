@@ -914,6 +914,41 @@ impl<'a> Side<'a> {
         (mul > 0).then_some(mul)
     }
 
+    /// Mishmash: "Whenever your Amalgam gains stats, this gains them too"
+    /// (twice on a golden one). A gain an Amalgam takes in combat lands on
+    /// every Mishmash of that side for the rest of the fight, through the
+    /// ordinary `gain_at`, so it is gone when the fight ends unless a
+    /// Persistent Poet next to it keeps it (Mishmash is every type, so it is
+    /// a Dragon for the Poet).
+    fn amalgam_gain_at(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
+        if !db.get(self.ms[i].m.card).amalgam || (da == 0 && dh == 0) {
+            return;
+        }
+        let me = self.ms[i].uid;
+        let mut hits: ArrayVec<(u16, i32, i32), BOARD> = ArrayVec::new();
+        for f in &self.ms {
+            if f.m.health <= 0 || f.uid == me {
+                continue;
+            }
+            let n = f
+                .m
+                .parts()
+                .map(|(c, golden)| {
+                    db.get(c).amalgam_gain_copy as i32 * if golden { 2 } else { 1 }
+                })
+                .max()
+                .unwrap_or(0);
+            if n > 0 {
+                let _ = hits.try_push((f.uid, da.saturating_mul(n), dh.saturating_mul(n)));
+            }
+        }
+        for (uid, a, h) in hits {
+            if let Some(j) = self.index_of(uid) {
+                self.gain_at(db, j, a, h);
+            }
+        }
+    }
+
     /// Give the minion in slot `i` stats. A keeper keeps them; Scarlet
     /// Survivor gains its keyword when the gain takes it to its threshold.
     fn gain_at(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
@@ -946,6 +981,7 @@ impl<'a> Side<'a> {
             self.out.permanent_stats[s].1 =
                 self.out.permanent_stats[s].1.saturating_add(dh.saturating_mul(mul));
         }
+        self.amalgam_gain_at(db, i, da, dh);
     }
 
     /// Give the minion in slot `i` stats that it keeps after the fight
@@ -962,6 +998,7 @@ impl<'a> Side<'a> {
             self.out.permanent_stats[s].0 = self.out.permanent_stats[s].0.saturating_add(da);
             self.out.permanent_stats[s].1 = self.out.permanent_stats[s].1.saturating_add(dh);
         }
+        self.amalgam_gain_at(db, i, da, dh);
     }
 
     /// A friendly Demon (`attacker_uid`) dealt damage: every other friendly
@@ -3505,6 +3542,22 @@ fn run_start_of_combat(
                 Some(StartOfCombat::AttackImmediately) => {
                     for _ in 0..mul {
                         attack_swings(sides, turn, me, db, uid, rng, w);
+                    }
+                }
+                Some(StartOfCombat::GainEndsStats) => {
+                    // All-Seeing Elder: the Attack of your left-most minion
+                    // and the Health of your right-most one, as they stand
+                    // before this lands. A lone minion gives its own, and a
+                    // golden one doubles both.
+                    let (la, rh) = if sides[turn].ms.is_empty() {
+                        (0, 0)
+                    } else {
+                        let l = sides[turn].ms.first().map_or(0, |f| f.m.attack);
+                        let r = sides[turn].ms.last().map_or(0, |f| f.m.health);
+                        (l, r)
+                    };
+                    if let Some(mi) = sides[turn].index_of(me) {
+                        sides[turn].gain_at(db, mi, la * mul, rh * mul);
                     }
                 }
                 Some(StartOfCombat::Hopebringer { attack, health, improve }) => {

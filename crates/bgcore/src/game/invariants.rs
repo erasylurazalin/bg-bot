@@ -44,9 +44,12 @@ impl Game {
             // A Tavern minion may be above the player's tier: Robust
             // Evolution (which ignores the Tavern tier) can put one there.
             // Generated cards (Fishbait) may be any Tier too, and a Golden
-            // Touch makes a Tavern minion golden.
+            // Touch makes a Tavern minion golden. The spell slot's card may be
+            // above the tier for the same reason: Evolving Tavern replaces it
+            // with one a Tier higher (Era's rule), so only "it is a spell" is
+            // checked here.
             if let Some(sp) = pl.shop_spell
-                && (!cards.get(sp).is_spell() || cards.get(sp).tier > pl.tier)
+                && !cards.get(sp).is_spell()
             {
                 return Err(format!("player {i}: shop_spell invalid"));
             }

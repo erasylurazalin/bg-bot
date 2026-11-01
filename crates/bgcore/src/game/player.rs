@@ -17,6 +17,7 @@ use crate::minion::{
 };
 use crate::real_boards::RealCounters;
 use crate::rules::Rules;
+use crate::trinkets::CardMod;
 use crate::{
     DISCOVER,
     Data,
@@ -27,6 +28,7 @@ use super::{
     HeroCounts,
     Player,
     PowerState,
+    PrizePowers,
     TavernBuff,
     TrinketPowers,
     TrinketState,
@@ -53,6 +55,7 @@ impl Player {
             trinket_offer_slot: 0,
             trinket_events: 0,
             tp: TrinketPowers::default(),
+            prize: PrizePowers::default(),
             dark_gifts: 0,
             real: false,
             placement: 0,
@@ -94,6 +97,9 @@ impl Player {
             shop_spell_ticket: 0,
             next_board: ArrayVec::new(),
             two_step: None,
+            amalgam_seen: [(0, 0, 0); crate::BOARD],
+            ice_block: false,
+            immune: false,
             devour_stats: (0, 0),
             discover_into_shop: 0,
             pot: ArrayVec::new(),
@@ -165,10 +171,17 @@ impl Player {
         }
     }
 
-    /// Cost of the spell currently in the shop, after Ominous Seer discounts.
+    /// Cost of the spell currently in the shop, after Ominous Seer discounts
+    /// and the Prizes' "this turn" ones (Reserve Prices).
     pub fn spell_cost(&self, cards: &CardDb) -> Option<u8> {
         let id = self.shop_spell?;
-        Some(cards.get(id).cost.saturating_sub(self.spell_discount))
+        Some(
+            cards
+                .get(id)
+                .cost
+                .saturating_sub(self.prize.spell_discount_turn)
+                .saturating_sub(self.spell_discount),
+        )
     }
 
     /// Highest discover tier of any Patient Scout currently on the board, or 0
@@ -351,7 +364,9 @@ impl Player {
         let dark = self.dark_offer;
         let copies: ArrayVec<u8, DISCOVER> = std::mem::take(&mut self.discover_copies);
         for (i, c) in self.discover.drain(..).enumerate() {
-            if ready || cards.get(c).is_spell() {
+            // A spell, a ready-made offer or a token (a Prize's minion) holds
+            // no pool copy, so nothing goes back for it.
+            if ready || cards.get(c).is_spell() || cards.get(c).token {
                 continue;
             }
             let n = if dark { copies.get(i).copied().unwrap_or(0) } else { 1 };
@@ -436,6 +451,15 @@ impl Player {
             m.attack += a * n;
             m.health += h * n;
         }
+        // A portrait that gives this card more tribes (Bronzebeard
+        // Portrait): every copy the player makes carries it.
+        for (mod_card, kind) in self.tp.card_mods.iter().flatten() {
+            if *mod_card == id
+                && let CardMod::AlsoTribes(t) = kind
+            {
+                m.extra_tribes = m.extra_tribes.with_all(*t);
+            }
+        }
         m
     }
 
@@ -447,6 +471,8 @@ impl Player {
     /// each, and Stein's needs a tier above yours to draw from.
     pub fn shop_size(&self, rules: &Rules) -> usize {
         let base = if self.tp.gauntlet { 6 } else { rules.shop_size(self.tier) };
+        // New Recruit: the Tavern offers one more minion this game.
+        let base = base + u8::from(self.prize.extra_shop) as usize;
         // Stay Frosty: the Tavern offers one fewer minion.
         let base = base.saturating_sub(self.shop_fewer as usize);
         let mut extra = 0;

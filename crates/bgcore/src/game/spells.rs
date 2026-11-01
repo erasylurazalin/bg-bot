@@ -29,10 +29,12 @@ use super::{
     Game,
     PendingChooseOne,
     PendingTarget,
+    RefreshKind,
     TargetKind,
     TavernBuff,
 };
 use super::effects::buff;
+use super::shop::{draw_filtered, give_back};
 
 impl Game {
     /// Total spell stat bonus for player `p`, combining Intrepid Botanist's
@@ -422,7 +424,7 @@ impl Game {
         (0..self.players[p].board.len()).any(|s| self.valid_spell_target(p, st, s))
             || (st.can_target_shop()
                 && (0..self.players[p].shop.len())
-                    .any(|s| self.spell_target_ok(st, &self.players[p].shop[s])))
+                    .any(|s| self.spell_target_ok(p, st, &self.players[p].shop[s])))
     }
 
     /// Puzzle Box: cast a random Tavern spell, at a random target when it
@@ -614,6 +616,11 @@ impl Game {
                     DiscoverKind::ChooseOneMinion => DiscoverRequest::ChooseOneMinion,
                     DiscoverKind::TierMinion(t) => DiscoverRequest::MinionTier(t),
                     DiscoverKind::TierMinionWithType(t) => DiscoverRequest::TypedMinionTier(t),
+                    // Top Shelf: one Tier higher, up to Tier 7.
+                    DiscoverKind::HigherTierMinion => {
+                        DiscoverRequest::MinionTier((tier + 1).min(crate::CARD_MAX_TIER))
+                    }
+                    DiscoverKind::LastOpponentMinion => DiscoverRequest::LastOpponentWarband,
                 };
                 let _ = self.players[p].discover_queue.try_push(req);
             }
@@ -624,6 +631,79 @@ impl Game {
             }
             SpellEffect::SetArmor(n) => {
                 self.players[p].armor = n as i32;
+            }
+            // ---- the Darkmoon Prizes (block 5) ----
+            SpellEffect::DiscoverPrize(tier) => {
+                let _ = self.players[p].discover_queue.try_push(DiscoverRequest::Prize(tier));
+            }
+            SpellEffect::DiscoverPrizesBelow(tier) => {
+                // One Discover per Prize tier below this one (Big Winner!).
+                for t in 1..=tier {
+                    let _ = self.players[p].discover_queue.try_push(DiscoverRequest::Prize(t));
+                }
+            }
+            SpellEffect::RandomPrize(n) => {
+                for _ in 0..n {
+                    let Some(card) = self.data.cards.random_prize_any(&mut self.rng) else { break };
+                    self.give_generated(p, card);
+                }
+            }
+            SpellEffect::FillHand { card } => {
+                while !self.players[p].hand.is_full() {
+                    self.give_generated(p, card);
+                }
+            }
+            SpellEffect::FillHandSpells => {
+                let tier = self.players[p].tier;
+                while !self.players[p].hand.is_full() {
+                    let Some(card) = self.data.cards.random_spell(tier, self.lobby, &mut self.rng)
+                    else {
+                        break;
+                    };
+                    self.give_generated(p, card);
+                }
+            }
+            SpellEffect::ReturnEachTurn { card } => {
+                self.players[p].prize.returns_each_turn = Some(card);
+                self.players[p].gold = self.players[p].gold.saturating_add(1);
+            }
+            SpellEffect::EvolvingTavern => self.evolve_tavern(p),
+            SpellEffect::StealAllTavern => {
+                self.steal_all_tavern(p);
+                self.refresh_tavern_now(p);
+            }
+            SpellEffect::ExtraShopMinion { attack, health } => {
+                // New Recruit: one more Tavern slot for good, and the +2/+2
+                // into the same "after the Tavern is Refreshed this game"
+                // amount Waveling and Easterly Winds give (Era: one shared
+                // buff, so they stack).
+                let pl = &mut self.players[p];
+                pl.prize.extra_shop = true;
+                pl.refresh_buff.0 += attack;
+                pl.refresh_buff.1 += health;
+            }
+            SpellEffect::FreeRollsPerTurn { now, per_turn } => {
+                let pl = &mut self.players[p];
+                pl.free_rolls = pl.free_rolls.saturating_add(now);
+                pl.prize.free_rolls_per_turn =
+                    pl.prize.free_rolls_per_turn.saturating_add(per_turn);
+            }
+            SpellEffect::RandomSpellAtLeast(cost) => {
+                let tier = self.players[p].tier;
+                if let Some(card) =
+                    self.data.cards.random_spell_at_least(cost, tier, self.lobby, &mut self.rng)
+                {
+                    self.give_generated(p, card);
+                }
+            }
+            SpellEffect::SpellDiscountThisTurn(n) => {
+                let pl = &mut self.players[p];
+                pl.prize.spell_discount_turn = pl.prize.spell_discount_turn.saturating_add(n);
+            }
+            SpellEffect::MinionPrice(n) => self.players[p].prize.minion_price = n,
+            SpellEffect::BattlecryExtraThisTurn(n) => {
+                let pl = &mut self.players[p];
+                pl.prize.battlecry_extra_turn = pl.prize.battlecry_extra_turn.saturating_add(n);
             }
             SpellEffect::DiscoverHeroPower => {}
             SpellEffect::MightyDragonbreath { attack, health } => {
@@ -819,6 +899,11 @@ impl Game {
                 }
             }
             SpellEffect::GetGems(n) => self.give_gems(p, n),
+            SpellEffect::SpellBonus { attack, health } => {
+                let pl = &mut self.players[p];
+                pl.spell_bonus.0 += attack + da;
+                pl.spell_bonus.1 += health + dh;
+            }
             SpellEffect::GemBonus { attack, health } => {
                 let pl = &mut self.players[p];
                 pl.gem_attack += attack;
@@ -867,5 +952,57 @@ impl Game {
             // Handled where the spell is cast (the tier lives on the copy).
             SpellEffect::TripleReward => {}
         }
+    }
+
+    /// Evolving Tavern: every card in the Tavern becomes one from a Tier
+    /// higher, the Tavern spell included. The old minions' pool copies go
+    /// back, the new ones take a copy each and get the player's Tavern buffs;
+    /// a spell never held a pool copy, so its slot just draws another one
+    /// (Era: "every card in the Tavern, minions and the Tavern spell").
+    fn evolve_tavern(&mut self, p: usize) {
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let cards = &data.cards;
+        let pl = &mut players[p];
+        // One Tier higher, and never past the Tavern's own top (a Tier 7
+        // card only comes from a card that names Tier 7).
+        let up = (pl.tier + 1).min(crate::MAX_TIER);
+        let old: ArrayVec<Minion, { crate::SHOP }> = pl.shop.drain(..).collect();
+        let mut made: ArrayVec<Minion, { crate::SHOP }> = ArrayVec::new();
+        for m in old {
+            give_back(pool, cards, &m);
+            let Some(c) = draw_filtered(pool, cards, rng, up, up, &[], *lobby, |_| true) else {
+                continue;
+            };
+            let mut n = pl.make_card(cards, c, false, 1);
+            pl.apply_tavern_buffs(cards, &mut n);
+            let _ = made.try_push(n);
+        }
+        pl.shop = made;
+        // The spell in the Tavern's spell slot goes one Tier higher too, and
+        // no Tavern spell above Tier 6 (a pool spell holds no pool copy, so
+        // nothing goes back for the old one).
+        if pl.shop_spell.is_some() {
+            pl.shop_spell = cards.random_tier_spell(up, &[], *lobby, rng);
+        }
+    }
+
+    /// Refresh the Tavern for an effect that says so (Evolving Tavern is the
+    /// only card that leaves its own shape; Mindflayer Goggles refreshes after
+    /// stealing every card). Not the player's own Refresh, so queued Fodders
+    /// wait, but it is a Refresh for the cards that count them.
+    pub(super) fn refresh_tavern_now(&mut self, p: usize) {
+        {
+            let Game { data, rng, players, pool, lobby, .. } = self;
+            Self::refresh_shop(
+                &mut players[p],
+                pool,
+                &data.cards,
+                &data.rules,
+                rng,
+                *lobby,
+                RefreshKind::Effect,
+            );
+        }
+        self.trinket_event(p, crate::trinkets::Event::Refresh, None, 1);
     }
 }

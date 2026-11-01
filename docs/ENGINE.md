@@ -38,6 +38,10 @@ crates/
                       heroes.rs (the hero frame: pick, armor, the 22 powers, the two spells),
                       trinkets.rs (the trinket frame: the two offers, the guarantee and the
                       discount, the slots, the hooks and the built cards),
+                      prizes.rs (the Darkmoon Prizes: the Discover, the Triple Prize,
+                      one test per Prize),
+                      heroes_batch1.rs, heroes_batch2.rs, heroes_batch3.rs,
+                      heroes_batch4.rs (Tickatus), heroes_frame2.rs,
                       darkgifts.rs (the gift table, the button, the offers, the landing,
                       the countdowns and the gift hooks),
                       tier7.rs (tier 7 in the engine and its seven minions),
@@ -738,11 +742,95 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   scalars, and each opponent's three slots as their scalars 30 to 32.
   `OBS_SIZE` grew with them and `train/model.py` embeds the trinket ids in a
   table of their own (`N_TRINKETS`). Hero frame 2 put the offered powers just
-  before the hero offer, so the trinket block moved from 173 to 183.
+  before the hero offer, so the trinket block moved from 173 to 183. Block 5
+  added four scalars at the end (`SCALAR_ICE_BLOCK`, `SCALAR_IMMUNE`,
+  `SCALAR_PRIZE_OFFER_TIER`, `SCALAR_TRIPLE_PRIZE`), so `SCALARS` grew by 4
+  and `train/model.py` picks them up on its own (its scale list is built from
+  `bgpy.SCALARS`).
 - **Bots** pick a trinket in `answer_pending`: the cheapest one of a tribe the
   board already has, else the cheapest. Tests: `tests/trinkets.rs`; the shared
   test helpers answer an open offer (and any Discover a trinket opened) before
   passing the turn.
+- **The Darkmoon Prizes (block 5).** A Prize is a spell or a minion with
+  `prize = <tier 1 to 4>` in cards.toml (`Card.prize`), never in the pool:
+  `CardDb.prizes` is the four lists a `DiscoverRequest::Prize(tier)` deals
+  three different cards from (`deal_...` in `maybe_start_discover` via
+  `CardDb::random_prize`), and the pick lands in hand with `pool_copies = 0`
+  (`resolve_choose` reads a Prize's offer as holding no pool copy;
+  `abandon_discover` skips a token for the same reason). The 31 Prize spells
+  are plain spells (`tavern_spell = false`), and All-Seeing Elder is the one
+  Prize minion (a `[[token]]` with `prize = 4`). `Act::DiscoverPrize`,
+  `Act::RandomPrize` and the `SpellEffect`s of the same name are the ways in.
+  What a Prize leaves behind that outlasts the cast lives in
+  `Player.prize` (`PrizePowers`): the extra Tavern slot (New Recruit, a flag
+  that `Player::shop_size` counts and `fill_shop` draws in; its +2/+2 is not
+  its own, it goes into `Player.refresh_buff`, the after-Refresh buff
+  Waveling and Easterly Winds give, so the two stack), the free Refreshes
+  per turn (Rocking and Rolling, Open Bar), this turn's Tavern spell discount
+  (Reserve Prices, read by `spell_price` and `Player::spell_cost`), this
+  turn's extra Battlecry triggers (Big Brann Play, read by
+  `battlecry_or_choose_one`), a set minion price (Friends and Family
+  Discount, read by `Game::minion_price`) and the card that comes back every
+  end of turn (The Unlimited Coin, given in `run_end_of_turn`). A minion can
+  be given "At the end of your turn, gain +4/+4" for good (Gruul Rules) in
+  `Minion.end_turn_gain`, read by `run_minion_end_of_turn`. Corrupted Tome's
+  Triple Prize is `tp.triple_prize`: `give_triple_reward` hands that card out
+  instead of a Triple Reward, so every Triple Reward source goes through it
+  (a Golden minion, Natural Balance, Heroic Inspiration). The observation
+  carries the Prize tier an open Discover offers (`SCALAR_PRIZE_OFFER_TIER`)
+  and whether Triple Rewards became Triple Prizes (`SCALAR_TRIPLE_PRIZE`) on
+  top of the Discover's own card ids. Tests: `tests/prizes.rs`, one per
+  Prize plus Balinda's extra casts.
+- **The last trinkets (block 5).** Every Triple Reward becomes a Triple Prize
+  (`Act::TriplePrize`). Tickatus Sticker is a `discover_prize = 3` at the pick
+  and `start_every = 3`. The Curator Sticker hands out a Golden Mishmash (a
+  trinket-only token, `buddy = true`) and a 10/10 Amalgam; Mishmash's
+  "whenever your Amalgam gains stats, this gains them twice" is
+  `Game::note_amalgam_gains`, run after every action beside Makeshift
+  Master's watch: the player keeps a snapshot of every board slot
+  (`Player.amalgam_seen`) and the gains an Amalgam made land on each Mishmash
+  once per `Card.amalgam_gain_copy` (golden doubles it). In a fight it is
+  `Side::amalgam_gain_at`, called from `gain_at` and `gain_permanent_at`: what
+  an Amalgam gains in combat lands on every Mishmash of that side for the rest
+  of the fight through the ordinary `gain_at`, so it is gone when the fight
+  ends unless a Persistent Poet next to it keeps it (Mishmash is every type,
+  so it is a Dragon for the Poet). Safety Patch sets
+  `Player.ice_block`; the fatal damage path (the fight damage loop in
+  `finish_fights` and `take_hero_damage`) prevents the hit that would knock
+  the hero out and sets `Player.immune` for the rest of the turn, cleared at
+  the start of the next one, and the observation carries both
+  (`SCALAR_ICE_BLOCK`, `SCALAR_IMMUNE`). `Act::Surprise` is the Surprise
+  Portrait's 5% roll on every buy, sell and Refresh, rolled at the top of
+  `trinket_event` (never twice in a row, `tp.surprise_last`); an Elemental of
+  Surprise arrives generated, and a Refresh either adds one to the Tavern or
+  fills every minion slot with them. `Act::YoggWheel` picks one of the
+  trinket's `wheel` acts, so the Wheel's six results are data in
+  trinkets.toml; its results are `Act::RandomPrize`, `Act::CurseOfFlesh`,
+  `Act::DevouringHunger`, `Act::RodOfRoasting`, `Act::GoldenTavern` and
+  `Act::CastRandomSpells` (Puzzle Box's `cast_random_spell`).
+  `Act::MechaDemon` hands out `CardDb.mecha_demons` (the four tokens with
+  `mecha_demon = true`), generated; their `magnetize_to_tribes` (a `Tribes`
+  on the card, Mech by default) is what `can_magnetize` reads, so they merge
+  onto Mechs and Demons. Bronzebeard Portrait's tribe change is
+  `CardMod::AlsoTribes`: it writes `Minion.extra_tribes` on the copies the
+  player has (the pick) and on every later one (`Player::make_card`), and
+  `CardDb::tribes_of` ORs it in, so every tribe check in the shop and in a
+  fight sees it; `most_common_card_type` is the one place that reads the cards
+  alone, for the Dark Discovery's "your type" slot. Two of the reviewed rules
+  needed no code of their own: a Prize is a spell, so `balinda_mult` already
+  gives a Prize that targets a friendly minion `PendingTarget.runs = 2` (or 3
+  with a golden Balinda), and a "then double it" buff doubles once per cast;
+  and `evolve_tavern` draws the Tavern spell one tier higher too, which the
+  invariant allows the way it allows Robust Evolution's minion. The greater Eternal
+  Portrait is an `on_pick` Golden Eternal Knight and a `rule` on `death_undead`
+  that buffs every Eternal Knight in hand and on the board. Tickatus' Prize
+  Wall is `PowerEffect::PrizeWall { every: 4 }`: a run-tested
+  `DiscoverRequest::Prize` at the start of turn 4, 8, 12, 16 and every four
+  turns after (Tier = turn / 4, at most 4), with the power's `progress`
+  holding the turns to the next Prize and `obs::power_progress` reporting the
+  tier coming and those turns. Tests: the block 5 section at the end of
+  `tests/trinkets.rs` (one per card) and `tests/heroes_batch4.rs` for
+  Tickatus.
 
 ## Dark Gifts
 
@@ -1003,6 +1091,13 @@ stand-in. Needs `ref/bg-cards.json` for the card id mapping.
 heroes) was about 13,300 games a second after hero batch 3: one core 1.04 ms
 a game, 1.2 us an action. The same build of `git archive HEAD` made 13,700,
 so the batch costs 2.7%. `fuzz 100000` takes about 14 s.
+
+After trinkets block 5 (2026-11-01) the same measure is about 12,800 games a
+second (one core 1.05 ms a game, about 1.21 us an action); the committed tree
+built beside it made 13,200, so the block costs about 1.5% to 3% (noise; the
+one change on every tribe read is `CardDb::tribes_of` ORing
+`Minion.extra_tribes`, the Bronzebeard Portrait's rule). `fuzz 100000` still
+takes about 14 s.
 
 Python side, from the repo root:
 

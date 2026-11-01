@@ -345,6 +345,14 @@ pub enum DiscoverRequest {
     /// A plain copy of a minion from the next opponent's warband as it stood
     /// at the start of the round (I Spy).
     IspyNextOpponent,
+    // ---- block 5 ----
+    /// Three different Darkmoon Prizes of one Prize tier (the Triple Prize,
+    /// Tickatus Sticker, Big Winner!, Tickatus' Prize Wall). Prizes are never
+    /// in the pool, so no pool copy moves for any of the three.
+    Prize(u8),
+    /// A plain copy of a minion from the last opponent's warband as it was
+    /// last seen (Time Thief).
+    LastOpponentWarband,
 }
 
 /// Why the Tavern is filled. Only the player's own Refresh action (paid with
@@ -549,6 +557,42 @@ pub struct TrinketPowers {
     /// and, for a Tavern spell, its card (Magicfin Sticker).
     pub bought_stats: (i32, i32),
     pub bought_spell: Option<CardId>,
+    // ---- block 5 ----
+    /// Every Triple Reward becomes this card (Corrupted Tome's Triple
+    /// Prize), and one went to hand at the pick.
+    pub triple_prize: Option<CardId>,
+    /// The Surprise Portrait's chance out of 100 of a surprise on each buy,
+    /// sell and Refresh, 0 for none, and whether the last one was a surprise
+    /// (never twice in a row).
+    pub surprise: u8,
+    pub surprise_last: bool,
+}
+
+/// The standing rules a Darkmoon Prize leaves behind. A Prize is a spell, so
+/// what outlasts the cast needs somewhere to live: one small block, like
+/// `TrinketPowers`, so a shop path reads a field and never the card. The
+/// per-turn fields are cleared in `start_turn`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PrizePowers {
+    /// The Tavern holds one more minion for good (New Recruit). The +2/+2 it
+    /// comes with is not its own: it goes into `Player.refresh_buff`, the same
+    /// "after the Tavern is Refreshed this game" amount Waveling and Easterly
+    /// Winds give (Era: they share one buff, so they stack).
+    pub extra_shop: bool,
+    /// Free Refreshes gained at the start of every turn (Rocking and
+    /// Rolling, Open Bar).
+    pub free_rolls_per_turn: u8,
+    /// Tavern spells cost this much less this turn (Reserve Prices).
+    pub spell_discount_turn: u8,
+    /// Minions in the Tavern cost this much for the rest of the game
+    /// (Friends and Family Discount), 0 for their own price.
+    pub minion_price: u8,
+    /// Your Battlecries trigger this many extra times this turn (Big Brann
+    /// Play).
+    pub battlecry_extra_turn: u8,
+    /// The card that comes back to hand at the end of every turn (The
+    /// Unlimited Coin).
+    pub returns_each_turn: Option<CardId>,
 }
 
 /// One held trinket: which one, its "every N" counter, the uses its hooks
@@ -655,6 +699,9 @@ pub struct Player {
     /// shape, and the small standing rules. One block, so a trinket effect is
     /// a field write and the card paths read it without a table lookup.
     pub tp: TrinketPowers,
+    /// What the Darkmoon Prizes this player cast left behind (New Recruit,
+    /// Rocking and Rolling, Friends and Family Discount).
+    pub prize: PrizePowers,
     /// Dark Gift uses. Room for a later run, unused.
     pub dark_gifts: u8,
     /// A real-board seat (docs/real-boards.md): no hero, no shopping. At the
@@ -729,6 +776,17 @@ pub struct Player {
     /// Tavern (Spirit Swap's two minions; Devour's minion before the sale is
     /// gone by the second pick, so only Spirit Swap keeps it).
     pub two_step: Option<(u8, bool)>,
+    /// Mishmash's snapshot of every board slot (card, Attack, Health) as of
+    /// the end of the last action, so the stats a friendly Amalgam gained
+    /// can be copied onto it. All zeros when no Mishmash is held.
+    pub amalgam_seen: [(CardId, i32, i32); BOARD],
+    /// A Safety Patch's Ice Block, unspent: the next fatal damage to the hero
+    /// is prevented and the hero is Immune for the rest of the turn
+    /// (docs/trinkets.md).
+    pub ice_block: bool,
+    /// The hero is Immune this turn: no damage at all. Cleared at the start
+    /// of the next turn.
+    pub immune: bool,
     /// The stats Devour sells, for the second pick to give.
     pub devour_stats: (i32, i32),
     /// A Discover whose pick lands in this Tavern slot (plus one) instead of
@@ -1508,8 +1566,11 @@ impl Game {
     /// (Prosthetic Hand).
     fn can_magnetize(&self, hand_card: CardId, board_card: CardId) -> bool {
         let cards = &self.data.cards;
+        // The tribes a card Magnetizes onto are data on the card: Mech for
+        // all but Prosthetic Hand (Mech and Undead) and the Mecha-Demons
+        // (Mech and Demon).
         let t = cards.get(board_card).tribes;
-        t.has(Tribe::Mech) || (cards.get(hand_card).magnetize_to_undead && t.has(Tribe::Undead))
+        cards.get(hand_card).magnetize_tribes.overlaps(t)
     }
 
     /// Whether the board minion in slot `s` has another friendly minion of
@@ -1580,7 +1641,7 @@ impl Game {
             .any(|m| !self.data.cards.get(m.card).is_spell())
     }
 
-    fn spell_target_ok(&self, st: SpellTarget, m: &Minion) -> bool {
+    fn spell_target_ok(&self, p: usize, st: SpellTarget, m: &Minion) -> bool {
         let c = self.data.cards.get(m.card);
         if c.is_spell() {
             return false;
@@ -1608,12 +1669,19 @@ impl Game {
             SpellTarget::TransformHigher => c.tier < crate::MAX_TIER,
             SpellTarget::WatchStats => true,
             SpellTarget::GemKeyword { .. } | SpellTarget::TriggerDeathrattle => true,
+            // A "then double it" buff takes any minion.
+            SpellTarget::BuffThenDouble { .. } => true,
+            // Returning a minion to hand needs a non-Golden one and room in
+            // hand (Repeat Customer, Raise the Stakes).
+            SpellTarget::ReturnToHand { .. } => !m.golden && !self.players[p].hand.is_full(),
+            SpellTarget::MakeGoldenReturn => !self.players[p].hand.is_full(),
+            SpellTarget::GrantEndOfTurn { .. } => true,
         }
     }
 
     fn valid_spell_target(&self, p: usize, st: SpellTarget, s: usize) -> bool {
         let b = &self.players[p].board;
-        s < b.len() && self.spell_target_ok(st, &b[s])
+        s < b.len() && self.spell_target_ok(p, st, &b[s])
     }
 
     /// Whether the pending target may be taken on the Tavern minion in
@@ -1639,7 +1707,9 @@ impl Game {
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } | TargetKind::BecomeCopy => {
                 true
             }
-            TargetKind::Spell(st) => st.can_target_shop() && self.spell_target_ok(st, &pl.shop[s]),
+            TargetKind::Spell(st) => {
+                st.can_target_shop() && self.spell_target_ok(p, st, &pl.shop[s])
+            }
             // A Tavern minion may go in the pot when it has a type (Stir the
             // Pot).
             TargetKind::ThrowInPot { .. } => {
@@ -1677,7 +1747,9 @@ impl Game {
         match pt.kind {
             TargetKind::MinionBuff { tribe, .. } => tribe.is_none_or(|t| c.tribes.has(t)),
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
-            TargetKind::Spell(st) => st.can_target_shop() && self.spell_target_ok(st, &pl.shop[s]),
+            TargetKind::Spell(st) => {
+                st.can_target_shop() && self.spell_target_ok(p, st, &pl.shop[s])
+            }
             _ => false,
         }
     }
@@ -1689,7 +1761,7 @@ impl Game {
                 (0..pl.board.len()).any(|s| self.valid_spell_target(p, st, s))
                     || (st.can_target_shop()
                         && (0..pl.shop.len())
-                            .any(|s| self.spell_target_ok(st, &pl.shop[s])))
+                            .any(|s| self.spell_target_ok(p, st, &pl.shop[s])))
             }
             ChooseOption::MinionTarget { .. }
             | ChooseOption::SpellBonus { .. }
@@ -1703,7 +1775,7 @@ impl Game {
             let pl = &self.players[p];
             (0..pl.board.len()).any(|s| self.valid_spell_target(p, st, s))
                 || (st.can_target_shop()
-                    && (0..pl.shop.len()).any(|s| self.spell_target_ok(st, &pl.shop[s])))
+                    && (0..pl.shop.len()).any(|s| self.spell_target_ok(p, st, &pl.shop[s])))
         } else if let Some(opts) = c.choose_one {
             opts.iter().any(|&opt| self.can_choose_option(p, opt))
         } else {
@@ -1827,6 +1899,9 @@ impl Game {
             // Makeshift Master: whatever the watched minion gained while the
             // action ran, the Deity gains too.
             self.watch_deity_gain(p);
+            // Mishmash: whatever stats a friendly Amalgam gained, it gains
+            // again (twice when golden).
+            self.note_amalgam_gains(p);
             // Glowing Gauntlet: a Tavern card that just left is replaced at
             // once, a minion by a minion and the spell by a spell.
             self.refill_tavern(p);

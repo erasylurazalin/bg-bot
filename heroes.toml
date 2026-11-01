@@ -1027,3 +1027,13 @@ armor = 14
 tribes = ["beast", "undead"]
 power = { name = "Rapid Reanimation", card_id = "BG25_HERO_103p", effect = { rapid_reanimation = true } }
 
+# ---- Trinkets block 5 (2026-11-01) ----
+
+# Prize Wall: every 4 turns, Discover a Darkmoon Prize: Tier 1 on turn 4, Tier
+# 2 on turn 8, Tier 3 on turn 12, Tier 4 on turn 16 and every 4 turns after (a
+# guess past 16, games rarely get there; docs/trinkets.md).
+[[hero]]
+name = "Tickatus"
+card_id = "TB_BaconShop_HERO_94"
+armor = 17
+power = { name = "Prize Wall", card_id = "TB_BaconShop_HP_106", passive = true, effect = { prize_wall = 4 } }

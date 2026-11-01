@@ -230,6 +230,19 @@ impl Game {
         crate::darkgifts::most_common_type(&tribes, &mut self.rng)
     }
 
+    /// The board's most common type read off the cards alone, the way the
+    /// Dark Discovery's "your type" slot reads it: a tribe a portrait gave a
+    /// minion (Bronzebeard Portrait's Branns counting as Murlocs and Dragons)
+    /// does not count there (docs/trinkets.md, Era's rule).
+    fn most_common_card_type(&mut self, p: usize) -> Option<crate::cards::Tribe> {
+        let tribes: ArrayVec<crate::cards::Tribes, BOARD> = self.players[p]
+            .board
+            .iter()
+            .map(|m| self.data.cards.get(m.card).tribes)
+            .collect();
+        crate::darkgifts::most_common_type(&tribes, &mut self.rng)
+    }
+
     /// Deal a Dark Gift offer into the player's Discover: one pool minion per
     /// slot, each with a gift, three different minions and three different
     /// gifts (docs/darkgifts.md "Era's rules"). Each offer holds a pool copy.
@@ -238,7 +251,7 @@ impl Game {
         let mut taken: ArrayVec<CardId, DISCOVER> = ArrayVec::new();
         for k in 0..DISCOVER {
             let slot = plan.slots[k];
-            let mine = if slot.yours { self.most_common_board_type(p) } else { None };
+            let mine = if slot.yours { self.most_common_card_type(p) } else { None };
             let Some(card) = self.draw_gift_minion(plan.gift_turn, slot, mine, &taken) else {
                 continue;
             };
