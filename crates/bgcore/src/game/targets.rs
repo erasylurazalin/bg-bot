@@ -30,6 +30,48 @@ use super::shop::{give_back, golden_up};
 use super::effects::buff;
 
 impl Game {
+    /// The Tavern buff "minions of its type" gives (Eonar's Favor): a tribe at
+    /// random for a dual-type target (DESIGN.md's rule for a type picked at
+    /// random), and every Tavern minion that has a type for an all-type one (an
+    /// Amalgam), which the log shows. A tribeless target gives nothing.
+    fn tavern_buff_type(&mut self, target: &crate::minion::Minion, attack: i32, health: i32) -> Option<TavernBuff> {
+        let tribes = self.data.cards.tribes_of(target);
+        if tribes.is_empty() {
+            return None;
+        }
+        let tribe = if tribes == crate::cards::Tribes::ALL {
+            None
+        } else {
+            Some(tribes.random_type(&mut self.rng)?)
+        };
+        Some(TavernBuff { tribe, attack, health, this_turn: false, typed_only: tribe.is_none() })
+    }
+
+    /// Set a Tavern minion's stats to `attack`/`health`, keeping the bonuses
+    /// that apply wherever the card is (the Undead bonus, an Eternal Knight's
+    /// deaths): the rule Pack Tactics' 3/3 copy follows (DESIGN.md "Exact
+    /// copies").
+    pub(super) fn set_shop_stats(&mut self, p: usize, slot: usize, attack: i32, health: i32) {
+        if slot >= self.players[p].shop.len() {
+            return;
+        }
+        let (a, h) = self.players[p].wherever_stats(&self.data.cards, &self.players[p].shop[slot]);
+        let m = &mut self.players[p].shop[slot];
+        m.attack = attack + a;
+        m.health = health + h;
+    }
+
+    /// `set_shop_stats` on a board minion.
+    pub(super) fn set_board_stats(&mut self, p: usize, pos: usize, attack: i32, health: i32) {
+        if pos >= self.players[p].board.len() {
+            return;
+        }
+        let (a, h) = self.players[p].wherever_stats(&self.data.cards, &self.players[p].board[pos]);
+        let m = &mut self.players[p].board[pos];
+        m.attack = attack + a;
+        m.health = health + h;
+    }
+
     pub(super) fn resolve_shop_target(&mut self, p: usize, slot: usize) {
         if let Some(pst) = self.players[p].pending_shop_target.take() {
             // The Tavern emptied while the pick was open (nothing does that
@@ -104,9 +146,7 @@ impl Game {
             }
             TargetKind::AnySetStats { attack, health } => {
                 for _ in 0..pt.runs {
-                    let m = &mut self.players[p].shop[slot];
-                    m.attack = attack;
-                    m.health = health;
+                    self.set_shop_stats(p, slot, attack, health);
                 }
             }
             // A Battlecry that picks its target at random reaches the Tavern
@@ -283,9 +323,7 @@ impl Game {
                             generated = self.data.cards.random_different_minion(t, c_id, tier, self.lobby, &mut self.rng);
                         }
                         SpellTarget::SetStats { attack, health } => {
-                            let m = &mut self.players[p].shop[target];
-                            m.attack = attack;
-                            m.health = health;
+                            self.set_shop_stats(p, target, attack, health);
                         }
                         SpellTarget::TrickyTrousers { attack, health } => {
                             let m = &mut self.players[p].shop[target];
@@ -301,14 +339,9 @@ impl Game {
                             stop_after = true;
                         }
                         SpellTarget::TavernBuffType { attack, health } => {
-                            let t = self.data.cards.tribes_of(&self.players[p].shop[target]);
-                            if let Some(tribe) = t.random_type(&mut self.rng) {
-                                let b = TavernBuff {
-                                    tribe: Some(tribe),
-                                    attack: attack + da,
-                                    health: health + dh,
-                                    this_turn: false,
-                                };
+                            let target_card = self.players[p].shop[target];
+                            let b = self.tavern_buff_type(&target_card, attack + da, health + dh);
+                            if let Some(b) = b {
                                 self.players[p].add_tavern_buff(&self.data.cards, b);
                             }
                         }
@@ -554,9 +587,7 @@ impl Game {
             }
             TargetKind::AnySetStats { attack, health } => {
                 for _ in 0..pt.runs {
-                    let m = &mut self.players[p].board[s];
-                    m.attack = attack;
-                    m.health = health;
+                    self.set_board_stats(p, s, attack, health);
                 }
             }
             TargetKind::BecomeCopy => {
@@ -804,9 +835,7 @@ impl Game {
                             );
                         }
                         SpellTarget::SetStats { attack, health } => {
-                            let m = &mut self.players[p].board[target_pos];
-                            m.attack = attack;
-                            m.health = health;
+                            self.set_board_stats(p, target_pos, attack, health);
                         }
                         SpellTarget::Consume { pick, keywords, count, .. } => {
                             self.start_consume(p, target_pos, pick, keywords, count, 1);
@@ -838,14 +867,9 @@ impl Game {
                             self.robust_evolution_board(p, target_pos);
                         }
                         SpellTarget::TavernBuffType { attack, health } => {
-                            let t = self.data.cards.tribes_of(&self.players[p].board[target_pos]);
-                            if let Some(tribe) = t.random_type(&mut self.rng) {
-                                let b = TavernBuff {
-                                    tribe: Some(tribe),
-                                    attack: attack + da,
-                                    health: health + dh,
-                                    this_turn: false,
-                                };
+                            let target_card = self.players[p].board[target_pos];
+                            let b = self.tavern_buff_type(&target_card, attack + da, health + dh);
+                            if let Some(b) = b {
                                 self.players[p].add_tavern_buff(&self.data.cards, b);
                             }
                         }

@@ -546,8 +546,12 @@ impl Game {
                 m.locked_turns = locked_turns;
             }
             if let Some((a, h)) = set_stats {
-                m.attack = a;
-                m.health = h;
+                // A set of the pick's stats keeps the bonuses that apply
+                // wherever the card is (the Undead bonus, an Eternal Knight's
+                // deaths), as every other stat set does.
+                let (wa, wh) = pl.wherever_stats(&data.cards, &m);
+                m.attack = a + wa;
+                m.health = h + wh;
             }
             if locked && !is_spell {
                 m.locked_turns = 1;

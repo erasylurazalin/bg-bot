@@ -4570,6 +4570,31 @@ impl Watch for DeadWatch {
 /// count, Reborn brings them back in the same slot, and Banshee and Phantom
 /// react. The `track`ed board slot is followed through the changes. Avenge
 /// does not count shop deaths (its counts start from 0 in every fight).
+/// The counters a death outside combat resolves with: everything that applies
+/// "wherever the card is" (the Undead bonus, Goldrinn's Beasts, the Beetles)
+/// stays, and everything that only a fight sets goes: the trinkets' `fight`
+/// acts and the Start of Combat powers. A shop-phase destroy is not a fight
+/// (docs/trinkets.md: a `fight` act runs in a fight), so a Funeral Wreath must
+/// not copy a minion that is reborn in the shop.
+fn shop_counters(counters: Counters) -> Counters {
+    Counters {
+        health: None,
+        boon_of_beetles: 0,
+        brood_of_nozdormu: 0,
+        upper_hand: 0,
+        sharing_is_caring: 0,
+        soc_leftmost: 0,
+        soc_rightmost: 0,
+        soc_double_left: 0,
+        soc_earth: 0,
+        soc_earth_card: 0,
+        soc_lightning: 0,
+        soc_lightning_damage: 0,
+        trinkets: FightTrinkets::default(),
+        ..counters
+    }
+}
+
 pub fn shop_destroy(
     db: &CardDb,
     board: &[Minion],
@@ -4579,14 +4604,7 @@ pub fn shop_destroy(
     rng: &mut Rng,
 ) -> ShopDestroy {
     let mut uid = 0u16;
-    let counters = Counters {
-        health: None,
-        boon_of_beetles: 0,
-        brood_of_nozdormu: 0,
-        upper_hand: 0,
-        sharing_is_caring: 0,
-        ..counters
-    };
+    let counters = shop_counters(counters);
     let mut side = Side::new(db, board, &[], counters, &mut uid);
     side.outside = true;
     side.count_avenge = false;
@@ -4618,14 +4636,7 @@ pub fn shop_trigger_deathrattles(
     rng: &mut Rng,
 ) -> ShopDestroy {
     let mut uid = 0u16;
-    let counters = Counters {
-        health: None,
-        boon_of_beetles: 0,
-        brood_of_nozdormu: 0,
-        upper_hand: 0,
-        sharing_is_caring: 0,
-        ..counters
-    };
+    let counters = shop_counters(counters);
     let mut side = Side::new(db, board, &[], counters, &mut uid);
     side.outside = true;
     side.count_avenge = false;

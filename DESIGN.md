@@ -48,7 +48,8 @@ fight phase.
 - Tiers 1 to 6. Upgrading costs gold, and the cost goes down by 1 every turn
   you don't upgrade, to a minimum of 0 **(check)**. Base costs as I remember
   them: tier 2 costs 5, tier 3 costs 7, tier 4 costs 8, tier 5 costs 11, tier
-  6 costs 10 **(check, these change between patches)**. The countdown for the
+  6 costs 11 (Era's logs, 2026-11-02: 44 of 44 level-ups to tier 5 show 11
+  next; these change between patches). The countdown for the
   next tier starts after you upgrade.
 - A higher tier shows more cards and lets the shop offer minions up to your
   tier. Shop size by tier: 3, 4, 4, 5, 5, 6 minions **(check)**, plus one

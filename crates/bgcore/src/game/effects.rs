@@ -284,7 +284,13 @@ impl Game {
             }
             Effect::TavernBuff { tribe, attack, health, this_turn } => {
                 let n = mul * runs as i32;
-                let b = TavernBuff { tribe, attack: attack * n, health: health * n, this_turn };
+                let b = TavernBuff {
+                    tribe,
+                    attack: attack * n,
+                    health: health * n,
+                    this_turn,
+                    typed_only: false,
+                };
                 self.players[p].add_tavern_buff(&self.data.cards, b);
                 // Azerite Portrait: the Living Azerites also give the stats
                 // to your Elementals on the board.
@@ -1107,7 +1113,16 @@ impl Game {
     /// keyword (once; `improvements` records that it fired).
     pub(super) fn check_attack_thresholds(&mut self, p: usize) {
         let cards = &self.data.cards;
-        for m in &mut self.players[p].board {
+        // "Once this reaches N Attack, gain X" (Scarlet Survivor) has no zone
+        // in its text: a minion in the Tavern and one in the hand are buffed
+        // there as a board minion is, so all three are checked.
+        let pl = &mut self.players[p];
+        for m in pl
+            .board
+            .iter_mut()
+            .chain(pl.hand.iter_mut())
+            .chain(pl.shop.iter_mut())
+        {
             if m.improvements != 0 {
                 continue;
             }

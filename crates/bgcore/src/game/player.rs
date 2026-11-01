@@ -35,6 +35,20 @@ use super::{
 };
 use super::effects::buff;
 
+/// Whether a Tavern buff lands on this card: a tribe's buff on a card of that
+/// tribe, "every minion" on any card, and the "minions of its type" a stat set
+/// on an all-type minion gives (Eonar's Favor) on every card that has a type.
+pub(super) fn tavern_buff_hits(cards: &CardDb, m: &Minion, b: &TavernBuff) -> bool {
+    let c = cards.get(m.card);
+    if c.is_spell() {
+        return false;
+    }
+    match b.tribe {
+        Some(t) => c.tribes.has(t),
+        None => !b.typed_only || !c.tribes.is_empty(),
+    }
+}
+
 impl Player {
     pub(super) fn new(data: &Data) -> Player {
         Player {
@@ -311,7 +325,7 @@ impl Player {
         match self
             .tavern_buffs
             .iter_mut()
-            .find(|o| o.tribe == b.tribe && o.this_turn == b.this_turn)
+            .find(|o| o.tribe == b.tribe && o.this_turn == b.this_turn && o.typed_only == b.typed_only)
         {
             Some(o) => {
                 o.attack += b.attack;
@@ -320,7 +334,7 @@ impl Player {
             None => self.tavern_buffs.push(b),
         }
         for m in &mut self.shop {
-            if !cards.get(m.card).is_spell() && cards.get(m.card).is(b.tribe) {
+            if tavern_buff_hits(cards, m, &b) {
                 buff(m, b.attack, b.health);
             }
         }
@@ -333,7 +347,7 @@ impl Player {
             return;
         }
         for b in &self.tavern_buffs {
-            if cards.get(m.card).is(b.tribe) {
+            if tavern_buff_hits(cards, m, b) {
                 buff(m, b.attack, b.health);
             }
         }
@@ -344,7 +358,7 @@ impl Player {
     pub fn end_turn_tavern_buffs(&mut self, cards: &CardDb) {
         for b in self.tavern_buffs.iter().filter(|b| b.this_turn) {
             for m in &mut self.shop {
-                if !cards.get(m.card).is_spell() && cards.get(m.card).is(b.tribe) {
+                if tavern_buff_hits(cards, m, b) {
                     buff(m, -b.attack, -b.health);
                 }
             }
@@ -396,62 +410,9 @@ impl Player {
     pub fn make_card(&self, cards: &CardDb, id: CardId, golden: bool, pool_copies: u8) -> Minion {
         let mut m = cards.make(id, golden);
         m.pool_copies = pool_copies;
-        if m.volumizers > 0 {
-            m.attack += self.volumizer_bonus.0 * m.volumizers as i32;
-            m.health += self.volumizer_bonus.1 * m.volumizers as i32;
-        }
-        let c = cards.get(id);
-        if c.is_beetle {
-            m.attack += self.beetle_bonus.0;
-            m.health += self.beetle_bonus.1;
-        }
-        if let Some((a, h)) = c.buff_per_deathrattle {
-            let n = self.deathrattles_triggered as i32 * m.mul();
-            m.attack += a * n;
-            m.health += h * n;
-        }
-        // The Dark Gift counters too: a card like Dark Paradox t6 ("+3/+3 for
-        // each Battlecry you have triggered this game, wherever this is")
-        // takes its count when it is made, a golden one double.
-        if let Some((a, h)) = c.buff_per_battlecry {
-            let n = self.battlecries_triggered as i32 * m.mul();
-            m.attack += a * n;
-            m.health += h * n;
-        }
-        if let Some((a, h)) = c.buff_per_tavern_spell {
-            let n = self.spells_cast as i32 * m.mul();
-            m.attack += a * n;
-            m.health += h * n;
-        }
-        if let Some((a, h)) = c.buff_per_discard {
-            let n = self.discarded as i32 * m.mul();
-            m.attack += a * n;
-            m.health += h * n;
-        }
-        if let Some((a, h)) = c.buff_per_golden_played {
-            let n = self.golden_played as i32 * m.mul();
-            m.attack += a * n;
-            m.health += h * n;
-        }
-        if let Some((a, h)) = c.buff_per_elemental_played {
-            let n = self.elementals_played as i32 * m.mul();
-            m.attack += a * n;
-            m.health += h * n;
-        }
-        if let Some((a, h)) = c.buff_per_magnetize {
-            let n = self.magnetizations as i32 * m.mul();
-            m.attack += a * n;
-            m.health += h * n;
-        }
-        if c.tribes.has(Tribe::Undead) && !c.fixed_stats {
-            m.attack += self.undead_bonus.0;
-            m.health += self.undead_bonus.1;
-        }
-        if let Some((a, h)) = c.buff_per_kind_death {
-            let n = self.knight_deaths as i32 * m.mul();
-            m.attack += a * n;
-            m.health += h * n;
-        }
+        let (a, h) = self.wherever_stats(cards, &m);
+        m.attack += a;
+        m.health += h;
         // A portrait that gives this card more tribes (Bronzebeard
         // Portrait): every copy the player makes carries it.
         for (mod_card, kind) in self.tp.card_mods.iter().flatten() {
@@ -462,6 +423,55 @@ impl Player {
             }
         }
         m
+    }
+
+    /// The stats a card gets "wherever it is", on top of its base: the Undead
+    /// bonus, Goldrinn's Beasts, the Beetle bonus, the Volumizers inside it,
+    /// and every counter a card scales with (Eternal Knight deaths, this
+    /// game's Deathrattles, Battlecries, Tavern spells, discards, Golden
+    /// minions played, Elementals played, Magnetizations). `make_card` adds
+    /// them to a fresh card, and a stat set keeps them: `set_stats` re-adds
+    /// this to the new stats the way Pack Tactics' 3/3 copy gets them back
+    /// from being summoned (DESIGN.md "Exact copies").
+    pub fn wherever_stats(&self, cards: &CardDb, m: &Minion) -> (i32, i32) {
+        let mut a = 0;
+        let mut h = 0;
+        if m.volumizers > 0 {
+            a += self.volumizer_bonus.0 * m.volumizers as i32;
+            h += self.volumizer_bonus.1 * m.volumizers as i32;
+        }
+        let c = cards.get(m.card);
+        let mul = m.mul();
+        if c.is_beetle {
+            a += self.beetle_bonus.0;
+            h += self.beetle_bonus.1;
+        }
+        let counts: [(Option<(i32, i32)>, u32); 7] = [
+            (c.buff_per_deathrattle, self.deathrattles_triggered),
+            (c.buff_per_battlecry, self.battlecries_triggered),
+            (c.buff_per_tavern_spell, self.spells_cast),
+            (c.buff_per_discard, self.discarded),
+            (c.buff_per_golden_played, self.golden_played),
+            (c.buff_per_elemental_played, self.elementals_played),
+            (c.buff_per_magnetize, self.magnetizations),
+        ];
+        for (per, count) in counts {
+            if let Some((pa, ph)) = per {
+                let n = count as i32 * mul;
+                a += pa * n;
+                h += ph * n;
+            }
+        }
+        if c.tribes.has(Tribe::Undead) && !c.fixed_stats {
+            a += self.undead_bonus.0;
+            h += self.undead_bonus.1;
+        }
+        if let Some((pa, ph)) = c.buff_per_kind_death {
+            let n = self.knight_deaths as i32 * mul;
+            a += pa * n;
+            h += ph * n;
+        }
+        (a, h)
     }
 
     /// The minion slots this player's Tavern has right now. `SHOP` holds the
@@ -662,6 +672,7 @@ impl Player {
                 attack: c.tavern_attack,
                 health: c.tavern_health,
                 this_turn: false,
+                typed_only: false,
             });
         }
         if c.tavern_elemental_attack != 0 || c.tavern_elemental_health != 0 {
@@ -670,6 +681,7 @@ impl Player {
                 attack: c.tavern_elemental_attack,
                 health: c.tavern_elemental_health,
                 this_turn: false,
+                typed_only: false,
             });
         }
         // A fight's outcome can move these too; they start from the base

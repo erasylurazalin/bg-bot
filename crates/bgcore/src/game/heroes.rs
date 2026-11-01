@@ -142,7 +142,7 @@ impl Game {
                 PowerEffect::TavernBuffAfterBuys { attack, health, .. } => {
                     self.players[p].add_tavern_buff(
                         &self.data.cards,
-                        TavernBuff { tribe: None, attack, health, this_turn: false },
+                        TavernBuff { tribe: None, attack, health, this_turn: false, typed_only: false },
                     );
                 }
                 PowerEffect::Champion { gold } => {
@@ -1645,7 +1645,7 @@ impl Game {
                     if !is_spell && self.power_count_up(p, second, every as u32) {
                         self.players[p].add_tavern_buff(
                             &self.data.cards,
-                            TavernBuff { tribe: None, attack, health, this_turn: false },
+                            TavernBuff { tribe: None, attack, health, this_turn: false, typed_only: false },
                         );
                     }
                 }

@@ -11,7 +11,7 @@ roll_cost = 1
 
 # Cost to go from tier 1 to 2, 2 to 3, ... 5 to 6. Goes down by 1 at the
 # start of every turn, to 0.
-upgrade_costs = [5, 7, 8, 11, 10]
+upgrade_costs = [5, 7, 8, 11, 11]
 shop_sizes = [3, 4, 4, 5, 5, 6]
 # Tier 7 has the same count as tier 6 (a guess, Blizzard doesn't show it).
 copies_per_tier = [16, 15, 13, 11, 9, 7, 7]

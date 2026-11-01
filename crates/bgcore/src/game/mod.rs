@@ -251,6 +251,11 @@ pub struct TavernBuff {
     pub health: i32,
     /// Ends when the player's turn does. Otherwise it lasts the game.
     pub this_turn: bool,
+    /// With `tribe: None`, only minions that have a type: "minions of its
+    /// type" on an all-type minion (Eonar's Favor on an Amalgam) means every
+    /// Tavern minion with a type, not a random tribe and not the tribeless
+    /// ones.
+    pub typed_only: bool,
 }
 
 /// One buff per (tribe filter, duration): 10 tribes and no filter, times 2.

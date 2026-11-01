@@ -237,6 +237,61 @@ fn tyrael_sets_a_tavern_minions_stats() {
     g.check_invariants().unwrap();
 }
 
+/// A game whose lobby has the Undead, for the cards that carry the Undead
+/// bonus and the Eternal Knight's counter.
+fn undead_game(seed: u64) -> Game {
+    Game::new_with_lobby(
+        Arc::new(Data::bundled()),
+        seed,
+        lobby(&[Tribe::Undead, Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc]),
+    )
+}
+
+#[test]
+fn a_stat_set_keeps_the_bonuses_that_apply_wherever_the_card_is() {
+    // Tyrael: "Activate (1): Set another minion's stats to 50/50". Era's log
+    // has a 19/7 Drustfallen Butcher with the Undead bonus at 17 become 67/50:
+    // the set reaches 50/50 and the bonuses that apply wherever the card is go
+    // on top, the rule Pack Tactics' 3/3 copy gets from being summoned
+    // (DESIGN.md "Exact copies", docs/heroes.md "Secrets").
+    let mut g = undead_game(5);
+    g.players[0].undead_bonus = (17, 0);
+    g.players[0].gold = 10;
+    let tyrael = put_on_board(&mut g, 0, "Tyrael");
+    put_on_board(&mut g, 0, "Cord Puller");
+    set_shop(&mut g, 0, &["Handless Forsaken"]); // Undead, 2/1 plus the bonus
+    assert_eq!(stats(&g.players[0].shop[0]), (19, 1));
+    act(&mut g, 0, Action::Activate(tyrael as u8));
+    act(&mut g, 0, Action::TargetShop(0));
+    assert_eq!(stats(&g.players[0].shop[0]), (67, 50));
+
+    // The other set of stats, Perfect Vision (20/20), keeps it too.
+    let undead = put_on_board(&mut g, 0, "Handless Forsaken");
+    assert_eq!(stats(&g.players[0].board[undead]), (19, 1));
+    g.give(0, "Perfect Vision").unwrap();
+    g.players[0].gold = 10;
+    play_card(&mut g, 0, "Perfect Vision");
+    act(&mut g, 0, Action::Target(undead as u8));
+    assert_eq!(stats(&g.players[0].board[undead]), (37, 20), "20/20 plus 17 Attack");
+
+    // And a counter a card scales with: an Eternal Knight's deaths.
+    let mut g = undead_game(6);
+    g.players[0].knight_deaths = 2;
+    g.players[0].gold = 10;
+    let tyrael = put_on_board(&mut g, 0, "Tyrael");
+    put_on_board(&mut g, 0, "Cord Puller");
+    set_shop(&mut g, 0, &["Eternal Knight"]);
+    let knight = g.data.cards.get(id(&g, "Eternal Knight"));
+    let printed = (knight.attack, knight.health);
+    let before = stats(&g.players[0].shop[0]);
+    let bonus = (before.0 - printed.0, before.1 - printed.1);
+    assert!(bonus.0 > 0, "the deaths are in its stats to begin with: {bonus:?}");
+    act(&mut g, 0, Action::Activate(tyrael as u8));
+    act(&mut g, 0, Action::TargetShop(0));
+    assert_eq!(stats(&g.players[0].shop[0]), (50 + bonus.0, 50 + bonus.1));
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn a_golden_tyrael_sets_100_100() {
     let mut g = game(4);
@@ -725,6 +780,58 @@ fn eonars_favor_buffs_tavern_minions_of_the_targets_type_this_game() {
     if let Some(m) = mech {
         let base = g.data.cards.get(m.card);
         assert_eq!((m.attack, m.health), (base.attack + 3, base.health + 3));
+    }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn eonars_favor_on_an_all_type_target_buffs_every_typed_tavern_minion() {
+    // "Choose a minion. Give minions of its type in the Tavern +3/+3 this
+    // game": an Amalgam has every type, so every Tavern minion with a type
+    // gets it (the log's En-Djinn Blazer and Firescale Hoarder next to an
+    // untouched tribeless minion), and the plus is the card's current numbers:
+    // the printed +3/+3 and the player's Tavern spell bonus, which the log
+    // shows as +6/+8.
+    let mut g = game(38);
+    g.players[0].spell_bonus = (3, 5);
+    let amalgam = put_on_board(&mut g, 0, "Gatekeeper Amalgam");
+    set_shop(&mut g, 0, &["Cord Puller", "Flittering Bat", "Boom-in-a-Box"]);
+    let printed: Vec<(i32, i32)> = g.players[0]
+        .shop
+        .iter()
+        .map(|m| {
+            let c = g.data.cards.get(m.card);
+            (c.attack, c.health)
+        })
+        .collect();
+    g.give(0, "Eonar's Favor").unwrap();
+    play_card(&mut g, 0, "Eonar's Favor");
+    act(&mut g, 0, Action::Target(amalgam as u8));
+    assert_eq!(
+        stats(&g.players[0].shop[0]),
+        (printed[0].0 + 6, printed[0].1 + 8),
+        "Cord Puller, a Mech"
+    );
+    assert_eq!(
+        stats(&g.players[0].shop[1]),
+        (printed[1].0 + 6, printed[1].1 + 8),
+        "Flittering Bat, a Beast"
+    );
+    assert_eq!(stats(&g.players[0].shop[2]), printed[2], "a tribeless minion gets nothing");
+    // It lasts the game: a minion dealt later gets the same plus.
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        if c.tribes.is_empty() || c.is_spell() {
+            continue;
+        }
+        assert_eq!(
+            (m.attack, m.health),
+            (c.attack + 6, c.health + 8),
+            "{} dealt later",
+            c.name
+        );
     }
     g.check_invariants().unwrap();
 }

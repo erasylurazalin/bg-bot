@@ -132,6 +132,49 @@ fn gold_goes_up_by_one_to_ten() {
 }
 
 #[test]
+fn the_tier_five_to_six_upgrade_costs_eleven() {
+    // Every level-up into tier 5 in Era's logs (44 of 44 when this was
+    // written) shows the next button at 11, not the 10 rules.toml had.
+    assert_eq!(Data::bundled().rules.upgrade_cost(5), 11);
+    let mut g = game(7);
+    g.players[0].tier = 4;
+    g.players[0].upgrade_cost = 11;
+    g.players[0].gold = 20;
+    act(&mut g, 0, Action::Level);
+    assert_eq!((g.players[0].tier, g.players[0].upgrade_cost), (5, 11));
+}
+
+#[test]
+fn once_this_reaches_attack_applies_in_the_tavern_and_in_hand() {
+    // Scarlet Survivor: "Once this reaches 6 Attack, gain Divine Shield". The
+    // text has no zone: a Tavern minion and a hand card gain it, not only a
+    // board minion (the log: a Tavern Scarlet Survivor buffed by Suspicious
+    // Prisonguard's +3/+3 gains the shield).
+    let mut g = game(11);
+    set_shop(&mut g, 0, &["Scarlet Survivor"]); // 3/3
+    let b = bgcore::game::TavernBuff {
+        tribe: None,
+        attack: 3,
+        health: 0,
+        this_turn: false,
+        typed_only: false,
+    };
+    g.players[0].add_tavern_buff(&g.data.cards, b);
+    assert_eq!(g.players[0].shop[0].attack, 6);
+    act(&mut g, 0, Action::Freeze); // any step runs the checks
+    assert!(g.players[0].shop[0].keywords.has(Keywords::DIVINE_SHIELD), "in the Tavern");
+
+    // In hand: buffed to 6 Attack there.
+    g.give(0, "Scarlet Survivor").unwrap();
+    let h = g.players[0].hand.len() - 1;
+    assert!(!g.players[0].hand[h].keywords.has(Keywords::DIVINE_SHIELD));
+    g.players[0].hand[h].attack = 6;
+    act(&mut g, 0, Action::Freeze);
+    assert!(g.players[0].hand[h].keywords.has(Keywords::DIVINE_SHIELD), "in hand");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn upgrade_cost_drops_each_turn_and_resets_on_upgrade() {
     let mut g = game(2);
     assert_eq!(g.players[0].upgrade_cost, 5);

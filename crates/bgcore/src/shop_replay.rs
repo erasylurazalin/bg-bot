@@ -1900,17 +1900,22 @@ type StepError = (String, Vec<String>);
 
 /// Apply one step to a freshly loaded game and snapshot the result. The error
 /// is what made the step impossible, which makes it incomplete or illegal.
-fn run_once(
-    data: &Arc<Data>,
-    ids: &CardIdMap,
-    file: &ShopFileSpec,
-    before: &ShopStateSpec,
-    step: &ShopStepSpec,
+/// One step of one turn, and the state it starts from, as `run_once` needs
+/// them: the file for the hero and the lobby, the state, the step, the turn
+/// and whether a one-shot trinket effect is armed.
+struct OneStep<'a> {
+    file: &'a ShopFileSpec,
+    before: &'a ShopStateSpec,
+    step: &'a ShopStepSpec,
     turn: u32,
-    seed: u64,
-) -> Result<StepRun, StepError> {
+    armed: bool,
+}
+
+fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<StepRun, StepError> {
+    let OneStep { file, before, step, turn, armed } = *one;
     let hero = file.hero(data, before);
     let mut loaded = load(data, before, hero, file.lobby(), turn, seed);
+    loaded.game.players[ME].tp.whistle = armed;
     let mut missing = std::mem::take(&mut loaded.missing);
     if step.step == "end_turn" {
         // The end of turn effects, without the fight that follows them: the
@@ -1925,7 +1930,40 @@ fn run_once(
     };
     let mut text = Vec::new();
     for a in &actions {
+        // A prompt with one answer is no prompt: the engine applies the only
+        // target itself (`offer_target`), so the step's own target click has
+        // nothing left to answer in the replay. The state the game left still
+        // says whether the engine picked the same target.
+        let pl = &loaded.game.players[ME];
+        let nothing_open = pl.pending_target.is_none()
+            && pl.pending_shop_target.is_none()
+            && pl.pending_choose_one.is_none()
+            && pl.discover.is_empty();
+        if matches!(a, Action::Target(_) | Action::TargetShop(_)) && nothing_open {
+            text.push(format!("{a:?} (one answer, so the engine took it)"));
+            continue;
+        }
         if loaded.game.step(*a).is_err() {
+            // A pick of a two-step effect answers the prompt the *game* opened
+            // in the step before, which one state cannot carry: the replay can
+            // answer only one of the two picks.
+            let pl = &loaded.game.players[ME];
+            if matches!(a, Action::Target(_)) && pl.pending_shop_target.is_some() {
+                return Err((
+                    "a board pick where the engine is still on the Tavern pick of a \
+                     two-step effect, whose first pick the file does not carry"
+                        .to_string(),
+                    missing,
+                ));
+            }
+            if matches!(a, Action::TargetShop(_)) && pl.pending_target.is_some() {
+                return Err((
+                    "a Tavern pick where the engine is still on the board pick of a \
+                     two-step effect, whose first pick the file does not carry"
+                        .to_string(),
+                    missing,
+                ));
+            }
             return Err((format!("the engine does not allow {a:?}"), missing));
         }
         text.push(format!("{a:?}"));
@@ -1948,6 +1986,32 @@ fn run_once(
     }
     let snap = ShopSnapshot::of_game(data, &loaded.game, ME);
     Ok((snap, missing, text.join(", ")))
+}
+
+/// The Warband Whistle: its pick makes the next Refresh deal plain copies of
+/// the warband, once.
+const WHISTLE: &str = "BG35_MagicItem_930";
+
+/// Whether the Warband Whistle's "your next Refresh holds copies of your
+/// warband" is still armed at a step. No state in the file says so, but the
+/// steps before it do: the pick of the trinket armed it and the first Refresh
+/// after that spent it.
+fn whistle_armed(file: &ShopFileSpec, turn: usize, step: usize) -> bool {
+    for t in (0..=turn).rev() {
+        let Some(turn_spec) = file.turns.get(t) else { continue };
+        let last = if t == turn { step } else { turn_spec.actions.len() };
+        for i in (0..last).rev() {
+            let a = &turn_spec.actions[i];
+            if a.step == "roll" {
+                return false;
+            }
+            let picked = a.picked.as_ref().and_then(|p| p.card_id.as_deref());
+            if a.step == "trinket_pick" && picked == Some(WHISTLE) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Replay one step of one logged turn and judge it.
@@ -2005,7 +2069,12 @@ pub fn replay_step(
     // The first run, then the ones that tell a deterministic step from a
     // random one: every seed that gives the same result as the first adds
     // nothing, and the first that differs stops the loop.
-    let first = run_once(data, ids, file, before, step, turn.turn, opts.seed);
+    // A one-shot trinket effect the state cannot show: the Warband Whistle's
+    // next Refresh.
+    let turn_index = file.turns.iter().position(|t| t.turn == turn.turn).unwrap_or(0);
+    let armed = whistle_armed(file, turn_index, i);
+    let one = OneStep { file, before, step, turn: turn.turn, armed };
+    let first = run_once(data, ids, &one, opts.seed);
     let (ours, load_missing, action) = match first {
         Ok(v) => v,
         Err((why, miss)) => {
@@ -2028,7 +2097,7 @@ pub fn replay_step(
     result.action = action;
     let mut deterministic = true;
     for k in 1..opts.seeds.max(1) {
-        match run_once(data, ids, file, before, step, turn.turn, opts.seed.wrapping_add(k as u64)) {
+        match run_once(data, ids, &one, opts.seed.wrapping_add(k as u64)) {
             Ok((snap, _, _)) => {
                 if snap != ours {
                     deterministic = false;

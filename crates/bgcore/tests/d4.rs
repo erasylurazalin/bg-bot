@@ -233,9 +233,9 @@ fn scalars_show_player_counters() {
     put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
     put_on_board(&mut g, 0, "Magicfin Mycologist");
     let cards = g.data.cards.clone();
-    g.players[0].add_tavern_buff(&cards, TavernBuff { tribe: Some(Tribe::Demon), attack: 2, health: 1, this_turn: true });
-    g.players[0].add_tavern_buff(&cards, TavernBuff { tribe: None, attack: 1, health: 1, this_turn: false });
-    g.players[0].add_tavern_buff(&cards, TavernBuff { tribe: None, attack: 1, health: 0, this_turn: false });
+    g.players[0].add_tavern_buff(&cards, TavernBuff { tribe: Some(Tribe::Demon), attack: 2, health: 1, this_turn: true, typed_only: false });
+    g.players[0].add_tavern_buff(&cards, TavernBuff { tribe: None, attack: 1, health: 1, this_turn: false, typed_only: false });
+    g.players[0].add_tavern_buff(&cards, TavernBuff { tribe: None, attack: 1, health: 0, this_turn: false, typed_only: false });
     let sprout = id(&g, "A New Sprout");
     g.players[0].shop_spell = Some(sprout);
     g.players[0].spell_discount = 1;

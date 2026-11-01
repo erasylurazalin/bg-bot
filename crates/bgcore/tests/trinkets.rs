@@ -818,6 +818,27 @@ fn the_gold_and_upgrade_trinkets() {
 }
 
 #[test]
+fn funeral_wreath_does_not_copy_a_minion_reborn_in_the_shop() {
+    // Funeral Wreath is `fight = [{ when = "reborn", copy = true, cap = 3 }]`:
+    // a fight's own. A shop-phase destroy (Butchering on a Reborn Handless
+    // Forsaken) returns the Reborn copy to the board and nothing else; the log
+    // shows no card in hand, while the engine used to hand over a copy because
+    // `destroy_in_shop` resolved the death with the trinkets' fight acts.
+    let mut g = game(19);
+    equip(&mut g, 0, 1, "Funeral Wreath");
+    put_on_board(&mut g, 0, "Handless Forsaken"); // Reborn, 2/1
+    g.give(0, "Butchering").unwrap();
+    g.players[0].gold = 10;
+    let hand = g.players[0].hand.len();
+    let spot = g.players[0].hand.iter().position(|m| g.data.cards.get(m.card).name == "Butchering").unwrap();
+    act(&mut g, 0, Action::Play { hand: spot as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(g.players[0].hand.len(), hand - 1, "no copy of the dead minion in hand");
+    assert_eq!(g.players[0].board.len(), 1, "the Reborn copy is on the board, as in the log");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn the_tavern_shape_trinkets() {
     // Cursed Crystal: +3/+3 to the Tavern this turn, and it must not stack
     // when you Refresh again.

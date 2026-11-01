@@ -804,6 +804,7 @@ impl Game {
                 attack: so.tavern_buff_gain.0,
                 health: so.tavern_buff_gain.1,
                 this_turn: false,
+                typed_only: false,
             };
             self.players[p].add_tavern_buff(&self.data.cards, b);
         }

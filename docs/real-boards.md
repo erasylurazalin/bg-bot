@@ -470,6 +470,14 @@ was written) takes about a second on 32 cores.
   whichever of a press's clicks it chooses, and not at all for a chooser), the
   MAGNETIC keyword (a card property), which card a random buff landed on, and
   the client's freeze button (the per-card flags say the same thing).
+- **Steps the file cannot carry.** A prompt with one answer is no prompt: the
+  engine applies the only target itself, so the step's own target click has
+  nothing left to answer and the state it left is compared instead. A pick of a
+  two-step effect (Spirit Swap's second minion) answers the prompt the game
+  opened in the step before, which one state cannot carry: that step is
+  incomplete. The Warband Whistle's one-shot "your next Refresh holds copies of
+  your warband" is armed from the steps before it (the pick armed it, the first
+  Refresh after that spent it), since no state says so.
 - **The step to the engine's action:** `buy` slot, `sell` position, `play`
   index with its target (and a Choose One's `sub_option`), `activate`, `move`,
   `roll`, `freeze`, `level`, `hero_power` (main or second) with its target,
