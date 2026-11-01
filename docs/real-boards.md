@@ -92,6 +92,124 @@ On 2026-10-26 it held 914 boards in 39 files, from 11 games of mine and the
 laptop's, all from 2026-10-24 to 2026-10-29 (older logs were already deleted
 by the game): 566 boards carry counters, 379 a hand, 486 a Deity.
 
+## The action file
+
+`tools/collect_actions.py` reads the same logs for the other half of a game:
+what I did in every shop phase, as named steps. It writes
+`boards/actions/<log folder>-g<N>.json`, numbered exactly like `boards/real/`
+(47 games, 548 turns). It keeps its own `.state.json` and skips a log whose
+size has not changed; `--rewrite` reads them all again. A run is about a
+minute. No player names are stored.
+
+```json
+{"source": "Hearthstone_2026_10_24_04_08_00", "game": 1,
+ "hero": {"card_id": "TB_BaconShop_HERO_57", "name": "Nozdormu"},
+ "unread": {},
+ "turns": [
+  {"turn": 1,
+   "start": {"gold": 3, "gold_max": 3, "tier": 1, "upgrade_cost": 5,
+             "health": 30, "armor": 13, "frozen": false,
+             "hero_powers": [{"card_id": "TB_BaconShop_HP_063",
+                              "name": "Clairvoyance", "numbers": [0, 0, 0, 0],
+                              "cost": 0, "used_this_turn": 0}],
+             "trinkets": [],
+             "tavern": [{"id": 333, "slot": 1, "card_id": "BG26_135",
+                         "name": "Southsea Busker", "attack": 3, "health": 1,
+                         "golden": false, "keywords": [], "kind": "minion",
+                         "frozen": false}],
+             "hand": [], "board": [], "hand_hidden": 0},
+   "actions": [
+     {"step": "buy", "slot": 1, "option": 4, "paid": {"gold": 3, "health": 0},
+      "target": {"id": 333, "card_id": "BG26_135", "name": "Southsea Busker",
+                 "kind": "slot", "slot": 1},
+      "card": {"id": 333, "card_id": "BG26_135", "name": "Southsea Busker",
+               "attack": 3, "health": 1, "golden": false},
+      "moved": {"id": 333, "from": {"where": "tavern", "slot": 1},
+                "to": {"where": "hand", "index": 1}}},
+     {"step": "end_turn", "paid": {"gold": 0, "health": 0}}],
+   "end": {"gold": 0, "health": 30, "armor": 13, "hand_hidden": 0, "board": [],
+           "hand": [{"id": 333, "index": 1, "card_id": "BG26_135",
+                     "name": "Southsea Busker", "attack": 3, "health": 1,
+                     "golden": false, "keywords": [], "kind": "minion"}],
+           "tavern": [{"...": "..."}]}}]}
+```
+
+- A turn starts at the first decision the game offers me in it, not at the
+  TURN tag's first change. That decision can be a choice rather than my
+  options: 86 turns open with a trinket offer and 27 with some other Discover.
+- `start` and `end` hold my hand, my board and Bob's Tavern the way
+  `boards/real/` writes a minion (card id, name, attack, health, golden,
+  keywords, dark gifts, script `numbers`) plus where each card sits: `slot` in
+  the Tavern, `index` in my hand, `position` on my board. A hand card the log
+  does not name is kept with a null card id and counted in `hand_hidden`; none
+  of the 47 games has one, so that count is 0 everywhere.
+- `gold` is `RESOURCES + TEMP_RESOURCES - RESOURCES_USED` on my player entity,
+  the number the client shows; `gold_max` is `RESOURCES`. `health` and `armor`
+  are my hero's, apart. `upgrade_cost` is the COST of the tier up button (null
+  at the top tier), `hero_powers` are the hero power entities in play with
+  their current numbers, cost and uses this turn, `trinkets` are my trinkets.
+- A Tavern spell carries its Gold price as `cost`; a minion has none, because
+  the log does not print one (a minion costs 3 Gold by the game's rule).
+- `end` is the state when the turn ended, after the end of turn effects and
+  before the fight (null when the log ends inside the turn).
+
+Every step says what it was and, where there is one, on which card or slot:
+
+| `step` | fields |
+|---|---|
+| `buy` | `slot`, `card`, `spell` for a spell, `target` (the Tavern slot) |
+| `sell` | `position`, `card`, `target` |
+| `play` | `index`, `card`, `target` (a Battlecry's or spell's target), `sub_option` |
+| `activate` | `position`, `card`, `target`: a minion's own Activate (it costs Gold) |
+| `move` | `position`, `to`, `card`: a minion dragged on my board |
+| `roll` | `cost`, `free` when a pool of free rerolls paid for it, `tavern` after |
+| `freeze` | `on` |
+| `level` | `cost`, `tier_after` |
+| `hero_power` | `which` (main or second), `cost`, `target` |
+| `dark_discovery` | `cost` (the Dark Gift button's price) |
+| `discover` | `kind`, `source`, `options`, `picked`: a Discover, a Choose One, a Dark Discovery's three minions with their gifts, a triple's reward |
+| `trinket_pick` | `slot_kind` (lesser or greater), `source`, `options`, `picked` |
+| `end_turn` | nothing: where my End Turn click lands, and where the game's end of turn effects go when they belong to my last step |
+
+- Every step also carries `option` (which of the client's own options I picked,
+  for reading the log), `paid` (the Gold and the Health it actually took, from
+  the client's own numbers) and `cost` when the client puts a price on the card
+  or button (`buy` of a spell, `roll`, `level`, `hero_power`,
+  `dark_discovery`). A card priced in Health is paid out of Armor first, so
+  `paid.health` counts Health and Armor together.
+- A step is measured against the state the step before it left, so nothing the
+  game does between two of my decisions is lost. Gold the game takes with no
+  step of mine (an end of turn effect, a trinket) is on the step as
+  `late_gold` and counted in `unread`.
+- What a step changed is written as `moved` (where the card it acted on went,
+  `{from: {where, slot|index|position}, to: ...}` or `to: null` when it left),
+  `entered` and `left` (cards that came into my hand or board, or left them,
+  with `from`, the log's CREATOR, the card that made them), `changed` (cards
+  whose numbers, keywords or gifts moved: a random buff's target, and the card
+  id when three copies turned one golden), `tavern` (the Tavern's offers after
+  a step that changed them) and `hand_hidden`.
+- `entered`/`left` follow the game's own entity ids: a card keeps one as it goes
+  from the Tavern to the hand to the board, so a replay can follow it.
+- A click that took and changed nothing (a minion picked up and put back, one
+  inspected) is not a step: it is counted in the turn as `canceled`.
+- `unread` counts what the log could not tell, per game. It is empty in 32 of
+  the 47 games. Across all of them: 24 cards that came into my hand or board
+  with no card behind them (18 from a minion's Activate, 6 from a card I
+  played: the log's CREATOR is empty for those), one turn I took no step in,
+  and one change the game made after my last step.
+
+`tools/check_actions.py` reads the files back with nothing from our engine and
+adds every turn up: the Gold the steps took against the Gold the turn started
+and ended with (and Health the same way), and my hand and board at the end
+against the start plus everything the steps moved. On the 47 games it finds
+546 of 548 turns balancing (99.6%); the two that do not are turns the log ends
+inside, before the fight. It also compares each price the client prints with
+what the step took: 13 cards were priced in Health, 13 Tavern spells were
+bought for no Gold at all, 10 rerolls were free, and one level up gained a Gold
+instead of taking its button's price (a Gold gain resolved in the same step).
+A card that came in with no card behind it is counted apart: the cards still
+add up, only the log does not say what made it (24 of them).
+
 ## How the boards are used
 
 A training game can seat a **real seat** that plays these boards instead of
