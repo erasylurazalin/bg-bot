@@ -135,6 +135,26 @@ pub struct RealCounters {
     /// The "improve your future ..." counts (`Counter::index`), which the
     /// fight scales their next buff by.
     pub improve: [u16; N_COUNTERS],
+    /// Gold this player has spent this game (Lovesick Balladist and the other
+    /// "Gold spent" cards read it). Only a shop step reads it.
+    pub gold_spent: u32,
+    /// The Tavern's "this game" buff: minions in Bob's Tavern have this much
+    /// more, and the ones dealt later get it too (Staff of Enrichment and its
+    /// kin). Only a shop step reads it.
+    pub tavern_attack: i32,
+    pub tavern_health: i32,
+    /// The same for Elementals only (Obsidian Ravager and its kin).
+    pub tavern_elemental_attack: i32,
+    pub tavern_elemental_health: i32,
+    /// "After the Tavern is Refreshed this game" (Waveling, En-Djinn Blazer,
+    /// Easterly Winds): what one Refresh gives one random Tavern minion. Only
+    /// a shop step reads it.
+    pub refresh_attack: i32,
+    pub refresh_health: i32,
+    /// Blood Gem Barrage casts this game: every Refresh gives this much, as
+    /// Blood Gems, to every minion in the Tavern. Only a shop step reads it.
+    pub barrage_attack: i32,
+    pub barrage_health: i32,
 }
 
 impl Default for RealCounters {
@@ -151,6 +171,15 @@ impl Default for RealCounters {
             spells_cast: 0,
             knight_deaths: 0,
             improve: [0; N_COUNTERS],
+            gold_spent: 0,
+            tavern_attack: 0,
+            tavern_health: 0,
+            tavern_elemental_attack: 0,
+            tavern_elemental_health: 0,
+            refresh_attack: 0,
+            refresh_health: 0,
+            barrage_attack: 0,
+            barrage_health: 0,
         }
     }
 }
@@ -159,9 +188,12 @@ impl RealCounters {
     /// Take one of the numbers a file holds, by its key: `gem_attack`,
     /// `gem_health`, `beetle_attack`, `beetle_health`, `undead_attack`,
     /// `undead_health`, `spell_attack`, `spell_health`, `spells_cast`,
-    /// `knight_deaths`, `tasty_lobster`, `baller`. A key that is not in the
-    /// file leaves its field at the base value; a key no engine number uses
-    /// is ignored.
+    /// `knight_deaths`, `tasty_lobster`, `baller`, and the numbers only a shop
+    /// step reads: `gold_spent`, `tavern_attack`, `tavern_health`,
+    /// `tavern_elemental_attack`, `tavern_elemental_health`, `refresh_attack`,
+    /// `refresh_health`, `barrage_attack`, `barrage_health`. A key that is not
+    /// in the file leaves its field at the base value; a key no engine number
+    /// uses is ignored.
     pub fn set(&mut self, key: &str, value: i32) {
         let count = |v: i32| v.max(0) as u32;
         let step = |v: i32| v.max(0).min(u16::MAX as i32) as u16;
@@ -178,6 +210,15 @@ impl RealCounters {
             "knight_deaths" => self.knight_deaths = count(value),
             "tasty_lobster" => self.improve[Counter::TastyLobster.index()] = step(value),
             "baller" => self.improve[Counter::Baller.index()] = step(value),
+            "gold_spent" => self.gold_spent = count(value),
+            "tavern_attack" => self.tavern_attack = value,
+            "tavern_health" => self.tavern_health = value,
+            "tavern_elemental_attack" => self.tavern_elemental_attack = value,
+            "tavern_elemental_health" => self.tavern_elemental_health = value,
+            "refresh_attack" => self.refresh_attack = value,
+            "refresh_health" => self.refresh_health = value,
+            "barrage_attack" => self.barrage_attack = value,
+            "barrage_health" => self.barrage_health = value,
             _ => {}
         }
     }
@@ -332,6 +373,10 @@ fn improvements(name: &str, golden: bool, numbers: &[i32]) -> u16 {
         // "Discover a Tier {0} minion. (Improves each turn!)": {0} is the
         // tier now, which is 1 + the count.
         "Patient Scout" => n(0) - 1,
+        // "Unplayable. In {0} turns, break this open and get a random Golden
+        // minion with a type!": {0} is the turns left, which the engine counts
+        // down in `improvements` and opens at 0.
+        "Lockbox" => n(0),
         _ => 0,
     };
     steps.clamp(0, u16::MAX as i32) as u16

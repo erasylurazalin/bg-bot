@@ -1,0 +1,828 @@
+{
+ "source": "Hearthstone_2026_10_28_22_11_50",
+ "game": 5,
+ "hero": {
+  "card_id": "BG20_HERO_283",
+  "name": "Galewing"
+ },
+ "tribes": [
+  "beast",
+  "dragon",
+  "elemental",
+  "mech",
+  "murloc",
+  "pirate",
+  "quilboar",
+  "undead"
+ ],
+ "unread": {},
+ "turns": [
+  {
+   "turn": 3,
+   "start": {
+    "board": [
+     {
+      "id": 985,
+      "position": 1,
+      "card_id": "BG36_200",
+      "name": "Flittering Bat",
+      "attack": 1,
+      "health": 4,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       1,
+       0,
+       0
+      ]
+     }
+    ],
+    "hand": [
+     {
+      "id": 292,
+      "index": 1,
+      "card_id": "BG_TB_006",
+      "name": "Big Banana",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_HERO_38",
+       "name": "King Mukla"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 812,
+      "index": 2,
+      "card_id": "BG_TB_006",
+      "name": "Big Banana",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_HERO_38",
+       "name": "King Mukla"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 1235,
+      "index": 3,
+      "card_id": "BG_EX1_014t",
+      "name": "Bananas",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_HERO_38",
+       "name": "King Mukla"
+      },
+      "kind": "spell"
+     }
+    ],
+    "tavern": [
+     {
+      "id": 1225,
+      "slot": 1,
+      "card_id": "BGS_115",
+      "name": "Sellemental",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1227,
+      "slot": 2,
+      "card_id": "BG21_015",
+      "name": "Tarecgosa",
+      "attack": 4,
+      "health": 4,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1229,
+      "slot": 3,
+      "card_id": "BG29_611",
+      "name": "Cord Puller",
+      "attack": 1,
+      "health": 1,
+      "golden": false,
+      "keywords": [
+       "DIVINE_SHIELD"
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1231,
+      "slot": 4,
+      "card_id": "BGS_115",
+      "name": "Sellemental",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1234,
+      "slot": 5,
+      "card_id": "BG33_101",
+      "name": "A New Sprout",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "kind": "spell",
+      "cost": 3,
+      "frozen": false
+     }
+    ],
+    "hand_hidden": 0,
+    "gold": 5,
+    "gold_max": 5,
+    "tier": 2,
+    "upgrade_cost": 6,
+    "health": 30,
+    "armor": 8,
+    "hero_powers": [
+     {
+      "card_id": "BG20_HERO_283p_t3",
+      "name": "Eastern Plaguelands",
+      "numbers": [
+       1,
+       0,
+       0,
+       0
+      ],
+      "cost": 0,
+      "used_this_turn": 0,
+      "waiting": null
+     }
+    ],
+    "trinkets": [],
+    "free_refreshes": 0,
+    "frozen": false,
+    "counters": {
+     "spells_cast": 1,
+     "gold_spent": 7
+    },
+    "secrets": [],
+    "won_last_combat": true
+   },
+   "actions": [
+    {
+     "step": "sell",
+     "target": {
+      "id": 985,
+      "card_id": "BG36_200",
+      "name": "Flittering Bat",
+      "kind": "board",
+      "position": 1
+     },
+     "option": 8,
+     "paid": {
+      "gold": -1,
+      "health": 0
+     },
+     "position": 1,
+     "card": {
+      "id": 985,
+      "card_id": "BG36_200",
+      "name": "Flittering Bat",
+      "attack": 1,
+      "health": 4,
+      "golden": false,
+      "numbers": [
+       1,
+       1,
+       0,
+       0
+      ]
+     },
+     "after": {
+      "board": [],
+      "hand": [
+       {
+        "id": 292,
+        "index": 1,
+        "card_id": "BG_TB_006",
+        "name": "Big Banana",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 812,
+        "index": 2,
+        "card_id": "BG_TB_006",
+        "name": "Big Banana",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 1235,
+        "index": 3,
+        "card_id": "BG_EX1_014t",
+        "name": "Bananas",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1225,
+        "slot": 1,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1227,
+        "slot": 2,
+        "card_id": "BG21_015",
+        "name": "Tarecgosa",
+        "attack": 4,
+        "health": 4,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1229,
+        "slot": 3,
+        "card_id": "BG29_611",
+        "name": "Cord Puller",
+        "attack": 1,
+        "health": 1,
+        "golden": false,
+        "keywords": [
+         "DIVINE_SHIELD"
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1231,
+        "slot": 4,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1234,
+        "slot": 5,
+        "card_id": "BG33_101",
+        "name": "A New Sprout",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "kind": "spell",
+        "cost": 3,
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 6,
+      "gold_max": 5,
+      "tier": 2,
+      "upgrade_cost": 6,
+      "health": 30,
+      "armor": 8,
+      "hero_powers": [
+       {
+        "card_id": "BG20_HERO_283p_t3",
+        "name": "Eastern Plaguelands",
+        "numbers": [
+         1,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 0,
+      "frozen": false,
+      "counters": {
+       "spells_cast": 1,
+       "gold_spent": 7
+      },
+      "secrets": [],
+      "won_last_combat": true
+     },
+     "moved": {
+      "id": 985,
+      "from": {
+       "where": "board",
+       "position": 1
+      },
+      "to": null
+     }
+    },
+    {
+     "step": "level",
+     "option": 7,
+     "paid": {
+      "gold": 6,
+      "health": 0
+     },
+     "cost": 6,
+     "after": {
+      "board": [],
+      "hand": [
+       {
+        "id": 292,
+        "index": 1,
+        "card_id": "BG_TB_006",
+        "name": "Big Banana",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 812,
+        "index": 2,
+        "card_id": "BG_TB_006",
+        "name": "Big Banana",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 1235,
+        "index": 3,
+        "card_id": "BG_EX1_014t",
+        "name": "Bananas",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1225,
+        "slot": 1,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1227,
+        "slot": 2,
+        "card_id": "BG21_015",
+        "name": "Tarecgosa",
+        "attack": 4,
+        "health": 4,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1229,
+        "slot": 3,
+        "card_id": "BG29_611",
+        "name": "Cord Puller",
+        "attack": 1,
+        "health": 1,
+        "golden": false,
+        "keywords": [
+         "DIVINE_SHIELD"
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1231,
+        "slot": 4,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1234,
+        "slot": 5,
+        "card_id": "BG33_101",
+        "name": "A New Sprout",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "kind": "spell",
+        "cost": 3,
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 0,
+      "gold_max": 5,
+      "tier": 3,
+      "upgrade_cost": 8,
+      "health": 30,
+      "armor": 8,
+      "hero_powers": [
+       {
+        "card_id": "BG20_HERO_283p_t3",
+        "name": "Eastern Plaguelands",
+        "numbers": [
+         1,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 0,
+      "frozen": false,
+      "counters": {
+       "spells_cast": 1,
+       "gold_spent": 13
+      },
+      "secrets": [],
+      "won_last_combat": true
+     },
+     "tier_after": 3
+    },
+    {
+     "step": "end_turn",
+     "paid": {
+      "gold": 0,
+      "health": 0
+     },
+     "after": {
+      "board": [],
+      "hand": [
+       {
+        "id": 292,
+        "index": 1,
+        "card_id": "BG_TB_006",
+        "name": "Big Banana",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 812,
+        "index": 2,
+        "card_id": "BG_TB_006",
+        "name": "Big Banana",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 1235,
+        "index": 3,
+        "card_id": "BG_EX1_014t",
+        "name": "Bananas",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1225,
+        "slot": 1,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1227,
+        "slot": 2,
+        "card_id": "BG21_015",
+        "name": "Tarecgosa",
+        "attack": 4,
+        "health": 4,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1229,
+        "slot": 3,
+        "card_id": "BG29_611",
+        "name": "Cord Puller",
+        "attack": 1,
+        "health": 1,
+        "golden": false,
+        "keywords": [
+         "DIVINE_SHIELD"
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1231,
+        "slot": 4,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1234,
+        "slot": 5,
+        "card_id": "BG33_101",
+        "name": "A New Sprout",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "kind": "spell",
+        "cost": 3,
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 0,
+      "gold_max": 5,
+      "tier": 3,
+      "upgrade_cost": 8,
+      "health": 30,
+      "armor": 8,
+      "hero_powers": [
+       {
+        "card_id": "BG20_HERO_283p_t3",
+        "name": "Eastern Plaguelands",
+        "numbers": [
+         1,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 0,
+      "frozen": false,
+      "counters": {
+       "spells_cast": 1,
+       "gold_spent": 13
+      },
+      "secrets": [],
+      "won_last_combat": true
+     }
+    }
+   ],
+   "end": {
+    "board": [],
+    "hand": [
+     {
+      "id": 292,
+      "index": 1,
+      "card_id": "BG_TB_006",
+      "name": "Big Banana",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_HERO_38",
+       "name": "King Mukla"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 812,
+      "index": 2,
+      "card_id": "BG_TB_006",
+      "name": "Big Banana",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_HERO_38",
+       "name": "King Mukla"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 1235,
+      "index": 3,
+      "card_id": "BG_EX1_014t",
+      "name": "Bananas",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_HERO_38",
+       "name": "King Mukla"
+      },
+      "kind": "spell"
+     }
+    ],
+    "tavern": [
+     {
+      "id": 1225,
+      "slot": 1,
+      "card_id": "BGS_115",
+      "name": "Sellemental",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1227,
+      "slot": 2,
+      "card_id": "BG21_015",
+      "name": "Tarecgosa",
+      "attack": 4,
+      "health": 4,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1229,
+      "slot": 3,
+      "card_id": "BG29_611",
+      "name": "Cord Puller",
+      "attack": 1,
+      "health": 1,
+      "golden": false,
+      "keywords": [
+       "DIVINE_SHIELD"
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1231,
+      "slot": 4,
+      "card_id": "BGS_115",
+      "name": "Sellemental",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1234,
+      "slot": 5,
+      "card_id": "BG33_101",
+      "name": "A New Sprout",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "kind": "spell",
+      "cost": 3,
+      "frozen": false
+     }
+    ],
+    "hand_hidden": 0,
+    "gold": 0,
+    "gold_max": 5,
+    "tier": 3,
+    "upgrade_cost": 8,
+    "health": 30,
+    "armor": 8,
+    "hero_powers": [
+     {
+      "card_id": "BG20_HERO_283p_t3",
+      "name": "Eastern Plaguelands",
+      "numbers": [
+       1,
+       0,
+       0,
+       0
+      ],
+      "cost": 0,
+      "used_this_turn": 0,
+      "waiting": null
+     }
+    ],
+    "trinkets": [],
+    "free_refreshes": 0,
+    "frozen": false,
+    "counters": {
+     "spells_cast": 1,
+     "gold_spent": 13
+    },
+    "secrets": [],
+    "won_last_combat": true
+   }
+  }
+ ]
+}

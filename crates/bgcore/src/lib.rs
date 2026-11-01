@@ -20,6 +20,7 @@ pub mod record;
 pub mod rng;
 pub mod rules;
 pub mod secrets;
+pub mod shop_replay;
 pub mod trinkets;
 
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};

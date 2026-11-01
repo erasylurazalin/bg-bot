@@ -41,6 +41,9 @@ crates/
                       (power and trinkets included), played many times, and
                       the three files it writes (docs/real-boards.md "The
                       fight check")
+    src/shop_replay.rs the shop replay: one logged shop state loaded into a
+                      game, one step played in it, and the three files it
+                      writes (docs/real-boards.md "The shop replay")
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
                       heroes.rs (the hero frame: pick, armor, the 22 powers, the two spells),
                       trinkets.rs (the trinket frame: the two offers, the guarantee and the
@@ -61,6 +64,8 @@ crates/
                       folder tests/data/real-boards stands in for boards/real),
                       fight_check.rs (one real fight seated and played, the
                       fixture folder through the checker, the three files),
+                      shop_replay.rs (a logged step replayed from its state,
+                      the fixture folder in tests/data/actions),
                       sandbox.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
   bgpy/               PyO3 bindings: a batch of games stepped together
@@ -1193,6 +1198,7 @@ cargo build --release -p bgbench
 ./target/release/bgbench match [games]  # bots against each other
 ./target/release/bgbench peak [n]       # peak boards of each build against each other
 ./target/release/bgbench fightcheck      # play Era's real fights, write boards/checks/
+./target/release/bgbench shopreplay      # replay Era's real shop steps, write boards/checks/
 cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 ```
 
@@ -1206,6 +1212,13 @@ paired fight of DIR `--runs` times on every core and writes `fights.tsv`,
 `cards.tsv` and `report.md` to `--out` (docs/real-boards.md "The fight
 check"). It only reads the engine: nothing in a fight changes. Needs
 `ref/bg-cards.json` for the card id mapping, like `--real-boards`.
+
+`shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME]` replays
+every step of Era's real shop phases from the logged state before it and writes
+`steps.tsv`, `shop-cards.tsv` and `shop-report.md` to `--out` (docs/real-boards.md
+"The shop replay"). It only reads the engine, and it needs no
+`ref/bg-cards.json`: the action files name every card they hold. A step that
+draws a random number is run `--seeds` times and judged by shape.
 
 `games 10` on this machine (release, 32 threads, five-tribe lobbies with
 heroes) was about 13,300 games a second after hero batch 3: one core 1.04 ms

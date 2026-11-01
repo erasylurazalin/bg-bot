@@ -18,7 +18,11 @@ What a turn holds (docs/real-boards.md, "The action file", has the shape):
 - `start`: the state at the first moment the game lets me act in the turn:
   Gold, max Gold, Tavern tier, upgrade cost, hero powers, trinkets, the
   Tavern's offers in slot order (the spell slot included, and whether they are
-  frozen), my hand and my board.
+  frozen), my hand and my board, the player-level numbers a step reads
+  (`counters`, the board files' keys plus Gold spent and the Tavern's "this
+  game" buffs), my Secret zone (`secrets`) and the marks a fight or a shop step
+  reads (a minion Rapid Reanimation chose carries `reanimate`; a power holding
+  a minion carries it as `waiting`).
 - `actions`: every step I took, in order, named after what I did, never our
   engine's action numbers: `buy`, `sell`, `play`, `activate` (a minion's or
   trinket's own Activate), `move` (dragging a minion on my board), `roll`,
@@ -34,7 +38,15 @@ What a turn holds (docs/real-boards.md, "The action file", has the shape):
   else it did: the Health it took and what gave it back (`health_cost`,
   `rewound`), the Gold it gained (`gold_gain`), the free Refreshes it used or
   that came in (`free_from`, `free_refreshes`).
-- `end`: my hand, board and Gold when the turn ended, before the fight.
+- `after` on every step: the whole state the step left, in `start`'s shape.
+  That is what the shop replay loads before the next step, and what it compares
+  a step's result with (`bgbench shopreplay`, docs/real-boards.md "The shop
+  replay"), so the log's randomness never has to be forced into the engine.
+- `end`: my hand, board and Gold when the turn ended, before the fight. It is
+  the same object as the last step's `after`.
+- `tribes` on the game: the tribes the log showed me, taken from every minion
+  that sat in my Tavern, my hand or my board. The lobby itself is not in the
+  log, so this is a lower bound on it.
 
 A step is measured against the state the step before it left, not against the
 state at the moment I clicked: the game can change things between two of my
@@ -91,7 +103,7 @@ from pathlib import Path
 
 TRACKER = Path.home() / "projects/bg"
 sys.path.insert(0, str(TRACKER))
-from bg.battlegrounds import (Tracker, card_name, gifts_by_minion,  # noqa: E402
+from bg.battlegrounds import (Tracker, card_name, cardxml, gifts_by_minion,  # noqa: E402
                               hero_enchants_by_minion, minion, trinkets)
 from bg.powerlog import PowerLog  # noqa: E402
 
@@ -138,6 +150,50 @@ SOURCES = ("MINION", "SPELL", "BATTLEGROUND_SPELL", "BATTLEGROUND_TRINKET",
 WATCHED = ("BACON_FREE_REFRESH_COUNT", "HEALTH", "DAMAGE", "ARMOR", "RESOURCES",
            "TEMP_RESOURCES", "RESOURCES_USED")
 
+# Rapid Reanimation (Teron Gorefiend) marks the minion it destroys at Start of
+# Combat with this enchantment, attached to it while both sit in PLAY. A state
+# writes a marked minion as "reanimate": true, the key the board files use
+# (docs/real-boards.md "The file").
+REANIMATE_MARK = "BG25_HERO_103pe"
+
+# The Secret cards a player can hold in the Secret zone, in the order they were
+# got (the order they fire in): Venomstrike Trap, Autodefense Matrix,
+# Redemption, Pack Tactics and the Ice Block a Safety Patch gives. The zone also
+# holds the Deity and quests, which are not Secrets and are not written.
+SECRET_CARDS = ("TB_Bacon_Secrets_01", "TB_Bacon_Secrets_07", "TB_Bacon_Secrets_10",
+                "TB_Bacon_Secrets_15", "TB_Bacon_Secrets_12")
+
+# Tavish Stormpike's Lock and Load: the minion it stole from the Tavern is held
+# in TAG_SCRIPT_DATA_ENT_1 of the power and comes into play as a copy of it at
+# the next Start of Combat. A hero power is written with it as `waiting` (null
+# when the power owes nothing), the key the board files use.
+LOCK_AND_LOAD = "BG22_HERO_000p_Alt"
+
+# Player enchantments that carry a side-wide number a shop step reads, with the
+# script numbers holding attack and health (None for a number the enchantment
+# does not have). The first three are the board files' counters, read the same
+# way collect_boards.py reads them. The last two are Tavern buffs ("minions in
+# Bob's Tavern have +X/+Y this game"): the game keeps one enchantment per buff
+# and adds into its numbers, so its current numbers are the whole buff.
+PLAYER_ENCHANTS = {
+    # Beetle Army: "Your Beetles have +{0}/+{1} this game".
+    "BG31_808pe": ("beetle_attack", "beetle_health"),
+    # Undead Bonus Attack: "Your Undead have +{0} Attack this game".
+    "BG25_011pe": ("undead_attack", None),
+    # Baller: Ballers sold, the "improve your future Ballers" count.
+    "BG31_816pe": ("baller", None),
+    # Staff of Enrichment and its kin: the whole Tavern has +{0}/+{1}.
+    "BG_ShopBuff": ("tavern_attack", "tavern_health"),
+    # Obsidian Ravager and its kin: Elementals in the Tavern have +{0}/+{1}.
+    "BG_ShopBuff_Elemental": ("tavern_elemental_attack", "tavern_elemental_health"),
+    # Waveling, En-Djinn Blazer, Easterly Winds: what one Refresh gives one
+    # random Tavern minion ("after the Tavern is Refreshed this game").
+    "BG34_854pe": ("refresh_attack", "refresh_health"),
+    # Blood Gem Barrage casts: every Refresh gives this much, as Blood Gems, to
+    # every minion in the Tavern.
+    "BG34_689e2": ("barrage_attack", "barrage_health"),
+}
+
 # A card the log names, e.g. "[entityName=Wrath Weaver id=434 zone=PLAY
 # zonePos=2 cardId=BGS_004 player=15]". A name can hold brackets of its own
 # ("UNKNOWN ENTITY [cardType=INVALID]"), so the name part is greedy.
@@ -176,6 +232,31 @@ def numbers(tags):
     none. The same read collect_boards.py does."""
     sd = [tags.get(f"TAG_SCRIPT_DATA_NUM_{i}", 0) for i in range(1, 5)]
     return sd if any(sd) else None
+
+
+# The ten tribes, named the way the engine spells them (cards.toml), from the
+# card data's Race enum names.
+TRIBE_NAMES = {"beast": "beast", "mechanical": "mech", "dragon": "dragon",
+               "murloc": "murloc", "demon": "demon", "pirate": "pirate",
+               "elemental": "elemental", "undead": "undead", "quilboar": "quilboar",
+               "aberration": "aberration"}
+_races = {}
+
+
+def card_tribes(card_id):
+    """The tribes of a card, as the engine names them. The lobby a game was
+    played in is not in the log, so a game's tribes are the ones the log showed
+    me: every tribe of every minion that sat in my Tavern, my hand or my board.
+    That is a lower bound (a lobby often has a tribe the Tavern never offered),
+    and a pool built from it can only draw fewer cards than the real one."""
+    if not card_id:
+        return ()
+    if card_id not in _races:
+        cards, _ = cardxml.load()
+        c = cards.get(card_id)
+        _races[card_id] = tuple(TRIBE_NAMES[r.name.lower()] for r in (c.races if c else ())
+                                if r.name.lower() in TRIBE_NAMES)
+    return _races[card_id]
 
 
 class ActionLog(PowerLog):
@@ -239,6 +320,8 @@ class ActionTracker(Tracker):
         self.damage = None      # my hero's DAMAGE at the last look
         self.armor_now = None   # and its Armor
         self.gold_live = None   # and my Gold
+        self.waited = {}        # Lock and Load minions read off the summoned copy
+        self.tribes = set()     # the tribes the log showed me this game
 
     # -- games ------------------------------------------------------------
 
@@ -260,6 +343,9 @@ class ActionTracker(Tracker):
         if rec is not None:
             rec["unread"] = dict(self.unread)
             rec["hero"] = self.my_hero()
+            # the lobby's tribes are not in the log; these are the ones it
+            # showed me (see `card_tribes`)
+            rec["tribes"] = sorted(self.tribes)
         self.games.append(rec)
         self.reset()
 
@@ -284,6 +370,8 @@ class ActionTracker(Tracker):
     def _on_tag(self, g, e, tag, value):
         super()._on_tag(g, e, tag, value)
         self.watch(e, tag, value)
+        if tag == "COPIED_FROM_ENTITY_ID" and value:
+            self.waited_copy(e, value)
         if e is not g.game_entity:
             return
         if tag == "TURN":
@@ -294,6 +382,21 @@ class ActionTracker(Tracker):
             self.close_step()
             self.ended = True
             self.open_step({"step": "end_turn"})
+
+    def waited_copy(self, e, held):
+        """The copy a power summons names the minion it held, in
+        COPIED_FROM_ENTITY_ID, with the stats it had when it was taken. Only
+        Lock and Load's held minion is not in the log itself (the Tavern copy
+        it stole is), so this is the fallback `waiting_minion` reads."""
+        if e["CARDTYPE"] != "MINION" or not e.card_id or held in self.waited:
+            return
+        m = minion(e, self.game)
+        d = {"card_id": m.card_id, "name": m.name, "attack": m.attack,
+             "health": m.health, "golden": m.golden, "keywords": list(m.keywords)}
+        sd = numbers(m.tags)
+        if sd is not None:
+            d["numbers"] = sd
+        self.waited[held] = d
 
     def watch(self, e, tag, value):
         """Follow, tag by tag, the things a step can do besides take Gold and
@@ -413,7 +516,7 @@ class ActionTracker(Tracker):
             self.unread["a turn I took no step in"] += 1
             self.turn = None
             return
-        end = self.state()
+        end = self.full_state()
         # the game can change things after my last step (an end of turn effect
         # that runs once the turn is over, an effect while I am idle). Those
         # changes belong to the turn, so they are written into its last step
@@ -431,9 +534,9 @@ class ActionTracker(Tracker):
         self.last = end
         self.last_gold = self.gold()
         self.last_health = self.health()
-        end["gold"] = self.gold()
-        end["health"] = self.hero_health()
-        end["armor"] = self.armor()
+        # the turn's end is the state the last step left, with the changes the
+        # game made after it: the next turn starts from the same shape
+        self.turn["actions"][-1]["after"] = end
         self.turn["end"] = end if before_fight else None
         self.record["turns"].append(self.turn)
         self.turn = None
@@ -471,7 +574,7 @@ class ActionTracker(Tracker):
     def begin(self):
         """The turn's start: the state the client first shows me, which is also
         what the first step of the turn is measured against."""
-        self.turn["start"] = self.start_state()
+        self.turn["start"] = self.full_state()
         self.last = self.turn["start"]
         self.last_gold = self.turn["start"]["gold"]
         self.last_health = self.health()
@@ -656,9 +759,17 @@ class ActionTracker(Tracker):
         if own:
             out["dark_gifts"] = [{"card_id": c, "name": card_name(c)} for c in own]
         if e["CARDTYPE"] == "MINION":
-            out["attack"] = e["ATK"]
-            out["health"] = e["HEALTH"] - e["DAMAGE"]
-            out["golden"] = bool(e["PREMIUM"]) or e.card_id.endswith("_G")
+            m = minion(e, g)
+            out["attack"] = m.attack
+            out["health"] = m.health
+            out["golden"] = m.golden
+            # An offer's card is written as it stands, keywords and numbers
+            # included: a Discover's pick lands with them (a stat-set offer,
+            # Innkeeper's Hearth, is not the card's printed stats).
+            out["keywords"] = list(m.keywords)
+            sd = numbers(m.tags)
+            if sd is not None:
+                out["numbers"] = sd
         if e["COST"]:
             out["cost"] = e["COST"]
         return out
@@ -734,11 +845,14 @@ class ActionTracker(Tracker):
             # nothing to write this state into: the next step is measured from
             # the state the last step left, so nothing in between is lost
             return
-        after = self.state()
+        after = self.full_state()
         self.last = after
         self.last_gold = self.gold()
         self.last_health = self.health()
         step = p["step"]
+        # the state the step left, which is what the replay loads before the
+        # next one and compares this one's result with
+        step["after"] = after
         step["paid"] = {"gold": p["gold"] - self.gold(),
                         "health": p["health"] - self.health()}
         self.finish_watch(step, p)
@@ -933,9 +1047,12 @@ class ActionTracker(Tracker):
 
     # -- the states -------------------------------------------------------
 
-    def start_state(self):
-        """A turn's start: the state, plus the numbers the client shows above
-        the board."""
+    def full_state(self):
+        """A turnover point of the shop phase as the replay loads it: my hand,
+        my board and the Tavern, the numbers the client shows above the board,
+        the hero powers and trinkets, and the player-level numbers and the marks
+        a step reads. One shape for a turn's `start`, every step's `after` and
+        the turn's `end`, so a replay can load any of them the same way."""
         s = self.state()
         p = self.player()
         s.update({"gold": self.gold(), "gold_max": p["RESOURCES"] if p is not None else None,
@@ -945,7 +1062,10 @@ class ActionTracker(Tracker):
                   "hero_powers": self.hero_powers(),
                   "trinkets": self.trinket_list(),
                   "free_refreshes": self.free,
-                  "frozen": self.frozen()})
+                  "frozen": self.frozen(),
+                  "counters": self.counters(),
+                  "secrets": self.secrets(),
+                  "won_last_combat": self.won_last_combat()})
         return s
 
     def state(self):
@@ -954,12 +1074,18 @@ class ActionTracker(Tracker):
         g = self.game
         me, dummy = self.me, self.dummy()
         gifts, ench = gifts_by_minion(g), hero_enchants_by_minion(g)
+        marks = self.reanimate_marks(g)
         board, hand, tavern = [], [], []
         hidden = 0
         for e in g.entities.values():
             ct, zone = e["CARDTYPE"], e["ZONE"]
             if e["CONTROLLER"] == me and zone == "PLAY" and ct == "MINION":
-                board.append(self.one(e, g, gifts, ench, "position"))
+                d = self.one(e, g, gifts, ench, "position")
+                if e.id in marks:
+                    # marked by Rapid Reanimation, as the board files write it
+                    d["reanimate"] = True
+                self.tribes.update(card_tribes(e.card_id))
+                board.append(d)
             elif e["CONTROLLER"] == dummy and zone == "PLAY" and ct in SHOP_TYPES:
                 d = self.one(e, g, gifts, ench, "slot")
                 d["kind"] = "spell" if ct == "BATTLEGROUND_SPELL" else "minion"
@@ -970,6 +1096,7 @@ class ActionTracker(Tracker):
                 d["frozen"] = bool(e["FROZEN"])
                 if e["BACON_COSTS_HEALTH_TO_BUY"]:
                     d["costs_health"] = True
+                self.tribes.update(card_tribes(e.card_id))
                 tavern.append(d)
             elif e["CONTROLLER"] == me and zone == "HAND" and ct not in NOT_IN_HAND:
                 # a hand card the log does not name is kept, so that it can be
@@ -982,6 +1109,7 @@ class ActionTracker(Tracker):
                     d["kind"] = "spell" if ct == "BATTLEGROUND_SPELL" else "minion"
                 elif ct:
                     d["kind"] = ct.lower()
+                self.tribes.update(card_tribes(e.card_id))
                 hand.append(d)
         board.sort(key=lambda c: (c["position"], c["id"]))
         hand.sort(key=lambda c: (c["index"], c["id"]))
@@ -1057,8 +1185,32 @@ class ActionTracker(Tracker):
                  "cost": x["COST"], "used_this_turn": x["HEROPOWER_ACTIVATIONS_THIS_TURN"]}
             if x["ADDITIONAL_HERO_POWER_INDEX"]:
                 d["second"] = True
+            # Lock and Load holds the Tavern minion it stole in the power's own
+            # entity tag and summons a copy of it at the next Start of Combat.
+            # Every other power owes nothing, and says so with a null (the
+            # board files write the same key).
+            d["waiting"] = self.waiting_minion(x)
             out.append(d)
         return out
+
+    def waiting_minion(self, power):
+        """The minion a power still owes the board, as a board minion, or None.
+        Read off the held entity itself; when the log never created it, the
+        copy the power summons names it (`COPIED_FROM_ENTITY_ID`, read in
+        `_on_tag`), as collect_boards.py does at a fight."""
+        ent = power["TAG_SCRIPT_DATA_ENT_1"]
+        if not ent:
+            return None
+        held = self.game.entities.get(ent)
+        if held is None or held["CARDTYPE"] != "MINION" or not held.card_id:
+            return self.waited.get(ent)
+        m = minion(held, self.game)
+        d = {"card_id": m.card_id, "name": m.name, "attack": m.attack,
+             "health": m.health, "golden": m.golden, "keywords": list(m.keywords)}
+        sd = numbers(m.tags)
+        if sd is not None:
+            d["numbers"] = sd
+        return d
 
     def trinket_list(self):
         if self.me is None:
@@ -1066,16 +1218,93 @@ class ActionTracker(Tracker):
         return [{"card_id": t.card_id, "name": t.name, "greater": t.greater,
                  "numbers": list(t.numbers)} for t in trinkets(self.game, self.me)]
 
+    def secrets(self):
+        """My Secret zone: the Secret card ids in it, in the order I got them
+        (which is the order they fire in). Always written, empty when there is
+        nothing."""
+        xs = [x for x in self.game.entities.values()
+              if x["ZONE"] == "SECRET" and x["CONTROLLER"] == self.me
+              and x.card_id in SECRET_CARDS]
+        return [x.card_id for x in sorted(xs, key=lambda x: x.id)]
+
+    def reanimate_marks(self, g):
+        """The entity ids of my minions Rapid Reanimation marked, the minion the
+        power destroys at the next Start of Combat."""
+        attached = {x["ATTACHED"] for x in g.entities.values()
+                    if x.card_id == REANIMATE_MARK and x["ZONE"] == "PLAY" and x["ATTACHED"]}
+        return {e.id for e in g.entities.values()
+                if e["CARDTYPE"] == "MINION" and e["ZONE"] == "PLAY"
+                and e["CONTROLLER"] == self.me and e.id in attached}
+
+    def won_last_combat(self):
+        """Whether my last fight was a win (the player tag of that name), which
+        the cards that say "if you lost your last combat" read. None when the
+        tag is not there (a game's first turn): the replay leaves it unknown."""
+        p = self.player()
+        if p is None or "BACON_WON_LAST_COMBAT" not in p.tags:
+            return None
+        return bool(p["BACON_WON_LAST_COMBAT"])
+
+    def counters(self):
+        """The player-level numbers a shop step reads, by the board files' keys
+        (docs/real-boards.md "The file"), plus the ones only a shop step reads:
+        Gold spent this game and the Tavern's "this game" buffs. A key is
+        written only when the log shows a number: a missing one is the base
+        value (no spell bonus, Blood Gems +1/+1, no Gold spent)."""
+        p = self.player()
+        out = {}
+        if p is None:
+            return out
+        # What one Blood Gem gives (BACON_BLOODGEMBUFFATKVALUE, +1/+1 base).
+        if p["BACON_BLOODGEMBUFFATKVALUE"] not in (0, 1) or \
+                p["BACON_BLOODGEMBUFFHEALTHVALUE"] not in (0, 1):
+            out["gem_attack"] = p["BACON_BLOODGEMBUFFATKVALUE"] or 1
+            out["gem_health"] = p["BACON_BLOODGEMBUFFHEALTHVALUE"] or 1
+        # The Tavern spell bonus, which every Tavern spell this player casts
+        # and every spell on a minion gets.
+        if p["TAVERN_SPELL_ATTACK_INCREASE"]:
+            out["spell_attack"] = p["TAVERN_SPELL_ATTACK_INCREASE"]
+        if p["TAVERN_SPELL_HEALTH_INCREASE"]:
+            out["spell_health"] = p["TAVERN_SPELL_HEALTH_INCREASE"]
+        for card_id, (atk_key, hp_key) in PLAYER_ENCHANTS.items():
+            sd = self.enchant_numbers(p.id, card_id)
+            if sd is None:
+                continue
+            if atk_key and sd[0]:
+                out[atk_key] = sd[0]
+            if hp_key and sd[1]:
+                out[hp_key] = sd[1]
+        if p["NUM_SPELLS_PLAYED_THIS_GAME"]:
+            out["spells_cast"] = p["NUM_SPELLS_PLAYED_THIS_GAME"]
+        if p["NUM_RESOURCES_SPENT_THIS_GAME"]:
+            out["gold_spent"] = p["NUM_RESOURCES_SPENT_THIS_GAME"]
+        return out
+
+    def enchant_numbers(self, player_id, card_id):
+        """The script numbers of one player enchantment `card_id` on the player
+        entity `player_id`, or None when it is not there (the read
+        collect_boards.py does)."""
+        xs = [x for x in self.game.entities.values()
+              if x.card_id == card_id and x["ZONE"] == "PLAY" and x["ATTACHED"] == player_id]
+        if not xs:
+            return None
+        x = max(xs, key=lambda x: x.id)
+        return [x[f"TAG_SCRIPT_DATA_NUM_{i}"] for i in range(1, 5)]
+
     def frozen(self):
-        """The Tavern's lock: the Freeze button's own flag, else whether any
-        offer is frozen."""
+        """The Tavern's lock: whether its offers are frozen. The offers' own
+        flags are what the game shows (a Freeze click sets them one by one),
+        while the Freeze button's tag can lag a toggle behind, so the offers
+        are read first and the button only when the Tavern holds nothing."""
+        dummy = self.dummy()
+        offers = [x for x in self.game.entities.values()
+                  if x["CONTROLLER"] == dummy and x["ZONE"] == "PLAY"
+                  and x["CARDTYPE"] in SHOP_TYPES]
+        if offers:
+            return any(x["FROZEN"] for x in offers)
         btn = [x for x in self.game.entities.values()
                if x["CONTROLLER"] == self.me and x["ZONE"] == "PLAY" and x.card_id == FREEZE]
-        if btn:
-            return bool(btn[0]["TAG_SCRIPT_DATA_NUM_1"])
-        dummy = self.dummy()
-        return any(x["FROZEN"] for x in self.game.entities.values()
-                   if x["CONTROLLER"] == dummy and x["ZONE"] == "PLAY" and x["CARDTYPE"] in SHOP_TYPES)
+        return bool(btn[0]["TAG_SCRIPT_DATA_NUM_1"]) if btn else False
 
 
 def read_log(path):

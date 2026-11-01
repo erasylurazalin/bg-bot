@@ -1,0 +1,1662 @@
+{
+ "source": "Hearthstone_2026_10_28_19_47_59",
+ "game": 2,
+ "hero": {
+  "card_id": "TB_BaconShop_HERO_57",
+  "name": "Nozdormu"
+ },
+ "tribes": [
+  "demon",
+  "dragon",
+  "elemental",
+  "mech",
+  "murloc",
+  "quilboar",
+  "undead"
+ ],
+ "unread": {},
+ "turns": [
+  {
+   "turn": 3,
+   "start": {
+    "board": [],
+    "hand": [
+     {
+      "id": 411,
+      "index": 1,
+      "card_id": "BG32_330",
+      "name": "Flighty Scout",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion"
+     }
+    ],
+    "tavern": [
+     {
+      "id": 1146,
+      "slot": 1,
+      "card_id": "BG31_816",
+      "name": "Fire Baller",
+      "attack": 4,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       0,
+       0,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1148,
+      "slot": 2,
+      "card_id": "BG31_815",
+      "name": "Dune Dweller",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       1,
+       0,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1150,
+      "slot": 3,
+      "card_id": "BG26_174",
+      "name": "Soul Rewinder",
+      "attack": 4,
+      "health": 2,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       0,
+       0,
+       2,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1152,
+      "slot": 4,
+      "card_id": "BG35_150",
+      "name": "Laboratory Assistant",
+      "attack": 3,
+      "health": 4,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       3,
+       0,
+       0,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1155,
+      "slot": 5,
+      "card_id": "BG28_966",
+      "name": "Them Apples",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       2,
+       0,
+       0
+      ],
+      "kind": "spell",
+      "cost": 1,
+      "frozen": false
+     }
+    ],
+    "hand_hidden": 0,
+    "gold": 5,
+    "gold_max": 5,
+    "tier": 2,
+    "upgrade_cost": 6,
+    "health": 30,
+    "armor": 10,
+    "hero_powers": [
+     {
+      "card_id": "TB_BaconShop_HP_063",
+      "name": "Clairvoyance",
+      "numbers": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "cost": 0,
+      "used_this_turn": 0,
+      "waiting": null
+     }
+    ],
+    "trinkets": [],
+    "free_refreshes": 3,
+    "frozen": false,
+    "counters": {
+     "gold_spent": 7
+    },
+    "secrets": [],
+    "won_last_combat": null
+   },
+   "actions": [
+    {
+     "step": "dark_discovery",
+     "option": 2,
+     "paid": {
+      "gold": 3,
+      "health": 0
+     },
+     "cost": 3,
+     "after": {
+      "board": [],
+      "hand": [
+       {
+        "id": 411,
+        "index": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1146,
+        "slot": 1,
+        "card_id": "BG31_816",
+        "name": "Fire Baller",
+        "attack": 4,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         0,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1148,
+        "slot": 2,
+        "card_id": "BG31_815",
+        "name": "Dune Dweller",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         1,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1150,
+        "slot": 3,
+        "card_id": "BG26_174",
+        "name": "Soul Rewinder",
+        "attack": 4,
+        "health": 2,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         0,
+         0,
+         2,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1152,
+        "slot": 4,
+        "card_id": "BG35_150",
+        "name": "Laboratory Assistant",
+        "attack": 3,
+        "health": 4,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         3,
+         0,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1155,
+        "slot": 5,
+        "card_id": "BG28_966",
+        "name": "Them Apples",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         2,
+         0,
+         0
+        ],
+        "kind": "spell",
+        "cost": 1,
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 2,
+      "gold_max": 5,
+      "tier": 2,
+      "upgrade_cost": 6,
+      "health": 30,
+      "armor": 10,
+      "hero_powers": [
+       {
+        "card_id": "TB_BaconShop_HP_063",
+        "name": "Clairvoyance",
+        "numbers": [
+         0,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 3,
+      "frozen": false,
+      "counters": {
+       "gold_spent": 10
+      },
+      "secrets": [],
+      "won_last_combat": null
+     }
+    },
+    {
+     "step": "discover",
+     "source": {
+      "id": 1179,
+      "card_id": "BG36_MidGameEffect_010",
+      "name": "Battlegrounds Dark Gift [DNT]"
+     },
+     "options": [
+      {
+       "id": 1180,
+       "card_id": "BG26_174",
+       "name": "Soul Rewinder",
+       "dark_gifts": [
+        {
+         "card_id": "BG36_MidGameEffect_000t74",
+         "name": "Sharpened Sword"
+        }
+       ],
+       "attack": 4,
+       "health": 2,
+       "golden": false,
+       "keywords": [],
+       "numbers": [
+        0,
+        0,
+        2,
+        0
+       ]
+      },
+      {
+       "id": 1181,
+       "card_id": "BG29_300",
+       "name": "Very Hungry Winterfinner",
+       "dark_gifts": [
+        {
+         "card_id": "BG36_MidGameEffect_000t82",
+         "name": "Affinity"
+        }
+       ],
+       "attack": 2,
+       "health": 6,
+       "golden": false,
+       "keywords": [
+        "TAUNT"
+       ]
+      },
+      {
+       "id": 1182,
+       "card_id": "BG31_177",
+       "name": "Mechagnome Interpreter",
+       "dark_gifts": [
+        {
+         "card_id": "BG36_MidGameEffect_000t13",
+         "name": "Harpy's Talons"
+        }
+       ],
+       "attack": 3,
+       "health": 1,
+       "golden": false,
+       "keywords": [
+        "DIVINE_SHIELD",
+        "WINDFURY"
+       ],
+       "numbers": [
+        3,
+        1,
+        0,
+        0
+       ]
+      }
+     ],
+     "kind": "dark_gift",
+     "paid": {
+      "gold": 0,
+      "health": 0
+     },
+     "after": {
+      "board": [],
+      "hand": [
+       {
+        "id": 411,
+        "index": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion"
+       },
+       {
+        "id": 1181,
+        "index": 2,
+        "card_id": "BG29_300",
+        "name": "Very Hungry Winterfinner",
+        "attack": 2,
+        "health": 6,
+        "golden": false,
+        "keywords": [
+         "TAUNT"
+        ],
+        "dark_gifts": [
+         {
+          "card_id": "BG36_MidGameEffect_000t82",
+          "name": "Affinity"
+         }
+        ],
+        "from": {
+         "card_id": "BG36_MidGameEffect_010",
+         "name": "Battlegrounds Dark Gift [DNT]"
+        },
+        "kind": "minion"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1146,
+        "slot": 1,
+        "card_id": "BG31_816",
+        "name": "Fire Baller",
+        "attack": 4,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         0,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1148,
+        "slot": 2,
+        "card_id": "BG31_815",
+        "name": "Dune Dweller",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         1,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1150,
+        "slot": 3,
+        "card_id": "BG26_174",
+        "name": "Soul Rewinder",
+        "attack": 4,
+        "health": 2,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         0,
+         0,
+         2,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1152,
+        "slot": 4,
+        "card_id": "BG35_150",
+        "name": "Laboratory Assistant",
+        "attack": 3,
+        "health": 4,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         3,
+         0,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1155,
+        "slot": 5,
+        "card_id": "BG28_966",
+        "name": "Them Apples",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         2,
+         0,
+         0
+        ],
+        "kind": "spell",
+        "cost": 1,
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 2,
+      "gold_max": 5,
+      "tier": 2,
+      "upgrade_cost": 6,
+      "health": 30,
+      "armor": 10,
+      "hero_powers": [
+       {
+        "card_id": "TB_BaconShop_HP_063",
+        "name": "Clairvoyance",
+        "numbers": [
+         0,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 3,
+      "frozen": false,
+      "counters": {
+       "gold_spent": 10
+      },
+      "secrets": [],
+      "won_last_combat": null
+     },
+     "picked": {
+      "id": 1181,
+      "card_id": "BG29_300",
+      "name": "Very Hungry Winterfinner",
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t82",
+        "name": "Affinity"
+       }
+      ],
+      "attack": 2,
+      "health": 6,
+      "golden": false,
+      "keywords": [
+       "TAUNT"
+      ]
+     },
+     "moved": {
+      "id": 1181,
+      "from": {
+       "where": "offer"
+      },
+      "to": {
+       "where": "hand",
+       "index": 2
+      }
+     }
+    },
+    {
+     "step": "play",
+     "target": null,
+     "option": 2,
+     "paid": {
+      "gold": 0,
+      "health": 0
+     },
+     "index": 2,
+     "card": {
+      "id": 1181,
+      "card_id": "BG29_300",
+      "name": "Very Hungry Winterfinner",
+      "attack": 2,
+      "health": 6,
+      "golden": false,
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t82",
+        "name": "Affinity"
+       }
+      ]
+     },
+     "after": {
+      "board": [
+       {
+        "id": 1181,
+        "position": 1,
+        "card_id": "BG29_300",
+        "name": "Very Hungry Winterfinner",
+        "attack": 2,
+        "health": 6,
+        "golden": false,
+        "keywords": [
+         "TAUNT"
+        ],
+        "dark_gifts": [
+         {
+          "card_id": "BG36_MidGameEffect_000t82",
+          "name": "Affinity"
+         }
+        ],
+        "from": {
+         "card_id": "BG36_MidGameEffect_010",
+         "name": "Battlegrounds Dark Gift [DNT]"
+        }
+       }
+      ],
+      "hand": [
+       {
+        "id": 411,
+        "index": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1146,
+        "slot": 1,
+        "card_id": "BG31_816",
+        "name": "Fire Baller",
+        "attack": 4,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         0,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1148,
+        "slot": 2,
+        "card_id": "BG31_815",
+        "name": "Dune Dweller",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         1,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1150,
+        "slot": 3,
+        "card_id": "BG26_174",
+        "name": "Soul Rewinder",
+        "attack": 4,
+        "health": 2,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         0,
+         0,
+         2,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1152,
+        "slot": 4,
+        "card_id": "BG35_150",
+        "name": "Laboratory Assistant",
+        "attack": 3,
+        "health": 4,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         3,
+         0,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1155,
+        "slot": 5,
+        "card_id": "BG28_966",
+        "name": "Them Apples",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         2,
+         0,
+         0
+        ],
+        "kind": "spell",
+        "cost": 1,
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 2,
+      "gold_max": 5,
+      "tier": 2,
+      "upgrade_cost": 6,
+      "health": 30,
+      "armor": 10,
+      "hero_powers": [
+       {
+        "card_id": "TB_BaconShop_HP_063",
+        "name": "Clairvoyance",
+        "numbers": [
+         0,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 3,
+      "frozen": false,
+      "counters": {
+       "gold_spent": 10
+      },
+      "secrets": [],
+      "won_last_combat": null
+     },
+     "moved": {
+      "id": 1181,
+      "from": {
+       "where": "hand",
+       "index": 2
+      },
+      "to": {
+       "where": "board",
+       "position": 1
+      }
+     }
+    },
+    {
+     "step": "roll",
+     "option": 2,
+     "paid": {
+      "gold": 0,
+      "health": 0
+     },
+     "free": 3,
+     "after": {
+      "board": [
+       {
+        "id": 1181,
+        "position": 1,
+        "card_id": "BG29_300",
+        "name": "Very Hungry Winterfinner",
+        "attack": 2,
+        "health": 6,
+        "golden": false,
+        "keywords": [
+         "TAUNT"
+        ],
+        "dark_gifts": [
+         {
+          "card_id": "BG36_MidGameEffect_000t82",
+          "name": "Affinity"
+         }
+        ],
+        "from": {
+         "card_id": "BG36_MidGameEffect_010",
+         "name": "Battlegrounds Dark Gift [DNT]"
+        }
+       }
+      ],
+      "hand": [
+       {
+        "id": 411,
+        "index": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1243,
+        "slot": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1242,
+        "slot": 2,
+        "card_id": "BG31_149",
+        "name": "Bubble Gunner",
+        "attack": 2,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1239,
+        "slot": 3,
+        "card_id": "BG31_320",
+        "name": "Crater Miner",
+        "attack": 2,
+        "health": 2,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         2,
+         0,
+         0,
+         0
+        ],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1238,
+        "slot": 4,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1237,
+        "slot": 5,
+        "card_id": "BG35_951",
+        "name": "Might of Stormwind",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         2,
+         0,
+         0
+        ],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "spell",
+        "cost": 2,
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 2,
+      "gold_max": 5,
+      "tier": 2,
+      "upgrade_cost": 6,
+      "health": 30,
+      "armor": 10,
+      "hero_powers": [
+       {
+        "card_id": "TB_BaconShop_HP_063",
+        "name": "Clairvoyance",
+        "numbers": [
+         0,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 2,
+      "frozen": false,
+      "counters": {
+       "gold_spent": 10
+      },
+      "secrets": [],
+      "won_last_combat": null
+     },
+     "free_refreshes": {
+      "before": 3,
+      "after": 2
+     },
+     "free_from": [
+      {
+       "card_id": "TB_BaconShop_HP_063",
+       "name": "Clairvoyance"
+      }
+     ],
+     "tavern": [
+      {
+       "id": 1243,
+       "slot": 1,
+       "card_id": "BG32_330",
+       "name": "Flighty Scout",
+       "attack": 3,
+       "health": 3,
+       "golden": false,
+       "keywords": [],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 1242,
+       "slot": 2,
+       "card_id": "BG31_149",
+       "name": "Bubble Gunner",
+       "attack": 2,
+       "health": 3,
+       "golden": false,
+       "keywords": [],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 1239,
+       "slot": 3,
+       "card_id": "BG31_320",
+       "name": "Crater Miner",
+       "attack": 2,
+       "health": 2,
+       "golden": false,
+       "keywords": [],
+       "numbers": [
+        2,
+        0,
+        0,
+        0
+       ],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 1238,
+       "slot": 4,
+       "card_id": "BGS_115",
+       "name": "Sellemental",
+       "attack": 3,
+       "health": 3,
+       "golden": false,
+       "keywords": [],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 1237,
+       "slot": 5,
+       "card_id": "BG35_951",
+       "name": "Might of Stormwind",
+       "attack": 0,
+       "health": 0,
+       "golden": false,
+       "keywords": [],
+       "numbers": [
+        1,
+        2,
+        0,
+        0
+       ],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "spell",
+       "cost": 2,
+       "frozen": false
+      }
+     ]
+    },
+    {
+     "step": "buy",
+     "target": {
+      "id": 1237,
+      "card_id": "BG35_951",
+      "name": "Might of Stormwind",
+      "kind": "slot",
+      "slot": 5
+     },
+     "spell": true,
+     "option": 11,
+     "paid": {
+      "gold": 2,
+      "health": 0
+     },
+     "slot": 5,
+     "card": {
+      "id": 1237,
+      "card_id": "BG35_951",
+      "name": "Might of Stormwind",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "numbers": [
+       1,
+       2,
+       0,
+       0
+      ],
+      "cost": 2
+     },
+     "cost": 2,
+     "after": {
+      "board": [
+       {
+        "id": 1181,
+        "position": 1,
+        "card_id": "BG29_300",
+        "name": "Very Hungry Winterfinner",
+        "attack": 2,
+        "health": 6,
+        "golden": false,
+        "keywords": [
+         "TAUNT"
+        ],
+        "dark_gifts": [
+         {
+          "card_id": "BG36_MidGameEffect_000t82",
+          "name": "Affinity"
+         }
+        ],
+        "from": {
+         "card_id": "BG36_MidGameEffect_010",
+         "name": "Battlegrounds Dark Gift [DNT]"
+        }
+       }
+      ],
+      "hand": [
+       {
+        "id": 411,
+        "index": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion"
+       },
+       {
+        "id": 1237,
+        "index": 2,
+        "card_id": "BG35_951",
+        "name": "Might of Stormwind",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         2,
+         0,
+         0
+        ],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "spell"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1243,
+        "slot": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1242,
+        "slot": 2,
+        "card_id": "BG31_149",
+        "name": "Bubble Gunner",
+        "attack": 2,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1239,
+        "slot": 3,
+        "card_id": "BG31_320",
+        "name": "Crater Miner",
+        "attack": 2,
+        "health": 2,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         2,
+         0,
+         0,
+         0
+        ],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1238,
+        "slot": 4,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 0,
+      "gold_max": 5,
+      "tier": 2,
+      "upgrade_cost": 6,
+      "health": 30,
+      "armor": 10,
+      "hero_powers": [
+       {
+        "card_id": "TB_BaconShop_HP_063",
+        "name": "Clairvoyance",
+        "numbers": [
+         0,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 2,
+      "frozen": false,
+      "counters": {
+       "gold_spent": 12
+      },
+      "secrets": [],
+      "won_last_combat": null
+     },
+     "moved": {
+      "id": 1237,
+      "from": {
+       "where": "tavern",
+       "slot": 5
+      },
+      "to": {
+       "where": "hand",
+       "index": 2
+      }
+     },
+     "tavern": [
+      {
+       "id": 1243,
+       "slot": 1,
+       "card_id": "BG32_330",
+       "name": "Flighty Scout",
+       "attack": 3,
+       "health": 3,
+       "golden": false,
+       "keywords": [],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 1242,
+       "slot": 2,
+       "card_id": "BG31_149",
+       "name": "Bubble Gunner",
+       "attack": 2,
+       "health": 3,
+       "golden": false,
+       "keywords": [],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 1239,
+       "slot": 3,
+       "card_id": "BG31_320",
+       "name": "Crater Miner",
+       "attack": 2,
+       "health": 2,
+       "golden": false,
+       "keywords": [],
+       "numbers": [
+        2,
+        0,
+        0,
+        0
+       ],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 1238,
+       "slot": 4,
+       "card_id": "BGS_115",
+       "name": "Sellemental",
+       "attack": 3,
+       "health": 3,
+       "golden": false,
+       "keywords": [],
+       "from": {
+        "card_id": "TB_BaconShop_8p_Reroll_Button",
+        "name": "Refresh"
+       },
+       "kind": "minion",
+       "frozen": false
+      }
+     ]
+    },
+    {
+     "step": "end_turn",
+     "paid": {
+      "gold": 0,
+      "health": 0
+     },
+     "after": {
+      "board": [
+       {
+        "id": 1181,
+        "position": 1,
+        "card_id": "BG29_300",
+        "name": "Very Hungry Winterfinner",
+        "attack": 2,
+        "health": 6,
+        "golden": false,
+        "keywords": [
+         "TAUNT"
+        ],
+        "dark_gifts": [
+         {
+          "card_id": "BG36_MidGameEffect_000t82",
+          "name": "Affinity"
+         }
+        ],
+        "from": {
+         "card_id": "BG36_MidGameEffect_010",
+         "name": "Battlegrounds Dark Gift [DNT]"
+        }
+       }
+      ],
+      "hand": [
+       {
+        "id": 411,
+        "index": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion"
+       },
+       {
+        "id": 1237,
+        "index": 2,
+        "card_id": "BG35_951",
+        "name": "Might of Stormwind",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         2,
+         0,
+         0
+        ],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "spell"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 1243,
+        "slot": 1,
+        "card_id": "BG32_330",
+        "name": "Flighty Scout",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1242,
+        "slot": 2,
+        "card_id": "BG31_149",
+        "name": "Bubble Gunner",
+        "attack": 2,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1239,
+        "slot": 3,
+        "card_id": "BG31_320",
+        "name": "Crater Miner",
+        "attack": 2,
+        "health": 2,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         2,
+         0,
+         0,
+         0
+        ],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 1238,
+        "slot": 4,
+        "card_id": "BGS_115",
+        "name": "Sellemental",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_8p_Reroll_Button",
+         "name": "Refresh"
+        },
+        "kind": "minion",
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 0,
+      "gold_max": 5,
+      "tier": 2,
+      "upgrade_cost": 6,
+      "health": 30,
+      "armor": 10,
+      "hero_powers": [
+       {
+        "card_id": "TB_BaconShop_HP_063",
+        "name": "Clairvoyance",
+        "numbers": [
+         0,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       }
+      ],
+      "trinkets": [],
+      "free_refreshes": 2,
+      "frozen": false,
+      "counters": {
+       "gold_spent": 12
+      },
+      "secrets": [],
+      "won_last_combat": null
+     }
+    }
+   ],
+   "end": {
+    "board": [
+     {
+      "id": 1181,
+      "position": 1,
+      "card_id": "BG29_300",
+      "name": "Very Hungry Winterfinner",
+      "attack": 2,
+      "health": 6,
+      "golden": false,
+      "keywords": [
+       "TAUNT"
+      ],
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t82",
+        "name": "Affinity"
+       }
+      ],
+      "from": {
+       "card_id": "BG36_MidGameEffect_010",
+       "name": "Battlegrounds Dark Gift [DNT]"
+      }
+     }
+    ],
+    "hand": [
+     {
+      "id": 411,
+      "index": 1,
+      "card_id": "BG32_330",
+      "name": "Flighty Scout",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion"
+     },
+     {
+      "id": 1237,
+      "index": 2,
+      "card_id": "BG35_951",
+      "name": "Might of Stormwind",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       2,
+       0,
+       0
+      ],
+      "from": {
+       "card_id": "TB_BaconShop_8p_Reroll_Button",
+       "name": "Refresh"
+      },
+      "kind": "spell"
+     }
+    ],
+    "tavern": [
+     {
+      "id": 1243,
+      "slot": 1,
+      "card_id": "BG32_330",
+      "name": "Flighty Scout",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_8p_Reroll_Button",
+       "name": "Refresh"
+      },
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1242,
+      "slot": 2,
+      "card_id": "BG31_149",
+      "name": "Bubble Gunner",
+      "attack": 2,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_8p_Reroll_Button",
+       "name": "Refresh"
+      },
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1239,
+      "slot": 3,
+      "card_id": "BG31_320",
+      "name": "Crater Miner",
+      "attack": 2,
+      "health": 2,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       2,
+       0,
+       0,
+       0
+      ],
+      "from": {
+       "card_id": "TB_BaconShop_8p_Reroll_Button",
+       "name": "Refresh"
+      },
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 1238,
+      "slot": 4,
+      "card_id": "BGS_115",
+      "name": "Sellemental",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_8p_Reroll_Button",
+       "name": "Refresh"
+      },
+      "kind": "minion",
+      "frozen": false
+     }
+    ],
+    "hand_hidden": 0,
+    "gold": 0,
+    "gold_max": 5,
+    "tier": 2,
+    "upgrade_cost": 6,
+    "health": 30,
+    "armor": 10,
+    "hero_powers": [
+     {
+      "card_id": "TB_BaconShop_HP_063",
+      "name": "Clairvoyance",
+      "numbers": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "cost": 0,
+      "used_this_turn": 0,
+      "waiting": null
+     }
+    ],
+    "trinkets": [],
+    "free_refreshes": 2,
+    "frozen": false,
+    "counters": {
+     "gold_spent": 12
+    },
+    "secrets": [],
+    "won_last_combat": null
+   }
+  }
+ ]
+}

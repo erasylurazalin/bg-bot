@@ -4,8 +4,11 @@ many turns add up.
     ~/projects/bg/.venv/bin/python tools/check_actions.py [--verbose] [PATTERN]
 
 Each file holds one game and, per turn, the state I started with, every step I
-took and the state I ended with (docs/real-boards.md, "The action file"). Two
-things are checked for every turn, with nothing from our engine:
+took and the state I ended with (docs/real-boards.md, "The action file"). The
+newer keys (a step's `after`, the player-level `counters`, `secrets`, a power's
+`waiting`, a minion's `reanimate`, the game's `tribes`) are for the shop replay
+and are not read here: this checker still adds up Gold, Health and the cards,
+with nothing from our engine. Two things are checked for every turn:
 
 - **The Gold.** What every step took (`paid.gold`, plus any Gold the game took
   with no step of mine, `late_gold`) and gave back (a sell), against the Gold

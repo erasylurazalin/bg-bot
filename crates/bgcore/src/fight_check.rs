@@ -19,7 +19,7 @@ use crate::game::Player;
 use crate::heroes::PowerEffect;
 use crate::minion::Minion;
 use crate::real_boards::{
-    RealBoard, RealBoardSpec, RealFightSpec, RealResult, STAND_IN,
+    RealBoard, RealBoardSpec, RealFightSpec, RealPowerSpec, RealResult, RealTrinketSpec, STAND_IN,
 };
 use crate::rng::Rng;
 use crate::trinkets::{FightAct, Trinket};
@@ -129,6 +129,142 @@ fn trinket_value(t: &Trinket, numbers: &[i32]) -> u8 {
     0
 }
 
+/// How a side's hero power is seated, for the two checks that load a real
+/// state: the fight check plays a power whose fight effect only runs when it
+/// was pressed as pressed, and a card that lives on the player's state (the
+/// hero power's own numbers) comes from the file. The shop replay reads the
+/// log's uses left on the power instead, and presses nothing.
+pub struct SeatMode {
+    /// The turn the state belongs to (a power unlocks by turn and tier).
+    pub turn: u32,
+    /// The presses the log says are left this turn, when it says.
+    pub uses_left: Option<u8>,
+    /// Whether a power that only fires when pressed counts as pressed.
+    pub armed: bool,
+}
+
+impl SeatMode {
+    /// The fight check's: the power is played as pressed.
+    pub fn fight(turn: u32) -> SeatMode {
+        SeatMode { turn, uses_left: None, armed: true }
+    }
+}
+
+/// Give the player the hero power the file names, with its numbers, the
+/// minion it still owes the board and Ozumat's Tentacle size. What the engine
+/// does not build comes back as a line saying so.
+pub fn seat_power(
+    data: &Data,
+    pl: &mut Player,
+    spec_power: &RealPowerSpec,
+    secrets: Option<&Vec<String>>,
+    mode: &SeatMode,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+    let Some(i) = data.heroes.power_by_card_id(&spec_power.card_id) else {
+        missing.push(format!(
+            "hero power not built: {} ({})",
+            spec_power.name, spec_power.card_id
+        ));
+        return missing;
+    };
+    let effect = data.heroes.power(i).effect;
+    let progress = power_progress(effect, &spec_power.numbers);
+    match mode.uses_left {
+        Some(left) => pl.hold_power_uses(data, i, progress, mode.turn, left, mode.armed),
+        None => pl.hold_power(data, i, progress, mode.turn),
+    }
+    // A Secret is in the player's Secret zone, not on a board, and the power
+    // that fills it is the only reason a check needs the zone. A file without
+    // the key cannot say what was up; an empty list says there was nothing.
+    if effect == PowerEffect::DiscoverSecret && secrets.is_none() {
+        missing.push("Secrets not in the file: Prestidigitation (the Secret zone)".to_string());
+    }
+    // Ozumat's Tentacles carry the game's sales in the power's own number, and
+    // the fight (and the shop's sale) adds them to the Tentacle it summons.
+    if let PowerEffect::Tentacular { card } = effect {
+        match tentacle_sold(&data.cards, card, &spec_power.numbers) {
+            Some(sold) => pl.counts.minions_sold = sold,
+            None => missing.push(
+                "the hero power's numbers not in the file: Ozumat's Tentacle size".to_string(),
+            ),
+        }
+    }
+    // Lock and Load's minion comes into the fight as soon as there is space,
+    // and attacks at once; in the shop phase the power keeps it until then.
+    if effect == PowerEffect::LockAndLoad {
+        match &spec_power.waiting {
+            Some(waiting_spec) => {
+                let (m, _) = RealBoard::build_minion(
+                    waiting_spec,
+                    mode.turn,
+                    &data.cards,
+                    &data.gifts,
+                );
+                pl.locked_and_loaded = Some(m);
+            }
+            None if !spec_power.waiting_known => missing.push(
+                "the minion locked in hand not in the file: Tavish's Lock and Load adds nothing"
+                    .to_string(),
+            ),
+            // Known and empty: the power owes nothing, so it adds nothing,
+            // exactly as in the game.
+            None => {}
+        }
+    }
+    missing
+}
+
+/// The Secret zone: the engine reads it off the player, in the order the
+/// Secrets were got, which is the order they fire in. A file without the key
+/// says nothing and adds nothing here (`seat_power` reports it).
+pub fn seat_secrets(pl: &mut Player, secrets: Option<&Vec<String>>) -> Vec<String> {
+    let mut missing = Vec::new();
+    let Some(secret_cards) = secrets else { return missing };
+    for card_id in secret_cards {
+        match secret_kind(card_id) {
+            Some(kind) => {
+                pl.secrets.add(kind);
+            }
+            None => missing.push(format!("Secret not modelled: {card_id}")),
+        }
+    }
+    missing
+}
+
+/// The trinkets a side's file carries, in the slots it marks. The engine has
+/// three: lesser, greater, and the slot a hero power turned into a trinket
+/// fills. A board with two lesser trinkets (a game that handed out an extra
+/// one) puts the second in that third slot, which no fight effect can tell
+/// apart.
+pub fn seat_trinkets(data: &Data, pl: &mut Player, trinkets: &[RealTrinketSpec]) -> Vec<String> {
+    let mut missing = Vec::new();
+    let mut slot = 0usize;
+    for spec_trinket in trinkets {
+        let want = if slot == 0 && !spec_trinket.greater {
+            0
+        } else if slot <= 1 && spec_trinket.greater {
+            1
+        } else {
+            2
+        };
+        slot = want + 1;
+        match data.trinkets.by_card_id(&spec_trinket.card_id) {
+            Some(i) => pl.hold_trinket(
+                data,
+                want,
+                i,
+                trinket_value(data.trinkets.get(i), &spec_trinket.numbers),
+            ),
+            None => missing.push(format!(
+                "trinket not built: {} ({})",
+                spec_trinket.name, spec_trinket.card_id
+            )),
+        }
+    }
+    missing
+}
+
 /// Seat one side of a real fight: `RealBoard::build_one` makes the board, a
 /// `Player` takes it as a real seat does, and this adds the hero power, the
 /// trinkets and the quest rewards, which need the hero and trinket tables.
@@ -163,94 +299,11 @@ fn prepare_side(data: &Data, spec: &RealBoardSpec, side: usize, p: &mut Prepared
         }
     }
     if let Some(spec_power) = &spec.power {
-        match data.heroes.power_by_card_id(&spec_power.card_id) {
-            Some(i) => {
-                let effect = data.heroes.power(i).effect;
-                pl.hold_power(data, i, power_progress(effect, &spec_power.numbers), spec.turn);
-                // A Secret is in the player's Secret zone, not on a board, and
-                // the power that fills it is the only reason a fight needs the
-                // zone. A file without the key cannot say what was up; an
-                // empty list says there was nothing.
-                if effect == PowerEffect::DiscoverSecret && spec.secrets.is_none() {
-                    p.missing[side].push(
-                        "Secrets not in the file: Prestidigitation (the Secret zone)".to_string(),
-                    );
-                }
-                // Ozumat's Tentacles carry the game's sales in the power's own
-                // number, and the fight adds them to the Tentacle it summons.
-                if let PowerEffect::Tentacular { card } = effect {
-                    match tentacle_sold(&data.cards, card, &spec_power.numbers) {
-                        Some(sold) => pl.counts.minions_sold = sold,
-                        None => p.missing[side].push(
-                            "the hero power's numbers not in the file: Ozumat's Tentacle size"
-                                .to_string(),
-                        ),
-                    }
-                }
-                // Lock and Load's minion comes into the fight as soon as there
-                // is space, and attacks at once.
-                if effect == PowerEffect::LockAndLoad {
-                    match &spec_power.waiting {
-                        Some(waiting_spec) => {
-                            let (m, _) = RealBoard::build_minion(
-                                waiting_spec,
-                                spec.turn,
-                                &data.cards,
-                                &data.gifts,
-                            );
-                            pl.locked_and_loaded = Some(m);
-                        }
-                        None if !spec_power.waiting_known => p.missing[side].push(
-                            "the minion locked in hand not in the file: Tavish's Lock and Load \
-                             adds nothing"
-                                .to_string(),
-                        ),
-                        // Known and empty: the power owes nothing this fight, so
-                        // it adds nothing, exactly as in the game.
-                        None => {}
-                    }
-                }
-            }
-            None => p.missing[side].push(format!(
-                "hero power not built: {} ({})",
-                spec_power.name, spec_power.card_id
-            )),
-        }
+        let hit = seat_power(data, &mut pl, spec_power, spec.secrets.as_ref(), &SeatMode::fight(spec.turn));
+        p.missing[side].extend(hit);
     }
-    // The Secret zone: the engine reads it off the player, in the order the
-    // Secrets were got, which is the order they fire in.
-    if let Some(secret_cards) = &spec.secrets {
-        for card_id in secret_cards {
-            match secret_kind(card_id) {
-                Some(kind) => {
-                    pl.secrets.add(kind);
-                }
-                None => p.missing[side].push(format!("Secret not modelled: {card_id}")),
-            }
-        }
-    }
-    // The file marks each trinket's slot. The engine has three: lesser,
-    // greater, and the slot a hero power turned into a trinket fills. A board
-    // with two lesser trinkets (a game that handed out an extra one) puts the
-    // second in that third slot, which no fight effect can tell apart.
-    let mut slot = 0usize;
-    for spec_trinket in &spec.trinkets {
-        let want = if slot == 0 && !spec_trinket.greater {
-            0
-        } else if slot <= 1 && spec_trinket.greater {
-            1
-        } else {
-            2
-        };
-        slot = want + 1;
-        match data.trinkets.by_card_id(&spec_trinket.card_id) {
-            Some(i) => pl.hold_trinket(data, want, i, trinket_value(data.trinkets.get(i), &spec_trinket.numbers)),
-            None => p.missing[side].push(format!(
-                "trinket not built: {} ({})",
-                spec_trinket.name, spec_trinket.card_id
-            )),
-        }
-    }
+    p.missing[side].extend(seat_secrets(&mut pl, spec.secrets.as_ref()));
+    p.missing[side].extend(seat_trinkets(data, &mut pl, &spec.trinkets));
     for reward in &spec.rewards {
         p.missing[side].push(format!(
             "quest reward not modelled: {} ({})",

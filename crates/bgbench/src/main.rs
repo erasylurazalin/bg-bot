@@ -555,6 +555,96 @@ fn fight_check(boards: &str, runs: u32, out: &str, flag_below: f64) {
     println!("wrote {out}/fights.tsv, {out}/cards.tsv, {out}/report.md");
 }
 
+/// `bgbench shopreplay`: replay every step of Era's real shop phases from the
+/// logged state before it, on every core, and write `steps.tsv`,
+/// `shop-cards.tsv` and `shop-report.md` (docs/real-boards.md "The shop
+/// replay"). Nothing is fixed here: the output says which steps the engine
+/// does not reproduce.
+fn shop_replay(dir: &str, seeds: u32, out: &str, card: Option<&str>) {
+    let t = Instant::now();
+    let files = read_board_files(dir).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    let ids = CardIdMap::parse(
+        &std::fs::read_to_string("ref/bg-cards.json")
+            .unwrap_or_else(|e| panic!("ref/bg-cards.json (the card id mapping): {e}")),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    let specs = bgcore::shop_replay::parse_action_files(&files).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    let data = Arc::new(Data::bundled());
+    let opts = bgcore::shop_replay::ReplayOptions { seeds: seeds.max(1), seed: 1 };
+    let turns: Vec<(&bgcore::shop_replay::ShopFileSpec, &bgcore::shop_replay::ShopTurnSpec)> =
+        specs.iter().flat_map(|f| f.turns.iter().map(move |t| (f, t))).collect();
+    let mut results: Vec<Vec<bgcore::shop_replay::StepResult>> = turns
+        .par_iter()
+        .map(|(f, turn)| bgcore::shop_replay::replay_turn(&data, &ids, f, turn, &opts, card))
+        .collect();
+    let mut report = bgcore::shop_replay::ShopReplayReport {
+        files: specs.len(),
+        turns: turns.len(),
+        ..Default::default()
+    };
+    for mut steps in results.drain(..) {
+        report.entries.append(&mut steps);
+    }
+    for f in &specs {
+        for u in bgcore::shop_replay::unknown_minions(&data, &f.turns.first().map(|t| t.start.clone()).unwrap_or_default()) {
+            if !report.unknown.contains(&u) {
+                report.unknown.push(u);
+            }
+        }
+    }
+    let el = t.elapsed();
+    std::fs::create_dir_all(out).unwrap_or_else(|e| panic!("{out}: {e}"));
+    for (name, text) in [
+        ("steps.tsv", report.steps_tsv()),
+        ("shop-cards.tsv", report.cards_tsv(&data)),
+        ("shop-report.md", report.report_md(&data)),
+    ] {
+        let path = format!("{out}/{name}");
+        std::fs::write(&path, text).unwrap_or_else(|e| panic!("{path}: {e}"));
+    }
+    let steps = report.steps();
+    let deterministic = report.deterministic();
+    println!(
+        "{} games, {} turns, {steps} steps replayed ({} deterministic, {} random)",
+        report.files,
+        report.turns,
+        deterministic,
+        steps - deterministic
+    );
+    let counts: Vec<String> = report
+        .verdict_counts()
+        .into_iter()
+        .filter(|(_, n)| *n > 0)
+        .map(|(name, n)| format!("{name} {n}"))
+        .collect();
+    println!("{}", counts.join(", "));
+    if let Some(card) = card {
+        println!("limited to steps involving {card}");
+    }
+    println!("the 20 most suspicious cards (flagged / steps):");
+    for t in report.pieces(&data).iter().take(20) {
+        println!(
+            "  {:>4}/{:<4} {:>5.1}%  {} ({})",
+            t.flagged,
+            t.steps,
+            t.ratio() * 100.0,
+            t.name,
+            t.kind
+        );
+    }
+    println!("{el:.1?} on {} cores", rayon::current_num_threads());
+    println!("wrote {out}/steps.tsv, {out}/shop-cards.tsv, {out}/shop-report.md");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let num = |default: u64| args.get(2).and_then(|s| s.parse().ok()).unwrap_or(default);
@@ -606,6 +696,27 @@ fn main() {
             });
             fight_check(&boards, runs.max(1), &out, flag_below);
         }
+        Some("shopreplay") => {
+            let opt = |name: &str, default: &str| {
+                args.iter()
+                    .position(|a| a == name)
+                    .and_then(|k| args.get(k + 1))
+                    .cloned()
+                    .unwrap_or_else(|| default.to_string())
+            };
+            let actions = opt("--actions", "boards/actions");
+            let out = opt("--out", "boards/checks");
+            let seeds: u32 = opt("--seeds", "64").parse().unwrap_or_else(|_| {
+                eprintln!("--seeds needs a number");
+                std::process::exit(2);
+            });
+            let card = args
+                .iter()
+                .position(|a| a == "--card")
+                .and_then(|k| args.get(k + 1))
+                .cloned();
+            shop_replay(&actions, seeds, &out, card.as_deref());
+        }
         Some("games") => bench_games(num(10), real),
         Some("fuzz") => fuzz(num(10_000), real),
         Some("match") => bot_match(num(10_000)),
@@ -614,6 +725,7 @@ fn main() {
             eprintln!(
                 "usage: bgbench fight [n] | games [secs] | fuzz [games] | match [games] | peak [n]\n\
                  \x20      bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]\n\
+                 \x20      bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME]\n\
                  \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N]"
             );
             std::process::exit(2);

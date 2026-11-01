@@ -554,9 +554,30 @@ impl Player {
     /// the file showed, as a power they hold at the first attack.
     pub fn hold_power(&mut self, data: &Data, i: u8, progress: u32, turn: u32) {
         let power = data.heroes.power(i);
+        // A power whose fight effect only runs when it is pressed before the
+        // fight (I'll Take That!, Embrace Your Rage, Rapid Reanimation) is
+        // played as pressed: whoever holds it and can pay for it presses it
+        // before a fight.
+        let armed = power.effect.fires_only_when_pressed();
+        self.hold_power_uses(data, i, progress, turn, power.uses_per_turn, armed);
+    }
+
+    /// `hold_power` with the presses the log says are left this turn, and
+    /// whether a power that only fires when pressed counts as pressed: the
+    /// shop replay reads both off the logged power (`bgbench shopreplay`).
+    pub fn hold_power_uses(
+        &mut self,
+        data: &Data,
+        i: u8,
+        progress: u32,
+        turn: u32,
+        uses_left: u8,
+        armed: bool,
+    ) {
+        let power = data.heroes.power(i);
         self.power = Some(PowerState {
             of: i,
-            uses_left: power.uses_per_turn,
+            uses_left,
             used_game: 0,
             // The same lock the turn start applies (`game/heroes.rs`): a power
             // that unlocks on a later turn or tier does nothing before it.
@@ -564,11 +585,7 @@ impl Player {
             progress,
             last_pick: 0,
             cost_delta: 0,
-            // A power whose fight effect only runs when it is pressed before
-            // the fight (I'll Take That!, Embrace Your Rage, Rapid
-            // Reanimation) is played as pressed: whoever holds it and can pay
-            // for it presses it before a fight.
-            armed: power.effect.fires_only_when_pressed(),
+            armed,
         });
     }
 
@@ -612,6 +629,12 @@ impl Player {
         }
     }
 
+    /// `take_real_counters`, for the shop replay, which seats a logged shop
+    /// state on a player it built itself (`crate::shop_replay`).
+    pub fn take_real_counters_public(&mut self, c: &RealCounters) {
+        self.take_real_counters(c, None);
+    }
+
     /// Give a real seat the numbers and the Deity of the board it just drew,
     /// replacing the ones the last turn's board left: nothing accumulates on
     /// a real seat, and a number the log did not show is the base value
@@ -627,6 +650,28 @@ impl Player {
         self.knight_deaths = c.knight_deaths;
         self.improve = c.improve;
         self.deity = deity;
+        // The numbers only a shop step reads: Gold spent this game, and the
+        // Tavern's "this game" buffs. A fight reads none of them, and a board
+        // file carries none, so this is a no-op for the fight check.
+        self.counts.gold_spent = c.gold_spent;
+        self.refresh_buff = (c.refresh_attack, c.refresh_health);
+        self.barrage = (c.barrage_attack, c.barrage_health);
+        if c.tavern_attack != 0 || c.tavern_health != 0 {
+            self.tavern_buffs.push(TavernBuff {
+                tribe: None,
+                attack: c.tavern_attack,
+                health: c.tavern_health,
+                this_turn: false,
+            });
+        }
+        if c.tavern_elemental_attack != 0 || c.tavern_elemental_health != 0 {
+            self.tavern_buffs.push(TavernBuff {
+                tribe: Some(Tribe::Elemental),
+                attack: c.tavern_elemental_attack,
+                health: c.tavern_elemental_health,
+                this_turn: false,
+            });
+        }
         // A fight's outcome can move these too; they start from the base
         // again. None of them is read without a shop phase.
         self.beast_bonus = (0, 0);

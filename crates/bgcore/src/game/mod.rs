@@ -1958,6 +1958,21 @@ impl Game {
         Ok(())
     }
 
+    /// Recompute the standing rules a hero power or a trinket sets, the way a
+    /// turn start does: the shop replay seats a logged power and logged
+    /// trinkets on a player it built itself (`crate::shop_replay`).
+    pub fn sync_seat_rules(&mut self, p: usize) {
+        self.sync_power_flags(p);
+    }
+
+    /// Run one player's end of turn effects without the fight that follows
+    /// them, which is the state a logged turn ends in: the shop replay
+    /// (`bgbench shopreplay`) compares them. `Action::EndTurn` reaches the
+    /// same code through `step`, and then fights.
+    pub fn shop_end_of_turn(&mut self, p: usize) {
+        self.finish_shop(p);
+    }
+
     fn apply(&mut self, p: usize, a: Action) {
         match a {
             Action::Buy(s) => {

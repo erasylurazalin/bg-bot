@@ -124,9 +124,10 @@ by the game): 566 boards carry counters, 379 a hand, 486 a Deity.
 `tools/collect_actions.py` reads the same logs for the other half of a game:
 what I did in every shop phase, as named steps. It writes
 `boards/actions/<log folder>-g<N>.json`, numbered exactly like `boards/real/`
-(47 games, 548 turns). It keeps its own `.state.json` and skips a log whose
-size has not changed; `--rewrite` reads them all again. A run is about a
-minute. No player names are stored.
+(52 games, 588 turns, about 12,600 steps when this was written; the folders
+grow every 15 minutes). It keeps its own `.state.json` and
+skips a log whose size has not changed; `--rewrite` reads them all again. A run
+is about a minute. No player names are stored.
 
 ```json
 {"source": "Hearthstone_2026_10_24_04_08_00", "game": 1,
@@ -158,7 +159,8 @@ minute. No player names are stored.
            "hand": [{"id": 333, "index": 1, "card_id": "BG26_135",
                      "name": "Southsea Busker", "attack": 3, "health": 1,
                      "golden": false, "keywords": [], "kind": "minion"}],
-           "tavern": [{"...": "..."}]}}]}
+           "tavern": [{"...": "..."}],
+           "counters": {"gold_spent": 7}, "secrets": []}}]}
 ```
 
 - A turn starts at the first decision the game offers me in it, not at the
@@ -177,8 +179,33 @@ minute. No player names are stored.
   their current numbers, cost and uses this turn, `trinkets` are my trinkets.
 - A Tavern spell carries its Gold price as `cost`; a minion has none, because
   the log does not print one (a minion costs 3 Gold by the game's rule).
+- `start`, the `after` of every step and `end` hold the same things, so the
+  replay (below) loads any of them the same way. Beyond the cards and the
+  numbers above they carry the marks and the player-level numbers a step reads:
+  - `counters`, in the board files' keys (`docs/real-boards.md` "The file":
+    Blood Gem size, Beetle and Undead bonuses, the Tavern spell bonus, spells
+    cast, Eternal Knight deaths, Tasty Lobster, Baller) plus the ones only a shop
+    step reads: `gold_spent` (`NUM_RESOURCES_SPENT_THIS_GAME`); the Tavern's
+    "this game" buffs, `tavern_attack`/`tavern_health` (`BG_ShopBuff`, Staff of
+    Enrichment and its kin) and `tavern_elemental_attack`/
+    `tavern_elemental_health` (`BG_ShopBuff_Elemental`, Obsidian Ravager);
+    `refresh_attack`/`refresh_health` (`BG34_854pe`, "after the Tavern is
+    Refreshed this game": Waveling, En-Djinn Blazer, Easterly Winds); and
+    `barrage_attack`/`barrage_health` (`BG34_689e2`, Blood Gem Barrage casts). A
+    key is written only when the log shows a number.
+  - `secrets`, the Secret zone by card id in the order the Secrets were got, as
+    the board files write it (always written, empty when there is nothing).
+  - `waiting` on a hero power: the minion Lock and Load holds, as a board
+    minion, or null (the board files' key).
+  - `reanimate` on a board minion: the Rapid Reanimation mark, as the board
+    files write it.
 - `end` is the state when the turn ended, after the end of turn effects and
-  before the fight (null when the log ends inside the turn).
+  before the fight (null when the log ends inside the turn). It is the same
+  object as the last step's `after`.
+- The game's `tribes` are the tribes the log showed me: every tribe of every
+  minion that sat in my Tavern, my hand or my board. The lobby itself is not in
+  the log, so this is a lower bound on it (a game often has a tribe the Tavern
+  never offered), which a replayed pool can only draw fewer cards from.
 
 Every step says what it was and, where there is one, on which card or slot:
 
@@ -198,7 +225,9 @@ Every step says what it was and, where there is one, on which card or slot:
 | `trinket_pick` | `slot_kind` (lesser or greater), `source`, `options`, `picked` |
 | `end_turn` | nothing: where my End Turn click lands, and where the game's end of turn effects go when they belong to my last step |
 
-- Every step also carries `option` (which of the client's own options I picked,
+- Every step also carries `after`, the whole state the step left (the same
+  shape as `start`), which is what the shop replay loads before the next step
+  and compares this one with. And `option` (which of the client's own options I picked,
   for reading the log), `paid` (the Gold and the Health it actually took, from
   the client's own numbers) and `cost` when the client puts a price on the card
   or button (`buy` of a spell, `roll`, `level`, `hero_power`,
@@ -244,20 +273,21 @@ Every step says what it was and, where there is one, on which card or slot:
 `tools/check_actions.py` reads the files back with nothing from our engine and
 adds every turn up: the Gold the steps took against the Gold the turn started
 and ended with (and Health the same way), and my hand and board at the end
-against the start plus everything the steps moved. On the 47 games it finds
-546 of 548 turns balancing (99.6%); the two that do not are turns the log ends
-inside, before the fight.
+against the start plus everything the steps moved. On the logs read for this
+round it finds 565 of 568 turns balancing (99.5%); the two that do not are
+turns the log ends inside, before the fight.
 
 Every price the client printed that the steps did not pay as printed is named
-by the file, and nothing is left unnamed:
+by the file but one: a free Refresh in one of the new games, which the log
+gives no card for.
 
 | what happened | how many | by |
 |---|---|---|
-| a free reroll from free Refreshes | 541 | Leaf Through the Pages 91, Refreshing Anomaly 77+36 goldens, Sly Infiltrator 51, Underrot Spawn 27, Clairvoyance 21, Decoy Conjurer 20, Eternal Knight 17 and 49 more kinds |
-| a Gold gain inside a step | 262 | Wand of Divination 75, Tavern Coin 51, Wealthy Bounty 34, Snare Trapper 23, Corrupted Coin 22, Hasty Excavation 22, Stuffed Coin Purse 1 and 10 more |
-| a price paid in Health and given back | 60 | Soul Rewinder 51, Ashen Corruptor 9 |
-| a card stolen out of the Tavern | 24 | Decoy Conjurer 17 (+1 golden), Enchanted Lasso 6 |
-| a price paid in Health | 13 | Hasty Excavation |
+| a free reroll from free Refreshes | 551 | Leaf Through the Pages 92, Refreshing Anomaly 77+36 goldens, Sly Infiltrator 51, Underrot Spawn 27, Clairvoyance 21, Decoy Conjurer 20, Amber Guardian 18 and 50 more kinds |
+| a Gold gain inside a step | 267 | Wand of Divination 75, Tavern Coin 52, Wealthy Bounty 34, Hasty Excavation 25, Snare Trapper 23, Corrupted Coin 22 and 16 more |
+| a price paid in Health and given back | 104 | Soul Rewinder 62, Ashen Corruptor 42 |
+| a card stolen out of the Tavern | 25 | Decoy Conjurer 18 (+1 golden), Enchanted Lasso 6 |
+| a price paid in Health | 15 | Hasty Excavation 13, 2 with no card |
 
 ## How the boards are used
 
@@ -386,3 +416,97 @@ the fight draws from every tribe), the shop-phase numbers a fight reads
 (Goldrinn's Beast bonus, Boon of Beetles, Gold spent, minions sold), a trinket
 aura's per-card steps (Hammer of Twilight's discards), and the Ice Block a
 Safety Patch gives (it moves Health between turns, not a fight's result).
+
+## The shop replay
+
+`bgbench shopreplay` covers the other half of a game: every step Era took in a
+shop phase (`boards/actions/*.json`), played through the engine and compared
+with what the real game did. It is a bug finder like the fight check
+(`docs/briefs/shop-replay.md`): it fixes nothing.
+
+```
+./target/release/bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME]
+```
+
+Defaults: `boards/actions`, 64 seeds, `boards/checks` (git-ignored), no card
+filter. It needs no `ref/bg-cards.json`: the file names every card it writes.
+Every step in the folder (52 games, 588 turns, about 12,600 steps when this
+was written) takes about a second on 32 cores.
+
+- **Reset before every step.** Replaying a whole turn would let one early
+  mismatch spoil every later step, and forcing the log's randomness into the
+  engine would need hooks everywhere. So a step is replayed on its own: the
+  engine is loaded from the logged state *before* it (the turn's `start`, else
+  the `after` of the step before), the step is applied, and the result is
+  compared with that step's `after`.
+- **The loader** (`bgcore::shop_replay::load`) is the fight check's, extended:
+  the same `RealBoard::build_one` and `Player::from_real_board` seat the board,
+  the hand and the player-level numbers, then the shop phase's own fields are
+  set (Gold, the Tavern tier and its price, the free Refreshes, the freeze, the
+  hero power and the trinkets, the Secret zone). What it has to get right, and
+  why:
+  - **The hero** is found through a hero power's card id (the log names a hero
+    by its game id, often a skin, which the card set does not use), walking a
+    chooser power's parents back to the one the hero starts with. A state with
+    no power at all is a hero whose passive power has no entity in play, and
+    the player is then seated without a hero.
+  - **The Tavern's spell slot** is the engine's own (`Player.shop_spell`), not
+    a minion slot: the game's spell slot is the last spell in slot order, and
+    putting it in `shop` let a card that picks a random Tavern minion pick the
+    spell. A spell the game put in a minion slot (Saloon's Finest) stays in
+    `shop`, and a buy of the spell slot is `Action::BuySpell`.
+  - **The freeze** is one state on the player (`pl.frozen`) and off the cards,
+    because the engine toggles the player's flag when Freeze is pressed.
+  - **The standing rules** a power or trinket sets are recomputed on the seat
+    (`Game::sync_seat_rules`), or a Tavern dealt by a Refresh would ignore
+    Stay Frosty, Enhancification, Glowing Gauntlet and the like.
+  - **Magnetic** is put back on a loaded card (the board loader drops it, since
+    a fight never reads it), and a Lockbox's turns left are its `{0}`.
+  - A game with one player is a sandbox game, so nothing else acts in it. The
+    pool is the lobby's minus the copies this player holds, so a Refresh draws
+    from what the game had left, and the cards hold those copies so a sale
+    gives them back.
+- **Not compared:** a hero power's presses left (the client's counter moves at
+  whichever of a press's clicks it chooses, and not at all for a chooser), the
+  MAGNETIC keyword (a card property), which card a random buff landed on, and
+  the client's freeze button (the per-card flags say the same thing).
+- **The step to the engine's action:** `buy` slot, `sell` position, `play`
+  index with its target (and a Choose One's `sub_option`), `activate`, `move`,
+  `roll`, `freeze`, `level`, `hero_power` (main or second) with its target,
+  `dark_discovery`, `discover`/`trinket_pick` (the log's options are loaded as
+  the engine's offer, then the same one is picked), `end_turn` (the end of turn
+  effects alone, through `Game::shop_end_of_turn`, without the fight).
+- **Deterministic or random.** Every step is run with `--seeds` seeds. If every
+  seed gives the same state the step is deterministic and is compared exactly.
+  If not, it is random: it passes when one of the states is the log's, or, for
+  a large random space (a Refresh, a random minion out of the pool), when it
+  has the same shape: Gold, Health, armor, the tier and its price, the free
+  Refreshes, how many cards each zone holds, how many of them are spells, and
+  every stat change that landed on a card that was there before and still is.
+  Which card a random buff lands on is not compared.
+- **Incomplete, not flagged.** A step is incomplete when the state or the step
+  involves something the engine does not build (a minion, a hero power, a
+  trinket, a Dark Gift, an option no card set has) or something the log does
+  not say. That is the same rule as the fight check's, and an incomplete step
+  is never flagged.
+- **Outputs** (`boards/checks/`):
+  - `steps.tsv`: one row per step (game, turn, step, kind, card, verdict,
+    deterministic, the first difference);
+  - `shop-cards.tsv`: per card, hero power, trinket and Dark Gift: the steps it
+    was in, the flagged ones and the ratio, most suspicious first;
+  - `shop-report.md`: the summary, the steps by kind, why steps were
+    incomplete, the most common differences grouped by cause, the 30 most
+    suspicious cards, and 30 flagged steps with the state before, the action,
+    the log's result and the engine's.
+- `--card NAME` limits a run to the steps that involve that card (by name or
+  card id), so a later build run can check the cards it touched.
+
+What the replay cannot see, and so cannot blame on the engine: the lobby's real
+tribes (the file's `tribes` are the ones the log showed), the client's own
+prices where a discount is invisible (a Tavern spell's price comes from the
+engine's own rule), a trinket's per-option price at a pick (the file only says
+what the pick paid), and anything that happens between two of Era's decisions
+(the file writes it into the step before).
+
+Measures for the two checks on one machine are comparable: `fightcheck` reads
+a fight, `shopreplay` a step.

@@ -26,6 +26,9 @@ trigger enums), `game/` (shop phase, one file per system, see `docs/ENGINE.md`),
    (docs/real-boards.md "The fight check"); a card whose size comes from a
    number in the log needs its line in `real_boards.rs`'s `improvements`, or
    the check plays it at the wrong size and flags its fights.
+   `./target/release/bgbench shopreplay --card NAME` does the same for the shop
+   phase: every real step the card was in, against the engine (docs/real-boards.md
+   "The shop replay").
 5. Never `cargo fmt` (the repo is not rustfmt-formatted).
 
 The owner's tracker sim `~/projects/bg/bg/engine.py` is a good reference for how a
