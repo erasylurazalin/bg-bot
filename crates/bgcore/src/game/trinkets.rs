@@ -1520,7 +1520,9 @@ impl Game {
         let Some(m) = pl.shop.get(slot) else { return MinionPrice::Gold(self.data.rules.buy_cost) };
         let card = self.data.cards.get(m.card);
         let tp = pl.tp;
-        if tp.free_buys > 0 || (tp.free_tribe_left > 0 && tp.free_tribe.is_some_and(|t| card.tribes.has(t)))
+        if pl.free_minion_left > 0
+            || tp.free_buys > 0
+            || (tp.free_tribe_left > 0 && tp.free_tribe.is_some_and(|t| card.tribes.has(t)))
         {
             return MinionPrice::Gold(0);
         }
@@ -1573,10 +1575,13 @@ impl Game {
     /// Spend the trinket prices a minion buy used up: a free buy's use, a
     /// Health price's use, and the every-Nth-buy counter.
     pub(super) fn note_minion_bought(&mut self, p: usize, price: MinionPrice) {
-        let tp = &mut self.players[p].tp;
+        let pl = &mut self.players[p];
+        let tp = &mut pl.tp;
         match price {
             MinionPrice::Gold(0) => {
-                if tp.free_buys > 0 {
+                if pl.free_minion_left > 0 {
+                    pl.free_minion_left -= 1;
+                } else if tp.free_buys > 0 {
                     tp.free_buys -= 1;
                 } else if tp.free_tribe_left > 0 {
                     tp.free_tribe_left -= 1;

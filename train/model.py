@@ -36,8 +36,12 @@ OWN_END = bgpy.OWN_END
 # more entries than there are heroes: the powers a hero only reaches later).
 N_HERO_IDS = max(bgpy.N_HEROES, bgpy.N_POWERS)
 # Card ids, embedded rather than scaled: the last spell, the card a pending
-# choice names, and the Dark Paradox version in the pool.
-SCALAR_IDS = [bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD, bgpy.SCALAR_PARADOX]
+# choice names, the Dark Paradox version in the pool, the minion stored in
+# Tavish's Lock and Load, and the two minions offered by Murloc Holmes.
+SCALAR_IDS = [
+    bgpy.SCALAR_LAST_SPELL, bgpy.SCALAR_PENDING_CARD, bgpy.SCALAR_PARADOX,
+    bgpy.SCALAR_LOCKED_CARD,
+] + list(range(bgpy.SCALAR_HOLMES_OFFER, bgpy.SCALAR_HOLMES_OFFER + 2))
 # Hero and power ids, embedded with their own table: own hero, the power's
 # hero (the first power and the second one, both indices into the power
 # table), the powers an open Hero Power Discover or chooser offers (so a pick
@@ -69,7 +73,8 @@ SLOT_LOG = [bgpy.SLOT_ATTACK, bgpy.SLOT_HEALTH, bgpy.SLOT_FIGHT_ATTACK, bgpy.SLO
 SCALAR_LOG = [bgpy.SCALAR_DEATHRATTLES, bgpy.SCALAR_KNIGHT_DEATHS, bgpy.SCALAR_DISCARDED,
               bgpy.SCALAR_SPELLS_CAST, bgpy.SCALAR_UNDEAD_ATTACK, bgpy.SCALAR_UNDEAD_HEALTH,
               bgpy.SCALAR_DEITY_ATTACK, bgpy.SCALAR_DEITY_HEALTH, bgpy.SCALAR_LAST_DAMAGE,
-              bgpy.SCALAR_POWER_PROGRESS, bgpy.SCALAR_POWER2_PROGRESS]
+              bgpy.SCALAR_POWER_PROGRESS, bgpy.SCALAR_POWER2_PROGRESS,
+              bgpy.SCALAR_LOCKED_ATTACK, bgpy.SCALAR_LOCKED_HEALTH]
 
 
 def _scales(n, prefix, table):
@@ -115,6 +120,9 @@ SCALAR_SCALE = _scales(bgpy.SCALARS, "SCALAR_", {
     # the handful a counting one needs.
     "POWER_PROGRESS": 10, "POWER_LEFT": 20,
     "POWER2_PROGRESS": 10, "POWER2_LEFT": 20,
+    "CONVICTION_COUNT": 7, "CONVICTION_ATTACK": 10, "CONVICTION_HEALTH": 10,
+    "LOCKED_ATTACK": 10, "LOCKED_HEALTH": 10,
+    (bgpy.SCALAR_WAGER_OFFER, 2): 8, "WAGER_PICK": 8,
     **{(bgpy.SCALAR_CHOOSE_ONE + j * bgpy.CHOOSE_FEATURES + 4, 2): 10 for j in range(2)},
 })
 OPP_SCALE = _scales(bgpy.OPP_SCALARS, "OPP_", {

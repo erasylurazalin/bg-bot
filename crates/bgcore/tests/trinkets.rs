@@ -22,6 +22,13 @@ fn game(seed: u64) -> Game {
     Game::new_with_lobby(data(), seed, all_tribes())
 }
 
+/// Replace a game in place. A `Game` is 128 KB, and a fresh local (or an
+/// assignment's temporary) per test section is a new stack slot in a debug
+/// build: ten of them overflow the 2 MiB a test thread gets.
+fn reset(g: &mut Game, seed: u64) {
+    *g = game(seed);
+}
+
 fn game_lobby(seed: u64, tribes: &[Tribe]) -> Game {
     let lobby = tribes.iter().copied().fold(Tribes::NONE, |m, t| m.with(t));
     Game::new_with_lobby(data(), seed, lobby)
@@ -630,6 +637,10 @@ fn the_start_of_turn_trinkets_hand_out_their_card_each_turn() {
 
 #[test]
 fn the_one_time_gifts_pay_on_the_pick() {
+    // One `Game` is 128 KB and libtest gives a test thread 2 MiB, so the
+    // sections go through `reset`: a `game(seed)` local per gift keeps every
+    // one of them, and a temporary per assignment, alive to the end of the
+    // test, and that overflows the stack in a debug build.
     // Explorer's Binoculars: three random tier 4 minions.
     let mut g = game(11);
     take(&mut g, 0, "Explorer's Binoculars");
@@ -638,30 +649,30 @@ fn the_one_time_gifts_pay_on_the_pick() {
         assert_eq!(g.data.cards.get(m.card).tier, 4);
     }
     // Magician's Top Hat: two each from tiers 1, 2 and 3.
-    let mut g = game(12);
+    reset(&mut g, 12);
     take(&mut g, 0, "Magician's Top Hat");
     assert_eq!(g.players[0].hand.len(), 6);
     // Corrupted Coin Portrait: two Corrupted Coins.
-    let mut g = game(13);
+    reset(&mut g, 13);
     take(&mut g, 0, "Corrupted Coin Portrait");
     assert_eq!(hand_of(&g, 0, "Corrupted Coin"), 2);
     // Great Boar Sticker: three Gems and +2/+1 to every future Gem.
-    let mut g = game(14);
+    reset(&mut g, 14);
     take(&mut g, 0, "Great Boar Sticker");
     assert_eq!(hand_of(&g, 0, "Blood Gem"), 3);
     assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (3, 2));
     // Artisanal Urn: your Undead have +20 Attack, wherever they are.
-    let mut g = game(15);
+    reset(&mut g, 15);
     take(&mut g, 0, "Artisanal Urn");
     assert_eq!(g.players[0].undead_bonus, (20, 0));
     // Bob's Tip Jar: 4 Gold and 4 maximum Gold.
-    let mut g = game(16);
+    reset(&mut g, 16);
     let gold = g.players[0].gold;
     take(&mut g, 0, "Bob's Tip Jar");
     assert_eq!(g.players[0].gold, gold + 4);
     assert_eq!(g.players[0].extra_max_gold, 4);
     // Pagle's Fishing Rod: a random tier 7 minion.
-    let mut g = game(17);
+    reset(&mut g, 17);
     take(&mut g, 0, "Pagle's Fishing Rod");
     assert_eq!(g.players[0].hand.len(), 1);
     assert_eq!(g.data.cards.get(g.players[0].hand[0].card).tier, 7);
@@ -670,12 +681,12 @@ fn the_one_time_gifts_pay_on_the_pick() {
         ("Surprise Portrait", "Elemental of Surprise"),
         ("Beatboxer Portrait", "Polarizing Beatboxer"),
     ] {
-        let mut g = game(18);
+        reset(&mut g, 18);
         take(&mut g, 0, name);
         assert_eq!(hand_of(&g, 0, card), 1, "{name}");
     }
     // Heart of the Forest: +1/+1 for your Tavern spells.
-    let mut g = game(19);
+    reset(&mut g, 19);
     take(&mut g, 0, "Heart of the Forest");
     assert_eq!(g.players[0].spell_bonus, (1, 1));
 }

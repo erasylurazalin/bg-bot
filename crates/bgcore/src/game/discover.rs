@@ -389,6 +389,24 @@ impl Game {
             self.maybe_start_discover(p);
             return;
         }
+        // Friendly Wager: the chosen player is first in the pair, the other
+        // second, settled after combat.
+        if let Some((a, b)) = self.players[p].wager_offer.take() {
+            let (picked, other) = if k == 0 { (a, b) } else { (b, a) };
+            let _ = self.players[p].wagers.try_push((picked, other));
+            self.maybe_start_discover(p);
+            return;
+        }
+        // Detective for Hire: a correct guess gives a Tavern Coin.
+        if let Some((_, correct)) = self.players[p].holmes_offer.take() {
+            if k as u8 == correct
+                && let Some(coin) = self.tavern_coin(p)
+            {
+                self.give_generated(p, coin);
+            }
+            self.maybe_start_discover(p);
+            return;
+        }
         // A Discover whose options are ready-made minions (Kel'Thuzad's
         // Kitty): the pick lands as it stands, and no pool copy moves.
         if !self.players[p].discover_minions.is_empty() {

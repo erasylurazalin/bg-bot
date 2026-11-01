@@ -2243,6 +2243,41 @@ stats = [2, 2]
 golden_stats = [4, 4]
 gains_friendly_deathrattles = true
 
+# The Curator (TB_BaconShop_HP_033t).
+[[token]]
+name = "Amalgam"
+tier = 1
+tribe = "all"
+stats = [2, 2]
+golden_stats = [4, 4]
+keywords = ["venomous"]
+
+# Sneed (BG21_HERO_030t).
+[[token]]
+name = "Sneed's New Shredder"
+tier = 1
+tribe = "mech"
+stats = [2, 1]
+golden_stats = [4, 2]
+deathrattle = { effect = { summon_from_hand = "any", by_health = true, shield = true } }
+
+# Onyxia (BG22_HERO_305t).
+[[token]]
+name = "Onyxian Whelp"
+tier = 1
+tribe = "dragon"
+stats = [1, 1]
+golden_stats = [2, 2]
+
+# Ozumat (BG23_HERO_201pt).
+[[token]]
+name = "Ozumat's Tentacle"
+tier = 1
+tribe = "beast"
+stats = [2, 2]
+golden_stats = [4, 4]
+keywords = ["taunt"]
+
 # --- Spells: Tier 1 ---
 
 [[spell]]

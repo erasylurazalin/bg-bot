@@ -3,7 +3,7 @@
 //! Card ids are written as id + 1 (0 for none); the model embeds them.
 //!
 //! Layout, in order:
-//! - SCALARS own values (208):
+//! - SCALARS own values (224):
 //!   0  gold
 //!   1  tier
 //!   2  upgrade_cost
@@ -133,6 +133,12 @@
 //!   193 a trinket offer is open, 194 which slot it fills (1 lesser,
 //!   2 greater, 3 the power's)
 //!   195..202 the four options: trinket index + 1, then the price
+//!   203..207 Dark Gifts and Dark Paradox
+//!   208 free_minion_left (Spectral Sight: free Tavern minions left this turn)
+//!   209..211 Conviction: minion count, Attack buff, Health buff
+//!   212..214 Lock and Load: stored minion card id + 1, Attack, Health
+//!   215..218 Friendly Wager: offer open, 2 offered opponents, picked opponent
+//!   219..223 Detective for Hire: offer open, 2 offered card ids + 1, 2 empty flags
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
@@ -149,7 +155,7 @@
 //!   their Blood Gem value and Tavern spell bonus at that moment (attack,
 //!   health each); then that board (BOARD = 7 card slots).
 //!
-//! A card slot is SLOT_FEATURES (78) values:
+//! A card slot is SLOT_FEATURES (90) values:
 //!   0  present (1 if occupied)
 //!   1  card id + 1 (one id space covering minions, tokens and spells)
 //!   2  is_spell
@@ -203,6 +209,7 @@
 //!   87 ticket (1 when the Tavern card carries a Darkmoon Ticket, Come One,
 //!      Come All!)
 //!   88 frozen (frozen on its own in the Tavern, Twice as Nice)
+//!   89 reanimate (1 when marked by Rapid Reanimation for Start of Combat)
 //! An empty slot is all zeros.
 
 use crate::cards::{Aura, CardDb, ChooseOption, Counter, DeityKind, SpellEffect, SpellTarget, Tribe};
@@ -213,7 +220,7 @@ use crate::minion::{Keywords, MAX_ATTACHED, Minion};
 use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 
 pub const SHOP_SPELL: usize = 1;
-pub const SLOT_FEATURES: usize = 89;
+pub const SLOT_FEATURES: usize = 90;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
 pub const OPP_SCALARS: usize = 33;
 
@@ -416,7 +423,29 @@ pub const SCALAR_DARK_OFFER: usize = SCALAR_DARK_GIFT_USES + 3;
 /// in a game's pool, so the id tells the bot which Tier, stats and gift the
 /// card has even when no copy is in sight.
 pub const SCALAR_PARADOX: usize = SCALAR_DARK_OFFER + 1;
-pub const SCALARS: usize = SCALAR_PARADOX + 1;
+/// Gallywix's Trade Prince: 1 when the next minion you buy this turn costs 0.
+pub const SCALAR_FREE_MINION_LEFT: usize = SCALAR_PARADOX + 1;
+/// Cariel Roame's Conviction: count, Attack, and Health of the next cast.
+pub const SCALAR_CONVICTION_COUNT: usize = SCALAR_FREE_MINION_LEFT + 1;
+pub const SCALAR_CONVICTION_ATTACK: usize = SCALAR_CONVICTION_COUNT + 1;
+pub const SCALAR_CONVICTION_HEALTH: usize = SCALAR_CONVICTION_ATTACK + 1;
+/// Tavish's Lock and Load: card id + 1, Attack, and Health of the minion stored
+/// in the hero power (0 when empty).
+pub const SCALAR_LOCKED_CARD: usize = SCALAR_CONVICTION_HEALTH + 1;
+pub const SCALAR_LOCKED_ATTACK: usize = SCALAR_LOCKED_CARD + 1;
+pub const SCALAR_LOCKED_HEALTH: usize = SCALAR_LOCKED_ATTACK + 1;
+/// Lord Barov's Friendly Wager: whether the 2-way wager choice is open, the
+/// two seats (seat + 1, 0 when closed), and the chosen seat + 1 (0 if none).
+pub const SCALAR_PENDING_WAGER: usize = SCALAR_LOCKED_HEALTH + 1;
+pub const SCALAR_WAGER_OFFER: usize = SCALAR_PENDING_WAGER + 1;
+pub const SCALAR_WAGER_PICK: usize = SCALAR_WAGER_OFFER + 2;
+/// Murloc Holmes's Detective for Hire: whether the 2-way guess is open, the
+/// two offered card ids + 1 (0 when none or empty-board option), and whether
+/// each option represents an empty board.
+pub const SCALAR_PENDING_HOLMES: usize = SCALAR_WAGER_PICK + 1;
+pub const SCALAR_HOLMES_OFFER: usize = SCALAR_PENDING_HOLMES + 1;
+pub const SCALAR_HOLMES_EMPTY: usize = SCALAR_HOLMES_OFFER + 2;
+pub const SCALARS: usize = SCALAR_HOLMES_EMPTY + 2;
 
 pub const SLOT_PRESENT: usize = 0;
 pub const SLOT_CARD_ID: usize = 1;
@@ -488,6 +517,9 @@ pub const SLOT_TICKETS: usize = SLOT_HATS + 1;
 /// Frozen on its own in the Tavern (Twice as Nice froze the two cards it
 /// copied), a card that stays one more turn.
 pub const SLOT_FROZEN: usize = SLOT_TICKETS + 1;
+/// Marked by Teron Gorefiend's Rapid Reanimation to be killed at Start of
+/// Combat and resummoned as an exact copy when space allows.
+pub const SLOT_REANIMATE: usize = SLOT_FROZEN + 1;
 
 pub const OPP_ALIVE: usize = 0;
 pub const OPP_HEALTH: usize = 1;
@@ -528,12 +560,12 @@ const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_L
 const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
 const _: () = assert!(SCALAR_POWER_OFFER + crate::CHOICES == SCALAR_HERO_OFFER);
 const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALAR_TRINKET);
-const _: () = assert!(SCALAR_PARADOX + 1 == SCALARS);
+const _: () = assert!(SCALAR_HOLMES_EMPTY + 2 == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
 const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
 const _: () = assert!(SLOT_ATTACHED_GOLDEN + MAX_ATTACHED == SLOT_GIFTS);
-const _: () = assert!(SLOT_FROZEN + 1 == SLOT_FEATURES);
+const _: () = assert!(SLOT_REANIMATE + 1 == SLOT_FEATURES);
 const _: () = assert!(OPP_TRIBES + Tribe::EVERY.len() == OPP_DEITY);
 const _: () = assert!(OPP_DEITY + DEITY_FEATURES == OPP_GEM_ATTACK);
 const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_HERO);
@@ -648,6 +680,7 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     o[SLOT_HATS] = m.hats as f32;
     o[SLOT_TICKETS] = (m.tickets == 1) as u8 as f32;
     o[SLOT_FROZEN] = m.frozen as u8 as f32;
+    o[SLOT_REANIMATE] = m.reanimate as u8 as f32;
 }
 
 fn write_slots<'a>(
@@ -728,7 +761,9 @@ fn target_kind(k: TargetKind) -> (usize, (i32, i32)) {
         | TargetKind::SpiritSwapSecond
         | TargetKind::DevourFirst
         | TargetKind::DevourSecond
-        | TargetKind::SummonExactCopy => (5, (0, 0)),
+        | TargetKind::SummonExactCopy
+        | TargetKind::LockAndLoad
+        | TargetKind::RapidReanimation => (5, (0, 0)),
     }
 }
 
@@ -781,7 +816,9 @@ fn power_progress(game: &Game, p: usize, st: &PowerState) -> (f32, f32) {
             let left = every - counts.cards_bought % every;
             (level as f32, left as f32)
         }
-        PowerEffect::BuyMilestone { count, .. } => pair(st.progress, count as u32),
+        PowerEffect::BuyMilestone { count, .. }
+        | PowerEffect::AttackMilestone { count, .. } => pair(st.progress, count as u32),
+        PowerEffect::DamageMilestone { damage, .. } => pair(st.progress, damage),
         PowerEffect::RandomTribeAfterSells { every, .. }
         | PowerEffect::CardAfterBuys { every, .. }
         | PowerEffect::UpgradeDiscountAfterElementals { every, .. }
@@ -789,7 +826,8 @@ fn power_progress(game: &Game, p: usize, st: &PowerState) -> (f32, f32) {
         | PowerEffect::DigForGolden { digs: every }
         | PowerEffect::StirThePot { count: every }
         | PowerEffect::HandCopyEvery { turns: every }
-        | PowerEffect::CopyBuyAfterMinions { every } => pair(st.progress, every as u32),
+        | PowerEffect::CopyBuyAfterMinions { every }
+        | PowerEffect::MechGyver { every } => pair(st.progress, every as u32),
         PowerEffect::TripleRewardAfterTiers { every }
         | PowerEffect::TripleRewardAfterAttacks { every }
         | PowerEffect::Champion { gold: every } => {
@@ -825,6 +863,27 @@ fn power_progress(game: &Game, p: usize, st: &PowerState) -> (f32, f32) {
             let goal = count.max(1);
             pair(game.players[p].tickets as u32, goal as u32)
         }
+        // Broodmother: the permanent +1/+1 bonus the Whelps have grown by.
+        PowerEffect::Broodmother { .. } => (st.progress as f32, 0.0),
+        // Tentacular: the Tentacle's current size (2/2 + 1/1 per minion sold).
+        PowerEffect::Tentacular { .. } => ((2 + counts.minions_sold) as f32, 0.0),
+        // Wax Warband: the current +1/+1 size and the Gold left to the next step.
+        PowerEffect::WaxWarband => (
+            (1 + counts.gold_spent / 10) as f32,
+            (10 - counts.gold_spent % 10) as f32,
+        ),
+        PowerEffect::FreeFirstMinion => (game.players[p].free_minion_left as f32, 0.0),
+        PowerEffect::TakeFirstKilled
+        | PowerEffect::EmbraceYourRage
+        | PowerEffect::RapidReanimation => (st.armed as u8 as f32, 0.0),
+        PowerEffect::Conviction => (
+            game.players[p].conviction.0 as f32,
+            game.players[p].conviction.1 as f32,
+        ),
+        PowerEffect::LockAndLoad => (
+            game.players[p].locked_and_loaded.as_ref().map_or(0.0, |m| m.card as f32 + 1.0),
+            0.0,
+        ),
         _ => (0.0, 0.0),
     }
 }
@@ -1019,6 +1078,31 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
         && !game.data.gifts.is_empty()) as u8 as f32;
     s[SCALAR_DARK_OFFER] = pl.dark_offer as u8 as f32;
     s[SCALAR_PARADOX] = game.paradox.map_or(0.0, |c| c as f32 + 1.0);
+    s[SCALAR_FREE_MINION_LEFT] = pl.free_minion_left as f32;
+    s[SCALAR_CONVICTION_COUNT] = pl.conviction.0 as f32;
+    s[SCALAR_CONVICTION_ATTACK] = pl.conviction.1 as f32;
+    s[SCALAR_CONVICTION_HEALTH] = pl.conviction.2 as f32;
+    if let Some(m) = &pl.locked_and_loaded {
+        s[SCALAR_LOCKED_CARD] = m.card as f32 + 1.0;
+        s[SCALAR_LOCKED_ATTACK] = m.attack as f32;
+        s[SCALAR_LOCKED_HEALTH] = m.health as f32;
+    }
+    if let Some((a, b)) = pl.wager_offer {
+        s[SCALAR_PENDING_WAGER] = 1.0;
+        s[SCALAR_WAGER_OFFER] = a as f32 + 1.0;
+        s[SCALAR_WAGER_OFFER + 1] = b as f32 + 1.0;
+    }
+    s[SCALAR_WAGER_PICK] = pl.wagers.first().map_or(0.0, |&(q, _)| q as f32 + 1.0);
+    if let Some((opts, _)) = pl.holmes_offer {
+        s[SCALAR_PENDING_HOLMES] = 1.0;
+        for (k, c) in opts.into_iter().enumerate() {
+            if c == u16::MAX {
+                s[SCALAR_HOLMES_EMPTY + k] = 1.0;
+            } else {
+                s[SCALAR_HOLMES_OFFER + k] = c as f32 + 1.0;
+            }
+        }
+    }
 }
 
 /// Write player `p`'s view into `out`, which must hold OBS_SIZE values.

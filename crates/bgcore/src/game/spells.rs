@@ -509,11 +509,13 @@ impl Game {
             }
             if matches!(se, SpellEffect::DiscoverHeroPower) {
                 // The exclusion list lives on the card, so the intercept runs
-                // here where the card is known.
+                // here where the card is known. Unmasked Identity replaces
+                // Power of the Storm for good on the main slot.
                 let excludes = self.data.heroes.hero_indices(&c.exclude_heroes);
                 if tavern {
                     self.trigger_on_cast_spell(p);
                 }
+                self.players[p].storm_power[0] = false;
                 self.discover_hero_power(p, &excludes, false, 1);
                 return;
             }

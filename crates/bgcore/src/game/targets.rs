@@ -171,6 +171,16 @@ impl Game {
                     self.players[p].shop.insert(slot, m);
                 }
             }
+            // Lock and Load: the minion leaves the Tavern to be summoned, and
+            // attack at once, when there is space in the next combat. It fights
+            // that combat only (nothing marks it for the board after), so its
+            // pool copy goes back and the power holds a made-fresh copy.
+            TargetKind::LockAndLoad => {
+                let mut m = self.players[p].shop.remove(slot);
+                give_back(&mut self.pool, &self.data.cards, &m);
+                m.pool_copies = 0;
+                self.players[p].locked_and_loaded = Some(m);
+            }
 
             // Spirit Swap: the first of the two minions is remembered and the
             // second pick is offered.
@@ -481,7 +491,8 @@ impl Game {
             TargetKind::StealShopCard { .. }
             | TargetKind::ReplaceHigher
             | TargetKind::StealShopAsStats { .. }
-            | TargetKind::ImprisonShop { .. } => {}
+            | TargetKind::ImprisonShop { .. }
+            | TargetKind::LockAndLoad => {}
             TargetKind::MinionBuff { attack, health, keyword, random_keyword, .. } => {
                 for _ in 0..pt.runs {
                     let m = &mut self.players[p].board[s];
@@ -635,6 +646,28 @@ impl Game {
                     let card = copy.card;
                     self.players[p].board.insert(s + 1, copy);
                     self.check_triple(p, card);
+                }
+            }
+            // Rapid Reanimation: mark the chosen minion for Start of Combat
+            // destruction and resummoning, and arm the power slot.
+            TargetKind::RapidReanimation => {
+                if s < self.players[p].board.len() {
+                    for m in &mut self.players[p].board {
+                        m.reanimate = false;
+                    }
+                    self.players[p].board[s].reanimate = true;
+                    let heroes = &self.data.heroes;
+                    let pl = &mut self.players[p];
+                    for slot in [&mut pl.power, &mut pl.power2] {
+                        if let Some(st) = slot.as_mut()
+                            && matches!(
+                                heroes.power(st.of).effect,
+                                crate::heroes::PowerEffect::RapidReanimation
+                            )
+                        {
+                            st.armed = true;
+                        }
+                    }
                 }
             }
             TargetKind::Consume { pick, keywords, count, stat_mul, .. } => {

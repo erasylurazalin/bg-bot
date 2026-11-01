@@ -278,6 +278,77 @@ pub enum PowerEffect {
     /// Two copies of a minion make it Golden, and they give `coin` (a Tavern
     /// Coin) instead of a Triple Reward (Double Time).
     DoubleTime { coin: CardId },
+    // ---- hero batch 3 (2026-11-01) ----
+    /// Start of Combat: left- and right-most minions gain +2/+1 and attack
+    /// immediately (Wingmen).
+    Wingmen,
+    /// Start of Combat: give a friendly minion of each type +1/+1, +1/+1 more
+    /// per 10 Gold spent this game (Wax Warband).
+    WaxWarband,
+    /// Start the game with a token minion on the board (Menagerist, Avatar of
+    /// N'Zoth, Pilot the Shredder).
+    StartMinion { card: CardId },
+    /// After friendly minions deal `damage` damage, becomes `becomes`, index
+    /// into `HeroDb::powers` (Bloodfury -> Nether Portal).
+    DamageMilestone { damage: u32, becomes: u8 },
+    /// At the start of each turn, get `count` random minions of `tribe`
+    /// (Nether Portal).
+    RandomMinionsEachTurn { tribe: Tribe, count: u8 },
+    /// Next combat, get a plain copy of the first enemy minion you kill (I'll
+    /// Take That!).
+    TakeFirstKilled,
+    /// Start of Combat: give ALL minions +2 Attack permanently (ALL Will
+    /// Burn!).
+    AllWillBurn,
+    /// After `count` friendly minions attack, becomes `becomes`, index into
+    /// `HeroDb::powers` (Demon Hunter Training -> Spectral Sight).
+    AttackMilestone { count: u8, becomes: u8 },
+    /// The first minion you buy each turn is free (Spectral Sight).
+    FreeFirstMinion,
+    /// Guess which player will win their next combat: 3 Tavern Coins (`coin`)
+    /// on a win, 1 Gold next turn on a tie (Friendly Wager).
+    FriendlyWager { coin: CardId },
+    /// Start of Combat: summon a random minion of your Tier for this combat
+    /// and add a copy of it to your hand (Embrace Your Rage).
+    EmbraceYourRage,
+    /// Give minions you summon during combat +1/+2 and Taunt (Sprout It Out!).
+    SproutItOut,
+    /// After a friendly minion kills an enemy by attacking, give it +1 Attack
+    /// permanently (Glory of Combat).
+    GloryOfCombat,
+    /// At the start of every turn, choose from 2 new Hero Powers (Power of the
+    /// Storm).
+    PowerOfTheStorm,
+    /// Give random friendly minions stats, upgraded at the start of each turn
+    /// by choosing a stance (Conviction).
+    Conviction,
+    /// Upgrade Conviction's target count, Attack or Health (Offensive,
+    /// Defensive and United Stance).
+    Stance { count: u8, attack: i32, health: i32 },
+    /// Start of Combat: give your lowest-Attack minion a Deathrattle that
+    /// gives your other minions its stats (Fragrant Phylactery).
+    FragrantPhylactery,
+    /// Steal a minion from the Tavern; when you have space next combat, summon
+    /// it and it attacks immediately (Lock and Load).
+    LockAndLoad,
+    /// When you have space in combat, summon an exact copy of your
+    /// highest-Attack (or highest-Health) minion (Frostwolf Fervor, Stormpike
+    /// Strength).
+    CopyHighestWhenSpace { by_health: bool },
+    /// After `every` friendly minions die, get a random Mech (MechGyver).
+    MechGyver { every: u8 },
+    /// Avenge (4): summon `card` (Onyxian Whelp) that attacks immediately, and
+    /// improve its stats by +1/+1 permanently (Broodmother).
+    Broodmother { card: CardId },
+    /// Look at 2 minions; guess which one your next opponent had last combat
+    /// for `coin` (Detective for Hire).
+    DetectiveForHire { coin: CardId },
+    /// When you have space in combat, summon `card` (Ozumat's Tentacle) with
+    /// +1/+1 per minion sold this game (Tentacular).
+    Tentacular { card: CardId },
+    /// Choose a friendly minion; Start of Combat: destroy it, and once you
+    /// have space resummon an exact copy (Rapid Reanimation).
+    RapidReanimation,
 }
 
 /// What a power's buy counter counts.
@@ -759,6 +830,57 @@ struct RawPowerEffect {
     cloning_gallery: bool,
     #[serde(default)]
     double_time: bool,
+    // ---- hero batch 3 (2026-11-01) ----
+    #[serde(default)]
+    wingmen: bool,
+    #[serde(default)]
+    wax_warband: bool,
+    #[serde(default)]
+    start_minion: Option<String>,
+    #[serde(default)]
+    damage_milestone: Option<u32>,
+    #[serde(default)]
+    random_minions_each_turn: Option<u8>,
+    #[serde(default)]
+    take_first_killed: bool,
+    #[serde(default)]
+    all_will_burn: bool,
+    #[serde(default)]
+    attack_milestone: Option<u8>,
+    #[serde(default)]
+    free_first_minion: bool,
+    #[serde(default)]
+    friendly_wager: bool,
+    #[serde(default)]
+    embrace_your_rage: bool,
+    #[serde(default)]
+    sprout_it_out: bool,
+    #[serde(default)]
+    glory_of_combat: bool,
+    #[serde(default)]
+    power_of_the_storm: bool,
+    #[serde(default)]
+    conviction: bool,
+    /// `[count, attack, health]` (Offensive, Defensive and United Stance).
+    #[serde(default)]
+    stance: Option<[i32; 3]>,
+    #[serde(default)]
+    fragrant_phylactery: bool,
+    #[serde(default)]
+    lock_and_load: bool,
+    /// "attack" or "health" (Frostwolf Fervor, Stormpike Strength).
+    #[serde(default)]
+    copy_highest_when_space: Option<String>,
+    #[serde(default)]
+    mech_gyver: Option<u8>,
+    #[serde(default)]
+    broodmother: bool,
+    #[serde(default)]
+    detective_for_hire: bool,
+    #[serde(default)]
+    tentacular: bool,
+    #[serde(default)]
+    rapid_reanimation: bool,
 }
 
 #[derive(Deserialize)]
@@ -1008,6 +1130,61 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
         PowerEffect::CloningGallery
     } else if e.double_time {
         PowerEffect::DoubleTime { coin: 0 }
+    } else if e.wingmen {
+        PowerEffect::Wingmen
+    } else if e.wax_warband {
+        PowerEffect::WaxWarband
+    } else if e.start_minion.is_some() {
+        PowerEffect::StartMinion { card: 0 }
+    } else if let Some(damage) = e.damage_milestone {
+        if e.becomes.is_none() {
+            return Err("damage_milestone needs `becomes`".into());
+        }
+        PowerEffect::DamageMilestone { damage: damage.max(1), becomes: 0 }
+    } else if let Some(count) = e.random_minions_each_turn {
+        let t = e.tribe.as_deref().ok_or("random_minions_each_turn needs a tribe")?;
+        PowerEffect::RandomMinionsEachTurn { tribe: tribe(t)?, count: count.max(1) }
+    } else if e.take_first_killed {
+        PowerEffect::TakeFirstKilled
+    } else if e.all_will_burn {
+        PowerEffect::AllWillBurn
+    } else if let Some(count) = e.attack_milestone {
+        if e.becomes.is_none() {
+            return Err("attack_milestone needs `becomes`".into());
+        }
+        PowerEffect::AttackMilestone { count: count.max(1), becomes: 0 }
+    } else if e.free_first_minion {
+        PowerEffect::FreeFirstMinion
+    } else if e.friendly_wager {
+        PowerEffect::FriendlyWager { coin: 0 }
+    } else if e.embrace_your_rage {
+        PowerEffect::EmbraceYourRage
+    } else if e.sprout_it_out {
+        PowerEffect::SproutItOut
+    } else if e.glory_of_combat {
+        PowerEffect::GloryOfCombat
+    } else if e.power_of_the_storm {
+        PowerEffect::PowerOfTheStorm
+    } else if e.conviction {
+        PowerEffect::Conviction
+    } else if let Some([count, attack, health]) = e.stance {
+        PowerEffect::Stance { count: count.max(0) as u8, attack, health }
+    } else if e.fragrant_phylactery {
+        PowerEffect::FragrantPhylactery
+    } else if e.lock_and_load {
+        PowerEffect::LockAndLoad
+    } else if let Some(which) = &e.copy_highest_when_space {
+        PowerEffect::CopyHighestWhenSpace { by_health: which.trim() == "health" }
+    } else if let Some(every) = e.mech_gyver {
+        PowerEffect::MechGyver { every: every.max(1) }
+    } else if e.broodmother {
+        PowerEffect::Broodmother { card: 0 }
+    } else if e.detective_for_hire {
+        PowerEffect::DetectiveForHire { coin: 0 }
+    } else if e.tentacular {
+        PowerEffect::Tentacular { card: 0 }
+    } else if e.rapid_reanimation {
+        PowerEffect::RapidReanimation
     } else {
         PowerEffect::None
     })
@@ -1033,11 +1210,38 @@ fn resolve_effect(
                 powers.get(name).copied().ok_or_else(|| format!("{who}: no power {name:?}"))?;
             PowerEffect::BuyMilestone { count, becomes }
         }
+        PowerEffect::DamageMilestone { damage, .. } => {
+            let name = e.becomes.as_deref().ok_or_else(|| format!("{who}: needs `becomes`"))?;
+            let becomes =
+                powers.get(name).copied().ok_or_else(|| format!("{who}: no power {name:?}"))?;
+            PowerEffect::DamageMilestone { damage, becomes }
+        }
+        PowerEffect::AttackMilestone { count, .. } => {
+            let name = e.becomes.as_deref().ok_or_else(|| format!("{who}: needs `becomes`"))?;
+            let becomes =
+                powers.get(name).copied().ok_or_else(|| format!("{who}: no power {name:?}"))?;
+            PowerEffect::AttackMilestone { count, becomes }
+        }
         PowerEffect::SocGrantDeathrattle { count, .. } => {
             PowerEffect::SocGrantDeathrattle { count, card: card(&e.card, "card")? }
         }
+        PowerEffect::StartMinion { .. } => {
+            PowerEffect::StartMinion { card: card(&e.start_minion, "start_minion")? }
+        }
         PowerEffect::DoubleTime { .. } => {
             PowerEffect::DoubleTime { coin: card(&e.card, "card")? }
+        }
+        PowerEffect::FriendlyWager { .. } => {
+            PowerEffect::FriendlyWager { coin: card(&e.card, "card")? }
+        }
+        PowerEffect::DetectiveForHire { .. } => {
+            PowerEffect::DetectiveForHire { coin: card(&e.card, "card")? }
+        }
+        PowerEffect::Broodmother { .. } => {
+            PowerEffect::Broodmother { card: card(&e.card, "card")? }
+        }
+        PowerEffect::Tentacular { .. } => {
+            PowerEffect::Tentacular { card: card(&e.card, "card")? }
         }
         PowerEffect::CardAfterBuys { every, of, .. } => {
             let b = e.card_after_buys.as_ref().unwrap();

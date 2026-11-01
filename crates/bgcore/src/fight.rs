@@ -114,6 +114,41 @@ pub struct Counters {
     /// rules.toml's Bonus Keyword mask, which "is Reborn with full stats and
     /// Bonus Keywords" (Dark Gifts Persisting Horror) reads.
     pub bonus_keywords: u8,
+    // ---- hero batch 3 ----
+    /// Minions sold this game (Ozumat's Tentacular).
+    pub minions_sold: u32,
+    /// Wingmen (Illidan Stormrage) Start of Combat runs.
+    pub wingmen: u8,
+    /// ALL Will Burn! (Deathwing) Start of Combat runs.
+    pub all_will_burn: u8,
+    /// Wax Warband (Queen Wagtoggle) Start of Combat runs.
+    pub wax_warband: u8,
+    /// Fragrant Phylactery (Tamsin Roame) Start of Combat runs.
+    pub phylactery: u8,
+    /// Embrace Your Rage (Y'Shaarj) Start of Combat runs.
+    pub embrace_rage: u8,
+    /// Sprout It Out! (Greybough) combat summon buff runs.
+    pub sprout_it_out: u8,
+    /// Glory of Combat (Rokara) permanent Attack on kill runs.
+    pub glory_of_combat: u8,
+    /// I'll Take That! (Arch-Villain Rafaam) copies of the first killed enemy.
+    pub take_first_killed: u8,
+    /// Whether to count damage dealt by friendly minions (Bloodfury).
+    pub count_damage: bool,
+    /// Frostwolf Fervor (Drek'Thar) copies when space opens.
+    pub frostwolf_fervor: u8,
+    /// Stormpike Strength (Vanndar Stormpike) copies when space opens.
+    pub stormpike_strength: u8,
+    /// Tentacular (Ozumat): `(Tentacle card_id, runs)`.
+    pub tentacular: Option<(CardId, u8)>,
+    /// Broodmother (Onyxia): `(Onyxian Whelp card_id, bonus_stats, runs)`.
+    pub broodmother: Option<(CardId, i32, u8)>,
+    /// Lock and Load (Tavish Stormpike): `(card, golden, attack, health,
+    /// keywords, runs)`.
+    pub locked_and_loaded: Option<(CardId, bool, i32, i32, Keywords, u8)>,
+    /// Rapid Reanimation (Teron Gorefiend) runs when a marked minion is on
+    /// the board.
+    pub rapid_reanimation: u8,
 }
 
 /// Every player's Blood Gems start at +1/+1, so a fight without the player's
@@ -159,6 +194,22 @@ impl Default for Counters {
                 | Keywords::VENOMOUS
                 | Keywords::REBORN
                 | Keywords::STEALTH,
+            minions_sold: 0,
+            wingmen: 0,
+            all_will_burn: 0,
+            wax_warband: 0,
+            phylactery: 0,
+            embrace_rage: 0,
+            sprout_it_out: 0,
+            glory_of_combat: 0,
+            take_first_killed: 0,
+            count_damage: false,
+            frostwolf_fervor: 0,
+            stormpike_strength: 0,
+            tentacular: None,
+            broodmother: None,
+            locked_and_loaded: None,
+            rapid_reanimation: 0,
         }
     }
 }
@@ -379,6 +430,10 @@ pub struct SideOutcome {
     /// Friendly minions that attacked here, once per swing, so a Windfury
     /// minion's two attacks count 2 (Dragonhead Staff).
     pub friendly_attacks: u16,
+    /// Damage dealt by friendly minions here (Bloodfury).
+    pub damage_dealt: u32,
+    /// Permanent +1/+1 steps Broodmother gained here (Onyxia).
+    pub broodmother_gain: u32,
     /// The counters the real client shows during combat, captured at the
     /// first attack, after Start of Combat effects: what the other player
     /// "last saw" of this one.
@@ -582,6 +637,23 @@ struct Side<'a> {
     /// they stood in, exactly as they were then. They come back when this
     /// side's last minion dies.
     fermenter: ArrayVec<(usize, Minion), 3>,
+    /// Minions Rapid Reanimation destroyed at Start of Combat, with the slot
+    /// they stood in, waiting for a board slot.
+    reanimate: ArrayVec<(usize, Minion), BOARD>,
+    /// Friendly minions destroyed by their own side at Start of Combat (Soul
+    /// Fermenter, Stitched Salvagers, Rapid Reanimation), so I'll Take That!
+    /// does not treat them as killed by the enemy.
+    self_destroyed: ArrayVec<u16, BOARD>,
+    /// The card of the first minion on this side killed by the enemy side
+    /// (for the enemy's I'll Take That!).
+    first_killed_by_enemy: Option<CardId>,
+    /// Friendly deaths counted toward Broodmother's Avenge (4).
+    broodmother_avenge: u16,
+    frostwolf_left: u8,
+    stormpike_left: u8,
+    tentacular_left: u8,
+    locked_and_loaded: Option<(CardId, bool, i32, i32, Keywords, u8)>,
+    take_first_killed_left: u8,
     /// The minion that died last and where it stood (Blood Golem Sticker).
     last_dead: Option<Minion>,
     dead_at: usize,
@@ -659,6 +731,15 @@ impl<'a> Side<'a> {
             granted: ArrayVec::new(),
             gained_dr: ArrayVec::new(),
             fermenter: ArrayVec::new(),
+            reanimate: ArrayVec::new(),
+            self_destroyed: ArrayVec::new(),
+            first_killed_by_enemy: None,
+            broodmother_avenge: 0,
+            frostwolf_left: counters.frostwolf_fervor,
+            stormpike_left: counters.stormpike_strength,
+            tentacular_left: counters.tentacular.map_or(0, |(_, n)| n),
+            locked_and_loaded: counters.locked_and_loaded,
+            take_first_killed_left: counters.take_first_killed,
             last_dead: None,
             dead_at: 0,
             out: SideOutcome::default(),
@@ -678,24 +759,26 @@ impl<'a> Side<'a> {
         self.hand_taken & (1 << i) != 0
     }
 
-    /// The hand minion with the highest Attack of a tribe that is still in
-    /// hand; ties go to the left-most. Spells are not minions.
-    fn best_in_hand(&self, db: &CardDb, tribe: Tribe, by_health: bool) -> Option<usize> {
+    /// The hand minion with the highest Attack (or Health when `by_health`)
+    /// that is still in hand; ties go to the left-most. Spells are not
+    /// minions.
+    fn best_in_hand(&self, db: &CardDb, tribe: Option<Tribe>, by_health: bool) -> Option<usize> {
         let mut best: Option<usize> = None;
         for (i, m) in self.hand.iter().enumerate() {
             if self.hand_taken(i)
                 || db.get(m.card).is_spell()
-                || !db.tribes_of(m).has(tribe)
-                // A card locked in hand (Faelin's Tier, Thorim's Gold) cannot
-                // be summoned either, not even by a Battlecry or a Start of
-                // Combat that reaches into the hand.
-                || (m.locked_tier > 0 && m.locked_tier > self.counters.tier)
-                || (m.locked_gold > 0 && self.counters.gold_spent < m.locked_gold as u32)
+                || tribe.is_some_and(|t| !db.tribes_of(m).has(t))
+                // A card locked in hand (Imprison, Search Through Time,
+                // Faelin's Tier, Thorim's Gold) cannot be summoned either, not
+                // even by a Battlecry or a Start of Combat that reaches into
+                // the hand.
+                || m.locked_in_hand(self.counters.tier, self.counters.gold_spent)
             {
                 continue;
             }
             // The best is the highest Attack, or the highest Health for
-            // Bassgill; a tie keeps the earlier one (the lower hand slot).
+            // Bassgill and Sneed's New Shredder; a tie keeps the earlier one
+            // (the lower hand slot).
             let stat = |k: usize| {
                 if by_health {
                     self.hand[k].health + self.hand_bonus[k].1
@@ -710,8 +793,8 @@ impl<'a> Side<'a> {
         best
     }
 
-    /// Summon the `n` highest-Attack minions of a tribe from hand for this
-    /// combat. A summoned copy leaves the hand; it is not put back.
+    /// Summon the `n` highest-Attack (or highest-Health) minions from hand for
+    /// this combat. A summoned copy leaves the hand; it is not put back.
     #[allow(clippy::too_many_arguments)]
     fn summon_from_hand(
         &mut self,
@@ -719,8 +802,9 @@ impl<'a> Side<'a> {
         side: usize,
         at: &mut usize,
         n: u32,
-        tribe: Tribe,
+        tribe: Option<Tribe>,
         by_health: bool,
+        shield: bool,
         skip_ptr: bool,
         uid: &mut u16,
         rng: &mut Rng,
@@ -731,7 +815,10 @@ impl<'a> Side<'a> {
                 break;
             }
             let Some(i) = self.best_in_hand(db, tribe, by_health) else { break };
-            let m = self.hand_at(i);
+            let mut m = self.hand_at(i);
+            if shield {
+                m.keywords.set(Keywords::DIVINE_SHIELD);
+            }
             self.hand_taken |= 1 << i;
             if !self.summon_baked(db, side, *at, m, uid, rng, w) {
                 self.hand_taken &= !(1 << i);
@@ -1486,6 +1573,7 @@ impl<'a> Side<'a> {
                 for k in 0..n {
                     let m = self.ms[k].m;
                     let _ = self.fermenter.try_push((k, m));
+                    let _ = self.self_destroyed.try_push(self.ms[k].uid);
                 }
                 for k in 0..n {
                     self.ms[k].m.health = 0;
@@ -1582,6 +1670,13 @@ impl<'a> Side<'a> {
             Fm { m, uid: *uid, start_slot: None, avenge: 0, killer: None, taken: 0, gifts: 0 },
         );
         *uid += 1;
+        // Sprout It Out! (Greybough): minions summoned during combat gain
+        // +1/+2 and Taunt.
+        if !self.outside && self.counters.sprout_it_out > 0 {
+            let n = self.counters.sprout_it_out as i32;
+            self.gain_at(db, pos, n, 2 * n);
+            self.gain_keyword_at(db, pos, Keywords::TAUNT);
+        }
         if c.tribes.has(Tribe::Beast) {
             self.ms[pos].m.attack += self.beast_buff.0;
             self.ms[pos].m.health += self.beast_buff.1;
@@ -1699,6 +1794,102 @@ impl<'a> Side<'a> {
         }
     }
 
+    /// Pick a living friendly minion with the highest Attack (or Health when
+    /// `by_health`), breaking ties at random.
+    fn pick_highest(&self, by_health: bool, rng: &mut Rng) -> Option<usize> {
+        let stat = |i: usize| if by_health { self.ms[i].m.health } else { self.ms[i].m.attack };
+        let high = (0..self.ms.len()).filter(|&i| self.ms[i].m.health > 0).map(&stat).max()?;
+        let ties: ArrayVec<usize, BOARD> = (0..self.ms.len())
+            .filter(|&i| self.ms[i].m.health > 0 && stat(i) == high)
+            .collect();
+        Some(ties[rng.below(ties.len() as u32) as usize])
+    }
+
+    /// An exact copy of the friendly minion in slot `i` as it stood at the
+    /// start of the fight: buffs, keywords and gifts included, undamaged, and
+    /// no pool copy taken (Frostwolf Fervor, Stormpike Strength, Rapid
+    /// Reanimation).
+    fn exact_copy(&self, i: usize) -> Minion {
+        let mut copy = self.ms[i].m;
+        copy.health += self.ms[i].taken;
+        copy.pool_copies = 0;
+        copy
+    }
+
+    /// Summon anything waiting for a board slot (`Rapid Reanimation`, `Lock
+    /// and Load`, `Frostwolf Fervor`, `Stormpike Strength`, `Tentacular`).
+    fn spawn_when_space(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) -> bool {
+        if self.outside || self.ms.is_full() {
+            return false;
+        }
+        let mut changed = false;
+        while !self.ms.is_full() && !self.reanimate.is_empty() {
+            let (slot, m) = self.reanimate.remove(0);
+            let at = slot.min(self.ms.len());
+            if self.summon_baked(db, side, at, m, uid, rng, w) {
+                changed = true;
+            }
+        }
+        if !self.ms.is_full()
+            && let Some((card, golden, attack, health, keywords, mut left)) =
+                self.locked_and_loaded.take()
+        {
+            while left > 0 && !self.ms.is_full() {
+                left -= 1;
+                let mut m = db.make(card, golden);
+                m.pool_copies = 0;
+                m.no_reward = true;
+                m.attack = attack;
+                m.health = health;
+                m.keywords = keywords;
+                let at = self.ms.len();
+                if self.summon_baked(db, side, at, m, uid, rng, w) {
+                    let u = self.ms[at].uid;
+                    let _ = self.immediate.try_push(u);
+                    changed = true;
+                }
+            }
+            if left > 0 {
+                self.locked_and_loaded = Some((card, golden, attack, health, keywords, left));
+            }
+        }
+        while !self.ms.is_full() && self.frostwolf_left > 0 {
+            let Some(pick) = self.pick_highest(false, rng) else { break };
+            self.frostwolf_left -= 1;
+            if self.summon_baked(db, side, pick + 1, self.exact_copy(pick), uid, rng, w) {
+                changed = true;
+            }
+        }
+        while !self.ms.is_full() && self.stormpike_left > 0 {
+            let Some(pick) = self.pick_highest(true, rng) else { break };
+            self.stormpike_left -= 1;
+            if self.summon_baked(db, side, pick + 1, self.exact_copy(pick), uid, rng, w) {
+                changed = true;
+            }
+        }
+        if let Some((card, _)) = self.counters.tentacular {
+            while !self.ms.is_full() && self.tentacular_left > 0 {
+                self.tentacular_left -= 1;
+                let mut m = db.make(card, false);
+                let bonus = self.counters.minions_sold as i32;
+                m.attack = m.attack.saturating_add(bonus);
+                m.health = m.health.saturating_add(bonus);
+                let at = self.ms.len();
+                if self.summon(db, side, at, m, uid, rng, w) {
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
     /// How many times one Deathrattle fires for this side: once, plus one
     /// for each Titus Rivendare and two for a golden one ("an extra time"
     /// stacks). Every path that fires a Deathrattle asks here, so a new way
@@ -1715,7 +1906,15 @@ impl<'a> Side<'a> {
                 let _ = got.try_push(Attached { card, golden });
             }
         }
-        if got.is_empty() {
+        let mut got_granted: ArrayVec<GrantedDr, 8> = ArrayVec::new();
+        if !dead.parts().any(|(c, _)| db.get(c).gains_friendly_deathrattles) {
+            for &(u, dr) in &self.granted {
+                if u == dead_uid {
+                    let _ = got_granted.try_push(dr);
+                }
+            }
+        }
+        if got.is_empty() && got_granted.is_empty() {
             return;
         }
         for i in 0..self.ms.len() {
@@ -1733,6 +1932,9 @@ impl<'a> Side<'a> {
             for _ in 0..times {
                 for &a in &got {
                     let _ = self.gained_dr.try_push((uid, a));
+                }
+                for &dr in &got_granted {
+                    let _ = self.granted.try_push((uid, dr));
                 }
             }
         }
@@ -2022,9 +2224,11 @@ impl<'a> Side<'a> {
                     }
                 }
             }
-            Effect::SummonFromHand { tribe, count, by_health } => {
+            Effect::SummonFromHand { tribe, count, by_health, shield } => {
                 let n = count as u32 * mul as u32;
-                self.summon_from_hand(db, fx.side, at, n, tribe, by_health, fx.skip_ptr, uid, rng, w);
+                self.summon_from_hand(
+                    db, fx.side, at, n, tribe, by_health, shield, fx.skip_ptr, uid, rng, w,
+                );
             }
             Effect::ShieldDragons { count } => {
                 // Dragons without Divine Shield come first; once every one
@@ -2247,6 +2451,7 @@ impl<'a> Side<'a> {
                         copy.pool_copies = 0;
                         let _ = self.salvage.try_push((fx.host, copy));
                     }
+                    let _ = self.self_destroyed.try_push(f.uid);
                     self.ms[t].m.health = 0;
                     self.ms[t].killer = Some(fx.host);
                 }
@@ -2467,10 +2672,17 @@ impl<'a> Side<'a> {
                     }
                 }
             }
-            // A Deathrattle a trinket gave this minion for the fight (Hoggy
-            // Bank, Jarred Frostling, Sky Golem Portrait). It fires with the
-            // minion's own, once per run, whether or not the card has one.
-            if let Some(dr) = self.granted.iter().find(|(u, _)| *u == host).map(|&(_, dr)| dr) {
+            // A Deathrattle a trinket or hero power gave this minion for the
+            // fight (Hoggy Bank, Jarred Frostling, Sky Golem Portrait,
+            // Fragrant Phylactery). It fires with the minion's own, once per
+            // run, whether or not the card has one.
+            let mut granted: ArrayVec<GrantedDr, 8> = ArrayVec::new();
+            for &(u, dr) in &self.granted {
+                if u == host {
+                    let _ = granted.try_push(dr);
+                }
+            }
+            for dr in granted {
                 self.note_deathrattle(db);
                 match dr {
                     GrantedDr::Gems(n) => {
@@ -2492,6 +2704,15 @@ impl<'a> Side<'a> {
                         for i in 0..self.ms.len() {
                             if self.ms[i].m.health > 0 {
                                 self.gain_permanent_at(db, i, attack, health);
+                            }
+                        }
+                    }
+                    GrantedDr::Phylactery => {
+                        let da = dead.attack;
+                        let dh = dead_max.max(1);
+                        for i in 0..self.ms.len() {
+                            if self.ms[i].m.health > 0 && self.ms[i].uid != host {
+                                self.gain_at(db, i, da, dh);
                             }
                         }
                     }
@@ -2526,12 +2747,50 @@ impl<'a> Side<'a> {
         }
     }
 
+    /// Broodmother (Onyxia): Avenge (4) summons a 3/1 Onyxian Whelp with
+    /// `+(base + broodmother_gain)` stats that attacks immediately, then
+    /// improves future Whelps by +1/+1.
+    fn broodmother_tick(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        let Some((card, base_bonus, triggers)) = self.counters.broodmother else {
+            return;
+        };
+        if triggers == 0 {
+            return;
+        }
+        self.broodmother_avenge = self.broodmother_avenge.saturating_add(1);
+        if !self.broodmother_avenge.is_multiple_of(4) {
+            return;
+        }
+        for _ in 0..triggers {
+            let bonus = base_bonus + self.out.broodmother_gain as i32;
+            let mut m = db.make(card, false);
+            m.attack += bonus;
+            m.health += bonus;
+            let at = self.ms.len();
+            if self.summon(db, side, at, m, uid, rng, w) && at < self.ms.len() {
+                let u = self.ms[at].uid;
+                let _ = self.immediate.try_push(u);
+            }
+            self.out.broodmother_gain = self.out.broodmother_gain.saturating_add(1);
+        }
+    }
+
     /// The minion in slot `i` dealt `dealt` damage: count it towards a damage
-    /// milestone (Treasure Parrot).
+    /// milestone (Treasure Parrot) and Bloodfury (`out.damage_dealt`).
     #[allow(clippy::too_many_arguments)]
     fn count_damage(&mut self, db: &CardDb, side: usize, i: usize, dealt: i32, uid: &mut u16, rng: &mut Rng, w: &mut impl Watch) {
         if dealt <= 0 {
             return;
+        }
+        if self.counters.count_damage {
+            self.out.damage_dealt = self.out.damage_dealt.saturating_add(dealt as u32);
         }
         let m = self.ms[i].m;
         let host = self.ms[i].uid;
@@ -2658,8 +2917,11 @@ impl<'a> Side<'a> {
             let dead = fm.m;
             w.death(side, i, &dead);
             self.out.note_dead_card(dead.card);
+            self.out.friendly_deaths = self.out.friendly_deaths.saturating_add(1);
+            if self.first_killed_by_enemy.is_none() && !self.self_destroyed.contains(&fm.uid) {
+                self.first_killed_by_enemy = Some(dead.card);
+            }
             if self.counters.trinkets.count_deaths {
-                self.out.friendly_deaths = self.out.friendly_deaths.saturating_add(1);
                 self.out.note_death_card(dead.card);
                 if self.counters.trinkets.count_death_tribes != 0 {
                     let tribes = db.tribes_of(&dead);
@@ -2692,6 +2954,7 @@ impl<'a> Side<'a> {
             self.note_deity_death(db, side, fm, uid, rng, w);
             if self.count_avenge {
                 self.avenge_tick(db, side, uid, rng, w);
+                self.broodmother_tick(db, side, uid, rng, w);
             }
             if dead.keywords.has(Keywords::REBORN) {
                 let mut m = db.make(dead.card, dead.golden);
@@ -2734,6 +2997,9 @@ impl<'a> Side<'a> {
                     changed = true;
                 }
             }
+        }
+        if self.spawn_when_space(db, side, uid, rng, w) {
+            changed = true;
         }
         changed
     }
@@ -2893,6 +3159,17 @@ fn resolve_deaths(
     let (att, def) = pair(sides, first_side);
     att.spawn_boon_of_beetles(db, first_side, uid, rng, w);
     def.spawn_boon_of_beetles(db, first_side ^ 1, uid, rng, w);
+    for s in 0..2 {
+        let n = sides[s].take_first_killed_left;
+        if n > 0
+            && let Some(card) = sides[s ^ 1].first_killed_by_enemy
+        {
+            for _ in 0..n {
+                sides[s].out.push_card(card);
+            }
+            sides[s].take_first_killed_left = 0;
+        }
+    }
 }
 
 fn run_start_of_combat(
@@ -2902,6 +3179,44 @@ fn run_start_of_combat(
     rng: &mut Rng,
     w: &mut impl Watch,
 ) {
+    // Wingmen (Illidan Stormrage) runs before all other Start of Combat
+    // effects (DESIGN.md "Order of events"), a trinket's included: the
+    // left-most and right-most minions gain +2/+1 and attack immediately,
+    // left then right.
+    if sides[0].counters.wingmen > 0 || sides[1].counters.wingmen > 0 {
+        let first = if sides[0].counters.wingmen > 0 && sides[1].counters.wingmen > 0 {
+            rng.coin() as usize
+        } else if sides[1].counters.wingmen > 0 {
+            1
+        } else {
+            0
+        };
+        for s in [first, first ^ 1] {
+            for _ in 0..sides[s].counters.wingmen {
+                if sides[s].ms.is_empty() {
+                    break;
+                }
+                let left_uid = sides[s].ms[0].uid;
+                let right_idx = sides[s].ms.len() - 1;
+                let right_uid = sides[s].ms[right_idx].uid;
+                sides[s].gain_at(db, 0, 2, 1);
+                if right_uid != left_uid {
+                    sides[s].gain_at(db, right_idx, 2, 1);
+                }
+                if !sides[s ^ 1].ms.is_empty() {
+                    attack_swings(sides, s, left_uid, db, uid, rng, w);
+                }
+                if right_uid != left_uid
+                    && sides[s].index_of(right_uid).is_some()
+                    && !sides[s ^ 1].ms.is_empty()
+                {
+                    attack_swings(sides, s, right_uid, db, uid, rng, w);
+                }
+            }
+        }
+    }
+    // Boon of Beetles hands its Beetles over at Start of Combat, after
+    // Wingmen's attacks.
     for s in 0..2 {
         sides[s].spawn_boon_of_beetles(db, s, uid, rng, w);
     }
@@ -2909,6 +3224,43 @@ fn run_start_of_combat(
     // "Order of events"): Al'Akir's left-most minion gains its keywords,
     // Bru'kan's Water Invocation the right-most one's.
     for s in 0..2 {
+        for _ in 0..sides[s].counters.all_will_burn {
+            for t in 0..2 {
+                for i in 0..sides[t].ms.len() {
+                    if sides[t].ms[i].m.health > 0 {
+                        sides[t].gain_permanent_at(db, i, 2, 0);
+                    }
+                }
+            }
+        }
+        for _ in 0..sides[s].counters.wax_warband {
+            let amt = 1 + (sides[s].counters.gold_spent / 10) as i32;
+            let mut tribes: ArrayVec<Tribes, BOARD> = ArrayVec::new();
+            for f in &sides[s].ms {
+                let t = if f.m.health > 0 { db.tribes_of(&f.m) } else { Tribes::NONE };
+                tribes.push(t);
+            }
+            for i in pick_one_per_type(&tribes, rng) {
+                sides[s].gain_at(db, i, amt, amt);
+            }
+        }
+        for _ in 0..sides[s].counters.phylactery {
+            let picked = sides[s].pick(db, Pick::LowestAttack(1), None, rng);
+            for i in picked {
+                let u = sides[s].ms[i].uid;
+                let _ = sides[s].granted.try_push((u, GrantedDr::Phylactery));
+            }
+        }
+        for _ in 0..sides[s].counters.embrace_rage {
+            if let Some(c) =
+                db.random_tier_minion(sides[s].counters.tier, sides[s].counters.lobby, rng)
+            {
+                sides[s].out.push_card(c);
+                let m = db.make(c, false);
+                let at = sides[s].ms.len();
+                sides[s].summon(db, s, at, m, uid, rng, w);
+            }
+        }
         let kw = sides[s].counters.soc_leftmost;
         if kw != 0
             && let Some(f) = sides[s].ms.first_mut()
@@ -2989,6 +3341,29 @@ fn run_start_of_combat(
             hit = Some(opp);
         }
     }
+    // Rapid Reanimation (Teron Gorefiend): destroy the marked friendly minion
+    // and queue an exact copy to summon once there is space.
+    for s in 0..2 {
+        let n = sides[s].counters.rapid_reanimation;
+        if n == 0 {
+            continue;
+        }
+        for i in 0..sides[s].ms.len() {
+            if sides[s].ms[i].m.reanimate && sides[s].ms[i].m.health > 0 {
+                let mut copy = sides[s].exact_copy(i);
+                copy.reanimate = false;
+                for _ in 0..n {
+                    let _ = sides[s].reanimate.try_push((i, copy));
+                }
+                let u = sides[s].ms[i].uid;
+                let _ = sides[s].self_destroyed.try_push(u);
+                sides[s].ms[i].m.health = 0;
+                if hit.is_none() {
+                    hit = Some(s);
+                }
+            }
+        }
+    }
     // It kills at once, Deathrattles and all, like any other Start of Combat
     // damage: a 1-Health minion is gone before the minions' own Start of
     // Combat runs.
@@ -2996,7 +3371,12 @@ fn run_start_of_combat(
         && sides.iter().any(|side| side.ms.iter().any(|f| f.m.health <= 0))
     {
         resolve_deaths(sides, opp, db, uid, rng, w);
+        run_immediate(sides, db, uid, rng, w);
     }
+    for s in 0..2 {
+        sides[s].spawn_when_space(db, s, uid, rng, w);
+    }
+    run_immediate(sides, db, uid, rng, w);
     // A trinket's Start of Combat comes at the same step as the hero power's
     // (DESIGN.md: hero powers, then the lesser trinket, then the greater).
     // The bundle holds the slots in order, so a lesser trinket's effect runs
@@ -3010,6 +3390,8 @@ fn run_start_of_combat(
     for s in 0..2 {
         for i in 0..sides[s].hand.len() {
             if sides[s].hand_taken(i)
+                || sides[s].hand[i]
+                    .locked_in_hand(sides[s].counters.tier, sides[s].counters.gold_spent)
                 || !matches!(
                     db.get(sides[s].hand[i].card).start_of_combat,
                     Some(StartOfCombat::FlightyScout)
@@ -3088,6 +3470,7 @@ fn run_start_of_combat(
                 }
                 Some(StartOfCombat::DamageAllOthers(dmg)) => {
                     let waves = if golden { 2 } else { 1 };
+                    let mut total_dealt = 0i32;
                     for _ in 0..waves {
                         for s in [turn, turn ^ 1] {
                             for i in 0..sides[s].ms.len() {
@@ -3097,6 +3480,7 @@ fn run_start_of_combat(
                                 let had = sides[s].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD);
                                 let dealt = deal_damage(&mut sides[s].ms[i].m, dmg);
                                 sides[s].ms[i].taken += dealt;
+                                total_dealt += dealt;
                                 if had && !sides[s].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD)
                                 {
                                     shields_lost[s] = true;
@@ -3106,6 +3490,11 @@ fn run_start_of_combat(
                                 }
                             }
                         }
+                    }
+                    if total_dealt > 0
+                        && let Some(mi) = sides[turn].index_of(me)
+                    {
+                        sides[turn].count_damage(db, turn, mi, total_dealt, uid, rng, w);
                     }
                 }
                 Some(StartOfCombat::Effect(e)) => {
@@ -3575,8 +3964,10 @@ fn attack_swings_at(
         xf.taken += dealt_y;
         let x_lost = x_shielded && !xf.m.keywords.has(Keywords::DIVINE_SHIELD);
         let y_lost = y_shielded && !yf.m.keywords.has(Keywords::DIVINE_SHIELD);
+        let mut kills = 0i32;
         if y_alive && yf.m.health <= 0 && dealt_x > 0 {
             yf.killer = Some(xf.uid);
+            kills += 1;
         }
         if x_alive && xf.m.health <= 0 && dealt_y > 0 {
             xf.killer = Some(yf.uid);
@@ -3601,6 +3992,7 @@ fn attack_swings_at(
                 if was_alive && def.ms[vi].m.health <= 0 && dealt > 0 {
                     def.ms[vi].killer = Some(me);
                     killed = true;
+                    kills += 1;
                 }
                 if dealt > 0 && def.damage_trigger {
                     def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
@@ -3646,6 +4038,7 @@ fn attack_swings_at(
                     let keep = near[rng.below(near.len() as u32) as usize];
                     near.retain(|u| *u == keep);
                 }
+                let mut overkill_dealt = 0;
                 for v in near {
                     let Some(vi) = def.index_of(v) else { continue };
                     let (was_alive, was_shielded) = (
@@ -3654,8 +4047,10 @@ fn attack_swings_at(
                     );
                     let dealt = deal_damage(&mut def.ms[vi].m, excess);
                     def.ms[vi].taken += dealt;
+                    overkill_dealt += dealt;
                     if was_alive && def.ms[vi].m.health <= 0 && dealt > 0 {
                         def.ms[vi].killer = Some(me);
+                        kills += 1;
                     }
                     if dealt > 0 && def.damage_trigger {
                         def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
@@ -3664,7 +4059,20 @@ fn attack_swings_at(
                         def.note_shield_lost(db);
                     }
                 }
+                if overkill_dealt > 0
+                    && let Some(ai) = att.index_of(me)
+                {
+                    att.count_damage(db, turn, ai, overkill_dealt, uid, rng, w);
+                }
             }
+        }
+        // Glory of Combat (Rokara): after a friendly minion attacks and kills
+        // an enemy, it gains +1 Attack permanently per kill.
+        if kills > 0
+            && att.counters.glory_of_combat > 0
+            && let Some(ai) = att.index_of(me)
+        {
+            att.gain_permanent_at(db, ai, kills * att.counters.glory_of_combat as i32, 0);
         }
         // Tide Oracle Morgl: after it attacks and kills a minion, that
         // minion's maximum stats (its Attack and its maximum Health) go to a

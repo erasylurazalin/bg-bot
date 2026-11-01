@@ -218,6 +218,10 @@ pub struct Minion {
     /// Frozen on its own in the Tavern (Twice as Nice freezes the two cards
     /// it names, not the whole Tavern): it stays one more turn on its own.
     pub frozen: bool,
+    /// Marked by Rapid Reanimation (Teron Gorefiend) for the next combat:
+    /// destroyed at Start of Combat and resummoned as an exact copy when
+    /// space opens. Cleared at the start of the next turn.
+    pub reanimate: bool,
 }
 
 impl Minion {

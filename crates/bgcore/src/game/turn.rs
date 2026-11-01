@@ -261,6 +261,8 @@ impl Game {
             || !pl.discover_queue.is_empty()
             || !pl.choose_queue.is_empty()
             || !pl.power_offer.is_empty()
+            || pl.wager_offer.is_some()
+            || pl.holmes_offer.is_some()
     }
 
     /// Turbo Hogrider fires for each Choose One card played once nothing
@@ -324,7 +326,11 @@ impl Game {
                     Some(k) => self.resolve_choose(p, k),
                     None => self.players[p].pending_choose_one = None,
                 }
-            } else if !pl.discover.is_empty() || !pl.power_offer.is_empty() {
+            } else if !pl.discover.is_empty()
+                || !pl.power_offer.is_empty()
+                || pl.wager_offer.is_some()
+                || pl.holmes_offer.is_some()
+            {
                 self.resolve_choose(p, 0);
             } else if !pl.trinket_offer.is_empty() {
                 // The offer can't be declined: ending the turn with it open
@@ -806,6 +812,7 @@ impl Game {
         }
         if so.friendly_deaths > 0 {
             self.trinket_event(p, crate::trinkets::Event::Death, None, so.friendly_deaths as u32);
+            self.power_friendly_deaths(p, so.friendly_deaths as u32);
         }
         if so.friendly_summons > 0 {
             self.trinket_event(p, crate::trinkets::Event::Summon, None, so.friendly_summons as u32);
@@ -818,8 +825,14 @@ impl Game {
         }
         if so.friendly_attacks > 0 {
             self.trinket_event(p, crate::trinkets::Event::Attack, None, so.friendly_attacks as u32);
-            // Heroic Inspiration: 15 friendly attacks are a Triple Reward.
+            // Heroic Inspiration and Demon Hunter Training count friendly attacks.
             self.power_attacks(p, so.friendly_attacks as u32);
+        }
+        if so.damage_dealt > 0 {
+            self.power_damage_dealt(p, so.damage_dealt);
+        }
+        if so.broodmother_gain > 0 {
+            self.power_broodmother_gain(p, so.broodmother_gain);
         }
         // Deaths of one named card (Snarky Portrait counts Fishbaits). The
         // bulk count above covers every other death counter, so a rule with
@@ -872,6 +885,9 @@ impl Game {
                     let hand: &[Minion] = if reads_board(&q.board)
                         || reads_hand(&q.hand)
                         || q.trinket_reads_hand(&self.data)
+                        || q.locked_and_loaded
+                            .as_ref()
+                            .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()))
                     {
                         &q.hand
                     } else {
@@ -888,6 +904,10 @@ impl Game {
             let my_hand: &[Minion] = if reads_board(&self.players[p].board)
                 || reads_hand(&self.players[p].hand)
                 || self.players[p].trinket_reads_hand(&self.data)
+                || self.players[p]
+                    .locked_and_loaded
+                    .as_ref()
+                    .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()))
             {
                 &self.players[p].hand
             } else {
@@ -986,6 +1006,7 @@ impl Game {
             pl.last_opponent = pl.opponent.take();
         }
         self.knockouts(alive);
+        self.settle_wagers();
     }
 
     /// The sandbox fight: the player against a copy of their own board,
@@ -1001,6 +1022,10 @@ impl Game {
         let hand: &[Minion] = if reads_board(&pl.board)
             || reads_hand(&pl.hand)
             || pl.trinket_reads_hand(&self.data)
+            || pl
+                .locked_and_loaded
+                .as_ref()
+                .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()))
         {
             &pl.hand
         } else {
@@ -1031,6 +1056,7 @@ impl Game {
         pl.won_last_combat = out.winner == Some(0);
         pl.lost_last_combat = out.winner == Some(1);
         self.apply_side_outcome(0, &out.sides[0], true);
+        self.settle_wagers();
         if let Some(sb) = &mut self.sandbox {
             sb.last_fight = Some(fight);
         }

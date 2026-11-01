@@ -341,6 +341,12 @@ pub fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Acti
         });
         return Some(best_of(scored).unwrap_or_else(|| first_legal(game)));
     }
+    // Friendly Wager and Detective for Hire: a guess, with nothing to go on
+    // here (the offered seats and minion ids are in the observation), so the
+    // first option.
+    if pl.wager_offer.is_some() || pl.holmes_offer.is_some() {
+        return Some(Action::Choose(0));
+    }
     // A trinket offer, once nothing else is open (`is_legal` gives the other
     // choices priority): the cheapest one of a tribe the board has, else the
     // cheapest. A simple rule on purpose.

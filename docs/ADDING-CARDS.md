@@ -195,6 +195,10 @@ exactly one legal target and drops the effect when there is none.
 | Tier 7 draw | Greedy Conniver, Hallowed Ritual (`discover = "tier_7_minion"`) | `give_tier7_minion`, `discover_tier7_minion` |
 | Tier 7 spell | Sacred Gift, Sharing is Caring, Menagerie Tableware | in `spells` like any pool spell, but every spell draw (`random_spell`, `random_spell_up_to`, `random_tier_spell`, `random_spell_of_cost`) caps at `MAX_TIER`, so none is ever offered |
 | Start of Combat spell | Brood of Nozdormu, Upper Hand, Sharing is Caring | a `Player` count passed in `Counters`, read in `run_start_of_combat`, cleared after the fight |
+| Start of Combat from a hero power | Wingmen, Wax Warband, Fragrant Phylactery (`heroes.toml` power effects) | a `Player::counters` field read in `run_start_of_combat`: Wingmen first of all, the rest in the hero-power step; a passive tick runs `tp.power_triggers` times (`tick_power_effect`) |
+| Summon when there is space in combat | Drek'Thar, Ozumat (Tentacular), Lock and Load | `Side::spawn_when_space`, called from `Side::resolve` after every death and at Start of Combat |
+| A Deathrattle granted for the fight | Fragrant Phylactery (`GrantedDr::Phylactery`), Earth Invocation (`SocGrantDeathrattle`) | `Side.granted`; `fire_deathrattles` fires every grant a minion has, so two Start of Combats give two |
+| A guess with two answers | Lord Barov (Friendly Wager), Murloc Holmes (Detective for Hire) | `Player.wager_offer`/`holmes_offer`, `is_legal` + `resolve_choose`, the observation, `answer_pending` in bots.rs |
 | Golden: doubles numbers | any card, `mul` in `run_effect` | "twice" (fixed count, max over copies): Brann/Balinda/Proud Privateer. "An extra time" (stacks): Titus |
 | Golden count differs from x2 | golden text says "twice" vs doubled stats | read the golden card; `golden_doubles_count` for summons, `golden_stats` for stats |
 | Make a minion golden on the board | Elite Navigator (`make_golden_max_tier`) | no reward, not counted as played; `golden_up` |
@@ -890,3 +894,50 @@ Triple Reward spell.
   turn back to its player (`turn_of`) before pressing or answering; a power
   pressed twice in one turn needs its use given back (`again`). `duel` leaves
   two players paired with each other for the fight-driven powers.
+
+## 13. Systems the hero batch 3 added (2026-11-01)
+
+- **A power that fights.** Read the fight section here first: a hero power has
+  no host, so anything it does inside a fight is a `Counters` field that
+  `Player::counters` fills from the two power slots, and the fight reads it in
+  `run_start_of_combat` (Wingmen before everything, the rest at the
+  hero-power step) or at the hook the rules name (`Side::spawn_when_space` for
+  "when you have space", `Side::count_damage` for damage dealt,
+  `attack_swings_at` for a kill). A passive power's tick is multiplied by
+  `tp.power_triggers` (`Player::tick_power_effect`); a press that fires in the
+  next fight arms the slot (`PowerState.armed`, set in `press_power`, read
+  through `Player::armed_power_effect`, cleared at the start of every turn).
+- **A copy or a token.** `Side::exact_copy(i)` is the undamaged copy of a
+  board minion (buffs, keywords and gifts kept, `pool_copies = 0`). A hero
+  power's token is a cards.toml `[[token]]` and the power is
+  `effect = { start_minion = "Name" }`: the board gets it when the hero is
+  taken (`take_hero`) and when such a power is picked at turn 0
+  (`set_power`). Menagerist's Amalgam, Avatar of N'Zoth's Fish and Pilot the
+  Shredder's Shredder are the three.
+- **Something stored for the fight.** `Player.locked_and_loaded` is Lock and
+  Load's Tavern minion: it leaves the Tavern, its pool copy goes back
+  (`give_back`) and the player keeps `pool_copies = 0`, because it fights that
+  one combat and is dropped at the start of the next turn. The fight reads it
+  from `Counters.locked_and_loaded`. Anything else a power holds for one
+  fight belongs in that shape, not in a card on the board.
+- **A press that opens a two-way choice.** Friendly Wager and Detective for
+  Hire open `Player.wager_offer` / `Player.holmes_offer` in `press_power`; a
+  choice like that needs four things or the bots and the training loop hang:
+  the `is_legal` arm (and `Game::is_choice_open`), the `resolve_choose` arm,
+  a scalar in `obs.rs` and `train/model.py` (`SCALAR_IDS` when the value is a
+  card id), and an arm in `bots::answer_pending`. `Game::settle_wagers` shows
+  how a guess's payout is settled after the round's fights.
+- **A counter a fight grows.** `apply_side_outcome` is where a fight's outcome
+  reaches the player: `power_damage_dealt` (Bloodfury, from
+  `SideOutcome.damage_dealt`), `power_friendly_deaths` (MechGyver, shop
+  destroys included because they go through the same call) and
+  `power_broodmother_gain` (Onyxia). A power that becomes another power at a
+  milestone is `becomes` in heroes.toml (`DamageMilestone`,
+  `AttackMilestone`), like BUY, INSECT!.
+- **Tests.** `tests/heroes_batch3.rs`, one test per hero: the game-side ones
+  use the batch 2 helpers, the fight-side ones call `fight_with` /
+  `fight_with_hands` with the counters set by hand and watch the order with a
+  `Watch`. One trap: a `Game` is 128 KB and libtest gives a test 2 MiB, so a
+  test with several games alive at once (or a fresh local per section) must
+  reuse one binding through a `reset` helper, or it overflows the stack in a
+  debug build before any assertion runs.

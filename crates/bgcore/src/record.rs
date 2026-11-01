@@ -173,6 +173,9 @@ struct FileMinion {
     /// Attack a temporary swap added (Spirit Swap), undone next turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     temp_attack: Option<i32>,
+    /// Marked by Rapid Reanimation (Teron Gorefiend) for the next combat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reanimate: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attached: Vec<FileAttached>,
     /// The Dark Gifts on the minion, and the small counter each one carries
@@ -227,6 +230,7 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         hats: differs(m.hats as u64, 0).map(|v| v as u8),
         temp_reborn: m.temp_reborn.then_some(true),
         temp_attack: differs(m.temp_attack as i64 as u64, 0).map(|v| v as i32),
+        reanimate: m.reanimate.then_some(true),
         attached: m
             .attached_slice()
             .iter()
@@ -293,6 +297,9 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     if let Some(v) = f.temp_attack {
         m.temp_attack = v;
+    }
+    if let Some(v) = f.reanimate {
+        m.reanimate = v;
     }
     if let Some(v) = f.activated {
         m.activated = v;

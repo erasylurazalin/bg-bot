@@ -41,6 +41,13 @@ fn open_session(seed: u64, label: Option<&str>, dir: &Path) -> Session {
     })
 }
 
+/// Replace a session in place. A `Session` owns a `Game`, which is 128 KB,
+/// and every fresh local (and every assignment's temporary) is its own stack
+/// slot in a debug build: five of them overflow the 2 MiB a test thread gets.
+fn reset_session(s: &mut Session, seed: u64, label: Option<&str>, dir: &Path) {
+    *s = open_session(seed, label, dir);
+}
+
 /// Run the command loop on a script as if at a terminal, returns the output.
 fn play_script(s: &mut Session, script: &str) -> String {
     let mut input = std::io::Cursor::new(script.as_bytes().to_vec());
@@ -339,12 +346,12 @@ Fodder Run
     assert_eq!((rec.label.as_str(), rec.turns.len()), ("Fodder Run", 2));
     // during the game the file has the temporary name
     let dir2 = tmp("ask-label2");
-    let mut s = open_session(5, None, &dir2);
+    reset_session(&mut s, 5, None, &dir2);
     s.exec("e");
     assert_eq!(boards_in(&dir2), ["game-5.toml"]);
     // a blank answer keeps unlabeled
     let dir3 = tmp("ask-label3");
-    let mut s = open_session(5, None, &dir3);
+    reset_session(&mut s, 5, None, &dir3);
     play_script(&mut s, "e
 quit
 
@@ -352,13 +359,13 @@ quit
     assert_eq!(boards_in(&dir3), ["unlabeled-5.toml"]);
     // end of input at the question does not hang or lose the game
     let dir4 = tmp("ask-label4");
-    let mut s = open_session(5, None, &dir4);
+    reset_session(&mut s, 5, None, &dir4);
     play_script(&mut s, "e
 ");
     assert_eq!(boards_in(&dir4), ["unlabeled-5.toml"]);
     // a label given up front is not asked again
     let dir5 = tmp("ask-label5");
-    let mut s = open_session(5, Some("magnetic"), &dir5);
+    reset_session(&mut s, 5, Some("magnetic"), &dir5);
     let out = play_script(&mut s, "e
 quit
 ");

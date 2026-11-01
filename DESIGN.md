@@ -383,7 +383,10 @@ Deliverer). That includes a Lockbox's minion and a Tavern minion that
 Golden Touch made golden, then bought and played. A minion that becomes
 golden on the board (Elite Navigator, Captain Sanders) gives nothing, and
 it doesn't count as a golden minion "played" (Maritime Extortionist,
-Hooktusk).
+Hooktusk). Golden-making effects (Eyes of the Earth Mother up to Tier 4,
+Captain Sanders up to Tier 6, never Tier 7) work on any friendly minion
+within their limit, tokens included: a Sneed's Shredder or a Beetle can be
+made golden this way, even though a token never triples.
 
 **"Twice" versus "an extra time".** "Your X trigger twice" or "cast twice"
 (Brann, Drakkari, Balinda, Proud Privateer) sets a fixed count: two copies

@@ -497,6 +497,30 @@ pub fn prompt(g: &Game, texts: &CardTexts, ctx: Option<&str>) -> Option<String> 
             opts.join("\n  ")
         ));
     }
+    if let Some((a, b)) = pl.wager_offer {
+        return Some(format!(
+            "CHOICE: Friendly Wager. Guess which player wins their next combat. Type 1 or 2.\n  1 seat {}\n  2 seat {}",
+            a + 1,
+            b + 1,
+        ));
+    }
+    if let Some((opts, _)) = pl.holmes_offer {
+        let lines: Vec<String> = opts
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| {
+                if id == u16::MAX {
+                    format!("{} (no minions)", i + 1)
+                } else {
+                    format!("{} {}", i + 1, db.get(id).name)
+                }
+            })
+            .collect();
+        return Some(format!(
+            "CHOICE: Detective for Hire. Guess which minion your next opponent had last combat. Type 1 or 2.\n  {}",
+            lines.join("\n  "),
+        ));
+    }
     None
 }
 
@@ -574,6 +598,8 @@ fn describe_target(pt: &PendingTarget) -> String {
             format!("destroy a {} for a random one", tribe_name(tribe))
         }
         TargetKind::SummonExactCopy => "the minion to copy".into(),
+        TargetKind::LockAndLoad => "lock a minion in your Hero Power".into(),
+        TargetKind::RapidReanimation => "destroy a friendly minion at Start of Combat, then resummon it".into(),
         TargetKind::Spell(st) => format!("{st:?}"),
     }
 }

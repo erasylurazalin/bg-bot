@@ -796,3 +796,234 @@ name = "Mister Clocksworth"
 card_id = "BG34_HERO_002"
 armor = 18
 power = { name = "Double Time", card_id = "BG34_HERO_002p", passive = true, effect = { double_time = true, card = "Tavern Coin" } }
+
+# ---- Hero batch 3 (docs/briefs/heroes-batch3.md) ----
+
+# Wingmen: Start of Combat: your left- and right-most minions gain +2/+1 and
+# attack immediately, before every other Start of Combat.
+[[hero]]
+name = "Illidan Stormrage"
+card_id = "TB_BaconShop_HERO_08"
+armor = 18
+power = { name = "Wingmen", card_id = "TB_BaconShop_HP_069", passive = true, effect = { wingmen = true } }
+
+# Wax Warband: Start of Combat: give a friendly minion of each type +1/+1,
+# improved by each 10 Gold spent this game.
+[[hero]]
+name = "Queen Wagtoggle"
+card_id = "TB_BaconShop_HERO_14"
+armor = 14
+power = { name = "Wax Warband", card_id = "TB_BaconShop_HP_037a", passive = true, effect = { wax_warband = true } }
+
+# Menagerist: start the game with a 2/2 Amalgam with Venomous and all minion
+# types.
+[[hero]]
+name = "The Curator"
+card_id = "TB_BaconShop_HERO_33"
+armor = 16
+power = { name = "Menagerist", card_id = "TB_BaconShop_HP_033", passive = true, effect = { start_minion = "Amalgam" } }
+
+# Bloodfury: after friendly minions deal 150 damage, becomes Nether Portal (at
+# the start of each turn, get 2 random Demons).
+[[hero]]
+name = "Lord Jaraxxus"
+card_id = "TB_BaconShop_HERO_37"
+armor = 15
+tribes = ["demon"]
+power = { name = "Bloodfury", card_id = "TB_BaconShop_HP_036", passive = true, effect = { damage_milestone = 150, becomes = "TB_BaconShop_HP_036t" } }
+
+[[power]]
+name = "Nether Portal"
+card_id = "TB_BaconShop_HP_036t"
+passive = true
+effect = { random_minions_each_turn = 2, tribe = "demon" }
+
+# I'll Take That!: next combat, get a plain copy of the first minion you kill.
+[[hero]]
+name = "Arch-Villain Rafaam"
+card_id = "TB_BaconShop_HERO_45"
+armor = 15
+power = { name = "I'll Take That!", card_id = "TB_BaconShop_HP_053", cost = 1, effect = { take_first_killed = true } }
+
+# ALL Will Burn!: Start of Combat: give ALL minions +2 Attack permanently.
+[[hero]]
+name = "Deathwing"
+card_id = "TB_BaconShop_HERO_52"
+armor = 18
+power = { name = "ALL Will Burn!", card_id = "TB_BaconShop_HP_061", passive = true, effect = { all_will_burn = true } }
+
+# Demon Hunter Training: after 14 friendly minions attack, becomes Spectral
+# Sight (the first minion you buy each turn is free).
+[[hero]]
+name = "Aranna Starseeker"
+card_id = "TB_BaconShop_HERO_59"
+armor = 12
+power = { name = "Demon Hunter Training", card_id = "TB_BaconShop_HP_065", passive = true, effect = { attack_milestone = 14, becomes = "TB_BaconShop_HP_065t2" } }
+
+[[power]]
+name = "Spectral Sight"
+card_id = "TB_BaconShop_HP_065t2"
+passive = true
+effect = { free_first_minion = true }
+
+# Friendly Wager: guess which player will win their next combat; if they win,
+# get 3 Tavern Coins; if they tie, get 1 Gold next turn.
+[[hero]]
+name = "Lord Barov"
+card_id = "TB_BaconShop_HERO_72"
+armor = 14
+power = { name = "Friendly Wager", card_id = "TB_BaconShop_HP_081", cost = 1, effect = { friendly_wager = true, card = "Tavern Coin" } }
+
+# Embrace Your Rage: Start of Combat: summon a minion of your Tier for this
+# combat, and add a copy of it to your hand.
+[[hero]]
+name = "Y'Shaarj"
+card_id = "TB_BaconShop_HERO_92"
+armor = 20
+power = { name = "Embrace Your Rage", card_id = "TB_BaconShop_HP_103", cost = 2, effect = { embrace_your_rage = true } }
+
+# Avatar of N'Zoth: start the game with a 2/2 Fish of N'Zoth that gains all
+# your Deathrattles in combat.
+[[hero]]
+name = "N'Zoth"
+card_id = "TB_BaconShop_HERO_93"
+armor = 12
+tribes = ["beast", "undead"]
+power = { name = "Avatar of N'Zoth", card_id = "TB_BaconShop_HP_105", passive = true, effect = { start_minion = "Fish of N'Zoth" } }
+
+# Sprout It Out!: give +1/+2 and Taunt to minions you summon during combat.
+[[hero]]
+name = "Greybough"
+card_id = "TB_BaconShop_HERO_95"
+armor = 16
+tribes = ["beast", "undead"]
+power = { name = "Sprout It Out!", card_id = "TB_BaconShop_HP_107", passive = true, effect = { sprout_it_out = true } }
+
+# Glory of Combat: after a friendly minion kills an enemy, give it +1 Attack
+# permanently.
+[[hero]]
+name = "Rokara"
+card_id = "BG20_HERO_100"
+armor = 18
+power = { name = "Glory of Combat", card_id = "BG20_HERO_100p", passive = true, effect = { glory_of_combat = true } }
+
+# Power of the Storm: at the start of every turn, choose from 2 new Hero
+# Powers.
+[[hero]]
+name = "Master Nguyen"
+card_id = "BG20_HERO_202"
+armor = 10
+power = { name = "Power of the Storm", card_id = "BG20_HERO_202p", passive = true, effect = { power_of_the_storm = true } }
+
+# Conviction: give 1 random friendly minion +1/+1; at the start of each turn
+# after turn 1, choose a stance to permanently upgrade this.
+[[hero]]
+name = "Cariel Roame"
+card_id = "BG21_HERO_000"
+armor = 10
+power = { name = "Conviction", card_id = "BG21_HERO_000p", effect = { conviction = true }, choose = [
+    "BG21_HERO_000_Buddyt",
+    "BG21_HERO_000_Buddyt2",
+    "BG21_HERO_000p_t1",
+] }
+
+[[power]]
+name = "Offensive Stance"
+card_id = "BG21_HERO_000_Buddyt"
+passive = true
+effect = { stance = [0, 1, 0] }
+
+[[power]]
+name = "Defensive Stance"
+card_id = "BG21_HERO_000_Buddyt2"
+passive = true
+effect = { stance = [0, 0, 1] }
+
+[[power]]
+name = "United Stance"
+card_id = "BG21_HERO_000p_t1"
+passive = true
+effect = { stance = [1, 0, 0] }
+
+# Fragrant Phylactery: Start of Combat: give your lowest-Attack minion
+# "Deathrattle: Give your other minions this minion's stats."
+[[hero]]
+name = "Tamsin Roame"
+card_id = "BG20_HERO_282"
+armor = 10
+power = { name = "Fragrant Phylactery", card_id = "BG20_HERO_282p", passive = true, effect = { fragrant_phylactery = true } }
+
+# Pilot the Shredder: start the game with a 2/1 Sneed's New Shredder.
+[[hero]]
+name = "Sneed"
+card_id = "BG21_HERO_030"
+armor = 15
+tribes = ["mech", "murloc"]
+power = { name = "Pilot the Shredder", card_id = "BG21_HERO_030p", passive = true, effect = { start_minion = "Sneed's New Shredder" } }
+
+# Lock and Load: steal a minion from the Tavern; when you have space in next
+# combat, summon it and it attacks immediately.
+[[hero]]
+name = "Tavish Stormpike"
+card_id = "BG22_HERO_000"
+armor = 14
+power = { name = "Lock and Load", card_id = "BG22_HERO_000p_Alt", effect = { lock_and_load = true } }
+
+# Frostwolf Fervor: when you have space in combat, summon an exact copy of your
+# highest-Attack minion. Unlocks on Turn 7.
+[[hero]]
+name = "Drek'Thar"
+card_id = "BG22_HERO_002"
+armor = 10
+power = { name = "Frostwolf Fervor", card_id = "BG22_HERO_002p", passive = true, unlock_turn = 7, effect = { copy_highest_when_space = "attack" } }
+
+# Stormpike Strength: when you have space in combat, summon an exact copy of
+# your highest-Health minion. Unlocks on Turn 7.
+[[hero]]
+name = "Vanndar Stormpike"
+card_id = "BG22_HERO_003"
+armor = 10
+power = { name = "Stormpike Strength", card_id = "BG22_HERO_003p", passive = true, unlock_turn = 7, effect = { copy_highest_when_space = "health" } }
+
+# MechGyver: after 9 friendly minions die, get a random Mech.
+[[hero]]
+name = "Ini Stormcoil"
+card_id = "BG22_HERO_200"
+armor = 15
+tribes = ["mech"]
+power = { name = "MechGyver", card_id = "BG22_HERO_200p", passive = true, effect = { mech_gyver = 9 } }
+
+# Broodmother: Avenge (4): summon a 1/1 Whelp that attacks immediately, and
+# improve this permanently.
+[[hero]]
+name = "Onyxia"
+card_id = "BG22_HERO_305"
+armor = 10
+tribes = ["beast", "undead"]
+power = { name = "Broodmother", card_id = "BG22_HERO_305p", passive = true, effect = { broodmother = true, card = "Onyxian Whelp" } }
+
+# Detective for Hire: look at 2 minions; guess which one your next opponent had
+# last combat for a Coin.
+[[hero]]
+name = "Murloc Holmes"
+card_id = "BG23_HERO_303"
+armor = 12
+power = { name = "Detective for Hire", card_id = "BG23_HERO_303p2", effect = { detective_for_hire = true, card = "Tavern Coin" } }
+
+# Tentacular: when you have space in combat, summon a 2/2 Tentacle with Taunt
+# (gains +1/+1 permanently after you sell a minion).
+[[hero]]
+name = "Ozumat"
+card_id = "BG23_HERO_201"
+armor = 15
+power = { name = "Tentacular", card_id = "BG23_HERO_201p", passive = true, effect = { tentacular = true, card = "Ozumat's Tentacle" } }
+
+# Rapid Reanimation: choose a friendly minion; Start of Combat: destroy it, and
+# once you have space resummon an exact copy.
+[[hero]]
+name = "Teron Gorefiend"
+card_id = "BG25_HERO_103"
+armor = 14
+tribes = ["beast", "undead"]
+power = { name = "Rapid Reanimation", card_id = "BG25_HERO_103p", effect = { rapid_reanimation = true } }
+

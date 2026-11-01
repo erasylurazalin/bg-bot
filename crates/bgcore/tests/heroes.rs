@@ -144,9 +144,9 @@ fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_eighty_two_heroes() {
+fn heroes_toml_parses_with_the_hundred_and_six_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 82);
+    assert_eq!(d.heroes.heroes.len(), 106);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),
@@ -928,10 +928,10 @@ fn mana_per_minute_refreshes_the_tavern_with_tavern_spells() {
 #[test]
 fn finley_discovers_a_power_right_after_the_pick() {
     let d = data();
-    // The hero deck is 20 deep now, so a seed may not deal Finley to player 0:
+    // The hero deck is over 100 deep now, so a seed may not deal Finley to player 0:
     // try more of them, and play the whole pick out (the order is shuffled, so
     // player 0's power Discover may be answered before or after the others).
-    for seed in 0..200 {
+    for seed in 0..1000 {
         let mut g = Game::new_heroes_with_lobby(
             d.clone(),
             seed,
@@ -983,7 +983,7 @@ fn finley_discovers_a_power_right_after_the_pick() {
             panic!("seed {seed}: Finley's power Discover never opened");
         }
     }
-    panic!("Finley was never offered to player 0 in 200 seeds");
+    panic!("Finley was never offered to player 0 in 1000 seeds");
 }
 
 #[test]

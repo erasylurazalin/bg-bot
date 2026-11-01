@@ -422,7 +422,70 @@ build hero-less games so old tests pass unchanged, and
     - `cast_spell` ends by dropping a target prompt nothing can answer, so a
       spell's own "after you cast" triggers can never leave the player
       stranded.
-- Bots answer the pick and a power Discover in `answer_pending`, and press a
+- **Hero batch 3 (2026-11-01)**, the fight, kill and rest powers
+  (docs/briefs/heroes-batch3.md, the rules in docs/heroes.md "Hero batch
+  rules (Era, 2026-11-01)"):
+  - **A power's Start of Combat is a `Counters` field.** `Player::counters`
+    fills `wingmen`, `wax_warband`, `all_will_burn`, `phylactery`, `glory_of_combat`,
+    `sprout_it_out`, `frostwolf_fervor`, `stormpike_strength`, `tentacular`,
+    `broodmother`, `minions_sold` and `count_damage` from the two power slots,
+    and the fight reads them: Wingmen before every other Start of Combat
+    effect (`run_start_of_combat`, a trinket's Boon of Beetles included),
+    then the rest in the hero-power step. `Player::power_effect` skips a power
+    that has not unlocked (Frostwolf Fervor's turn 7). A passive power's tick runs
+    `tp.power_triggers` times (`Player::tick_power_effect`); a press that
+    fights (Embrace Your Rage, I'll Take That!, Rapid Reanimation) arms the
+    slot instead and uses `Player::armed_power_effect`, so it counts once per
+    press. `PowerState.armed` is cleared at the start of every turn.
+  - **Something waits for a board slot.** `Side::spawn_when_space` is the one
+    place that summons what a power holds back, and `Side::resolve` calls it
+    after every death: Rapid Reanimation's queued exact copies (`Side.reanimate`,
+    in the slot the minion stood in), Lock and Load's stored minion (summoned
+    then pushed on `Side.immediate`, so it attacks at once), Frostwolf
+    Fervor's and Stormpike Strength's one copy of the highest Attack or
+    Health (`Side.pick_highest`, ties at random) and Tentacular's Tentacle.
+    `Side::exact_copy` is the copy: undamaged, buffs and keywords kept, no
+    pool copy.
+  - **A power's token.** Menagerist's Amalgam, Avatar of N'Zoth's Fish and
+    Pilot the Shredder's Sneed's New Shredder are cards.toml `[[token]]`s and
+    a `start_minion = "Name"` power puts one on the board when the hero is
+    taken (and when such a power is picked at turn 0). Heroes.toml writes it
+    that way; the token takes no pool copy.
+  - **A Deathrattle granted for the fight.** `Counters.phylactery` gives the
+    lowest-Attack minion `GrantedDr::Phylactery` (Attack and maximum Health to
+    its other minions when it dies); `Side.granted` holds every such grant and
+    `fire_deathrattles` now fires all of them for a minion rather than the
+    first, so two triggers of the same Start of Combat give two Deathrattles.
+    A Fish of N'Zoth takes a granted Deathrattle too.
+  - **A press with a guess in it.** Friendly Wager and Detective for Hire
+    open a two-way choice: `Player.wager_offer` (the two seats) and
+    `Player.holmes_offer` (the two card ids and which is right) are checked by
+    `is_legal` and `Game::is_choice_open`, answered by `Action::Choose(k)` in
+    `resolve_choose`, settled in `Game::settle_wagers` after the round's
+    fights (3 Tavern Coins for the winner, `gold_next_turn` 1 for a tie) and
+    read by the observation (`SCALAR_PENDING_WAGER`, `SCALAR_WAGER_OFFER`,
+    `SCALAR_WAGER_PICK`, `SCALAR_PENDING_HOLMES`, `SCALAR_HOLMES_OFFER`, the
+    "empty" flags). `Player.wagers` holds the unanswered guesses for the round.
+  - **Counters that only a fight can grow.** `apply_side_outcome` feeds
+    `power_attacks` (Demon Hunter Training), `power_friendly_deaths` (MechGyver,
+    shop destroys included), `power_damage_dealt` (Bloodfury, from
+    `SideOutcome.damage_dealt`, the damage friendly minions deal in the fight)
+    and `power_broodmother_gain` (Onyxia's Whelps, `SideOutcome.broodmother_gain`).
+    Bloodfury becomes Nether Portal at its milestone and the portal is a
+    `random_minions_each_turn` power, so the Demons arrive in
+    `power_start_of_turn`.
+  - **Conviction's stances** are `[[power]]` entries in heroes.toml, listed in
+    the power's `choose`, with `effect = { stance = [count, attack, health] }`.
+    `Player.conviction` is what the three add up to; the offer opens in
+    `power_start_of_turn` (turn 2 on, three options, United left out at 7
+    minions) and `pick_power` adds a Stance instead of replacing a power.
+  - **What a third power needs.** A power whose effect the pick must run at
+    once is fired from `pick_power` when it came from Power of the Storm:
+    Master Nguyen's slot (`Player.storm_power`) is re-offered every turn
+    (`deal_power_offer` deals two options, same exclusions, never Power of the
+    Storm back), and Unmasked Identity clears the flag.
+- Bots answer the pick, a power Discover and the two guesses in
+  `answer_pending`, and press a
   legal button (either one) with gold that would be left over (Gonna Be
   Rich! waits for turn 8). A skipped turn gets a Freeze and then an End Turn.
   `bgbench` and `bgpy` games play with heroes.
@@ -784,7 +847,10 @@ through exactly that card's code. The engine never matches a gift by name:
   whether it was pressed this turn, whether it can be pressed and whether the
   open Discover is a gift offer as four own scalars after the trinket block.
   `SLOT_FEATURES` went 78 to 86, and hero batch 2 took it from 86 to 89
-  (hats, ticket, frozen after the gift slots; OBS_SIZE 7145 to 7292).
+  (hats, ticket, frozen after the gift slots; OBS_SIZE 7145 to 7292). Hero
+  batch 3 took the scalars from 208 to 224 and the card slot from 89 to 90
+  (the reanimate mark; OBS_SIZE 7292 to 7385): free minion buys, Conviction,
+  Lock and Load's stored minion, the two guesses and the "empty" flags.
 - **Real-board seats** carry the `dark_gifts` the files record: the loader
   attaches them (their stats are already in the file's attack and health),
   with the counter set as if the gift had landed on that board's turn.
@@ -933,6 +999,11 @@ to seat real-board seats playing DIR's boards (docs/real-boards.md); without
 a real boards/ folder, `crates/bgcore/tests/data/real-boards/` is a small
 stand-in. Needs `ref/bg-cards.json` for the card id mapping.
 
+`games 10` on this machine (release, 32 threads, five-tribe lobbies with
+heroes) was about 13,300 games a second after hero batch 3: one core 1.04 ms
+a game, 1.2 us an action. The same build of `git archive HEAD` made 13,700,
+so the batch costs 2.7%. `fuzz 100000` takes about 14 s.
+
 Python side, from the repo root:
 
 ```
@@ -987,7 +1058,9 @@ Deleting `.venv` undoes it.
   (SCALARS 195 to 199, N_ACTIONS 182): every checkpoint before it breaks as
   well. Hero batch 2 (2026-11-01) added hats, the Darkmoon Ticket mark and a
   frozen card to the card slot (SLOT_FEATURES 86 to 89, OBS_SIZE 7145 to
-  7292), so every checkpoint before it breaks too. A hero id and a power id share the model's one id embedding, so its
+  7292), and hero batch 3 the reanimate mark and sixteen scalars
+  (SLOT_FEATURES 89 to 90, OBS_SIZE 7292 to 7385), so every checkpoint before
+  it breaks too. A hero id and a power id share the model's one id embedding, so its
   table is `max(N_HEROES, N_POWERS)` wide and the offer slots are embedded
   from it too (`HERO_IDS` in train/model.py), not scaled as numbers.
 - Games from `bgpy` play with heroes (`Game::new_random_heroes`, no pick),

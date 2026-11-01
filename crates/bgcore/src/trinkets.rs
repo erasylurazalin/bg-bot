@@ -596,6 +596,9 @@ pub enum GrantedDr {
     Summon { card: CardId, count: u8 },
     /// Give every friendly minion stats they keep after the fight.
     BuffAll { attack: i32, health: i32 },
+    /// Give every other friendly minion this minion's Attack and maximum
+    /// Health for the fight (Fragrant Phylactery).
+    Phylactery,
 }
 
 /// One thing a trinket does inside a fight. Every variant with a `Pick` runs

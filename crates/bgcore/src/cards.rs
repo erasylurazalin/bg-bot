@@ -295,10 +295,11 @@ pub enum Effect {
     /// Give `count` random other friendly minions of a tribe stats and a
     /// keyword (Amber Guardian). A golden minion picks `count` twice as many.
     BuffRandomOther { tribe: Option<Tribe>, attack: i32, health: i32, keyword: u8, count: u8 },
-    /// Summon the `count` highest-Attack minions of a tribe from hand, for
-    /// this combat only (Expert Aviator, Diremuck Forager). The copies leave
-    /// the hand for the rest of the fight and are back in it afterwards.
-    SummonFromHand { tribe: Tribe, count: u8, by_health: bool },
+    /// Summon the `count` highest-Attack minions of a tribe (or any minion)
+    /// from hand, for this combat only (Expert Aviator, Diremuck Forager,
+    /// Sneed's New Shredder). The copies leave the hand for the rest of the
+    /// fight and are back in it afterwards.
+    SummonFromHand { tribe: Option<Tribe>, count: u8, by_health: bool, shield: bool },
     /// Give a random minion in hand stats, permanently (Very Hungry
     /// Winterfinner). Fights only.
     BuffRandomHand { attack: i32, health: i32 },
@@ -2149,6 +2150,8 @@ struct RawEffect {
     #[serde(default)]
     by_health: bool,
     #[serde(default)]
+    shield: bool,
+    #[serde(default)]
     golden_doubles_count: bool,
     /// Get a random pool minion of this tribe.
     random_minion: Option<String>,
@@ -3098,9 +3101,10 @@ impl CardDb {
                 }
             } else if let Some(name) = &b.summon_from_hand {
                 Effect::SummonFromHand {
-                    tribe: tribe(name)?,
+                    tribe: if name == "any" { None } else { Some(tribe(name)?) },
                     count: b.count.unwrap_or(1),
                     by_health: b.by_health,
+                    shield: b.shield,
                 }
             } else if b.become_copy {
                 Effect::BecomeCopyChosen
@@ -4495,6 +4499,7 @@ impl CardDb {
             temp_reborn: false,
             temp_attack: 0,
             frozen: false,
+            reanimate: false,
         }
     }
 }

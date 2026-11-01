@@ -20,6 +20,12 @@ batches.
 `docs/briefs/heroes-batch2.md` and their rules under "Hero batch rules (Era,
 2026-11-01)" ("Stats and targets", "The Tavern", "Guessing" for I Spy).
 
+**Built 2026-11-01 (hero batch 3):** the 24 heroes of
+`docs/briefs/heroes-batch3.md` and their rules under "Hero batch rules (Era,
+2026-11-01)" ("Start of Combat and fights", "Kills and counters" and the
+Power of the Storm line under "Other"), with the guessing powers (Lord
+Barov, Murloc Holmes) from "Guessing".
+
 ## Powers in general
 
 - A button power works once per turn unless its text says otherwise. Uses

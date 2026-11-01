@@ -171,6 +171,13 @@ pub enum TargetKind {
     DestroyGetTribe { tribe: Tribe },
     /// Summon an exact copy of the chosen friendly minion (Cloning Gallery).
     SummonExactCopy,
+    // ---- hero batch 3 (2026-11-01) ----
+    /// Lock the chosen Tavern minion in hand for 1 turn and summon a copy of
+    /// it in the next combat (Lock and Load).
+    LockAndLoad,
+    /// Mark the chosen friendly minion to be destroyed at Start of Combat and
+    /// resummoned as an exact copy when there is space (Rapid Reanimation).
+    RapidReanimation,
 }
 
 impl TargetKind {
@@ -189,7 +196,8 @@ impl TargetKind {
             | TargetKind::StealShopAsStats { .. }
             | TargetKind::ImprisonShop { .. }
             | TargetKind::SpiritSwapFirst
-            | TargetKind::SpiritSwapSecond => true,
+            | TargetKind::SpiritSwapSecond
+            | TargetKind::LockAndLoad => true,
             _ => false,
         }
     }
@@ -841,6 +849,28 @@ pub struct Player {
     /// Gold the open Discover's pick stays locked in hand for (Choose Your
     /// Champion): 0 for none.
     pub discover_locked_gold: u16,
+    /// Spectral Sight: free minion buys left this turn (1 at turn start when
+    /// the power is held).
+    pub free_minion_left: u8,
+    /// Power of the Storm (Master Nguyen): whether each hero-power slot (0 =
+    /// main, 1 = second) came from Power of the Storm and swaps at the start
+    /// of every turn.
+    pub storm_power: [bool; 2],
+    /// Conviction (Cariel Roame): `(count, attack, health)` accumulated over
+    /// the game by choosing Offensive / Defensive / United Stance. Starts at
+    /// `(2, 1, 1)` once the hero is picked; `count` caps at 7.
+    pub conviction: (u8, i32, i32),
+    /// Lock and Load (Saurfang): the exact copy of the Tavern minion locked in
+    /// hand this turn to summon at the next Start of Combat when space opens.
+    pub locked_and_loaded: Option<Minion>,
+    /// Friendly Wager (Lord Barov): the two living players `(a, b)` offered by
+    /// the open Choose One, and the active wagers `(guessed_player, opponent)`
+    /// waiting for `finish_fights`.
+    pub wager_offer: Option<(u8, u8)>,
+    pub wagers: ArrayVec<(u8, u8), 2>,
+    /// Detective for Hire (Murloc Holmes): the two candidate minion `CardId`s
+    /// and the correct answer index (`0` or `1`) while the Choose One is open.
+    pub holmes_offer: Option<([CardId; 2], u8)>,
     pub deity: Option<Deity>,
     pub discarded: u32,
     /// The last card this player discarded, for a reward that copies it
@@ -1206,6 +1236,9 @@ impl Game {
         if !pl.power_offer.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.power_offer.len());
         }
+        if pl.wager_offer.is_some() || pl.holmes_offer.is_some() {
+            return matches!(a, Action::Choose(k) if k < 2);
+        }
         // A skipped turn (Procrastinate, Expedition Plans): Freeze and End
         // Turn (already answered above) and the answers to whatever choice the
         // turn opened, nothing else; the fight still happens.
@@ -1425,6 +1458,10 @@ impl Game {
             for k in 0..pl.power_offer.len() as u8 {
                 ask(Action::Choose(k));
             }
+        } else if open && (pl.wager_offer.is_some() || pl.holmes_offer.is_some()) {
+            for k in 0..2 {
+                ask(Action::Choose(k));
+            }
         } else if open && self.turn_skipped(p) {
             // A skipped turn: Freeze and End Turn only.
             ask(Action::Freeze);
@@ -1610,8 +1647,11 @@ impl Game {
             }
             // Reborn Rites buffs any minion; Galakrond's Greed needs a Tier
             // below the top so there is one above it; See the Light takes a
-            // minion; Spirit Swap takes any minion twice.
-            TargetKind::TempReborn | TargetKind::StealShopAsStats { .. } => true,
+            // minion; Spirit Swap takes any minion twice; Lock and Load takes
+            // any Tavern minion.
+            TargetKind::TempReborn
+            | TargetKind::StealShopAsStats { .. }
+            | TargetKind::LockAndLoad => true,
             TargetKind::ReplaceHigher => self.data.cards.get(pl.shop[s].card).tier < crate::MAX_TIER,
             TargetKind::SpiritSwapFirst => true,
             TargetKind::SpiritSwapSecond => {
@@ -1740,12 +1780,16 @@ impl Game {
                 !matches!(self.players[p].two_step, Some((f, false)) if f as usize == s)
             }
             // A board minion only: the minion to sell into (Devour, after the
-            // sale) and the copy taken (Cloning Gallery).
-            TargetKind::DevourSecond | TargetKind::SummonExactCopy => true,
+            // sale), the copy taken (Cloning Gallery) and the minion destroyed
+            // at the start of combat (Rapid Reanimation).
+            TargetKind::DevourSecond
+            | TargetKind::SummonExactCopy
+            | TargetKind::RapidReanimation => true,
             // A Tavern card only, and a Tavern minion only.
             TargetKind::ReplaceHigher
             | TargetKind::StealShopAsStats { .. }
-            | TargetKind::ImprisonShop { .. } => false,
+            | TargetKind::ImprisonShop { .. }
+            | TargetKind::LockAndLoad => false,
             TargetKind::DestroyGetTribe { tribe } => {
                 self.data.cards.tribes_of(&b[s]).has(tribe)
             }

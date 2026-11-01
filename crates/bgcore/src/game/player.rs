@@ -129,6 +129,13 @@ impl Player {
             discover_doomed: false,
             discover_both: false,
             discover_locked_gold: 0,
+            free_minion_left: 0,
+            storm_power: [false; 2],
+            conviction: (0, 0, 0),
+            locked_and_loaded: None,
+            wager_offer: None,
+            wagers: ArrayVec::new(),
+            holmes_offer: None,
             discover_gifts: ArrayVec::new(),
             discover_copies: ArrayVec::new(),
             discover_minions: ArrayVec::new(),
@@ -577,7 +584,28 @@ impl Player {
         [self.power, self.power2]
             .iter()
             .flatten()
+            .filter(|st| st.unlocked)
             .map(|st| f(data.heroes.power(st.of).effect))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// A passive power's tick in the next fight (Start of Combat, a summon, a
+    /// kill), multiplied by `tp.power_triggers`: docs/ENGINE.md, a passive
+    /// power's tick runs twice on one payment.
+    fn tick_power_effect(&self, data: &Data, f: impl Fn(PowerEffect) -> u8) -> u8 {
+        self.power_effect(data, f).saturating_mul(self.tp.power_triggers.max(1))
+    }
+
+    /// An active power that was pressed this turn (`st.armed`) and fires in
+    /// the next fight, multiplied by `tp.power_triggers`.
+    fn armed_power_effect(&self, data: &Data, f: impl Fn(PowerEffect) -> u8) -> u8 {
+        let runs = self.tp.power_triggers.max(1);
+        [self.power, self.power2]
+            .iter()
+            .flatten()
+            .filter(|st| st.unlocked && st.armed)
+            .map(|st| f(data.heroes.power(st.of).effect).saturating_mul(runs))
             .max()
             .unwrap_or(0)
     }
@@ -657,6 +685,66 @@ impl Player {
             deity: self.deity,
             spells_cast: self.spells_cast,
             lobby,
+            minions_sold: self.counts.minions_sold,
+            wingmen: self.tick_power_effect(data, |e| u8::from(matches!(e, PowerEffect::Wingmen))),
+            wax_warband: self
+                .tick_power_effect(data, |e| u8::from(matches!(e, PowerEffect::WaxWarband))),
+            all_will_burn: self
+                .tick_power_effect(data, |e| u8::from(matches!(e, PowerEffect::AllWillBurn))),
+            sprout_it_out: self
+                .tick_power_effect(data, |e| u8::from(matches!(e, PowerEffect::SproutItOut))),
+            glory_of_combat: self
+                .tick_power_effect(data, |e| u8::from(matches!(e, PowerEffect::GloryOfCombat))),
+            phylactery: self
+                .tick_power_effect(data, |e| u8::from(matches!(e, PowerEffect::FragrantPhylactery))),
+            take_first_killed: self
+                .armed_power_effect(data, |e| u8::from(matches!(e, PowerEffect::TakeFirstKilled))),
+            embrace_rage: self
+                .armed_power_effect(data, |e| u8::from(matches!(e, PowerEffect::EmbraceYourRage))),
+            rapid_reanimation: self.armed_power_effect(data, |e| {
+                u8::from(matches!(e, PowerEffect::RapidReanimation))
+            }),
+            frostwolf_fervor: self.tick_power_effect(data, |e| {
+                u8::from(matches!(e, PowerEffect::CopyHighestWhenSpace { by_health: false }))
+            }),
+            stormpike_strength: self.tick_power_effect(data, |e| {
+                u8::from(matches!(e, PowerEffect::CopyHighestWhenSpace { by_health: true }))
+            }),
+            locked_and_loaded: self.locked_and_loaded.map(|m| {
+                (
+                    m.card,
+                    m.golden,
+                    m.attack,
+                    m.health,
+                    m.keywords,
+                    self.tp.power_triggers.max(1),
+                )
+            }),
+            broodmother: [self.power, self.power2]
+                .iter()
+                .flatten()
+                .filter(|st| st.unlocked)
+                .find_map(|st| match data.heroes.power(st.of).effect {
+                    PowerEffect::Broodmother { card } => {
+                        Some((card, st.progress as i32, self.tp.power_triggers.max(1)))
+                    }
+                    _ => None,
+                }),
+            tentacular: [self.power, self.power2]
+                .iter()
+                .flatten()
+                .filter(|st| st.unlocked)
+                .find_map(|st| match data.heroes.power(st.of).effect {
+                    PowerEffect::Tentacular { card } => Some((card, self.tp.power_triggers.max(1))),
+                    _ => None,
+                }),
+            count_damage: [self.power, self.power2]
+                .iter()
+                .flatten()
+                .any(|st| {
+                    st.unlocked
+                        && matches!(data.heroes.power(st.of).effect, PowerEffect::DamageMilestone { .. })
+                }),
         }
     }
 }
