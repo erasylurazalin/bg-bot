@@ -128,6 +128,8 @@ SLOT_SCALE = _scales(SF, "SLOT_", {
     "MAGNETIZATIONS": 10, "VOLUMIZERS": 10, "IMPROVEMENTS": 10, "EVENTS_LEFT": 4,
     "WINNERS_BREAD": 2, "ACTIVATE_COST": 2, "EXTRA_MAGNETIZE": 2, "COST": 3,
     "GEM_ATTACK": 50, "GEM_HEALTH": 50, "LINK_GROUP": 64,
+    # Dancin' Deryl's hats: a handful at most on one minion.
+    "HATS": 4,
 })
 
 assert len(SCALAR_SCALE) == bgpy.SCALARS

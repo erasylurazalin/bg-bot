@@ -82,6 +82,20 @@ impl Player {
             beetle_bonus: (0, 0),
             improve: [0; N_COUNTERS],
             counts: HeroCounts::default(),
+            shop_fewer: 0,
+            freeze_end: false,
+            extra_dragon: false,
+            double_time: None,
+            hat: (0, 0),
+            enhance_times: 0,
+            twice_nice: false,
+            ticket_chance: 0,
+            tickets: 0,
+            shop_spell_ticket: 0,
+            next_board: ArrayVec::new(),
+            two_step: None,
+            devour_stats: (0, 0),
+            discover_into_shop: 0,
             pot: ArrayVec::new(),
             recent_buys: ArrayVec::new(),
             dead_last_fight: ArrayVec::new(),
@@ -426,11 +440,17 @@ impl Player {
     /// each, and Stein's needs a tier above yours to draw from.
     pub fn shop_size(&self, rules: &Rules) -> usize {
         let base = if self.tp.gauntlet { 6 } else { rules.shop_size(self.tier) };
+        // Stay Frosty: the Tavern offers one fewer minion.
+        let base = base.saturating_sub(self.shop_fewer as usize);
         let mut extra = 0;
         if self.tp.extra_high_tier && self.tier < crate::MAX_TIER {
             extra += 1;
         }
         if self.tp.extra_magnetic {
+            extra += 1;
+        }
+        // Dream Portal: one more minion, a Dragon.
+        if self.extra_dragon {
             extra += 1;
         }
         (base + extra).min(crate::SHOP - 1)

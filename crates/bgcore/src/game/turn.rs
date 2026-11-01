@@ -492,6 +492,18 @@ impl Game {
                     m.keywords.clear(Keywords::DIVINE_SHIELD);
                     m.temp_shield = false;
                 }
+                // Reborn Rites' Reborn and Spirit Swap's Attack last until
+                // the next turn too; a Reborn printed on the card stays.
+                if m.temp_reborn {
+                    if !data.cards.get(m.card).keywords.has(Keywords::REBORN) {
+                        m.keywords.clear(Keywords::REBORN);
+                    }
+                    m.temp_reborn = false;
+                }
+                if m.temp_attack != 0 {
+                    m.attack -= m.temp_attack;
+                    m.temp_attack = 0;
+                }
                 if m.winners_bread > 0 {
                     if won {
                         let n = m.winners_bread as i32;
@@ -505,6 +517,16 @@ impl Game {
             }
             for m in &mut pl.hand {
                 m.locked_turns = m.locked_turns.saturating_sub(1);
+                if m.temp_reborn {
+                    if !data.cards.get(m.card).keywords.has(Keywords::REBORN) {
+                        m.keywords.clear(Keywords::REBORN);
+                    }
+                    m.temp_reborn = false;
+                }
+                if m.temp_attack != 0 {
+                    m.attack -= m.temp_attack;
+                    m.temp_attack = 0;
+                }
             }
             pl.done = false;
             pl.actions = 0;
@@ -514,13 +536,29 @@ impl Game {
             // "This turn only" trinket numbers (Honeycomb Ring).
             pl.tp.spell_bonus_turn = (0, 0);
             let was_frozen = pl.frozen;
+            let had_frozen = pl.shop.iter().any(|m| m.frozen);
             if pl.frozen {
                 pl.frozen = false;
-            } else {
-                for m in pl.shop.drain(..) {
-                    give_back(pool, &data.cards, &m);
+                for m in pl.shop.iter_mut() {
+                    m.frozen = false;
                 }
-                pl.shop_spell = None;
+            } else {
+                // A card frozen on its own (Twice as Nice froze the two cards
+                // it copied) stays for one more turn, like a frozen Tavern.
+                let mut kept: ArrayVec<Minion, { crate::SHOP }> = ArrayVec::new();
+                for m in pl.shop.drain(..) {
+                    if m.frozen {
+                        let mut m = m;
+                        m.frozen = false;
+                        kept.push(m);
+                    } else {
+                        give_back(pool, &data.cards, &m);
+                    }
+                }
+                pl.shop = kept;
+                if !had_frozen {
+                    pl.shop_spell = None;
+                }
             }
             // Guiding Candle's two Tier 6 Refreshes come back each turn, and
             // the roll here is the first of them when the Tavern changed
@@ -536,13 +574,16 @@ impl Game {
             // new slot from levelling, an empty spell slot). It is still not
             // the player's own Refresh, so queued Fodders wait for an
             // explicit one.
-            let refreshed = !was_frozen || pl.shop.len() < size || pl.shop_spell.is_none();
+            let refreshed =
+                !was_frozen || had_frozen || pl.shop.len() < size || pl.shop_spell.is_none();
             Self::fill_shop(
                 pl, pool, &data.cards, &data.rules, size, rng, self.lobby, RefreshKind::TurnStart,
             );
             if refreshed {
                 Self::apply_refresh_buff(pl, &data.cards, rng);
                 Self::apply_barrage(pl, &data.cards);
+                let bonus = data.rules.bonus_mask;
+                Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
                 pl.tp.refresh_tier6 = pl.tp.refresh_tier6.saturating_sub(1);
             }
         }
@@ -628,6 +669,21 @@ impl Game {
                 let ghost = self.ghost.as_ref().map(|g| Opponent::Ghost(g.player));
                 self.players[c[0] as usize].opponent = ghost;
             }
+        }
+        // I Spy reads the next opponent's warband as it stands now, before
+        // anyone has played this turn (docs/heroes.md "Guessing").
+        for p in 0..PLAYERS {
+            let board = match self.players[p].opponent {
+                Some(Opponent::Player(q)) => self.players[q as usize].board.clone(),
+                Some(Opponent::Ghost(q)) => self
+                    .ghost
+                    .as_ref()
+                    .filter(|g| g.player == q)
+                    .map(|g| g.board.clone())
+                    .unwrap_or_default(),
+                None => ArrayVec::new(),
+            };
+            self.players[p].next_board = board;
         }
     }
 

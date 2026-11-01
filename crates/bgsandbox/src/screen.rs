@@ -555,6 +555,25 @@ fn describe_target(pt: &PendingTarget) -> String {
             format!("steal a Tavern card (any card, the spell slot too), take {damage} damage")
         }
         TargetKind::BecomeCopy => "become a copy of a minion".into(),
+        TargetKind::TempReborn => "a minion gets Reborn until next turn".into(),
+        TargetKind::ReplaceHigher => {
+            "a Tavern minion, replaced by a Discover one Tier higher".into()
+        }
+        TargetKind::ReplaceSameTier => "a card becomes a random one of the same Tier".into(),
+        TargetKind::StealShopAsStats { attack, health } => {
+            format!("a Tavern minion to hand as {attack}/{health}")
+        }
+        TargetKind::ImprisonShop { turns } => {
+            format!("a Tavern card to hand, locked {turns} turns")
+        }
+        TargetKind::SpiritSwapFirst => "the first minion to swap Attack with".into(),
+        TargetKind::SpiritSwapSecond => "the second minion to swap Attack with".into(),
+        TargetKind::DevourFirst => "the minion to sell".into(),
+        TargetKind::DevourSecond => "the minion that takes its stats".into(),
+        TargetKind::DestroyGetTribe { tribe } => {
+            format!("destroy a {} for a random one", tribe_name(tribe))
+        }
+        TargetKind::SummonExactCopy => "the minion to copy".into(),
         TargetKind::Spell(st) => format!("{st:?}"),
     }
 }

@@ -166,7 +166,7 @@ pub(super) fn golden_up(cards: &CardDb, m: &mut Minion) {
     m.health += gh - base.health;
 }
 
-pub(super) fn give_back(pool: &mut [u8], cards: &CardDb, m: &Minion) {
+pub(crate) fn give_back(pool: &mut [u8], cards: &CardDb, m: &Minion) {
     let c = cards.get(m.card);
     if m.pool_copies > 0 && !c.token && !c.is_spell() {
         let slot = c.pool_slot as usize;
@@ -220,6 +220,106 @@ impl Game {
         Self::fill_shop(pl, pool, cards, rules, size, rng, lobby, kind);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
+        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
+    }
+
+    /// The hero powers that watch the Tavern's shape (hero batch 2), run by
+    /// every Refresh: Come One, Come All! marks some of the new cards with a
+    /// Darkmoon Ticket, Twice as Nice copies the highest-Tier minion and
+    /// Freezes both cards, and Enhancification gives random Bonus Keywords.
+    pub(super) fn after_refresh_powers(
+        pl: &mut Player,
+        cards: &CardDb,
+        rng: &mut Rng,
+        bonus_mask: u8,
+        size: usize,
+    ) {
+        // A Ticket roll: 1 for a card that carries one, 2 for one that was
+        // rolled for without getting one, 0 for a card the Tavern never
+        // marked (so a card that stays put is not rolled again).
+        if pl.ticket_chance > 0 {
+            let chance = pl.ticket_chance as u32;
+            for m in &mut pl.shop {
+                if m.tickets == 0 {
+                    m.tickets = if rng.below(100) < chance { 1 } else { 2 };
+                }
+            }
+            if pl.shop_spell.is_some() && pl.shop_spell_ticket == 0 {
+                pl.shop_spell_ticket = if rng.below(100) < chance { 1 } else { 2 };
+            }
+        }
+        // Twice as Nice: the highest-Tier minion in the Tavern, and an exact
+        // copy of it, both frozen. The copy sits outside the normal slots.
+        if pl.twice_nice && pl.shop.len() <= size && !pl.shop.is_full() {
+            let mut best: Option<usize> = None;
+            for i in 0..pl.shop.len() {
+                let c = cards.get(pl.shop[i].card);
+                if c.is_spell() {
+                    continue;
+                }
+                match best {
+                    Some(b) if cards.get(pl.shop[b].card).tier >= c.tier => {}
+                    _ => best = Some(i),
+                }
+            }
+            if let Some(b) = best {
+                let mut copy = pl.shop[b];
+                copy.pool_copies = 0;
+                copy.frozen = true;
+                pl.shop[b].frozen = true;
+                pl.shop.push(copy);
+            }
+        }
+        // Enhancification: a random minion in the Tavern gains a random Bonus
+        // Keyword, twice; both may land on the same one, and one holding every
+        // keyword is skipped (docs/heroes.md).
+        for _ in 0..pl.enhance_times {
+            let mut cands: ArrayVec<usize, { crate::SHOP }> = ArrayVec::new();
+            for i in 0..pl.shop.len() {
+                let c = cards.get(pl.shop[i].card);
+                if c.is_spell() || pl.shop[i].keywords.0 & bonus_mask == bonus_mask {
+                    continue;
+                }
+                let _ = cands.try_push(i);
+            }
+            if cands.is_empty() {
+                break;
+            }
+            let k = rng.below(cands.len() as u32) as usize;
+            let m = &mut pl.shop[cands[k]];
+            if let Some(kw) = m.keywords.random_missing(bonus_mask, rng) {
+                m.keywords.set(kw);
+            }
+        }
+    }
+
+    /// Temporal Tavern: the last `count` Tavern minion slots hold minions from
+    /// a Tier above the player's, each drawn from a random Tier up to Tier 6;
+    /// the higher-Tier cards take normal slots, they are not extra ones
+    /// (docs/heroes.md).
+    pub(super) fn add_high_tier_slots(
+        pl: &mut Player,
+        pool: &mut [u8],
+        cards: &CardDb,
+        rng: &mut Rng,
+        lobby: Tribes,
+        count: u8,
+    ) {
+        let n = pl.shop.len();
+        if n == 0 || pl.tier >= crate::MAX_TIER {
+            return;
+        }
+        for k in 0..(count as usize).min(n) {
+            let at = n - 1 - k;
+            let tier = pl.tier + 1 + rng.below((crate::MAX_TIER - pl.tier) as u32) as u8;
+            let drawn = draw_filtered(pool, cards, rng, tier, tier, &[], lobby, |_| true);
+            let Some(c) = drawn else { continue };
+            let old = pl.shop[at];
+            give_back(pool, cards, &old);
+            let mut m = pl.make_card(cards, c, false, 1);
+            pl.apply_tavern_buffs(cards, &mut m);
+            pl.shop[at] = m;
+        }
     }
 
     /// "After the Tavern is Refreshed this game" (Waveling, En-Djinn Blazer,
@@ -290,6 +390,7 @@ impl Game {
         // The tier's own size: the extra slots below fill whatever the
         // player's shape adds on top of it.
         let base = if pl.tp.gauntlet { 6 } else { rules.shop_size(pl.tier) };
+        let base = base.saturating_sub(pl.shop_fewer as usize);
         let normal = base.saturating_sub(fodders);
         // The tier bounds this Refresh draws in: Bob-blehead's floor, and
         // Guiding Candle's first Refreshes of a turn, which hold Tier 6 cards
@@ -334,6 +435,17 @@ impl Game {
                 c.keywords.has(crate::minion::Keywords::MAGNETIC) && c.tribes.has(Tribe::Mech)
             });
             if let Some(c) = mech {
+                let mut m = pl.make_card(cards, c, false, 1);
+                pl.apply_tavern_buffs(cards, &mut m);
+                pl.shop.push(m);
+            }
+        }
+        // Dream Portal: one more minion, a Dragon, in a normal slot.
+        if pl.extra_dragon && pl.shop.len() < size {
+            let dragon = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |c| {
+                c.tribes.has(Tribe::Dragon)
+            });
+            if let Some(c) = dragon {
                 let mut m = pl.make_card(cards, c, false, 1);
                 pl.apply_tavern_buffs(cards, &mut m);
                 pl.shop.push(m);
@@ -413,6 +525,17 @@ impl Game {
         if pl.shop.len() <= size && pl.shop_spell.is_none() {
             pl.shop_spell = cards.random_spell(pl.tier, *lobby, rng);
         }
+        // A refilled card is a new card in the Tavern: it takes its Darkmoon
+        // Ticket roll like any other (Come One, Come All!).
+        if pl.ticket_chance > 0 {
+            let chance = pl.ticket_chance as u32;
+            for m in pl.shop.iter_mut().filter(|m| m.tickets == 0) {
+                m.tickets = if rng.below(100) < chance { 1 } else { 2 };
+            }
+            if pl.shop_spell.is_some() && pl.shop_spell_ticket == 0 {
+                pl.shop_spell_ticket = if rng.below(100) < chance { 1 } else { 2 };
+            }
+        }
     }
 
     /// Saloon's Finest: every Tavern slot becomes a Tavern spell up to the
@@ -444,6 +567,7 @@ impl Game {
         pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
+        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
     }
 
     /// Chillmere Mosaic's Spellcraft spell: refresh the Tavern with Battlecry
@@ -481,6 +605,7 @@ impl Game {
         pl.tp.tavern_price = price;
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
+        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
     }
 
     /// Lost Staff of Hamuul: refresh the Tavern with minions of one type,
@@ -515,6 +640,7 @@ impl Game {
         pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards);
+        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
     }
 
     /// After an action: Fodders that waited in the Tavern because there was
@@ -682,6 +808,18 @@ impl Game {
     /// Devourer sells through here too).
     pub(super) fn sell_minion(&mut self, p: usize, slot: usize) -> Minion {
         let m = self.players[p].board.remove(slot);
+        // Hat Trick: a sold minion's hats move to a random other friendly
+        // minion, so they are only lost when the whole board is sold or the
+        // minion is destroyed (docs/heroes.md).
+        if m.hats > 0 && !self.players[p].board.is_empty() {
+            let n = self.players[p].board.len();
+            let k = self.rng.below(n as u32) as usize;
+            let hat = self.players[p].hat;
+            let b = &mut self.players[p].board[k];
+            b.attack += hat.0 * m.hats as i32;
+            b.health += hat.1 * m.hats as i32;
+            b.hats = b.hats.saturating_add(m.hats);
+        }
         let mut sell_gold = self.data.rules.sell_gold;
         if self.players[p].lost_last_combat {
             for (card, golden) in m.parts() {

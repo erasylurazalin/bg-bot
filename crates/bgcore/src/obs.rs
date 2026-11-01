@@ -198,6 +198,11 @@
 //!   46..61 attached: card id + 1 of each effect-carrying card Magnetized
 //!          into it, in the order they merged (0 for an empty slot)
 //!   62..77 attached_golden: whether that attachment is golden
+//!   78..85 the Dark Gifts on the minion, as their effect card id + 1
+//!   86 hats (Hat Trick: each is +1/+1, already in its stats)
+//!   87 ticket (1 when the Tavern card carries a Darkmoon Ticket, Come One,
+//!      Come All!)
+//!   88 frozen (frozen on its own in the Tavern, Twice as Nice)
 //! An empty slot is all zeros.
 
 use crate::cards::{Aura, CardDb, ChooseOption, Counter, DeityKind, SpellEffect, SpellTarget, Tribe};
@@ -208,7 +213,7 @@ use crate::minion::{Keywords, MAX_ATTACHED, Minion};
 use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 
 pub const SHOP_SPELL: usize = 1;
-pub const SLOT_FEATURES: usize = 86;
+pub const SLOT_FEATURES: usize = 89;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
 pub const OPP_SCALARS: usize = 33;
 
@@ -475,6 +480,14 @@ pub const SLOT_ATTACHED_GOLDEN: usize = SLOT_ATTACHED + MAX_ATTACHED;
 /// MAX_GIFTS values: the Dark Gifts on the minion, as the gift's effect card
 /// id + 1 (the model embeds them like card ids), 0 for an empty slot.
 pub const SLOT_GIFTS: usize = SLOT_ATTACHED_GOLDEN + MAX_ATTACHED;
+/// Hat Trick: the hats this minion wears (each is +1/+1, already in its
+/// stats), 0 for none.
+pub const SLOT_HATS: usize = SLOT_GIFTS + crate::MAX_GIFTS;
+/// Come One, Come All!: 1 when the Tavern card carries a Darkmoon Ticket.
+pub const SLOT_TICKETS: usize = SLOT_HATS + 1;
+/// Frozen on its own in the Tavern (Twice as Nice froze the two cards it
+/// copied), a card that stays one more turn.
+pub const SLOT_FROZEN: usize = SLOT_TICKETS + 1;
 
 pub const OPP_ALIVE: usize = 0;
 pub const OPP_HEALTH: usize = 1;
@@ -520,7 +533,7 @@ const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
 const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
 const _: () = assert!(SLOT_ATTACHED_GOLDEN + MAX_ATTACHED == SLOT_GIFTS);
-const _: () = assert!(SLOT_GIFTS + crate::MAX_GIFTS == SLOT_FEATURES);
+const _: () = assert!(SLOT_FROZEN + 1 == SLOT_FEATURES);
 const _: () = assert!(OPP_TRIBES + Tribe::EVERY.len() == OPP_DEITY);
 const _: () = assert!(OPP_DEITY + DEITY_FEATURES == OPP_GEM_ATTACK);
 const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_HERO);
@@ -632,6 +645,9 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     for (j, g) in m.gift_slice().iter().enumerate() {
         o[SLOT_GIFTS + j] = g.card() as f32 + 1.0;
     }
+    o[SLOT_HATS] = m.hats as f32;
+    o[SLOT_TICKETS] = (m.tickets == 1) as u8 as f32;
+    o[SLOT_FROZEN] = m.frozen as u8 as f32;
 }
 
 fn write_slots<'a>(
@@ -700,6 +716,19 @@ fn target_kind(k: TargetKind) -> (usize, (i32, i32)) {
         // Tavern steal; the swap is a board pick of its own.
         TargetKind::ThrowInPot { .. } | TargetKind::SwapWithShop => (5, (0, 0)),
         TargetKind::RemoveTierBelow => (1, (0, 0)),
+        // Hero batch 2: a keyword buff shares the buff slot, a replacement or
+        // a stat steal the any-buff one, and the multicard picks the buff one
+        // (a board pick, as Devour's is).
+        TargetKind::TempReborn | TargetKind::DestroyGetTribe { .. } => (0, (0, 0)),
+        TargetKind::StealShopAsStats { attack, health } => (6, (attack, health)),
+        TargetKind::ReplaceHigher
+        | TargetKind::ReplaceSameTier
+        | TargetKind::ImprisonShop { .. }
+        | TargetKind::SpiritSwapFirst
+        | TargetKind::SpiritSwapSecond
+        | TargetKind::DevourFirst
+        | TargetKind::DevourSecond
+        | TargetKind::SummonExactCopy => (5, (0, 0)),
     }
 }
 
@@ -781,6 +810,20 @@ fn power_progress(game: &Game, p: usize, st: &PowerState) -> (f32, f32) {
         // Every third Tavern spell bought is free.
         PowerEffect::FreeThirdSpell => {
             pair(counts.tavern_spells_bought % 3, 3)
+        }
+        // Tavern Lighting: the extra +1/+1 each Tavern spell has now, and the
+        // turns to the next one.
+        PowerEffect::TavernLighting { .. } => {
+            let turns = st.progress.max(1);
+            ((1 + turns / 3) as f32, (3 - turns % 3) as f32)
+        }
+        // Saturday C'Thuns!: the repeats the end of this turn gives.
+        PowerEffect::SaturdayCthun { .. } => (st.progress as f32, 0.0),
+        // Come One, Come All!: the Tickets taken, and how many are still to
+        // come.
+        PowerEffect::DarkmoonTickets { count, .. } => {
+            let goal = count.max(1);
+            pair(game.players[p].tickets as u32, goal as u32)
         }
         _ => (0.0, 0.0),
     }

@@ -1225,10 +1225,12 @@ impl Game {
                     }
                     match best.first() {
                         Some(&b) if self.players[p].shop[b].health > m.health => {}
-                        Some(&b) if self.players[p].shop[b].health == m.health => best.push(i),
+                        Some(&b) if self.players[p].shop[b].health == m.health => {
+                            let _ = best.try_push(i);
+                        }
                         _ => {
                             best.clear();
-                            best.push(i);
+                            let _ = best.try_push(i);
                         }
                     }
                 }
@@ -1246,16 +1248,18 @@ impl Game {
                 // spell slot too), ties at random. A steal, so it leaves the
                 // pool like a bought copy but fires no buy trigger.
                 let cards = &self.data.cards;
-                let mut best: ArrayVec<usize, { crate::SHOP }> = ArrayVec::new();
+                // SHOP + 1: the spell slot ties in too, and the Tavern can hold
+                // one card more than its size (Twice as Nice's copy).
+                let mut best: ArrayVec<usize, { crate::SHOP + 1 }> = ArrayVec::new();
                 let mut best_tier = 0u8;
                 for (i, m) in self.players[p].shop.iter().enumerate() {
                     let t = cards.get(m.card).tier;
                     if t > best_tier {
                         best_tier = t;
                         best.clear();
-                        best.push(i);
+                        let _ = best.try_push(i);
                     } else if t == best_tier {
-                        best.push(i);
+                        let _ = best.try_push(i);
                     }
                 }
                 let spells = self
@@ -1265,9 +1269,9 @@ impl Game {
                     .unwrap_or(0);
                 if spells > best_tier {
                     best.clear();
-                    best.push(self.players[p].shop.len());
+                    let _ = best.try_push(self.players[p].shop.len());
                 } else if spells == best_tier && spells > 0 {
-                    best.push(self.players[p].shop.len());
+                    let _ = best.try_push(self.players[p].shop.len());
                 }
                 if best.is_empty() {
                     return;

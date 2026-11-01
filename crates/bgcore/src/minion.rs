@@ -202,6 +202,22 @@ pub struct Minion {
     /// left, 0 (or 1) for an ordinary one. Set by Toreth's Blessing; it never
     /// carries out of a fight, like any other shield damage.
     pub shield_hits: u8,
+    /// Dancin' Deryl's hats on this minion (Hat Trick): each is +1/+1, already
+    /// counted in its stats, and they move to another friendly minion when it
+    /// is sold (docs/heroes.md).
+    pub hats: u8,
+    /// Darkmoon Tickets on this card while it sits in the Tavern (Come One,
+    /// Come All!): a mark the buy takes, not a card of its own.
+    pub tickets: u8,
+    /// Its Reborn came from Reborn Rites and comes off at the start of the
+    /// next turn. A Reborn printed on the card stays.
+    pub temp_reborn: bool,
+    /// The Attack a temporary swap added or took off (Spirit Swap): undone at
+    /// the start of the next turn, so a later buff stays.
+    pub temp_attack: i32,
+    /// Frozen on its own in the Tavern (Twice as Nice freezes the two cards
+    /// it names, not the whole Tavern): it stays one more turn on its own.
+    pub frozen: bool,
 }
 
 impl Minion {

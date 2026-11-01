@@ -159,14 +159,20 @@ always afford one. A trinket with no cost in the game data is free.
 - **Yogg Wheel:** its results are cards in the data (`TB_BaconShop_HERO_35_Buddy_t*`).
   Mysterybox there is "a random Tavern minion turns golden" (the other
   Mysterybox, "your Hero Power triggers an extra time", isn't on the
-  Wheel). Yogg-Tastic Pastry stays unbuilt (Era: not worth it).
+  Wheel). Yogg-Tastic Pastry is built anyway: the Wheel's six results
+  (Mysterybox, Hand of Fate, Curse of Flesh, Devouring Hunger, Rod of
+  Roasting, Mindflayer Goggles), each equally likely (a guess).
+- **Mecha-Jaraxxus Sticker:** the four Magnetic Mecha-Demons are tokens in
+  the data (`BG25_807t` to `t4`): Rusted Reggie 5/5 Windfury, Magtheridon
+  Prime 1/10 Taunt, Baltharak 10/1 Reborn, Shield of the Legion 7/3 Divine
+  Shield. They can Magnetize to Mechs and to Demons. "Random" is one of the
+  four, equally likely.
 
 **Not in the game, or later:** Shrine of Evolution (Era thinks it's gone,
 though the data still lists it), Kiri's Double Eclipse (never seen in
 Era's games or pro play, though the data lists it in the pool: never
 build it), Wisdomball Supply, Safety Patch (Secrets), Yogg-Tastic
-Pastry (the Wheel), Putricide Sticker, Mecha-Jaraxxus Sticker (no Demon
-Mechs this patch), Tickatus Sticker and Corrupted Tome (they need the
+Putricide Sticker, Tickatus Sticker and Corrupted Tome (they need the
 Darkmoon Prizes exported first), and the Dark Gift trinkets (built since).
 
 ## Portraits that rewrite a card

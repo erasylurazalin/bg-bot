@@ -164,6 +164,15 @@ struct FileMinion {
     /// Toreth's Blessing's hits left on the shield, when above one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     shield_hits: Option<u8>,
+    /// Dancin' Deryl's hats on the minion (Hat Trick).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hats: Option<u8>,
+    /// Its Reborn comes off at the start of the next turn (Reborn Rites).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    temp_reborn: Option<bool>,
+    /// Attack a temporary swap added (Spirit Swap), undone next turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    temp_attack: Option<i32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attached: Vec<FileAttached>,
     /// The Dark Gifts on the minion, and the small counter each one carries
@@ -215,6 +224,9 @@ fn to_file_minion(db: &CardDb, m: &Minion) -> FileMinion {
         both_effects: m.both_effects.then_some(true),
         linked: differs(m.linked as u64, 0).map(|v| v as u16),
         shield_hits: differs(m.shield_hits as u64, 0).map(|v| v as u8),
+        hats: differs(m.hats as u64, 0).map(|v| v as u8),
+        temp_reborn: m.temp_reborn.then_some(true),
+        temp_attack: differs(m.temp_attack as i64 as u64, 0).map(|v| v as i32),
         attached: m
             .attached_slice()
             .iter()
@@ -272,6 +284,15 @@ fn from_file_minion(db: &CardDb, f: &FileMinion) -> Result<Minion, String> {
     }
     if let Some(v) = f.locked_tier {
         m.locked_tier = v;
+    }
+    if let Some(v) = f.hats {
+        m.hats = v;
+    }
+    if let Some(v) = f.temp_reborn {
+        m.temp_reborn = v;
+    }
+    if let Some(v) = f.temp_attack {
+        m.temp_attack = v;
     }
     if let Some(v) = f.activated {
         m.activated = v;

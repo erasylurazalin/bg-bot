@@ -16,6 +16,10 @@ Bananas.
 2026-11-01)" that are theirs; the rest of that section waits for later
 batches.
 
+**Built 2026-11-01 (hero batch 2):** the 22 heroes of
+`docs/briefs/heroes-batch2.md` and their rules under "Hero batch rules (Era,
+2026-11-01)" ("Stats and targets", "The Tavern", "Guessing" for I Spy).
+
 ## Powers in general
 
 - A button power works once per turn unless its text says otherwise. Uses

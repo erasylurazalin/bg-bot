@@ -142,6 +142,35 @@ pub enum TargetKind {
     /// Swap the chosen friendly non-Golden minion with a random Tavern
     /// minion (Swap, Lock, & Shop It).
     SwapWithShop,
+    // ---- hero batch 2 (2026-11-01) ----
+    /// Give the chosen minion, the Tavern's included, Reborn until the next
+    /// turn (Reborn Rites).
+    TempReborn,
+    /// Replace the chosen Tavern minion with a Discover from exactly one Tier
+    /// higher (Galakrond's Greed); the old card goes back to the pool.
+    ReplaceHigher,
+    /// Replace the chosen card, on the board or in the Tavern, with a random
+    /// one of the same Tier (Arcane Alteration).
+    ReplaceSameTier,
+    /// Steal the chosen Tavern card into hand as these stats (See the Light).
+    StealShopAsStats { attack: i32, health: i32 },
+    /// Take the chosen Tavern card into hand, locked for this many turns
+    /// (Imprison).
+    ImprisonShop { turns: u8 },
+    /// Spirit Swap, the first of the two minions (any minion).
+    SpiritSwapFirst,
+    /// Spirit Swap, the second one: it swaps Attack with the one the first
+    /// pick remembered.
+    SpiritSwapSecond,
+    /// Devour, the friendly minion to sell.
+    DevourFirst,
+    /// Devour, the friendly minion that takes its stats.
+    DevourSecond,
+    /// Destroy the chosen friendly minion of a tribe (a real death in the
+    /// shop) and get a random one of that tribe (Rune of Damnation).
+    DestroyGetTribe { tribe: Tribe },
+    /// Summon an exact copy of the chosen friendly minion (Cloning Gallery).
+    SummonExactCopy,
 }
 
 impl TargetKind {
@@ -153,6 +182,14 @@ impl TargetKind {
             | TargetKind::BecomeCopy => true,
             TargetKind::Spell(st) => st.can_target_shop(),
             TargetKind::StealShopCard { .. } | TargetKind::ThrowInPot { .. } => true,
+            // Hero batch 2: a Tavern minion, or any Tavern card.
+            TargetKind::TempReborn
+            | TargetKind::ReplaceHigher
+            | TargetKind::ReplaceSameTier
+            | TargetKind::StealShopAsStats { .. }
+            | TargetKind::ImprisonShop { .. }
+            | TargetKind::SpiritSwapFirst
+            | TargetKind::SpiritSwapSecond => true,
             _ => false,
         }
     }
@@ -297,6 +334,9 @@ pub enum DiscoverRequest {
     /// A Tier 7 minion, locked in hand until this much Gold has been spent
     /// this game (Choose Your Champion).
     Champion(u16),
+    /// A plain copy of a minion from the next opponent's warband as it stood
+    /// at the start of the round (I Spy).
+    IspyNextOpponent,
 }
 
 /// Why the Tavern is filled. Only the player's own Refresh action (paid with
@@ -338,6 +378,9 @@ pub struct PowerState {
     /// each turn waited (The Perfect Crime, The Galaxy's Lens). The price
     /// never drops below 0.
     pub cost_delta: i8,
+    /// Whether this power was pressed this turn and its effect fires at the
+    /// end of it (Saturday C'Thuns!). Cleared at the start of every turn.
+    pub armed: bool,
 }
 
 impl PowerState {
@@ -350,6 +393,7 @@ impl PowerState {
             progress: 0,
             last_pick: 0,
             cost_delta: 0,
+            armed: false,
         }
     }
 }
@@ -645,6 +689,43 @@ pub struct Player {
     pub improve: [u16; N_COUNTERS],
     /// The counters the hero powers keep (see `HeroCounts`).
     pub counts: HeroCounts,
+    /// The standing rules a hero power sets (hero batch 2), kept in sync by
+    /// `Game::sync_power_flags` whenever a power arrives and at the start of
+    /// every turn, so a shop path reads one field and never the power table.
+    /// Stay Frosty: one fewer Tavern minion, the Tavern frozen at every end of
+    /// turn; Dream Portal: one more Tavern minion, a Dragon; Double Time: two
+    /// copies make a minion Golden.
+    pub shop_fewer: u8,
+    pub freeze_end: bool,
+    pub extra_dragon: bool,
+    /// Double Time: the Tavern Coin a Golden minion gives instead of a Triple
+    /// Reward, None without the power.
+    pub double_time: Option<CardId>,
+    /// Hat Trick: what each hat gives, (0, 0) for no hats.
+    pub hat: (i32, i32),
+    /// Enhancification: random Bonus Keywords a Refresh gives, 0 for none.
+    pub enhance_times: u8,
+    /// Twice as Nice: copy the Tavern's highest-Tier minion on every Refresh.
+    pub twice_nice: bool,
+    /// Come One, Come All!: the chance a Tavern card carries a Darkmoon
+    /// Ticket, and the Tickets taken so far.
+    pub ticket_chance: u8,
+    pub tickets: u8,
+    /// The spell slot's Darkmoon Ticket: 1 when it carries one, 2 when it was
+    /// rolled for and carries none, 0 for a slot never marked.
+    pub shop_spell_ticket: u8,
+    /// I Spy: the warband of the opponent this player is paired against, as it
+    /// stood at the start of the round (`Game::pair` copies it).
+    pub next_board: ArrayVec<Minion, BOARD>,
+    /// A two-step pick's first answer: the slot and whether it was in the
+    /// Tavern (Spirit Swap's two minions; Devour's minion before the sale is
+    /// gone by the second pick, so only Spirit Swap keeps it).
+    pub two_step: Option<(u8, bool)>,
+    /// The stats Devour sells, for the second pick to give.
+    pub devour_stats: (i32, i32),
+    /// A Discover whose pick lands in this Tavern slot (plus one) instead of
+    /// the hand (Galakrond's Greed); 0 for a pick that goes to hand.
+    pub discover_into_shop: u8,
     /// The tribes of the minions thrown into Stir the Pot, and the minion
     /// cards bought this turn that Glaive Ricochet may copy. Both are hero
     /// power odds and ends that fit no counter.
@@ -1508,6 +1589,12 @@ impl Game {
             return s < pl.shop.len()
                 || (s == pl.shop.len() && pl.shop_spell.is_some() && s < SHOP);
         }
+        // Arcane Alteration and Imprison take any Tavern card, a spell in a
+        // minion slot and the spell slot included.
+        if matches!(pt.kind, TargetKind::ReplaceSameTier | TargetKind::ImprisonShop { .. }) {
+            return s < pl.shop.len()
+                || (s == pl.shop.len() && pl.shop_spell.is_some() && s < SHOP);
+        }
         if s >= pl.shop.len() || self.data.cards.get(pl.shop[s].card).is_spell() {
             return false;
         }
@@ -1520,6 +1607,15 @@ impl Game {
             // Pot).
             TargetKind::ThrowInPot { .. } => {
                 !self.data.cards.tribes_of(&pl.shop[s]).is_neutral()
+            }
+            // Reborn Rites buffs any minion; Galakrond's Greed needs a Tier
+            // below the top so there is one above it; See the Light takes a
+            // minion; Spirit Swap takes any minion twice.
+            TargetKind::TempReborn | TargetKind::StealShopAsStats { .. } => true,
+            TargetKind::ReplaceHigher => self.data.cards.get(pl.shop[s].card).tier < crate::MAX_TIER,
+            TargetKind::SpiritSwapFirst => true,
+            TargetKind::SpiritSwapSecond => {
+                !matches!(pl.two_step, Some((f, true)) if f as usize == s)
             }
             _ => false,
         }
@@ -1630,6 +1726,29 @@ impl Game {
             TargetKind::ThrowInPot { .. } => !self.data.cards.tribes_of(&b[s]).is_neutral(),
             // Only a non-Golden minion may be swapped out.
             TargetKind::SwapWithShop => !b[s].golden,
+            // Reborn Rites (any minion), Arcane Alteration (the board too),
+            // Devour (the minion to sell and the one that takes its stats)
+            // and Cloning Gallery (an exact copy) all take a board minion.
+            TargetKind::TempReborn
+            | TargetKind::ReplaceSameTier
+            | TargetKind::DevourFirst
+            | TargetKind::SpiritSwapFirst => true,
+            // Spirit Swap's second pick is a minion different from the first
+            // one, on the board or in the Tavern (checked with the remembered
+            // pick).
+            TargetKind::SpiritSwapSecond => {
+                !matches!(self.players[p].two_step, Some((f, false)) if f as usize == s)
+            }
+            // A board minion only: the minion to sell into (Devour, after the
+            // sale) and the copy taken (Cloning Gallery).
+            TargetKind::DevourSecond | TargetKind::SummonExactCopy => true,
+            // A Tavern card only, and a Tavern minion only.
+            TargetKind::ReplaceHigher
+            | TargetKind::StealShopAsStats { .. }
+            | TargetKind::ImprisonShop { .. } => false,
+            TargetKind::DestroyGetTribe { tribe } => {
+                self.data.cards.tribes_of(&b[s]).has(tribe)
+            }
         }
     }
 
@@ -1716,6 +1835,9 @@ impl Game {
                     }
                     let m = self.players[p].shop.remove(slot);
                     self.add_to_hand(p, m);
+                    if m.tickets == 1 {
+                        self.take_ticket(p);
+                    }
                     self.pay_for_spell(p, pay_health, cost);
                     self.magicfin_teach(p, id);
                     self.fire_event(p, EventKind::CardsBought, 1);
@@ -1731,10 +1853,15 @@ impl Game {
                         MinionPrice::Health(_) => 0,
                     };
                     self.note_minion_bought(p, price);
-                    let pl = &mut self.players[p];
-                    let m = pl.shop.remove(slot);
-                    pl.gold -= buy_cost;
+                    let m = self.players[p].shop.remove(slot);
+                    self.players[p].gold -= buy_cost;
                     self.add_to_hand(p, m);
+                    // Come One, Come All!: the buy takes the card's Darkmoon
+                    // Ticket with it. The card is in hand first, so a Ticket
+                    // that pays out a reward never costs the buy its slot.
+                    if m.tickets == 1 {
+                        self.take_ticket(p);
+                    }
                     // A Health price is self damage, not Gold spent
                     // (DESIGN.md). Paid once the card is in hand, so a buy
                     // that kills the hero still settles cleanly.
@@ -1777,6 +1904,7 @@ impl Game {
             }
             Action::BuySpell => {
                 let id = self.players[p].shop_spell.take().unwrap();
+                let ticket = std::mem::replace(&mut self.players[p].shop_spell_ticket, 0) == 1;
                 let c = self.data.cards.get(id);
                 let trinket_health = self.players[p].tp.spell_health_left > 0;
                 let pay_health = c.pay_health || trinket_health;
@@ -1787,6 +1915,11 @@ impl Game {
                 let pl = &mut self.players[p];
                 let m = pl.make_card(&self.data.cards, id, false, 0);
                 self.add_to_hand(p, m);
+                // Come One, Come All!: the spell slot's Ticket, taken with the
+                // spell.
+                if ticket {
+                    self.take_ticket(p);
+                }
                 self.pay_for_spell(p, pay_health, cost);
                 self.magicfin_teach(p, id);
                 self.fire_event(p, EventKind::CardsBought, 1);
@@ -1878,7 +2011,7 @@ impl Game {
                 if is_merge {
                     self.magnetize_to(p, pos, m, true);
                     if m.golden && !m.no_reward {
-                        self.give_triple_reward(p);
+                        self.give_play_reward(p);
                     }
                 } else {
                     let mut m = m;
@@ -1892,6 +2025,15 @@ impl Game {
                     // Mycologist's teachings, Malchezaar's Health Refreshes).
                     m.uses_left = m.turn_uses(&self.data.cards);
                     self.players[p].board.insert(pos, m);
+                    // Hat Trick: the minion comes with a +1/+1 hat, already in
+                    // its stats; hats stack (docs/heroes.md).
+                    let hat = self.players[p].hat;
+                    if hat != (0, 0) {
+                        let b = &mut self.players[p].board[pos];
+                        b.attack += hat.0;
+                        b.health += hat.1;
+                        b.hats = b.hats.saturating_add(1);
+                    }
                     // Defensive Shell: the first minion played each turn
                     // gains Divine Shield.
                     if self.players[p].tp.play_shields > 0 {
@@ -1903,7 +2045,7 @@ impl Game {
                     // The Triple Reward comes before anything the Battlecry
                     // adds to the hand (and is lost on a full hand).
                     if m.golden && !m.no_reward {
-                        self.give_triple_reward(p);
+                        self.give_play_reward(p);
                     }
                     choose_one_play = self.data.cards.get(m.card).choose_one.is_some();
                     if t.has(Tribe::Elemental) {
@@ -2040,10 +2182,14 @@ impl Game {
         self.give_generated_tracking(p, card, &mut dummy);
     }
 
-    fn add_to_hand(&mut self, p: usize, m: Minion) -> bool {
+    fn add_to_hand(&mut self, p: usize, mut m: Minion) -> bool {
         if self.players[p].hand.is_full() {
             return false;
         }
+        // A Darkmoon Ticket and a per-card Freeze belong to the Tavern, not to
+        // the card: a card that leaves it carries neither.
+        m.tickets = 0;
+        m.frozen = false;
         self.players[p].hand.push(m);
         // "Whenever you get a Pirate" (Doubloon Grifter's event trigger, and a
         // trinket's `on_get`): a card of that tribe entered the hand, from

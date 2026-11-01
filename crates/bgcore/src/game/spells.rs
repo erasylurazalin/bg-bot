@@ -396,6 +396,13 @@ impl Game {
             // Gem or a Banana (DESIGN.md "Spells versus Tavern spells").
             self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
         }
+        // A cast never leaves a prompt nothing can answer: the spell's own
+        // "after you cast" triggers can take away its last target (the only
+        // way one could go missing, since the cast itself checked), and then
+        // the spell simply fizzles.
+        if self.players[p].pending_target.is_some() && self.choice_stuck(p) {
+            self.players[p].pending_target = None;
+        }
     }
 
     /// Whether a spell has anything to land on right now. A spell cast

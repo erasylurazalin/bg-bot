@@ -357,6 +357,71 @@ build hero-less games so old tests pass unchanged, and
     `valid_discard`, the fight's summon-from-hand (`Counters.gold_spent`) and
     the observation's `SLOT_LOCKED` (the turn count, or 1 while a tier or
     Gold lock holds it). Every card that locks reuses it.
+  - **Hero batch 2 (2026-11-01)**, the stats, target and Tavern powers
+    (docs/briefs/heroes-batch2.md, the rules in docs/heroes.md
+    "Hero batch rules (Era, 2026-11-01)"):
+    - **A standing rule is a player field.** `Game::sync_power_flags` reads
+      both power slots into `Player.shop_fewer` (Stay Frosty's one fewer
+      minion), `freeze_end`, `extra_dragon` (Dream Portal), `double_time`
+      (the Tavern Coin it names), `hat` (Hat Trick), `enhance_times`
+      (Enhancification), `twice_nice` and `ticket_chance` (Come One, Come
+      All!). It runs whenever a power arrives (the pick, `set_power`) and at
+      the start of every turn, so `Player::shop_size`, `minion_price` and the
+      shop paths read one field and never the power table. A power that
+      presses into its own price (Stay Frosty's minions cost 2) goes through
+      `Game::power_prices` like Manastorm's.
+    - **One after-Refresh hook.** `Game::after_refresh_powers` runs at the
+      end of every Refresh (`refresh_shop`, `refresh_with_spells`,
+      `refresh_with_battlecries`, `refresh_with_tribe`, Temporal Tavern's own
+      fill, the turn-start roll when the Tavern changed, Bob's Burgles): it
+      marks Darkmoon Tickets on the new cards, gives Twice as Nice's copy
+      (the highest-Tier minion, frozen, outside the normal slots) and
+      Enhancification's two random Bonus Keywords.
+    - **Frozen on its own.** `Minion.frozen` is a per-card Freeze (Twice as
+      Nice freezes the two cards it names): the turn-start roll in
+      `start_turn` keeps those cards and drops the rest, the same one-turn
+      rule `Player.frozen` follows. `Player.frozen` stays the whole Tavern.
+    - **Two-step picks.** `Player.two_step` remembers the first answer of a
+      pick that needs two: Spirit Swap (two minions, any minion, the Tavern's
+      included; the attacks swap at once and come back at the next turn's
+      start through `Minion.temp_attack`) and Devour (the sold minion, whose
+      stats `Player.devour_stats` carries to the second pick, after
+      `sell_minion` has paid out Gold and the sell triggers).
+    - **Until the next turn.** `Minion.temp_reborn` (Reborn Rites) and
+      `Minion.temp_attack` come off at the start of the player's next turn, on
+      the board and in hand; a Reborn the card prints stays.
+    - **A Discover that lands in the Tavern.** `Player.discover_into_shop`
+      (slot + 1) sends the pick into that Tavern slot instead of the hand:
+      Galakrond's Greed puts the old card back in the pool and Discovers from
+      exactly one Tier higher into its slot, with no Tavern buffs. Arcane
+      Alteration replaces a card on the board or in the Tavern with a pool
+      card of the same Tier, keeping the stats the old card had gained.
+    - **Hats and Tickets.** `Minion.hats` counts Dancin' Deryl's +1/+1 hats
+      (already in the stats): a played minion gets one, a sold minion's move
+      to a random friendly minion, and a triple adds the copies' up.
+      `Minion.tickets` is 1 for a Tavern card carrying a Darkmoon Ticket, 2
+      for one rolled for without getting one (so a card that stays put is not
+      rolled again), and 0 once it leaves the Tavern (`add_to_hand` clears
+      it). `Player.tickets` counts the Tickets taken; the third gives a
+      Triple Reward spell whose Discover tier is the player's own
+      (`Game::take_ticket`).
+    - **What the bot sees of them.** `Minion.hats`, `Minion.tickets` and
+      `Minion.frozen` are three new card-slot features (`SLOT_HATS`,
+      `SLOT_TICKETS`, `SLOT_FROZEN`, `SLOT_FEATURES` 86 to 89), and
+      `obs::power_progress` reports Tavern Lighting's level, Saturday
+      C'Thuns!' repeats and Come One, Come All!'s Tickets in the power's own
+      progress/left pair.
+    - **The next warband at the start of the round.** `Game::pair` copies each
+      player's opponent's board into `Player.next_board`, so I Spy (and the
+      button's legality) reads the warband as it stood before anyone played.
+    - **A power that arms an end of turn.** `PowerState.armed` is set by
+      Saturday C'Thuns!'s press and spent in `power_end_of_turn`, where the
+      repeats are the power's own turn count. `HeroPower.swaps_to`
+      (`swaps_each_turn` in heroes.toml) is how Major Hymn becomes Minor Hymn
+      at the end of every turn.
+    - `cast_spell` ends by dropping a target prompt nothing can answer, so a
+      spell's own "after you cast" triggers can never leave the player
+      stranded.
 - Bots answer the pick and a power Discover in `answer_pending`, and press a
   legal button (either one) with gold that would be left over (Gonna Be
   Rich! waits for turn 8). A skipped turn gets a Freeze and then an End Turn.
@@ -718,7 +783,8 @@ through exactly that card's code. The engine never matches a gift by name:
   the card table, `SLOT_IDS` in `train/model.py`), the button's uses,
   whether it was pressed this turn, whether it can be pressed and whether the
   open Discover is a gift offer as four own scalars after the trinket block.
-  `SLOT_FEATURES` went 78 to 86.
+  `SLOT_FEATURES` went 78 to 86, and hero batch 2 took it from 86 to 89
+  (hats, ticket, frozen after the gift slots; OBS_SIZE 7145 to 7292).
 - **Real-board seats** carry the `dark_gifts` the files record: the loader
   attaches them (their stats are already in the file's attack and health),
   with the counter set as if the gift had landed on that board's turn.
@@ -919,7 +985,9 @@ Deleting `.venv` undoes it.
   bot picks a power it can see; four for Bru'kan's Elements, three for a
   Discover), a fourth `choose` slot and the `hero_power2` action kind
   (SCALARS 195 to 199, N_ACTIONS 182): every checkpoint before it breaks as
-  well. A hero id and a power id share the model's one id embedding, so its
+  well. Hero batch 2 (2026-11-01) added hats, the Darkmoon Ticket mark and a
+  frozen card to the card slot (SLOT_FEATURES 86 to 89, OBS_SIZE 7145 to
+  7292), so every checkpoint before it breaks too. A hero id and a power id share the model's one id embedding, so its
   table is `max(N_HEROES, N_POWERS)` wide and the offer slots are embedded
   from it too (`HERO_IDS` in train/model.py), not scaled as numbers.
 - Games from `bgpy` play with heroes (`Game::new_random_heroes`, no pick),

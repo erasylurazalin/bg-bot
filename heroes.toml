@@ -611,3 +611,188 @@ name = "Loh, the Living Legend"
 card_id = "BG33_HERO_001"
 armor = 19
 power = { name = "Heroic Inspiration", card_id = "BG33_HERO_001p_ALT", passive = true, effect = { triple_reward_after_attacks = 15 } }
+
+# ---- hero batch 2 (2026-11-01): stats, targets and the Tavern
+# (docs/briefs/heroes-batch2.md; the rules in docs/heroes.md "Hero batch rules
+# (Era, 2026-11-01)" under "Stats and targets" and "The Tavern").
+
+# Galakrond's Greed: a Tavern minion, then a Discover from exactly one Tier
+# higher takes its slot; the old card goes back to the pool and the Tavern's
+# buffs are lost.
+[[hero]]
+name = "Galakrond"
+card_id = "TB_BaconShop_HERO_02"
+armor = 18
+power = { name = "Galakrond's Greed", card_id = "TB_BaconShop_HP_011", cost = 1, effect = { replace_shop_higher = true } }
+
+# Reborn Rites: Reborn until the next turn, any minion, the Tavern's too.
+[[hero]]
+name = "The Lich King"
+card_id = "TB_BaconShop_HERO_22"
+armor = 14
+power = { name = "Reborn Rites", card_id = "TB_BaconShop_HP_024", effect = { temp_reborn = true } }
+
+# Stay Frosty: minions cost 2, the Tavern offers one fewer minion, and it
+# Freezes at the end of every turn.
+[[hero]]
+name = "Sindragosa"
+card_id = "TB_BaconShop_HERO_27"
+armor = 10
+power = { name = "Stay Frosty", card_id = "TB_BaconShop_HP_014", passive = true, effect = { stay_frosty = 2 } }
+
+# Temporal Tavern: a Refresh that also holds two minions from a Tier above the
+# player's, in normal slots, at most Tier 6.
+[[hero]]
+name = "Infinite Toki"
+card_id = "TB_BaconShop_HERO_28"
+armor = 15
+power = { name = "Temporal Tavern", card_id = "TB_BaconShop_HP_028", cost = 1, effect = { refresh_high_tier = 2 } }
+
+# Saturday C'Thuns!: pressed, the end of the turn gives a random friendly
+# minion +1/+1, one more repeat every turn, all game.
+[[hero]]
+name = "C'Thun"
+card_id = "TB_BaconShop_HERO_29"
+armor = 20
+power = { name = "Saturday C'Thuns!", card_id = "TB_BaconShop_HP_104", cost = 1, effect = { saturday_cthun = [1, 1] } }
+
+# Hat Trick: every minion played gets a +1/+1 hat that moves to a random
+# friendly minion when it is sold; hats stack and survive a triple.
+[[hero]]
+name = "Dancin' Deryl"
+card_id = "TB_BaconShop_HERO_36"
+armor = 18
+power = { name = "Hat Trick", card_id = "TB_BaconShop_HP_042", passive = true, effect = { hat_trick = [1, 1] } }
+
+# Bob's Burgles: Refresh the Tavern with plain copies of the warband last
+# fought, made fresh.
+[[hero]]
+name = "Tess Greymane"
+card_id = "TB_BaconShop_HERO_50"
+armor = 17
+power = { name = "Bob's Burgles", card_id = "TB_BaconShop_HP_077", cost = 1, effect = { burgle_last_opponent = true } }
+
+# Dream Portal: the Tavern offers one more minion on every Refresh, a Dragon,
+# in a normal slot (docs/heroes.md "The Tavern's shape").
+[[hero]]
+name = "Ysera"
+card_id = "TB_BaconShop_HERO_53"
+armor = 17
+tribes = ["dragon"]
+power = { name = "Dream Portal", card_id = "TB_BaconShop_HP_062", passive = true, effect = { extra_dragon = true } }
+
+# Arcane Alteration: a card on the board or in the Tavern becomes a random one
+# of the same Tier, twice a turn; a Tavern card keeps its buffs.
+[[hero]]
+name = "Malygos"
+card_id = "TB_BaconShop_HERO_58"
+armor = 17
+power = { name = "Arcane Alteration", card_id = "TB_BaconShop_HP_052", uses_per_turn = 2, effect = { replace_same_tier = true } }
+
+# Imprison: a Tavern card goes to hand, not bought, locked for 2 turns.
+[[hero]]
+name = "Maiev Shadowsong"
+card_id = "TB_BaconShop_HERO_62"
+armor = 18
+power = { name = "Imprison", card_id = "TB_BaconShop_HP_068", cost = 1, effect = { imprison = 2 } }
+
+# Tavern Lighting: your Tavern spells give an extra +1/+1, one more every 3
+# turns.
+[[hero]]
+name = "Rakanishu"
+card_id = "TB_BaconShop_HERO_75"
+armor = 10
+power = { name = "Tavern Lighting", card_id = "TB_BaconShop_HP_085t", passive = true, effect = { tavern_lighting = [1, 1] } }
+
+# Come One, Come All!: Darkmoon Tickets on Tavern cards (33% a card); 3 of them
+# Discover a minion of the player's own Tier.
+[[hero]]
+name = "Silas Darkmoon"
+card_id = "TB_BaconShop_HERO_90"
+armor = 16
+power = { name = "Come One, Come All!", card_id = "TB_BaconShop_HP_101", passive = true, effect = { darkmoon_tickets = [33, 3] } }
+
+# See the Light: a Tavern minion goes to hand as a 2/2, as a steal.
+[[hero]]
+name = "Xyrella"
+card_id = "BG20_HERO_101"
+armor = 14
+power = { name = "See the Light", card_id = "BG20_HERO_101p", cost = 2, effect = { steal_shop_as_stats = [2, 2] } }
+
+# Spirit Swap: two minions gain each other's Attack until the next turn.
+[[hero]]
+name = "Vol'jin"
+card_id = "BG20_HERO_201"
+armor = 17
+power = { name = "Spirit Swap", card_id = "BG20_HERO_201p", effect = { spirit_swap = true } }
+
+# Devour: sell a friendly minion and spit its stats onto another.
+[[hero]]
+name = "Mutanus the Devourer"
+card_id = "BG20_HERO_301"
+armor = 20
+power = { name = "Devour", card_id = "BG20_HERO_301p", effect = { devour = true } }
+
+# I Spy: Discover a plain copy of a minion from the next opponent's warband as
+# it stood at the start of the turn.
+[[hero]]
+name = "Scabbs Cutterbutter"
+card_id = "BG21_HERO_010"
+armor = 18
+power = { name = "I Spy", card_id = "BG21_HERO_010p", cost = 2, effect = { ispy_next_opponent = true } }
+
+# Twice as Nice: after a Refresh, copy its highest-Tier minion and Freeze both
+# cards; the copy sits outside the normal slots.
+[[hero]]
+name = "Varden Dawngrasp"
+card_id = "BG22_HERO_004"
+armor = 18
+power = { name = "Twice as Nice", card_id = "BG22_HERO_004p", passive = true, effect = { twice_as_nice = true } }
+
+# Enhancification: after a Refresh, give a random Tavern minion a random Bonus
+# Keyword, twice.
+[[hero]]
+name = "Enhance-o Mechano"
+card_id = "BG24_HERO_204"
+armor = 14
+power = { name = "Enhancification", card_id = "BG24_HERO_204p", passive = true, effect = { enhancification = 2 } }
+
+# Rune of Damnation: destroy a friendly Undead (a real death) to get a random
+# Undead. Unlocks at Tier 2.
+[[hero]]
+name = "The Jailer"
+card_id = "TB_BaconShop_HERO_702"
+armor = 10
+tribes = ["undead"]
+power = { name = "Rune of Damnation", card_id = "TB_BaconShop_HP_702t", cost = 1, unlock_tier = 2, effect = { destroy_tribe_get_random = true, tribe = "undead" } }
+
+# Major Hymn and Minor Hymn: twice a turn, Attack (then Health) equal to the
+# player's Tier; the power is the other one at the start of every turn.
+[[hero]]
+name = "Inge, the Iron Hymn"
+card_id = "BG26_HERO_102"
+armor = 10
+power = { name = "Major Hymn", card_id = "BG26_HERO_102p", uses_per_turn = 2, swaps_each_turn = "BG26_HERO_102p2", effect = { hymn = "attack" } }
+
+[[power]]
+name = "Minor Hymn"
+card_id = "BG26_HERO_102p2"
+uses_per_turn = 2
+swaps_each_turn = "BG26_HERO_102p"
+effect = { hymn = "health" }
+
+# Cloning Gallery: once a game, summon an exact copy of a friendly minion; it
+# takes no pool copy and counts toward a triple.
+[[hero]]
+name = "Zerek, Master Cloner"
+card_id = "BG31_HERO_005"
+armor = 12
+power = { name = "Cloning Gallery", card_id = "BG31_HERO_005p", once_per_game = true, effect = { cloning_gallery = true } }
+
+# Double Time: two copies make a minion Golden, and a Golden played gives a
+# Tavern Coin instead of a Triple Reward.
+[[hero]]
+name = "Mister Clocksworth"
+card_id = "BG34_HERO_002"
+armor = 18
+power = { name = "Double Time", card_id = "BG34_HERO_002p", passive = true, effect = { double_time = true, card = "Tavern Coin" } }

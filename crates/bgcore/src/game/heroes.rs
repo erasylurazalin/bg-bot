@@ -28,6 +28,7 @@ use super::{
     PendingDiscard,
     PendingTarget,
     PowerState,
+    RefreshKind,
     TavernBuff,
     TargetKind,
 };
@@ -220,14 +221,174 @@ impl Game {
     /// Refresh cost, and what upgrading costs on top of the tier's price.
     pub(super) fn power_prices(&self, p: usize) -> Option<(u8, u8, u8)> {
         for second in [false, true] {
-            if let Some(st) = self.players[p].power_at(second)
-                && let PowerEffect::Prices { minion, refresh, upgrade_extra } =
-                    self.data.heroes.power(st.of).effect
-            {
-                return Some((minion, refresh, upgrade_extra));
+            if let Some(st) = self.players[p].power_at(second) {
+                match self.data.heroes.power(st.of).effect {
+                    PowerEffect::Prices { minion, refresh, upgrade_extra } => {
+                        return Some((minion, refresh, upgrade_extra));
+                    }
+                    // Stay Frosty: minions cost this; a Refresh and upgrading
+                    // keep the rules' prices.
+                    PowerEffect::StayFrosty { price } => {
+                        return Some((price, self.data.rules.roll_cost, 0));
+                    }
+                    _ => {}
+                }
             }
         }
         None
+    }
+
+    /// Read the standing rules the hero powers set into the player's fields
+    /// (hero batch 2: Stay Frosty's Tavern shape, Dream Portal's Dragon, Hat
+    /// Trick, Enhancification, Twice as Nice, Double Time, Come One, Come
+    /// All!). Called whenever a power arrives and at the start of every turn,
+    /// so a shop path reads one field and never the power table.
+    pub(super) fn sync_power_flags(&mut self, p: usize) {
+        let (main, second) = (self.players[p].power, self.players[p].power2);
+        let mut shop_fewer = 0u8;
+        let mut freeze_end = false;
+        let mut extra_dragon = false;
+        let mut double_time: Option<CardId> = None;
+        let mut hat = (0, 0);
+        let mut enhance_times = 0u8;
+        let mut twice_nice = false;
+        let mut ticket_chance = 0u8;
+        for st in [main, second].into_iter().flatten() {
+            match self.data.heroes.power(st.of).effect {
+                PowerEffect::StayFrosty { .. } => {
+                    shop_fewer = 1;
+                    freeze_end = true;
+                }
+                PowerEffect::ExtraDragon => extra_dragon = true,
+                PowerEffect::DoubleTime { coin } => double_time = Some(coin),
+                PowerEffect::HatTrick { attack, health } => hat = (attack, health),
+                PowerEffect::Enhancification { times } => enhance_times = times,
+                PowerEffect::TwiceAsNice => twice_nice = true,
+                PowerEffect::DarkmoonTickets { percent, .. } => ticket_chance = percent,
+                _ => {}
+            }
+        }
+        let pl = &mut self.players[p];
+        pl.shop_fewer = shop_fewer;
+        pl.freeze_end = freeze_end;
+        pl.extra_dragon = extra_dragon;
+        pl.double_time = double_time;
+        pl.hat = hat;
+        pl.enhance_times = enhance_times;
+        pl.twice_nice = twice_nice;
+        pl.ticket_chance = ticket_chance;
+    }
+
+    /// How many Darkmoon Tickets a Discover takes (Come One, Come All!), 3
+    /// unless the power says otherwise.
+    fn ticket_goal(&self, p: usize) -> u8 {
+        for second in [false, true] {
+            if let Some(st) = self.players[p].power_at(second)
+                && let PowerEffect::DarkmoonTickets { count, .. } =
+                    self.data.heroes.power(st.of).effect
+            {
+                return count.max(1);
+            }
+        }
+        3
+    }
+
+    /// Whether a Tavern minion has a Tier below the top, so Galakrond's Greed
+    /// has one above it to draw from.
+    fn shop_has_higher(&self, p: usize) -> bool {
+        self.players[p]
+            .shop
+            .iter()
+            .any(|m| !self.data.cards.get(m.card).is_spell() && self.data.cards.get(m.card).tier < crate::MAX_TIER)
+    }
+
+    /// Whether the Tavern holds any card at all, the spell slot included.
+    fn shop_has_card(&self, p: usize) -> bool {
+        !self.players[p].shop.is_empty() || self.players[p].shop_spell.is_some()
+    }
+
+    /// Minions on the board and in the Tavern together.
+    fn any_minions(&self, p: usize) -> usize {
+        let pl = &self.players[p];
+        pl.board.len()
+            + pl.shop.iter().filter(|m| !self.data.cards.get(m.card).is_spell()).count()
+    }
+
+    /// Whether the player has a warband they last fought to copy (Bob's
+    /// Burgles).
+    fn burgle_has_board(&self, p: usize) -> bool {
+        let pl = &self.players[p];
+        let q = match pl.last_opponent {
+            Some(super::Opponent::Player(q)) | Some(super::Opponent::Ghost(q)) => q as usize,
+            None => return false,
+        };
+        pl.seen.get(q).is_some_and(|s| !s.board.is_empty())
+    }
+
+    /// Bob's Burgles: Refresh the Tavern with plain copies of the warband
+    /// this player last fought, made fresh (no pool copy, printed stats).
+    /// The Tavern's spell slot rolls as usual.
+    fn burgle_last_opponent(&mut self, p: usize) {
+        let Some(opp) = self.players[p].last_opponent else { return };
+        let q = match opp {
+            super::Opponent::Player(q) | super::Opponent::Ghost(q) => q as usize,
+        };
+        let mut board: ArrayVec<CardId, BOARD> =
+            self.players[p].seen[q].board.iter().map(|m| m.card).collect();
+        if board.is_empty() {
+            return;
+        }
+        self.rng.shuffle(&mut board);
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let pl = &mut players[p];
+        pl.frozen = false;
+        for m in pl.shop.drain(..) {
+            super::shop::give_back(pool, &data.cards, &m);
+        }
+        pl.shop_spell = None;
+        let size = pl.shop_size(&data.rules);
+        let mut next = 0;
+        while pl.shop.len() < size {
+            let card = if next < board.len() {
+                next += 1;
+                board[next - 1]
+            } else {
+                board[rng.below(board.len() as u32) as usize]
+            };
+            let mut m = pl.make_card(&data.cards, card, false, 0);
+            pl.apply_tavern_buffs(&data.cards, &mut m);
+            pl.shop.push(m);
+        }
+        pl.shop_spell = data.cards.random_spell(pl.tier, *lobby, rng);
+        Self::apply_refresh_buff(pl, &data.cards, rng);
+        Self::apply_barrage(pl, &data.cards);
+        let bonus = data.rules.bonus_mask;
+        Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
+    }
+
+    /// Take one Darkmoon Ticket from a Tavern card that carries one. At the
+    /// goal, the player gets a Triple Reward spell that Discovers a minion of
+    /// their own Tier (a Triple Reward is the Tier above, docs/heroes.md).
+    pub(super) fn take_ticket(&mut self, p: usize) {
+        let goal = self.ticket_goal(p);
+        let pl = &mut self.players[p];
+        pl.tickets = pl.tickets.saturating_add(1);
+        if pl.tickets < goal {
+            return;
+        }
+        pl.tickets = 0;
+        if pl.hand.is_full() {
+            return;
+        }
+        let id = self
+            .data
+            .cards
+            .triple_reward
+            .expect("the card data has no Triple Reward spell");
+        let tier = pl.tier.max(1);
+        let mut m = pl.make_card(&self.data.cards, id, false, 0);
+        m.improvements = tier as u16;
+        self.add_to_hand(p, m);
     }
 
     /// What a Refresh costs this player: the rules' price, or a power's own.
@@ -322,6 +483,48 @@ impl Game {
             }
             // The fourth dig hands out a Golden minion.
             PowerEffect::DigForGolden { .. } => hand_room,
+            // A Tavern minion with one Tier above it to draw from.
+            PowerEffect::ReplaceShopHigher => self.shop_has_higher(p),
+            // Any minion, the Tavern's included.
+            PowerEffect::TempReborn => shop_minion || !pl.board.is_empty(),
+            PowerEffect::RefreshHighTier { .. } => true,
+            PowerEffect::SaturdayCthun { .. } => !pl.board.is_empty(),
+            // A warband to copy, and a Tavern to put it in.
+            PowerEffect::BurgleLastOpponent => self.burgle_has_board(p),
+            // A card on the board or in the Tavern (the spell slot included)
+            // to replace.
+            PowerEffect::ReplaceSameTier => self.shop_has_card(p) || !pl.board.is_empty(),
+            // A Tavern card to take, and room in hand for it.
+            PowerEffect::Imprison { .. } => hand_room && self.shop_has_card(p),
+            PowerEffect::StealShopAsStats { .. } => hand_room && shop_minion,
+            // Two minions, one on the board or in the Tavern and another one
+            // different from it.
+            PowerEffect::SpiritSwap => {
+                self.any_minions(p) >= 2
+            }
+            // A friendly minion to sell and another to take its stats.
+            PowerEffect::Devour => pl.board.len() >= 2,
+            // The next opponent's warband as it stood at the start of the
+            // turn (docs/heroes.md "Guessing").
+            PowerEffect::IspyNextOpponent => hand_room && !pl.next_board.is_empty(),
+            // A friendly Undead to destroy and room for the random one.
+            PowerEffect::DestroyTribeGetRandom { tribe } => {
+                hand_room
+                    && pl.board.iter().any(|m| self.data.cards.tribes_of(m).has(tribe))
+            }
+            // A minion to buff, Attack or Health equal to the Tier.
+            PowerEffect::Hymn { .. } => shop_minion || !pl.board.is_empty(),
+            // An exact copy needs a space on the board.
+            PowerEffect::CloningGallery => !pl.board.is_full(),
+            // A passive: no button.
+            PowerEffect::StayFrosty { .. }
+            | PowerEffect::HatTrick { .. }
+            | PowerEffect::ExtraDragon
+            | PowerEffect::TavernLighting { .. }
+            | PowerEffect::DarkmoonTickets { .. }
+            | PowerEffect::TwiceAsNice
+            | PowerEffect::Enhancification { .. }
+            | PowerEffect::DoubleTime { .. } => false,
             // A press that only completes a chooser's pick needs nothing.
             _ => true,
         }
@@ -616,6 +819,179 @@ impl Game {
                     }
                 }
             }
+            // ---- hero batch 2 (2026-11-01) ----
+            // Galakrond's Greed: a Tavern minion, then a Discover one Tier
+            // higher takes its slot.
+            PowerEffect::ReplaceShopHigher => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::ReplaceHigher,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // Reborn Rites: any minion, the Tavern's included.
+            PowerEffect::TempReborn => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::TempReborn,
+                    runs,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // Temporal Tavern: a Refresh that also holds minions from a Tier
+            // above the player's. The two higher-Tier cards go in before the
+            // powers that watch a Refresh (Twice as Nice's copy, coming last,
+            // may then be one of them).
+            PowerEffect::RefreshHighTier { count } => {
+                for _ in 0..runs {
+                    let Game { data, rng, players, pool, lobby, .. } = self;
+                    let pl = &mut players[p];
+                    pl.frozen = false;
+                    for m in pl.shop.drain(..) {
+                        super::shop::give_back(pool, &data.cards, &m);
+                    }
+                    pl.shop_spell = None;
+                    let size = pl.shop_size(&data.rules);
+                    Self::fill_shop(
+                        pl,
+                        pool,
+                        &data.cards,
+                        &data.rules,
+                        size,
+                        rng,
+                        *lobby,
+                        RefreshKind::Explicit,
+                    );
+                    Self::add_high_tier_slots(pl, pool, &data.cards, rng, *lobby, count);
+                    Self::apply_refresh_buff(pl, &data.cards, rng);
+                    Self::apply_barrage(pl, &data.cards);
+                    let bonus = data.rules.bonus_mask;
+                    Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
+                }
+            }
+            // Saturday C'Thuns!: pay, and the end of the turn gives the buff,
+            // once more for every turn the power has lasted.
+            PowerEffect::SaturdayCthun { .. } => {
+                if let Some(st) = self.players[p].power_at_mut(second) {
+                    st.armed = true;
+                }
+            }
+            // Bob's Burgles: plain copies of the warband last fought.
+            PowerEffect::BurgleLastOpponent => {
+                for _ in 0..runs {
+                    self.burgle_last_opponent(p);
+                }
+            }
+            // Arcane Alteration: a card on the board or in the Tavern becomes a
+            // random one of the same Tier.
+            PowerEffect::ReplaceSameTier => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::ReplaceSameTier,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // Imprison: a Tavern card to hand, locked for its turns.
+            PowerEffect::Imprison { turns } => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::ImprisonShop { turns },
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // See the Light: a Tavern minion to hand as a 2/2.
+            PowerEffect::StealShopAsStats { attack, health } => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::StealShopAsStats { attack, health },
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // Spirit Swap and Devour: the first of two minions.
+            PowerEffect::SpiritSwap => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::SpiritSwapFirst,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            PowerEffect::Devour => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::DevourFirst,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // I Spy: plain copies of the next opponent's warband.
+            PowerEffect::IspyNextOpponent => {
+                for _ in 0..runs {
+                    let _ = self.players[p]
+                        .discover_queue
+                        .try_push(DiscoverRequest::IspyNextOpponent);
+                }
+                self.maybe_start_discover(p);
+            }
+            // Rune of Damnation: a friendly Undead dies for a random one.
+            PowerEffect::DestroyTribeGetRandom { tribe } => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::DestroyGetTribe { tribe },
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // Major and Minor Hymn: Attack (or Health) equal to the Tier now.
+            PowerEffect::Hymn { attack } => {
+                let tier = self.players[p].tier as i32;
+                let (a, h) = if attack { (tier, 0) } else { (0, tier) };
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::MinionBuff {
+                        tribe: None,
+                        attack: a,
+                        health: h,
+                        keyword: 0,
+                        random_keyword: false,
+                    },
+                    runs,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            // Cloning Gallery: an exact copy, summoned.
+            PowerEffect::CloningGallery => {
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::SummonExactCopy,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
             // Lucky Roll: a fair six-sided die, and the power is locked for
             // that many turns.
             PowerEffect::LuckyRoll => {
@@ -644,6 +1020,8 @@ impl Game {
     /// down (or completes), and the powers that hand out cards do it.
     pub(super) fn power_start_of_turn(&mut self, p: usize) {
         let turn = self.turn;
+        // The standing rules the powers set, from whatever the slot holds now.
+        self.sync_power_flags(p);
         for second in [false, true] {
             let Some(st) = self.players[p].power_at(second) else { continue };
             // Only the Copy numbers of the power are read here, so nothing is
@@ -787,6 +1165,28 @@ impl Game {
                         self.maybe_start_discover(p);
                     }
                 }
+                // Tavern Lighting: one more +1/+1 for Tavern spells at the
+                // start of every third turn, on top of the spell power.
+                PowerEffect::TavernLighting { attack, health } => {
+                    let n = {
+                        let Some(sl) = self.players[p].power_at_mut(second) else { continue };
+                        sl.progress += 1;
+                        sl.progress
+                    };
+                    if n == 1 || n % 3 == 0 {
+                        let pl = &mut self.players[p];
+                        pl.spell_bonus.0 += attack;
+                        pl.spell_bonus.1 += health;
+                    }
+                }
+                // Saturday C'Thuns!: one more repeat every turn, all game, and
+                // the press of the turn before is spent.
+                PowerEffect::SaturdayCthun { .. } => {
+                    if let Some(sl) = self.players[p].power_at_mut(second) {
+                        sl.progress = sl.progress.saturating_add(1);
+                        sl.armed = false;
+                    }
+                }
                 PowerEffect::CopyBuyAfterMinions { .. } => {
                     if let Some(st) = self.players[p].power_at_mut(second) {
                         st.progress = 0;
@@ -859,6 +1259,36 @@ impl Game {
                     // With one minion it is both ends, so it gets both buffs.
                     buff(&mut self.players[p].board[n - 1], attack, health);
                 }
+            }
+            // Saturday C'Thuns!: pressed this turn, the end of it gives a
+            // random friendly minion +1/+1, once more for every turn the power
+            // has lasted (docs/heroes.md).
+            if let PowerEffect::SaturdayCthun { attack, health } = effect
+                && st.armed
+            {
+                let times = st.progress.saturating_mul(runs as u32);
+                for _ in 0..times {
+                    let n = self.players[p].board.len();
+                    if n == 0 {
+                        break;
+                    }
+                    let k = self.rng.below(n as u32) as usize;
+                    buff(&mut self.players[p].board[k], attack, health);
+                }
+                if let Some(sl) = self.players[p].power_at_mut(second) {
+                    sl.armed = false;
+                }
+            }
+            // Major and Minor Hymn: the power is the other one after this
+            // turn (Attack on the first turn, then Health, docs/heroes.md).
+            if matches!(effect, PowerEffect::Hymn { .. })
+                && let Some(next) = self.data.heroes.power(st.of).swaps_to
+            {
+                self.set_power(p, second, Some(next));
+            }
+            // Stay Frosty: the Tavern Freezes at the end of every turn.
+            if matches!(effect, PowerEffect::StayFrosty { .. }) && self.players[p].freeze_end {
+                self.players[p].frozen = true;
             }
             // The Perfect Crime and The Galaxy's Lens: the next press costs 1
             // less, down to 0.

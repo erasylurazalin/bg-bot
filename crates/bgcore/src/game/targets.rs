@@ -74,12 +74,28 @@ impl Game {
             }
             return;
         }
+        // Arcane Alteration and Imprison take any Tavern card, a spell in a
+        // minion slot and the spell slot included, so they run before the
+        // spell guard below.
+        match pt.kind {
+            TargetKind::ReplaceSameTier => {
+                self.replace_tavern_same_tier(p, slot);
+                return;
+            }
+            TargetKind::ImprisonShop { turns } => {
+                self.imprison_tavern_card(p, slot, turns);
+                return;
+            }
+            _ => {}
+        }
         if slot >= self.players[p].shop.len()
             || self.data.cards.get(self.players[p].shop[slot].card).is_spell()
         {
             return;
         }
         match pt.kind {
+            // Handled above, before the spell guard.
+            TargetKind::ReplaceSameTier | TargetKind::ImprisonShop { .. } => {}
             TargetKind::AnyBuff { attack, health } => {
                 for _ in 0..pt.runs {
                     buff(&mut self.players[p].shop[slot], attack, health);
@@ -123,6 +139,56 @@ impl Game {
             TargetKind::ThrowInPot { count } => {
                 let m = self.players[p].shop.remove(slot);
                 self.stir_the_pot(p, m, count);
+            }
+            // Reborn Rites: a Tavern minion gains Reborn until the next turn,
+            // so a bought one keeps it for this one.
+            TargetKind::TempReborn => {
+                let m = &mut self.players[p].shop[slot];
+                m.keywords.set(Keywords::REBORN);
+                m.temp_reborn = true;
+            }
+            // Galakrond's Greed: the old card goes back to the pool (the
+            // Tavern's buffs are lost) and a Discover from exactly one Tier
+            // higher takes its slot.
+            TargetKind::ReplaceHigher => {
+                let old = self.players[p].shop.remove(slot);
+                let tier = self.data.cards.get(old.card).tier;
+                give_back(&mut self.pool, &self.data.cards, &old);
+                self.players[p].discover_into_shop =
+                    (slot.min(crate::SHOP - 1) + 1) as u8;
+                let _ = self.players[p]
+                    .discover_queue
+                    .try_push(DiscoverRequest::MinionTier((tier + 1).min(crate::MAX_TIER)));
+                self.maybe_start_discover(p);
+            }
+
+            // See the Light: the minion goes to hand as a 2/2, as a steal.
+            TargetKind::StealShopAsStats { attack, health } => {
+                let mut m = self.players[p].shop.remove(slot);
+                m.attack = attack;
+                m.health = health;
+                if !self.add_to_hand(p, m) {
+                    self.players[p].shop.insert(slot, m);
+                }
+            }
+
+            // Spirit Swap: the first of the two minions is remembered and the
+            // second pick is offered.
+            TargetKind::SpiritSwapFirst => {
+                self.players[p].two_step = Some((slot as u8, true));
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::SpiritSwapSecond,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            TargetKind::SpiritSwapSecond => {
+                if let Some(first) = self.players[p].two_step.take() {
+                    self.swap_attacks(p, first, (slot as u8, true));
+                }
             }
             TargetKind::Spell(st) => {
                 let target = slot;
@@ -380,9 +446,15 @@ impl Game {
                     let _ = shop.try_push(s);
                 }
             }
-            // A card steal may also take the spell slot, one past the cards.
-            if matches!(pt.kind, TargetKind::StealShopCard { .. })
-                && self.valid_shop_target(p, &pt, self.players[p].shop.len())
+            // A card steal, and the two powers that take any Tavern card
+            // (Imprison, Arcane Alteration), may also take the spell slot,
+            // one past the cards.
+            if matches!(
+                pt.kind,
+                TargetKind::StealShopCard { .. }
+                    | TargetKind::ImprisonShop { .. }
+                    | TargetKind::ReplaceSameTier
+            ) && self.valid_shop_target(p, &pt, self.players[p].shop.len())
             {
                 let _ = shop.try_push(self.players[p].shop.len());
             }
@@ -403,8 +475,13 @@ impl Game {
 
     pub(super) fn apply_target(&mut self, p: usize, pt: &PendingTarget, s: usize) {
         match pt.kind {
-            // Never reached: a card steal is a Tavern pick (`apply_target_shop`).
-            TargetKind::StealShopCard { .. } => {}
+            // Never reached: a card steal is a Tavern pick (`apply_target_shop`),
+            // and so are Galakrond's Greed's replacement, See the Light and
+            // Imprison.
+            TargetKind::StealShopCard { .. }
+            | TargetKind::ReplaceHigher
+            | TargetKind::StealShopAsStats { .. }
+            | TargetKind::ImprisonShop { .. } => {}
             TargetKind::MinionBuff { attack, health, keyword, random_keyword, .. } => {
                 for _ in 0..pt.runs {
                     let m = &mut self.players[p].board[s];
@@ -489,6 +566,76 @@ impl Game {
             TargetKind::ThrowInPot { count } => {
                 let m = self.players[p].board.remove(s);
                 self.stir_the_pot(p, m, count);
+            }
+            // Reborn Rites: Reborn until the next turn.
+            TargetKind::TempReborn => {
+                let m = &mut self.players[p].board[s];
+                m.keywords.set(Keywords::REBORN);
+                m.temp_reborn = true;
+            }
+            // Arcane Alteration on the board: a random card of the same Tier
+            // takes the slot, keeping the stats the old one had gained.
+            TargetKind::ReplaceSameTier => self.replace_board_same_tier(p, s),
+            // Devour: the minion is sold (Gold and sell triggers, like
+            // Channel the Devourer) and its stats go to another friendly one.
+            TargetKind::DevourFirst => {
+                if s < self.players[p].board.len() {
+                    let m = self.players[p].board[s];
+                    self.players[p].devour_stats = (m.attack, m.health);
+                    self.sell_minion(p, s);
+                    if !self.players[p].board.is_empty() {
+                        let pt = PendingTarget {
+                            source: None,
+                            kind: TargetKind::DevourSecond,
+                            runs: 1,
+                            tavern: false,
+                            gem: false,
+                        };
+                        self.offer_target(p, pt);
+                    }
+                }
+            }
+            TargetKind::DevourSecond => {
+                let (a, h) = self.players[p].devour_stats;
+                if let Some(m) = self.players[p].board.get_mut(s) {
+                    buff(m, a, h);
+                }
+            }
+            // Spirit Swap: the first minion is remembered, the second offered.
+            TargetKind::SpiritSwapFirst => {
+                self.players[p].two_step = Some((s as u8, false));
+                let pt = PendingTarget {
+                    source: None,
+                    kind: TargetKind::SpiritSwapSecond,
+                    runs: 1,
+                    tavern: false,
+                    gem: false,
+                };
+                self.offer_target(p, pt);
+            }
+            TargetKind::SpiritSwapSecond => {
+                if let Some(first) = self.players[p].two_step.take() {
+                    self.swap_attacks(p, first, (s as u8, false));
+                }
+            }
+            // Rune of Damnation: a real death in the shop (Deathrattles fire)
+            // for a random minion of that tribe.
+            TargetKind::DestroyGetTribe { tribe } => {
+                self.destroy_in_shop(p, &[s], None);
+                let mut pos = 0usize;
+                self.run_effect(p, &mut pos, Effect::GetRandomMinion { tribe }, false, 1);
+            }
+            // Cloning Gallery: an exact copy, summoned beside it, taking no
+            // pool copy; it counts toward a triple.
+            TargetKind::SummonExactCopy => {
+                if s < self.players[p].board.len() && !self.players[p].board.is_full() {
+                    let mut copy = self.players[p].board[s];
+                    copy.pool_copies = 0;
+                    copy.no_reward = true;
+                    let card = copy.card;
+                    self.players[p].board.insert(s + 1, copy);
+                    self.check_triple(p, card);
+                }
             }
             TargetKind::Consume { pick, keywords, count, stat_mul, .. } => {
                 self.start_consume(p, s, pick, keywords, count, stat_mul);
@@ -879,6 +1026,135 @@ impl Game {
                 }
             }
         }
+    }
+
+    /// Arcane Alteration on a Tavern card: a random card of the same Tier
+    /// takes the slot, and whatever buffs the old card carried are the new
+    /// one's too (docs/heroes.md). A spell is replaced by a Tavern spell of
+    /// its Tier, a minion by a pool minion; the old card's pool copy goes
+    /// back. The slot may be the spell slot, one past the last card.
+    pub(super) fn replace_tavern_same_tier(&mut self, p: usize, slot: usize) {
+        let from_spell_slot = slot >= self.players[p].shop.len();
+        let old = if from_spell_slot {
+            match self.players[p].shop_spell.take() {
+                Some(id) => self.players[p].make_card(&self.data.cards, id, false, 0),
+                None => return,
+            }
+        } else {
+            self.players[p].shop.remove(slot)
+        };
+        let card = self.data.cards.get(old.card);
+        let tier = card.tier;
+        let was_spell = card.is_spell();
+        // The stats the old card had gained over its printed ones.
+        let (da, dh) = if was_spell {
+            (0, 0)
+        } else {
+            let base = self.players[p].make_card(&self.data.cards, old.card, false, 0);
+            (old.attack - base.attack, old.health - base.health)
+        };
+        let golden = old.golden;
+        give_back(&mut self.pool, &self.data.cards, &old);
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let pl = &mut players[p];
+        if was_spell {
+            let next = data.cards.random_tier_spell(tier, &[], *lobby, rng);
+            let Some(id) = next else { return };
+            if from_spell_slot {
+                pl.shop_spell = Some(id);
+            } else {
+                let m = pl.make_card(&data.cards, id, false, 0);
+                pl.shop.insert(slot.min(pl.shop.len()), m);
+            }
+            return;
+        }
+        let drawn = super::shop::draw_filtered(
+            pool, &data.cards, rng, tier, tier, &[], *lobby, |_| true,
+        );
+        let Some(id) = drawn else { return };
+        let mut m = pl.make_card(&data.cards, id, golden, 1);
+        m.attack += da;
+        m.health += dh;
+        m.uses_left = m.turn_uses(&data.cards);
+        pl.shop.insert(slot.min(pl.shop.len()), m);
+    }
+
+    /// Imprison: the card goes to hand, not bought, locked for its turns; its
+    /// pool copy leaves with it, as a steal's does. `slot` may be the spell
+    /// slot, one past the last card.
+    fn imprison_tavern_card(&mut self, p: usize, slot: usize, turns: u8) {
+        let from_spell_slot = slot >= self.players[p].shop.len();
+        let mut m = if from_spell_slot {
+            match self.players[p].shop_spell.take() {
+                Some(id) => self.players[p].make_card(&self.data.cards, id, false, 0),
+                None => return,
+            }
+        } else {
+            self.players[p].shop.remove(slot)
+        };
+        m.locked_turns = turns;
+        if !self.add_to_hand(p, m) {
+            let pl = &mut self.players[p];
+            if from_spell_slot {
+                pl.shop_spell = Some(m.card);
+            } else {
+                pl.shop.insert(slot.min(pl.shop.len()), m);
+            }
+        }
+    }
+
+    /// Arcane Alteration on the board: a random pool minion of the same Tier
+    /// takes the slot, keeping the stats the old one had gained and its
+    /// Golden status.
+    pub(super) fn replace_board_same_tier(&mut self, p: usize, s: usize) {
+        if s >= self.players[p].board.len() {
+            return;
+        }
+        let old = self.players[p].board[s];
+        let tier = self.data.cards.get(old.card).tier;
+        let base = self.players[p].make_card(&self.data.cards, old.card, false, 0);
+        let (da, dh) = (old.attack - base.attack, old.health - base.health);
+        let golden = old.golden;
+        give_back(&mut self.pool, &self.data.cards, &old);
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let drawn = super::shop::draw_filtered(
+            pool, &data.cards, rng, tier, tier, &[], *lobby, |_| true,
+        );
+        if let Some(id) = drawn {
+            let mut m = players[p].make_card(&data.cards, id, golden, 1);
+            m.attack += da;
+            m.health += dh;
+            m.uses_left = m.turn_uses(&data.cards);
+            players[p].board[s] = m;
+        }
+    }
+
+    /// Spirit Swap: the two minions gain each other's Attack until the next
+    /// turn. The swap is read from the Attack both had at the same moment, and
+    /// the change is kept as a `temp_attack` so a later buff still stands and
+    /// the swap comes off cleanly at the start of the next turn.
+    fn swap_attacks(&mut self, p: usize, first: (u8, bool), second: (u8, bool)) {
+        let atk = |g: &Game, at: (u8, bool)| -> Option<i32> {
+            if at.1 {
+                g.players[p].shop.get(at.0 as usize).map(|m| m.attack)
+            } else {
+                g.players[p].board.get(at.0 as usize).map(|m| m.attack)
+            }
+        };
+        let (Some(a), Some(b)) = (atk(self, first), atk(self, second)) else { return };
+        let set = |g: &mut Game, at: (u8, bool), to: i32| {
+            let m = if at.1 {
+                g.players[p].shop.get_mut(at.0 as usize)
+            } else {
+                g.players[p].board.get_mut(at.0 as usize)
+            };
+            if let Some(m) = m {
+                m.temp_attack += to - m.attack;
+                m.attack = to;
+            }
+        };
+        set(self, first, b);
+        set(self, second, a);
     }
 
     pub(super) fn resolve_target(&mut self, p: usize, s: usize) {

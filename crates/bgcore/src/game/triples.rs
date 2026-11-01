@@ -39,6 +39,16 @@ impl Game {
         self.add_to_hand(p, m);
     }
 
+    /// What playing a Golden minion gives: a Triple Reward, or with Double
+    /// Time the Tavern Coin it names instead (docs/heroes.md).
+    pub(super) fn give_play_reward(&mut self, p: usize) {
+        if let Some(coin) = self.players[p].double_time {
+            self.give_generated(p, coin);
+            return;
+        }
+        self.give_triple_reward(p);
+    }
+
     /// Three copies of a minion in hand and on board become a golden one in
     /// hand, with double printed stats plus the buffs and attachments of all
     /// three. Spells never triple.
@@ -69,8 +79,11 @@ impl Game {
         let can_stand_in = |w: CardId, x: CardId| {
             w != x && wild_of(w).is_some_and(|t| cards.get(x).tribes.has(t))
         };
-        // Designer Eyepatch: two copies of a Pirate make it Golden.
-        let need = if pl.tp.pirate_triple && cards.get(card).tribes.has(Tribe::Pirate) {
+        // Designer Eyepatch: two copies of a Pirate make it Golden. Double
+        // Time: two copies of anything.
+        let need = if pl.double_time.is_some()
+            || (pl.tp.pirate_triple && cards.get(card).tribes.has(Tribe::Pirate))
+        {
             2
         } else {
             3
@@ -98,7 +111,9 @@ impl Game {
             // the card plus this wildcard first, then one plus two wildcards.
             let n_w = stand_ins(card);
             let pool_ids = 0..cards.cards.len() as CardId;
-            let need = if pl.tp.pirate_triple && cards.get(card).tribes.has(Tribe::Pirate) {
+            let need = if pl.double_time.is_some()
+                || (pl.tp.pirate_triple && cards.get(card).tribes.has(Tribe::Pirate))
+            {
                 2usize
             } else {
                 3usize
@@ -121,6 +136,11 @@ impl Game {
             }
         }
         let Some((x_card, x_count, wild)) = plan else { return };
+        // The Golden minion goes to hand: with no room for it the copies stay
+        // where they are (a summon from a power can fill the hand first).
+        if self.players[p].hand.is_full() {
+            return;
+        }
         let pl = &mut self.players[p];
         let mut gold = pl.make_card(cards, x_card, true, 0);
         // A Living Prison's arms are the one "this turn" effect that adds up
@@ -151,6 +171,7 @@ impl Game {
                 };
                 gold.attack += m.attack - bonus.0 - base.attack;
                 gold.health += m.health - bonus.1 - base.health;
+                gold.hats = gold.hats.saturating_add(m.hats);
                 gold.winners_bread = gold.winners_bread.saturating_add(m.winners_bread);
                 gold.magnetizations = gold.magnetizations.saturating_add(m.magnetizations);
                 gold.volumizers =

@@ -214,6 +214,70 @@ pub enum PowerEffect {
     /// After every `every` friendly attacks, get a Triple Reward (Heroic
     /// Inspiration).
     TripleRewardAfterAttacks { every: u32 },
+    // ---- hero batch 2 (2026-11-01) ----
+    /// Replace a Tavern minion with a Discover from exactly one Tier higher
+    /// (Galakrond's Greed). The old card goes back to the pool and the
+    /// Tavern's buffs are lost.
+    ReplaceShopHigher,
+    /// Give a minion Reborn until the next turn, a Tavern minion included
+    /// (Reborn Rites).
+    TempReborn,
+    /// Minions cost `price`, the Tavern offers one fewer minion, and it
+    /// Freezes at the end of every turn (Stay Frosty).
+    StayFrosty { price: u8 },
+    /// A Refresh that also holds `count` minions from a Tier above yours
+    /// (Temporal Tavern).
+    RefreshHighTier { count: u8 },
+    /// Pressed, at the end of the turn give a friendly minion
+    /// +`attack`/+`health`, one more repeat every turn, all game (Saturday
+    /// C'Thuns!).
+    SaturdayCthun { attack: i32, health: i32 },
+    /// Every minion you play gets a +`attack`/+`health` hat that moves to a
+    /// friendly minion when it is sold (Hat Trick).
+    HatTrick { attack: i32, health: i32 },
+    /// Refresh the Tavern with plain copies of the warband you last fought
+    /// (Bob's Burgles).
+    BurgleLastOpponent,
+    /// The Tavern offers one more minion, a Dragon, on every Refresh (Dream
+    /// Portal).
+    ExtraDragon,
+    /// Replace a card, the Tavern's or your own, with a random one of the
+    /// same Tier; a Tavern card keeps its buffs (Arcane Alteration).
+    ReplaceSameTier,
+    /// Lock a Tavern card in hand for `turns` turns, never bought (Imprison).
+    Imprison { turns: u8 },
+    /// Tavern spells give an extra +`attack`/+`health`, one more of each every
+    /// three turns (Tavern Lighting).
+    TavernLighting { attack: i32, health: i32 },
+    /// Darkmoon Tickets sit on Tavern cards, `percent` of a chance each card;
+    /// `count` of them Discover a minion of your Tier (Come One, Come All!).
+    DarkmoonTickets { percent: u8, count: u8 },
+    /// Steal a Tavern minion into hand as `attack`/`health` (See the Light).
+    StealShopAsStats { attack: i32, health: i32 },
+    /// Two minions swap Attack until the next turn (Spirit Swap).
+    SpiritSwap,
+    /// Sell a friendly minion and give its stats to another (Devour).
+    Devour,
+    /// Discover a plain copy of a minion from the next opponent's warband as
+    /// it was at the start of the turn (I Spy).
+    IspyNextOpponent,
+    /// After a Refresh, copy the Tavern's highest-Tier minion and Freeze both
+    /// cards (Twice as Nice).
+    TwiceAsNice,
+    /// After a Refresh, give a random Tavern minion a random Bonus Keyword,
+    /// `times` times (Enhancification).
+    Enhancification { times: u8 },
+    /// Destroy a friendly minion of `tribe` and get a random one of it (Rune
+    /// of Damnation).
+    DestroyTribeGetRandom { tribe: Tribe },
+    /// Give a minion Attack (or Health) equal to your Tier, twice a turn; the
+    /// power is the other one of the two next turn (Major and Minor Hymn).
+    Hymn { attack: bool },
+    /// Summon an exact copy of a friendly minion (Cloning Gallery).
+    CloningGallery,
+    /// Two copies of a minion make it Golden, and they give `coin` (a Tavern
+    /// Coin) instead of a Triple Reward (Double Time).
+    DoubleTime { coin: CardId },
 }
 
 /// What a power's buy counter counts.
@@ -265,6 +329,10 @@ pub struct HeroPower {
     /// The powers a press may turn this one into (Embrace the Elements,
     /// Dungar's Gryphon), indices into `HeroDb::powers`.
     pub options: Vec<u8>,
+    /// The power this one becomes at the start of every turn (Major Hymn and
+    /// Minor Hymn swap): index into `HeroDb::powers`, None for a power that
+    /// stays.
+    pub swaps_to: Option<u8>,
 }
 
 impl HeroPower {
@@ -428,6 +496,9 @@ struct RawExtraPower {
     skip_turns: u8,
     #[serde(default)]
     choose: Vec<String>,
+    /// The card_id of the power this one becomes at the start of every turn.
+    #[serde(default)]
+    swaps_each_turn: Option<String>,
     #[serde(default)]
     effect: RawPowerEffect,
 }
@@ -459,6 +530,9 @@ struct RawPower {
     skip_turns: u8,
     #[serde(default)]
     choose: Vec<String>,
+    /// The card_id of the power this one becomes at the start of every turn.
+    #[serde(default)]
+    swaps_each_turn: Option<String>,
     #[serde(default)]
     effect: RawPowerEffect,
 }
@@ -631,6 +705,60 @@ struct RawPowerEffect {
     copy_last_spell: bool,
     #[serde(default)]
     triple_reward_after_attacks: Option<u32>,
+    // ---- hero batch 2 (2026-11-01) ----
+    #[serde(default)]
+    replace_shop_higher: bool,
+    #[serde(default)]
+    temp_reborn: bool,
+    /// What minions cost (Stay Frosty).
+    #[serde(default)]
+    stay_frosty: Option<u8>,
+    #[serde(default)]
+    refresh_high_tier: Option<u8>,
+    /// `[attack, health]` (Saturday C'Thuns!).
+    #[serde(default)]
+    saturday_cthun: Option<[i32; 2]>,
+    /// `[attack, health]` (Hat Trick).
+    #[serde(default)]
+    hat_trick: Option<[i32; 2]>,
+    #[serde(default)]
+    burgle_last_opponent: bool,
+    #[serde(default)]
+    extra_dragon: bool,
+    #[serde(default)]
+    replace_same_tier: bool,
+    #[serde(default)]
+    imprison: Option<u8>,
+    /// `[attack, health, every]` (Tavern Lighting).
+    #[serde(default)]
+    tavern_lighting: Option<[i32; 2]>,
+    /// `[percent, count]` (Come One, Come All!).
+    #[serde(default)]
+    darkmoon_tickets: Option<[u8; 2]>,
+    /// `[attack, health]` (See the Light).
+    #[serde(default)]
+    steal_shop_as_stats: Option<[i32; 2]>,
+    #[serde(default)]
+    spirit_swap: bool,
+    #[serde(default)]
+    devour: bool,
+    #[serde(default)]
+    ispy_next_opponent: bool,
+    #[serde(default)]
+    twice_as_nice: bool,
+    #[serde(default)]
+    enhancification: Option<u8>,
+    /// The tribe whose minion is destroyed for a random one (Rune of
+    /// Damnation).
+    #[serde(default)]
+    destroy_tribe_get_random: bool,
+    /// "attack" or "health" (Major and Minor Hymn).
+    #[serde(default)]
+    hymn: Option<String>,
+    #[serde(default)]
+    cloning_gallery: bool,
+    #[serde(default)]
+    double_time: bool,
 }
 
 #[derive(Deserialize)]
@@ -835,6 +963,51 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
         PowerEffect::CopyLastSpell
     } else if let Some(every) = e.triple_reward_after_attacks {
         PowerEffect::TripleRewardAfterAttacks { every: every.max(1) }
+    } else if e.replace_shop_higher {
+        PowerEffect::ReplaceShopHigher
+    } else if e.temp_reborn {
+        PowerEffect::TempReborn
+    } else if let Some(price) = e.stay_frosty {
+        PowerEffect::StayFrosty { price }
+    } else if let Some(count) = e.refresh_high_tier {
+        PowerEffect::RefreshHighTier { count: count.max(1) }
+    } else if let Some([attack, health]) = e.saturday_cthun {
+        PowerEffect::SaturdayCthun { attack, health }
+    } else if let Some([attack, health]) = e.hat_trick {
+        PowerEffect::HatTrick { attack, health }
+    } else if e.burgle_last_opponent {
+        PowerEffect::BurgleLastOpponent
+    } else if e.extra_dragon {
+        PowerEffect::ExtraDragon
+    } else if e.replace_same_tier {
+        PowerEffect::ReplaceSameTier
+    } else if let Some(turns) = e.imprison {
+        PowerEffect::Imprison { turns }
+    } else if let Some([attack, health]) = e.tavern_lighting {
+        PowerEffect::TavernLighting { attack, health }
+    } else if let Some([percent, count]) = e.darkmoon_tickets {
+        PowerEffect::DarkmoonTickets { percent, count: count.max(1) }
+    } else if let Some([attack, health]) = e.steal_shop_as_stats {
+        PowerEffect::StealShopAsStats { attack, health }
+    } else if e.spirit_swap {
+        PowerEffect::SpiritSwap
+    } else if e.devour {
+        PowerEffect::Devour
+    } else if e.ispy_next_opponent {
+        PowerEffect::IspyNextOpponent
+    } else if e.twice_as_nice {
+        PowerEffect::TwiceAsNice
+    } else if let Some(times) = e.enhancification {
+        PowerEffect::Enhancification { times: times.max(1) }
+    } else if e.destroy_tribe_get_random {
+        let t = e.tribe.as_deref().ok_or("destroy_tribe_get_random needs a tribe")?;
+        PowerEffect::DestroyTribeGetRandom { tribe: tribe(t)? }
+    } else if let Some(which) = &e.hymn {
+        PowerEffect::Hymn { attack: which.trim() == "attack" }
+    } else if e.cloning_gallery {
+        PowerEffect::CloningGallery
+    } else if e.double_time {
+        PowerEffect::DoubleTime { coin: 0 }
     } else {
         PowerEffect::None
     })
@@ -862,6 +1035,9 @@ fn resolve_effect(
         }
         PowerEffect::SocGrantDeathrattle { count, .. } => {
             PowerEffect::SocGrantDeathrattle { count, card: card(&e.card, "card")? }
+        }
+        PowerEffect::DoubleTime { .. } => {
+            PowerEffect::DoubleTime { coin: card(&e.card, "card")? }
         }
         PowerEffect::CardAfterBuys { every, of, .. } => {
             let b = e.card_after_buys.as_ref().unwrap();
@@ -899,6 +1075,7 @@ struct Pending {
     family: Option<String>,
     returns_to: Option<String>,
     choose: Vec<String>,
+    swaps_to: Option<String>,
 }
 
 impl HeroDb {
@@ -942,6 +1119,7 @@ impl HeroDb {
                 family: 0,
                 skip_turns: h.power.skip_turns,
                 options: Vec::new(),
+                swaps_to: None,
             };
             pending.push(Pending {
                 power,
@@ -949,6 +1127,7 @@ impl HeroDb {
                 family: h.power.family,
                 returns_to: None,
                 choose: h.power.choose,
+                swaps_to: h.power.swaps_each_turn,
             });
             let mut tribes = Tribes::NONE;
             for t in &h.tribes {
@@ -986,6 +1165,7 @@ impl HeroDb {
                 family: 0,
                 skip_turns: h.skip_turns,
                 options: Vec::new(),
+                swaps_to: None,
             };
             pending.push(Pending {
                 power,
@@ -993,6 +1173,7 @@ impl HeroDb {
                 family: h.family,
                 returns_to: h.returns_to,
                 choose: h.choose,
+                swaps_to: h.swaps_each_turn,
             });
         }
         // Every card_id is known now, so the names inside the effects and the
@@ -1014,6 +1195,12 @@ impl HeroDb {
         for (i, p) in pending.iter().enumerate() {
             let plain = p.power.effect;
             db.powers[i].effect = resolve_effect(&p.raw, plain, cards, &db.power_by_card_id, &p.power.name)?;
+            if let Some(r) = &p.swaps_to {
+                db.powers[i].swaps_to = Some(
+                    db.power_by_card_id(r)
+                        .ok_or_else(|| format!("{}: no power {r:?}", p.power.name))?,
+                );
+            }
             if let Some(r) = &p.returns_to {
                 db.powers[i].parent = Some(
                     db.power_by_card_id(r)

@@ -52,12 +52,14 @@ impl Game {
             }
             // The minion slots plus the spell slot, which a Fodder can take
             // (and fill with a minion once it feeds).
+            // The Tavern holds its minion slots plus the spell slot, which a
+            // Fodder can take: one card more. Twice as Nice's copy sits
+            // outside the normal slots, one more again, and a Tavern filled
+            // before a power or trinket changed its size (Stay Frosty takes a
+            // slot away, a trinket adds one) keeps what it had.
             let size = pl.shop_size(&self.data.rules);
-            if pl.shop.len() > size + 1 {
+            if pl.shop.len() > size + 2 {
                 return Err(format!("player {i}: shop too big"));
-            }
-            if pl.shop.len() == size + 1 && pl.shop_spell.is_some() {
-                return Err(format!("player {i}: shop spell in a taken slot"));
             }
             if let Some(pt) = pl.pending_target
                 && let Some(src) = pt.source

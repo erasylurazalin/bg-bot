@@ -4490,6 +4490,11 @@ impl CardDb {
             } else {
                 0
             },
+            hats: 0,
+            tickets: 0,
+            temp_reborn: false,
+            temp_attack: 0,
+            frozen: false,
         }
     }
 }

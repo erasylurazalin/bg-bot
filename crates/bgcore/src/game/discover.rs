@@ -238,6 +238,10 @@ impl Game {
                     self.deal_champion(p, gold);
                     continue;
                 }
+                DiscoverRequest::IspyNextOpponent => {
+                    self.deal_ispy_offer(p);
+                    continue;
+                }
                 _ => {}
             }
             let damage_from = match req {
@@ -334,7 +338,8 @@ impl Game {
                     | DiscoverRequest::PotTypes(_)
                     | DiscoverRequest::DeadWarband(_)
                     | DiscoverRequest::DeadLastFight
-                    | DiscoverRequest::Champion(_) => None,
+                    | DiscoverRequest::Champion(_)
+                    | DiscoverRequest::IspyNextOpponent => None,
                     DiscoverRequest::DemonMinion { max_tier: max_t, .. } => draw_filtered(
                         pool,
                         &data.cards,
@@ -459,6 +464,24 @@ impl Game {
                 let slot = data.cards.get(c).pool_slot as usize;
                 self.pool[slot] += copies[k];
             }
+            self.maybe_start_discover(p);
+            return;
+        }
+        // Galakrond's Greed: this pick takes the Tavern slot the old card
+        // left, from the pool, with no Tavern buffs (docs/heroes.md).
+        let into_shop = std::mem::take(&mut pl.discover_into_shop);
+        if into_shop != 0 {
+            if !is_spell {
+                let slot = (into_shop as usize - 1).min(crate::SHOP - 1);
+                let mut m = pl.make_card(&data.cards, c, false, copies[k].max(1));
+                m.uses_left = m.turn_uses(&data.cards);
+                let at = slot.min(pl.shop.len());
+                pl.shop.insert(at, m);
+            } else if copies[k] > 0 {
+                let slot = data.cards.get(c).pool_slot as usize;
+                self.pool[slot] += copies[k];
+            }
+            self.fire_after_discover(p);
             self.maybe_start_discover(p);
             return;
         }
@@ -607,6 +630,28 @@ impl Game {
             pl.discover.push(c);
             let m = pl.make_card(&data.cards, c, false, 0);
             pl.discover_minions.push(m);
+        }
+    }
+
+    /// I Spy: up to three different minions from the warband of the opponent
+    /// this player is about to fight, as it stood at the start of the round,
+    /// each offered as a plain copy (printed stats, no buffs, no pool copy).
+    fn deal_ispy_offer(&mut self, p: usize) {
+        let Game { data, rng, players, .. } = self;
+        let pl = &mut players[p];
+        let mut left = pl.next_board.clone();
+        pl.discover_minions.clear();
+        let mut tried = 0;
+        while !pl.discover.is_full() && !left.is_empty() && tried < left.len() * 4 + 1 {
+            tried += 1;
+            let k = rng.below(left.len() as u32) as usize;
+            let m = left.remove(k);
+            if pl.discover.contains(&m.card) {
+                continue;
+            }
+            pl.discover.push(m.card);
+            let copy = pl.make_card(&data.cards, m.card, false, 0);
+            pl.discover_minions.push(copy);
         }
     }
 

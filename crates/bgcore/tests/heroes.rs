@@ -144,9 +144,9 @@ fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_sixty_heroes() {
+fn heroes_toml_parses_with_the_eighty_two_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 60);
+    assert_eq!(d.heroes.heroes.len(), 82);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),
@@ -184,6 +184,29 @@ fn heroes_toml_parses_with_the_sixty_heroes() {
         // The two Dark Gift heroes (docs/darkgifts.md).
         ("Tras'tath, Soul Parasite", "BG36_HERO_101", 15, 0),
         ("Nightmare Lord Xavius", "BG36_HERO_105", 6, 0),
+        // Hero batch 2 (docs/briefs/heroes-batch2.md).
+        ("Galakrond", "TB_BaconShop_HERO_02", 18, 0),
+        ("The Lich King", "TB_BaconShop_HERO_22", 14, 0),
+        ("Sindragosa", "TB_BaconShop_HERO_27", 10, 0),
+        ("Infinite Toki", "TB_BaconShop_HERO_28", 15, 0),
+        ("C'Thun", "TB_BaconShop_HERO_29", 20, 0),
+        ("Dancin' Deryl", "TB_BaconShop_HERO_36", 18, 0),
+        ("Tess Greymane", "TB_BaconShop_HERO_50", 17, 0),
+        ("Ysera", "TB_BaconShop_HERO_53", 17, 0),
+        ("Malygos", "TB_BaconShop_HERO_58", 17, 0),
+        ("Maiev Shadowsong", "TB_BaconShop_HERO_62", 18, 0),
+        ("Rakanishu", "TB_BaconShop_HERO_75", 10, 0),
+        ("Silas Darkmoon", "TB_BaconShop_HERO_90", 16, 0),
+        ("Xyrella", "BG20_HERO_101", 14, 0),
+        ("Vol'jin", "BG20_HERO_201", 17, 0),
+        ("Mutanus the Devourer", "BG20_HERO_301", 20, 0),
+        ("Scabbs Cutterbutter", "BG21_HERO_010", 18, 0),
+        ("Varden Dawngrasp", "BG22_HERO_004", 18, 0),
+        ("Enhance-o Mechano", "BG24_HERO_204", 14, 0),
+        ("The Jailer", "TB_BaconShop_HERO_702", 10, 0),
+        ("Inge, the Iron Hymn", "BG26_HERO_102", 10, 0),
+        ("Zerek, Master Cloner", "BG31_HERO_005", 12, 0),
+        ("Mister Clocksworth", "BG34_HERO_002", 18, 0),
     ] {
         let h = d.heroes.by_name(name).expect(name);
         let hero = d.heroes.get(h);
@@ -908,7 +931,7 @@ fn finley_discovers_a_power_right_after_the_pick() {
     // The hero deck is 20 deep now, so a seed may not deal Finley to player 0:
     // try more of them, and play the whole pick out (the order is shuffled, so
     // player 0's power Discover may be answered before or after the others).
-    for seed in 0..80 {
+    for seed in 0..200 {
         let mut g = Game::new_heroes_with_lobby(
             d.clone(),
             seed,
@@ -960,7 +983,7 @@ fn finley_discovers_a_power_right_after_the_pick() {
             panic!("seed {seed}: Finley's power Discover never opened");
         }
     }
-    panic!("Finley was never offered to player 0 in 80 seeds");
+    panic!("Finley was never offered to player 0 in 200 seeds");
 }
 
 #[test]
@@ -1105,7 +1128,7 @@ fn random_hero_games_deal_everyone_a_different_hero_without_a_pick() {
 #[test]
 fn finley_finding_all_patched_up_starts_with_60_health_and_his_armor() {
     let d = data();
-    for seed in 0..400 {
+    for seed in 0..1500 {
         let mut g = Game::new_random_heroes(d.clone(), seed);
         while g.turn == 0 {
             let p = g.current_player().unwrap();
@@ -1125,5 +1148,5 @@ fn finley_finding_all_patched_up_starts_with_60_health_and_his_armor() {
             return;
         }
     }
-    panic!("no Finley was offered All Patched Up in 400 seeds");
+    panic!("no Finley was offered All Patched Up in 1500 seeds");
 }

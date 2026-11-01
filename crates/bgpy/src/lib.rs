@@ -601,6 +601,9 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ATTACHED_SLOTS", bgcore::minion::MAX_ATTACHED)?;
     m.add("SLOT_GIFTS", obs::SLOT_GIFTS)?;
     m.add("GIFT_SLOTS", bgcore::MAX_GIFTS)?;
+    m.add("SLOT_HATS", obs::SLOT_HATS)?;
+    m.add("SLOT_TICKETS", obs::SLOT_TICKETS)?;
+    m.add("SLOT_FROZEN", obs::SLOT_FROZEN)?;
     m.add("SCALAR_DARK_GIFT_USES", obs::SCALAR_DARK_GIFT_USES)?;
     m.add("SCALAR_DARK_GIFT_PRESSED", obs::SCALAR_DARK_GIFT_PRESSED)?;
     m.add("SCALAR_DARK_GIFT_READY", obs::SCALAR_DARK_GIFT_READY)?;
