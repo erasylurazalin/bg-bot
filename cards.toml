@@ -2361,6 +2361,17 @@ stats = [2, 2]
 golden_stats = [4, 4]
 keywords = ["taunt"]
 
+# Venomstrike Trap's Cobra (docs/heroes.md "Secrets"). The export has no card
+# for it (the spell's script makes it), so it is a token here, summoned only
+# by the Secret.
+[[token]]
+name = "Cobra"
+tier = 1
+tribe = "beast"
+stats = [2, 3]
+keywords = ["venomous"]
+secret_cobra = true
+
 # --- Spells: Tier 1 ---
 
 [[spell]]

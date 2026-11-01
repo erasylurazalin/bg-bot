@@ -144,9 +144,9 @@ fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_hundred_and_seven_heroes() {
+fn heroes_toml_parses_with_the_hundred_and_eight_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 107);
+    assert_eq!(d.heroes.heroes.len(), 108);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),
@@ -207,6 +207,8 @@ fn heroes_toml_parses_with_the_hundred_and_seven_heroes() {
         ("Inge, the Iron Hymn", "BG26_HERO_102", 10, 0),
         ("Zerek, Master Cloner", "BG31_HERO_005", 12, 0),
         ("Mister Clocksworth", "BG34_HERO_002", 18, 0),
+        // Secrets (docs/briefs/secrets.md).
+        ("The Great Akazamzarak", "TB_BaconShop_HERO_21", 12, 0),
     ] {
         let h = d.heroes.by_name(name).expect(name);
         let hero = d.heroes.get(h);
@@ -236,6 +238,12 @@ fn heroes_toml_parses_with_the_hundred_and_seven_heroes() {
     assert_eq!(pw("Death Speaker Blackthorn").uses_per_turn, 2);
     assert_eq!(pw("Reno Jackson").uses_per_game, 1);
     assert_eq!(pw("Alexstrasza").unlock_tier, 4);
+    // Prestidigitation: free, once a turn, from turn 1 (docs/heroes.md
+    // "Secrets").
+    assert_eq!(pw("The Great Akazamzarak").cost, 0);
+    assert_eq!(pw("The Great Akazamzarak").uses_per_turn, 1);
+    assert_eq!(pw("The Great Akazamzarak").unlock_turn, 0);
+    assert!(!pw("The Great Akazamzarak").passive);
     // The 2026-10-30 batch: the two turn-3 unlocks, and the three costs that
     // are not in the game data (a null cost is 0: two presses are buttons).
     assert_eq!(pw("Exarch Othaar").unlock_turn, 3);
@@ -554,6 +562,16 @@ fn alakir_gives_the_leftmost_minion_the_three_keywords() {
             "the second minion got nothing"
         );
     }
+    // A doubled power (Valdrakken Wind Chimes, Ancient Wishbone) has nothing
+    // to repeat here: the same three keywords twice are the same three
+    // keywords, so the mask stays the single grant (docs/heroes.md "Start of
+    // Combat powers that trigger twice").
+    let mut g = hero_game(9, "Al'Akir");
+    let once = g.players[0].counters(&g.data, g.lobby).soc_leftmost;
+    g.players[0].tp.power_triggers = 2;
+    let twice = g.players[0].counters(&g.data, g.lobby).soc_leftmost;
+    assert_eq!(once, twice, "the same grant twice");
+    assert_eq!(twice, Keywords::TAUNT | Keywords::DIVINE_SHIELD | Keywords::WINDFURY);
 }
 
 #[test]

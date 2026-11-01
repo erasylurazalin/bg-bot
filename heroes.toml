@@ -1037,3 +1037,15 @@ name = "Tickatus"
 card_id = "TB_BaconShop_HERO_94"
 armor = 17
 power = { name = "Prize Wall", card_id = "TB_BaconShop_HP_106", passive = true, effect = { prize_wall = 4 } }
+
+# ---- Secrets (docs/briefs/secrets.md, docs/heroes.md "Secrets") ----
+
+# Prestidigitation: choose one of the combat Secrets you don't have yet and put
+# it into the battlefield. Free, once a turn (the default), from turn 1; with
+# all four up it can't be pressed. Armor 12 is ref/bg-meta.json's `armor` for
+# TB_BaconShop_HERO_21, which is what every hero here takes.
+[[hero]]
+name = "The Great Akazamzarak"
+card_id = "TB_BaconShop_HERO_21"
+armor = 12
+power = { name = "Prestidigitation", card_id = "TB_BaconShop_HP_020", cost = 0, effect = { discover_secret = true } }

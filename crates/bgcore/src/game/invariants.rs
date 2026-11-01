@@ -204,6 +204,20 @@ impl Game {
                     return Err(format!("player {i}: {} uses left", st.uses_left));
                 }
             }
+            // The Secret zone holds each kind once, and an open offer holds
+            // only kinds the zone lacks (one each), so a press can never offer
+            // a Secret the player already has.
+            if pl.secrets.len() > crate::secrets::MAX_ZONE {
+                return Err(format!("player {i}: {} Secrets held", pl.secrets.len()));
+            }
+            for (k, &kind) in pl.secret_offer.iter().enumerate() {
+                if kind >= crate::secrets::COMBAT_SECRETS {
+                    return Err(format!("player {i}: a Secret offer of kind {kind}"));
+                }
+                if pl.secrets.has(kind) || pl.secret_offer[..k].contains(&kind) {
+                    return Err(format!("player {i}: a Secret offered twice or already held"));
+                }
+            }
             if pl
                 .hero_offer
                 .iter()

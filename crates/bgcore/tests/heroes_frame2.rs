@@ -152,7 +152,7 @@ fn power_name(g: &Game, p: usize) -> String {
 #[test]
 fn heroes_toml_parses_with_every_hero_and_the_later_powers() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 107);
+    assert_eq!(d.heroes.heroes.len(), 108);
     // Every power is its own entry, and a hero's starting power is its own
     // index, so a hero and its starting power are the same number.
     for (i, h) in d.heroes.heroes.iter().enumerate() {
@@ -910,3 +910,96 @@ fn the_observation_carries_the_second_power() {
     assert_ne!(Action::HeroPower.kind(), Action::HeroPower2.kind());
 }
 
+
+// ---- Start of Combat powers that trigger twice (docs/heroes.md, 2026-11-01) ----
+//
+// Valdrakken Wind Chimes and Ancient Wishbone make a Start of Combat power
+// run its effect twice, the older ones included: `tp.power_triggers` is what
+// a trinket's `power_triggers = 2` writes.
+
+#[test]
+fn the_fire_invocation_triggers_twice() {
+    let mut g = hero_game(50, "Bru'kan");
+    let fire = power_id(&g, "BG22_HERO_001p_t2");
+    g.players[0].power = Some(make_power(&g, fire));
+    assert_eq!(g.players[0].counters(&g.data, g.lobby).soc_double_left, 1);
+    g.players[0].tp.power_triggers = 2;
+    let counters = g.players[0].counters(&g.data, g.lobby);
+    assert_eq!(counters.soc_double_left, 2, "the doubling runs twice");
+    // The fight doubles the left-most minion twice: a 2/3 becomes 8/3 and
+    // kills a 5-Health wall that a 4/3 only wounds.
+    let db = &g.data.cards;
+    let mk = |name: &str, attack: i32, health: i32| {
+        let mut m = db.make(db.by_name(name).expect(name), false);
+        m.attack = attack;
+        m.health = health;
+        m
+    };
+    let mine = [mk("Clever Castaway", 2, 3)];
+    let enemy = [mk("Microbot", 0, 5)];
+    let mut rng = bgcore::Rng::new(50);
+    let out = fight_with(db, &mine, &enemy, [counters, Counters::default()], 1, &mut rng, &mut ());
+    assert_eq!(out.winner, Some(0), "8 Attack killed the 5-Health wall");
+    let once = Counters { soc_double_left: 1, ..Counters::default() };
+    let mut rng = bgcore::Rng::new(50);
+    let out = fight_with(db, &mine, &enemy, [once, Counters::default()], 1, &mut rng, &mut ());
+    assert_eq!(out.winner, None, "4 Attack leaves it standing");
+}
+
+#[test]
+fn the_earth_invocation_triggers_twice() {
+    let mut g = hero_game(51, "Bru'kan");
+    let earth = power_id(&g, "BG22_HERO_001p_t1");
+    g.players[0].power = Some(make_power(&g, earth));
+    let once = g.players[0].counters(&g.data, g.lobby);
+    assert_eq!(once.soc_earth, 4, "four minions get the Deathrattle");
+    g.players[0].tp.power_triggers = 2;
+    let twice = g.players[0].counters(&g.data, g.lobby);
+    assert_eq!(twice.soc_earth, 8, "eight of them, twice the effect");
+    assert_eq!(twice.soc_earth_card, once.soc_earth_card, "the same Elemental");
+    assert_eq!(g.data.cards.get(twice.soc_earth_card).name, "Stone Elemental");
+}
+
+#[test]
+fn the_lightning_invocation_triggers_twice() {
+    let mut g = hero_game(52, "Bru'kan");
+    let bolt = power_id(&g, "BG22_HERO_001p_t4");
+    g.players[0].power = Some(make_power(&g, bolt));
+    let once = g.players[0].counters(&g.data, g.lobby);
+    assert_eq!((once.soc_lightning, once.soc_lightning_damage), (5, 1));
+    g.players[0].tp.power_triggers = 2;
+    let twice = g.players[0].counters(&g.data, g.lobby);
+    assert_eq!(
+        (twice.soc_lightning, twice.soc_lightning_damage),
+        (10, 1),
+        "twice the hits, the same damage"
+    );
+    // Ten hits clear seven 1-Health enemies at Start of Combat, where five
+    // leave two of them standing to be fought.
+    let db = &g.data.cards;
+    let mk = |name: &str| db.make(db.by_name(name).expect(name), false);
+    let mut mine = [mk("Treasure Parrot")];
+    mine[0].attack = 10;
+    let enemy: Vec<Minion> = (0..7).map(|_| mk("Mechagnome Interpreter")).collect();
+    let mut rng = bgcore::Rng::new(52);
+    let out = fight_with(db, &mine, &enemy, [twice, Counters::default()], 40, &mut rng, &mut ());
+    assert_eq!((out.attacks, out.winner), (0, Some(0)), "all seven died at Start of Combat");
+    let mut rng = bgcore::Rng::new(52);
+    let out = fight_with(db, &mine, &enemy, [once, Counters::default()], 40, &mut rng, &mut ());
+    assert!(out.attacks > 0, "five hits left two of them");
+}
+
+#[test]
+fn a_keyword_grant_has_nothing_to_repeat() {
+    // The Water Invocation gives the right-most minion two keywords. The same
+    // two keywords twice are the same two keywords, so a doubled power keeps
+    // the single grant (and the mask must not be multiplied).
+    let mut g = hero_game(53, "Bru'kan");
+    let water = power_id(&g, "BG22_HERO_001p_t3");
+    g.players[0].power = Some(make_power(&g, water));
+    let once = g.players[0].counters(&g.data, g.lobby).soc_rightmost;
+    g.players[0].tp.power_triggers = 2;
+    let twice = g.players[0].counters(&g.data, g.lobby).soc_rightmost;
+    assert_eq!(once, twice, "the same grant twice");
+    assert_eq!(twice, Keywords::DIVINE_SHIELD | Keywords::TAUNT);
+}

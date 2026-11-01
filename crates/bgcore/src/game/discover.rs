@@ -397,6 +397,12 @@ impl Game {
             self.maybe_start_discover(p);
             return;
         }
+        // Prestidigitation's offer: the chosen Secret joins the Secret zone.
+        if !self.players[p].secret_offer.is_empty() {
+            self.pick_secret(p, k);
+            self.maybe_start_discover(p);
+            return;
+        }
         // Friendly Wager: the chosen player is first in the pair, the other
         // second, settled after combat.
         if let Some((a, b)) = self.players[p].wager_offer.take() {

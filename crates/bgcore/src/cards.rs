@@ -1742,6 +1742,8 @@ pub struct CardDb {
     pub volumizers: Vec<CardId>,
     pub spells: Vec<CardId>,
     pub beetle_token: Option<CardId>,
+    /// The 2/3 Venomous Cobra Venomstrike Trap summons (a Beast token).
+    pub cobra_token: Option<CardId>,
     /// The five Chromadrakes "a random Chromadrake" picks from.
     pub chromadrakes: Vec<CardId>,
     /// The 1/1 Murloc Magicfin Mycologist teaches a spell to.
@@ -1802,6 +1804,9 @@ struct RawCard {
     keywords: Vec<String>,
     #[serde(default)]
     beetle: bool,
+    /// The token Venomstrike Trap summons (cards.toml `secret_cobra`).
+    #[serde(default)]
+    secret_cobra: bool,
     volumizer_buff: Option<[i32; 2]>,
     spell_buff: Option<[i32; 2]>,
     battlecry: Option<RawEffect>,
@@ -3194,6 +3199,7 @@ impl CardDb {
         let mut spells = Vec::with_capacity(raw.spell.len());
         let mut first_volumizer_slot: Option<CardId> = None;
         let mut beetle_token: Option<CardId> = None;
+        let mut cobra_token: Option<CardId> = None;
         let mut chromadrakes = Vec::new();
         let mut taught_token: Option<CardId> = None;
         let mut fodder_token: Option<CardId> = None;
@@ -3501,6 +3507,15 @@ impl CardDb {
             }
             if c.beetle && *token {
                 beetle_token = Some(id);
+            }
+            if c.secret_cobra && *token {
+                if let Some(other) = cobra_token {
+                    return Err(err(format!(
+                        "secret_cobra is already {}",
+                        all_minions[other as usize].0.name
+                    )));
+                }
+                cobra_token = Some(id);
             }
             if c.chromadrake && *token {
                 chromadrakes.push(id);
@@ -4360,6 +4375,7 @@ impl CardDb {
             volumizers,
             spells,
             beetle_token,
+            cobra_token,
             chromadrakes,
             taught_token,
             fodder_token,

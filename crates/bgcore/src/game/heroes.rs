@@ -541,6 +541,8 @@ impl Game {
             // Any minion, the Tavern's included.
             PowerEffect::TempReborn => shop_minion || !pl.board.is_empty(),
             PowerEffect::RefreshHighTier { .. } => true,
+            // A combat Secret still missing from the zone (Prestidigitation).
+            PowerEffect::DiscoverSecret => !pl.secrets.all_combat(),
             PowerEffect::SaturdayCthun { .. } => !pl.board.is_empty(),
             // A warband to copy, and a Tavern to put it in.
             PowerEffect::BurgleLastOpponent => self.burgle_has_board(p),
@@ -1127,6 +1129,19 @@ impl Game {
             }
             PowerEffect::DetectiveForHire { .. } => {
                 self.open_holmes_offer(p);
+            }
+            // Prestidigitation: one offer of every combat Secret the zone
+            // lacks, however many that is, not the three of a Discover
+            // (docs/heroes.md "Secrets"). With all four up the press is not
+            // legal, so there is always at least one option to offer.
+            PowerEffect::DiscoverSecret => {
+                let mut offer: ArrayVec<u8, CHOICES> = ArrayVec::new();
+                for kind in 0..crate::secrets::COMBAT_SECRETS {
+                    if !self.players[p].secrets.has(kind) {
+                        let _ = offer.try_push(kind);
+                    }
+                }
+                self.players[p].secret_offer = offer;
             }
             _ => {}
         }
@@ -2201,6 +2216,14 @@ impl Game {
         }
     }
 
+    /// Prestidigitation's pick: the chosen Secret joins the player's Secret
+    /// zone, at the end of the order (docs/heroes.md "Secrets").
+    pub(super) fn pick_secret(&mut self, p: usize, k: usize) {
+        let Some(&kind) = self.players[p].secret_offer.get(k) else { return };
+        self.players[p].secret_offer.clear();
+        self.players[p].secrets.add(kind);
+    }
+
     /// The Health a power gives the hero for good when it is picked (All
     /// Patched Up), 0 for every other power.
     fn power_extra_health(&self, of: u8) -> i32 {
@@ -2235,7 +2258,7 @@ impl Game {
         if pl.immune {
             return;
         }
-        if pl.ice_block && amount >= pl.health + pl.armor {
+        if pl.secrets.ice_block() && amount >= pl.health + pl.armor {
             Self::use_ice_block(pl);
             return;
         }
@@ -2272,7 +2295,7 @@ impl Game {
     /// never happened, so nothing reacts to it) and the hero is Immune for
     /// the rest of the turn. Once.
     fn use_ice_block(pl: &mut super::Player) {
-        pl.ice_block = false;
+        pl.secrets.remove(crate::secrets::ICE_BLOCK);
         pl.immune = true;
         pl.last_damage = 0;
         pl.last_damage_armor = 0;

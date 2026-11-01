@@ -267,6 +267,11 @@ pub fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Acti
     if !pl.power_offer.is_empty() {
         return Some(Action::Choose(0));
     }
+    // Prestidigitation: the first offered Secret (all four are worth having,
+    // and the zone stops it from offering one that is already held).
+    if !pl.secret_offer.is_empty() {
+        return Some(Action::Choose(0));
+    }
     if let Some(pt) = pl.pending_target {
         let board = (0..pl.board.len() as u8)
             .map(Action::Target)

@@ -3,7 +3,7 @@
 //! Card ids are written as id + 1 (0 for none); the model embeds them.
 //!
 //! Layout, in order:
-//! - SCALARS own values (228):
+//! - SCALARS own values (239):
 //!   0  gold
 //!   1  tier
 //!   2  upgrade_cost
@@ -145,6 +145,10 @@
 //!   228 Immune this turn
 //!   229 the Prize tier the open Discover offers (0 if it is not a Prize one)
 //!   230 Triple Prizes replace Triple Rewards (Corrupted Tome)
+//!   231..234 the Secret zone: Venomstrike Trap, Autodefense Matrix, Pack
+//!   Tactics, Redemption (1 when held; the Ice Block is the flag above)
+//!   235..238 the Secrets an open Prestidigitation offers, one per Choose
+//!   slot (kind + 1 in the order above, 0 for an empty slot)
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
@@ -465,7 +469,14 @@ pub const SCALAR_ICE_BLOCK: usize = SCALAR_HOLMES_EMPTY + 2;
 pub const SCALAR_IMMUNE: usize = SCALAR_ICE_BLOCK + 1;
 pub const SCALAR_PRIZE_OFFER_TIER: usize = SCALAR_IMMUNE + 1;
 pub const SCALAR_TRIPLE_PRIZE: usize = SCALAR_PRIZE_OFFER_TIER + 1;
-pub const SCALARS: usize = SCALAR_TRIPLE_PRIZE + 1;
+/// The Secret zone (docs/heroes.md "Secrets"): one flag per combat Secret,
+/// in `secrets` module order (Venomstrike Trap, Autodefense Matrix, Pack
+/// Tactics, Redemption), then the Secrets an open Prestidigitation offers
+/// (kind + 1, 0 for an empty slot). Only the player's OWN zone is ever
+/// written: an opponent's Secrets stay hidden, as the client hides them.
+pub const SCALAR_SECRET: usize = SCALAR_TRIPLE_PRIZE + 1;
+pub const SCALAR_SECRET_OFFER: usize = SCALAR_SECRET + crate::secrets::COMBAT_SECRETS as usize;
+pub const SCALARS: usize = SCALAR_SECRET_OFFER + crate::CHOICES;
 
 pub const SLOT_PRESENT: usize = 0;
 pub const SLOT_CARD_ID: usize = 1;
@@ -581,7 +592,8 @@ const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
 const _: () = assert!(SCALAR_POWER_OFFER + crate::CHOICES == SCALAR_HERO_OFFER);
 const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALAR_TRINKET);
 const _: () = assert!(SCALAR_TRINKET_TRIBE + crate::TRINKET_SLOTS == SCALAR_PENDING_TRINKET);
-const _: () = assert!(SCALAR_TRIPLE_PRIZE + 1 == SCALARS);
+const _: () = assert!(SCALAR_TRIPLE_PRIZE + 1 == SCALAR_SECRET);
+const _: () = assert!(SCALAR_SECRET_OFFER + crate::CHOICES == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
 const _: () = assert!(SLOT_ATTACHED + MAX_ATTACHED == SLOT_ATTACHED_GOLDEN);
@@ -894,6 +906,12 @@ fn power_progress(game: &Game, p: usize, st: &PowerState) -> (f32, f32) {
             (10 - counts.gold_spent % 10) as f32,
         ),
         PowerEffect::FreeFirstMinion => (game.players[p].free_minion_left as f32, 0.0),
+        // Prestidigitation: the combat Secrets held, and how many are still
+        // missing (the options its offer has, 0 when the button is dead).
+        PowerEffect::DiscoverSecret => {
+            let held = game.players[p].secrets.combat_len() as f32;
+            (held, crate::secrets::COMBAT_SECRETS as f32 - held)
+        }
         // Prize Wall: the Prize tier the next Prize turn offers, and the turns
         // to it (0 on a Prize turn, when the Discover is already open).
         PowerEffect::PrizeWall { every } => {
@@ -1142,8 +1160,16 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     // open Discover is offering (the prizes themselves are in the Discover's
     // own card ids, like every other option) and Corrupted Tome's Triple
     // Prize tier.
-    s[SCALAR_ICE_BLOCK] = pl.ice_block as u8 as f32;
+    s[SCALAR_ICE_BLOCK] = pl.secrets.ice_block() as u8 as f32;
     s[SCALAR_IMMUNE] = pl.immune as u8 as f32;
+    // The Secret zone: which of the four combat Secrets are held, and the
+    // Secrets an open Prestidigitation offers (kind + 1, 0 for an empty slot).
+    for k in 0..crate::secrets::COMBAT_SECRETS as usize {
+        s[SCALAR_SECRET + k] = pl.secrets.has(k as u8) as u8 as f32;
+    }
+    for (k, &kind) in pl.secret_offer.iter().enumerate() {
+        s[SCALAR_SECRET_OFFER + k] = kind as f32 + 1.0;
+    }
     s[SCALAR_PRIZE_OFFER_TIER] = pl
         .discover
         .iter()

@@ -18,6 +18,7 @@ pub mod real_boards;
 pub mod record;
 pub mod rng;
 pub mod rules;
+pub mod secrets;
 pub mod trinkets;
 
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
@@ -32,6 +33,7 @@ pub use real_boards::{
 };
 pub use rng::Rng;
 pub use rules::Rules;
+pub use secrets::Secrets;
 pub use trinkets::{Trinket, TrinketDb, TRINKET_CHOICES, TRINKET_SLOTS};
 
 pub const PLAYERS: usize = 8;

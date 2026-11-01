@@ -4491,7 +4491,7 @@ fn safety_patch_gives_five_gold_and_saves_the_hero_once() {
     let gold = g.players[0].gold;
     take(&mut g, 0, "Safety Patch");
     assert_eq!(g.players[0].gold, gold + 5, "the 5 Gold");
-    assert!(g.players[0].ice_block, "the Ice Block is held");
+    assert!(g.players[0].secrets.ice_block(), "the Ice Block is held");
     // The fight the player loses at 1 Health.
     turn_of(&mut g, 0);
     let opp = match g.players[0].opponent.expect("an opponent") {
@@ -4503,7 +4503,7 @@ fn safety_patch_gives_five_gold_and_saves_the_hero_once() {
             g.players[0].board.clear();
             next_turn(&mut g);
             assert_eq!(g.players[0].health, 1, "the fatal hit was prevented");
-            assert!(!g.players[0].ice_block, "the Ice Block is spent");
+            assert!(!g.players[0].secrets.ice_block(), "the Ice Block is spent");
             assert!(g.players[0].alive);
             return;
         }
@@ -4517,7 +4517,7 @@ fn safety_patch_gives_five_gold_and_saves_the_hero_once() {
     g.players[0].armor = 0;
     next_turn(&mut g);
     assert_eq!(g.players[0].health, 1, "the fatal hit was prevented");
-    assert!(!g.players[0].ice_block, "the Ice Block is spent");
+    assert!(!g.players[0].secrets.ice_block(), "the Ice Block is spent");
     assert!(g.players[0].alive);
     g.check_invariants().unwrap();
 }

@@ -175,12 +175,14 @@ legality in mod.rs.
 | A minion that gains stats at the end of every turn | a spell `effect = { target = "chosen", grant_end_of_turn = [4, 4] }` writes `Minion.end_turn_gain` | `run_minion_end_of_turn` (a triple sums it, `magnetize` adds it) | Gruul Rules |
 | Trinket that brings every Triple Reward back as another card | `on_pick = [{ triple_prize = "Triple Prize" }]` sets `tp.triple_prize` | `give_triple_reward`, the one place a Triple Reward is made (a Golden minion, Natural Balance, Heroic Inspiration) | Corrupted Tome |
 | Trinket every N turns that Discovers a Prize | `start_every = 3` with `start_of_turn = [{ discover_prize = 3 }]` | `trinket_start_of_turn` | Tickatus Sticker |
-| Trinket that saves the hero once | `on_pick = [{ ice_block = true }]` sets `Player.ice_block` | the fight damage loop in `finish_fights` and `take_hero_damage` prevent the fatal hit and set `Player.immune` for the turn (cleared in `start_turn`); `SCALAR_ICE_BLOCK`/`SCALAR_IMMUNE` show both | Safety Patch |
+| Trinket that saves the hero once | `on_pick = [{ ice_block = true }]` adds the Ice Block kind to `Player.secrets` (the Secret zone, docs/heroes.md "Secrets") | the fight damage loop and `take_hero_damage` prevent the fatal hit and set `Player.immune` for the turn (cleared in `start_turn`); `SCALAR_ICE_BLOCK`/`SCALAR_IMMUNE` show both | Safety Patch |
 | Trinket with a hidden random trigger | `on_pick = [{ surprise = 5 }]` sets `tp.surprise`, a chance out of 100 per buy, sell and Refresh, never twice in a row | `Game::surprise_roll`, called at the top of `trinket_event`; the cards it makes are generated | Surprise Portrait |
 | Trinket with a random wheel | `wheel = [..]` (a list of acts) and `yogg_wheel = true` in a hook | `Act::YoggWheel` picks one entry of `Trinket.wheel` and runs it | Yogg-Tastic Pastry |
 | Magnetic minions that merge onto more than a Mech | `magnetize_to_tribes = ["mech", "demon"]` on the card (`Card.magnetize_tribes`, Mech by default) | `can_magnetize`, `is_legal(Play)` and the bots' `play_pos` | Rusted Reggie |
 | A portrait that gives a card more tribes | `card_of_mod = "X", also_tribes = ["murloc", "dragon"]` (`CardMod::AlsoTribes`) writes `Minion.extra_tribes` on the copies the player has (the pick) and on every later one (`Player::make_card`) | `CardDb::tribes_of` ORs it in, so every tribe check sees it; `most_common_card_type` reads the cards alone for the Dark Discovery's "your type" slot | Bronzebeard Portrait |
 | Hero power that Discovers a Prize on a turn count | `heroes.toml` `effect = { prize_wall = 4 }` (`PowerEffect::PrizeWall`) | `power_start_of_turn`: turn 4, 8, 12, 16 and every four after, the Prize tier being turn / 4 (at most 4); the power's `progress` holds the turns to the next one and `obs::power_progress` reports it | Tickatus |
+| A combat Secret (the Secret zone) | kind constants in `crates/bgcore/src/secrets.rs` (`VENOMSTRIKE_TRAP`, `AUTODEFENSE_MATRIX`, `PACK_TACTICS`, `REDEMPTION`, plus `ICE_BLOCK`) | `Player.secrets` -> `Counters.secrets` -> `Side.secrets`: `Side::attack_secrets` from `attack_swings_at` ("when a friendly minion is attacked") and `Side::redemption` from `Side::resolve` ("when a friendly minion dies"); `SideOutcome.secrets_fired` takes a fired one out of the zone | Venomstrike Trap |
+| A hero power that offers Secrets | `heroes.toml` `effect = { discover_secret = true }` (`PowerEffect::DiscoverSecret`) | `press_power` fills `Player.secret_offer` (kinds, `ArrayVec<u8, CHOICES>`), answered by `Action::Choose` through `resolve_choose` -> `Game::pick_secret`; `power_usable` refuses it while all four are held | The Great Akazamzarak |
 
 Choices the player makes mid-action (`PendingTarget`, `PendingShopTarget`,
 `PendingChooseOne`, Discover): an `Effect` that asks must be in `Effect::needs_choice`;
@@ -915,11 +917,20 @@ Triple Reward spell.
   hero-power step) or at the hook the rules name (`Side::spawn_when_space` for
   "when you have space", `Side::count_damage` for damage dealt,
   `attack_swings_at` for a kill). A passive power's tick is multiplied by
-  `tp.power_triggers` (`Player::tick_power_effect`); a press that fires in the
+  `tp.power_triggers` (`Player::tick_power_effect`), so "your Start of Combat
+  powers trigger twice" (Valdrakken Wind Chimes, Ancient Wishbone) needs no
+  per-power code: every Start of Combat count in `Player::counters` goes
+  through it, while a keyword mask (`soc_leftmost`, `soc_rightmost`) keeps the
+  single grant, because the same keywords twice are the same keywords. A
+  press that fires in the
   next fight arms the slot (`PowerState.armed`, set in `press_power`, read
   through `Player::armed_power_effect`, cleared at the start of every turn).
-- **A copy or a token.** `Side::exact_copy(i)` is the undamaged copy of a
-  board minion (buffs, keywords and gifts kept, `pool_copies = 0`). A hero
+- **A copy or a token.** `Side::exact_copy(i)` is the copy of a board minion
+  as it stands right now (buffs, keywords and gifts kept, the damage it has
+  taken carried over, `pool_copies = 0`), and `Side::summon_exact_copy` puts
+  it on the board with the original's `taken`, so a 10/10 at 4 Health copies
+  as a 10/4 whose maximum Health is still 10 (docs/heroes.md "Exact copies in
+  a fight"). A hero
   power's token is a cards.toml `[[token]]` and the power is
   `effect = { start_minion = "Name" }`: the board gets it when the hero is
   taken (`take_hero`) and when such a power is picked at turn 0
@@ -1040,3 +1051,60 @@ Triple Reward spell.
   board, and the Gold-plated Compass's Golden buy that yields no Triple
   Reward) and `timewarped_poet_keeps_every_dragons_gains_and_its_own` in
   `tests/dragons.rs`.
+
+## 16. Systems the Secrets run added (2026-11-01)
+
+docs/heroes.md "Secrets (Era, 2026-11-01)" is the rule; this is where it
+hooks in.
+
+- **The zone is data, not cards.** `crates/bgcore/src/secrets.rs` holds
+  `Secrets`: five `u8` kinds (the four combat Secrets, then the Ice Block)
+  and a length, in the order they were got, which is the order they fire in.
+  `Secrets::add`/`remove`/`has`/`iter`/`combat_len`/`all_combat`; `Copy`,
+  `Eq`, `Hash` and `Default`, so it rides in `Player` and in `Counters`
+  without allocating. `NAMES` and `CARD_IDS` name each kind (the export's
+  `TB_Bacon_Secrets_01`, `_07`, `_15`, `_10` and `_12`). The other Secrets in
+  the data are not in the game and must not be added.
+- **Moving the Ice Block in.** It used to be `Player.ice_block`; it is now a
+  kind, so the two fatal-damage paths ask `secrets.ice_block()` and remove
+  `ICE_BLOCK`. It is never offered (Prestidigitation counts combat Secrets
+  only) and never fires in a fight.
+- **A fight gets the zone.** `Player::counters` copies it to
+  `Counters.secrets`; `Side::new` keeps `Side.secrets` and fires each one in
+  order with `Side::fire_secret`, which also sets its bit in
+  `SideOutcome.secrets_fired`. `apply_side_outcome` removes those kinds from
+  the player's zone after the fight, so a fired Secret is gone for good.
+- **Where the two events fire.** "When a friendly minion is attacked" is
+  `Side::attack_secrets`, called from `attack_swings_at` after the attack
+  triggers and before the hit, so Autodefense Matrix's Divine Shield blocks
+  it. "When a friendly minion dies" is `Side::redemption`, called at the end
+  of the dead minion's turn in `Side::resolve` (after its Deathrattles and
+  its Reborn). All three summoning paths go through `Side::summon`, so a copy
+  or a Cobra gets the summoned-minion bonuses (Undead, Eternal Knights,
+  Goldrinn, the trinket aura) with no card named anywhere. A Secret that
+  would summon and finds the board full stays in the zone; Redemption's copy
+  waits in `Side.secret_wait` and `spawn_when_space` puts it down when room
+  opens.
+- **The Cobra is a token.** cards.toml's "Cobra" (`[[token]]`, 2/3, Beast,
+  Venomous, `secret_cobra = true`) is the only card flag: the parser stores
+  it in `CardDb::cobra_token`, the way `beetle` gives `beetle_token`. The
+  export has no card for it (the spell's script makes it).
+- **Combat only.** `Side.outside` (a Tavern attack, a shop destroy) turns
+  every Secret hook off.
+- **Prestidigitation reuses the Choose flow, not a Discover.** Four Secrets do
+  not fit `DISCOVER` (three), so the offer is `Player.secret_offer`
+  (`ArrayVec<u8, CHOICES>`), read by `is_legal`, `legal_actions`,
+  `resolve_choose` (`Game::pick_secret`), the bots' `answer_pending`, and
+  `other_choice_open` (a trinket offer waits behind it). `power_usable` needs
+  a combat Secret still missing.
+- **The observation** writes the player's own zone only: `SCALAR_SECRET`
+  (four flags) and `SCALAR_SECRET_OFFER` (kind + 1 per slot); an opponent's
+  Secrets are written nowhere. `obs::power_progress` gives the holdings and
+  the count still missing.
+- **Tests.** `tests/secrets.rs`: one per Secret, two Secrets on one attack in
+  both orders, a full board (Venomstrike waits, and Pack Tactics fills a six
+  to make it wait), the Eternal Knight copy at 7/5, Goldrinn reaching the copy
+  and the Cobra, Redemption on a board its Deathrattle filled, the zone and
+  `apply_side_outcome`, the offer and the Ice Block, and the observation.
+  `tests/trinkets.rs` and `tests/heroes_batch4.rs` read the Ice Block through
+  the zone now.

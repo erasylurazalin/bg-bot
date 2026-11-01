@@ -177,7 +177,7 @@ fn the_observation_says_whether_the_ice_block_is_held() {
     let mut obs = vec![f32::NAN; bgcore::obs::OBS_SIZE];
     bgcore::obs::write(&g, 0, &mut obs);
     assert_eq!(obs[bgcore::obs::SCALAR_ICE_BLOCK], 1.0, "the save is visible");
-    assert!(g.players[0].ice_block);
+    assert!(g.players[0].secrets.ice_block());
 }
 
 #[test]

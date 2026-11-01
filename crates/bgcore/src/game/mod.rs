@@ -789,10 +789,15 @@ pub struct Player {
     /// the end of the last action, so the stats a friendly Amalgam gained
     /// can be copied onto it. All zeros when no Mishmash is held.
     pub amalgam_seen: [(CardId, i32, i32); BOARD],
-    /// A Safety Patch's Ice Block, unspent: the next fatal damage to the hero
-    /// is prevented and the hero is Immune for the rest of the turn
-    /// (docs/trinkets.md).
-    pub ice_block: bool,
+    /// The Secret zone (docs/heroes.md "Secrets"): the combat Secrets this
+    /// player holds in the order they were got, and the Ice Block a Safety
+    /// Patch gives, unspent (the next fatal damage to the hero is prevented
+    /// and the hero is Immune for the rest of the turn, docs/trinkets.md).
+    pub secrets: crate::secrets::Secrets,
+    /// The Secrets an open Prestidigitation offers, as kinds (`secrets`
+    /// module indexes), answered with `Action::Choose` like a Hero Power
+    /// Discover. Empty when no offer is open.
+    pub secret_offer: ArrayVec<u8, CHOICES>,
     /// The hero is Immune this turn: no damage at all. Cleared at the start
     /// of the next turn.
     pub immune: bool,
@@ -1303,6 +1308,10 @@ impl Game {
         if !pl.power_offer.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.power_offer.len());
         }
+        // Prestidigitation's offer of Secrets: answered the same way.
+        if !pl.secret_offer.is_empty() {
+            return matches!(a, Action::Choose(k) if (k as usize) < pl.secret_offer.len());
+        }
         if pl.wager_offer.is_some() || pl.holmes_offer.is_some() {
             return matches!(a, Action::Choose(k) if k < 2);
         }
@@ -1523,6 +1532,10 @@ impl Game {
             }
         } else if open && !pl.power_offer.is_empty() {
             for k in 0..pl.power_offer.len() as u8 {
+                ask(Action::Choose(k));
+            }
+        } else if open && !pl.secret_offer.is_empty() {
+            for k in 0..pl.secret_offer.len() as u8 {
                 ask(Action::Choose(k));
             }
         } else if open && (pl.wager_offer.is_some() || pl.holmes_offer.is_some()) {

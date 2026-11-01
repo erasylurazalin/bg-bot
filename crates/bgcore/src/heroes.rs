@@ -355,6 +355,11 @@ pub enum PowerEffect {
     /// Tier 2, turn 12 Tier 3, turn 16 Tier 4, and Tier 4 every four turns
     /// after (a guess past 16, docs/trinkets.md).
     PrizeWall { every: u8 },
+    // ---- secrets (2026-11-01) ----
+    /// Prestidigitation: offer every combat Secret the player does not hold
+    /// (one to four cards) and put the pick in the Secret zone. With all four
+    /// up the power cannot be pressed (docs/heroes.md "Secrets").
+    DiscoverSecret,
 }
 
 /// What a power's buy counter counts.
@@ -890,6 +895,11 @@ struct RawPowerEffect {
     // ---- trinkets block 5 (2026-11-01) ----
     /// The turns between Prizes (Prize Wall: 4).
     prize_wall: Option<u8>,
+    // ---- secrets ----
+    /// Choose one of the combat Secrets still missing from the zone
+    /// (Prestidigitation).
+    #[serde(default)]
+    discover_secret: bool,
 }
 
 #[derive(Deserialize)]
@@ -1196,6 +1206,8 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
         PowerEffect::RapidReanimation
     } else if let Some(n) = e.prize_wall {
         PowerEffect::PrizeWall { every: n.max(1) }
+    } else if e.discover_secret {
+        PowerEffect::DiscoverSecret
     } else {
         PowerEffect::None
     })

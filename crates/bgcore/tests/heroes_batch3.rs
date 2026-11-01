@@ -1218,3 +1218,127 @@ fn rapid_reanimation_destroys_the_chosen_minion_and_resummons_it_when_there_is_s
     assert_eq!((copy.2, copy.3), (4, 5));
 }
 
+
+// ---- Exact copies in a fight (docs/heroes.md, 2026-11-01) ----
+//
+// Frostwolf Fervor, Stormpike Strength and Rapid Reanimation copy the minion
+// as it stands: the damage it has taken comes along, and a keyword it has
+// already lost (a popped Divine Shield) stays lost on the copy.
+
+#[test]
+fn an_exact_copy_takes_the_damage_the_minion_has_taken() {
+    let db = cards();
+    // A 10/10 that the enemy's Lightning Invocation hits for 6 at Start of
+    // Combat. Frostwolf Fervor's copy of it is 10/4, not 10/10.
+    let mut mine = board(&db, &["Microbot"]);
+    mine[0].attack = 10;
+    mine[0].health = 10;
+    let mut b = board(&db, &["Microbot"]);
+    b[0].attack = 0;
+    b[0].health = 400;
+    let mut counters = [Counters::default(); 2];
+    counters[0].frostwolf_fervor = 1;
+    counters[1].soc_lightning = 1;
+    counters[1].soc_lightning_damage = 6;
+    let mut log = Log::new(&db);
+    fight_with(&db, &mine, &b, counters, 1, &mut Rng::new(40), &mut log);
+    assert_eq!(
+        log.summons.first().cloned(),
+        Some((0, "Microbot".to_string(), 10, 4, false, false)),
+        "the copy is the minion as it stands, damage and all"
+    );
+}
+
+#[test]
+fn an_exact_copy_of_a_minion_whose_shield_popped_has_none() {
+    let db = cards();
+    // Rapid Reanimation at Start of Combat, after the enemy's Lightning has
+    // already popped the marked minion's Divine Shield (its 3 damage goes on
+    // the shield, so the minion itself is untouched).
+    let mut marked = db.make(db.by_name("Microbot").unwrap(), false);
+    marked.reanimate = true;
+    marked.attack = 4;
+    marked.health = 5;
+    marked.keywords.set(Keywords::DIVINE_SHIELD);
+    let mut b = board(&db, &["Microbot"]);
+    b[0].attack = 0;
+    b[0].health = 300;
+    let mut counters = [Counters::default(); 2];
+    counters[0].rapid_reanimation = 1;
+    counters[1].soc_lightning = 1;
+    counters[1].soc_lightning_damage = 3;
+    let mut log = Log::new(&db);
+    fight_with(&db, &[marked], &b, counters, 1, &mut Rng::new(41), &mut log);
+    let copy = log.summons.iter().find(|s| s.1 == "Microbot").cloned().expect("the copy");
+    assert_eq!((copy.2, copy.3), (4, 5), "the shield took the damage, not the minion");
+    assert!(!copy.5, "the shield had popped, so the copy has none");
+}
+
+#[test]
+fn an_exact_copy_of_an_unhurt_shielded_minion_keeps_its_shield() {
+    let db = cards();
+    // Stormpike Strength's copy, and nothing hit the minion first.
+    let mut mine = board(&db, &["Blue Whelp"]);
+    mine[0].attack = 2;
+    mine[0].health = 12;
+    mine[0].keywords.set(Keywords::DIVINE_SHIELD);
+    mine[0].keywords.set(Keywords::TAUNT);
+    let mut b = board(&db, &["Microbot"]);
+    b[0].attack = 0;
+    b[0].health = 400;
+    let mut counters = [Counters::default(); 2];
+    counters[0].stormpike_strength = 1;
+    let mut log = Log::new(&db);
+    fight_with(&db, &mine, &b, counters, 1, &mut Rng::new(42), &mut log);
+    assert_eq!(
+        log.summons.first().cloned(),
+        Some((0, "Blue Whelp".to_string(), 2, 12, true, true)),
+        "the shield is still up, so the copy has it too"
+    );
+}
+
+#[test]
+fn an_exact_copys_maximum_health_is_the_originals() {
+    let db = cards();
+    // A 10/10 Taunt, hit for 6 by my Lightning Invocation at Start of Combat
+    // and copied by the enemy's Frostwolf Fervor: both the original and the
+    // copy stand at 10/4. Tide Oracle Morgl kills both, and each kill hands
+    // the killed minion's Attack and maximum Health to my hand: 10/10 for
+    // each, so the copy's maximum Health is 10 too, not the 4 it shows
+    // (docs/heroes.md "Exact copies in a fight").
+    let mut t = db.make(db.by_name("Microbot").unwrap(), false);
+    t.attack = 10;
+    t.health = 10;
+    t.keywords.set(Keywords::TAUNT);
+    let mut morgl = db.make(db.by_name("Tide Oracle Morgl").unwrap(), false);
+    morgl.attack = 20;
+    morgl.health = 100;
+    morgl.keywords.0 = 0; // no Venomous: the damage itself should be the kill
+    // A 0-Attack Taunt takes the enemy's swings, so the copy survives to be
+    // killed by Morgl rather than dying to his counter-attack.
+    let mut wall = db.make(db.by_name("Microbot").unwrap(), false);
+    wall.attack = 0;
+    wall.health = 300;
+    wall.keywords.set(Keywords::TAUNT);
+    let hand = [db.make(db.by_name("Microbot").unwrap(), false)];
+    let mut counters = [Counters::default(); 2];
+    counters[0].soc_lightning = 1;
+    counters[0].soc_lightning_damage = 6;
+    counters[1].frostwolf_fervor = 1;
+    let mut log = Log::new(&db);
+    let out = fight_with_hands(
+        &db,
+        &[morgl, wall],
+        &[t],
+        [&hand, &[]],
+        counters,
+        20,
+        &mut Rng::new(43),
+        &mut log,
+    );
+    assert_eq!(
+        out.sides[0].hand_stats[0],
+        (20, 20),
+        "both kills gave 10/10: the copy's maximum Health is the original's"
+    );
+}

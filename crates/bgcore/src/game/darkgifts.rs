@@ -147,6 +147,7 @@ impl Game {
             && pl.pending_shop_target.is_none()
             && pl.pending_discard.is_none()
             && pl.power_offer.is_empty()
+            && pl.secret_offer.is_empty()
             && pl.trinket_offer.is_empty()
             && !pl.skipped
             && !pl.done

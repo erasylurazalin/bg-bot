@@ -149,6 +149,11 @@ pub struct Counters {
     /// Rapid Reanimation (Teron Gorefiend) runs when a marked minion is on
     /// the board.
     pub rapid_reanimation: u8,
+    /// The owner's Secret zone (docs/heroes.md "Secrets"), in the order the
+    /// Secrets were got: they fire in that order on the event each answers.
+    /// Empty for a fight without a game behind it, which every hook answers
+    /// from this one field.
+    pub secrets: crate::secrets::Secrets,
 }
 
 /// Every player's Blood Gems start at +1/+1, so a fight without the player's
@@ -210,6 +215,7 @@ impl Default for Counters {
             broodmother: None,
             locked_and_loaded: None,
             rapid_reanimation: 0,
+            secrets: crate::secrets::Secrets::new(),
         }
     }
 }
@@ -438,6 +444,9 @@ pub struct SideOutcome {
     /// first attack, after Start of Combat effects: what the other player
     /// "last saw" of this one.
     pub seen: SeenCounters,
+    /// The Secrets that fired here, as a bit per `secrets` kind: each one is
+    /// gone from the owner's zone for good (docs/heroes.md "Secrets").
+    pub secrets_fired: u8,
 }
 
 /// The Deity, the Blood Gem value and the Tavern spell bonus of one side at
@@ -639,7 +648,9 @@ struct Side<'a> {
     fermenter: ArrayVec<(usize, Minion), 3>,
     /// Minions Rapid Reanimation destroyed at Start of Combat, with the slot
     /// they stood in, waiting for a board slot.
-    reanimate: ArrayVec<(usize, Minion), BOARD>,
+    /// The minions Rapid Reanimation destroyed at Start of Combat, with the
+    /// slot they stood in and the damage each had taken.
+    reanimate: ArrayVec<(usize, Minion, i32), BOARD>,
     /// Friendly minions destroyed by their own side at Start of Combat (Soul
     /// Fermenter, Stitched Salvagers, Rapid Reanimation), so I'll Take That!
     /// does not treat them as killed by the enemy.
@@ -657,6 +668,14 @@ struct Side<'a> {
     /// The minion that died last and where it stood (Blood Golem Sticker).
     last_dead: Option<Minion>,
     dead_at: usize,
+    /// This side's Secret zone as the fight finds it: a Secret leaves it when
+    /// it fires (`out.secrets_fired` says which), and one that summons with
+    /// no room stays in it, unfired (docs/heroes.md "Secrets").
+    secrets: crate::secrets::Secrets,
+    /// Redemption's copy waiting for a board slot, with the slot the minion
+    /// died in. The Secret itself stays armed until this lands, and it owes
+    /// one copy at most (there is one Redemption).
+    secret_wait: Option<(usize, Minion)>,
     out: SideOutcome,
 }
 
@@ -742,6 +761,8 @@ impl<'a> Side<'a> {
             take_first_killed_left: counters.take_first_killed,
             last_dead: None,
             dead_at: 0,
+            secrets: counters.secrets,
+            secret_wait: None,
             out: SideOutcome::default(),
         }
     }
@@ -1818,6 +1839,112 @@ impl<'a> Side<'a> {
         true
     }
 
+    /// A Secret fires: it leaves the zone for good, and the outcome says
+    /// which one so the player's zone loses it after the fight.
+    fn fire_secret(&mut self, kind: u8) {
+        if self.secrets.remove(kind) {
+            self.out.secrets_fired |= 1 << kind;
+        }
+    }
+
+    /// The Secrets that answer "when one of your minions is attacked", in the
+    /// order they were got (docs/heroes.md "Secrets"): Autodefense Matrix
+    /// gives the minion Divine Shield before the hit lands, Pack Tactics
+    /// summons a 3/3 copy of it to its right and Venomstrike Trap a 2/3
+    /// Venomous Cobra there. A Secret that would summon stays in the zone,
+    /// unfired, when the board is full.
+    fn attack_secrets(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        def_uid: u16,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        // Only a real fight: a Tavern attack and a shop destroy are not one.
+        if self.outside || self.secrets.is_empty() {
+            return;
+        }
+        let mut held: ArrayVec<u8, { crate::secrets::MAX_ZONE }> = ArrayVec::new();
+        for k in self.secrets.iter() {
+            let _ = held.try_push(k);
+        }
+        for kind in held {
+            let Some(di) = self.index_of(def_uid) else { return };
+            match kind {
+                crate::secrets::AUTODEFENSE_MATRIX => {
+                    self.ms[di].m.keywords.set(Keywords::DIVINE_SHIELD);
+                    self.fire_secret(kind);
+                }
+                crate::secrets::PACK_TACTICS => {
+                    if self.ms.is_full() {
+                        continue;
+                    }
+                    // An exact copy (keywords, Deathrattles, gifts, the cards
+                    // Magnetized into it) whose stats are set to 3/3: the
+                    // base stats, so ordinary buffs are dropped. The bonuses
+                    // that apply wherever the card is (the Undead bonus, an
+                    // Eternal Knight's deaths, Goldrinn's Beasts, a trinket's
+                    // "your minions have") go on top, from `summon`, exactly
+                    // as they do for any newly summoned minion.
+                    let mut copy = self.ms[di].m;
+                    copy.attack = 3;
+                    copy.health = 3;
+                    copy.pool_copies = 0;
+                    if self.summon(db, side, di + 1, copy, uid, rng, w) {
+                        self.fire_secret(kind);
+                    }
+                }
+                crate::secrets::VENOMSTRIKE_TRAP => {
+                    let Some(cobra) = db.cobra_token else { continue };
+                    if self.ms.is_full() {
+                        continue;
+                    }
+                    let mut m = db.make(cobra, false);
+                    m.pool_copies = 0;
+                    if self.summon(db, side, di + 1, m, uid, rng, w) {
+                        self.fire_secret(kind);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Redemption: a friendly minion died, so a fresh copy of it (its base
+    /// card, Golden kept) comes back with 1 Health where it stood. With no
+    /// room the copy waits for a slot and the Secret stays armed, so a
+    /// Deathrattle that filled the board does not spend it.
+    #[allow(clippy::too_many_arguments)]
+    fn redemption(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        dead: &Minion,
+        at: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        if self.outside || !self.secrets.has(crate::secrets::REDEMPTION) {
+            return;
+        }
+        // The Secret already owes a copy to an earlier death: that one comes
+        // back when there is room, not this minion's (one Secret, one save).
+        if self.secret_wait.is_some() {
+            return;
+        }
+        let mut m = db.make(dead.card, dead.golden);
+        m.health = 1;
+        let at = at.min(self.ms.len());
+        if self.summon(db, side, at, m, uid, rng, w) {
+            self.fire_secret(crate::secrets::REDEMPTION);
+        } else {
+            self.secret_wait = Some((at, m));
+        }
+    }
+
     fn spawn_boon_of_beetles(
         &mut self,
         db: &CardDb,
@@ -1854,15 +1981,42 @@ impl<'a> Side<'a> {
         Some(ties[rng.below(ties.len() as u32) as usize])
     }
 
-    /// An exact copy of the friendly minion in slot `i` as it stood at the
-    /// start of the fight: buffs, keywords and gifts included, undamaged, and
-    /// no pool copy taken (Frostwolf Fervor, Stormpike Strength, Rapid
-    /// Reanimation).
+    /// An exact copy of the friendly minion in slot `i` as it stands right
+    /// now (docs/heroes.md "Exact copies in a fight"): buffs, keywords and
+    /// gifts included, the damage it has taken carried over and any keyword
+    /// it has lost in this fight gone from the copy too, and no pool copy
+    /// taken (Frostwolf Fervor, Stormpike Strength, Rapid Reanimation).
     fn exact_copy(&self, i: usize) -> Minion {
         let mut copy = self.ms[i].m;
-        copy.health += self.ms[i].taken;
         copy.pool_copies = 0;
         copy
+    }
+
+    /// Summon an exact copy of the minion in slot `i` at `pos`. The copy is
+    /// the minion as it stands, so it keeps the damage it has taken: a 10/10
+    /// at 4 Health copies as 10/4, and its maximum Health is still 10 (its
+    /// `taken` is the original's, like the Reborn copy's).
+    #[allow(clippy::too_many_arguments)]
+    fn summon_exact_copy(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        pos: usize,
+        i: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) -> bool {
+        let m = self.exact_copy(i);
+        let damage = self.ms[i].taken;
+        if !self.summon_baked(db, side, pos, m, uid, rng, w) {
+            return false;
+        }
+        // `summon_baked` clamps `pos` to the end of the board, which is where
+        // a copy from the last slot goes anyway.
+        let at = pos.min(self.ms.len() - 1);
+        self.ms[at].taken = damage;
+        true
     }
 
     /// Summon anything waiting for a board slot (`Rapid Reanimation`, `Lock
@@ -1880,9 +2034,10 @@ impl<'a> Side<'a> {
         }
         let mut changed = false;
         while !self.ms.is_full() && !self.reanimate.is_empty() {
-            let (slot, m) = self.reanimate.remove(0);
+            let (slot, m, damage) = self.reanimate.remove(0);
             let at = slot.min(self.ms.len());
             if self.summon_baked(db, side, at, m, uid, rng, w) {
+                self.ms[at].taken = damage;
                 changed = true;
             }
         }
@@ -1909,17 +2064,29 @@ impl<'a> Side<'a> {
                 self.locked_and_loaded = Some((card, golden, attack, health, keywords, left));
             }
         }
+        // Redemption's copy, waiting for the Deathrattle that filled the
+        // board to make room (docs/heroes.md "Secrets").
+        if !self.ms.is_full()
+            && let Some((slot, m)) = self.secret_wait
+        {
+            let at = slot.min(self.ms.len());
+            if self.summon(db, side, at, m, uid, rng, w) {
+                self.secret_wait = None;
+                self.fire_secret(crate::secrets::REDEMPTION);
+                changed = true;
+            }
+        }
         while !self.ms.is_full() && self.frostwolf_left > 0 {
             let Some(pick) = self.pick_highest(false, rng) else { break };
             self.frostwolf_left -= 1;
-            if self.summon_baked(db, side, pick + 1, self.exact_copy(pick), uid, rng, w) {
+            if self.summon_exact_copy(db, side, pick + 1, pick, uid, rng, w) {
                 changed = true;
             }
         }
         while !self.ms.is_full() && self.stormpike_left > 0 {
             let Some(pick) = self.pick_highest(true, rng) else { break };
             self.stormpike_left -= 1;
-            if self.summon_baked(db, side, pick + 1, self.exact_copy(pick), uid, rng, w) {
+            if self.summon_exact_copy(db, side, pick + 1, pick, uid, rng, w) {
                 changed = true;
             }
         }
@@ -3035,6 +3202,13 @@ impl<'a> Side<'a> {
                     i += 1;
                 }
             }
+            // Redemption: a friendly minion died, so a fresh copy with 1
+            // Health comes back where it stood. It comes after this minion's
+            // own Deathrattles and its Reborn, so a board they filled makes
+            // it wait for room (docs/heroes.md "Secrets").
+            if !self.secrets.is_empty() {
+                self.redemption(db, side, &dead, i, uid, rng, w);
+            }
         }
         // Soul Fermenter: once this side's last minion is gone, the ones it
         // destroyed at Start of Combat come back exactly as they were.
@@ -3401,8 +3575,9 @@ fn run_start_of_combat(
             if sides[s].ms[i].m.reanimate && sides[s].ms[i].m.health > 0 {
                 let mut copy = sides[s].exact_copy(i);
                 copy.reanimate = false;
+                let damage = sides[s].ms[i].taken;
                 for _ in 0..n {
-                    let _ = sides[s].reanimate.try_push((i, copy));
+                    let _ = sides[s].reanimate.try_push((i, copy, damage));
                 }
                 let u = sides[s].ms[i].uid;
                 let _ = sides[s].self_destroyed.try_push(u);
@@ -4002,6 +4177,14 @@ fn attack_swings_at(
                 resolve_deaths(sides, turn, db, uid, rng, w);
                 continue;
             }
+        }
+
+        // "When one of your minions is attacked": the defender's Secrets, in
+        // the order they were got, before the hit lands (so Autodefense
+        // Matrix's Divine Shield blocks it). Nothing here damages anything,
+        // and a defender with no Secret pays one field test.
+        if !sides[turn ^ 1].secrets.is_empty() {
+            sides[turn ^ 1].attack_secrets(db, turn ^ 1, def_uid, uid, rng, w);
         }
 
         let Some(ai) = sides[turn].index_of(me) else { break };

@@ -1527,7 +1527,9 @@ impl Game {
                     self.give_generated(p, card);
                 }
             }
-            Act::IceBlock => self.players[p].ice_block = true,
+            Act::IceBlock => {
+                self.players[p].secrets.add(crate::secrets::ICE_BLOCK);
+            }
             Act::Surprise(percent) => self.players[p].tp.surprise = percent,
             Act::YoggWheel => {
                 // The Wheel's six results are the trinket's own `wheel` list:

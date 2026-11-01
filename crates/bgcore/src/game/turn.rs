@@ -96,7 +96,8 @@ impl Game {
             && pl.pending_choose_one.is_none()
             && pl.pending_discard.is_none()
             && pl.choose_queue.is_empty()
-            && pl.power_offer.is_empty();
+            && pl.power_offer.is_empty()
+            && pl.secret_offer.is_empty();
         if idle {
             return;
         }
@@ -116,6 +117,7 @@ impl Game {
         pl.discover_queue.clear();
         pl.tavern_buffs.clear();
         pl.power_offer.clear();
+        pl.secret_offer.clear();
     }
 
     fn run_end_of_turn(&mut self, p: usize) {
@@ -275,6 +277,7 @@ impl Game {
             || !pl.discover_queue.is_empty()
             || !pl.choose_queue.is_empty()
             || !pl.power_offer.is_empty()
+            || !pl.secret_offer.is_empty()
             || pl.wager_offer.is_some()
             || pl.holmes_offer.is_some()
     }
@@ -779,6 +782,13 @@ impl Game {
             pl.beast_bonus.1 += so.beast_bonus_gain.1;
         }
         self.add_deathrattles_triggered(p, so.deathrattles_triggered as u32, after_fight);
+        // A Secret that fired in this fight is gone from the zone for good
+        // (docs/heroes.md "Secrets").
+        for kind in 0..crate::secrets::MAX_ZONE as u8 {
+            if so.secrets_fired & (1 << kind) != 0 {
+                self.players[p].secrets.remove(kind);
+            }
+        }
         self.add_undead_bonus(p, so.undead_gain.0, so.undead_gain.1, after_fight);
         self.add_knight_deaths(p, so.knight_deaths, after_fight);
         // A Sanguine Refiner Rally in a fight raises the Gem value for good.
@@ -1025,8 +1035,8 @@ impl Game {
             // A Safety Patch's Ice Block: the hit that would knock the hero
             // out is prevented and the hero is Immune for the rest of the
             // turn, once (docs/trinkets.md).
-            if !pl.immune && pl.ice_block && d >= pl.health + pl.armor {
-                pl.ice_block = false;
+            if !pl.immune && pl.secrets.ice_block() && d >= pl.health + pl.armor {
+                pl.secrets.remove(crate::secrets::ICE_BLOCK);
                 pl.immune = true;
                 pl.last_damage = 0;
                 pl.last_damage_armor = 0;

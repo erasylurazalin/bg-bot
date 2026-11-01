@@ -98,7 +98,8 @@ impl Player {
             next_board: ArrayVec::new(),
             two_step: None,
             amalgam_seen: [(0, 0, 0); crate::BOARD],
-            ice_block: false,
+            secrets: crate::secrets::Secrets::new(),
+            secret_offer: ArrayVec::new(),
             immune: false,
             devour_stats: (0, 0),
             discover_into_shop: 0,
@@ -655,6 +656,13 @@ impl Player {
             trinkets: self.fight_trinkets(data),
             // Both of the player's powers can carry a Start of Combat effect
             // (`soc_leftmost` is Al'Akir's, the rest are Bru'kan's Elements).
+            // A power that triggers twice (Valdrakken Wind Chimes, Ancient
+            // Wishbone: docs/heroes.md "Start of Combat powers that trigger
+            // twice") runs its effect twice, so the counts double through
+            // `tick_power_effect`. A keyword grant has nothing to repeat: the
+            // same keywords twice are the same keywords, so the two masks keep
+            // the single grant (and must not be multiplied: a mask doubled is
+            // a different set of bits).
             soc_leftmost: self.power_effect(data, |e| match e {
                 PowerEffect::SocLeftmost { keywords } => keywords,
                 _ => 0,
@@ -663,11 +671,11 @@ impl Player {
                 PowerEffect::SocRightmost { keywords } => keywords,
                 _ => 0,
             }),
-            soc_double_left: self.power_effect(data, |e| match e {
+            soc_double_left: self.tick_power_effect(data, |e| match e {
                 PowerEffect::SocDoubleLeftAttack(n) => n,
                 _ => 0,
             }),
-            soc_earth: self.power_effect(data, |e| match e {
+            soc_earth: self.tick_power_effect(data, |e| match e {
                 PowerEffect::SocGrantDeathrattle { count, .. } => count,
                 _ => 0,
             }),
@@ -681,7 +689,9 @@ impl Player {
                     }
                 })
                 .unwrap_or(0),
-            soc_lightning: self.power_effect(data, |e| match e {
+            // Twice the hits, not twice the damage: the effect is "deal this
+            // much to this many enemies", so a second run strikes again.
+            soc_lightning: self.tick_power_effect(data, |e| match e {
                 PowerEffect::SocDamageEnemies { hits, .. } => hits,
                 _ => 0,
             }),
@@ -730,6 +740,7 @@ impl Player {
             rapid_reanimation: self.armed_power_effect(data, |e| {
                 u8::from(matches!(e, PowerEffect::RapidReanimation))
             }),
+            secrets: self.secrets,
             frostwolf_fervor: self.tick_power_effect(data, |e| {
                 u8::from(matches!(e, PowerEffect::CopyHighestWhenSpace { by_health: false }))
             }),

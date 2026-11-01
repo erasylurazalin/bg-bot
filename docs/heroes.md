@@ -316,3 +316,11 @@ The Great Akazamzarak's Prestidigitation costs 0 and can be used once each turn 
 - Opponents don't see your Secrets, and neither does the bot (only its own).
 - **Ice Block** (Safety Patch) is labelled a Secret but has nothing to do with these four. In the engine it lives in the same Secret zone, and it doesn't count toward Akazamzarak's offer.
 
+## Start of Combat powers that trigger twice (Era, 2026-11-01)
+
+Valdrakken Wind Chimes and Ancient Wishbone make every Start of Combat hero power trigger an extra time, the older ones (Al'Akir, the Invocations) included, not just batch 3's.
+
+## Exact copies in a fight (Era, 2026-11-01)
+
+Frostwolf Fervor, Stormpike Strength and Rapid Reanimation copy the minion's state right now: damage included (a 10/10 that took 6 damage gives a 10/4 copy), and a Divine Shield that already popped stays popped on the copy.
+

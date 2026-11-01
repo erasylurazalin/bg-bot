@@ -26,6 +26,8 @@ crates/
                       darkgifts.rs, invariants.rs
     src/fight.rs      the fight: a pure function of two boards, an RNG and counters
     src/minion.rs     Minion (Copy, fixed size), Keywords, Magnetic attachments
+    src/secrets.rs    the Secret zone: the four combat Secrets, the Ice Block,
+                      the order they were got in (see "Secrets")
     src/action.rs     the flat action space and its index mapping
     src/obs.rs        the observation a player sees, as fixed-size f32
     src/bots.rs       random, standard-curve and rush-curve bots
@@ -42,6 +44,8 @@ crates/
                       one test per Prize),
                       heroes_batch1.rs, heroes_batch2.rs, heroes_batch3.rs,
                       heroes_batch4.rs (Tickatus), heroes_frame2.rs,
+                      secrets.rs (the Secret zone, the four Secrets in a fight,
+                      Prestidigitation),
                       darkgifts.rs (the gift table, the button, the offers, the landing,
                       the countdowns and the gift hooks),
                       tier7.rs (tier 7 in the engine and its seven minions),
@@ -253,7 +257,11 @@ build hero-less games so old tests pass unchanged, and
   and the four Start of Combat effects through `Counters` (`soc_leftmost`,
   `soc_rightmost`, `soc_double_left`, `soc_earth` with its token card,
   `soc_lightning`) at the top of `run_start_of_combat`, before any minion's.
-  `Player::counters` reads both held powers.
+  `Player::counters` reads both held powers, and a power that triggers twice
+  (Valdrakken Wind Chimes, Ancient Wishbone: docs/heroes.md "Start of Combat
+  powers that trigger twice") doubles the three counts through
+  `Player::tick_power_effect`; the two keyword masks keep the single grant,
+  since the same keywords twice are the same keywords.
 - **Buttons that reuse a card path** (the 2026-10-30 batch): SpellDiscount
   writes `Player.spell_discount`, the same field Ominous Seer sets and
   `pay_for_spell` uses up; GetRandomSpell draws through
@@ -448,8 +456,11 @@ build hero-less games so old tests pass unchanged, and
     then pushed on `Side.immediate`, so it attacks at once), Frostwolf
     Fervor's and Stormpike Strength's one copy of the highest Attack or
     Health (`Side.pick_highest`, ties at random) and Tentacular's Tentacle.
-    `Side::exact_copy` is the copy: undamaged, buffs and keywords kept, no
-    pool copy.
+    `Side::exact_copy` is the copy: the minion as it stands, buffs, keywords
+    and gifts kept, its damage carried over (a 10/10 at 4 Health copies as
+    10/4, and `Side::summon_exact_copy` keeps the original's `taken` so its
+    maximum Health stays 10), no pool copy (docs/heroes.md "Exact copies in a
+    fight").
   - **A power's token.** Menagerist's Amalgam, Avatar of N'Zoth's Fish and
     Pilot the Shredder's Sneed's New Shredder are cards.toml `[[token]]`s and
     a `start_minion = "Name"` power puts one on the board when the hero is
@@ -493,6 +504,61 @@ build hero-less games so old tests pass unchanged, and
   legal button (either one) with gold that would be left over (Gonna Be
   Rich! waits for turn 8). A skipped turn gets a Freeze and then an End Turn.
   `bgbench` and `bgpy` games play with heroes.
+
+## Secrets
+
+The Great Akazamzarak's Prestidigitation and the four combat Secrets
+(docs/heroes.md "Secrets", Era's rules). `src/secrets.rs` holds the zone:
+the Secrets are neither pool cards nor minions, so there is no table for
+them. There are four kinds (`VENOMSTRIKE_TRAP`, `AUTODEFENSE_MATRIX`,
+`PACK_TACTICS`, `REDEMPTION`) and a fifth kind in the zone, the Ice Block a
+Safety Patch gives.
+
+- **The zone.** `Player.secrets` (`Secrets`) is five `u8` kinds and a length:
+  the order they were got is the order they fire in, and nothing allocates. A
+  Secret stays until it fires. `combat_len`/`all_combat` never count the Ice
+  Block, which is why Prestidigitation never offers it and still works with
+  the save in hand. The Ice Block keeps working exactly as it did from
+  `Player.ice_block`: the fatal combat damage in `game/turn.rs` and
+  `heroes.rs::take_hero_damage` ask `ice_block()` and remove the kind instead
+  of clearing a flag; `SCALAR_ICE_BLOCK` is unchanged.
+- **A fight gets the zone as counters.** `Player::counters` copies it into
+  `Counters.secrets`, and `Side::new` copies it again into `Side.secrets`, so
+  a fight keeps its own copy and pays one field test when it has none.
+  `Side::fire_secret` removes a fired kind and sets its bit in
+  `SideOutcome.secrets_fired`, and `apply_side_outcome` takes those kinds out
+  of the player's zone for good after the fight.
+- **The attack Secrets** run in `Side::attack_secrets`, called from
+  `attack_swings_at` after the Rally and "whenever a friendly minion attacks"
+  triggers and before the hit (so Autodefense Matrix's Divine Shield blocks
+  it): Autodefense Matrix sets the keyword, Pack Tactics summons a copy of the
+  attacked minion to its right with 3/3 base stats and Venomstrike Trap a 2/3
+  Venomous Cobra there (`CardDb::cobra_token`, cards.toml's "Cobra" token).
+  Both summons go through `Side::summon`, so the "wherever this is" bonuses
+  land on the copy exactly as they do on any summoned minion: the Undead
+  bonus, an Eternal Knight's deaths, Goldrinn's Beasts, a trinket's "your
+  minions have". A Secret that would summon stays in the zone when the board
+  is full.
+- **Redemption** runs `Side::redemption` in `Side::resolve` after the dead
+  minion's Deathrattles and its Reborn: `CardDb::make` of its base card, 1
+  Health, summoned where it stood. With no room the copy waits in
+  `Side.secret_wait` and `spawn_when_space` puts it down as soon as a slot
+  opens; the Secret is only spent when the copy lands, and a death that comes
+  while a copy is owed does not replace it.
+- **Secrets are combat only.** `Side.outside` (a Tavern attack, a shop
+  destroy) turns every Secret hook off: they are the client's combat Secrets,
+  and a shop destroy is not a fight.
+- **Prestidigitation** is `PowerEffect::DiscoverSecret`: free, once a turn,
+  from turn 1, and `power_usable` refuses it while all four combat Secrets are
+  up. A press fills `Player.secret_offer` (`ArrayVec<u8, CHOICES>`, the kinds
+  still missing, all of them rather than the three of a Discover), answered
+  with `Action::Choose` exactly as `power_offer` is, and `pick_secret` adds
+  the kind at the end of the zone. `obs::power_progress` reports the Secrets
+  held and the ones still missing.
+- **The observation** carries the player's own zone only: `SCALAR_SECRET` is
+  four flags (one per combat Secret) and `SCALAR_SECRET_OFFER` the kinds an
+  open offer gives (kind + 1). An opponent's zone is written nowhere: the
+  client hides it, and so does this.
 
 ## Trinkets
 
