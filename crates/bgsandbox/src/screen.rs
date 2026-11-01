@@ -612,7 +612,7 @@ fn kw_suffix(k: u8) -> String {
 fn describe_option(o: &bgcore::cards::ChooseOption) -> String {
     use bgcore::cards::ChooseOption as C;
     match o {
-        C::MinionTarget { tribe, attack, health, keyword } => format!(
+        C::MinionTarget { tribe, attack, health, keyword, .. } => format!(
             "give {} +{attack}/+{health}{}",
             tribe.map_or("a minion", |t| tribe_name(t)),
             kw_suffix(*keyword)

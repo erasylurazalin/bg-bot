@@ -395,6 +395,23 @@ damage taken (a 10/10 that took 6 damage gives a 10/4 copy), and keywords it
 has lost (a popped Divine Shield stays popped). This holds for every card
 that says it: Cloning Gallery, Rapid Reanimation, Frostwolf Fervor,
 Stormpike Strength, Stitched Salvager, Archlich Kel'Thuzad and the rest.
+
+**Targets in the shop (Era, 2026-11-02).** A spell, Battlecry or Activate
+that targets "a minion" can target a minion on your board or in the Tavern.
+Only the card's own words narrow it: "a friendly minion" means your board
+(and hand where it says so), "a minion in the Tavern" means the Tavern, "a
+Beast" means a Beast in either. A Choose One with a target asks for the
+option first, then the target (Sprightly Scarab, Alliance Flag, Forest's
+Bounty).
+
+**Malchezaar and free Refreshes (Era, 2026-11-02; a bug in the real game
+that we copy).** Malchezaar, Prince of Dance makes two Refreshes each turn
+cost Health. Free Refreshes are used first, but the last free Refresh also
+uses up one of Malchezaar's two, so with any free Refresh that turn only
+one Health Refresh is left. Era's logs show it on every such turn (seven
+turns in three games): the count goes 2 to 1 on the last free Refresh, then
+to 0 on the one Health Refresh. With no free Refresh, both Health Refreshes
+happen as printed.
 Pack Tactics is an exact copy whose stats are then set to 3/3.
 
 **"Twice" versus "an extra time".** "Your X trigger twice" or "cast twice"

@@ -305,6 +305,10 @@ class ActionTracker(Tracker):
 
     def reset(self):
         self.record = {"turns": [], "hero": None}
+        # Upper Hands cast this turn: "Start of Combat: set a random enemy
+        # minion's Health to 1" hides its pending trigger, so the casts are the
+        # count (the board files write it the same way).
+        self.upper = 0
         self.unread = Counter()
         self.turn = None       # the shop turn being built
         self.pending = None    # the step being resolved
@@ -470,6 +474,8 @@ class ActionTracker(Tracker):
 
     def _on_block_start(self, g, kind, e):
         super()._on_block_start(g, kind, e)
+        if kind == "PLAY" and e is not None and e.card_id == "BG28_573":
+            self.upper += 1
         p = self.pending
         if p is None or p["step"]["step"] != "board" or e is None or e.id != p["entity"]:
             return
@@ -495,6 +501,7 @@ class ActionTracker(Tracker):
 
     def set_turn(self, value):
         if value % 2 == 1:
+            self.upper = 0
             self.close_turn(False)
             self.turn = {"turn": (value + 1) // 2, "start": None, "actions": [], "end": None}
             self.ended = False
@@ -1278,6 +1285,8 @@ class ActionTracker(Tracker):
             out["spells_cast"] = p["NUM_SPELLS_PLAYED_THIS_GAME"]
         if p["NUM_RESOURCES_SPENT_THIS_GAME"]:
             out["gold_spent"] = p["NUM_RESOURCES_SPENT_THIS_GAME"]
+        if self.upper:
+            out["upper_hand"] = self.upper
         return out
 
     def enchant_numbers(self, player_id, card_id):

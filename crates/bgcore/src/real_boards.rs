@@ -146,6 +146,10 @@ pub struct RealCounters {
     /// The same for Elementals only (Obsidian Ravager and its kin).
     pub tavern_elemental_attack: i32,
     pub tavern_elemental_health: i32,
+    /// Upper Hands this side has pending: each sets a random enemy minion's
+    /// Health to 1 at Start of Combat. A shop step also reads it (the Obs
+    /// shows it), and a shop-phase destroy ignores it.
+    pub upper_hand: u32,
     /// "After the Tavern is Refreshed this game" (Waveling, En-Djinn Blazer,
     /// Easterly Winds): what one Refresh gives one random Tavern minion. Only
     /// a shop step reads it.
@@ -176,6 +180,7 @@ impl Default for RealCounters {
             tavern_health: 0,
             tavern_elemental_attack: 0,
             tavern_elemental_health: 0,
+            upper_hand: 0,
             refresh_attack: 0,
             refresh_health: 0,
             barrage_attack: 0,
@@ -213,6 +218,7 @@ impl RealCounters {
             "gold_spent" => self.gold_spent = count(value),
             "tavern_attack" => self.tavern_attack = value,
             "tavern_health" => self.tavern_health = value,
+            "upper_hand" => self.upper_hand = count(value),
             "tavern_elemental_attack" => self.tavern_elemental_attack = value,
             "tavern_elemental_health" => self.tavern_elemental_health = value,
             "refresh_attack" => self.refresh_attack = value,
@@ -428,6 +434,15 @@ fn make_real_minion(
     }
     minion.keywords = keywords;
     minion.reanimate = m.reanimate;
+    // A minion with limited uses this turn (Malchezaar's Health Refreshes, a
+    // Thorned Trailblazer's combines, a Magicfin Mycologist's teachings) shows
+    // how many it has left as its {0} ("(2 left!)"), so the file's numbers say
+    // it; a copy made by the game starts at its own count.
+    let uses = minion.turn_uses(db);
+    if uses > 0 {
+        let left = m.numbers.first().copied().unwrap_or(uses as i32).clamp(0, u8::MAX as i32) as u8;
+        minion.uses_left = left;
+    }
     // A Dark Gift the board carried: the landing's stats are already
     // in the file's attack and health, so only the gift itself comes
     // along. The counter the log does not carry is set as if the gift

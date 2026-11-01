@@ -91,6 +91,10 @@ pub enum TargetKind {
         keyword: u8,
         /// Also give a random Bonus Keyword the minion doesn't have.
         random_keyword: bool,
+        /// The pick may be a Tavern minion too (DESIGN.md "Targets in the
+        /// shop": a text that says "another Murloc" or "a Beast", not "a
+        /// friendly minion").
+        shop: bool,
     },
     /// Pick the friendly minion that consumes `count` Tavern minions.
     /// `stat_mul` doubles the stats taken by a golden consumer.
@@ -187,6 +191,9 @@ impl TargetKind {
             TargetKind::AnyBuff { .. }
             | TargetKind::AnySetStats { .. }
             | TargetKind::BecomeCopy => true,
+            // "another Murloc", "a Pirate", "a Beast": the Tavern is included
+            // when the card's words do not say "friendly".
+            TargetKind::MinionBuff { shop, .. } => shop,
             TargetKind::Spell(st) => st.can_target_shop(),
             TargetKind::StealShopCard { .. } | TargetKind::ThrowInPot { .. } => true,
             // Hero batch 2: a Tavern minion, or any Tavern card.
@@ -1749,6 +1756,11 @@ impl Game {
             TargetKind::TempReborn
             | TargetKind::StealShopAsStats { .. }
             | TargetKind::LockAndLoad => true,
+            // "another Murloc", "a Pirate": a tribe in either zone, when the
+            // card's words do not say "friendly" (`takes_shop` said it may).
+            TargetKind::MinionBuff { tribe, .. } => {
+                tribe.is_none_or(|t| self.data.cards.tribes_of(&pl.shop[s]).has(t))
+            }
             TargetKind::ReplaceHigher => self.data.cards.get(pl.shop[s].card).tier < crate::MAX_TIER,
             TargetKind::SpiritSwapFirst => true,
             TargetKind::SpiritSwapSecond => {
@@ -2284,6 +2296,14 @@ impl Game {
                 let mut health_paid = 0;
                 if pl.free_rolls > 0 {
                     pl.free_rolls -= 1;
+                    // Malchezaar, Prince of Dance's bug, which we copy
+                    // (DESIGN.md "Malchezaar and free Refreshes"): the last
+                    // free Refresh of the turn also uses up one of his two
+                    // Health Refreshes, so a turn with any free Refresh at all
+                    // has one Health Refresh left, not two.
+                    if pl.free_rolls == 0 {
+                        pl.spend_health_refresh(cards);
+                    }
                 } else if pl.can_refresh_with_health(cards, rules) {
                     pl.spend_health_refresh(cards);
                     health_paid = rules.health_refresh_cost;

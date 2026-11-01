@@ -837,6 +837,91 @@ fn eonars_favor_on_an_all_type_target_buffs_every_typed_tavern_minion() {
 }
 
 #[test]
+fn a_target_that_says_a_minion_reaches_the_tavern() {
+    // DESIGN.md "Targets in the shop": a spell, Battlecry or Activate that
+    // targets "a minion" (or "another Murloc", "a Pirate", "a Beast") reaches
+    // a Tavern minion; only "a friendly minion" stays on the board.
+    let mut g = game(71);
+    g.players[0].gold = 10;
+    let escapee = put_on_board(&mut g, 0, "Sewer Escapee");
+    // Two Murlocs, so the pick is a real prompt rather than its only answer.
+    set_shop(&mut g, 0, &["Bile Spitter", "Bile Spitter"]);
+    act(&mut g, 0, Action::Activate(escapee as u8));
+    act(&mut g, 0, Action::TargetShop(0));
+    let m = g.players[0].shop[0];
+    let c = g.data.cards.get(m.card);
+    assert_eq!((m.attack, m.health), (c.attack + 7, c.health + 7), "another Murloc, in the Tavern");
+
+    // Lovesick Balladist's "Give a Pirate +2 Health": a Tavern Pirate, which
+    // Era's log shows.
+    let mut g = game(72);
+    g.players[0].gold = 10;
+    set_shop(&mut g, 0, &["Southsea Busker", "Southsea Busker"]);
+    g.give(0, "Lovesick Balladist").unwrap();
+    let before = g.players[0].shop[0].health;
+    play_card(&mut g, 0, "Lovesick Balladist");
+    act(&mut g, 0, Action::TargetShop(0));
+    assert_eq!(g.players[0].shop[0].health, before + 2, "a Pirate in the Tavern");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_choose_one_with_a_target_asks_the_option_then_a_tavern_target() {
+    // Sprightly Scarab is a Beast with a Choose One Battlecry that targets a
+    // Beast: the option comes first, then the target, and a Tavern Beast is a
+    // Beast (Era's log has it on one).
+    let mut g = game(73);
+    g.players[0].gold = 10;
+    set_shop(&mut g, 0, &["Flittering Bat", "Flittering Bat"]);
+    g.give(0, "Sprightly Scarab").unwrap();
+    play_card(&mut g, 0, "Sprightly Scarab");
+    assert!(g.players[0].pending_choose_one.is_some(), "the option is asked first");
+    act(&mut g, 0, Action::Choose(0));
+    assert!(g.players[0].pending_target.is_some(), "then the target");
+    act(&mut g, 0, Action::TargetShop(0));
+    let m = g.players[0].shop[0];
+    let c = g.data.cards.get(m.card);
+    assert_eq!((m.attack, m.health), (c.attack + 1, c.health + 1), "a Tavern Beast");
+    assert!(m.keywords.has(Keywords::REBORN), "and Reborn");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn malchezaars_last_free_refresh_spends_one_of_his_health_refreshes() {
+    // DESIGN.md "Malchezaar and free Refreshes" (a bug in the real game we
+    // copy): free Refreshes go first, and the last one also uses up one of
+    // Malchezaar's two Health Refreshes, so a turn with any free Refresh has
+    // one Health Refresh left.
+    let mut g = Game::new_with_lobby(
+        Arc::new(Data::bundled()),
+        74,
+        lobby(&[Tribe::Demon, Tribe::Undead, Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc]),
+    );
+    g.players[0].gold = 20;
+    put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 2);
+    g.players[0].free_rolls = 2;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 2, "one free Refresh left");
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].free_rolls, 0);
+    assert_eq!(
+        g.players[0].health_refreshes_left(&g.data.cards),
+        1,
+        "the last free Refresh used one Health Refresh"
+    );
+    let health = g.players[0].health;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 0, "the Health Refresh");
+    assert_eq!(g.players[0].health, health - g.data.rules.health_refresh_cost);
+    // A Malchezaar that reaches the board without being played has its uses
+    // at once (docs/KNOWN-GAPS.md, the first row).
+    let m = g.players[0].make_card(&g.data.cards, id(&g, "Malchezaar, Prince of Dance"), false, 0);
+    assert_eq!(m.uses_left, 2, "a made Malchezaar arrives with both");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn eonars_favor_cannot_target_a_neutral_minion() {
     let mut g = game(37);
     put_on_board(&mut g, 0, "Boom-in-a-Box"); // neutral

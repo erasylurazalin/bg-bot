@@ -398,22 +398,20 @@ impl Game {
         // Guiding Candle's first Refreshes of a turn, which hold Tier 6 cards
         // only (free access to the tier, as the card says).
         let (lo, hi) = Self::tavern_tiers(pl);
-        if pl.tp.whistle && !pl.board.is_empty() {
-            // Warband Whistle: this Refresh holds plain copies of the
-            // warband, each minion once while there are enough of them.
+        // Warband Whistle: this Refresh holds one plain copy (the card's own
+        // stats) of each minion in the warband, and nothing else random
+        // (DESIGN.md, docs/trinkets.md). A warband of 7 fills the Tavern and
+        // leaves no spell slot; 6 or fewer copies sit next to the spell.
+        let whistle = pl.tp.whistle && !pl.board.is_empty();
+        if whistle {
             pl.tp.whistle = false;
             let mut order: ArrayVec<usize, { crate::BOARD }> = (0..pl.board.len()).collect();
             rng.shuffle(&mut order);
-            let mut next = 0;
-            while pl.shop.len() < normal {
-                let card = if next < order.len() {
-                    let k = order[next];
-                    next += 1;
-                    pl.board[k].card
-                } else {
-                    pl.board[rng.below(pl.board.len() as u32) as usize].card
-                };
-                let mut m = pl.make_card(cards, card, false, 0);
+            for k in order {
+                if pl.shop.len() >= crate::SHOP {
+                    break;
+                }
+                let mut m = pl.make_card(cards, pl.board[k].card, false, 0);
                 pl.apply_tavern_buffs(cards, &mut m);
                 pl.shop.push(m);
             }
@@ -432,7 +430,7 @@ impl Game {
         // The extra slots (Innkeeper's Stein, Electrode Attractor): one
         // Magnetic Mech, then one minion of the tier above. `size` already
         // counts them, so a slot only appears when the size allows it.
-        if pl.tp.extra_magnetic && pl.shop.len() < size {
+        if pl.tp.extra_magnetic && pl.shop.len() < size && !whistle {
             let mech = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |c| {
                 c.keywords.has(crate::minion::Keywords::MAGNETIC) && c.tribes.has(Tribe::Mech)
             });
@@ -443,7 +441,7 @@ impl Game {
             }
         }
         // Dream Portal: one more minion, a Dragon, in a normal slot.
-        if pl.extra_dragon && pl.shop.len() < size {
+        if pl.extra_dragon && pl.shop.len() < size && !whistle {
             let dragon = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |c| {
                 c.tribes.has(Tribe::Dragon)
             });
@@ -457,13 +455,14 @@ impl Game {
         // the after-Refresh buff below, the one Waveling gives.
         if pl.prize.extra_shop
             && pl.shop.len() < size
+            && !whistle
             && let Some(c) = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |_| true)
         {
             let mut m = pl.make_card(cards, c, false, 1);
             pl.apply_tavern_buffs(cards, &mut m);
             pl.shop.push(m);
         }
-        if pl.tp.extra_high_tier && pl.tier < crate::MAX_TIER && pl.shop.len() < size {
+        if pl.tp.extra_high_tier && pl.tier < crate::MAX_TIER && pl.shop.len() < size && !whistle {
             let up = (pl.tier + 1).max(lo);
             let drawn = draw_filtered(pool, cards, rng, up, up, &[], lobby, |_| true);
             if let Some(c) = drawn {
@@ -472,7 +471,9 @@ impl Game {
                 pl.shop.push(m);
             }
         }
-        if let Some(tok) = cards.fodder_token {
+        if let Some(tok) = cards.fodder_token
+            && !whistle
+        {
             let mut made: ArrayVec<Minion, SHOP> = ArrayVec::new();
             for _ in 0..fodders {
                 if pl.shop.len() + made.len() >= slots {
@@ -487,8 +488,11 @@ impl Game {
             }
         }
         // The spell slot is free unless Fodders took it too; a frozen Tavern
-        // keeps the spell it already had.
-        if pl.shop.len() <= size {
+        // keeps the spell it already had. The Warband Whistle's Tavern holds a
+        // copy per warband minion, so with six copies the spell takes the
+        // seventh slot and with seven there is no spell.
+        let room = if whistle { pl.shop.len() < crate::SHOP } else { pl.shop.len() <= size };
+        if room {
             if pl.shop_spell.is_none() {
                 pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
             }

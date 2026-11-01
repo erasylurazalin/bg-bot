@@ -241,7 +241,7 @@ impl Game {
                     buff(m, attack * mul * runs as i32, health * mul * runs as i32);
                 }
             }
-            Effect::BuffChosen { tribe, attack, health, per_keyword, random_keyword } => {
+            Effect::BuffChosen { tribe, attack, health, per_keyword, random_keyword, in_shop } => {
                 let k = self.players[p].distinct_bonus_keywords(bonus_mask) as i32;
                 let pt = PendingTarget {
                     source: Some(*pos as u8),
@@ -251,6 +251,7 @@ impl Game {
                         health: (health + per_keyword.1 * k) * mul,
                         keyword: 0,
                         random_keyword,
+                        shop: in_shop,
                     },
                     runs,
                         tavern: true,
@@ -586,6 +587,11 @@ impl Game {
                         m.attack += ba;
                         m.health += bh;
                     }
+                    // A minion that reaches the board without being played
+                    // gets its limited uses at once (docs/KNOWN-GAPS.md):
+                    // Malchezaar's Health Refreshes, a Trailblazer's combines,
+                    // a Mycologist's teachings.
+                    m.uses_left = m.turn_uses(&self.data.cards);
                     self.players[p].board.insert(at, m);
                     at += 1;
                 }
@@ -768,7 +774,7 @@ impl Game {
                     }
                 }
             }
-            Effect::BuffChosenPerGold { tribe, attack, health, per_gold } => {
+            Effect::BuffChosenPerGold { tribe, attack, health, per_gold, in_shop } => {
                 let g = self.players[p].gold_spent_turn as i32;
                 let pt = PendingTarget {
                     source: Some(*pos as u8),
@@ -778,6 +784,7 @@ impl Game {
                         health: (health + per_gold.1 * g) * mul,
                         keyword: 0,
                         random_keyword: false,
+                        shop: in_shop,
                     },
                     runs,
                         tavern: true,
@@ -1004,6 +1011,7 @@ impl Game {
                 let mut m = self.players[p].make_card(&self.data.cards, card, false, 0);
                 m.attack = host.attack * mul;
                 m.health = host.health * mul;
+                m.uses_left = m.turn_uses(&self.data.cards);
                 let at = *pos + 1;
                 if !self.players[p].board.is_full() && at <= self.players[p].board.len() {
                     self.players[p].board.insert(at, m);

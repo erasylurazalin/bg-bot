@@ -334,12 +334,13 @@ impl Game {
         let card = self.data.cards.get(m.card);
         if let Some(options) = card.choose_one {
             let scaled = options.map(|o| match o {
-                ChooseOption::MinionTarget { tribe, attack, health, keyword } => {
+                ChooseOption::MinionTarget { tribe, attack, health, keyword, in_shop } => {
                     ChooseOption::MinionTarget {
                         tribe,
                         attack: attack * mul,
                         health: health * mul,
                         keyword,
+                        in_shop,
                     }
                 }
                 ChooseOption::SpellBonus { attack, health } => ChooseOption::SpellBonus {

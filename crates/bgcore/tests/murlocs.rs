@@ -488,6 +488,11 @@ fn twilight_shamanic_and_sewer_escapee_buff_the_hand_and_the_board() {
     put_on_board(&mut g, 0, "Sewer Escapee");
     put_on_board(&mut g, 0, "Tad");
     act(&mut g, 0, Action::Activate(0));
+    // The Tavern's Murlocs are offered too; pick the board's Tad (with none
+    // there the pick is the only answer and no prompt opens).
+    if g.players[0].pending_target.is_some() {
+        act(&mut g, 0, Action::Target(1));
+    }
     let mask = g.data.rules.bonus_mask;
     assert_eq!(stats(&g.players[0].board[1]), (9, 9));
     assert!(g.players[0].board[1].keywords.0 & mask != 0);

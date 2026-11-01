@@ -99,7 +99,7 @@ impl Game {
     /// and the both-effects paths).
     fn apply_choose_option(&mut self, p: usize, source: Option<u8>, opt: ChooseOption, tavern: bool) {
         match opt {
-            ChooseOption::MinionTarget { tribe, attack, health, keyword } => {
+            ChooseOption::MinionTarget { tribe, attack, health, keyword, in_shop } => {
                 let pt = PendingTarget {
                     source,
                     kind: TargetKind::MinionBuff {
@@ -108,6 +108,7 @@ impl Game {
                         health,
                         keyword,
                         random_keyword: false,
+                        shop: in_shop,
                     },
                     runs: 1,
                     tavern: true,

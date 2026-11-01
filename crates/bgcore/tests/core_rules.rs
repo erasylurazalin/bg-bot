@@ -795,6 +795,12 @@ fn a_random_bonus_keyword_is_never_one_it_has() {
             turn_of(&mut g, 0);
             g.players[0].gold = 9;
             act(&mut g, 0, Action::Activate(0));
+            // "another Murloc" is a Murloc in the Tavern too (DESIGN.md
+            // "Targets in the shop"): pick the board's Tad when the pick is
+            // asked (with no Murloc in the Tavern it is the only answer).
+            if g.players[0].pending_target.is_some() {
+                act(&mut g, 0, Action::Target(1));
+            }
             let now = (g.players[0].board[1].keywords.0 & g.data.rules.bonus_mask).count_ones();
             assert_eq!(now, have + 1, "seed {seed}: it must gain a new keyword every time");
             have = now;

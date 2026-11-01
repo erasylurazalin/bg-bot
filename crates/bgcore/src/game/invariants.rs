@@ -60,7 +60,10 @@ impl Game {
             // outside the normal slots, one more again, and a Tavern filled
             // before a power or trinket changed its size (Stay Frosty takes a
             // slot away, a trinket adds one) keeps what it had.
-            let size = pl.shop_size(&self.data.rules);
+            // The Warband Whistle's Refresh holds one copy per warband
+            // minion, up to the seven slots and with no spell then, so its
+            // Tavern can be bigger than the tier's size (`fill_shop`).
+            let size = pl.shop_size(&self.data.rules).max(crate::SHOP - 1);
             if pl.shop.len() > size + 2 {
                 return Err(format!("player {i}: shop too big"));
             }

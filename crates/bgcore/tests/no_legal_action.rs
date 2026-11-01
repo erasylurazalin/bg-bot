@@ -228,6 +228,7 @@ fn a_target_prompt_that_lost_its_last_target_fizzles() {
             health: 2,
             keyword: 0,
             random_keyword: false,
+            shop: false,
         },
         runs: 1,
         tavern: true,

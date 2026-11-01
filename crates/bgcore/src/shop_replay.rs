@@ -575,7 +575,10 @@ pub fn load(
         let pl = &mut game.players[ME];
         pl.tier = spec.tier.clamp(1, MAX_TIER);
         pl.upgrade_cost = match spec.upgrade_cost {
-            Some(c) => c.clamp(0, u8::MAX as i32) as u8,
+            // The button's price is the player's own upgrade cost plus whatever
+            // a power adds to it (Manastorm's 1 Gold): the file shows the
+            // button, so the power's part comes back out.
+            Some(c) => (c - power_upgrade_extra(data, &spec.hero_powers)).clamp(0, u8::MAX as i32) as u8,
             None => data.rules.upgrade_cost(pl.tier),
         };
         pl.gold = spec.gold.clamp(0, u8::MAX as i32) as u8;
@@ -730,6 +733,21 @@ pub fn load(
         None => missing.push("Secrets not in the file (the Secret zone)".to_string()),
     }
     LoadedShop { game, missing, tavern_ids, hand_ids, board_ids, spell_id }
+}
+
+/// What a logged hero power adds to the tier-up price (Manastorm's prices:
+/// 1 Gold for him). The log's upgrade cost is the button, so it goes back out.
+fn power_upgrade_extra(data: &Data, powers: &[ShopPowerSpec]) -> i32 {
+    for power in powers {
+        let Some(card_id) = power.card_id.as_deref() else { continue };
+        let Some(i) = data.heroes.power_by_card_id(card_id) else { continue };
+        if let crate::heroes::PowerEffect::Prices { upgrade_extra, .. } =
+            data.heroes.power(i).effect
+        {
+            return upgrade_extra as i32;
+        }
+    }
+    0
 }
 
 /// A minion of a logged state as the engine builds it, and the name of the
@@ -997,7 +1015,9 @@ impl ShopSnapshot {
         ShopSnapshot {
             gold: pl.gold as i32,
             tier: pl.tier,
-            upgrade_cost: (pl.tier < MAX_TIER).then_some(pl.upgrade_cost),
+            // The button's price, which is what the file shows: the player's
+            // own upgrade cost plus whatever a power adds (Manastorm's 1).
+            upgrade_cost: (pl.tier < MAX_TIER).then_some(g.upgrade_price(p)),
             health: pl.health,
             armor: pl.armor,
             free_refreshes: pl.free_rolls,
@@ -1709,7 +1729,15 @@ fn force_offer(
             m
         })
         .collect();
-    if ready.len() == step.options.len() && !ready.is_empty() {
+    // A pick that lands on the board or in a Tavern slot goes through the
+    // engine's transform paths, which need the offer's card ids, not
+    // ready-made minions.
+    let placed_elsewhere = step
+        .moved
+        .as_ref()
+        .and_then(|m| m.to.as_ref())
+        .is_some_and(|to| matches!(to.kind.as_deref(), Some("board") | Some("slot")));
+    if !placed_elsewhere && ready.len() == step.options.len() && !ready.is_empty() {
         for m in &ready {
             let _ = pl.discover_minions.try_push(*m);
         }
@@ -1924,12 +1952,51 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         let snap = ShopSnapshot::of_game(data, &loaded.game, ME);
         return Ok((snap, missing, "end of turn effects".to_string()));
     }
+    // Where a Discover's pick lands, when it is not the hand: the file says, in
+    // the pick's `moved.to`, and the engine only does that from a state the
+    // press left (Galakrond's Greed's Tavern slot, a transform on the board).
+    if step.step == "discover"
+        && let Some(to) = step.moved.as_ref().and_then(|m| m.to.as_ref())
+    {
+            match to.kind.as_deref() {
+                Some("board") => {
+                    if let Some(pos) = to.position {
+                        loaded.game.players[ME].tp.transform_slot = pos;
+                    }
+                }
+                Some("slot") => {
+                    if let Some(slot) = to.slot {
+                        loaded.game.players[ME].discover_into_shop = slot;
+                    }
+                }
+        _ => {}
+        }
+    }
     let actions = match actions_for(data, ids, &mut loaded, step, turn, &mut missing) {
         Ok(a) => a,
         Err(e) => return Err((e, missing)),
     };
     let mut text = Vec::new();
+    // A Choose One with a target asks the option first, then the target
+    // (DESIGN.md "Targets in the shop"): the play's own sub-option is answered
+    // before the step's target, not after it.
+    let choose_first = step.step == "play"
+        && step.sub_option.is_some_and(|k| (0..2).contains(&k))
+        && actions.len() > 1;
+    let mut chosen = false;
     for a in &actions {
+        if choose_first
+            && !chosen
+            && matches!(a, Action::Target(_) | Action::TargetShop(_))
+            && loaded.game.players[ME].pending_choose_one.is_some()
+        {
+            let k = step.sub_option.unwrap_or(0) as u8;
+            if loaded.game.step(Action::Choose(k)).is_err() {
+                return Err((format!("the engine does not allow {k:?} of the Choose One"), missing));
+            }
+            text.push(format!("Choose({k})"));
+            chosen = true;
+        }
         // A prompt with one answer is no prompt: the engine applies the only
         // target itself (`offer_target`), so the step's own target click has
         // nothing left to answer in the replay. The state the game left still
@@ -1972,6 +2039,7 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     // in the game, and the client's own sub-option says which one it was: the
     // engine opens the two options after the play.
     if step.step == "play"
+        && !chosen
         && let Some(k) = step.sub_option
         && (0..2).contains(&k)
         && loaded.game.players[ME].pending_choose_one.is_some()

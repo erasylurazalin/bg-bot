@@ -839,6 +839,131 @@ fn funeral_wreath_does_not_copy_a_minion_reborn_in_the_shop() {
 }
 
 #[test]
+fn the_warband_whistle_deals_one_plain_copy_of_each_warband_minion() {
+    // Warband Whistle: the next Refresh holds one plain copy (the card's own
+    // stats) of each minion in the warband and nothing else random (Era,
+    // 2026-11-02). Seven minions fill the Tavern and leave no spell slot; six
+    // or fewer sit next to the spell.
+    let mut g = game(41);
+    equip(&mut g, 0, 1, "Warband Whistle");
+    g.players[0].tp.whistle = true;
+    let names = ["Cord Puller", "Lullabot", "Flittering Bat", "Deadly Spore", "Mangled Bandit", "Spark Snapper", "Buzzing Vermin"];
+    for n in names {
+        put_on_board(&mut g, 0, n);
+    }
+    // The warband's own buffs are not in the copies: only the cards.
+    g.players[0].board[0].attack += 5;
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    let shop: Vec<String> = g.players[0]
+        .shop
+        .iter()
+        .map(|m| g.data.cards.get(m.card).name.clone())
+        .collect();
+    assert_eq!(shop.len(), 7, "one copy per warband minion: {shop:?}");
+    for n in names {
+        assert!(shop.iter().any(|s| s == n), "{n} is in the Tavern: {shop:?}");
+    }
+    assert!(g.players[0].shop_spell.is_none(), "seven copies leave no spell slot");
+    for m in &g.players[0].shop {
+        let c = g.data.cards.get(m.card);
+        assert_eq!((m.attack, m.health), (c.attack, c.health), "{} is a plain copy", c.name);
+    }
+    // A warband of six: six copies and the spell.
+    let mut g = game(42);
+    equip(&mut g, 0, 1, "Warband Whistle");
+    g.players[0].tp.whistle = true;
+    for n in &names[..6] {
+        put_on_board(&mut g, 0, n);
+    }
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].shop.len(), 6);
+    assert!(g.players[0].shop_spell.is_some(), "six copies and the spell");
+    // A warband of three: three copies and the spell.
+    let mut g = game(43);
+    equip(&mut g, 0, 1, "Warband Whistle");
+    g.players[0].tp.whistle = true;
+    for n in &names[..3] {
+        put_on_board(&mut g, 0, n);
+    }
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].shop.len(), 3);
+    assert!(g.players[0].shop_spell.is_some(), "three copies and the spell");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_wand_of_divination_counts_every_cast_on_a_minion() {
+    // "After you cast 3 spells on minions, gain 1 Gold": a Tavern minion is a
+    // minion (DESIGN.md "Targets in the shop"), and every cast of one spell
+    // counts (a Blood Gem Balinda casts three times).
+    let mut g = game(44);
+    equip(&mut g, 0, 0, "Wand of Divination");
+    set_shop(&mut g, 0, &["Cord Puller"]);
+    g.players[0].gold = 10;
+    let count = |g: &Game| g.players[0].trinkets[0].count;
+    for i in 1..=3u16 {
+        g.give(0, "Blood Gem").unwrap();
+        let gem = g.players[0]
+            .hand
+            .iter()
+            .position(|m| g.data.cards.get(m.card).name == "Blood Gem")
+            .unwrap();
+        let gold = g.players[0].gold;
+        act(&mut g, 0, Action::Play { hand: gem as u8, pos: 0 });
+        act(&mut g, 0, Action::TargetShop(0));
+        if i < 3 {
+            assert_eq!(count(&g), i, "cast {i} on a Tavern minion counts");
+            assert_eq!(g.players[0].gold, gold, "no Gold before the third cast");
+        } else {
+            assert_eq!(count(&g), 0, "the third cast wraps the count");
+            assert_eq!(g.players[0].gold, gold + 1, "the third cast pays 1 Gold");
+        }
+    }
+    // Balinda casts one Blood Gem twice (a golden one three times): every
+    // cast counts.
+    let mut g = game(45);
+    equip(&mut g, 0, 0, "Wand of Divination");
+    put_on_board(&mut g, 0, "Balinda Stonehearth");
+    put_on_board(&mut g, 0, "Cord Puller");
+    g.players[0].gold = 10;
+    g.give(0, "Blood Gem").unwrap();
+    let gem = g.players[0]
+        .hand
+        .iter()
+        .position(|m| g.data.cards.get(m.card).name == "Blood Gem")
+        .unwrap();
+    let gold = g.players[0].gold;
+    act(&mut g, 0, Action::Play { hand: gem as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!(g.players[0].trinkets[0].count, 2, "two casts from one Gem");
+    assert_eq!(g.players[0].gold, gold, "two casts are not three");
+    // A golden Balinda casts three times, so the same Gem pays.
+    let mut g = game(46);
+    equip(&mut g, 0, 0, "Wand of Divination");
+    let balinda = id(&g, "Balinda Stonehearth");
+    let mut m = g.players[0].make_card(&g.data.cards, balinda, true, 0);
+    m.golden = true;
+    g.players[0].board.push(m);
+    put_on_board(&mut g, 0, "Cord Puller");
+    g.players[0].gold = 10;
+    g.give(0, "Blood Gem").unwrap();
+    let gem = g.players[0]
+        .hand
+        .iter()
+        .position(|m| g.data.cards.get(m.card).name == "Blood Gem")
+        .unwrap();
+    let gold = g.players[0].gold;
+    act(&mut g, 0, Action::Play { hand: gem as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!(g.players[0].trinkets[0].count, 0, "three casts wrap the count");
+    assert_eq!(g.players[0].gold, gold + 1, "three casts of one Gem pay 1 Gold");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn the_tavern_shape_trinkets() {
     // Cursed Crystal: +3/+3 to the Tavern this turn, and it must not stack
     // when you Refresh again.

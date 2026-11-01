@@ -208,6 +208,12 @@ def side_numbers(g, pid):
     return counters
 
 
+# Upper Hand: "Start of Combat: Set a random enemy minion's Health to 1". The
+# spell hides its pending trigger (the card goes back to SETASIDE), so the
+# pending count is the Upper Hands each side *cast* since the turn began.
+UPPER_HAND = "BG28_573"
+
+
 class CollectingTracker(Tracker):
     """The tracker, plus the side-wide numbers at each snapshot it captures.
 
@@ -218,6 +224,19 @@ class CollectingTracker(Tracker):
     Reanimation's mark is read: it lands on the minion the power chose, which
     is gone from the board by the first attack.
     """
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        # Upper Hands each side has cast this turn (see `UPPER_HAND`).
+        self.upper_hands = [0, 0]
+
+    def _on_block_start(self, g, kind, e):
+        super()._on_block_start(g, kind, e)
+        # An Upper Hand cast this turn is a pending Start of Combat trigger.
+        # Its card goes back to SETASIDE, so the cast is all the log says.
+        if kind == "PLAY" and e is not None and e.card_id == UPPER_HAND:
+            side = 0 if e["CONTROLLER"] == self.me else 1
+            self.upper_hands[side] += 1
 
     def _start_fight(self, g):
         # The board a file holds is the one before Start of Combat, which is
@@ -237,10 +256,14 @@ class CollectingTracker(Tracker):
             ent = waiting_entity(g, pid)
             if ent:
                 self._waiting[ent] = side
+        upper = (self.upper_hands[0], self.upper_hands[1])
         super()._start_fight(g)
         if self.fight is not None:
             self.fight.reanimates = marks
             self.fight.secrets = secret_cards
+            self.fight.upper_hands = upper
+        # A new turn's Upper Hands start from zero.
+        self.upper_hands = [0, 0]
 
     def _on_tag(self, g, e, tag, value):
         super()._on_tag(g, e, tag, value)
@@ -271,6 +294,8 @@ def counters(fight, side):
     holds. A number the log does not show is left out: the loader then uses
     the base value (0 spells cast, no spell bonus, Blood Gems +1/+1)."""
     out = dict(fight.side_numbers[side])
+    if getattr(fight, "upper_hands", (0, 0))[side]:
+        out["upper_hand"] = fight.upper_hands[side]
     # Blood Gems (BACON_BLOODGEMBUFFATKVALUE / _HEALTHVALUE on the player).
     ga, gh = fight.gems[side]
     if ga != 1 or gh != 1:

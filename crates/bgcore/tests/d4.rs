@@ -317,6 +317,11 @@ fn pending_choose_one_and_discover_are_shown() {
     assert_eq!((opt(0, 0), opt(0, 4), opt(0, 5)), (1.0, 1.0, 1.0));
     assert_eq!((opt(1, 0), opt(1, 4), opt(1, 5)), (1.0, 4.0, 0.0));
     act(&mut g, 0, Action::Choose(1));
+    // A Beast in the Tavern is a Beast too (DESIGN.md "Targets in the shop"),
+    // so answer the pick on the board when it is asked.
+    if g.players[0].pending_target.is_some() {
+        act(&mut g, 0, Action::Target(0));
+    }
 
     // Search Through Time: a locked Discover
     g.players[0].gold = 10;

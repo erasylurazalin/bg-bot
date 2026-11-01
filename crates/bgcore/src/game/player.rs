@@ -413,6 +413,10 @@ impl Player {
         let (a, h) = self.wherever_stats(cards, &m);
         m.attack += a;
         m.health += h;
+        // A card made now has its limited uses now, wherever it lands: a
+        // Malchezaar summoned by a Tavern spell keeps its Health Refreshes
+        // (docs/KNOWN-GAPS.md, the first row).
+        m.uses_left = m.turn_uses(cards);
         // A portrait that gives this card more tribes (Bronzebeard
         // Portrait): every copy the player makes carries it.
         for (mod_card, kind) in self.tp.card_mods.iter().flatten() {
@@ -684,12 +688,13 @@ impl Player {
                 typed_only: false,
             });
         }
+        // Upper Hand: the pending Start of Combat triggers this side cast.
+        self.upper_hand = c.upper_hand.min(u8::MAX as u32) as u8;
         // A fight's outcome can move these too; they start from the base
         // again. None of them is read without a shop phase.
         self.beast_bonus = (0, 0);
         self.boon_of_beetles = 0;
         self.brood_of_nozdormu = 0;
-        self.upper_hand = 0;
         self.sharing_is_caring = 0;
     }
 

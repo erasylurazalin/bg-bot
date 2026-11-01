@@ -451,7 +451,14 @@ fn sprightly_scarab_choose_one_and_patient_scout_discover() {
     // Option 1: +4 Attack and Windfury to a Beast
     act(&mut g, 0, Action::Choose(1));
     turn_of(&mut g, 0);
-    assert_eq!(legal(&g), [Action::Target(0), Action::Target(1)]);
+    // The two board Beasts, and the Tavern's Beasts too (DESIGN.md "Targets
+    // in the shop").
+    let board_targets: Vec<Action> = legal(&g)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Target(_)))
+        .collect();
+    assert_eq!(board_targets, [Action::Target(0), Action::Target(1)]);
+    assert!(legal(&g).iter().all(|a| matches!(a, Action::Target(_) | Action::TargetShop(_))));
     act(&mut g, 0, Action::Target(1));
     assert_eq!(g.players[0].board[1].attack, 5);
     assert!(g.players[0].board[1].keywords.has(Keywords::WINDFURY));

@@ -218,6 +218,9 @@ pub enum Effect {
         health: i32,
         per_keyword: (i32, i32),
         random_keyword: bool,
+        /// The pick may be a Tavern minion (a text that says "another
+        /// Murloc" or "a Beast", not "a friendly minion").
+        in_shop: bool,
     },
     /// Buff one minion the player picks on the board or in the Tavern
     /// ("another minion", Suspicious Prisonguard).
@@ -384,7 +387,13 @@ pub enum Effect {
     /// Buff one other friendly minion the player picks (of a tribe), by
     /// `attack`/`health` plus `per_gold` for each Gold spent this turn
     /// (Lovesick Balladist).
-    BuffChosenPerGold { tribe: Option<Tribe>, attack: i32, health: i32, per_gold: (i32, i32) },
+    BuffChosenPerGold {
+        tribe: Option<Tribe>,
+        attack: i32,
+        health: i32,
+        per_gold: (i32, i32),
+        in_shop: bool,
+    },
     /// Make `count` friendly minions of a tribe (if given) of Tier `max_tier`
     /// or lower Golden on the board, picked by the player (Elite Navigator,
     /// Captain Sanders). Golden doubles `count`.
@@ -832,6 +841,7 @@ impl SpellTarget {
                 | SpellTarget::PlainCopy { .. }
                 | SpellTarget::TransformHigher
                 | SpellTarget::GemKeyword { .. }
+                | SpellTarget::BuffThenDouble { .. }
             )
     }
 
@@ -993,6 +1003,8 @@ pub enum ChooseOption {
         attack: i32,
         health: i32,
         keyword: u8,
+        /// The pick may be a Tavern minion too.
+        in_shop: bool,
     },
     SpellBonus {
         attack: i32,
@@ -2258,6 +2270,11 @@ struct RawEffect {
     buff: Option<[i32; 2]>,
     /// "chosen", "others" or "self", for a buff.
     target: Option<String>,
+    /// "chosen" may pick a minion in the Tavern too: only the card's words
+    /// narrow a target (DESIGN.md "Targets in the shop"), so a text that says
+    /// "another Murloc" or "a Beast" (not "a friendly ...") reaches it.
+    #[serde(default)]
+    in_shop: bool,
     tribe: Option<String>,
     /// Added once more per different Bonus Keyword in the warband.
     per_keyword: Option<[i32; 2]>,
@@ -2516,6 +2533,8 @@ struct RawMinionChooseOption {
     keyword: Option<String>,
     tribe: Option<String>,
     spell_buff: Option<[i32; 2]>,
+    #[serde(default)]
+    in_shop: bool,
 }
 
 #[derive(Deserialize)]
@@ -3304,6 +3323,7 @@ impl CardDb {
                     attack,
                     health,
                     per_gold: (per_gold[0], per_gold[1]),
+                    in_shop: b.in_shop,
                 }
             } else if b.per_golden_played {
                 let [attack, health] = b.buff.ok_or("per_golden_played needs buff")?;
@@ -3329,6 +3349,7 @@ impl CardDb {
                         health,
                         per_keyword,
                         random_keyword: b.random_keyword,
+                        in_shop: b.in_shop,
                     },
                     Some("others") => Effect::BuffOthers { tribe: t, attack, health, per_keyword },
                     Some("self") => Effect::BuffSelf { attack, health },
@@ -3632,6 +3653,7 @@ impl CardDb {
                                         attack,
                                         health,
                                         keyword: keyword_bit(kw)?,
+                                        in_shop: o.in_shop,
                                     })
                                 } else if let Some([attack, health]) = o.spell_buff {
                                     Ok(ChooseOption::SpellBonus { attack, health })

@@ -153,7 +153,7 @@ impl Game {
             // too (Young Murk-Eye Sticker, Hackerfin Portrait): "a minion"
             // there is a Tavern minion. No played Battlecry lands here, only
             // `answer_target_at_random`.
-            TargetKind::MinionBuff { tribe, attack, health, keyword, random_keyword } => {
+            TargetKind::MinionBuff { tribe, attack, health, keyword, random_keyword, .. } => {
                 let ok = tribe.is_none_or(|t| {
                     self.data.cards.tribes_of(&self.players[p].shop[slot]).has(t)
                 });
@@ -441,10 +441,19 @@ impl Game {
                         // A friendly board minion's Deathrattle: no Tavern
                         // minion has one to trigger.
                         SpellTarget::TriggerDeathrattle => {}
-                        // The Prizes' four "a friendly minion" effects never
+                        // "Give a minion +2 Attack, then double its Attack"
+                        // ("I'm Still Just a Rat in a Cage") reaches a Tavern
+                        // minion; it is a Prize, so it never counts as a
+                        // Tavern spell (`pt.tavern` stays false).
+                        SpellTarget::BuffThenDouble { attack, .. } => {
+                            let m = &mut self.players[p].shop[target];
+                            m.attack += attack + da;
+                            m.health += dh;
+                            m.attack = m.attack.saturating_mul(2);
+                        }
+                        // The Prizes' three "a friendly minion" effects never
                         // reach a Tavern minion (`can_target_shop` says so).
-                        SpellTarget::BuffThenDouble { .. }
-                        | SpellTarget::ReturnToHand { .. }
+                        SpellTarget::ReturnToHand { .. }
                         | SpellTarget::MakeGoldenReturn
                         | SpellTarget::GrantEndOfTurn { .. } => {}
                     }
@@ -476,6 +485,10 @@ impl Game {
                 if slot < self.players[p].shop.len() {
                     self.players[p].tp.shop_hit = slot as u8 + 1;
                     self.trinket_event(p, Event::CastSpellOnShop, None, 1);
+                    // A Tavern minion is a minion (DESIGN.md "Targets in the
+                    // shop"), so the spell was cast on one: "after you cast 3
+                    // spells on minions" (Wand of Divination) counts it.
+                    self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
                 }
             }
             _ => {}
