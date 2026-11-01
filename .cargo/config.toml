@@ -1,0 +1,4 @@
+# Test threads get 2 MiB by default, and a debug build of the bgsandbox undo
+# test needs more since the game state grew. 8 MiB, the main thread's size.
+[env]
+RUST_MIN_STACK = "8388608"

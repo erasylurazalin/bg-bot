@@ -556,10 +556,12 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
 - **The effects.** `Act` mirrors the effect keys of cards.toml (`get`,
   `get_gems`, `cast`, ...) and `Game::run_trinket_act` runs each through the
   same `Effect`/`SpellEffect` arm the card path runs, with no host slot (`pos`
-  0) and no golden multiplier. Five keys have no card behind them:
-  `upgrade_discount`, `buff_tavern_this_turn` (Cursed Crystal's per-Refresh
-  buff must not be remembered and stack), `make_golden_random`,
-  `last_spell_copies` and `discover_deathrattle` (Deathly Phylactery; a
+  0) and no golden multiplier. The keys with no card behind them are the ones
+  trinkets.toml's header lists; `Act` names the card each was written for.
+  The first five were `upgrade_discount`, `buff_tavern_this_turn` (Cursed
+  Crystal's per-Refresh buff must not be remembered and stack),
+  `make_golden_random`, `last_spell_copies` and `discover_deathrattle`
+  (Deathly Phylactery; a
   `SpellEffect::Discover(DiscoverKind::DeathrattleMinion)`).
 - **Getting cards (block 2).** `on_get` is the hook for "whenever you get a
   <tribe>": `add_to_hand` is the one place a card enters the hand (a buy, a
@@ -831,6 +833,30 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   tier coming and those turns. Tests: the block 5 section at the end of
   `tests/trinkets.rs` (one per card) and `tests/heroes_batch4.rs` for
   Tickatus.
+- **The compasses and the Poet Portrait (block 6).** A trinket can lock a
+  minion type in at the pick. `lock_type` (`Act::LockType`) reads the board's
+  most common type through `crate::darkgifts::most_common_type`, the same read
+  the Dark Discovery's "your type" slot uses (the all-type minions count for
+  every tribe, a tie is broken at random, an empty or all-neutral board gives
+  none), and stores it in `TrinketState.tribe`, which `set_trinket` clears
+  with the rest of the slot. `random_most_common_type` hands out minions of
+  the type the slot holds and only reads the board when it holds none (a
+  Colorful Compass therefore keeps its type however the board changes, and a
+  copy a portrait made over it still does something). The Gold-plated
+  Compass's `golden_bought` is an `on_buy` act (`Act::GoldenBoughtType`): the
+  minion just bought is `TrinketPowers.bought_card`, written beside
+  `bought_stats` just before the Buy event, so the act makes that hand minion
+  Golden with `golden_up`, sets `Minion.no_reward` (playing it gives no Triple
+  Reward, DESIGN.md) and spends the slot's type. The Poet Portrait's token,
+  Timewarped Poet, is Persistent Poet's keep for every friendly Dragon:
+  `permanent_keep = "all_dragons"` is `PermanentKeep::AllDragons`, which
+  `Side::keep_mul` reads on every living minion of the side, the keeper's own
+  gains included; a golden one doubles them, as goldens do for
+  `adjacent_dragons`, and a keyword a Dragon gains in the fight is kept the
+  same way. The observation carries each slot's locked type in
+  `SCALAR_TRINKET_TRIBE` (a tribe index + 1, 0 for none). Tests: the block 6
+  section at the end of `tests/trinkets.rs`, and `tests/dragons.rs` for the
+  keep.
 
 ## Dark Gifts
 

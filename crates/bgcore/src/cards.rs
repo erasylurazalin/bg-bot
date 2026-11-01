@@ -1147,6 +1147,9 @@ pub enum PermanentKeep {
     SelfKeep,
     /// Adjacent Dragons keep theirs (Persistent Poet).
     AdjacentDragons,
+    /// Every friendly Dragon keeps its own, the keeper included (Timewarped
+    /// Poet, the Poet Portrait's token).
+    AllDragons,
 }
 
 /// Which attacking minions an attack trigger reacts to.
@@ -3561,6 +3564,7 @@ impl CardDb {
                 None => None,
                 Some("self") => Some(PermanentKeep::SelfKeep),
                 Some("adjacent_dragons") => Some(PermanentKeep::AdjacentDragons),
+                Some("all_dragons") => Some(PermanentKeep::AllDragons),
                 Some(other) => return Err(err(format!("unknown permanent_keep {other:?}"))),
             };
 

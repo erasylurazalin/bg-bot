@@ -553,9 +553,11 @@ pub struct TrinketPowers {
     /// The Tavern slot (plus one) a spell was just cast on, for a trinket
     /// that consumes it (Felsteel Cleaver).
     pub shop_hit: u8,
-    /// The minion just bought: its stats (Reusable Batteries' Satellite)
-    /// and, for a Tavern spell, its card (Magicfin Sticker).
+    /// The minion just bought: its stats (Reusable Batteries' Satellite) and
+    /// its card (the Gold-plated Compass's Golden buy); for a Tavern spell,
+    /// its card (Magicfin Sticker).
     pub bought_stats: (i32, i32),
+    pub bought_card: Option<CardId>,
     pub bought_spell: Option<CardId>,
     // ---- block 5 ----
     /// Every Triple Reward becomes this card (Corrupted Tome's Triple
@@ -610,6 +612,13 @@ pub struct TrinketState {
     /// The card this trinket remembers from a Discover, so it can hand out
     /// another copy each turn (Portable Factory).
     pub card: Option<CardId>,
+    /// The minion type this trinket locked in at the pick, which it keeps for
+    /// the rest of the game whatever the board becomes: the Colorful
+    /// Compasses hand out minions of it, the Gold-plated Compass makes the
+    /// next minion of it bought Golden (and spends it). None when the trinket
+    /// locks no type, or the board had none at the pick (docs/trinkets.md,
+    /// "Block 6 rules").
+    pub tribe: Option<Tribe>,
     /// The Mystery Cube's effect belongs to the slot and not to the trinket
     /// in it: while this is set, the start of every turn offers new free
     /// Lesser trinkets to replace whatever the slot holds (DESIGN.md).
@@ -2007,14 +2016,16 @@ impl Game {
                     self.fire_event(p, EventKind::CardsBought, 1);
                     self.power_bought_card(p, &m);
                     // A trinket that reads the minion just bought: its stats
-                    // as they stand now (Reusable Batteries) or the Tavern
-                    // spell (Magicfin Sticker).
+                    // as they stand now (Reusable Batteries) or its card (the
+                    // Gold-plated Compass) or the Tavern spell (Magicfin
+                    // Sticker).
                     let bought = self.players[p]
                         .hand
                         .iter()
                         .rev()
                         .find(|h| h.card == m.card)
                         .copied();
+                    self.players[p].tp.bought_card = Some(m.card);
                     if let Some(b) = bought {
                         self.players[p].tp.bought_stats = (b.attack, b.health);
                     }

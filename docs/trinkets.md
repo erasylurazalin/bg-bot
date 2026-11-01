@@ -222,3 +222,11 @@ See `docs/darkgifts.md`.
 - **Wisdomball Supply and Putricide Sticker:** out for now.
 - The game data has `92` (the Naga race id) in these cards' text slot. The live game rewrites it while the trinket is offered: logs show 17 (Mech), 43 (Quilboar), 126 and 0.
 
+Built in block 6 (2026-11-01): the Poet Portrait with its Timewarped Poet
+token (`permanent_keep = "all_dragons"`), the lesser and greater Colorful
+Compass and the Gold-plated Compass. The type they read at the pick is
+`TrinketState.tribe` (`lock_type` in trinkets.toml, docs/ENGINE.md "The
+compasses and the Poet Portrait (block 6)"). Minion Bait, Wisdomball Supply,
+Putricide Sticker, Kiri, Shrine and the Naga and Timewarp trinkets are not
+built.
+

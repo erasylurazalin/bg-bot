@@ -2268,6 +2268,19 @@ golden_stats = [8, 8]
 amalgam_gain_copy = 1
 buddy = true
 
+# Poet Portrait (BG32_MagicItem_364): the game data's Timewarped Poet
+# (BG34_Giant_314, golden BG34_Giant_314_G), a trinket-only token. Persistent
+# Poet's text for every friendly Dragon instead of the adjacent ones, so the
+# keep is a card field and `all_dragons` says which Dragons it reaches.
+[[token]]
+name = "Timewarped Poet"
+tier = 5
+tribe = "dragon"
+stats = [6, 7]
+golden_stats = [12, 14]
+keywords = ["divine_shield"]
+permanent_keep = "all_dragons"
+
 # Mecha-Jaraxxus Sticker (BG30_MagicItem_942): the four Magnetic
 # Mecha-Demons it hands out (BG25_807t to t4) and their goldens. They
 # Magnetize to Mechs and to Demons (magnetize_to_tribes), a rule of their own.

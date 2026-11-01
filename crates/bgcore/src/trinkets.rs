@@ -276,7 +276,9 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     /// Buff the two left-most friendly minions by the base plus this many per
     /// Battlecry the player has triggered this game (Murky Sticker).
     BuffLeftmostTwoPerBattlecry { attack: i32, health: i32 },
-    /// A random minion of the player's most common type (Charisma).
+    /// This many random minions of a minion type: the one this trinket locked
+    /// in with `lock_type`, else the player's most common type now (Charisma,
+    /// both Compasses).
     RandomMostCommonType(u8),
     /// Give this many random friendly minions of a tribe stats (Booty Bay
     /// Brew).
@@ -501,6 +503,16 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     /// Get this many random Magnetic Mecha-Demons (Mecha-Jaraxxus Sticker):
     /// the tokens `CardDb.mecha_demons` holds, generated.
     MechaDemon(u8),
+    // ---- block 6: the compasses (docs/trinkets.md, 2026-11-01) ----
+    /// Read the player's most common minion type now and keep it on this
+    /// trinket's slot for the rest of the game: "the type is fixed at the
+    /// pick" (Colorful Compass, Gold-plated Compass). A `RandomMostCommonType`
+    /// act hands out minions of the type it locked in.
+    LockType,
+    /// The next minion of this trinket's locked type that the player buys
+    /// becomes Golden, and it is not a triple: playing it gives no Triple
+    /// Reward (DESIGN.md). The type is spent by the buy (Gold-plated Compass).
+    GoldenBoughtType,
 }
 
 /// A rewrite a portrait applies to every copy of a card the player has or
@@ -1163,6 +1175,13 @@ struct RawAct {
     /// The tribes a portrait adds to a card (Bronzebeard Portrait).
     #[serde(default)]
     also_tribes: Vec<String>,
+    // ---- block 6 ----
+    /// Lock the player's most common type in on this trinket's slot.
+    #[serde(default)]
+    lock_type: bool,
+    /// The next minion of the locked type you buy becomes Golden.
+    #[serde(default)]
+    golden_bought: bool,
 }
 
 #[derive(Deserialize)]
@@ -1713,6 +1732,10 @@ impl TrinketDb {
                     Act::CastRandomSpells(n)
                 } else if let Some(n) = a.mecha_demon {
                     Act::MechaDemon(n)
+                } else if a.lock_type {
+                    Act::LockType
+                } else if a.golden_bought {
+                    Act::GoldenBoughtType
                 } else if a.triple_need_two_pirate {
                     Act::TripleNeedTwoPirate
                 } else if let Some([slot, tribe]) = &a.replace_with_random {

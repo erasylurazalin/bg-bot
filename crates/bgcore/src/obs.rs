@@ -130,19 +130,21 @@
 //!   187..189 the lesser slot, greater slot and hero power trinket (index
 //!   into the trinket table + 1, 0 for empty)
 //!   190..192 their "every N" counters
-//!   193 a trinket offer is open, 194 which slot it fills (1 lesser,
+//!   193..195 the minion type each slot locked in at the pick (index + 1, 0
+//!   for none: the Colorful and Gold-plated Compasses)
+//!   196 a trinket offer is open, 197 which slot it fills (1 lesser,
 //!   2 greater, 3 the power's)
-//!   195..202 the four options: trinket index + 1, then the price
-//!   203..207 Dark Gifts and Dark Paradox
-//!   208 free_minion_left (Spectral Sight: free Tavern minions left this turn)
-//!   209..211 Conviction: minion count, Attack buff, Health buff
-//!   212..214 Lock and Load: stored minion card id + 1, Attack, Health
-//!   215..218 Friendly Wager: offer open, 2 offered opponents, picked opponent
-//!   219..223 Detective for Hire: offer open, 2 offered card ids + 1, 2 empty flags
-//!   224 Ice Block held (Safety Patch: the save is still there)
-//!   225 Immune this turn
-//!   226 the Prize tier the open Discover offers (0 if it is not a Prize one)
-//!   227 Triple Prizes replace Triple Rewards (Corrupted Tome)
+//!   198..205 the four options: trinket index + 1, then the price
+//!   206..210 Dark Gifts and Dark Paradox
+//!   211 free_minion_left (Spectral Sight: free Tavern minions left this turn)
+//!   212..214 Conviction: minion count, Attack buff, Health buff
+//!   215..217 Lock and Load: stored minion card id + 1, Attack, Health
+//!   218..221 Friendly Wager: offer open, 2 offered opponents, picked opponent
+//!   222..226 Detective for Hire: offer open, 2 offered card ids + 1, 2 empty flags
+//!   227 Ice Block held (Safety Patch: the save is still there)
+//!   228 Immune this turn
+//!   229 the Prize tier the open Discover offers (0 if it is not a Prize one)
+//!   230 Triple Prizes replace Triple Rewards (Corrupted Tome)
 //!   (Its legality is in the action mask, so it isn't repeated here.)
 //! - Own card slots (OWN_SLOTS = 28, each SLOT_FEATURES values):
 //!   shop minions (SHOP = 7), shop spell (SHOP_SPELL = 1), hand (HAND = 10),
@@ -404,9 +406,14 @@ pub const SCALAR_HERO_OFFER: usize = SCALAR_POWER_OFFER + crate::CHOICES;
 /// table plus one (0 for empty), then the "every N" counter of each.
 pub const SCALAR_TRINKET: usize = SCALAR_HERO_OFFER + DISCOVER;
 pub const SCALAR_TRINKET_COUNT: usize = SCALAR_TRINKET + crate::TRINKET_SLOTS;
+/// The minion type each trinket slot locked in at the pick (`Tribe` as an
+/// index plus one, 0 for none): the Colorful Compasses hand out minions of it
+/// and the Gold-plated Compass makes the next one bought Golden, so the bot
+/// sees which type is worth buying (docs/trinkets.md, "Block 6 rules").
+pub const SCALAR_TRINKET_TRIBE: usize = SCALAR_TRINKET_COUNT + crate::TRINKET_SLOTS;
 /// A trinket offer is open, and which slot it is for (1 lesser, 2 greater,
 /// 3 the hero power's).
-pub const SCALAR_PENDING_TRINKET: usize = SCALAR_TRINKET_COUNT + crate::TRINKET_SLOTS;
+pub const SCALAR_PENDING_TRINKET: usize = SCALAR_TRINKET_TRIBE + crate::TRINKET_SLOTS;
 pub const SCALAR_TRINKET_OFFER_SLOT: usize = SCALAR_PENDING_TRINKET + 1;
 /// The four options: trinket index + 1 and the price it is sold at.
 pub const SCALAR_TRINKET_OPTION: usize = SCALAR_TRINKET_OFFER_SLOT + 1;
@@ -573,6 +580,7 @@ const _: () = assert!(SCALAR_TARGET_KIND + TARGET_KINDS == SCALAR_SHOP_CONSUME_L
 const _: () = assert!(SCALAR_CHOOSE_ONE + 2 * CHOOSE_FEATURES == SCALAR_ARMOR);
 const _: () = assert!(SCALAR_POWER_OFFER + crate::CHOICES == SCALAR_HERO_OFFER);
 const _: () = assert!(SCALAR_HERO_OFFER + DISCOVER == SCALAR_TRINKET);
+const _: () = assert!(SCALAR_TRINKET_TRIBE + crate::TRINKET_SLOTS == SCALAR_PENDING_TRINKET);
 const _: () = assert!(SCALAR_TRIPLE_PRIZE + 1 == SCALARS);
 const _: () = assert!(SLOT_TRIBES + Tribe::EVERY.len() == SLOT_KEYWORDS);
 const _: () = assert!(SLOT_KEYWORDS + Keywords::ALL.len() == SLOT_MAGNETIZATIONS);
@@ -1085,6 +1093,7 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
         let st = pl.trinkets[slot];
         s[SCALAR_TRINKET + slot] = st.of as f32;
         s[SCALAR_TRINKET_COUNT + slot] = st.count as f32;
+        s[SCALAR_TRINKET_TRIBE + slot] = st.tribe.map_or(0, |t| t as usize + 1) as f32;
     }
     s[SCALAR_PENDING_TRINKET] = (!pl.trinket_offer.is_empty()) as u8 as f32;
     s[SCALAR_TRINKET_OFFER_SLOT] = pl.trinket_offer_slot as f32;

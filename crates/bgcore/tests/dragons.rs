@@ -211,6 +211,43 @@ fn persistent_poet_keeps_only_adjacent_dragons_gains() {
 }
 
 #[test]
+fn timewarped_poet_keeps_every_dragons_gains_and_its_own() {
+    let db = db();
+    // The Poet Portrait's token: "All your Dragons keep Bonus Keywords and
+    // stats gained in combat". Electric Synthesizer gives every other Dragon
+    // +1/+1, so every slot but its own keeps the gain, wherever the Poet
+    // stands, the Poet's own gain included.
+    let board = [
+        mk(&db, "Electric Synthesizer", false),
+        mk(&db, "Scarlet Survivor", false),
+        mk(&db, "Timewarped Poet", false),
+        mk(&db, "Glim Guardian", false),
+        mk(&db, "Scarlet Survivor", false),
+    ];
+    let out = attack_with(&db, &board);
+    assert_eq!(out.sides[0].permanent_stats[0], (0, 0), "the Synthesizer gains nothing");
+    for slot in 1..5 {
+        assert_eq!(out.sides[0].permanent_stats[slot], (1, 1), "slot {slot}");
+    }
+
+    // The golden one doubles them all, its own too.
+    let board = [
+        mk(&db, "Timewarped Poet", true),
+        mk(&db, "Scarlet Survivor", false),
+        mk(&db, "Electric Synthesizer", false),
+    ];
+    let out = attack_with(&db, &board);
+    assert_eq!(out.sides[0].permanent_stats[0], (2, 2), "the golden Poet's own gain");
+    assert_eq!(out.sides[0].permanent_stats[1], (2, 2));
+    assert_eq!(out.sides[0].permanent_stats[2], (0, 0));
+
+    // A Bonus Keyword a Dragon gains in the fight is kept too.
+    let board = [mk(&db, "Heroic Broodmother", false), mk(&db, "Timewarped Poet", false)];
+    let out = fight_with(&db, &board, &[wall(&db)], [Counters::default(); 2], 3, &mut Rng::new(1), &mut ());
+    assert!(out.sides[0].permanent_keywords[0] & Keywords::DIVINE_SHIELD != 0);
+}
+
+#[test]
 fn tarecgosa_keeps_a_keyword_gained_by_heroic_broodmothers_rally() {
     let db = db();
     // Broodmother's Rally gives it Divine Shield in the fight; next to a

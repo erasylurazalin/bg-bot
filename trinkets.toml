@@ -29,7 +29,7 @@
 # make_golden_random, last_spell_copies, discover_deathrattle, discover_tier,
 # discover_remember / get_remembered, copy_buys, gems_each_type,
 # buff_leftmost, get_golden, lockbox_sooner, magnetize_ends, one_of,
-# warband_whistle, triple_need_two_pirate.
+# warband_whistle, triple_need_two_pirate, lock_type, golden_bought.
 
 #
 # Second round (2026-10-31): prices and Gold. `health_price_minions`,
@@ -2087,3 +2087,52 @@ cost = 3
 tribes = ["demon", "mech"]
 on_pick = [{ mecha_demon = 2 }]
 start_of_turn = [{ mecha_demon = 2 }]
+
+# ---- block 6: the compasses and the Poet Portrait (docs/trinkets.md, "Block
+# 6 rules (Era, 2026-11-01)") ----
+#
+# The compasses' type is read once, at the pick, and never changes: `lock_type`
+# stores the player's most common minion type on the trinket's slot, and
+# `random_most_common_type` then hands out minions of that type whatever the
+# board becomes. A common type read the same way as the Dark Discovery's "your
+# type" slot: the all-type minions count for every tribe, a tie is broken at
+# random, and a board with no typed minion gives none.
+
+# Get a Timewarped Poet, a trinket-only token: Persistent Poet's keep for every
+# friendly Dragon instead of the adjacent ones.
+[[trinket]]
+name = "Poet Portrait"
+cube = false
+card_id = "BG32_MagicItem_364"
+slot = "greater"
+cost = 4
+tribes = ["dragon"]
+on_pick = [{ get = "Timewarped Poet" }]
+
+# Get a random minion of the type, on the pick and at the start of each turn.
+[[trinket]]
+name = "Colorful Compass"
+card_id = "BG30_MagicItem_426"
+slot = "lesser"
+cost = 2
+on_pick = [{ lock_type = true }, { random_most_common_type = 1 }]
+start_of_turn = [{ random_most_common_type = 1 }]
+
+# The Greater one hands out two.
+[[trinket]]
+name = "Colorful Compass (Greater)"
+card_id = "BG30_MagicItem_426t"
+slot = "greater"
+cost = 2
+on_pick = [{ lock_type = true }, { random_most_common_type = 2 }]
+start_of_turn = [{ random_most_common_type = 2 }]
+
+# The next minion of the type that you buy becomes Golden (not a triple, and
+# no Triple Reward when it is played: DESIGN.md), and 5 free Refreshes.
+[[trinket]]
+name = "Gold-plated Compass"
+card_id = "BG32_MagicItem_901"
+slot = "greater"
+cost = 0
+on_pick = [{ lock_type = true }, { free_refreshes = 5 }]
+on_buy = [{ golden_bought = true }]

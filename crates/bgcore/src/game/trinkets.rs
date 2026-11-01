@@ -152,6 +152,18 @@ impl Game {
         if of == 0 { None } else { Some(of - 1) }
     }
 
+    /// The player's most common minion type now: the tribe a plurality of the
+    /// board's minions have, a tie broken at random, and the all-type minions
+    /// count for every tribe. `crate::darkgifts::most_common_type` is the one
+    /// read of it (Dark Discovery's "your type" slot and the compasses' lock
+    /// at the pick), so an empty or all-neutral board gives None.
+    fn board_most_common_type(&mut self, p: usize) -> Option<Tribe> {
+        let cards = &self.data.cards;
+        let tribes: ArrayVec<Tribes, { crate::BOARD }> =
+            self.players[p].board.iter().map(|m| cards.tribes_of(m)).collect();
+        crate::darkgifts::most_common_type(&tribes, &mut self.rng)
+    }
+
     /// The tribes the player has minions of, for the guarantee and the
     /// price: `[board counts, board plus hand counts]`. DESIGN.md counts the
     /// board only, except Murlocs, which count in hand too; the wider one is
@@ -444,6 +456,7 @@ impl Game {
                     uses_left: t.uses_per_turn.unwrap_or(u8::MAX),
                     done: false,
                     card: None,
+                    tribe: None,
                     cube,
                     cube_choices: if cube {
                         self.players[p].trinkets[slot].cube_choices
@@ -1611,27 +1624,41 @@ impl Game {
                 self.give_generated(p, pick);
             }
             Act::RandomMostCommonType(n) => {
-                let mut counts = [0u8; Tribe::EVERY.len()];
-                let cards = &self.data.cards;
-                for m in &self.players[p].board {
-                    let ts = cards.tribes_of(m);
-                    for (i, t) in Tribe::EVERY.into_iter().enumerate() {
-                        if ts.has(t) {
-                            counts[i] = counts[i].saturating_add(1);
-                        }
-                    }
-                }
-                let Some(best) = counts.iter().max().copied().filter(|&c| c > 0) else { return };
-                let tied: ArrayVec<Tribe, { Tribe::EVERY.len() }> = Tribe::EVERY
-                    .into_iter()
-                    .enumerate()
-                    .filter(|&(i, _)| counts[i] == best)
-                    .map(|(_, t)| t)
-                    .collect();
-                let t = tied[self.rng.below(tied.len() as u32) as usize];
+                // A trinket that read its type at the pick keeps it: "the type
+                // is fixed at the pick" (docs/trinkets.md). One that never read
+                // one (a copy a portrait made over it, a pick with no typed
+                // minion on the board) reads the board now.
+                let locked = self.players[p].trinkets[slot].tribe;
+                let t = locked.or_else(|| self.board_most_common_type(p));
+                let Some(t) = t else { return };
                 for _ in 0..n {
                     self.run_effect(p, &mut pos, Effect::GetRandomMinion { tribe: t }, false, 1);
                 }
+            }
+            Act::LockType => {
+                let t = self.board_most_common_type(p);
+                self.players[p].trinkets[slot].tribe = t;
+            }
+            Act::GoldenBoughtType => {
+                // The type the pick locked in: the minion just bought turns
+                // Golden if it is of it, and the type is spent.
+                let Some(t) = self.players[p].trinkets[slot].tribe else { return };
+                let Some(card) = self.players[p].tp.bought_card else { return };
+                let cards = &self.data.cards;
+                let Some(at) = self.players[p]
+                    .hand
+                    .iter()
+                    .rposition(|m| m.card == card && !m.golden && cards.tribes_of(m).has(t))
+                else {
+                    return;
+                };
+                let mut m = self.players[p].hand[at];
+                super::shop::golden_up(cards, &mut m);
+                // "A minion made golden this way is not a triple and gives no
+                // Triple Reward" (DESIGN.md): playing it gives none.
+                m.no_reward = true;
+                self.players[p].hand[at] = m;
+                self.players[p].trinkets[slot].tribe = None;
             }
         }
     }

@@ -48,27 +48,47 @@ fn trinket(g: &Game, name: &str) -> u8 {
 /// when nothing is open.
 fn answer(g: &mut Game) -> bool {
     let Some(p) = g.current_player() else { return false };
-    let pl = &g.players[p];
-    // The same priority `is_legal` gives: another choice first, then the
-    // trinket offer.
-    let a = if !pl.discover.is_empty()
-        || !pl.power_offer.is_empty()
-        || pl.pending_choose_one.is_some()
+    // The engine's own priority (`Game::is_legal`): a pending target first,
+    // then a Discover or another choice, then the trinket offer. Every
+    // candidate that could be open is tried in that order and the first legal
+    // one is the answer: a target nothing can satisfy is fizzled by the
+    // engine (a wheel result or a random spell can leave two things open at
+    // once), so a later candidate can be the one that is legal.
+    let mut tries: Vec<Action> = Vec::new();
     {
-        Action::Choose(0)
-    } else if pl.pending_discard.is_some() {
-        Action::Discard(0)
-    } else if pl.pending_shop_target.is_some() {
-        Action::TargetShop(0)
-    } else if pl.pending_target.is_some() {
-        Action::Target(0)
-    } else if !pl.trinket_offer.is_empty() {
-        Action::ChooseTrinket(0)
-    } else {
-        return false;
-    };
-    g.step(a).unwrap_or_else(|_| panic!("could not answer {a:?}"));
-    true
+        let pl = &g.players[p];
+        if let Some(pt) = pl.pending_target {
+            tries.push(if pt.kind.takes_shop() {
+                Action::TargetShop(0)
+            } else {
+                Action::Target(0)
+            });
+        }
+        if pl.pending_shop_target.is_some() {
+            tries.push(Action::TargetShop(0));
+        }
+        if pl.pending_discard.is_some() {
+            tries.push(Action::Discard(0));
+        }
+        if pl.pending_choose_one.is_some()
+            || !pl.discover.is_empty()
+            || !pl.power_offer.is_empty()
+            || pl.wager_offer.is_some()
+            || pl.holmes_offer.is_some()
+        {
+            tries.push(Action::Choose(0));
+        }
+        if !pl.trinket_offer.is_empty() {
+            tries.push(Action::ChooseTrinket(0));
+        }
+    }
+    for a in tries {
+        if g.is_legal(a) {
+            g.step(a).unwrap_or_else(|_| panic!("could not answer {a:?}"));
+            return true;
+        }
+    }
+    false
 }
 
 fn turn_of(g: &mut Game, p: usize) {
@@ -4723,5 +4743,139 @@ fn a_mecha_demon_magnetizes_onto_a_demon_as_well_as_a_mech() {
         (demon.0 + md_stats.0, demon.1 + md_stats.1),
         "the Demon took its stats"
     );
+    g.check_invariants().unwrap();
+}
+
+// ---- block 6: the Poet Portrait and the compasses (2026-11-01) ----
+
+/// The number of minions in hand that have this tribe.
+fn hand_tribe(g: &Game, p: usize, t: Tribe) -> usize {
+    g.players[p].hand.iter().filter(|m| g.data.cards.tribes_of(m).has(t)).count()
+}
+
+#[test]
+fn the_poet_portrait_hands_out_a_timewarped_poet() {
+    let mut g = game(501);
+    put_on_board(&mut g, 0, "Scarlet Survivor");
+    take(&mut g, 0, "Poet Portrait");
+    let poet = g.players[0].hand.iter().find(|m| m.card == id(&g, "Timewarped Poet")).copied();
+    let poet = poet.expect("a Timewarped Poet in hand");
+    let c = g.data.cards.get(poet.card);
+    assert_eq!(c.tier, 5, "a Tier 5 minion");
+    assert!(c.tribes.has(Tribe::Dragon), "and a Dragon");
+    assert!(c.token, "a trinket-only token, never in the pool");
+    assert_eq!((c.attack, c.health), (6, 7));
+    assert_eq!(c.golden_stats, Some((12, 14)), "the golden one is double");
+    assert!(poet.keywords.has(bgcore::minion::Keywords::DIVINE_SHIELD), "Divine Shield");
+    assert!(!poet.golden, "the plain one");
+    g.check_invariants().unwrap();
+}
+
+/// Two Microbots and a Demon: the board's type is Mech, and the Microbots are
+/// tokens, so a Mech the compass hands out can never make a triple with them.
+fn mech_board(g: &mut Game) {
+    put_on_board(g, 0, "Microbot");
+    put_on_board(g, 0, "Microbot");
+    put_on_board(g, 0, "Wrath Weaver");
+}
+
+#[test]
+fn the_colorful_compass_keeps_the_type_it_read_at_the_pick() {
+    let mut g = game(502);
+    mech_board(&mut g);
+    take(&mut g, 0, "Colorful Compass");
+    assert_eq!(g.players[0].trinkets[0].tribe, Some(Tribe::Mech), "fixed at the pick");
+    assert_eq!(g.players[0].hand.len(), 1, "one minion on the pick");
+    assert_eq!(hand_tribe(&g, 0, Tribe::Mech), 1, "and it is a Mech");
+    // The bot sees the type in the trinket slot's own scalar.
+    let mut out = vec![0f32; bgcore::obs::OBS_SIZE];
+    bgcore::obs::write(&g, 0, &mut out);
+    assert_eq!(out[bgcore::obs::SCALAR_TRINKET_TRIBE], Tribe::Mech as usize as f32 + 1.0);
+    // Rebuilt into Demons, the compass still hands out Mechs.
+    for _ in 0..4 {
+        put_on_board(&mut g, 0, "Wrath Weaver");
+    }
+    next_turn(&mut g);
+    assert_eq!(hand_tribe(&g, 0, Tribe::Mech), 2, "another Mech at the start of the turn");
+    assert_eq!(g.players[0].hand.len(), 2, "and nothing else");
+    assert_eq!(g.players[0].trinkets[0].tribe, Some(Tribe::Mech), "still Mechs");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_greater_colorful_compass_hands_out_two() {
+    let mut g = game(503);
+    mech_board(&mut g);
+    take(&mut g, 0, "Colorful Compass (Greater)");
+    assert_eq!(g.players[0].hand.len(), 2, "two on the pick");
+    assert_eq!(hand_tribe(&g, 0, Tribe::Mech), 2, "both Mechs");
+    // The pick's two are generated (no pool copy), so dropping them gives
+    // nothing back to the pool and the two the next turn brings can only be
+    // two of a kind, never a triple of three.
+    g.players[0].hand.clear();
+    next_turn(&mut g);
+    assert_eq!(g.players[0].hand.len(), 2, "two more at the start of the turn");
+    assert_eq!(hand_tribe(&g, 0, Tribe::Mech), 2, "both Mechs");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn an_amalgam_counts_for_every_tribe_when_the_compass_reads_the_type() {
+    let mut g = game(504);
+    // An Amalgam is every type: Mythrax plus one Demon is a Demon board.
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    let amal = g.players[0].make_card(&g.data.cards, id(&g, "Amalgam"), false, 0);
+    g.players[0].board.push(amal);
+    take(&mut g, 0, "Colorful Compass");
+    assert_eq!(g.players[0].trinkets[0].tribe, Some(Tribe::Demon));
+    assert_eq!(hand_tribe(&g, 0, Tribe::Demon), 1, "a Demon for it");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_compass_on_an_empty_board_gives_nothing() {
+    let mut g = game(505);
+    take(&mut g, 0, "Colorful Compass");
+    assert_eq!(g.players[0].trinkets[0].tribe, None, "no type to read");
+    assert!(g.players[0].hand.is_empty(), "and so no minion");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_gold_plated_compass_makes_the_next_minion_of_its_type_golden() {
+    let mut g = game(506);
+    g.players[0].gold = 10;
+    mech_board(&mut g);
+    take(&mut g, 0, "Gold-plated Compass");
+    assert_eq!(g.players[0].free_rolls, 5, "5 free Refreshes");
+    assert_eq!(g.players[0].trinkets[1].tribe, Some(Tribe::Mech), "the type, fixed");
+    // A Demon bought first leaves the trinket waiting for its Mech.
+    set_shop(&mut g, 0, &["Wrath Weaver", "Lullabot"]);
+    act(&mut g, 0, Action::Buy(0));
+    let demon = g.players[0].hand.iter().find(|m| m.card == id(&g, "Wrath Weaver")).copied();
+    assert!(!demon.expect("bought").golden, "not its type: not Golden");
+    assert_eq!(g.players[0].trinkets[1].tribe, Some(Tribe::Mech), "still waiting");
+    // The Mech turns Golden, with the golden card's stats, and is no triple.
+    assert!(g.is_legal(Action::Buy(0)));
+    act(&mut g, 0, Action::Buy(0));
+    let mech = g.players[0].hand.iter().find(|m| m.card == id(&g, "Lullabot")).copied();
+    let mech = mech.expect("bought");
+    let base = g.data.cards.get(mech.card);
+    let golden = base.golden_stats.unwrap_or((base.attack * 2, base.health * 2));
+    assert!(mech.golden, "Golden");
+    assert_eq!((mech.attack, mech.health), golden, "the golden card's stats");
+    assert!(mech.no_reward, "not a triple: no Triple Reward for it");
+    assert_eq!(g.players[0].trinkets[1].tribe, None, "the type is spent");
+    // Playing it puts no Triple Reward in hand, and it is not a Golden played.
+    let at = g.players[0].hand.iter().position(|m| m.card == id(&g, "Lullabot")).unwrap();
+    act(&mut g, 0, Action::Play { hand: at as u8, pos: 0 });
+    let reward = g.data.cards.triple_reward.expect("a Triple Reward spell");
+    assert!(
+        g.players[0].hand.iter().all(|m| m.card != reward),
+        "no Triple Reward"
+    );
+    // A Golden minion played it is, so the "Golden minions played" counters
+    // (Gold Mallet) still see it; only the Triple Reward is gone.
+    assert_eq!(g.players[0].golden_played, 1, "a Golden minion was played");
     g.check_invariants().unwrap();
 }

@@ -100,7 +100,7 @@ legality in mod.rs.
 | Per-game player counter | `buff_per_deathrattle`, `improve_counter`, `spell_bonus`, volumizer/beetle bonus | fields on `Player` (`counters()` hands them to fights) | Tasty Lobster |
 | Per-minion counter | `improvements` (u16) | tier of Patient Scout, event counts, damage milestones, Lockbox turns | Patient Scout |
 | Stat threshold | `attack_threshold` | `check_attack_thresholds`, `Side::gain_at` | Scarlet Survivor |
-| Keep combat gains | `permanent_keep = "self"/"adjacent_dragons"`, `SideOutcome::permanent_*` | `Side::gain_at`, `apply_side_outcome` | Tarecgosa |
+| Keep combat gains | `permanent_keep = "self"/"adjacent_dragons"/"all_dragons"`, `SideOutcome::permanent_*` | `Side::gain_at`, `apply_side_outcome` | Tarecgosa, Timewarped Poet |
 | Cards gained in a fight | `get = "X"`, `random_*` effects | `SideOutcome.cards`, `apply_side_outcome` -> `give_generated` | Headhunter Gryphon |
 | Spell effect (no target) | `[[spell]] effect = { gold = 2 }` etc | `cast_spell_inner` -> `execute_spell_effect` (`SpellEffect`) | Tavern Coin |
 | Spell effect (needs a minion) | `effect = { target = "chosen", .. }` | `cast_spell_inner` -> `PendingTarget` -> `apply_target` (`SpellTarget`) | Tavern Dish Banana |
@@ -217,7 +217,7 @@ exactly one legal target and drops the effect when there is none.
 | Summon in combat | Cord Puller / Den Mother style (`summon`) | `golden_doubles_count` for Beetle style |
 | Summon a copy / from hand | Flighty Scout, Expert Aviator | fights need the hand passed (`reads_hand`) |
 | Deal damage in combat | Obsidian Ravager (`damage_target_and_neighbor`), Blade Collector (cleave) | `rally_damage`, `hit`; Divine Shield/Venomous honoured |
-| Keep stats after the fight | Tarecgosa (`permanent_keep`), Eudora (`keep_golden`), Persistent Poet | `SideOutcome.permanent_stats` by start slot |
+| Keep stats after the fight | Tarecgosa (`permanent_keep`), Eudora (`keep_golden`), Persistent Poet (adjacent), Timewarped Poet (all Dragons) | `SideOutcome.permanent_stats` by start slot |
 | Keep a counter after the fight | Lurking Leviathan, Treasure Parrot | `permanent_improvements` |
 | Cast a named spell | Gatekeeper Amalgam (`cast`) | counts as a real cast |
 | Trigger another card's Battlecry/Rally | Kelp Keeper, Sky-hatch Runaway | `TriggerBattlecry`, `TriggerRally` |
@@ -366,9 +366,9 @@ passes the slot through.
    `rule` with `event = "death"`, `"summon"`, `"attack"` or a tribe of either.
    A hook that needs the card the event is about (the minion just bought, the
    spell just bought, the Tavern slot a spell hit) reads it from
-   `TrinketPowers` (`bought_stats`, `bought_spell`, `shop_hit`), which the
-   card path writes just before firing the event; a `run_trinket_act` has no
-   card argument and never asks the player anything.
+   `TrinketPowers` (`bought_card`, `bought_stats`, `bought_spell`, `shop_hit`),
+   which the card path writes just before firing the event; a
+   `run_trinket_act` has no card argument and never asks the player anything.
 4. Tests in `crates/bgcore/tests/trinkets.rs`: `equip` puts a trinket in a slot
    without its pick effects (`Game::set_trinket`, which also refreshes the
    player's event mask), `take` picks it through the real offer (so `on_pick`
@@ -1004,3 +1004,39 @@ Triple Reward spell.
   test per trinket and token; `tests/heroes_batch4.rs` for Tickatus. The
   Yogg wheel is random, so its test hunts seeds until each of the six results
   has been seen.
+
+## 15. Systems the trinket block 6 added (2026-11-01)
+
+- **A trinket that keeps a minion type.** `lock_type` (`Act::LockType`) reads
+  the board's most common type once and stores it in `TrinketState.tribe`,
+  which `set_trinket` clears with the rest of the slot (docs/trinkets.md: "the
+  type is fixed at the pick"). The read is
+  `crate::darkgifts::most_common_type` on `CardDb::tribes_of` of every board
+  minion, so an all-type minion counts for every tribe, a tie is broken at
+  random and an empty board gives None; `Game::board_most_common_type` is the
+  one wrapper. `random_most_common_type` (which already existed for Charisma)
+  now hands out minions of the slot's stored type and only falls back to the
+  live board when the slot holds none, so a card can use it for "of the type
+  this trinket locked in". The observation carries the stored type per slot in
+  `SCALAR_TRINKET_TRIBE`.
+- **A trinket that makes a bought minion Golden.** `golden_bought` on `on_buy`
+  (`Act::GoldenBoughtType`) makes the minion just bought Golden when its
+  tribes include the slot's stored type: `golden_up` for the stats, and
+  `Minion.no_reward` so playing it gives no Triple Reward (DESIGN.md: it is
+  not a triple), then the type is cleared. The act finds the minion through
+  `TrinketPowers.bought_card`, which `Action::Buy` writes beside
+  `bought_stats` just before the Buy event; the buy's own `check_triple` has
+  already run by then, so a buy that made a triple keeps its Triple Reward and
+  the trinket stays armed.
+- **The keep for every Dragon.** `permanent_keep = "all_dragons"`
+  (`PermanentKeep::AllDragons`) is Persistent Poet's `adjacent_dragons` for
+  every living friendly Dragon instead of the two neighbours, the keeper's own
+  gains included; `Side::keep_mul` is the one place that reads it, so a golden
+  keeper doubles the gains and a keyword gained in the fight is kept the usual
+  way. Its token, Timewarped Poet, is in cards.toml's "Trinket-only minions"
+  block.
+- **Tests.** The block 6 section at the end of `tests/trinkets.rs` (the Poet
+  Portrait's token, both compasses' fixed type, an all-type board, an empty
+  board, and the Gold-plated Compass's Golden buy that yields no Triple
+  Reward) and `timewarped_poet_keeps_every_dragons_gains_and_its_own` in
+  `tests/dragons.rs`.

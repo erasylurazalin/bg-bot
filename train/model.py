@@ -123,6 +123,8 @@ SCALAR_SCALE = _scales(bgpy.SCALARS, "SCALAR_", {
     "CONVICTION_COUNT": 7, "CONVICTION_ATTACK": 10, "CONVICTION_HEALTH": 10,
     "LOCKED_ATTACK": 10, "LOCKED_HEALTH": 10,
     (bgpy.SCALAR_WAGER_OFFER, 2): 8, "WAGER_PICK": 8,
+    # The type each trinket slot locked in at the pick (a tribe index + 1).
+    (bgpy.SCALAR_TRINKET_TRIBE, bgpy.TRINKET_SLOTS): 10,
     **{(bgpy.SCALAR_CHOOSE_ONE + j * bgpy.CHOOSE_FEATURES + 4, 2): 10 for j in range(2)},
 })
 OPP_SCALE = _scales(bgpy.OPP_SCALARS, "OPP_", {

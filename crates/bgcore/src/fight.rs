@@ -890,7 +890,9 @@ impl<'a> Side<'a> {
     /// How much of a stat gain at board slot `i` is kept permanently: 1, 2
     /// for a golden keeper, None when nothing keeps it. Tarecgosa keeps its
     /// own gains; a Dragon keeps its when a living Persistent Poet sits next
-    /// to it, checked at the moment of the gain.
+    /// to it, or when a living Timewarped Poet is anywhere on its side (that
+    /// one keeps its own gains too: it is one of "all your Dragons"), checked
+    /// at the moment of the gain.
     fn keep_mul(&self, db: &CardDb, i: usize) -> Option<i32> {
         let m = &self.ms[i].m;
         let mut mul = 0;
@@ -906,6 +908,16 @@ impl<'a> Side<'a> {
                 }
                 for (card, golden) in self.ms[j].m.parts() {
                     if db.get(card).permanent_keep == Some(PermanentKeep::AdjacentDragons) {
+                        mul = mul.max(if golden { 2 } else { 1 });
+                    }
+                }
+            }
+            for f in &self.ms {
+                if f.m.health <= 0 {
+                    continue;
+                }
+                for (card, golden) in f.m.parts() {
+                    if db.get(card).permanent_keep == Some(PermanentKeep::AllDragons) {
                         mul = mul.max(if golden { 2 } else { 1 });
                     }
                 }
