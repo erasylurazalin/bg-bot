@@ -96,20 +96,21 @@ fn power_progress(effect: PowerEffect, numbers: &[i32]) -> u32 {
     }
 }
 
-/// The powers whose fight effect reads a number the file does not carry, with
-/// what is missing. Ozumat's Tentacles take +1/+1 for every minion sold this
-/// game, and Tavish's Lock and Load needs the minion it locked in hand; a real
-/// board keeps neither. A fight with one of these is incomplete.
-fn power_needs_unknown_state(effect: PowerEffect) -> Option<&'static str> {
-    match effect {
-        PowerEffect::Tentacular { .. } => {
-            Some("minions sold this game not in the file: Ozumat's Tentacles are too small")
-        }
-        PowerEffect::LockAndLoad => {
-            Some("the minion locked in hand not in the file: Tavish's Lock and Load adds nothing")
-        }
-        _ => None,
-    }
+/// Ozumat's Tentacle, from the numbers the power's file entry shows. The
+/// number is the Tentacle's Attack as it stands (checked against the Tentacle
+/// the logged fights summon: 2 gives a 2/2, 3 a 3/3), and the engine's
+/// Tentacle is the card's own stats plus one more of each for every minion
+/// sold this game (`Counters.minions_sold`). So what to seat is the printed
+/// Attack minus the card's printed Attack. None when the file shows no number.
+fn tentacle_sold(cards: &crate::CardDb, card: crate::CardId, numbers: &[i32]) -> Option<u32> {
+    let printed = numbers.first().copied()?;
+    let base = cards.make(card, false).attack;
+    Some((printed - base).max(0) as u32)
+}
+
+/// The kind a Secret card id stands for, in `crate::secrets::CARD_IDS` order.
+fn secret_kind(card_id: &str) -> Option<u8> {
+    crate::secrets::CARD_IDS.iter().position(|c| *c == card_id).map(|k| k as u8)
 }
 
 /// A trinket's "improve this" number from the numbers its file shows: a
@@ -166,22 +167,66 @@ fn prepare_side(data: &Data, spec: &RealBoardSpec, side: usize, p: &mut Prepared
             Some(i) => {
                 let effect = data.heroes.power(i).effect;
                 pl.hold_power(data, i, power_progress(effect, &spec_power.numbers), spec.turn);
-                // A Secret is in the player's Secret zone, not on a board: the
-                // file does not carry the zone, so a fight with the power that
-                // fills it is missing whatever Secrets were up.
-                if effect == PowerEffect::DiscoverSecret {
+                // A Secret is in the player's Secret zone, not on a board, and
+                // the power that fills it is the only reason a fight needs the
+                // zone. A file without the key cannot say what was up; an
+                // empty list says there was nothing.
+                if effect == PowerEffect::DiscoverSecret && spec.secrets.is_none() {
                     p.missing[side].push(
                         "Secrets not in the file: Prestidigitation (the Secret zone)".to_string(),
                     );
                 }
-                if let Some(line) = power_needs_unknown_state(effect) {
-                    p.missing[side].push(line.to_string());
+                // Ozumat's Tentacles carry the game's sales in the power's own
+                // number, and the fight adds them to the Tentacle it summons.
+                if let PowerEffect::Tentacular { card } = effect {
+                    match tentacle_sold(&data.cards, card, &spec_power.numbers) {
+                        Some(sold) => pl.counts.minions_sold = sold,
+                        None => p.missing[side].push(
+                            "the hero power's numbers not in the file: Ozumat's Tentacle size"
+                                .to_string(),
+                        ),
+                    }
+                }
+                // Lock and Load's minion comes into the fight as soon as there
+                // is space, and attacks at once.
+                if effect == PowerEffect::LockAndLoad {
+                    match &spec_power.waiting {
+                        Some(waiting_spec) => {
+                            let (m, _) = RealBoard::build_minion(
+                                waiting_spec,
+                                spec.turn,
+                                &data.cards,
+                                &data.gifts,
+                            );
+                            pl.locked_and_loaded = Some(m);
+                        }
+                        None if !spec_power.waiting_known => p.missing[side].push(
+                            "the minion locked in hand not in the file: Tavish's Lock and Load \
+                             adds nothing"
+                                .to_string(),
+                        ),
+                        // Known and empty: the power owes nothing this fight, so
+                        // it adds nothing, exactly as in the game.
+                        None => {}
+                    }
                 }
             }
             None => p.missing[side].push(format!(
                 "hero power not built: {} ({})",
                 spec_power.name, spec_power.card_id
             )),
+        }
+    }
+    // The Secret zone: the engine reads it off the player, in the order the
+    // Secrets were got, which is the order they fire in.
+    if let Some(secret_cards) = &spec.secrets {
+        for card_id in secret_cards {
+            match secret_kind(card_id) {
+                Some(kind) => {
+                    pl.secrets.add(kind);
+                }
+                None => p.missing[side].push(format!("Secret not modelled: {card_id}")),
+            }
         }
     }
     // The file marks each trinket's slot. The engine has three: lesser,

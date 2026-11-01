@@ -78,9 +78,36 @@ laptop with `systemctl --user disable --now bg-logs.timer`.
 - `hand` is the minions in the side's hand at the first attack, the same
   shape as `minions` (the opponent's hand is in the log too); `hand_hidden`
   counts the cards the log shows without a card id, which are left out.
+- `reanimate` is `true` on the minion Rapid Reanimation (Teron Gorefiend)
+  chose: the log attaches the power's mark, the enchantment
+  `BG25_HERO_103pe`, to that minion while both sit in PLAY, and the file
+  writes the mark at the moment the fight is staged, which is the board it
+  holds. At the first attack the chosen minion is already gone and the mark
+  sits on the copy the power summoned, so reading it there would name the
+  wrong minion. The key is written only when the mark is attached; a fight
+  with the power and no mark means the player did not use it that turn.
 - `numbers` on a minion are its current `TAG_SCRIPT_DATA_NUM_1..4`, the
   {0} {1} {2} {3} of its text (Lurking Leviathan's growth, Spark Snapper's
   Satellite, a Tasty Lobster's buff). Written only for cards that have any.
+- `secrets` is the side's Secret zone at the first attack: the card ids of the
+  Secrets in it, in the order they were got, which is the order they fire in.
+  The five are `TB_Bacon_Secrets_01` (Venomstrike Trap), `_07` (Autodefense
+  Matrix), `_15` (Pack Tactics), `_10` (Redemption) and `_12` (the Ice Block a
+  Safety Patch gives). The zone also holds the Deity and quests, which are not
+  Secrets and are not written here. The list is always written, empty when
+  there is nothing, so a missing key means a file from before it was
+  collected. The opponent's Secrets are in the log too and are written: the
+  bot never sees them, but the fight check needs what was up.
+- `hero_power` numbers are the power's `TAG_SCRIPT_DATA_NUM_1..4` at the first
+  attack. For Ozumat's Tentacular the first one is the Attack the Tentacle has
+  now (2 summons a 2/2 Tentacle, 3 a 3/3), which is how the check gives the
+  fight the sales the Tentacle grows by. `hero_power.waiting` is the minion
+  Lock and Load still owes the board, in the same shape as a board minion, or
+  `null` when it owes none (every other power has `null` too): the power keeps
+  it in `TAG_SCRIPT_DATA_ENT_1`, and the file reads its stats off the copy the
+  power summons, because the held entity itself is not created in the log when
+  the opponent stole it. The key is always written with the power, so a
+  missing one means a file from before it was collected.
 - The raw logs stay in `~/bg-logs/`, so anything else the tracker can read
   can be added later: delete `boards/real/.state.json` and run the script
   again with `--no-archive` to rewrite every file (the flag skips copying
@@ -309,10 +336,18 @@ Defaults: `boards/real`, 1000 runs, `boards/checks` (git-ignored, under
     the loader maps, the hand, the counters, the Deity, the Tavern tier,
     Health and armor;
   - the hero power (`HeroDb::power_by_card_id`) with the one number a fight
-    reads off its text (Onyxia's Broodmother bonus). The three powers whose
-    fight effect only runs when the power was pressed in the same turn (I'll
-    Take That!, Embrace Your Rage, Rapid Reanimation) are played as pressed:
-    whoever holds one and can pay for it presses it before a fight;
+    reads off its text (Onyxia's Broodmother bonus, and Ozumat's Tentacular,
+    whose number is the Tentacle's Attack now and so the sales the Tentacle
+    grows by). The three powers whose fight effect only runs when the power was
+    pressed in the same turn (I'll Take That!, Embrace Your Rage, Rapid
+    Reanimation) are played as pressed: whoever holds one and can pay for it
+    presses it before a fight. Rapid Reanimation then needs the minion it
+    chose, which the file says with `reanimate`; without a marked minion the
+    power is armed with nothing to destroy, as it is in a game where the
+    player did not use it. Lock and Load gets the minion it holds, which the
+    file carries as `hero_power.waiting`;
+  - the Secret zone, from the file's `secrets`, in the order the Secrets were
+    got (the order they fire in);
   - the trinkets (`TrinketDb::by_card_id`) in the slot the file marks, with
     their "improve this" number from the printed stats where a fight effect
     grows them (Fang Anklet, All-Purpose Kibble) and the small standing rules
@@ -321,12 +356,12 @@ Defaults: `boards/real`, 1000 runs, `boards/checks` (git-ignored, under
 - **Incomplete:** a fight is incomplete when the engine does not build
   something it carried, and its missing pieces are listed: a minion (it
   keeps its stats and keywords as a Stand-in, Era's rule for the loader), a
-  hero power, a trinket, a Dark Gift, a quest reward (no quest is modelled),
-  a hand card the log does not name. Two gaps that come from the file itself
-  count too: a power whose fight effect reads a number the file does not
-  carry (Ozumat's Tentacles grow with minions sold, Tavish's Lock and Load
-  needs the minion it locked), and Prestidigitation, because a Secret zone is
-  not in the file. An incomplete fight is never flagged.
+  hero power, a trinket, a Dark Gift, a Secret card the engine has no kind
+  for, a quest reward (no quest is modelled), a hand card the log does not
+  name. A file written before a key existed counts too, because the check
+  cannot tell what was missing: Lock and Load without `hero_power.waiting`,
+  Prestidigitation without `secrets`, Ozumat without the power's numbers. An
+  incomplete fight is never flagged.
 - **Flags and calibration:** a complete fight is **flagged** when the engine
   gives the recorded result less than `--flag` percent. Complete fights are
   also grouped by the engine's predicted win % in ten buckets with the real

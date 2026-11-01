@@ -1132,15 +1132,19 @@ minions in the hand.
   and tier stay the seat's own (30, 10 and the board's). A minion's current
   numbers become `Minion.improvements` for the cards whose scaling the
   engine models that way, and a Tasty Lobster's become the player's
-  `tasty_lobster` count (the list is in `docs/real-boards.md`).
+  `tasty_lobster` count (the list is in `docs/real-boards.md`). A minion the
+  power Rapid Reanimation chose carries the file's `reanimate` as
+  `Minion.reanimate`, which the fight reads.
 - **One side as it went into a fight:** `RealBoard` also holds the Health,
-  armor, hero power, trinkets and quest rewards the file carries, and
+  armor, hero power (with the minion Lock and Load owes the board), trinkets,
+  quest rewards and Secret zone the file carries, and
   `Player::from_real_board` seats the board, the hand, the tier, the numbers
   and the Deity on a player. The fight check
-  (`src/fight_check.rs`) adds the power and the trinkets
-  (`Player::hold_power`, `Player::hold_trinket`) on top; a real seat takes
-  none of that yet (no hero, flat 30 Health and 10 armor). This is the seam a
-  real seat would use to play with its hero power and trinkets later.
+  (`src/fight_check.rs`) adds the power, the trinkets, the Secret zone and
+  Ozumat's Tentacle sales (`Player::hold_power`, `Player::hold_trinket`) on
+  top; a real seat takes none of that yet (no hero, flat 30 Health and 10
+  armor). This is the seam a real seat would use to play with its hero power
+  and trinkets later.
 - **The hand:** a real seat's hand reaches the fight through
   `fight_with_hands`, which already passes each side's hand whenever a card
   on either board reads it; the minions come out of it with no pool copies,

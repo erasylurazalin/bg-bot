@@ -29,7 +29,7 @@ from pathlib import Path
 
 TRACKER = Path.home() / "projects/bg"
 sys.path.insert(0, str(TRACKER))
-from bg.battlegrounds import Tracker  # noqa: E402
+from bg.battlegrounds import Tracker, minion  # noqa: E402
 
 LOGS = Path.home() / "hearthstone-linux/hearthstone/Logs"
 ARCHIVE = Path.home() / "bg-logs"
@@ -61,15 +61,63 @@ def numbers(tags):
     return sd if any(sd) else None
 
 
-def minions(board):
+# Rapid Reanimation (Teron Gorefiend) marks the minion it destroys at Start of
+# Combat with this enchantment, attached to it while both sit in PLAY. The
+# board file writes a marked minion as "reanimate": true, which the engine's
+# fight reads (docs/real-boards.md "The file").
+REANIMATE_MARK = "BG25_HERO_103pe"
+
+# The Secret cards a player can hold in the Secret zone (docs/real-boards.md
+# "The file"): Venomstrike Trap, Autodefense Matrix, Redemption, Pack Tactics
+# and the Ice Block a Safety Patch gives. The zone also holds the Deity and
+# quests, which are not Secrets and are not written here.
+SECRET_CARDS = ("TB_Bacon_Secrets_01", "TB_Bacon_Secrets_07", "TB_Bacon_Secrets_10",
+                "TB_Bacon_Secrets_15", "TB_Bacon_Secrets_12")
+
+# Tavish Stormpike's Lock and Load: the minion it stole from the Tavern is held
+# in TAG_SCRIPT_DATA_ENT_1 of the power, and comes into play as a copy of it
+# (COPIED_FROM_ENTITY_ID points at the held entity) when the fight has space.
+LOCK_AND_LOAD = "BG22_HERO_000p_Alt"
+
+
+def secret_cards_in_zone(g, pid):
+    """The Secret card ids in player `pid`'s Secret zone, in the order they
+    entered it (entity id order, which is the order they fire in)."""
+    xs = [x for x in g.entities.values()
+          if x["ZONE"] == "SECRET" and x["CONTROLLER"] == pid and x.card_id in SECRET_CARDS]
+    return [x.card_id for x in sorted(xs, key=lambda x: x.id)]
+
+
+def waiting_entity(g, pid):
+    """The entity id of the minion Lock and Load still holds (0 for none). It
+    is not created in the log when the opponent stole it, so its stats are read
+    off the copy the power summons (see `CollectingTracker._on_tag`)."""
+    hp = next((x for x in g.entities.values()
+               if x.card_id == LOCK_AND_LOAD and x["ZONE"] == "PLAY" and x["CONTROLLER"] == pid), None)
+    return hp["TAG_SCRIPT_DATA_ENT_1"] if hp is not None else 0
+
+
+def reanimate_flags(g, pid):
+    """Which minions on player `pid`'s board carry the mark, in board order (the
+    order `board()` and the file use)."""
+    marked = {x["ATTACHED"] for x in g.entities.values()
+              if x.card_id == REANIMATE_MARK and x["ZONE"] == "PLAY" and x["ATTACHED"]}
+    ms = [x for x in g.entities.values()
+          if x["CARDTYPE"] == "MINION" and x["ZONE"] == "PLAY" and x["CONTROLLER"] == pid]
+    return tuple(x.id in marked for x in sorted(ms, key=lambda x: x["ZONE_POSITION"]))
+
+
+def minions(board, marks=()):
     out = []
-    for m in board:
+    for i, m in enumerate(board):
         d = {"card_id": m.card_id, "name": m.name, "attack": m.attack,
              "health": m.health, "golden": m.golden, "keywords": list(m.keywords),
              "dark_gifts": list(m.dark_gifts)}
         sd = numbers(m.tags)
         if sd is not None:
             d["numbers"] = sd
+        if i < len(marks) and marks[i]:
+            d["reanimate"] = True
         out.append(d)
     return out
 
@@ -89,10 +137,15 @@ FLIP = {"win": "lose", "lose": "win", "tie": "tie", "": ""}
 
 def extras(fight, side):
     """What a side had at the first attack besides its board: hero power,
-    trinkets and quest rewards (side 0 is me, 1 the opponent)."""
+    trinkets and quest rewards (side 0 is me, 1 the opponent). The hero power
+    also carries the minion Lock and Load still owes the board, as `waiting`
+    (null when it owes none, which is also every power that is not Lock and
+    Load)."""
     hp = fight.hero_powers[side]
+    waiting = getattr(fight, "waiting", {}).get(side)
     return {
-        "hero_power": {"card_id": hp.card_id, "name": hp.name, "numbers": list(hp.numbers)}
+        "hero_power": {"card_id": hp.card_id, "name": hp.name,
+                       "numbers": list(hp.numbers), "waiting": waiting}
         if hp else None,
         "trinkets": [{"card_id": t.card_id, "name": t.name, "greater": t.greater,
                       "numbers": list(t.numbers)} for t in fight.trinkets[side]],
@@ -159,8 +212,52 @@ class CollectingTracker(Tracker):
     """The tracker, plus the side-wide numbers at each snapshot it captures.
 
     `_capture` runs at the first attack (before any minion's own Start of
-    Combat), which is the state the board files hold.
+    Combat), which is the state the counters and the side's power are read
+    from. The board itself is the one the tracker stages the fight with
+    (`_start_fight`, before Start of Combat), so that is where Rapid
+    Reanimation's mark is read: it lands on the minion the power chose, which
+    is gone from the board by the first attack.
     """
+
+    def _start_fight(self, g):
+        # The board a file holds is the one before Start of Combat, which is
+        # this instant, so this is where the state that only exists before the
+        # fight is read: Rapid Reanimation's mark (at the first attack the
+        # minion it marked is already destroyed and the enchantment sits on the
+        # copy) and each side's Secret zone.
+        stand = self._stand_in(g)
+        self._waiting = {}
+        if stand is None:
+            return super()._start_fight(g)
+        marks = (reanimate_flags(g, self.me), reanimate_flags(g, stand))
+        secret_cards = (secret_cards_in_zone(g, self.me), secret_cards_in_zone(g, stand))
+        # whose side a Lock and Load minion belongs to, by the entity the power
+        # holds; the copy that comes in later names it in COPIED_FROM_ENTITY_ID
+        for side, pid in ((0, self.me), (1, stand)):
+            ent = waiting_entity(g, pid)
+            if ent:
+                self._waiting[ent] = side
+        super()._start_fight(g)
+        if self.fight is not None:
+            self.fight.reanimates = marks
+            self.fight.secrets = secret_cards
+
+    def _on_tag(self, g, e, tag, value):
+        super()._on_tag(g, e, tag, value)
+        # Lock and Load's stolen minion is not in the log (the opponent's Tavern
+        # is hidden), but the copy the power summons names it, with the stats it
+        # had when it was taken. It is read when it appears, before it fights.
+        if tag != "COPIED_FROM_ENTITY_ID" or not value:
+            return
+        side = self._waiting.get(value) if getattr(self, "_waiting", None) else None
+        f = self._live
+        if side is None or f is None or e["CARDTYPE"] != "MINION" or not e.card_id:
+            return
+        waiting = getattr(f, "waiting", None)
+        if waiting is None:
+            waiting = f.waiting = {}
+        if side not in waiting:
+            waiting[side] = minions([minion(e, g)])[0]
 
     def _capture(self, g):
         d = super()._capture(g)
@@ -204,7 +301,9 @@ def side(fight, index, seat):
     shows of the side itself at the first attack (counters, Deity, hand)."""
     out = dict(seat)
     out.update(extras(fight, index))
-    out["minions"] = minions(fight.mine if index == 0 else fight.theirs)
+    marks = getattr(fight, "reanimates", ((), ()))[index]
+    out["minions"] = minions(fight.mine if index == 0 else fight.theirs, marks)
+    out["secrets"] = getattr(fight, "secrets", ([], []))[index]
     if fight.at_attack is not None:
         hand = fight.hand if index == 0 else fight.their_hand
         out["counters"] = counters(fight, index)

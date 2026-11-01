@@ -43,6 +43,9 @@ pub struct RealMinionSpec {
     /// Their stats are already in attack and health; the effect is attached
     /// here, with the counter the log does not show set to the board's turn.
     pub dark_gifts: Vec<String>,
+    /// Marked by Rapid Reanimation (the file's `reanimate`): the minion the
+    /// power destroys at Start of Combat and brings back as an exact copy.
+    pub reanimate: bool,
 }
 
 /// A real board's Deity: the minion it awakens and the stats it has now.
@@ -78,11 +81,19 @@ pub enum RealResult {
 /// A side's hero power as the file carries it at the first attack: the
 /// power's card id, its name, and its current numbers (the {0} {1} {2} {3} of
 /// its text). None of this reaches a real seat yet.
+///
+/// `waiting` is the minion the power still owes the board, which only Lock and
+/// Load has (it steals a Tavern minion and summons it in the next combat);
+/// `waiting_known` says whether the file says so. A file written before the
+/// key existed has neither, and a fight with Lock and Load in it is then
+/// incomplete because the engine cannot tell whether a minion was coming.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RealPowerSpec {
     pub card_id: String,
     pub name: String,
     pub numbers: Vec<i32>,
+    pub waiting: Option<RealMinionSpec>,
+    pub waiting_known: bool,
 }
 
 /// A side's trinket as the file carries it: the card id, whether it sits in
@@ -204,6 +215,11 @@ pub struct RealBoardSpec {
     pub power: Option<RealPowerSpec>,
     pub trinkets: Vec<RealTrinketSpec>,
     pub rewards: Vec<RealRewardSpec>,
+    /// The Secret zone: the card ids in the order they were got, which is the
+    /// order they fire in. None in a file written before the key existed, and
+    /// then a fight with Prestidigitation is incomplete (the engine cannot
+    /// tell whether any Secret was up); an empty list means no Secret at all.
+    pub secrets: Option<Vec<String>>,
     /// The cards in the hand the log showed without a card id: they are not
     /// in `hand` and nothing can be built for them.
     pub hand_hidden: u32,
@@ -275,6 +291,9 @@ pub struct RealBoard {
     pub power: Option<RealPowerSpec>,
     pub trinkets: Vec<RealTrinketSpec>,
     pub rewards: Vec<RealRewardSpec>,
+    /// The Secret zone, by card id in the order the Secrets were got, or None
+    /// when the file does not say (see `RealBoardSpec::secrets`).
+    pub secrets: Option<Vec<String>>,
 }
 
 /// Real boards grouped by turn for the seat draws. Turn `LATE_TURN` and every
@@ -332,7 +351,70 @@ fn lobster_count(numbers: &[i32], golden: bool) -> u16 {
     ((attack / per_play - 1).max(0)).min(u16::MAX as i32) as u16
 }
 
+/// One minion of a real board, built exactly as the file writes it: a fresh
+/// `Minion` (pool_copies 0, so it takes no pool copy and nothing goes back
+/// when it dies) with the file's attack, health, golden flag, keywords, Dark
+/// Gifts and the scaling state its numbers stand for
+/// (`Minion.improvements`). A minion whose name matches no card becomes a
+/// Stand-in with those stats and keywords and no effect (Era, 2026-10-25), and
+/// its name is returned. `turn` is the board's turn, which a Dark Gift without
+/// a countdown uses as the turn it landed.
+fn make_real_minion(
+    m: &RealMinionSpec,
+    turn: u32,
+    db: &CardDb,
+    gifts: &crate::darkgifts::GiftDb,
+) -> (Minion, Option<String>) {
+    let mut unbuilt = None;
+    let id = match db.by_name(&m.name) {
+        Some(id) => id,
+        None => {
+            unbuilt = Some(m.name.clone());
+            db.by_name(STAND_IN).expect("cards.toml has the Stand-in token")
+        }
+    };
+    let mut minion = db.make(id, m.golden);
+    minion.attack = m.attack;
+    minion.health = m.health;
+    minion.improvements = improvements(&m.name, m.golden, &m.numbers);
+    let mut keywords = Keywords(0);
+    for kw in &m.keywords {
+        set_keyword(&mut keywords, kw);
+    }
+    minion.keywords = keywords;
+    minion.reanimate = m.reanimate;
+    // A Dark Gift the board carried: the landing's stats are already
+    // in the file's attack and health, so only the gift itself comes
+    // along. The counter the log does not carry is set as if the gift
+    // had landed on this board's turn.
+    for gift_id in &m.dark_gifts {
+        let Some(i) = gifts.gifts.iter().position(|g| &g.id == gift_id) else {
+            continue;
+        };
+        let card = gifts.gifts[i].card;
+        let c = db.get(card);
+        let state = match c.countdown {
+            Some(cd) => cd.turns,
+            None => turn.min(crate::minion::GIFT_STATE_MAX as u32) as u8,
+        };
+        minion.push_gift(crate::minion::GiftOn::new(card, state));
+    }
+    (minion, unbuilt)
+}
+
 impl RealBoard {
+    /// One minion built as the file writes it (`make_real_minion`): the fight
+    /// check uses it for the minion Lock and Load holds, which is not on a
+    /// board. The name comes back when the card set has no such card.
+    pub fn build_minion(
+        m: &RealMinionSpec,
+        turn: u32,
+        db: &CardDb,
+        gifts: &crate::darkgifts::GiftDb,
+    ) -> (Minion, Option<String>) {
+        make_real_minion(m, turn, db, gifts)
+    }
+
     /// One board resolved against the card set: each minion becomes a fresh
     /// `Minion` (pool_copies 0, so it takes no pool copy and nothing goes
     /// back when it dies or its seat is knocked out) with the file's attack,
@@ -349,37 +431,9 @@ impl RealBoard {
     ) -> (RealBoard, Vec<String>) {
         let mut unmatched = Vec::new();
         let make = |m: &RealMinionSpec, turn: u32, unmatched: &mut Vec<String>| {
-            let id = match db.by_name(&m.name) {
-                Some(id) => id,
-                None => {
-                    unmatched.push(m.name.clone());
-                    db.by_name(STAND_IN).expect("cards.toml has the Stand-in token")
-                }
-            };
-            let mut minion = db.make(id, m.golden);
-            minion.attack = m.attack;
-            minion.health = m.health;
-            minion.improvements = improvements(&m.name, m.golden, &m.numbers);
-            let mut keywords = Keywords(0);
-            for kw in &m.keywords {
-                set_keyword(&mut keywords, kw);
-            }
-            minion.keywords = keywords;
-            // A Dark Gift the board carried: the landing's stats are already
-            // in the file's attack and health, so only the gift itself comes
-            // along. The counter the log does not carry is set as if the gift
-            // had landed on this board's turn.
-            for gift_id in &m.dark_gifts {
-                let Some(i) = gifts.gifts.iter().position(|g| &g.id == gift_id) else {
-                    continue;
-                };
-                let card = gifts.gifts[i].card;
-                let c = db.get(card);
-                let state = match c.countdown {
-                    Some(cd) => cd.turns,
-                    None => turn.min(crate::minion::GIFT_STATE_MAX as u32) as u8,
-                };
-                minion.push_gift(crate::minion::GiftOn::new(card, state));
+            let (minion, unbuilt) = make_real_minion(m, turn, db, gifts);
+            if let Some(name) = unbuilt {
+                unmatched.push(name);
             }
             minion
         };
@@ -434,6 +488,7 @@ impl RealBoard {
             power: spec.power.clone(),
             trinkets: spec.trinkets.clone(),
             rewards: spec.rewards.clone(),
+            secrets: spec.secrets.clone(),
         }, unmatched)
     }
 }
@@ -556,6 +611,10 @@ struct RawBoard {
     trinkets: Vec<RawTrinket>,
     #[serde(default)]
     rewards: Vec<RawReward>,
+    /// The Secret zone, by card id in the order the Secrets were got. A file
+    /// without the key does not say what was up.
+    #[serde(default)]
+    secrets: Option<Vec<String>>,
     /// The cards in the hand the log did not name.
     #[serde(default)]
     hand_hidden: u32,
@@ -582,6 +641,22 @@ struct RawPower {
     name: String,
     #[serde(default)]
     numbers: Vec<i32>,
+    /// The minion the power still owes the board (Lock and Load): a board
+    /// minion object, or null when it owes none. A file without the key was
+    /// written before it was collected, and then nothing can be said.
+    #[serde(default, deserialize_with = "present_or_null")]
+    waiting: Option<Option<RawMinion>>,
+}
+
+/// Read a field that may be an object, null, or absent as those three things:
+/// serde's `Option` alone reads null and absent the same way, and the fight
+/// check has to tell "the power owes no minion" from "the file does not say".
+fn present_or_null<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(de).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -634,6 +709,10 @@ struct RawMinion {
     /// them, or nothing when the card has none.
     #[serde(default)]
     numbers: Vec<i32>,
+    /// Marked by Rapid Reanimation: the minion the power destroys at Start of
+    /// Combat and brings back as an exact copy.
+    #[serde(default)]
+    reanimate: bool,
 }
 
 #[derive(Deserialize)]
@@ -706,35 +785,31 @@ pub fn parse_board_files(
     for (file, text) in files {
         let raw: RawFile = serde_json::from_str(text).map_err(|e| format!("{file}: {e}"))?;
         for b in raw.boards {
-            let side = |list: Vec<RawMinion>, unknown: &mut Vec<String>| {
-                let mut out = Vec::new();
-                for m in list {
-                    // An unknown card id becomes a Stand-in (see `build`).
-                    let (name, id_golden) = match ids.get(&m.card_id) {
-                        Some(hit) => hit,
-                        None => {
-                            unknown.push(if m.name.is_empty() {
-                                m.card_id.clone()
-                            } else {
-                                m.name.clone()
-                            });
-                            (STAND_IN, false)
-                        }
+            let minions = b
+                .minions
+                .into_iter()
+                .map(|m| real_minion(m, ids, &mut unknown))
+                .collect();
+            let hand = b.hand.into_iter().map(|m| real_minion(m, ids, &mut unknown)).collect();
+            // The hero power's waiting minion (Lock and Load) goes through the
+            // same card id map, so its stats are the ones the file shows.
+            let power = match b.hero_power {
+                None => None,
+                Some(p) => {
+                    let (waiting, waiting_known) = match p.waiting {
+                        None => (None, false),
+                        Some(None) => (None, true),
+                        Some(Some(m)) => (Some(real_minion(m, ids, &mut unknown)), true),
                     };
-                    out.push(RealMinionSpec {
-                        name: name.to_string(),
-                        attack: m.attack,
-                        health: m.health,
-                        golden: m.golden || id_golden,
-                        keywords: m.keywords,
-                        numbers: m.numbers,
-                        dark_gifts: m.dark_gifts,
-                    });
+                    Some(RealPowerSpec {
+                        card_id: p.card_id,
+                        name: p.name,
+                        numbers: p.numbers,
+                        waiting,
+                        waiting_known,
+                    })
                 }
-                out
             };
-            let minions = side(b.minions, &mut unknown);
-            let hand = side(b.hand, &mut unknown);
             let mut counters = RealCounters::default();
             for (key, value) in &b.counters {
                 counters.set(key, *value);
@@ -764,11 +839,7 @@ pub fn parse_board_files(
                 result: parse_result(&b.result),
                 health: b.health.unwrap_or(0),
                 armor: b.armor,
-                power: b.hero_power.map(|p| RealPowerSpec {
-                    card_id: p.card_id,
-                    name: p.name,
-                    numbers: p.numbers,
-                }),
+                power,
                 trinkets: b
                     .trinkets
                     .into_iter()
@@ -788,6 +859,7 @@ pub fn parse_board_files(
                         numbers: r.numbers,
                     })
                     .collect(),
+                secrets: b.secrets,
                 hand_hidden: b.hand_hidden,
             });
         }
@@ -796,6 +868,30 @@ pub fn parse_board_files(
 }
 
 /// The result the file records for a side.
+/// One minion of a file as a spec, its card id mapped through the ref data: an
+/// unknown id becomes a Stand-in (see `RealBoard::build_one`) and its name goes
+/// to `unknown`. Boards, hands and the minion Lock and Load holds all come
+/// through here.
+fn real_minion(m: RawMinion, ids: &CardIdMap, unknown: &mut Vec<String>) -> RealMinionSpec {
+    let (name, id_golden) = match ids.get(&m.card_id) {
+        Some(hit) => hit,
+        None => {
+            unknown.push(if m.name.is_empty() { m.card_id.clone() } else { m.name.clone() });
+            (STAND_IN, false)
+        }
+    };
+    RealMinionSpec {
+        name: name.to_string(),
+        attack: m.attack,
+        health: m.health,
+        golden: m.golden || id_golden,
+        keywords: m.keywords,
+        numbers: m.numbers,
+        dark_gifts: m.dark_gifts,
+        reanimate: m.reanimate,
+    }
+}
+
 fn parse_result(s: &str) -> RealResult {
     match s {
         "win" => RealResult::Win,

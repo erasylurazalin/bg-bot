@@ -33,6 +33,7 @@ fn spec(turn: u32, tier: u8, minions: &[(&str, i32, i32, bool, &[&str])]) -> Rea
                 keywords: keywords.iter().map(|s| s.to_string()).collect(),
                 numbers: Vec::new(),
                 dark_gifts: Vec::new(),
+                reanimate: false,
             })
             .collect(),
         ..RealBoardSpec::default()
@@ -413,6 +414,7 @@ fn a_real_seat_takes_the_boards_numbers() {
         keywords: Vec::new(),
         numbers: vec![14, 7, 0, 0],
         dark_gifts: Vec::new(),
+        reanimate: false,
     }];
     b.counters.set("gem_attack", 5);
     b.counters.set("gem_health", 4);
@@ -523,6 +525,7 @@ fn a_real_seat_hand_reaches_the_fight() {
         keywords: Vec::new(),
         numbers: Vec::new(),
         dark_gifts: Vec::new(),
+        reanimate: false,
     }];
     let boards = single_board_folder(&b);
     let mut g = Game::new_random_heroes_real(d.clone(), 11, &[0], boards);
