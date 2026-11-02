@@ -67,15 +67,20 @@ crates/
                       shop_replay.rs (a logged step replayed from its state,
                       the fixture folder in tests/data/actions),
                       sandbox.rs; parser tests build small TOML strings inline
-  bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
+  bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix,
+                      `bgbench collect-boards` (Era's board files, a port of
+                      tools/collect_boards.py; the timer still runs the Python
+                      until phase 5)
   bglog/              Power.log reading, a port of the tracker's Python
                       (docs/briefs/log-reader.md): the parser and entity table
                       (src/parser.rs, game.rs, entity.rs), the Battlegrounds views
                       (src/views.rs: boards, hands, hero powers, trinkets,
-                      rewards, Deity, counters, Dark Gifts) and the Tracker that
-                      follows a log into fights (src/tracker.rs); card names from
-                      ref/hsjson-cards.json (src/cards.rs). `bgbench powerlog`
-                      and `bgbench tracker` dump a log, to diff against the Python
+                      rewards, Deity, counters, Dark Gifts, Secrets, Rapid
+                      Reanimation's mark, Upper Hands, the player-level numbers)
+                      and the Tracker that follows a log into fights
+                      (src/tracker.rs); card names from ref/hsjson-cards.json
+                      (src/cards.rs). `bgbench powerlog` and `bgbench tracker`
+                      dump a log, to diff against the Python
   bgpy/               PyO3 bindings: a batch of games stepped together
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/

@@ -30,8 +30,9 @@ use crate::entity::{Entity, TagValue};
 use crate::game::Game;
 use crate::parser::{Handler, PowerLog};
 use crate::views::{
-    Board, Deity, Fight, HeroPower, LOCK_AND_LOAD, Reward, Seat, Trinket, WINGMEN, board, counts,
-    deity, gem, hand, hero_power, hidden_in_hand, rewards, trinkets, turn_of, waiting,
+    Board, Deity, Fight, HeroPower, LOCK_AND_LOAD, Reward, Seat, Trinket, UPPER_HAND,
+    WINGMEN, board, counts, deity, gem, hand, held_entity, hero_power, hidden_in_hand, one_minion,
+    reanimates, rewards, secrets, side_numbers, trinkets, turn_of, waiting,
 };
 
 /// The fight's state at one moment: what a snapshot fills in, both before
@@ -48,6 +49,7 @@ pub struct Snapshot {
     pub trinkets: (Vec<Trinket>, Vec<Trinket>),
     pub rewards: (Vec<Reward>, Vec<Reward>),
     pub counters: (BTreeMap<&'static str, i64>, BTreeMap<&'static str, i64>),
+    pub side_numbers: (BTreeMap<&'static str, i64>, BTreeMap<&'static str, i64>),
     pub deities: (Option<Deity>, Option<Deity>),
 }
 
@@ -63,6 +65,7 @@ impl Snapshot {
         fight.trinkets = self.trinkets;
         fight.rewards = self.rewards;
         fight.counters = self.counters;
+        fight.side_numbers = self.side_numbers;
         fight.deities = self.deities;
     }
 }
@@ -94,6 +97,12 @@ pub struct Tracker {
     blocks: Vec<(String, Option<i32>)>,
     /// See [`Tracker::block_end`].
     after_wingmen: Option<Snapshot>,
+    /// Upper Hands each side cast since the fight last started (see
+    /// [`UPPER_HAND`]), mine and theirs.
+    upper_hands: [i64; 2],
+    /// A minion Lock and Load holds (see [`crate::views::held_entity`]) to the
+    /// side that played it, while its copy is still to come.
+    held: BTreeMap<i32, usize>,
 }
 
 impl Tracker {
@@ -113,6 +122,8 @@ impl Tracker {
             winner: String::new(),
             blocks: Vec::new(),
             after_wingmen: None,
+            upper_hands: [0, 0],
+            held: BTreeMap::new(),
         }
     }
 
@@ -209,14 +220,26 @@ impl Tracker {
                 rewards(g, &self.cards, stand_pid),
             ),
             counters: (counts(g, player(g, me)), counts(g, player(g, stand_pid))),
+            side_numbers: (
+                side_numbers(g, player(g, me)),
+                side_numbers(g, player(g, stand_pid)),
+            ),
             deities: (deity(g, &self.cards, me), deity(g, &self.cards, stand_pid)),
         }
     }
 
     /// Start the snapshot of a staged fight, at `MAIN_START` or when its setup
     /// block closed.
+    ///
+    /// This is the one moment a file's board is read from: the board before
+    /// Start of Combat. So it is also where the state that only exists then is
+    /// read: Rapid Reanimation's mark (by the first attack the minion it named
+    /// is destroyed and the enchantment sits on the copy), each side's Secret
+    /// zone, the Upper Hands cast this turn, and the minions Lock and Load
+    /// still holds.
     fn start_fight(&mut self, g: &Game) {
         self.setup_depth = None; // one snapshot per fight
+        self.held.clear();
         let Some(stand_pid) = g.stand_in_player() else {
             return;
         };
@@ -225,18 +248,29 @@ impl Tracker {
             .map(|e| e.int("BACON_CURRENT_COMBAT_PLAYER_ID"))
             .unwrap_or(0) as i32;
         let me = me(g);
-        let fight = Fight::new(
+        let mut fight = Fight::new(
             turn_of(g),
             opponent,
             board(g, &self.cards, me),
             board(g, &self.cards, Some(stand_pid)),
         );
+        fight.secrets = (secrets(g, me), secrets(g, Some(stand_pid)));
+        fight.reanimates = (reanimates(g, me), reanimates(g, Some(stand_pid)));
+        fight.upper_hands = (self.upper_hands[0], self.upper_hands[1]);
+        for (side, pid) in [(0, me), (1, Some(stand_pid))] {
+            let held = held_entity(g, pid);
+            if held != 0 {
+                self.held.insert(held as i32, side);
+            }
+        }
         self.fights.push(fight);
         let index = self.fights.len() - 1;
         self.fight = Some(index);
         self.live = Some(index);
         self.winner.clear();
         self.after_wingmen = None;
+        // A new turn's Upper Hands start from zero.
+        self.upper_hands = [0, 0];
         if let Some(seat) = self.seats.get_mut(&opponent) {
             seat.last_fight = Some(index);
             if !self.opponent_name.is_empty() {
@@ -312,6 +346,32 @@ impl Tracker {
             .iter()
             .any(|(_, entity)| is_card(g, *entity, WINGMEN))
     }
+
+    /// Take down the minion a Lock and Load copy was made from.
+    ///
+    /// Lock and Load's held minion is not in the log when the opponent stole
+    /// it (their Tavern is hidden), but the copy the power summons names it in
+    /// `COPIED_FROM_ENTITY_ID`, with the stats it had when it was taken. It is
+    /// read as it appears, before it fights.
+    fn waiting_copy(&mut self, g: &Game, entity: i32, value: &TagValue) {
+        let Some(&side) = self.held.get(&(value.as_int() as i32)) else {
+            return;
+        };
+        let Some(live) = self.live else {
+            return;
+        };
+        let Some(e) = g.entities.get(&entity) else {
+            return;
+        };
+        if e.text("CARDTYPE") != "MINION" || e.card_id.is_empty() {
+            return;
+        }
+        let waiting = &mut self.fights[live].waiting;
+        let slot = if side == 0 { &mut waiting.0 } else { &mut waiting.1 };
+        if slot.is_none() {
+            *slot = Some(one_minion(e, g, &self.cards));
+        }
+    }
 }
 
 impl Handler for Tracker {
@@ -386,6 +446,9 @@ impl Handler for Tracker {
                 };
             }
         }
+        if tag == "COPIED_FROM_ENTITY_ID" {
+            self.waiting_copy(g, entity, value);
+        }
     }
 
     fn block_start(
@@ -403,6 +466,21 @@ impl Handler for Tracker {
             self.blocks.push((String::new(), None));
         }
         self.blocks.push((block_type.to_string(), entity));
+
+        // An Upper Hand cast this turn is a pending Start of Combat trigger,
+        // and the spell's card goes back to SETASIDE, so the cast is all the
+        // log says: count it for the fight it will fire in.
+        if block_type == "PLAY"
+            && let Some(e) = entity.and_then(|e| g.entities.get(&e))
+            && e.card_id == UPPER_HAND
+        {
+            let side = if Some(e.int("CONTROLLER")) == me(g).map(|me| me as i64) {
+                0
+            } else {
+                1
+            };
+            self.upper_hands[side] += 1;
+        }
 
         let Some(live) = self.live else {
             return;

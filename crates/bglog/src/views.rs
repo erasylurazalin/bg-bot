@@ -108,6 +108,12 @@ pub struct Fight {
     /// Both boards before start-of-combat effects: what the window shows.
     pub mine: Board,
     pub theirs: Board,
+    /// The Secret card ids in each side's Secret zone as the fight was staged,
+    /// mine and theirs (see [`secrets`]).
+    pub secrets: (Vec<String>, Vec<String>),
+    /// Which of each side's minions carried Rapid Reanimation's mark as the
+    /// fight was staged, in board order, mine and theirs (see [`reanimates`]).
+    pub reanimates: (Vec<bool>, Vec<bool>),
     /// Both boards at the first attack, after start-of-combat effects, and who
     /// swings first.
     pub at_attack: Option<(Board, Board)>,
@@ -123,6 +129,11 @@ pub struct Fight {
     pub hidden: (i64, i64),
     /// Diremuck summons still waiting for space, mine and theirs.
     pub waits: (i64, i64),
+    /// The minion Lock and Load still owes each side's board, read off the copy
+    /// the power summoned as it came in (see [`crate::Tracker`]), mine and
+    /// theirs. `None` for a side whose power is not Lock and Load or that owes
+    /// nothing.
+    pub waiting: (Option<Minion>, Option<Minion>),
     /// Both hero powers at the first attack, mine and theirs.
     pub hero_powers: (Option<HeroPower>, Option<HeroPower>),
     /// The minion that makes the first attack when a hero power sent it in
@@ -135,6 +146,12 @@ pub struct Fight {
     pub rewards: (Vec<Reward>, Vec<Reward>),
     /// Game-long counts per side at the first attack, see [`counts`].
     pub counters: (BTreeMap<&'static str, i64>, BTreeMap<&'static str, i64>),
+    /// The Upper Hands each side cast before this fight, mine and theirs (see
+    /// [`UPPER_HAND`]).
+    pub upper_hands: (i64, i64),
+    /// What the log shows of each side's player at the first attack, mine and
+    /// theirs (see [`side_numbers`]).
+    pub side_numbers: (BTreeMap<&'static str, i64>, BTreeMap<&'static str, i64>),
     /// Both Deities at the first attack.
     pub deities: (Option<Deity>, Option<Deity>),
     /// "win", "lose" or "tie" once the fight is over, empty before that.
@@ -153,6 +170,8 @@ impl Fight {
             opponent,
             mine,
             theirs,
+            secrets: (Vec::new(), Vec::new()),
+            reanimates: (Vec::new(), Vec::new()),
             at_attack: None,
             first: String::new(),
             gems: ((1, 1), (1, 1)),
@@ -160,11 +179,14 @@ impl Fight {
             their_hand: None,
             hidden: (0, 0),
             waits: (0, 0),
+            waiting: (None, None),
             hero_powers: (None, None),
             opening: None,
             trinkets: (Vec::new(), Vec::new()),
             rewards: (Vec::new(), Vec::new()),
             counters: (BTreeMap::new(), BTreeMap::new()),
+            upper_hands: (0, 0),
+            side_numbers: (BTreeMap::new(), BTreeMap::new()),
             deities: (None, None),
             result: String::new(),
             odds: None,
@@ -454,6 +476,33 @@ pub fn hidden_in_hand(g: &Game, controller: Option<i32>) -> i64 {
         .count() as i64
 }
 
+/// The Secret cards a player can hold in the Secret zone: Venomstrike Trap,
+/// Autodefense Matrix, Redemption, Pack Tactics and the Ice Block a Safety
+/// Patch gives. The zone also holds the Deity and quests, which are not
+/// Secrets.
+pub const SECRET_CARDS: [&str; 5] = [
+    "TB_Bacon_Secrets_01",
+    "TB_Bacon_Secrets_07",
+    "TB_Bacon_Secrets_10",
+    "TB_Bacon_Secrets_15",
+    "TB_Bacon_Secrets_12",
+];
+
+/// The Secret card ids in a player's Secret zone, in entity id order (which is
+/// the order they fire in).
+pub fn secrets(g: &Game, controller: Option<i32>) -> Vec<String> {
+    let mut xs: Vec<&Entity> = g
+        .entities_in_order()
+        .filter(|x| {
+            x.text("ZONE") == "SECRET"
+                && controlled_by(x, controller)
+                && SECRET_CARDS.contains(&x.card_id.as_str())
+        })
+        .collect();
+    xs.sort_by_key(|x| x.id);
+    xs.iter().map(|x| x.card_id.clone()).collect()
+}
+
 /// Diremuck Forager summons this player still has waiting for a free slot.
 ///
 /// Its Start of Combat puts an enchantment (`BG27_556pe`) on the player, which
@@ -510,6 +559,94 @@ pub fn counts(g: &Game, player: Option<&Entity>) -> BTreeMap<&'static str, i64> 
 /// Lock and Load: its shot is a copy of a minion, and the shot's attack opens
 /// the fight.
 pub const LOCK_AND_LOAD: &str = "BG22_HERO_000p_Alt";
+
+/// The entity id of the minion Lock and Load still holds
+/// (`TAG_SCRIPT_DATA_ENT_1` of the power in play), 0 for none. The minion is
+/// not created in the log when the opponent stole it, so its stats are read
+/// off the copy the power summons (see [`crate::Tracker`]).
+pub fn held_entity(g: &Game, controller: Option<i32>) -> i64 {
+    g.entities_in_order()
+        .find(|x| {
+            x.card_id == LOCK_AND_LOAD
+                && x.text("ZONE") == "PLAY"
+                && controlled_by(x, controller)
+        })
+        .map(|x| x.int("TAG_SCRIPT_DATA_ENT_1"))
+        .unwrap_or(0)
+}
+
+/// Upper Hand: "Start of Combat: Set a random enemy minion's Health to 1". The
+/// spell hides its pending trigger (the card goes back to SETASIDE), so the
+/// pending count is the Upper Hands each side cast since the turn began.
+pub const UPPER_HAND: &str = "BG28_573";
+
+/// Player enchantments that carry a side-wide number, and what their script
+/// numbers are: the name the file gives the number, and the
+/// `TAG_SCRIPT_DATA_NUM_1..4` slot holding it (`None` for a number the
+/// enchantment does not have, attack first and health second). The log attaches
+/// them to the player of both seats (the opponent's to the stand-in player) and
+/// only while the number is nonzero, so a missing one means the base value.
+pub const PLAYER_ENCHANTS: [(&str, Option<&str>, Option<&str>); 3] = [
+    // Beetle Army: "Your Beetles have +{0}/+{1} this game" (Forest Rover,
+    // Runed Progenitor, Turquoise Skitterer).
+    ("BG31_808pe", Some("beetle_attack"), Some("beetle_health")),
+    // Undead Bonus Attack: "Your Undead have +{0} Attack this game, wherever
+    // they are" (Nerubian Deathswarmer, Plaguerunner, Forsaken Weaver,
+    // Butchering). There is no health one.
+    ("BG25_011pe", Some("undead_attack"), None),
+    // Baller: how many Ballers were sold, the "improve your future Ballers"
+    // count.
+    ("BG31_816pe", Some("baller"), None),
+];
+
+/// The script numbers of one player enchantment on a player, or `None` when it
+/// is not there.
+pub fn enchant_numbers(g: &Game, player: &Entity, card_id: &str) -> Option<[i64; 4]> {
+    let x = g
+        .entities_in_order()
+        .filter(|x| {
+            x.card_id == card_id
+                && x.text("ZONE") == "PLAY"
+                && x.int("ATTACHED") == player.id as i64
+        })
+        .max_by_key(|x| x.id)?;
+    Some(numbers(x))
+}
+
+/// What the log shows of one side's player at the first attack besides its
+/// board: the Tavern spell bonus and the [`PLAYER_ENCHANTS`] numbers, under the
+/// names the board file uses. A number the log does not show is left out.
+pub fn side_numbers(g: &Game, player: Option<&Entity>) -> BTreeMap<&'static str, i64> {
+    let mut out = BTreeMap::new();
+    let Some(player) = player else {
+        return out;
+    };
+    let spell_attack = player.int("TAVERN_SPELL_ATTACK_INCREASE");
+    if spell_attack != 0 {
+        out.insert("spell_attack", spell_attack);
+    }
+    let spell_health = player.int("TAVERN_SPELL_HEALTH_INCREASE");
+    if spell_health != 0 {
+        out.insert("spell_health", spell_health);
+    }
+    for (card_id, attack_key, health_key) in PLAYER_ENCHANTS {
+        let Some(sd) = enchant_numbers(g, player, card_id) else {
+            continue;
+        };
+        if let Some(key) = attack_key
+            && sd[0] != 0
+        {
+            out.insert(key, sd[0]);
+        }
+        if let Some(key) = health_key
+            && sd[1] != 0
+        {
+            out.insert(key, sd[1]);
+        }
+    }
+    out
+}
+
 
 /// Lock and Load and Rapid Reanimation: hero powers whose minion may not have
 /// been summoned yet.
@@ -698,9 +835,212 @@ pub fn board(g: &Game, cards: &Cards, controller: Option<i32>) -> Board {
         .collect()
 }
 
+/// Rapid Reanimation (Teron Gorefiend) marks the minion it destroys at Start of
+/// Combat with this enchantment, attached to it while both sit in PLAY.
+pub const REANIMATE_MARK: &str = "BG25_HERO_103pe";
+
+/// Which minions on a player's board carry [`REANIMATE_MARK`], in board order
+/// (the order [`board`] uses). The mark is read while the fight is staged: by
+/// the first attack the minion it named is destroyed and the enchantment sits
+/// on its copy, which is not on the board.
+pub fn reanimates(g: &Game, controller: Option<i32>) -> Vec<bool> {
+    let marked: HashSet<i64> = g
+        .entities_in_order()
+        .filter(|x| {
+            x.card_id == REANIMATE_MARK && x.text("ZONE") == "PLAY" && x.int("ATTACHED") != 0
+        })
+        .map(|x| x.int("ATTACHED"))
+        .collect();
+    let mut ms: Vec<&Entity> = g
+        .entities_in_order()
+        .filter(|x| {
+            x.text("CARDTYPE") == "MINION"
+                && x.text("ZONE") == "PLAY"
+                && controlled_by(x, controller)
+        })
+        .collect();
+    ms.sort_by_key(|x| x.int("ZONE_POSITION"));
+    ms.iter().map(|x| marked.contains(&(x.id as i64))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One tag of a test entity.
+    type Tag<'a> = (&'a str, TagValue);
+    /// One entity of a test game: id, card id and its tags.
+    type Given<'a> = (i32, &'a str, &'a [Tag<'a>]);
+
+    /// A game with just the entities a view reads.
+    fn game(entities: &[Given]) -> Game {
+        let mut g = Game::new();
+        for (id, card_id, tags) in entities {
+            let e = g.entity(*id);
+            e.card_id = card_id.to_string();
+            for (tag, value) in *tags {
+                e.set(tag, value.clone());
+            }
+        }
+        g
+    }
+
+    fn text(value: &str) -> TagValue {
+        TagValue::Text(value.to_string())
+    }
+
+    fn number(value: i64) -> TagValue {
+        TagValue::Int(value)
+    }
+
+    #[test]
+    fn the_secret_zone_holds_the_secret_cards_in_entity_order() {
+        // The Deity's zone is SECRET too, a Secret still in hand is not in the
+        // zone, and another player's Secrets are not mine.
+        let g = game(&[
+            (40, "BG_OldGod", &[("ZONE", text("SECRET")), ("CONTROLLER", number(6))]),
+            (30, "TB_Bacon_Secrets_07", &[("ZONE", text("SECRET")), ("CONTROLLER", number(6))]),
+            (20, "TB_Bacon_Secrets_01", &[("ZONE", text("SECRET")), ("CONTROLLER", number(6))]),
+            (21, "TB_Bacon_Secrets_01", &[("ZONE", text("HAND")), ("CONTROLLER", number(6))]),
+            (22, "TB_Bacon_Secrets_01", &[("ZONE", text("SECRET")), ("CONTROLLER", number(7))]),
+        ]);
+        assert_eq!(
+            secrets(&g, Some(6)),
+            vec!["TB_Bacon_Secrets_01".to_string(), "TB_Bacon_Secrets_07".to_string()]
+        );
+        assert!(secrets(&g, Some(7)).len() == 1);
+        assert!(secrets(&g, None).is_empty());
+    }
+
+    #[test]
+    fn a_reanimation_mark_marks_the_minion_it_is_attached_to() {
+        let g = game(&[
+            (
+                10,
+                "BGS_004",
+                &[
+                    ("CARDTYPE", text("MINION")),
+                    ("ZONE", text("PLAY")),
+                    ("CONTROLLER", number(6)),
+                    ("ZONE_POSITION", number(2)),
+                ],
+            ),
+            (
+                11,
+                "BGS_004",
+                &[
+                    ("CARDTYPE", text("MINION")),
+                    ("ZONE", text("PLAY")),
+                    ("CONTROLLER", number(6)),
+                    ("ZONE_POSITION", number(1)),
+                ],
+            ),
+            // A mark in play marks minion 10; one that is not in play marks
+            // nothing.
+            (12, REANIMATE_MARK, &[("ZONE", text("PLAY")), ("ATTACHED", number(10))]),
+            (13, REANIMATE_MARK, &[("ZONE", text("SETASIDE")), ("ATTACHED", number(11))]),
+        ]);
+        // Board order, not entity order.
+        assert_eq!(reanimates(&g, Some(6)), vec![false, true]);
+    }
+
+    #[test]
+    fn side_numbers_are_the_tavern_spell_bonus_and_the_player_enchantments() {
+        let g = game(&[
+            (
+                10,
+                "",
+                &[("CARDTYPE", text("PLAYER")), ("TAVERN_SPELL_ATTACK_INCREASE", number(2))],
+            ),
+            (
+                20,
+                "BG31_808pe",
+                &[
+                    ("ZONE", text("PLAY")),
+                    ("ATTACHED", number(10)),
+                    ("TAG_SCRIPT_DATA_NUM_1", number(3)),
+                    ("TAG_SCRIPT_DATA_NUM_2", number(4)),
+                ],
+            ),
+            // Two Undead Bonus Attack enchantments: the newest (highest id) is
+            // the current one.
+            (
+                21,
+                "BG25_011pe",
+                &[
+                    ("ZONE", text("PLAY")),
+                    ("ATTACHED", number(10)),
+                    ("TAG_SCRIPT_DATA_NUM_1", number(1)),
+                ],
+            ),
+            (
+                22,
+                "BG25_011pe",
+                &[
+                    ("ZONE", text("PLAY")),
+                    ("ATTACHED", number(10)),
+                    ("TAG_SCRIPT_DATA_NUM_1", number(5)),
+                ],
+            ),
+            // A zero number is left out (the log only shows the nonzero ones),
+            // and another player's enchantment is not mine.
+            (
+                23,
+                "BG31_816pe",
+                &[
+                    ("ZONE", text("PLAY")),
+                    ("ATTACHED", number(10)),
+                    ("TAG_SCRIPT_DATA_NUM_1", number(0)),
+                ],
+            ),
+            (
+                24,
+                "BG31_808pe",
+                &[
+                    ("ZONE", text("PLAY")),
+                    ("ATTACHED", number(11)),
+                    ("TAG_SCRIPT_DATA_NUM_1", number(9)),
+                ],
+            ),
+        ]);
+        assert_eq!(
+            side_numbers(&g, g.entities.get(&10)),
+            BTreeMap::from([
+                ("beetle_attack", 3),
+                ("beetle_health", 4),
+                ("spell_attack", 2),
+                ("undead_attack", 5),
+            ])
+        );
+        assert!(side_numbers(&g, None).is_empty());
+    }
+
+    #[test]
+    fn lock_and_load_holds_the_minion_it_stole() {
+        let g = game(&[
+            (
+                10,
+                LOCK_AND_LOAD,
+                &[
+                    ("ZONE", text("PLAY")),
+                    ("CONTROLLER", number(1)),
+                    ("TAG_SCRIPT_DATA_ENT_1", number(44)),
+                ],
+            ),
+            // Another power's held entity is not a Lock and Load minion.
+            (
+                11,
+                "BG21_HERO_010p",
+                &[
+                    ("ZONE", text("PLAY")),
+                    ("CONTROLLER", number(1)),
+                    ("TAG_SCRIPT_DATA_ENT_1", number(45)),
+                ],
+            ),
+        ]);
+        assert_eq!(held_entity(&g, Some(1)), 44);
+        assert_eq!(held_entity(&g, Some(2)), 0);
+    }
 
     #[test]
     fn gift_enchantments_name_their_gift_and_numbers_do_not() {

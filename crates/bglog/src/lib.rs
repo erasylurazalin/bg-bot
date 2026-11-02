@@ -86,7 +86,8 @@ pub use parser::{Handler, PowerLog};
 pub use tracker::{Snapshot, Tracker};
 pub use views::{
     Board, DEITY_MINIONS, Deity, Fight, GIFT_TAG, HERO_ENCHANTMENTS, HeroPower, KEYWORDS,
-    LOCK_AND_LOAD, Minion, OWES_A_SUMMON, PLAYER_COUNTS, Reward, Seat, Trinket, WINGMEN, board,
-    counts, deity, gem, gifts_by_minion, hand, hero_enchants_by_minion, hero_power,
-    hidden_in_hand, minion, one_minion, rewards, trinkets, turn_of, waiting,
+    LOCK_AND_LOAD, Minion, OWES_A_SUMMON, PLAYER_COUNTS, PLAYER_ENCHANTS, REANIMATE_MARK, Reward,
+    SECRET_CARDS, Seat, Trinket, UPPER_HAND, WINGMEN, board, counts, deity, enchant_numbers, gem,
+    gifts_by_minion, hand, held_entity, hero_enchants_by_minion, hero_power, hidden_in_hand, minion,
+    one_minion, reanimates, rewards, secrets, side_numbers, trinkets, turn_of, waiting,
 };

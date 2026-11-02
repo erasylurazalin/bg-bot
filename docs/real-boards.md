@@ -7,7 +7,21 @@ sessions, so the script first copies them to `~/bg-logs/`. Then it reads
 each new or grown log with the tracker's parser (`~/projects/bg`) and writes
 one file per game to `boards/real/<log folder>-g<N>.json` (git-ignored).
 
-A systemd user timer runs it every 15 minutes:
+The same collector is also a Rust subcommand now, `bgbench collect-boards`
+(`crates/bgbench/src/collect_boards.rs`, on the Rust log reader in
+`crates/bglog`): the same files, the same archive, the same
+`<out>/.state.json` (log folder name to the size of the `Power.log` last read
+from it, so a rerun only reads logs that are new or grown; delete it to
+rewrite every file). `--out DIR` is where the files and the state go
+(`boards/real` by default) and `--no-archive` skips the copy into `~/bg-logs`.
+The one thing it writes differently is `dark_gifts`: `bglog` counts a Dark
+Gift once per copy (a golden that kept the same gift twice carries two, and
+the "+0/+0" buff a gift leaves is not a gift, see `gifts_by_minion`), where
+the Python keeps one id per gift. Until the switch-over (phase 5) the timer
+still runs the Python script, so run the subcommand by hand, with
+`--no-archive --out` on a scratch folder.
+
+A systemd user timer runs the Python script every 15 minutes:
 
 ```
 systemctl --user list-timers bg-boards.timer    # when it runs next
@@ -39,7 +53,7 @@ laptop with `systemctl --user disable --now bg-logs.timer`.
    "counters": {"gem_attack": 3, "gem_health": 2, "beetle_attack": 4,
                 "beetle_health": 2, "undead_attack": 6, "spell_attack": 1,
                 "spells_cast": 4, "knight_deaths": 2, "baller": 1,
-                "tasty_lobster": 6},
+                "upper_hand": 1},
    "deity": {"card_id": "BGFYM_000", "name": "C'Thun", "attack": 4, "health": 6},
    "hand": [{"card_id": "BG36_202", "name": "Tasty Lobster", "attack": 6,
              "health": 3, "golden": false, "keywords": ["DEATHRATTLE"],
@@ -66,11 +80,16 @@ laptop with `systemctl --user disable --now bg-logs.timer`.
   |---|---|
   | `gem_attack`, `gem_health` | `BACON_BLOODGEMBUFFATKVALUE` / `_HEALTHVALUE` on the player (the `BG26_159pe` enchantment carries the same pair) |
   | `beetle_attack`, `beetle_health` | `BG31_808pe` (Beetle Army player enchant) numbers 1 and 2 |
-  | `undead_attack`, `undead_health` | `BG25_011pe` (Undead Bonus Attack player enchant) number 1 |
+  | `undead_attack` | `BG25_011pe` (Undead Bonus Attack player enchant) number 1; there is no health one |
   | `spell_attack`, `spell_health` | `TAVERN_SPELL_ATTACK_INCREASE` / `TAVERN_SPELL_HEALTH_INCREASE` on the player |
   | `spells_cast` | `NUM_SPELLS_PLAYED_THIS_GAME` on the player (mine only: the stand-in player carries none for the opponent) |
   | `knight_deaths` | `BG25_008pe` (Eternal Knight player enchant) number 1 |
-  | `tasty_lobster`, `baller` | the `Counter` counts: a Tasty Lobster's numbers on the board or in hand, and `BG31_816pe` (Baller player enchant) number 1 |
+  | `baller` | `BG31_816pe` (Baller player enchant) number 1 |
+  | `upper_hand` | not a number in the log: the Upper Hands the side cast this turn (the spell's card goes back to SETASIDE), counted from the `PLAY` blocks of `BG28_573` |
+
+  A Tasty Lobster's count is not in `counters`: the loader reads it off the
+  card's own numbers, on the board or in the hand (see the paragraph about
+  `numbers` below).
 
 - `deity` is the side's Deity at the first attack (`BG_OldGod` in SECRET:
   the minion it awakens, its stats) or `null`. Its Aberration deaths still

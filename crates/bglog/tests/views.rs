@@ -171,6 +171,24 @@ fn a_fight_is_snapped_when_it_is_staged_and_again_at_the_first_attack() {
 }
 
 #[test]
+fn a_staged_fight_carries_what_only_exists_before_start_of_combat() {
+    // The board file reads these as the fight is staged and at the first
+    // attack; `fight.log` has neither a Secret, a reanimation mark, an Upper
+    // Hand nor a held minion, so they are the empty readings.
+    let tracker = tracker("fight.log");
+    let fight = &tracker.fights()[0];
+    assert_eq!(fight.reanimates.0.len(), fight.mine.len());
+    assert_eq!(fight.reanimates.1.len(), fight.theirs.len());
+    assert!(fight.reanimates.0.iter().all(|marked| !marked));
+    assert!(fight.secrets.0.is_empty() && fight.secrets.1.is_empty());
+    assert_eq!(fight.upper_hands, (0, 0));
+    assert_eq!(fight.waiting, (None, None));
+    // The first attack captured both sides' player-level numbers.
+    assert!(fight.at_attack.is_some());
+    assert!(fight.side_numbers.0.is_empty() && fight.side_numbers.1.is_empty());
+}
+
+#[test]
 fn a_seat_comes_from_the_leaderboard_hero() {
     let tracker = tracker("views.log");
     let seats = tracker.seats();
