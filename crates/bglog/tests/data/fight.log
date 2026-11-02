@@ -1,0 +1,155 @@
+D 00:57:53.6478530 GameState.DebugPrintPower() - CREATE_GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 00:57:53.6478530 GameState.DebugPrintPower() -     Player EntityID=2 PlayerID=1 GameAccountId=[hi=111111111111111111 lo=222222222]
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 00:57:53.6478530 GameState.DebugPrintPower() -     Player EntityID=3 PlayerID=9 GameAccountId=[hi=0 lo=0]
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 00:57:53.6478530 GameState.DebugPrintGame() - BuildNumber=254477
+D 00:57:53.6478530 GameState.DebugPrintGame() - GameType=GT_BATTLEGROUNDS
+D 00:57:53.6478530 GameState.DebugPrintGame() - FormatType=FT_WILD
+D 00:57:53.6478530 GameState.DebugPrintGame() - ScenarioID=3459
+D 00:57:53.6478530 GameState.DebugPrintGame() - PlayerID=1, PlayerName=Alice#1919
+D 00:57:53.6478530 GameState.DebugPrintGame() - PlayerID=9, PlayerName=Eve
+D 00:58:25.1783940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=TURN value=1 
+D 00:58:25.5893630 GameState.DebugPrintPower() -         TAG_CHANGE Entity=290 tag=IS_BACON_POOL_MINION value=1 
+D 00:58:25.5893630 GameState.DebugPrintPower() -         TAG_CHANGE Entity=290 tag=BACON_SUBSET_UNDEAD value=1 
+D 00:58:25.5893630 GameState.DebugPrintPower() -         TAG_CHANGE Entity=290 tag=BACON_GUIDE_RELATED_CARD value=99629 
+D 00:58:25.5893630 GameState.DebugPrintPower() -         TAG_CHANGE Entity=290 tag=HAS_ACTIVATE_POWER value=1 
+D 00:58:25.5893630 GameState.DebugPrintPower() -         FULL_ENTITY - Creating ID=296 CardID=BG36_345
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CONTROLLER value=9
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CARDTYPE value=MINION
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=1196 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=479 value=3
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=ATK value=3
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=HEALTH value=3
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=TAG_SCRIPT_DATA_NUM_1 value=3
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=TAG_SCRIPT_DATA_NUM_2 value=3
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=EXHAUSTED value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=ZONE value=PLAY
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=ENTITY_ID value=296
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=ZONE_POSITION value=2
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CREATOR value=46
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=1037 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=1254 value=46
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CREATOR_DBID value=57980
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=BACON_TRIPLE_UPGRADE_MINION_ID value=132916
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=TECH_LEVEL value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=IS_BACON_POOL_MINION value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=SUPPRESS_ALL_SUMMON_VO value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=SPAWN_TIME_COUNT value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=1724 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=HAS_ACTIVATE_POWER value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=TAG_SCRIPT_DATA_NUM_3 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=3085 value=3
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=INTERACTABLE_OBJECT value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=INTERACTABLE_OBJECT_COST value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=INTERACTABLE_OBJECT_PASSIVE_ANIMATION_TYPE value=2
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=WAS_EVER_AN_INTERACTABLE_OBJECT value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=4901 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         TAG_CHANGE Entity=296 tag=4901 value=0 
+D 00:58:25.5893630 GameState.DebugPrintPower() -         FULL_ENTITY - Creating ID=297 CardID=TB_BaconShop_DragBuy
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CONTROLLER value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CARDTYPE value=MOVE_MINION_HOVER_TARGET
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=ZONE value=PLAY
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=ENTITY_ID value=297
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CLASS value=NEUTRAL
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CREATOR value=46
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=1037 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -             tag=CREATOR_DBID value=57980
+D 00:58:43.7457550 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Suspicious Prisonguard id=296 zone=PLAY zonePos=2 cardId=BG36_345 player=9] tag=CONTROLLER value=1 
+D 00:59:12.5949630 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Suspicious Prisonguard id=296 zone=PLAY zonePos=1 cardId=BG36_345 player=1] tag=SPAWN_TIME_COUNT value=1 
+D 00:59:12.5949630 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=1453 value=0 
+D 00:59:12.5949630 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=3534 value=1 
+D 00:59:12.5949630 PowerTaskList.DebugPrintPower() -     META_DATA - Meta=ARTIFICIAL_PAUSE Data=1500 InfoCount=1
+D 00:59:12.5949630 PowerTaskList.DebugPrintPower() -                 Info[0] = [entityName=BaconShop8PlayerEnchant id=46 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=1]
+D 00:59:12.5949630 PowerTaskList.DebugPrintPower() -     META_DATA - Meta=SLUSH_TIME Data=1425 InfoCount=1
+D 00:59:12.5949630 PowerTaskList.DebugPrintPower() -                 Info[0] = [entityName=BaconShop8PlayerEnchant id=46 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=1]
+D 00:59:12.5949630 PowerTaskList.DebugPrintPower() - BLOCK_END
+D 00:59:12.5949630 PowerProcessor.PrepareHistoryForCurrentTaskList() - m_currentTaskList=206
+D 00:59:12.6839750 GameState.DebugPrintPowerList() - Count=119
+D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_START_TRIGGERS 
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=Ethereal Rabbit'ath id=216 zone=COSMETIC zonePos=0 cardId=PET_4_3 player=9] EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=5 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Ethereal Rabbit'ath id=216 zone=COSMETIC zonePos=0 cardId=PET_4_3 player=9] tag=PET_EVENT_ID value=12 
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_END
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=Ethereal Rabbit'ath id=216 zone=COSMETIC zonePos=0 cardId=PET_4_3 player=9] EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=12 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_END
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=Eve EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=-1 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=NEXT_STEP value=MAIN_START 
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_END
+D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_START 
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=Ethereal Rabbit'ath id=216 zone=COSMETIC zonePos=0 cardId=PET_4_3 player=9] EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=38 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_END
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=Eve EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=-1 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=NEXT_STEP value=MAIN_ACTION 
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_END
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=BaconShop8PlayerEnchant id=46 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=1] EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=-1 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=2022 value=1 
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=1453 value=1 
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=BACON_CURRENT_COMBAT_PLAYER_ID value=1 
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Eve tag=BACON_CURRENT_COMBAT_PLAYER_ID value=4 
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=3452 value=1 
+D 00:59:12.6839750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=2374 value=1 
+D 00:59:12.6839750 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=576 CardID=BG24_HERO_100
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=CARDTYPE value=HERO
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=HEALTH value=30
+D 00:59:12.6839750 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=579 CardID=BG28_300
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=CARDTYPE value=MINION
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=1196 value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=479 value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=ATK value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=HEALTH value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_1 value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=EXHAUSTED value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=ENTITY_ID value=579
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=CARDRACE value=UNDEAD
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=DEATHRATTLE value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=ZONE_POSITION value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=CREATOR value=46
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=1037 value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=1254 value=46
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=CREATOR_DBID value=57980
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=BACON_TRIPLE_UPGRADE_MINION_ID value=104554
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=TECH_LEVEL value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=IS_BACON_POOL_MINION value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=SUPPRESS_ALL_SUMMON_VO value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=BACON_SUBSET_UNDEAD value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=HAS_ACTIVATE_POWER value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=3085 value=1
+D 00:59:12.6839750 GameState.DebugPrintPower() -         tag=BACON_GUIDE_RELATED_CARD value=99629
+D 00:59:12.6839750 GameState.DebugPrintPower() - BLOCK_END
+D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=576 tag=3669 value=0 
+D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=579 tag=3669 value=0 
+D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=577 tag=3669 value=0 
+D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=578 tag=3669 value=0 
+D 00:59:12.8785010 GameState.DebugPrintPowerList() - Count=315
+D 00:59:12.8785010 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=[entityName=BaconShop8PlayerEnchant id=46 zone=PLAY zonePos=0 cardId=TB_BaconShop_8P_PlayerE player=1] EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=40 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:59:12.8785010 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=580 CardID=
+D 00:59:12.8785010 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 00:59:12.8785010 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:59:12.8785010 GameState.DebugPrintPower() -         tag=ENTITY_ID value=580
+D 00:59:12.8785010 GameState.DebugPrintPower() -     TAG_CHANGE Entity=580 tag=ZONE value=PLAY 
+D 00:59:12.8785010 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=4741 value=8 
+D 00:59:12.8785010 GameState.DebugPrintPower() - BLOCK_END
+D 00:59:12.8785010 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_ACTION 
+D 00:59:12.8785010 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=Eve EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=-1 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:59:12.8785010 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=NEXT_STEP value=MAIN_END 
+D 00:59:12.8785010 GameState.DebugPrintPower() - BLOCK_END
+D 00:59:12.8785010 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=2022 value=0 
+D 00:59:12.8785010 GameState.DebugPrintPower() - TAG_CHANGE Entity=Alice#1919 tag=2029 value=1 
+D 00:59:12.8785010 GameState.DebugPrintPower() - BLOCK_START BlockType=ATTACK Entity=[entityName=Suspicious Prisonguard id=296 zone=PLAY zonePos=1 cardId=BG36_345 player=1] EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=0 Target=0 SubOption=-1 
+D 00:59:12.8785010 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_FRIENDLY_MINIONS_THAT_ATTACKED_THIS_TURN value=1 
+D 00:59:12.8785010 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=PROPOSED_ATTACKER value=296 
+D 00:59:12.8785010 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=PROPOSED_DEFENDER value=579 
+D 00:59:12.8785010 GameState.DebugPrintPower() -     BLOCK_START BlockType=TRIGGER Entity=[entityName=Heroic Inspiration id=235 zone=PLAY zonePos=0 cardId=BG33_HERO_001p_ALT player=1] EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=2 Target=0 SubOption=-1 TriggerKeyword=TRIGGER_VISUAL
+D 00:59:12.8785010 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Heroic Inspiration id=235 zone=PLAY zonePos=0 cardId=BG33_HERO_001p_ALT player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=14 
+D 00:59:12.8785010 GameState.DebugPrintPower() -     BLOCK_END
+D 00:59:13.3062760 GameState.DebugPrintPower() - TAG_CHANGE Entity=Alice#1919 tag=BACON_CURRENT_COMBAT_PLAYER_ID value=0 
+D 00:59:13.3062760 GameState.DebugPrintPower() - TAG_CHANGE Entity=Eve tag=BACON_CURRENT_COMBAT_PLAYER_ID value=0 

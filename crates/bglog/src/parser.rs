@@ -37,8 +37,19 @@ pub trait Handler {
     fn new_game(&mut self, game: &mut Game) {}
 
     /// A `TAG_CHANGE` line set `tag` on the entity `entity`. The value is
-    /// already in the entity's tags when this fires.
-    fn tag_change(&mut self, game: &mut Game, entity: i32, tag: &str, value: &TagValue) {}
+    /// already in the entity's tags when this fires. `depth` counts the blocks
+    /// open now, as in [`Handler::block_start`]: the Python's Battlegrounds
+    /// layer reads the reader's depth from here to know where a fight was
+    /// staged.
+    fn tag_change(
+        &mut self,
+        game: &mut Game,
+        depth: usize,
+        entity: i32,
+        tag: &str,
+        value: &TagValue,
+    ) {
+    }
 
     /// A block opened. `depth` counts the blocks open now, this one included.
     /// `entity` is the block's `Entity=`, which may name an entity no line has
@@ -176,7 +187,7 @@ impl PowerLog {
             if let Some(entity) = resolve(game, entity) {
                 let value = TagValue::parse(value);
                 game.entity(entity).set(tag, value.clone());
-                handler.tag_change(game, entity, tag, &value);
+                handler.tag_change(game, self.depth, entity, tag, &value);
             }
         } else if let Some((entity, card_id)) = full_entity(body) {
             if let Some(entity) = resolve(game, entity) {

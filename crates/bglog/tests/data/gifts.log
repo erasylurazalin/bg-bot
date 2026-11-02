@@ -1,0 +1,76 @@
+D 00:57:53.6478530 GameState.DebugPrintPower() - CREATE_GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=5422 CardID=BG28_309
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CARDTYPE value=MINION
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=1196 value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=479 value=5
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ATK value=5
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=HEALTH value=2
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=EXHAUSTED value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ENTITY_ID value=5422
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CARDRACE value=UNDEAD
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=DEATHRATTLE value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ZONE_POSITION value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CREATOR value=46
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=1037 value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=1254 value=46
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CREATOR_DBID value=57980
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=BACON_TRIPLE_UPGRADE_MINION_ID value=109003
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=TECH_LEVEL value=3
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=IS_BACON_POOL_MINION value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=SUPPRESS_ALL_SUMMON_VO value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=BACON_SUBSET_UNDEAD value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=HAS_ACTIVATE_POWER value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=3085 value=2
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=4901 value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5422 tag=4901 value=0 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5422 tag=3085 value=4 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5422 tag=TRIGGER_VISUAL value=1 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=5423 CardID=
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ENTITY_ID value=5423
+D 01:07:34.4120080 GameState.DebugPrintPower() -     SHOW_ENTITY - Updating Entity=5423 CardID=BG36_MidGameEffect_000t74e
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CARDTYPE value=ENCHANTMENT
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ATTACHED value=5422
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ENTITY_ID value=5423
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CREATOR value=5422
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=1037 value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=1068 value=0
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CREATOR_DBID value=108992
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=IS_NIGHTMARE_BONUS value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=4901 value=0
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5423 tag=1068 value=1 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5423 tag=1068 value=0 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5423 tag=ZONE value=PLAY 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5423 tag=CREATOR value=3436 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5423 tag=CREATOR_DBID value=133423 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5423 tag=COPIED_FROM_ENTITY_ID value=5086 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=5424 CardID=
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ENTITY_ID value=5424
+D 01:07:34.4120080 GameState.DebugPrintPower() -     SHOW_ENTITY - Updating Entity=5424 CardID=BG36_MidGameEffect_000t74e2
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CARDTYPE value=ENCHANTMENT
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ATTACHED value=5422
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=ENTITY_ID value=5424
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CREATOR value=5422
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=1037 value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=1068 value=0
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=CREATOR_DBID value=108992
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 01:07:34.4120080 GameState.DebugPrintPower() -         tag=4901 value=0
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5424 tag=1068 value=1 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5424 tag=1068 value=0 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5424 tag=ZONE value=PLAY 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5424 tag=TAG_SCRIPT_DATA_NUM_1 value=9 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5424 tag=3528 value=1 
+D 01:07:34.4120080 GameState.DebugPrintPower() -     TAG_CHANGE Entity=5424 tag=COPIED_FROM_ENTITY_ID value=5087 

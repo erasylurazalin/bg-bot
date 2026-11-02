@@ -194,7 +194,7 @@ fn write_game(out: &mut dyn Write, index: usize, game: &Game) -> io::Result<()> 
 }
 
 /// A number bare, a text value quoted.
-fn value_text(value: &TagValue) -> String {
+pub(crate) fn value_text(value: &TagValue) -> String {
     match value {
         TagValue::Int(n) => n.to_string(),
         TagValue::Text(s) => quote(s),
@@ -203,7 +203,7 @@ fn value_text(value: &TagValue) -> String {
 
 /// In single quotes, with backslashes and quotes escaped, so the Python dump
 /// can produce the same bytes.
-fn quote(text: &str) -> String {
+pub(crate) fn quote(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
     out.push('\'');
     for c in text.chars() {

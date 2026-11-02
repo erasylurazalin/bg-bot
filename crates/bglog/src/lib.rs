@@ -1,7 +1,8 @@
-//! Reads Hearthstone's `Power.log`: a game, its entities and their tags.
+//! Reads Hearthstone's `Power.log`: a game, its entities and their tags, and
+//! the Battlegrounds views built on them.
 //!
-//! A port of `~/projects/bg/bg/powerlog.py`, the tracker's log reader, and the
-//! base the Battlegrounds views are built on. Feed it lines as they are
+//! A port of `~/projects/bg/bg/powerlog.py` and `~/projects/bg/bg/battlegrounds.py`,
+//! the tracker's log reader and its views. Feed it lines as they are
 //! written and it keeps the entity table the game client holds: every
 //! `FULL_ENTITY`, `SHOW_ENTITY`, `CHANGE_ENTITY`, `HIDE_ENTITY` and
 //! `TAG_CHANGE`, and the indented `tag=` lines under an entity.
@@ -41,11 +42,51 @@
 //!   (`[entityName=... id=287 ...]`), or a name (`Entity=Bartender Bob`).
 //!   Names resolve through the header's player names, and any other name goes
 //!   to the player with no real account behind it (the stand-in opponent).
+//!
+//! # The Battlegrounds views
+//!
+//! [`Tracker`] follows the lines and keeps the lobby and the fights current:
+//! a fight is snapped when it is staged (`MAIN_START`, or the setup block
+//! closing if the step came first), snapped again at its first attack, and
+//! finished when `BACON_CURRENT_COMBAT_PLAYER_ID` drops back to 0.
+//!
+//! ```
+//! use bglog::{Cards, Tracker};
+//!
+//! let mut tracker = Tracker::new(Cards::default());
+//! tracker.feed("D 00:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME");
+//! assert!(tracker.game().is_some());
+//! assert!(tracker.fights().is_empty());
+//! ```
+//!
+//! Each view is also a plain function of one [`Game`] at one moment: [`board`]
+//! and [`hand`] (their [`Minion`]s, with Dark Gifts and hero power
+//! enchantments), [`hero_power`], [`trinkets`], [`rewards`], [`deity`],
+//! [`counts`], [`gem`], [`waiting`], [`hidden_in_hand`] and [`turn_of`].
+//! [`gifts_by_minion`] counts a Dark Gift once per copy: one entry per gift
+//! card that gave it (the carriers of one gift card are one copy), where the
+//! Python kept one per gift id. A minion that kept the same gift twice carries
+//! two. The buffs a gift leaves ("+0/+0." and the like) are not gifts.
+//!
+//! Card names come from [`Cards`], read from `ref/hsjson-cards.json`
+//! (git-ignored); an id no data names prints as itself, as the Python's
+//! `card_name` does.
 
+mod cards;
 mod entity;
 mod game;
 mod parser;
+mod tracker;
+mod views;
 
+pub use cards::Cards;
 pub use entity::{Entity, TagValue};
 pub use game::Game;
 pub use parser::{Handler, PowerLog};
+pub use tracker::{Snapshot, Tracker};
+pub use views::{
+    Board, DEITY_MINIONS, Deity, Fight, GIFT_TAG, HERO_ENCHANTMENTS, HeroPower, KEYWORDS,
+    LOCK_AND_LOAD, Minion, OWES_A_SUMMON, PLAYER_COUNTS, Reward, Seat, Trinket, WINGMEN, board,
+    counts, deity, gem, gifts_by_minion, hand, hero_enchants_by_minion, hero_power,
+    hidden_in_hand, minion, one_minion, rewards, trinkets, turn_of, waiting,
+};

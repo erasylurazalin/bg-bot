@@ -1,0 +1,83 @@
+D 15:26:30.0383600 GameState.DebugPrintPower() - CREATE_GAME
+D 15:26:30.0383600 GameState.DebugPrintPower() -     GameEntity EntityID=10
+D 15:48:02.2557710 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=460 CardID=BG_OldGod
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=CONTROLLER value=6
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=CARDTYPE value=SPELL
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_1 value=4
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_2 value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=ZONE value=SECRET
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=ENTITY_ID value=460
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=CLASS value=NEUTRAL
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=CREATOR value=75
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=QUEST_PROGRESS_TOTAL value=4
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=1037 value=6
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=CREATOR_DBID value=57980
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=SUPPRESS_ALL_SUMMON_VO value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=1500 value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=START_OF_COMBAT value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=OBJECTIVE value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=BACON_EVOLUTION_CARD_ID value=130610
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_3 value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_6 value=130610
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=BACON_TRIGGER_XY value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=QUEST_HIDE_PROGRESS value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=3736 value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=4901 value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=USE_EVOLUITON_BIG_CARD_AS_PRIMARY value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=BACON_DEITY_SIGIL value=1
+D 15:48:02.2557710 GameState.DebugPrintPower() -         tag=4946 value=1
+D 15:48:37.8961290 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_2 value=3 
+D 15:48:37.8961290 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_3 value=2 
+D 15:48:49.3073620 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=1 
+D 15:48:49.3073620 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 15:48:49.7007180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=0 
+D 15:48:49.7007180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=4 
+D 15:50:26.5679690 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=1 
+D 15:50:26.5679690 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 15:50:26.5679690 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=2 
+D 15:50:26.5679690 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 15:50:26.8674100 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=0 
+D 15:50:26.8674100 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=4 
+D 15:51:44.5843970 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=1 
+D 15:51:44.5843970 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 15:51:44.5843970 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=2 
+D 15:51:44.5843970 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 15:51:44.5843970 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=3 
+D 15:51:44.5843970 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 15:51:45.1559640 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=0 
+D 15:51:45.1559640 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=4 
+D 15:53:16.2238240 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=1 
+D 15:53:16.2238240 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 15:53:16.2238240 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=2 
+D 15:53:16.2238240 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 15:53:16.2238240 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=3 
+D 15:53:16.2238240 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 15:53:17.1502530 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=0 
+D 15:53:17.1502530 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=4 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=1 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=2 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=3 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=4 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 15:55:17.0564720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=5 
+D 15:55:17.4507300 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=0 
+D 15:55:17.4507300 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=4 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=1 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=2 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=3 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=4 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 15:57:14.4058550 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=5 
+D 15:57:14.7896170 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=QUEST_PROGRESS value=0 
+D 15:57:14.7896170 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_1 value=4 
+D 16:00:58.1107510 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_2 value=5 
+D 16:00:58.1107510 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_3 value=3 
+D 16:00:58.1107510 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_2 value=7 
+D 16:00:58.1107510 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Secret Deity [DNT] id=460 zone=SECRET zonePos=0 cardId=BG_OldGod player=6] tag=TAG_SCRIPT_DATA_NUM_3 value=4 

@@ -9,6 +9,8 @@
 //!                           [--boards DIR] [--runs N] [--out DIR] [--flag PCT]
 //!   bgbench powerlog FILE   every game of a Power.log as its entities and tags stood
 //!                           [--out FILE] [--time]
+//!   bgbench tracker FILE    the Battlegrounds seats and fights of a Power.log
+//!                           [--out FILE] [--cards FILE] [--time]
 //!
 //! `fuzz` and `games` also take --real-boards DIR [--real-seats N] to seat
 //! real-board seats playing the boards of DIR (docs/real-boards.md), the
@@ -29,6 +31,7 @@ use rayon::prelude::*;
 use serde::Deserialize;
 
 mod powerlog;
+mod tracker;
 
 /// The boards real seats play, and how many seats of a game are real.
 type Real = Option<(Arc<RealBoards>, usize)>;
@@ -722,6 +725,7 @@ fn main() {
             shop_replay(&actions, seeds, &out, card.as_deref());
         }
         Some("powerlog") => powerlog::run(&args),
+        Some("tracker") => tracker::run(&args),
         Some("games") => bench_games(num(10), real),
         Some("fuzz") => fuzz(num(10_000), real),
         Some("match") => bot_match(num(10_000)),
@@ -732,6 +736,7 @@ fn main() {
                  \x20      bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]\n\
                  \x20      bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME]\n\
                  \x20      bgbench powerlog FILE [--out FILE] [--time]\n\
+                 \x20      bgbench tracker FILE [--out FILE] [--cards FILE] [--time]\n\
                  \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N]"
             );
             std::process::exit(2);

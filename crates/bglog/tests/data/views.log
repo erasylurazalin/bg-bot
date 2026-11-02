@@ -1,0 +1,409 @@
+D 00:57:53.6478530 GameState.DebugPrintPower() - CREATE_GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 00:57:53.6478530 GameState.DebugPrintPower() -     Player EntityID=2 PlayerID=1 GameAccountId=[hi=111111111111111111 lo=222222222]
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=PLAYER_ID value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=LAST_AFFECTED_BY value=2
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=HERO_ENTITY value=25
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=MAXHANDSIZE value=10
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=STARTHANDSIZE value=4
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=TEAM_ID value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=ENTITY_ID value=2
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CANT_DRAW value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_0 value=15
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_1 value=16
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_2 value=17
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_3 value=18
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_4 value=19
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_5 value=20
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=1355 value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=NEXT_OPPONENT_PLAYER_ID value=4
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=PLAYER_TECH_LEVEL value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=BACON_MAX_PLAYER_TECH_LEVEL value=6
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=MAX_EXCAVATE_TIER value=2
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=4741 value=2
+D 00:57:53.6478530 GameState.DebugPrintPower() -     Player EntityID=3 PlayerID=9 GameAccountId=[hi=0 lo=0]
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 00:57:53.6478530 GameState.DebugPrintGame() - BuildNumber=254477
+D 00:57:53.6478530 GameState.DebugPrintGame() - GameType=GT_BATTLEGROUNDS
+D 00:57:53.6478530 GameState.DebugPrintGame() - FormatType=FT_WILD
+D 00:57:53.6478530 GameState.DebugPrintGame() - ScenarioID=3459
+D 00:57:53.6478530 GameState.DebugPrintGame() - PlayerID=1, PlayerName=Alice#1919
+D 00:57:53.6478530 GameState.DebugPrintGame() - PlayerID=9, PlayerName=Eve
+D 00:57:53.9062180 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=102 CardID=BG33_HERO_001
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=CARDTYPE value=HERO
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=HEALTH value=30
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=ZONE value=HAND
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=ENTITY_ID value=102
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=CLASS value=NEUTRAL
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=RARITY value=FREE
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=ZONE_POSITION value=1
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=NUM_TURNS_IN_HAND value=1
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=ARMOR value=19
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=CREATOR value=1
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=HERO_POWER value=129164
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=BACON_HERO_CAN_BE_DRAFTED value=1
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=BACON_COMPANION_ID value=123075
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=HAS_ACTIVATE_POWER value=1
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=3085 value=30
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=3190 value=100
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=3206 value=17
+D 00:57:53.9062180 GameState.DebugPrintPower() -         tag=4901 value=1
+D 00:57:53.9062180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=102 tag=ZONE_POSITION value=0 
+D 00:57:53.9062180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=102 tag=ZONE value=SETASIDE 
+D 00:57:53.9062180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=102 tag=ZONE value=HAND 
+D 00:57:53.9062180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=102 tag=ZONE_POSITION value=4 
+D 00:57:53.9062180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=102 tag=ZONE_POSITION value=3 
+D 00:58:24.7615870 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=HAND zonePos=3 cardId=BG33_HERO_001 player=1] tag=ZONE_POSITION value=2 
+D 00:58:24.7615870 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=HAND zonePos=3 cardId=BG33_HERO_001 player=1] tag=ZONE_POSITION value=1 
+D 00:58:24.7615870 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=HAND zonePos=3 cardId=BG33_HERO_001 player=1] tag=ZONE_POSITION value=0 
+D 00:58:24.7615870 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=HAND zonePos=3 cardId=BG33_HERO_001 player=1] tag=ZONE value=PLAY 
+D 00:58:24.7615870 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=HAND zonePos=3 cardId=BG33_HERO_001 player=1] tag=PLAYER_ID value=1 
+D 00:58:24.7615870 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=HAND zonePos=3 cardId=BG33_HERO_001 player=1] tag=PLAYER_LEADERBOARD_PLACE value=1 
+D 00:58:25.5893630 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=PLAYER_TECH_LEVEL value=1 
+D 00:58:25.5893630 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=287 CardID=BG30_Trinket_1st
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CARDTYPE value=BATTLEGROUND_TRINKET
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_1 value=5
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=ENTITY_ID value=287
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CLASS value=NEUTRAL
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=FACTION value=NEUTRAL
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CREATOR value=46
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=1037 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CREATOR_DBID value=57980
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=TECH_LEVEL value=4
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=SUPPRESS_ALL_SUMMON_VO value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=SPELL_SCHOOL value=11
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=1724 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_6 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=3169 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=BACON_IS_MAGIC_ITEM_DISCOVER value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=3639 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=BACON_IS_POTENTIAL_TRINKET value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=BACON_TURNS_LEFT_TO_DISCOVER_TRINKET value=5
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=4901 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=288 CardID=BG30_Trinket_2nd
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CARDTYPE value=BATTLEGROUND_TRINKET
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_1 value=8
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=ENTITY_ID value=288
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CLASS value=NEUTRAL
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=FACTION value=NEUTRAL
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CREATOR value=46
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=1037 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=CREATOR_DBID value=57980
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=TECH_LEVEL value=6
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=SUPPRESS_ALL_SUMMON_VO value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=SPELL_SCHOOL value=12
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=1724 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=TAG_SCRIPT_DATA_NUM_6 value=2
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=3169 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=BACON_IS_MAGIC_ITEM_DISCOVER value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=3639 value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=BACON_IS_POTENTIAL_TRINKET value=1
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=BACON_TURNS_LEFT_TO_DISCOVER_TRINKET value=8
+D 00:58:25.5893630 GameState.DebugPrintPower() -         tag=4901 value=1
+D 00:59:13.3062760 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=4 
+D 00:59:13.3062760 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=7 
+D 00:59:50.2069520 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=1 
+D 00:59:50.2069520 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=2 
+D 00:59:50.2069520 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=3 
+D 00:59:50.2069520 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 00:59:50.6174260 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 00:59:50.6174260 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=6 
+D 01:00:10.3014880 GameState.DebugPrintPower() -         TAG_CHANGE Entity=Alice#1919 tag=PLAYER_TECH_LEVEL value=2 
+D 01:00:10.3014880 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=PLAYER_TECH_LEVEL value=2 
+D 01:00:47.7286940 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ARMOR value=15 
+D 01:00:48.1904830 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 01:00:48.1904830 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=5 
+D 01:01:19.8683510 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=1 
+D 01:02:05.3953770 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=2 
+D 01:02:05.3953770 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=4 
+D 01:02:05.3953770 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:02:05.8007000 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 01:02:05.8007000 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=4 
+D 01:02:32.1628780 GameState.DebugPrintPower() -         TAG_CHANGE Entity=Alice#1919 tag=PLAYER_TECH_LEVEL value=3 
+D 01:02:32.1628780 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=PLAYER_TECH_LEVEL value=3 
+D 01:02:37.5687590 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=2 
+D 01:03:34.6014710 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=3 
+D 01:03:34.6014710 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=4 
+D 01:03:34.6014710 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:03:35.8567650 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 01:03:35.8567650 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 01:04:15.2908400 GameState.DebugPrintPower() - CHANGE_ENTITY - Updating Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] CardID=BG36_MagicItem_220
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TAG_NOT_SET value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=CARDTYPE value=BATTLEGROUND_TRINKET
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=1196 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=479 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TAG_SCRIPT_DATA_NUM_1 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=PREMIUM value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TRIGGER_VISUAL value=1
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=EXHAUSTED value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=CLASS value=NEUTRAL
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=FACTION value=INVALID
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=JUST_PLAYED value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=NUM_TURNS_IN_PLAY value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=NUM_TURNS_IN_HAND value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=CREATOR value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=341 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=1037 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=1068 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=1069 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=1271 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=CREATOR_DBID value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=COPIED_BY_KHADGAR value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TECH_LEVEL value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=SPAWN_TIME_COUNT value=1
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=SPELL_SCHOOL value=11
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=1724 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TIMES_BEEN_TRANSFORMED value=1
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=2485 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TAG_SCRIPT_DATA_NUM_4 value=11
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TAG_SCRIPT_DATA_NUM_6 value=1
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3085 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3169 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3388 value=1
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=BACON_TRINKET value=1
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3551 value=1
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=STARSHIP value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=BACON_IS_MAGIC_ITEM_DISCOVER value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3614 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3616 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3617 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3618 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3619 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3620 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3621 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3622 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3639 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=3669 value=1
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=BACON_IS_POTENTIAL_TRINKET value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=BACON_TURNS_LEFT_TO_DISCOVER_TRINKET value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=ADDITIONAL_HERO_POWER_INDEX value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=4235 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=4236 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=THO_DEFEATED_ALLY value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=4472 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=4901 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=4997 value=0
+D 01:05:35.6073720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=3 
+D 01:05:35.6073720 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=4 
+D 01:05:35.6073720 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=7 
+D 01:05:35.6073720 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:05:36.5961940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 01:06:02.2129420 GameState.DebugPrintPower() -         TAG_CHANGE Entity=Alice#1919 tag=PLAYER_TECH_LEVEL value=4 
+D 01:06:02.2129420 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=PLAYER_TECH_LEVEL value=4 
+D 01:06:04.9962250 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=3 
+D 01:06:17.7239380 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=4 
+D 01:07:19.4517900 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=5 
+D 01:07:35.8787530 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=4 
+D 01:07:35.8787530 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=7 
+D 01:07:35.8787530 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:07:36.4122400 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 01:08:08.7464320 GameState.DebugPrintPower() -         TAG_CHANGE Entity=Alice#1919 tag=PLAYER_TECH_LEVEL value=5 
+D 01:08:08.7464320 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=PLAYER_TECH_LEVEL value=5 
+D 01:08:11.9685370 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=6 
+D 01:08:15.4301250 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=7 
+D 01:09:19.4520980 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=8 
+D 01:09:49.1795000 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=5 
+D 01:09:49.1795000 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=6 
+D 01:09:49.1795000 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=12 
+D 01:09:49.1795000 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=15 
+D 01:09:49.1795000 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:09:50.1233750 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 01:11:01.3747690 GameState.DebugPrintPower() - CHANGE_ENTITY - Updating Entity=[entityName=Greater Trinket id=288 zone=PLAY zonePos=0 cardId=BG30_Trinket_2nd player=1] CardID=BG36_MagicItem_217
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=TAG_NOT_SET value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=CARDTYPE value=BATTLEGROUND_TRINKET
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=1196 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=479 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=COST value=3
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=TAG_SCRIPT_DATA_NUM_1 value=3
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=TAG_SCRIPT_DATA_NUM_2 value=3
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=PREMIUM value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=TRIGGER_VISUAL value=1
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=EXHAUSTED value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=CLASS value=NEUTRAL
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=FACTION value=NEUTRAL
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=JUST_PLAYED value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=NUM_TURNS_IN_PLAY value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=NUM_TURNS_IN_HAND value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=CREATOR value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=341 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=1037 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=1068 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=1069 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=1271 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=CREATOR_DBID value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=COPIED_BY_KHADGAR value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=TECH_LEVEL value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=SPAWN_TIME_COUNT value=1
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=SPELL_SCHOOL value=12
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=1724 value=1
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=TIMES_BEEN_TRANSFORMED value=1
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=BACON_SUBSET_UNDEAD value=1
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=2485 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=TAG_SCRIPT_DATA_NUM_4 value=11
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=TAG_SCRIPT_DATA_NUM_6 value=2
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3085 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3169 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=BACON_TRINKET value=1
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=STARSHIP value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=BACON_IS_MAGIC_ITEM_DISCOVER value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3614 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3616 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3617 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3618 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3619 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3620 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3621 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3622 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3639 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=3669 value=1
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=BACON_IS_POTENTIAL_TRINKET value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=BACON_TURNS_LEFT_TO_DISCOVER_TRINKET value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=ADDITIONAL_HERO_POWER_INDEX value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=4235 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=4236 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=THO_DEFEATED_ALLY value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=4472 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=4701 value=1
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=4901 value=0
+D 01:11:01.3747690 GameState.DebugPrintPower() -     tag=4997 value=0
+D 01:11:33.8523180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=9 
+D 01:11:36.7381110 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=10 
+D 01:12:24.9747860 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 01:12:24.9747860 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 01:12:24.9747860 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 01:12:24.9747860 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=5 
+D 01:12:24.9747860 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=10 
+D 01:12:24.9747860 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:12:25.7187520 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 01:13:16.9801150 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=11 
+D 01:13:17.8801780 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=12 
+D 01:13:38.0635880 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=13 
+D 01:14:21.7854340 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=14 
+D 01:14:32.6636970 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=15 
+D 01:14:46.3912230 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=16 
+D 01:14:54.2630980 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 01:14:54.2630980 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 01:14:54.2630980 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 01:14:54.2630980 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=5 
+D 01:14:54.2630980 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=6 
+D 01:14:54.2630980 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=7 
+D 01:14:54.2630980 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=8 
+D 01:14:54.2630980 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=9 
+D 01:14:54.2630980 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=15 
+D 01:14:54.2630980 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:14:55.1246660 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 01:15:38.8526940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=17 
+D 01:15:46.5975220 GameState.DebugPrintPower() -         TAG_CHANGE Entity=Alice#1919 tag=PLAYER_TECH_LEVEL value=6 
+D 01:15:46.5975220 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=PLAYER_TECH_LEVEL value=6 
+D 01:15:48.3750590 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=18 
+D 01:15:57.4922380 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=19 
+D 01:16:14.8475160 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=20 
+D 01:16:15.5476730 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=21 
+D 01:16:16.3476870 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=22 
+D 01:16:20.9923380 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=23 
+D 01:16:40.3032840 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=24 
+D 01:17:25.0707680 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 01:17:25.0707680 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 01:17:25.0707680 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 01:17:25.0707680 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=6 
+D 01:17:25.0707680 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=7 
+D 01:17:25.0707680 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=8 
+D 01:17:25.0707680 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=9 
+D 01:17:25.0707680 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=15 
+D 01:17:25.0707680 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=20 
+D 01:17:25.0707680 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:17:25.6535110 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 01:18:24.1763280 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=25 
+D 01:18:29.7272470 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=26 
+D 01:19:21.8547470 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=27 
+D 01:19:26.8267880 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=28 
+D 01:19:40.7152800 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=29 
+D 01:19:53.2379410 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 01:19:53.2379410 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 01:19:53.2379410 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 01:19:53.2379410 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=6 
+D 01:19:53.2379410 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=7 
+D 01:19:53.2379410 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=10 
+D 01:19:53.2379410 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=15 
+D 01:19:53.2379410 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=21 
+D 01:19:53.2379410 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 
+D 01:19:53.6247510 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=3 
+D 01:20:49.7883610 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=30 
+D 01:21:06.9662690 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=31 
+D 01:21:11.8271270 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=32 
+D 01:21:14.2103770 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=33 
+D 01:21:20.4941730 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=34 
+D 01:21:37.1051540 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=35 
+D 01:21:41.4554340 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=36 
+D 01:21:44.0943340 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=37 
+D 01:21:57.0940200 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=38 
+D 01:21:59.3887010 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=39 
+D 01:22:10.8272860 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=40 
+D 01:22:13.3271460 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=17570 CardID=BG22_HERO_001p_t4
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=CONTROLLER value=1
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=CARDTYPE value=HERO_POWER
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=TRIGGER_VISUAL value=1
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=ZONE value=PLAY
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=ENTITY_ID value=17570
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=CLASS value=NEUTRAL
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=CREATOR value=17209
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=HIDE_COST value=1
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=1037 value=1
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=CREATOR_DBID value=79720
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=BACON_HERO_POWER_ACTIVATED value=1
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=START_OF_COMBAT value=1
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=SPAWN_TIME_COUNT value=1
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=1567 value=1
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=BACON_HEROPOWER_BASE_HERO_ID value=79719
+D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=4901 value=1
+D 01:22:15.3552880 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=41 
+D 01:22:26.1278120 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
+D 01:22:26.1278120 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
+D 01:22:26.1278120 GameState.DebugPrintPower() -         FULL_ENTITY - Creating ID=17878 CardID=BG32_324
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=CONTROLLER value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=CARDTYPE value=MINION
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=479 value=2
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=ATK value=2
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=HEALTH value=7
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=TAG_SCRIPT_DATA_NUM_1 value=4
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=ZONE value=HAND
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=ENTITY_ID value=17878
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=CLASS value=DEATHKNIGHT
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=CARDRACE value=UNDEAD
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=ZONE_POSITION value=6
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=NUM_TURNS_IN_HAND value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=CREATOR value=288
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=SCORE_VALUE_1 value=4
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=1037 value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=CREATOR_DBID value=133405
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=BACON_TRIPLE_UPGRADE_MINION_ID value=120105
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=TECH_LEVEL value=5
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=IS_BACON_POOL_MINION value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=SPAWN_TIME_COUNT value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=AVENGE value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=BACON_SUBSET_UNDEAD value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=BACON_EVOLUTION_CARD_ID value=110412
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=HAS_ACTIVATE_POWER value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=3085 value=7
+D 01:22:26.1278120 GameState.DebugPrintPower() -             tag=4901 value=1
+D 01:22:26.1278120 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=0 
+D 01:22:26.1278120 GameState.DebugPrintPower() - TAG_CHANGE Entity=17878 tag=ATK value=282 
+D 01:22:26.1278120 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=6 
+D 01:22:26.1278120 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=11 
+D 01:22:26.1278120 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=17 
+D 01:22:26.1278120 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Loh, the Living Legend id=102 zone=PLAY zonePos=0 cardId=BG33_HERO_001 player=1] tag=ATK value=0 

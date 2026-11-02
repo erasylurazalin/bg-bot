@@ -4,6 +4,7 @@
 //! (`Game` in `~/projects/bg/bg/powerlog.py`). A game starts at `CREATE_GAME`
 //! and ends at the next one; the reader keeps the latest game only.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use crate::entity::Entity;
@@ -11,9 +12,13 @@ use crate::entity::Entity;
 /// Every entity of one game, with the players and the names the log used.
 #[derive(Clone, Debug, Default)]
 pub struct Game {
-    /// Entity id to entity. Holders of a `Game` should not assume an order
-    /// here: sort by id when printing.
+    /// Entity id to entity. A hash map has no order: read it through
+    /// [`Game::entities_in_order`] when the order the log created entities in
+    /// matters, as it does for the Battlegrounds views (the Python reads the
+    /// values of its dict, which is the creation order).
     pub entities: HashMap<i32, Entity>,
+    /// The entity ids in the order [`Game::entity`] first made each of them.
+    pub created: Vec<i32>,
     /// The `GameType=` from the game header (`GT_BATTLEGROUNDS`), or empty
     /// while no header has been read.
     pub game_type: String,
@@ -40,13 +45,36 @@ impl Game {
 
     /// The entity with this id, created empty if the log has not named it yet.
     pub fn entity(&mut self, id: i32) -> &mut Entity {
-        self.entities.entry(id).or_insert_with(|| Entity::new(id))
+        match self.entities.entry(id) {
+            Entry::Occupied(slot) => slot.into_mut(),
+            Entry::Vacant(slot) => {
+                self.created.push(id);
+                slot.insert(Entity::new(id))
+            }
+        }
     }
 
-    /// The game entity: id 1 unless the log said otherwise.
-    pub fn game_entity(&mut self) -> &mut Entity {
-        let id = self.names.get("GameEntity").copied().unwrap_or(1);
-        self.entity(id)
+    /// Every entity, in the order the log created them.
+    pub fn entities_in_order(&self) -> impl Iterator<Item = &Entity> {
+        self.created.iter().filter_map(|id| self.entities.get(id))
+    }
+
+    /// The game entity, if the log has made one: id 1 unless the log said
+    /// otherwise (`GameEntity EntityID=`).
+    pub fn game_entity(&self) -> Option<&Entity> {
+        self.entities
+            .get(&self.names.get("GameEntity").copied().unwrap_or(1))
+    }
+
+    /// A tag of the game entity, 0 when the tag or the entity is missing (the
+    /// Python's `game_entity["TAG"]`).
+    pub fn game_tag(&self, tag: &str) -> i64 {
+        self.game_entity().map(|e| e.int(tag)).unwrap_or(0)
+    }
+
+    /// The text of a game entity tag, "" when the tag or the entity is missing.
+    pub fn game_text(&self, tag: &str) -> &str {
+        self.game_entity().map(|e| e.text(tag)).unwrap_or("")
     }
 
     /// The `Player` entity of a PlayerID, if the log has created it.
@@ -72,6 +100,17 @@ impl Game {
             Some(slot) => slot.1 = name,
             None => self.player_names.push((player_id, name)),
         }
+    }
+
+    /// The PlayerID of the first player with no real account behind it: the
+    /// stand-in the log plays the opponent on, and the player whose entity the
+    /// opponent's views are read from (the Python's `Tracker._stand_in`).
+    /// Unlike [`Game::stand_in`] it does not ask that there be only one.
+    pub fn stand_in_player(&self) -> Option<i32> {
+        self.players
+            .keys()
+            .copied()
+            .find(|player| !self.real_players.contains(player))
     }
 
     /// The entity id of the only player with no real account behind it: the

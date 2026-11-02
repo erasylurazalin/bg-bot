@@ -81,7 +81,14 @@ impl Handler for Recorder {
         self.games.push(game.clone());
     }
 
-    fn tag_change(&mut self, game: &mut Game, entity: i32, tag: &str, value: &TagValue) {
+    fn tag_change(
+        &mut self,
+        game: &mut Game,
+        _depth: usize,
+        entity: i32,
+        tag: &str,
+        value: &TagValue,
+    ) {
         self.keep(game);
         self.tags.push((entity, tag.to_string(), value.clone()));
     }
