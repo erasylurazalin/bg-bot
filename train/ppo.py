@@ -117,6 +117,9 @@ def args():
                    help="snapshot seats per game whose levels are forced to the standard curve")
     a.add_argument("--force-turn2-level", action="store_true",
                    help="a tier 1 seat that can level on turn 2 must level (learner and snapshots)")
+    a.add_argument("--force-dark-gift", action="store_true",
+                   help="on turns 3, 4 and 5 every learner and snapshot seat presses Dark "
+                        "Discovery first thing when it can, in training and test games")
     a.add_argument("--low-penalty", type=float, default=0.0,
                    help="reward taken off at each turn end per tier below the standard curve")
     a.add_argument("--low-penalty-fade", type=float, default=240,
@@ -169,6 +172,12 @@ class Bufs:
 # (the curve every beginner is taught). Set from the flag in main().
 FORCE_TURN2 = False
 LEVEL = int(np.nonzero(KIND_OF.numpy() == KINDS.index("level"))[0][0])
+DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
+# --force-dark-gift: on turns 3, 4 and 5 every Python seat presses Dark
+# Discovery first thing when it can (once per turn, the tutorial line). Set
+# from the flag in main().
+FORCE_DARK = False
+DARK_TURNS = (3, 4, 5)
 
 
 # The standard curve bots.rs levels on: the tier wanted by turn 1..12+.
@@ -191,11 +200,23 @@ def force_mask(obs, mask, curve_rows=None):
         behind = obs[:, bgpy.SCALAR_TIER] < CURVE.to(obs.device)[turn]
         rows |= curve_rows & behind
     rows &= mask[:, LEVEL]
-    if not rows.any():
+    dark = torch.zeros_like(rows)
+    if FORCE_DARK:
+        turn = obs[:, bgpy.SCALAR_TURN]
+        on = torch.zeros_like(rows)
+        for t in DARK_TURNS:
+            on |= turn == t
+        dark = on & mask[:, DARK]
+    if not rows.any() and not dark.any():
         return mask
     mask = mask.clone()
+    # Dark Discovery comes first: a seat forced to do both presses now and
+    # levels on its next action.
+    rows &= ~dark
     mask[rows] = False
     mask[rows, LEVEL] = True
+    mask[dark] = False
+    mask[dark, DARK] = True
     return mask
 
 
@@ -228,6 +249,19 @@ def names_at_rev(rev):
 
 
 def evaluate(net, n_games, lineup, dev, seed, real_boards=None, curve=False):
+    """_evaluate, retried on a new seed when a scripted bot hits the engine's
+    illegal-action panic (a known engine bug, 2026-11-02), so one bad test
+    game doesn't kill the training run."""
+    for attempt in range(4):
+        try:
+            return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards, curve)
+        except BaseException as e:  # pyo3 PanicException is a BaseException
+            if type(e).__name__ != "PanicException" or attempt == 3:
+                raise
+            print(f"eval panic ({e}); retrying with a new seed", flush=True)
+
+
+def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, curve=False):
     """Play n_games with `lineup` and return (avg_place, learner_records).
     With curve, the learner seats are curve seats (levels forced)."""
     n = min(n_games, 1024)
@@ -324,9 +358,10 @@ def summarize_records(records):
 
 
 def main():
-    global FORCE_TURN2
+    global FORCE_TURN2, FORCE_DARK
     cfg = args()
     FORCE_TURN2 = cfg.force_turn2_level
+    FORCE_DARK = cfg.force_dark_gift
     torch.manual_seed(cfg.seed)
     random.seed(cfg.seed)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")

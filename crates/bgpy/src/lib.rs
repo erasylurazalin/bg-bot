@@ -17,7 +17,7 @@ use std::sync::Arc;
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::obs::{self, OBS_SIZE};
 use bgcore::real_boards::{RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec};
-use bgcore::{ACTION_KINDS, Action, Data, Game, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES};
+use bgcore::{ACTION_KINDS, Action, Data, Game, Keywords, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES};
 use numpy::{PyReadonlyArray1, PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -409,6 +409,48 @@ impl VecEnv {
             }
         }
         Ok(())
+    }
+
+    /// Every seat of game `i` as it stands now, for looking at what bots
+    /// build (train/show_boards.py): (kind, alive, placement, tier, hero,
+    /// board), board minions as (name, golden, attack, health, keywords).
+    /// Read only; not used in training.
+    #[allow(clippy::type_complexity)]
+    fn seats(
+        &self,
+        i: usize,
+    ) -> PyResult<Vec<(u8, bool, u8, u8, String, Vec<(String, bool, i32, i32, String)>)>> {
+        let env = self.envs.get(i).ok_or_else(|| PyValueError::new_err("no such game"))?;
+        let data = &self.data;
+        Ok((0..PLAYERS)
+            .map(|p| {
+                let pl = &env.game.players[p];
+                let hero = pl
+                    .hero
+                    .and_then(|h| data.heroes.heroes.get(h as usize))
+                    .map(|h| h.name.clone())
+                    .unwrap_or_default();
+                let board = pl
+                    .board
+                    .iter()
+                    .map(|m| {
+                        let kw: Vec<&str> = Keywords::ALL
+                            .iter()
+                            .filter(|(k, _)| m.keywords.has(*k))
+                            .map(|(_, n)| *n)
+                            .collect();
+                        (
+                            data.cards.cards[m.card as usize].name.clone(),
+                            m.golden,
+                            m.attack,
+                            m.health,
+                            kw.join(","),
+                        )
+                    })
+                    .collect();
+                (env.kinds[p], pl.alive, pl.placement, pl.tier, hero, board)
+            })
+            .collect())
     }
 
     /// Card names by id, for logging and for matching a checkpoint's card
