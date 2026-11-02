@@ -25,6 +25,7 @@ use crate::{
     MAX_TIER,
 };
 use super::{
+    CastAfterChoice,
     DiscoverRequest,
     Game,
     PendingChooseOne,
@@ -381,22 +382,40 @@ impl Game {
         if self.players[p].tp.first_spell_double > 0 {
             self.players[p].tp.first_spell_double -= 1;
         }
+        // A Choose One spell is cast, then its option is picked, then its
+        // target: only then do the "after you cast a spell" triggers fire
+        // (DESIGN.md "Targets in the shop", Era 2026-11-02). The counters of
+        // the cast itself are taken now, as the log shows them moving on the
+        // play; the triggers wait for the choice to be answered.
+        let waits = matches!(self.players[p].pending_choose_one, Some(pco) if pco.source.is_none());
+        if waits {
+            self.players[p].cast_after_choice = Some(CastAfterChoice { card: m.card, casts, tavern });
+        }
         // Every spell is a spell cast: a Tavern spell, a Blood Gem, a Gem
         // Day, a Banana, a Spellcraft spell (DESIGN.md). "Tavern spell" is
         // the narrower one, and only those touch the Tavern spell counters.
-        for _ in 0..if tavern { casts } else { 1 } {
-            self.fire_event(p, EventKind::AllSpellsCast, 1);
-        }
-        self.trinket_event(p, Event::SpellCast, Some(m.card), 1);
-        if tavern {
-            for _ in 0..casts {
-                self.fire_event(p, EventKind::SpellsCast, 1);
+        if waits {
+            if tavern {
+                let n = casts as u32;
+                let pl = &mut self.players[p];
+                pl.spells_cast = pl.spells_cast.saturating_add(n);
+                pl.spells_cast_turn = pl.spells_cast_turn.saturating_add(1);
             }
-            self.players[p].spells_cast_turn = self.players[p].spells_cast_turn.saturating_add(1);
-            self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
-            // Dark Gifts Spell Siphon counts Tavern spells, never a Blood
-            // Gem or a Banana (DESIGN.md "Spells versus Tavern spells").
-            self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
+        } else {
+            for _ in 0..if tavern { casts } else { 1 } {
+                self.fire_event(p, EventKind::AllSpellsCast, 1);
+            }
+            self.trinket_event(p, Event::SpellCast, Some(m.card), 1);
+            if tavern {
+                for _ in 0..casts {
+                    self.fire_event(p, EventKind::SpellsCast, 1);
+                }
+                self.players[p].spells_cast_turn = self.players[p].spells_cast_turn.saturating_add(1);
+                self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
+                // Dark Gifts Spell Siphon counts Tavern spells, never a Blood
+                // Gem or a Banana (DESIGN.md "Spells versus Tavern spells").
+                self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
+            }
         }
         // A cast never leaves a prompt nothing can answer: the spell's own
         // "after you cast" triggers can take away its last target (the only
@@ -405,6 +424,27 @@ impl Game {
         if self.players[p].pending_target.is_some() && self.choice_stuck(p) {
             self.players[p].pending_target = None;
         }
+    }
+
+    /// Fire the triggers a Choose One spell's cast owed: the board's "after
+    /// you cast a spell" minions, the trinkets that count casts and the Dark
+    /// Gifts that buff on a Tavern spell. Called once the option and its
+    /// target are answered (`maybe_start_discover`).
+    pub(super) fn fire_cast_after_choice(&mut self, p: usize, what: CastAfterChoice) {
+        if !what.tavern {
+            self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None);
+            self.trinket_event(p, Event::SpellCast, Some(what.card), 1);
+            return;
+        }
+        for _ in 0..what.casts {
+            self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None);
+        }
+        self.trinket_event(p, Event::SpellCast, Some(what.card), 1);
+        for _ in 0..what.casts {
+            self.run_event_triggers(p, EventKind::SpellsCast, 1, None);
+        }
+        self.trinket_event(p, Event::CastSpell, Some(what.card), 1);
+        self.dark_gift_count(p, what.casts as i32, |c| c.buff_per_tavern_spell);
     }
 
     /// Whether a spell has anything to land on right now. A spell cast

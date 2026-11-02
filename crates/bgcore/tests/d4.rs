@@ -631,6 +631,19 @@ fn curve_bots_finish_many_games_against_each_other() {
 }
 
 #[test]
+fn seven_standard_bots_and_one_random_seat_never_pick_an_illegal_action() {
+    // The training lineup that died on `IllegalAction` (2026-11-02: ten test
+    // batches of "1 learner against 7 standard bots"): one seat playing
+    // differently from the seven, in games with heroes and trinkets.
+    let data = Arc::new(Data::bundled());
+    for seed in 0..160 {
+        let mut g = Game::new_random_heroes(data.clone(), 9000 + seed);
+        let mut rng = Rng::new(seed);
+        play_out(&mut g, &mut rng, |p| if p == 0 { 2 } else { 0 });
+    }
+}
+
+#[test]
 fn curve_bots_play_every_card() {
     let data = Arc::new(Data::bundled());
     let names: Vec<String> = data.cards.cards.iter().map(|c| c.name.clone()).collect();

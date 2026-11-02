@@ -1652,8 +1652,16 @@ impl<'a> Side<'a> {
             }
             FightAct::GemGolem { card } => {
                 // Blood Golem Sticker: a Golem with the Blood Gem stats of
-                // the Quilboar that just died, where it stood.
+                // the Quilboar that just died, where it stood. The Golem is a
+                // Quilboar itself, and a Golem for its own death is a Golem
+                // for ever: the fight then cannot end (2026-11-02: games
+                // against real seats stalled to the turn cap on exactly this,
+                // a tie that costs neither side Health). One Golem for the
+                // Quilboar that died; the Golem's death gives no Golem.
                 let dead = self.last_dead.unwrap_or_else(|| db.make(card, false));
+                if dead.card == card {
+                    return;
+                }
                 let (ga, gh) = (dead.gem_attack, dead.gem_health);
                 let mut m = db.make(card, false);
                 m.attack = ga.max(1);

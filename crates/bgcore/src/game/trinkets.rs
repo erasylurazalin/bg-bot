@@ -1692,7 +1692,8 @@ impl Game {
                         || (self.players[p].shop.len() == size
                             && self.players[p].shop_spell.is_none());
                     if room && self.players[p].shop.len() < crate::SHOP {
-                        let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+                        let mut m = self.players[p].make_card(&self.data.cards, card, false, 0);
+                        self.players[p].apply_tavern_buffs(&self.data.cards, &mut m);
                         self.players[p].shop.push(m);
                     }
                 } else {
@@ -1707,7 +1708,8 @@ impl Game {
                     }
                     players[p].shop_spell = None;
                     for _ in 0..size.min(crate::SHOP) {
-                        let m = players[p].make_card(&data.cards, card, false, 0);
+                        let mut m = players[p].make_card(&data.cards, card, false, 0);
+                        players[p].apply_tavern_buffs(&data.cards, &mut m);
                         players[p].shop.push(m);
                     }
                 }

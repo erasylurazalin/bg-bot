@@ -933,12 +933,18 @@ impl Game {
                             );
                         }
                         SpellTarget::Butchering { attack } => {
-                            // The bonus lands first, so a Reborn copy comes
-                            // back with it. Like Channel the Devourer, a
-                            // second cast (Balinda) does nothing: its
-                            // target is gone.
-                            self.add_undead_bonus(p, attack + da, dh, true);
+                            // The Undead dies first: what its death gives the
+                            // Tavern spells (Friendly Geist's "your Tavern
+                            // spells give +1 Attack") is a Tavern spell
+                            // number, and the +Attack this game is one too, so
+                            // this cast reads the spell power after the death
+                            // (Era, 2026-11-02; log 00_56_06-g1 turn 12).
+                            // Like Channel the Devourer, a second cast
+                            // (Balinda) does nothing: its target is gone.
                             self.destroy_in_shop(p, &[target_pos], None);
+                            let (da, dh) =
+                                if pt.tavern { self.total_spell_bonus(p) } else { (0, 0) };
+                            self.add_undead_bonus(p, attack + da, dh, true);
                             stop_after = true;
                             target_removed = true;
                         }

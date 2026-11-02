@@ -806,22 +806,17 @@ fn last_one_standing_buffs_one_minion_of_each_type_once_and_can_pick_itself() {
     // Pirate is a type too, and the Last One Standing is the only Pirate
     // here: it is always among the picks (as its own Pirate pick, or earlier
     // for another type), so it is buffed once and five or six minions are.
-    let mut five = false;
-    let mut six = false;
+    // An all-type minion is a type of its own ("all"), so the Last One
+    // Standing takes that pick and every other minion takes its own: all six
+    // are buffed, once each (the log of a Misplaced Tea Set with a Gatekeeper
+    // Amalgam on the board, 15_25_26-g1 turn 10 step 24, shows the same rule).
     for seed in 0..300 {
         let (out, _) = run(&db, &los_board(&db), &[wall(&db)], 1, seed);
         let perm = &out.sides[0].permanent_stats;
         let buffed: Vec<usize> = (0..6).filter(|&i| perm[i] != (0, 0)).collect();
-        assert!(buffed.len() == 5 || buffed.len() == 6, "seed {seed}: {perm:?}");
+        assert_eq!(buffed.len(), 6, "seed {seed}: {perm:?}");
         assert!(buffed.iter().all(|&i| perm[i] == (15, 15)), "seed {seed}: {perm:?}");
-        assert!(perm[0] == (15, 15), "seed {seed}: it is the only Pirate: {perm:?}");
-        if buffed.len() == 5 {
-            five = true;
-        } else {
-            six = true;
-        }
     }
-    assert!(five && six);
 
     // Alone it is every type but one minion: one buff, not five.
     let (out, _) = run(&db, &[mk(&db, "The Last One Standing", false)], &[wall(&db)], 1, 1);

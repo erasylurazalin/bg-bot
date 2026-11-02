@@ -4337,6 +4337,35 @@ fn blood_golem_sticker_summons_a_golem_with_the_gem_stats() {
 }
 
 #[test]
+fn a_golem_dying_does_not_summon_another_golem() {
+    // A Blood Golem is a Quilboar, so a Golem for its own death is a Golem for
+    // ever and the fight can never end (2026-11-02: games against real seats
+    // stalled to the turn cap on exactly that, a tie that costs no Health).
+    let mut g = game(346);
+    equip(&mut g, 0, 1, "Blood Golem Sticker");
+    let mut q = g.data.cards.make(id(&g, "Prodigious Tusker"), false);
+    q.gem_attack = 3;
+    q.gem_health = 3;
+    g.players[0].board.push(q);
+    let mut seen = Seen::default();
+    let out = fight_wall_watched(&g, 6, 40, 400, 500, &mut seen);
+    assert_eq!(out.winner, Some(1), "the wall outlasts the one Golem");
+    assert!(
+        out.attacks < 500,
+        "the fight ends long before the cap: {} attacks",
+        out.attacks
+    );
+    assert_eq!(
+        seen.summons
+            .iter()
+            .filter(|(s, m)| *s == 0 && m.card == id(&g, "Blood Golem"))
+            .count(),
+        1,
+        "one Golem for the Quilboar, none for the Golem"
+    );
+}
+
+#[test]
 fn floating_candle_set_triggers_a_deathrattle_in_the_shop() {
     let mut g = game(345);
     take(&mut g, 0, "Floating Candle Set");

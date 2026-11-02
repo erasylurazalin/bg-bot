@@ -424,11 +424,17 @@ build hero-less games so old tests pass unchanged, and
     - **A Discover that lands in the Tavern.** `Player.discover_into_shop`
       (slot + 1) sends the pick into that Tavern slot instead of the hand:
       Galakrond's Greed Discovers from exactly one Tier higher into its slot,
-      with no Tavern buffs, and the old card stays on show in the slot until
-      the pick lands (the game's own client keeps it there too); the pick then
-      puts it back in the pool, buffs and all. Arcane
+      and the pick lands in the Tavern, so it gets the Tavern's standing
+      "this game" buffs like any card dealt there (Era, 2026-11-02). The old
+      card stays on show in the slot until the pick lands (the game's own
+      client keeps it there too); the pick then puts it back in the pool,
+      buffs and all. Arcane
       Alteration replaces a card on the board or in the Tavern with a pool
       card of the same Tier, keeping the stats the old card had gained.
+      Anything else that puts a card into the Tavern goes through
+      `Player::apply_tavern_buffs` (the Refresh, Evolving Tavern, a
+      Surprise Portrait's Elementals, a Fishbait), since the standing buffs
+      belong to whatever sits in the Tavern.
     - **Hats and Tickets.** `Minion.hats` counts Dancin' Deryl's +1/+1 hats
       (already in the stats): a played minion gets one, a sold minion's move
       to a random friendly minion, and a triple adds the copies' up.

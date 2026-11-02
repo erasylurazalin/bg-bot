@@ -547,6 +547,22 @@ fn butchering_destroys_an_undead_and_gives_the_undead_attack_everywhere() {
 }
 
 #[test]
+fn butchering_counts_the_spell_power_the_undeads_own_death_gives() {
+    // DESIGN.md "Butchering and spell power" (Era, 2026-11-02): the +8 Attack
+    // is a Tavern spell number, and the Undead dies first, so a death that
+    // gives the Tavern spells more (Friendly Geist's +1 Attack) is inside it.
+    let mut g = game(12);
+    put_on_board(&mut g, 0, "Friendly Geist", false); // 6/3, deathrattle: +1 spell Attack
+    put_on_board(&mut g, 0, "Risen Rider", false); // 2/1
+    cast(&mut g, "Butchering");
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(g.players[0].spell_bonus, (1, 0), "the Geist's deathrattle");
+    assert_eq!(g.players[0].undead_bonus, (9, 0), "+8 plus the spell power it just gave");
+    assert_eq!(stats(&g.players[0].board[0]), (11, 1), "the Rider has the +9");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn butchering_cast_twice_by_balinda_counts_twice_for_forsaken_weaver() {
     let mut g = game(11);
     put_on_board(&mut g, 0, "Forsaken Weaver", false);
@@ -683,25 +699,27 @@ fn the_snazzy_phantom_chain_end_to_end() {
     assert_eq!(stats(&g.players[0].board[1]), (13 + 4, 6 + 4), "Bellringer's own +4/+4");
     g.check_invariants().unwrap();
 
-    // And with Butchering: the bonus builds first, then the Reborn minion
-    // comes back with it. Two casts, the second sees the +8.
+    // And with Butchering: the Undead dies first (DESIGN.md "Butchering and
+    // spell power": its death's Tavern spell power is inside the +8), so the
+    // Reborn copy comes back before the bonus lands, and the Phantom gains
+    // the Attack it came back with before the +8 does.
     let mut g = game(21);
     put_on_board(&mut g, 0, "Risen Rider", false);
     put_on_board(&mut g, 0, "Snazzy Phantom", false);
     cast(&mut g, "Butchering");
     act(&mut g, 0, Action::Target(0));
-    // the +8 lands first: the Rider comes back with 2 + 8 = 10 Attack, and
-    // Phantom (6 + 8) gets +10/+10
+    // The Rider comes back as 2/1, Phantom (6 + 2 = 8 Attack) gains 2/2 for
+    // it, and then the +8 lands on both: 2 + 8 = 10, 8 + 8 = 16 Attack.
     assert_eq!(stats(&g.players[0].board[0]), (10, 1));
-    assert_eq!(stats(&g.players[0].board[1]), (6 + 8 + 10, 8 + 10));
+    assert_eq!(stats(&g.players[0].board[1]), (16, 10));
     g.players[0].board[0].keywords.set(Keywords::REBORN);
     cast(&mut g, "Butchering");
     act(&mut g, 0, Action::Target(0));
-    // +8 more first (16 in all), the Rider comes back as 2 + 16 = 18, and
-    // Phantom (24 + 8) gets +18/+18
+    // +8 more (16 in all): the Rider comes back with 10 Attack, the Phantom
+    // gains that 10/10 and then the 8: 16 + 10 + 8 = 34 Attack, 10 + 10 = 20.
     assert_eq!(g.players[0].undead_bonus, (16, 0));
     assert_eq!(stats(&g.players[0].board[0]), (18, 1));
-    assert_eq!(stats(&g.players[0].board[1]), (24 + 8 + 18, 18 + 18));
+    assert_eq!(stats(&g.players[0].board[1]), (34, 20));
     g.check_invariants().unwrap();
 }
 

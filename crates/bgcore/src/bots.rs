@@ -424,7 +424,40 @@ fn spell_buy_ok(game: &Game, p: usize, sp: CardId, stat_only: bool) -> bool {
         && (!c.pay_health || health_ok(game, p, c.cost as i32))
 }
 
+/// The curve bot's action, checked: a heuristic that read the state wrong
+/// (training hit this on 2026-11-02, ten test batches dying on
+/// `IllegalAction`) never hands the engine an action it refuses. The state is
+/// printed once when it happens, so the stale read can be found, and a legal
+/// action is played instead.
 fn curve_action(game: &Game, curve: &[u8]) -> Action {
+    let a = curve_action_unchecked(game, curve);
+    if game.is_legal(a) {
+        return a;
+    }
+    let p = game.current_player();
+    if let Some(pl) = p.map(|p| &game.players[p]) {
+        let names = |ms: &[crate::Minion]| -> Vec<String> {
+            ms.iter().map(|m| game.data.cards.get(m.card).name.clone()).collect()
+        };
+        eprintln!(
+            "the bot picked an illegal {a:?}: turn {} player {:?} hero {:?} power {:?} gold {} tier {}\n  \
+             pending_target {:?}\n  pending_shop_target {:?}\n  pending_choose_one {:?}\n  \
+             pending_discard {:?}\n  discover {:?} queue {} choose_queue {}\n  power_offer {:?} \
+             secret_offer {:?} trinket_offer {}\n  board {:?}\n  hand {:?}\n  shop {:?} spell {:?}",
+            game.turn, p, pl.hero.map(|h| game.data.heroes.get(h).name.clone()), pl.power,
+            pl.gold, pl.tier, pl.pending_target, pl.pending_shop_target, pl.pending_choose_one,
+            pl.pending_discard,
+            pl.discover.iter().map(|&c| game.data.cards.get(c).name.clone()).collect::<Vec<_>>(),
+            pl.discover_queue.len(), pl.choose_queue.len(), pl.power_offer, pl.secret_offer,
+            pl.trinket_offer.len(),
+            names(&pl.board), names(&pl.hand), names(&pl.shop),
+            pl.shop_spell.map(|c| game.data.cards.get(c).name.clone()),
+        );
+    }
+    first_legal(game)
+}
+
+fn curve_action_unchecked(game: &Game, curve: &[u8]) -> Action {
     let p = game.current_player().expect("game is over");
     let pl = &game.players[p];
     let r = &game.data.rules;

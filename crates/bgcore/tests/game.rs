@@ -439,6 +439,38 @@ fn brann_and_drakkari_multiply_triggers_including_golden() {
 }
 
 #[test]
+fn a_choose_one_spells_cast_triggers_wait_for_the_option_and_the_target() {
+    // DESIGN.md "Targets in the shop" (Era, 2026-11-02): a Choose One spell is
+    // cast, then its option is picked, then its target, and only then do the
+    // "after you cast a spell" triggers fire. Living Azerite is one: it gives
+    // Elemental Tavern minions +4/+3 after every Tavern spell.
+    let mut g = Game::new_with_lobby(
+        Arc::new(Data::bundled()),
+        143,
+        lobby(&[Tribe::Elemental, Tribe::Beast, Tribe::Dragon]),
+    );
+    put_on_board(&mut g, 0, "Living Azerite");
+    set_shop(&mut g, 0, &["Living Azerite"]);
+    let before = g.players[0].shop[0].attack;
+    let on_board = g.players[0].board[0].attack;
+    g.give(0, "Alliance Flag").unwrap();
+    let hand = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
+    assert_eq!(g.players[0].shop[0].attack, before, "the option is not picked yet");
+    assert!(g.players[0].pending_choose_one.is_some(), "the option is asked for");
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].shop[0].attack, before, "the target is not picked yet");
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(
+        g.players[0].shop[0].attack,
+        before + 4,
+        "the Tavern spell's own trigger lands after the target"
+    );
+    assert_eq!(g.players[0].board[0].attack, on_board + 3, "Alliance Flag's own +3 Attack");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn sprightly_scarab_choose_one_and_patient_scout_discover() {
     let mut g = game(107);
     put_on_board(&mut g, 0, "Buzzing Vermin"); // 1/1 at slot 0

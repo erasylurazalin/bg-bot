@@ -289,6 +289,20 @@ pub struct QueuedOption {
     pub tavern: bool,
 }
 
+/// A Choose One spell's own "after you cast a spell" triggers, waiting for
+/// the option and its target to be picked (DESIGN.md "Targets in the shop":
+/// cast, pick the option, pick the target, then the cast triggers). The
+/// counters of the cast are taken at the play; these are what "after" means.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CastAfterChoice {
+    /// The spell cast, for the trinkets and Dark Gifts that read it.
+    pub card: CardId,
+    /// How many "spells cast" events it gives: a Tavern spell gives `casts`
+    /// of each (Balinda's extra cast), any other spell one.
+    pub casts: u8,
+    pub tavern: bool,
+}
+
 /// "Discard a card" (Mangled Bandit's Activate) waiting for the player to
 /// pick the card in hand to throw away.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -866,6 +880,9 @@ pub struct Player {
     pub pending_shop_target: Option<PendingShopTarget>,
     /// "Discard a card" waiting for the player's pick.
     pub pending_discard: Option<PendingDiscard>,
+    /// A Choose One spell cast whose "after you cast a spell" triggers wait
+    /// for the option and its target (see `CastAfterChoice`).
+    pub cast_after_choice: Option<CastAfterChoice>,
     /// Choose One cards played whose choice is still open: Turbo Hogrider
     /// reacts once the card is fully resolved (`resolve_hogrider`).
     pub hogrider_pending: u8,
@@ -1490,6 +1507,9 @@ impl Game {
         pl.pending_shop_target = None;
         pl.pending_discard = None;
         pl.pending_choose_one = None;
+        // A Choose One spell whose choice files away has no "after" left to
+        // fire: the cast counted itself already.
+        pl.cast_after_choice = None;
     }
 
     /// Fills `mask` with `is_legal` for every action. Only the index ranges

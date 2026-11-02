@@ -203,7 +203,7 @@ exactly one legal target and drops the effect when there is none.
 |---|---|---|
 | Battlecry: buff one friendly minion (of a tribe) | Forest Rover / Tinkerer (`target = "chosen"`, `tribe`) | cannot pick itself |
 | Buff all / others / self / random | `target = "all"/"others"/"self"/"random"` | `fixed_stats` minions are skipped |
-| Buff one minion of each type (one buff per minion) | The Last One Standing (`buff_each_type`), Misplaced Tea Set | `cards::pick_one_per_type`; all-type minions are every tribe |
+| Buff one minion of each type (one buff per minion) | The Last One Standing (`buff_each_type`), Misplaced Tea Set | `cards::pick_one_per_type`; an all-type minion is a type of its own ("all") and takes that one pick, never another tribe's (`15_25_26-g1` turn 10 step 24, Era 2026-11-02) |
 | Buff scaled by a counter that improves | Tasty Lobster (`improve_counter`) | player counter `Counter`, kept through fights via `improve_gain` |
 | Per-minion "N left" counter | Gunpowder Courier (`on_event`), Treasure Parrot (`damage_milestone`) | triple keeps the highest count |
 | Stat per thing counted game-long | Falling Sky Golem (`buff_per_deathrattle`), Maritime Extortionist | wherever-it-is: update shop, hand, board (`add_golden_played`, `add_deathrattles_triggered`) |
@@ -845,7 +845,9 @@ Triple Reward spell.
 - **Two fight leftovers.** `FightAct::Fermenter` (Soul Fermenter) keeps the
   destroyed minions in `Side.fermenter` and `Side::resolve` brings them back
   when the side's last minion dies; `FightAct::GemGolem` summons a token with
-  the dead minion's Blood Gem stats (`Side.last_dead`, `Side.dead_at`).
+  the dead minion's Blood Gem stats (`Side.last_dead`, `Side.dead_at`), and
+  does not summon one for that token's own death (the Golem is a Quilboar, so
+  it would summon itself for ever and the fight could never end).
 - **Tests.** `tests/trinkets.rs`, the block 4 section at the end: one test per
   card, and `apply_side_outcome` is public so a `fight_with` outcome can be
   applied to a game the way a combat does.

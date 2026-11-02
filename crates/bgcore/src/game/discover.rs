@@ -205,6 +205,13 @@ impl Game {
                 continue;
             }
             if self.players[p].discover_queue.is_empty() {
+                // Nothing the cast opened is left: a Choose One spell's "after
+                // you cast a spell" triggers fire now, the option and its
+                // target behind them (DESIGN.md "Targets in the shop").
+                if let Some(what) = self.players[p].cast_after_choice.take() {
+                    self.fire_cast_after_choice(p, what);
+                    continue;
+                }
                 return;
             }
             let req = self.players[p].discover_queue.remove(0);
@@ -501,9 +508,11 @@ impl Game {
             return;
         }
         // Galakrond's Greed: this pick takes the Tavern slot the old card
-        // held, from the pool, with no Tavern buffs (docs/heroes.md). The old
-        // card stayed on show while the Discover was open; it goes back to the
-        // pool now, its buffs with it.
+        // held, from the pool. It lands in the Tavern, so it gets the Tavern's
+        // standing "this game" buffs like any card dealt there (docs/heroes.md;
+        // Era 2026-11-02 saw a 6/8 offer land 46/48). The old card stayed on
+        // show while the Discover was open; it goes back to the pool now, its
+        // own buffs with it.
         let into_shop = std::mem::take(&mut pl.discover_into_shop);
         if into_shop != 0 {
             if !is_spell {
@@ -514,6 +523,7 @@ impl Game {
                     give_back(pool, &data.cards, &old);
                 }
                 let mut m = pl.make_card(&data.cards, c, false, copies[k].max(1));
+                pl.apply_tavern_buffs(&data.cards, &mut m);
                 m.uses_left = m.turn_uses(&data.cards);
                 pl.shop.insert(at, m);
             } else if copies[k] > 0 {

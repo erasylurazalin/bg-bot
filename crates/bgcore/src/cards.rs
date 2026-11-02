@@ -155,8 +155,25 @@ impl Tribes {
 /// not been picked yet, so every minion gets at most one buff, even a dual or
 /// all-type one. `tribes[i]` is the types of board minion `i`, `Tribes::NONE`
 /// for one that can't be picked (dead). Returns the picked indexes.
+///
+/// An all-type minion (Gatekeeper Amalgam) is a type of its own, "all", and
+/// is picked for that type alone: in Era's log a Tea Set on a board of one
+/// Dragon, one Demon+Quilboar, one Quilboar, one Demon+Elemental and one
+/// Amalgam gives each of the five exactly one buff
+/// (`15_25_26-g1` turn 10 step 24), so the Amalgam is not picked again for a
+/// tribe it also has.
 pub fn pick_one_per_type(tribes: &[Tribes], rng: &mut Rng) -> ArrayVec<usize, BOARD> {
     let mut picked: ArrayVec<usize, BOARD> = ArrayVec::new();
+    let mut all: ArrayVec<usize, BOARD> = ArrayVec::new();
+    for (i, ts) in tribes.iter().enumerate().take(BOARD) {
+        if *ts == Tribes::ALL {
+            all.push(i);
+        }
+    }
+    if !all.is_empty() {
+        let k = if all.len() == 1 { 0 } else { rng.below(all.len() as u32) as usize };
+        picked.push(all[k]);
+    }
     for t in Tribe::EVERY {
         let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
         for (i, ts) in tribes.iter().enumerate().take(BOARD) {

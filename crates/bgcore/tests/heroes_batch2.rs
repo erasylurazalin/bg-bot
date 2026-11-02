@@ -218,6 +218,35 @@ fn galakronds_greed_replaces_a_tavern_minion_with_a_discover_one_tier_higher() {
 }
 
 #[test]
+fn galakronds_greed_pick_lands_with_the_tavens_standing_buffs() {
+    let mut g = hero_game(19, "Galakrond");
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Southsea Busker"]);
+    g.players[0].gold = 5;
+    // A standing "this game" Tavern buff, as a Tavern spell gives it.
+    let b = bgcore::game::TavernBuff {
+        tribe: None,
+        attack: 40,
+        health: 40,
+        this_turn: false,
+        typed_only: false,
+    };
+    g.players[0].add_tavern_buff(&g.data.cards, b);
+    act(&mut g, 0, Action::HeroPower);
+    act(&mut g, 0, Action::TargetShop(0));
+    let picked = g.players[0].discover[0];
+    let base = g.data.cards.make(picked, false);
+    choose(&mut g, 0, 0);
+    let m = g.players[0].shop[0];
+    assert_eq!(m.card, picked, "the pick took the old slot");
+    assert_eq!(
+        (m.attack, m.health),
+        (base.attack + 40, base.health + 40),
+        "the pick sits in the Tavern, so the standing buffs land on it"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn reborn_rites_gives_reborn_until_the_next_turn() {
     let mut g = hero_game(2, "The Lich King");
     assert_eq!(power(&g, 0).cost, 0);
@@ -504,6 +533,33 @@ fn see_the_light_steals_a_tavern_minion_as_a_two_two() {
     let h = g.players[0].hand[0];
     assert_eq!((h.attack, h.health), (2, 2), "stats set to 2/2");
     assert_eq!(h.pool_copies, 1, "as a steal: the pool copy comes along");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn spirit_swap_takes_a_tavern_minion_for_either_pick() {
+    // The log's own case (15_25_26-g1 turn 1): a board minion, then a
+    // Tavern minion. docs/heroes.md: any minion, the Tavern's included.
+    let mut g = hero_game(18, "Vol'jin");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Southsea Busker");
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Southsea Busker"]);
+    g.players[0].board[0].attack = 3;
+    g.players[0].board[1].attack = 5;
+    g.players[0].shop[0].attack = 9;
+    g.players[0].shop[1].attack = 7;
+    act(&mut g, 0, Action::HeroPower);
+    act(&mut g, 0, Action::Target(0));
+    act(&mut g, 0, Action::TargetShop(0));
+    assert_eq!(g.players[0].board[0].attack, 9, "the Tavern minion's Attack");
+    assert_eq!(g.players[0].shop[0].attack, 3, "and it took the board one's");
+    // The Tavern first, the board second: the same swap, the other way round.
+    again(&mut g, 0);
+    act(&mut g, 0, Action::HeroPower);
+    act(&mut g, 0, Action::TargetShop(1));
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!(g.players[0].shop[1].attack, 5, "the board minion's Attack");
+    assert_eq!(g.players[0].board[1].attack, 7, "and the Tavern card's");
     g.check_invariants().unwrap();
 }
 

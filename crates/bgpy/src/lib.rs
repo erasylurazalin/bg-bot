@@ -130,7 +130,26 @@ impl Env {
                 RANDOM => random_action(&self.game, &mut self.rng),
                 _ => return,
             };
-            self.game.step(a).expect("bot picked an illegal action");
+            if self.game.step(a).is_err() {
+                // Name the state, not only the action: an illegal scripted
+                // action is a bug in the bot or the engine, and this is all a
+                // training run leaves behind (2026-11-02, ten test batches).
+                let pl = &self.game.players[p];
+                let names = |ms: &[bgcore::Minion]| -> Vec<String> {
+                    ms.iter().map(|m| self.game.data.cards.get(m.card).name.clone()).collect()
+                };
+                panic!(
+                    "bot picked an illegal action {a:?}: turn {} player {p} gold {} tier {} \
+                     power {:?} board {:?} hand {:?} shop {:?} spell {:?} \
+                     pending_target {:?} pending_shop_target {:?} pending_choose_one {:?} \
+                     pending_discard {:?} discover {:?}",
+                    self.game.turn, pl.gold, pl.tier, pl.power,
+                    names(&pl.board), names(&pl.hand), names(&pl.shop),
+                    pl.shop_spell.map(|c| self.game.data.cards.get(c).name.clone()),
+                    pl.pending_target, pl.pending_shop_target, pl.pending_choose_one,
+                    pl.pending_discard, pl.discover.len(),
+                );
+            }
         }
     }
 

@@ -433,7 +433,8 @@ with what the real game did. It is a bug finder like the fight check
 Defaults: `boards/actions`, 64 seeds, `boards/checks` (git-ignored), no card
 filter. It needs no `ref/bg-cards.json`: the file names every card it writes.
 Every step in the folder (56 games, 638 turns, about 13,900 steps on
-2026-11-02) takes about a second and a half on 32 cores.
+2026-11-02) takes about two seconds on 32 cores: every seed of a random step
+is run, since any of them may be the log's.
 
 - **Reset before every step.** Replaying a whole turn would let one early
   mismatch spoil every later step, and forcing the log's randomness into the
@@ -504,7 +505,10 @@ Every step in the folder (56 games, 638 turns, about 13,900 steps on
   nothing left to answer and the state it left is compared instead. A pick of a
   two-step effect (Spirit Swap's second minion) answers the prompt the game
   opened in the step before, which one state cannot carry: that step is
-  incomplete. The Warband Whistle's one-shot "your next Refresh holds copies of
+  incomplete. So is that power's second click when the log writes it as a
+  press of its own (`BG20_HERO_201p2`): the game counts each click as a use
+  and swaps the button to the power's second half, while the engine presses
+  once, so the file shows a power the engine does not build. The Warband Whistle's one-shot "your next Refresh holds copies of
   your warband" is armed from the steps before it (the pick armed it, the first
   Refresh after that spent it), since no state says so.
 - **The step to the engine's action:** `buy` slot, `sell` position, `play`
@@ -515,12 +519,14 @@ Every step in the folder (56 games, 638 turns, about 13,900 steps on
   effects alone, through `Game::shop_end_of_turn`, without the fight).
 - **Deterministic or random.** Every step is run with `--seeds` seeds. If every
   seed gives the same state the step is deterministic and is compared exactly.
-  If not, it is random: it passes when one of the states is the log's, or, for
-  a large random space (a Refresh, a random minion out of the pool), when it
-  has the same shape: Gold, Health, armor, the tier and its price, the free
+  If not, it is random, and every seed's outcome is looked at, not the first
+  one's: it passes when one of them is the log's, or, for a large random space
+  (a Refresh, a random minion out of the pool), when one of them has the same
+  shape: Gold, Health, armor, the tier and its price, the free
   Refreshes, how many cards each zone holds, how many of them are spells, and
   every stat change that landed on a card that was there before and still is.
-  Which card a random buff lands on is not compared.
+  Which card a random buff lands on is not compared (one seed picks the
+  Tea Set's Dragon, another the other one).
 - **Incomplete, not flagged.** A step is incomplete when the state or the step
   involves something the engine does not build (a minion, a hero power, a
   trinket, a Dark Gift, an option no card set has) or something the log does

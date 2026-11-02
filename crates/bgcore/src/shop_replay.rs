@@ -2081,6 +2081,19 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         Ok(a) => a,
         Err(e) => return Err((e, missing)),
     };
+    // The game's power button for a press is one the engine does not build:
+    // the log then shows a press the engine has no state for. Spirit Swap's
+    // second click is one (the game counts each click of a two-click power as
+    // a use and swaps the button to the power's second half, while the engine
+    // presses once and remembers the first pick itself), and so is a power no
+    // card set has. Such a step is not a finding: the state cannot carry it.
+    let press_not_built = step.step == "hero_power"
+        && before
+            .hero_powers
+            .iter()
+            .find(|p| p.second == (step.which.as_deref() == Some("second")))
+            .and_then(|p| p.card_id.as_deref())
+            .is_some_and(|id| data.heroes.power_by_card_id(id).is_none());
     let mut text = Vec::new();
     // A Choose One with a target asks the option first, then the target
     // (DESIGN.md "Targets in the shop"): the play's own sub-option is answered
@@ -2132,6 +2145,14 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
                 return Err((
                     "a Tavern pick where the engine is still on the board pick of a \
                      two-step effect, whose first pick the file does not carry"
+                        .to_string(),
+                    missing,
+                ));
+            }
+            if press_not_built && matches!(a, Action::HeroPower | Action::HeroPower2) {
+                return Err((
+                    "the power the game shows is one the engine does not build: its \
+                     second click of a two-click power, or a power no card set has"
                         .to_string(),
                     missing,
                 ));
@@ -2268,20 +2289,41 @@ pub fn replay_step(
     missing.extend(load_missing);
     result.ours = ours.clone();
     result.action = action;
+    // A hero power press is the one step whose own presses left the game does
+    // not count when the press opens a choice.
+    let pressed = (step.step == "hero_power").then(|| {
+        usize::from(step.which.as_deref() == Some("second"))
+    });
+    // Every seed, not two: a step whose randomness is a pick (which of this
+    // type the Tea Set buffs, which card a Refresh deals) is one of the
+    // engine's outcomes when some seed lands on the log's, and the first
+    // seed's own outcome says nothing about the others. The shape is the
+    // fallback for a space too large to hit (a whole Refresh's cards).
+    let log_shape = ShopShape::of(&result.log_after, &result.before);
     let mut deterministic = true;
+    let mut one_seed_matches = false;
+    let mut one_seed_has_the_shape = compare_pressed(&ours, &result.log_after, pressed).is_empty()
+        || ShopShape::of(&ours, &result.before).diffs(&log_shape).is_empty();
     for k in 1..opts.seeds.max(1) {
         match run_once(data, ids, &one, opts.seed.wrapping_add(k as u64)) {
             Ok((snap, _, _)) => {
                 if snap != ours {
                     deterministic = false;
-                    break;
+                }
+                if !one_seed_matches && compare_pressed(&snap, &result.log_after, pressed).is_empty()
+                {
+                    one_seed_matches = true;
+                }
+                if !one_seed_has_the_shape
+                    && ShopShape::of(&snap, &result.before).diffs(&log_shape).is_empty()
+                {
+                    one_seed_has_the_shape = true;
                 }
             }
             Err(_) => {
                 // A seed that cannot even play the step (an illegal action)
                 // says nothing about randomness.
                 deterministic = false;
-                break;
             }
         }
     }
@@ -2293,29 +2335,20 @@ pub fn replay_step(
         result.verdict = Verdict::Incomplete;
         return result;
     }
-    // A hero power press is the one step whose own presses left the game does
-    // not count when the press opens a choice.
-    let pressed = (step.step == "hero_power").then(|| {
-        usize::from(step.which.as_deref() == Some("second"))
-    });
     let diffs = compare_pressed(&ours, &result.log_after, pressed);
     result.diffs = diffs.clone();
     if deterministic {
         result.verdict = if diffs.is_empty() { Verdict::Ok } else { Verdict::Flagged };
         return result;
     }
-    if diffs.is_empty() {
+    if diffs.is_empty() || one_seed_matches {
         result.verdict = Verdict::OkRandom;
         return result;
     }
     // A random step with a large random space (a Refresh, a random minion):
     // the log's result can only be compared by shape.
-    let shape_ours = ShopShape::of(&ours, &result.before);
-    let shape_log = ShopShape::of(&result.log_after, &result.before);
-    // A random step passes when the log's result has the engine's shape; what
-    // it differs in is kept, as the report says why a random step was flagged.
-    result.diffs = shape_ours.diffs(&shape_log);
-    result.verdict = if result.diffs.is_empty() { Verdict::OkShape } else { Verdict::Flagged };
+    result.diffs = ShopShape::of(&ours, &result.before).diffs(&log_shape);
+    result.verdict = if one_seed_has_the_shape { Verdict::OkShape } else { Verdict::Flagged };
     result
 }
 

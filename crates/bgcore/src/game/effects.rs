@@ -1361,6 +1361,23 @@ impl Game {
             // The hero powers' own Gold count (Choose Your Champion).
             self.power_gold_spent(p, amount);
         }
+        self.run_event_triggers(p, kind, amount, skip);
+    }
+
+    /// The board minions' own triggers for an event, without the player-level
+    /// counters and trinkets `fire_event` takes first. A Choose One spell's
+    /// cast counts itself at the play but its triggers wait for the choice
+    /// (DESIGN.md "Targets in the shop"), so the two halves are fired apart.
+    pub(super) fn run_event_triggers(
+        &mut self,
+        p: usize,
+        kind: EventKind,
+        amount: u32,
+        skip: Option<usize>,
+    ) {
+        if amount == 0 {
+            return;
+        }
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             if skip == Some(pos) {
