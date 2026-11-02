@@ -5105,3 +5105,83 @@ fn the_gold_plated_compass_makes_the_next_minion_of_its_type_golden() {
     assert_eq!(g.players[0].golden_played, 1, "a Golden minion was played");
     g.check_invariants().unwrap();
 }
+
+/// A full hand (DESIGN.md "A full hand", Era 2026-11-02): a card that arrives
+/// at the start of your turn is queued and joins as soon as there is room,
+/// while a card got during your shop phase or in combat is lost. The hand
+/// holds ten.
+#[test]
+fn a_full_hand_queues_the_start_of_turns_card_and_loses_the_rest() {
+    // The start of the turn: Sellemental Portrait hands out a Sellemental
+    // every turn, and with ten cards in hand it waits.
+    let mut g = game(61);
+    g.set_trinket(0, 0, Some(trinket(&g, "Sellemental Portrait")));
+    while !g.players[0].hand.is_full() {
+        assert!(g.give(0, "Skeleton").is_some());
+    }
+    to_turn(&mut g, 2);
+    let queued: Vec<String> = g.players[0]
+        .hand_queue
+        .iter()
+        .map(|m| g.data.cards.get(m.card).name.clone())
+        .collect();
+    assert_eq!(g.players[0].hand.len(), 10, "the hand is still full");
+    assert_eq!(queued, ["Sellemental"], "the start of the turn's card is queued");
+    // Playing a card frees a slot, and the queued card joins at once.
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(g.players[0].hand.len(), 10);
+    assert!(g.players[0].hand_queue.is_empty(), "the queue moved into the hand");
+    assert!(
+        g.players[0].hand.iter().any(|m| g.data.cards.get(m.card).name == "Sellemental"),
+        "the queued Sellemental is in the hand now"
+    );
+
+    // The shop phase: Sky Admiral Rogers' Bounty with a full hand is lost, not
+    // queued. Eight Gold of its nine have been spent already.
+    let mut g = game(62);
+    put_on_board(&mut g, 0, "Sky Admiral Rogers");
+    g.players[0].board[0].improvements = 8;
+    while !g.players[0].hand.is_full() {
+        assert!(g.give(0, "Skeleton").is_some());
+    }
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    let bounties = |g: &Game| {
+        g.players[0].hand.iter().filter(|m| g.data.cards.get(m.card).is_bounty).count()
+    };
+    assert_eq!(g.players[0].hand.len(), 10, "the Bounty had no room");
+    assert_eq!(bounties(&g), 0, "the Bounty is lost");
+    assert!(g.players[0].hand_queue.is_empty(), "nothing waits from the shop phase");
+    // The trigger did fire: the same roll with nine cards in hand lands one.
+    let mut g = game(64);
+    put_on_board(&mut g, 0, "Sky Admiral Rogers");
+    g.players[0].board[0].improvements = 8;
+    while g.players[0].hand.len() < 9 {
+        assert!(g.give(0, "Skeleton").is_some());
+    }
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(bounties(&g), 1, "the ninth Gold spent got the Bounty");
+
+    // In combat: a Roadboar's rallies give Blood Gems, and with a full hand
+    // they are lost too. The same fight with room in the hand gets them.
+    let one_roadboar = || {
+        let mut s = Game::new_sandbox(data(), 63, Some(bgcore::Tribes::of(Tribe::Quilboar)), 0);
+        s.players[0].board.clear();
+        let id = s.data.cards.by_name("Roadboar").unwrap();
+        s.players[0].board.push(s.data.cards.make(id, false));
+        s
+    };
+    let mut roomy = one_roadboar();
+    roomy.step(Action::EndTurn).unwrap();
+    let gained: Vec<String> =
+        roomy.players[0].hand.iter().map(|m| roomy.data.cards.get(m.card).name.clone()).collect();
+    assert!(!gained.is_empty(), "the fight's Blood Gems reach the hand");
+    let mut full = one_roadboar();
+    while !full.players[0].hand.is_full() {
+        assert!(full.give(0, "Skeleton").is_some());
+    }
+    full.step(Action::EndTurn).unwrap();
+    assert_eq!(full.players[0].hand.len(), 10, "a full hand loses the fight's cards");
+    assert!(full.players[0].hand_queue.is_empty(), "combat queues nothing");
+}

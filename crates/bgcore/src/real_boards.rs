@@ -826,6 +826,41 @@ pub struct CardIdMap {
     by_id: HashMap<String, (String, bool)>,
 }
 
+/// Dark Paradox: the game's five versions are all named "Dark Paradox" in the
+/// ref data (`BG36_360t3` and its kin, golden `BG36_360_Gt3`...), with a
+/// different Tier, stats and Dark Gift each, and `cards.toml` builds them as
+/// "Dark Paradox t3" to "t9" (the suffix is the game's, not the tier's). A
+/// name on its own cannot say which version, so the id names it.
+const PARADOX_ID: &str = "BG36_360";
+
+/// The cards.toml name of a Dark Paradox version, from its card id: the id's
+/// own suffix, golden included ("BG36_360t4" and "BG36_360_Gt4" are both
+/// "Dark Paradox t4"). None for the Tier 1 placeholder (`BG36_360` and its
+/// golden `BG36_360_G`), which no game deals out.
+fn paradox_name(card_id: &str) -> Option<String> {
+    let suffix = card_id.strip_prefix(PARADOX_ID)?;
+    let suffix = suffix.strip_prefix('_').unwrap_or(suffix);
+    let suffix = suffix.strip_prefix('G').unwrap_or(suffix);
+    (!suffix.is_empty()).then(|| format!("Dark Paradox {suffix}"))
+}
+
+/// Card ids whose logged name is not the name `cards.toml` builds them under.
+/// Floating Candle Set is a trinket whose Spellcraft spell is written with
+/// the trinket's name in the log (`BG36_MagicItem_208t`, "Floating Candle
+/// Set"); `cards.toml` builds the spell as the "Floating Candle" token.
+const RENAMED_BY_ID: &[(&str, &str)] = &[("BG36_MagicItem_208t", "Floating Candle")];
+
+/// The name to build a card under, given its id and the name the file shows:
+/// a card id that says more than its logged name does (a Dark Paradox version,
+/// Floating Candle Set's spell) wins, everything else keeps the file's name
+/// (which is why the shop replay needs no ref data).
+pub fn resolved_name(card_id: &str, name: &str) -> String {
+    if let Some((_, card)) = RENAMED_BY_ID.iter().find(|(id, _)| *id == card_id) {
+        return card.to_string();
+    }
+    paradox_name(card_id).unwrap_or_else(|| name.to_string())
+}
+
 impl CardIdMap {
     pub fn parse(json: &str) -> Result<CardIdMap, String> {
         let raw: RawRefFile =
@@ -838,6 +873,14 @@ impl CardIdMap {
         }
         let mut by_id = HashMap::new();
         for c in raw.cards {
+            // The ids whose logged name does not name the card we build.
+            if RENAMED_BY_ID.iter().any(|(id, _)| *id == c.card_id)
+                || paradox_name(&c.card_id).is_some()
+            {
+                let name = resolved_name(&c.card_id, &c.name);
+                by_id.insert(c.card_id, (name, c.is_golden));
+                continue;
+            }
             let name = if c.is_golden {
                 // The golden card's name is the base's; where the export
                 // points at the base, take that name for sure.

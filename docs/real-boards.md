@@ -453,6 +453,19 @@ is run, since any of them may be the log's.
     chooser power's parents back to the one the hero starts with. A state with
     no power at all is a hero whose passive power has no entity in play, and
     the player is then seated without a hero.
+  - **The two power slots** are the file's own `second` mark, not the order of
+    its list (a state can name the second power first: `11_02_00_10_22-g5`
+    turn 11 has Patches' power in the second slot and a trinket's in the main
+    one). A file without the mark is in slot order. The comparison orders the
+    file's list the same way.
+  - **A name that is not the card's name.** The ref data names every Dark
+    Paradox version plainly ("Dark Paradox") and the file's card id says which
+    one (`BG36_360t3` and its kin, golden `BG36_360_Gt3`; `cards.toml` builds
+    them as "Dark Paradox t3" to "t9"), so `CardIdMap` names them by their id,
+    and the shop replay's own loader does the same through
+    `real_boards::resolved_name`. Floating Candle Set's Spellcraft spell is
+    logged under the trinket's name (`BG36_MagicItem_208t`); `cards.toml`
+    builds it as the "Floating Candle" token, and the same table maps it.
   - **The Tavern's spell slot** is the engine's own (`Player.shop_spell`), not
     a minion slot: the game's spell slot is the last spell in slot order, and
     putting it in `shop` let a card that picks a random Tavern minion pick the
@@ -485,6 +498,13 @@ is run, since any of them may be the log's.
     - a hero power's count: Tae'thelan's Reliquary Research counts Tavern
       spells bought in `HeroCounts.tavern_spells_bought`, which the log shows
       as how many more spells it takes.
+  - **Steady Growth's turn** ("At the end of your turn, gain +X/+Y", the pair
+    fixed by the turn the gift landed) is the first turn the file shows that
+    card with that gift (`parse_action_files` seats `ShopGiftSpec::landed`
+    from the file's own history, by card name and golden flag: the game gives
+    a minion a new entity id every turn, so the ids cannot follow it). The
+    growth then comes from darkgifts.toml's table for that turn, and the
+    doubling for Drakkari the engine already does.
   - **A Discover that takes a slot** is seated from the pick's `moved.to`: the
     engine's `discover_into_shop` for a Tavern slot (Galakrond's Greed) and
     `tp.transform_slot` for a board minion (Token of the Old Gods). The slot is
@@ -516,7 +536,10 @@ is run, since any of them may be the log's.
   `roll`, `freeze`, `level`, `hero_power` (main or second) with its target,
   `dark_discovery`, `discover`/`trinket_pick` (the log's options are loaded as
   the engine's offer, then the same one is picked), `end_turn` (the end of turn
-  effects alone, through `Game::shop_end_of_turn`, without the fight).
+  effects alone, through `Game::shop_end_of_turn`, without the fight). A step
+  whose target is a card in the hand is a Discard (`Action::Discard`, the
+  card's hand slot): an Activate with `discard = true` (Mangled Bandit) or a
+  power that discards (Drest'agath's Incubate).
 - **Deterministic or random.** Every step is run with `--seeds` seeds. If every
   seed gives the same state the step is deterministic and is compared exactly.
   If not, it is random, and every seed's outcome is looked at, not the first

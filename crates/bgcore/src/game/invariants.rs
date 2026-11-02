@@ -19,7 +19,7 @@ impl Game {
         let cards = &self.data.cards;
         let mut held = [0u32; MAX_POOL_CARDS];
         for (i, pl) in self.players.iter().enumerate() {
-            for m in pl.shop.iter().chain(&pl.hand).chain(&pl.board) {
+            for m in pl.shop.iter().chain(&pl.hand).chain(&pl.hand_queue).chain(&pl.board) {
                 let c = cards.get(m.card);
                 if !c.token && !c.is_spell() {
                     let slot = c.pool_slot as usize;
@@ -173,6 +173,7 @@ impl Game {
             let holds_cards = !(pl.shop.is_empty()
                 && pl.shop_spell.is_none()
                 && pl.hand.is_empty()
+                && pl.hand_queue.is_empty()
                 && pl.board.is_empty()
                 && pl.discover.is_empty());
             if !pl.alive && holds_cards {

@@ -874,6 +874,13 @@ pub struct Player {
     pub shop_spell: Option<CardId>,
     pub shop: ArrayVec<Minion, SHOP>,
     pub hand: ArrayVec<Minion, HAND>,
+    /// Cards that arrived at the start of the turn with a full hand: the game
+    /// queues them and they join the hand as soon as there is room, while a
+    /// card got any other time is lost (DESIGN.md "A full hand").
+    pub hand_queue: ArrayVec<Minion, HAND>,
+    /// Whether a card got now is queued rather than lost: on through the
+    /// start of the turn's own effects, off after them.
+    pub hand_queue_on: bool,
     pub board: ArrayVec<Minion, BOARD>,
     pub pending_choose_one: Option<PendingChooseOne>,
     pub pending_target: Option<PendingTarget>,
@@ -1957,6 +1964,9 @@ impl Game {
         }
         // A hero knocked out by its own effect damage takes no more actions.
         if self.players[p].alive {
+            // A card the start of the turn queued with a full hand joins as
+            // soon as this action freed a slot (DESIGN.md "A full hand").
+            self.drain_hand_queue(p);
             // Makeshift Master: whatever the watched minion gained while the
             // action ran, the Deity gains too.
             self.watch_deity_gain(p);
@@ -2389,6 +2399,18 @@ impl Game {
 
     fn add_to_hand(&mut self, p: usize, mut m: Minion) -> bool {
         if self.players[p].hand.is_full() {
+            // A card that arrives at the start of the turn (a compass
+            // trinket's tribe card) waits for room; a card got at any other
+            // time is lost (DESIGN.md "A full hand"). A queued card is not in
+            // the hand yet, so nothing that reads a card entering the hand
+            // fires until it joins (`drain_hand_queue`).
+            let pl = &mut self.players[p];
+            if pl.hand_queue_on && !pl.hand_queue.is_full() {
+                // A Darkmoon Ticket and a per-card Freeze stay in the Tavern.
+                m.tickets = 0;
+                m.frozen = false;
+                pl.hand_queue.push(m);
+            }
             return false;
         }
         // A Darkmoon Ticket and a per-card Freeze belong to the Tavern, not to
@@ -2425,6 +2447,20 @@ impl Game {
         // along. The copy carries no gift, so this never chains.
         self.dark_gift_on_acquire(p, &m);
         true
+    }
+
+    /// The cards the start of the turn queued join the hand, first in first
+    /// out, for as long as there is room (DESIGN.md "A full hand"). A card
+    /// that joins can make a triple, and a triple's golden card takes a slot
+    /// of its own, so the hand can fill again here.
+    fn drain_hand_queue(&mut self, p: usize) {
+        while !self.players[p].hand.is_full() && !self.players[p].hand_queue.is_empty() {
+            let m = self.players[p].hand_queue.remove(0);
+            let card = m.card;
+            if self.add_to_hand(p, m) && !self.data.cards.get(card).is_spell() {
+                self.check_triple(p, card);
+            }
+        }
     }
 
     fn give_linked(&mut self, p: usize, cards: &[CardId], golden: bool) {

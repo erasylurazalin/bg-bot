@@ -43,6 +43,10 @@ ALIASES = {
 
 STAND_IN = "Stand-in"
 
+# Dark Paradox's five versions are all named "Dark Paradox" in the ref data
+# and cards.toml names them by the game's own id suffix ("Dark Paradox t3").
+PARADOX_ID = "BG36_360"
+
 
 def built_cards(cards_toml: Path = CARDS_TOML) -> set[str]:
     """The card names the engine can build (cards.toml holds names, not ids)."""
@@ -52,12 +56,22 @@ def built_cards(cards_toml: Path = CARDS_TOML) -> set[str]:
 
 def card_map(ref: Path = REF_CARDS) -> dict[str, tuple[str, bool]]:
     """card_id -> (card name, whether the id itself is a golden card), from
-    ref/bg-cards.json (docs/card-data.md)."""
+    ref/bg-cards.json (docs/card-data.md).
+
+    Dark Paradox is the one card whose name does not say which version it is:
+    the ref data names all five "Dark Paradox", golden included, and the
+    version is the game's own id suffix (`BG36_360t3` and its kin, golden
+    `BG36_360_Gt3`...). cards.toml builds them as "Dark Paradox t3" to "t9",
+    so the id picks the version here too."""
     cards = json.loads(ref.read_text())["cards"]
     names = {c["card_id"]: c["name"] for c in cards if not c["is_golden"]}
     out: dict[str, tuple[str, bool]] = {}
     for c in cards:
-        if c["is_golden"]:
+        suffix = c["card_id"][len(PARADOX_ID):] if c["card_id"].startswith(PARADOX_ID) else ""
+        suffix = suffix.removeprefix("_").removeprefix("G")
+        if suffix:
+            out[c["card_id"]] = (f"Dark Paradox {suffix}", c["is_golden"])
+        elif c["is_golden"]:
             # The golden card's name is the base's; where the export points
             # at the base, take that name for sure.
             base = c.get("normal_card_id")

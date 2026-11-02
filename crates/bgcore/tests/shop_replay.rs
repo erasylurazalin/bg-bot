@@ -400,3 +400,118 @@ fn a_golden_the_file_marks_with_no_reward_gives_no_triple_reward() {
         .expect("the same Golden, unmarked");
     assert!(!loaded.game.players[0].hand[at].no_reward);
 }
+
+/// Steady Growth: "At the end of your turn, gain +X/+Y", where the pair is
+/// fixed by the turn the gift landed (darkgifts.toml's table). The loader
+/// used to seat the gift at the board's own turn, so every turn the replay
+/// loaded grew it a step further; the turn it landed is the first turn the
+/// file shows the gift on that card.
+#[test]
+fn steady_growth_grows_by_the_pair_of_the_turn_it_landed() {
+    let text = r#"{"source": "steady", "game": 1, "turns": [
+        {"turn": 3,
+         "start": {"board": [{"id": 7, "card_id": "BG28_300", "name": "Harmless Bonehead",
+                              "attack": 3, "health": 4, "golden": false, "keywords": [],
+                              "dark_gifts": [{"card_id": "BG36_MidGameEffect_000t51",
+                                              "name": "Steady Growth"}],
+                              "position": 1}],
+                   "hand": [], "tavern": [], "gold": 5, "tier": 3, "upgrade_cost": 6,
+                   "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                   "hero_powers": [], "trinkets": [], "secrets": []},
+         "actions": [], "end": null},
+        {"turn": 4,
+         "start": {"board": [{"id": 70, "card_id": "BG28_300", "name": "Harmless Bonehead",
+                              "attack": 5, "health": 6, "golden": false, "keywords": [],
+                              "dark_gifts": [{"card_id": "BG36_MidGameEffect_000t51",
+                                              "name": "Steady Growth"}],
+                              "position": 1}],
+                   "hand": [], "tavern": [], "gold": 6, "tier": 3, "upgrade_cost": 6,
+                   "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                   "hero_powers": [], "trinkets": [], "secrets": []},
+         "actions": [{"step": "end_turn", "paid": {"gold": 0, "health": 0}}], "end": null}]}"#;
+    let files = parse_action_files(&[("steady.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let data = data();
+    let turn = &file.turns[1];
+    let mut loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1);
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    let gift = data.gifts.gifts.iter().find(|g| g.id == "BG36_MidGameEffect_000t51").unwrap();
+    assert_eq!(loaded.game.players[0].board[0].gift_state(gift.card), Some(3),
+        "the gift landed on turn 3, the first turn the file shows it");
+    // The growth is +2/+2, the pair for turn 3, not the +2/+3 of turn 4.
+    loaded.game.shop_end_of_turn(0);
+    let m = loaded.game.players[0].board[0];
+    assert_eq!((m.attack, m.health), (7, 8), "5/6 plus turn 3's +2/+2");
+}
+
+/// Steady Growth runs as many times as the player's end of turn effects:
+/// Drakkari Enchanter makes the end of your turn happen twice
+/// (DESIGN.md "'Twice' versus 'an extra time'"), so the gift's pair lands
+/// twice.
+#[test]
+fn steady_growth_grows_once_per_end_of_turn() {
+    let text = r#"{"source": "steady", "game": 1, "turns": [
+        {"turn": 4,
+         "start": {"board": [{"id": 70, "card_id": "BG28_300", "name": "Harmless Bonehead",
+                              "attack": 5, "health": 6, "golden": false, "keywords": [],
+                              "dark_gifts": [{"card_id": "BG36_MidGameEffect_000t51",
+                                              "name": "Steady Growth"}],
+                              "position": 1},
+                             {"id": 8, "card_id": "BG26_520", "name": "Drakkari Enchanter",
+                              "attack": 1, "health": 5, "golden": false, "keywords": [],
+                              "position": 2}],
+                   "hand": [], "tavern": [], "gold": 6, "tier": 4, "upgrade_cost": 7,
+                   "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                   "hero_powers": [], "trinkets": [], "secrets": []},
+         "actions": [{"step": "end_turn", "paid": {"gold": 0, "health": 0}}], "end": null}]}"#;
+    let files = parse_action_files(&[("steady.json".to_string(), text.to_string())]).unwrap();
+    let data = data();
+    let turn = &files[0].turns[0];
+    let mut loaded = load(&data, &turn.start, None, files[0].lobby(), turn.turn, 1);
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    loaded.game.shop_end_of_turn(0);
+    let m = loaded.game.players[0].board[0];
+    // The file's first turn is this one, so the gift landed here: +2/+3,
+    // the turn 4 pair, twice.
+    assert_eq!((m.attack, m.health), (9, 12), "5/6 plus +2/+3, twice");
+}
+
+/// The two power slots: a state marks its second power with `second`, and the
+/// list can put the second one first (Rafaam holding Patches' power in the
+/// second slot and a trinket's power in the main one: a step that loads that
+/// state used to seat the second power as the main one and then fall back to
+/// the hero's starting power, which made every step after it incomplete).
+#[test]
+fn a_second_power_is_seated_by_its_mark_not_its_place_in_the_list() {
+    let text = r#"{"source": "powers", "game": 1,
+        "hero": {"card_id": "TB_BaconShop_HERO_18", "name": "Patches the Pirate"},
+        "turns": [
+        {"turn": 9,
+         "start": {"board": [], "hand": [], "tavern": [], "gold": 5, "tier": 4,
+                   "upgrade_cost": 6, "health": 30, "armor": 0, "free_refreshes": 0,
+                   "frozen": false, "secrets": [],
+                   "hero_powers": [
+                      {"card_id": "TB_BaconShop_HP_072", "name": "Pirate Parrrrty!",
+                       "second": true},
+                      {"card_id": "TB_BaconShop_HP_014", "name": "Stay Frosty"}],
+                   "trinkets": []},
+         "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("powers.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let data = data();
+    let turn = &file.turns[0];
+    let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1);
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    let power = loaded.game.players[0].power.map(|p| p.of);
+    let power2 = loaded.game.players[0].power2.map(|p| p.of);
+    assert_eq!(
+        power.map(|i| data.heroes.power(i).card_id.clone()),
+        Some("TB_BaconShop_HP_014".to_string()),
+        "the main slot holds the power the file leaves unmarked"
+    );
+    assert_eq!(
+        power2.map(|i| data.heroes.power(i).card_id.clone()),
+        Some("TB_BaconShop_HP_072".to_string()),
+        "the marked one is the second"
+    );
+}

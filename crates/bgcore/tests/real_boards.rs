@@ -305,8 +305,16 @@ fn the_fixture_folder_loads_through_the_shared_parser() {
     assert_eq!(t4opp.counters.improve[Counter::Baller.index()], 1);
     assert!(t4opp.deity.is_none());
     let (boards, unmatched) = RealBoards::build(&specs, &d.cards, &d.gifts);
-    // Dark Paradox: the id is known, the card is not built here.
-    assert_eq!(unmatched, ["Dark Paradox"]);
+    // Dark Paradox's file names it plainly and its id says which version it
+    // is, so the board builds it (and nothing else in the folder is missing).
+    assert!(unmatched.is_empty(), "{unmatched:?}");
+    let paradox = boards
+        .boards_at(3)
+        .iter()
+        .flat_map(|b| b.minions.iter())
+        .find(|m| d.cards.get(m.card).name.starts_with("Dark Paradox"))
+        .expect("the fixture's Dark Paradox is built");
+    assert!(d.cards.get(paradox.card).tier > 1, "the version's own tier");
     // The hand's Lobster is the player's improve count (10 / 2 - 1), and the
     // Leviathan carries its growth (15 / 3).
     let t2 = boards.boards_at(2).iter().find(|b| !b.hand.is_empty()).unwrap();
@@ -821,4 +829,71 @@ fn a_this_turn_tavern_buff_comes_off_at_the_end_of_the_turn() {
         (base_a + 10, base_h + 10),
         "the this turn half comes off, the this game half stays"
     );
+}
+
+/// Dark Paradox: all five versions are named "Dark Paradox" in the ref data,
+/// golden included, and only the card id says which one; cards.toml builds
+/// them as "Dark Paradox t3" to "t9", so the id map names them that way and
+/// the loader builds the version the file had rather than a Stand-in
+/// (docs/darkgifts.md "Dark Paradox", docs/real-boards.md).
+#[test]
+fn dark_paradox_is_matched_by_its_card_id() {
+    let ids = CardIdMap::parse(
+        r#"{"cards": [
+            {"card_id": "BG36_360", "name": "Dark Paradox", "is_golden": false},
+            {"card_id": "BG36_360_G", "name": "Dark Paradox", "is_golden": true,
+             "normal_card_id": "BG36_360"},
+            {"card_id": "BG36_360t3", "name": "Dark Paradox", "is_golden": false},
+            {"card_id": "BG36_360_Gt3", "name": "Dark Paradox", "is_golden": true,
+             "normal_card_id": "BG36_360t3"},
+            {"card_id": "BG36_360t9", "name": "Dark Paradox", "is_golden": false},
+            {"card_id": "BG36_360_Gt9", "name": "Dark Paradox", "is_golden": true,
+             "normal_card_id": "BG36_360t9"}
+        ]}"#,
+    )
+    .unwrap();
+    assert_eq!(ids.get("BG36_360t3"), Some(("Dark Paradox t3", false)));
+    assert_eq!(ids.get("BG36_360_Gt3"), Some(("Dark Paradox t3", true)));
+    assert_eq!(ids.get("BG36_360t9"), Some(("Dark Paradox t9", false)));
+    assert_eq!(ids.get("BG36_360_Gt9"), Some(("Dark Paradox t9", true)));
+    // The Tier 1 placeholder is no game's card and stays unnamed by version.
+    assert_eq!(ids.get("BG36_360"), Some(("Dark Paradox", false)));
+    // Every version cards.toml builds is a card the engine knows, and the
+    // stats are the version's own (t3 is the Tier 2, 2/6 one).
+    let d = data();
+    for t in ["t3", "t4", "t5", "t6", "t9"] {
+        let name = format!("Dark Paradox {t}");
+        let id = d.cards.by_name(&name).unwrap_or_else(|| panic!("cards.toml has {name}"));
+        let m = d.cards.make(id, false);
+        let golden = d.cards.make(id, true);
+        assert!(golden.attack == 2 * m.attack, "{name}'s golden doubles its attack");
+    }
+    let t3 = d.cards.make(d.cards.by_name("Dark Paradox t3").unwrap(), false);
+    assert_eq!((t3.attack, t3.health), (2, 6));
+    assert_eq!(d.cards.get(d.cards.by_name("Dark Paradox t3").unwrap()).tier, 2);
+}
+
+/// Floating Candle Set: the trinket's Spellcraft spell is logged under the
+/// trinket's name ("Floating Candle Set", `BG36_MagicItem_208t`), and
+/// cards.toml builds the spell as the "Floating Candle" token. The id maps to
+/// the name we build, so a state that holds the spell builds it instead of a
+/// Stand-in (docs/trinkets.md "Floating Candle Set").
+#[test]
+fn floating_candle_sets_spell_is_matched_by_its_card_id() {
+    let ids = CardIdMap::parse(
+        r#"{"cards": [
+            {"card_id": "BG36_MagicItem_208t", "name": "Floating Candle Set"}
+        ]}"#,
+    )
+    .unwrap();
+    assert_eq!(ids.get("BG36_MagicItem_208t"), Some(("Floating Candle", false)));
+    // The board loader builds it: a hand holding the spell comes through with
+    // the token's card, not a Stand-in.
+    let json = r#"{"boards": [{"game": "g", "turn": 6, "tier": 3,
+        "minions": [], "hand": [
+            {"card_id": "BG36_MagicItem_208t", "name": "Floating Candle Set",
+             "attack": 0, "health": 0, "golden": false}]}]}"#;
+    let (specs, unknown) = parse_board_files(&[("f".to_string(), json.to_string())], &ids).unwrap();
+    assert!(unknown.is_empty(), "nothing is unmatched: {unknown:?}");
+    assert_eq!(specs[0].hand[0].name, "Floating Candle");
 }

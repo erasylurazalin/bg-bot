@@ -45,6 +45,12 @@ pub struct ShopGiftSpec {
     /// have got to instead of starting them over.
     #[serde(default)]
     pub state: Option<i32>,
+    /// The turn this gift first shows on this card anywhere in the file, the
+    /// turn it landed: the loader seats Steady Growth's growth from it, which
+    /// the gift fixes at landing and which no single state can say
+    /// (`seat_gift_landings`).
+    #[serde(skip)]
+    pub landed: Option<u32>,
 }
 
 /// One card of a logged state: my board (with `position`), my hand (`index`),
@@ -100,8 +106,15 @@ impl ShopMinionSpec {
     /// The card as the board loader builds one: name, attack, health, golden
     /// flag, keywords, gifts, numbers and the Rapid Reanimation mark.
     fn real_spec(&self) -> RealMinionSpec {
+        let name = self.name.as_deref().unwrap_or_default();
         RealMinionSpec {
-            name: self.name.clone().unwrap_or_default(),
+            // Dark Paradox's five versions share one name in the log, and the
+            // file's card id says which one (crate::real_boards); every other
+            // card keeps the file's name, which needs no ref data.
+            name: match self.card_id.as_deref() {
+                Some(id) => crate::real_boards::resolved_name(id, name),
+                None => name.to_string(),
+            },
             attack: self.attack,
             health: self.health,
             golden: self.golden,
@@ -471,11 +484,55 @@ pub fn parse_action_files(
 ) -> Result<Vec<ShopFileSpec>, String> {
     let mut out = Vec::with_capacity(files.len());
     for (name, text) in files {
-        let spec: ShopFileSpec =
+        let mut spec: ShopFileSpec =
             serde_json::from_str(text).map_err(|e| format!("{name}: {e}"))?;
+        seat_gift_landings(&mut spec);
         out.push(spec);
     }
     Ok(out)
+}
+
+/// When a Dark Gift landed, from the file itself: a countdown gift's turns
+/// left are in its own `state`, but Steady Growth's growth is fixed by the
+/// turn it landed and no one state says that turn. What does say it is the
+/// game's history: the card carries the gift from the turn it landed on, so
+/// the first turn the file shows a card with that name, that golden flag and
+/// that gift is the turn it landed. The log's own entity ids cannot follow a
+/// card across turns (the game gives a minion a new id every turn, so the
+/// board's `start` and the step before it never share one), and a name and a
+/// gift together are the closest thing to a card's identity the file has: a
+/// second copy of one card wearing the same gift, bought later than the
+/// first, would be read as having landed with it.
+fn seat_gift_landings(spec: &mut ShopFileSpec) {
+    let mut landed: HashMap<(String, bool, String), u32> = HashMap::new();
+    fn note(
+        state: &mut ShopStateSpec,
+        turn: u32,
+        landed: &mut HashMap<(String, bool, String), u32>,
+    ) {
+        for zone in [&mut state.board, &mut state.hand, &mut state.tavern] {
+            for m in zone {
+                for g in &mut m.dark_gifts {
+                    let Some(id) = g.card_id.clone() else { continue };
+                    let key = (m.name.clone().unwrap_or_default(), m.golden, id);
+                    let at = *landed.entry(key).or_insert(turn);
+                    g.landed = Some(at);
+                }
+            }
+        }
+    }
+    for turn in &mut spec.turns {
+        let t = turn.turn;
+        note(&mut turn.start, t, &mut landed);
+        for step in &mut turn.actions {
+            if let Some(after) = &mut step.after {
+                note(after, t, &mut landed);
+            }
+        }
+        if let Some(end) = &mut turn.end {
+            note(end, t, &mut landed);
+        }
+    }
 }
 
 // ---- loading a logged state into a game ----
@@ -679,6 +736,11 @@ pub fn load(
     // replace it, the main one first and the second one in its own slot.
     game.players[ME].power = None;
     game.players[ME].power2 = None;
+    // Which slot each logged power sits in: its own `second` mark when the
+    // file has them (a state can list the second power first: Rafaam with
+    // Patches' power in the second slot and a trinket's power in the main
+    // one, `11_02_00_10_22-g5` turn 11), else the order the list is in.
+    let marked = spec.hero_powers.iter().any(|p| p.second);
     for (i, power) in spec.hero_powers.iter().enumerate() {
         if i > 1 {
             // The engine has two power slots; a log with three is a game this
@@ -718,7 +780,7 @@ pub fn load(
         // `seat_power` fills the main slot; a power the file marks as the
         // second one goes to the other slot.
         let seated = game.players[ME].power.take();
-        if power.second || i == 1 {
+        if if marked { power.second } else { i == 1 } {
             game.players[ME].power2 = seated;
             game.players[ME].power = main;
         } else {
@@ -812,6 +874,25 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
         let left = m.numbers.first().copied().unwrap_or(trigger.every as i32);
         let done = (trigger.every as i32 - left).clamp(0, trigger.every as i32 - 1);
         minion.improvements = done as u16;
+    }
+    // Dark Gifts Steady Growth: "At the end of your turn, gain +X/+Y", and
+    // the pair is fixed by the turn the gift landed (darkgifts.toml's table:
+    // +2/+2 on turn 3, +2/+3 on turn 4, +3/+4 on turn 5). The board loader
+    // seats a gift without a countdown at the board's own turn, which would
+    // grow it a step further every turn the replay loads; the turn it landed
+    // is the file's (`ShopGiftSpec::landed`).
+    for g in &m.dark_gifts {
+        let Some(id) = g.card_id.as_deref() else { continue };
+        let Some(gift) = data.gifts.gifts.iter().find(|x| x.id == id) else { continue };
+        if !matches!(
+            data.cards.get(gift.card).end_of_turn,
+            Some(crate::cards::EndOfTurn::GiftBuffSelf)
+        ) {
+            continue;
+        }
+        if let Some(turn) = g.landed {
+            minion.set_gift_state(gift.card, turn.min(crate::minion::GIFT_STATE_MAX as u32) as u8);
+        }
     }
     (minion, bad)
 }
@@ -1157,7 +1238,15 @@ impl ShopSnapshot {
             tavern.push(snap_minion(data, spell, turn, missing));
         }
         let mut powers = Vec::new();
-        for power in &state.hero_powers {
+        // The two slots, in slot order: the file's `second` mark says which
+        // power is the second one, and the list can name it first (the game's
+        // own order is not the slot order). A file without the mark is in
+        // slot order already.
+        let mut listed: Vec<&ShopPowerSpec> = state.hero_powers.iter().collect();
+        if listed.iter().any(|p| p.second) {
+            listed.sort_by_key(|p| p.second);
+        }
+        for power in listed {
             let card_id = power.card_id.clone().unwrap_or_default();
             let uses_left = data
                 .heroes
@@ -1730,6 +1819,15 @@ fn target_action(loaded: &LoadedShop, target: &ShopPlace) -> Result<Action, Stri
     }
 }
 
+/// The card in the hand a step throws away: an Activate or a power that
+/// discards a card first opens the engine's discard prompt, and the step's
+/// target names the card the log threw.
+fn discard_action(loaded: &LoadedShop, target: &ShopPlace) -> Result<Action, String> {
+    zone_index(&loaded.hand_ids, target.id, target.index)
+        .map(Action::Discard)
+        .ok_or_else(|| "a hand target that is not in the hand".to_string())
+}
+
 /// The card a place names, resolved against the card set through the card id
 /// file: the card id the game used, its name in the card set, and the index.
 fn resolve_card(data: &Data, ids: &CardIdMap, place: &ShopPlace) -> Option<CardId> {
@@ -1994,7 +2092,15 @@ fn actions_for(
             }
             out.push(Action::Activate(at));
             if let Some(target) = &step.target {
-                out.push(target_action(loaded, target)?);
+                // Mangled Bandit and its kin: "Discard a card to get ...".
+                let card = loaded.game.players[ME].board[at as usize].card;
+                if target.kind.as_deref() == Some("hand")
+                    && data.cards.get(card).activate.is_some_and(|a| a.discard)
+                {
+                    out.push(discard_action(loaded, target)?);
+                } else {
+                    out.push(target_action(loaded, target)?);
+                }
             }
         }
         "move" => {
@@ -2015,7 +2121,23 @@ fn actions_for(
                 Action::HeroPower
             });
             if let Some(target) = &step.target {
-                out.push(target_action(loaded, target)?);
+                // Drest'agath's Incubate: "Discard a card, then Discover".
+                let slot = if step.which.as_deref() == Some("second") {
+                    loaded.game.players[ME].power2
+                } else {
+                    loaded.game.players[ME].power
+                };
+                let discards = slot.is_some_and(|st| {
+                    matches!(
+                        data.heroes.power(st.of).effect,
+                        crate::heroes::PowerEffect::DiscardGetRandomMinion { .. }
+                    )
+                });
+                if target.kind.as_deref() == Some("hand") && discards {
+                    out.push(discard_action(loaded, target)?);
+                } else {
+                    out.push(target_action(loaded, target)?);
+                }
             }
         }
         "dark_discovery" => out.push(Action::DarkGift),

@@ -134,6 +134,16 @@ rules behind each are in DESIGN.md Part 2.
 - **The hand in combat.** `fight_with_hands` passes a side's hand only when
   something on that side reads it. Murlocs summoned from hand come back
   unchanged; Winterfinner's hand buffs are kept.
+- **A full hand.** `Player.hand` holds `HAND` (10) cards; `add_to_hand` is
+  the one way in. With a full hand the card is lost, which is what a card got
+  during the shop phase or in combat does (Sky Admiral Rogers' Bounty, a
+  fight's Blood Gems), except at the start of the turn: `Player.hand_queue_on`
+  is set through `start_turn`'s own effects (hero powers, trinkets, Dark
+  Gifts) and a card got then waits in `Player.hand_queue` instead, joining
+  the hand first in first out as soon as a slot frees (`drain_hand_queue`,
+  run after every action and at the end of the start of turn). A queued card
+  is not in the hand yet, so nothing that reads "when you get a card" fires
+  until it joins (DESIGN.md "A full hand", Era 2026-11-02).
 - **Refresh kinds.** `RefreshKind { TurnStart, Explicit, Effect }`: only an
   explicit Refresh (the player's action) takes queued Fodders.
 - **Hero health.** `take_hero_damage` runs the "after your hero takes
@@ -685,8 +695,11 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   spell" counts it and "Tavern spell" counters don't) that leaves the hand at the end of the turn if it was
   not cast, dropped in `finish_shop` without firing a discard. The trinket
   hands it out with `on_pick` and `start_of_turn` `get` lists, so it comes
-  back every turn. Floating Candle Set is not built: triggering a Deathrattle
-  outside combat is a shop system the engine does not have (docs/KNOWN-GAPS.md).
+  back every turn. Floating Candle Set's Spellcraft spell is the "Floating
+  Candle" token (`cards.toml`: `target = "chosen", trigger_deathrattle`): it
+  fires a friendly minion's Deathrattle outside combat through
+  `fight::shop_trigger_deathrattles`, with the minion standing and the summon
+  landing where it stands.
 - **The Tavern's shape (block 3).** `Player::shop_size` is the one Tavern
   size: `rules.shop_size(tier)`, or six with Glowing Gauntlet, plus one for
   Innkeeper's Stein (`extra_high_tier`: a minion of the tier above, none at

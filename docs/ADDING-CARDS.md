@@ -784,8 +784,10 @@ Triple Reward spell.
   its level there.
 - **One hand-insert hook.** `Game::add_to_hand` is the only path into a
   player's hand (buys, generated cards, Discover picks, Triple Rewards,
-  Blood Gems, the Lockbox, `Game::give`); a full hand drops the card first,
-  then `Card.on_card_added` runs (The Shadow of Doubt buffs the Deity).
+  Blood Gems, the Lockbox, `Game::give`); a full hand drops the card first
+  (except at the start of the turn, where it waits in `Player.hand_queue`:
+  docs/ENGINE.md "A full hand"), then `Card.on_card_added` runs (The Shadow
+  of Doubt buffs the Deity).
 - **Linked cards.** `Minion.linked`: the low 14 bits are a group id from
   `Player.next_link`, bit 15 (0x8000) marks a golden four-card group, bit 14
   (0x4000) that one of it was played. `Game::give_linked`

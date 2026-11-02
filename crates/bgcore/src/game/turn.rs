@@ -87,6 +87,7 @@ impl Game {
         }
         let idle = pl.shop.is_empty()
             && pl.hand.is_empty()
+            && pl.hand_queue.is_empty()
             && pl.board.is_empty()
             && pl.discover.is_empty()
             && pl.shop_spell.is_none()
@@ -102,7 +103,13 @@ impl Game {
             return;
         }
         pl.shop_spell = None;
-        for m in pl.shop.drain(..).chain(pl.hand.drain(..)).chain(pl.board.drain(..)) {
+        for m in pl
+            .shop
+            .drain(..)
+            .chain(pl.hand.drain(..))
+            .chain(pl.hand_queue.drain(..))
+            .chain(pl.board.drain(..))
+        {
             give_back(pool, &data.cards, &m);
         }
         pl.abandon_discover(pool, &data.cards);
@@ -404,6 +411,10 @@ impl Game {
                 pl.tp.deity_watching = false;
             }
         }
+        // A Spellcraft spell leaving frees a hand slot, and a card the start
+        // of the turn queued with a full hand joins as soon as there is room
+        // (DESIGN.md "A full hand").
+        self.drain_hand_queue(p);
         let cards = &self.data.cards;
         // "This turn" effects end with the turn wherever the minion is: a
         // golden made from a triple holds its copies' in hand.
@@ -471,6 +482,12 @@ impl Game {
             if let Some(sb) = sandbox {
                 pl.free_rolls = pl.free_rolls.max(sb.free_rolls);
             }
+            // Everything the start of the turn hands out (a compass trinket's
+            // tribe card and the like) waits in the queue when the hand is
+            // full, where a card got later in the turn would be lost
+            // (DESIGN.md "A full hand"). The flag is cleared at the end of
+            // this function, after every start-of-turn effect has run.
+            pl.hand_queue_on = true;
             // the Beast bonus lasts until now; it never kills a Beast
             let (ba, bh) = std::mem::take(&mut pl.beast_bonus);
             if (ba, bh) != (0, 0) {
@@ -662,6 +679,15 @@ impl Game {
             // gave it in the real game, so they don't fire here.
             if self.players[p].alive && !self.players[p].real {
                 self.check_attack_thresholds(p);
+            }
+        }
+        // The start of the turn's own effects are done: a card they had to
+        // queue with a full hand joins now if a slot opened, and anything got
+        // from here on is lost rather than queued (DESIGN.md "A full hand").
+        for p in 0..PLAYERS {
+            if self.players[p].hand_queue_on {
+                self.players[p].hand_queue_on = false;
+                self.drain_hand_queue(p);
             }
         }
         self.pair();

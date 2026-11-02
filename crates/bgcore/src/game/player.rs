@@ -135,6 +135,8 @@ impl Player {
             shop_spell: None,
             shop: ArrayVec::new(),
             hand: ArrayVec::new(),
+            hand_queue: ArrayVec::new(),
+            hand_queue_on: false,
             board: ArrayVec::new(),
             pending_choose_one: None,
             cast_after_choice: None,
