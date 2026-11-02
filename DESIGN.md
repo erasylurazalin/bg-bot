@@ -74,6 +74,11 @@ fight phase.
 - Hand holds 10 cards, the board 7 minions. A bought minion goes to hand.
   Playing it puts it on the board at a position you choose and triggers its
   Battlecry.
+- **A full hand (Era, 2026-11-02).** A card you get with 10 cards in hand,
+  during your shop phase or in combat, is lost (Sky Admiral Rogers' Bounty;
+  Blood Gems from a Roadboar that attacks 15 times). A card that arrives at
+  the start of your turn (a compass trinket's tribe card and the like) is
+  queued instead and joins your hand as soon as there is space.
 - The board order matters in the fight, and you can rearrange it freely
   during the shop phase.
 
