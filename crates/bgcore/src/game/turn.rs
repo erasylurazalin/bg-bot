@@ -128,6 +128,9 @@ impl Game {
             self.run_minion_end_of_turn(p, &mut pos, runs);
             pos += 1;
         }
+        // The Dark Gift countdowns (Incubation, Replication, Affinity) tick
+        // and fire here, at the end of the turn (docs/darkgifts.md).
+        self.dark_gift_end_of_turn(p);
         // The powers' own end-of-turn effects (Sulfuras gives your ends
         // +8/+8), then the trinkets'.
         self.power_end_of_turn(p);
@@ -647,8 +650,8 @@ impl Game {
         }
         for p in 0..PLAYERS {
             // Dark Gifts at the start of the player's turn: the button is
-            // pressable again, a Time Turning minion runs its end of turn
-            // effects, and the countdown gifts tick.
+            // pressable again, and a Time Turning minion runs its end of turn
+            // effects again. The countdown gifts tick at the end of the turn.
             if self.players[p].alive && !self.players[p].real {
                 self.players[p].dark_gift_pressed = false;
                 self.dark_gift_start_of_turn(p);

@@ -34,6 +34,8 @@ fn spec(turn: u32, tier: u8, minions: &[(&str, i32, i32, bool, &[&str])]) -> Rea
                 numbers: Vec::new(),
                 dark_gifts: Vec::new(),
                 reanimate: false,
+                no_reward: false,
+                dark_gift_states: Vec::new(),
             })
             .collect(),
         ..RealBoardSpec::default()
@@ -415,6 +417,8 @@ fn a_real_seat_takes_the_boards_numbers() {
         numbers: vec![14, 7, 0, 0],
         dark_gifts: Vec::new(),
         reanimate: false,
+        no_reward: false,
+        dark_gift_states: Vec::new(),
     }];
     b.counters.set("gem_attack", 5);
     b.counters.set("gem_health", 4);
@@ -526,6 +530,8 @@ fn a_real_seat_hand_reaches_the_fight() {
         numbers: Vec::new(),
         dark_gifts: Vec::new(),
         reanimate: false,
+        no_reward: false,
+        dark_gift_states: Vec::new(),
     }];
     let boards = single_board_folder(&b);
     let mut g = Game::new_random_heroes_real(d.clone(), 11, &[0], boards);
@@ -770,4 +776,49 @@ fn a_board_file_s_dark_gifts_load_onto_its_minions() {
     let names: Vec<String> =
         m.gift_slice().iter().map(|g| d.cards.get(g.card()).name.clone()).collect();
     assert_eq!(names, ["Gift: Fortitude", "Gift: Steady Growth"]);
+}
+
+/// A "this turn" Tavern buff that the log keeps apart (Ashen Corruptor's
+/// +2/+2 per Health payment, in its own player enchantment) rides along on
+/// the loaded Tavern minions and comes off at the end of the turn, while the
+/// standing "this game" buff stays.
+#[test]
+fn a_this_turn_tavern_buff_comes_off_at_the_end_of_the_turn() {
+    let data = Data::bundled();
+    let cards = &data.cards;
+    let mut g = Game::new_with_lobby(
+        Arc::new(Data::bundled()),
+        3,
+        bgcore::Tribe::EVERY.into_iter().fold(bgcore::Tribes::NONE, |m: bgcore::Tribes, t| m.with(t)),
+    );
+    let c = cards.by_name("Cord Puller").unwrap();
+    let mut m = g.players[0].make_card(cards, c, false, 0);
+    let (base_a, base_h) = (m.attack, m.health);
+    // The log's Tavern minion shows both buffs: +10/+10 this game and +8/+8
+    // this turn (the 28/30 Hyena that goes back to 20/22 at the end of turn
+    // 10 of 15_25_26-g4).
+    m.attack += 18;
+    m.health += 18;
+    g.players[0].shop.clear();
+    g.players[0].shop.push(m);
+    let at = 0;
+    let counters = RealCounters {
+        tavern_attack: 10,
+        tavern_health: 10,
+        tavern_turn_attack: 8,
+        tavern_turn_health: 8,
+        ..RealCounters::default()
+    };
+    g.players[0].take_real_counters_public(&counters);
+    assert_eq!(
+        (g.players[0].shop[at].attack, g.players[0].shop[at].health),
+        (base_a + 18, base_h + 18),
+        "the loaded minion already carries both buffs once"
+    );
+    g.players[0].end_turn_tavern_buffs(cards);
+    assert_eq!(
+        (g.players[0].shop[at].attack, g.players[0].shop[at].health),
+        (base_a + 10, base_h + 10),
+        "the this turn half comes off, the this game half stays"
+    );
 }

@@ -643,7 +643,7 @@ fn steady_growth_carries_the_numbers_of_the_turn_it_landed() {
 }
 
 #[test]
-fn incalculable_countdowns_tick_two_turns_at_the_start_of_the_turn() {
+fn incalculable_countdowns_tick_two_turns_at_the_end_of_the_turn() {
     let mut g = game(16);
     let incubation = gift(&g, "Incubation");
     let c = id(&g, "Cord Puller");
@@ -654,12 +654,12 @@ fn incalculable_countdowns_tick_two_turns_at_the_start_of_the_turn() {
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (5, 5));
     g.players[0].board[0].attack = 10;
     g.players[0].board[0].health = 10;
-    // First tick: 1 turn left, nothing doubles.
-    g.dark_gift_start_of_turn(0);
+    // First tick (the end of the turn): 1 turn left, nothing doubles.
+    g.dark_gift_end_of_turn(0);
     assert_eq!(g.players[0].board[0].gift_slice()[0].state(), 1);
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 10));
     // Second tick: it fires and the gift comes off.
-    g.dark_gift_start_of_turn(0);
+    g.dark_gift_end_of_turn(0);
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (20, 20));
     assert_eq!(g.players[0].board[0].n_gifts, 0);
 }
@@ -672,9 +672,9 @@ fn replication_and_affinity_count_down_then_hand_over_a_card() {
     g.players[0].board[pos].attack = 9;
     g.players[0].board[pos].health = 9;
     assert!(g.give_gift(0, pos, g.data.gifts.gifts[replication].name.clone().as_str(), 4));
-    g.dark_gift_start_of_turn(0);
+    g.dark_gift_end_of_turn(0);
     assert!(g.players[0].hand.is_empty(), "one turn to go");
-    g.dark_gift_start_of_turn(0);
+    g.dark_gift_end_of_turn(0);
     assert_eq!(g.players[0].hand.len(), 1, "a plain copy");
     let copy = g.players[0].hand[0];
     assert_eq!((copy.card, copy.attack, copy.health), (id(&g, "Cord Puller"), 9, 9));
@@ -684,11 +684,51 @@ fn replication_and_affinity_count_down_then_hand_over_a_card() {
     let pos = put_on_board(&mut g, 0, "Cord Puller");
     assert!(g.give_gift(0, pos, g.data.gifts.gifts[affinity].name.clone().as_str(), 3));
     g.players[0].hand.clear();
-    g.dark_gift_start_of_turn(0);
-    g.dark_gift_start_of_turn(0);
+    g.dark_gift_end_of_turn(0);
+    g.dark_gift_end_of_turn(0);
     assert_eq!(g.players[0].hand.len(), 1);
     let card = g.data.cards.get(g.players[0].hand[0].card);
     assert!(card.tribes.has(Tribe::Mech), "{} is not a Mech", card.name);
+}
+
+/// Drakkari Enchanter makes a countdown's payout run twice on the turn it
+/// fires, and never speeds the count itself (docs/darkgifts.md, Era
+/// 2026-11-02): two plain copies from Replication, and Incubation's doubling
+/// twice.
+#[test]
+fn drakkari_doubles_the_payout_not_the_count() {
+    let mut g = game(18);
+    let replication = gift(&g, "Replication");
+    let pos = put_on_board(&mut g, 0, "Cord Puller");
+    g.players[0].board[pos].attack = 4;
+    g.players[0].board[pos].health = 4;
+    assert!(g.give_gift(0, pos, g.data.gifts.gifts[replication].name.clone().as_str(), 4));
+    put_on_board(&mut g, 0, "Drakkari Enchanter");
+    // The first end of turn still only counts: one turn to go, no copy.
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 0, "the count is not doubled");
+    assert_eq!(g.players[0].board[pos].gift_slice()[0].state(), 1);
+    // The second end of turn fires it twice: two plain copies.
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 2, "two plain copies from one payout");
+    assert!(g.players[0].hand.iter().all(|m| m.card == id(&g, "Cord Puller") && m.n_gifts == 0));
+    assert_eq!(g.players[0].board[pos].n_gifts, 0, "and the gift is spent");
+
+    // Incubation doubles the minion's stats twice with a Drakkari.
+    let mut g = game(19);
+    let incubation = gift(&g, "Incubation");
+    let c = id(&g, "Cord Puller");
+    let n = pool_copies(&mut g, c);
+    let mut m = g.players[0].make_card(&g.data.cards, c, false, n);
+    bgcore::game::darkgifts::land_gift(&g.data, &g.players[0], &mut m, incubation, 6);
+    g.players[0].board.push(m);
+    put_on_board(&mut g, 0, "Drakkari Enchanter");
+    g.players[0].board[0].attack = 10;
+    g.players[0].board[0].health = 10;
+    g.dark_gift_end_of_turn(0);
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 10));
+    g.dark_gift_end_of_turn(0);
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (40, 40));
 }
 
 // ---- gift effects, one test per mechanism ----

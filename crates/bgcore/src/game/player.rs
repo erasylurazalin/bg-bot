@@ -680,6 +680,18 @@ impl Player {
                 typed_only: false,
             });
         }
+        // The Tavern's "this turn" buff: the logged minions already carry it
+        // in their stats, so it is remembered without being put on them
+        // again, and the end of the turn takes it off (Ashen Corruptor).
+        if c.tavern_turn_attack != 0 || c.tavern_turn_health != 0 {
+            self.tavern_buffs.push(TavernBuff {
+                tribe: None,
+                attack: c.tavern_turn_attack,
+                health: c.tavern_turn_health,
+                this_turn: true,
+                typed_only: false,
+            });
+        }
         if c.tavern_elemental_attack != 0 || c.tavern_elemental_health != 0 {
             self.tavern_buffs.push(TavernBuff {
                 tribe: Some(Tribe::Elemental),

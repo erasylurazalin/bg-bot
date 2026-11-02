@@ -2125,11 +2125,12 @@ tribe = "neutral"
 stats = [1, 1]
 
 # Blood Golem Sticker: summoned with the Blood Gem stats of the Quilboar
-# that died. A Quilboar, so the trinket carries that tribe.
+# that died. The token is NEUTRAL (ref/hsjson-cards.json, BG30_MagicItem_442t,
+# has no race), so its own death is no Quilboar death.
 [[token]]
 name = "Blood Golem"
 tier = 1
-tribe = "quilboar"
+tribe = "neutral"
 stats = [1, 1]
 
 [[token]]

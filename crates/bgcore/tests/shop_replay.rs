@@ -355,3 +355,48 @@ fn a_step_the_engine_cannot_play_is_incomplete() {
     assert_eq!(r.verdict, Verdict::Incomplete);
     assert!(r.diffs[0].contains("no action for"), "{:?}", r.diffs);
 }
+
+/// A Golden minion the file marks `no_reward` is seated that way: the log
+/// lists a triple's three parts (BACON_TRIPLED_BASE_MINION_ID2 and _ID3) only
+/// when three copies made it, so a Golden from Silent Deliverer's Battlecry,
+/// from Sinister Invitation or from a Golden bought gives no Triple Reward
+/// when it is played (Era, 2026-11-02). The extractor writes the mark and the
+/// loader seats it; playing it here gives no reward.
+#[test]
+fn a_golden_the_file_marks_with_no_reward_gives_no_triple_reward() {
+    let data = data();
+    let mut file = fixture();
+    let turn = &mut file.turns[0];
+    let minion = turn
+        .start
+        .hand
+        .iter_mut()
+        .find(|m| !m.keywords.iter().any(|k| k == "undefined") && m.name.is_some())
+        .expect("the fixture's hand has a minion");
+    minion.golden = true;
+    minion.no_reward = true;
+    let name = minion.name.clone().unwrap();
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 1);
+    let at = loaded
+        .game
+        .players[0]
+        .hand
+        .iter()
+        .position(|m| m.golden && data.cards.get(m.card).name == name)
+        .unwrap_or_else(|| panic!("{name} (golden) is in the loaded hand"));
+    assert!(loaded.game.players[0].hand[at].no_reward, "the mark came along");
+    // Without the mark the same Golden would give one.
+    let mut other = file.turns[0].start.clone();
+    for m in &mut other.hand {
+        m.no_reward = false;
+    }
+    let loaded = load(&data, &other, None, None, file.turns[0].turn, 1);
+    let at = loaded
+        .game
+        .players[0]
+        .hand
+        .iter()
+        .position(|m| m.golden && data.cards.get(m.card).name == name)
+        .expect("the same Golden, unmarked");
+    assert!(!loaded.game.players[0].hand[at].no_reward);
+}

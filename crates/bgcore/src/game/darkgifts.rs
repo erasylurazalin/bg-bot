@@ -443,8 +443,9 @@ impl Game {
     }
 
     /// The start-of-turn gift work for one player: a minion's Time Turning
-    /// runs its end of turn effects again, and every countdown gift ticks
-    /// (Incubation, Replication and Affinity fire at 0 and come off).
+    /// runs its end of turn effects again. The countdown gifts (Incubation,
+    /// Replication and Affinity) do *not* tick here: they count down and fire
+    /// at the END of the turn (docs/darkgifts.md, Era 2026-11-02).
     pub fn dark_gift_start_of_turn(&mut self, p: usize) {
         if self.data.gifts.is_empty() {
             return;
@@ -453,20 +454,43 @@ impl Game {
         while pos < self.players[p].board.len() {
             let m = self.players[p].board[pos];
             let mut turning = false;
+            if m.n_gifts > 0 {
+                for g in m.gift_slice() {
+                    if self.data.cards.get(g.card()).end_of_turn_at_start {
+                        turning = true;
+                    }
+                }
+            }
+            if turning {
+                let mut at = pos;
+                self.run_minion_end_of_turn(p, &mut at, 1);
+            }
+            pos += 1;
+        }
+    }
+
+    /// The end-of-turn gift work for one player: every countdown gift ticks
+    /// down a turn, and the one that reaches 0 fires. The payout runs
+    /// `drakkari_mult` times (Drakkari Enchanter sets 2, golden 3; Ghastly
+    /// Sticker adds one), never the count: a gift fires on one end of turn
+    /// only (docs/darkgifts.md).
+    pub fn dark_gift_end_of_turn(&mut self, p: usize) {
+        if self.data.gifts.is_empty() {
+            return;
+        }
+        let runs = self.drakkari_mult(p);
+        let mut pos = 0;
+        while pos < self.players[p].board.len() {
+            let m = self.players[p].board[pos];
             let mut fire: ArrayVec<(usize, CountdownEffect), { crate::MAX_GIFTS }> =
                 ArrayVec::new();
             if m.n_gifts > 0 {
                 for (k, g) in m.gift_slice().iter().enumerate() {
-                    let c = self.data.cards.get(g.card());
-                    if c.end_of_turn_at_start {
-                        turning = true;
-                    }
-                    if let Some(cd) = c.countdown {
-                        let left = g.state().saturating_sub(1);
-                        self.players[p].board[pos].set_gift_state_at(k, left);
-                        if left == 0 {
-                            let _ = fire.try_push((k, cd.effect));
-                        }
+                    let Some(cd) = self.data.cards.get(g.card()).countdown else { continue };
+                    let left = g.state().saturating_sub(1);
+                    self.players[p].board[pos].set_gift_state_at(k, left);
+                    if left == 0 {
+                        let _ = fire.try_push((k, cd.effect));
                     }
                 }
             }
@@ -476,11 +500,9 @@ impl Game {
                 self.players[p].board[pos].remove_gift_at(k);
             }
             for &(_, effect) in &fire {
-                self.run_countdown(p, pos, effect);
-            }
-            if turning {
-                let mut at = pos;
-                self.run_minion_end_of_turn(p, &mut at, 1);
+                for _ in 0..runs {
+                    self.run_countdown(p, pos, effect);
+                }
             }
             pos += 1;
         }

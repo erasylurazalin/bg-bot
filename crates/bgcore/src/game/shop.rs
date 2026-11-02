@@ -174,6 +174,16 @@ pub(crate) fn give_back(pool: &mut [u8], cards: &CardDb, m: &Minion) {
     }
 }
 
+/// `give_back`'s opposite: take a card's pool copies again, for a minion that
+/// survived something that put them back.
+fn take_copy(pool: &mut [u8], cards: &CardDb, m: &Minion) {
+    let c = cards.get(m.card);
+    if m.pool_copies > 0 && !c.token && !c.is_spell() {
+        let slot = c.pool_slot as usize;
+        pool[slot] = pool[slot].saturating_sub(m.pool_copies);
+    }
+}
+
 impl Game {
     /// The Attack and Health of the highest-Health minion in the player's
     /// Tavern, a random one of them on a Health tie (no random number is
@@ -969,7 +979,7 @@ impl Game {
     /// The left-most Beast on the player's board attacks the Tavern minion in
     /// `slot`. It dies, or stays if the Beast can't hurt it.
     fn tavern_attack(&mut self, p: usize, slot: usize) {
-        let Game { data, rng, players, lobby, .. } = self;
+        let Game { data, rng, players, pool, lobby, .. } = self;
         let pl = &mut players[p];
         let Some(ai) = pl.board.iter().position(|m| data.cards.tribes_of(m).has(Tribe::Beast))
         else {
@@ -983,8 +993,20 @@ impl Game {
             pl.counters(data, *lobby),
             rng,
         );
+        // A Beast that dies to the Fishbait dies for real, so its pool copy
+        // goes back with it (the same rule a shop-phase destroy follows);
+        // the ones still standing keep theirs. Only the copies change hands
+        // here: each old copy goes back to the pool and the survivors take
+        // their own out again.
+        let old: ArrayVec<Minion, { crate::BOARD }> = pl.board.iter().copied().collect();
         pl.board.clear();
         pl.board.extend(out.board);
+        for m in &old {
+            give_back(pool, &data.cards, m);
+        }
+        for m in &pl.board {
+            take_copy(pool, &data.cards, m);
+        }
         match out.target {
             Some(t) => pl.shop[slot] = t,
             None => {
@@ -1041,5 +1063,48 @@ impl Game {
         let card = m.card;
         self.add_to_hand(p, m);
         self.check_triple(p, card);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Data, Tribe, Tribes};
+    use std::sync::Arc;
+
+    /// A Beast that dies to a Fishbait dies for real, so its pool copy comes
+    /// back (2026-11-02: the board was cleared and the survivors pushed back
+    /// without it, so the copy vanished and the pool invariant caught it).
+    /// The Fishbait's own stats are fixed, so the attack is set here to make
+    /// the Beast die; nothing else about the attack changes.
+    #[test]
+    fn a_beast_that_dies_to_a_fishbait_gives_its_pool_copy_back() {
+        let mut g = Game::new_with_lobby(
+            Arc::new(Data::bundled()),
+            7,
+            Tribes::NONE.with(Tribe::Beast).with(Tribe::Quilboar),
+        );
+        let c = g.data.cards.by_name("Wolf Pup").expect("Wolf Pup");
+        let slot = g.data.cards.get(c).pool_slot as usize;
+        g.pool[slot] -= 1;
+        let mut m = g.players[0].make_card(&g.data.cards, c, false, 1);
+        m.attack = 1;
+        m.health = 1;
+        g.players[0].board.push(m);
+        // The Tavern: a Fishbait that hits hard enough to kill the Beast.
+        let old: ArrayVec<Minion, { crate::BOARD }> = g.players[0].shop.drain(..).collect();
+        for m in &old {
+            give_back(&mut g.pool, &g.data.cards, m);
+        }
+        let fish = g.data.cards.by_name("Fishbait").expect("Fishbait");
+        let mut f = g.data.cards.make(fish, false);
+        f.attack = 5;
+        g.players[0].shop.push(f);
+        let before = g.pool[slot];
+        g.tavern_attack(0, 0);
+        assert!(g.players[0].board.is_empty(), "the Beast died to the Fishbait");
+        assert!(g.players[0].shop.is_empty(), "and it ate the Fishbait on the way");
+        assert_eq!(g.pool[slot], before + 1, "its pool copy came back with it");
+        g.check_invariants().unwrap();
     }
 }

@@ -46,6 +46,14 @@ pub struct RealMinionSpec {
     /// Marked by Rapid Reanimation (the file's `reanimate`): the minion the
     /// power destroys at Start of Combat and brings back as an exact copy.
     pub reanimate: bool,
+    /// The file's `no_reward`: a Golden minion that was not made from three
+    /// copies, so playing it gives no Triple Reward (Silent Deliverer's
+    /// goldens, Sinister Invitation's, a Golden bought).
+    pub no_reward: bool,
+    /// The countdown each gift in `dark_gifts` has left, by index, or -1 for
+    /// a gift whose countdown the file does not say (the log numbers it in
+    /// the gift's own enchantment, TAG_SCRIPT_DATA_NUM_1).
+    pub dark_gift_states: Vec<i32>,
 }
 
 /// A real board's Deity: the minion it awakens and the stats it has now.
@@ -143,6 +151,12 @@ pub struct RealCounters {
     /// kin). Only a shop step reads it.
     pub tavern_attack: i32,
     pub tavern_health: i32,
+    /// The Tavern's "this turn" buff (Ashen Corruptor's +2/+2 after the hero
+    /// takes damage): it comes off every minion still in the Tavern at the
+    /// end of the turn. The log keeps it apart from the "this game" buff, in
+    /// the Ashen Corruptor player enchantment.
+    pub tavern_turn_attack: i32,
+    pub tavern_turn_health: i32,
     /// The same for Elementals only (Obsidian Ravager and its kin).
     pub tavern_elemental_attack: i32,
     pub tavern_elemental_health: i32,
@@ -178,6 +192,8 @@ impl Default for RealCounters {
             gold_spent: 0,
             tavern_attack: 0,
             tavern_health: 0,
+            tavern_turn_attack: 0,
+            tavern_turn_health: 0,
             tavern_elemental_attack: 0,
             tavern_elemental_health: 0,
             upper_hand: 0,
@@ -218,6 +234,8 @@ impl RealCounters {
             "gold_spent" => self.gold_spent = count(value),
             "tavern_attack" => self.tavern_attack = value,
             "tavern_health" => self.tavern_health = value,
+            "tavern_turn_attack" => self.tavern_turn_attack = value,
+            "tavern_turn_health" => self.tavern_turn_health = value,
             "upper_hand" => self.upper_hand = count(value),
             "tavern_elemental_attack" => self.tavern_elemental_attack = value,
             "tavern_elemental_health" => self.tavern_elemental_health = value,
@@ -434,6 +452,7 @@ fn make_real_minion(
     }
     minion.keywords = keywords;
     minion.reanimate = m.reanimate;
+    minion.no_reward = m.no_reward;
     // A minion with limited uses this turn (Malchezaar's Health Refreshes, a
     // Thorned Trailblazer's combines, a Magicfin Mycologist's teachings) shows
     // how many it has left as its {0} ("(2 left!)"), so the file's numbers say
@@ -447,14 +466,19 @@ fn make_real_minion(
     // in the file's attack and health, so only the gift itself comes
     // along. The counter the log does not carry is set as if the gift
     // had landed on this board's turn.
-    for gift_id in &m.dark_gifts {
+    for (k, gift_id) in m.dark_gifts.iter().enumerate() {
         let Some(i) = gifts.gifts.iter().position(|g| &g.id == gift_id) else {
             continue;
         };
         let card = gifts.gifts[i].card;
         let c = db.get(card);
         let state = match c.countdown {
-            Some(cd) => cd.turns,
+            Some(cd) => m
+                .dark_gift_states
+                .get(k)
+                .copied()
+                .filter(|&s| s >= 0)
+                .map_or(cd.turns, |s| (s as u8).min(cd.turns)),
             None => turn.min(crate::minion::GIFT_STATE_MAX as u32) as u8,
         };
         minion.push_gift(crate::minion::GiftOn::new(card, state));
@@ -773,6 +797,10 @@ struct RawMinion {
     /// Combat and brings back as an exact copy.
     #[serde(default)]
     reanimate: bool,
+    /// A Golden minion that gives no Triple Reward when played (the action
+    /// files' mark; a board file never writes one).
+    #[serde(default)]
+    no_reward: bool,
 }
 
 #[derive(Deserialize)]
@@ -949,6 +977,8 @@ fn real_minion(m: RawMinion, ids: &CardIdMap, unknown: &mut Vec<String>) -> Real
         numbers: m.numbers,
         dark_gifts: m.dark_gifts,
         reanimate: m.reanimate,
+        no_reward: m.no_reward,
+        dark_gift_states: Vec::new(),
     }
 }
 

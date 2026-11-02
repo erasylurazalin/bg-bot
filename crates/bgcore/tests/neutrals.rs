@@ -1149,6 +1149,29 @@ fn natural_blessing_picks_one_type_of_a_dual_minion() {
 }
 
 #[test]
+fn natural_blessing_reaches_the_taverns_minions_of_the_type() {
+    // "Give all minions that share a type with it +2/+1" is every such
+    // minion, the Tavern's included (Era, 2026-11-02; log 15_25_26-g2 turn 7
+    // step 27, where a Tavern Abyssal Envoy gained it).
+    let mut g = game(34);
+    put_on_board(&mut g, 0, "Lullabot"); // Mech
+    set_shop(&mut g, 0, &["Lullabot", "Tad"]); // a Mech, a Murloc
+    let before_mech = stats(&g.players[0].shop[0]);
+    let before_murloc = stats(&g.players[0].shop[1]);
+    g.give(0, "Natural Blessing").unwrap();
+    play_card(&mut g, 0, "Natural Blessing");
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(stats(&g.players[0].board[0]), (4, 3), "the board's Mech: +2/+1");
+    assert_eq!(
+        stats(&g.players[0].shop[0]),
+        (before_mech.0 + 2, before_mech.1 + 1),
+        "the Tavern's Mech gains it too"
+    );
+    assert_eq!(stats(&g.players[0].shop[1]), before_murloc, "the Murloc does not");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_same_tribe_buff_reaches_a_minion_through_either_of_its_tribes() {
     let mut g = game(33);
     put_on_board(&mut g, 0, "Gearfin"); // Mech and Murloc

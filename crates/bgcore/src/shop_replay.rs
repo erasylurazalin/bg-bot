@@ -39,6 +39,12 @@ pub struct ShopGiftSpec {
     pub card_id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
+    /// The countdown the gift's own enchantment shows
+    /// (TAG_SCRIPT_DATA_NUM_1 in the log): Incubation, Replication and
+    /// Affinity number their turns there, so the loader seats where they
+    /// have got to instead of starting them over.
+    #[serde(default)]
+    pub state: Option<i32>,
 }
 
 /// One card of a logged state: my board (with `position`), my hand (`index`),
@@ -66,6 +72,11 @@ pub struct ShopMinionSpec {
     pub dark_gifts: Vec<ShopGiftSpec>,
     #[serde(default)]
     pub reanimate: bool,
+    /// A Golden minion that gives no Triple Reward when played: the log says
+    /// so with no BACON_TRIPLED_BASE_MINION_ID2 (it was not made from three
+    /// copies). The engine's `Minion.no_reward`.
+    #[serde(default)]
+    pub no_reward: bool,
     #[serde(default)]
     pub position: Option<u8>,
     #[serde(default)]
@@ -101,7 +112,9 @@ impl ShopMinionSpec {
                 .iter()
                 .filter_map(|g| g.card_id.clone())
                 .collect(),
+            dark_gift_states: self.dark_gifts.iter().map(|g| g.state.unwrap_or(-1)).collect(),
             reanimate: self.reanimate,
+            no_reward: self.no_reward,
         }
     }
 }

@@ -194,6 +194,19 @@ PLAYER_ENCHANTS = {
     "BG34_689e2": ("barrage_attack", "barrage_health"),
 }
 
+# Enchantments that hold ONE number for both halves of a "+N/+N" (the card's
+# text gives the same amount to Attack and Health). Ashen Corruptor's "minions
+# in the Tavern have +2/+2 this turn" is one: its enchantment counts the
+# payments and no NUM_2, and the game keeps it apart from the "this game"
+# Tavern buff so the replay can take it off at the end of the turn.
+SAME_NUMBER_ENCHANTS = {
+    "BG31_873pe2": ("tavern_turn_attack", "tavern_turn_health"),
+}
+
+# Silent Deliverer: its Battlecry hands out golden minions, which give no
+# Triple Reward when they are played (Era, 2026-11-02).
+SILENT_DELIVERER = "BG36_343"
+
 # A card the log names, e.g. "[entityName=Wrath Weaver id=434 zone=PLAY
 # zonePos=2 cardId=BGS_004 player=15]". A name can hold brackets of its own
 # ("UNKNOWN ENTITY [cardType=INVALID]"), so the name part is greedy.
@@ -1146,6 +1159,24 @@ class ActionTracker(Tracker):
         tavern.sort(key=lambda c: (c["slot"], c["id"]))
         return {"board": board, "hand": hand, "tavern": tavern, "hand_hidden": hidden}
 
+    def gift_of(self, host, card):
+        """A Dark Gift on a minion: its card id, and the countdown its own
+        enchantment shows. Incubation, Replication and Affinity keep their
+        turns left in TAG_SCRIPT_DATA_NUM_1 (the log numbers it: 2 when the
+        gift lands), so the replay can seat where the count has got to
+        instead of starting it over."""
+        out = {"card_id": card, "name": card_name(card)}
+        for x in self.game.entities.values():
+            if not x.card_id or not x.card_id.startswith(card) or x["ATTACHED"] != host.id:
+                continue
+            if x["ZONE"] != "PLAY":
+                continue
+            n = x.tags.get("TAG_SCRIPT_DATA_NUM_1")
+            if n is not None:
+                out["state"] = n
+            break
+        return out
+
     def one(self, e, g, gifts, ench, key):
         d = {"id": e.id, key: e["ZONE_POSITION"]}
         if not e.card_id:
@@ -1155,14 +1186,25 @@ class ActionTracker(Tracker):
         m = minion(e, g, gifts, ench)
         d.update({"card_id": m.card_id, "name": m.name, "attack": m.attack,
                   "health": m.health, "golden": m.golden, "keywords": list(m.keywords)})
-        if m.dark_gifts:
-            d["dark_gifts"] = [{"card_id": c, "name": card_name(c)} for c in m.dark_gifts]
-        sd = numbers(m.tags)
-        if sd is not None:
-            d["numbers"] = sd
         creator = g.entities.get(e["CREATOR"]) if e["CREATOR"] else None
         if creator is not None and creator.card_id and not creator.card_id.startswith(SYSTEM):
             d["from"] = {"card_id": creator.card_id, "name": card_name(creator.card_id)}
+        if m.dark_gifts:
+            d["dark_gifts"] = [self.gift_of(e, c) for c in m.dark_gifts]
+        sd = numbers(m.tags)
+        if sd is not None:
+            d["numbers"] = sd
+        # A Golden minion gives a Triple Reward when it is played, unless its
+        # own source says otherwise (Era, 2026-11-02): Silent Deliverer's
+        # Battlecry goldens and the golden copies a Dark Gift makes (Sinister
+        # Invitation, Gilding) give none, and Aureate Laureate is always Golden
+        # (its card data carries that). A triple's golden, a Lockbox's and a
+        # Golden bought do give one. The engine's `Minion.no_reward` is the
+        # same mark.
+        if m.golden and (
+            (creator is not None and creator.card_id == SILENT_DELIVERER) or m.dark_gifts
+        ):
+            d["no_reward"] = True
         return d
 
     # -- the client's numbers ---------------------------------------------
@@ -1301,6 +1343,12 @@ class ActionTracker(Tracker):
             out["spell_attack"] = p["TAVERN_SPELL_ATTACK_INCREASE"]
         if p["TAVERN_SPELL_HEALTH_INCREASE"]:
             out["spell_health"] = p["TAVERN_SPELL_HEALTH_INCREASE"]
+        for card_id, (atk_key, hp_key) in SAME_NUMBER_ENCHANTS.items():
+            sd = self.enchant_numbers(p.id, card_id)
+            if sd is None or not sd[0]:
+                continue
+            out[atk_key] = sd[0]
+            out[hp_key] = sd[0]
         for card_id, (atk_key, hp_key) in PLAYER_ENCHANTS.items():
             sd = self.enchant_numbers(p.id, card_id)
             if sd is None:

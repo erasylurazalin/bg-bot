@@ -304,15 +304,23 @@ impl Game {
                             }
                         }
                         SpellTarget::BuffSameTribe { attack, health } => {
+                            // "all minions that share a type with it", the
+                            // Tavern's included: a Tavern minion of the type
+                            // gains it too (Era, 2026-11-02; log 15_25_26-g2
+                            // turn 7 step 27).
                             let t = self.data.cards.tribes_of(&self.players[p].shop[target]);
                             if let Some(tribe) = t.random_type(&mut self.rng) {
-                                for o in &mut self.players[p].board {
-                                    if self.data.cards.tribes_of(o).has(tribe) {
+                                let cards = &self.data.cards;
+                                let pl = &mut self.players[p];
+                                for o in &mut pl.board {
+                                    if cards.tribes_of(o).has(tribe) {
                                         buff(o, attack + da, health + dh);
                                     }
                                 }
-                                if self.data.cards.tribes_of(&self.players[p].shop[target]).has(tribe) {
-                                    buff(&mut self.players[p].shop[target], attack + da, health + dh);
+                                for o in &mut pl.shop {
+                                    if cards.tribes_of(o).has(tribe) {
+                                        buff(o, attack + da, health + dh);
+                                    }
                                 }
                             }
                         }
@@ -831,10 +839,20 @@ impl Game {
                         SpellTarget::BuffSameTribe { attack, health } => {
                             let t = self.data.cards.tribes_of(&self.players[p].board[target_pos]);
                             // DESIGN.md "Types": a dual or all-type minion
-                            // uses one of its types, picked at random.
+                            // uses one of its types, picked at random. The
+                            // Tavern's minions of that type gain it too ("all
+                            // minions that share a type with it", Era
+                            // 2026-11-02).
                             if let Some(tribe) = t.random_type(&mut self.rng) {
-                                for o in &mut self.players[p].board {
-                                    if self.data.cards.tribes_of(o).has(tribe) {
+                                let cards = &self.data.cards;
+                                let pl = &mut self.players[p];
+                                for o in &mut pl.board {
+                                    if cards.tribes_of(o).has(tribe) {
+                                        buff(o, attack + da, health + dh);
+                                    }
+                                }
+                                for o in &mut pl.shop {
+                                    if cards.tribes_of(o).has(tribe) {
                                         buff(o, attack + da, health + dh);
                                     }
                                 }

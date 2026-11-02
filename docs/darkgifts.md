@@ -59,9 +59,11 @@ Incubation, Replication and Affinity count down 2 turns. They are end of
 turn effects (Era, 2026-11-02; the card text says "At the end of every 2
 turns", and Era's log has Replication's copy in hand at the end of the
 turn): the count goes down and the gift fires at the end of your turn.
-Drakkari Enchanter makes the payout fire twice on the turn it fires (two
-plain copies from Replication, two random minions from Affinity); it never
-speeds up the count, which stays every 2 turns.
+On the turn it fires, the payout runs as many times as the player's end of
+turn effects do: Drakkari Enchanter sets that to 2 (3 golden; two Drakkari
+still make 2), and Ghastly Sticker adds one on top (Drakkari plus Sticker:
+3). Nothing doubles; see DESIGN.md "'Twice' versus 'an extra time'". It
+never speeds up the count, which stays every 2 turns (Era, 2026-11-02).
 
 The pool the offers come from:
 - No Battlecry or Choose One minions before turn 5.

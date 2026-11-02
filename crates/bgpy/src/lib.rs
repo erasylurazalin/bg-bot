@@ -62,9 +62,11 @@ fn minion_specs(list: Vec<PyMinion>) -> Vec<RealMinionSpec> {
             numbers,
             dark_gifts,
             // Training hands boards in from the beasts' names and numbers; the
-            // Rapid Reanimation mark is the fight check's (it comes from the
-            // board files' `reanimate`).
+            // Rapid Reanimation mark and the no-reward mark are the replay's
+            // (they come from the action files).
             reanimate: false,
+            no_reward: false,
+            dark_gift_states: Vec::new(),
         })
         .collect()
 }

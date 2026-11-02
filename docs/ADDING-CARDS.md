@@ -236,6 +236,7 @@ exactly one legal target and drops the effect when there is none.
 | Dual / all tribes | Treasure Parrot (`tribes = [..]`), `tribe = "all"` | `Tribes` bit set; every filter asks `has` |
 | Effect only while in hand | Bream Counter, Choral Mrrrglr | |
 | Stats that the Tavern can't change | Fishbait (`fixed_stats`) | |
+| A minion that dies in a Tavern attack | Fishbait's Beast | `Game::tavern_attack`: the dead Beasts' pool copies go back to the pool, the survivors keep theirs |
 
 ## 2b. Adding a hero
 
@@ -583,8 +584,11 @@ Triple Reward spell.
   `Tribes::ALL` includes Pirate.
 - **Golden minions.** Played from hand, a Golden minion adds to
   `Player.golden_played` (Extortionist, Hooktusk) and gives a Triple Reward unless
-  `Minion.no_reward` (Aureate Laureate is `always_golden`, Silent Deliverer's
-  minions). `TargetKind::MakeGolden` makes a board minion Golden with no reward and
+  `Minion.no_reward`: Aureate Laureate is `always_golden`, Silent Deliverer's
+  Battlecry goldens and the golden copies a Dark Gift makes (Sinister
+  Invitation, Gilding) give none (Era, 2026-11-02). The replay reads that from
+  the action file's `no_reward`, which the extractor writes for those two
+  sources; a triple's golden, a Lockbox's and a Golden bought do give one. `TargetKind::MakeGolden` makes a board minion Golden with no reward and
   no count (Elite Navigator, Captain Sanders).
 - **Golden draws from the pool.** `draw_golden` (game/shop.rs) takes up to three copies for
   one Golden minion (Lockbox, Silent Deliverer).
@@ -845,9 +849,9 @@ Triple Reward spell.
 - **Two fight leftovers.** `FightAct::Fermenter` (Soul Fermenter) keeps the
   destroyed minions in `Side.fermenter` and `Side::resolve` brings them back
   when the side's last minion dies; `FightAct::GemGolem` summons a token with
-  the dead minion's Blood Gem stats (`Side.last_dead`, `Side.dead_at`), and
-  does not summon one for that token's own death (the Golem is a Quilboar, so
-  it would summon itself for ever and the fight could never end).
+  the dead minion's Blood Gem stats (`Side.last_dead`, `Side.dead_at`). The
+  Golem token is Neutral (its own card has no race), so its death is no
+  Quilboar death and no Golem summons another for ever.
 - **Tests.** `tests/trinkets.rs`, the block 4 section at the end: one test per
   card, and `apply_side_outcome` is public so a `fight_with` outcome can be
   applied to a game the way a combat does.
