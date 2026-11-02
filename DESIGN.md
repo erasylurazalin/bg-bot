@@ -95,6 +95,13 @@ fight phase.
   Discovers tier 5 even if you level before casting it. You can also keep
   it and never cast it. It comes before anything the golden minion's
   Battlecry adds to your hand; with a full hand it's lost.
+- **Which goldens give no Triple Reward (Era, 2026-11-02).** Only those whose
+  own text says so: Aureate Laureate, Silent Deliverer's goldens, Sinister
+  Invitation's golden, and a minion made golden by the Gilding gift. A golden
+  that carries any other Dark Gift gives one as usual: three copies where one
+  happened to have a gift still make a normal triple. Summoned tokens triple
+  too (three Skeletons from Cadaver Caretaker make a golden Skeleton in hand,
+  with its Triple Reward when played).
 
 ### Spells
 
