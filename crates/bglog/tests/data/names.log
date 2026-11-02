@@ -1,0 +1,17 @@
+D 00:57:53.6478530 GameState.DebugPrintPower() - CREATE_GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -     Player EntityID=2 PlayerID=1 GameAccountId=[hi=111111111111111111 lo=222222222]
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 00:57:53.6478530 GameState.DebugPrintPower() -     Player EntityID=3 PlayerID=9 GameAccountId=[hi=0 lo=0]
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 00:57:53.6478530 GameState.DebugPrintGame() - BuildNumber=254477
+D 00:57:53.6478530 GameState.DebugPrintGame() - GameType=GT_BATTLEGROUNDS
+D 00:57:53.6478530 GameState.DebugPrintGame() - FormatType=FT_WILD
+D 00:57:53.6478530 GameState.DebugPrintGame() - ScenarioID=3459
+D 00:57:53.6478530 GameState.DebugPrintGame() - PlayerID=1, PlayerName=Alice#1919
+D 00:57:53.6478530 GameState.DebugPrintGame() - PlayerID=9, PlayerName=Eve
+D 00:57:53.9062180 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=MULLIGAN_STATE value=INPUT 
+D 00:58:25.1783940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_TURNS_IN_PLAY value=1 
+D 00:58:25.1783940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Bartender Bob tag=NUM_TURNS_IN_PLAY value=1 

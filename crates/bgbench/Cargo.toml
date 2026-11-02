@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 bgcore = { path = "../bgcore" }
+bglog = { path = "../bglog" }
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "1"

@@ -1,0 +1,24 @@
+D 00:57:53.6478530 GameState.DebugPrintPower() - CREATE_GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 00:58:25.1783940 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=250 CardID=
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=ENTITY_ID value=250
+D 00:58:25.1783940 GameState.DebugPrintPower() -     SHOW_ENTITY - Updating Entity=250 CardID=TB_BaconShop_HP_038e
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=CARDTYPE value=ENCHANTMENT
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=ATTACHED value=2
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=ENTITY_ID value=250
+D 00:58:25.1783940 GameState.DebugPrintPower() -         tag=CLASS value=NEUTRAL
+D 00:58:48.1292170 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Costs 0 id=467 zone=PLAY zonePos=0 cardId=TB_BaconShopBadsongE player=1] tag=1234 value=296 
+D 00:58:48.1292170 GameState.DebugPrintPower() -         HIDE_ENTITY - Entity=[entityName=Costs 0 id=467 zone=PLAY zonePos=0 cardId=TB_BaconShopBadsongE player=1] tag=ZONE value=REMOVEDFROMGAME
+D 01:04:15.2908400 GameState.DebugPrintPower() - TAG_CHANGE Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] tag=1069 value=133696 
+D 01:04:15.2908400 GameState.DebugPrintPower() - TAG_CHANGE Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] tag=1069 value=0 
+D 01:04:15.2908400 GameState.DebugPrintPower() - CHANGE_ENTITY - Updating Entity=[entityName=Lesser Trinket id=287 zone=PLAY zonePos=0 cardId=BG30_Trinket_1st player=1] CardID=BG36_MagicItem_220
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TAG_NOT_SET value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=CARDTYPE value=BATTLEGROUND_TRINKET
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=1196 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=479 value=0
+D 01:04:15.2908400 GameState.DebugPrintPower() -     tag=TAG_SCRIPT_DATA_NUM_1 value=0
+D 01:00:11.9964790 GameState.DebugPrintPower() -         TAG_CHANGE Entity=[entityName=Them Apples id=1098 zone=PLAY zonePos=4 cardId=BG28_966 player=9] tag=CARDTYPE value=SPELL DEF CHANGE

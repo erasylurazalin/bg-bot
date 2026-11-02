@@ -1,0 +1,24 @@
+D 00:57:53.6478530 GameState.DebugPrintPower() - CREATE_GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 00:57:53.6478530 GameState.DebugPrintPower() -     Player EntityID=2 PlayerID=1 GameAccountId=[hi=111111111111111111 lo=222222222]
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 00:57:53.6478530 GameState.DebugPrintPower() -     Player EntityID=3 PlayerID=9 GameAccountId=[hi=0 lo=0]
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CONTROLLER value=9
+D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 00:57:53.6478530 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=25 CardID=TB_BaconShop_HERO_PH
+D 00:57:53.6478530 GameState.DebugPrintPower() -     tag=CONTROLLER value=1
+D 00:57:53.6478530 GameState.DebugPrintPower() -     tag=CARDTYPE value=HERO
+D 00:57:53.6478530 GameState.DebugPrintPower() -     tag=HEALTH value=30
+D 00:57:53.6478530 GameState.DebugPrintPower() -     tag=ZONE value=PLAY
+D 00:57:53.6478530 GameState.DebugPrintPower() -     tag=ENTITY_ID value=25
+D 00:57:53.6478530 GameState.DebugPrintPower() -     tag=CLASS value=NEUTRAL
+D 00:57:53.6478530 GameState.DebugPrintPower() -     tag=SPAWN_TIME_COUNT value=1
+D 00:57:53.6478530 GameState.DebugPrintGame() - BuildNumber=254477
+D 00:57:53.6478530 GameState.DebugPrintGame() - GameType=GT_BATTLEGROUNDS
+D 00:57:53.6478530 GameState.DebugPrintGame() - FormatType=FT_WILD
+D 00:57:53.6478530 GameState.DebugPrintGame() - ScenarioID=3459
+D 00:57:53.6478530 GameState.DebugPrintGame() - PlayerID=1, PlayerName=Alice#1919
+D 00:57:53.6478530 GameState.DebugPrintGame() - PlayerID=9, PlayerName=Eve

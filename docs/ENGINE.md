@@ -68,6 +68,9 @@ crates/
                       the fixture folder in tests/data/actions),
                       sandbox.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix
+  bglog/              Power.log reading: the parser, the game's entities and their
+                      tags (docs/briefs/log-reader.md); `bgbench powerlog` dumps a
+                      log's games, to diff against the Python tracker
   bgpy/               PyO3 bindings: a batch of games stepped together
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
