@@ -402,7 +402,12 @@ Only the card's own words narrow it: "a friendly minion" means your board
 (and hand where it says so), "a minion in the Tavern" means the Tavern, "a
 Beast" means a Beast in either. A Choose One with a target asks for the
 option first, then the target (Sprightly Scarab, Alliance Flag, Forest's
-Bounty).
+Bounty). For a Choose One spell, "after you cast a spell" fires only after
+both: cast, pick the option, pick the target, then the cast triggers (Era,
+2026-11-02).
+
+**Butchering and spell power (Era, 2026-11-02).** Butchering's "+8 Attack
+this game" is a Tavern spell number, so Tavern spell power adds to it.
 
 **Malchezaar and free Refreshes (Era, 2026-11-02; a bug in the real game
 that we copy).** Malchezaar, Prince of Dance makes two Refreshes each turn
