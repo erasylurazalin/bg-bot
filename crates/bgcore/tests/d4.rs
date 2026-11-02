@@ -676,6 +676,7 @@ fn curve_bot_answers_a_target_only_the_tavern_can_take() {
     turn_of(&mut g, 0);
     put_on_board(&mut g, 0, "Tyrael");
     g.players[0].pending_target = Some(PendingTarget {
+        by_minion: false,
         source: Some(0),
         kind: TargetKind::AnySetStats { attack: 50, health: 50 },
         runs: 1,

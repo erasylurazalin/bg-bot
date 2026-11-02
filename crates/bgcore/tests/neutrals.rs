@@ -523,7 +523,7 @@ fn balinda_doubles_only_targeted_spells() {
 }
 
 #[test]
-fn gatekeeper_casts_tea_set_and_hooktail_sees_it() {
+fn gatekeeper_casts_tea_set_and_hooktail_does_not_see_it() {
     let mut g = game(21);
     put_on_board(&mut g, 0, "Gatekeeper Amalgam");
     put_on_board(&mut g, 0, "Timecap'n Hooktail");
@@ -532,10 +532,11 @@ fn gatekeeper_casts_tea_set_and_hooktail_sees_it() {
     play_card(&mut g, 0, "Tavern Dish Banana");
     let gatekeeper = board_pos(&g, 0, "Gatekeeper Amalgam");
     act(&mut g, 0, Action::Target(gatekeeper as u8));
-    // The Banana cast and the Misplaced Tea Set cast the Gatekeeper made
-    // each gave every minion +1 Attack through Hooktail. Boom-in-a-Box is
-    // neutral and no Tea Set type reaches it, so it shows exactly +2.
-    assert_eq!(stats(&g.players[0].board[2]), (7, 10));
+    // Only the Banana is a spell you cast, so Hooktail gives every minion +1
+    // Attack once. The Misplaced Tea Set the Gatekeeper casts for you is not
+    // your cast (Era 2026-11-02), so it adds nothing. Boom-in-a-Box is
+    // neutral and no Tea Set type reaches it, so it shows exactly +1.
+    assert_eq!(stats(&g.players[0].board[2]), (6, 10));
     g.check_invariants().unwrap();
 }
 

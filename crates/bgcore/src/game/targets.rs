@@ -228,6 +228,7 @@ impl Game {
             TargetKind::SpiritSwapFirst => {
                 self.players[p].two_step = Some((slot as u8, true));
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::SpiritSwapSecond,
                     runs: 1,
@@ -470,10 +471,14 @@ impl Game {
                         | SpellTarget::MakeGoldenReturn
                         | SpellTarget::GrantEndOfTurn { .. } => {}
                     }
-                    if pt.tavern {
+                    // A spell a minion casts for the player is not the
+                    // player's cast (Era 2026-11-02): no Tavern spell trigger
+                    // and no "cast on a Tavern Mech" watcher sees it.
+                    if pt.tavern && !pt.by_minion {
                         self.trigger_on_cast_spell(p);
                     }
-                    if !stop_after
+                    if !pt.by_minion
+                        && !stop_after
                         && target < self.players[p].shop.len()
                         && self.data.cards.tribes_of(&self.players[p].shop[target]).has(Tribe::Mech)
                     {
@@ -489,13 +494,14 @@ impl Game {
                 }
                 // A Blood Gem cast from the hand on a Tavern minion counts
                 // for Ruby Tusk too.
-                if pt.gem && pt.source.is_none() {
+                if pt.gem && pt.source.is_none() && !pt.by_minion {
                     self.trinket_event(p, Event::Gem, None, 1);
                 }
                 // "After you cast a spell on a Tavern minion" (Felsteel
                 // Cleaver): the slot is remembered so the trinket can
-                // consume the minion the spell hit.
-                if slot < self.players[p].shop.len() {
+                // consume the minion the spell hit. A minion's cast for the
+                // player is not one of those.
+                if !pt.by_minion && slot < self.players[p].shop.len() {
                     self.players[p].tp.shop_hit = slot as u8 + 1;
                     self.trinket_event(p, Event::CastSpellOnShop, None, 1);
                     // A Tavern minion is a minion (DESIGN.md "Targets in the
@@ -660,6 +666,7 @@ impl Game {
                     self.sell_minion(p, s);
                     if !self.players[p].board.is_empty() {
                         let pt = PendingTarget {
+                            by_minion: false,
                             source: None,
                             kind: TargetKind::DevourSecond,
                             runs: 1,
@@ -680,6 +687,7 @@ impl Game {
             TargetKind::SpiritSwapFirst => {
                 self.players[p].two_step = Some((s as u8, false));
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::SpiritSwapSecond,
                     runs: 1,
@@ -772,8 +780,9 @@ impl Game {
                     // Every extra cast (Balinda) is another spell cast: one
                     // more for the "every spell" counters always, and one
                     // more for the Tavern ones only (a Blood Gem does not
-                    // count there).
-                    if k > 0 {
+                    // count there). A minion's cast for the player counts
+                    // none of them (Era 2026-11-02).
+                    if k > 0 && !pt.by_minion {
                         self.fire_event(p, EventKind::AllSpellsCast, 1);
                         if pt.tavern {
                             self.fire_event(p, EventKind::SpellsCast, 1);
@@ -1116,12 +1125,18 @@ impl Game {
                             m.end_turn_gain.1 += health + dh;
                         }
                     }
-                    if pt.tavern {
+                    if pt.tavern && !pt.by_minion {
                         self.trigger_on_cast_spell(p);
                     }
                     if !target_removed && target_pos < self.players[p].board.len() {
-                        self.trigger_on_cast_spell_on_target(p, target_pos);
-                        if pt.gem {
+                        // "Whenever you cast a spell on" cards, the target's
+                        // own watcher and Roogug's Gem reaction are all
+                        // reactions to a spell the player cast: a minion's
+                        // cast for the player fires none of them.
+                        if !pt.by_minion {
+                            self.trigger_on_cast_spell_on_target(p, target_pos);
+                        }
+                        if pt.gem && !pt.by_minion {
                             // A Gem was played from hand on the target.
                             self.roogug_on_gem(p, target_pos);
                         }
@@ -1131,7 +1146,7 @@ impl Game {
                             .get(self.players[p].board[target_pos].card)
                             .tribes
                             .has(Tribe::Mech);
-                        if is_mech {
+                        if is_mech && !pt.by_minion {
                             self.trigger_on_cast_spell_on_mech(p, target_pos);
                         }
                     }
@@ -1163,6 +1178,7 @@ impl Game {
                             runs: 1,
                             tavern: pt.tavern,
                             gem: pt.gem,
+                            by_minion: pt.by_minion,
                         };
                         self.apply_target(p, &copy, at);
                         self.players[p].tp.locket_copy = false;

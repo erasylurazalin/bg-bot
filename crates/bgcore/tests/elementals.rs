@@ -919,7 +919,7 @@ fn a_spell_cast_twice_counts_twice_for_the_azerite_and_balinda_casts_count() {
 }
 
 #[test]
-fn air_revenant_casts_easterly_winds_every_7_gold_and_it_counts_as_a_spell() {
+fn air_revenant_casts_easterly_winds_every_7_gold_and_it_is_not_your_cast() {
     let mut g = game(34);
     put_on_board(&mut g, 0, "Air Revenant", false);
     put_on_board(&mut g, 0, "Felboar", false);
@@ -938,9 +938,10 @@ fn air_revenant_casts_easterly_winds_every_7_gold_and_it_counts_as_a_spell() {
     assert_eq!(g.players[0].refresh_buff, (0, 0));
     let felboar = g.players[0].board[1].improvements;
     act(&mut g, 0, Action::Roll);
-    // the 7th gold cast Easterly Winds: it counts as a spell cast
+    // the 7th gold casts Easterly Winds: it buffs the Tavern as printed, but
+    // a spell a minion casts for you is not a spell you cast (Era 2026-11-02)
     assert_eq!(g.players[0].refresh_buff, (9, 9));
-    assert_eq!(g.players[0].board[1].improvements, felboar + 1);
+    assert_eq!(g.players[0].board[1].improvements, felboar, "not your cast");
     g.check_invariants().unwrap();
 }
 
@@ -953,8 +954,12 @@ fn a_golden_air_revenant_casts_two_easterly_winds() {
     for _ in 0..7 {
         act(&mut g, 0, Action::Roll);
     }
-    assert_eq!(g.players[0].refresh_buff, (18, 18));
-    assert_eq!(g.players[0].board[1].improvements, 2);
+    assert_eq!(g.players[0].refresh_buff, (18, 18), "both casts still happen");
+    assert_eq!(
+        g.players[0].board[1].improvements,
+        0,
+        "a minion's cast for you is not a spell you cast"
+    );
 }
 
 // ================= Elemental of Surprise =================

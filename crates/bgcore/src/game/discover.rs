@@ -96,11 +96,20 @@ impl Game {
     }
 
     /// Run one option of a Choose One (the shared body of `resolve_choose`
-    /// and the both-effects paths).
-    fn apply_choose_option(&mut self, p: usize, source: Option<u8>, opt: ChooseOption, tavern: bool) {
+    /// and the both-effects paths). `by_minion` says a minion's effect cast
+    /// the spell: its target then fires no "you cast a spell" trigger.
+    fn apply_choose_option(
+        &mut self,
+        p: usize,
+        source: Option<u8>,
+        opt: ChooseOption,
+        tavern: bool,
+        by_minion: bool,
+    ) {
         match opt {
             ChooseOption::MinionTarget { tribe, attack, health, keyword, in_shop } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source,
                     kind: TargetKind::MinionBuff {
                         tribe,
@@ -133,11 +142,14 @@ impl Game {
                         runs,
                         tavern,
                         gem: false,
+                        by_minion,
                     },
                 );
             }
             ChooseOption::SpellEffect(se) => {
-                if tavern {
+                // A spell a minion casts for the player is not the player's
+                // cast: no "whenever you cast a spell" card sees it.
+                if tavern && !by_minion {
                     self.trigger_on_cast_spell(p);
                 }
                 self.execute_spell_effect(p, se, tavern);
@@ -149,12 +161,14 @@ impl Game {
     /// the second right after it, or through the queue when the first leaves
     /// a target prompt open. `source.is_some()` means the Choose One is a
     /// minion's Battlecry, so "after you trigger a Battlecry" fires once.
+    /// `by_minion` says a minion cast the spell (see `apply_choose_option`).
     pub(super) fn resolve_choose_options(
         &mut self,
         p: usize,
         source: Option<u8>,
         options: [ChooseOption; 2],
         tavern: bool,
+        by_minion: bool,
         both: bool,
     ) {
         if !both {
@@ -163,21 +177,25 @@ impl Game {
                 golden: false,
                 options,
                 tavern,
+                by_minion,
             });
             return;
         }
-        self.apply_choose_option(p, source, options[0], tavern);
+        self.apply_choose_option(p, source, options[0], tavern, by_minion);
         let blocked = self.players[p].pending_target.is_some()
             || self.players[p].pending_shop_target.is_some()
             || self.players[p].pending_choose_one.is_some()
             || self.players[p].pending_discard.is_some()
             || !self.players[p].discover.is_empty();
         if blocked {
-            let _ = self.players[p]
-                .choose_queue
-                .try_push(QueuedOption { source, option: options[1], tavern });
+            let _ = self.players[p].choose_queue.try_push(QueuedOption {
+                source,
+                option: options[1],
+                tavern,
+                by_minion,
+            });
         } else {
-            self.apply_choose_option(p, source, options[1], tavern);
+            self.apply_choose_option(p, source, options[1], tavern, by_minion);
         }
         if source.is_some() {
             self.fire_after_battlecry(p, 1);
@@ -201,7 +219,7 @@ impl Game {
             // A both-effects Choose One option waiting for the one before it.
             if let Some(q) = self.players[p].choose_queue.first().copied() {
                 self.players[p].choose_queue.remove(0);
-                self.apply_choose_option(p, q.source, q.option, q.tavern);
+                self.apply_choose_option(p, q.source, q.option, q.tavern, q.by_minion);
                 continue;
             }
             if self.players[p].discover_queue.is_empty() {
@@ -388,7 +406,7 @@ impl Game {
 
     pub(super) fn resolve_choose(&mut self, p: usize, k: usize) {
         if let Some(pco) = self.players[p].pending_choose_one.take() {
-            self.apply_choose_option(p, pco.source, pco.options[k], pco.tavern);
+            self.apply_choose_option(p, pco.source, pco.options[k], pco.tavern, pco.by_minion);
             // A minion's Choose One is its Battlecry.
             if pco.source.is_some() {
                 self.fire_after_battlecry(p, 1);

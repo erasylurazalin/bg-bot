@@ -287,6 +287,75 @@ fn blood_gems_are_plain_spells_no_counters_no_azerite_no_spell_power() {
 }
 
 #[test]
+fn a_gem_on_the_amalgam_feeds_felboar_once_per_player_cast() {
+    // The known step from Era's log (Hearthstone_2026_10_24_17_59_26-g1,
+    // turn 10 steps 59 to 64): one plain Hot-Air Surveyor, a Blood Gem on the
+    // Gatekeeper Amalgam. Felboar counts the gem and the Surveyor's extra
+    // cast, two spells, and never the Misplaced Tea Set the Amalgam casts for
+    // the player (Era 2026-11-02).
+    let mut g = game(30);
+    put_on_board(&mut g, 0, "Felboar", false);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", false);
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam", false);
+    let before: i32 = g.players[0].board.iter().map(|m| m.attack).sum();
+    g.players[0].gold = 10;
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 2);
+    assert_eq!(
+        g.players[0].board[0].improvements,
+        2,
+        "the gem and the Surveyor's copy, no Tea Set"
+    );
+    // The Tea Set itself still happened: it buffed a minion of each type.
+    let after: i32 = g.players[0].board.iter().map(|m| m.attack).sum();
+    assert!(after >= before + 4, "the Tea Set still buffed the board");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_taught_choose_one_spell_is_the_minions_cast_too() {
+    // A Magicfin Apprentice casts the Tavern spell it was taught: Alliance
+    // Flag is a Choose One spell, so its option and its target still wait for
+    // the player, but the cast is the minion's and counts for nothing.
+    let mut g = game(32);
+    put_on_board(&mut g, 0, "Felboar", false);
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam", false);
+    let flag = g.data.cards.by_name("Alliance Flag").unwrap();
+    let token = g.data.cards.taught_token.expect("a taught token");
+    let mut m = g.players[0].make_card(&g.data.cards, token, false, 0);
+    m.taught_spell = Some(flag);
+    g.players[0].hand.push(m);
+    g.players[0].gold = 10;
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 2);
+    act(&mut g, 0, Action::Choose(0));
+    act(&mut g, 0, Action::Target(1));
+    // The Amalgam is 6/6 and the first option is +3/+1: the cast still lands.
+    assert_eq!(stats(&g.players[0].board[1]), (6 + 3, 6 + 1), "the spell still buffed");
+    assert_eq!(g.players[0].board[0].improvements, 0, "not a spell you cast");
+    assert_eq!(g.players[0].spells_cast, 0, "and not a Tavern spell you cast");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_tavern_spell_on_the_amalgam_counts_once() {
+    // Hearthstone_2026_10_28_02_28_32-g4, turn 11 step 33: a Fortify cast on
+    // the Gatekeeper Amalgam counts 1, not 2.
+    let mut g = game(31);
+    put_on_board(&mut g, 0, "Felboar", false);
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam", false);
+    g.players[0].gold = 10;
+    g.give(0, "Fortify").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!(g.players[0].board[0].improvements, 1, "one Tavern spell, one count");
+    assert_eq!(g.players[0].spells_cast, 1, "the Tea Set is not a spell you cast");
+    assert_eq!(g.players[0].spells_cast_turn, 1, "and not one this turn either");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn balinda_sets_and_each_surveyor_adds_gem_casts() {
     let mut g = game(7);
     put_on_board(&mut g, 0, "Tusked Camper", false);

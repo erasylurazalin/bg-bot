@@ -661,8 +661,11 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
 - **The effects.** `Act` mirrors the effect keys of cards.toml (`get`,
   `get_gems`, `cast`, ...) and `Game::run_trinket_act` runs each through the
   same `Effect`/`SpellEffect` arm the card path runs, with no host slot (`pos`
-  0) and no golden multiplier. The keys with no card behind them are the ones
-  trinkets.toml's header lists; `Act` names the card each was written for.
+  0) and no golden multiplier. `Act::Cast` is the one exception: a trinket's
+  spell is the player's cast, while the same `cast` key on a minion is the
+  minion's (`Game::minion_cast_spell`), so it calls `cast_named_spell` itself.
+  The keys with no card behind them are the ones trinkets.toml's header lists;
+  `Act` names the card each was written for.
   The first five were `upgrade_discount`, `buff_tavern_this_turn` (Cursed
   Crystal's per-Refresh buff must not be remembered and stack),
   `make_golden_random`, `last_spell_copies` and `discover_deathrattle`
@@ -820,6 +823,26 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   minion triggers only for a Tavern spell, and the trinket's `when = "cast"`
   hook for every spell. Replica Cathedral's "your first spell each turn casts
   an extra time" covers any spell, a Blood Gem included (`gem_casts`).
+- **A spell a minion casts for you is not your cast (Era 2026-11-02).**
+  `Effect::CastSpell` (Gatekeeper Amalgam's Misplaced Tea Set, an Air
+  Revenant's Easterly Winds, a Crimson Vindicator's Rally spell) and
+  `Effect::CastTaughtSpell` (a Magicfin token's spell) go through
+  `Game::minion_cast_spell`; `Game::cast_spell` stays the player's own cast.
+  The spell still runs and buffs as printed, spell power included, but none of
+  the "spells you cast" bookkeeping is its: no `EventKind::AllSpellsCast` or
+  `EventKind::SpellsCast` (so no Felboar count, no `spells_cast`), no
+  `spells_cast_turn`, no trinket `spell_cast` or `cast_spell` event, no
+  `trigger_on_cast_spell`, `trigger_on_cast_spell_on_target` or
+  `trigger_on_cast_spell_on_mech`, so neither Timecap'n Hooktail nor the
+  Amalgam's own "on this" fires for the Tea Set. The flag travels with the
+  prompt a taught spell can open (`PendingTarget.by_minion`,
+  `PendingChooseOne.by_minion`, `QueuedOption`), so `apply_target` and
+  `apply_choose_option` also skip the extra-cast counters and the "cast on a
+  Tavern minion" trinket events for it. Every extra cast the player's own
+  cards add still counts (Balinda, a Hot-Air Surveyor's Gem copy). A trinket's own `cast` act is the player's cast: `Act::Cast` calls
+  `cast_named_spell` with `by_minion` false, as does `cast_spell_on`; the
+  Lovely Locket's copy inherits the flag of the cast it copies. In a fight the
+  same `Effect::CastSpell` keeps its own `Side` counters.
 - **The numbers that grow (block 4).** `tp.spell_bonus_per_type`
   (Multilayered Shield: the bonus per different friendly minion type) and
   `tp.spell_bonus_turn` (Honeycomb Ring: this turn only, cleared in

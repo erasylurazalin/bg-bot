@@ -631,6 +631,7 @@ impl Game {
             }
             PowerEffect::GiveDivineShield => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::MinionBuff {
                         tribe: None,
@@ -648,6 +649,7 @@ impl Game {
             }
             PowerEffect::StealCardDamage(damage) => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::StealShopCard { damage },
                     runs,
@@ -665,6 +667,7 @@ impl Game {
             }
             PowerEffect::MakeGolden => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::MakeGolden { tribe: None, max_tier: crate::CARD_MAX_TIER },
                     runs,
@@ -695,6 +698,7 @@ impl Game {
             }
             PowerEffect::TriggerBattlecry => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::TriggerBattlecry,
                     runs,
@@ -760,6 +764,7 @@ impl Game {
             PowerEffect::BuffPerBuys { attack, health, every } => {
                 let grown = (self.players[p].counts.cards_bought / every.max(1) as u32) as i32;
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::MinionBuff {
                         tribe: None,
@@ -825,6 +830,7 @@ impl Game {
             // from the Tier below it.
             PowerEffect::DiscoverBelow => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::RemoveTierBelow,
                     runs: 1,
@@ -841,6 +847,7 @@ impl Game {
             }
             PowerEffect::SwapWithShop => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::SwapWithShop,
                     runs: 1,
@@ -870,6 +877,7 @@ impl Game {
             // Stir the Pot: one throw a press.
             PowerEffect::StirThePot { count } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::ThrowInPot { count },
                     runs: 1,
@@ -906,6 +914,7 @@ impl Game {
             // higher takes its slot.
             PowerEffect::ReplaceShopHigher => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::ReplaceHigher,
                     runs: 1,
@@ -917,6 +926,7 @@ impl Game {
             // Reborn Rites: any minion, the Tavern's included.
             PowerEffect::TempReborn => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::TempReborn,
                     runs,
@@ -973,6 +983,7 @@ impl Game {
             // random one of the same Tier.
             PowerEffect::ReplaceSameTier => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::ReplaceSameTier,
                     runs: 1,
@@ -984,6 +995,7 @@ impl Game {
             // Imprison: a Tavern card to hand, locked for its turns.
             PowerEffect::Imprison { turns } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::ImprisonShop { turns },
                     runs: 1,
@@ -995,6 +1007,7 @@ impl Game {
             // See the Light: a Tavern minion to hand as a 2/2.
             PowerEffect::StealShopAsStats { attack, health } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::StealShopAsStats { attack, health },
                     runs: 1,
@@ -1006,6 +1019,7 @@ impl Game {
             // Spirit Swap and Devour: the first of two minions.
             PowerEffect::SpiritSwap => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::SpiritSwapFirst,
                     runs: 1,
@@ -1016,6 +1030,7 @@ impl Game {
             }
             PowerEffect::Devour => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::DevourFirst,
                     runs: 1,
@@ -1036,6 +1051,7 @@ impl Game {
             // Rune of Damnation: a friendly Undead dies for a random one.
             PowerEffect::DestroyTribeGetRandom { tribe } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::DestroyGetTribe { tribe },
                     runs: 1,
@@ -1049,6 +1065,7 @@ impl Game {
                 let tier = self.players[p].tier as i32;
                 let (a, h) = if attack { (tier, 0) } else { (0, tier) };
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::MinionBuff {
                         tribe: None,
@@ -1067,6 +1084,7 @@ impl Game {
             // Cloning Gallery: an exact copy, summoned.
             PowerEffect::CloningGallery => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::SummonExactCopy,
                     runs: 1,
@@ -1109,6 +1127,7 @@ impl Game {
             }
             PowerEffect::LockAndLoad => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::LockAndLoad,
                     runs: 1,
@@ -1119,6 +1138,7 @@ impl Game {
             }
             PowerEffect::RapidReanimation => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: None,
                     kind: TargetKind::RapidReanimation,
                     runs: 1,

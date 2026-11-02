@@ -857,8 +857,10 @@ impl Game {
                 false,
                 1,
             ),
+            // A trinket's own cast (Easterly Winds): the player's, unlike the
+            // same `cast` key on a minion (`Effect::CastSpell`).
             Act::Cast { card, times } => {
-                self.run_effect(p, &mut pos, Effect::CastSpell { card, times }, false, 1)
+                self.cast_named_spell(p, card, times as u32, false)
             }
             Act::TavernBuff { tribe, attack, health, this_turn } => self.run_effect(
                 p,

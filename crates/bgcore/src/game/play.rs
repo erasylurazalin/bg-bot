@@ -385,13 +385,14 @@ impl Game {
             let covered = !m.both_effects
                 && (self.players[p].tp.choose_one_all || self.take_trailblazer_cover(p));
             if m.both_effects || covered {
-                self.resolve_choose_options(p, Some(pos as u8), scaled, true, true);
+                self.resolve_choose_options(p, Some(pos as u8), scaled, true, false, true);
             } else {
                 self.players[p].pending_choose_one = Some(PendingChooseOne {
                     source: Some(pos as u8),
                     golden: m.golden,
                     options: scaled,
                     tavern: true,
+                    by_minion: false,
                 });
             }
             return;

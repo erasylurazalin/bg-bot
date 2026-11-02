@@ -225,6 +225,11 @@ pub struct PendingTarget {
     /// Gem value, the stats it gives are Blood Gem stats, and each cast is a
     /// Gem played on the target (Geomagus Roogug reacts to those from hand).
     pub gem: bool,
+    /// The spell is one a minion's own effect casts for the player (Gatekeeper
+    /// Amalgam's Misplaced Tea Set, a Magicfin token's taught spell). It still
+    /// happens and buffs as printed, but it is not a spell the player cast
+    /// (Era 2026-11-02), so no "spells you cast" trigger and no count sees it.
+    pub by_minion: bool,
 }
 
 /// A chosen consume waiting for the player to pick the Tavern minion.
@@ -277,6 +282,10 @@ pub struct PendingChooseOne {
     pub options: [ChooseOption; 2],
     /// The spell being cast is a Tavern spell (see `PendingTarget::tavern`).
     pub tavern: bool,
+    /// A minion's effect cast the spell for the player (see
+    /// `PendingTarget::by_minion`): the option runs, but no "spells you cast"
+    /// trigger or counter sees it.
+    pub by_minion: bool,
 }
 
 /// One option of a "both effects combined" Choose One that still has to run,
@@ -287,6 +296,8 @@ pub struct QueuedOption {
     pub option: ChooseOption,
     /// Whether the Choose One spell was a Tavern spell.
     pub tavern: bool,
+    /// Whether a minion's effect cast the spell (see `PendingChooseOne`).
+    pub by_minion: bool,
 }
 
 /// A Choose One spell's own "after you cast a spell" triggers, waiting for

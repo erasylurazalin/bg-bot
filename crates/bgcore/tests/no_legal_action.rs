@@ -197,6 +197,7 @@ fn a_choose_one_nothing_can_answer_fizzles() {
         golden: false,
         options: [needs_a_minion(1, 1), needs_a_minion(2, 2)],
         tavern: true,
+        by_minion: false,
     });
     // Answering the choice is illegal (that is what used to strand the bots)...
     assert!(!g.is_legal(Action::Choose(0)));
@@ -221,6 +222,7 @@ fn a_target_prompt_that_lost_its_last_target_fizzles() {
     // offered: a neutral minion is all that is left to point at.
     put_on_board(&mut g, 0, "Deadly Spore");
     g.players[0].pending_target = Some(PendingTarget {
+        by_minion: false,
         source: Some(0),
         kind: TargetKind::MinionBuff {
             tribe: Some(Tribe::Demon),

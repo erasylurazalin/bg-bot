@@ -244,6 +244,7 @@ impl Game {
             Effect::BuffChosen { tribe, attack, health, per_keyword, random_keyword, in_shop } => {
                 let k = self.players[p].distinct_bonus_keywords(bonus_mask) as i32;
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::MinionBuff {
                         tribe,
@@ -273,6 +274,7 @@ impl Game {
                     ConsumeBy::This => self.start_consume(p, *pos, pick, keywords, count, stat_mul),
                     ConsumeBy::Chosen(tribe) => {
                         let pt = PendingTarget {
+                            by_minion: false,
                             source: Some(*pos as u8),
                             kind: TargetKind::Consume { tribe, pick, keywords, count, stat_mul },
                             runs: 1,
@@ -385,6 +387,7 @@ impl Game {
             }
             Effect::BuffAnyMinion { attack, health } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::AnyBuff {
                         attack: attack * mul,
@@ -398,6 +401,7 @@ impl Game {
             }
             Effect::SetStatsAnyMinion { attack, health } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::AnySetStats {
                         attack: attack * mul,
@@ -609,22 +613,18 @@ impl Game {
                     }
                 }
             }
-            // A spell cast by a minion (Gatekeeper Amalgam) is a real cast:
-            // it gets the Tavern spell bonus and every "whenever you cast a
-            // spell" card sees it.
+            // A spell a minion's own effect casts for the player: Gatekeeper
+            // Amalgam's Misplaced Tea Set, an Air Revenant's Easterly Winds, a
+            // Crimson Vindicator's Rally spell. It happens and buffs as
+            // printed, but it is not a spell the player cast (Era 2026-11-02,
+            // docs/UNSURE.md). A trinket's own `cast` act is the player's
+            // cast: it calls `cast_named_spell` itself (trinkets.rs).
             Effect::CastSpell { card, times } => {
-                for _ in 0..times as u32 * mul as u32 * runs as u32 {
-                    let m = self.data.cards.make(card, false);
-                    self.cast_spell(p, m);
-                    if self.players[p].pending_target.is_some()
-                        || self.players[p].pending_choose_one.is_some()
-                    {
-                        break;
-                    }
-                }
+                self.cast_named_spell(p, card, times as u32 * mul as u32 * runs as u32, true);
             }
             Effect::TriggerRally => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::TriggerRally,
                     runs: (mul as u8).saturating_mul(runs),
@@ -635,6 +635,7 @@ impl Game {
             }
             Effect::TriggerBattlecry => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::TriggerBattlecry,
                     runs: (mul as u8).saturating_mul(runs),
@@ -701,20 +702,14 @@ impl Game {
                 }
                 self.maybe_start_discover(p);
             }
+            // A Magicfin token casts the spell it was taught: the minion's
+            // cast, not the player's.
             Effect::CastTaughtSpell => {
                 let Some(sp) = self.players[p].board.get(*pos).and_then(|m| m.taught_spell)
                 else {
                     return;
                 };
-                for _ in 0..mul as u8 * runs {
-                    let m = self.data.cards.make(sp, false);
-                    self.cast_spell(p, m);
-                    if self.players[p].pending_target.is_some()
-                        || self.players[p].pending_choose_one.is_some()
-                    {
-                        break;
-                    }
-                }
+                self.cast_named_spell(p, sp, (mul as u8 * runs) as u32, true);
                 self.maybe_start_discover(p);
             }
             Effect::GetRandomTierMinion { tier } => {
@@ -777,6 +772,7 @@ impl Game {
             Effect::BuffChosenPerGold { tribe, attack, health, per_gold, in_shop } => {
                 let g = self.players[p].gold_spent_turn as i32;
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::MinionBuff {
                         tribe,
@@ -794,6 +790,7 @@ impl Game {
             }
             Effect::MakeGoldenChosen { tribe, max_tier, count } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::MakeGolden { tribe, max_tier },
                     runs: count.saturating_mul(mul as u8).saturating_mul(runs),
@@ -816,6 +813,7 @@ impl Game {
             }
             Effect::BecomeCopyChosen => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::BecomeCopy,
                     runs,
@@ -917,6 +915,7 @@ impl Game {
             }
             Effect::DestroyChosenDiscover { tribe, count } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::DestroyDiscover {
                         tribe,
@@ -930,6 +929,7 @@ impl Game {
             }
             Effect::DestroyChosenGetCopy { tribe, copies } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::DestroyCopy {
                         tribe,
@@ -943,6 +943,7 @@ impl Game {
             }
             Effect::GiveRebornDestroy { tribe, attack, health } => {
                 let pt = PendingTarget {
+                    by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::RebornDestroy {
                         tribe,

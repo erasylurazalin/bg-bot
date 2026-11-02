@@ -192,6 +192,7 @@ impl Game {
         let tavern = c.tavern_spell;
         self.players[p].last_spell = Some(card);
         let pt = PendingTarget {
+            by_minion: false,
             source: None,
             kind: TargetKind::Spell(st),
             runs: self.balinda_mult(p),
@@ -364,7 +365,48 @@ impl Game {
         }
     }
 
+    /// A spell the player casts: the play from the hand, plus every extra cast
+    /// their own cards add (a Bounty's again, Balinda's, a Surveyor's Gem).
     pub(super) fn cast_spell(&mut self, p: usize, m: Minion) {
+        self.cast_spell_as(p, m, false);
+    }
+
+    /// A spell a minion's own effect casts for the player: Gatekeeper
+    /// Amalgam's Misplaced Tea Set, a Magicfin token's taught spell, an Air
+    /// Revenant's Easterly Winds. The spell still happens and buffs as
+    /// printed, but it is not a spell the player cast (Era 2026-11-02,
+    /// docs/UNSURE.md), so nothing that counts or reacts to "spells you cast"
+    /// sees it.
+    pub(super) fn minion_cast_spell(&mut self, p: usize, m: Minion) {
+        self.cast_spell_as(p, m, true);
+    }
+
+    /// Cast a named spell `times` times, stopping at a prompt it opens (the
+    /// player answers that one first). `by_minion` says whose cast it is:
+    /// see `minion_cast_spell`.
+    pub(super) fn cast_named_spell(
+        &mut self,
+        p: usize,
+        card: CardId,
+        times: u32,
+        by_minion: bool,
+    ) {
+        for _ in 0..times {
+            let m = self.data.cards.make(card, false);
+            if by_minion {
+                self.minion_cast_spell(p, m);
+            } else {
+                self.cast_spell(p, m);
+            }
+            if self.players[p].pending_target.is_some()
+                || self.players[p].pending_choose_one.is_some()
+            {
+                break;
+            }
+        }
+    }
+
+    fn cast_spell_as(&mut self, p: usize, m: Minion, by_minion: bool) {
         // A Bounty cast again (Proud Privateer) is another spell cast for
         // every trigger and every "spells cast" counter.
         let c = self.data.cards.get(m.card);
@@ -373,8 +415,17 @@ impl Game {
         // A Triple Reward is a reward you open, not a spell you cast
         // (DESIGN.md "Read the card's exact words, every time").
         let reward = matches!(c.spell_effect, Some(SpellEffect::TripleReward));
-        self.cast_spell_inner(p, m);
+        self.cast_spell_inner(p, m, by_minion);
         if reward {
+            return;
+        }
+        if by_minion {
+            // A minion's cast for the player is not a spell they cast: none
+            // of the triggers, trinket events or counters below are its. It
+            // can still open a prompt, so the fizzle check is repeated here.
+            if self.players[p].pending_target.is_some() && self.choice_stuck(p) {
+                self.players[p].pending_target = None;
+            }
             return;
         }
         // Replica Cathedral: its doubling is spent by the first spell of the
@@ -501,7 +552,10 @@ impl Game {
         }
     }
 
-    fn cast_spell_inner(&mut self, p: usize, m: Minion) {
+    /// Run the spell itself: open its target or Choose One prompt, or run its
+    /// effect. `by_minion` says whether a minion's effect cast it, and then no
+    /// "whenever you cast a spell" card sees it.
+    fn cast_spell_inner(&mut self, p: usize, m: Minion, by_minion: bool) {
         self.players[p].last_spell = Some(m.card);
         let c = self.data.cards.get(m.card);
         let tavern = c.tavern_spell;
@@ -522,6 +576,7 @@ impl Game {
                 runs,
                 tavern,
                 gem,
+                by_minion,
             });
         } else if let Some(options) = c.choose_one {
             if !options.iter().any(|&opt| self.can_choose_option(p, opt)) {
@@ -530,13 +585,14 @@ impl Game {
             // A Trailblazer's coverage runs both effects instead of asking,
             // and Trailblazer Sticker covers every Choose One card.
             if self.players[p].tp.choose_one_all || self.take_trailblazer_cover(p) {
-                self.resolve_choose_options(p, None, options, tavern, true);
+                self.resolve_choose_options(p, None, options, tavern, by_minion, true);
             } else {
                 self.players[p].pending_choose_one = Some(PendingChooseOne {
                     source: None,
                     golden: false,
                     options,
                     tavern,
+                    by_minion,
                 });
             }
         } else if let Some(se) = c.spell_effect {
@@ -554,7 +610,7 @@ impl Game {
                 // here where the card is known. Unmasked Identity replaces
                 // Power of the Storm for good on the main slot.
                 let excludes = self.data.heroes.hero_indices(&c.exclude_heroes);
-                if tavern {
+                if tavern && !by_minion {
                     self.trigger_on_cast_spell(p);
                 }
                 self.players[p].storm_power[0] = false;
@@ -570,7 +626,7 @@ impl Game {
                 casts = casts.saturating_add(1);
             }
             for _ in 0..casts {
-                if tavern {
+                if tavern && !by_minion {
                     self.trigger_on_cast_spell(p);
                 }
                 self.execute_spell_effect(p, se, tavern);
@@ -969,16 +1025,11 @@ impl Game {
                 pl.barrage.0 += attack + ga + da;
                 pl.barrage.1 += health + gh + dh;
             }
+            // Veteran Brigand's "cast Blood Gem Barrage 3 times": left as
+            // the player's cast, as it was. Whether a Battlecry's cast is the
+            // minion's is still open, for docs/UNSURE.md.
             SpellEffect::CastSpell { card, times } => {
-                for _ in 0..times {
-                    let m = self.data.cards.make(card, false);
-                    self.cast_spell(p, m);
-                    if self.players[p].pending_target.is_some()
-                        || self.players[p].pending_choose_one.is_some()
-                    {
-                        break;
-                    }
-                }
+                self.cast_named_spell(p, card, times as u32, false);
             }
             SpellEffect::RandomTribeMinion { tribe, count } => {
                 let tier = self.players[p].tier;

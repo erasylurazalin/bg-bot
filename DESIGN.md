@@ -418,6 +418,12 @@ Bounty). For a Choose One spell, "after you cast a spell" fires only after
 both: cast, pick the option, pick the target, then the cast triggers (Era,
 2026-11-02).
 
+**Counting Battlecries (Era, 2026-11-02).** "For each Battlecry you've
+triggered" (Dark Paradox t6, Murky Sticker, Battle Scars) counts Battlecry
+triggers: a Battlecry doubled by Brann counts twice, and a minion without a
+Battlecry counts nothing when played. A Choose One minion is not a
+Battlecry. "Wherever this is" includes Bob's Tavern: a copy there grows too.
+
 **Butchering and spell power (Era, 2026-11-02).** Butchering's "+8 Attack
 this game" is a Tavern spell number, so Tavern spell power adds to it.
 
