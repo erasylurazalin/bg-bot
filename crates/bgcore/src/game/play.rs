@@ -320,13 +320,6 @@ impl Game {
     }
 
     pub(super) fn battlecry_or_choose_one(&mut self, p: usize, mut pos: usize) {
-        // "Battlecries you have triggered this game" (Murky Sticker), and
-        // the same count for the Dark Gift Battle Scars, wherever the
-        // minion with it is.
-        self.players[p].tp.battlecries = self.players[p].tp.battlecries.saturating_add(1);
-        self.players[p].battlecries_triggered =
-            self.players[p].battlecries_triggered.saturating_add(1);
-        self.dark_gift_count(p, 1, |c| c.buff_per_battlecry);
         // A hook that ran just before this can have taken the slot away (a
         // triple that pulled the minion off the board): nothing to trigger.
         let Some(&m) = self.players[p].board.get(pos) else { return };
@@ -409,13 +402,83 @@ impl Game {
         {
             runs = runs.saturating_add(self.players[p].tp.dragon_battlecry);
         }
+        // "For each Battlecry you've triggered this game" (Dark Paradox t6,
+        // Murky Sticker, the Dark Gift Battle Scars, whoever holds it) counts
+        // triggers, so a Brann double counts twice. Only a Battlecry counts:
+        // a minion without one counts nothing when played, and a Choose One
+        // is not a Battlecry (the branch above already returned). A Battlecry
+        // that leaves a choice open counts when the pick is made, as the log
+        // shows (Rodeo Performer's Discover grows the Tavern's Paradox at the
+        // pick, not on the play), so what it owes waits for the choice.
         self.run_effect(p, &mut pos, bc, m.golden, runs);
+        if self.battlecry_choice_open(p) {
+            self.players[p].pending_battlecries =
+                self.players[p].pending_battlecries.saturating_add(runs);
+        } else {
+            self.count_battlecries(p, runs);
+        }
         self.fire_after_battlecry(p, runs);
         // Dragon Skull: once per Battlecry trigger, so a Brann double fires it
         // twice.
         for _ in 0..runs {
             self.trinket_event(p, crate::trinkets::Event::Battlecry, Some(m.card), 1);
         }
+    }
+
+    /// Add `n` Battlecry triggers to the "for each Battlecry you've
+    /// triggered this game" count: the player's two counts and every minion
+    /// that scales with them (Dark Paradox t6, the Dark Gift Battle Scars),
+    /// on the board, in the hand and in the Tavern (DESIGN.md "Counting
+    /// Battlecries").
+    pub(super) fn count_battlecries(&mut self, p: usize, n: u8) {
+        if n == 0 {
+            return;
+        }
+        self.players[p].tp.battlecries =
+            self.players[p].tp.battlecries.saturating_add(n as u16);
+        self.players[p].battlecries_triggered =
+            self.players[p].battlecries_triggered.saturating_add(n as u32);
+        self.dark_gift_count(p, n as i32, |c| c.buff_per_battlecry);
+    }
+
+    /// Pay the Battlecry triggers a resolving Battlecry still owes: takes
+    /// `Player.pending_battlecries` and counts it, which is what
+    /// `maybe_start_discover` does once nothing is left to answer. The shop
+    /// replay calls it on an end of turn whose Discovers the log folded into
+    /// the end of turn step itself.
+    pub fn pay_pending_battlecries(&mut self, p: usize) -> u8 {
+        let owed = std::mem::take(&mut self.players[p].pending_battlecries);
+        self.count_battlecries(p, owed);
+        owed
+    }
+
+    /// Whether a Battlecry left the player a choice to answer: a target, a
+    /// Tavern pick, a discard, a Choose One or a Discover. Its trigger is
+    /// counted when the last of them is answered (`maybe_start_discover`).
+    fn battlecry_choice_open(&self, p: usize) -> bool {
+        let pl = &self.players[p];
+        pl.pending_target.is_some()
+            || pl.pending_shop_target.is_some()
+            || pl.pending_discard.is_some()
+            || pl.pending_choose_one.is_some()
+            || !pl.discover.is_empty()
+            || !pl.discover_queue.is_empty()
+    }
+
+    /// How many times the Battlecry of a minion of `card` triggers right now:
+    /// Brann's set-or-add count, this turn's extra trigger (a Prize) and
+    /// Dragon's Eye's one more for a Dragon. Read only: War Drum's two extra
+    /// are spent by the play itself (`take_war_drum`), so a caller that only
+    /// has to say what a resolving Battlecry owes does not spend them.
+    pub fn battlecry_triggers(&self, p: usize, card: crate::CardId) -> u8 {
+        let mut runs = self.brann_mult(p);
+        runs = runs.saturating_add(self.players[p].prize.battlecry_extra_turn);
+        if self.players[p].tp.dragon_battlecry > 0
+            && self.data.cards.get(card).tribes.has(Tribe::Dragon)
+        {
+            runs = runs.saturating_add(self.players[p].tp.dragon_battlecry);
+        }
+        runs
     }
 
     /// Run the Battlecry of the minion in board slot `pos`, for a trigger
@@ -452,7 +515,11 @@ impl Game {
         }
         let total = board.len() + shop.len();
         if total == 0 {
+            // Nothing legal to answer it: the Battlecry resolved without its
+            // target, so what it owed the count is paid (if nothing else of
+            // it is left open).
             self.players[p].pending_target = None;
+            self.maybe_start_discover(p);
             return;
         }
         let k = self.rng.below(total as u32) as usize;

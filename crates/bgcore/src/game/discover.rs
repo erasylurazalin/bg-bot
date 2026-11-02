@@ -230,6 +230,13 @@ impl Game {
                     self.fire_cast_after_choice(p, what);
                     continue;
                 }
+                // And a Battlecry that waited on a choice counts now that
+                // nothing is left of it (DESIGN.md "Counting Battlecries": a
+                // Discover Battlecry counts at the pick).
+                if self.players[p].pending_battlecries > 0 {
+                    self.pay_pending_battlecries(p);
+                    continue;
+                }
                 return;
             }
             let req = self.players[p].discover_queue.remove(0);

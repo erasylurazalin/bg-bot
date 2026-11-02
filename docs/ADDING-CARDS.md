@@ -825,7 +825,13 @@ Triple Reward spell.
   top three).
 - **Battlecry multipliers in one place.** `battlecry_or_choose_one` counts
   Brann, War Drum (`take_war_drum` spends the trinket's own use) and Dragon's
-  Eye. `Game::run_battlecry_at` triggers a Battlecry outside a play and can
+  Eye, and the `runs` it reaches is what the "for each Battlecry you've
+  triggered" cards read (DESIGN.md "Counting Battlecries": Dark Paradox t6,
+  Murky Sticker, Battle Scars), so a new multiplier needs no second change.
+  A Battlecry that opens a choice owes that count until the pick is made
+  (`Player.pending_battlecries`, paid by `maybe_start_discover`), whatever
+  the choice is, so a new target or Discover arm needs nothing either.
+  `Game::run_battlecry_at` triggers a Battlecry outside a play and can
   answer its target at random out of the board and the Tavern; that is the
   only path that reaches `apply_target_shop`'s `TargetKind::MinionBuff` arm.
 - **A Deathrattle outside combat.** `fight::shop_trigger_deathrattles` builds

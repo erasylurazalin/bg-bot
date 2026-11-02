@@ -901,6 +901,11 @@ pub struct Player {
     /// A Choose One spell cast whose "after you cast a spell" triggers wait
     /// for the option and its target (see `CastAfterChoice`).
     pub cast_after_choice: Option<CastAfterChoice>,
+    /// Battlecry triggers a Battlecry that opened a choice still owes the
+    /// "for each Battlecry you've triggered" count: they are added once
+    /// nothing is left to answer (DESIGN.md "Counting Battlecries": a
+    /// Discover Battlecry counts at the pick, not on the play).
+    pub pending_battlecries: u8,
     /// Choose One cards played whose choice is still open: Turbo Hogrider
     /// reacts once the card is fully resolved (`resolve_hogrider`).
     pub hogrider_pending: u8,
@@ -1528,6 +1533,9 @@ impl Game {
         // A Choose One spell whose choice files away has no "after" left to
         // fire: the cast counted itself already.
         pl.cast_after_choice = None;
+        // A Battlecry's trigger did happen, only its choice had no answer, so
+        // the count it owes lands now.
+        self.pay_pending_battlecries(p);
     }
 
     /// Fills `mask` with `is_legal` for every action. Only the index ranges

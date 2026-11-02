@@ -782,6 +782,21 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   runs the end-of-turn list once per Drakkari.
   `Player.trinket_events` is a `u32` for them; the mask test is still the one
   thing every hook pays.
+- **Counting Battlecries (DESIGN.md "Counting Battlecries").** One place
+  counts a Battlecry's triggers: `battlecry_or_choose_one`, through
+  `Game::count_battlecries`, which adds `runs` (the trigger count just below)
+  to `Player.tp.battlecries` and `Player.battlecries_triggered` and grows
+  every "for each Battlecry" minion by that many stacks: Dark Paradox t6,
+  Murky Sticker's `buff_leftmost_two_per_battlecry` and the Battle Scars
+  gift. Only a Battlecry counts: a minion without one counts nothing when
+  played, and a Choose One minion counts nothing (its branch returns first).
+  A Battlecry that leaves a choice open (a target, a Discover, a Choose One)
+  counts when the pick is made, as the log shows (17_59_26-g1 turn 8: the
+  Tavern's Paradox grows at the Discover pick, not on the play), so what it
+  owes waits in `Player.pending_battlecries` and `maybe_start_discover` adds
+  it once nothing is left to answer. `Game::battlecry_triggers` says, read
+  only, what a Battlecry of a card would trigger now; the shop replay uses
+  it to pay a pick step what the play step before it owed.
 - **Battlecry multipliers (block 4).** One place counts a Battlecry's
   triggers: `battlecry_or_choose_one`. It is Brann's `brann_mult` (set or add)
   plus `tp.war_drum` (War Drum's two extra, spent from that trinket's own
@@ -1053,7 +1068,9 @@ through exactly that card's code. The engine never matches a gift by name:
   `dark_gift_count` grows the "for each Battlecry / Tavern spell / discard"
   gifts from `battlecry_or_choose_one`, the Tavern-spell branch of
   `cast_spell` and `discard_card` (Death's Embrace rides the existing
-  `buff_per_deathrattle`); `dark_gift_on_acquire` gives Double Vision's plain
+  `buff_per_deathrattle`), on the board, in the hand and in Bob's Tavern
+  (a Tavern Dark Paradox t6 grows too, "wherever this is");
+  `dark_gift_on_acquire` gives Double Vision's plain
   copy in `add_to_hand`; Efficiency doubles an Activate in `Action::Activate`.
 - **In a fight.** New `StartOfCombat` arms: Resistance, Hostility,
   Transcendence, Admiration, Worship (reads `Counters.deity`), Jaws of Death,

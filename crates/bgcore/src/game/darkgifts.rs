@@ -579,7 +579,9 @@ impl Game {
     }
 
     /// The "for each ... this game" gifts grow on their event (Battle Scars,
-    /// Death's Embrace, Spell Siphon, Desecration), wherever the minion is.
+    /// Death's Embrace, Spell Siphon, Desecration), wherever the minion is:
+    /// the board, the hand and Bob's Tavern (a Tavern copy of a Dark Paradox
+    /// t6 grows too, DESIGN.md "Counting Battlecries").
     pub fn dark_gift_count(
         &mut self,
         p: usize,
@@ -591,7 +593,12 @@ impl Game {
         }
         let cards = &self.data.cards;
         let pl = &mut self.players[p];
-        for m in pl.board.iter_mut().chain(pl.hand.iter_mut()) {
+        for m in pl
+            .board
+            .iter_mut()
+            .chain(pl.hand.iter_mut())
+            .chain(pl.shop.iter_mut())
+        {
             // The minion's own card counts too (Dark Paradox t6, whose golden
             // gets +6/+6 per Battlecry); a gift part is never golden, so a
             // gift never doubles.

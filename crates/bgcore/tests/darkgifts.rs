@@ -1649,3 +1649,189 @@ fn the_tier_two_version_gains_attack_on_every_card_played() {
     assert_eq!(g.players[0].board[0].attack, before.0 + 3, "+3 Attack per card played");
     assert_eq!(g.players[0].board[1].attack, before.1 + 6, "the golden gets +6");
 }
+
+// ---- counting Battlecries (DESIGN.md "Counting Battlecries") ----
+
+/// A pool minion given to the hand and played at the right end of the board,
+/// through the same path the client's play takes.
+fn play_from_hand(g: &mut Game, p: usize, name: &str) {
+    let c = id(g, name);
+    let n = pool_copies(g, c);
+    let m = g.players[p].make_card(&g.data.cards, c, false, n);
+    g.players[p].hand.push(m);
+    let slot = g.players[p].hand.len() - 1;
+    act(g, p, Action::Play { hand: slot as u8, pos: g.players[p].board.len() as u8 });
+}
+
+/// A Dark Paradox t6 in the hand, at its printed stats.
+fn paradox_in_hand(g: &mut Game, p: usize) -> usize {
+    let mut m = g.players[p].make_card(&g.data.cards, g.paradox.expect("a paradox game"), false, 0);
+    m.pool_copies = 0;
+    g.players[p].hand.push(m);
+    g.players[p].hand.len() - 1
+}
+
+fn stats(g: &Game, p: usize, i: usize) -> (i32, i32) {
+    (g.players[p].board[i].attack, g.players[p].board[i].health)
+}
+
+#[test]
+fn a_minion_without_a_battlecry_counts_nothing() {
+    let mut g = game_with_paradox("Dark Paradox t6");
+    let h = paradox_in_hand(&mut g, 0);
+    let before = (g.players[0].hand[h].attack, g.players[0].hand[h].health);
+    play_from_hand(&mut g, 0, "Cord Puller"); // no Battlecry, no Choose One
+    assert_eq!(g.players[0].battlecries_triggered, 0, "a plain minion is no Battlecry");
+    assert_eq!(g.players[0].tp.battlecries, 0, "Murky Sticker's count stays put");
+    assert_eq!(
+        (g.players[0].hand[h].attack, g.players[0].hand[h].health),
+        before,
+        "the Paradox in the hand does not grow"
+    );
+}
+
+#[test]
+fn playing_a_dark_paradox_counts_nothing() {
+    // The log case: the Paradox is played at the stats it had in the hand.
+    let mut g = game_with_paradox("Dark Paradox t6");
+    let h = paradox_in_hand(&mut g, 0);
+    let before = (g.players[0].hand[h].attack, g.players[0].hand[h].health);
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    assert_eq!(g.players[0].battlecries_triggered, 0, "it has no Battlecry of its own");
+    assert_eq!(stats(&g, 0, 0), before, "and it does not buff itself");
+}
+
+#[test]
+fn a_battlecry_counts_once_and_a_brann_double_counts_twice() {
+    let mut g = game_with_paradox("Dark Paradox t6");
+    play_from_hand(&mut g, 0, "Refreshing Anomaly"); // Battlecry, no Choose One
+    assert_eq!(g.players[0].battlecries_triggered, 1, "one Battlecry trigger");
+    assert_eq!(g.players[0].tp.battlecries, 1, "Murky Sticker's count");
+
+    // Brann makes it trigger twice, which is two Battlecries.
+    let mut g = game_with_paradox("Dark Paradox t6");
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    let h = paradox_in_hand(&mut g, 0);
+    let before = (g.players[0].hand[h].attack, g.players[0].hand[h].health);
+    play_from_hand(&mut g, 0, "Refreshing Anomaly");
+    assert_eq!(g.players[0].battlecries_triggered, 2, "a Brann double counts twice");
+    assert_eq!(g.players[0].tp.battlecries, 2, "Murky Sticker's count");
+    assert_eq!(
+        (g.players[0].hand[h].attack, g.players[0].hand[h].health),
+        (before.0 + 6, before.1 + 6),
+        "+3/+3 for each of the two triggers"
+    );
+}
+
+#[test]
+fn a_choose_one_minion_is_not_a_battlecry() {
+    let mut g = game_with_paradox("Dark Paradox t6");
+    let h = paradox_in_hand(&mut g, 0);
+    let before = (g.players[0].hand[h].attack, g.players[0].hand[h].health);
+    play_from_hand(&mut g, 0, "Fearless Foodie"); // Choose One
+    assert_eq!(g.players[0].battlecries_triggered, 0, "a Choose One is not a Battlecry");
+    assert_eq!(g.players[0].tp.battlecries, 0, "Murky Sticker's count stays put");
+    assert_eq!(
+        (g.players[0].hand[h].attack, g.players[0].hand[h].health),
+        before,
+        "the Paradox in the hand does not grow"
+    );
+}
+
+#[test]
+fn a_tavern_dark_paradox_grows_on_a_battlecry() {
+    let mut g = game_with_paradox("Dark Paradox t6");
+    set_shop(&mut g, 0, &["Dark Paradox t6"]);
+    let at = g.players[0].shop.iter().position(|m| Some(m.card) == g.paradox).expect("in the Tavern");
+    let before = (g.players[0].shop[at].attack, g.players[0].shop[at].health);
+    // A Tavern copy is "wherever this is" too.
+    play_from_hand(&mut g, 0, "Refreshing Anomaly");
+    assert_eq!(
+        (g.players[0].shop[at].attack, g.players[0].shop[at].health),
+        (before.0 + 3, before.1 + 3),
+        "the Tavern copy grows by one Battlecry"
+    );
+    // Brann's double gives it two.
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    play_from_hand(&mut g, 0, "Refreshing Anomaly");
+    assert_eq!(
+        (g.players[0].shop[at].attack, g.players[0].shop[at].health),
+        (before.0 + 9, before.1 + 9),
+        "two more triggers"
+    );
+}
+
+#[test]
+fn the_battle_scars_gift_reads_the_same_count() {
+    let mut g = game(40);
+    let pos = board_with_gift(&mut g, 0, "Cord Puller", "Battle Scars");
+    let before = stats(&g, 0, pos);
+    play_from_hand(&mut g, 0, "Lullabot"); // no Battlecry
+    assert_eq!(stats(&g, 0, pos), before, "no Battlecry, no growth");
+    play_from_hand(&mut g, 0, "Refreshing Anomaly");
+    assert_eq!(stats(&g, 0, pos), (before.0 + 3, before.1 + 3), "+3/+3 per Battlecry");
+    g.check_invariants().unwrap();
+}
+
+/// A Dark Paradox t6 in Bob's Tavern, with its stats and where it sits.
+fn tavern_paradox(g: &mut Game) -> ((i32, i32), usize) {
+    set_shop(g, 0, &["Dark Paradox t6"]);
+    let at = g.players[0].shop.iter().position(|m| Some(m.card) == g.paradox).expect("in the Tavern");
+    ((g.players[0].shop[at].attack, g.players[0].shop[at].health), at)
+}
+
+#[test]
+fn a_discover_battlecry_counts_at_the_pick_not_on_the_play() {
+    // The log case (17_59_26-g1 turn 8): Rodeo Performer's Discover Battlecry
+    // grows the Tavern's Paradox at the pick, one step after the play.
+    let mut g = game_with_paradox("Dark Paradox t6");
+    let (before, at) = tavern_paradox(&mut g);
+    play_from_hand(&mut g, 0, "Rodeo Performer");
+    assert_eq!(g.players[0].battlecries_triggered, 0, "nothing counted on the play");
+    assert_eq!(g.players[0].tp.battlecries, 0, "Murky Sticker's count too");
+    assert_eq!(g.players[0].pending_battlecries, 1, "one trigger waits for the pick");
+    assert_eq!(
+        (g.players[0].shop[at].attack, g.players[0].shop[at].health),
+        before,
+        "the Tavern copy has not grown yet"
+    );
+    // The pick: now it counts.
+    turn_of(&mut g, 0);
+    assert!(answer(&mut g), "the Discover is open");
+    assert_eq!(g.players[0].battlecries_triggered, 1, "counted at the pick");
+    assert_eq!(g.players[0].tp.battlecries, 1);
+    assert_eq!(g.players[0].pending_battlecries, 0, "nothing left owed");
+    assert_eq!(
+        (g.players[0].shop[at].attack, g.players[0].shop[at].health),
+        (before.0 + 3, before.1 + 3),
+        "the Tavern copy grows by the one trigger"
+    );
+}
+
+#[test]
+fn a_brann_doubled_discover_battlecry_counts_twice_at_the_picks() {
+    let mut g = game_with_paradox("Dark Paradox t6");
+    let (before, at) = tavern_paradox(&mut g);
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    play_from_hand(&mut g, 0, "Rodeo Performer");
+    assert_eq!(g.players[0].battlecries_triggered, 0, "still nothing on the play");
+    assert_eq!(g.players[0].pending_battlecries, 2, "Brann's two triggers wait");
+    assert_eq!(
+        (g.players[0].shop[at].attack, g.players[0].shop[at].health),
+        before,
+        "the Tavern copy has not grown yet"
+    );
+    // Brann's two Discovers: the count waits for the last pick.
+    turn_of(&mut g, 0);
+    assert!(answer(&mut g), "the first pick");
+    assert_eq!(g.players[0].battlecries_triggered, 0, "the second trigger still waits");
+    turn_of(&mut g, 0);
+    assert!(answer(&mut g), "the second pick");
+    assert_eq!(g.players[0].battlecries_triggered, 2, "two triggers at the last pick");
+    assert_eq!(g.players[0].pending_battlecries, 0);
+    assert_eq!(
+        (g.players[0].shop[at].attack, g.players[0].shop[at].health),
+        (before.0 + 6, before.1 + 6),
+        "+3/+3 for each of the two triggers"
+    );
+}

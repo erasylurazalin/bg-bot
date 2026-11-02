@@ -140,6 +140,7 @@ impl Player {
             board: ArrayVec::new(),
             pending_choose_one: None,
             cast_after_choice: None,
+            pending_battlecries: 0,
             pending_target: None,
             pending_shop_target: None,
             pending_discard: None,

@@ -1840,6 +1840,30 @@ fn resolve_card(data: &Data, ids: &CardIdMap, place: &ShopPlace) -> Option<CardI
     place.name.as_deref().and_then(|name| data.cards.by_name(name))
 }
 
+/// What a `discover` step's pick still owes the Battlecry count. A Discover a
+/// Battlecry opened counts for "for each Battlecry you've triggered" at the
+/// pick, not on the play (DESIGN.md "Counting Battlecries", 17_59_26-g1 turn
+/// 8: the Tavern's Dark Paradox grows at the pick). This replay plays one
+/// step at a time from the log's own state, so the play that owed it is
+/// behind us: the step names the card that opened the Discover (`source`),
+/// and when that card has a Battlecry the pick pays the triggers it would
+/// have had.
+fn owe_battlecry_count(data: &Data, ids: &CardIdMap, game: &mut Game, step: &ShopStepSpec) {
+    if step.kind.as_deref() != Some("discover") {
+        // A Triple Reward, a Dark Gift offer or a Choose One spell's pick.
+        return;
+    }
+    let Some(card) = step.source.as_ref().and_then(|s| resolve_card(data, ids, s)) else {
+        return;
+    };
+    if data.cards.get(card).battlecry.is_none() {
+        return;
+    }
+    let n = game.battlecry_triggers(ME, card);
+    let pl = &mut game.players[ME];
+    pl.pending_battlecries = pl.pending_battlecries.saturating_add(n);
+}
+
 /// Put the log's offer on the player before answering it: a Discover's
 /// options, a Dark Discovery's offers with their gifts, or a trinket offer.
 /// Returns the index of the option the log picked.
@@ -2142,6 +2166,9 @@ fn actions_for(
         }
         "dark_discovery" => out.push(Action::DarkGift),
         "discover" | "trinket_pick" => {
+            if step.step == "discover" {
+                owe_battlecry_count(data, ids, &mut loaded.game, step);
+            }
             let at = force_offer(data, ids, &mut loaded.game, step, turn, missing)?;
             out.push(Action::Choose(at as u8));
         }
@@ -2181,6 +2208,10 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         // The end of turn effects, without the fight that follows them: the
         // logged turn ends before the fight.
         loaded.game.shop_end_of_turn(ME);
+        // And the picks those effects opened are in the same logged step (the
+        // file folds them in), so a Battlecry they triggered has resolved and
+        // owes its count here.
+        loaded.game.pay_pending_battlecries(ME);
         let snap = ShopSnapshot::of_game(data, &loaded.game, ME);
         return Ok((snap, missing, "end of turn effects".to_string()));
     }
