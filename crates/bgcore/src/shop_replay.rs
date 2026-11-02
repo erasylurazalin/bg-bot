@@ -200,6 +200,11 @@ pub struct ShopPlace {
     /// `board`, `hand`, `slot`, `hero`, `offer` or a zone name.
     #[serde(default)]
     pub kind: Option<String>,
+    /// The same for a card that went somewhere: `moved`'s `from` and `to` say
+    /// it as `where` (`hand`, `board`, `tavern`, `offer`, `off`), while a
+    /// step's `target` and `card` say it as `kind` (`zone()` reads both).
+    #[serde(default, rename = "where")]
+    pub place: Option<String>,
     /// The Dark Gifts the card carries (a Dark Discovery's offers).
     #[serde(default)]
     pub dark_gifts: Vec<ShopGiftSpec>,
@@ -222,6 +227,14 @@ pub struct ShopPlace {
     pub index: Option<u8>,
     #[serde(default)]
     pub slot: Option<u8>,
+}
+
+impl ShopPlace {
+    /// The zone this place names: a step's `target` and `card` say it as
+    /// `kind`, a `moved` destination as `where`.
+    pub fn zone(&self) -> Option<&str> {
+        self.place.as_deref().or(self.kind.as_deref())
+    }
 }
 
 /// One step of a shop phase, as the file names it, with the state it left.
@@ -488,6 +501,14 @@ fn tavern_split(state: &ShopStateSpec) -> (Vec<&ShopMinionSpec>, Option<&ShopMin
     (sorted, spell)
 }
 
+/// The engine's shop index of a slot the file names: the file counts the
+/// spell slot in its slot order and the engine keeps it apart
+/// (`Player.shop_spell`), so only the minion slots before it count.
+fn engine_shop_slot(state: &ShopStateSpec, slot: u8) -> usize {
+    let (slots, _) = tavern_split(state);
+    slots.iter().filter(|m| m.slot.unwrap_or(0) < slot).count()
+}
+
 /// The player index every replay loads into: a sandbox game with one player.
 pub const ME: usize = 0;
 
@@ -725,6 +746,8 @@ pub fn load(
         .collect();
     let hit = seat_trinkets(data, &mut game.players[ME], &trinkets);
     missing.extend(hit);
+    seat_trinket_counters(data, &mut game.players[ME], &spec.trinkets);
+    seat_power_counters(data, &mut game.players[ME], &spec.hero_powers);
     match &spec.secrets {
         Some(_) => {
             let hit = seat_secrets(&mut game.players[ME], spec.secrets.as_ref());
@@ -762,7 +785,81 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
     if card.keywords.has(Keywords::MAGNETIC) {
         minion.keywords.set(Keywords::MAGNETIC);
     }
+    // A card whose trigger counts its events ("After you spend 9 Gold, get a
+    // random Bounty. (6 Gold left!)"): the engine keeps how far the count has
+    // come in `improvements` (`Minion::events_left`), and the logged card's
+    // first number is what is left of it. The card data says which cards
+    // count (`on_event`) and how many events the next firing takes, and the
+    // cards whose numbers mean something else (Living Azerite's buff pair) or
+    // that have no count (Doubloon Grifter, an "@ left!" the log never fills)
+    // are left at 0, as they are today.
+    if let Some(trigger) = card.on_event
+        && trigger.every > 1
+    {
+        let left = m.numbers.first().copied().unwrap_or(trigger.every as i32);
+        let done = (trigger.every as i32 - left).clamp(0, trigger.every as i32 - 1);
+        minion.improvements = done as u16;
+    }
     (minion, bad)
+}
+
+/// The counters a trinket's own numbers hold: what is left of a per-turn use
+/// (Warcry Totem's free Battlecry minions, Transcribing Typewriter's copies,
+/// Magicfin Sticker's uses) or how far an "every N" rule has come (Wand of
+/// Divination's three spells on minions). Only the cards whose number the log
+/// shows with that meaning are here: every other trinket's numbers are
+/// something else (a stat, an improvement count, the card Portable Factory
+/// remembers) and are left alone. Per-card mapping, as for the Tavern's
+/// prices: the same number means a different thing on each trinket.
+fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]) {
+    for slot in 0..pl.trinkets.len() {
+        let of = pl.trinkets[slot].of;
+        if of == 0 {
+            continue;
+        }
+        let card_id = data.trinkets.get(of - 1).card_id.clone();
+        let Some(spec) = specs.iter().find(|t| t.card_id.as_deref() == Some(&card_id)) else {
+            continue;
+        };
+        let n = |i: usize| spec.numbers.get(i).copied().unwrap_or(0).clamp(0, u8::MAX as i32) as u8;
+        match card_id.as_str() {
+            // "The first two Battlecry minions you buy each turn are free."
+            "BG36_MagicItem_202" => pl.tp.free_buys = n(0),
+            // "Get an extra copy of the next 2 (4, greater) minions you buy."
+            "BG35_MagicItem_931" | "BG35_MagicItem_931t" => pl.tp.copy_buys = n(0),
+            // "Your first two Refreshes each turn contain only Tier 6 cards."
+            // The base is what the next turn starts over from.
+            "BG32_MagicItem_366" => {
+                pl.tp.refresh_tier6 = n(0);
+                pl.tp.refresh_tier6_base = 2;
+            }
+            // "After you buy a Tavern spell, get a 1/1 Murloc and teach it that
+            // spell. (2 times per turn.)"
+            "BG35_MagicItem_750" => pl.trinkets[slot].uses_left = n(0),
+            // "After you cast 3 spells on minions, gain 1 Gold." The number is
+            // what is left of the three.
+            "BG36_MagicItem_307" => pl.trinkets[slot].count = (3 - n(0)).min(3) as u16,
+            _ => {}
+        }
+    }
+}
+
+/// The count one hero power keeps, from the number its log entry shows:
+/// Tae'thelan's Reliquary Research counts Tavern spells bought toward the free
+/// third one, and the log's number is how many more it takes. The count lives
+/// on the player (`HeroCounts`), which every card that reads it looks at.
+fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPowerSpec]) {
+    for power in powers {
+        let Some(card_id) = power.card_id.as_deref() else { continue };
+        if data.heroes.power_by_card_id(card_id).is_none() {
+            continue;
+        }
+        let left = power.numbers.first().copied().unwrap_or(0).clamp(0, 2);
+        if card_id.starts_with("BG28_HERO_800p") {
+            // "(3 left!)" is nothing bought yet, "(1 left!)" one bought.
+            pl.counts.tavern_spells_bought = (2 - left) as u32;
+        }
+    }
 }
 
 /// One zone (the board or the hand) of a logged state, in position order.
@@ -1736,7 +1833,7 @@ fn force_offer(
         .moved
         .as_ref()
         .and_then(|m| m.to.as_ref())
-        .is_some_and(|to| matches!(to.kind.as_deref(), Some("board") | Some("slot")));
+        .is_some_and(|to| matches!(to.zone(), Some("board") | Some("tavern")));
     if !placed_elsewhere && ready.len() == step.options.len() && !ready.is_empty() {
         for m in &ready {
             let _ = pl.discover_minions.try_push(*m);
@@ -1958,15 +2055,23 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     if step.step == "discover"
         && let Some(to) = step.moved.as_ref().and_then(|m| m.to.as_ref())
     {
-            match to.kind.as_deref() {
+            match to.zone() {
                 Some("board") => {
                     if let Some(pos) = to.position {
                         loaded.game.players[ME].tp.transform_slot = pos;
                     }
                 }
-                Some("slot") => {
+                Some("tavern") => {
                     if let Some(slot) = to.slot {
-                        loaded.game.players[ME].discover_into_shop = slot;
+                        // The pick takes the Tavern slot the old card held,
+                        // which is still where the logged state shows it (the
+                        // game keeps it on show while the Discover is open) and
+                        // which the engine's own pick clears. The slot is the
+                        // file's, the spell slot counted in it; the engine's
+                        // shop holds the minion slots alone.
+                        let at = engine_shop_slot(before, slot);
+                        loaded.game.players[ME].discover_into_shop =
+                            (at.min(crate::SHOP - 1) + 1) as u8;
                     }
                 }
         _ => {}

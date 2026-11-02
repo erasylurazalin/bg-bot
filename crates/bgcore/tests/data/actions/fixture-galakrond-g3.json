@@ -1,0 +1,1145 @@
+{
+ "source": "Hearthstone_2026_10_26_00_48_15",
+ "game": 3,
+ "hero": {
+  "card_id": "TB_BaconShop_HERO_27",
+  "name": "Sindragosa"
+ },
+ "tribes": [
+  "aberration",
+  "beast",
+  "dragon",
+  "mech",
+  "murloc",
+  "pirate"
+ ],
+ "turns": [
+  {
+   "turn": 7,
+   "start": {
+    "board": [
+     {
+      "id": 4392,
+      "position": 1,
+      "card_id": "BG36_521",
+      "name": "Locked-up Mutineer",
+      "attack": 8,
+      "health": 5,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "id": 4394,
+      "position": 2,
+      "card_id": "BG36_202",
+      "name": "Tasty Lobster",
+      "attack": 4,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t16",
+        "name": "Jaws of Death"
+       }
+      ],
+      "numbers": [
+       14,
+       7,
+       0,
+       0
+      ]
+     },
+     {
+      "id": 4397,
+      "position": 3,
+      "card_id": "BG36_202",
+      "name": "Tasty Lobster",
+      "attack": 4,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       14,
+       7,
+       0,
+       0
+      ]
+     },
+     {
+      "id": 4399,
+      "position": 4,
+      "card_id": "BG36_312",
+      "name": "Mindbending Recruiter",
+      "attack": 6,
+      "health": 2,
+      "golden": false,
+      "keywords": [],
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t5",
+        "name": "Mystic Essence"
+       }
+      ]
+     },
+     {
+      "id": 4401,
+      "position": 5,
+      "card_id": "BG36_342",
+      "name": "Clever Castaway",
+      "attack": 15,
+      "health": 16,
+      "golden": false,
+      "keywords": [],
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t73",
+        "name": "Fortitude"
+       }
+      ],
+      "numbers": [
+       2,
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "id": 4406,
+      "position": 6,
+      "card_id": "BG36_112",
+      "name": "Fetid Corroder",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": []
+     }
+    ],
+    "hand": [
+     {
+      "id": 3542,
+      "index": 1,
+      "card_id": "BG36_520t",
+      "name": "Lockbox",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       3,
+       0,
+       0,
+       0
+      ],
+      "from": {
+       "card_id": "BG36_521",
+       "name": "Locked-up Mutineer"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 4138,
+      "index": 2,
+      "card_id": "BG36_301t",
+      "name": "Sludge Corrosion",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       1,
+       0,
+       0
+      ],
+      "from": {
+       "card_id": "BG36_112",
+       "name": "Fetid Corroder"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 4922,
+      "index": 3,
+      "card_id": "BG28_601",
+      "name": "Cloning Conch",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "BG36_312",
+       "name": "Mindbending Recruiter"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 5182,
+      "index": 4,
+      "card_id": "BG_EX1_014t",
+      "name": "Bananas",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_HERO_38",
+       "name": "King Mukla"
+      },
+      "kind": "spell"
+     }
+    ],
+    "tavern": [
+     {
+      "id": 5173,
+      "slot": 1,
+      "card_id": "BG36_342",
+      "name": "Clever Castaway",
+      "attack": 2,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       2,
+       0,
+       0,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 5175,
+      "slot": 2,
+      "card_id": "BGS_018",
+      "name": "Goldrinn, the Great Wolf",
+      "attack": 7,
+      "health": 7,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       7,
+       7,
+       0,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 5177,
+      "slot": 3,
+      "card_id": "BG33_822",
+      "name": "Bigwig Bandit",
+      "attack": 4,
+      "health": 6,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 5179,
+      "slot": 4,
+      "card_id": "BG36_200",
+      "name": "Flittering Bat",
+      "attack": 1,
+      "health": 4,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       1,
+       0,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 4367,
+      "slot": 5,
+      "card_id": "BG33_814",
+      "name": "Friendly Bounty",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "kind": "spell",
+      "cost": 2,
+      "frozen": false
+     }
+    ],
+    "hand_hidden": 0,
+    "gold": 9,
+    "gold_max": 10,
+    "tier": 4,
+    "upgrade_cost": 10,
+    "health": 18,
+    "armor": 0,
+    "hero_powers": [
+     {
+      "card_id": "TB_BaconShop_HP_014",
+      "name": "Stay Frosty",
+      "numbers": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "cost": 0,
+      "used_this_turn": 0,
+      "waiting": null
+     },
+     {
+      "card_id": "TB_BaconShop_HP_011",
+      "name": "Galakrond's Greed",
+      "numbers": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "cost": 1,
+      "used_this_turn": 0,
+      "second": true,
+      "waiting": null
+     }
+    ],
+    "trinkets": [
+     {
+      "card_id": "BG36_MagicItem_411",
+      "name": "Reinvigorating Light",
+      "greater": false,
+      "numbers": [
+       3,
+       0,
+       0,
+       20
+      ]
+     }
+    ],
+    "free_refreshes": 0,
+    "frozen": false,
+    "counters": {
+     "spells_cast": 9,
+     "gold_spent": 42
+    },
+    "secrets": [],
+    "won_last_combat": false
+   },
+   "actions": [
+    {
+     "step": "discover",
+     "source": {
+      "id": 3878,
+      "card_id": "TB_BaconShop_HP_011",
+      "name": "Galakrond's Greed",
+      "cost": 1
+     },
+     "options": [
+      {
+       "id": 5232,
+       "card_id": "BG22_403",
+       "name": "Young Murk-Eye",
+       "attack": 8,
+       "health": 5,
+       "golden": false,
+       "keywords": []
+      },
+      {
+       "id": 5233,
+       "card_id": "BG36_640",
+       "name": "Gatekeeper Amalgam",
+       "attack": 6,
+       "health": 6,
+       "golden": false,
+       "keywords": []
+      },
+      {
+       "id": 5234,
+       "card_id": "BG33_823",
+       "name": "Sky Admiral Rogers",
+       "attack": 4,
+       "health": 5,
+       "golden": false,
+       "keywords": [],
+       "numbers": [
+        9,
+        0,
+        9,
+        0
+       ]
+      }
+     ],
+     "kind": "discover",
+     "paid": {
+      "gold": 0,
+      "health": 0
+     },
+     "after": {
+      "board": [
+       {
+        "id": 4392,
+        "position": 1,
+        "card_id": "BG36_521",
+        "name": "Locked-up Mutineer",
+        "attack": 8,
+        "health": 5,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         0,
+         0,
+         0
+        ]
+       },
+       {
+        "id": 4394,
+        "position": 2,
+        "card_id": "BG36_202",
+        "name": "Tasty Lobster",
+        "attack": 4,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "dark_gifts": [
+         {
+          "card_id": "BG36_MidGameEffect_000t16",
+          "name": "Jaws of Death"
+         }
+        ],
+        "numbers": [
+         14,
+         7,
+         0,
+         0
+        ]
+       },
+       {
+        "id": 4397,
+        "position": 3,
+        "card_id": "BG36_202",
+        "name": "Tasty Lobster",
+        "attack": 4,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         14,
+         7,
+         0,
+         0
+        ]
+       },
+       {
+        "id": 4399,
+        "position": 4,
+        "card_id": "BG36_312",
+        "name": "Mindbending Recruiter",
+        "attack": 6,
+        "health": 2,
+        "golden": false,
+        "keywords": [],
+        "dark_gifts": [
+         {
+          "card_id": "BG36_MidGameEffect_000t5",
+          "name": "Mystic Essence"
+         }
+        ]
+       },
+       {
+        "id": 4401,
+        "position": 5,
+        "card_id": "BG36_342",
+        "name": "Clever Castaway",
+        "attack": 15,
+        "health": 16,
+        "golden": false,
+        "keywords": [],
+        "dark_gifts": [
+         {
+          "card_id": "BG36_MidGameEffect_000t73",
+          "name": "Fortitude"
+         }
+        ],
+        "numbers": [
+         2,
+         0,
+         0,
+         0
+        ]
+       },
+       {
+        "id": 4406,
+        "position": 6,
+        "card_id": "BG36_112",
+        "name": "Fetid Corroder",
+        "attack": 3,
+        "health": 3,
+        "golden": false,
+        "keywords": []
+       }
+      ],
+      "hand": [
+       {
+        "id": 3542,
+        "index": 1,
+        "card_id": "BG36_520t",
+        "name": "Lockbox",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         3,
+         0,
+         0,
+         0
+        ],
+        "from": {
+         "card_id": "BG36_521",
+         "name": "Locked-up Mutineer"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 4138,
+        "index": 2,
+        "card_id": "BG36_301t",
+        "name": "Sludge Corrosion",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         1,
+         0,
+         0
+        ],
+        "from": {
+         "card_id": "BG36_112",
+         "name": "Fetid Corroder"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 4922,
+        "index": 3,
+        "card_id": "BG28_601",
+        "name": "Cloning Conch",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "BG36_312",
+         "name": "Mindbending Recruiter"
+        },
+        "kind": "spell"
+       },
+       {
+        "id": 5182,
+        "index": 4,
+        "card_id": "BG_EX1_014t",
+        "name": "Bananas",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "from": {
+         "card_id": "TB_BaconShop_HERO_38",
+         "name": "King Mukla"
+        },
+        "kind": "spell"
+       }
+      ],
+      "tavern": [
+       {
+        "id": 5173,
+        "slot": 1,
+        "card_id": "BG36_342",
+        "name": "Clever Castaway",
+        "attack": 2,
+        "health": 3,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         2,
+         0,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 5251,
+        "slot": 2,
+        "card_id": "BG33_823",
+        "name": "Sky Admiral Rogers",
+        "attack": 4,
+        "health": 5,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         9,
+         0,
+         9,
+         0
+        ],
+        "from": {
+         "card_id": "TB_BaconShop_HP_011",
+         "name": "Galakrond's Greed"
+        },
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 5177,
+        "slot": 3,
+        "card_id": "BG33_822",
+        "name": "Bigwig Bandit",
+        "attack": 4,
+        "health": 6,
+        "golden": false,
+        "keywords": [],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 5179,
+        "slot": 4,
+        "card_id": "BG36_200",
+        "name": "Flittering Bat",
+        "attack": 1,
+        "health": 4,
+        "golden": false,
+        "keywords": [],
+        "numbers": [
+         1,
+         1,
+         0,
+         0
+        ],
+        "kind": "minion",
+        "frozen": false
+       },
+       {
+        "id": 4367,
+        "slot": 5,
+        "card_id": "BG33_814",
+        "name": "Friendly Bounty",
+        "attack": 0,
+        "health": 0,
+        "golden": false,
+        "keywords": [],
+        "kind": "spell",
+        "cost": 2,
+        "frozen": false
+       }
+      ],
+      "hand_hidden": 0,
+      "gold": 9,
+      "gold_max": 10,
+      "tier": 4,
+      "upgrade_cost": 10,
+      "health": 18,
+      "armor": 0,
+      "hero_powers": [
+       {
+        "card_id": "TB_BaconShop_HP_014",
+        "name": "Stay Frosty",
+        "numbers": [
+         0,
+         0,
+         0,
+         0
+        ],
+        "cost": 0,
+        "used_this_turn": 0,
+        "waiting": null
+       },
+       {
+        "card_id": "TB_BaconShop_HP_011",
+        "name": "Galakrond's Greed",
+        "numbers": [
+         0,
+         0,
+         0,
+         0
+        ],
+        "cost": 1,
+        "used_this_turn": 1,
+        "second": true,
+        "waiting": null
+       }
+      ],
+      "trinkets": [
+       {
+        "card_id": "BG36_MagicItem_411",
+        "name": "Reinvigorating Light",
+        "greater": false,
+        "numbers": [
+         3,
+         0,
+         0,
+         20
+        ]
+       }
+      ],
+      "free_refreshes": 0,
+      "frozen": false,
+      "counters": {
+       "spells_cast": 9,
+       "gold_spent": 42
+      },
+      "secrets": [],
+      "won_last_combat": false
+     },
+     "picked": {
+      "id": 5234,
+      "card_id": "BG33_823",
+      "name": "Sky Admiral Rogers",
+      "attack": 4,
+      "health": 5,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       9,
+       0,
+       9,
+       0
+      ]
+     },
+     "moved": {
+      "id": 5234,
+      "from": {
+       "where": "offer"
+      },
+      "to": {
+       "where": "tavern",
+       "slot": 2,
+       "id": 5251
+      }
+     },
+     "tavern": [
+      {
+       "id": 5173,
+       "slot": 1,
+       "card_id": "BG36_342",
+       "name": "Clever Castaway",
+       "attack": 2,
+       "health": 3,
+       "golden": false,
+       "keywords": [],
+       "numbers": [
+        2,
+        0,
+        0,
+        0
+       ],
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 5251,
+       "slot": 2,
+       "card_id": "BG33_823",
+       "name": "Sky Admiral Rogers",
+       "attack": 4,
+       "health": 5,
+       "golden": false,
+       "keywords": [],
+       "numbers": [
+        9,
+        0,
+        9,
+        0
+       ],
+       "from": {
+        "card_id": "TB_BaconShop_HP_011",
+        "name": "Galakrond's Greed"
+       },
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 5177,
+       "slot": 3,
+       "card_id": "BG33_822",
+       "name": "Bigwig Bandit",
+       "attack": 4,
+       "health": 6,
+       "golden": false,
+       "keywords": [],
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 5179,
+       "slot": 4,
+       "card_id": "BG36_200",
+       "name": "Flittering Bat",
+       "attack": 1,
+       "health": 4,
+       "golden": false,
+       "keywords": [],
+       "numbers": [
+        1,
+        1,
+        0,
+        0
+       ],
+       "kind": "minion",
+       "frozen": false
+      },
+      {
+       "id": 4367,
+       "slot": 5,
+       "card_id": "BG33_814",
+       "name": "Friendly Bounty",
+       "attack": 0,
+       "health": 0,
+       "golden": false,
+       "keywords": [],
+       "kind": "spell",
+       "cost": 2,
+       "frozen": false
+      }
+     ]
+    }
+   ],
+   "end": {
+    "board": [
+     {
+      "id": 4392,
+      "position": 1,
+      "card_id": "BG36_521",
+      "name": "Locked-up Mutineer",
+      "attack": 8,
+      "health": 5,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "id": 4394,
+      "position": 2,
+      "card_id": "BG36_202",
+      "name": "Tasty Lobster",
+      "attack": 4,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t16",
+        "name": "Jaws of Death"
+       }
+      ],
+      "numbers": [
+       14,
+       7,
+       0,
+       0
+      ]
+     },
+     {
+      "id": 4397,
+      "position": 3,
+      "card_id": "BG36_202",
+      "name": "Tasty Lobster",
+      "attack": 4,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       14,
+       7,
+       0,
+       0
+      ]
+     },
+     {
+      "id": 4399,
+      "position": 4,
+      "card_id": "BG36_312",
+      "name": "Mindbending Recruiter",
+      "attack": 6,
+      "health": 2,
+      "golden": false,
+      "keywords": [],
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t5",
+        "name": "Mystic Essence"
+       }
+      ]
+     },
+     {
+      "id": 4401,
+      "position": 5,
+      "card_id": "BG36_342",
+      "name": "Clever Castaway",
+      "attack": 15,
+      "health": 16,
+      "golden": false,
+      "keywords": [],
+      "dark_gifts": [
+       {
+        "card_id": "BG36_MidGameEffect_000t73",
+        "name": "Fortitude"
+       }
+      ],
+      "numbers": [
+       2,
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "id": 4406,
+      "position": 6,
+      "card_id": "BG36_112",
+      "name": "Fetid Corroder",
+      "attack": 3,
+      "health": 3,
+      "golden": false,
+      "keywords": []
+     }
+    ],
+    "hand": [
+     {
+      "id": 3542,
+      "index": 1,
+      "card_id": "BG36_520t",
+      "name": "Lockbox",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       3,
+       0,
+       0,
+       0
+      ],
+      "from": {
+       "card_id": "BG36_521",
+       "name": "Locked-up Mutineer"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 4138,
+      "index": 2,
+      "card_id": "BG36_301t",
+      "name": "Sludge Corrosion",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       1,
+       0,
+       0
+      ],
+      "from": {
+       "card_id": "BG36_112",
+       "name": "Fetid Corroder"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 4922,
+      "index": 3,
+      "card_id": "BG28_601",
+      "name": "Cloning Conch",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "BG36_312",
+       "name": "Mindbending Recruiter"
+      },
+      "kind": "spell"
+     },
+     {
+      "id": 5182,
+      "index": 4,
+      "card_id": "BG_EX1_014t",
+      "name": "Bananas",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "from": {
+       "card_id": "TB_BaconShop_HERO_38",
+       "name": "King Mukla"
+      },
+      "kind": "spell"
+     }
+    ],
+    "tavern": [
+     {
+      "id": 5173,
+      "slot": 1,
+      "card_id": "BG36_342",
+      "name": "Clever Castaway",
+      "attack": 2,
+      "health": 3,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       2,
+       0,
+       0,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 5251,
+      "slot": 2,
+      "card_id": "BG33_823",
+      "name": "Sky Admiral Rogers",
+      "attack": 4,
+      "health": 5,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       9,
+       0,
+       9,
+       0
+      ],
+      "from": {
+       "card_id": "TB_BaconShop_HP_011",
+       "name": "Galakrond's Greed"
+      },
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 5177,
+      "slot": 3,
+      "card_id": "BG33_822",
+      "name": "Bigwig Bandit",
+      "attack": 4,
+      "health": 6,
+      "golden": false,
+      "keywords": [],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 5179,
+      "slot": 4,
+      "card_id": "BG36_200",
+      "name": "Flittering Bat",
+      "attack": 1,
+      "health": 4,
+      "golden": false,
+      "keywords": [],
+      "numbers": [
+       1,
+       1,
+       0,
+       0
+      ],
+      "kind": "minion",
+      "frozen": false
+     },
+     {
+      "id": 4367,
+      "slot": 5,
+      "card_id": "BG33_814",
+      "name": "Friendly Bounty",
+      "attack": 0,
+      "health": 0,
+      "golden": false,
+      "keywords": [],
+      "kind": "spell",
+      "cost": 2,
+      "frozen": false
+     }
+    ],
+    "hand_hidden": 0,
+    "gold": 9,
+    "gold_max": 10,
+    "tier": 4,
+    "upgrade_cost": 10,
+    "health": 18,
+    "armor": 0,
+    "hero_powers": [
+     {
+      "card_id": "TB_BaconShop_HP_014",
+      "name": "Stay Frosty",
+      "numbers": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "cost": 0,
+      "used_this_turn": 0,
+      "waiting": null
+     },
+     {
+      "card_id": "TB_BaconShop_HP_011",
+      "name": "Galakrond's Greed",
+      "numbers": [
+       0,
+       0,
+       0,
+       0
+      ],
+      "cost": 1,
+      "used_this_turn": 1,
+      "second": true,
+      "waiting": null
+     }
+    ],
+    "trinkets": [
+     {
+      "card_id": "BG36_MagicItem_411",
+      "name": "Reinvigorating Light",
+      "greater": false,
+      "numbers": [
+       3,
+       0,
+       0,
+       20
+      ]
+     }
+    ],
+    "free_refreshes": 0,
+    "frozen": false,
+    "counters": {
+     "spells_cast": 9,
+     "gold_spent": 42
+    },
+    "secrets": [],
+    "won_last_combat": false
+   }
+  }
+ ]
+}

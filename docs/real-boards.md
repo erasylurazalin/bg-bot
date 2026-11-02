@@ -124,8 +124,8 @@ by the game): 566 boards carry counters, 379 a hand, 486 a Deity.
 `tools/collect_actions.py` reads the same logs for the other half of a game:
 what I did in every shop phase, as named steps. It writes
 `boards/actions/<log folder>-g<N>.json`, numbered exactly like `boards/real/`
-(52 games, 588 turns, about 12,600 steps when this was written; the folders
-grow every 15 minutes). It keeps its own `.state.json` and
+(56 games, 638 turns, about 13,900 steps on 2026-11-02; the folders grow every
+15 minutes). It keeps its own `.state.json` and
 skips a log whose size has not changed; `--rewrite` reads them all again. A run
 is about a minute. No player names are stored.
 
@@ -184,8 +184,10 @@ is about a minute. No player names are stored.
   numbers above they carry the marks and the player-level numbers a step reads:
   - `counters`, in the board files' keys (`docs/real-boards.md` "The file":
     Blood Gem size, Beetle and Undead bonuses, the Tavern spell bonus, spells
-    cast, Eternal Knight deaths, Tasty Lobster, Baller) plus the ones only a shop
-    step reads: `gold_spent` (`NUM_RESOURCES_SPENT_THIS_GAME`); the Tavern's
+    cast, Eternal Knight deaths, Tasty Lobster, Baller; `gem_attack`/`gem_health`
+    are the whole pair one Blood Gem gives, the printed +1/+1 plus the bonus the
+    `BACON_BLOODGEMBUFF*` tags hold, so a game with Gem Day has 1/2 Gems) plus
+    the ones only a shop step reads: `gold_spent` (`NUM_RESOURCES_SPENT_THIS_GAME`); the Tavern's
     "this game" buffs, `tavern_attack`/`tavern_health` (`BG_ShopBuff`, Staff of
     Enrichment and its kin) and `tavern_elemental_attack`/
     `tavern_elemental_health` (`BG_ShopBuff_Elemental`, Obsidian Ravager);
@@ -274,8 +276,8 @@ Every step says what it was and, where there is one, on which card or slot:
 adds every turn up: the Gold the steps took against the Gold the turn started
 and ended with (and Health the same way), and my hand and board at the end
 against the start plus everything the steps moved. On the logs read for this
-round it finds 565 of 568 turns balancing (99.5%); the two that do not are
-turns the log ends inside, before the fight.
+round (2026-11-02, 56 games) it finds 635 of 638 turns balancing (99.5%); the
+three that do not are turns the log ends inside, before the fight.
 
 Every price the client printed that the steps did not pay as printed is named
 by the file but one: a free Refresh in one of the new games, which the log
@@ -430,8 +432,8 @@ with what the real game did. It is a bug finder like the fight check
 
 Defaults: `boards/actions`, 64 seeds, `boards/checks` (git-ignored), no card
 filter. It needs no `ref/bg-cards.json`: the file names every card it writes.
-Every step in the folder (52 games, 588 turns, about 12,600 steps when this
-was written) takes about a second on 32 cores.
+Every step in the folder (56 games, 638 turns, about 13,900 steps on
+2026-11-02) takes about a second and a half on 32 cores.
 
 - **Reset before every step.** Replaying a whole turn would let one early
   mismatch spoil every later step, and forcing the log's randomness into the
@@ -462,6 +464,33 @@ was written) takes about a second on 32 cores.
     Stay Frosty, Enhancification, Glowing Gauntlet and the like.
   - **Magnetic** is put back on a loaded card (the board loader drops it, since
     a fight never reads it), and a Lockbox's turns left are its `{0}`.
+  - **The counters a card keeps** are read off the logged numbers, card by
+    card, because the same number means something else on each card:
+    - a minion's `on_event` trigger counts its events in `improvements`
+      ("After you spend 9 Gold, get a random Bounty. (6 Gold left!)"), and the
+      card data says which cards have one and how many events it takes: the
+      logged first number is what is left of it (Sky Admiral Rogers, Gunpowder
+      Courier, Felboar, Eredar Escapist, Enterprising Escapee, Air Revenant,
+      Auto Reveille, Unbound Tempest). A card whose first number is something
+      else (Living Azerite's buff pair), whose trigger is every 1, or whose
+      count the log never fills (Doubloon Grifter's "@ left!") keeps 0;
+    - a trinket's "left this turn" or "every N" count: Warcry Totem's free
+      Battlecry minions (`tp.free_buys`, its `{0}`), Transcribing Typewriter's
+      copies (`tp.copy_buys`), Magicfin Sticker's uses (`uses_left`), Guiding
+      Candle's Tier 6 Refreshes (`tp.refresh_tier6`, its `{0}`) and Wand of
+      Divination's count toward the third spell on a minion (`count`, three
+      minus its `{0}`). Every other trinket's numbers are a stat, an
+      improvement count or a card id (Portable Factory) and are left alone;
+    - a hero power's count: Tae'thelan's Reliquary Research counts Tavern
+      spells bought in `HeroCounts.tavern_spells_bought`, which the log shows
+      as how many more spells it takes.
+  - **A Discover that takes a slot** is seated from the pick's `moved.to`: the
+    engine's `discover_into_shop` for a Tavern slot (Galakrond's Greed) and
+    `tp.transform_slot` for a board minion (Token of the Old Gods). The slot is
+    the file's, which counts the spell slot; the engine's shop holds the minion
+    slots alone. The old card is still in the Tavern in the state before the
+    pick (the game keeps it on show while the Discover is open) and the
+    engine's pick puts it back in the pool, so nothing is removed twice.
   - A game with one player is a sandbox game, so nothing else acts in it. The
     pool is the lobby's minus the copies this player holds, so a Refresh draws
     from what the game had left, and the cards hold those copies so a sale
@@ -512,9 +541,15 @@ was written) takes about a second on 32 cores.
 What the replay cannot see, and so cannot blame on the engine: the lobby's real
 tribes (the file's `tribes` are the ones the log showed), the client's own
 prices where a discount is invisible (a Tavern spell's price comes from the
-engine's own rule), a trinket's per-option price at a pick (the file only says
-what the pick paid), and anything that happens between two of Era's decisions
-(the file writes it into the step before).
+engine's own rule, and so does a standing "minions cost (1)" from a played
+Friends and Family Discount or the Chillmere Mosaic spell: the logged Tavern
+minions carry no price, so a buy's Gold comes out of the engine's rule), a
+trinket's per-option price at a pick (the file only says what the pick paid), a
+Dark Gift's countdown (Incubation, Replication and Affinity keep "turns left" on
+the gift's enchantment, which the log does not number, so a start of turn and an
+end of turn step that is waiting on it is short by one card), and anything that
+happens between two of Era's decisions (the file writes it into the step
+before).
 
 Measures for the two checks on one machine are comparable: `fightcheck` reads
 a fight, `shopreplay` a step.

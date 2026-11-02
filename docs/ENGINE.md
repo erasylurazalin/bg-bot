@@ -123,7 +123,14 @@ rules behind each are in DESIGN.md Part 2.
   three. Per player: `Player.improve` with `Counters.improve` inside a
   fight (Tasty Lobster), the Tavern spell bonus, the Beast bonus from a
   shop Goldrinn, the Fodder queue. Gains made inside a fight come back
-  through `SideOutcome`.
+  through `SideOutcome`. The shop replay loads the per-minion "N left"
+  count off a logged card's first number for every card whose `on_event`
+  trigger takes more than one event (the card data says which, and what the
+  number means), and the "left this turn" counts a trinket keeps (Warcry
+  Totem's free Battlecry minions, Transcribing Typewriter's copies, Magicfin
+  Sticker's uses, Guiding Candle's Tier 6 Refreshes, Wand of Divination's
+  third spell) card by card, since the same number means something else on
+  each trinket (docs/real-boards.md "The shop replay").
 - **The hand in combat.** `fight_with_hands` passes a side's hand only when
   something on that side reads it. Murlocs summoned from hand come back
   unchanged; Winterfinner's hand buffs are kept.
@@ -416,8 +423,10 @@ build hero-less games so old tests pass unchanged, and
       the board and in hand; a Reborn the card prints stays.
     - **A Discover that lands in the Tavern.** `Player.discover_into_shop`
       (slot + 1) sends the pick into that Tavern slot instead of the hand:
-      Galakrond's Greed puts the old card back in the pool and Discovers from
-      exactly one Tier higher into its slot, with no Tavern buffs. Arcane
+      Galakrond's Greed Discovers from exactly one Tier higher into its slot,
+      with no Tavern buffs, and the old card stays on show in the slot until
+      the pick lands (the game's own client keeps it there too); the pick then
+      puts it back in the pool, buffs and all. Arcane
       Alteration replaces a card on the board or in the Tavern with a pool
       card of the same Tier, keeping the stats the old card had gained.
     - **Hats and Tickets.** `Minion.hats` counts Dancin' Deryl's +1/+1 hats
@@ -869,7 +878,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   trinket-only token, `buddy = true`) and a 10/10 Amalgam; Mishmash's
   "whenever your Amalgam gains stats, this gains them twice" is
   `Game::note_amalgam_gains`, run after every action beside Makeshift
-  Master's watch: the player keeps a snapshot of every board slot
+  Master's watch (which marks the card it chose, `Minion.watched`, so it
+  follows a Tavern minion I buy and then play): the player keeps a snapshot of every board slot
   (`Player.amalgam_seen`) and the gains an Amalgam made land on each Mishmash
   once per `Card.amalgam_gain_copy` (golden doubles it). In a fight it is
   `Side::amalgam_gain_at`, called from `gain_at` and `gain_permanent_at`: what

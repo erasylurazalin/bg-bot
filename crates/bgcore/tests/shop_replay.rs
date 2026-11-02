@@ -196,6 +196,43 @@ fn a_refresh_passes_by_shape() {
     );
 }
 
+/// Galakrond's Greed's Discover lands in the Tavern slot the power emptied,
+/// not in the hand: the file says where the pick went (`moved.to`, a Tavern
+/// slot) and the replay seats the engine's `discover_into_shop` with it.
+#[test]
+fn a_pick_that_takes_a_tavern_slot_lands_there() {
+    let file = fixtures()
+        .into_iter()
+        .find(|f| {
+            f.turns[0]
+                .actions
+                .iter()
+                .any(|s| s.moved.as_ref().and_then(|m| m.to.as_ref()).and_then(|t| t.zone()) == Some("tavern"))
+        })
+        .expect("a fixture whose Discover takes a Tavern slot");
+    let turn = &file.turns[0];
+    let i = step_named(turn, "discover");
+    let step = &turn.actions[i];
+    let to = step
+        .moved
+        .as_ref()
+        .and_then(|m| m.to.as_ref())
+        .expect("this Discover's pick takes a slot");
+    assert_eq!(to.zone(), Some("tavern"), "the file says the Tavern slot it took");
+    let picked = step.picked.as_ref().and_then(|p| p.name.clone()).unwrap_or_default();
+    let r = replay(&file, "discover");
+    assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.diffs);
+    assert!(
+        r.ours.tavern.iter().any(|m| m.name == picked),
+        "{picked} is in the Tavern the engine left"
+    );
+    assert!(
+        !r.ours.hand.iter().any(|m| m.name == picked),
+        "{picked} is not in the hand"
+    );
+    assert_eq!(r.ours.tavern.len(), r.log_after.tavern.len(), "the Tavern keeps its size");
+}
+
 /// A step that involves something the engine does not build is incomplete, not
 /// flagged: the state it starts from says what was missing.
 #[test]

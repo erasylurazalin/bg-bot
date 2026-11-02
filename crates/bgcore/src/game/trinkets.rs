@@ -1727,8 +1727,9 @@ impl Game {
         let Some(m) = pl.shop.get(slot) else { return MinionPrice::Gold(self.data.rules.buy_cost) };
         let card = self.data.cards.get(m.card);
         let tp = pl.tp;
+        // Warcry Totem's free buys are Battlecry minions only.
         if pl.free_minion_left > 0
-            || tp.free_buys > 0
+            || (tp.free_buys > 0 && card.battlecry.is_some())
             || (tp.free_tribe_left > 0 && tp.free_tribe.is_some_and(|t| card.tribes.has(t)))
         {
             return MinionPrice::Gold(0);

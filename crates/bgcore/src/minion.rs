@@ -226,6 +226,11 @@ pub struct Minion {
     /// Prize gave it "At the end of your turn, gain +4/+4" (Gruul Rules).
     /// (0, 0) for none.
     pub end_turn_gain: (i32, i32),
+    /// Watched by a Makeshift Master this turn: whatever stats it gains
+    /// outside combat the Deity gains too, wherever it is (the Tavern when it
+    /// is chosen, the hand after a buy, the board after it is played). The
+    /// watch ends with the turn, and with the card when it is sold.
+    pub watched: bool,
     /// Tribes a portrait gave every copy of this card its owner has or will
     /// have (Bronzebeard Portrait: a Brann counts as a Murloc and a Dragon).
     /// `CardDb::tribes_of` adds them, so every tribe check in the engine

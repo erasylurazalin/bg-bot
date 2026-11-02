@@ -1044,25 +1044,26 @@ impl Game {
     }
 
     /// Makeshift Master: the stats the watched minion gained since the last
-    /// action go to the Deity too. A board that moved (a triple, a death, a
-    /// different card in the slot) ends the watch rather than crediting the
-    /// wrong minion.
+    /// action go to the Deity too. The mark is on the card (`Minion.watched`),
+    /// so the watch follows it wherever it goes: a Tavern minion I bought,
+    /// the copy in my hand, the minion I then played. A card that leaves the
+    /// game (sold, consumed, tripled away) takes the watch with it.
     pub(super) fn watch_deity_gain(&mut self, p: usize) {
         let tp = self.players[p].tp;
-        if tp.deity_watch == 0 {
+        if !tp.deity_watching {
             return;
         }
-        let slot = (tp.deity_watch as usize - 1).min(crate::BOARD - 1);
-        let Some(m) = self.players[p].board.get(slot).copied() else {
-            self.players[p].tp.deity_watch = 0;
-            self.players[p].tp.deity_watch_card = None;
+        let pl = &self.players[p];
+        let watched = pl
+            .board
+            .iter()
+            .chain(pl.hand.iter())
+            .chain(pl.shop.iter())
+            .find(|m| m.watched)
+            .copied();
+        let Some(m) = watched else {
             return;
         };
-        if Some(m.card) != tp.deity_watch_card {
-            self.players[p].tp.deity_watch = 0;
-            self.players[p].tp.deity_watch_card = None;
-            return;
-        }
         let (a0, h0) = tp.deity_watch_stats;
         let (da, dh) = ((m.attack - a0).max(0), (m.health - h0).max(0));
         self.players[p].tp.deity_watch_stats = (m.attack, m.health);

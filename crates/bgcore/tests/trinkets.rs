@@ -3114,6 +3114,57 @@ fn the_makeshift_master_gives_the_deity_what_its_minion_gains() {
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn the_makeshift_master_watches_a_tavern_minion_and_follows_the_card() {
+    // DESIGN.md "Targets in the shop": "Choose a minion" takes a Tavern
+    // minion too, and the watch stays on the card when it is bought.
+    let mut g = game(195);
+    assert!(g.players[0].deity.is_some(), "an Aberration lobby has a Deity");
+    take(&mut g, 0, "Makeshift Master");
+    turn_of(&mut g, 0);
+    g.players[0].gold = 10;
+    assert!(!g.players[0].shop.is_empty(), "the Tavern holds a minion");
+    cast_from_hand(&mut g, 0, "Makeshift Master");
+    act(&mut g, 0, Action::TargetShop(0));
+    assert!(
+        g.players[0].shop[0].watched,
+        "the Tavern minion I chose carries the watch"
+    );
+    // A Tavern spell on it (+2/+2): the Deity gains the same.
+    let c = id(&g, "Tavern Dish Banana");
+    let m = g.players[0].make_card(&g.data.cards, c, false, 0);
+    g.players[0].hand.push(m);
+    let before = g.players[0].deity.unwrap();
+    cast_from_hand(&mut g, 0, "Tavern Dish Banana");
+    act(&mut g, 0, Action::TargetShop(0));
+    let after = g.players[0].deity.unwrap();
+    assert_eq!(
+        (after.attack - before.attack, after.health - before.health),
+        (2, 2),
+        "the Deity gained what the watched Tavern minion gained"
+    );
+    // Bought into the hand, then played: the watch goes with it.
+    act(&mut g, 0, Action::Buy(0));
+    let h = (0..g.players[0].hand.len())
+        .find(|&h| g.players[0].hand[h].watched)
+        .expect("the bought minion keeps its watch in hand");
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    assert!(g.players[0].board[0].watched, "the watch followed it to the board");
+    let before = g.players[0].deity.unwrap();
+    let c = id(&g, "Tavern Dish Banana");
+    let m = g.players[0].make_card(&g.data.cards, c, false, 0);
+    g.players[0].hand.push(m);
+    cast_from_hand(&mut g, 0, "Tavern Dish Banana");
+    act(&mut g, 0, Action::Target(0));
+    let after = g.players[0].deity.unwrap();
+    assert_eq!(
+        (after.attack - before.attack, after.health - before.health),
+        (2, 2),
+        "the Deity still follows the minion on the board"
+    );
+    g.check_invariants().unwrap();
+}
+
 // ---- the leftovers ----
 
 #[test]

@@ -505,11 +505,13 @@ pub struct TrinketPowers {
     pub refresh_tier6_base: u8,
     /// The lowest Tavern tier on offer, 0 for tier 1 (Bob-blehead).
     pub min_tier: u8,
-    /// Makeshift Master: the board slot (plus one) whose stat gains this
-    /// turn the Deity copies, the card that was there, and the stats it had
-    /// when the watching started. 0 when nothing is watched.
-    pub deity_watch: u8,
-    pub deity_watch_card: Option<CardId>,
+    /// Makeshift Master: the stats the watched minion (`Minion.watched`) had
+    /// when the watching started, so whatever it gains from then on goes to
+    /// the Deity too. It follows the card: the Tavern minion chosen, the hand
+    /// after a buy, the board after it is played. `deity_watching` says whether
+    /// anything is watched at all, so the pass after every action costs one
+    /// read when no Makeshift Master is out.
+    pub deity_watching: bool,
     pub deity_watch_stats: (i32, i32),
     /// The price of the minions a Refresh put in the Tavern (Chillmere
     /// Mosaic: they cost 1), 0 for their own price. It ends with the next

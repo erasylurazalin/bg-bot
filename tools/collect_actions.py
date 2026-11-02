@@ -839,6 +839,24 @@ class ActionTracker(Tracker):
                     return {"where": key, field: c[field]}
         return {"where": "off"}
 
+    def landed(self, picked, before, after):
+        """Where a pick that took a slot went: the one card of that card id the
+        step added to my hand, my board or my Tavern, with the entity the game
+        made it as. A pick the game landed as a new entity keeps no id of the
+        offer, so it is the id that says which card is new. A pick that left
+        the game (a trinket, a card a spell consumed) adds none, and `off`
+        says so."""
+        card_id = picked.get("card_id")
+        if not card_id:
+            return {"where": "off"}
+        for key, field in (("hand", "index"), ("board", "position"), ("tavern", "slot")):
+            had = {c["id"] for c in before[key]}
+            for c in after[key]:
+                if c["id"] in had or c.get("card_id") != card_id:
+                    continue
+                return {"where": key, field: c[field], "id": c["id"]}
+        return {"where": "off"}
+
     def card_brief(self, c):
         d = {"id": c["id"], "card_id": c["card_id"], "name": c["name"]}
         for k in ("attack", "health", "golden", "dark_gifts", "numbers"):
@@ -874,8 +892,13 @@ class ActionTracker(Tracker):
                 self.unread["a pick the log does not show"] += 1
             else:
                 # where the card I picked went: my hand, my board, or a trinket
-                # slot, which is neither
+                # slot, which is neither. A pick that takes a slot (Galakrond's
+                # Greed's Tavern slot, Token of the Old Gods's board minion) is
+                # a new entity with the picked card's id, so it is found by
+                # what the step added, not by the offer's entity id.
                 now = self.moved_to(picked["id"], after)
+                if now["where"] == "off" and step["step"] == "discover":
+                    now = self.landed(picked, p["before"], after)
                 step["moved"] = {"id": picked["id"], "from": {"where": "offer"},
                                  "to": None if now["where"] == "off" else now}
             self.choice = None
@@ -1262,11 +1285,16 @@ class ActionTracker(Tracker):
         out = {}
         if p is None:
             return out
-        # What one Blood Gem gives (BACON_BLOODGEMBUFFATKVALUE, +1/+1 base).
-        if p["BACON_BLOODGEMBUFFATKVALUE"] not in (0, 1) or \
-                p["BACON_BLOODGEMBUFFHEALTHVALUE"] not in (0, 1):
-            out["gem_attack"] = p["BACON_BLOODGEMBUFFATKVALUE"] or 1
-            out["gem_health"] = p["BACON_BLOODGEMBUFFHEALTHVALUE"] or 1
+        # What one Blood Gem gives: the printed +1/+1 plus the bonus the two
+        # BACON_BLOODGEMBUFF tags hold (Gem Day's "+1 Health", Sanguine
+        # Refiner). The tags are the bonus, not the pair: a game with Gem
+        # Day shows tag 1 and hands out 1/2 Gems, and the Gems in my hand
+        # carry that pair in their own numbers.
+        gem_attack = 1 + max(p["BACON_BLOODGEMBUFFATKVALUE"], 0)
+        gem_health = 1 + max(p["BACON_BLOODGEMBUFFHEALTHVALUE"], 0)
+        if gem_attack != 1 or gem_health != 1:
+            out["gem_attack"] = gem_attack
+            out["gem_health"] = gem_health
         # The Tavern spell bonus, which every Tavern spell this player casts
         # and every spell on a minion gets.
         if p["TAVERN_SPELL_ATTACK_INCREASE"]:

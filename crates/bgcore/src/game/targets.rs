@@ -188,13 +188,13 @@ impl Game {
                 m.keywords.set(Keywords::REBORN);
                 m.temp_reborn = true;
             }
-            // Galakrond's Greed: the old card goes back to the pool (the
-            // Tavern's buffs are lost) and a Discover from exactly one Tier
-            // higher takes its slot.
+            // Galakrond's Greed: a Discover from exactly one Tier higher
+            // takes this slot, and the old card goes back to the pool (the
+            // Tavern's buffs are lost) when the pick lands: the game keeps the
+            // card on show while the Discover is open, so the state the client
+            // shows still has it.
             TargetKind::ReplaceHigher => {
-                let old = self.players[p].shop.remove(slot);
-                let tier = self.data.cards.get(old.card).tier;
-                give_back(&mut self.pool, &self.data.cards, &old);
+                let tier = self.data.cards.get(self.players[p].shop[slot].card).tier;
                 self.players[p].discover_into_shop =
                     (slot.min(crate::SHOP - 1) + 1) as u8;
                 let _ = self.players[p]
@@ -362,10 +362,15 @@ impl Game {
                             stop_after = true;
                         }
                         SpellTarget::DestroyGetRandom { .. }
-                        | SpellTarget::TransformHigher
-                        | SpellTarget::WatchStats => {
+                        | SpellTarget::TransformHigher => {
                             // Friendly minions only: none of them reaches the
                             // Tavern (`SpellTarget::can_target_shop`).
+                        }
+                        // Makeshift Master: "Choose a minion" takes a Tavern
+                        // minion too (DESIGN.md "Targets in the shop"), and
+                        // the watch stays on the card when it is bought.
+                        SpellTarget::WatchStats => {
+                            self.set_deity_watch(p, target, true);
                         }
                         SpellTarget::Confiscation { gems } => {
                             // 3 Gems on the Tavern minion, then its
@@ -972,11 +977,7 @@ impl Game {
                         SpellTarget::WatchStats => {
                             // Makeshift Master: from now on, whatever stats
                             // this minion gains this turn the Deity gains.
-                            let m = self.players[p].board[target_pos];
-                            let tp = &mut self.players[p].tp;
-                            tp.deity_watch = target_pos as u8 + 1;
-                            tp.deity_watch_card = Some(m.card);
-                            tp.deity_watch_stats = (m.attack, m.health);
+                            self.set_deity_watch(p, target_pos, false);
                         }
                         SpellTarget::Confiscation { gems } => {
                             // 3 Gems on the target, then the neighbours'
@@ -1274,6 +1275,20 @@ impl Game {
         };
         set(self, first, b);
         set(self, second, a);
+    }
+
+    /// Makeshift Master: watch the minion at `at`, in the Tavern (`tavern`)
+    /// or on the board, and remember the stats it has now. One minion is
+    /// watched at a time, so any earlier mark comes off.
+    fn set_deity_watch(&mut self, p: usize, at: usize, tavern: bool) {
+        let pl = &mut self.players[p];
+        for m in pl.board.iter_mut().chain(pl.hand.iter_mut()).chain(pl.shop.iter_mut()) {
+            m.watched = false;
+        }
+        let m = if tavern { &mut pl.shop[at] } else { &mut pl.board[at] };
+        m.watched = true;
+        pl.tp.deity_watching = true;
+        pl.tp.deity_watch_stats = (m.attack, m.health);
     }
 
     pub(super) fn resolve_target(&mut self, p: usize, s: usize) {

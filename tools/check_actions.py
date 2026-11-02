@@ -59,6 +59,8 @@ def walk(turn):
         if mv and ent is not None:
             to = mv.get("to")
             if to and to["where"] in ("hand", "board"):
+                # a pick the game landed as a new entity says which one it made
+                ent = to.get("id", ent)
                 card = a.get("card") or a.get("target") or a.get("picked") or {}
                 have.setdefault(ent, {"id": ent, "card_id": card.get("card_id"),
                                       **({"position": to["position"]} if "position" in to

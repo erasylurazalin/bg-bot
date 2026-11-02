@@ -121,6 +121,19 @@ def args():
                    help="reward taken off at each turn end per tier below the standard curve")
     a.add_argument("--low-penalty-fade", type=float, default=240,
                    help="run minutes over which --low-penalty fades linearly to 0")
+    a.add_argument("--deadline-penalty", action="store_true",
+                   help="Era's levelling deadlines (2026-11-02): at each turn end, a free seat "
+                        "short of tier 2 from turn 2 pays --deadline-turn2 per missing tier, short "
+                        "of tier 3 from turn 6 or tier 4 from turn 8 pays --deadline-later")
+    a.add_argument("--deadline-turn2", type=float, default=0.30)
+    a.add_argument("--deadline-turn2-floor", type=float, default=0.10,
+                   help="what the turn 2 part fades to and keeps: levelling on turn 2 is "
+                        "right most of the time, so a slight penalty stays")
+    a.add_argument("--deadline-later", type=float, default=0.15)
+    a.add_argument("--deadline-full", type=float, default=180,
+                   help="run minutes at full strength, then it fades linearly")
+    a.add_argument("--deadline-end", type=float, default=360,
+                   help="run minute where the deadline penalty reaches 0")
     a.add_argument("--cost-kinds", default="move",
                    help="action kinds that pay --action-cost, comma separated, or all")
     a.add_argument("--snapshot-every", type=int, default=250, help="updates")
@@ -403,6 +416,9 @@ def main():
     cost_of = torch.tensor([cfg.action_cost if k in cost_kinds else 0.0 for k in KINDS], device=dev)
     # the standard curve bots.rs levels on: the tier it wants by turn 1..12+
     curve = torch.tensor([1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6], device=dev, dtype=torch.float32)
+    # Era's deadlines, inclusive: tier 3 by the end of turn 6, tier 4 by the
+    # end of turn 8 (index = turn - 1, the last entry holds for later turns)
+    late_need = torch.tensor([0, 0, 0, 0, 0, 3, 3, 4], device=dev, dtype=torch.float32)
     print(f"{cfg.model} {opts or ''}: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M "
           f"parameters on {dev}{', compiled' if cfg.compile and cfg.model == 'attn' else ''}")
 
@@ -462,6 +478,12 @@ def main():
         # alone decides in the end (docs/briefs/training-strategy.md)
         run_min = t_total + (t0 - start) / 60
         low_pen = cfg.low_penalty * max(0.0, 1.0 - run_min / cfg.low_penalty_fade) if cfg.low_penalty_fade > 0 else cfg.low_penalty
+        if run_min >= cfg.deadline_end:
+            dl_scale = 0.0
+        elif run_min <= cfg.deadline_full:
+            dl_scale = 1.0
+        else:
+            dl_scale = (cfg.deadline_end - run_min) / (cfg.deadline_end - cfg.deadline_full)
         with torch.no_grad():
             for t in range(T):
                 env.observe(b.obs, b.mask, b.seat, b.kind)
@@ -482,6 +504,18 @@ def main():
                     turn_i = o[:, bgpy.SCALAR_TURN].long().clamp(1, len(curve)) - 1
                     behind = (curve[turn_i] - o[:, bgpy.SCALAR_TIER]).clamp(min=0)
                     rews[t] -= low_pen * behind * ends_turn
+                if cfg.deadline_penalty:
+                    # curve seats are forced past every deadline, so only free
+                    # seats can ever pay this
+                    ends_turn = (a == END_TURN) | (o[:, ACTIONS_LEFT] <= 1)
+                    turn = o[:, bgpy.SCALAR_TURN]
+                    tier = o[:, bgpy.SCALAR_TIER]
+                    short2 = (2 - tier).clamp(min=0) * (turn >= 2)
+                    need = late_need[turn.long().clamp(1, len(late_need)) - 1]
+                    short_late = (need - tier.clamp(min=2)).clamp(min=0)
+                    w2 = cfg.deadline_turn2_floor + dl_scale * (cfg.deadline_turn2 - cfg.deadline_turn2_floor)
+                    pen = w2 * short2 + dl_scale * cfg.deadline_later * short_late
+                    rews[t] -= pen * ends_turn
                 learn[t] = is_learner
                 seats[t] = torch.from_numpy(b.seat).to(dev)
                 le = np.nonzero(b.kind == LEARNER)[0]

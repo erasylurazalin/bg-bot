@@ -805,8 +805,9 @@ pub enum SpellTarget {
     /// Transform the chosen minion into one from a Tier higher, which the
     /// player picks from three (Token of the Old Gods).
     TransformHigher,
-    /// Watch the chosen friendly minion: whatever stats it gains outside
-    /// combat this turn, the Deity gains too (Makeshift Master).
+    /// Watch the chosen minion, the Tavern's too: whatever stats it gains
+    /// outside combat this turn, the Deity gains too, and the watch follows
+    /// the card when it is bought (Makeshift Master).
     WatchStats,
     /// Give the minion stats and a keyword, then multiply one of its stats
     /// (I'm Still Just a Rat in a Cage, The Bouncer).
@@ -838,6 +839,7 @@ impl SpellTarget {
                 | SpellTarget::RefreshWithType
                 | SpellTarget::BuffPerTribePlayed { .. }
                 | SpellTarget::Confiscation { .. }
+                | SpellTarget::WatchStats
                 | SpellTarget::PlainCopy { .. }
                 | SpellTarget::TransformHigher
                 | SpellTarget::GemKeyword { .. }
@@ -4897,6 +4899,7 @@ impl CardDb {
             },
             hats: 0,
             tickets: 0,
+            watched: false,
             temp_reborn: false,
             temp_attack: 0,
             frozen: false,

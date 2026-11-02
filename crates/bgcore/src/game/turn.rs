@@ -393,8 +393,12 @@ impl Game {
                 }
             }
             // A Makeshift Master's watch lasts this turn only.
-            pl.tp.deity_watch = 0;
-            pl.tp.deity_watch_card = None;
+            if pl.tp.deity_watching {
+                for m in pl.board.iter_mut().chain(pl.hand.iter_mut()).chain(pl.shop.iter_mut()) {
+                    m.watched = false;
+                }
+                pl.tp.deity_watching = false;
+            }
         }
         let cards = &self.data.cards;
         // "This turn" effects end with the turn wherever the minion is: a

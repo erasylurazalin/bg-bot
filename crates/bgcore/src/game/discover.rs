@@ -501,14 +501,20 @@ impl Game {
             return;
         }
         // Galakrond's Greed: this pick takes the Tavern slot the old card
-        // left, from the pool, with no Tavern buffs (docs/heroes.md).
+        // held, from the pool, with no Tavern buffs (docs/heroes.md). The old
+        // card stayed on show while the Discover was open; it goes back to the
+        // pool now, its buffs with it.
         let into_shop = std::mem::take(&mut pl.discover_into_shop);
         if into_shop != 0 {
             if !is_spell {
                 let slot = (into_shop as usize - 1).min(crate::SHOP - 1);
+                let at = slot.min(pl.shop.len().saturating_sub(1));
+                if at < pl.shop.len() {
+                    let old = pl.shop.remove(at);
+                    give_back(pool, &data.cards, &old);
+                }
                 let mut m = pl.make_card(&data.cards, c, false, copies[k].max(1));
                 m.uses_left = m.turn_uses(&data.cards);
-                let at = slot.min(pl.shop.len());
                 pl.shop.insert(at, m);
             } else if copies[k] > 0 {
                 let slot = data.cards.get(c).pool_slot as usize;
