@@ -127,7 +127,11 @@ def args():
     a.add_argument("--deadline-penalty", action="store_true",
                    help="Era's levelling deadlines (2026-11-02): at each turn end, a free seat "
                         "short of tier 2 from turn 2 pays --deadline-turn2 per missing tier, short "
-                        "of tier 3 from turn 6 or tier 4 from turn 8 pays --deadline-later")
+                        "of the --deadline-curve tier pays --deadline-later")
+    a.add_argument("--deadline-curve", default="0,0,0,0,0,3,3,4",
+                   help="tier needed at the end of turns 1, 2, ... for --deadline-later, the last "
+                        "value holding for every later turn (0: none). Default: tier 3 by turn 6, "
+                        "tier 4 by turn 8; Era's own curve is 0,0,0,0,3,3,4,5")
     a.add_argument("--deadline-turn2", type=float, default=0.30)
     a.add_argument("--deadline-turn2-floor", type=float, default=0.10,
                    help="what the turn 2 part fades to and keeps: levelling on turn 2 is "
@@ -451,9 +455,10 @@ def main():
     cost_of = torch.tensor([cfg.action_cost if k in cost_kinds else 0.0 for k in KINDS], device=dev)
     # the standard curve bots.rs levels on: the tier it wants by turn 1..12+
     curve = torch.tensor([1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6], device=dev, dtype=torch.float32)
-    # Era's deadlines, inclusive: tier 3 by the end of turn 6, tier 4 by the
-    # end of turn 8 (index = turn - 1, the last entry holds for later turns)
-    late_need = torch.tensor([0, 0, 0, 0, 0, 3, 3, 4], device=dev, dtype=torch.float32)
+    # Era's deadlines, inclusive, from --deadline-curve (index = turn - 1, the
+    # last entry holds for later turns)
+    late_need = torch.tensor([float(x) for x in cfg.deadline_curve.split(",")],
+                             device=dev, dtype=torch.float32)
     print(f"{cfg.model} {opts or ''}: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M "
           f"parameters on {dev}{', compiled' if cfg.compile and cfg.model == 'attn' else ''}")
 
