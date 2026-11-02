@@ -238,7 +238,9 @@ so)
 - Imprison: the card goes to your hand without a buy, locked 2 turns, and
   leaves the pool; like any locked card it can be buffed in hand.
 - Galakrond's Greed: Discover from exactly one tier higher; the old card
-  goes back to the pool; Tavern buffs are lost.
+  goes back to the pool and its own buffs go with it. The pick lands in the
+  Tavern, so it gets the Tavern's standing "this game" buffs like any card
+  in the Tavern (Era, 2026-11-02; the log shows a 6/8 offer landing 46/48).
 - Come One, Come All!: a Darkmoon Ticket is a mark on a Tavern minion or
   spell (assume a 33% chance per card). Buying the card takes the Ticket
   and adds 1; at 3 you get a spell like a Triple Reward that Discovers a
