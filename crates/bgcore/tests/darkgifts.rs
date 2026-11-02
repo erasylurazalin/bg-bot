@@ -1049,6 +1049,140 @@ fn the_shop_gifts_buff_on_a_card_played_and_on_events() {
     assert_eq!(g.players[0].board[pos4].attack, before + 3);
 }
 
+// ---- Eating a minion with a spell ----
+//
+// DESIGN.md "Eating a minion with a spell" (Era, 2026-11-02): when Channel
+// the Devourer or Butchering takes one of your minions, everything that
+// fires on the cast fires first, and only then is it eaten or destroyed, so
+// the eater gains the buffed stats. The eater here is always the only other
+// friendly minion, so the eaten stats have exactly one place to go.
+
+/// Put a spell in the hand and play it, leaving its target pending.
+fn play_spell(g: &mut Game, name: &str) {
+    g.players[0].gold = 10;
+    g.give(0, name).unwrap();
+    let hand = g.players[0].hand.len() - 1;
+    act(g, 0, Action::Play { hand: hand as u8, pos: 0 });
+}
+
+#[test]
+fn channel_the_devourer_eats_the_health_toughened_shield_added() {
+    let mut g = game(70);
+    let food = board_with_gift(&mut g, 0, "Cord Puller", "Toughened Shield");
+    put_on_board(&mut g, 0, "Cord Puller");
+    let (fa, fh) = stats(&g, 0, food);
+    let (ea, eh) = stats(&g, 0, food + 1);
+    play_spell(&mut g, "Channel the Devourer");
+    // The gift fired while the spell was played, before the minion is eaten.
+    assert_eq!(stats(&g, 0, food), (fa, fh + 3), "Toughened Shield +3 Health");
+    act(&mut g, 0, Action::Target(food as u8));
+    assert_eq!(g.players[0].board.len(), 1);
+    assert_eq!(
+        stats(&g, 0, 0),
+        (ea + fa, eh + fh + 3),
+        "the eater gets the eaten minion's +3 Health"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn channel_the_devourer_eats_the_attack_sharpened_sword_added() {
+    let mut g = game(71);
+    let food = board_with_gift(&mut g, 0, "Cord Puller", "Sharpened Sword");
+    put_on_board(&mut g, 0, "Cord Puller");
+    let (fa, fh) = stats(&g, 0, food);
+    let (ea, eh) = stats(&g, 0, food + 1);
+    play_spell(&mut g, "Channel the Devourer");
+    // The gift fired while the spell was played, before the minion is eaten.
+    assert_eq!(stats(&g, 0, food), (fa + 3, fh), "Sharpened Sword +3 Attack");
+    act(&mut g, 0, Action::Target(food as u8));
+    assert_eq!(g.players[0].board.len(), 1);
+    assert_eq!(
+        stats(&g, 0, 0),
+        (ea + fa + 3, eh + fh),
+        "the eater gets the eaten minion's +3 Attack"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn channel_the_devourer_eats_the_stats_a_cast_a_spell_watcher_gained() {
+    // "Whenever you cast a spell, gain stats": Vicious Mindslasher (+1/+2 on
+    // itself), one of DESIGN.md's own examples of the hook. Eventide Brute
+    // (+1/+1) is not in cards.toml, so this stands in for it.
+    let mut g = game(72);
+    let food = put_on_board(&mut g, 0, "Vicious Mindslasher"); // 1/2
+    put_on_board(&mut g, 0, "Boom-in-a-Box"); // neutral, untargeted by watchers
+    let (fa, fh) = stats(&g, 0, food);
+    let (ea, eh) = stats(&g, 0, food + 1);
+    play_spell(&mut g, "Channel the Devourer");
+    act(&mut g, 0, Action::Target(food as u8));
+    assert_eq!(g.players[0].board.len(), 1);
+    assert_eq!(
+        stats(&g, 0, 0),
+        (ea + fa + 1, eh + fh + 2),
+        "the eater gets the +1/+2 this cast gave before the eat"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn channel_the_devourer_eats_the_stats_a_cast_on_this_watcher_gained() {
+    // "Whenever you cast a spell on this": Fleeing Fugitive (+1 Health) is
+    // not in cards.toml, so Shamanic Tidecaller stands in, giving your
+    // Murlocs +3/+3 with its own Murloc self included. Gatekeeper Amalgam,
+    // the rule's other example of the hook, has a test of its own below.
+    let mut g = game(73);
+    let food = put_on_board(&mut g, 0, "Shamanic Tidecaller"); // 5/7, Murloc
+    put_on_board(&mut g, 0, "Boom-in-a-Box"); // no Murloc, so it stays put
+    let (fa, fh) = stats(&g, 0, food);
+    let (ea, eh) = stats(&g, 0, food + 1);
+    play_spell(&mut g, "Channel the Devourer");
+    act(&mut g, 0, Action::Target(food as u8));
+    assert_eq!(g.players[0].board.len(), 1);
+    assert_eq!(
+        stats(&g, 0, 0),
+        (ea + fa + 3, eh + fh + 3),
+        "the eater gets the +3/+3 the cast on it gave"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn channel_the_devourer_eats_what_the_gatekeepers_tea_set_gave_it() {
+    let mut g = game(74);
+    let food = put_on_board(&mut g, 0, "Gatekeeper Amalgam"); // 6/6, every type
+    put_on_board(&mut g, 0, "Boom-in-a-Box"); // neutral: the Tea Set skips it
+    let (fa, fh) = stats(&g, 0, food);
+    let (ea, eh) = stats(&g, 0, food + 1);
+    play_spell(&mut g, "Channel the Devourer");
+    act(&mut g, 0, Action::Target(food as u8));
+    assert_eq!(g.players[0].board.len(), 1);
+    // The Tea Set fires on the cast, giving the Amalgam +4/+4, then the
+    // Amalgam is eaten: its own spell is not a spell you cast.
+    assert_eq!(
+        stats(&g, 0, 0),
+        (ea + fa + 4, eh + fh + 4),
+        "the eater gets the +4/+4 the Tea Set gave the Amalgam"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn butchering_destroys_the_weaver_after_its_after_cast_trigger() {
+    let mut g = game(75);
+    let weaver = put_on_board(&mut g, 0, "Forsaken Weaver"); // 3/8, +3 on a cast
+    put_on_board(&mut g, 0, "Risen Rider"); // 2/1, Undead
+    play_spell(&mut g, "Butchering");
+    act(&mut g, 0, Action::Target(weaver as u8));
+    // The Weaver's +3 lands though the Weaver is destroyed (docs/UNSURE.md),
+    // then Butchering's +8: 11 this game, and the other Undead has both.
+    assert_eq!(g.players[0].undead_bonus, (8 + 3, 0));
+    assert_eq!(g.players[0].board.len(), 1);
+    assert_eq!(stats(&g, 0, 0), (2 + 8 + 3, 1));
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn double_vision_brings_a_plain_copy_along() {
     let mut g = game(29);

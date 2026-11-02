@@ -555,6 +555,24 @@ impl Game {
         }
     }
 
+    /// The cast triggers of a spell that is about to take its target off the
+    /// board (Channel the Devourer eats it, Butchering destroys it): the
+    /// "whenever you cast a spell" minions and the target's own "whenever you
+    /// cast a spell on this" watcher run while it is still there, so
+    /// whatever they give it goes on to the eater. DESIGN.md "Eating a
+    /// minion with a spell".
+    fn fire_cast_triggers_early(&mut self, p: usize, target_pos: usize, tavern: bool, by_minion: bool) {
+        if target_pos >= self.players[p].board.len() {
+            return;
+        }
+        if tavern && !by_minion {
+            self.trigger_on_cast_spell(p);
+        }
+        if !by_minion {
+            self.trigger_on_cast_spell_on_target(p, target_pos);
+        }
+    }
+
     pub(super) fn apply_target(&mut self, p: usize, pt: &PendingTarget, s: usize) {
         match pt.kind {
             // Never reached: a card steal is a Tavern pick (`apply_target_shop`),
@@ -797,6 +815,11 @@ impl Game {
                     // usefully be cast again on the same slot (Balinda).
                     let mut stop_after = false;
                     let mut target_removed = false;
+                    // A spell that eats or destroys its target runs the cast
+                    // triggers before that (DESIGN.md "Eating a minion with a
+                    // spell"), so the generic block below must not run them
+                    // again.
+                    let mut cast_triggers_done = false;
                     match st {
                         SpellTarget::Buff {
                             attack,
@@ -936,6 +959,13 @@ impl Game {
                             // twice and both casts' on-cast triggers fire.
                         }
                         SpellTarget::Devourer => {
+                            // Everything that fires on the cast fires first:
+                            // "whenever you cast a spell" minions and the
+                            // target's own watcher buff it while it is still
+                            // on the board, so the eater gains those stats
+                            // (DESIGN.md "Eating a minion with a spell").
+                            self.fire_cast_triggers_early(p, target_pos, pt.tavern, pt.by_minion);
+                            cast_triggers_done = true;
                             self.channel_the_devourer(p, target_pos);
                             stop_after = true;
                             target_removed = true;
@@ -968,6 +998,14 @@ impl Game {
                             // (Era, 2026-11-02; log 00_56_06-g1 turn 12).
                             // Like Channel the Devourer, a second cast
                             // (Balinda) does nothing: its target is gone.
+                            //
+                            // Everything that fires on the cast fires first,
+                            // so a Forsaken Weaver's "after you cast a Tavern
+                            // spell" +3 lands though the Weaver is the one
+                            // destroyed (DESIGN.md "Eating a minion with a
+                            // spell", docs/UNSURE.md).
+                            self.fire_cast_triggers_early(p, target_pos, pt.tavern, pt.by_minion);
+                            cast_triggers_done = true;
                             self.destroy_in_shop(p, &[target_pos], None);
                             let (da, dh) =
                                 if pt.tavern { self.total_spell_bonus(p) } else { (0, 0) };
@@ -1125,7 +1163,7 @@ impl Game {
                             m.end_turn_gain.1 += health + dh;
                         }
                     }
-                    if pt.tavern && !pt.by_minion {
+                    if pt.tavern && !pt.by_minion && !cast_triggers_done {
                         self.trigger_on_cast_spell(p);
                     }
                     if !target_removed && target_pos < self.players[p].board.len() {

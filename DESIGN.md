@@ -424,6 +424,16 @@ triggers: a Battlecry doubled by Brann counts twice, and a minion without a
 Battlecry counts nothing when played. A Choose One minion is not a
 Battlecry. "Wherever this is" includes Bob's Tavern: a copy there grows too.
 
+**Eating a minion with a spell (Era, 2026-11-02).** When Channel the
+Devourer or Butchering takes one of your minions, everything that fires on
+the cast fires first: "whenever you play a card" Dark Gifts (Toughened
+Shield, Sharpened Sword), "whenever you cast a spell" minions (Eventide
+Brute, The Glad-iator, Wizened Captain, Vicious Mindslasher), "whenever you
+cast a spell on this" (Fleeing Fugitive; Gatekeeper Amalgam casts its Tea
+Set), and only then is the minion eaten or destroyed, so the eater gains the
+buffed stats. "After you cast a spell" triggers fire after the spell has
+resolved.
+
 **Butchering and spell power (Era, 2026-11-02).** Butchering's "+8 Attack
 this game" is a Tavern spell number, so Tavern spell power adds to it.
 
