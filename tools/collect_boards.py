@@ -293,7 +293,8 @@ def counters(fight, side):
     """A side's player-level numbers at the first attack, the keys the file
     holds. A number the log does not show is left out: the loader then uses
     the base value (0 spells cast, no spell bonus, Blood Gems +1/+1)."""
-    out = dict(fight.side_numbers[side])
+    # A fight nobody attacks in (two empty boards) never gets side_numbers.
+    out = dict(getattr(fight, "side_numbers", ({}, {}))[side])
     if getattr(fight, "upper_hands", (0, 0))[side]:
         out["upper_hand"] = fight.upper_hands[side]
     # Blood Gems (BACON_BLOODGEMBUFFATKVALUE / _HEALTHVALUE on the player).
