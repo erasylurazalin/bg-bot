@@ -86,7 +86,7 @@ impl Game {
         let on_board = if board { &mut pl.board[..] } else { &mut [] };
         for m in pl.shop.iter_mut().chain(&mut pl.hand).chain(on_board) {
             let c = cards.get(m.card);
-            if !c.is_spell() && !c.fixed_stats && c.tribes.has(Tribe::Undead) {
+            if !c.is_spell() && !c.fixed_stats && cards.tribes_of(m).has(Tribe::Undead) {
                 m.attack += da;
                 m.health += dh;
             }
@@ -230,7 +230,7 @@ impl Game {
                 let (da, dh) = (attack + per_keyword.0 * k, health + per_keyword.1 * k);
                 for _ in 0..runs {
                     for (i, o) in pl.board.iter_mut().enumerate() {
-                        if i != *pos && cards.get(o.card).is(tribe) {
+                        if i != *pos && cards.tribes_of(o).is(tribe) {
                             buff(o, da * mul, dh * mul);
                         }
                     }
@@ -482,7 +482,7 @@ impl Game {
                 let cards = &self.data.cards;
                 for _ in 0..runs {
                     for o in &mut self.players[p].board {
-                        if cards.get(o.card).is(tribe) && !cards.get(o.card).fixed_stats {
+                        if cards.tribes_of(o).is(tribe) && !cards.get(o.card).fixed_stats {
                             buff(o, attack * mul, health * mul);
                         }
                     }
@@ -493,7 +493,7 @@ impl Game {
                     let scale = improve.map_or(1, |c| 1 + self.players[p].improve[c.index()] as i32);
                     let cards = &self.data.cards;
                     let board = &mut self.players[p].board;
-                    let ok = |m: &Minion| cards.get(m.card).is(tribe) && !cards.get(m.card).fixed_stats;
+                    let ok = |m: &Minion| cards.tribes_of(m).is(tribe) && !cards.get(m.card).fixed_stats;
                     let n = board.iter().filter(|m| ok(m)).count() as u32;
                     if n > 0 {
                         let k = self.rng.below(n) as usize;
@@ -586,7 +586,7 @@ impl Game {
                         break;
                     }
                     let mut m = self.players[p].make_card(&self.data.cards, card, g, 0);
-                    if self.data.cards.get(card).tribes.has(Tribe::Beast) {
+                    if self.data.cards.tribes_of(&m).has(Tribe::Beast) {
                         let (ba, bh) = self.players[p].beast_bonus;
                         m.attack += ba;
                         m.health += bh;
@@ -854,7 +854,7 @@ impl Game {
                 let pl = &mut self.players[p];
                 for _ in 0..runs {
                     for (i, o) in pl.board.iter_mut().enumerate() {
-                        if i != *pos && cards.get(o.card).is(tribe) {
+                        if i != *pos && cards.tribes_of(o).is(tribe) {
                             buff(o, attack * mul * k, health * mul * k);
                         }
                     }

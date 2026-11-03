@@ -789,6 +789,48 @@ fn double_time_makes_two_copies_golden_and_pays_a_coin_instead_of_a_reward() {
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn double_time_pairs_an_amalgamation_minion_with_a_surprise() {
+    // docs/rules/heroes.md "Double Time": with an Elemental of Surprise, one
+    // copy of an Elemental plus one Surprise is a pair, so a minion the
+    // Amalgamation Dark Gift made every type does it too (Era, 2026-11-03).
+    let mut g = hero_game(23, "Mister Clocksworth");
+    put_on_board(&mut g, 0, "Titus Rivendare");
+    let host = g.players[0].board.len() - 1;
+    assert!(g.give_gift(0, host, "Amalgamation", g.turn.max(1)));
+    set_shop(&mut g, 0, &["Elemental of Surprise"]);
+    g.players[0].gold = 5;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(g.players[0].hand.len(), 1, "the pair and the Surprise are one card");
+    let golden = g.players[0].hand[0];
+    assert!(golden.golden, "one Titus and one Surprise are a pair");
+    assert_eq!(g.data.cards.get(golden.card).name, "Titus Rivendare");
+    assert!(
+        golden.keywords.has(bgcore::Keywords::DIVINE_SHIELD),
+        "the Surprise's shield carries"
+    );
+    assert!(g.players[0].board.is_empty(), "the board copy went into it");
+    // Playing it pays the Tavern Coin, as Double Time does for every pair.
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    let coin = id(&g, "Tavern Coin");
+    assert!(
+        g.players[0].hand.iter().any(|m| m.card == coin),
+        "a Tavern Coin instead of a Triple Reward"
+    );
+    g.check_invariants().unwrap();
+    // The same pair with no gift is no pair: a plain Titus is no Elemental.
+    let mut g = hero_game(24, "Mister Clocksworth");
+    put_on_board(&mut g, 0, "Titus Rivendare");
+    set_shop(&mut g, 0, &["Elemental of Surprise"]);
+    g.players[0].gold = 5;
+    act(&mut g, 0, Action::Buy(0));
+    assert!(
+        g.players[0].hand.iter().chain(&g.players[0].board).all(|m| !m.golden),
+        "a plain Titus and a Surprise are no pair"
+    );
+    g.check_invariants().unwrap();
+}
+
 // ---- the Spellcraft target fix (the brief's last note) ----
 
 #[test]

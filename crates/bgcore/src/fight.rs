@@ -1143,7 +1143,10 @@ impl<'a> Side<'a> {
         }
         for i in 0..self.hand.len() {
             let c = db.get(self.hand[i].card);
-            if !self.hand_taken(i) && !c.is_spell() && !c.fixed_stats && c.tribes.has(Tribe::Undead)
+            if !self.hand_taken(i)
+                && !c.is_spell()
+                && !c.fixed_stats
+                && db.tribes_of(&self.hand[i]).has(Tribe::Undead)
             {
                 self.hand_bonus[i].0 = self.hand_bonus[i].0.saturating_add(da);
                 self.hand_bonus[i].1 = self.hand_bonus[i].1.saturating_add(dh);
@@ -1718,7 +1721,7 @@ impl<'a> Side<'a> {
             // carries it already, so only a minion summoned here needs it.
             m.attack += self.counters.aura_attack;
             m.health += self.counters.aura_health;
-            if c.tribes.has(Tribe::Undead) {
+            if db.tribes_of(&m).has(Tribe::Undead) {
                 m.attack += self.counters.undead_attack;
                 m.health += self.counters.undead_health;
             }
@@ -1750,7 +1753,7 @@ impl<'a> Side<'a> {
             self.gain_at(db, pos, n, 2 * n);
             self.gain_keyword_at(db, pos, Keywords::TAUNT);
         }
-        if c.tribes.has(Tribe::Beast) {
+        if db.tribes_of(&self.ms[pos].m).has(Tribe::Beast) {
             self.ms[pos].m.attack += self.beast_buff.0;
             self.ms[pos].m.health += self.beast_buff.1;
             for j in 0..self.ms.len() {
@@ -2292,7 +2295,7 @@ impl<'a> Side<'a> {
                 for i in 0..self.ms.len() {
                     if self.ms[i].uid != fx.host
                         && self.ms[i].m.health > 0
-                        && db.get(self.ms[i].m.card).is(tribe)
+                        && db.tribes_of(&self.ms[i].m).is(tribe)
                     {
                         self.gain_at(db, i, attack * mul, health * mul);
                     }
@@ -2300,7 +2303,7 @@ impl<'a> Side<'a> {
             }
             Effect::BuffAll { tribe, attack, health } => {
                 for i in 0..self.ms.len() {
-                    if self.ms[i].m.health > 0 && db.get(self.ms[i].m.card).is(tribe) {
+                    if self.ms[i].m.health > 0 && db.tribes_of(&self.ms[i].m).is(tribe) {
                         self.gain_at(db, i, attack * mul, health * mul);
                     }
                 }
@@ -2313,7 +2316,7 @@ impl<'a> Side<'a> {
             Effect::BuffRandomFriendly { tribe, attack, health, improve } => {
                 let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
                 for (i, f) in self.ms.iter().enumerate() {
-                    if f.m.health > 0 && db.get(f.m.card).is(tribe) {
+                    if f.m.health > 0 && db.tribes_of(&f.m).is(tribe) {
                         ok.push(i);
                     }
                 }
@@ -2444,7 +2447,7 @@ impl<'a> Side<'a> {
                 let n = count as u32 * mul as u32;
                 let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
                 for (i, f) in self.ms.iter().enumerate() {
-                    if f.uid != fx.host && f.m.health > 0 && db.get(f.m.card).is(tribe) {
+                    if f.uid != fx.host && f.m.health > 0 && db.tribes_of(&f.m).is(tribe) {
                         ok.push(i);
                     }
                 }
@@ -2515,7 +2518,7 @@ impl<'a> Side<'a> {
                 for i in 0..self.ms.len() {
                     if self.ms[i].uid != fx.host
                         && self.ms[i].m.health > 0
-                        && db.get(self.ms[i].m.card).is(tribe)
+                        && db.tribes_of(&self.ms[i].m).is(tribe)
                     {
                         self.gain_at(db, i, attack * mul * k, health * mul * k);
                     }
@@ -3117,7 +3120,7 @@ impl<'a> Side<'a> {
             return;
         }
         let card = db.get(fm.m.card);
-        if card.tribes.has(Tribe::Aberration) {
+        if db.tribes_of(&fm.m).has(Tribe::Aberration) {
             if card.deity.is_none() && self.dead_aberrations.len() < 4 {
                 let mut dead = fm.m;
                 dead.health += fm.taken;

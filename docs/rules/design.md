@@ -632,6 +632,10 @@ counter.
   The Surprise's Divine Shield and buffs carry into the golden X. A golden
   Surprise can still triple with two copies of X into a golden X, the only
   card that triples while already golden.
+  X can be anything that is an Elemental, by any route: a printed
+  Elemental, an all-type card (Gatekeeper Amalgam, Dark Paradox) or a
+  minion the Amalgamation Dark Gift made every type. The golden result
+  always gets Divine Shield (Era, 2026-11-03).
 - **"After you play an X"** never counts the card being played, for every
   card (Ultraviolet Ascendant, Unbound Tempest, Wrath Weaver, Insatiable
   Ur'zul, the Pirate and Demon cards).

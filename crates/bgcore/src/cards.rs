@@ -102,6 +102,15 @@ impl Tribes {
         self.0 == 0
     }
 
+    /// The test a tribe filter asks for, on a minion's tribes: this set has
+    /// `tribe`, or `None` asks for any minion. It goes with
+    /// `CardDb::tribes_of`, so an Amalgamation and a portrait's extra tribes
+    /// count (docs/rules/trinkets.md). A card definition (a pool draw, an
+    /// offer) has no minion: it tests its own `tribes` directly.
+    pub fn is(self, tribe: Option<Tribe>) -> bool {
+        tribe.is_none_or(|t| self.has(t))
+    }
+
     /// Whether the two sets share a tribe ("a minion of its type").
     pub fn overlaps(self, other: Tribes) -> bool {
         self.0 & other.0 != 0
@@ -1677,11 +1686,6 @@ pub enum CountdownEffect {
 }
 
 impl Card {
-    /// Whether the card has this tribe, always true for no filter.
-    pub fn is(&self, tribe: Option<Tribe>) -> bool {
-        tribe.is_none_or(|t| self.tribes.has(t))
-    }
-
     pub fn is_spell(&self) -> bool {
         self.spell
     }

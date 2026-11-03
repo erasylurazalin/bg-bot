@@ -848,10 +848,33 @@ impl Game {
         }
     }
 
-    /// An event a trinket listens for. `card` is the minion, spell or card
-    /// the event is about (for the tribe and "a spell" filters); `amount`
-    /// counts for events that count a number (Gold spent).
+    /// An event a trinket listens for. `card` is the spell or card the event
+    /// is about (the "a spell" filter, a death counter that names a card);
+    /// `amount` counts for events that count a number (Gold spent). Anything
+    /// about a minion goes through `trinket_event_minion`, so its tribes are
+    /// the ones it has now.
     pub(super) fn trinket_event(&mut self, p: usize, event: Event, card: Option<CardId>, amount: u32) {
+        let tribes = card.map(|c| self.data.cards.get(c).tribes);
+        self.trinket_event_of(p, event, card, tribes, amount);
+    }
+
+    /// The same event about a minion (bought, played, sold): its tribes are
+    /// the ones it has now, a Dark Gift's Amalgamation and a portrait's extra
+    /// tribes included (`CardDb::tribes_of`, the one source), so "when you
+    /// play a Dragon" sees an Amalgamation.
+    pub(super) fn trinket_event_minion(&mut self, p: usize, event: Event, m: &Minion, amount: u32) {
+        let tribes = self.data.cards.tribes_of(m);
+        self.trinket_event_of(p, event, Some(m.card), Some(tribes), amount);
+    }
+
+    fn trinket_event_of(
+        &mut self,
+        p: usize,
+        event: Event,
+        card: Option<CardId>,
+        card_tribes: Option<Tribes>,
+        amount: u32,
+    ) {
         if self.players[p].tp.golden_when_rich != 0 {
             self.check_golden_when_rich(p);
         }
@@ -873,7 +896,6 @@ impl Game {
         if self.players[p].trinket_events & event.bit() == 0 {
             return;
         }
-        let card_tribes = card.map(|c| self.data.cards.get(c).tribes);
         let card_is_spell = card.is_some_and(|c| self.data.cards.get(c).is_spell());
         for slot in 0..TRINKET_SLOTS {
             let Some(i) = self.trinket_of(p, slot) else { continue };
@@ -1214,7 +1236,7 @@ impl Game {
                     .board
                     .iter()
                     .enumerate()
-                    .filter(|(_, m)| cards.get(m.card).is(tribe) && !cards.get(m.card).fixed_stats)
+                    .filter(|(_, m)| cards.tribes_of(m).is(tribe) && !cards.get(m.card).fixed_stats)
                     .map(|(i, _)| i)
                     .collect();
                 for _ in 0..count {
@@ -1357,7 +1379,7 @@ impl Game {
                 // is found again after the first Magnetization: its triggers
                 // can change the board (2026-10-31: a stale index panicked).
                 let find_left = |g: &Self| {
-                    g.players[p].board.iter().position(|m| g.data.cards.get(m.card).is(tribe))
+                    g.players[p].board.iter().position(|m| g.data.cards.tribes_of(m).is(tribe))
                 };
                 if let Some(l) = find_left(self) {
                     let m = self.players[p].make_card(&self.data.cards, card, false, 0);
@@ -1365,7 +1387,7 @@ impl Game {
                     let r = self.players[p]
                         .board
                         .iter()
-                        .rposition(|m| self.data.cards.get(m.card).is(tribe));
+                        .rposition(|m| self.data.cards.tribes_of(m).is(tribe));
                     if let Some(r) = r
                         && r != l
                     {
@@ -1929,16 +1951,19 @@ impl Game {
         let pl = &self.players[p];
         let Some(m) = pl.shop.get(slot) else { return MinionPrice::Gold(self.data.rules.buy_cost) };
         let card = self.data.cards.get(m.card);
+        // A Tavern minion can carry a Dark Gift (Amalgamation) or a
+        // portrait's extra tribes, so its tribe tests are its own.
+        let tribes = self.data.cards.tribes_of(m);
         let tp = pl.tp;
         // Warcry Totem's free buys are Battlecry minions only.
         if pl.free_minion_left > 0
             || (tp.free_buys > 0 && card.battlecry.is_some())
-            || (tp.free_tribe_left > 0 && tp.free_tribe.is_some_and(|t| card.tribes.has(t)))
+            || (tp.free_tribe_left > 0 && tp.free_tribe.is_some_and(|t| tribes.has(t)))
         {
             return MinionPrice::Gold(0);
         }
         let by_tribe = tp.health_price_left > 0
-            && tp.health_price_tribe.is_none_or(|t| card.tribes.has(t));
+            && tp.health_price_tribe.is_none_or(|t| tribes.has(t));
         let highest = tp.highest_tier_health && self.is_highest_tier_slot(p, slot);
         let every_nth = tp.fourth_buy_every > 0
             && (tp.fourth_buy + 1).is_multiple_of(tp.fourth_buy_every);
@@ -1958,7 +1983,7 @@ impl Game {
             MinionPrice::Gold(pl.prize.minion_price)
         } else if tp.magnetic_cost > 0
             && card.keywords.has(crate::minion::Keywords::MAGNETIC)
-            && card.tribes.has(Tribe::Mech)
+            && tribes.has(Tribe::Mech)
         {
             // "Magnetic Mechs cost (2)": a set price, not a discount
             // (Electrode Attractor).

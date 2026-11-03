@@ -83,8 +83,32 @@ impl Game {
             pl.hand.iter().chain(&pl.board).filter(|m| m.card == id).count()
         };
         let wild_of = |id: CardId| cards.get(id).triple_wildcard;
-        let can_stand_in = |w: CardId, x: CardId| {
-            w != x && wild_of(w).is_some_and(|t| cards.get(x).tribes.has(t))
+        // The copies of `x` a triple would use: the hand-then-board order
+        // `take_from` takes them in, and never a golden one. A wildcard
+        // stands in for `x` when every one of them is of its tribe, which a
+        // printed card always is and a Dark Gift can make one (the
+        // Amalgamation on a minion with no type: Era, 2026-11-03,
+        // docs/rules/design.md "Elemental of Surprise"). A triple that would
+        // use a plain copy of `x` the gift never reached does not happen.
+        let copies_of_tribe = |x: CardId, n: usize, t: Tribe| {
+            let mut seen = 0;
+            for m in pl.hand.iter().chain(&pl.board) {
+                if seen == n {
+                    break;
+                }
+                if m.card == x && !m.golden {
+                    if !cards.tribes_of(m).has(t) {
+                        return false;
+                    }
+                    seen += 1;
+                }
+            }
+            seen == n
+        };
+        let can_stand_in = |w: CardId, x: CardId, n: usize| {
+            w != x
+                && wild_of(w)
+                    .is_some_and(|t| cards.get(x).tribes.has(t) || copies_of_tribe(x, n, t))
         };
         // Designer Eyepatch: two copies of a Pirate make it Golden. Double
         // Time: two copies of anything.
@@ -104,12 +128,14 @@ impl Game {
             let n = copies(card);
             let ids = 0..cards.cards.len() as CardId;
             if n + 1 >= need
-                && let Some(w) = ids.clone().find(|&w| can_stand_in(w, card) && stand_ins(w) >= 1)
+                && let Some(w) =
+                    ids.clone().find(|&w| can_stand_in(w, card, need - 1) && stand_ins(w) >= 1)
             {
                 plan = Some((card, need - 1, Some((w, 1))));
             } else if need >= 3
                 && n + 2 >= need
-                && let Some(w) = ids.clone().find(|&w| can_stand_in(w, card) && stand_ins(w) >= 2)
+                && let Some(w) =
+                    ids.clone().find(|&w| can_stand_in(w, card, need - 2) && stand_ins(w) >= 2)
             {
                 plan = Some((card, need - 2, Some((w, 2))));
             }
@@ -127,7 +153,7 @@ impl Game {
             };
             let x = pool_ids
                 .clone()
-                .find(|&x| can_stand_in(card, x) && copies(x) + 1 >= need && n_w >= 1)
+                .find(|&x| can_stand_in(card, x, need - 1) && copies(x) + 1 >= need && n_w >= 1)
                 .map(|x| (x, need - 1, 1usize))
                 .or_else(|| {
                     if need < 3 {
@@ -135,7 +161,7 @@ impl Game {
                     }
                     pool_ids
                         .clone()
-                        .find(|&x| can_stand_in(card, x) && copies(x) + 2 >= need && n_w >= 2)
+                        .find(|&x| can_stand_in(card, x, need - 2) && copies(x) + 2 >= need && n_w >= 2)
                         .map(|x| (x, need - 2, 2usize))
                 });
             if let Some((x, nx, nw)) = x {
@@ -171,7 +197,7 @@ impl Game {
                     (pl.board.remove(i), true)
                 };
                 let base = pl.make_card(cards, id, m.golden, 0);
-                let bonus = if from_board && cards.get(id).tribes.has(Tribe::Beast) {
+                let bonus = if from_board && cards.tribes_of(&m).has(Tribe::Beast) {
                     beast_bonus
                 } else {
                     (0, 0)

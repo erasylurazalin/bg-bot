@@ -1426,6 +1426,52 @@ fn amalgamation_makes_the_minion_every_type() {
 }
 
 #[test]
+fn a_fight_tribe_buff_reaches_an_amalgamation() {
+    // Ultraviolet Ascendant: at Start of Combat, your Elementals get +3/+3.
+    // A Drakkari Enchanter (no type) with Amalgamation is an Elemental too;
+    // the Pirate beside it is not.
+    let mut g = game(38);
+    let amalgam = board_with_gift(&mut g, 0, "Drakkari Enchanter", "Amalgamation");
+    let pirate = put_on_board(&mut g, 0, "Sky Admiral Rogers");
+    put_on_board(&mut g, 0, "Ultraviolet Ascendant");
+    let board: Vec<Minion> = g.players[0].board.to_vec();
+    let (aa, ah) = (board[amalgam].attack, board[amalgam].health);
+    let (pa, ph) = (board[pirate].attack, board[pirate].health);
+    let data = Data::bundled();
+    let db = &data.cards;
+    // A 0-Attack wall: nobody dies, and every minion swings once.
+    let mut wall = db.make(db.by_name("Lullabot").unwrap(), false);
+    wall.attack = 0;
+    wall.health = 80;
+    let mut seen = Seen::default();
+    let mut rng = Rng::new(11);
+    fight_with(db, &board, &[wall], [Counters::default(); 2], 60, &mut rng, &mut seen);
+    let mine = |name: &str| seen.stats_of(0, id(&g, name)).unwrap_or_else(|| panic!("{name} swung"));
+    assert_eq!(mine("Drakkari Enchanter"), (aa + 3, ah + 3), "every type is an Elemental");
+    assert_eq!(mine("Sky Admiral Rogers"), (pa, ph), "a Pirate is no Elemental");
+}
+
+#[test]
+fn a_chosen_tribe_target_sees_an_amalgamation() {
+    // Lovesick Balladist: "Battlecry: give a Pirate +0/+2" (and more per Gold
+    // spent). A typeless minion with Amalgamation is a Pirate, so the board
+    // target it asks for can be that minion.
+    let mut g = game(39);
+    let host = board_with_gift(&mut g, 0, "Drakkari Enchanter", "Amalgamation");
+    let (a, h) = (g.players[0].board[host].attack, g.players[0].board[host].health);
+    let c = id(&g, "Lovesick Balladist");
+    let n = pool_copies(&mut g, c);
+    let m = g.players[0].make_card(&g.data.cards, c, false, n);
+    g.players[0].hand.push(m);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    // The Amalgamation is the only Pirate it can pick, so the engine answers
+    // its own target; a minion that is no Pirate gives it nothing to pick.
+    assert_eq!(g.players[0].board[host].health, h + 2, "+0/+2 landed");
+    assert_eq!(g.players[0].board[host].attack, a, "no Attack");
+}
+
+#[test]
 fn toxicity_furtiveness_and_the_fifty_weights_land_their_keywords() {
     let mut g = game(37);
     let pos = board_with_gift(&mut g, 0, "Cord Puller", "Toxicity");

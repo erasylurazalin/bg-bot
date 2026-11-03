@@ -43,9 +43,10 @@ pub(super) fn tavern_buff_hits(cards: &CardDb, m: &Minion, b: &TavernBuff) -> bo
     if c.is_spell() {
         return false;
     }
+    let tribes = cards.tribes_of(m);
     match b.tribe {
-        Some(t) => c.tribes.has(t),
-        None => !b.typed_only || !c.tribes.is_empty(),
+        Some(t) => tribes.has(t),
+        None => !b.typed_only || !tribes.is_empty(),
     }
 }
 
@@ -471,7 +472,7 @@ impl Player {
                 h += ph * n;
             }
         }
-        if c.tribes.has(Tribe::Undead) && !c.fixed_stats {
+        if cards.tribes_of(m).has(Tribe::Undead) && !c.fixed_stats {
             a += self.undead_bonus.0;
             h += self.undead_bonus.1;
         }

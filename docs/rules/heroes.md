@@ -214,6 +214,9 @@ so)
   counts toward a triple.
 - Double Time: a golden from 2 copies keeps both copies' buffs, gives a
   Tavern Coin instead of a Triple Reward, and works on pairs already held.
+  With an Elemental of Surprise, one copy of an Elemental plus one Surprise
+  is a pair: a Titus with the Amalgamation Dark Gift plus a Surprise makes a
+  golden Titus (Era, 2026-11-03).
 - Saturday C'Thuns!: one more repeat each turn, all game, each repeat on a
   random friendly minion; Drakkari doubles the whole power.
 - Tavern Lighting: +1/+1 more every 3 turns, on top of spell power.

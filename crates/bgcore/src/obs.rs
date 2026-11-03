@@ -668,12 +668,13 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     o[SLOT_ATTACK] = m.attack as f32;
     o[SLOT_HEALTH] = m.health as f32;
     let v = vanguard_bonus(db, m, owner.health);
-    let (ba, bh) = if c.tribes.has(Tribe::Beast) { owner.beast_bonus } else { (0, 0) };
+    let tribes = db.tribes_of(m);
+    let (ba, bh) = if tribes.has(Tribe::Beast) { owner.beast_bonus } else { (0, 0) };
     o[SLOT_FIGHT_ATTACK] = (m.attack + v + ba) as f32;
     o[SLOT_FIGHT_HEALTH] = (m.health + v + bh) as f32;
     o[SLOT_GOLDEN] = m.golden as u8 as f32;
     for (j, t) in Tribe::EVERY.into_iter().enumerate() {
-        o[SLOT_TRIBES + j] = c.tribes.has(t) as u8 as f32;
+        o[SLOT_TRIBES + j] = tribes.has(t) as u8 as f32;
     }
     for (j, (bit, _)) in Keywords::ALL.iter().enumerate() {
         o[SLOT_KEYWORDS + j] = m.keywords.has(*bit) as u8 as f32;
@@ -1238,9 +1239,9 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
         o[OPP_LAST] = is(pl.last_opponent) as u8 as f32;
         o[OPP_PLACEMENT] = them.placement as f32;
         for m in &seen.board {
-            let c = db.get(m.card);
+            let tribes = db.tribes_of(m);
             for (j, t) in Tribe::EVERY.into_iter().enumerate() {
-                o[OPP_TRIBES + j] += c.tribes.has(t) as u8 as f32;
+                o[OPP_TRIBES + j] += tribes.has(t) as u8 as f32;
             }
         }
         write_deity(&mut o[OPP_DEITY..], db, seen.deity);

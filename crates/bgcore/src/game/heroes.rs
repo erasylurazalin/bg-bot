@@ -2490,8 +2490,8 @@ impl Game {
     fn note_shop_demon_damage(&mut self, p: usize, source: Option<usize>) {
         let Some(src) = source else { return };
         let cards = &self.data.cards;
-        let Some(src_card) = self.players[p].board.get(src).map(|m| m.card) else { return };
-        if !cards.get(src_card).tribes.has(Tribe::Demon) {
+        let Some(src_m) = self.players[p].board.get(src).copied() else { return };
+        if !cards.tribes_of(&src_m).has(Tribe::Demon) {
             return;
         }
         let mut hits: ArrayVec<(usize, i32, i32), BOARD> = ArrayVec::new();

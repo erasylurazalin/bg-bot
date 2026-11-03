@@ -1456,7 +1456,7 @@ impl Game {
                     false
                 } else if pl.hand[h].keywords.has(Keywords::MAGNETIC)
                     && pos < pl.board.len()
-                    && self.can_magnetize(card_id, pl.board[pos].card)
+                    && self.can_magnetize(card_id, &pl.board[pos])
                 {
                     true
                 } else {
@@ -1649,14 +1649,15 @@ impl Game {
     }
 
     /// Whether the Magnetic card `hand_card` can merge into the board minion
-    /// `board_card`: a Mech, or an Undead for a card that says so
+    /// `board_minion`: a Mech, or an Undead for a card that says so
     /// (Prosthetic Hand).
-    fn can_magnetize(&self, hand_card: CardId, board_card: CardId) -> bool {
+    fn can_magnetize(&self, hand_card: CardId, board_minion: &Minion) -> bool {
         let cards = &self.data.cards;
         // The tribes a card Magnetizes onto are data on the card: Mech for
         // all but Prosthetic Hand (Mech and Undead) and the Mecha-Demons
-        // (Mech and Demon).
-        let t = cards.get(board_card).tribes;
+        // (Mech and Demon). The minion it lands on is a minion, so its tribes
+        // are its own: an Amalgamation is a Mech too.
+        let t = cards.tribes_of(board_minion);
         cards.get(hand_card).magnetize_tribes.overlaps(t)
     }
 
@@ -1733,8 +1734,11 @@ impl Game {
         if c.is_spell() {
             return false;
         }
+        // A target is a minion, so a tribe test on it is its tribes now, an
+        // Amalgamation and a portrait's extra tribes included.
+        let tribes = self.data.cards.tribes_of(m);
         match st {
-            SpellTarget::Buff { tribe, .. } => tribe.is_none_or(|t| c.tribes.has(t)),
+            SpellTarget::Buff { tribe, .. } => tribes.is(tribe),
             SpellTarget::BuffPerBonusKeyword { .. }
             | SpellTarget::SetStats { .. }
             | SpellTarget::TrickyTrousers { .. }
@@ -1742,16 +1746,16 @@ impl Game {
             SpellTarget::BuffSameTribe { .. }
             | SpellTarget::SameTribeMinion
             | SpellTarget::TavernBuffType { .. }
-            | SpellTarget::RefreshWithType => !c.tribes.is_neutral(),
-            SpellTarget::Consume { tribe, .. } => c.is(tribe),
+            | SpellTarget::RefreshWithType => !tribes.is_neutral(),
+            SpellTarget::Consume { tribe, .. } => tribes.is(tribe),
             SpellTarget::MakeGolden { max_tier } => !m.golden && c.tier <= max_tier,
             SpellTarget::Devourer => true,
-            SpellTarget::HalfOfHighestTavern { tribe } => c.tribes.has(tribe),
+            SpellTarget::HalfOfHighestTavern { tribe } => tribes.has(tribe),
             SpellTarget::BuffPerTribePlayed { .. } => true,
-            SpellTarget::Butchering { .. } => c.tribes.has(Tribe::Undead),
+            SpellTarget::Butchering { .. } => tribes.has(Tribe::Undead),
             SpellTarget::Confiscation { .. } => true,
             SpellTarget::PlainCopy { max_tier } => c.tier <= max_tier,
-            SpellTarget::DestroyGetRandom { tribe, .. } => c.tribes.has(tribe),
+            SpellTarget::DestroyGetRandom { tribe, .. } => tribes.has(tribe),
             // There is no tier above 6, so such a minion is not a target.
             SpellTarget::TransformHigher => c.tier < crate::MAX_TIER,
             SpellTarget::WatchStats => true,
@@ -1837,7 +1841,7 @@ impl Game {
             return false;
         }
         match pt.kind {
-            TargetKind::MinionBuff { tribe, .. } => tribe.is_none_or(|t| c.tribes.has(t)),
+            TargetKind::MinionBuff { tribe, .. } => self.data.cards.tribes_of(&pl.shop[s]).is(tribe),
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
             TargetKind::Spell(st) => {
                 st.can_target_shop() && self.spell_target_ok(p, st, &pl.shop[s])
@@ -1895,7 +1899,7 @@ impl Game {
         }
         match pt.kind {
             TargetKind::MinionBuff { tribe, .. } | TargetKind::Consume { tribe, .. } => {
-                self.data.cards.get(b[s].card).is(tribe)
+                self.data.cards.tribes_of(&b[s]).is(tribe)
             }
             TargetKind::AnyBuff { .. } | TargetKind::AnySetStats { .. } => true,
             // A card steal is answered on a Tavern slot, never a board one.
@@ -1903,7 +1907,7 @@ impl Game {
             TargetKind::Spell(st) => self.valid_spell_target(p, st, s),
             TargetKind::MakeGolden { tribe, max_tier } => {
                 let c = self.data.cards.get(b[s].card);
-                !b[s].golden && c.tier <= max_tier && c.is(tribe)
+                !b[s].golden && c.tier <= max_tier && self.data.cards.tribes_of(&b[s]).is(tribe)
             }
             TargetKind::DestroyDiscover { tribe, .. } | TargetKind::DestroyCopy { tribe, .. } => {
                 self.data.cards.tribes_of(&b[s]).has(tribe)
@@ -2130,7 +2134,7 @@ impl Game {
                     if let Some(b) = bought {
                         self.players[p].tp.bought_stats = (b.attack, b.health);
                     }
-                    self.trinket_event(p, Event::Buy, Some(m.card), 1);
+                    self.trinket_event_minion(p, Event::Buy, &m, 1);
                 }
             }
             Action::BuySpell => {
@@ -2230,7 +2234,7 @@ impl Game {
                 let magnetic = m.keywords.has(Keywords::MAGNETIC);
                 let is_merge = magnetic
                     && pos < self.players[p].board.len()
-                    && self.can_magnetize(m.card, self.players[p].board[pos].card);
+                    && self.can_magnetize(m.card, &self.players[p].board[pos]);
                 let mut choose_one_play = false;
                 self.trinket_event(p, Event::CardPlayed, Some(m.card), 1);
                 // A Magnetic minion played on its own is still a Magnetic
@@ -2289,7 +2293,7 @@ impl Game {
                     }
                     self.fire_after_play_tribe(p, t, pos);
                     // A trinket that watches every minion played.
-                    self.trinket_event(p, Event::Play, Some(m.card), 1);
+                    self.trinket_event_minion(p, Event::Play, &m, 1);
                     // Hammer of Twilight: "your minions have +X" reaches the
                     // minion that just landed.
                     self.hammer_on_play(p, pos);

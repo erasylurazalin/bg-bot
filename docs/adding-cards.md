@@ -648,7 +648,11 @@ Triple Reward spell.
   three plain copies first, else two of a card plus one stand-in, else one
   plus two. Each source minion's buffs are measured against its own card,
   the stand-in keeps only keywords it was given, and its pool copy goes back
-  to the pool.
+  to the pool. A stand-in (`triple_wildcard`, the Elemental of Surprise)
+  covers a card when every copy the triple would use is of that tribe
+  through `CardDb::tribes_of`, not just on the printed card: the printed
+  tribe is the fast path, and a copy the Amalgamation Dark Gift made every
+  type counts too (docs/rules/design.md "Elemental of Surprise").
 - **Spells counted twice.** `apply_target` fires one extra `SpellsCast` event for
   every extra Balinda cast on a friendly minion (Proud Privateer's extra Bounty
   casts were already counted in `cast_spell`).

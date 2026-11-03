@@ -1060,7 +1060,13 @@ through exactly that card's code. The engine never matches a gift by name:
   A triple takes the gifts of all three copies, a Magnetized Mech keeps its
   own (the magnetic minion's are lost) and a sold minion's go with it.
   `CardDb::tribes_of(&Minion)` is the one tribe read that knows about
-  Amalgamation ("has all minion types").
+  Amalgamation ("has all minion types"). Every tribe check on a minion goes
+  through it (board, hand, the Tavern, a fight, an observation, a bot's
+  score, a target's validity, a trinket's "when you play a Dragon"); a
+  `Card`'s own `.tribes` is only for card definitions, where no minion
+  exists yet (a pool draw, an offer, a Discover filter, the Dark Discovery's
+  "your type" slot). `Tribes::is(tribe)` is that test with `None` meaning
+  "any minion".
 - **The landing** is `game::darkgifts::land_gift`: the effect card's stats
   (its `stats` are what the gift adds), its keywords, `shield_hits` for
   Toreth's Blessing, Gilding's `golden_up`, the "for each ... this game"

@@ -327,7 +327,7 @@ impl Game {
                         }
                         SpellTarget::SameTribeMinion => {
                             let c_id = self.players[p].shop[target].card;
-                            let t = self.data.cards.get(c_id).tribes;
+                            let t = self.data.cards.tribes_of(&self.players[p].shop[target]);
                             let tier = self.players[p].tier;
                             generated = self.data.cards.random_different_minion(t, c_id, tier, self.lobby, &mut self.rng);
                         }
@@ -892,7 +892,8 @@ impl Game {
                         }
                         SpellTarget::SameTribeMinion => {
                             let c_id = self.players[p].board[target_pos].card;
-                            let t = self.data.cards.get(c_id).tribes;
+                            let t =
+                                self.data.cards.tribes_of(&self.players[p].board[target_pos]);
                             let tier = self.players[p].tier;
                             generated = self.data.cards.random_different_minion(
                                 t,
@@ -1099,17 +1100,16 @@ impl Game {
                             // (docs/rules/trinkets.md).
                             let (ga, gh) =
                                 (self.players[p].gem_attack, self.players[p].gem_health);
+                            let quilboar = self
+                                .data
+                                .cards
+                                .tribes_of(&self.players[p].board[target_pos])
+                                .has(Tribe::Quilboar);
                             let m = &mut self.players[p].board[target_pos];
                             m.attack += ga;
                             m.health += gh;
                             m.gem_attack += ga;
                             m.gem_health += gh;
-                            let quilboar = self
-                                .data
-                                .cards
-                                .get(m.card)
-                                .tribes
-                                .has(Tribe::Quilboar);
                             if quilboar {
                                 m.keywords.set(keyword);
                             }
@@ -1181,8 +1181,7 @@ impl Game {
                         let is_mech = self
                             .data
                             .cards
-                            .get(self.players[p].board[target_pos].card)
-                            .tribes
+                            .tribes_of(&self.players[p].board[target_pos])
                             .has(Tribe::Mech);
                         if is_mech && !pt.by_minion {
                             self.trigger_on_cast_spell_on_mech(p, target_pos);

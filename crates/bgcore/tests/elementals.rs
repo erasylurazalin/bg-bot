@@ -104,13 +104,14 @@ fn end_all_turns(g: &mut Game) {
 }
 
 /// A card from the pool straight onto the board; golden takes three copies.
-fn put_on_board(g: &mut Game, p: usize, name: &str, golden: bool) {
+fn put_on_board(g: &mut Game, p: usize, name: &str, golden: bool) -> usize {
     let c = id(&g.data.cards, name);
     let slot = g.data.cards.get(c).pool_slot as usize;
     let copies = if golden { 3 } else { 1 };
     g.pool[slot] -= copies;
     let m = g.players[p].make_card(&g.data.cards, c, golden, copies);
     g.players[p].board.push(m);
+    g.players[p].board.len() - 1
 }
 
 fn put_in_hand(g: &mut Game, p: usize, name: &str, golden: bool) {
@@ -1081,6 +1082,114 @@ fn a_surprise_triple_keeps_the_buffs_of_all_three_and_the_surprises_shield() {
     // golden Waveling 10/2 + 10 Attack + 3 Health + the Surprise's +7/+5
     assert_eq!(stats(&gold), (10 + 10 + 7, 2 + 3 + 5));
     assert!(gold.keywords.has(Keywords::DIVINE_SHIELD), "the Surprise's shield carries");
+    g.check_invariants().unwrap();
+}
+
+/// The Amalgamation Dark Gift makes a minion with no type every type, which
+/// reaches the triple through `CardDb::tribes_of` (Era, 2026-11-03,
+/// docs/rules/design.md "Elemental of Surprise").
+fn amalgamate(g: &mut Game, pos: usize) {
+    assert!(g.give_gift(0, pos, "Amalgamation", g.turn.max(1)), "the gift lands");
+    assert!(
+        g.data.cards.tribes_of(&g.players[0].board[pos]).has(Tribe::Elemental),
+        "the gift makes it an Elemental"
+    );
+}
+
+#[test]
+fn two_surprises_plus_an_amalgamation_minion_make_a_golden_one() {
+    let mut g = game(50);
+    put_in_hand(&mut g, 0, "Elemental of Surprise", false);
+    let host = put_on_board(&mut g, 0, "Titus Rivendare", false);
+    amalgamate(&mut g, host);
+    // The second Surprise arrives by the buy, so it is the one checked.
+    set_shop(&mut g, 0, &["Elemental of Surprise"]);
+    buy_slot0(&mut g);
+    let p = &g.players[0];
+    assert_eq!(p.hand.len(), 1, "two Surprises and the Titus are one card");
+    let gold = p.hand[0];
+    assert!(gold.golden);
+    assert_eq!(name(&g, &gold), "Titus Rivendare");
+    assert!(gold.keywords.has(Keywords::DIVINE_SHIELD), "the Surprises' shield");
+    assert!(p.board.is_empty(), "the board copy went into the golden one");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_surprise_does_not_stand_in_when_one_copy_lost_the_gift() {
+    let mut g = game(51);
+    put_in_hand(&mut g, 0, "Elemental of Surprise", false);
+    let host = put_on_board(&mut g, 0, "Titus Rivendare", false);
+    amalgamate(&mut g, host);
+    // The second Titus arrives plain: one copy of the triple is no Elemental.
+    set_shop(&mut g, 0, &["Titus Rivendare"]);
+    buy_slot0(&mut g);
+    let p = &g.players[0];
+    assert!(p.hand.iter().chain(&p.board).all(|m| !m.golden), "no triple");
+    assert_eq!(p.hand.len(), 2, "the Surprise and the plain Titus stay apart");
+    assert_eq!(p.board.len(), 1, "the gifted Titus stays");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_surprise_stands_in_when_every_copy_has_the_gift() {
+    let mut g = game(52);
+    let a = put_on_board(&mut g, 0, "Titus Rivendare", false);
+    let b = put_on_board(&mut g, 0, "Titus Rivendare", false);
+    amalgamate(&mut g, a);
+    amalgamate(&mut g, b);
+    // One Surprise, bought last, completes the pair of gifted copies.
+    set_shop(&mut g, 0, &["Elemental of Surprise"]);
+    buy_slot0(&mut g);
+    let p = &g.players[0];
+    assert_eq!(p.hand.len(), 1);
+    let gold = p.hand[0];
+    assert!(gold.golden);
+    assert_eq!(name(&g, &gold), "Titus Rivendare");
+    assert!(gold.keywords.has(Keywords::DIVINE_SHIELD), "the Surprise's shield");
+    assert!(p.board.is_empty());
+    g.check_invariants().unwrap();
+    // A golden Surprise is a stand-in too, and its shield (and buffs) carry:
+    // it is taken first from the hand, ahead of the one the buy brought.
+    let mut g = game(55);
+    let a = put_on_board(&mut g, 0, "Titus Rivendare", false);
+    let b = put_on_board(&mut g, 0, "Titus Rivendare", false);
+    amalgamate(&mut g, a);
+    amalgamate(&mut g, b);
+    put_in_hand(&mut g, 0, "Elemental of Surprise", true);
+    set_shop(&mut g, 0, &["Elemental of Surprise"]);
+    buy_slot0(&mut g);
+    let p = &g.players[0];
+    let gold = p.hand.iter().find(|m| m.golden).copied().expect("a golden Titus");
+    assert_eq!(name(&g, &gold), "Titus Rivendare");
+    assert!(gold.keywords.has(Keywords::DIVINE_SHIELD), "the golden Surprise's shield");
+    assert!(p.board.is_empty());
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_plain_typeless_minion_never_triples_with_surprises() {
+    // Two Surprises and one Titus with no gift: no Elemental anywhere.
+    let mut g = game(53);
+    put_in_hand(&mut g, 0, "Elemental of Surprise", false);
+    put_on_board(&mut g, 0, "Titus Rivendare", false);
+    set_shop(&mut g, 0, &["Elemental of Surprise"]);
+    buy_slot0(&mut g);
+    let p = &g.players[0];
+    assert!(p.hand.iter().chain(&p.board).all(|m| !m.golden), "no triple");
+    assert_eq!(p.hand.len(), 2, "the two Surprises stay");
+    assert_eq!(p.board.len(), 1, "the Titus stays");
+    g.check_invariants().unwrap();
+    // Two plain Tituses and one Surprise: no triple either.
+    let mut g = game(54);
+    put_on_board(&mut g, 0, "Titus Rivendare", false);
+    put_on_board(&mut g, 0, "Titus Rivendare", false);
+    set_shop(&mut g, 0, &["Elemental of Surprise"]);
+    buy_slot0(&mut g);
+    let p = &g.players[0];
+    assert!(p.hand.iter().chain(&p.board).all(|m| !m.golden), "no triple");
+    assert_eq!(p.board.len(), 2, "both Tituses stay");
+    assert_eq!(p.hand.len(), 1, "the Surprise stays");
     g.check_invariants().unwrap();
 }
 

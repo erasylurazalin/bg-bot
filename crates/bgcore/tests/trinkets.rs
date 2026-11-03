@@ -147,11 +147,12 @@ fn pool_copies(g: &mut Game, c: CardId) -> u8 {
     1
 }
 
-fn put_on_board(g: &mut Game, p: usize, name: &str) {
+fn put_on_board(g: &mut Game, p: usize, name: &str) -> usize {
     let c = id(g, name);
     let n = pool_copies(g, c);
     let m = g.players[p].make_card(&g.data.cards, c, false, n);
     g.players[p].board.push(m);
+    g.players[p].board.len() - 1
 }
 
 /// A board minion's current stats, by card name.
@@ -4851,6 +4852,62 @@ fn a_golden_fishbait_gives_its_killer_ten_and_the_portraits_buff_on_top() {
     assert_eq!(stats(&g, "Hoarding Hyena"), (4 + 4, 6 + 4), "the Portrait's alone");
     let slot = slot_of(&g, "Snarky Portrait");
     assert_eq!(g.players[0].trinkets[slot].value, 8, "improved by +4");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_bronzebeard_brann_counts_as_a_dragon_for_kalecgos() {
+    // Kalecgos, Arcane Aspect: "After you play a Battlecry, give your Dragons
+    // +2/+2". The portrait makes every Brann a Murloc and a Dragon, so the
+    // buff lands on a Brann and not on the Pirate beside it.
+    let mut g = game(423);
+    take(&mut g, 0, "Bronzebeard Portrait");
+    put_on_board(&mut g, 0, "Kalecgos, Arcane Aspect");
+    let brann = put_on_board(&mut g, 0, "Brann Bronzebeard");
+    put_on_board(&mut g, 0, "Sky Admiral Rogers");
+    let tribes = g.data.cards.tribes_of(&g.players[0].board[brann]);
+    assert!(tribes.has(Tribe::Dragon) && tribes.has(Tribe::Murloc), "the portrait's tribes");
+    let brann_before = stats(&g, "Brann Bronzebeard");
+    let pirate_before = stats(&g, "Sky Admiral Rogers");
+    // A Battlecry minion played from the hand.
+    put_in_hand(&mut g, 0, "Razorfen Geomancer");
+    g.players[0].gold = 10;
+    let hand = g.players[0].hand.len() as u8 - 1;
+    let at = g.players[0].board.len() as u8;
+    act(&mut g, 0, Action::Play { hand, pos: at });
+    assert_eq!(
+        stats(&g, "Brann Bronzebeard"),
+        (brann_before.0 + 4, brann_before.1 + 4),
+        "the Brann is a Dragon, and a Brann doubles the Battlecry so Kalecgos fires twice"
+    );
+    assert_eq!(stats(&g, "Sky Admiral Rogers"), pirate_before, "a Pirate is no Dragon");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_portraits_beast_buff_reaches_an_amalgamation() {
+    // Snarky Portrait gives your Beasts +4/+4. A Drakkari Enchanter (no type,
+    // which is what the Amalgamation gift goes on) is every type, so it is a
+    // Beast too; the Pirate beside it is not.
+    let mut g = game(424);
+    to_turn(&mut g, 3);
+    take(&mut g, 0, "Snarky Portrait");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Snarky Shark");
+    let amalgam = put_on_board(&mut g, 0, "Drakkari Enchanter");
+    assert!(g.give_gift(0, amalgam, "Amalgamation", 9), "the Amalgamation gift");
+    assert!(g.data.cards.tribes_of(&g.players[0].board[amalgam]).has(Tribe::Beast));
+    let amalgam_before = stats(&g, "Drakkari Enchanter");
+    put_on_board(&mut g, 0, "Sky Admiral Rogers");
+    let pirate_before = stats(&g, "Sky Admiral Rogers");
+    let shark = g.players[0].board.iter().position(|m| m.card == id(&g, "Snarky Shark")).unwrap();
+    act(&mut g, 0, Action::Sell(shark as u8));
+    assert_eq!(
+        stats(&g, "Drakkari Enchanter"),
+        (amalgam_before.0 + 4, amalgam_before.1 + 4),
+        "the Amalgamation is a Beast"
+    );
+    assert_eq!(stats(&g, "Sky Admiral Rogers"), pirate_before, "a Pirate is no Beast");
     g.check_invariants().unwrap();
 }
 

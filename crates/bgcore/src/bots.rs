@@ -59,11 +59,12 @@ fn preferred_tribe(game: &Game, p: usize) -> Option<Tribe> {
         if c.is_spell() {
             continue;
         }
+        let tribes = game.data.cards.tribes_of(m);
         for (n, t) in counts.iter_mut().zip(Tribe::EVERY) {
             // an out-of-lobby tribe can never be preferred: an all-type
             // minion counts for it, but no card of it can ever be bought
             if game.lobby.has(t) {
-                *n += c.tribes.has(t) as u32;
+                *n += tribes.has(t) as u32;
             }
         }
     }
@@ -82,7 +83,7 @@ fn card_value(game: &Game, pref: Option<Tribe>, m: &Minion) -> i32 {
         return c.tier as i32 * 10;
     }
     let golden = if m.golden { 100 } else { 0 };
-    let tribe = if pref.is_some_and(|t| c.tribes.has(t)) { 6 } else { 0 };
+    let tribe = if pref.is_some_and(|t| game.data.cards.tribes_of(m).has(t)) { 6 } else { 0 };
     golden + c.tier as i32 * 10 + m.attack + m.health + tribe
 }
 
@@ -147,7 +148,6 @@ fn target_score(game: &Game, pref: Option<Tribe>, kind: TargetKind, m: &Minion, 
     let value = board_value(game, pref, m);
     // Board minions are kept; a Tavern minion only matters if bought later.
     let place = if on_board { 10_000 } else { 0 };
-    let c = game.data.cards.get(m.card);
     let set_gain = |a: i32, h: i32| (a - m.attack) + (h - m.health);
     place
         + match kind {
@@ -167,7 +167,11 @@ fn target_score(game: &Game, pref: Option<Tribe>, kind: TargetKind, m: &Minion, 
                 | SpellTarget::RefreshWithType
                 | SpellTarget::SameTribeMinion
                 | SpellTarget::BuffSameTribe { .. } => {
-                    let tribe = if pref.is_some_and(|t| c.tribes.has(t)) { 1000 } else { 0 };
+                    let tribe = if pref.is_some_and(|t| game.data.cards.tribes_of(m).has(t)) {
+                        1000
+                    } else {
+                        0
+                    };
                     tribe + value
                 }
                 _ => value,
@@ -182,7 +186,7 @@ fn choose_one_score(game: &Game, p: usize, opt: ChooseOption) -> i32 {
     let n = pl.board.len() as i32;
     match opt {
         ChooseOption::MinionTarget { tribe, attack, health, .. } => {
-            let any = pl.board.iter().any(|m| game.data.cards.get(m.card).is(tribe));
+            let any = pl.board.iter().any(|m| game.data.cards.tribes_of(m).is(tribe));
             if any { attack + health } else { -100 }
         }
         // a permanent bonus on every later spell
@@ -226,7 +230,7 @@ fn activate_worth(game: &Game, p: usize, s: usize) -> u8 {
             if gain { 2 } else { 0 }
         }
         Effect::BuffChosen { tribe, .. } => {
-            let target = others().any(|m| cards.get(m.card).is(tribe));
+            let target = others().any(|m| cards.tribes_of(m).is(tribe));
             if target { 2 } else { 0 }
         }
         Effect::DemonsConsume { .. } => {
