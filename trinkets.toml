@@ -506,7 +506,9 @@ card_id = "BG30_MagicItem_943"
 slot = "greater"
 cost = 1
 tribes = ["quilboar"]
-on_pick = [{ get = "Hot-Air Surveyor" }, { gem_bonus = [6, 6] }]
+# "Blood Gems played from your hand give an extra +6/+6": the from-hand part
+# only, so a Gem Turbo Hogrider or Gem Confiscation plays does not get it.
+on_pick = [{ get = "Hot-Air Surveyor" }, { gem_bonus_hand = [6, 6] }]
 
 [[trinket]]
 name = "Great Boar Sticker"

@@ -987,6 +987,11 @@ pub struct Player {
     /// give an extra +X/+Y this game". Starts at +1/+1.
     pub gem_attack: i32,
     pub gem_health: i32,
+    /// What a Blood Gem played from the hand gives on top of that (Surveyor
+    /// Portrait: "Blood Gems played from your hand give an extra +6/+6"). A
+    /// Gem a minion plays does not get it.
+    pub gem_hand_attack: i32,
+    pub gem_hand_health: i32,
     /// Blood Gem Barrage casts: every Refresh gives this much, as Blood
     /// Gems, to every minion in the Tavern (the turn-start roll included
     /// when the Tavern changed).

@@ -744,7 +744,11 @@ Triple Reward spell.
   gems). Fight gems are plain buffs unless `permanent` (Vineweaver), which
   leaves through `SideOutcome::permanent_gems`. A hand cast on a friendly
   minion plays `gem_casts` times: Balinda sets, each Hot-Air Surveyor adds
-  ("Set versus add", `cards::how_many_times`). Roogug
+  ("Set versus add", `cards::how_many_times`). A card that reads "Blood Gems
+  played from your hand give an extra +X/+Y" (Surveyor Portrait) raises
+  `Player.gem_hand_attack/gem_hand_health` instead, and only a cast from the
+  hand adds it: a Gem a minion plays (Hogrider, Confiscation, Roogug) gets
+  the player value alone. Roogug
   (`on_gem_played_on_self`) reacts only to gems cast from hand. Blood Gem
   Barrage adds to `Player.barrage` per cast; every Refresh gives it to every
   Tavern minion (`apply_barrage`), the turn-start roll included when the

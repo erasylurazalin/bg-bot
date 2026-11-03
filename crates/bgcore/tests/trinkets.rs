@@ -1202,12 +1202,17 @@ fn the_discover_bounty_and_link_portraits() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     assert_eq!(g.players[0].hand.len(), 0, "the other one was discarded");
     assert_eq!(g.players[0].discarded, 1);
-    // Surveyor Portrait: a Hot-Air Surveyor and +6/+6 to the Gems you play
-    // from hand.
+    // Surveyor Portrait: a Hot-Air Surveyor and +6/+6 for the Gems you play
+    // from hand only, not for the player's whole Gem value.
     let mut g = game(45);
     take(&mut g, 0, "Surveyor Portrait");
     assert_eq!(hand_of(&g, 0, "Hot-Air Surveyor"), 1);
-    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (7, 7));
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (1, 1));
+    assert_eq!(
+        (g.players[0].gem_hand_attack, g.players[0].gem_hand_health),
+        (6, 6),
+        "the from-hand part"
+    );
     // Cookie's Stirring Rod: after five Murlocs, two random Tavern spells.
     let mut g = game_lobby(46, &[Tribe::Murloc, Tribe::Beast]);
     equip(&mut g, 0, 1, "Cookie's Stirring Rod");
@@ -3694,6 +3699,76 @@ fn lovely_locket_casts_the_spell_on_another_friendly_minion() {
         after[1],
         (before[1].0 + 4, before[1].1 + 8),
         "the Locket cast it on the other minion too"
+    );
+    g.check_invariants().unwrap();
+}
+
+/// Lovely Locket copies the spell once per cast: a Blood Gem that Balinda
+/// casts twice gets two copies. The log `Hearthstone_2026_11_02_00_10_22-g2`
+/// turn 10 shows three +1/+1 copies for one Gem with two Hot-Air Surveyors up
+/// (triage group A2, 29 steps; one copy per play was the engine's bug).
+#[test]
+fn lovely_locket_copies_a_gem_once_per_cast() {
+    let mut g = game(309);
+    take(&mut g, 0, "Lovely Locket");
+    put_on_board(&mut g, 0, "Balinda Stonehearth");
+    let target = put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Lullabot");
+    g.give(0, "Blood Gem").unwrap();
+    let hand = g.players[0].hand.len() as u8 - 1;
+    let before: i32 = g.players[0].board.iter().map(|m| m.attack).sum();
+    act(&mut g, 0, Action::Play { hand, pos: 0 });
+    act(&mut g, 0, Action::Target(target as u8));
+    let after: i32 = g.players[0].board.iter().map(|m| m.attack).sum();
+    assert_eq!(
+        after - before,
+        4,
+        "two casts on the target and one copy for each cast (a 1/1 Gem: 2 + 2)"
+    );
+    g.check_invariants().unwrap();
+}
+
+/// Surveyor Portrait's "Blood Gems played from your hand give an extra
+/// +6/+6": a Gem the player plays gets it, a Gem a minion plays does not.
+/// The log keeps the pair outside the player's Gem counter: in
+/// `Hearthstone_2026_11_03_00_29_06-g2` turn 9 the counter is 3/5 (a Gem of
+/// 4/6) while every Gem cast gives 9/11 (triage group A1).
+#[test]
+fn surveyor_portraits_gem_bonus_is_for_gems_played_from_hand() {
+    let mut g = game(310);
+    take(&mut g, 0, "Surveyor Portrait");
+    let target = put_on_board(&mut g, 0, "Lullabot");
+    put_on_board(&mut g, 0, "Lullabot");
+    g.give(0, "Blood Gem").unwrap();
+    let hand = g.players[0].hand.len() as u8 - 1;
+    let before = (g.players[0].board[target].attack, g.players[0].board[target].health);
+    act(&mut g, 0, Action::Play { hand, pos: 0 });
+    act(&mut g, 0, Action::Target(target as u8));
+    let after = (g.players[0].board[target].attack, g.players[0].board[target].health);
+    assert_eq!(
+        (after.0 - before.0, after.1 - before.1),
+        (7, 7),
+        "a hand Gem: the printed 1/1 and the Portrait's 6/6"
+    );
+    // The same Portrait, with a Choose One card played instead: Turbo
+    // Hogrider's two Gems are its own plays and get the player value only.
+    reset(&mut g, 311);
+    take(&mut g, 0, "Surveyor Portrait");
+    put_on_board(&mut g, 0, "Turbo Hogrider");
+    put_on_board(&mut g, 0, "Roadboar");
+    put_in_hand(&mut g, 0, "Intrepid Botanist");
+    // The pick put a Hot-Air Surveyor in the hand first, so the Botanist is
+    // the last card.
+    let hand = g.players[0].hand.len() as u8 - 1;
+    act(&mut g, 0, Action::Play { hand, pos: 2 });
+    assert!(g.players[0].pending_choose_one.is_some(), "the Choose One waits");
+    act(&mut g, 0, Action::Choose(0));
+    let hog = &g.players[0].board[0];
+    assert_eq!(
+        (hog.attack - 6, hog.health - 8),
+        (2, 2),
+        "Turbo Hogrider's two 1/1 Gems, with no from-hand bonus"
     );
     g.check_invariants().unwrap();
 }

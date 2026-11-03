@@ -159,6 +159,19 @@ rules behind each are in docs/rules/design.md Part 2.
   copy) is in no logged state: `shop_replay` reads it off the file's own
   history, the last `play` step of a Tavern spell before the step being
   replayed, because only the player's own casts count.
+- **The two counters the engine itself adds to.** The log's Tavern spell
+  bonus (`TAVERN_SPELL_*_INCREASE`) is the total the game gives every spell:
+  a board aura (Humon'gozz), a trinket's standing rule (Honeycomb Ring,
+  Multilayered Shield) and its "this turn" part are already inside it. The
+  loader takes the engine's own part back out (`Player::total_spell_bonus`
+  minus `Player.spell_bonus`), so the total is the log's number and a Tavern
+  spell cast in a replayed turn is exactly what the log shows. The Blood Gem
+  counter is the other way round: `gem_attack`/`gem_health` leave out a
+  trinket's from-hand bonus (Surveyor Portrait's +6/+6 is written on the Gem
+  cards, not on the player), so the loader runs that `on_pick` act
+  (`Act::GemBonusHand` into `Player.gem_hand_attack/gem_hand_health`) while
+  `Act::GemBonus` stays in the logged state. The log evidence is under
+  docs/real-boards.md "The file", at `counters`.
 - **The hand in combat.** `fight_with_hands` passes a side's hand only when
   something on that side reads it. Murlocs summoned from hand come back
   unchanged; Winterfinner's hand buffs are kept.

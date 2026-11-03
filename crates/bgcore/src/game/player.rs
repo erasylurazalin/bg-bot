@@ -178,6 +178,8 @@ impl Player {
             fodder_refreshes: ArrayVec::new(),
             gem_attack: 1,
             gem_health: 1,
+            gem_hand_attack: 0,
+            gem_hand_health: 0,
             barrage: (0, 0),
             deity: None,
             discarded: 0,
