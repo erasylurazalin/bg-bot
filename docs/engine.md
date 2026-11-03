@@ -743,7 +743,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   same `Effect`/`SpellEffect` arm the card path runs, with no host slot (`pos`
   0) and no golden multiplier. `Act::Cast` is the one exception: a trinket's
   spell is the player's cast, while the same `cast` key on a minion is the
-  minion's (`Game::minion_cast_spell`), so it calls `cast_named_spell` itself.
+  minion's (`cast_named_spell` with `by_minion` true), so it calls
+  `cast_named_spell` itself.
   The keys with no card behind them are the ones trinkets.toml's header lists;
   `Act` names the card each was written for.
   The first five were `upgrade_discount`, `buff_tavern_this_turn` (Cursed
@@ -934,7 +935,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `Effect::CastSpell` (Gatekeeper Amalgam's Misplaced Tea Set, an Air
   Revenant's Easterly Winds, a Crimson Vindicator's Rally spell) and
   `Effect::CastTaughtSpell` (a Magicfin token's spell) go through
-  `Game::minion_cast_spell`; `Game::cast_spell` stays the player's own cast.
+  `cast_named_spell` with `by_minion` true; `Game::cast_spell` stays the
+  player's own cast.
   The spell still runs and buffs as printed, spell power included, but none of
   the "spells you cast" bookkeeping is its: no `EventKind::AllSpellsCast` or
   `EventKind::SpellsCast` (so no Felboar count, no `spells_cast`), no
@@ -950,6 +952,27 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `cast_named_spell` with `by_minion` false, as does `cast_spell_on`; the
   Lovely Locket's copy inherits the flag of the cast it copies. In a fight the
   same `Effect::CastSpell` keeps its own `Side` counters.
+- **A repeated targeting spell or Battlecry keeps the one target.** Every
+  "how many times" count is `cards::how_many_times` ("Set versus add"), and a
+  spell or Battlecry that asks for a target asks once: the repeats land on
+  the minion picked for the first (docs/rules/design.md "Set versus add", Era
+  2026-11-04). A played minion's targeted Battlecry already does this:
+  `run_effect` puts the count in `PendingTarget.runs` and `apply_target` runs
+  the effect that many times on the one pick. A named spell does it through
+  `cast_named_spell`: it passes the casts it still owes to `cast_spell_as`
+  (`repeats`), and `cast_spell_inner` folds them into the prompt's `runs`
+  beside Balinda's own count, so a Battlecry doubled by Brann asks for one
+  target and casts the spell twice on it. A Choose One is still picked once
+  and the casts after it are lost, and a spell that removes its target stops
+  the loop (`stop_after`). Three paths do not follow it yet, and no replay
+  verdict turns on them. `TargetKind::MakeGolden` asks for a second pick
+  for each repeat, so Brann plus Elite Navigator goldens two minions; under
+  the rule as written the second trigger would land on the minion the first
+  made Golden and do nothing (an open question, no log either way). A golden
+  `Effect::TriggerBattlecry` and Young Murk-Eye's adjacent Battlecries (with
+  Drakkari) drop the triggers after the first, because the answer comes
+  after the trigger has returned, and a target the second neighbour asks for
+  replaces the first one's prompt; folding those needs a queued trigger.
 - **The numbers that grow (block 4).** `tp.spell_bonus_per_type`
   (Multilayered Shield: the bonus per different friendly minion type) and
   `tp.spell_bonus_turn` (Honeycomb Ring: this turn only, cleared in

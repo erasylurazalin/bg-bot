@@ -371,22 +371,18 @@ impl Game {
     /// A spell the player casts: the play from the hand, plus every extra cast
     /// their own cards add (a Bounty's again, Balinda's, a Surveyor's Gem).
     pub(super) fn cast_spell(&mut self, p: usize, m: Minion) {
-        self.cast_spell_as(p, m, false);
+        self.cast_spell_as(p, m, false, 1);
     }
 
-    /// A spell a minion's own effect casts for the player: Gatekeeper
-    /// Amalgam's Misplaced Tea Set, a Magicfin token's taught spell, an Air
-    /// Revenant's Easterly Winds. The spell still happens and buffs as
-    /// printed, but it is not a spell the player cast (Era 2026-11-02,
-    /// docs/notes/UNSURE.md), so nothing that counts or reacts to "spells you cast"
-    /// sees it.
-    pub(super) fn minion_cast_spell(&mut self, p: usize, m: Minion) {
-        self.cast_spell_as(p, m, true);
-    }
-
-    /// Cast a named spell `times` times, stopping at a prompt it opens (the
-    /// player answers that one first). `by_minion` says whose cast it is:
-    /// see `minion_cast_spell`.
+    /// Cast a named spell `times` times. A targeting spell asks for its
+    /// target once and every cast left lands on it, so the loop stops at the
+    /// prompt it opens; a Choose One is picked once and the casts after it
+    /// are lost. `by_minion` says whose cast it is: a spell a minion's own
+    /// effect casts for the player (Gatekeeper Amalgam's Misplaced Tea Set, a
+    /// Magicfin token's taught spell, an Air Revenant's Easterly Winds)
+    /// happens and buffs as printed, but it is not a spell the player cast
+    /// (Era 2026-11-02, docs/notes/UNSURE.md), so nothing that counts or
+    /// reacts to "spells you cast" sees it.
     pub(super) fn cast_named_spell(
         &mut self,
         p: usize,
@@ -394,13 +390,13 @@ impl Game {
         times: u32,
         by_minion: bool,
     ) {
-        for _ in 0..times {
+        for cast in 0..times {
+            // The casts still to come all land on the target this one picks
+            // (docs/rules/design.md "Set versus add"), so `cast_spell_as`
+            // folds them into the prompt's own count.
+            let casts_left = (times - cast).min(u8::MAX as u32) as u8;
             let m = self.data.cards.make(card, false);
-            if by_minion {
-                self.minion_cast_spell(p, m);
-            } else {
-                self.cast_spell(p, m);
-            }
+            self.cast_spell_as(p, m, by_minion, casts_left);
             if self.players[p].pending_target.is_some()
                 || self.players[p].pending_choose_one.is_some()
             {
@@ -409,7 +405,10 @@ impl Game {
         }
     }
 
-    fn cast_spell_as(&mut self, p: usize, m: Minion, by_minion: bool) {
+    /// `repeats` is how many times this one cast happens: the Battlecry or
+    /// effect that casts a named spell `times` times folds its repeats in
+    /// here, so a targeting spell asks for one target and uses it every time.
+    fn cast_spell_as(&mut self, p: usize, m: Minion, by_minion: bool, repeats: u8) {
         // A Bounty cast again (Proud Privateer) is another spell cast for
         // every trigger and every "spells cast" counter.
         let c = self.data.cards.get(m.card);
@@ -418,7 +417,7 @@ impl Game {
         // A Triple Reward is a reward you open, not a spell you cast
         // (docs/rules/design.md "Read the card's exact words, every time").
         let reward = matches!(c.spell_effect, Some(SpellEffect::TripleReward));
-        self.cast_spell_inner(p, m, by_minion);
+        self.cast_spell_inner(p, m, by_minion, repeats);
         if reward {
             return;
         }
@@ -605,8 +604,9 @@ impl Game {
 
     /// Run the spell itself: open its target or Choose One prompt, or run its
     /// effect. `by_minion` says whether a minion's effect cast it, and then no
-    /// "whenever you cast a spell" card sees it.
-    fn cast_spell_inner(&mut self, p: usize, m: Minion, by_minion: bool) {
+    /// "whenever you cast a spell" card sees it. `repeats` is how many times
+    /// this cast happens: see `cast_spell_as`.
+    fn cast_spell_inner(&mut self, p: usize, m: Minion, by_minion: bool, repeats: u8) {
         let c = self.data.cards.get(m.card);
         let tavern = c.tavern_spell;
         // "The last Tavern spell you cast" (Cataclysmic Harbinger, the
@@ -628,6 +628,9 @@ impl Game {
             } else {
                 (self.balinda_mult(p), false)
             };
+            // A Battlecry's repeats (Brann, and whatever else sets or adds
+            // them) cast this spell again on the one target it picks.
+            let runs = runs.max(1).saturating_mul(repeats.max(1));
             self.players[p].pending_target = Some(PendingTarget {
                 source: None,
                 kind: TargetKind::Spell(st),

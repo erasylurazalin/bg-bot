@@ -324,6 +324,60 @@ fn magicfin_mycologist_teaches_a_targeted_spell_once_per_turn() {
     g.check_invariants().unwrap();
 }
 
+/// A Magicfin token in hand taught Tricky Trousers, ready to be played.
+fn taught_token_in_hand(g: &mut Game) -> u8 {
+    g.give(0, "Magicfin Apprentice").expect("a token in hand");
+    let tricky = g.data.cards.by_name("Tricky Trousers").expect("Tricky Trousers");
+    let h = g.players[0].hand.len() - 1;
+    g.players[0].hand[h].taught_spell = Some(tricky);
+    h as u8
+}
+
+#[test]
+fn brann_casts_a_taught_targeting_spell_twice_on_the_one_target() {
+    // docs/rules/design.md "Set versus add": a repeated Battlecry or spell
+    // that picks a target uses the same target every time (Era 2026-11-04,
+    // log Hearthstone_2026_10_28_02_28_32-g1 turn 10 step 2).
+    let mut g = game(15);
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    put_on_board(&mut g, 0, "Lullabot");
+    let h = taught_token_in_hand(&mut g);
+    act(&mut g, 0, Action::Play { hand: h, pos: 2 });
+    // The spell asks for its target once, for both casts.
+    assert_eq!(g.players[0].pending_target.map(|pt| pt.runs), Some(2));
+    act(&mut g, 0, Action::Target(1));
+    // Tricky Trousers gives +1/+2, twice, and its Taunt comes and goes.
+    assert_eq!(stats(&g.players[0].board[1]), (2 + 2, 2 + 4));
+    assert!(!g.players[0].board[1].keywords.has(Keywords::TAUNT));
+    assert_eq!(stats(&g.players[0].board[0]), (2, 4), "the other minion is untouched");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_golden_setter_casts_a_taught_targeting_spell_three_times_on_one_target() {
+    // A golden Brann sets the count at three ("Set versus add"): three casts,
+    // all on the one minion picked.
+    let mut g = game(16);
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    let brann = g.data.cards.by_name("Brann Bronzebeard").expect("Brann");
+    let slot = g.data.cards.get(brann).pool_slot as usize;
+    g.pool[slot] -= 2;
+    g.players[0].board[0].golden = true;
+    g.players[0].board[0].pool_copies = 3;
+    put_on_board(&mut g, 0, "Lullabot");
+    let h = taught_token_in_hand(&mut g);
+    act(&mut g, 0, Action::Play { hand: h, pos: 2 });
+    assert_eq!(g.players[0].pending_target.map(|pt| pt.runs), Some(3));
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!(stats(&g.players[0].board[1]), (2 + 3, 2 + 6));
+    assert!(
+        g.players[0].board[1].keywords.has(Keywords::TAUNT),
+        "the third cast sets Taunt again"
+    );
+    assert_eq!(stats(&g.players[0].board[0]), (2, 4), "the other minion is untouched");
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn a_mycologist_triple_teaches_with_fresh_uses() {
     // the copy used up its one teaching this turn; the golden from the
