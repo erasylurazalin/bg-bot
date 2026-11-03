@@ -63,6 +63,11 @@ fight phase.
 - When the shop refreshes, unbought minions go back to the pool and new ones
   are drawn at random from what is left, among minions of your tier or lower.
   Fewer copies left means lower odds of seeing that minion.
+  Every copy is equally likely, so a tier's odds are its share of the copies
+  left: at Tavern tier 6 a slot is about 12% tier 1, 16% tier 2, 21% tier
+  3, 22% tier 4, 20% tier 5 and 8% tier 6. Checked against Era's logs
+  (2026-11-04: 851 Tavern minions at the start of tier 6 turns gave exactly
+  those shares), and the engine's model predicts the same.
 - The shop refreshes at the start of each turn and on every roll. A frozen
   shop keeps its minions for the next turn, and its empty slots fill up.
   Moving a minion on your board doesn't touch the freeze: the Tavern stays
