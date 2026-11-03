@@ -1614,10 +1614,10 @@ pub struct Card {
     /// A Spellcraft spell: it leaves the hand at the end of the turn if it
     /// was not cast (docs/rules/design.md "Spellcraft").
     pub spellcraft: bool,
-    /// Whenever a Blood Gem is cast from hand on this minion, this plays this
-    /// many Blood Gems on a random different friendly minion (Geomagus
-    /// Roogug). Golden doubles the count. The Gems it plays are not from
-    /// hand, so they never chain.
+    /// Whenever a Blood Gem is played on this minion, this plays this many
+    /// Blood Gems on a random different friendly minion (Geomagus Roogug).
+    /// Golden doubles the count. The only Gem it ignores is another Roogug's
+    /// (docs/rules/design.md "Geomagus Roogug"), so two Roogugs never loop.
     pub on_gem_played_on_self: Option<u8>,
     /// How many Choose One cards played this turn get both effects combined
     /// (Thorned Trailblazer). Golden doubles it. Left to right, each

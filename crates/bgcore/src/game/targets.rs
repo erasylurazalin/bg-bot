@@ -260,6 +260,9 @@ impl Game {
                     let (da, dh) = if pt.tavern { self.total_spell_bonus(p) } else { (0, 0) };
                     let mut generated: Option<CardId> = None;
                     let mut stop_after = false;
+                    // How many Blood Gems this cast played on the Tavern
+                    // minion: a Roogug there reacts once for each of them.
+                    let mut gems_played: u8 = 0;
                     match st {
                         SpellTarget::Buff {
                             attack,
@@ -273,7 +276,7 @@ impl Game {
                             if pt.gem {
                                 // A Blood Gem on a Tavern minion: one cast,
                                 // the player's Gem value, tracked as Blood
-                                // Gem stats.
+                                // Gem stats. A Roogug there reacts below.
                                 let (ga, gh) =
                                     (self.players[p].gem_attack, self.players[p].gem_health);
                                 let m = &mut self.players[p].shop[target];
@@ -281,6 +284,7 @@ impl Game {
                                 m.health += gh;
                                 m.gem_attack += ga;
                                 m.gem_health += gh;
+                                gems_played = gems_played.saturating_add(1);
                             } else {
                                 let m = &mut self.players[p].shop[target];
                                 for _ in 0..times {
@@ -389,15 +393,8 @@ impl Game {
                         SpellTarget::Confiscation { gems } => {
                             // 3 Gems on the Tavern minion, then its
                             // neighbours' Blood Gem stats move onto it.
-                            let (ga, gh) =
-                                (self.players[p].gem_attack, self.players[p].gem_health);
-                            {
-                                let m = &mut self.players[p].shop[target];
-                                m.attack += ga * gems as i32;
-                                m.health += gh * gems as i32;
-                                m.gem_attack += ga * gems as i32;
-                                m.gem_health += gh * gems as i32;
-                            }
+                            self.add_gem_stats_shop(p, target, gems);
+                            gems_played = gems_played.saturating_add(gems);
                             for n in [target.checked_sub(1), Some(target + 1)]
                                 .into_iter()
                                 .flatten()
@@ -444,17 +441,15 @@ impl Game {
                         }
                         SpellTarget::GemKeyword { keyword } => {
                             // A special Blood Gem cast on a Tavern minion.
-                            let (ga, gh) =
-                                (self.players[p].gem_attack, self.players[p].gem_health);
-                            let m = &mut self.players[p].shop[target];
-                            m.attack += ga;
-                            m.health += gh;
-                            m.gem_attack += ga;
-                            m.gem_health += gh;
-                            let quilboar =
-                                self.data.cards.tribes_of(m).has(Tribe::Quilboar);
+                            self.add_gem_stats_shop(p, target, 1);
+                            gems_played = gems_played.saturating_add(1);
+                            let quilboar = self
+                                .data
+                                .cards
+                                .tribes_of(&self.players[p].shop[target])
+                                .has(Tribe::Quilboar);
                             if quilboar {
-                                m.keywords.set(keyword);
+                                self.players[p].shop[target].keywords.set(keyword);
                             }
                         }
                         // A friendly board minion's Deathrattle: no Tavern
@@ -482,6 +477,10 @@ impl Game {
                     if pt.tavern && !pt.by_minion {
                         self.trigger_on_cast_spell(p);
                     }
+                    // A Roogug in the Tavern doesn't react to a Gem cast on
+                    // it: whether a Tavern Roogug reacts at all is open
+                    // (docs/notes/UNSURE.md).
+                    let _ = gems_played;
                     if !pt.by_minion
                         && !stop_after
                         && target < self.players[p].shop.len()
@@ -826,6 +825,9 @@ impl Game {
                     // spell"), so the generic block below must not run them
                     // again.
                     let mut cast_triggers_done = false;
+                    // How many Blood Gems this cast played on the target: a
+                    // Roogug there reacts once for each of them.
+                    let mut gems_played: u8 = 0;
                     match st {
                         SpellTarget::Buff {
                             attack,
@@ -839,22 +841,14 @@ impl Game {
                             if pt.gem {
                                 // A Blood Gem: the player's Gem value, no
                                 // spell power, tracked as Blood Gem stats. A
-                                // Gem the player played from the hand gets
-                                // Surveyor Portrait's from-hand bonus too; one
-                                // a minion plays (Turbo Hogrider, Gem
-                                // Confiscation) does not.
-                                let pl = &self.players[p];
-                                let mut ga = pl.gem_attack;
-                                let mut gh = pl.gem_health;
-                                if pt.source.is_none() {
-                                    ga += pl.gem_hand_attack;
-                                    gh += pl.gem_hand_health;
-                                }
-                                let m = &mut self.players[p].board[target_pos];
-                                m.attack += ga;
-                                m.health += gh;
-                                m.gem_attack += ga;
-                                m.gem_health += gh;
+                                // Gem the player played (or the Lovely Locket
+                                // copied for them) gets Surveyor Portrait's
+                                // from-hand bonus; one a minion's own effect
+                                // casts for the player does not. A Roogug's
+                                // reaction to it waits for the cast's other
+                                // "played on this" triggers below.
+                                self.players[p].add_gem_stats(target_pos, 1, pt.source.is_none());
+                                gems_played = gems_played.saturating_add(1);
                             } else {
                                 let m = &mut self.players[p].board[target_pos];
                                 for _ in 0..times {
@@ -1070,15 +1064,8 @@ impl Game {
                             // 3 Gems on the target, then the neighbours'
                             // Blood Gem stats move onto it: they lose them,
                             // it gains them.
-                            let (ga, gh) =
-                                (self.players[p].gem_attack, self.players[p].gem_health);
-                            {
-                                let m = &mut self.players[p].board[target_pos];
-                                m.attack += ga * gems as i32;
-                                m.health += gh * gems as i32;
-                                m.gem_attack += ga * gems as i32;
-                                m.gem_health += gh * gems as i32;
-                            }
+                            self.players[p].add_gem_stats(target_pos, gems, false);
+                            gems_played = gems_played.saturating_add(gems);
                             for n in [target_pos.checked_sub(1), Some(target_pos + 1)]
                                 .into_iter()
                                 .flatten()
@@ -1112,21 +1099,17 @@ impl Game {
                         SpellTarget::GemKeyword { keyword } => {
                             // Jewelry Box: the player's Gem value, and the
                             // keyword only when the target is a Quilboar
-                            // (docs/rules/trinkets.md).
-                            let (ga, gh) =
-                                (self.players[p].gem_attack, self.players[p].gem_health);
+                            // (docs/rules/trinkets.md). The Gem is a Gem
+                            // played on it, so a Roogug reacts below.
+                            self.players[p].add_gem_stats(target_pos, 1, false);
+                            gems_played = gems_played.saturating_add(1);
                             let quilboar = self
                                 .data
                                 .cards
                                 .tribes_of(&self.players[p].board[target_pos])
                                 .has(Tribe::Quilboar);
-                            let m = &mut self.players[p].board[target_pos];
-                            m.attack += ga;
-                            m.health += gh;
-                            m.gem_attack += ga;
-                            m.gem_health += gh;
                             if quilboar {
-                                m.keywords.set(keyword);
+                                self.players[p].board[target_pos].keywords.set(keyword);
                             }
                         }
                         SpellTarget::TriggerDeathrattle => {
@@ -1182,16 +1165,19 @@ impl Game {
                         self.trigger_on_cast_spell(p);
                     }
                     if !target_removed && target_pos < self.players[p].board.len() {
-                        // "Whenever you cast a spell on" cards, the target's
-                        // own watcher and Roogug's Gem reaction are all
-                        // reactions to a spell the player cast: a minion's
-                        // cast for the player fires none of them.
+                        // "Whenever you cast a spell on" cards and the
+                        // target's own watcher are reactions to a spell the
+                        // player cast: a minion's cast for the player fires
+                        // none of them.
                         if !pt.by_minion {
                             self.trigger_on_cast_spell_on_target(p, target_pos);
                         }
-                        if pt.gem && !pt.by_minion {
-                            // A Gem was played from hand on the target.
-                            self.roogug_on_gem(p, target_pos);
+                        if gems_played > 0 {
+                            // Every Gem played on the target, from however
+                            // the cast got them there: a Geomagus Roogug
+                            // reacts to each one (docs/rules/design.md
+                            // "Geomagus Roogug").
+                            self.roogug_reacts(p, target_pos, gems_played);
                         }
                         let is_mech = self
                             .data

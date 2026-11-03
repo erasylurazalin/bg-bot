@@ -23,15 +23,16 @@ use super::shop::give_back;
 
 impl Game {
     /// A Choose One card was just played: every Turbo Hogrider plays its
-    /// Blood Gems on all friendly Quilboar.
+    /// Blood Gems on all friendly Quilboar. Each of those Gems is a Gem
+    /// played on the minion it lands on, so a Geomagus Roogug there reacts
+    /// (docs/rules/design.md "Geomagus Roogug").
     pub(super) fn after_choose_one_played(&mut self, p: usize) {
-        let cards = &self.data.cards;
         let hogs: ArrayVec<(u8, bool), BOARD> = self.players[p]
             .board
             .iter()
             .filter_map(|m| {
                 m.parts().find_map(|(c, g)| {
-                    cards.get(c).after_choose_one_play.map(|n| (n, g))
+                    self.data.cards.get(c).after_choose_one_play.map(|n| (n, g))
                 })
             })
             .collect();
@@ -40,14 +41,11 @@ impl Game {
         }
         for (count, golden) in hogs {
             let times = count * (if golden { 2 } else { 1 });
-            let (ga, gh) = (self.players[p].gem_attack, self.players[p].gem_health);
-            for m in &mut self.players[p].board {
-                if cards.tribes_of(m).has(Tribe::Quilboar) {
-                    m.attack += ga * times as i32;
-                    m.health += gh * times as i32;
-                    m.gem_attack += ga * times as i32;
-                    m.gem_health += gh * times as i32;
+            for i in 0..self.players[p].board.len() {
+                if !self.data.cards.tribes_of(&self.players[p].board[i]).has(Tribe::Quilboar) {
+                    continue;
                 }
+                self.play_gems_on_board(p, i, times);
             }
         }
     }

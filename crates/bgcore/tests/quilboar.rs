@@ -443,7 +443,10 @@ fn balinda_sets_and_each_surveyor_adds_gem_casts() {
 }
 
 #[test]
-fn roogug_plays_gems_from_hand_only_and_never_loops() {
+fn a_roogug_reacts_to_a_gem_from_hand_and_two_roogugs_never_loop() {
+    // docs/rules/design.md "Geomagus Roogug": every Gem played on it makes it
+    // play its own on a different friendly minion, and a Gem another Roogug
+    // played is the one exception, so two Roogugs never loop.
     let mut g = game(11);
     put_on_board(&mut g, 0, "Geomagus Roogug", false);
     put_on_board(&mut g, 0, "Tusked Camper", false);
@@ -474,13 +477,75 @@ fn roogug_plays_gems_from_hand_only_and_never_loops() {
 }
 
 #[test]
+fn a_hogriders_gem_on_a_roogug_makes_it_play_its_own() {
+    // docs/rules/design.md "Geomagus Roogug": it reacts to Gems a minion or
+    // a spell plays, Turbo Hogrider's included. The Power log
+    // Hearthstone_2026_10_28_02_28_32 shows each of the Hogrider's Gems on a
+    // Roogug followed by its trigger.
+    let mut g = game(41);
+    put_on_board(&mut g, 0, "Turbo Hogrider", false);
+    put_on_board(&mut g, 0, "Geomagus Roogug", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Gem Day").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::Choose(0));
+    // Gem Day makes a Gem +2/+1: the Hogrider's two Gems land on it (and on
+    // the two Quilboar beside it), and each one makes the Roogug play a Gem
+    // of its own.
+    assert_eq!(g.players[0].board[1].gem_attack, 4, "the Hogrider's two Gems");
+    let all: i32 = g.players[0].board.iter().map(|m| m.gem_attack).sum();
+    assert_eq!(all, 16, "2 Gems on each of the three Quilboar, and 2 reactions");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_gem_confiscation_on_a_roogug_makes_it_play_a_gem_per_gem() {
+    // Three Gems go on the target, so a Roogug there plays three of its own.
+    let mut g = game(42);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    put_on_board(&mut g, 0, "Geomagus Roogug", false);
+    put_on_board(&mut g, 0, "Roadboar", false);
+    g.give(0, "Gem Confiscation").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::Target(1));
+    assert_eq!(g.players[0].board[1].gem_attack, 3, "the three Confiscation Gems");
+    let others: i32 = [0, 2].into_iter().map(|i| g.players[0].board[i].gem_attack).sum();
+    assert_eq!(others, 3, "one Gem from the Roogug for each of them");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_barrage_gem_on_a_tavern_roogug_does_nothing_to_the_board() {
+    // Blood Gem Barrage gives its Gem to every Tavern minion on a Refresh. A
+    // Roogug in the Tavern doesn't react from there until we know it does
+    // (docs/notes/UNSURE.md, 2026-11-04): the board gets nothing.
+    let mut g = game(43);
+    set_shop(&mut g, 0, &["Geomagus Roogug", "Cord Puller", "Wolf Pup"]);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.players[0].barrage = (2, 2);
+    g.players[0].gold = 10;
+    // buy one of the Roogug's neighbours and freeze: the next turn's roll
+    // fills that slot, which makes it a Refresh, and the Roogug stays
+    act(&mut g, 0, Action::Buy(1));
+    act(&mut g, 0, Action::Freeze);
+    end_all_turns(&mut g);
+    assert_eq!(name(&g, &g.players[0].shop[0]), "Geomagus Roogug", "still in the Tavern");
+    assert_eq!(g.players[0].shop[0].gem_attack, 2, "Barrage's Gem on it");
+    let board: i32 = g.players[0].board.iter().map(|m| m.gem_attack).sum();
+    assert_eq!(board, 0, "a Tavern Roogug plays no Gem on the board");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_golden_roogug_reacts_once_per_extra_gem_cast() {
-    // docs/rules/design.md "Geomagus Roogug reacts only to Gems cast from
-    // hand (extra casts included)": a golden Hot-Air Surveyor makes one gem
-    // play three casts, each cast lands on the Roogug and makes it react, so
-    // a golden Roogug's two gems fire three times. A Gem from Roogug is not
-    // from hand, so nothing chains: 3 gems on the Roogug itself and 6 over
-    // the rest of the board, and no more.
+    // docs/rules/design.md "Geomagus Roogug": every Gem played on it makes it
+    // react. A golden Hot-Air Surveyor makes one gem play three casts, each
+    // cast lands on the Roogug and makes it react, so a golden Roogug's two
+    // Gems fire three times. Its own Gems carry the from-Roogug mark, so
+    // nothing chains: 3 Gems on the Roogug itself and 6 over the rest of the
+    // board, and no more.
     let mut g = game(19);
     put_on_board(&mut g, 0, "Geomagus Roogug", true);
     put_on_board(&mut g, 0, "Hot-Air Surveyor", true);

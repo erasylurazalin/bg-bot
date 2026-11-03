@@ -223,7 +223,7 @@ pub struct PendingTarget {
     pub tavern: bool,
     /// The spell being cast is a Blood Gem: its buff is the player's Blood
     /// Gem value, the stats it gives are Blood Gem stats, and each cast is a
-    /// Gem played on the target (Geomagus Roogug reacts to those from hand).
+    /// Gem played on the target (a Geomagus Roogug there reacts to it).
     pub gem: bool,
     /// The spell is one a minion's own effect casts for the player (Gatekeeper
     /// Amalgam's Misplaced Tea Set, a Magicfin token's taught spell). It still
