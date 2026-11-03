@@ -357,12 +357,11 @@ fn a_step_the_engine_cannot_play_is_incomplete() {
     assert!(r.diffs[0].contains("no action for"), "{:?}", r.diffs);
 }
 
-/// A Golden minion the file marks `no_reward` is seated that way: the log
-/// lists a triple's three parts (BACON_TRIPLED_BASE_MINION_ID2 and _ID3) only
-/// when three copies made it, so a Golden from Silent Deliverer's Battlecry,
-/// from Sinister Invitation or from a Golden bought gives no Triple Reward
-/// when it is played (Era, 2026-11-02). The extractor writes the mark and the
-/// loader seats it; playing it here gives no reward.
+/// A Golden minion the file marks `no_reward` is seated that way: the sources
+/// docs/rules/design.md names (Silent Deliverer's Battlecry goldens, Sinister
+/// Invitation's golden, the Gilding Dark Gift) give no Triple Reward when
+/// played, and the extractor writes the mark for them. The loader seats it;
+/// playing it here gives no reward.
 #[test]
 fn a_golden_the_file_marks_with_no_reward_gives_no_triple_reward() {
     let data = data();
@@ -400,6 +399,44 @@ fn a_golden_the_file_marks_with_no_reward_gives_no_triple_reward() {
         .position(|m| m.golden && data.cards.get(m.card).name == name)
         .expect("the same Golden, unmarked");
     assert!(!loaded.game.players[0].hand[at].no_reward);
+}
+
+/// Aureate Laureate is `always_golden`, so `CardDb::make` marks it as giving no
+/// Triple Reward and the game shows it Golden in the shop. A logged state is
+/// built from the file, which the collector of an older run may leave unmarked,
+/// so the loader keeps the card's own mark: the replay gives no reward for it
+/// either way (`Hearthstone_2026_11_02_00_10_22-g5` turn 10 step 58).
+#[test]
+fn a_logged_aureate_laureate_gives_no_triple_reward_whatever_the_file_says() {
+    let data = data();
+    let mut file = fixture();
+    let turn = &mut file.turns[0];
+    let slot = turn
+        .start
+        .hand
+        .iter()
+        .position(|m| m.kind.as_deref() != Some("spell"))
+        .expect("the fixture's hand has a minion");
+    let logged = &mut turn.start.hand[slot];
+    logged.card_id = Some("BG32_236".to_string());
+    logged.name = Some("Aureate Laureate".to_string());
+    logged.attack = 2;
+    logged.health = 2;
+    logged.golden = true;
+    logged.no_reward = false;
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 1);
+    let at = loaded
+        .game
+        .players[0]
+        .hand
+        .iter()
+        .position(|m| data.cards.get(m.card).name == "Aureate Laureate")
+        .expect("the Aureate Laureate is in the loaded hand");
+    assert!(loaded.game.players[0].hand[at].golden, "it is Golden");
+    assert!(
+        loaded.game.players[0].hand[at].no_reward,
+        "its own card says it gives no Triple Reward"
+    );
 }
 
 /// Steady Growth: "At the end of your turn, gain +X/+Y", where the pair is

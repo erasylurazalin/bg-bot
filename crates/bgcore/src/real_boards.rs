@@ -46,9 +46,10 @@ pub struct RealMinionSpec {
     /// Marked by Rapid Reanimation (the file's `reanimate`): the minion the
     /// power destroys at Start of Combat and brings back as an exact copy.
     pub reanimate: bool,
-    /// The file's `no_reward`: a Golden minion that was not made from three
-    /// copies, so playing it gives no Triple Reward (Silent Deliverer's
-    /// goldens, Sinister Invitation's, a Golden bought).
+    /// The file's `no_reward`: a Golden minion whose own source says it gives
+    /// no Triple Reward when played (Silent Deliverer's goldens, Sinister
+    /// Invitation's, the Gilding Dark Gift, Aureate Laureate). `build_minion`
+    /// adds it to the mark `CardDb::make` sets on an `always_golden` card.
     pub no_reward: bool,
     /// The countdown each gift in `dark_gifts` has left, by index, or -1 for
     /// a gift whose countdown the file does not say (the log numbers it in
@@ -452,7 +453,10 @@ fn make_real_minion(
     }
     minion.keywords = keywords;
     minion.reanimate = m.reanimate;
-    minion.no_reward = m.no_reward;
+    // `CardDb::make` already set the mark on an `always_golden` card (Aureate
+    // Laureate), which the file may not say, so the file's mark adds to it
+    // instead of replacing it.
+    minion.no_reward |= m.no_reward;
     // A minion with limited uses this turn (Malchezaar's Health Refreshes, a
     // Thorned Trailblazer's combines, a Magicfin Mycologist's teachings) shows
     // how many it has left as its {0} ("(2 left!)"), so the file's numbers say

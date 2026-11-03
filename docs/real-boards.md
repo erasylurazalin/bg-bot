@@ -217,6 +217,11 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     minion, or null (the board files' key).
   - `reanimate` on a board minion: the Rapid Reanimation mark, as the board
     files write it.
+  - `no_reward` on a Golden minion: it gives no Triple Reward when played,
+    written for the sources whose own card says so (docs/rules/design.md, THE
+    GOLDEN RULE: Silent Deliverer's Battlecry goldens, Sinister Invitation's,
+    the Gilding Dark Gift, Aureate Laureate). The replay adds the mark itself
+    for an `always_golden` card, so a Laureate needs no key in the file.
 - `end` is the state when the turn ended, after the end of turn effects and
   before the fight (null when the log ends inside the turn). It is the same
   object as the last step's `after`.

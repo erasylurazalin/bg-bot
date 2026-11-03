@@ -70,6 +70,8 @@ const ROLL: &str = "TB_BaconShop_8p_Reroll_Button";
 const FREEZE: &str = "TB_BaconShopLockAll_Button";
 const LEVEL: &str = "TB_BaconShopTechUp";
 const DARK: &str = "BG36_Button_DarkGift";
+/// The Dark Gift Discover a trinket deals (Ominous Stone, Wax Lance, Sinister
+/// Invitation). Only Sinister Invitation's offers are Golden.
 const DARK_DISCOVERY: &str = "BG36_MidGameEffect_010";
 const TRIPLE: &str = "TB_BaconShop_Triples_01";
 
@@ -113,6 +115,15 @@ const WATCHED: [&str; 7] = [
 ];
 
 const SILENT_DELIVERER: &str = "BG36_343";
+
+/// Aureate Laureate: `always_golden`, so the game shows it Golden without three
+/// copies, and its text says it gives no Triple Reward. The golden card id is
+/// listed too, against a log that names that one.
+const AUREATE_LAUREATE: [&str; 2] = ["BG32_236", "BG32_236_G"];
+
+/// The Gilding Dark Gift (`darkgifts.toml`): it makes the minion it lands on
+/// Golden, and that Golden gives no Triple Reward.
+const GILDING: &str = "BG36_MidGameEffect_000t14";
 
 /// The blocks a click on my own board turns into a step, and the step it makes.
 const BOARD_BLOCKS: [&str; 2] = ["PLAY", "MOVE_MINION"];
@@ -680,6 +691,23 @@ fn is_system(card_id: &str) -> bool {
 fn plain_minion<'a>(game: &'a Game, cards: &Cards, e: &'a Entity) -> bglog::Minion {
     let gifts: HashMap<i32, Vec<String>> = HashMap::new();
     minion(e, game, cards, &gifts, &gifts)
+}
+
+/// Whether a Golden minion gives no Triple Reward when it is played.
+///
+/// Every Golden minion gives one unless its own card or the effect that made it
+/// says it does not (docs/rules/design.md, THE GOLDEN RULE). The ones that say
+/// so are the four sources Era knows: Silent Deliverer's Battlecry goldens,
+/// Sinister Invitation's (its Dark Gift offer is the only one whose offers are
+/// Golden), the Gilding Dark Gift, and Aureate Laureate (`always_golden`).
+/// Everything else gives one, a Golden carrying any other Dark Gift, a triple's
+/// Golden and a Golden bought included, so the default here is `false`.
+fn no_triple_reward(m: &bglog::Minion, creator: Option<&str>) -> bool {
+    m.golden
+        && (creator == Some(SILENT_DELIVERER)
+            || creator == Some(DARK_DISCOVERY)
+            || AUREATE_LAUREATE.contains(&m.card_id.as_str())
+            || m.dark_gifts.iter().any(|gift| gift == GILDING))
 }
 
 impl Handler for Collector {
@@ -2356,12 +2384,8 @@ impl Collector {
             put(&mut d, "numbers", numbers_json(&sd));
         }
         // A Golden minion gives a Triple Reward when it is played, unless its
-        // own source says otherwise: Silent Deliverer's Battlecry goldens and
-        // the golden copies a Dark Gift makes give none.
-        if m.golden
-            && (creator.map(|c| c.card_id == SILENT_DELIVERER).unwrap_or(false)
-                || !m.dark_gifts.is_empty())
-        {
+        // own source says otherwise (`no_triple_reward`).
+        if no_triple_reward(&m, creator.map(|c| c.card_id.as_str())) {
             put(&mut d, "no_reward", Json::Bool(true));
         }
         d
@@ -2695,5 +2719,58 @@ mod tests {
         tally.bump("buy");
         assert_eq!(tally.render(), "{'buy': 2, 'other': 1}");
         assert_eq!(Tally::new().render(), "{}");
+    }
+
+    /// The `no_reward` mark: only the sources whose own card says a Golden
+    /// gives no Triple Reward (docs/rules/design.md, THE GOLDEN RULE); every
+    /// other Golden gives one, a Golden carrying another Dark Gift too.
+    #[test]
+    fn only_the_named_sources_give_no_triple_reward() {
+        fn golden(card_id: &str, gifts: &[&str]) -> bglog::Minion {
+            bglog::Minion {
+                card_id: card_id.to_string(),
+                golden: true,
+                dark_gifts: gifts.iter().map(|gift| gift.to_string()).collect(),
+                ..Default::default()
+            }
+        }
+        // Silent Deliverer's Battlecry goldens.
+        assert!(no_triple_reward(
+            &golden("BG35_341_G", &[]),
+            Some(SILENT_DELIVERER)
+        ));
+        // Sinister Invitation's golden: a Dark Gift offer, whatever gift it got.
+        assert!(no_triple_reward(
+            &golden("BG30_125_G", &["BG36_MidGameEffect_000t71"]),
+            Some(DARK_DISCOVERY)
+        ));
+        // The Gilding Dark Gift, which is what made it Golden.
+        assert!(no_triple_reward(&golden("BG32_340_G", &[GILDING]), None));
+        // Aureate Laureate, always Golden, and its printed golden card.
+        assert!(no_triple_reward(&golden("BG32_236", &[]), None));
+        assert!(no_triple_reward(&golden("BG32_236_G", &[]), None));
+        // A Golden that carries any other Dark Gift gives one: the Mummifier of
+        // Hearthstone_2026_10_24_00_56_06-g1 turn 7 step 5, whose log hand
+        // gains a Triple Reward.
+        assert!(!no_triple_reward(
+            &golden("BG28_309_G", &["BG36_MidGameEffect_000t52"]),
+            None
+        ));
+        // A triple's Golden, and one a hero power handed out.
+        assert!(!no_triple_reward(
+            &golden("BG28_309_G", &[]),
+            Some("TB_BaconShop_CheckTriples")
+        ));
+        assert!(!no_triple_reward(
+            &golden("BG36_854_G", &[]),
+            Some("TB_BaconShop_HP_080")
+        ));
+        // A minion that is not Golden is never marked: playing it gives no
+        // Triple Reward in the first place.
+        let normal = bglog::Minion {
+            card_id: "BG32_236".to_string(),
+            ..Default::default()
+        };
+        assert!(!no_triple_reward(&normal, None));
     }
 }

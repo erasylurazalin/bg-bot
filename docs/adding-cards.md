@@ -597,9 +597,14 @@ Triple Reward spell.
   `Minion.no_reward`: Aureate Laureate is `always_golden`, Silent Deliverer's
   Battlecry goldens and the golden copies a Dark Gift makes (Sinister
   Invitation, Gilding) give none (Era, 2026-11-02). The replay reads that from
-  the action file's `no_reward`, which the extractor writes for those two
-  sources; a triple's golden, a Lockbox's and a Golden bought do give one. `TargetKind::MakeGolden` makes a board minion Golden with no reward and
-  no count (Elite Navigator, Captain Sanders).
+  the action file's `no_reward`, which the extractor writes for those sources
+  (`collect_actions.rs`'s `no_triple_reward`: Silent Deliverer as the creator,
+  the Dark Gift Discover `BG36_MidGameEffect_010` as the creator, the Gilding
+  gift in `dark_gifts`, the Laureate's card id), and the loader also sets it
+  from the card's `always_golden`, so a Laureate does not depend on the file; a
+  golden carrying any other Dark Gift, a triple's golden, a Lockbox's and a
+  Golden bought do give one. `TargetKind::MakeGolden` makes a board minion
+  Golden with no reward and no count (Elite Navigator, Captain Sanders).
 - **Golden draws from the pool.** `draw_golden` (game/shop.rs) takes up to three copies for
   one Golden minion (Lockbox, Silent Deliverer).
 - **Gold spent.** Every payment goes through `fire_event(GoldSpent, n)`, which also

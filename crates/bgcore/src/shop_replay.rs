@@ -78,9 +78,11 @@ pub struct ShopMinionSpec {
     pub dark_gifts: Vec<ShopGiftSpec>,
     #[serde(default)]
     pub reanimate: bool,
-    /// A Golden minion that gives no Triple Reward when played: the log says
-    /// so with no BACON_TRIPLED_BASE_MINION_ID2 (it was not made from three
-    /// copies). The engine's `Minion.no_reward`.
+    /// A Golden minion that gives no Triple Reward when played, the file's
+    /// mark: only the sources docs/rules/design.md names say so (Silent
+    /// Deliverer's goldens, Sinister Invitation's, Gilding, Aureate Laureate).
+    /// The engine's `Minion.no_reward`, which the loader also sets for an
+    /// `always_golden` card whatever the file says.
     #[serde(default)]
     pub no_reward: bool,
     #[serde(default)]
