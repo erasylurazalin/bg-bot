@@ -318,12 +318,12 @@ impl Game {
         }
     }
 
-    /// Play `times` Blood Gems on a friendly minion (the player's Gem value,
-    /// tracked as Blood Gem stats). Shop only: a fight plays its Gems through
-    /// the fight's own counters.
-    pub(super) fn play_gems_on_board(&mut self, p: usize, pos: usize, times: u8) {
+    /// The stats of `times` Blood Gems on the Tavern minion in `slot`: the
+    /// player's Gem value each, tracked as Blood Gem stats. No from-hand
+    /// bonus: a Tavern minion is not a friendly minion.
+    pub(super) fn add_gem_stats_shop(&mut self, p: usize, slot: usize, times: u8) {
         let (ga, gh) = (self.players[p].gem_attack, self.players[p].gem_health);
-        if let Some(m) = self.players[p].board.get_mut(pos) {
+        if let Some(m) = self.players[p].shop.get_mut(slot) {
             m.attack += ga * times as i32;
             m.health += gh * times as i32;
             m.gem_attack += ga * times as i32;
@@ -331,17 +331,60 @@ impl Game {
         }
     }
 
-    /// A Blood Gem was just cast from hand onto the friendly minion in
-    /// `target`: every Geomagus Roogug there plays its Blood Gems on a random
-    /// different friendly minion. Those Gems are not from hand, so two
-    /// Roogugs never loop.
-    pub(super) fn roogug_on_gem(&mut self, p: usize, target: usize) {
-        let Some((count, golden)) = self.players[p].board.get(target).and_then(|m| {
-            m.parts().find_map(|(c, g)| self.data.cards.get(c).on_gem_played_on_self.map(|n| (n, g)))
-        }) else {
+    /// How many Blood Gems a minion plays when one lands on it (Geomagus
+    /// Roogug, either part of a multi-part card). Golden doubles it.
+    fn gem_reaction(&self, m: &Minion) -> Option<u8> {
+        m.parts().find_map(|(c, g)| {
+            self.data
+                .cards
+                .get(c)
+                .on_gem_played_on_self
+                .map(|n| n * if g { 2 } else { 1 })
+        })
+    }
+
+    /// A Blood Gem played on the friendly board minion in `pos` by a minion's
+    /// or a spell's effect. `from_roogug` is the mark a Gem carries when a
+    /// Geomagus Roogug played it: a Roogug there reacts to every Gem but
+    /// another Roogug's, so two Roogugs never loop (docs/rules/design.md
+    /// "Geomagus Roogug"). A Gem the player plays from the hand gets Surveyor
+    /// Portrait's bonus where it lands instead (`Player::add_gem_stats` then
+    /// `Game::roogug_reacts`). Shop only: a fight plays its Gems through the
+    /// fight's own counters.
+    fn gem_on_board(&mut self, p: usize, pos: usize, from_roogug: bool) {
+        self.players[p].add_gem_stats(pos, 1, false);
+        if !from_roogug {
+            self.roogug_on_gem(p, pos);
+        }
+    }
+
+    /// Play `times` Blood Gems on a friendly minion: the Gems a minion's or a
+    /// spell's effect plays (Turbo Hogrider, Gem Confiscation, a Rally), each
+    /// of them a Gem played on it for a Geomagus Roogug.
+    pub(super) fn play_gems_on_board(&mut self, p: usize, pos: usize, times: u8) {
+        for _ in 0..times {
+            self.gem_on_board(p, pos, false);
+        }
+    }
+
+    /// Every Gem played on the friendly minion in `pos` makes a Geomagus
+    /// Roogug there play its own Gems, once per Gem. For a cast whose other
+    /// "played on this" triggers go first.
+    pub(super) fn roogug_reacts(&mut self, p: usize, pos: usize, gems: u8) {
+        for _ in 0..gems {
+            self.roogug_on_gem(p, pos);
+        }
+    }
+
+    /// A Blood Gem was just played on the friendly minion in `target`: every
+    /// Geomagus Roogug there plays its Blood Gems on a random different
+    /// friendly minion. Those Gems carry the from-Roogug mark, so they never
+    /// make another Roogug react.
+    fn roogug_on_gem(&mut self, p: usize, target: usize) {
+        let Some(times) = self.players[p].board.get(target).and_then(|m| self.gem_reaction(m))
+        else {
             return;
         };
-        let times = count * (if golden { 2 } else { 1 });
         let n = self.players[p].board.len();
         if n <= 1 {
             return;
@@ -350,7 +393,7 @@ impl Game {
             // A different friendly minion, uniformly at random.
             let k = self.rng.below((n - 1) as u32) as usize;
             let at = if k < target { k } else { k + 1 };
-            self.play_gems_on_board(p, at, 1);
+            self.gem_on_board(p, at, true);
         }
     }
 
@@ -1065,13 +1108,10 @@ impl Game {
                 pl.gem_health += health;
             }
             SpellEffect::GemsOnBoard(n) => {
-                // Gems played by an effect, not from hand: no Roogug chain.
-                let (ga, gh) = (self.players[p].gem_attack, self.players[p].gem_health);
-                for m in &mut self.players[p].board {
-                    m.attack += ga * n as i32;
-                    m.health += gh * n as i32;
-                    m.gem_attack += ga * n as i32;
-                    m.gem_health += gh * n as i32;
+                // Gems played by an effect, not from hand: each one makes a
+                // Geomagus Roogug react.
+                for i in 0..self.players[p].board.len() {
+                    self.play_gems_on_board(p, i, n);
                 }
             }
             SpellEffect::Barrage { attack, health } => {

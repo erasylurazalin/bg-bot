@@ -400,7 +400,7 @@ impl Game {
         }
         pl.shop_spell = data.cards.random_spell(pl.tier, *lobby, rng);
         Self::apply_refresh_buff(pl, &data.cards, rng);
-        Self::apply_barrage(pl, &data.cards);
+        Self::apply_barrage(pl, &data.cards, rng);
         let bonus = data.rules.bonus_mask;
         Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
     }
@@ -955,7 +955,7 @@ impl Game {
                     );
                     Self::add_high_tier_slots(pl, pool, &data.cards, rng, *lobby, count);
                     Self::apply_refresh_buff(pl, &data.cards, rng);
-                    Self::apply_barrage(pl, &data.cards);
+                    Self::apply_barrage(pl, &data.cards, rng);
                     let bonus = data.rules.bonus_mask;
                     Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
                 }

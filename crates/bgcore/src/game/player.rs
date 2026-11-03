@@ -512,6 +512,24 @@ impl Player {
         (base + extra).min(crate::SHOP - 1)
     }
 
+    /// The stats of `times` Blood Gems on the board minion in `pos`: the
+    /// player's Gem value each, tracked as Blood Gem stats. `hand` adds
+    /// Surveyor Portrait's from-hand bonus, which only a Gem the player
+    /// plays from the hand gets. Nothing triggers here.
+    pub(super) fn add_gem_stats(&mut self, pos: usize, times: u8, hand: bool) {
+        let (mut ga, mut gh) = (self.gem_attack, self.gem_health);
+        if hand {
+            ga += self.gem_hand_attack;
+            gh += self.gem_hand_health;
+        }
+        if let Some(m) = self.board.get_mut(pos) {
+            m.attack += ga * times as i32;
+            m.health += gh * times as i32;
+            m.gem_attack += ga * times as i32;
+            m.gem_health += gh * times as i32;
+        }
+    }
+
     /// The player's Tavern spell stat bonus: permanent gains plus board
     /// auras (Enchanted Sentinel, including when Magnetized into a host,
     /// and Humon'gozz).

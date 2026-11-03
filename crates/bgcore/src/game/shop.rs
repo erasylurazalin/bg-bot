@@ -229,7 +229,7 @@ impl Game {
         let size = pl.shop_size(rules);
         Self::fill_shop(pl, pool, cards, rules, size, rng, lobby, kind);
         Self::apply_refresh_buff(pl, cards, rng);
-        Self::apply_barrage(pl, cards);
+        Self::apply_barrage(pl, cards, rng);
         Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
     }
 
@@ -355,8 +355,10 @@ impl Game {
 
     /// Blood Gem Barrage: after every Refresh (the turn-start roll included
     /// when the Tavern changed), every minion in the Tavern gains the whole
-    /// amount cast so far, as Blood Gem stats.
-    pub(super) fn apply_barrage(pl: &mut Player, cards: &CardDb) {
+    /// amount cast so far, as Blood Gem stats. A Geomagus Roogug in the
+    /// Tavern doesn't react to it (whether a Tavern Roogug reacts at all is
+    /// open: docs/notes/UNSURE.md).
+    pub(super) fn apply_barrage(pl: &mut Player, cards: &CardDb, _rng: &mut Rng) {
         let (a, h) = pl.barrage;
         if a == 0 && h == 0 {
             return;
@@ -592,7 +594,7 @@ impl Game {
         }
         pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         Self::apply_refresh_buff(pl, cards, rng);
-        Self::apply_barrage(pl, cards);
+        Self::apply_barrage(pl, cards, rng);
         Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
     }
 
@@ -630,7 +632,7 @@ impl Game {
         pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         pl.tp.tavern_price = price;
         Self::apply_refresh_buff(pl, cards, rng);
-        Self::apply_barrage(pl, cards);
+        Self::apply_barrage(pl, cards, rng);
         Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
     }
 
@@ -665,7 +667,7 @@ impl Game {
         }
         pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         Self::apply_refresh_buff(pl, cards, rng);
-        Self::apply_barrage(pl, cards);
+        Self::apply_barrage(pl, cards, rng);
         Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
     }
 
