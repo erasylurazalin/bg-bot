@@ -1,9 +1,10 @@
 # How trinkets work
 
 Era's rules for trinkets: the offer and the trinkets whose card text
-leaves room. They carry the same weight as `DESIGN.md` Part 2. Rules we
-are still guessing at are in `docs/UNSURE.md`. The log evidence behind the
-offer and discount rules is in `docs/briefs/trinket-facts.md`.
+leaves room. They carry the same weight as `docs/rules/design.md` Part 2.
+The rules still being guessed at are in a private notes file
+(`docs/notes/UNSURE.md`), and so is the log evidence behind the offer and
+discount rules.
 
 ## The offer
 
@@ -45,7 +46,7 @@ always afford one. A trinket with no cost in the game data is free.
   triggers don't fire. It is still a buy.
 - Deaths in the shop count for death counters (Butchering, Mutanus...).
 - The Tavern never has more than 7 slots, one of them the spell (see
-  `docs/heroes.md`, Ysera, for the exceptions). **Glowing Gauntlet** makes
+  `docs/rules/heroes.md`, Ysera, for the exceptions). **Glowing Gauntlet** makes
   it 6 minions and 1 spell, and refills at once: a bought or consumed
   minion is replaced by a minion, a bought spell by another spell.
 
@@ -193,7 +194,7 @@ and in hand.
 Built 2026-10-31 (block 4): every portrait but Bronzebeard and Eternal (the
 Eternal Portrait's Taunt and Reborn are a Start of Combat effect, built with
 the fight block). The change is data on the player, keyed by card
-(`docs/ENGINE.md` "The portraits that rewrite a card").
+(`docs/engine.md` "The portraits that rewrite a card").
 
 Built 2026-11-01 (block 5): the Bronzebeard Portrait's "also Murlocs and
 Dragons" is a card modifier like the others, `also_tribes`, and it is read by
@@ -206,7 +207,7 @@ friendly Undead death.
 
 ## Dark Gifts
 
-See `docs/darkgifts.md`.
+See `docs/rules/darkgifts.md`.
 
 ## Block 5 corrections (Era, 2026-11-01)
 
@@ -228,7 +229,7 @@ See `docs/darkgifts.md`.
 Built in block 6 (2026-11-01): the Poet Portrait with its Timewarped Poet
 token (`permanent_keep = "all_dragons"`), the lesser and greater Colorful
 Compass and the Gold-plated Compass. The type they read at the pick is
-`TrinketState.tribe` (`lock_type` in trinkets.toml, docs/ENGINE.md "The
+`TrinketState.tribe` (`lock_type` in trinkets.toml, docs/engine.md "The
 compasses and the Poet Portrait (block 6)"). Minion Bait, Wisdomball Supply,
 Putricide Sticker, Kiri, Shrine and the Naga and Timewarp trinkets are not
 built.

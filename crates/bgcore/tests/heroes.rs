@@ -181,7 +181,7 @@ fn heroes_toml_parses_with_the_hundred_and_eight_heroes() {
         ("A. F. Kay", "TB_BaconShop_HERO_16", 15, 0),
         ("Ambassador Faelin", "BG22_HERO_201", 14, 0),
         ("King Mukla", "TB_BaconShop_HERO_38", 16, 0),
-        // The two Dark Gift heroes (docs/darkgifts.md).
+        // The two Dark Gift heroes (docs/rules/darkgifts.md).
         ("Tras'tath, Soul Parasite", "BG36_HERO_101", 15, 0),
         ("Nightmare Lord Xavius", "BG36_HERO_105", 6, 0),
         // Hero batch 2 (docs/briefs/heroes-batch2.md).
@@ -238,7 +238,7 @@ fn heroes_toml_parses_with_the_hundred_and_eight_heroes() {
     assert_eq!(pw("Death Speaker Blackthorn").uses_per_turn, 2);
     assert_eq!(pw("Reno Jackson").uses_per_game, 1);
     assert_eq!(pw("Alexstrasza").unlock_tier, 4);
-    // Prestidigitation: free, once a turn, from turn 1 (docs/heroes.md
+    // Prestidigitation: free, once a turn, from turn 1 (docs/rules/heroes.md
     // "Secrets").
     assert_eq!(pw("The Great Akazamzarak").cost, 0);
     assert_eq!(pw("The Great Akazamzarak").uses_per_turn, 1);
@@ -564,7 +564,7 @@ fn alakir_gives_the_leftmost_minion_the_three_keywords() {
     }
     // A doubled power (Valdrakken Wind Chimes, Ancient Wishbone) has nothing
     // to repeat here: the same three keywords twice are the same three
-    // keywords, so the mask stays the single grant (docs/heroes.md "Start of
+    // keywords, so the mask stays the single grant (docs/rules/heroes.md "Start of
     // Combat powers that trigger twice").
     let mut g = hero_game(9, "Al'Akir");
     let once = g.players[0].counters(&g.data, g.lobby).soc_leftmost;
@@ -1162,7 +1162,7 @@ fn finley_finding_all_patched_up_starts_with_60_health_and_his_armor() {
             assert_eq!(g.players[p].health, 30);
             g.step(Action::Choose(k as u8)).unwrap();
             assert_eq!(g.players[p].health, 60, "All Patched Up's 30 extra Health");
-            assert_eq!(g.players[p].armor, armor, "Finley keeps his armor (UNSURE.md)");
+            assert_eq!(g.players[p].armor, armor, "Finley keeps his armor (docs/notes/UNSURE.md)");
             return;
         }
     }

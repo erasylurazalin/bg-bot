@@ -1,4 +1,4 @@
-//! Secrets and The Great Akazamzarak (docs/heroes.md "Secrets"): the zone,
+//! Secrets and The Great Akazamzarak (docs/rules/heroes.md "Secrets"): the zone,
 //! the four combat Secrets as the fight runs them, and Prestidigitation.
 
 use std::sync::Arc;

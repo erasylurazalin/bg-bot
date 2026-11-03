@@ -1,9 +1,10 @@
 # How the non-obvious heroes work
 
 Era's rules for heroes whose card text leaves room. They carry the same
-weight as `DESIGN.md` Part 2. The general hero frame (the pick, health and
-armor, what a power costs) is in `DESIGN.md` "Heroes". Rules we are still
-guessing at are in `docs/UNSURE.md`.
+weight as `docs/rules/design.md` Part 2. The general hero frame (the pick,
+health and armor, what a power costs) is in `docs/rules/design.md` "Heroes".
+The rules still being guessed at are in a private notes file
+(`docs/notes/UNSURE.md`).
 
 **Built 2026-10-31 (hero frame 2):** everything on this page except the
 guessing powers (Barov, Holmes, I Spy): the two powers (Genn, the
@@ -11,20 +12,18 @@ Reinvigorating Light trinket), the powers that change (Ragnaros, Bru'kan,
 Galewing, the Rat King), the skipped turns (A. F. Kay, Faelin) and Mukla's
 Bananas.
 
-**Built 2026-11-01 (hero batch 1):** the 28 heroes of
-`docs/briefs/heroes-batch1.md` and the rules under "Hero batch rules (Era,
-2026-11-01)" that are theirs; the rest of that section waits for later
-batches.
+**Built 2026-11-01 (hero batch 1):** 28 heroes and the rules under "Hero
+batch rules (Era, 2026-11-01)" that are theirs; the rest of that section
+waits for later batches.
 
-**Built 2026-11-01 (hero batch 2):** the 22 heroes of
-`docs/briefs/heroes-batch2.md` and their rules under "Hero batch rules (Era,
-2026-11-01)" ("Stats and targets", "The Tavern", "Guessing" for I Spy).
+**Built 2026-11-01 (hero batch 2):** 22 heroes and their rules under "Hero
+batch rules (Era, 2026-11-01)" ("Stats and targets", "The Tavern",
+"Guessing" for I Spy).
 
-**Built 2026-11-01 (hero batch 3):** the 24 heroes of
-`docs/briefs/heroes-batch3.md` and their rules under "Hero batch rules (Era,
-2026-11-01)" ("Start of Combat and fights", "Kills and counters" and the
-Power of the Storm line under "Other"), with the guessing powers (Lord
-Barov, Murloc Holmes) from "Guessing".
+**Built 2026-11-01 (hero batch 3):** 24 heroes and their rules under "Hero
+batch rules (Era, 2026-11-01)" ("Start of Combat and fights", "Kills and
+counters" and the Power of the Storm line under "Other"), with the guessing
+powers (Lord Barov, Murloc Holmes) from "Guessing".
 
 ## Powers in general
 
@@ -123,7 +122,7 @@ a Big Banana (+2/+2) with a 33% chance, the same chance for every player.
 They are not the Tavern dish Banana, and they are spells but not Tavern
 spells: "after you cast a spell" fires for them (Devilish Distractor),
 "after you cast a Tavern spell" doesn't (Forsaken Weaver). See
-`DESIGN.md` "Tavern spells versus other spells".
+`docs/rules/design.md` "Tavern spells versus other spells".
 
 ## Hero batch rules (Era, 2026-11-01)
 
@@ -165,7 +164,7 @@ so)
 - Verdant Spheres: minions bought across turns, repeats every 3.
 - Avalanche: the discounts stack on the current upgrade price, down to 0.
 - Choose Your Champion: the Tier 7 minion is Discovered at the start of
-  the game and sits in hand locked (`DESIGN.md` "Cards locked in hand")
+  the game and sits in hand locked (`docs/rules/design.md` "Cards locked in hand")
   until you have spent 60 Gold; only Gold counts, not Health.
 - Upbeat Harmony: with an empty hand nothing happens.
 - Heroic Inspiration: every 15 friendly attacks, a Triple Reward (your

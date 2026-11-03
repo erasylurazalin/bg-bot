@@ -31,7 +31,7 @@ use super::effects::buff;
 
 impl Game {
     /// The Tavern buff "minions of its type" gives (Eonar's Favor): a tribe at
-    /// random for a dual-type target (DESIGN.md's rule for a type picked at
+    /// random for a dual-type target (docs/rules/design.md's rule for a type picked at
     /// random), and every Tavern minion that has a type for an all-type one (an
     /// Amalgam), which the log shows. A tribeless target gives nothing.
     fn tavern_buff_type(&mut self, target: &crate::minion::Minion, attack: i32, health: i32) -> Option<TavernBuff> {
@@ -49,7 +49,7 @@ impl Game {
 
     /// Set a Tavern minion's stats to `attack`/`health`, keeping the bonuses
     /// that apply wherever the card is (the Undead bonus, an Eternal Knight's
-    /// deaths): the rule Pack Tactics' 3/3 copy follows (DESIGN.md "Exact
+    /// deaths): the rule Pack Tactics' 3/3 copy follows (docs/rules/design.md "Exact
     /// copies").
     pub(super) fn set_shop_stats(&mut self, p: usize, slot: usize, attack: i32, health: i32) {
         if slot >= self.players[p].shop.len() {
@@ -112,7 +112,7 @@ impl Game {
             if self.steal_shop_card(p, slot) {
                 // The damage runs through the hero-damage path, so armor
                 // takes it and a rewind on the board gives it back
-                // (DESIGN.md "Heroes").
+                // (docs/rules/design.md "Heroes").
                 self.take_shop_damage(p, damage, None);
             }
             return;
@@ -376,7 +376,7 @@ impl Game {
                             // Tavern (`SpellTarget::can_target_shop`).
                         }
                         // Makeshift Master: "Choose a minion" takes a Tavern
-                        // minion too (DESIGN.md "Targets in the shop"), and
+                        // minion too (docs/rules/design.md "Targets in the shop"), and
                         // the watch stays on the card when it is bought.
                         SpellTarget::WatchStats => {
                             self.set_deity_watch(p, target, true);
@@ -504,7 +504,7 @@ impl Game {
                 if !pt.by_minion && slot < self.players[p].shop.len() {
                     self.players[p].tp.shop_hit = slot as u8 + 1;
                     self.trinket_event(p, Event::CastSpellOnShop, None, 1);
-                    // A Tavern minion is a minion (DESIGN.md "Targets in the
+                    // A Tavern minion is a minion (docs/rules/design.md "Targets in the
                     // shop"), so the spell was cast on one: "after you cast 3
                     // spells on minions" (Wand of Divination) counts it.
                     self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
@@ -559,7 +559,7 @@ impl Game {
     /// board (Channel the Devourer eats it, Butchering destroys it): the
     /// "whenever you cast a spell" minions and the target's own "whenever you
     /// cast a spell on this" watcher run while it is still there, so
-    /// whatever they give it goes on to the eater. DESIGN.md "Eating a
+    /// whatever they give it goes on to the eater. docs/rules/design.md "Eating a
     /// minion with a spell".
     fn fire_cast_triggers_early(&mut self, p: usize, target_pos: usize, tavern: bool, by_minion: bool) {
         if target_pos >= self.players[p].board.len() {
@@ -816,7 +816,7 @@ impl Game {
                     let mut stop_after = false;
                     let mut target_removed = false;
                     // A spell that eats or destroys its target runs the cast
-                    // triggers before that (DESIGN.md "Eating a minion with a
+                    // triggers before that (docs/rules/design.md "Eating a minion with a
                     // spell"), so the generic block below must not run them
                     // again.
                     let mut cast_triggers_done = false;
@@ -870,7 +870,7 @@ impl Game {
                         }
                         SpellTarget::BuffSameTribe { attack, health } => {
                             let t = self.data.cards.tribes_of(&self.players[p].board[target_pos]);
-                            // DESIGN.md "Types": a dual or all-type minion
+                            // docs/rules/design.md "Types": a dual or all-type minion
                             // uses one of its types, picked at random. The
                             // Tavern's minions of that type gain it too ("all
                             // minions that share a type with it", Era
@@ -963,7 +963,7 @@ impl Game {
                             // "whenever you cast a spell" minions and the
                             // target's own watcher buff it while it is still
                             // on the board, so the eater gains those stats
-                            // (DESIGN.md "Eating a minion with a spell").
+                            // (docs/rules/design.md "Eating a minion with a spell").
                             self.fire_cast_triggers_early(p, target_pos, pt.tavern, pt.by_minion);
                             cast_triggers_done = true;
                             self.channel_the_devourer(p, target_pos);
@@ -1002,8 +1002,8 @@ impl Game {
                             // Everything that fires on the cast fires first,
                             // so a Forsaken Weaver's "after you cast a Tavern
                             // spell" +3 lands though the Weaver is the one
-                            // destroyed (DESIGN.md "Eating a minion with a
-                            // spell", docs/UNSURE.md).
+                            // destroyed (docs/rules/design.md "Eating a minion with a
+                            // spell", docs/notes/UNSURE.md).
                             self.fire_cast_triggers_early(p, target_pos, pt.tavern, pt.by_minion);
                             cast_triggers_done = true;
                             self.destroy_in_shop(p, &[target_pos], None);
@@ -1096,7 +1096,7 @@ impl Game {
                         SpellTarget::GemKeyword { keyword } => {
                             // Jewelry Box: the player's Gem value, and the
                             // keyword only when the target is a Quilboar
-                            // (docs/trinkets.md).
+                            // (docs/rules/trinkets.md).
                             let (ga, gh) =
                                 (self.players[p].gem_attack, self.players[p].gem_health);
                             let m = &mut self.players[p].board[target_pos];
@@ -1201,7 +1201,7 @@ impl Game {
                 }
                 // Lovely Locket: the trinket casts the same spell on another
                 // friendly minion, picked at random and ignoring the spell's
-                // own target rules (docs/trinkets.md). The copy is a real
+                // own target rules (docs/rules/trinkets.md). The copy is a real
                 // cast, and it never chains.
                 if self.players[p].tp.locket && !self.players[p].tp.locket_copy {
                     let n = self.players[p].board.len();
@@ -1228,7 +1228,7 @@ impl Game {
 
     /// Arcane Alteration on a Tavern card: a random card of the same Tier
     /// takes the slot, and whatever buffs the old card carried are the new
-    /// one's too (docs/heroes.md). A spell is replaced by a Tavern spell of
+    /// one's too (docs/rules/heroes.md). A spell is replaced by a Tavern spell of
     /// its Tier, a minion by a pool minion; the old card's pool copy goes
     /// back. The slot may be the spell slot, one past the last card.
     pub(super) fn replace_tavern_same_tier(&mut self, p: usize, slot: usize) {

@@ -1,7 +1,7 @@
 //! What a Battlegrounds game looks like from the log: the lobby, and the
 //! boards at the start of every fight.
 //!
-//! A port of `~/projects/bg/bg/battlegrounds.py` (its types and its free
+//! A port of the older tracker's `battlegrounds.py` (its types and its free
 //! functions; the reader that follows the lines is [`crate::Tracker`]). Every
 //! function here is a pure view of one [`Game`] at one moment.
 //!

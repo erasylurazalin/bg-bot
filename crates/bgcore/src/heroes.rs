@@ -1,6 +1,6 @@
 //! The hero table: heroes, their armor and their powers, parsed from
 //! heroes.toml. Effects are data here as they are in cards.toml; the rules
-//! code never matches a hero or power by name. See DESIGN.md "Heroes".
+//! code never matches a hero or power by name. See docs/rules/design.md "Heroes".
 //!
 //! A power is its own entry, so `PowerState` names a power and not a hero: a
 //! power can turn into another (Sulfuras, the four Invocations, Galewing's
@@ -130,7 +130,7 @@ pub enum PowerEffect {
     Bananarama { mine: u8, others: u8, big_percent: u8, banana: CardId, big: CardId },
     /// At the start of the game, Discover a Tier 5 minion with a Dark Gift,
     /// locked in hand until turn 7 (Void Power). The gifts are picked as if
-    /// it were turn 7 (docs/darkgifts.md).
+    /// it were turn 7 (docs/rules/darkgifts.md).
     DarkGiftStart,
     /// Every `turns` turns, Discover a minion with a Dark Gift (Feel
     /// Devastation). The count lives in the power's `progress`.
@@ -353,12 +353,12 @@ pub enum PowerEffect {
     /// Prize Wall: on turn `every` (4), twice that, and so on, Discover a
     /// Darkmoon Prize of the tier the turn names: turn 4 is Tier 1, turn 8
     /// Tier 2, turn 12 Tier 3, turn 16 Tier 4, and Tier 4 every four turns
-    /// after (a guess past 16, docs/trinkets.md).
+    /// after (a guess past 16, docs/rules/trinkets.md).
     PrizeWall { every: u8 },
     // ---- secrets (2026-11-01) ----
     /// Prestidigitation: offer every combat Secret the player does not hold
     /// (one to four cards) and put the pick in the Secret zone. With all four
-    /// up the power cannot be pressed (docs/heroes.md "Secrets").
+    /// up the power cannot be pressed (docs/rules/heroes.md "Secrets").
     DiscoverSecret,
 }
 

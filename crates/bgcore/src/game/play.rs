@@ -393,7 +393,7 @@ impl Game {
         let Some(bc) = card.battlecry else { return };
         // How many times the Battlecry triggers: Brann's set-or-add count,
         // War Drum's two extra on the first Battlecry of the turn and Dragon's
-        // Eye's one more for a Dragon (docs/trinkets.md).
+        // Eye's one more for a Dragon (docs/rules/trinkets.md).
         let mut runs = self.brann_mult(p);
         runs = runs.saturating_add(self.players[p].prize.battlecry_extra_turn);
         runs = runs.saturating_add(self.take_war_drum(p));
@@ -428,7 +428,7 @@ impl Game {
     /// Add `n` Battlecry triggers to the "for each Battlecry you've
     /// triggered this game" count: the player's two counts and every minion
     /// that scales with them (Dark Paradox t6, the Dark Gift Battle Scars),
-    /// on the board, in the hand and in the Tavern (DESIGN.md "Counting
+    /// on the board, in the hand and in the Tavern (docs/rules/design.md "Counting
     /// Battlecries").
     pub(super) fn count_battlecries(&mut self, p: usize, n: u8) {
         if n == 0 {
@@ -485,7 +485,7 @@ impl Game {
     /// that is not a play (Young Murk-Eye Sticker, Hackerfin Portrait, the
     /// Snicker-snack power). With `random`, a target the Battlecry asks for
     /// is answered at random, out of the board and the Tavern
-    /// (docs/trinkets.md: "a Battlecry that needs a target picks one at
+    /// (docs/rules/trinkets.md: "a Battlecry that needs a target picks one at
     /// random, and that can be a Tavern minion").
     pub(super) fn run_battlecry_at(&mut self, p: usize, pos: usize, random: bool) {
         if pos >= self.players[p].board.len() {

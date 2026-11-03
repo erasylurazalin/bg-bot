@@ -108,7 +108,7 @@ impl Tribes {
     }
 
     /// One of the card's tribes picked uniformly at random; None when it is
-    /// neutral (DESIGN.md "Types": a dual or all-type minion uses one of its
+    /// neutral (docs/rules/design.md "Types": a dual or all-type minion uses one of its
     /// types at random).
     pub fn random_type(self, rng: &mut Rng) -> Option<Tribe> {
         let n = self.0.count_ones();
@@ -128,7 +128,7 @@ impl Tribes {
     }
 
     /// A lobby: `n` of the ten tribes, distinct, uniformly at random
-    /// (DESIGN.md "The lobby's tribes": every game has 5).
+    /// (docs/rules/design.md "The lobby's tribes": every game has 5).
     pub fn random_lobby(n: usize, rng: &mut Rng) -> Tribes {
         let mut left: ArrayVec<Tribe, { Tribe::EVERY.len() }> = Tribe::EVERY.into_iter().collect();
         let mut lobby = Tribes::NONE;
@@ -674,7 +674,7 @@ pub enum EventKind {
     /// Forest's.
     SpellsCast,
     /// Every spell cast: Tavern spells, Blood Gems, Gem Days, Bananas,
-    /// Spellcraft spells (DESIGN.md "Read the card's exact words"). Felboar
+    /// Spellcraft spells (docs/rules/design.md "Read the card's exact words"). Felboar
     /// counts these. A Triple Reward is not a spell you cast.
     AllSpellsCast,
     /// Counts gold, so spending 5 adds 5.
@@ -840,7 +840,7 @@ pub enum SpellTarget {
 
 impl SpellTarget {
     /// Whether this target may also be a minion in the Tavern. Spells that
-    /// say "a minion" (no "friendly") reach both, per DESIGN.md; "friendly"
+    /// say "a minion" (no "friendly") reach both, per docs/rules/design.md; "friendly"
     /// means the board only.
     pub fn can_target_shop(self) -> bool {
         matches!(
@@ -1321,7 +1321,7 @@ pub enum KillReward {
     MaxStatsToHand,
 }
 
-/// A card's role in a "how many times" count (DESIGN.md "Set versus add, as
+/// A card's role in a "how many times" count (docs/rules/design.md "Set versus add, as
 /// one mechanic").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimesRole {
@@ -1340,7 +1340,7 @@ impl Aura {
     }
 }
 
-/// The shared "how many times" count of DESIGN.md's "Set versus add": the
+/// The shared "how many times" count of docs/rules/design.md's "Set versus add": the
 /// highest value any setter on the board gives (1 when none), plus what each
 /// adder adds. `role` classifies an aura; auras it ignores are not counted.
 /// `parts` yields every (card, golden) of the board, attachments included.
@@ -1548,7 +1548,7 @@ pub struct Card {
     /// the player's current Blood Gem value.
     pub blood_gem: bool,
     /// A Spellcraft spell: it leaves the hand at the end of the turn if it
-    /// was not cast (DESIGN.md "Spellcraft").
+    /// was not cast (docs/rules/design.md "Spellcraft").
     pub spellcraft: bool,
     /// Whenever a Blood Gem is cast from hand on this minion, this plays this
     /// many Blood Gems on a random different friendly minion (Geomagus
@@ -1595,7 +1595,7 @@ pub struct Card {
     pub golden_shield_hits: u8,
     /// One of the Dark Paradox versions (`BG36_360t3` and its kin): a pool
     /// card, but only ONE of them is in a game's pool, the same for every
-    /// player (docs/darkgifts.md "Dark Paradox").
+    /// player (docs/rules/darkgifts.md "Dark Paradox").
     pub paradox: bool,
     /// Immune while attacking, in a fight (Dark Gifts Invulnerability).
     pub immune_attacking: bool,
@@ -1608,7 +1608,7 @@ pub struct Card {
     /// Land on the host as a Golden minion (Dark Gifts Gilding).
     pub makes_golden: bool,
     /// A gift that does not stack: a second copy of it on the same minion
-    /// changes nothing (docs/darkgifts.md "Gifts stack": the keyword gifts,
+    /// changes nothing (docs/rules/darkgifts.md "Gifts stack": the keyword gifts,
     /// Amalgamation, Toreth's Blessing's hits and Gilding, which set a state
     /// instead of firing again). Every other gift stacks.
     pub gift_unique: bool,
@@ -2019,7 +2019,7 @@ struct RawAttackThreshold {
 
 /// Whether casting this spell at a random target, as Puzzle Box does, would
 /// destroy or transform something: those are never offered
-/// (docs/heroes.md). Channel the Devourer sells a minion, Butchering
+/// (docs/rules/heroes.md). Channel the Devourer sells a minion, Butchering
 /// destroys one, Corrupted Cupcakes eats the Tavern's minions and Unmasked
 /// Identity replaces the hero power.
 fn destructive_at_random(c: &Card) -> bool {
@@ -2291,7 +2291,7 @@ struct RawEffect {
     /// "chosen", "others" or "self", for a buff.
     target: Option<String>,
     /// "chosen" may pick a minion in the Tavern too: only the card's words
-    /// narrow a target (DESIGN.md "Targets in the shop"), so a text that says
+    /// narrow a target (docs/rules/design.md "Targets in the shop"), so a text that says
     /// "another Murloc" or "a Beast" (not "a friendly ...") reaches it.
     #[serde(default)]
     in_shop: bool,
@@ -4727,7 +4727,7 @@ impl CardDb {
     }
 
     /// A random Tavern spell of Tier `max_tier` or lower for Puzzle Box to
-    /// cast: never one of the destructive ones (docs/heroes.md). Spells have
+    /// cast: never one of the destructive ones (docs/rules/heroes.md). Spells have
     /// no pool, so nothing is taken.
     pub fn random_castable_spell(&self, max_tier: u8, lobby: Tribes, rng: &mut Rng) -> Option<CardId> {
         let max_tier = max_tier.min(crate::MAX_TIER);
@@ -4831,7 +4831,7 @@ impl CardDb {
 
     /// A random one of the four Mecha-Demons, which the Mecha-Jaraxxus
     /// Sticker hands out as generated copies ("random" is one of the four,
-    /// equally likely: docs/trinkets.md).
+    /// equally likely: docs/rules/trinkets.md).
     pub fn random_mecha_demon(&self, rng: &mut Rng) -> Option<CardId> {
         if self.mecha_demons.is_empty() {
             return None;

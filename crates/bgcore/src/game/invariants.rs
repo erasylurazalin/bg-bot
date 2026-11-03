@@ -99,7 +99,7 @@ impl Game {
                 }
                 // Either slot can hold either kind now: Trip Vouchers puts a
                 // greater offer into the lesser slot, and Mysterious Orb
-                // makes the next offer a lesser one (DESIGN.md, second
+                // makes the next offer a lesser one (docs/rules/design.md, second
                 // round). The power slot holds whatever the power offered.
                 // The card a trinket remembers (Portable Factory) is a real
                 // card of the table.

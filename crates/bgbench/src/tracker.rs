@@ -3,9 +3,8 @@
 //! Runs the tracker over a log and prints, game by game, the lobby seats and
 //! every fight: both boards, the boards at the first attack, who swung first,
 //! the result, and the hero powers, trinkets, rewards, counters, Deities and
-//! hands of both sides. The same dump comes out of Era's Python tracker
-//! (`~/projects/bg/bg/battlegrounds.py`), so the two can be diffed line for
-//! line.
+//! hands of both sides. The same dump comes out of the older Python tracker
+//! (`battlegrounds.py`), so the two can be diffed line for line.
 //!
 //!   bgbench tracker FILE [--out FILE] [--cards FILE] [--time]
 //!

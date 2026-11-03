@@ -3,7 +3,7 @@
 //! The fixtures are lines from real games, with the player names and account
 //! ids replaced, and they carry nothing personal:
 //!
-//! | fixture | `~/bg-logs/Hearthstone_...` |
+//! | fixture | `Power.log` folder |
 //! |---|---|
 //! | `gifts.log` | `2026_10_24_00_56_06`: 2-3, 88858-88931: a minion, one Sharpened Sword carrier and the buff it left |
 //! | `gift_twice.log` | `2026_11_02_00_10_22` game 5: the golden Clever Castaway with two Toughened Shield carriers and their two buffs |

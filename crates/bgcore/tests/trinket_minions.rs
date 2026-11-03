@@ -1,4 +1,4 @@
-//! The minions only trinkets hand out (DESIGN.md "Generated minions outside
+//! The minions only trinkets hand out (docs/rules/design.md "Generated minions outside
 //! the pool": Tide Oracle Morgl, Arcane Behemoth, Dr. Boom's Monster,
 //! Doubloon Grifter, Bassgill, Faceless Manipulator, Flourishing Frostling and
 //! the Fish of N'Zoth). Each one's text is a card field a real card can use,

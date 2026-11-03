@@ -795,7 +795,7 @@ fn a_random_bonus_keyword_is_never_one_it_has() {
             turn_of(&mut g, 0);
             g.players[0].gold = 9;
             act(&mut g, 0, Action::Activate(0));
-            // "another Murloc" is a Murloc in the Tavern too (DESIGN.md
+            // "another Murloc" is a Murloc in the Tavern too (docs/rules/design.md
             // "Targets in the shop"): pick the board's Tad when the pick is
             // asked (with no Murloc in the Tavern it is the only answer).
             if g.players[0].pending_target.is_some() {

@@ -1,4 +1,4 @@
-# The rules. See DESIGN.md, Part 2. Board 7, hand 10, shop 6 and
+# The rules. See docs/rules/design.md, Part 2. Board 7, hand 10, shop 6 and
 # 8 players are fixed in the code, because the action space and the
 # observation layout depend on them.
 
@@ -37,7 +37,7 @@ hero_choices = 2
 # Health a Refresh costs when a card makes it cost Health instead of Gold.
 health_refresh_cost = 1
 
-# Trinkets (DESIGN.md "Trinkets and Dark Gifts"). The lesser trinket is
+# Trinkets (docs/rules/design.md "Trinkets and Dark Gifts"). The lesser trinket is
 # offered at the start of this turn and the greater one at the start of that
 # turn. A tribe with `trinket_lesser_need` minions on your board (Murlocs
 # count in hand too) is guaranteed a trinket of that tribe, and its trinkets
@@ -56,7 +56,7 @@ trinket_offer_own = 42
 trinket_offer_other = 7
 trinket_offer_mechanic = 20
 
-# The Dark Discovery button (docs/darkgifts.md): 3 Gold, once a turn, 3 uses
+# The Dark Discovery button (docs/rules/darkgifts.md): 3 Gold, once a turn, 3 uses
 # a game, locked until turn 3.
 dark_gift_cost = 3
 dark_gift_uses = 3

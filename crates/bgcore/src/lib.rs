@@ -1,6 +1,6 @@
 //! The rules of Hearthstone Battlegrounds as this project models them:
 //! card data, the shop phase and the fight. No I/O and no Python here,
-//! see DESIGN.md.
+//! see docs/rules/design.md.
 
 // Card ids index the pool and the card list, so index loops read best there.
 #![allow(clippy::needless_range_loop)]

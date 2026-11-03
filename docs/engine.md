@@ -1,7 +1,7 @@
 # How the engine and training fit together
 
 A map of the code for whoever works on it next. The rules themselves are in
-`DESIGN.md`.
+`docs/rules/design.md`.
 
 ## Layout
 
@@ -68,14 +68,13 @@ crates/
                       the fixture folder in tests/data/actions),
                       sandbox.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix,
-                      `bgbench collect-boards` (Era's board files),
-                      `bgbench collect-actions` and `bgbench check-actions` (Era's
-                      shop actions: src/collect_actions.rs, src/check_actions.rs;
-                      bg-boards.timer runs collect-boards and collect-actions from
-                      ~/.local/bin/bgbench-collect)
-  bglog/              Power.log reading, a port of the tracker's Python
-                      (docs/briefs/log-reader.md): the parser and entity table
-                      (src/parser.rs, game.rs, entity.rs), the Battlegrounds views
+                      `bgbench collect-boards` (the real board files),
+                      `bgbench collect-actions` and `bgbench check-actions` (the
+                      real shop actions: src/collect_actions.rs, src/check_actions.rs;
+                      a user timer runs the first two every 15 minutes)
+  bglog/              Power.log reading, a port of the older Python tracker:
+                      the parser and entity table (src/parser.rs, game.rs,
+                      entity.rs), the Battlegrounds views
                       (src/views.rs: boards, hands, hero powers, trinkets,
                       rewards, Deity, counters, Dark Gifts, Secrets, Rapid
                       Reanimation's mark, Upper Hands, the player-level numbers),
@@ -85,7 +84,7 @@ crates/
                       follows a log into fights (src/tracker.rs); card names and
                       tribes from ref/hsjson-cards.json (src/cards.rs).
                       `bgbench powerlog` and `bgbench tracker` dump a log, to diff
-                      against the Python
+                      against the older Python tracker
   bgpy/               PyO3 bindings: a batch of games stepped together
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
@@ -119,7 +118,7 @@ docs/                 concept, pool analysis, mechanics inventory (a snapshot fr
 ## Systems the five-tribe lobby added
 
 What exists, so the next card reuses it instead of rebuilding it. The
-rules behind each are in DESIGN.md Part 2.
+rules behind each are in docs/rules/design.md Part 2.
 
 - **Choices the player makes mid-action.** `PendingTarget` (a minion on
   the board or in the Tavern), `PendingShopTarget` (a Tavern slot),
@@ -161,7 +160,7 @@ rules behind each are in DESIGN.md Part 2.
   the hand first in first out as soon as a slot frees (`drain_hand_queue`,
   run after every action and at the end of the start of turn). A queued card
   is not in the hand yet, so nothing that reads "when you get a card" fires
-  until it joins (DESIGN.md "A full hand", Era 2026-11-02).
+  until it joins (docs/rules/design.md "A full hand", Era 2026-11-02).
 - **Refresh kinds.** `RefreshKind { TurnStart, Explicit, Effect }`: only an
   explicit Refresh (the player's action) takes queued Fodders.
 - **Hero health.** `take_hero_damage` runs the "after your hero takes
@@ -171,7 +170,7 @@ rules behind each are in DESIGN.md Part 2.
 - **Tavern buffs** "this game" and "this turn", consuming Tavern minions,
   stealing them, Fishbait and Demon Fodder as generated Tavern cards.
 - **Generated cards** (`pool_copies = 0`): tokens, Chromadrakes, Fodder,
-  Fishbait, and the trinket-only minions of DESIGN.md ("Generated minions
+  Fishbait, and the trinket-only minions of docs/rules/design.md ("Generated minions
   outside the pool": Tide Oracle Morgl and the rest, in the
   "--- Trinket-only minions" block of cards.toml). They never touch the
   pool.
@@ -200,23 +199,23 @@ rules behind each are in DESIGN.md Part 2.
   Beatboxer, `Aura::PolarizingBeatboxer`), so a new "whenever you Magnetize"
   card hooks in there.
 - **Pirates, Golden minions, gold spent, Lockbox, Bounties, Cleave:** see
-  `docs/ADDING-CARDS.md` section 6.
+  `docs/adding-cards.md` section 6.
 - **Undead** (the Undead bonus, Reborn in the shop, shop destroys, Knight
-  count, Phantom chain): see `docs/ADDING-CARDS.md` section 8.
+  count, Phantom chain): see `docs/adding-cards.md` section 8.
 - **Quilboar** (Blood Gems and the gem value, Tavern spells versus plain
   spells, the Triple Reward spell, set-versus-add, discard, both effects,
-  the Juggernaut Golem): see `docs/ADDING-CARDS.md` section 9.
+  the Juggernaut Golem): see `docs/adding-cards.md` section 9.
 - **Aberration** (the Deity, one discard path, one hand-insert hook, linked
-  cards): see `docs/ADDING-CARDS.md` section 10.
+  cards): see `docs/adding-cards.md` section 10.
 - **Elementals** (refresh amount, free Refreshes, Baller count, Surprise
-  triples, Slab, Prison, Wildfire): see `docs/ADDING-CARDS.md` section 7.
+  triples, Slab, Prison, Wildfire): see `docs/adding-cards.md` section 7.
 - **Legal actions.** `Game::legal_mask` only asks `is_legal` for slots that
   can be legal (a test checks it against `is_legal` everywhere). Use it
   rather than looping `is_legal` over every action.
 
 ## The lobby
 
-Every game plays with exactly 5 of the 10 tribes (DESIGN.md "The lobby's
+Every game plays with exactly 5 of the 10 tribes (docs/rules/design.md "The lobby's
 tribes"). `Game::unstarted` rolls them with the game's RNG (`Tribes::random_lobby`)
 and stores them on `Game.lobby`; the same seed always rolls the same lobby. The
 pool starts with copies only of lobby cards (`Card::lobby_ok`: a minion with a
@@ -240,7 +239,7 @@ lobby)` (a test may pass more than 5 to reach its cards) and
 
 ## Heroes
 
-`heroes.toml` (DESIGN.md "Heroes") holds the built heroes: armor, extra
+`heroes.toml` (docs/rules/design.md "Heroes") holds the built heroes: armor, extra
 Health, the tribes a hero is tied to (offered only with one of them in the
 lobby) and the power, as data (`PowerEffect` in heroes.rs: the engine never
 matches a hero by name). Games with heroes come from `Game::new_heroes` (or
@@ -305,7 +304,7 @@ build hero-less games so old tests pass unchanged, and
   `soc_rightmost`, `soc_double_left`, `soc_earth` with its token card,
   `soc_lightning`) at the top of `run_start_of_combat`, before any minion's.
   `Player::counters` reads both held powers, and a power that triggers twice
-  (Valdrakken Wind Chimes, Ancient Wishbone: docs/heroes.md "Start of Combat
+  (Valdrakken Wind Chimes, Ancient Wishbone: docs/rules/heroes.md "Start of Combat
   powers that trigger twice") doubles the three counts through
   `Player::tick_power_effect`; the two keyword masks keep the single grant,
   since the same keywords twice are the same keywords.
@@ -333,8 +332,8 @@ build hero-less games so old tests pass unchanged, and
   the second power, the second pick the main one. Finley's runs right after
   his pick, before turn 1.
 - **Hero batch 1 (2026-11-01)**, the gold and price, counter, Discover and
-  generate powers (docs/briefs/heroes-batch1.md, the rules in docs/heroes.md
-  "Hero batch rules (Era, 2026-11-01)"):
+  generate powers (the rules are in docs/rules/heroes.md "Hero batch rules
+  (Era, 2026-11-01)"):
   - **The press price is not the card's.** `PowerState.cost_delta` is a
     running change to it and `Game::power_cost(p, second)` is the one read
     (legality, payment, the observation's `SCALAR_POWER_COST`): Lead Explorer
@@ -385,7 +384,7 @@ build hero-less games so old tests pass unchanged, and
     no pool copy moving; `abandon_discover` returns none). `Champion` deals
     three Tier 7 minions and the pick lands in hand with
     `Minion.locked_gold` set (`discover_locked_gold`), the shared lock of
-    DESIGN.md "Cards locked in hand". `MagneticMinion` is a plain draw with a
+    docs/rules/design.md "Cards locked in hand". `MagneticMinion` is a plain draw with a
     filter (Tinker).
   - **The last fight's dead** are `SideOutcome.dead_cards` (one list per
     side, in death order, tokens included); `combat` puts both sides' into
@@ -410,15 +409,15 @@ build hero-less games so old tests pass unchanged, and
   - Reliquary Research reads `Game::spell_price` (0 for every third Tavern
     spell bought) in both spell buy paths, and The Galaxy's Lens hands over a
     fresh copy of `Player.last_spell`.
-  - **Cards locked in hand** (DESIGN.md) are one lock in the engine:
+  - **Cards locked in hand** (docs/rules/design.md) are one lock in the engine:
     `Minion.locked_in_hand(tier, gold_spent)` over `locked_turns`,
     `locked_tier` and `locked_gold`, read by `is_legal` (Play),
     `valid_discard`, the fight's summon-from-hand (`Counters.gold_spent`) and
     the observation's `SLOT_LOCKED` (the turn count, or 1 while a tier or
     Gold lock holds it). Every card that locks reuses it.
   - **Hero batch 2 (2026-11-01)**, the stats, target and Tavern powers
-    (docs/briefs/heroes-batch2.md, the rules in docs/heroes.md
-    "Hero batch rules (Era, 2026-11-01)"):
+    (the rules are in docs/rules/heroes.md "Hero batch rules (Era,
+    2026-11-01)"):
     - **A standing rule is a player field.** `Game::sync_power_flags` reads
       both power slots into `Player.shop_fewer` (Stay Frosty's one fewer
       minion), `freeze_end`, `extra_dragon` (Dream Portal), `double_time`
@@ -490,8 +489,8 @@ build hero-less games so old tests pass unchanged, and
       spell's own "after you cast" triggers can never leave the player
       stranded.
 - **Hero batch 3 (2026-11-01)**, the fight, kill and rest powers
-  (docs/briefs/heroes-batch3.md, the rules in docs/heroes.md "Hero batch
-  rules (Era, 2026-11-01)"):
+  (the rules are in docs/rules/heroes.md "Hero batch rules (Era,
+  2026-11-01)"):
   - **A power's Start of Combat is a `Counters` field.** `Player::counters`
     fills `wingmen`, `wax_warband`, `all_will_burn`, `phylactery`, `glory_of_combat`,
     `sprout_it_out`, `frostwolf_fervor`, `stormpike_strength`, `tentacular`,
@@ -514,7 +513,7 @@ build hero-less games so old tests pass unchanged, and
     `Side::exact_copy` is the copy: the minion as it stands, buffs, keywords
     and gifts kept, its damage carried over (a 10/10 at 4 Health copies as
     10/4, and `Side::summon_exact_copy` keeps the original's `taken` so its
-    maximum Health stays 10), no pool copy (DESIGN.md "Exact copies").
+    maximum Health stays 10), no pool copy (docs/rules/design.md "Exact copies").
     `Side::summon_saved_copy` is the one summon path for a saved copy, so
     Frostwolf Fervor, Stormpike Strength, Rapid Reanimation and Stitched
     Salvager all copy the same way.
@@ -565,7 +564,7 @@ build hero-less games so old tests pass unchanged, and
 ## Secrets
 
 The Great Akazamzarak's Prestidigitation and the four combat Secrets
-(docs/heroes.md "Secrets", Era's rules). `src/secrets.rs` holds the zone:
+(docs/rules/heroes.md "Secrets", Era's rules). `src/secrets.rs` holds the zone:
 the Secrets are neither pool cards nor minions, so there is no table for
 them. There are four kinds (`VENOMSTRIKE_TRAP`, `AUTODEFENSE_MATRIX`,
 `PACK_TACTICS`, `REDEMPTION`) and a fifth kind in the zone, the Ice Block a
@@ -619,7 +618,7 @@ Safety Patch gives.
 
 ## Trinkets
 
-`trinkets.toml` (DESIGN.md "Trinkets and Dark Gifts (2026-10-30)") holds the
+`trinkets.toml` (docs/rules/design.md "Trinkets and Dark Gifts (2026-10-30)") holds the
 built trinkets: card_id, slot, price, the lobby tribes it belongs to and its
 effects, as data (`crates/bgcore/src/trinkets.rs`: the engine never matches a
 trinket by name). Only built trinkets are in the table, so the offer pool is
@@ -736,7 +735,7 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   size: `rules.shop_size(tier)`, or six with Glowing Gauntlet, plus one for
   Innkeeper's Stein (`extra_high_tier`: a minion of the tier above, none at
   tier 6) and one for Electrode Attractor (`extra_magnetic`), never past
-  `SHOP - 1` minions because the seventh slot is the spell (DESIGN.md).
+  `SHOP - 1` minions because the seventh slot is the spell (docs/rules/design.md).
   `fill_shop` draws the extra slots and takes its tier bounds from
   `tavern_tiers` (Bob-blehead's `min_tier`, Guiding Candle's
   `tier6_refreshes`, which the turn-start roll counts down too when the
@@ -789,7 +788,7 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `apply_side_outcome` applies them and fires `trinket_event` with the new
   shop events `Event::Death` (and `death_<tribe>`) and `Event::Summon` (and
   `summon_<tribe>`), so those counters count fight deaths, fight summons and
-  shop destroys (DESIGN.md: shop deaths count for death counters) in one
+  shop destroys (docs/rules/design.md: shop deaths count for death counters) in one
   slot counter that carries across turns. A shop destroy counts deaths but
   not Avenge: a trinket's Avenge is Avenge, and its counts start from 0 in
   every fight.
@@ -811,7 +810,7 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   runs the end-of-turn list once per Drakkari.
   `Player.trinket_events` is a `u32` for them; the mask test is still the one
   thing every hook pays.
-- **Counting Battlecries (DESIGN.md "Counting Battlecries").** One place
+- **Counting Battlecries (docs/rules/design.md "Counting Battlecries").** One place
   counts a Battlecry's triggers: `battlecry_or_choose_one`, through
   `Game::count_battlecries`, which adds `runs` (the trigger count just below)
   to `Player.tp.battlecries` and `Player.battlecries_triggered` and grows
@@ -850,7 +849,7 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   rules, guarded by `tp.locket_copy` so it never chains.
 - **Spells versus Tavern spells (`cast_spell`, fixed 2026-10-31).** Two
   events, and every card or trinket that reacts to a cast is on the one its
-  own words name (DESIGN.md "Read the card's exact words, every time"):
+  own words name (docs/rules/design.md "Read the card's exact words, every time"):
   `Event::SpellCast` fires for every spell cast (a Tavern spell, a Blood Gem,
   Gem Day, a Banana, a Spellcraft spell), `Event::CastSpell` for a
   `tavern_spell = true` card only. The trinket lists are `on_any_spell` and
@@ -1023,7 +1022,7 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   minion just bought is `TrinketPowers.bought_card`, written beside
   `bought_stats` just before the Buy event, so the act makes that hand minion
   Golden with `golden_up`, sets `Minion.no_reward` (playing it gives no Triple
-  Reward, DESIGN.md) and spends the slot's type. The Poet Portrait's token,
+  Reward, docs/rules/design.md) and spends the slot's type. The Poet Portrait's token,
   Timewarped Poet, is Persistent Poet's keep for every friendly Dragon:
   `permanent_keep = "all_dragons"` is `PermanentKeep::AllDragons`, which
   `Side::keep_mul` reads on every living minion of the side, the keeper's own
@@ -1036,7 +1035,7 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
 
 ## Dark Gifts
 
-`darkgifts.toml` (docs/darkgifts.md; DESIGN.md "Trinkets and Dark Gifts")
+`darkgifts.toml` (docs/rules/darkgifts.md; docs/rules/design.md "Trinkets and Dark Gifts")
 holds the 47 gift cards of the game data: each gift's card_id, its turn
 window (tags 4853/4854), its weight (4856, 50 half as likely) and the
 condition its host has to meet. What a gift *does* is a token in cards.toml
@@ -1051,7 +1050,7 @@ through exactly that card's code. The engine never matches a gift by name:
   gifts (always as `golden: false`, so a gift never doubles), which is what
   makes the fight and the shop run a gift's Start of Combat, Deathrattle,
   Rally and end of turn effects with no code of their own. Gifts stack
-  (docs/darkgifts.md): `push_gift` attaches a second copy, which fires a
+  (docs/rules/darkgifts.md): `push_gift` attaches a second copy, which fires a
   second time, except for the gifts that set a state (`Card::gift_unique`:
   the keyword gifts, Amalgamation, Toreth's Blessing's hits and Gilding),
   which `push_gift_unique` drops. Past `MAX_GIFTS` a new gift is not attached.
@@ -1280,7 +1279,7 @@ minions in the hand.
 
 ## Adding a card
 
-See `docs/ADDING-CARDS.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).
+See `docs/adding-cards.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).
 
 ## Card data snapshots (`ref/`, git-ignored)
 
@@ -1289,7 +1288,7 @@ See `docs/ADDING-CARDS.md` (hook index, recipes, new-tribe checklist, test helpe
   Has tokens and golden versions. Some retired cards are missing from it.
 - `ref/bg-pool.tsv`: the solo Battlegrounds pool from it.
 - `ref/lobby5.tsv`: our lobby, built from the JSON (the rule is in
-  DESIGN.md Part 2). The JSON's pool flags aren't perfect (Rot Hide Gnoll);
+  docs/rules/design.md Part 2). The JSON's pool flags aren't perfect (Rot Hide Gnoll);
   `docs/card-data.md` and `tools/export_cards.py` read the game's own.
 - Useful flags in the JSON: `isBattlegroundsPoolMinion`,
   `isBattlegroundsPoolSpell`, `isBattlegroundsDuosExclusive` (drop these),
@@ -1434,18 +1433,13 @@ Deleting `.venv` undoes it.
   (`runs/n1025-attn` trained on `7b545bd`). `--resume` still needs the
   same cards: after a card change, start a new run with `--init-from`.
 
-## Agent briefs and references
+## An older simulator
 
-Tribe runs are done by subagents from briefs in `docs/briefs/` (one file
-per run: house rules, the cards with their text, the owner's rules, tests,
-done-means). Write the brief only after the owner has answered the unsure
-rules; DESIGN.md Part 2 holds the answers.
-
-`~/projects/bg/bg/engine.py` is the owner's tracker fight simulator in
-Python, with combat effects for about 325 cards of every tribe, much of it
-checked by hand against real games. It's the best reference for how a
-card fights. DESIGN.md wins where they disagree (for example, a per-type
-pick gives each minion at most one buff, unlike its `_phalanx`).
+An older private simulator, in Python, models fights for about 325 cards
+of every tribe, much of it checked by hand against real games. It is the
+best reference for how a card fights. `docs/rules/design.md` wins where
+the two disagree (for example, a per-type pick gives each minion at most
+one buff, unlike the simulator's `_phalanx`).
 
 ## Model comparison (night 2026-10-23)
 

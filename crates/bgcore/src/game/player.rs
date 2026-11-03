@@ -420,7 +420,7 @@ impl Player {
         m.health += h;
         // A card made now has its limited uses now, wherever it lands: a
         // Malchezaar summoned by a Tavern spell keeps its Health Refreshes
-        // (docs/KNOWN-GAPS.md, the first row).
+        // (docs/notes/KNOWN-GAPS.md, the first row).
         m.uses_left = m.turn_uses(cards);
         // A portrait that gives this card more tribes (Bronzebeard
         // Portrait): every copy the player makes carries it.
@@ -441,7 +441,7 @@ impl Player {
     /// minions played, Elementals played, Magnetizations). `make_card` adds
     /// them to a fresh card, and a stat set keeps them: `set_stats` re-adds
     /// this to the new stats the way Pack Tactics' 3/3 copy gets them back
-    /// from being summoned (DESIGN.md "Exact copies").
+    /// from being summoned (docs/rules/design.md "Exact copies").
     pub fn wherever_stats(&self, cards: &CardDb, m: &Minion) -> (i32, i32) {
         let mut a = 0;
         let mut h = 0;
@@ -485,7 +485,7 @@ impl Player {
 
     /// The minion slots this player's Tavern has right now. `SHOP` holds the
     /// spell slot too, so a Tavern never offers more than `SHOP - 1` minions
-    /// at once (DESIGN.md: never more than 7 slots, one almost always the
+    /// at once (docs/rules/design.md: never more than 7 slots, one almost always the
     /// spell). Glowing Gauntlet fixes it at six (six plus the spell is the
     /// seven it promises); Innkeeper's Stein and Electrode Attractor add one
     /// each, and Stein's needs a tier above yours to draw from.
@@ -784,7 +784,7 @@ impl Player {
     }
 
     /// A passive power's tick in the next fight (Start of Combat, a summon, a
-    /// kill), multiplied by `tp.power_triggers`: docs/ENGINE.md, a passive
+    /// kill), multiplied by `tp.power_triggers`: docs/engine.md, a passive
     /// power's tick runs twice on one payment.
     fn tick_power_effect(&self, data: &Data, f: impl Fn(PowerEffect) -> u8) -> u8 {
         self.power_effect(data, f).saturating_mul(self.tp.power_triggers.max(1))
@@ -823,7 +823,7 @@ impl Player {
             // Both of the player's powers can carry a Start of Combat effect
             // (`soc_leftmost` is Al'Akir's, the rest are Bru'kan's Elements).
             // A power that triggers twice (Valdrakken Wind Chimes, Ancient
-            // Wishbone: docs/heroes.md "Start of Combat powers that trigger
+            // Wishbone: docs/rules/heroes.md "Start of Combat powers that trigger
             // twice") runs its effect twice, so the counts double through
             // `tick_power_effect`. A keyword grant has nothing to repeat: the
             // same keywords twice are the same keywords, so the two masks keep

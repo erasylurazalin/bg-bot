@@ -1,7 +1,7 @@
 //! Hero batch 3 (docs/briefs/heroes-batch3.md): the 24 fight, kill and rest
 //! powers, one test each. Era's rules for their non-obvious parts are in
-//! docs/heroes.md "Hero batch rules (Era, 2026-11-01)" (the "Start of Combat
-//! and fights", "Kills and counters" and "Other" lists) and DESIGN.md
+//! docs/rules/heroes.md "Hero batch rules (Era, 2026-11-01)" (the "Start of Combat
+//! and fights", "Kills and counters" and "Other" lists) and docs/rules/design.md
 //! "Order of events".
 
 use std::sync::Arc;
@@ -1219,7 +1219,7 @@ fn rapid_reanimation_destroys_the_chosen_minion_and_resummons_it_when_there_is_s
 }
 
 
-// ---- Exact copies (DESIGN.md "Exact copies (Era, 2026-11-01)") ----
+// ---- Exact copies (docs/rules/design.md "Exact copies (Era, 2026-11-01)") ----
 //
 // Frostwolf Fervor, Stormpike Strength and Rapid Reanimation copy the minion
 // as it stands: the damage it has taken comes along, and a keyword it has
@@ -1305,7 +1305,7 @@ fn an_exact_copys_maximum_health_is_the_originals() {
     // copy stand at 10/4. Tide Oracle Morgl kills both, and each kill hands
     // the killed minion's Attack and maximum Health to my hand: 10/10 for
     // each, so the copy's maximum Health is 10 too, not the 4 it shows
-    // (DESIGN.md "Exact copies").
+    // (docs/rules/design.md "Exact copies").
     let mut t = db.make(db.by_name("Microbot").unwrap(), false);
     t.attack = 10;
     t.health = 10;
@@ -1350,7 +1350,7 @@ fn a_stitched_salvagers_copy_is_the_minion_as_it_stands() {
     // and its Deathrattle summons an exact copy of it. The enemy's Lightning
     // Invocation hits both of my minions first (two hits, so both take it):
     // the victim is 10/4 when the Salvager takes it, and the copy comes back
-    // at 10/4, not at its full 10/10 (DESIGN.md "Exact copies").
+    // at 10/4, not at its full 10/10 (docs/rules/design.md "Exact copies").
     let mut victim = db.make(db.by_name("Microbot").unwrap(), false);
     victim.attack = 10;
     victim.health = 10;

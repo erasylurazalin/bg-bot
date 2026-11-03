@@ -1,11 +1,11 @@
 # Adding cards and tribes
 
 A working reference for whoever adds the next tribe. Rules are in
-`DESIGN.md` Part 2 (they win over everything here), the code map and
-principles in `docs/ENGINE.md`. Function names, no line numbers: grep them.
+`docs/rules/design.md` Part 2 (they win over everything here), the code map and
+principles in `docs/engine.md`. Function names, no line numbers: grep them.
 
 Files: `cards.toml` (data), `crates/bgcore/src/cards.rs` (parsing, `Effect` and
-trigger enums), `game/` (shop phase, one file per system, see `docs/ENGINE.md`),
+trigger enums), `game/` (shop phase, one file per system, see `docs/engine.md`),
 `fight.rs` (combat), `minion.rs`.
 
 ## Workflow
@@ -31,8 +31,8 @@ trigger enums), `game/` (shop phase, one file per system, see `docs/ENGINE.md`),
    "The shop replay").
 5. Never `cargo fmt` (the repo is not rustfmt-formatted).
 
-The owner's tracker sim `~/projects/bg/bg/engine.py` is a good reference for how a
-card fights (read only); DESIGN.md wins on disagreement.
+An older private simulator is a good reference for how a card fights (read
+only); `docs/rules/design.md` wins on disagreement.
 
 ## 1. Hook index
 
@@ -44,7 +44,7 @@ variant that a fight can run must be in `Effect::runs_in_fights`; the parser rej
 Rally/Deathrattle/Start of Combat/Avenge/etc. effects that are not.
 
 The shop-phase functions named below live in `crates/bgcore/src/game/`, one file
-per system (see `docs/ENGINE.md` for the map): `run_effect` and event triggers in
+per system (see `docs/engine.md` for the map): `run_effect` and event triggers in
 effects.rs, spells in spells.rs, hero powers in heroes.rs, the Tavern and pool in
 shop.rs, Discover and Choose One in discover.rs, pending targets in targets.rs,
 triples in triples.rs, turn flow and combat in turn.rs, and `step`/`apply` and
@@ -68,7 +68,7 @@ legality in mod.rs.
 | After you summon (combat) | `after_summon_give_stats = { times }`, `on_summon_beast` | `Side::summon` | Stalwart Kodo |
 | Summon from hand | `summon_from_hand = "murloc"` | `Side::summon_from_hand`; fight needs the hand (`Card::reads_hand`) | Expert Aviator |
 | Magnetize / Mech played | `on_play_mech`, `on_play_or_magnetize_mech`, `on_cast_spell_on_mech`, `aura = polarizing_beatboxer` | `magnetize_to`, `trigger_mech_played_or_magnetized`, `beatboxers_copy`, `Minion::magnetize` | Spark Snapper |
-| Cast a Tavern spell (the exact words) | `on_cast_spell`, `on_cast_spell_on_self`, `on_cast_spell_on_tribe` | `trigger_on_cast_spell` (Tavern spells only), `trigger_on_cast_spell_on_target` (any spell, one per cast); one call per cast (a Bounty cast twice calls it twice). A spell that takes its target off the board runs them before it does: `fire_cast_triggers_early`, from the `Devourer` and `Butchering` arms (DESIGN.md "Eating a minion with a spell") | Timecap'n Hooktail |
+| Cast a Tavern spell (the exact words) | `on_cast_spell`, `on_cast_spell_on_self`, `on_cast_spell_on_tribe` | `trigger_on_cast_spell` (Tavern spells only), `trigger_on_cast_spell_on_target` (any spell, one per cast); one call per cast (a Bounty cast twice calls it twice). A spell that takes its target off the board runs them before it does: `fire_cast_triggers_early`, from the `Devourer` and `Butchering` arms (docs/rules/design.md "Eating a minion with a spell") | Timecap'n Hooktail |
 | Cast any spell, Tavern spell or not | `EventKind::AllSpellsCast` for a minion's `on_event` counter (Felboar), `Event::SpellCast` for a trinket (Bewitched Ribbon, Bloodbound Earrings) | `Game::cast_spell` / `cast_spell_on`, once per spell cast (a Blood Gem, Gem Day, a Banana, a Spellcraft spell; a Triple Reward is not cast); the extra casts of one spell count too (`apply_target`). A spell a minion's effect casts for you (`cast` on a minion, `cast_taught`) is not your cast: `Game::minion_cast_spell` runs it and nothing here sees it (Era 2026-11-02) | Felboar |
 | Spell cast event counter | `on_event = { event = "spells_cast" }` | `cast_spell` -> `fire_event(SpellsCast)` | Felboar |
 | Gold spent / hero damage / sold / bought / Elementals played / discarded | `on_event = { event = "gold_spent" / "hero_damage" / "minions_sold" / "cards_bought" / "elementals_played" / "discarded", every, effect }` | `Game::fire_event` (count in `improvements`, remainder kept, can fire several times; an every-1 trigger leaves `improvements` alone so a self-improving effect can use it) | Gunpowder Courier |
@@ -142,7 +142,7 @@ legality in mod.rs.
 | Hero power that lasts until the next turn | `temp_reborn = true`, `spirit_swap = true`, plus `Minion.temp_reborn` and `Minion.temp_attack` | the press offers `TargetKind::TempReborn` / `SpiritSwapFirst`; both come off in `start_turn` (board and hand), a Reborn the card prints stays | The Lich King, Vol'jin |
 | Hero power that needs two picks | `spirit_swap = true`, `devour = true` | `Player.two_step` holds the first answer, the second prompt is a fresh `offer_target`, and `Devour` carries the sold minion's stats in `Player.devour_stats` after `sell_minion` | Vol'jin, Mutanus the Devourer |
 | Hero power that puts a card where another one stood | `replace_shop_higher = true`, `replace_same_tier = true` | `TargetKind::ReplaceHigher` (old card back to the pool, `Player.discover_into_shop` sends the pick into its slot) and `TargetKind::ReplaceSameTier` (`Game::replace_tavern_same_tier` / `replace_board_same_tier`, the old card's stat gain moves onto the new one) | Galakrond, Malygos |
-| Hero power that gives a card temporary state | `imprison = 2`, `steal_shop_as_stats = [2, 2]`, `hat_trick = [1, 1]` | `Minion.locked_turns` (the shared lock of DESIGN.md "Cards locked in hand"), a stat set on the way into hand, and `Minion.hats` (already in the stats; a sale moves them in `sell_minion`, a triple adds them in `check_triple`) | Maiev Shadowsong, Xyrella, Dancin' Deryl |
+| Hero power that gives a card temporary state | `imprison = 2`, `steal_shop_as_stats = [2, 2]`, `hat_trick = [1, 1]` | `Minion.locked_turns` (the shared lock of docs/rules/design.md "Cards locked in hand"), a stat set on the way into hand, and `Minion.hats` (already in the stats; a sale moves them in `sell_minion`, a triple adds them in `check_triple`) | Maiev Shadowsong, Xyrella, Dancin' Deryl |
 | Hero power that arms an end of turn | `saturday_cthun = [1, 1]`, `swaps_each_turn = "<power card_id>"` | `PowerState.armed` is spent in `power_end_of_turn` (repeats = the power's `progress`, one more every turn); `HeroPower.swaps_to` replaces the power at the end of each turn | C'Thun, Inge the Iron Hymn |
 | Hero power that Discovers from something that is not the pool, part 2 | `ispy_next_opponent = true`, `burgle_last_opponent = true` | `DiscoverRequest::IspyNextOpponent` dealt by `deal_ispy_offer` from `Player.next_board` (copied by `Game::pair` at the start of the round); Bob's Burgles fills the Tavern from `Player.seen` instead | Scabbs Cutterbutter, Tess Greymane |
 | Hero power that changes what makes a Golden minion | `double_time = true, card = "Tavern Coin"` | `Player.double_time`: `check_triple` needs two copies, and `Game::give_play_reward` (the two play sites) hands the named coin instead of a Triple Reward | Mister Clocksworth |
@@ -182,7 +182,7 @@ legality in mod.rs.
 | A minion that gains stats at the end of every turn | a spell `effect = { target = "chosen", grant_end_of_turn = [4, 4] }` writes `Minion.end_turn_gain` | `run_minion_end_of_turn` (a triple sums it, `magnetize` adds it) | Gruul Rules |
 | Trinket that brings every Triple Reward back as another card | `on_pick = [{ triple_prize = "Triple Prize" }]` sets `tp.triple_prize` | `give_triple_reward`, the one place a Triple Reward is made (a Golden minion, Natural Balance, Heroic Inspiration) | Corrupted Tome |
 | Trinket every N turns that Discovers a Prize | `start_every = 3` with `start_of_turn = [{ discover_prize = 3 }]` | `trinket_start_of_turn` | Tickatus Sticker |
-| Trinket that saves the hero once | `on_pick = [{ ice_block = true }]` adds the Ice Block kind to `Player.secrets` (the Secret zone, docs/heroes.md "Secrets") | the fight damage loop and `take_hero_damage` prevent the fatal hit and set `Player.immune` for the turn (cleared in `start_turn`); `SCALAR_ICE_BLOCK`/`SCALAR_IMMUNE` show both | Safety Patch |
+| Trinket that saves the hero once | `on_pick = [{ ice_block = true }]` adds the Ice Block kind to `Player.secrets` (the Secret zone, docs/rules/heroes.md "Secrets") | the fight damage loop and `take_hero_damage` prevent the fatal hit and set `Player.immune` for the turn (cleared in `start_turn`); `SCALAR_ICE_BLOCK`/`SCALAR_IMMUNE` show both | Safety Patch |
 | Trinket with a hidden random trigger | `on_pick = [{ surprise = 5 }]` sets `tp.surprise`, a chance out of 100 per buy, sell and Refresh, never twice in a row | `Game::surprise_roll`, called at the top of `trinket_event`; the cards it makes are generated | Surprise Portrait |
 | Trinket with a random wheel | `wheel = [..]` (a list of acts) and `yogg_wheel = true` in a hook | `Act::YoggWheel` picks one entry of `Trinket.wheel` and runs it | Yogg-Tastic Pastry |
 | Magnetic minions that merge onto more than a Mech | `magnetize_to_tribes = ["mech", "demon"]` on the card (`Card.magnetize_tribes`, Mech by default) | `can_magnetize`, `is_legal(Play)` and the bots' `play_pos` | Rusted Reggie |
@@ -255,7 +255,7 @@ exactly one legal target and drops the effect when there is none.
 3. Tests in `crates/bgcore/tests/heroes.rs`: `hero_game(seed, "Name")` builds
    a game with the hero forced on player 0 (or `Game::new_heroes_with_lobby`
    to play the pick itself), `clear_board` keeps the pool exact.
-4. Update `docs/ENGINE.md` "Heroes" if the frame changed; the pick offers,
+4. Update `docs/engine.md` "Heroes" if the frame changed; the pick offers,
    the observation (hero indices are embedded, `N_HEROES` in bgpy) and the
    bots need nothing per hero. A power that counts something needs no new
    observation value either: `obs::power_progress` fills that slot's
@@ -398,7 +398,7 @@ passes the slot through.
    neutral, the token has to be neutral too, and if the token has a tribe the
    trinket carries that tribe (otherwise
    `nothing_outside_the_lobby_ever_shows_up_in_whole_games` fails).
-6. Update `docs/ENGINE.md` "Trinkets" if the frame changed. The observation
+6. Update `docs/engine.md` "Trinkets" if the frame changed. The observation
    carries the slots by trinket index (an embedding, `N_TRINKETS` in bgpy), so
    a new trinket needs nothing there.
 
@@ -437,7 +437,7 @@ passes the slot through.
    fight (`bgcore::game::darkgifts::land_gift`), and `every_gift_effect_card_
    runs_somewhere` fails a gift whose token has nothing the engine reads. The
    shared `act` helper returns the turn's cursor first: every action moves it.
-5. Update `docs/ENGINE.md` "Dark Gifts" if a mechanism changed; the
+5. Update `docs/engine.md` "Dark Gifts" if a mechanism changed; the
    observation carries the gifts as effect card ids in `SLOT_GIFTS`, so a new
    gift needs nothing there.
 
@@ -498,9 +498,10 @@ passes the slot through.
 11. New `Effect` variants: add to `needs_choice` / `needs_any_minion` / `runs_in_fights`
     as fits, to the shop `Game::run_effect` (put fight-only ones in its last arm), to
     `Side::run_effect` if it runs in fights (it ends with `_ => {}`).
-12. Update `docs/ENGINE.md` where your work makes it wrong, and the tests list there.
-13. Do not edit `DESIGN.md`, `CLAUDETODO.md`, `TODO.md` unless asked; note unsure rules
-    in your report (they go to `docs/UNSURE.md` by the coordinator).
+12. Update `docs/engine.md` where your work makes it wrong, and the tests list there.
+13. If a card needs a rule the docs don't settle, say which guess you made in
+    your change description; rules that are still guesses live in private
+    notes (`docs/notes/UNSURE.md`).
 
 ## 4. Test helpers
 
@@ -585,7 +586,7 @@ Triple Reward spell.
   the checklist. Fix expectations only after confirming the rule, and report it.
 - **Do not trust JSON pool flags blindly** (Rot Hide Gnoll is flagged but not in
   the pool; `docs/card-data.md` has the game's own flags). The "(N left!)" display can disagree with the text (Gunpowder Courier);
-  DESIGN.md records the owner's answer.
+  docs/rules/design.md records the owner's answer.
 
 ## 6. Systems the Pirate run added
 
@@ -624,7 +625,7 @@ Triple Reward spell.
   Deathrattle (fight or shop), En-Djinn Blazer and Easterly Winds add into;
   every Refresh gives all of it to one random non-spell, non-`fixed_stats`
   Tavern minion, the turn-start roll included when the Tavern changed (see
-  DESIGN.md "Two kinds of Refresh"). No random number is drawn while it is
+  docs/rules/design.md "Two kinds of Refresh"). No random number is drawn while it is
   0, so seeded games without these cards are unchanged.
 - **A second player counter.** `N_COUNTERS` is 2: `Counter::Baller` is the
   count of Ballers sold. Tests that spell out `improve` arrays need two entries.
@@ -632,7 +633,7 @@ Triple Reward spell.
   `Player.elementals_played_turn` (Conflagration, reset in `start_turn`) and
   `give_play_shield`, then, before the Battlecry, `fire_event(ElementalsPlayed)`
   (Unbound Tempest) and every `after_play_tribe` card (Wrath Weaver, Insatiable
-  Ur'zul, Ultraviolet Ascendant). None counts the minion being played (DESIGN.md);
+  Ur'zul, Ultraviolet Ascendant). None counts the minion being played (docs/rules/design.md);
   `fire_after_play_tribe` skips its board slot, and they all run before the
   Battlecry. Only minions played from hand count.
 - **Triples with a stand-in.** `check_triple_tracking` builds a `TriplePlan`:
@@ -724,7 +725,7 @@ Triple Reward spell.
   (`on_gem_played_on_self`) reacts only to gems cast from hand. Blood Gem
   Barrage adds to `Player.barrage` per cast; every Refresh gives it to every
   Tavern minion (`apply_barrage`), the turn-start roll included when the
-  Tavern changed (see DESIGN.md "Two kinds of Refresh").
+  Tavern changed (see docs/rules/design.md "Two kinds of Refresh").
 - **Triple Reward as a card.** A golden minion played from hand puts the
   Triple Reward spell in hand (`Game::give_triple_reward`), its Discover tier
   in the copy's `improvements`, fixed when given; it comes before anything the
@@ -763,7 +764,7 @@ Triple Reward spell.
   every tribe since the 2026-10-25 observation run.
 - **The Deity.** One god per lobby (C'Thun or Y'Shaarj), drawn from the game's
   RNG in `Game::unstarted`, and only when Aberration is in the lobby (see the
-  lobby section in `docs/ENGINE.md`). Every player's `Player.deity` starts 1/1;
+  lobby section in `docs/engine.md`). Every player's `Player.deity` starts 1/1;
   `Effect::BuffDeity` (with `per_spell`), `BuffSelfAndDeity` and the
   `OnCastSpell` deity parts grow it in the shop, `Side::buff_deity` in a
   fight, and a fight's gains come back through `SideOutcome::deity_gain`.
@@ -795,7 +796,7 @@ Triple Reward spell.
   player's hand (buys, generated cards, Discover picks, Triple Rewards,
   Blood Gems, the Lockbox, `Game::give`); a full hand drops the card first
   (except at the start of the turn, where it waits in `Player.hand_queue`:
-  docs/ENGINE.md "A full hand"), then `Card.on_card_added` runs (The Shadow
+  docs/engine.md "A full hand"), then `Card.on_card_added` runs (The Shadow
   of Doubt buffs the Deity).
 - **Linked cards.** `Minion.linked`: the low 14 bits are a group id from
   `Player.next_link`, bit 15 (0x8000) marks a golden four-card group, bit 14
@@ -808,7 +809,7 @@ Triple Reward spell.
   `attack_triggers` after the minion's own swing (even when it died
   attacking): damage equal to its Attack (golden double) to a random tied
   highest-Health enemy, honouring Divine Shield and Venomous.
-- **Hidden numbers** (DESIGN.md): Mindbending Recruiter's Activate costs 0;
+- **Hidden numbers** (docs/rules/design.md): Mindbending Recruiter's Activate costs 0;
   Aph'lass +2/+1 improving +2/+1 per discard; Parasitic Fleshling +2/+2 per
   card discarded this game (`Player.discarded`); Faceless Converter +2/+1
   per Tavern spell cast this game (`Player.spells_cast`, raised by fights
@@ -829,13 +830,13 @@ Triple Reward spell.
   `ref/hsjson-cards.json` before picking one.
 - **One player-level trigger list per event, not a field per card.** The
   frame's lists and its mask carry every block 4 hook; see "Block 4: the
-  player-level hooks" in `docs/ENGINE.md`. `Player.trinket_events` is a `u32`
+  player-level hooks" in `docs/engine.md`. `Player.trinket_events` is a `u32`
   (the events take bits 0 to 22, `STARTS_TURN`/`ENDS_TURN`/`HAS_TRINKET` the
   top three).
 - **Battlecry multipliers in one place.** `battlecry_or_choose_one` counts
   Brann, War Drum (`take_war_drum` spends the trinket's own use) and Dragon's
   Eye, and the `runs` it reaches is what the "for each Battlecry you've
-  triggered" cards read (DESIGN.md "Counting Battlecries": Dark Paradox t6,
+  triggered" cards read (docs/rules/design.md "Counting Battlecries": Dark Paradox t6,
   Murky Sticker, Battle Scars), so a new multiplier needs no second change.
   A Battlecry that opens a choice owes that count until the pick is made
   (`Player.pending_battlecries`, paid by `maybe_start_discover`), whatever
@@ -959,7 +960,7 @@ Triple Reward spell.
   as it stands right now (buffs, keywords and gifts kept, the damage it has
   taken carried over, `pool_copies = 0`), and `Side::summon_exact_copy` puts
   it on the board with the original's `taken`, so a 10/10 at 4 Health copies
-  as a 10/4 whose maximum Health is still 10 (DESIGN.md "Exact copies").
+  as a 10/4 whose maximum Health is still 10 (docs/rules/design.md "Exact copies").
   `Side::summon_saved_copy` summons a copy the fight saved earlier (Rapid
   Reanimation's queue, Stitched Salvager's), so all four cards copy the same
   way. A hero
@@ -1052,7 +1053,7 @@ Triple Reward spell.
 
 - **A trinket that keeps a minion type.** `lock_type` (`Act::LockType`) reads
   the board's most common type once and stores it in `TrinketState.tribe`,
-  which `set_trinket` clears with the rest of the slot (docs/trinkets.md: "the
+  which `set_trinket` clears with the rest of the slot (docs/rules/trinkets.md: "the
   type is fixed at the pick"). The read is
   `crate::darkgifts::most_common_type` on `CardDb::tribes_of` of every board
   minion, so an all-type minion counts for every tribe, a tie is broken at
@@ -1065,7 +1066,7 @@ Triple Reward spell.
 - **A trinket that makes a bought minion Golden.** `golden_bought` on `on_buy`
   (`Act::GoldenBoughtType`) makes the minion just bought Golden when its
   tribes include the slot's stored type: `golden_up` for the stats, and
-  `Minion.no_reward` so playing it gives no Triple Reward (DESIGN.md: it is
+  `Minion.no_reward` so playing it gives no Triple Reward (docs/rules/design.md: it is
   not a triple), then the type is cleared. The act finds the minion through
   `TrinketPowers.bought_card`, which `Action::Buy` writes beside
   `bought_stats` just before the Buy event; the buy's own `check_triple` has
@@ -1086,7 +1087,7 @@ Triple Reward spell.
 
 ## 16. Systems the Secrets run added (2026-11-01)
 
-docs/heroes.md "Secrets (Era, 2026-11-01)" is the rule; this is where it
+docs/rules/heroes.md "Secrets (Era, 2026-11-01)" is the rule; this is where it
 hooks in.
 
 - **The zone is data, not cards.** `crates/bgcore/src/secrets.rs` holds

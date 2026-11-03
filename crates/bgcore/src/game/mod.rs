@@ -91,7 +91,7 @@ pub enum TargetKind {
         keyword: u8,
         /// Also give a random Bonus Keyword the minion doesn't have.
         random_keyword: bool,
-        /// The pick may be a Tavern minion too (DESIGN.md "Targets in the
+        /// The pick may be a Tavern minion too (docs/rules/design.md "Targets in the
         /// shop": a text that says "another Murloc" or "a Beast", not "a
         /// friendly minion").
         shop: bool,
@@ -301,7 +301,7 @@ pub struct QueuedOption {
 }
 
 /// A Choose One spell's own "after you cast a spell" triggers, waiting for
-/// the option and its target to be picked (DESIGN.md "Targets in the shop":
+/// the option and its target to be picked (docs/rules/design.md "Targets in the shop":
 /// cast, pick the option, pick the target, then the cast triggers). The
 /// counters of the cast are taken at the play; these are what "after" means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -568,7 +568,7 @@ pub struct TrinketPowers {
     /// Set while the Locket's own copy is being cast, so it never chains.
     pub locket_copy: bool,
     /// A rewrite a portrait gives every copy of a card the player has or
-    /// will have (docs/trinkets.md "Portraits that rewrite a card").
+    /// will have (docs/rules/trinkets.md "Portraits that rewrite a card").
     pub card_mods: [Option<(CardId, CardMod)>; CARD_MODS],
     /// Your Choose One cards always have both effects (Trailblazer
     /// Sticker).
@@ -655,12 +655,12 @@ pub struct TrinketState {
     /// the rest of the game whatever the board becomes: the Colorful
     /// Compasses hand out minions of it, the Gold-plated Compass makes the
     /// next minion of it bought Golden (and spends it). None when the trinket
-    /// locks no type, or the board had none at the pick (docs/trinkets.md,
+    /// locks no type, or the board had none at the pick (docs/rules/trinkets.md,
     /// "Block 6 rules").
     pub tribe: Option<Tribe>,
     /// The Mystery Cube's effect belongs to the slot and not to the trinket
     /// in it: while this is set, the start of every turn offers new free
-    /// Lesser trinkets to replace whatever the slot holds (DESIGN.md).
+    /// Lesser trinkets to replace whatever the slot holds (docs/rules/design.md).
     pub cube: bool,
     /// How many options a cube slot offers ("choose from 2"), kept on the
     /// slot with the flag.
@@ -708,7 +708,7 @@ pub struct Player {
     pub power: Option<PowerState>,
     /// The SECOND hero power, from Genn's King of Duality or the
     /// Reinvigorating Light trinket. Nothing changes or disables it, and it
-    /// has its own uses, cost and state (docs/heroes.md "Two hero powers").
+    /// has its own uses, cost and state (docs/rules/heroes.md "Two hero powers").
     pub power2: Option<PowerState>,
     /// Heroes offered before turn 1 (indices into `HeroDb`), `u8::MAX` for an
     /// empty offer slot. While one is open the only legal action answers it.
@@ -828,10 +828,10 @@ pub struct Player {
     /// the end of the last action, so the stats a friendly Amalgam gained
     /// can be copied onto it. All zeros when no Mishmash is held.
     pub amalgam_seen: [(CardId, i32, i32); BOARD],
-    /// The Secret zone (docs/heroes.md "Secrets"): the combat Secrets this
+    /// The Secret zone (docs/rules/heroes.md "Secrets"): the combat Secrets this
     /// player holds in the order they were got, and the Ice Block a Safety
     /// Patch gives, unspent (the next fatal damage to the hero is prevented
-    /// and the hero is Immune for the rest of the turn, docs/trinkets.md).
+    /// and the hero is Immune for the rest of the turn, docs/rules/trinkets.md).
     pub secrets: crate::secrets::Secrets,
     /// The Secrets an open Prestidigitation offers, as kinds (`secrets`
     /// module indexes), answered with `Action::Choose` like a Hero Power
@@ -887,7 +887,7 @@ pub struct Player {
     pub hand: ArrayVec<Minion, HAND>,
     /// Cards that arrived at the start of the turn with a full hand: the game
     /// queues them and they join the hand as soon as there is room, while a
-    /// card got any other time is lost (DESIGN.md "A full hand").
+    /// card got any other time is lost (docs/rules/design.md "A full hand").
     pub hand_queue: ArrayVec<Minion, HAND>,
     /// Whether a card got now is queued rather than lost: on through the
     /// start of the turn's own effects, off after them.
@@ -908,7 +908,7 @@ pub struct Player {
     pub cast_after_choice: Option<CastAfterChoice>,
     /// Battlecry triggers a Battlecry that opened a choice still owes the
     /// "for each Battlecry you've triggered" count: they are added once
-    /// nothing is left to answer (DESIGN.md "Counting Battlecries": a
+    /// nothing is left to answer (docs/rules/design.md "Counting Battlecries": a
     /// Discover Battlecry counts at the pick, not on the play).
     pub pending_battlecries: u8,
     /// Choose One cards played whose choice is still open: Turbo Hogrider
@@ -951,7 +951,7 @@ pub struct Player {
     /// Turns the open offer's pick stays locked in hand (Void Power).
     pub dark_offer_locked: u8,
     /// The Dark Discovery button: uses left this game, and whether it was
-    /// pressed this turn (docs/darkgifts.md: once a turn, 3 uses a game).
+    /// pressed this turn (docs/rules/darkgifts.md: once a turn, 3 uses a game).
     pub dark_gift_uses: u8,
     pub dark_gift_pressed: bool,
     /// Battlecries this player has triggered this game, which Dark Gifts
@@ -1031,7 +1031,7 @@ pub struct IllegalAction;
 pub struct Game {
     pub data: Arc<Data>,
     pub rng: Rng,
-    /// The five tribes of this game's lobby (DESIGN.md "The lobby's
+    /// The five tribes of this game's lobby (docs/rules/design.md "The lobby's
     /// tribes"): the pool and every draw are filtered to them.
     pub lobby: Tribes,
     pub turn: u32,
@@ -1097,7 +1097,7 @@ impl Game {
 
     /// A game with heroes: before turn 1 every living player is offered
     /// `hero_choices` heroes and picks one with `Action::Choose`, then turn 1
-    /// starts (DESIGN.md "The pick"). The lobby is rolled from the seed.
+    /// starts (docs/rules/design.md "The pick"). The lobby is rolled from the seed.
     pub fn new_heroes(data: Arc<Data>, seed: u64) -> Game {
         let mut g = Game::unstarted(data, seed, None);
         g.open_hero_picks();
@@ -1147,7 +1147,7 @@ impl Game {
 
     /// A normal game with a fixed lobby: for tests and the sandbox, which
     /// need known tribes. Games that roll one pick exactly 5 of the 10
-    /// (DESIGN.md); a test may pass more to set up its cards.
+    /// (docs/rules/design.md); a test may pass more to set up its cards.
     pub fn new_with_lobby(data: Arc<Data>, seed: u64, lobby: Tribes) -> Game {
         let mut g = Game::unstarted(data, seed, Some(lobby));
         g.start_turn();
@@ -1226,7 +1226,7 @@ impl Game {
             })
             .collect();
         // Dark Paradox: one of its five versions is in this game's pool, the
-        // same for every player, and the other four are not (docs/darkgifts.md
+        // same for every player, and the other four are not (docs/rules/darkgifts.md
         // "Dark Paradox"). The pick has an RNG of its own, seeded from the
         // game seed, so every draw the rest of the game makes stays what it
         // was before the card existed.
@@ -1253,7 +1253,7 @@ impl Game {
             .filter(|(_, c)| c.deity.is_some())
             .map(|(id, _)| id as CardId)
             .collect();
-        // The Deity only exists in lobbies with Aberrations (DESIGN.md).
+        // The Deity only exists in lobbies with Aberrations (docs/rules/design.md).
         let god = (lobby.has(Tribe::Aberration) && !gods.is_empty())
             .then(|| gods[rng.below(gods.len() as u32) as usize]);
         if let Some(card) = god {
@@ -1677,7 +1677,7 @@ impl Game {
         let pl = &self.players[p];
         let Some(m) = pl.hand.get(s) else { return false };
         // A locked card is a real card in hand, but it can't be thrown away
-        // (DESIGN.md "Cards locked in hand").
+        // (docs/rules/design.md "Cards locked in hand").
         if m.locked_in_hand(pl.tier, pl.counts.gold_spent) {
             return false;
         }
@@ -1824,7 +1824,7 @@ impl Game {
     }
 
     /// Whether the pending target may be answered on the Tavern minion in
-    /// slot `s` when a Battlecry picks its target at random (docs/trinkets.md:
+    /// slot `s` when a Battlecry picks its target at random (docs/rules/trinkets.md:
     /// a Tavern minion is allowed). Only a plain "a minion" buff reaches the
     /// Tavern this way; a Battlecry about your own minions does not.
     fn valid_battlecry_shop_target(&self, p: usize, pt: &PendingTarget, s: usize) -> bool {
@@ -1925,7 +1925,7 @@ impl Game {
             TargetKind::BecomeCopy => true,
             // Any friendly minion may be removed for the Discover from the
             // Tier below it; only a typed one may go in the pot (a neutral
-            // minion cannot be thrown, docs/heroes.md).
+            // minion cannot be thrown, docs/rules/heroes.md).
             TargetKind::RemoveTierBelow => true,
             TargetKind::ThrowInPot { .. } => !self.data.cards.tribes_of(&b[s]).is_neutral(),
             // Only a non-Golden minion may be swapped out.
@@ -1989,7 +1989,7 @@ impl Game {
         // A hero knocked out by its own effect damage takes no more actions.
         if self.players[p].alive {
             // A card the start of the turn queued with a full hand joins as
-            // soon as this action freed a slot (DESIGN.md "A full hand").
+            // soon as this action freed a slot (docs/rules/design.md "A full hand").
             self.drain_hand_queue(p);
             // Makeshift Master: whatever the watched minion gained while the
             // action ran, the Deity gains too.
@@ -2092,7 +2092,7 @@ impl Game {
                         self.take_ticket(p);
                     }
                     // A Health price is self damage, not Gold spent
-                    // (DESIGN.md). Paid once the card is in hand, so a buy
+                    // (docs/rules/design.md). Paid once the card is in hand, so a buy
                     // that kills the hero still settles cleanly.
                     if let MinionPrice::Health(h) = price {
                         self.take_shop_damage(p, h as i32, None);
@@ -2257,7 +2257,7 @@ impl Game {
                     m.uses_left = m.turn_uses(&self.data.cards);
                     self.players[p].board.insert(pos, m);
                     // Hat Trick: the minion comes with a +1/+1 hat, already in
-                    // its stats; hats stack (docs/heroes.md).
+                    // its stats; hats stack (docs/rules/heroes.md).
                     let hat = self.players[p].hat;
                     if hat != (0, 0) {
                         let b = &mut self.players[p].board[pos];
@@ -2353,7 +2353,7 @@ impl Game {
                 if pl.free_rolls > 0 {
                     pl.free_rolls -= 1;
                     // Malchezaar, Prince of Dance's bug, which we copy
-                    // (DESIGN.md "Malchezaar and free Refreshes"): the last
+                    // (docs/rules/design.md "Malchezaar and free Refreshes"): the last
                     // free Refresh of the turn also uses up one of his two
                     // Health Refreshes, so a turn with any free Refresh at all
                     // has one Health Refresh left, not two.
@@ -2425,7 +2425,7 @@ impl Game {
         if self.players[p].hand.is_full() {
             // A card that arrives at the start of the turn (a compass
             // trinket's tribe card) waits for room; a card got at any other
-            // time is lost (DESIGN.md "A full hand"). A queued card is not in
+            // time is lost (docs/rules/design.md "A full hand"). A queued card is not in
             // the hand yet, so nothing that reads a card entering the hand
             // fires until it joins (`drain_hand_queue`).
             let pl = &mut self.players[p];
@@ -2474,7 +2474,7 @@ impl Game {
     }
 
     /// The cards the start of the turn queued join the hand, first in first
-    /// out, for as long as there is room (DESIGN.md "A full hand"). A card
+    /// out, for as long as there is room (docs/rules/design.md "A full hand"). A card
     /// that joins can make a triple, and a triple's golden card takes a slot
     /// of its own, so the hand can fill again here.
     fn drain_hand_queue(&mut self, p: usize) {

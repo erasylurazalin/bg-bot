@@ -26,7 +26,7 @@ impl Game {
     /// player's tier, tier 6 at most. Lost on a full hand.
     pub(super) fn give_triple_reward(&mut self, p: usize) {
         // Corrupted Tome: "Whenever you would get a Triple Reward, get a
-        // Triple Prize instead" (docs/trinkets.md: nothing more than its own
+        // Triple Prize instead" (docs/rules/trinkets.md: nothing more than its own
         // Discover a Tier 3 Darkmoon Prize).
         if let Some(prize) = self.players[p].tp.triple_prize {
             self.give_generated(p, prize);
@@ -47,7 +47,7 @@ impl Game {
     }
 
     /// What playing a Golden minion gives: a Triple Reward, or with Double
-    /// Time the Tavern Coin it names instead (docs/heroes.md).
+    /// Time the Tavern Coin it names instead (docs/rules/heroes.md).
     pub(super) fn give_play_reward(&mut self, p: usize) {
         if let Some(coin) = self.players[p].double_time {
             self.give_generated(p, coin);
@@ -194,7 +194,7 @@ impl Game {
                     gold.push_attached(a);
                 }
                 // A triple's golden keeps the gifts of all three copies
-                // (docs/darkgifts.md), and gifts stack: two copies with the
+                // (docs/rules/darkgifts.md), and gifts stack: two copies with the
                 // same gift give two of it, except a gift that sets a state.
                 for &g in m.gift_slice() {
                     if cards.get(g.card()).gift_unique {

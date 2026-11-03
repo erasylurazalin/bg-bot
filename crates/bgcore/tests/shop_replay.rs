@@ -447,7 +447,7 @@ fn steady_growth_grows_by_the_pair_of_the_turn_it_landed() {
 
 /// Steady Growth runs as many times as the player's end of turn effects:
 /// Drakkari Enchanter makes the end of your turn happen twice
-/// (DESIGN.md "'Twice' versus 'an extra time'"), so the gift's pair lands
+/// (docs/rules/design.md "'Twice' versus 'an extra time'"), so the gift's pair lands
 /// twice.
 #[test]
 fn steady_growth_grows_once_per_end_of_turn() {

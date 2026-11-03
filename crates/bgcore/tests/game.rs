@@ -440,7 +440,7 @@ fn brann_and_drakkari_multiply_triggers_including_golden() {
 
 #[test]
 fn a_choose_one_spells_cast_triggers_wait_for_the_option_and_the_target() {
-    // DESIGN.md "Targets in the shop" (Era, 2026-11-02): a Choose One spell is
+    // docs/rules/design.md "Targets in the shop" (Era, 2026-11-02): a Choose One spell is
     // cast, then its option is picked, then its target, and only then do the
     // "after you cast a spell" triggers fire. Living Azerite is one: it gives
     // Elemental Tavern minions +4/+3 after every Tavern spell.
@@ -483,7 +483,7 @@ fn sprightly_scarab_choose_one_and_patient_scout_discover() {
     // Option 1: +4 Attack and Windfury to a Beast
     act(&mut g, 0, Action::Choose(1));
     turn_of(&mut g, 0);
-    // The two board Beasts, and the Tavern's Beasts too (DESIGN.md "Targets
+    // The two board Beasts, and the Tavern's Beasts too (docs/rules/design.md "Targets
     // in the shop").
     let board_targets: Vec<Action> = legal(&g)
         .into_iter()
@@ -606,7 +606,7 @@ fn spell_shop_slot_buy_hold_cast_freeze_roll_and_discount() {
 
     // With the board and the Tavern empty, a targeted spell in hand cannot
     // be cast. (A Tavern minion is a legal target for "a minion", per
-    // DESIGN.md "Who a card can reach".)
+    // docs/rules/design.md "Who a card can reach".)
     assert!(g.players[0].board.is_empty());
     set_shop(&mut g, 0, &[]);
     g.players[0].hand.clear();

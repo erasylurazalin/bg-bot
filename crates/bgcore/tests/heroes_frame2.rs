@@ -911,7 +911,7 @@ fn the_observation_carries_the_second_power() {
 }
 
 
-// ---- Start of Combat powers that trigger twice (docs/heroes.md, 2026-11-01) ----
+// ---- Start of Combat powers that trigger twice (docs/rules/heroes.md, 2026-11-01) ----
 //
 // Valdrakken Wind Chimes and Ancient Wishbone make a Start of Combat power
 // run its effect twice, the older ones included: `tp.power_triggers` is what

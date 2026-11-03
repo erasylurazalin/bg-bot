@@ -1,7 +1,7 @@
 //! Trinkets: what the lesser and greater slots do, parsed from
 //! trinkets.toml. Effects are data here as they are in cards.toml, and the
-//! rules code never matches a trinket by name. See DESIGN.md "Trinkets and
-//! Dark Gifts (2026-10-30)" and docs/ENGINE.md "Trinkets".
+//! rules code never matches a trinket by name. See docs/rules/design.md "Trinkets and
+//! Dark Gifts (2026-10-30)" and docs/engine.md "Trinkets".
 //!
 //! A trinket has no host minion, so it needs its own place in the trigger
 //! dispatch: the lists below are the hook points `Game::trinket_event` and
@@ -59,7 +59,7 @@ pub enum Event {
     Refresh,
     /// Any spell cast at all, wherever the cast comes from: a Tavern spell,
     /// a Blood Gem, Gem Day, a Banana, a Spellcraft spell. "Whenever you
-    /// cast a spell" / "after you cast N spells" (DESIGN.md "Read the
+    /// cast a spell" / "after you cast N spells" (docs/rules/design.md "Read the
     /// card's exact words, every time"): Bewitched Ribbon, Bloodbound
     /// Earrings, Charming Panpipes.
     SpellCast,
@@ -73,7 +73,7 @@ pub enum Event {
     GoldSpent,
     /// A card discarded.
     Discard,
-    /// A friendly minion died, in the shop or in a fight (DESIGN.md: shop
+    /// A friendly minion died, in the shop or in a fight (docs/rules/design.md: shop
     /// deaths count for death counters).
     Death,
     /// A friendly minion of this tribe died.
@@ -225,7 +225,7 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     /// Play this many Blood Gems on every friendly minion: Bloodbound
     /// Earrings, Great Boar Sticker's counterpart (`gems_on_board`).
     GemsOnBoard(u8),
-    // ---- prices, Gold and the trinket slots (DESIGN.md, second round) ----
+    // ---- prices, Gold and the trinket slots (docs/rules/design.md, second round) ----
     /// Minion buys that cost Health instead of Gold: this many this turn, of
     /// a tribe or any (Pilgrimp Sticker).
     HealthPriceMinions { tribe: Option<Tribe>, count: u8 },
@@ -387,7 +387,7 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     /// Your first Tavern spell each turn casts this many times in all
     /// (Replica Cathedral: twice), and how many turns start with it.
     FirstSpellTwice(u8),
-    // ---- block 4: player-level hooks (docs/trinkets.md, 2026-10-31) ----
+    // ---- block 4: player-level hooks (docs/rules/trinkets.md, 2026-10-31) ----
     /// The first Battlecry each turn triggers this many extra times
     /// (War Drum); the per-turn use is the trinket's own.
     WarDrum(u8),
@@ -475,7 +475,7 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     RandomPrize(u8),
     /// A Safety Patch's Ice Block: the next fatal damage to the hero is
     /// prevented and the hero is Immune for the rest of the turn, once
-    /// (docs/trinkets.md).
+    /// (docs/rules/trinkets.md).
     IceBlock,
     /// The hidden part of the Surprise Portrait: this chance out of 100 of a
     /// surprise on every buy, sell and Refresh, never twice in a row. On a
@@ -503,7 +503,7 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     /// Get this many random Magnetic Mecha-Demons (Mecha-Jaraxxus Sticker):
     /// the tokens `CardDb.mecha_demons` holds, generated.
     MechaDemon(u8),
-    // ---- block 6: the compasses (docs/trinkets.md, 2026-11-01) ----
+    // ---- block 6: the compasses (docs/rules/trinkets.md, 2026-11-01) ----
     /// Read the player's most common minion type now and keep it on this
     /// trinket's slot for the rest of the game: "the type is fixed at the
     /// pick" (Colorful Compass, Gold-plated Compass). A `RandomMostCommonType`
@@ -511,12 +511,12 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     LockType,
     /// The next minion of this trinket's locked type that the player buys
     /// becomes Golden, and it is not a triple: playing it gives no Triple
-    /// Reward (DESIGN.md). The type is spent by the buy (Gold-plated Compass).
+    /// Reward (docs/rules/design.md). The type is spent by the buy (Gold-plated Compass).
     GoldenBoughtType,
 }
 
 /// A rewrite a portrait applies to every copy of a card the player has or
-/// will have (docs/trinkets.md "Portraits that rewrite a card"). The card's
+/// will have (docs/rules/trinkets.md "Portraits that rewrite a card"). The card's
 /// own effect reads it where that effect runs, so the rules never name a
 /// card: the trinket's data says which card it is about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -768,7 +768,7 @@ pub struct Trinket {
     pub on_get: Vec<Act>,
     pub get_tribe: Option<Tribe>,
     /// Whenever the player spends Gold, once per spending whatever the
-    /// amount (DESIGN.md, second round): Booty Bay Brew.
+    /// amount (docs/rules/design.md, second round): Booty Bay Brew.
     pub on_gold_spent: Vec<Act>,
     // ---- block 4: the events the block added ----
     /// A card of any kind played from the hand (Dragonwing Glider).
@@ -812,7 +812,7 @@ pub struct Trinket {
     pub wheel: Vec<Act>,
     /// A trinket that is a Secret (Safety Patch's Ice Block), tagged for
     /// Akazamzarak later. Not hidden: everyone sees everyone's trinkets live
-    /// (docs/trinkets.md). Nothing reads it yet.
+    /// (docs/rules/trinkets.md). Nothing reads it yet.
     pub secret: bool,
     /// The effects it has inside a fight, in the order they run.
     pub fight: Vec<FightEntry>,
@@ -1905,7 +1905,7 @@ impl TrinketDb {
             };
             let mut tribes = Tribes::NONE;
             for n in &t.tribes {
-                // Naga left the game (DESIGN.md): a Naga tag is no tag, so a
+                // Naga left the game (docs/rules/design.md): a Naga tag is no tag, so a
                 // trinket tagged Naga and something else stays offerable with
                 // that something else.
                 if n.trim().eq_ignore_ascii_case("naga") {

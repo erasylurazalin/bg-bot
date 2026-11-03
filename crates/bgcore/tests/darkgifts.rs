@@ -1,4 +1,4 @@
-//! Dark Gifts (docs/darkgifts.md): the gift table, the Dark Discovery
+//! Dark Gifts (docs/rules/darkgifts.md): the gift table, the Dark Discovery
 //! button, its offers (tiers by turn, the "your type" slot, the pool), the
 //! gifts on minions (a triple, a Magnetism, a turn countdown) and every gift
 //! effect, one test per mechanism.
@@ -525,7 +525,7 @@ fn a_gift_adds_its_stats_and_a_second_one_stacks() {
     let m = g.players[0].board[pos];
     assert_eq!((m.attack, m.health), (1 + 5, 1 + 5));
     assert_eq!(gift_names(&g, &m), ["Gift: Fortitude"]);
-    // Gifts stack (docs/darkgifts.md): a second Fortitude adds again.
+    // Gifts stack (docs/rules/darkgifts.md): a second Fortitude adds again.
     g.give_gift(0, pos, "Fortitude", 3);
     let m = g.players[0].board[pos];
     assert_eq!((m.attack, m.health), (11, 11));
@@ -596,7 +596,7 @@ fn a_triple_keeps_the_gifts_of_all_three_copies() {
         .find(|m| m.card == c && m.golden)
         .expect("the triple is golden");
     let names = gift_names(&g, golden);
-    // Gifts stack (docs/darkgifts.md): Fortitude was on two copies, so the
+    // Gifts stack (docs/rules/darkgifts.md): Fortitude was on two copies, so the
     // golden holds it twice; Harpy's Talons sets a state, so once.
     assert_eq!(
         names,
@@ -617,7 +617,7 @@ fn a_magnetized_mech_keeps_its_gifts_and_the_magnetic_minions_are_lost() {
     bgcore::game::darkgifts::land_gift(&g.data, &g.players[0], &mut m, gift(&g, "Furtiveness"), 4);
     assert_eq!(m.n_gifts, 1, "the magnetic minion's own gift");
     g.magnetize_onto(0, host, m);
-    // docs/darkgifts.md "Magnetic minions and gifts": the Mech keeps its own
+    // docs/rules/darkgifts.md "Magnetic minions and gifts": the Mech keeps its own
     // gifts and the magnetic minion's are lost (Era thinks so).
     let names = gift_names(&g, &g.players[0].board[host]);
     assert_eq!(names, ["Gift: Fortitude"]);
@@ -758,7 +758,7 @@ fn the_replication_copy_triples_at_the_start_of_the_next_turn() {
 
 /// Replication and Affinity stay on the minion after paying out and start
 /// their 2-turn count again, while Incubation fires once and is gone (Era
-/// 2026-11-03, docs/darkgifts.md).
+/// 2026-11-03, docs/rules/darkgifts.md).
 #[test]
 fn replication_and_affinity_start_their_count_again() {
     let mut g = game(20);
@@ -802,7 +802,7 @@ fn replication_and_affinity_start_their_count_again() {
 }
 
 /// Drakkari Enchanter makes a countdown's payout run twice on the turn it
-/// fires, and never speeds the count itself (docs/darkgifts.md, Era
+/// fires, and never speeds the count itself (docs/rules/darkgifts.md, Era
 /// 2026-11-02): two plain copies from Replication, and Incubation's doubling
 /// twice.
 #[test]
@@ -1167,7 +1167,7 @@ fn the_shop_gifts_buff_on_a_card_played_and_on_events() {
 
 // ---- Eating a minion with a spell ----
 //
-// DESIGN.md "Eating a minion with a spell" (Era, 2026-11-02): when Channel
+// docs/rules/design.md "Eating a minion with a spell" (Era, 2026-11-02): when Channel
 // the Devourer or Butchering takes one of your minions, everything that
 // fires on the cast fires first, and only then is it eaten or destroyed, so
 // the eater gains the buffed stats. The eater here is always the only other
@@ -1224,7 +1224,7 @@ fn channel_the_devourer_eats_the_attack_sharpened_sword_added() {
 #[test]
 fn channel_the_devourer_eats_the_stats_a_cast_a_spell_watcher_gained() {
     // "Whenever you cast a spell, gain stats": Vicious Mindslasher (+1/+2 on
-    // itself), one of DESIGN.md's own examples of the hook. Eventide Brute
+    // itself), one of docs/rules/design.md's own examples of the hook. Eventide Brute
     // (+1/+1) is not in cards.toml, so this stands in for it.
     let mut g = game(72);
     let food = put_on_board(&mut g, 0, "Vicious Mindslasher"); // 1/2
@@ -1291,7 +1291,7 @@ fn butchering_destroys_the_weaver_after_its_after_cast_trigger() {
     put_on_board(&mut g, 0, "Risen Rider"); // 2/1, Undead
     play_spell(&mut g, "Butchering");
     act(&mut g, 0, Action::Target(weaver as u8));
-    // The Weaver's +3 lands though the Weaver is destroyed (docs/UNSURE.md),
+    // The Weaver's +3 lands though the Weaver is destroyed (docs/notes/UNSURE.md),
     // then Butchering's +8: 11 this game, and the other Undead has both.
     assert_eq!(g.players[0].undead_bonus, (8 + 3, 0));
     assert_eq!(g.players[0].board.len(), 1);
@@ -1469,7 +1469,7 @@ fn every_gift_effect_card_runs_somewhere() {
             || c.end_of_turn_at_start
             || c.countdown.is_some()
             // Sunken Persistence has no host with a Spellcraft yet
-            // (docs/ENGINE.md "Dark Gifts").
+            // (docs/engine.md "Dark Gifts").
             || g.name == "Sunken Persistence";
         assert!(runs, "gift {} has nothing to run", g.name);
     }
@@ -1900,7 +1900,7 @@ fn the_tier_two_version_gains_attack_on_every_card_played() {
     assert_eq!(g.players[0].board[1].attack, before.1 + 6, "the golden gets +6");
 }
 
-// ---- counting Battlecries (DESIGN.md "Counting Battlecries") ----
+// ---- counting Battlecries (docs/rules/design.md "Counting Battlecries") ----
 
 /// A pool minion given to the hand and played at the right end of the board,
 /// through the same path the client's play takes.

@@ -126,7 +126,7 @@
 //!   index + 1, 0 for an empty slot): a Hero Power Discover offers three,
 //!   Bru'kan's Elements four, so the bot picks a power and not blind
 //!   184..186 hero offer (DISCOVER slots, hero index + 1, 0 for empty)
-//!   Trinkets (DESIGN.md "Trinkets and Dark Gifts"):
+//!   Trinkets (docs/rules/design.md "Trinkets and Dark Gifts"):
 //!   187..189 the lesser slot, greater slot and hero power trinket (index
 //!   into the trinket table + 1, 0 for empty)
 //!   190..192 their "every N" counters
@@ -191,7 +191,7 @@
 //!   31 winners_bread (pending Winner's Bread stacks)
 //!   32 taught_spell (card id + 1 of the spell a Magicfin token casts, 0 if none)
 //!   33 locked (turns it stays locked in hand for, Search Through Time; 1
-//!      while a Tavern tier or a Gold count holds it, DESIGN.md "Cards
+//!      while a Tavern tier or a Gold count holds it, docs/rules/design.md "Cards
 //!      locked in hand")
 //!   34 activate_cost (Gold of its Activate, 0 if it has none or it was
 //!      already used this turn: once per turn per minion)
@@ -413,7 +413,7 @@ pub const SCALAR_TRINKET_COUNT: usize = SCALAR_TRINKET + crate::TRINKET_SLOTS;
 /// The minion type each trinket slot locked in at the pick (`Tribe` as an
 /// index plus one, 0 for none): the Colorful Compasses hand out minions of it
 /// and the Gold-plated Compass makes the next one bought Golden, so the bot
-/// sees which type is worth buying (docs/trinkets.md, "Block 6 rules").
+/// sees which type is worth buying (docs/rules/trinkets.md, "Block 6 rules").
 pub const SCALAR_TRINKET_TRIBE: usize = SCALAR_TRINKET_COUNT + crate::TRINKET_SLOTS;
 /// A trinket offer is open, and which slot it is for (1 lesser, 2 greater,
 /// 3 the hero power's).
@@ -469,7 +469,7 @@ pub const SCALAR_ICE_BLOCK: usize = SCALAR_HOLMES_EMPTY + 2;
 pub const SCALAR_IMMUNE: usize = SCALAR_ICE_BLOCK + 1;
 pub const SCALAR_PRIZE_OFFER_TIER: usize = SCALAR_IMMUNE + 1;
 pub const SCALAR_TRIPLE_PRIZE: usize = SCALAR_PRIZE_OFFER_TIER + 1;
-/// The Secret zone (docs/heroes.md "Secrets"): one flag per combat Secret,
+/// The Secret zone (docs/rules/heroes.md "Secrets"): one flag per combat Secret,
 /// in `secrets` module order (Venomstrike Trap, Autodefense Matrix, Pack
 /// Tactics, Redemption), then the Secrets an open Prestidigitation offers
 /// (kind + 1, 0 for an empty slot). Only the player's OWN zone is ever
@@ -685,7 +685,7 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     o[SLOT_FROM_POOL] = (m.pool_copies > 0) as u8 as f32;
     o[SLOT_WINNERS_BREAD] = m.winners_bread as f32;
     o[SLOT_TAUGHT_SPELL] = m.taught_spell.map_or(0.0, |s| s as f32 + 1.0);
-    // Locked in hand (DESIGN.md "Cards locked in hand"): the turns it stays
+    // Locked in hand (docs/rules/design.md "Cards locked in hand"): the turns it stays
     // locked, or 1 while a condition holds it (a Tavern tier, Gold spent).
     o[SLOT_LOCKED] = if m.locked_turns > 0 {
         m.locked_turns as f32
@@ -1250,7 +1250,7 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
         o[OPP_SPELL_HEALTH] = seen.spell.1 as f32;
         o[OPP_HERO] = them.hero.map_or(0.0, |h| h as f32 + 1.0);
         o[OPP_ARMOR] = them.armor as f32;
-        // Their trinkets are visible (DESIGN.md: every player sees theirs).
+        // Their trinkets are visible (docs/rules/design.md: every player sees theirs).
         for slot in 0..crate::TRINKET_SLOTS {
             o[OPP_TRINKET + slot] = them.trinkets[slot].of as f32;
         }

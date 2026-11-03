@@ -1,5 +1,5 @@
-# The built trinkets (DESIGN.md "Trinkets and Dark Gifts (2026-10-30)",
-# docs/ENGINE.md "Trinkets", how to add one in docs/ADDING-CARDS.md).
+# The built trinkets (docs/rules/design.md "Trinkets and Dark Gifts (2026-10-30)",
+# docs/engine.md "Trinkets", how to add one in docs/adding-cards.md).
 #
 # One entry per trinket: name, card_id, slot ("lesser" or "greater"), cost
 # (0 or left out means free: the game data has no price), the lobby tribes it
@@ -23,7 +23,7 @@
 # whose whole effect is spent when you get it (a card or two into the hand, a
 # payout of Gold, one moved offer) and the ones that replace themselves on the
 # pick (Orb of the Unknown, Quartermaster's Hook). The list is a guess until
-# Era rules on it (DESIGN.md "Some trinkets are never offered by the cube").
+# Era rules on it (docs/rules/design.md "Some trinkets are never offered by the cube").
 #
 # Effect keys with no card behind them: upgrade_discount, buff_tavern_this_turn,
 # make_golden_random, last_spell_copies, discover_deathrattle, discover_tier,
@@ -42,7 +42,7 @@
 # Cube) and `replace_with_random` (Orb of the Unknown, Quartermaster's Hook).
 # `on_gold_spent` fires once per spending whatever the amount. The `rule`
 # events follow the same split: `cast_spell` is a Tavern spell, `spell_cast`
-# is any spell (DESIGN.md "Read the card's exact words, every time").
+# is any spell (docs/rules/design.md "Read the card's exact words, every time").
 # `grow_value` plus `buff_all_growing`/`buff_leftmost_growing` are the
 # "improve this" cards, and `buff_all_per_golden`/`buff_leftmost_two_per_battlecry`
 # read the game-long counters. `buff_random_other` is done in the shop by the
@@ -362,7 +362,7 @@ card_id = "BG30_MagicItem_555"
 slot = "greater"
 cost = 5
 tribes = ["elemental"]
-# "More appear when you least expect them..." (docs/trinkets.md, Era's
+# "More appear when you least expect them..." (docs/rules/trinkets.md, Era's
 # model): every buy, sell and Refresh has a 5% chance of a surprise, never
 # twice in a row.
 on_pick = [{ get = "Elemental of Surprise" }, { surprise = 5 }]
@@ -689,7 +689,7 @@ rule = { event = "cast_spell_on_minion", every = 3, acts = [{ gold = 1 }] }
 # is about, and pick the minions a Start of Combat or Avenge effect reaches
 # (`pick = "all" | "ends" | "random" | "lowest_attack" | "rally" | "card"`).
 # A rule whose event is "death", "summon", "death_<tribe>" or "summon_<tribe>"
-# counts those fight events in the shop counter as well (DESIGN.md: shop
+# counts those fight events in the shop counter as well (docs/rules/design.md: shop
 # deaths count for death counters).
 
 # ---- the frame's proof: one Avenge, one Start of Combat, one summon ----
@@ -769,7 +769,7 @@ slot = "lesser"
 cost = 2
 fight = [{ when = "death", neutral = true, random_spell = 1 }]
 
-# ---- counters fed by a fight (and by shop deaths, per DESIGN.md) ----
+# ---- counters fed by a fight (and by shop deaths, per docs/rules/design.md) ----
 
 [[trinket]]
 name = "Bleeding Heart"
@@ -1268,7 +1268,7 @@ cost = 2
 on_pick = [{ power_extra_uses = 1 }, { power_gold = 1 }]
 
 #
-# The Tavern's shape (block 3). DESIGN.md: the Tavern never has more than 7
+# The Tavern's shape (block 3). docs/rules/design.md: the Tavern never has more than 7
 # slots, one of them almost always the spell. `gauntlet` fixes it at six
 # minions and one spell and refills a bought or consumed card at once;
 # `extra_high_tier` and `extra_magnetic` add one slot each (never past six
@@ -1314,7 +1314,7 @@ on_pick = [{ gold = 2 }, { min_tier = 3 }]
 #
 # Spellcraft (block 3). A Spellcraft trinket hands its spell out when it is
 # picked and again at the start of every turn; the spell is a Tavern spell and
-# leaves the hand at the end of the turn if it was not cast (DESIGN.md
+# leaves the hand at the end of the turn if it was not cast (docs/rules/design.md
 # "Spellcraft").
 #
 
@@ -1394,7 +1394,7 @@ tribes = ["elemental"]
 rule = { event = "sell", every = 6, acts = [{ random_minion = "elemental" }] }
 
 # "After you summon 25 minions, replace this with a random Greater Undead
-# Trinket": the summons a fight reports home count (docs/ENGINE.md).
+# Trinket": the summons a fight reports home count (docs/engine.md).
 [[trinket]]
 name = "Soul Battery"
 card_id = "BG36_MagicItem_410"
@@ -1522,7 +1522,7 @@ slot = "lesser"
 cost = 1
 tribes = ["dragon"]
 # Any card played from the hand counts, Blood Gems and Bananas included
-# (docs/trinkets.md).
+# (docs/rules/trinkets.md).
 on_card_play = [{ buff_random_other = [4, 4], tribe = "dragon" }]
 
 [[trinket]]
@@ -1798,7 +1798,7 @@ on_pick = [
 # (`also_tribes`), and `CardDb::tribes_of` reads it, so every tribe check in
 # the engine sees it: board, hand, the most common type, tribe synergies, a
 # golden Brann and a fight. The Dark Discovery's "your type" slot is the one
-# exception (docs/trinkets.md).
+# exception (docs/rules/trinkets.md).
 [[trinket]]
 name = "Bronzebeard Portrait"
 card_id = "BG30_MagicItem_418"
@@ -1941,7 +1941,7 @@ card_id = "BG36_MagicItem_411"
 slot = "lesser"
 on_pick = [{ second_power = true }, { gold = 3 }]
 
-# --- The Dark Gift trinkets (docs/darkgifts.md) ---
+# --- The Dark Gift trinkets (docs/rules/darkgifts.md) ---
 #
 # Each opens a Dark Gift offer: one minion per offer with a gift on it, the
 # same offer the Dark Discovery button deals (the gifts follow the same
@@ -1985,7 +1985,7 @@ start_every = 2
 start_of_turn = [{ dark_gift_copies = true }]
 
 # ---- Block 5 (2026-11-01): the Darkmoon Prizes and the last trinkets ----
-# Rules: docs/trinkets.md, "Rules for the last trinket batch (Era,
+# Rules: docs/rules/trinkets.md, "Rules for the last trinket batch (Era,
 # 2026-11-01)". A Prize Discover offers three different Prizes of one tier
 # from `CardDb.prizes`; no pool copy is involved, since a Prize is never in
 # the pool.
@@ -2049,7 +2049,7 @@ rule = { event = "death_undead", every = 1, acts = [
 
 # Spin the Wheel of Yogg-Saron on the pick and at the start of every turn.
 # Its six results are the game data's own cards (TB_BaconShop_HERO_35_Buddy_*,
-# the other Mysterybox left out), each equally likely (docs/trinkets.md): the
+# the other Mysterybox left out), each equally likely (docs/rules/trinkets.md): the
 # `wheel` list below is one entry per result, in data order.
 [[trinket]]
 name = "Yogg-Tastic Pastry"
@@ -2087,7 +2087,7 @@ tribes = ["demon", "mech"]
 on_pick = [{ mecha_demon = 2 }]
 start_of_turn = [{ mecha_demon = 2 }]
 
-# ---- block 6: the compasses and the Poet Portrait (docs/trinkets.md, "Block
+# ---- block 6: the compasses and the Poet Portrait (docs/rules/trinkets.md, "Block
 # 6 rules (Era, 2026-11-01)") ----
 #
 # The compasses' type is read once, at the pick, and never changes: `lock_type`
@@ -2127,7 +2127,7 @@ on_pick = [{ lock_type = true }, { random_most_common_type = 2 }]
 start_of_turn = [{ random_most_common_type = 2 }]
 
 # The next minion of the type that you buy becomes Golden (not a triple, and
-# no Triple Reward when it is played: DESIGN.md), and 5 free Refreshes.
+# no Triple Reward when it is played: docs/rules/design.md), and 5 free Refreshes.
 [[trinket]]
 name = "Gold-plated Compass"
 card_id = "BG32_MagicItem_901"

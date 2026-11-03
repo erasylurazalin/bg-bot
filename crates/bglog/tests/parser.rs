@@ -9,7 +9,7 @@
 //!
 //! Where each came from, `create_game.log` first:
 //!
-//! | fixture | `~/bg-logs/Hearthstone_...` |
+//! | fixture | `Power.log` folder |
 //! |---|---|
 //! | `create_game.log` | `2026_10_24_00_56_06`: 2-5, 48-50, 73-75, 94-101, 240-245 |
 //! | `entities.log` | the same game: 2-3, 2026-2036, 4742-4743, 52632-52639, 16836 |

@@ -548,7 +548,7 @@ fn butchering_destroys_an_undead_and_gives_the_undead_attack_everywhere() {
 
 #[test]
 fn butchering_counts_the_spell_power_the_undeads_own_death_gives() {
-    // DESIGN.md "Butchering and spell power" (Era, 2026-11-02): the +8 Attack
+    // docs/rules/design.md "Butchering and spell power" (Era, 2026-11-02): the +8 Attack
     // is a Tavern spell number, and the Undead dies first, so a death that
     // gives the Tavern spells more (Friendly Geist's +1 Attack) is inside it.
     let mut g = game(12);
@@ -699,7 +699,7 @@ fn the_snazzy_phantom_chain_end_to_end() {
     assert_eq!(stats(&g.players[0].board[1]), (13 + 4, 6 + 4), "Bellringer's own +4/+4");
     g.check_invariants().unwrap();
 
-    // And with Butchering: the Undead dies first (DESIGN.md "Butchering and
+    // And with Butchering: the Undead dies first (docs/rules/design.md "Butchering and
     // spell power": its death's Tavern spell power is inside the +8), so the
     // Reborn copy comes back before the bonus lands, and the Phantom gains
     // the Attack it came back with before the +8 does.

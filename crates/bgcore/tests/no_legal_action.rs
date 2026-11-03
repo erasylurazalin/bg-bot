@@ -1,4 +1,4 @@
-//! Regression tests for the "no legal action" audit (docs/KNOWN-GAPS.md):
+//! Regression tests for the "no legal action" audit (docs/notes/KNOWN-GAPS.md):
 //! a pending choice nothing can answer fizzles, a Choose One with no
 //! choosable option is skipped, the action limit picks a choosable option, a
 //! Tavern pick fizzles when the Tavern empties, and a Discover that finds

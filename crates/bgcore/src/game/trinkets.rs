@@ -1,5 +1,5 @@
 //! Trinkets in a game: the two offers, the pick, the slots they live in and
-//! the hooks they fire. See DESIGN.md "Trinkets and Dark Gifts (2026-10-30)"
+//! the hooks they fire. See docs/rules/design.md "Trinkets and Dark Gifts (2026-10-30)"
 //! and `crates/bgcore/src/trinkets.rs` for the data.
 
 use arrayvec::ArrayVec;
@@ -42,7 +42,7 @@ pub const POWER_SLOT: usize = 2;
 enum Offer {
     Standalone,
     /// `choices` options, all free and all Lesser, never the trinket the
-    /// slot holds and never a one-time effect (DESIGN.md).
+    /// slot holds and never a one-time effect (docs/rules/design.md).
     Cube { exclude: u8, choices: u8 },
 }
 
@@ -59,7 +59,7 @@ impl Offer {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MinionPrice {
     Gold(u8),
-    /// Paid in Health: self damage, not Gold spent (DESIGN.md).
+    /// Paid in Health: self damage, not Gold spent (docs/rules/design.md).
     Health(u8),
 }
 
@@ -134,7 +134,7 @@ impl Game {
     }
 
     /// The rewrite a portrait gives this card, if the player holds one
-    /// (docs/trinkets.md "Portraits that rewrite a card").
+    /// (docs/rules/trinkets.md "Portraits that rewrite a card").
     pub fn player_card_mod(&self, p: usize, card: CardId) -> Option<CardMod> {
         self.players[p]
             .tp
@@ -165,7 +165,7 @@ impl Game {
     }
 
     /// The tribes the player has minions of, for the guarantee and the
-    /// price: `[board counts, board plus hand counts]`. DESIGN.md counts the
+    /// price: `[board counts, board plus hand counts]`. docs/rules/design.md counts the
     /// board only, except Murlocs, which count in hand too; the wider one is
     /// what the offer weights call "your tribes".
     fn tribe_counts(&self, p: usize) -> [[u32; Tribe::EVERY.len()]; 2] {
@@ -731,7 +731,7 @@ impl Game {
     }
 
     /// The Mystery Cube's turn-start offer: two free Lesser trinkets to
-    /// replace the one the slot holds (DESIGN.md). Nothing is dealt while
+    /// replace the one the slot holds (docs/rules/design.md). Nothing is dealt while
     /// another offer is open, and `cube_pending` remembers the slot until
     /// that offer is answered.
     fn deal_cube_offer(&mut self, p: usize, slot: usize) {
@@ -818,7 +818,7 @@ impl Game {
         for slot in 0..TRINKET_SLOTS {
             let Some(i) = self.trinket_of(p, slot) else { continue };
             // "Trigger all your Rallies" and "trigger your minions'
-            // Battlecries" fire once more per Drakkari (DESIGN.md: Drakkari
+            // Battlecries" fire once more per Drakkari (docs/rules/design.md: Drakkari
             // doubles your end-of-turn effects).
             let runs = if self.data.trinkets.get(i).drakkari_end { self.drakkari_mult(p) } else { 1 };
             for _ in 0..runs {
@@ -1229,7 +1229,7 @@ impl Game {
             Act::OfferReplace(n) => {
                 // The Mystery Cube: this slot now offers `n` free Lesser
                 // trinkets to replace whatever it holds, at the pick and at
-                // the start of every turn after it (DESIGN.md).
+                // the start of every turn after it (docs/rules/design.md).
                 self.players[p].trinkets[slot].cube = true;
                 self.players[p].trinkets[slot].cube_choices = n;
                 self.refresh_trinket_mask(p);
@@ -1559,7 +1559,7 @@ impl Game {
                     for (card, golden) in m.parts() {
                         if let Some(e) = self.data.cards.get(card).rally {
                             // A Rally that needs the minion it attacks does
-                            // nothing here (docs/trinkets.md).
+                            // nothing here (docs/rules/trinkets.md).
                             let mut pos = i;
                             self.run_effect(p, &mut pos, e, golden, 1);
                         }
@@ -1691,7 +1691,7 @@ impl Game {
             Act::CardMod { card, kind } => {
                 // A tribe change reaches the copies the player already has:
                 // "the change applies to every copy of that card you have or
-                // will have" (docs/trinkets.md), the ones already on the
+                // will have" (docs/rules/trinkets.md), the ones already on the
                 // board and in hand. A later copy gets it in `make_card`.
                 if let CardMod::AlsoTribes(t) = kind {
                     for m in self.players[p].board.iter_mut().chain(self.players[p].hand.iter_mut()) {
@@ -1828,7 +1828,7 @@ impl Game {
             }
             Act::RandomMostCommonType(n) => {
                 // A trinket that read its type at the pick keeps it: "the type
-                // is fixed at the pick" (docs/trinkets.md). One that never read
+                // is fixed at the pick" (docs/rules/trinkets.md). One that never read
                 // one (a copy a portrait made over it, a pick with no typed
                 // minion on the board) reads the board now.
                 let locked = self.players[p].trinkets[slot].tribe;
@@ -1858,7 +1858,7 @@ impl Game {
                 let mut m = self.players[p].hand[at];
                 super::shop::golden_up(cards, &mut m);
                 // "A minion made golden this way is not a triple and gives no
-                // Triple Reward" (DESIGN.md): playing it gives none.
+                // Triple Reward" (docs/rules/design.md): playing it gives none.
                 m.no_reward = true;
                 self.players[p].hand[at] = m;
                 self.players[p].trinkets[slot].tribe = None;
@@ -1866,7 +1866,7 @@ impl Game {
         }
     }
 
-    /// The Surprise Portrait's hidden part (docs/trinkets.md, Era's model):
+    /// The Surprise Portrait's hidden part (docs/rules/trinkets.md, Era's model):
     /// every buy, sell and Refresh has a 5% chance of a surprise, never twice
     /// in a row. A buy or a sell gets an Elemental of Surprise; a Refresh
     /// gets one in the Tavern or has every Tavern slot filled with them.
@@ -1923,7 +1923,7 @@ impl Game {
 
     /// What a minion in Tavern slot `s` costs this player right now: Gold
     /// (0 when a trinket makes it free) or Health (Pilgrimp Sticker, Demonic
-    /// Tapestry, The Eye of Sargeras). DESIGN.md: a Health price is self
+    /// Tapestry, The Eye of Sargeras). docs/rules/design.md: a Health price is self
     /// damage, not Gold spent.
     pub(super) fn minion_price(&self, p: usize, slot: usize) -> MinionPrice {
         let pl = &self.players[p];

@@ -84,7 +84,7 @@ pub struct Attached {
     pub golden: bool,
 }
 
-/// One Dark Gift attached to a minion (docs/darkgifts.md: a gift sits on its
+/// One Dark Gift attached to a minion (docs/rules/darkgifts.md: a gift sits on its
 /// minion like an attached card). Packed into 16 bits so `Minion` stays
 /// small: the low ten bits are the gift's effect card (a token in
 /// cards.toml's Dark Gifts section, ids below 1024) and the top six its own
@@ -204,7 +204,7 @@ pub struct Minion {
     pub shield_hits: u8,
     /// Dancin' Deryl's hats on this minion (Hat Trick): each is +1/+1, already
     /// counted in its stats, and they move to another friendly minion when it
-    /// is sold (docs/heroes.md).
+    /// is sold (docs/rules/heroes.md).
     pub hats: u8,
     /// Darkmoon Tickets on this card while it sits in the Tavern (Come One,
     /// Come All!): a mark the buy takes, not a card of its own.
@@ -242,7 +242,7 @@ pub struct Minion {
 impl Minion {
     /// 2 for a golden minion, else 1: what its card's numbers are multiplied by.
     /// Whether it is locked in hand right now, for any of the locks
-    /// (DESIGN.md "Cards locked in hand"): for a turn or two, until the Tavern
+    /// (docs/rules/design.md "Cards locked in hand"): for a turn or two, until the Tavern
     /// reaches its tier, or until enough Gold has been spent this game. A
     /// locked card takes a hand slot, can't be played, sold, discarded or
     /// summoned from the hand, and hand buffs still reach it.
@@ -290,7 +290,7 @@ impl Minion {
     }
 
     /// Attach a gift. A gift works the same on a golden minion; gifts stack
-    /// (docs/darkgifts.md "Gifts stack"), so the same gift can sit on a
+    /// (docs/rules/darkgifts.md "Gifts stack"), so the same gift can sit on a
     /// minion twice and fire twice, except the ones that set a state
     /// (`Card::gift_unique`), which `push_gift_unique` drops. Returns whether
     /// it was attached.
@@ -418,6 +418,6 @@ impl Minion {
             self.push_attached(a);
         }
         // A Magnetized Mech keeps its own gifts; the magnetic minion's are
-        // lost (docs/darkgifts.md "Magnetic minions and gifts").
+        // lost (docs/rules/darkgifts.md "Magnetic minions and gifts").
     }
 }

@@ -23,16 +23,17 @@ Output (all under git-ignored `ref/`):
 | `bg-meta-<build>.json` | heroes, hero powers, trinkets and Dark Gifts (see the last section) |
 | `bg-meta.json` | copy of the file above |
 
-Read them with `python3 -I`. The export reads
-`~/hearthstone-linux/hearthstone/Data/OSX/dbf.unity3d` (tables `CARD_TAG`,
-`CARD`, `CARD_RACE`) and the Power.log files. Nothing is written there and
-the engine never touches the network.
+Read them with `python3 -I`. The export reads the installed game's
+`Data/OSX/dbf.unity3d` (tables `CARD_TAG`, `CARD`, `CARD_RACE`) and the
+Power.log files in its `Logs/` folders. Nothing is written there and the
+engine never touches the network. The folder is `GAME` at the top of the
+script; edit it to point at your install.
 
 ## Build
 
 - Power.log `BuildNumber`: **254477**. This is the number in the file name.
 - Unity version of the bundle: 6000.3.11f1 (from `globalgamemanagers`).
-- `~/hearthstone-linux/craft.log` lists the last install as 37.0.0.255130.254477
+- The install's `craft.log` lists 37.0.0.255130.254477
   and HearthstoneJSON's latest CardDefs is build 255130. I compared 36,390 cards
   (tags 45, 47, 48, 200, 1429, 1440, 1456, 3081, 2, 3, 2889, 2919) between the
   bundle and that CardDefs: identical, except that the bundle writes an
@@ -106,7 +107,7 @@ Evidence:
   (BG25_013). HearthstoneJSON turns any non-zero into `true`, so it lists the
   Gnoll as a pool minion. Power.log never shows that card in the logged games
   (four) (212 of the other pool minions do appear). Treat 2 as not in the pool,
-  as the owner says.
+  as I decided.
 - 106 minions have an explicit 1456 of 0 (rotated out, for example Tough Tusk,
   Pack Leader, Murozond) and are not in the pool in either source.
 - `CARDS_SHOWN_IN_SHOP` is not Battlegrounds (it holds 23 CATA cards).
@@ -120,8 +121,8 @@ Evidence:
   files, and HearthstoneJSON also says false. Power.log has it six times,
   always in a hand, always with a CREATOR (Weapons Forge, BG36_884), and with
   no pool tag. So the logs show it as a generated spell, not a shop spell. I
-  could not confirm that it is a pool spell. If the owner saw it in a shop,
-  it was not in these logs, or it is newer than this build.
+  could not confirm that it is a pool spell. If I saw it in a shop, it was
+  not in these logs, or it is newer than this build.
 
 ## Disagreements with HearthstoneJSON
 
@@ -246,7 +247,7 @@ hero (base power or an alternate form), 11 have no hero (below).
   false. Treat false as "unknown".
 - Text: 22 have an alternate text. 4 have `{n}` left unresolved (the game sets
   those numbers at runtime). Hero powers keep their current numbers in
-  TAG_SCRIPT_DATA_NUM_1..4 at runtime, as `bg/battlegrounds.py` reads them.
+  TAG_SCRIPT_DATA_NUM_1..4 at runtime, as my tracker reads them.
 - Log: 87 of 172 were created in the 2026-10-24 games, all of them belong to
   a pool hero.
 
@@ -258,7 +259,7 @@ no 3407 (rotated out or event cards).
 
 - Lesser or Greater: **SPELL_SCHOOL (1635) 11 = Lesser, 12 = Greater**. Sure:
   in the log all 111 trinkets seen carry that school, and the Lesser ones sit
-  in NUM_6 slot 1, the Greater in slot 2 (as `bg/battlegrounds.py` reads it).
+  in NUM_6 slot 1, the Greater in slot 2 (as my tracker reads it).
 - Pool: **BACON_TRINKET (3407) equals 1, not a placeholder, not 3166**. Fairly
   sure: all 111 non-placeholder trinkets seen in the logs have 3407 = 1 and
   none with 0 or missing was seen. The 3407 = 0 ones have not been seen so I
@@ -283,7 +284,8 @@ Counts: **47** Dark Gifts, all marked in the pool.
 - What they are: a Dark Gift is a SPELL card (CARDTYPE 5) with id
   `BG36_MidGameEffect_000t<n>` (4 variants end in a second `t`: 28t, 29t, 30t,
   64t). Its enchantments are CARDTYPE 6, ids `<gift id>e`, `e2`, `e3`. This
-  matches `GIFT_ENCHANTMENT` and `gifts_by_minion` in `bg/battlegrounds.py`,
+  matches `GIFT_ENCHANTMENT` and `gifts_by_minion` in the older tracker's
+  `battlegrounds.py`,
   which names the gift from the enchantment id on the minion.
 - Tag: **IS_NIGHTMARE_BONUS (3567) = 1** on 47 of those 48 cards. The 48th,
   `BG36_MidGameEffect_010` ("Battlegrounds Dark Gift [DNT]"), is a placeholder

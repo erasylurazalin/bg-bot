@@ -835,7 +835,7 @@ fn a_this_turn_tavern_buff_comes_off_at_the_end_of_the_turn() {
 /// golden included, and only the card id says which one; cards.toml builds
 /// them as "Dark Paradox t3" to "t9", so the id map names them that way and
 /// the loader builds the version the file had rather than a Stand-in
-/// (docs/darkgifts.md "Dark Paradox", docs/real-boards.md).
+/// (docs/rules/darkgifts.md "Dark Paradox", docs/real-boards.md).
 #[test]
 fn dark_paradox_is_matched_by_its_card_id() {
     let ids = CardIdMap::parse(
@@ -877,7 +877,7 @@ fn dark_paradox_is_matched_by_its_card_id() {
 /// trinket's name ("Floating Candle Set", `BG36_MagicItem_208t`), and
 /// cards.toml builds the spell as the "Floating Candle" token. The id maps to
 /// the name we build, so a state that holds the spell builds it instead of a
-/// Stand-in (docs/trinkets.md "Floating Candle Set").
+/// Stand-in (docs/rules/trinkets.md "Floating Candle Set").
 #[test]
 fn floating_candle_sets_spell_is_matched_by_its_card_id() {
     let ids = CardIdMap::parse(

@@ -432,7 +432,7 @@ impl Game {
             Effect::RewindDamage => {
                 let pl = &mut self.players[p];
                 // What the damage took comes back as it was taken: the Health
-                // as Health, the Armor as Armor (DESIGN.md "Heroes").
+                // as Health, the Armor as Armor (docs/rules/design.md "Heroes").
                 pl.health += pl.last_damage - pl.last_damage_armor;
                 pl.armor += pl.last_damage_armor;
                 pl.last_damage = 0;
@@ -592,7 +592,7 @@ impl Game {
                         m.health += bh;
                     }
                     // A minion that reaches the board without being played
-                    // gets its limited uses at once (docs/KNOWN-GAPS.md):
+                    // gets its limited uses at once (docs/notes/KNOWN-GAPS.md):
                     // Malchezaar's Health Refreshes, a Trailblazer's combines,
                     // a Mycologist's teachings.
                     m.uses_left = m.turn_uses(&self.data.cards);
@@ -617,7 +617,7 @@ impl Game {
             // Amalgam's Misplaced Tea Set, an Air Revenant's Easterly Winds, a
             // Crimson Vindicator's Rally spell. It happens and buffs as
             // printed, but it is not a spell the player cast (Era 2026-11-02,
-            // docs/UNSURE.md). A trinket's own `cast` act is the player's
+            // docs/notes/UNSURE.md). A trinket's own `cast` act is the player's
             // cast: it calls `cast_named_spell` itself (trinkets.rs).
             Effect::CastSpell { card, times } => {
                 self.cast_named_spell(p, card, times as u32 * mul as u32 * runs as u32, true);
@@ -1277,7 +1277,7 @@ impl Game {
 
     /// Return the old copies to the pool and draw the new one. The result is
     /// never golden; a golden old minion keeps its Attack and Health and
-    /// returns its copies (an assumption, see DESIGN.md).
+    /// returns its copies (an assumption, see docs/rules/design.md).
     fn robust_evolution_draw(&mut self, _p: usize, old: Minion) -> Option<CardId> {
         let old_tier = self.data.cards.get(old.card).tier;
         // Tier 6 and tier 7 minions stay on their tier: no minion is ever
@@ -1368,7 +1368,7 @@ impl Game {
     /// The board minions' own triggers for an event, without the player-level
     /// counters and trinkets `fire_event` takes first. A Choose One spell's
     /// cast counts itself at the play but its triggers wait for the choice
-    /// (DESIGN.md "Targets in the shop"), so the two halves are fired apart.
+    /// (docs/rules/design.md "Targets in the shop"), so the two halves are fired apart.
     pub(super) fn run_event_triggers(
         &mut self,
         p: usize,

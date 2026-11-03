@@ -1,9 +1,9 @@
 //! `bgbench powerlog`: a Power.log as the reader sees it, game by game.
 //!
 //! Prints every game in the log, one line per thing, in a stable order, so a
-//! dump from this and a dump from the Python tracker
-//! (`~/projects/bg/bg/powerlog.py`) can be diffed line for line: the entity
-//! table the reader built, exactly as it stood when the game ended.
+//! dump from this and a dump from the older Python tracker (`powerlog.py`)
+//! can be diffed line for line: the entity table the reader built, exactly
+//! as it stood when the game ended.
 //!
 //!   bgbench powerlog FILE [--out FILE]   write the dump (stdout by default)
 //!   bgbench powerlog FILE --time         parse only, print the time taken

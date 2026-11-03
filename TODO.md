@@ -119,8 +119,8 @@ catching up after a patch cheap.
 
 ## Also on the list
 
-- Check our fights against `~/projects/bg`, the tracker, which simulates
-  real boards from my logs.
+- Check our fights against an older private simulator, which models real
+  boards from my logs.
 - Peak boards taken from bots that force each build, to check balance
   between the builds.
 - Better scripted bots as yardsticks.

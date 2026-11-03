@@ -1,7 +1,7 @@
 //! The fight: a pure function of two boards, their counters, and an RNG.
-//! The order of events follows DESIGN.md, Part 1, and matches `~/projects/bg`'s
-//! engine where the design leaves room (attack pointer, Windfury swings, death
-//! order), so the two can be cross-checked.
+//! The order of events follows `docs/rules/design.md` Part 1, and matches the
+//! older private simulator's engine where the design leaves room (attack
+//! pointer, Windfury swings, death order), so the two can be cross-checked.
 //!
 //! Rally, "whenever" and "after a friendly minion attacks" triggers, Avenge,
 //! damage milestones and Deathrattles all run the same `Effect`s, through
@@ -149,7 +149,7 @@ pub struct Counters {
     /// Rapid Reanimation (Teron Gorefiend) runs when a marked minion is on
     /// the board.
     pub rapid_reanimation: u8,
-    /// The owner's Secret zone (docs/heroes.md "Secrets"), in the order the
+    /// The owner's Secret zone (docs/rules/heroes.md "Secrets"), in the order the
     /// Secrets were got: they fire in that order on the event each answers.
     /// Empty for a fight without a game behind it, which every hook answers
     /// from this one field.
@@ -445,7 +445,7 @@ pub struct SideOutcome {
     /// "last saw" of this one.
     pub seen: SeenCounters,
     /// The Secrets that fired here, as a bit per `secrets` kind: each one is
-    /// gone from the owner's zone for good (docs/heroes.md "Secrets").
+    /// gone from the owner's zone for good (docs/rules/heroes.md "Secrets").
     pub secrets_fired: u8,
 }
 
@@ -671,7 +671,7 @@ struct Side<'a> {
     dead_at: usize,
     /// This side's Secret zone as the fight finds it: a Secret leaves it when
     /// it fires (`out.secrets_fired` says which), and one that summons with
-    /// no room stays in it, unfired (docs/heroes.md "Secrets").
+    /// no room stays in it, unfired (docs/rules/heroes.md "Secrets").
     secrets: crate::secrets::Secrets,
     /// Redemption's copy waiting for a board slot, with the slot the minion
     /// died in. The Secret itself stays armed until this lands, and it owes
@@ -1524,7 +1524,7 @@ impl<'a> Side<'a> {
             FightAct::HalfAttackToHealth { pick } => {
                 for i in self.pick(db, pick, target, rng) {
                     let a = self.ms[i].m.attack;
-                    // "Half" rounds up (DESIGN.md).
+                    // "Half" rounds up (docs/rules/design.md).
                     let h = if a > 0 { (a + 1) / 2 } else { 0 };
                     self.gain_at(db, i, 0, h);
                 }
@@ -1568,7 +1568,7 @@ impl<'a> Side<'a> {
             }
             FightAct::Summon { card, count, keywords } => {
                 // A trinket has no source minion, so its summons go to the
-                // right end (DESIGN.md).
+                // right end (docs/rules/design.md).
                 let mut at = self.ms.len();
                 for _ in 0..count {
                     if !self.summon(db, side, at, db.make(card, false), uid, rng, w) {
@@ -1639,7 +1639,7 @@ impl<'a> Side<'a> {
             FightAct::Fermenter { count } => {
                 // Soul Fermenter: the `count` left-most minions are
                 // destroyed now and held, exactly as they stand, until this
-                // side's last minion dies (docs/trinkets.md).
+                // side's last minion dies (docs/rules/trinkets.md).
                 let n = (count as usize).min(self.ms.len());
                 for k in 0..n {
                     let m = self.ms[k].m;
@@ -1851,7 +1851,7 @@ impl<'a> Side<'a> {
     }
 
     /// The Secrets that answer "when one of your minions is attacked", in the
-    /// order they were got (docs/heroes.md "Secrets"): Autodefense Matrix
+    /// order they were got (docs/rules/heroes.md "Secrets"): Autodefense Matrix
     /// gives the minion Divine Shield before the hit lands, Pack Tactics
     /// summons a 3/3 copy of it to its right and Venomstrike Trap a 2/3
     /// Venomous Cobra there. A Secret that would summon stays in the zone,
@@ -1985,7 +1985,7 @@ impl<'a> Side<'a> {
     }
 
     /// An exact copy of the friendly minion in slot `i` as it stands right
-    /// now (DESIGN.md "Exact copies"): buffs, keywords and gifts included,
+    /// now (docs/rules/design.md "Exact copies"): buffs, keywords and gifts included,
     /// the damage it has taken carried over and any keyword it has lost in
     /// this fight gone from the copy too, and no pool copy taken. The damage
     /// it has taken comes back beside the copy, so a copy summoned later
@@ -2085,7 +2085,7 @@ impl<'a> Side<'a> {
             }
         }
         // Redemption's copy, waiting for the Deathrattle that filled the
-        // board to make room (docs/heroes.md "Secrets").
+        // board to make room (docs/rules/heroes.md "Secrets").
         if !self.ms.is_full()
             && let Some((slot, m)) = self.secret_wait
         {
@@ -3223,7 +3223,7 @@ impl<'a> Side<'a> {
             // Redemption: a friendly minion died, so a fresh copy with 1
             // Health comes back where it stood. It comes after this minion's
             // own Deathrattles and its Reborn, so a board they filled makes
-            // it wait for room (docs/heroes.md "Secrets").
+            // it wait for room (docs/rules/heroes.md "Secrets").
             if !self.secrets.is_empty() {
                 self.redemption(db, side, &dead, i, uid, rng, w);
             }
@@ -3421,7 +3421,7 @@ fn run_start_of_combat(
     w: &mut impl Watch,
 ) {
     // Wingmen (Illidan Stormrage) runs before all other Start of Combat
-    // effects (DESIGN.md "Order of events"), a trinket's included: the
+    // effects (docs/rules/design.md "Order of events"), a trinket's included: the
     // left-most and right-most minions gain +2/+1 and attack immediately,
     // left then right.
     if sides[0].counters.wingmen > 0 || sides[1].counters.wingmen > 0 {
@@ -3461,7 +3461,7 @@ fn run_start_of_combat(
     for s in 0..2 {
         sides[s].spawn_boon_of_beetles(db, s, uid, rng, w);
     }
-    // A hero power's Start of Combat goes before any minion's (DESIGN.md
+    // A hero power's Start of Combat goes before any minion's (docs/rules/design.md
     // "Order of events"): Al'Akir's left-most minion gains its keywords,
     // Bru'kan's Water Invocation the right-most one's.
     for s in 0..2 {
@@ -3619,7 +3619,7 @@ fn run_start_of_combat(
     }
     run_immediate(sides, db, uid, rng, w);
     // A trinket's Start of Combat comes at the same step as the hero power's
-    // (DESIGN.md: hero powers, then the lesser trinket, then the greater).
+    // (docs/rules/design.md: hero powers, then the lesser trinket, then the greater).
     // The bundle holds the slots in order, so a lesser trinket's effect runs
     // before a greater one's.
     for s in 0..2 {
@@ -4215,7 +4215,7 @@ fn attack_swings_at(
         );
         w.attack(turn, &att.ms[ai].m, &def.ms[di].m);
         // One count per swing: a Windfury minion's two attacks count 2
-        // (Dragonhead Staff, docs/trinkets.md).
+        // (Dragonhead Staff, docs/rules/trinkets.md).
         att.out.friendly_attacks = att.out.friendly_attacks.saturating_add(1);
         let (dx, dy) = (att.ms[ai].m.attack, def.ms[di].m.attack);
         // Dark Gifts Invulnerability: the attacker takes nothing back. The
@@ -4576,7 +4576,7 @@ impl Watch for DeadWatch {
 /// "wherever the card is" (the Undead bonus, Goldrinn's Beasts, the Beetles)
 /// stays, and everything that only a fight sets goes: the trinkets' `fight`
 /// acts and the Start of Combat powers. A shop-phase destroy is not a fight
-/// (docs/trinkets.md: a `fight` act runs in a fight), so a Funeral Wreath must
+/// (docs/rules/trinkets.md: a `fight` act runs in a fight), so a Funeral Wreath must
 /// not copy a minion that is reborn in the shop.
 fn shop_counters(counters: Counters) -> Counters {
     Counters {

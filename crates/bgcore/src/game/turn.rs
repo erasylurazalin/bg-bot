@@ -137,7 +137,7 @@ impl Game {
             pos += 1;
         }
         // The Dark Gift countdowns (Incubation, Replication, Affinity) tick
-        // and fire here, at the end of the turn (docs/darkgifts.md).
+        // and fire here, at the end of the turn (docs/rules/darkgifts.md).
         self.dark_gift_end_of_turn(p);
         // The powers' own end-of-turn effects (Sulfuras gives your ends
         // +8/+8), then the trinkets'.
@@ -391,7 +391,7 @@ impl Game {
         // prompt outlives the turn it was opened in.
         self.resolve_open_choices(p);
         // Spellcraft: a spell a trinket handed out that was not cast leaves
-        // the hand now (DESIGN.md "Spellcraft"). Leaving is not a discard, so
+        // the hand now (docs/rules/design.md "Spellcraft"). Leaving is not a discard, so
         // no discard trigger fires.
         {
             let cards = &self.data.cards;
@@ -414,7 +414,7 @@ impl Game {
         }
         // A Spellcraft spell leaving frees a hand slot, and a card the start
         // of the turn queued with a full hand joins as soon as there is room
-        // (DESIGN.md "A full hand").
+        // (docs/rules/design.md "A full hand").
         self.drain_hand_queue(p);
         let cards = &self.data.cards;
         // "This turn" effects end with the turn wherever the minion is: a
@@ -486,7 +486,7 @@ impl Game {
             // Everything the start of the turn hands out (a compass trinket's
             // tribe card and the like) waits in the queue when the hand is
             // full, where a card got later in the turn would be lost
-            // (DESIGN.md "A full hand"). The flag is cleared at the end of
+            // (docs/rules/design.md "A full hand"). The flag is cleared at the end of
             // this function, after every start-of-turn effect has run.
             pl.hand_queue_on = true;
             // the Beast bonus lasts until now; it never kills a Beast
@@ -619,7 +619,7 @@ impl Game {
             }
             // Guiding Candle's two Tier 6 Refreshes come back each turn, and
             // the roll here is the first of them when the Tavern changed
-            // (DESIGN.md, "Two kinds of Refresh").
+            // (docs/rules/design.md, "Two kinds of Refresh").
             pl.tp.refresh_tier6 = pl.tp.refresh_tier6_base;
             // Replica Cathedral: a fresh "first spell" each turn.
             pl.tp.first_spell_double = pl.tp.first_spell_double_base;
@@ -684,7 +684,7 @@ impl Game {
         }
         // The start of the turn's own effects are done: a card they had to
         // queue with a full hand joins now if a slot opened, and anything got
-        // from here on is lost rather than queued (DESIGN.md "A full hand").
+        // from here on is lost rather than queued (docs/rules/design.md "A full hand").
         for p in 0..PLAYERS {
             if self.players[p].hand_queue_on {
                 self.players[p].hand_queue_on = false;
@@ -737,7 +737,7 @@ impl Game {
             }
         }
         // I Spy reads the next opponent's warband as it stands now, before
-        // anyone has played this turn (docs/heroes.md "Guessing").
+        // anyone has played this turn (docs/rules/heroes.md "Guessing").
         for p in 0..PLAYERS {
             let board = match self.players[p].opponent {
                 Some(Opponent::Player(q)) => self.players[q as usize].board.clone(),
@@ -818,7 +818,7 @@ impl Game {
         }
         self.add_deathrattles_triggered(p, so.deathrattles_triggered as u32, after_fight);
         // A Secret that fired in this fight is gone from the zone for good
-        // (docs/heroes.md "Secrets").
+        // (docs/rules/heroes.md "Secrets").
         for kind in 0..crate::secrets::MAX_ZONE as u8 {
             if so.secrets_fired & (1 << kind) != 0 {
                 self.players[p].secrets.remove(kind);
@@ -868,7 +868,7 @@ impl Game {
         // Trinket gains from the fight: free Refreshes (Herding Horn), the
         // trinket's own "improve this" numbers, and the deaths and summons
         // its shop-side "after N" counters are following (Bleeding Heart,
-        // Wildfeather Duster). DESIGN.md: shop deaths count for these too, so
+        // Wildfeather Duster). docs/rules/design.md: shop deaths count for these too, so
         // a shop destroy reports its dead the same way.
         let pl = &mut self.players[p];
         pl.free_rolls = pl.free_rolls.saturating_add(so.free_refresh_gain);
@@ -1070,7 +1070,7 @@ impl Game {
             let pl = &mut self.players[p];
             // A Safety Patch's Ice Block: the hit that would knock the hero
             // out is prevented and the hero is Immune for the rest of the
-            // turn, once (docs/trinkets.md).
+            // turn, once (docs/rules/trinkets.md).
             if !pl.immune && pl.secrets.ice_block() && d >= pl.health + pl.armor {
                 pl.secrets.remove(crate::secrets::ICE_BLOCK);
                 pl.immune = true;

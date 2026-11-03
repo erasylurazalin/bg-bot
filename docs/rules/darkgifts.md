@@ -1,10 +1,10 @@
 # How Dark Gifts work
 
-Era's rules and sources for Dark Gifts. Same weight as `DESIGN.md` Part 2.
+Era's rules and sources for Dark Gifts. Same weight as `docs/rules/design.md` Part 2.
 Built 2026-10-31 (the table is `darkgifts.toml`, the code is
 `crates/bgcore/src/darkgifts.rs` and `crates/bgcore/src/game/darkgifts.rs`,
-see `docs/ENGINE.md` "Dark Gifts"; Dark Paradox stays out). The evidence from
-the game data and Era's logs is in `docs/briefs/darkgift-facts.md`.
+see `docs/engine.md` "Dark Gifts"; Dark Paradox stays out). The evidence
+from the game data and Era's logs is in a private notes file.
 
 ## What a gift is
 
@@ -33,7 +33,7 @@ tiers of the three offers by turn. "Yours" means a minion of your type
 | 9 | Tier 4 or 5, yours | Tier 5 | Tier 6 |
 | 10+ | Tier 5, yours | Tier 5 or 6, yours | Tier 5 or 6 |
 
-Era's logs confirm this table on all 127 presses (`docs/briefs/darkgift-facts.md`):
+Era's logs confirm this table on all 127 presses:
 on turn 9 the first slot was Tier 4 four times and Tier 5 three times, and
 on turn 10 the second and third were 5 or 6. The first slot is the
 player's most common type on the board (41 of 43 presses from turn 6; the
@@ -62,13 +62,13 @@ turn): the count goes down and the gift fires at the end of your turn.
 On the turn it fires, the payout runs as many times as the player's end of
 turn effects do: Drakkari Enchanter sets that to 2 (3 golden; two Drakkari
 still make 2), and Ghastly Sticker adds one on top (Drakkari plus Sticker:
-3). Nothing doubles; see DESIGN.md "'Twice' versus 'an extra time'". It
+3). Nothing doubles; see docs/rules/design.md "'Twice' versus 'an extra time'". It
 never speeds up the count, which stays every 2 turns (Era, 2026-11-02).
 After paying out, **Replication and Affinity stay on the minion and start
 their 2-turn count again; Incubation does not restart** (it fires once and
 is gone) (Era, 2026-11-03). Replication's copy is a plain copy (the base card), and if it is your
 third copy the three merge at the start of your next turn, not at the end of
-this one (DESIGN.md "Nothing triples during combat").
+this one (docs/rules/design.md "Nothing triples during combat").
 
 The pool the offers come from:
 - No Battlecry or Choose One minions before turn 5.

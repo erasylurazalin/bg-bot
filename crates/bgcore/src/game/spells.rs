@@ -246,7 +246,7 @@ impl Game {
         self.add_to_hand(p, m);
     }
 
-    /// "Set versus add, as one mechanic" (DESIGN.md): every "how many times"
+    /// "Set versus add, as one mechanic" (docs/rules/design.md): every "how many times"
     /// count is the highest value a setter on the board sets (1 if none),
     /// plus what each adder adds. See `cards::how_many_times`.
     fn times_count(&self, p: usize, role: impl Fn(Aura) -> Option<TimesRole> + Copy) -> u8 {
@@ -375,7 +375,7 @@ impl Game {
     /// Amalgam's Misplaced Tea Set, a Magicfin token's taught spell, an Air
     /// Revenant's Easterly Winds. The spell still happens and buffs as
     /// printed, but it is not a spell the player cast (Era 2026-11-02,
-    /// docs/UNSURE.md), so nothing that counts or reacts to "spells you cast"
+    /// docs/notes/UNSURE.md), so nothing that counts or reacts to "spells you cast"
     /// sees it.
     pub(super) fn minion_cast_spell(&mut self, p: usize, m: Minion) {
         self.cast_spell_as(p, m, true);
@@ -413,7 +413,7 @@ impl Game {
         let casts = if c.is_bounty && c.spell_effect.is_some() { self.bounty_mult(p) } else { 1 };
         let tavern = c.tavern_spell;
         // A Triple Reward is a reward you open, not a spell you cast
-        // (DESIGN.md "Read the card's exact words, every time").
+        // (docs/rules/design.md "Read the card's exact words, every time").
         let reward = matches!(c.spell_effect, Some(SpellEffect::TripleReward));
         self.cast_spell_inner(p, m, by_minion);
         if reward {
@@ -435,7 +435,7 @@ impl Game {
         }
         // A Choose One spell is cast, then its option is picked, then its
         // target: only then do the "after you cast a spell" triggers fire
-        // (DESIGN.md "Targets in the shop", Era 2026-11-02). The counters of
+        // (docs/rules/design.md "Targets in the shop", Era 2026-11-02). The counters of
         // the cast itself are taken now, as the log shows them moving on the
         // play; the triggers wait for the choice to be answered.
         let waits = matches!(self.players[p].pending_choose_one, Some(pco) if pco.source.is_none());
@@ -443,7 +443,7 @@ impl Game {
             self.players[p].cast_after_choice = Some(CastAfterChoice { card: m.card, casts, tavern });
         }
         // Every spell is a spell cast: a Tavern spell, a Blood Gem, a Gem
-        // Day, a Banana, a Spellcraft spell (DESIGN.md). "Tavern spell" is
+        // Day, a Banana, a Spellcraft spell (docs/rules/design.md). "Tavern spell" is
         // the narrower one, and only those touch the Tavern spell counters.
         if waits {
             if tavern {
@@ -464,7 +464,7 @@ impl Game {
                 self.players[p].spells_cast_turn = self.players[p].spells_cast_turn.saturating_add(1);
                 self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
                 // Dark Gifts Spell Siphon counts Tavern spells, never a Blood
-                // Gem or a Banana (DESIGN.md "Spells versus Tavern spells").
+                // Gem or a Banana (docs/rules/design.md "Spells versus Tavern spells").
                 self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
             }
         }
@@ -520,7 +520,7 @@ impl Game {
 
     /// Puzzle Box: cast a random Tavern spell, at a random target when it
     /// needs one. A spell with nothing to land on is not picked, and the
-    /// destructive ones are never cast (docs/heroes.md).
+    /// destructive ones are never cast (docs/rules/heroes.md).
     pub(super) fn cast_random_spell(&mut self, p: usize) {
         let tier = self.players[p].tier;
         let mut picked = None;
@@ -941,7 +941,7 @@ impl Game {
                     price,
                 );
                 // An effect that says "Refresh" is one for the cards that
-                // count Refreshes (DESIGN.md, "Two kinds of Refresh").
+                // count Refreshes (docs/rules/design.md, "Two kinds of Refresh").
                 self.trinket_event(p, crate::trinkets::Event::Refresh, None, 1);
             }
             SpellEffect::GetCard { card, count } => {
@@ -1027,7 +1027,7 @@ impl Game {
             }
             // Veteran Brigand's "cast Blood Gem Barrage 3 times": left as
             // the player's cast, as it was. Whether a Battlecry's cast is the
-            // minion's is still open, for docs/UNSURE.md.
+            // minion's is still open, for docs/notes/UNSURE.md.
             SpellEffect::CastSpell { card, times } => {
                 self.cast_named_spell(p, card, times as u32, false);
             }

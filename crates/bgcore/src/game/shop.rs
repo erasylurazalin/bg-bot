@@ -282,7 +282,7 @@ impl Game {
         }
         // Enhancification: a random minion in the Tavern gains a random Bonus
         // Keyword, twice; both may land on the same one, and one holding every
-        // keyword is skipped (docs/heroes.md).
+        // keyword is skipped (docs/rules/heroes.md).
         for _ in 0..pl.enhance_times {
             let mut cands: ArrayVec<usize, { crate::SHOP }> = ArrayVec::new();
             for i in 0..pl.shop.len() {
@@ -306,7 +306,7 @@ impl Game {
     /// Temporal Tavern: the last `count` Tavern minion slots hold minions from
     /// a Tier above the player's, each drawn from a random Tier up to Tier 6;
     /// the higher-Tier cards take normal slots, they are not extra ones
-    /// (docs/heroes.md).
+    /// (docs/rules/heroes.md).
     pub(super) fn add_high_tier_slots(
         pl: &mut Player,
         pool: &mut [u8],
@@ -335,7 +335,7 @@ impl Game {
     /// "After the Tavern is Refreshed this game" (Waveling, En-Djinn Blazer,
     /// Easterly Winds): the whole amount goes to one random minion in the
     /// Tavern. Called by every Refresh, the turn-start roll included when
-    /// the Tavern changed (see "Two kinds of Refresh" in DESIGN.md). It
+    /// the Tavern changed (see "Two kinds of Refresh" in docs/rules/design.md). It
     /// draws no random number when there is nothing to give.
     pub(super) fn apply_refresh_buff(pl: &mut Player, cards: &CardDb, rng: &mut Rng) {
         let (a, h) = pl.refresh_buff;
@@ -410,7 +410,7 @@ impl Game {
         let (lo, hi) = Self::tavern_tiers(pl);
         // Warband Whistle: this Refresh holds one plain copy (the card's own
         // stats) of each minion in the warband, and nothing else random
-        // (DESIGN.md, docs/trinkets.md). A warband of 7 fills the Tavern and
+        // (docs/rules/design.md, docs/rules/trinkets.md). A warband of 7 fills the Tavern and
         // leaves no spell slot; 6 or fewer copies sit next to the spell.
         let whistle = pl.tp.whistle && !pl.board.is_empty();
         if whistle {
@@ -527,7 +527,7 @@ impl Game {
 
     /// Glowing Gauntlet: the Tavern always holds seven cards, six minions and
     /// the spell, so a bought, consumed or stolen minion is replaced by a
-    /// minion, and a bought spell by a spell (DESIGN.md). Called after every
+    /// minion, and a bought spell by a spell (docs/rules/design.md). Called after every
     /// action; a player without the trinket returns on one flag.
     pub(super) fn refill_tavern(&mut self, p: usize) {
         if !self.players[p].tp.gauntlet {
@@ -836,7 +836,7 @@ impl Game {
         let m = self.players[p].board.remove(slot);
         // Hat Trick: a sold minion's hats move to a random other friendly
         // minion, so they are only lost when the whole board is sold or the
-        // minion is destroyed (docs/heroes.md).
+        // minion is destroyed (docs/rules/heroes.md).
         if m.hats > 0 && !self.players[p].board.is_empty() {
             let n = self.players[p].board.len();
             let k = self.rng.below(n as u32) as usize;

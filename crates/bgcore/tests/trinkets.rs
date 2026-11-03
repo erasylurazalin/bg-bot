@@ -897,7 +897,7 @@ fn the_warband_whistle_deals_one_plain_copy_of_each_warband_minion() {
 #[test]
 fn the_wand_of_divination_counts_every_cast_on_a_minion() {
     // "After you cast 3 spells on minions, gain 1 Gold": a Tavern minion is a
-    // minion (DESIGN.md "Targets in the shop"), and every cast of one spell
+    // minion (docs/rules/design.md "Targets in the shop"), and every cast of one spell
     // counts (a Blood Gem Balinda casts three times).
     let mut g = game(44);
     equip(&mut g, 0, 0, "Wand of Divination");
@@ -1477,7 +1477,7 @@ fn the_mystery_cube_keeps_offering_every_turn() {
 #[test]
 fn the_mystery_cube_offers_after_the_held_trinkets_own_start_of_turn() {
     // A trinket with a start-of-turn effect in a cube slot does its own work
-    // first, then the cube replaces it (DESIGN.md).
+    // first, then the cube replaces it (docs/rules/design.md).
     let mut g = game(168);
     let cube = trinket(&g, "Mystery Cube");
     g.set_trinket(0, 0, Some(cube));
@@ -1642,7 +1642,7 @@ fn an_avenge_trinket_fires_after_its_third_friendly_death() {
     weak_board(&mut g, 0, "Southsea Busker", 2);
     let out = fight_wall(&g, 1, 10, 500, 60);
     assert_eq!(out.sides[0].gem_gain, (0, 0), "two deaths: no fire");
-    // The count starts again in the next fight (DESIGN.md: Avenge resets).
+    // The count starts again in the next fight (docs/rules/design.md: Avenge resets).
     g.players[0].board.clear();
     weak_board(&mut g, 0, "Southsea Busker", 2);
     let out = fight_wall(&g, 2, 10, 500, 60);
@@ -1847,7 +1847,7 @@ fn a_death_counter_takes_shop_and_fight_deaths_and_carries_across_fights() {
     sandbox_turn(&mut g);
     assert_eq!(g.players[0].trinkets[0].count, 1, "nine deaths: fired at eight, one over");
     assert_eq!(count_in_hand(&g, 0, Tribe::Undead), 1, "a random Undead");
-    // A shop death counts too (DESIGN.md: shop deaths count for death
+    // A shop death counts too (docs/rules/design.md: shop deaths count for death
     // counters). Butchering destroys an Undead in the shop; the counter was
     // at 1 after nine deaths and goes to 2.
     let before = g.players[0].trinkets[0].count;
@@ -3116,7 +3116,7 @@ fn the_makeshift_master_gives_the_deity_what_its_minion_gains() {
 
 #[test]
 fn the_makeshift_master_watches_a_tavern_minion_and_follows_the_card() {
-    // DESIGN.md "Targets in the shop": "Choose a minion" takes a Tavern
+    // docs/rules/design.md "Targets in the shop": "Choose a minion" takes a Tavern
     // minion too, and the watch stays on the card when it is bought.
     let mut g = game(195);
     assert!(g.players[0].deity.is_some(), "an Aberration lobby has a Deity");
@@ -3201,7 +3201,7 @@ fn a_fight_reports_the_minions_it_summoned() {
 #[test]
 fn the_soul_battery_swaps_itself_after_a_fights_summons() {
     // The counter is the minions a fight summons, which come home with the
-    // fight's outcome (docs/ENGINE.md).
+    // fight's outcome (docs/engine.md).
     let mut g = game(201);
     to_turn(&mut g, 4);
     take(&mut g, 0, "Soul Battery");
@@ -4582,7 +4582,7 @@ fn curator_sticker_gets_a_golden_mishmash_and_a_ten_ten_amalgam() {
 
 #[test]
 fn mishmash_is_tagged_as_a_buddy_and_safety_patch_as_a_secret() {
-    // Tags for later (docs/trinkets.md): nothing reads them yet.
+    // Tags for later (docs/rules/trinkets.md): nothing reads them yet.
     let g = game(411);
     let mishmash = g.data.cards.get(id(&g, "Mishmash"));
     assert!(mishmash.buddy, "Mishmash is a buddy");
@@ -5106,7 +5106,7 @@ fn the_gold_plated_compass_makes_the_next_minion_of_its_type_golden() {
     g.check_invariants().unwrap();
 }
 
-/// A full hand (DESIGN.md "A full hand", Era 2026-11-02): a card that arrives
+/// A full hand (docs/rules/design.md "A full hand", Era 2026-11-02): a card that arrives
 /// at the start of your turn is queued and joins as soon as there is room,
 /// while a card got during your shop phase or in combat is lost. The hand
 /// holds ten.

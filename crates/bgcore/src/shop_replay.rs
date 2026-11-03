@@ -1847,7 +1847,7 @@ fn resolve_card(data: &Data, ids: &CardIdMap, place: &ShopPlace) -> Option<CardI
 
 /// What a `discover` step's pick still owes the Battlecry count. A Discover a
 /// Battlecry opened counts for "for each Battlecry you've triggered" at the
-/// pick, not on the play (DESIGN.md "Counting Battlecries", 17_59_26-g1 turn
+/// pick, not on the play (docs/rules/design.md "Counting Battlecries", 17_59_26-g1 turn
 /// 8: the Tavern's Dark Paradox grows at the pick). This replay plays one
 /// step at a time from the log's own state, so the play that owed it is
 /// behind us: the step names the card that opened the Discover (`source`),
@@ -2267,7 +2267,7 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
             .is_some_and(|id| data.heroes.power_by_card_id(id).is_none());
     let mut text = Vec::new();
     // A Choose One with a target asks the option first, then the target
-    // (DESIGN.md "Targets in the shop"): the play's own sub-option is answered
+    // (docs/rules/design.md "Targets in the shop"): the play's own sub-option is answered
     // before the step's target, not after it.
     let choose_first = step.step == "play"
         && step.sub_option.is_some_and(|k| (0..2).contains(&k))

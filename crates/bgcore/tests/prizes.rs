@@ -1,5 +1,5 @@
 //! The Darkmoon Prizes: the 31 Prize spells, the one Prize minion, the Triple
-//! Prize and the Prize Discover. Rules: docs/trinkets.md, "Rules for the last
+//! Prize and the Prize Discover. Rules: docs/rules/trinkets.md, "Rules for the last
 //! trinket batch (Era, 2026-11-01)".
 
 use std::sync::Arc;

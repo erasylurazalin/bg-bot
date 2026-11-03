@@ -27,7 +27,7 @@ pub fn land_gift(data: &crate::Data, pl: &Player, m: &mut Minion, gift: usize, t
         let card_id = g.card;
         let c = data.cards.get(card_id);
         // A gift that sets a state instead of firing again never stacks; a
-        // second one changes nothing (docs/darkgifts.md "Gifts stack").
+        // second one changes nothing (docs/rules/darkgifts.md "Gifts stack").
         if c.gift_unique && m.gift_slice().iter().any(|o| o.card() == card_id) {
             return;
         }
@@ -131,7 +131,7 @@ impl Game {
 
     /// The Dark Discovery button: every player has it, it costs
     /// `dark_gift_cost` Gold, works once a turn, has `dark_gift_uses` uses a
-    /// game and is locked until `dark_gift_turn` (docs/darkgifts.md).
+    /// game and is locked until `dark_gift_turn` (docs/rules/darkgifts.md).
     pub(super) fn dark_gift_usable(&self, p: usize) -> bool {
         if self.data.gifts.is_empty() || self.turn < self.data.rules.dark_gift_turn as u32 {
             return false;
@@ -234,7 +234,7 @@ impl Game {
     /// The board's most common type read off the cards alone, the way the
     /// Dark Discovery's "your type" slot reads it: a tribe a portrait gave a
     /// minion (Bronzebeard Portrait's Branns counting as Murlocs and Dragons)
-    /// does not count there (docs/trinkets.md, Era's rule).
+    /// does not count there (docs/rules/trinkets.md, Era's rule).
     fn most_common_card_type(&mut self, p: usize) -> Option<crate::cards::Tribe> {
         let tribes: ArrayVec<crate::cards::Tribes, BOARD> = self.players[p]
             .board
@@ -246,7 +246,7 @@ impl Game {
 
     /// Deal a Dark Gift offer into the player's Discover: one pool minion per
     /// slot, each with a gift, three different minions and three different
-    /// gifts (docs/darkgifts.md "Era's rules"). Each offer holds a pool copy.
+    /// gifts (docs/rules/darkgifts.md "Era's rules"). Each offer holds a pool copy.
     pub(super) fn deal_dark_gift_offer(&mut self, p: usize, plan: DarkGiftPlan) {
         let mut used: ArrayVec<u8, DISCOVER> = ArrayVec::new();
         let mut taken: ArrayVec<CardId, DISCOVER> = ArrayVec::new();
@@ -447,7 +447,7 @@ impl Game {
     /// it could not have then, and a minion's Time Turning runs its end of
     /// turn effects again. The countdown gifts (Incubation, Replication and
     /// Affinity) do *not* tick here: they count down and fire at the END of
-    /// the turn (docs/darkgifts.md, Era 2026-11-02).
+    /// the turn (docs/rules/darkgifts.md, Era 2026-11-02).
     pub fn dark_gift_start_of_turn(&mut self, p: usize) {
         // Nothing triples during the fights, so a payout's copy that makes a
         // third copy merges now: three copies become the golden one in the
@@ -483,7 +483,7 @@ impl Game {
     /// minion and starts its count again; the rest (Incubation) comes off.
     /// The payout runs `drakkari_mult` times (Drakkari Enchanter sets 2,
     /// golden 3; Ghastly Sticker adds one), never the count: a gift fires on
-    /// one end of turn only (docs/darkgifts.md).
+    /// one end of turn only (docs/rules/darkgifts.md).
     pub fn dark_gift_end_of_turn(&mut self, p: usize) {
         if self.data.gifts.is_empty() {
             return;
@@ -550,7 +550,7 @@ impl Game {
             }
             CountdownEffect::PlainCopy => {
                 // "get a plain copy of this": the base card, never the host
-                // as it stands (DESIGN.md "Lichling Hoarder": no golden, no
+                // as it stands (docs/rules/design.md "Lichling Hoarder": no golden, no
                 // buffs, no added keywords, no gift). The same shape a
                 // spell's `plain_copy` target and Funeral Wreath use
                 // (`make_card`, no pool copy). The copy does not go through
@@ -621,7 +621,7 @@ impl Game {
     /// The "for each ... this game" gifts grow on their event (Battle Scars,
     /// Death's Embrace, Spell Siphon, Desecration), wherever the minion is:
     /// the board, the hand and Bob's Tavern (a Tavern copy of a Dark Paradox
-    /// t6 grows too, DESIGN.md "Counting Battlecries").
+    /// t6 grows too, docs/rules/design.md "Counting Battlecries").
     pub fn dark_gift_count(
         &mut self,
         p: usize,

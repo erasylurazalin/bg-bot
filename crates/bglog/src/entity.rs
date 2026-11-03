@@ -1,6 +1,6 @@
 //! One entity of a game: its card id and its tags.
 //!
-//! A port of the `Entity` of `~/projects/bg/bg/powerlog.py`. Tags are keyed
+//! A port of the `Entity` of the older tracker's `powerlog.py`. Tags are keyed
 //! the way the log spells them: names like `ZONE` stay names, and tags the
 //! client has no name for keep their number as the key (`"2022"`). Values
 //! that parse as a number become [`TagValue::Int`], everything else stays

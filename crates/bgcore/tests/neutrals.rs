@@ -253,7 +253,7 @@ fn a_stat_set_keeps_the_bonuses_that_apply_wherever_the_card_is() {
     // has a 19/7 Drustfallen Butcher with the Undead bonus at 17 become 67/50:
     // the set reaches 50/50 and the bonuses that apply wherever the card is go
     // on top, the rule Pack Tactics' 3/3 copy gets from being summoned
-    // (DESIGN.md "Exact copies", docs/heroes.md "Secrets").
+    // (docs/rules/design.md "Exact copies", docs/rules/heroes.md "Secrets").
     let mut g = undead_game(5);
     g.players[0].undead_bonus = (17, 0);
     g.players[0].gold = 10;
@@ -839,7 +839,7 @@ fn eonars_favor_on_an_all_type_target_buffs_every_typed_tavern_minion() {
 
 #[test]
 fn a_target_that_says_a_minion_reaches_the_tavern() {
-    // DESIGN.md "Targets in the shop": a spell, Battlecry or Activate that
+    // docs/rules/design.md "Targets in the shop": a spell, Battlecry or Activate that
     // targets "a minion" (or "another Murloc", "a Pirate", "a Beast") reaches
     // a Tavern minion; only "a friendly minion" stays on the board.
     let mut g = game(71);
@@ -889,7 +889,7 @@ fn a_choose_one_with_a_target_asks_the_option_then_a_tavern_target() {
 
 #[test]
 fn malchezaars_last_free_refresh_spends_one_of_his_health_refreshes() {
-    // DESIGN.md "Malchezaar and free Refreshes" (a bug in the real game we
+    // docs/rules/design.md "Malchezaar and free Refreshes" (a bug in the real game we
     // copy): free Refreshes go first, and the last one also uses up one of
     // Malchezaar's two Health Refreshes, so a turn with any free Refresh has
     // one Health Refresh left.
@@ -916,7 +916,7 @@ fn malchezaars_last_free_refresh_spends_one_of_his_health_refreshes() {
     assert_eq!(g.players[0].health_refreshes_left(&g.data.cards), 0, "the Health Refresh");
     assert_eq!(g.players[0].health, health - g.data.rules.health_refresh_cost);
     // A Malchezaar that reaches the board without being played has its uses
-    // at once (docs/KNOWN-GAPS.md, the first row).
+    // at once (docs/notes/KNOWN-GAPS.md, the first row).
     let m = g.players[0].make_card(&g.data.cards, id(&g, "Malchezaar, Prince of Dance"), false, 0);
     assert_eq!(m.uses_left, 2, "a made Malchezaar arrives with both");
     g.check_invariants().unwrap();

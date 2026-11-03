@@ -1,6 +1,6 @@
 //! Hero batch 1 (docs/briefs/heroes-batch1.md): the 28 gold and price,
 //! counter, Discover and generate powers, one test each. Era's rules for
-//! their non-obvious parts are in docs/heroes.md "Hero batch rules
+//! their non-obvious parts are in docs/rules/heroes.md "Hero batch rules
 //! (Era, 2026-11-01)".
 
 use std::sync::Arc;

@@ -1,4 +1,4 @@
-//! The Secret zone (docs/heroes.md "Secrets", Era's rules).
+//! The Secret zone (docs/rules/heroes.md "Secrets", Era's rules).
 //!
 //! A player holds at most the four combat Secrets plus, in the same zone, the
 //! Ice Block a Safety Patch gives (the trinket's save, which has nothing to do
@@ -33,7 +33,7 @@ pub const COMBAT_SECRETS: u8 = 4;
 /// Kinds the zone can hold: the four combat Secrets and the Ice Block.
 pub const MAX_ZONE: usize = 5;
 
-/// Every kind's name, by index (`docs/heroes.md` names).
+/// Every kind's name, by index (`docs/rules/heroes.md` names).
 pub const NAMES: [&str; MAX_ZONE] = [
     "Venomstrike Trap",
     "Autodefense Matrix",

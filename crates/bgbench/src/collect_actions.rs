@@ -2,7 +2,7 @@
 //! per game.
 //!
 //! Ported from the Python `tools/collect_actions.py` (removed 2026-11-03). It
-//! runs from bg-boards.timer after collect-boards. It reads the logs
+//! runs from the same timer as collect-boards, after it. It reads the logs
 //! the way `collect-boards` does (the same games, numbered the same way), follows
 //! the shop phase turn by turn, and writes what I did there:
 //!
@@ -16,7 +16,7 @@
 //!                           [--laptop DIR] [--rewrite]
 //!
 //! `--out` is where the files and the `.state.json` incremental state go
-//! (`boards/actions` by default, Era's live folder), `--rewrite`
+//! (`boards/actions` by default, the live folder), `--rewrite`
 //! reads every log even when the state says it was read already, and the
 //! printed lines are the Python's own:
 //! one per log, with the number of games, the step kinds it wrote and what the

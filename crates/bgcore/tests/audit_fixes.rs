@@ -1,4 +1,4 @@
-//! Fixes from docs/card-audit.md, with the real cards from cards.toml:
+//! Fixes from docs/notes/card-audit.md, with the real cards from cards.toml:
 //! Gunpowder Courier at 5 Gold, the generated-card tiers and the Satellite,
 //! "after you play" never counting the played card, Disguised Graverobber,
 //! and the four tier 7 spells (which no draw reaches).

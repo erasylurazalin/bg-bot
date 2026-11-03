@@ -1,4 +1,4 @@
-# The Dark Gifts (docs/darkgifts.md, Era's rules). One [[gift]] per gift card
+# The Dark Gifts (docs/rules/darkgifts.md, Era's rules). One [[gift]] per gift card
 # of the game data (`ref/bg-meta.json` `dark_gifts`): its card_id, its name,
 # the turn window it can be offered in (game tags 4853 and 4854), its weight
 # (4856, 50 means half as likely to be picked for an offer) and the condition
@@ -12,7 +12,7 @@
 # `repeats` are read here; `crates/bgcore/src/darkgifts.rs` holds the loader
 # and the offer rules.
 
-# The pool the Dark Discovery draws its minions from (docs/darkgifts.md).
+# The pool the Dark Discovery draws its minions from (docs/rules/darkgifts.md).
 # On top of these: never a Magnetic minion, never one with a "when you sell
 # this", never one whose effect works in hand. Those are flags on the card,
 # not names here.
@@ -21,7 +21,7 @@
 no_battlecry_before = 5
 no_choose_one_before = 5
 # Left out for balance, by card name (cards.toml names).
-# The five Dark Paradox versions are left out too (docs/darkgifts.md "Dark
+# The five Dark Paradox versions are left out too (docs/rules/darkgifts.md "Dark
 # Paradox"): the card the pool does hold never shows up with a gift.
 exclude = [
     "Leeroy the Reckless",
@@ -205,7 +205,7 @@ card = "Gift: Replication"
 window = [4, 7]
 condition = "any"
 # A countdown gift that starts its 2-turn count again after paying out
-# (docs/darkgifts.md, Era 2026-11-03). Incubation has no `repeats`.
+# (docs/rules/darkgifts.md, Era 2026-11-03). Incubation has no `repeats`.
 repeats = true
 
 [[gift]]

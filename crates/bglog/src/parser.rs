@@ -1,6 +1,6 @@
 //! Reading `Power.log` lines into a [`Game`].
 //!
-//! A port of `PowerLog` in `~/projects/bg/bg/powerlog.py`, line for line: the
+//! A port of `PowerLog` in the older tracker's `powerlog.py`, line for line: the
 //! same lines are read, in the same order, into the same entities and tags.
 //!
 //! Only the `GameState.` lines are read. The log prints every line a second

@@ -1,6 +1,6 @@
 //! Hero batch 2 (docs/briefs/heroes-batch2.md): the 22 stats, target and
 //! Tavern powers, one test each, plus the Spellcraft target fix the brief
-//! asks for. Era's rules for their non-obvious parts are in docs/heroes.md
+//! asks for. Era's rules for their non-obvious parts are in docs/rules/heroes.md
 //! "Hero batch rules (Era, 2026-11-01)".
 
 use std::sync::Arc;
@@ -539,7 +539,7 @@ fn see_the_light_steals_a_tavern_minion_as_a_two_two() {
 #[test]
 fn spirit_swap_takes_a_tavern_minion_for_either_pick() {
     // The log's own case (15_25_26-g1 turn 1): a board minion, then a
-    // Tavern minion. docs/heroes.md: any minion, the Tavern's included.
+    // Tavern minion. docs/rules/heroes.md: any minion, the Tavern's included.
     let mut g = hero_game(18, "Vol'jin");
     put_on_board(&mut g, 0, "Buzzing Vermin");
     put_on_board(&mut g, 0, "Southsea Busker");

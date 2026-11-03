@@ -1,5 +1,5 @@
 //! Dark Gifts: the 47 gift cards, when each can be offered and which hosts it
-//! fits (docs/darkgifts.md). What a gift does is a token in cards.toml, so
+//! fits (docs/rules/darkgifts.md). What a gift does is a token in cards.toml, so
 //! every effect a gift shares with a card runs through the same code; this
 //! file only holds the gift table, the offer rules and the landing.
 //!
@@ -17,7 +17,7 @@ use crate::rng::Rng;
 /// Growth) is fixed. Void Power picks its gifts as if it were turn 7.
 pub const VOID_POWER_TURN: u32 = 7;
 
-/// Which hosts a gift may land on (docs/darkgifts.md "Era's rules"). Every
+/// Which hosts a gift may land on (docs/rules/darkgifts.md "Era's rules"). Every
 /// gift whose logs never showed a condition goes on any minion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GiftCond {
@@ -472,7 +472,7 @@ impl GiftDb {
     }
 
     /// Whether the Dark Discovery pool leaves this minion out on `turn`
-    /// (docs/darkgifts.md "The pool the offers come from"). The flags are on
+    /// (docs/rules/darkgifts.md "The pool the offers come from"). The flags are on
     /// the card: a Magnetic minion, one with "when you sell this", one whose
     /// effect works in hand, and the balance list in darkgifts.toml.
     pub fn pool_allows(&self, card: &Card, id: CardId, turn: u32) -> bool {

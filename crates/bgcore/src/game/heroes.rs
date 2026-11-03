@@ -239,7 +239,7 @@ impl Game {
 
     /// A rotating power (A Tale of Kings) becomes a random other power of its
     /// family whose tribe is in the lobby, never the same tribe twice
-    /// (docs/heroes.md "King of Beasts, Rat King").
+    /// (docs/rules/heroes.md "King of Beasts, Rat King").
     pub(super) fn rotate_family_power(&mut self, p: usize, second: bool) {
         let Some(st) = self.players[p].power_at(second) else { return };
         let power = self.data.heroes.power(st.of);
@@ -416,7 +416,7 @@ impl Game {
 
     /// Take one Darkmoon Ticket from a Tavern card that carries one. At the
     /// goal, the player gets a Triple Reward spell that Discovers a minion of
-    /// their own Tier (a Triple Reward is the Tier above, docs/heroes.md).
+    /// their own Tier (a Triple Reward is the Tier above, docs/rules/heroes.md).
     pub(super) fn take_ticket(&mut self, p: usize) {
         let goal = self.ticket_goal(p);
         let pl = &mut self.players[p];
@@ -560,7 +560,7 @@ impl Game {
             // A friendly minion to sell and another to take its stats.
             PowerEffect::Devour => pl.board.len() >= 2,
             // The next opponent's warband as it stood at the start of the
-            // turn (docs/heroes.md "Guessing").
+            // turn (docs/rules/heroes.md "Guessing").
             PowerEffect::IspyNextOpponent => hand_room && !pl.next_board.is_empty(),
             // A friendly Undead to destroy and room for the random one.
             PowerEffect::DestroyTribeGetRandom { tribe } => {
@@ -741,7 +741,7 @@ impl Game {
             // second slot and the second into the main one.
             PowerEffect::DiscoverPowers(n) => {
                 self.players[p].power_offer_left = n;
-                // The first pick is the second power (docs/heroes.md).
+                // The first pick is the second power (docs/rules/heroes.md).
                 self.players[p].power_offer_second = !second;
                 self.deal_power_offer(p);
             }
@@ -760,7 +760,7 @@ impl Game {
                 pl.power_offer_second = second;
             }
             // Sharpen Blades: the buff grows by 1 for every `every` cards
-            // bought this game (docs/heroes.md).
+            // bought this game (docs/rules/heroes.md).
             PowerEffect::BuffPerBuys { attack, health, every } => {
                 let grown = (self.players[p].counts.cards_bought / every.max(1) as u32) as i32;
                 let pt = PendingTarget {
@@ -1155,7 +1155,7 @@ impl Game {
             }
             // Prestidigitation: one offer of every combat Secret the zone
             // lacks, however many that is, not the three of a Discover
-            // (docs/heroes.md "Secrets"). With all four up the press is not
+            // (docs/rules/heroes.md "Secrets"). With all four up the press is not
             // legal, so there is always at least one option to offer.
             PowerEffect::DiscoverSecret => {
                 let mut offer: ArrayVec<u8, CHOICES> = ArrayVec::new();
@@ -1379,7 +1379,7 @@ impl Game {
             }
             // Prize Wall: on turn 4, 8, 12, 16 and every four turns after,
             // Discover a Darkmoon Prize of that turn's Prize tier (turn 4 is
-            // Tier 1); Tier 4 from turn 16 on (docs/trinkets.md).
+            // Tier 1); Tier 4 from turn 16 on (docs/rules/trinkets.md).
             PowerEffect::PrizeWall { every } => {
                 let every = every.max(1) as u32;
                 let on_prize = turn >= every && turn.is_multiple_of(every);
@@ -1514,7 +1514,7 @@ impl Game {
             }
             // Saturday C'Thuns!: pressed this turn, the end of it gives a
             // random friendly minion +1/+1, once more for every turn the power
-            // has lasted (docs/heroes.md).
+            // has lasted (docs/rules/heroes.md).
             if let PowerEffect::SaturdayCthun { attack, health } = effect
                 && st.armed
             {
@@ -1532,7 +1532,7 @@ impl Game {
                 }
             }
             // Major and Minor Hymn: the power is the other one after this
-            // turn (Attack on the first turn, then Health, docs/heroes.md).
+            // turn (Attack on the first turn, then Health, docs/rules/heroes.md).
             if matches!(effect, PowerEffect::Hymn { .. })
                 && let Some(next) = self.data.heroes.power(st.of).swaps_to
             {
@@ -2033,7 +2033,7 @@ impl Game {
     /// picks from. Heroes die at the end of a fight, so several can die in one
     /// round: the warbands wait on the game, and every holder gets one
     /// Discover per warband, back to back, at the start of its next turn
-    /// (docs/heroes.md).
+    /// (docs/rules/heroes.md).
     pub(super) fn kitty_watch(&mut self, who: usize, board: &[Minion], dying: &[u8]) {
         let holds = (0..PLAYERS).any(|p| {
             p != who
@@ -2162,7 +2162,7 @@ impl Game {
     /// Deal the open Hero Power Discover: three starting powers of built
     /// heroes (or two for Power of the Storm), never one the player already
     /// holds, never a hero on the exclusion list, never a hero tied only to
-    /// tribes outside the lobby (DESIGN.md "Discovering a hero power"). The
+    /// tribes outside the lobby (docs/rules/design.md "Discovering a hero power"). The
     /// slot it answers into is the player's `power_offer_second`.
     fn deal_power_offer(&mut self, p: usize) {
         let storm = self.players[p].storm_power[self.players[p].power_offer_second as usize];
@@ -2240,7 +2240,7 @@ impl Game {
     }
 
     /// Prestidigitation's pick: the chosen Secret joins the player's Secret
-    /// zone, at the end of the order (docs/heroes.md "Secrets").
+    /// zone, at the end of the order (docs/rules/heroes.md "Secrets").
     pub(super) fn pick_secret(&mut self, p: usize, k: usize) {
         let Some(&kind) = self.players[p].secret_offer.get(k) else { return };
         self.players[p].secret_offer.clear();
@@ -2277,7 +2277,7 @@ impl Game {
             return;
         }
         // Safety Patch: Immune for the rest of the turn, or the Ice Block
-        // eats the one hit that would kill (docs/trinkets.md).
+        // eats the one hit that would kill (docs/rules/trinkets.md).
         if pl.immune {
             return;
         }
@@ -2285,7 +2285,7 @@ impl Game {
             Self::use_ice_block(pl);
             return;
         }
-        // Armor takes it first (DESIGN.md "Health and armor").
+        // Armor takes it first (docs/rules/design.md "Health and armor").
         let to_armor = pl.armor.min(amount);
         pl.armor -= to_armor;
         pl.health -= amount - to_armor;
@@ -2359,7 +2359,7 @@ impl Game {
 
     /// Every minion this player holds two plain copies of, in hand or on the
     /// board, for Three Wishes: a Golden copy never counts as one of a pair
-    /// (docs/heroes.md).
+    /// (docs/rules/heroes.md).
     pub(super) fn three_wishes_pairs(&self, p: usize) -> ArrayVec<CardId, 4> {
         let pl = &self.players[p];
         let mut pairs: ArrayVec<CardId, 4> = ArrayVec::new();
@@ -2392,7 +2392,7 @@ impl Game {
     }
 
     /// The Perfect Crime: steal every card in the Tavern, left to right. A
-    /// hand with no room loses the rest (docs/heroes.md).
+    /// hand with no room loses the rest (docs/rules/heroes.md).
     pub(super) fn steal_all_tavern(&mut self, p: usize) {
         while self.steal_shop_card(p, 0) {
             if self.players[p].hand.is_full() {
@@ -2415,7 +2415,7 @@ impl Game {
         // A thrown minion is gone for good: its pool copy is spent with it.
         self.consume_copies(&thrown);
         let tribes = self.data.cards.tribes_of(&thrown);
-        // DESIGN.md "Types": a dual or all-type minion counts as one of its
+        // docs/rules/design.md "Types": a dual or all-type minion counts as one of its
         // types, picked at random.
         let some = tribes.random_type(&mut self.rng);
         if let Some(t) = some
@@ -2466,7 +2466,7 @@ impl Game {
     /// Swap, Lock, & Shop It: the picked minion goes into the Tavern where a
     /// random Tavern minion stood, and that one takes its place on the board.
     /// Both keep their buffs, and nothing triggers: it is not a buy and not a
-    /// play (docs/heroes.md).
+    /// play (docs/rules/heroes.md).
     pub(super) fn swap_with_shop(&mut self, p: usize, s: usize) {
         let slots: ArrayVec<usize, SHOP> = (0..self.players[p].shop.len())
             .filter(|&i| !self.data.cards.get(self.players[p].shop[i].card).is_spell())

@@ -1,5 +1,5 @@
 //! Trinkets block 5: Tickatus, whose Prize Wall Discovers a Darkmoon Prize
-//! every four turns (docs/trinkets.md, "Rules for the last trinket batch").
+//! every four turns (docs/rules/trinkets.md, "Rules for the last trinket batch").
 
 use std::sync::Arc;
 

@@ -1,26 +1,26 @@
-//! `bgbench collect-boards`: Era's real boards, one JSON file per game.
+//! `bgbench collect-boards`: the real boards, one JSON file per game.
 //!
 //! Ported from the Python `tools/collect_boards.py` (removed 2026-11-03); a
-//! systemd user timer (`bg-boards.timer`) runs it every 15 minutes. The game writes
-//! every Battlegrounds game to `Logs/Hearthstone_<date>/Power.log` and deletes
-//! old log folders after a few sessions, so the command first copies the log
-//! folders into `~/bg-logs/` (`--no-archive` skips that), then reads every new
+//! user timer runs it every 15 minutes. The game writes every Battlegrounds
+//! game to `Logs/Hearthstone_<date>/Power.log` and deletes old log folders
+//! after a few sessions, so the command first copies the log folders into an
+//! archive outside the repo (`--no-archive` skips that), then reads every new
 //! or grown `Power.log` with [`Tracker`] and writes one file per game:
 //!
 //!   boards/real/<log folder>-g<N>.json
 //!
 //! Every fight gives two boards, each marked with `who`: `me` is my board, one
 //! per turn, and `opp` the opponent I fought that turn. Player names are not
-//! stored. The laptop keeps its own logs and rsyncs them into
-//! `~/bg-logs-laptop`; its boards get a `laptop-` prefix.
+//! stored. A second machine keeps its own logs and syncs them into another
+//! archive; its boards get a `laptop-` prefix.
 //!
 //!   bgbench collect-boards [--out DIR] [--cards FILE] [--no-archive]
 //!                          [--logs DIR] [--archive DIR] [--laptop DIR]
 //!
 //! `--out` is where the files and the `.state.json` incremental state go
 //! (`boards/real` by default). `--logs`, `--archive` and `--laptop` are the
-//! client's log folders, the archive and the laptop's archive, for testing
-//! with fake folders; they default to Era's.
+//! client's log folders, the archive and the second machine's archive, for
+//! testing with fake folders; they default to folders in the home directory.
 //!
 //! The state file maps a log folder's name (with the `laptop-` prefix) to the
 //! size of the `Power.log` last read from it, so a rerun only reads logs that

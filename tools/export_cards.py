@@ -5,7 +5,7 @@ Run with the venv that has UnityPy:
 
     .venv-unity/bin/python tools/export_cards.py
 
-Reads (never writes) ~/hearthstone-linux/hearthstone/. Writes
+Reads (never writes) the installed Hearthstone folder (`GAME` below). Writes
 ref/bg-cards-<build>.json, a copy at ref/bg-cards.json, and
 ref/bg-disagreements.json (comparison with ref/hsjson-cards.json and with
 the Power.log pool tags, only if those exist). Also writes

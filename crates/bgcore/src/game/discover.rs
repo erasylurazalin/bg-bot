@@ -225,13 +225,13 @@ impl Game {
             if self.players[p].discover_queue.is_empty() {
                 // Nothing the cast opened is left: a Choose One spell's "after
                 // you cast a spell" triggers fire now, the option and its
-                // target behind them (DESIGN.md "Targets in the shop").
+                // target behind them (docs/rules/design.md "Targets in the shop").
                 if let Some(what) = self.players[p].cast_after_choice.take() {
                     self.fire_cast_after_choice(p, what);
                     continue;
                 }
                 // And a Battlecry that waited on a choice counts now that
-                // nothing is left of it (DESIGN.md "Counting Battlecries": a
+                // nothing is left of it (docs/rules/design.md "Counting Battlecries": a
                 // Discover Battlecry counts at the pick).
                 if self.players[p].pending_battlecries > 0 {
                     self.pay_pending_battlecries(p);
@@ -534,7 +534,7 @@ impl Game {
         }
         // Galakrond's Greed: this pick takes the Tavern slot the old card
         // held, from the pool. It lands in the Tavern, so it gets the Tavern's
-        // standing "this game" buffs like any card dealt there (docs/heroes.md;
+        // standing "this game" buffs like any card dealt there (docs/rules/heroes.md;
         // Era 2026-11-02 saw a 6/8 offer land 46/48). The old card stayed on
         // show while the Discover was open; it goes back to the pool now, its
         // own buffs with it.
@@ -643,7 +643,7 @@ impl Game {
 
     /// Stir the Pot: one minion per thrown type, each drawn from the pool up
     /// to the player's Tier and all different, so a Demon, a Beast and a Mech
-    /// give one of each and three Mechs give three Mechs (docs/heroes.md).
+    /// give one of each and three Mechs give three Mechs (docs/rules/heroes.md).
     /// The slots hold the tribe plus one, 0 for an empty slot.
     fn deal_pot_offer(&mut self, p: usize, types: [u8; 3]) {
         let Game { data, rng, players, pool, lobby, .. } = self;
@@ -664,7 +664,7 @@ impl Game {
 
     /// Kel'Thuzad's Kitty: up to three of the dead hero's minions, exactly as
     /// they stood (buffs, keywords, Dark Gifts, Golden included), none of them
-    /// taking a pool copy (docs/heroes.md). The warband is the `i`th hero
+    /// taking a pool copy (docs/rules/heroes.md). The warband is the `i`th hero
     /// that died in the round.
     fn deal_dead_warband(&mut self, p: usize, i: usize) {
         let Game { kitty_warbands, rng, players, .. } = self;
@@ -757,7 +757,7 @@ impl Game {
 
     /// Choose Your Champion: three Tier 7 minions from the pool, the pick
     /// landing in hand locked until `gold` Gold has been spent this game
-    /// (docs/heroes.md, DESIGN.md "Cards locked in hand").
+    /// (docs/rules/heroes.md, docs/rules/design.md "Cards locked in hand").
     fn deal_champion(&mut self, p: usize, gold: u16) {
         let Game { data, rng, players, pool, lobby, .. } = self;
         let pl = &mut players[p];

@@ -3,43 +3,31 @@
 `bgbench collect-boards` (`crates/bgbench/src/collect_boards.rs`, on the log
 reader in `crates/bglog`) keeps the boards from every Battlegrounds game I
 play. The game writes each game to `Logs/Hearthstone_<date>/Power.log`
-whether or not a tracker runs, and deletes old log folders after a few
-sessions, so the command first copies them to `~/bg-logs/`. Then it reads
-each new or grown log and writes one file per game to
+whether or not a log tracker runs, and deletes old log folders after a few
+sessions, so the command first copies them to a log archive outside the
+repo. Then it reads each new or grown log and writes one file per game to
 `boards/real/<log folder>-g<N>.json` (git-ignored). `boards/real/.state.json`
 maps each log folder to the size of the `Power.log` last read from it, so a
 rerun only reads logs that are new or grown; delete it to rewrite every file.
-`--out DIR` is where the files and the state go (`boards/real` by default) and
-`--no-archive` skips the copy into `~/bg-logs`.
+`--out DIR` is where the files and the state go (`boards/real` by default),
+`--archive DIR` is where the logs are copied, and `--no-archive` skips that
+copy.
 
 A minion's `dark_gifts` lists a gift once per copy: a golden that kept the
 same gift from two copies carries it twice, and the "+0/+0" buff a gift leaves
 is not a gift (`gifts_by_minion` in `crates/bglog/src/views.rs`). The Python
 collector this replaced (until 2026-11-03) kept one id per gift; every file
-was rewritten with the Rust command that day (the old files are in
-`~/bg-backups/boards-before-rust-20261103.tar.gz`).
+was rewritten with the Rust command that day (the old files are backed up
+outside the repo).
 
-A systemd user timer runs it every 15 minutes, from a copy of the release
-binary at `~/.local/bin/bgbench-collect`, so a rebuild of `target/` never
-breaks a run. After changing the collector, copy the new binary there:
-`cargo build --release -p bgbench && cp target/release/bgbench ~/.local/bin/bgbench-collect`.
+A user timer runs it every 15 minutes, from a copy of the release binary
+outside `target/`, so a rebuild never breaks a run. After changing the
+collector, rebuild with `cargo build --release -p bgbench` and copy the new
+binary to wherever the timer runs it from.
 
-```
-systemctl --user list-timers bg-boards.timer    # when it runs next
-systemctl --user start bg-boards.service        # run it now
-journalctl --user -u bg-boards.service          # what it printed
-systemctl --user disable --now bg-boards.timer  # stop it
-```
-
-The unit files are `~/.config/systemd/user/bg-boards.{service,timer}`.
-
-**Games on era-laptop.** The laptop's client writes its own `Power.log`
-(`log.config` copied there on 2026-10-25). Its timer `bg-logs.timer` runs
-`~/.local/bin/bg-logs-sync` every 15 minutes: it copies the log folders to
-the laptop's `~/bg-logs/` and, when era-arch answers over ssh, rsyncs them
-to `~/bg-logs-laptop/` here. The collector reads both archives; laptop games
-are named `boards/real/laptop-<log folder>-g<N>.json`. Stop it on the
-laptop with `systemctl --user disable --now bg-logs.timer`.
+**A second machine.** Its client writes its own `Power.log`, and a timer
+there syncs the log folders into a second archive that the collector reads
+too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
 
 ## The file
 
@@ -128,10 +116,10 @@ laptop with `systemctl --user disable --now bg-logs.timer`.
   power summons, because the held entity itself is not created in the log when
   the opponent stole it. The key is always written with the power, so a
   missing one means a file from before it was collected.
-- The raw logs stay in `~/bg-logs/`, so anything else the tracker can read
+- The raw logs stay in the archive, so anything else my tracker can read
   can be added later: delete `boards/real/.state.json` and run the script
   again with `--no-archive` to rewrite every file (the flag skips copying
-  the client's logs into `~/bg-logs`, which is outside this project).
+  the client's logs into the archive, which is outside this project).
 - `place` is my final place (0 while the game is still going).
 - No player names are stored.
 
@@ -148,7 +136,7 @@ what I did in every shop phase, as named steps. It writes
 board folder grows every 15 minutes). It keeps its own `.state.json` and
 skips a log whose size has not changed; `--rewrite` reads them all again. A
 full run is about 30 seconds. No player names are stored. The same timer runs
-it right after `collect-boards` (a second `ExecStart` in `bg-boards.service`).
+it right after `collect-boards`.
 
 The command is `crates/bgbench/src/collect_actions.rs`, ported from the
 Python `tools/collect_actions.py` (removed 2026-11-03), which wrote the same
@@ -323,7 +311,7 @@ gives no card for.
 ## How the boards are used
 
 A training game can seat a **real seat** that plays these boards instead of
-shopping (docs/ENGINE.md "Real-board seats"): at the start of each of its
+shopping (docs/engine.md "Real-board seats"): at the start of each of its
 turns it takes a fresh random board of that turn, keeps the file's attack,
 health, golden flag and keywords (a Dark Gift's stats are already inside
 them; its effect is not built, so it is lost), takes that player's hand and
@@ -372,7 +360,7 @@ every eval then also plays one learner against 7 real seats
 
 `bgbench fightcheck` plays Era's real fights through the engine many times and
 says which real results the engine finds unlikely, and which cards those
-fights share. It is a bug finder: it fixes nothing (docs/briefs/fight-check.md).
+fights share. It is a bug finder: it fixes nothing.
 
 ```
 ./target/release/bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]
@@ -452,8 +440,8 @@ Safety Patch gives (it moves Health between turns, not a fight's result).
 
 `bgbench shopreplay` covers the other half of a game: every step Era took in a
 shop phase (`boards/actions/*.json`), played through the engine and compared
-with what the real game did. It is a bug finder like the fight check
-(`docs/briefs/shop-replay.md`): it fixes nothing.
+with what the real game did. It is a bug finder like the fight check: it
+fixes nothing.
 
 ```
 ./target/release/bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME]

@@ -1,8 +1,8 @@
 //! Reads Hearthstone's `Power.log`: a game, its entities and their tags, and
 //! the Battlegrounds views built on them.
 //!
-//! A port of `~/projects/bg/bg/powerlog.py` and `~/projects/bg/bg/battlegrounds.py`,
-//! the tracker's log reader and its views. Feed it lines as they are
+//! A port of `powerlog.py` and `battlegrounds.py`, the log reader and the
+//! views of an older private tracker. Feed it lines as they are
 //! written and it keeps the entity table the game client holds: every
 //! `FULL_ENTITY`, `SHOW_ENTITY`, `CHANGE_ENTITY`, `HIDE_ENTITY` and
 //! `TAG_CHANGE`, and the indented `tag=` lines under an entity.

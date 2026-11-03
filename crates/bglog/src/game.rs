@@ -1,7 +1,7 @@
 //! One game: every entity the log has named, keyed by entity id.
 //!
 //! This is the state the reader builds, the same table the game client holds
-//! (`Game` in `~/projects/bg/bg/powerlog.py`). A game starts at `CREATE_GAME`
+//! (`Game` in the older tracker's `powerlog.py`). A game starts at `CREATE_GAME`
 //! and ends at the next one; the reader keeps the latest game only.
 
 use std::collections::hash_map::Entry;

@@ -1,6 +1,6 @@
 //! Following a log line by line: the lobby and the fights.
 //!
-//! A port of `Tracker` in `~/projects/bg/bg/battlegrounds.py`. It reads through
+//! A port of `Tracker` in the older tracker's `battlegrounds.py`. It reads through
 //! [`PowerLog`] and hears about the four moments the reader reports (a new game,
 //! a tag change, a block opening and closing), which is all it needs to spot a
 //! fight being staged, snapped and played out.

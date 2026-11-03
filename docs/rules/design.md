@@ -5,14 +5,13 @@ can, as the reference for everything the engine will grow into. The second
 is the game we build: the real tribes, cards and rules of the current patch,
 with every rule I decided.
 
-`docs/ENGINE.md` maps the code, `docs/ADDING-CARDS.md` is the working
+`docs/engine.md` maps the code, `docs/adding-cards.md` is the working
 reference for adding cards.
 
 Facts marked **(check)** are from memory and may be stale or wrong. Settle
-them from Power.log (`~/projects/bg` reads it) or from playing before the
-engine depends on them. Fight rules marked as checked come from
-`~/projects/bg/docs/scripted.md`, section 1, where they were compared against
-real logs.
+them from Power.log (my tracker reads it) or by playing, before the engine
+depends on them. Fight rules marked as checked come from a set of notes
+where they were compared against real logs.
 
 # Part 1: Battlegrounds
 
@@ -127,8 +126,8 @@ Spell Siphon counts spells cast through the game, not the fight.
 
 Each hero has one. Some are active (pay gold, click), some passive, some
 fire at Start of Combat or during the fight. They range from small stat
-bonuses to rule-changing ones. `~/projects/bg/docs/scripted.md` section 7 has
-the ones that act in a fight.
+bonuses to rule-changing ones. The older simulator's notes have the ones
+that act in a fight.
 
 ### Season mechanics (as my logs show them on 2026-10-18)
 
@@ -229,8 +228,9 @@ value in `rules.toml`.
 ## Settled: read before asking Era
 
 These come up again and again. Each line is settled; the full rule is in the
-section named. Grep this file, `docs/heroes.md`, `docs/trinkets.md`,
-`docs/darkgifts.md` and `docs/UNSURE.md` before asking Era any rule question.
+section named. Grep this file, `docs/rules/heroes.md`, `docs/rules/trinkets.md`
+and `docs/rules/darkgifts.md`, plus the private notes on unsure rules, before
+asking Era any rule question.
 
 - **Goldens and Triple Rewards:** every golden gives one unless its own text
   explicitly says not (Laureate, Silent Deliverer, Sinister Invitation,
@@ -252,11 +252,11 @@ section named. Grep this file, `docs/heroes.md`, `docs/trinkets.md`,
 - **A minion's cast isn't yours** ("A spell a minion casts for you").
 - **Gold:** any spend action of any amount counts; Health payments are
   self-damage, not Gold; a free buy spends nothing ("Spending gold",
-  docs/trinkets.md).
+  docs/rules/trinkets.md).
 - **Copies:** an exact copy copies the state right now (damaged, a popped
   shield stays popped); a plain copy is the base card, not golden, no buffs
   ("Exact copies", Lichling Hoarder under "Undead", Replication in
-  docs/darkgifts.md).
+  docs/rules/darkgifts.md).
 - **Full hand:** 10 cards. A card you get in the shop or a fight with a full
   hand is lost; one you get at the start of your turn waits in a queue ("A full
   hand", Part 1 "Hand and board").
@@ -276,12 +276,12 @@ section named. Grep this file, `docs/heroes.md`, `docs/trinkets.md`,
 - **Halves round up** ("Halves round up").
 - **Dark Gifts:** they stack (duplicates too), travel with the card, work the
   same on a golden; countdowns fire at the end of your turn, Replication and
-  Affinity restart, Incubation doesn't (docs/darkgifts.md).
+  Affinity restart, Incubation doesn't (docs/rules/darkgifts.md).
 - **Trinkets:** the Compass locks its type at the pick; Mystery Cube fires
   the old trinket's start of turn first, then switches; offers on turns 6
-  and 9 (docs/trinkets.md).
+  and 9 (docs/rules/trinkets.md).
 - **Heroes:** Genn's first pick is the second power; A. F. Kay only freezes
-  turns 1 and 2; the rest in docs/heroes.md.
+  turns 1 and 2; the rest in docs/rules/heroes.md.
 - **Shop replay answers from 2026-11-03** (Lionfish, Kelp Keeper, Decoy
   Conjurer, Fishbait, Scarab): "Shop replay answers".
 
@@ -343,7 +343,7 @@ Interpreter made 5/3 gives Beatboxer a 5/3 copy. Interpreter sees the copy
 as a Magnetization but doesn't buff it again (no 8/4). Spark Snapper only
 triggers on a Mech played from hand, never on a copy or a Satellite. A
 copied Volumizer counts as Magnetized for the first time (in
-docs/UNSURE.md).
+docs/notes/UNSURE.md).
 
 **Tribes of a card versus tribes of the lobby.** A minion with two tribes
 is in the pool if either tribe is in the lobby. A card always keeps all
@@ -527,7 +527,7 @@ summoned later). A 1/1 Skeleton with Reborn then comes back as a 12/4.
   stolen one is random among them.
 - Fishbait: the minion that kills it (your left-most Beast, which attacks it)
   gets +5/+5, +10/+10 for a golden Fishbait. Snarky Portrait's +4/+4 to all
-  your Beasts is separate and comes on top (docs/trinkets.md).
+  your Beasts is separate and comes on top (docs/rules/trinkets.md).
 - Sprightly Scarab: either option may target a Beast on your board or in the
   Tavern (`in_shop = true` means "the Tavern too").
 
@@ -675,7 +675,7 @@ the JSON flags it.
 - **Maw Caster, Butchering:** you choose the Undead to destroy; with none,
   nothing happens (Butchering can't be cast).
 - **Tomb Turning:** the Discovered Undead dies right after it's played
-  that turn, after its Battlecry (in docs/UNSURE.md). Kept in hand to a
+  that turn, after its Battlecry (in docs/notes/UNSURE.md). Kept in hand to a
   later turn, it's a normal minion.
 - **Lichling Hoarder:** a plain copy (no golden, no buffs) of a random
   minion that was on your board at the end of the shop phase, itself and
@@ -719,7 +719,7 @@ Revenant's Easterly Winds, a Magicfin token's taught spell), the spell happens
 and does what it says, but it doesn't count as a spell you cast: no "after you
 cast a spell" trigger and no cast counter (Felboar) sees it. Your own casts
 do count, including Balinda's and Hot-Air Surveyor's extra casts. From Era's
-logs; Era is skeptical about Felboar and will watch it (docs/UNSURE.md).
+logs; Era is skeptical about Felboar and will watch it (docs/notes/UNSURE.md).
 
 **Quilboar (2026-10-24).**
 - **Blood Gem:** a 0-cost plain spell, "Give a minion +1/+1", generated,
@@ -823,9 +823,8 @@ the cards show (gold, tier, gem value, spell power, the Deity's stats,
 "N left" counters, improved numbers). Opponents: health, tier, placement,
 the lobby, and from your last fight against them their board, Deity stats,
 spell power and gem value (shown during combat only, so they are "as last
-seen"). The tracker in `~/projects/bg` reads exactly this from a real
-game (`bg/battlegrounds.py`, the `Fight` record), and the suggestion
-window will build the observation from it.
+seen"). My tracker reads exactly this from a real game (its `Fight`
+record), and the suggestion window will build the observation from it.
 
 **Uses run out per minion, and a golden from a triple starts fresh.**
 Effects with limited uses (Activate once per turn, Stone Age Slab once per
@@ -853,12 +852,12 @@ by health left, ties at random; the best ranked of them becomes the ghost.
 A knocked-out player's cards go back to the pool. The game ends when one
 player is left, or at turn 40 (the rest ranked by health).
 
-**Fight details** where Part 1 leaves room (they match `~/projects/bg`'s
-engine, so the two can be compared): dead minions are handled one at a time
-in board order, each one's Deathrattle and then its Reborn before the next;
-the next attacker is tracked with a pointer that shifts when minions left of
-it die or appear; Windfury swings twice in a row. Safety cap: 500 attacks,
-then a tie.
+**Fight details** where Part 1 leaves room (they match the older private
+simulator's engine, so the two can be compared): dead minions are handled
+one at a time in board order, each one's Deathrattle and then its Reborn
+before the next; the next attacker is tracked with a pointer that shifts
+when minions left of it die or appear; Windfury swings twice in a row.
+Safety cap: 500 attacks, then a tie.
 
 ## Heroes (2026-10-25)
 
@@ -895,7 +894,7 @@ at Tier N", "Unlocks on Turn N"). A power with no cost in the data costs 0
 or is passive.
 
 **Heroes with rules beyond their text** (two powers, skipped turns,
-powers that change, guessing, Bananas): `docs/heroes.md`. It carries the
+powers that change, guessing, Bananas): `docs/rules/heroes.md`. It carries the
 same weight as this file.
 
 **Getting a card from the Tavern without buying it** ("steal"): the card
@@ -906,7 +905,7 @@ buy, so "after you buy" triggers don't fire.
 
 The offer (turns, guarantee, discount), Gold and Tavern rules, Mystery
 Cube, copies, Spellcraft, trinket-only minions, rewrite portraits and what
-we know of Dark Gifts: `docs/trinkets.md`. It carries the same weight as
+we know of Dark Gifts: `docs/rules/trinkets.md`. It carries the same weight as
 this file.
 
 ## Actions
