@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::cards::Tribe;
+use crate::cards::{Effect, Tribe};
 use crate::fight_check::{
     SeatMode, seat_power as fight_seat_power, seat_secrets, seat_trinkets,
 };
@@ -265,6 +265,22 @@ pub struct ShopPlace {
     pub index: Option<u8>,
     #[serde(default)]
     pub slot: Option<u8>,
+    /// The stats a changed card had and has: a step's `changed` list writes
+    /// each card as `was` and `now`. The Magnetic host is the card the played
+    /// minion's own stats went into (`magnetize_host`).
+    #[serde(default)]
+    pub was: Option<ShopStats>,
+    #[serde(default)]
+    pub now: Option<ShopStats>,
+}
+
+/// The stats of a card a step changed, before and after the step.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+pub struct ShopStats {
+    #[serde(default)]
+    pub attack: i32,
+    #[serde(default)]
+    pub health: i32,
 }
 
 impl ShopPlace {
@@ -334,6 +350,14 @@ pub struct ShopStepSpec {
     pub options: Vec<ShopPlace>,
     #[serde(default)]
     pub source: Option<ShopPlace>,
+    /// The cards that came to the board or the hand this step, and the ones
+    /// that left it. A card that left a slot and came back to it is the same
+    /// card still standing there (a Reborn minion the step destroyed), which
+    /// is part of where a played minion went (`play_slot`).
+    #[serde(default)]
+    pub entered: Vec<ShopPlace>,
+    #[serde(default)]
+    pub left: Vec<ShopPlace>,
     /// What the step took (net of what it gave back).
     #[serde(default)]
     pub paid: Option<ShopPaid>,
@@ -672,7 +696,7 @@ pub fn load(
     let spell_id = spell_slot.map(|m| m.id);
     let mut tavern_ids = Vec::new();
     let mut tavern: Vec<Minion> = Vec::new();
-    for m in tavern_slots {
+    for m in &tavern_slots {
         let (minion, bad) = build_minion(data, m, turn);
         if let Some(name) = bad {
             missing.push(format!("minion not built: {name} (a Stand-in with its stats)"));
@@ -776,7 +800,16 @@ pub fn load(
             .unwrap_or(0);
         let slot = crate::cards::Counter::TastyLobster.index();
         counters.improve[slot] = counters.improve[slot].max(lobster);
+        // Golden minions played this game: a file the collector wrote after
+        // 2026-11-03 counts them (`counters`), and an older one shows the
+        // count on a card that improves with it (see
+        // `golden_played_shown`).
+        let shown = golden_played_shown(data, &spec.board, &board_ids, &board)
+            .max(golden_played_shown(data, &spec.hand, &hand_ids, &hand))
+            .max(golden_played_shown(data, &spec.tavern, &tavern_ids, &tavern));
         pl.take_real_counters_public(&counters);
+        // `take_real_counters` leaves it alone: only a shop step reads it.
+        pl.golden_played = counters.golden_played.max(shown);
     }
 
     // The hero power and the trinkets, through the loader the fight check uses.
@@ -1103,6 +1136,44 @@ fn state_before_turn(file: &ShopFileSpec, turn_index: usize) -> Option<&ShopStat
         .end
         .as_ref()
         .or_else(|| before.actions.iter().rev().find_map(|s| s.after.as_ref()))
+}
+
+/// "Golden minions you played this game", from what a card in this zone shows
+/// now: a card whose "after you Discover" buff is a pair per Golden minion
+/// played (Hooktusk, Master Marauder's +1/+1, improved by Golden minions you
+/// played this game) keeps the pair it gives now in the card's own script
+/// numbers, and that pair is the printed buff times (1 + the count), doubled
+/// on a Golden copy. A file the collector wrote now carries the count itself
+/// in the counters, which is what the loader uses; this is what an older file
+/// still says.
+fn golden_played_shown(
+    data: &Data,
+    zone: &[ShopMinionSpec],
+    ids: &[u64],
+    built: &[Minion],
+) -> u32 {
+    let mut best = 0;
+    for (k, m) in built.iter().enumerate() {
+        let Some(Effect::BuffOthersPerGolden { attack, health, .. }) =
+            data.cards.get(m.card).after_discover
+        else {
+            continue;
+        };
+        let Some(id) = ids.get(k) else { continue };
+        let Some(spec) = zone.iter().find(|s| s.id == *id) else {
+            continue;
+        };
+        let n = |i: usize| spec.numbers.get(i).copied().unwrap_or(0);
+        let (per, shown) = if attack != 0 {
+            (attack * m.mul(), n(0))
+        } else {
+            (health * m.mul(), n(1))
+        };
+        if per > 0 && shown >= per && shown % per == 0 {
+            best = best.max((shown / per - 1) as u32);
+        }
+    }
+    best
 }
 
 /// One zone (the board or the hand) of a logged state, in position order.
@@ -2017,6 +2088,64 @@ fn owe_battlecry_count(data: &Data, ids: &CardIdMap, game: &mut Game, step: &Sho
     pl.pending_battlecries = pl.pending_battlecries.saturating_add(n);
 }
 
+/// Where a Discover's pick went when it did not join the hand, as a zone and
+/// a place in it: `board` and the 1-based position, or `tavern` and the file's
+/// 1-based slot. The file says it in the pick's `moved.to` when it writes one;
+/// when it does not, the state the step left still shows the pick standing
+/// where another card stood (Token of the Old Gods turns a minion on the board
+/// or in the Tavern into the discovered one, and the turned card keeps its
+/// entity id, so the card id is what says it).
+fn pick_landing<'a>(
+    before: &'a ShopStateSpec,
+    step: &'a ShopStepSpec,
+) -> Option<(&'static str, u8)> {
+    let picked = step.picked.as_ref()?;
+    let card_id = picked.card_id.as_deref()?;
+    if let Some(to) = step.moved.as_ref().and_then(|m| m.to.as_ref()) {
+        match to.zone() {
+            Some("board") => return to.position.map(|p| ("board", p)),
+            Some("tavern") => return to.slot.map(|s| ("tavern", s)),
+            _ => {}
+        }
+    }
+    let after = step.after.as_ref()?;
+    // A pick that joins the hand is not a transform, even when the hand held
+    // another copy of it: the copies it holds go up by one.
+    let copies = |zone: &[ShopMinionSpec]| {
+        zone.iter()
+            .filter(|m| m.card_id.as_deref() == Some(card_id))
+            .count()
+    };
+    if copies(&after.hand) > copies(&before.hand) {
+        return None;
+    }
+    let empty_before = |m: &ShopMinionSpec| {
+        before
+            .board
+            .iter()
+            .find(|b| b.position == m.position)
+            .is_none_or(|b| b.card_id.as_deref() != Some(card_id))
+    };
+    if let Some(m) = after.board.iter().find(|m| {
+        m.card_id.as_deref() == Some(card_id) && m.position.is_some() && empty_before(m)
+    }) {
+        return Some(("board", m.position.unwrap_or(0)));
+    }
+    let slot_changed = |m: &ShopMinionSpec| {
+        before
+            .tavern
+            .iter()
+            .find(|b| b.slot == m.slot)
+            .is_none_or(|b| b.card_id.as_deref() != Some(card_id))
+    };
+    if let Some(m) = after.tavern.iter().find(|m| {
+        m.card_id.as_deref() == Some(card_id) && m.slot.is_some() && slot_changed(m)
+    }) {
+        return Some(("tavern", m.slot.unwrap_or(0)));
+    }
+    None
+}
+
 /// Put the log's offer on the player before answering it: a Discover's
 /// options, a Dark Discovery's offers with their gifts, or a trinket offer.
 /// Returns the index of the option the log picked.
@@ -2026,6 +2155,7 @@ fn force_offer(
     game: &mut Game,
     step: &ShopStepSpec,
     turn: u32,
+    turned: bool,
     missing: &mut Vec<String>,
 ) -> Result<usize, String> {
     let picked = step
@@ -2114,14 +2244,12 @@ fn force_offer(
             m
         })
         .collect();
-    // A pick that lands on the board or in a Tavern slot goes through the
-    // engine's transform paths, which need the offer's card ids, not
-    // ready-made minions.
-    let placed_elsewhere = step
-        .moved
-        .as_ref()
-        .and_then(|m| m.to.as_ref())
-        .is_some_and(|to| matches!(to.zone(), Some("board") | Some("tavern")));
+    // A pick that lands on the board or in a Tavern slot (a transform, or
+    // Galakrond's Greed taking the slot) goes through the engine's transform
+    // paths, which need the offer's card ids, not ready-made minions. The step
+    // that reads it says so (`pick_landing`), whether the file writes the
+    // pick's `moved.to` or only shows the card it turned in the state it left.
+    let placed_elsewhere = turned;
     if !placed_elsewhere && ready.len() == step.options.len() && !ready.is_empty() {
         for m in &ready {
             let _ = pl.discover_minions.try_push(*m);
@@ -2186,6 +2314,80 @@ fn force_offer(
     Ok(at)
 }
 
+/// The board slot a played minion went into, from the state the step left.
+/// The file's `moved.to` is the position the log showed when the minion
+/// landed, which is not where it was played: a Battlecry's summons come after
+/// it (and a minion the Battlecry kills leaves a gap before it), so the logged
+/// position can be past the board (an illegal play) or in front of the card
+/// the log puts before it (triage group D3, and I5 with a full board). Where
+/// the minion stands among the cards the loader already knows is the slot: the
+/// one just past the last of them it stands behind.
+fn play_slot(loaded: &LoadedShop, step: &ShopStepSpec) -> Option<u8> {
+    let after = step.after.as_ref()?;
+    let played = step.moved.as_ref().map(|m| m.id)?;
+    if played == 0 {
+        return None;
+    }
+    let mut board: Vec<&ShopMinionSpec> = after.board.iter().collect();
+    board.sort_by_key(|m| (m.position.unwrap_or(0), m.id));
+    let at = board.iter().position(|m| m.id == played)?;
+    // The slot a card stands in: its entity id in the board the play started
+    // from, or, for a card the game destroyed and brought back to the slot it
+    // stood in (a Reborn minion: Dead Bellringer's Reborn copy has a new
+    // entity id), the slot the card that left had.
+    let slot = |m: &ShopMinionSpec| -> Option<u8> {
+        if let Some(i) = loaded.board_ids.iter().position(|&x| x == m.id) {
+            return Some(i as u8);
+        }
+        let gone = step
+            .left
+            .iter()
+            .find(|l| l.position == m.position && l.card_id.is_some() && l.card_id == m.card_id)?;
+        loaded.board_ids.iter().position(|&x| x == gone.id).map(|i| i as u8)
+    };
+    for m in board[..at].iter().rev() {
+        if let Some(i) = slot(m) {
+            return Some(i + 1);
+        }
+    }
+    Some(0)
+}
+
+/// The board minion a Magnetized minion merged into. The file lists every
+/// card the step changed, in no order of its own: a stat static the play set
+/// off comes before the host (triage group M1: Timecap'n Hooktail's +3 Attack
+/// was the first entry and the Volumizer merged into Relentless Deflector).
+/// The host is the one the played card's own stats went into: a minion it can
+/// Magnetize onto whose stats grew by at least the card's, the smallest growth
+/// when a static grew it too.
+fn magnetize_host(data: &Data, loaded: &LoadedShop, step: &ShopStepSpec) -> Option<u8> {
+    let at = zone_index(&loaded.hand_ids, step.card.as_ref()?.id, step.index)?;
+    let played = *loaded.game.players[ME].hand.get(at as usize)?;
+    let mut best: Option<(i32, u8)> = None;
+    for c in &step.changed {
+        let (Some(pos), Some(was), Some(now)) = (c.position, c.was, c.now) else {
+            continue;
+        };
+        let Some(host) = loaded.game.players[ME].board.get(pos.saturating_sub(1) as usize) else {
+            continue;
+        };
+        if !data.cards.get(played.card).magnetize_tribes.overlaps(data.cards.tribes_of(host)) {
+            continue;
+        }
+        let (da, dh) = (now.attack - was.attack, now.health - was.health);
+        if da < played.attack || dh < played.health {
+            continue;
+        }
+        if best.is_none_or(|(grown, _)| da + dh < grown) {
+            best = Some((da + dh, pos.saturating_sub(1)));
+        }
+    }
+    // A step the file lists no changed entry for: the first one it does list
+    // is all the loader has to go on, as before.
+    best.map(|(_, pos)| pos)
+        .or_else(|| step.changed.iter().find_map(|c| c.position).map(|p| p.saturating_sub(1)))
+}
+
 /// The engine's actions for one logged step, in order. A step the engine has
 /// no action for comes back as an error and the step is incomplete.
 fn actions_for(
@@ -2194,6 +2396,7 @@ fn actions_for(
     loaded: &mut LoadedShop,
     step: &ShopStepSpec,
     turn: u32,
+    landing: bool,
     missing: &mut Vec<String>,
 ) -> Result<Vec<Action>, String> {
     let id = step.card.as_ref().map_or(0, |c| c.id);
@@ -2235,26 +2438,27 @@ fn actions_for(
             if at as usize >= pl.hand.len() {
                 return Err("the card the step played is not in the hand".to_string());
             }
-            // A spell is played into no slot; a minion lands where the file
-            // says it landed (a Magnetize keeps the position it merged into).
+            // A spell is played into no slot. A minion is played into the
+            // slot it stands behind in the state the step left, which is not
+            // the position the log showed when it landed: a Battlecry's
+            // summons push that one right and a minion it killed leaves a
+            // gap (triage group D3). A Magnetized minion goes nowhere at all
+            // (`moved.to` is null): it merged into a host.
             let spell = data.cards.get(pl.hand[at as usize].card).is_spell();
             let landed = step
                 .moved
                 .as_ref()
                 .and_then(|m| m.to.as_ref())
                 .and_then(|to| to.position);
-            // A Magnetized minion goes nowhere the file shows (`moved.to` is
-            // null): it merged into a host, which the step lists among the
-            // cards it changed.
-            let host = step
-                .changed
-                .iter()
-                .find_map(|c| c.position)
-                .filter(|_| landed.is_none());
             let pos = if spell {
                 0
             } else {
-                landed.or(host).map_or(board_len as u8, |p| p.saturating_sub(1))
+                play_slot(loaded, step)
+                    .or_else(|| match landed {
+                        Some(_) => landed.map(|p| p.saturating_sub(1)),
+                        None => magnetize_host(data, loaded, step),
+                    })
+                    .unwrap_or(board_len as u8)
             };
             out.push(Action::Play { hand: at, pos });
             if let Some(target) = &step.target {
@@ -2337,7 +2541,7 @@ fn actions_for(
             if step.step == "discover" {
                 owe_battlecry_count(data, ids, &mut loaded.game, step);
             }
-            let at = force_offer(data, ids, &mut loaded.game, step, turn, missing)?;
+            let at = force_offer(data, ids, &mut loaded.game, step, turn, landing, missing)?;
             out.push(Action::Choose(at as u8));
         }
         other => {
@@ -2396,35 +2600,36 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         let snap = ShopSnapshot::of_game(data, &loaded.game, ME);
         return Ok((snap, missing, "end of turn effects".to_string()));
     }
-    // Where a Discover's pick lands, when it is not the hand: the file says, in
-    // the pick's `moved.to`, and the engine only does that from a state the
-    // press left (Galakrond's Greed's Tavern slot, a transform on the board).
-    if step.step == "discover"
-        && let Some(to) = step.moved.as_ref().and_then(|m| m.to.as_ref())
-    {
-            match to.zone() {
-                Some("board") => {
-                    if let Some(pos) = to.position {
-                        loaded.game.players[ME].tp.transform_slot = pos;
-                    }
-                }
-                Some("tavern") => {
-                    if let Some(slot) = to.slot {
-                        // The pick takes the Tavern slot the old card held,
-                        // which is still where the logged state shows it (the
-                        // game keeps it on show while the Discover is open) and
-                        // which the engine's own pick clears. The slot is the
-                        // file's, the spell slot counted in it; the engine's
-                        // shop holds the minion slots alone.
-                        let at = engine_shop_slot(before, slot);
-                        loaded.game.players[ME].discover_into_shop =
-                            (at.min(crate::SHOP - 1) + 1) as u8;
-                    }
-                }
-        _ => {}
+    // Where a Discover's pick lands, when it is not the hand: the engine only
+    // does that from a state the press left (Galakrond's Greed's Tavern slot, a
+    // transform on the board).
+    let landing = (step.step == "discover")
+        .then(|| pick_landing(before, step))
+        .flatten();
+    if let Some((zone, at)) = landing {
+        match zone {
+            "board" => loaded.game.players[ME].tp.transform_slot = at,
+            _ => {
+                // The pick takes the Tavern slot the old card held, which is
+                // still where the logged state shows it (the game keeps it on
+                // show while the Discover is open) and which the engine's own
+                // pick clears. The slot is the file's, the spell slot counted
+                // in it; the engine's shop holds the minion slots alone.
+                let slot = engine_shop_slot(before, at);
+                loaded.game.players[ME].discover_into_shop =
+                    (slot.min(crate::SHOP - 1) + 1) as u8;
+            }
         }
     }
-    let actions = match actions_for(data, ids, &mut loaded, step, turn, &mut missing) {
+    let actions = match actions_for(
+        data,
+        ids,
+        &mut loaded,
+        step,
+        turn,
+        landing.is_some(),
+        &mut missing,
+    ) {
         Ok(a) => a,
         Err(e) => return Err((e, missing)),
     };

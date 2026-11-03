@@ -863,3 +863,38 @@ fn a_triple_does_not_keep_the_beast_bonus_twice() {
     let plain = g.data.cards.make(gold.card, true);
     assert_eq!(stats(gold), stats(&plain));
 }
+
+/// A Volumizer that merges into a host does not grow it by the pair it just
+/// improved: "After you Magnetize this, improve your future Magnetizations"
+/// is for the Magnetizations after this one, and the host takes the card's own
+/// stats (triage group M1; log 2026_10_28_22_11_50-g5 turn 6 step 12:
+/// Relentless Deflector 13/19 to 20/36 for a Red Volumizer's 4/8, and its
+/// Volumizer in hand 3/7 to 4/8).
+#[test]
+fn a_volumizers_own_improvement_does_not_reach_its_host() {
+    let mut g = game(346);
+    put_on_board(&mut g, 0, "Cord Puller");
+    let shop = g.data.cards.by_name("Red Volumizer").unwrap();
+    let slot = g.data.cards.get(shop).pool_slot as usize;
+    g.pool[slot] -= 1;
+    let mut vol = g.players[0].make_card(&g.data.cards, shop, false, 1);
+    vol.attack = 4;
+    vol.health = 8;
+    g.players[0].hand.push(vol);
+    // A second Volumizer in hand: the improvement does reach that one.
+    let green = g.data.cards.by_name("Green Volumizer").unwrap();
+    let gslot = g.data.cards.get(green).pool_slot as usize;
+    g.pool[gslot] -= 1;
+    g.players[0].hand.push(g.players[0].make_card(&g.data.cards, green, false, 1));
+
+    let before = stats(&g.players[0].board[0]);
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    assert_eq!(
+        stats(&g.players[0].board[0]),
+        (before.0 + 4, before.1 + 8),
+        "the host takes the Volumizer's own 4/8 and not its +3/+0 improvement"
+    );
+    let in_hand = stats(&g.players[0].hand[0]);
+    assert_eq!(in_hand, (6, 3), "the Green Volumizer still in hand grew by +3/+0");
+    g.check_invariants().unwrap();
+}

@@ -655,6 +655,11 @@ Triple Reward spell.
   through `CardDb::tribes_of`, not just on the printed card: the printed
   tribe is the fast path, and a copy the Amalgamation Dark Gift made every
   type counts too (docs/rules/design.md "Elemental of Surprise").
+- **Triples from a summon.** A shop-phase summon checks the board for a triple
+  once it lands (`check_triples_on_board`, called by `Effect::Summon` when it
+  summons more than one and by `trigger_one_deathrattle`): a Cadaver
+  Caretaker's three Skeletons are a triple like any other three, and the Golden
+  one goes to the hand.
 - **Spells counted twice.** `apply_target` fires one extra `SpellsCast` event for
   every extra Balinda cast on a friendly minion (Proud Privateer's extra Bounty
   casts were already counted in `cast_spell`).

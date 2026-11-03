@@ -458,6 +458,10 @@ struct Collector {
     last_gold: i64,
     last_health: i64,
     free: i64,
+    /// Golden minions this player played from hand this game: the log shows no
+    /// number for it, and "After you Discover a card ... improved by Golden
+    /// minions you played this game" (Hooktusk, Master Marauder) reads it.
+    goldens: i64,
     pool: Vec<Pool>,
     stats: Option<Stats>,
     damage: Option<i64>,
@@ -486,6 +490,7 @@ impl Collector {
             last_gold: 0,
             last_health: 0,
             free: 0,
+            goldens: 0,
             pool: Vec::new(),
             stats: None,
             damage: None,
@@ -541,6 +546,7 @@ impl Collector {
         self.last_gold = 0;
         self.last_health = 0;
         self.free = 0;
+        self.goldens = 0;
         self.pool.clear();
         self.stats = None;
         self.damage = None;
@@ -1732,7 +1738,31 @@ impl Collector {
         let Some(mut turn) = self.turn.take() else {
             return;
         };
-        let after = self.full_state(game);
+        let mut after = self.full_state(game);
+        // A Golden minion played from hand counts for "Golden minions you
+        // played this game" (Hooktusk, Master Marauder; the log shows no
+        // number for it). The state the step left carries the count, so the
+        // increment goes in before the state is put on the step. A Magnetic
+        // minion that merged into a host is a Magnetization, not a play, and
+        // stands on no board afterwards.
+        let golden_play = text_in(&pending.step, "step") == "play"
+            && field(&pending.step, "card")
+                .and_then(Json::as_obj)
+                .and_then(|c| field(c, "golden"))
+                == Some(&Json::Bool(true))
+            && pending.entity.is_some_and(|id| {
+                parts(&after, "board")
+                    .iter()
+                    .any(|m| m.as_obj().is_some_and(|m| number_in(m, "id") == id as i64))
+            });
+        if golden_play {
+            self.goldens += 1;
+            if let Some(counters) = after.as_obj_mut().and_then(|o| field_mut(o, "counters"))
+                && let Some(counters) = counters.as_obj_mut()
+            {
+                set(counters, "golden_played", Json::Int(self.goldens));
+            }
+        }
         self.last = Some(after.clone());
         self.last_gold = gold(game);
         self.last_health = health(game);
@@ -2634,6 +2664,9 @@ impl Collector {
         }
         if self.upper != 0 {
             put(&mut out, "upper_hand", Json::Int(self.upper));
+        }
+        if self.goldens != 0 {
+            put(&mut out, "golden_played", Json::Int(self.goldens));
         }
         Json::Obj(out)
     }
