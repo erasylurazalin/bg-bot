@@ -250,6 +250,10 @@ asking Era any rule question.
 - **Battlecries:** Brann counts twice; a Choose One is not a Battlecry
   ("Counting Battlecries").
 - **A minion's cast isn't yours** ("A spell a minion casts for you").
+- **Start versus end of turn:** an effect happens at the start of the turn
+  unless its text says "end of turn" (counters, discounts, countdowns).
+  Drakkari Enchanter repeats every end-of-turn effect and never a
+  start-of-turn one (Era, 2026-11-03).
 - **"A minion of each type" (Tea Set):** each minion gets at most one buff,
   and as many minions as possible get one; random only between equal choices
   like two Demons ("Types").
