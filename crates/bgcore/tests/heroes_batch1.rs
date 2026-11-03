@@ -411,7 +411,20 @@ fn the_galaxys_lens_copies_the_last_tavern_spell_and_gets_cheaper() {
     press(&mut g, 0);
     assert_eq!(g.players[0].hand.len(), hand + 1, "a copy of the spell");
     assert_eq!(g.players[0].hand.last().unwrap().card, id(&g, "Fortify"));
-    // The price falls by 1 at the end of each turn, down to 0.
+    // The price falls by 1 at the start of each turn, down to 0. It is a
+    // start-of-turn change, so a Drakkari Enchanter doesn't repeat it (Era,
+    // 2026-11-03).
+    put_on_board(&mut g, 0, "Drakkari Enchanter");
+    end_all_turns(&mut g);
+    turn_of(&mut g, 0);
+    assert_eq!(g.power_cost(0, false), 2, "one less, Drakkari or not");
+    end_all_turns(&mut g);
+    turn_of(&mut g, 0);
+    assert_eq!(g.power_cost(0, false), 1);
+    // A press puts it back to the full 3, and it starts falling again.
+    g.players[0].gold = 20;
+    press(&mut g, 0);
+    assert_eq!(g.power_cost(0, false), 3, "a press resets the price");
     end_all_turns(&mut g);
     turn_of(&mut g, 0);
     assert_eq!(g.power_cost(0, false), 2);

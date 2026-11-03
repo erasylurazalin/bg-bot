@@ -884,6 +884,11 @@ impl Game {
                 for _ in 0..runs {
                     self.steal_all_tavern(p);
                 }
+                // A press puts the price back to full (Era, 2026-11-03, for
+                // the Lens; assumed the same here: docs/notes/UNSURE.md).
+                if let Some(st) = self.players[p].power_at_mut(second) {
+                    st.cost_delta = 0;
+                }
             }
             // Reclaimed Souls: up to three plain copies of minions that died
             // in the last fight, either side.
@@ -901,6 +906,10 @@ impl Game {
                     for _ in 0..runs {
                         self.give_generated(p, card);
                     }
+                }
+                // A press puts the price back to its full 3 (Era, 2026-11-03).
+                if let Some(st) = self.players[p].power_at_mut(second) {
+                    st.cost_delta = 0;
                 }
             }
             // ---- hero batch 2 (2026-11-01) ----
@@ -1185,6 +1194,19 @@ impl Game {
         }
         // The standing rules the powers set, from whatever the slot holds now.
         self.sync_power_flags(p);
+        // The Perfect Crime and The Galaxy's Lens: 1 cheaper at the start of
+        // each turn after the first, down to 0. A start-of-turn change, so
+        // Drakkari never repeats it (Era, 2026-11-03, docs/rules/heroes.md).
+        if self.turn > 1 {
+            for second in [false, true] {
+                let Some(of) = self.players[p].power_at(second).map(|st| st.of) else { continue };
+                if self.data.heroes.power(of).cheaper_each_turn
+                    && let Some(st) = self.players[p].power_at_mut(second)
+                {
+                    st.cost_delta = st.cost_delta.saturating_sub(1);
+                }
+            }
+        }
         for second in [false, true] {
             if self.players[p].storm_power[second as usize] {
                 let excludes =
@@ -1540,13 +1562,6 @@ impl Game {
             // Stay Frosty: the Tavern Freezes at the end of every turn.
             if matches!(effect, PowerEffect::StayFrosty { .. }) && self.players[p].freeze_end {
                 self.players[p].frozen = true;
-            }
-            // The Perfect Crime and The Galaxy's Lens: the next press costs 1
-            // less, down to 0.
-            if self.data.heroes.power(st.of).cheaper_each_turn
-                && let Some(st) = self.players[p].power_at_mut(second)
-            {
-                st.cost_delta = st.cost_delta.saturating_sub(1);
             }
             // Upbeat Harmony: a plain copy of the left-most card in hand
             // every `turns` turns.
