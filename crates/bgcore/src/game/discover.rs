@@ -175,7 +175,6 @@ impl Game {
                 golden: false,
                 options,
                 tavern,
-                by_minion,
                 repeats: 1,
             });
             return;
@@ -254,6 +253,10 @@ impl Game {
                 return;
             }
             let req = self.players[p].discover_queue.remove(0);
+            // A Discover a Battlecry an Activate triggered opened is the one
+            // waiting at the front: the queue pushes its requests together
+            // and drains before anything else can add one.
+            let from_repeat = self.players[p].repeat_discover > 0;
             // A Dark Gift offer draws its own minions and gifts, one per
             // slot, so it fills the Discover itself and lets the loop go on.
             if let DiscoverRequest::DarkGift(plan) = req {
@@ -313,6 +316,7 @@ impl Game {
             pl.discover_locked_tier = locked_tier;
             pl.discover_doomed = doomed;
             pl.discover_both = both;
+            pl.discover_silent = false;
             while !pl.discover.is_full() {
                 let next = match req {
                     DiscoverRequest::MinionTier(t)
@@ -421,13 +425,39 @@ impl Game {
                 pl.discover_doomed = false;
                 pl.discover_both = false;
                 pl.tp.remember_in = 0;
+                // A Discover a repeat opened is still spent, even when there
+                // is nothing to offer.
+                if from_repeat {
+                    pl.repeat_discover = pl.repeat_discover.saturating_sub(1);
+                }
+            } else if from_repeat {
+                // A Discover a Battlecry an Activate triggered opened gives a
+                // random card of its pool instead of being offered, and that
+                // card is not a Discover for "after you Discover" cards
+                // (docs/rules/design.md "Shop replay answers", Era 2026-11-03
+                // and 2026-11-04: a Kelp Keeper's Activate).
+                self.players[p].repeat_discover -= 1;
+                let k = self.rng.below(self.players[p].discover.len() as u32) as usize;
+                self.players[p].discover_silent = true;
+                self.resolve_choose(p, k);
+                self.players[p].discover_silent = false;
             }
         }
     }
 
     pub(super) fn resolve_choose(&mut self, p: usize, k: usize) {
         if let Some(pco) = self.players[p].pending_choose_one.take() {
-            self.apply_choose_option(p, pco.source, pco.options[k], pco.tavern, pco.by_minion);
+            // The option the player picked: every repeat a queue entry still
+            // owes takes this same one (docs/rules/design.md "Set versus
+            // add", Era 2026-11-04).
+            if let Some(q) = self.players[p].repeats.first_mut()
+                && q.started
+                && q.option.is_none()
+                && q.source() == pco.source
+            {
+                q.option = Some(k as u8);
+            }
+            self.apply_choose_option(p, pco.source, pco.options[k], pco.tavern, false);
             // A minion's Choose One is its Battlecry.
             if pco.source.is_some() {
                 self.fire_after_battlecry(p, 1);
@@ -878,6 +908,13 @@ impl Game {
 
     /// After the player Discovers a card: Hooktusk and its like run.
     fn fire_after_discover(&mut self, p: usize) {
+        // The random card a repeat's Discover gave is not a Discover for
+        // "after you Discover" cards (Hooktusk, Master Marauder): docs/rules/
+        // design.md "Set versus add" and "Shop replay answers" (Era
+        // 2026-11-03, 2026-11-04: a Kelp Keeper's Activate).
+        if std::mem::take(&mut self.players[p].discover_silent) {
+            return;
+        }
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             let m = self.players[p].board[pos];

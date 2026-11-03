@@ -416,18 +416,20 @@ impl Game {
     /// A spell the player casts: the play from the hand, plus every extra cast
     /// their own cards add (a Bounty's again, Balinda's, a Surveyor's Gem).
     pub(super) fn cast_spell(&mut self, p: usize, m: Minion) {
-        self.cast_spell_as(p, m, false, 1);
+        let _ = self.cast_spell_as(p, m, false, 1);
     }
 
     /// Cast a named spell `times` times. A targeting spell asks for its
-    /// target once and every cast left lands on it, so the loop stops at the
-    /// prompt it opens; a Choose One is picked once and the casts after it
-    /// are lost. `by_minion` says whose cast it is: a spell a minion's own
-    /// effect casts for the player (Gatekeeper Amalgam's Misplaced Tea Set, a
-    /// Magicfin token's taught spell, an Air Revenant's Easterly Winds)
-    /// happens and buffs as printed, but it is not a spell the player cast
-    /// (Era 2026-11-02, docs/notes/UNSURE.md), so nothing that counts or
-    /// reacts to "spells you cast" sees it.
+    /// target once and every cast left lands on it, and a Choose One is
+    /// picked once and its casts after the first use that same option, so the
+    /// loop stops at the prompt or the queue one cast took them all into.
+    /// `by_minion` says whose cast it is: a spell a minion's own effect casts
+    /// for the player (Gatekeeper Amalgam's Misplaced Tea Set, a Magicfin
+    /// token's taught spell, an Air Revenant's Easterly Winds) happens and
+    /// buffs as printed, but it is not a spell the player cast (Era
+    /// 2026-11-02, docs/notes/UNSURE.md), so nothing that counts or reacts to
+    /// "spells you cast" sees it, and it gets no Choose One choice: the option
+    /// is picked at random (Era 2026-11-04).
     pub(super) fn cast_named_spell(
         &mut self,
         p: usize,
@@ -441,8 +443,9 @@ impl Game {
             // folds them into the prompt's own count.
             let casts_left = (times - cast).min(u8::MAX as u32) as u8;
             let m = self.data.cards.make(card, false);
-            self.cast_spell_as(p, m, by_minion, casts_left);
-            if self.players[p].pending_target.is_some()
+            let took_all = self.cast_spell_as(p, m, by_minion, casts_left);
+            if took_all
+                || self.players[p].pending_target.is_some()
                 || self.players[p].pending_choose_one.is_some()
             {
                 break;
@@ -452,8 +455,11 @@ impl Game {
 
     /// `repeats` is how many times this one cast happens: the Battlecry or
     /// effect that casts a named spell `times` times folds its repeats in
-    /// here, so a targeting spell asks for one target and uses it every time.
-    fn cast_spell_as(&mut self, p: usize, m: Minion, by_minion: bool, repeats: u8) {
+    /// here, so a targeting spell asks for one target and uses it every time
+    /// and a Choose One asks for one option. Returns whether this cast took
+    /// all `repeats` into a prompt or the repeat queue, so the caller must
+    /// not cast again.
+    fn cast_spell_as(&mut self, p: usize, m: Minion, by_minion: bool, repeats: u8) -> bool {
         // A Bounty cast again (Proud Privateer) is another spell cast for
         // every trigger and every "spells cast" counter.
         let c = self.data.cards.get(m.card);
@@ -462,9 +468,9 @@ impl Game {
         // A Triple Reward is a reward you open, not a spell you cast
         // (docs/rules/design.md "Read the card's exact words, every time").
         let reward = matches!(c.spell_effect, Some(SpellEffect::TripleReward));
-        self.cast_spell_inner(p, m, by_minion, repeats);
+        let took_all = self.cast_spell_inner(p, m, by_minion, repeats);
         if reward {
-            return;
+            return took_all;
         }
         if by_minion {
             // A minion's cast for the player is not a spell they cast: none
@@ -473,7 +479,7 @@ impl Game {
             if self.players[p].pending_target.is_some() && self.choice_stuck(p) {
                 self.players[p].pending_target = None;
             }
-            return;
+            return took_all;
         }
         // Replica Cathedral: its doubling is spent by the first spell of the
         // turn, Tavern spell or not: the cast itself read it already.
@@ -569,6 +575,7 @@ impl Game {
         if self.players[p].pending_target.is_some() && self.choice_stuck(p) {
             self.players[p].pending_target = None;
         }
+        took_all
     }
 
     /// Fire the triggers a Choose One or targeting spell's cast owed. A
@@ -656,9 +663,12 @@ impl Game {
 
     /// Run the spell itself: open its target or Choose One prompt, or run its
     /// effect. `by_minion` says whether a minion's effect cast it, and then no
-    /// "whenever you cast a spell" card sees it. `repeats` is how many times
-    /// this cast happens: see `cast_spell_as`.
-    fn cast_spell_inner(&mut self, p: usize, m: Minion, by_minion: bool, repeats: u8) {
+    /// "whenever you cast a spell" card sees it and it gets no Choose One
+    /// choice (its option is picked at random).
+    /// `repeats` is how many times this cast happens: see `cast_spell_as`.
+    /// Returns whether this one cast took all `repeats` into a prompt or the
+    /// repeat queue (`true`) or has to be cast again for each repeat.
+    fn cast_spell_inner(&mut self, p: usize, m: Minion, by_minion: bool, repeats: u8) -> bool {
         let c = self.data.cards.get(m.card);
         let tavern = c.tavern_spell;
         // "The last Tavern spell you cast" (Cataclysmic Harbinger, the
@@ -671,7 +681,7 @@ impl Game {
         }
         if let Some(st) = c.spell_target {
             if !self.spell_castable(p, m.card) {
-                return;
+                return false;
             }
             // A Blood Gem plays once per cast: Balinda sets the count and
             // each Hot-Air Surveyor adds one ("Set versus add").
@@ -691,29 +701,65 @@ impl Game {
                 gem,
                 by_minion,
             });
-        } else if let Some(options) = c.choose_one {
+            return true;
+        }
+        if let Some(options) = c.choose_one {
             if !options.iter().any(|&opt| self.can_choose_option(p, opt)) {
-                return;
+                return false;
             }
-            // A Choose One cast more than once asks once: the player picks the
-            // option and its target, and every cast after the first picks its
-            // option at random on the same target (docs/rules/design.md "Set
-            // versus add", Era 2026-11-04). That is a Battlecry's repeats, a
-            // Magicfin token's taught Choose One spell doubled by Brann.
-            // Balinda is not one of them: `apply_choose_option` runs the option
-            // she doubles again, the same option on the same target (log
-            // Hearthstone_2026_11_02_00_10_22-g4 turn 12 step 0: two casts of
-            // Alliance Flag's second option on one minion, one "spells cast").
+            // A repeated Choose One works normally: the player picks the
+            // option and its target once, and every cast after the first uses
+            // the SAME option on the SAME target (docs/rules/design.md "Set
+            // versus add", Era 2026-11-04). That is a Battlecry's repeats.
+            // Balinda is not one of them: `apply_choose_option` runs the
+            // option she doubles again, the same option on the same target
+            // (log Hearthstone_2026_11_02_00_10_22-g4 turn 12 step 0: two
+            // casts of Alliance Flag's second option on one minion, one
+            // "spells cast").
             let runs = repeats.max(1);
             // A Trailblazer's coverage runs both effects instead of asking,
             // and Trailblazer Sticker covers every Choose One card.
             let both = self.players[p].tp.choose_one_all || self.take_trailblazer_cover(p);
+            if by_minion {
+                // A spell a minion casts gets no Choose One choice (Era
+                // 2026-11-04): its option is picked at random, and with
+                // Brann's two casts each picks its own. A target it needs is
+                // still the player's pick, so the casts after this one wait
+                // in the queue and land on the one picked here.
+                let picked = if both {
+                    None
+                } else {
+                    // No pickable option cannot happen (the guard above), and
+                    // then the cast is simply spent.
+                    let Some(k) = self.random_choose_option(p, options) else {
+                        return true;
+                    };
+                    Some(k)
+                };
+                if runs > 1 {
+                    let _ = self.players[p].repeats.try_push(QueuedRepeat {
+                        what: RepeatWhat::ChooseOne { source: None, options, both, tavern, by_minion },
+                        runs: runs - 1,
+                        started: true,
+                        at: None,
+                        option: None,
+                        random_discover: false,
+                    });
+                }
+                match picked {
+                    Some(k) => self.apply_choose_option(p, None, options[k], tavern, true),
+                    None => self.resolve_choose_options(p, None, options, tavern, true, true),
+                }
+                return true;
+            }
             if runs > 1 {
                 let _ = self.players[p].repeats.try_push(QueuedRepeat {
                     what: RepeatWhat::ChooseOne { source: None, options, both, tavern, by_minion },
                     runs: runs - 1,
                     started: true,
                     at: None,
+                    option: None,
+                    random_discover: false,
                 });
             }
             if both {
@@ -724,11 +770,12 @@ impl Game {
                     golden: false,
                     options,
                     tavern,
-                    by_minion,
                     repeats: runs,
                 });
             }
-        } else if let Some(se) = c.spell_effect {
+            return true;
+        }
+        if let Some(se) = c.spell_effect {
             if matches!(se, SpellEffect::TripleReward) {
                 // The tier was fixed when the reward was given.
                 let tier = (m.improvements as u8).clamp(1, MAX_TIER);
@@ -736,7 +783,7 @@ impl Game {
                     .discover_queue
                     .try_push(DiscoverRequest::MinionTier(tier));
                 self.maybe_start_discover(p);
-                return;
+                return false;
             }
             if matches!(se, SpellEffect::DiscoverHeroPower) {
                 // The exclusion list lives on the card, so the intercept runs
@@ -748,7 +795,7 @@ impl Game {
                 }
                 self.players[p].storm_power[0] = false;
                 self.discover_hero_power(p, &excludes, false, 1);
-                return;
+                return false;
             }
             // Proud Privateer: a Bounty casts again, each cast a spell cast.
             // Replica Cathedral's extra cast lands here for a spell with no
@@ -766,6 +813,7 @@ impl Game {
             }
             self.maybe_start_discover(p);
         }
+        false
     }
 
     /// Run a spell effect (or a Choose One option). `tavern` says whether the

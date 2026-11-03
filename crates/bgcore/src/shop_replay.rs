@@ -1430,6 +1430,8 @@ fn clear_choices(pool: &mut [u8], cards: &crate::cards::CardDb, pl: &mut Player)
     pl.pending_discard = None;
     pl.pending_choose_one = None;
     pl.repeats.clear();
+    pl.repeat_discover = 0;
+    pl.discover_silent = false;
     pl.hero_offer = [u8::MAX; crate::DISCOVER];
 }
 

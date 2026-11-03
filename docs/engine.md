@@ -950,13 +950,24 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `trigger_on_cast_spell_on_mech`, so neither Timecap'n Hooktail nor the
   Amalgam's own "on this" fires for the Tea Set. The flag travels with the
   prompt a taught spell can open (`PendingTarget.by_minion`,
-  `PendingChooseOne.by_minion`, `QueuedOption`), so `apply_target` and
-  `apply_choose_option` also skip the extra-cast counters and the "cast on a
-  Tavern minion" trinket events for it. Every extra cast the player's own
-  cards add still counts (Balinda, a Hot-Air Surveyor's Gem copy). A trinket's own `cast` act is the player's cast: `Act::Cast` calls
+  `QueuedOption`), so `apply_target` and `apply_choose_option` also skip the
+  extra-cast counters and the "cast on a Tavern minion" trinket events for
+  it. Every extra cast the player's own cards add still counts (Balinda, a
+  Hot-Air Surveyor's Gem copy). A trinket's own `cast` act is the player's cast: `Act::Cast` calls
   `cast_named_spell` with `by_minion` false, as does `cast_spell_on`; the
   Lovely Locket's copy inherits the flag of the cast it copies. In a fight the
   same `Effect::CastSpell` keeps its own `Side` counters.
+  **A spell a minion casts gets no Choose One choice (Era 2026-11-04).** The
+  Choose One option of a taught spell is picked for the player at random
+  (`cast_spell_inner`, which never opens a `PendingChooseOne` for a minion's
+  cast) and each cast picks its own, so Brann's two Battlecry triggers make
+  two separate random casts. A Discover it opens is a normal Discover: it is
+  offered to the player like any other and counts for "after you Discover"
+  cards. The log shows the game doing exactly that
+  (`Hearthstone_2026_10_28_02_28_32` at 02:41: a Magicfin token's Boundless
+  Potential offers three Tavern spells and Era picks one). A target the spell
+  needs is still the player's pick, and every cast of the one taught spell
+  lands on it (the Tavern slots included, see `resolve_shop_target`).
 - **A repeated targeting spell or Battlecry keeps the one target.** Every
   "how many times" count is `cards::how_many_times` ("Set versus add"), and a
   spell or Battlecry that asks for a target asks once: the repeats land on
@@ -974,32 +985,62 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   heap), and `Game::run_queued_repeats` runs one run at a time. An entry is
   either a `RepeatWhat::Battlecry` (that minion's Battlecry triggered again:
   a golden Kelp Keeper, Drakkari on Young Murk-Eye's neighbours) or a
-  `RepeatWhat::ChooseOne` (the option picked at random). The first run of an
-  entry asks the player, and `resolve_target` writes its answer into
-  `QueuedRepeat.at`: every repeat lands on it, and one whose own Battlecry asks
-  for a target the first run never picked answers at random
-  (`answer_target_at_random`). A different minion's Battlecry has its own
+  `RepeatWhat::ChooseOne` (the option the player picked, or a new random one
+  for each cast a minion makes). The first run of an entry asks the player,
+  and its answers are kept on the entry: `resolve_target` (a board slot) or
+  `resolve_shop_target` (a Tavern one) writes the target into
+  `QueuedRepeat.at`, and `resolve_choose` writes the Choose One option into
+  `QueuedRepeat.option`. Every repeat lands on them, and one whose own
+  Battlecry asks for a target the first run never picked answers at random
+  (`answer_target_at_random`). `QueuedRepeat.random_discover` marks the
+  entries a Kelp Keeper's Activate makes (see "A Discover an Activate opens"
+  below): the Discover requests such a run queues go into
+  `Player.repeat_discover`, and `maybe_start_discover` answers each with a
+  random card of the offer instead of showing it, `Player.discover_silent`
+  keeping `fire_after_discover` from firing. A different minion's Battlecry has its own
   entry with its own first pick, so a second neighbour's prompt never replaces
   the one before it. `maybe_start_discover` runs the queue once nothing else
   is open, before the "after" triggers of the Battlecry or cast, and
   `Player.repeating` keeps the driver from re-entering itself when it answers
   a prompt. Cleared with the other pending choices at the end of a turn, in
   `fizzle_stuck_choice` and by the replay's state loader.
-- **A repeated Choose One.** The player picks the option and its target once;
-  every cast after the first picks its option at random on the same target
-  (docs/rules/design.md "Set versus add", Era 2026-11-04: "you choose a
-  target, and the choice is random"). A Battlecry's repeats are the ones that
-  reach a Choose One spell (`cast_spell_inner`): `PendingChooseOne.repeats` is
-  how many casts the one choice stands for, each of them counted as a cast in
-  `cast_spell_as` (`CastAfterChoice.casts`), and the runs themselves are a
+- **A Discover an Activate opens is random and silent.** A Battlecry an
+  Activate (or a hero power) triggers is not a Battlecry you played, and a
+  Discover it opens is answered for you: Kelp Keeper's Activate on a Rodeo
+  Performer gives a random card from that Discover's pool with no Discover
+  offered, and that card is not a Discover for "after you Discover" cards
+  (docs/rules/design.md "Shop replay answers" and "Set versus add", Era
+  2026-11-03 and 2026-11-04). `Game::run_queued_repeats` counts the requests
+  such a run queues (`QueuedRepeat.random_discover`, then
+  `Player.repeat_discover`), `maybe_start_discover` picks one of the offers
+  with the RNG, and `Player.discover_silent` stops `fire_after_discover`, so
+  Hooktusk and Master Marauder do not react. A Battlecry you play yourself,
+  Brann's double included, keeps its normal Discover, and so does a Magicfin
+  token's taught spell. Only the `TargetKind::TriggerBattlecry` entries carry
+  `random_discover`; the ones Young Murk-Eye makes
+  (`Effect::TriggerAdjacentBattlecries`) keep the normal Discover, because the
+  docs name only the Activate (open question: whether a Battlecry triggered at
+  the end of the turn picks its Discover at random too).
+- **A repeated Choose One remembers the pick.** The player picks the option
+  and its target once, and every cast after the first uses the SAME option on
+  the SAME target (docs/rules/design.md "Set versus add", Era 2026-11-04).
+  `resolve_choose` writes that option into the queue entry's `QueuedRepeat.option`
+  beside the target `resolve_target` writes into `at`, and
+  `run_queued_repeats` takes it from there (`Game::repeat_choose_option`);
+  only a cast with no pick of its own (a spell a minion casts) chooses at
+  random. A Battlecry's repeats are the ones that reach a Choose One spell
+  (`cast_spell_inner`): `PendingChooseOne.repeats` is how many casts the one
+  choice stands for, each of them counted as a cast in `cast_spell_as`
+  (`CastAfterChoice.casts`), and the runs themselves are a
   `RepeatWhat::ChooseOne` entry in the queue. Balinda is not one of them:
   `apply_choose_option` runs the option she doubles again, the same option on
   the same target, which is what the log shows: turn 12 step 0 of
   `Hearthstone_2026_11_02_00_10_22-g4`, Alliance Flag cast twice with the
   second option on one minion and one "spells cast". A Choose One minion's
   choice is its Battlecry, so a trigger that repeats it (a golden Kelp Keeper)
-  goes through the same queue. A Choose One played from the hand is not a
-  Battlecry and Brann never repeats it ("Counting Battlecries").
+  goes through the same queue and the same remembered option. A Choose One
+  played from the hand is not a Battlecry and Brann never repeats it
+  ("Counting Battlecries").
 - **Making a minion Golden happens once.** A repeat still counts as a trigger
   or a cast, but it makes no second minion Golden (docs/rules/design.md "Set
   versus add"). So `Effect::MakeGoldenChosen` puts only the card's own count

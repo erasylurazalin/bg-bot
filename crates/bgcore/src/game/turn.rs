@@ -125,6 +125,8 @@ impl Game {
         pl.discover_locked = false;
         pl.discover_locked_tier = 0;
         pl.discover_queue.clear();
+        pl.repeat_discover = 0;
+        pl.discover_silent = false;
         pl.tavern_buffs.clear();
         pl.power_offer.clear();
         pl.secret_offer.clear();
@@ -1206,6 +1208,8 @@ impl Game {
             pl.repeats.clear();
             pl.tavern_buffs.clear();
             pl.discover_queue.clear();
+            pl.repeat_discover = 0;
+            pl.discover_silent = false;
             pl.power_offer.clear();
         }
         let mut left: ArrayVec<u8, PLAYERS> =

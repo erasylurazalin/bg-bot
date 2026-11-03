@@ -721,6 +721,8 @@ impl Game {
                             runs: times,
                             started: false,
                             at: None,
+                            option: None,
+                            random_discover: false,
                         })
                         .ok();
                     }

@@ -53,7 +53,7 @@ legality in mod.rs.
 | Kind | cards.toml field | Fires in | Example |
 |---|---|---|---|
 | Battlecry | `battlecry = {..}` | `Game::battlecry_or_choose_one` (via Play), Brann's `brann_mult` runs, `fire_after_battlecry` after | Southsea Busker |
-| Choose One | `choose_one = [a, b]` | `battlecry_or_choose_one` -> `PendingChooseOne` -> `resolve_choose`; with no option the state can answer, the minion is played and the choice is skipped (as for a Choose One spell) | Intrepid Botanist |
+| Choose One | `choose_one = [a, b]` | `battlecry_or_choose_one` -> `PendingChooseOne` -> `resolve_choose`; a repeat takes the option the player picked (`QueuedRepeat.option`) on the same target; with no option the state can answer, the minion is played and the choice is skipped (as for a Choose One spell) | Intrepid Botanist |
 | Deathrattle | `deathrattle = {..}` | `Side::fire_deathrattles` (count via `deathrattle_fires`, Titus), called by `Side::resolve` | Locked-up Mutineer |
 | Rally | `rally = {..}` | `attack_triggers` in fight.rs (before the hit); shop copy via `Effect::TriggerRally` | Bigwig Bandit |
 | Start of Combat | `start_of_combat = {..}` | `run_start_of_combat` | Diremuck Forager |
@@ -78,8 +78,8 @@ legality in mod.rs.
 | Play a minion of a tribe | `after_play_tribe = { tribe, effects }` (never counts the minion being played, no flag; runs right after it lands, before its Battlecry). `golden_twice = true` when the golden text says ", twice": the whole list then runs twice with the printed numbers, so a golden Wrath Weaver's two hits are two hero-damage events (a Soul Rewinder takes +2 Health for each) | `fire_after_play_tribe` | Wrath Weaver |
 | While in hand, after a tribe is played | `while_in_hand` | `trigger_in_hand_on_play` | Bream Counter |
 | After you trigger a Battlecry | `after_battlecry` | `fire_after_battlecry` | Kalecgos |
-| Discover (the effect) | `discover_spell`, `discover_tribe_if_another`, `Effect::Discover*`, spell `discover = ..` | `discover_queue` of `DiscoverRequest`, `maybe_start_discover`, `resolve_choose` | Rodeo Performer |
-| After you Discover | `after_discover = {..}` | `fire_after_discover` (end of `resolve_choose`) | Hooktusk |
+| Discover (the effect) | `discover_spell`, `discover_tribe_if_another`, `Effect::Discover*`, spell `discover = ..` | `discover_queue` of `DiscoverRequest`, `maybe_start_discover`, `resolve_choose`. A Discover a Battlecry an Activate triggers opens is the exception: it gives a random card of its pool with no offer (`QueuedRepeat.random_discover`, `Player.repeat_discover`; docs/rules/design.md "Shop replay answers") | Rodeo Performer |
+| After you Discover | `after_discover = {..}` | `fire_after_discover` (end of `resolve_choose`), skipped for the random card such an Activate's Discover gives (`Player.discover_silent`, Era 2026-11-03/04) | Hooktusk |
 | Hero takes damage | `after_hero_damage = [..]`, `DamageHero` | `take_hero_damage`, `take_shop_damage` (can kill), `can_pay_health` | Wrath Weaver |
 | Refresh | `health_refreshes`, `RefreshKind` | `refresh_shop`, `fill_shop`, Roll in `apply` | Malchezaar |
 | After the Tavern is Refreshed | `refresh_buff = [a, h]` (effect and spell effect) | `Player.refresh_buff`, `apply_refresh_buff` (end of `refresh_shop`, `refresh_with_spells`, `refresh_with_tribe`, and in `start_turn` when the turn-start roll changed the Tavern); a fight adds through `SideOutcome::refresh_buff_gain` | Waveling |
@@ -229,7 +229,7 @@ exactly one legal target and drops the effect when there is none.
 | Deal damage in combat | Obsidian Ravager (`damage_target_and_neighbor`), Blade Collector (cleave) | `rally_damage`, `hit`; Divine Shield/Venomous honoured |
 | Keep stats after the fight | Tarecgosa (`permanent_keep`), Eudora (`keep_golden`), Persistent Poet (adjacent), Timewarped Poet (all Dragons) | `SideOutcome.permanent_stats` by start slot |
 | Keep a counter after the fight | Lurking Leviathan, Treasure Parrot | `permanent_improvements` |
-| Cast a named spell | Gatekeeper Amalgam (`cast`), a Magicfin token (`cast_taught`) | `Effect::CastSpell` / `Effect::CastTaughtSpell` -> `cast_named_spell` with `by_minion` true: the spell runs and buffs as printed, but it is not your cast, so no cast trigger and no counter sees it (Era 2026-11-02); `PendingTarget.by_minion` carries that through the target prompt. A trinket's `cast` act is your cast (`cast_named_spell` with `by_minion` false). Cast `times` times by one Battlecry, a targeting spell asks for one target and casts again on it (`cast_spell_as`'s `repeats`) |
+| Cast a named spell | Gatekeeper Amalgam (`cast`), a Magicfin token (`cast_taught`) | `Effect::CastSpell` / `Effect::CastTaughtSpell` -> `cast_named_spell` with `by_minion` true: the spell runs and buffs as printed, but it is not your cast, so no cast trigger and no counter sees it (Era 2026-11-02); `PendingTarget.by_minion` carries that through the target prompt. It also gets no Choose One choice (Era 2026-11-04): the option is random, one per cast. A Discover it opens is a normal Discover: the player picks it and it counts for "after you Discover" cards (log Hearthstone_2026_10_28_02_28_32 at 02:41). A trinket's `cast` act is your cast (`cast_named_spell` with `by_minion` false). Cast `times` times by one Battlecry, a targeting spell asks for one target and casts again on it and a repeated Choose One reuses the option picked (`cast_spell_as`'s `repeats`, `QueuedRepeat.option`) |
 | Trigger another card's Battlecry/Rally | Kelp Keeper, Sky-hatch Runaway | `TriggerBattlecry`, `TriggerRally` |
 | Spells that share a pool slot | Volumizers (`volumizer_buff`), Bounties (`bounty = true`) | `CardDb.bounties`, only the first is in `spells` |
 | Unplayable held card with a countdown | Lockbox (`lockbox = 5`) | counter in `improvements`, `tick_lockboxes` |
@@ -788,9 +788,11 @@ Triple Reward spell.
   back (a golden Kelp Keeper, Drakkari on Young Murk-Eye's neighbours, a
   Choose One cast twice) goes on `Player.repeats` instead:
   `Game::run_queued_repeats` runs it once the prompt is answered, on the slot
-  the first run picked, and a repeated Choose One's option is random
-  (`QueuedRepeat`, `RepeatWhat`). Making a minion Golden never repeats: the
-  prompt carries only the card's own count.
+  the first run picked and with the Choose One option the player picked there
+  (`QueuedRepeat.at` and `.option`, `RepeatWhat`); only a cast with no choice
+  of its own takes a new random option each (a spell a minion casts). Making
+  a minion Golden never repeats: the prompt carries only the card's own
+  count.
 - **Discard.** `Action::Discard(i)` answers `Player.pending_discard`, opened
   by an Activate with `discard = true` (Mangled Bandit): the reward effect
   runs after the pick. Any playable card is discardable (a Blood Gem

@@ -110,6 +110,15 @@ impl Game {
             return;
         }
         let Some(pt) = self.players[p].pending_target.take() else { return };
+        // The Tavern card a repeated Choose One or Battlecry picked: every
+        // repeat lands on it (docs/rules/design.md "Set versus add").
+        if let Some(q) = self.players[p].repeats.first_mut()
+            && q.started
+            && q.at.is_none()
+            && q.source() == pt.source
+        {
+            q.at = Some(slot as u8);
+        }
         self.apply_target_shop(p, &pt, slot);
         self.maybe_start_discover(p);
     }
@@ -795,6 +804,11 @@ impl Game {
                             runs: pt.runs,
                             started: false,
                             at: None,
+                            option: None,
+                            // A Kelp Keeper's Activate: a Discover its
+                            // Battlecry opens gives a random card instead
+                            // (docs/rules/design.md "Shop replay answers").
+                            random_discover: true,
                         })
                         .ok();
                     }
@@ -1398,10 +1412,11 @@ impl Game {
     /// Run the repeats a Battlecry trigger or a spell cast still owes, the
     /// ones in `Player.repeats`, until a prompt is left open. The first run of
     /// an entry is the one that asks, so the player answers it; every repeat
-    /// lands on the target that run picked, and a Choose One's option is
-    /// picked at random (docs/rules/design.md "Set versus add", Era
-    /// 2026-11-04). Called by `maybe_start_discover` and by whoever queues the
-    /// first run.
+    /// lands on the target that run picked and takes the Choose One option the
+    /// player picked there (docs/rules/design.md "Set versus add", Era
+    /// 2026-11-04). An entry whose first run had no pick of its own (a spell a
+    /// minion casts) picks a new option at random for each run. Called by
+    /// `maybe_start_discover` and by whoever queues the first run.
     pub(super) fn run_queued_repeats(&mut self, p: usize) {
         // Nothing runs while the player still has a prompt to answer: the
         // driver picks up again when the answer lands.
@@ -1419,6 +1434,7 @@ impl Game {
             let first = !q.started;
             q.started = true;
             self.players[p].repeats[0] = q;
+            let discovers_before = self.players[p].discover_queue.len();
             // One run of the entry.
             match q.what {
                 RepeatWhat::Battlecry { slot } => {
@@ -1432,7 +1448,9 @@ impl Game {
                     if both {
                         self.resolve_choose_options(p, source, options, tavern, by_minion, true);
                     } else {
-                        let Some(k) = self.random_choose_option(p, options) else {
+                        // The option the player picked for the first run, or
+                        // a fresh random one for a cast that had no pick.
+                        let Some(k) = self.repeat_choose_option(p, q.option, options) else {
                             self.players[p].repeats.remove(0);
                             continue;
                         };
@@ -1440,12 +1458,24 @@ impl Game {
                     }
                 }
             }
-            // A Choose One a repeat opened is the repeat's own choice: random,
-            // on the same target.
+            // A Discover this run opened is answered with a random card of
+            // its pool, with no Discover offered, when the entry is a
+            // Battlecry an Activate triggered (a Kelp Keeper), and that card
+            // is not a Discover for "after you Discover" cards (docs/rules/
+            // design.md "Shop replay answers", Era 2026-11-03 and 2026-11-04).
+            if q.random_discover {
+                let opened =
+                    self.players[p].discover_queue.len().saturating_sub(discovers_before);
+                self.players[p].repeat_discover =
+                    self.players[p].repeat_discover.saturating_add(opened as u8);
+            }
+            // A Choose One a repeat opened takes the option the first run's
+            // player picked, on the same target. Only a cast with no pick of
+            // its own chooses at random.
             if !first
                 && let Some(pco) = self.players[p].pending_choose_one
             {
-                match self.random_choose_option(p, pco.options) {
+                match self.repeat_choose_option(p, q.option, pco.options) {
                     Some(k) => self.resolve_choose(p, k),
                     None => self.players[p].pending_choose_one = None,
                 }
@@ -1465,24 +1495,55 @@ impl Game {
         self.players[p].repeating = false;
     }
 
-    /// Answer the target a repeat asks for with the slot its entry's first run
-    /// picked, or a random legal one when it picked none or that one is gone.
+    /// Answer the target a repeat asks for with the board or Tavern slot its
+    /// entry's first run picked, or a random legal one when it picked none or
+    /// that one is gone.
     fn answer_repeat_target(&mut self, p: usize, at: Option<u8>) {
         let Some(pt) = self.players[p].pending_target else { return };
-        if let Some(s) = at
-            && self.valid_target(p, &pt, s as usize)
-        {
-            self.players[p].pending_target = None;
-            self.apply_target(p, &pt, s as usize);
-            return;
+        if let Some(s) = at {
+            let s = s as usize;
+            if pt.kind.takes_shop() {
+                if s < self.players[p].shop.len() && self.valid_shop_target(p, &pt, s) {
+                    self.players[p].pending_target = None;
+                    self.apply_target_shop(p, &pt, s);
+                    return;
+                }
+            } else if self.valid_target(p, &pt, s) {
+                self.players[p].pending_target = None;
+                self.apply_target(p, &pt, s);
+                return;
+            }
         }
         self.answer_target_at_random(p);
     }
 
+    /// The option a repeat takes: the one the player picked for the entry's
+    /// first run when there is one, and a random pickable one otherwise (a
+    /// cast with no choices of its own, or a pick the board can no longer
+    /// answer).
+    fn repeat_choose_option(
+        &mut self,
+        p: usize,
+        picked: Option<u8>,
+        options: [ChooseOption; 2],
+    ) -> Option<usize> {
+        let k = picked.map(|k| k as usize).filter(|&k| k < 2);
+        if let Some(k) = k
+            && self.can_choose_option(p, options[k])
+        {
+            return Some(k);
+        }
+        self.random_choose_option(p, options)
+    }
+
     /// One of a Choose One's options at random, out of those the board can
-    /// answer: what a repeat picks (Era 2026-11-04: "you choose a target, and
-    /// the choice is random").
-    fn random_choose_option(&mut self, p: usize, options: [ChooseOption; 2]) -> Option<usize> {
+    /// answer: what a spell a minion casts picks (Era 2026-11-04: its casts
+    /// get no choice, so the option is random).
+    pub(super) fn random_choose_option(
+        &mut self,
+        p: usize,
+        options: [ChooseOption; 2],
+    ) -> Option<usize> {
         let mut ok: ArrayVec<usize, 2> = ArrayVec::new();
         for k in 0..2 {
             if self.can_choose_option(p, options[k]) {
