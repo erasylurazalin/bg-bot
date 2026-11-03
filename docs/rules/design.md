@@ -352,6 +352,15 @@ triggers on a Mech played from hand, never on a copy or a Satellite. A
 copied Volumizer counts as Magnetized for the first time (in
 docs/notes/UNSURE.md).
 
+**Volumizers inside a host (Era, 2026-11-03).** A Volumizer's "your
+Volumizers have +N/+M this game (wherever they are)" reaches the Volumizers
+in the Tavern, in your hand and on your board, but never the ones already
+Magnetized into a host: a magnetized Volumizer brings the stats it has at
+that moment and stops being one of "your Volumizers". Log
+`Hearthstone_2026_10_29_22_20_04-g3` turn 6: Resourceful Robot magnetizes a
+3/1 Red Volumizer and gains exactly +3/+1, while the Red's +3 Attack reaches
+the copy in hand (6/1) and the Green in the Tavern (3/3 to 6/3).
+
 **Tribes of a card versus tribes of the lobby.** A minion with two tribes
 is in the pool if either tribe is in the lobby. A card always keeps all
 its tribes, whatever the lobby has: with no Beasts in the lobby, Treasure

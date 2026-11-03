@@ -12,10 +12,10 @@ pub const MAX_GIFTS: usize = 8;
 
 /// Maximum number of effect-carrying Magnetic cards attached to a single host.
 /// Cards without persistent effects (such as Satellites and Volumizers) only
-/// increment `magnetizations` and `volumizers` and take no slot here. When a
-/// host already holds `MAX_ATTACHED` effect-carrying attachments, further
-/// merges still grant full stats, keywords, magnetization count and Volumizer
-/// count, and drop only the excess trigger.
+/// increment `magnetizations` and take no slot here. When a host already
+/// holds `MAX_ATTACHED` effect-carrying attachments, further merges still
+/// grant full stats, keywords and magnetization count, and drop only the
+/// excess trigger.
 pub const MAX_ATTACHED: usize = 16;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -142,7 +142,11 @@ pub struct Minion {
     /// Total Magnetizations on this minion. Merging a card with N
     /// Magnetizations adds N + 1.
     pub magnetizations: u16,
-    /// Number of Volumizers this minion is or carries inside it.
+    /// How many Volumizers this minion is (1 for a Volumizer, 0 otherwise):
+    /// the count "your Volumizers have +N/+M" scales by. A Volumizer
+    /// Magnetized into a host is not counted there: the bonuses reach the
+    /// Volumizers in the Tavern, the hand and on the board, never the ones
+    /// already inside a host (Era, 2026-11-03).
     pub volumizers: u16,
     /// Per-minion scaling or progress counter (Lurking Leviathan, Spark
     /// Snapper, Patient Scout tier offset, and the count of an event
@@ -398,7 +402,9 @@ impl Minion {
     }
 
     /// Merge `other` into `self` as a Magnetization, recursively bringing all
-    /// its stats, keywords, magnetization counts, Volumizer counts and effects.
+    /// its stats, keywords, magnetization counts and effects. Its Volumizer
+    /// count stays behind: a Volumizer inside a host keeps the stats it
+    /// brought, and later "your Volumizers" bonuses don't reach it.
     pub fn magnetize(&mut self, db: &CardDb, other: Minion) {
         self.attack += other.attack;
         self.health += other.health;
@@ -408,7 +414,6 @@ impl Minion {
         self.keywords.0 |= other.keywords.0;
         self.winners_bread = self.winners_bread.saturating_add(other.winners_bread);
         self.magnetizations = self.magnetizations.saturating_add(other.magnetizations).saturating_add(1);
-        self.volumizers = self.volumizers.saturating_add(other.volumizers);
         self.gem_attack = self.gem_attack.saturating_add(other.gem_attack);
         self.gem_health = self.gem_health.saturating_add(other.gem_health);
         if db.get(other.card).carries_effect() {

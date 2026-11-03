@@ -186,16 +186,17 @@ fn magnetic_merge_into_full_board_and_normal_placement() {
 }
 
 #[test]
-fn volumizer_bonus_reaches_hand_shop_and_host_with_volumizers() {
+fn volumizer_bonus_reaches_hand_and_shop_but_not_the_ones_inside_a_host() {
     let mut g = game(102);
     g.players[0].tier = 2;
     put_on_board(&mut g, 0, "Cord Puller"); // 1/1 host at slot 0
-    // Magnetize 3 Volumizers (Blue, Green, Red) into Cord Puller so it holds 3 Volumizers.
+    // Magnetize 3 Volumizers (Blue, Green, Red) into Cord Puller. Inside a host
+    // they stop counting as Volumizers (Era, 2026-11-03).
     for v_name in ["Blue Volumizer", "Green Volumizer", "Red Volumizer"] {
         g.give(0, v_name).unwrap();
         act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     }
-    assert_eq!(g.players[0].board[0].volumizers, 3);
+    assert_eq!(g.players[0].board[0].volumizers, 0);
     // Bonus so far: +3/+0 (Red) + +1/+1 (Green) + +0/+3 (Blue) = +4/+4.
     assert_eq!(g.players[0].volumizer_bonus, (4, 4));
 
@@ -210,7 +211,7 @@ fn volumizer_bonus_reaches_hand_shop_and_host_with_volumizers() {
 
     // Play the Green Volumizer (hand slot 1) as a standalone minion at board pos 1.
     // Its +1/+1 bonus reaches the shop Volumizer (+1/+1), the hand Volumizer (+1/+1),
-    // and the host with 3 Volumizers inside (+3/+3).
+    // but not the host with 3 Volumizers inside.
     act(&mut g, 0, Action::Play { hand: 1, pos: 1 });
     assert_eq!(
         (g.players[0].shop[0].attack, g.players[0].shop[0].health),
@@ -222,7 +223,7 @@ fn volumizer_bonus_reaches_hand_shop_and_host_with_volumizers() {
     );
     assert_eq!(
         (g.players[0].board[0].attack, g.players[0].board[0].health),
-        (host_before.0 + 3, host_before.1 + 3)
+        host_before
     );
     g.check_invariants().unwrap();
 }
@@ -1054,7 +1055,8 @@ fn stage2_observation_spells_magnetizations_and_scalars() {
     assert_eq!(b0[SLOT_KEYWORDS + 1], 1.0); // divine_shield
     assert_eq!(b0[SLOT_KEYWORDS + 5], 1.0); // magnetic inherited from Red Volumizer
     assert_eq!(b0[SLOT_MAGNETIZATIONS], 2.0);
-    assert_eq!(b0[SLOT_VOLUMIZERS], 1.0);
+    // A Volumizer inside a host no longer counts as one (Era, 2026-11-03).
+    assert_eq!(b0[SLOT_VOLUMIZERS], 0.0);
     assert_eq!(b0[SLOT_FROM_POOL], 1.0);
     assert_eq!(b0[SLOT_WINNERS_BREAD], 1.0);
 
