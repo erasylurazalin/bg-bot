@@ -291,22 +291,19 @@ pub struct PendingChooseOne {
     pub options: [ChooseOption; 2],
     /// The spell being cast is a Tavern spell (see `PendingTarget::tavern`).
     pub tavern: bool,
-    /// A minion's effect cast the spell for the player (see
-    /// `PendingTarget::by_minion`): the option runs, but no "spells you cast"
-    /// trigger or counter sees it.
-    pub by_minion: bool,
     /// How many times the card is cast by this one choice: the player picks the
-    /// option and its target once, and every cast after the first picks its
-    /// option at random (docs/rules/design.md "Set versus add", Era
-    /// 2026-11-04). The runs still owed are the `Player.repeats` queue.
+    /// option and its target once, and every cast after the first uses the
+    /// same option on the same target (docs/rules/design.md "Set versus add",
+    /// Era 2026-11-04). The runs still owed are the `Player.repeats` queue.
     pub repeats: u8,
 }
 
 /// A repeat a Battlecry trigger or a spell cast still owes after its first run
 /// asked for a target or a Choose One option: it lands on the target that was
-/// picked there, and a Choose One's option is random (docs/rules/design.md
-/// "Set versus add", Era 2026-11-04). No heap: the queue is a fixed array on
-/// `Player`.
+/// picked there, and on the Choose One option the player picked there
+/// (docs/rules/design.md "Set versus add", Era 2026-11-04). Only a spell a
+/// minion casts gets no pick of its own, so its repeats take a new random
+/// option each. No heap: the queue is a fixed array on `Player`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct QueuedRepeat {
     pub what: RepeatWhat,
@@ -316,10 +313,21 @@ pub struct QueuedRepeat {
     /// Whether the first run has happened. Until it has, the player answers
     /// what that run asks; after it, every prompt is answered from `at`.
     pub started: bool,
-    /// The board slot the first run picked, when it picked one: every repeat
-    /// lands on it. A repeat whose own Battlecry asks for a target it was
-    /// never given picks a random one.
+    /// The board or Tavern slot the first run picked, when it picked one:
+    /// every repeat lands on it. A repeat whose own Battlecry asks for a
+    /// target it was never given picks a random one.
     pub at: Option<u8>,
+    /// The Choose One option (0 or 1) the player picked for the first run, if
+    /// it asked: every repeat takes the same one. `None` when the first run
+    /// had no pick of its own (a spell a minion casts picks at random), and
+    /// then every run picks its own option at random.
+    pub option: Option<u8>,
+    /// Whether a Discover a run opens is answered with a random card of its
+    /// pool instead of being offered, and does not count as a Discover for
+    /// "after you Discover" cards: a Battlecry an Activate triggers does that
+    /// (Kelp Keeper; docs/rules/design.md "Shop replay answers", Era
+    /// 2026-11-03).
+    pub random_discover: bool,
 }
 
 /// What a `QueuedRepeat` repeats.
@@ -328,8 +336,10 @@ pub enum RepeatWhat {
     /// The Battlecry of the minion in this board slot, triggered again (a
     /// golden Kelp Keeper, Drakkari on Young Murk-Eye's neighbours).
     Battlecry { slot: u8 },
-    /// A Choose One cast again: the option is picked at random, or both run
-    /// again when the card covers both (Trailblazer Sticker).
+    /// A Choose One cast again, on the option (and target) the player picked,
+    /// or both running again when the card covers both (Trailblazer
+    /// Sticker). `by_minion` marks a spell a minion cast, whose casts get no
+    /// choice: each picks a random option of its own.
     ChooseOne {
         source: Option<u8>,
         options: [ChooseOption; 2],
@@ -999,6 +1009,15 @@ pub struct Player {
     pub discover: ArrayVec<CardId, DISCOVER>,
     /// Queued Discover requests to offer once pending choices finish.
     pub discover_queue: ArrayVec<DiscoverRequest, 8>,
+    /// How many of the queued Discover requests a Battlecry an Activate (or a
+    /// hero power) triggered opened. Those are answered with a random card of
+    /// the Discover's pool instead of being offered (docs/rules/design.md
+    /// "Shop replay answers": a Kelp Keeper's Activate).
+    pub repeat_discover: u8,
+    /// Whether the Discover offer now being answered is one of those: its
+    /// pick is not a Discover for `after_discover` cards (Hooktusk; Era
+    /// 2026-11-04, docs/rules/design.md "Set versus add").
+    pub discover_silent: bool,
     /// The board slot of the Demon whose Discover makes the hero take damage
     /// equal to the chosen card's Tier (Imposing Percussionist), if any.
     pub discover_damage_from: Option<u8>,

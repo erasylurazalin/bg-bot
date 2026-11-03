@@ -152,6 +152,8 @@ impl Player {
             repeating: false,
             discover: ArrayVec::new(),
             discover_queue: ArrayVec::new(),
+            repeat_discover: 0,
+            discover_silent: false,
             discover_damage_from: None,
             discover_locked: false,
             discover_locked_tier: 0,

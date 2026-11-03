@@ -366,10 +366,12 @@ fn a_whenever_tavern_spell_trigger_fires_before_the_spell_resolves() {
 }
 
 #[test]
-fn a_taught_choose_one_spell_is_the_minions_cast_too() {
+fn a_taught_choose_one_spell_is_the_minions_cast_and_gets_no_option() {
     // A Magicfin Apprentice casts the Tavern spell it was taught: Alliance
-    // Flag is a Choose One spell, so its option and its target still wait for
-    // the player, but the cast is the minion's and counts for nothing.
+    // Flag is a Choose One spell, so its option is picked at random with no
+    // prompt (docs/rules/design.md "Set versus add", Era 2026-11-04). Its
+    // target is still the player's pick, and the cast is the minion's and
+    // counts for nothing.
     let mut g = game(32);
     put_on_board(&mut g, 0, "Felboar", false);
     put_on_board(&mut g, 0, "Gatekeeper Amalgam", false);
@@ -381,10 +383,15 @@ fn a_taught_choose_one_spell_is_the_minions_cast_too() {
     g.players[0].gold = 10;
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 2);
-    act(&mut g, 0, Action::Choose(0));
+    assert!(g.players[0].pending_choose_one.is_none(), "no option is offered");
     act(&mut g, 0, Action::Target(1));
-    // The Amalgam is 6/6 and the first option is +3/+1: the cast still lands.
-    assert_eq!(stats(&g.players[0].board[1]), (6 + 3, 6 + 1), "the spell still buffed");
+    // The Amalgam is 6/6 and the random option is +3/+1 or +1/+3: the cast
+    // still lands.
+    let (attack, health) = stats(&g.players[0].board[1]);
+    assert!(
+        [(6 + 3, 6 + 1), (6 + 1, 6 + 3)].contains(&(attack, health)),
+        "the spell still buffed: {attack}/{health}"
+    );
     assert_eq!(g.players[0].board[0].improvements, 0, "not a spell you cast");
     assert_eq!(g.players[0].spells_cast, 0, "and not a Tavern spell you cast");
     g.check_invariants().unwrap();

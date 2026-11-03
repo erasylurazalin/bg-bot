@@ -1,8 +1,13 @@
 //! Repeats: what a repeated Battlecry or spell does. A repeat still counts as
 //! a trigger or a cast, but making a minion Golden happens once; a repeated
-//! Choose One picks its option at random on the target the player picked; and
-//! a repeat that asks for a target lands on the one the first run picked
-//! (docs/rules/design.md "Set versus add", Era 2026-11-04).
+//! Choose One takes the option the player picked on the target the player
+//! picked; a repeat that asks for a target lands on the one the first run
+//! picked; a spell a minion casts gets no Choose One choice (its option is
+//! random) but a Discover it opens is a normal Discover the player answers,
+//! Hooktusk included; and a Discover a Battlecry an Activate triggers opens
+//! gives a random card with no Discover offered, which Hooktusk does not see
+//! (docs/rules/design.md "Set versus add" and "Shop replay answers", Era
+//! 2026-11-04 and 2026-11-03).
 
 use std::sync::Arc;
 
@@ -28,6 +33,11 @@ fn id(db: &CardDb, name: &str) -> CardId {
 
 fn stats(g: &Game, p: usize, slot: usize) -> (i32, i32) {
     let m = &g.players[p].board[slot];
+    (m.attack, m.health)
+}
+
+fn stats_shop(g: &Game, p: usize, slot: usize) -> (i32, i32) {
+    let m = &g.players[p].shop[slot];
     (m.attack, m.health)
 }
 
@@ -225,13 +235,51 @@ fn eyes_of_the_earth_mother_with_balinda_makes_one_golden_and_counts_two_casts()
 
 // ---- a repeated Choose One ----
 
+/// The Magicfin token in hand, taught `spell`, ready to be played.
+fn taught_token(g: &mut Game, spell: &str) -> u8 {
+    let card = id(&g.data.cards, spell);
+    // A token has no pool copy to take.
+    g.give(0, "Magicfin Apprentice").expect("a taught token");
+    let h = g.players[0].hand.len() - 1;
+    g.players[0].hand[h].taught_spell = Some(card);
+    h as u8
+}
+
 #[test]
-fn brann_repeats_a_taught_choose_one_spell_with_a_random_option_on_the_same_target() {
-    // Brann doubles the Magicfin token's Battlecry, which is the Choose One
-    // spell it was taught. The player picks the option and the target once;
-    // the second cast's option is random and lands on the same minion
-    // (docs/rules/design.md "Set versus add", Era 2026-11-04).
+fn a_taught_choose_one_spell_gets_no_option_and_a_random_one_lands_on_the_target() {
+    // A Magicfin token casts the Choose One spell it was taught: its option is
+    // picked at random with no prompt, and the target the spell needs is still
+    // the player's pick (docs/rules/design.md "Set versus add", Era
+    // 2026-11-04).
     let mut g = game(7004);
+    put_on_board(&mut g, 0, "Southsea Busker", false);
+    put_on_board(&mut g, 0, "Bigwig Bandit", false);
+    let token = taught_token(&mut g, "Alliance Flag");
+    g.players[0].gold = 10;
+    let at = g.players[0].board.len() as u8;
+    play(&mut g, 0, token, at);
+    assert!(g.players[0].pending_choose_one.is_none(), "no option is offered");
+    assert!(g.players[0].pending_target.is_some(), "the target still waits for the player");
+    let busy = stats(&g, 0, 0);
+    let bandit = stats(&g, 0, 1);
+    act(&mut g, 0, Action::Target(0));
+    assert!(g.players[0].pending_target.is_none(), "one cast, one pick");
+    // Alliance Flag's options are +3/+1 and +1/+3; either may come up.
+    let after = stats(&g, 0, 0);
+    let gained = (after.0 - busy.0, after.1 - busy.1);
+    assert!([(3, 1), (1, 3)].contains(&gained), "one random option ran: {gained:?}");
+    assert_eq!(stats(&g, 0, 1), bandit, "nothing else was touched");
+    assert_eq!(g.players[0].spells_cast, 0, "a minion's cast is not one of yours");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn brann_casts_a_taught_choose_one_spell_twice_each_with_its_own_random_option() {
+    // Brann doubles the token's Battlecry, so the taught Choose One casts
+    // twice: each cast picks its own random option, both on the one target the
+    // player picked, and neither asks anything of the player (docs/rules/
+    // design.md "Set versus add", Era 2026-11-04).
+    let mut g = game(7008);
     put_on_board(&mut g, 0, "Brann Bronzebeard", false);
     put_on_board(&mut g, 0, "Magicfin Mycologist", false);
     put_on_board(&mut g, 0, "Southsea Busker", false);
@@ -247,128 +295,200 @@ fn brann_repeats_a_taught_choose_one_spell_with_a_random_option_on_the_same_targ
         .expect("a taught token") as u8;
     let at = g.players[0].board.len() as u8;
     play(&mut g, 0, token, at);
+    assert!(g.players[0].pending_choose_one.is_none(), "no option is offered");
+    assert!(g.players[0].pending_target.is_some(), "and its target once");
     let before: Vec<(i32, i32)> =
         (0..g.players[0].board.len()).map(|s| stats(&g, 0, s)).collect();
-    assert!(g.players[0].pending_choose_one.is_some(), "the player picks the option once");
-    act(&mut g, 0, Action::Choose(0));
-    assert!(g.players[0].pending_target.is_some(), "and its target once");
-    act(&mut g, 0, Action::Target(2));
-    assert!(g.players[0].pending_choose_one.is_none(), "the repeat's option is random, not asked");
-    assert!(g.players[0].pending_target.is_none(), "and it does not ask for a target");
-    // Alliance Flag's options are +3/+1 and +1/+3, so two casts on one minion
-    // give 8 stats in all whichever options the random pick took.
+    let busker = g.players[0]
+        .board
+        .iter()
+        .position(|m| g.data.cards.get(m.card).name == "Southsea Busker")
+        .unwrap();
+    act(&mut g, 0, Action::Target(busker as u8));
+    assert!(g.players[0].pending_choose_one.is_none(), "the second cast picks at random too");
+    assert!(g.players[0].pending_target.is_none(), "and does not ask for a target again");
+    // +3/+1 and +1/+3 in either order: two casts give 8 stats in all, and only
+    // on the minion the player picked.
     let after: Vec<(i32, i32)> =
         (0..g.players[0].board.len()).map(|s| stats(&g, 0, s)).collect();
-    let mut gained = (0, 0);
     for (s, (a, h)) in after.iter().enumerate() {
         let d = (a - before[s].0, h - before[s].1);
         if d != (0, 0) {
-            assert_eq!(s, 2, "only the minion the player picked was touched");
-            gained = d;
+            assert_eq!(s, busker, "only the minion the player picked was touched");
+            assert_eq!(d.0 + d.1, 8, "both casts landed on it: {d:?}");
         }
     }
-    assert_eq!(gained.0 + gained.1, 8, "both casts landed on it: {gained:?}");
-    g.check_invariants().unwrap();
-}
-
-// ---- repeats after a prompt: a Battlecry trigger ----
-
-#[test]
-fn a_golden_kelp_keeper_triggers_a_targeting_battlecry_twice_on_the_one_pick() {
-    // A golden Kelp Keeper triggers the chosen minion's Battlecry twice. The
-    // first trigger asks for the Pirate to buff and the second lands on it
-    // (docs/rules/design.md "Set versus add").
-    let mut g = game(7005);
-    put_on_board(&mut g, 0, "Kelp Keeper", true);
-    put_on_board(&mut g, 0, "Lovesick Balladist", false);
-    put_on_board(&mut g, 0, "Southsea Busker", false);
-    put_on_board(&mut g, 0, "Bigwig Bandit", false);
-    set_shop(&mut g, 0, &["Bubble Gunner"]);
-    g.players[0].gold = 10;
-    g.players[0].gold_spent_turn = 0;
-    act(&mut g, 0, Action::Activate(0));
-    // The Activate asks which minion's Battlecry to trigger.
-    assert!(g.players[0].pending_target.is_some(), "the Activate picks its minion");
-    act(&mut g, 0, Action::Target(1));
-    // Lovesick Balladist's own Battlecry asks which Pirate to buff.
-    assert!(g.players[0].pending_target.is_some(), "its Battlecry picks its Pirate");
-    let busker = stats(&g, 0, 2);
-    let bandit = stats(&g, 0, 3);
-    act(&mut g, 0, Action::Target(2));
-    assert!(g.players[0].pending_target.is_none(), "the second trigger asks nothing more");
-    let after = stats(&g, 0, 2);
-    // +0/+2 a trigger, and Lovesick Balladist adds +0/+1 for each Gold spent
-    // this turn (the Activate spent 1), so two triggers give +0/+6.
-    assert_eq!(
-        (after.0 - busker.0, after.1 - busker.1),
-        (0, 6),
-        "both triggers landed on the one Pirate picked"
-    );
-    assert_eq!(stats(&g, 0, 3), bandit, "nothing else moved");
+    assert_eq!(g.players[0].spells_cast, 0, "a minion's cast is not one of yours");
     g.check_invariants().unwrap();
 }
 
 #[test]
-fn drakkari_young_murk_eye_lands_every_neighbours_battlecry_twice() {
-    // Drakkari Enchanter repeats the end of turn, so Young Murk-Eye triggers
-    // each neighbour's Battlecry twice. Both neighbours ask for their own
-    // target and both repeats land on it: four Battlecry triggers in all.
-    let mut g = game(7006);
-    put_on_board(&mut g, 0, "Lovesick Balladist", false);
-    put_on_board(&mut g, 0, "Young Murk-Eye", false);
-    put_on_board(&mut g, 0, "Lovesick Balladist", false);
-    put_on_board(&mut g, 0, "Drakkari Enchanter", false);
+fn balinda_casts_a_choose_one_spell_twice_with_the_one_option_and_target() {
+    // A repeated Choose One remembers the choice: Balinda casts the spell
+    // twice with the same option on the same target (docs/rules/design.md "Set
+    // versus add", Era 2026-11-04; log Hearthstone_2026_11_02_00_10_22-g4 turn
+    // 12 step 0).
+    let mut g = game(7009);
+    put_on_board(&mut g, 0, "Balinda Stonehearth", false);
     put_on_board(&mut g, 0, "Southsea Busker", false);
     put_on_board(&mut g, 0, "Bigwig Bandit", false);
-    set_shop(&mut g, 0, &["Bubble Gunner"]);
-    g.players[0].gold_spent_turn = 0;
+    g.players[0].gold = 20;
+    g.give(0, "Alliance Flag").unwrap();
+    let hand = g.players[0].hand.len() as u8 - 1;
     let before: Vec<(i32, i32)> =
         (0..g.players[0].board.len()).map(|s| stats(&g, 0, s)).collect();
-    // The end of the turn answers what it opens by itself: a target no one
-    // answered goes to the first legal minion.
-    act(&mut g, 0, Action::EndTurn);
-    while answer(&mut g) {}
-    let after: Vec<(i32, i32)> =
-        (0..g.players[0].board.len()).map(|s| stats(&g, 0, s)).collect();
-    let health: i32 = after.iter().zip(&before).map(|(a, b)| a.1 - b.1).sum();
-    assert_eq!(health, 8, "two neighbours, twice each, +0/+2 a trigger: {after:?}");
+    play(&mut g, 0, hand, 0);
+    assert!(g.players[0].pending_choose_one.is_some(), "the player picks the option");
+    act(&mut g, 0, Action::Choose(1)); // +1/+3
+    assert!(g.players[0].pending_target.is_some(), "and its target, once");
+    act(&mut g, 0, Action::Target(1));
+    assert!(g.players[0].pending_choose_one.is_none(), "the second cast asks nothing");
+    assert!(g.players[0].pending_target.is_none(), "and needs no other target");
+    assert_eq!(
+        (stats(&g, 0, 1).0 - before[1].0, stats(&g, 0, 1).1 - before[1].1),
+        (2, 6),
+        "the option the player picked, twice, on the one minion"
+    );
+    assert_eq!(stats(&g, 0, 2), before[2], "nothing else changed");
     g.check_invariants().unwrap();
 }
 
+// ---- a repeated Choose One minion ----
+
 #[test]
-fn a_repeat_of_a_choose_one_minion_picks_its_option_at_random() {
+fn a_golden_kelp_keeper_repeats_a_choose_one_minion_with_the_same_option_and_target() {
     // A golden Kelp Keeper triggers a Choose One minion's choice twice: the
-    // player picks once, the repeat's option is random (docs/rules/design.md
-    // "Set versus add"). Sprightly Scarab's options are +1/+1 with Reborn or
+    // player picks the option and the target once, and the repeat uses the
+    // SAME option on the SAME target (docs/rules/design.md "Set versus add",
+    // Era 2026-11-04). Sprightly Scarab's options are +1/+1 with Reborn or
     // +4/+0 with Windfury, both on a Tavern Beast.
     let mut g = game(7007);
     put_on_board(&mut g, 0, "Kelp Keeper", true);
     put_on_board(&mut g, 0, "Sprightly Scarab", false);
-    // Sprightly Scarab's options buff a Beast, so the Tavern holds one.
-    set_shop(&mut g, 0, &["Flittering Bat"]);
+    // Two Beasts in the Tavern, so the target is a real pick.
+    set_shop(&mut g, 0, &["Flittering Bat", "Flittering Bat"]);
     g.players[0].gold = 10;
     act(&mut g, 0, Action::Activate(0));
     // The Activate picks the minion whose Battlecry to trigger: the Scarab is
-    // the only one, so it runs straight away.
+    // the only one with a Battlecry or a Choose One.
     if g.players[0].pending_target.is_some() {
         act(&mut g, 0, Action::Target(1));
     }
     assert!(g.players[0].pending_choose_one.is_some(), "the player picks the option");
+    act(&mut g, 0, Action::Choose(1)); // +4/+0 with Windfury
+    assert!(g.players[0].pending_target.is_some(), "and the Tavern Beast once");
     let beast = {
-        let m = g.players[0].shop[0]; // the Tavern's Beast, the only legal target
+        let m = g.players[0].shop[1];
         (m.attack, m.health)
     };
-    act(&mut g, 0, Action::Choose(0));
-    assert!(g.players[0].pending_choose_one.is_none(), "the repeat never asks for an option");
-    assert!(g.players[0].pending_target.is_none(), "and never for a target");
-    // One choice of the player's option 0 is +1/+1; the random one is either
-    // option 0 again (+1/+1) or option 1 (+4/+0 with Windfury).
-    let shop_after = g.players[0].shop[0];
+    let other = {
+        let m = g.players[0].shop[0];
+        (m.attack, m.health)
+    };
+    act(&mut g, 0, Action::TargetShop(1));
+    assert!(g.players[0].pending_choose_one.is_none(), "the repeat asks no option");
+    assert!(g.players[0].pending_target.is_none(), "and no target");
+    let shop_after = g.players[0].shop[1];
     let gained = (shop_after.attack - beast.0, shop_after.health - beast.1);
-    assert!(
-        [(2, 2), (5, 1)].contains(&gained),
-        "both choices landed on the one Tavern Beast: {gained:?}"
+    assert_eq!(gained, (8, 0), "the same option twice, on the one Beast picked");
+    assert_eq!(stats_shop(&g, 0, 0), other, "the other Beast is untouched");
+    g.check_invariants().unwrap();
+}
+
+// ---- a Discover a spell a minion casts opens ----
+
+#[test]
+fn a_taught_discover_spell_offers_its_discover_and_hooktusk_fires() {
+    // A Magicfin token casts the Discover spell it was taught: the player
+    // answers that Discover like any other and it counts for "after you
+    // Discover" cards (log Hearthstone_2026_10_28_02_28_32 at 02:41, where
+    // the token's Boundless Potential offers three Tavern spells; docs/rules/
+    // design.md "Set versus add", Era 2026-11-04). Hooktusk gives the other
+    // Pirates +1/+1 for each golden minion played this game.
+    let mut g = game(7010);
+    put_on_board(&mut g, 0, "Hooktusk, Master Marauder", false);
+    put_on_board(&mut g, 0, "Southsea Busker", false);
+    g.players[0].golden_played = 1;
+    let token = taught_token(&mut g, "A New Sprout");
+    g.players[0].gold = 10;
+    let at = g.players[0].board.len() as u8;
+    let busker = stats(&g, 0, 1);
+    let hand = g.players[0].hand.len();
+    play(&mut g, 0, token, at);
+    assert!(!g.players[0].discover.is_empty(), "a normal Discover is offered");
+    assert_eq!(g.players[0].repeat_discover, 0, "no repeat's Discover is waiting here");
+    act(&mut g, 0, Action::Choose(0));
+    assert!(g.players[0].discover.is_empty(), "the pick landed");
+    assert_eq!(g.players[0].hand.len(), hand, "the token left and one card arrived");
+    assert_eq!(
+        stats(&g, 0, 1),
+        (busker.0 + 2, busker.1 + 2),
+        "Hooktusk fired for the pick (+1/+1 for the one golden minion played)"
     );
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn brann_sets_off_two_discovers_from_a_taught_spell() {
+    // Brann's two Battlecry triggers are two separate casts, each opening its
+    // own Discover for the player to answer (docs/rules/design.md "Set versus
+    // add", Era 2026-11-04).
+    let mut g = game(7011);
+    put_on_board(&mut g, 0, "Brann Bronzebeard", false);
+    put_on_board(&mut g, 0, "Magicfin Mycologist", false);
+    set_shop(&mut g, 0, &["Bubble Gunner"]);
+    g.players[0].shop_spell = Some(id(&g.data.cards, "A New Sprout"));
+    g.players[0].gold = 20;
+    act(&mut g, 0, Action::BuySpell);
+    let token = g.players[0]
+        .hand
+        .iter()
+        .position(|m| m.taught_spell.is_some())
+        .expect("a taught token") as u8;
+    let at = g.players[0].board.len() as u8;
+    let hand = g.players[0].hand.len();
+    play(&mut g, 0, token, at);
+    assert!(!g.players[0].discover.is_empty(), "the first Discover is offered");
+    act(&mut g, 0, Action::Choose(0));
+    assert!(!g.players[0].discover.is_empty(), "the second cast offers its own");
+    act(&mut g, 0, Action::Choose(0));
+    assert!(g.players[0].discover.is_empty(), "both picks landed");
+    // The token left the hand and two Discoveries arrived.
+    assert_eq!(g.players[0].hand.len(), hand + 1, "two casts, two cards");
+    g.check_invariants().unwrap();
+}
+
+// ---- a Discover a Kelp Keeper's Activate opens ----
+
+#[test]
+fn a_kelp_keeper_answers_a_battlecrys_discover_with_a_random_silent_card() {
+    // Kelp Keeper's Activate triggers Rodeo Performer's "Discover a Tavern
+    // spell": the way the game answers that is a random card of the Discover's
+    // pool with no Discover offered, and it is not a Discover for "after you
+    // Discover" cards (docs/rules/design.md "Shop replay answers" and "Set
+    // versus add", Era 2026-11-03 and 2026-11-04). A golden Kelp Keeper
+    // triggers it twice, so two cards arrive and Hooktusk still sees none.
+    let mut g = game(7012);
+    put_on_board(&mut g, 0, "Kelp Keeper", true);
+    put_on_board(&mut g, 0, "Rodeo Performer", false);
+    put_on_board(&mut g, 0, "Hooktusk, Master Marauder", false);
+    put_on_board(&mut g, 0, "Southsea Busker", false);
+    g.players[0].golden_played = 1;
+    g.players[0].gold = 10;
+    let busker = stats(&g, 0, 3);
+    let hand = g.players[0].hand.len();
+    act(&mut g, 0, Action::Activate(0));
+    // The Activate asks which minion's Battlecry to trigger: Rodeo Performer
+    // and Southsea Busker have one, and the Rodeo Performer is slot 1.
+    assert!(g.players[0].pending_target.is_some(), "the Activate picks its minion");
+    act(&mut g, 0, Action::Target(1));
+    assert!(g.players[0].discover.is_empty(), "no Discover is offered");
+    assert!(g.players[0].discover_queue.is_empty(), "and none is left waiting");
+    assert_eq!(g.players[0].repeat_discover, 0, "the repeat counter is spent");
+    assert_eq!(g.players[0].hand.len(), hand + 2, "both triggers gave a random card");
+    for m in &g.players[0].hand {
+        assert!(g.data.cards.get(m.card).is_spell(), "a Tavern spell: {:?}", m.card);
+    }
+    assert_eq!(stats(&g, 0, 3), busker, "Hooktusk did not fire");
+    g.check_invariants().unwrap();
+}
