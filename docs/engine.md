@@ -160,7 +160,11 @@ rules behind each are in docs/rules/design.md Part 2.
   card when it is not the rule's is on the card too (`cost_override` for
   Chillmere Mosaic's (1), `cost_reduce` for a free buy), and the loader turns
   a Tavern that all costs the same into the engine's own state: the shop's
-  price (`tp.tavern_price`) or a free buy charge (`free_minion_left`). The
+  price (`tp.tavern_price`) or a free buy charge (`free_minion_left`). A
+  Tavern spell's own price goes in as the player's next-spell discount
+  (`Player.spell_discount`), from the same marks or, when the card has
+  none, from what the step's `paid` says the log charged
+  (`seat_spell_paid`). The
   spell a Magicfin token was taught is a dbf id in the token's first
   number, so `shop_replay::seat_taught_spells` (with `ref/bg-cards.json`)
   fills `ShopMinionSpec::taught` before the replay runs, and the loader hands
@@ -175,7 +179,12 @@ rules behind each are in docs/rules/design.md Part 2.
   Multilayered Shield) and its "this turn" part are already inside it. The
   loader takes the engine's own part back out (`Player::total_spell_bonus`
   minus `Player.spell_bonus`), so the total is the log's number and a Tavern
-  spell cast in a replayed turn is exactly what the log shows. The Blood Gem
+  spell cast in a replayed turn is exactly what the log shows. What the
+  turn's own spells improved goes into `tp.spell_bonus_turn`
+  (`seat_spell_bonus_turn`, the counter against the one the turn started
+  with), which is the engine's own part for "this turn only"; it does not
+  change the total, so the engine's live improvement inside one step still
+  orders as the engine does. The Blood Gem
   counter is the other way round: `gem_attack`/`gem_health` leave out a
   trinket's from-hand bonus (Surveyor Portrait's +6/+6 is written on the Gem
   cards, not on the player), so the loader runs that `on_pick` act
