@@ -246,6 +246,18 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     GOLDEN RULE: Silent Deliverer's Battlecry goldens, Sinister Invitation's,
     the Gilding Dark Gift, Aureate Laureate). The replay adds the mark itself
     for an `always_golden` card, so a Laureate needs no key in the file.
+  - `last_opponent_board`, the warband of the opponent I last fought, as the
+    log last showed it in combat: the board that went into the fight, before
+    start-of-combat effects, in the shape `board` has (a Dark Gift is its card
+    id and name, a copy made by Rapid Reanimation keeps its `reanimate` mark).
+    It is taken from the last fight the log finished, never from a fight it has
+    already staged for the round to come, and it is null before the first
+    fight. The powers that copy a warband read it: Bob's Burgles and Time
+    Thief read the last opponent's seen board (`Player.seen`) and I Spy reads
+    the next opponent's (`Player.next_board`), which the log writes only after
+    that opponent's own shop phase, so this board is the closest a state has to
+    it. A file written before the key existed has the warband nowhere, and then
+    those powers have nothing to copy.
 - `end` is the state when the turn ended, after the end of turn effects and
   before the fight (null when the log ends inside the turn). It is the same
   object as the last step's `after`.
@@ -519,6 +531,15 @@ of a random step is run, since any of them may be the log's.
     `shop`, and a buy of the spell slot is `Action::BuySpell`.
   - **The freeze** is one state on the player (`pl.frozen`) and off the cards,
     because the engine toggles the player's flag when Freeze is pressed.
+  - **The last opponent's warband** (`last_opponent_board`, see "The action
+    file") is seated twice: as that opponent's seen board (`Player.seen`, with
+    `Player.last_opponent` naming a seat, which Bob's Burgles and Time Thief
+    copy from) and as `Player.next_board`, so that I Spy's button is legal. The
+    log keeps no state of the warband I am about to fight, so I Spy is pressed
+    against the last one I fought; the offers it opens are the file's own (the
+    replay forces a pick's options), so only the press's own state is read. A
+    card the card set cannot build is left out of the warband (it is copied by
+    card only).
   - **The standing rules** a power or trinket sets are recomputed on the seat
     (`Game::sync_seat_rules` for the powers; for a trinket,
     `Game::seat_trinket_pick_state` runs its `on_pick` acts that leave a rule

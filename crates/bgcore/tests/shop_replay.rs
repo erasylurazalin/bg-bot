@@ -14,7 +14,7 @@ use bgcore::shop_replay::{
 };
 use bgcore::real_boards::CardIdMap;
 use bgcore::trinkets::CardMod;
-use bgcore::{Action, Data, Game, Tribe};
+use bgcore::{Action, CardId, Data, Game, Tribe};
 
 fn data() -> Arc<Data> {
     Arc::new(Data::bundled())
@@ -364,6 +364,107 @@ fn the_loader_gives_a_one_player_game() {
     let game: &Game = &loaded.game;
     assert_eq!(game.current_player(), Some(bgcore::shop_replay::ME));
     assert_eq!(game.turn, turn.turn);
+}
+
+/// The warband of the opponent I last fought (`last_opponent_board`): the
+/// loader seats it as the last opponent's seen board, which Bob's Burgles and
+/// Time Thief copy from, and as the next opponent's warband, which is what I
+/// Spy's button reads (the offers a press opens are the file's own). A state
+/// without the key leaves the game with no warband to copy, and the power
+/// stays unpressed, as before the key existed.
+#[test]
+fn the_last_opponents_warband_is_seated_for_the_powers_that_copy_it() {
+    // One minion per Tavern slot (Tier 1 offers three), so a press fills the
+    // Tavern from the warband alone and no card is dealt twice.
+    let seated = r#", "last_opponent_board": [
+        {"position": 1, "card_id": "BG31_803", "name": "Buzzing Vermin",
+         "attack": 3, "health": 4, "golden": false, "keywords": []},
+        {"position": 2, "card_id": "BGS_004", "name": "Wrath Weaver",
+         "attack": 2, "health": 3, "golden": false, "keywords": []},
+        {"position": 3, "card_id": "BG31_149", "name": "Bubble Gunner",
+         "attack": 5, "health": 6, "golden": true, "keywords": ["VENOMOUS"]}]"#;
+    let file_of = |key: &str| {
+        let text = format!(
+            r#"{{"source": "burgles", "game": 1,
+            "hero": {{"card_id": "TB_BaconShop_HERO_50", "name": "Tess Greymane"}},
+            "turns": [
+            {{"turn": 4,
+              "start": {{"board": [], "hand": [], "tavern": [
+                 {{"id": 21, "card_id": "BG31_803", "name": "Buzzing Vermin", "attack": 1, "health": 1, "golden": false, "kind": "minion", "slot": 1}},
+                 {{"id": 22, "card_id": "BG31_803", "name": "Buzzing Vermin", "attack": 1, "health": 1, "golden": false, "kind": "minion", "slot": 2}},
+                 {{"id": 23, "card_id": "BG31_803", "name": "Buzzing Vermin", "attack": 1, "health": 1, "golden": false, "kind": "minion", "slot": 3}}],
+               "hand_hidden": 0, "gold": 5, "gold_max": 5, "tier": 1,
+               "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+               "frozen": false,
+               "secrets": [],
+               "hero_powers": [{{"card_id": "TB_BaconShop_HP_077", "name": "Bob's Burgles", "cost": 1, "used_this_turn": 0}}],
+               "trinkets": []{key}}},
+             "actions": [], "end": null}}]}}"#
+        );
+        parse_action_files(&[("burgles.json".to_string(), text)]).unwrap().remove(0)
+    };
+    let data = data();
+    let with = file_of(seated);
+    let loaded = load(
+        &data,
+        &with.turns[0].start,
+        with.hero(&data, &with.turns[0].start),
+        with.lobby(),
+        with.turns[0].turn,
+        1,
+        None,
+    );
+    assert!(loaded.missing.is_empty(), "loaded with: {:?}", loaded.missing);
+    let card = |name: &str| data.cards.by_name(name).unwrap_or_else(|| panic!("{name}"));
+    let warband = [card("Buzzing Vermin"), card("Wrath Weaver"), card("Bubble Gunner")];
+    let mine = &loaded.game.players[bgcore::shop_replay::ME];
+    let seen: Vec<CardId> = mine.seen[1].board.iter().map(|m| m.card).collect();
+    assert_eq!(seen, warband, "the last opponent's warband is the seen board");
+    assert_eq!(mine.last_opponent, Some(bgcore::Opponent::Player(1)));
+    let next: Vec<CardId> = mine.next_board.iter().map(|m| m.card).collect();
+    assert_eq!(next, warband, "and the next opponent's warband I Spy reads");
+    assert_eq!(loaded.game.check_invariants(), Ok(()));
+
+    // Bob's Burgles copies the warband into the Tavern, made fresh.
+    let mut game = loaded.game.clone();
+    game.step(Action::HeroPower).expect("the press is legal with a warband");
+    let mut dealt: Vec<CardId> = game.players[bgcore::shop_replay::ME]
+        .shop
+        .iter()
+        .map(|m| m.card)
+        .collect();
+    dealt.sort();
+    let mut want = warband.to_vec();
+    want.sort();
+    assert_eq!(dealt, want);
+    assert!(
+        game.players[bgcore::shop_replay::ME]
+            .shop
+            .iter()
+            .all(|m| m.pool_copies == 0),
+        "plain copies, made fresh"
+    );
+    assert_eq!(game.check_invariants(), Ok(()));
+
+    // A state without the key: no warband to copy, and the power cannot be
+    // pressed (the game's own rule: "if that board was empty").
+    let without = file_of("");
+    let loaded = load(
+        &data,
+        &without.turns[0].start,
+        without.hero(&data, &without.turns[0].start),
+        without.lobby(),
+        without.turns[0].turn,
+        1,
+        None,
+    );
+    let mine = &loaded.game.players[bgcore::shop_replay::ME];
+    assert_eq!(mine.last_opponent, None);
+    assert!(mine.seen[1].board.is_empty(), "no seen board");
+    assert!(mine.next_board.is_empty(), "no next warband");
+    let mut game = loaded.game.clone();
+    assert!(!game.is_legal(Action::HeroPower), "the press has nothing to copy");
+    assert!(game.step(Action::HeroPower).is_err());
 }
 
 /// A file written before the new keys existed still loads: no counters, no

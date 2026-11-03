@@ -16,13 +16,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use arrayvec::ArrayVec;
 use serde::Deserialize;
 
 use crate::cards::{Effect, Tribe};
 use crate::fight_check::{
     SeatMode, seat_power as fight_seat_power, seat_secrets, seat_trinkets,
 };
-use crate::game::Player;
+use crate::game::{Opponent, Player};
 use crate::minion::Minion;
 use crate::real_boards::{
     CardIdMap, RealBoard, RealCounters, RealMinionSpec, RealPowerSpec, RealTrinketSpec,
@@ -240,6 +241,17 @@ pub struct ShopStateSpec {
     /// your last combat" (Tortollan Blue Shell) read. None on a first turn.
     #[serde(default)]
     pub won_last_combat: Option<bool>,
+    /// The warband of the opponent I last fought, as the log last showed it
+    /// in combat: the board that went into the fight, before start-of-combat
+    /// effects, in the shape `board` has. It is the seen board of the last
+    /// opponent (`Player.seen`, which Bob's Burgles and Time Thief copy from)
+    /// and the closest board the file has to the next opponent's warband for
+    /// I Spy (`Player.next_board`): the log writes the next opponent's board
+    /// only after their own shop phase, so no state can hold it. None before
+    /// the first fight, and in a file written before the collector read it;
+    /// then the powers that copy a warband have nothing to copy.
+    #[serde(default)]
+    pub last_opponent_board: Option<Vec<ShopMinionSpec>>,
 }
 
 /// Where a step's card or target sits, as the file writes it.
@@ -666,6 +678,11 @@ fn engine_shop_slot(state: &ShopStateSpec, slot: u8) -> usize {
 /// The player index every replay loads into: a sandbox game with one player.
 pub const ME: usize = 0;
 
+/// The seat the loaded last opponent sits in: any slot but `ME`, whose others
+/// are dead and empty in a sandbox game. Nothing plays them: the seat only
+/// holds the warband a power copies.
+const THEM: usize = 1;
+
 /// Build the engine's game from a logged state: the board, the hand and the
 /// Tavern, Gold, the Tavern tier and its upgrade price, the free Refreshes and
 /// the freeze, Health and armor, the player-level numbers, the hero power, the
@@ -897,6 +914,27 @@ pub fn load(
         pl.take_real_counters_public(&counters);
         // `take_real_counters` leaves it alone: only a shop step reads it.
         pl.golden_played = counters.golden_played.max(shown);
+    }
+    // The warband of the opponent I last fought (`last_opponent_board`): the
+    // engine keeps it as the seen board of the last opponent, which Bob's
+    // Burgles and Time Thief copy from, and as the next opponent's warband,
+    // which is the best the file can do for I Spy (see the field's own note).
+    // A card the pool cannot build is left out: a warband is copied by card,
+    // and nothing else reads it.
+    if let Some(specs) = spec.last_opponent_board.as_ref() {
+        let mut theirs: ArrayVec<Minion, BOARD> = ArrayVec::new();
+        for m in specs {
+            let (minion, bad) = build_minion(data, m, turn);
+            if bad.is_none() {
+                let _ = theirs.try_push(minion);
+            }
+        }
+        if !theirs.is_empty() {
+            let pl = &mut game.players[ME];
+            pl.last_opponent = Some(Opponent::Player(THEM as u8));
+            pl.seen[THEM].board = theirs.clone();
+            pl.next_board = theirs;
+        }
     }
 
     // The hero power and the trinkets, through the loader the fight check uses.
