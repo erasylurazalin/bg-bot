@@ -148,8 +148,12 @@ Gifts) and takes nothing from the pool.
 - The Perfect Crime: steals the Tavern's cards left to right (at most 7,
   the spell included). When the hand is full, the rest are not added: they
   disappear. Steals, so no buy triggers.
-- The Galaxy's Lens, The Perfect Crime: the next press costs 1 less at the
-  end of each turn, stacking down to 0. The Lens's copy is made fresh.
+- The Perfect Crime: the next press costs 1 less at the end of each turn,
+  stacking down to 0.
+- The Galaxy's Lens: a press puts the price back to its full 3; at the start
+  of each later turn it costs 1 less, down to 0. It is a start-of-turn
+  change, not an end-of-turn effect, so Drakkari Enchanter does nothing to
+  it (Era, 2026-11-03). The Lens's copy is made fresh.
   "The last Tavern spell you cast" reaches back into earlier turns, over
   the whole game. With Ancient Wishbone the power triggers twice, so one
   press gives two copies (Era, 2026-11-03).
