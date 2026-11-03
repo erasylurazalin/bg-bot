@@ -1,6 +1,6 @@
 //! `bgbench check-actions`: how many turns of the action files add up.
 //!
-//! A port of `~/projects/bg-bot/tools/check_actions.py`. Each file holds one
+//! Ported from the Python `tools/check_actions.py` (removed 2026-11-03). Each file holds one
 //! game and, per turn, the state I started with, every step I took and the state
 //! I ended with (`docs/real-boards.md` "The action file"). Two things are
 //! checked for every turn, with nothing from our engine:

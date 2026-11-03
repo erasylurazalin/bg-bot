@@ -1,8 +1,8 @@
 //! `bgbench collect-actions`: my shop turns from the real logs, one JSON file
 //! per game.
 //!
-//! A port of `~/projects/bg-bot/tools/collect_actions.py`, which a systemd user
-//! timer (`bg-boards.timer`) still runs until the switch-over. It reads the logs
+//! Ported from the Python `tools/collect_actions.py` (removed 2026-11-03). It
+//! is run by hand, not by a timer. It reads the logs
 //! the way `collect-boards` does (the same games, numbered the same way), follows
 //! the shop phase turn by turn, and writes what I did there:
 //!
@@ -16,8 +16,7 @@
 //!                           [--laptop DIR] [--rewrite]
 //!
 //! `--out` is where the files and the `.state.json` incremental state go
-//! (`boards/actions` by default, which is Era's live folder and the Python's
-//! until phase 5, so a run of this command names a scratch folder), `--rewrite`
+//! (`boards/actions` by default, Era's live folder), `--rewrite`
 //! reads every log even when the state says it was read already, and the
 //! printed lines are the Python's own:
 //! one per log, with the number of games, the step kinds it wrote and what the

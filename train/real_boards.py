@@ -1,7 +1,7 @@
 """Load the boards from Era's real games for training (docs/real-boards.md).
 
 Reads every board file in boards/real/ (one JSON file per game, written by
-tools/collect_boards.py; load whatever is there when a run starts, new games
+`bgbench collect-boards`; load whatever is there when a run starts, new games
 arrive every 15 minutes), maps every minion's card id to a card name through
 ref/bg-cards.json (a golden id, the game's `_G` and TB_BaconUps_* forms, maps
 to the base card's name and sets golden), and prints what was loaded: boards

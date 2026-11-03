@@ -1,27 +1,28 @@
 # Real boards from my games
 
-`tools/collect_boards.py` keeps the boards from every Battlegrounds game I
+`bgbench collect-boards` (`crates/bgbench/src/collect_boards.rs`, on the log
+reader in `crates/bglog`) keeps the boards from every Battlegrounds game I
 play. The game writes each game to `Logs/Hearthstone_<date>/Power.log`
-whether or not the tracker runs, and deletes old log folders after a few
-sessions, so the script first copies them to `~/bg-logs/`. Then it reads
-each new or grown log with the tracker's parser (`~/projects/bg`) and writes
-one file per game to `boards/real/<log folder>-g<N>.json` (git-ignored).
+whether or not a tracker runs, and deletes old log folders after a few
+sessions, so the command first copies them to `~/bg-logs/`. Then it reads
+each new or grown log and writes one file per game to
+`boards/real/<log folder>-g<N>.json` (git-ignored). `boards/real/.state.json`
+maps each log folder to the size of the `Power.log` last read from it, so a
+rerun only reads logs that are new or grown; delete it to rewrite every file.
+`--out DIR` is where the files and the state go (`boards/real` by default) and
+`--no-archive` skips the copy into `~/bg-logs`.
 
-The same collector is also a Rust subcommand now, `bgbench collect-boards`
-(`crates/bgbench/src/collect_boards.rs`, on the Rust log reader in
-`crates/bglog`): the same files, the same archive, the same
-`<out>/.state.json` (log folder name to the size of the `Power.log` last read
-from it, so a rerun only reads logs that are new or grown; delete it to
-rewrite every file). `--out DIR` is where the files and the state go
-(`boards/real` by default) and `--no-archive` skips the copy into `~/bg-logs`.
-The one thing it writes differently is `dark_gifts`: `bglog` counts a Dark
-Gift once per copy (a golden that kept the same gift twice carries two, and
-the "+0/+0" buff a gift leaves is not a gift, see `gifts_by_minion`), where
-the Python keeps one id per gift. Until the switch-over (phase 5) the timer
-still runs the Python script, so run the subcommand by hand, with
-`--no-archive --out` on a scratch folder.
+A minion's `dark_gifts` lists a gift once per copy: a golden that kept the
+same gift from two copies carries it twice, and the "+0/+0" buff a gift leaves
+is not a gift (`gifts_by_minion` in `crates/bglog/src/views.rs`). The Python
+collector this replaced (until 2026-11-03) kept one id per gift; every file
+was rewritten with the Rust command that day (the old files are in
+`~/bg-backups/boards-before-rust-20261103.tar.gz`).
 
-A systemd user timer runs the Python script every 15 minutes:
+A systemd user timer runs it every 15 minutes, from a copy of the release
+binary at `~/.local/bin/bgbench-collect`, so a rebuild of `target/` never
+breaks a run. After changing the collector, copy the new binary there:
+`cargo build --release -p bgbench && cp target/release/bgbench ~/.local/bin/bgbench-collect`.
 
 ```
 systemctl --user list-timers bg-boards.timer    # when it runs next
@@ -140,27 +141,21 @@ by the game): 566 boards carry counters, 379 a hand, 486 a Deity.
 
 ## The action file
 
-`tools/collect_actions.py` reads the same logs for the other half of a game:
+`bgbench collect-actions` reads the same logs for the other half of a game:
 what I did in every shop phase, as named steps. It writes
 `boards/actions/<log folder>-g<N>.json`, numbered exactly like `boards/real/`
-(56 games, 650 turns, 14,247 steps in `boards/actions` on 2026-11-03; the
-folders grow every 15 minutes). It keeps its own `.state.json` and
-skips a log whose size has not changed; `--rewrite` reads them all again. A run
-is about a minute. No player names are stored.
+(62 games, 717 turns, 15,674 steps in `boards/actions` on 2026-11-03; the
+board folder grows every 15 minutes). It keeps its own `.state.json` and
+skips a log whose size has not changed; `--rewrite` reads them all again. A
+full run is about 30 seconds. No player names are stored. No timer runs it: run
+`./target/release/bgbench collect-actions` by hand before a shop replay.
 
-`bgbench collect-actions` is the same command in Rust
-(`crates/bgbench/src/collect_actions.rs`): the same files from the same logs,
-byte for byte but for the Dark Gift count below, its own `.state.json` in its
-`--out` folder (also
-`boards/actions` by default, which must not be written while the Python still
-owns it), `--rewrite`, and the same printed line per log. Read over every log in
-the archive on 2026-11-03 it writes 62 games, 717 turns and 15,674 steps; the
-six games it has and `boards/actions` does not are the newest log's five and the
-laptop's `Hearthstone_2026_11_02_17_12_47`, which the timer has not reached.
-A difference it keeps on purpose: a minion that carries the same Dark Gift twice
-(two gift cards gave it) lists the gift twice, where the Python listed one id per
-gift (docs/ENGINE.md, `gifts_by_minion`). Two golden minions in those logs carry
-one of their gifts twice.
+The command is `crates/bgbench/src/collect_actions.rs`, ported from the
+Python `tools/collect_actions.py` (removed 2026-11-03), which wrote the same
+files byte for byte but for one thing: a minion that carries the same Dark
+Gift twice (two gift cards gave it) lists the gift twice, where the Python
+listed one id per gift (`gifts_by_minion`). On 2026-11-03 every file was
+rewritten with it: 62 games, 717 turns, 15,674 steps.
 
 ```json
 {"source": "Hearthstone_2026_10_24_04_08_00", "game": 1,
@@ -305,14 +300,13 @@ Every step says what it was and, where there is one, on which card or slot:
   game but two: one turn I took no step in, and one change the game made after
   my last step.
 
-`tools/check_actions.py` reads the files back with nothing from our engine and
+`bgbench check-actions` reads the files back with nothing from our engine and
 adds every turn up: the Gold the steps took against the Gold the turn started
 and ended with (and Health the same way), and my hand and board at the end
 against the start plus everything the steps moved. On the logs read for this
 round (2026-11-03, 62 games) it finds 715 of 717 turns balancing (99.7%); the
-two that do not are turns the log ends inside, before the fight. Its port is
-`bgbench check-actions [--verbose] [PATTERN] [--actions DIR]`, which prints the
-same summary; `--actions` is ours (the Python reads `boards/actions` only).
+two that do not are turns the log ends inside, before the fight. Usage:
+`bgbench check-actions [--verbose] [PATTERN] [--actions DIR]`.
 
 Every price the client printed that the steps did not pay as printed is named
 by the file but one: a free Refresh in one of the new games, which the log
@@ -467,7 +461,7 @@ with what the real game did. It is a bug finder like the fight check
 
 Defaults: `boards/actions`, 64 seeds, `boards/checks` (git-ignored), no card
 filter. It needs no `ref/bg-cards.json`: the file names every card it writes.
-Every step in the folder (56 games, 650 turns, 14,247 steps in
+Every step in the folder (62 games, 717 turns, 15,674 steps in
 `boards/actions` on 2026-11-03) takes about two seconds on 32 cores: every seed
 of a random step is run, since any of them may be the log's.
 

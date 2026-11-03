@@ -69,11 +69,10 @@ crates/
                       sandbox.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix,
                       `bgbench collect-boards` (Era's board files),
-                      `bgbench collect-actions` and `bgbench check-actions` (his
-                      shop actions: src/collect_actions.rs, src/check_actions.rs,
-                      ports of tools/collect_boards.py, tools/collect_actions.py
-                      and tools/check_actions.py; bg-boards.timer still runs the
-                      Python for the boards until phase 5)
+                      `bgbench collect-actions` and `bgbench check-actions` (Era's
+                      shop actions: src/collect_actions.rs, src/check_actions.rs;
+                      bg-boards.timer runs collect-boards from
+                      ~/.local/bin/bgbench-collect)
   bglog/              Power.log reading, a port of the tracker's Python
                       (docs/briefs/log-reader.md): the parser and entity table
                       (src/parser.rs, game.rs, entity.rs), the Battlegrounds views

@@ -1,7 +1,7 @@
 //! `bgbench collect-boards`: Era's real boards, one JSON file per game.
 //!
-//! A port of `~/projects/bg-bot/tools/collect_boards.py`, which a systemd user
-//! timer (`bg-boards.timer`) still runs until the switch-over. The game writes
+//! Ported from the Python `tools/collect_boards.py` (removed 2026-11-03); a
+//! systemd user timer (`bg-boards.timer`) runs it every 15 minutes. The game writes
 //! every Battlegrounds game to `Logs/Hearthstone_<date>/Power.log` and deletes
 //! old log folders after a few sessions, so the command first copies the log
 //! folders into `~/bg-logs/` (`--no-archive` skips that), then reads every new
