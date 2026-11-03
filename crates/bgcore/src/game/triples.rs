@@ -110,10 +110,15 @@ impl Game {
                 && wild_of(w)
                     .is_some_and(|t| cards.get(x).tribes.has(t) || copies_of_tribe(x, n, t))
         };
-        // Designer Eyepatch: two copies of a Pirate make it Golden. Double
-        // Time: two copies of anything.
+        // Designer Eyepatch: two copies of a Pirate make it Golden, so both
+        // copies the pair would use have to be Pirates, by their printed card
+        // or through a Dark Gift (the Amalgamation on a minion with no type:
+        // Era, 2026-11-03, docs/notes/UNSURE.md). Double Time: two copies of
+        // anything.
         let need = if pl.double_time.is_some()
-            || (pl.tp.pirate_triple && cards.get(card).tribes.has(Tribe::Pirate))
+            || (pl.tp.pirate_triple
+                && (cards.get(card).tribes.has(Tribe::Pirate)
+                    || copies_of_tribe(card, 2, Tribe::Pirate)))
         {
             2
         } else {
@@ -144,13 +149,6 @@ impl Game {
             // the card plus this wildcard first, then one plus two wildcards.
             let n_w = stand_ins(card);
             let pool_ids = 0..cards.cards.len() as CardId;
-            let need = if pl.double_time.is_some()
-                || (pl.tp.pirate_triple && cards.get(card).tribes.has(Tribe::Pirate))
-            {
-                2usize
-            } else {
-                3usize
-            };
             let x = pool_ids
                 .clone()
                 .find(|&x| can_stand_in(card, x, need - 1) && copies(x) + 1 >= need && n_w >= 1)

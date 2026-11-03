@@ -2689,6 +2689,63 @@ fn designer_eyepatch_makes_two_pirates_golden() {
     assert_eq!(hand_of(&g, 0, "Lullabot"), 2, "still two Lullabots");
 }
 
+/// Give the Tavern minion in `slot` a Dark Gift, the way a Dark Discovery's
+/// offer carries one: the buy then lands it in the hand with the gift on it.
+fn gift_shop(g: &mut Game, slot: usize, name: &str) {
+    let i = g
+        .data
+        .gifts
+        .gifts
+        .iter()
+        .position(|x| x.name == name)
+        .unwrap_or_else(|| panic!("no gift {name}"));
+    let turn = g.turn.max(1);
+    let mut m = g.players[0].shop[slot];
+    bgcore::game::darkgifts::land_gift(&g.data, &g.players[0], &mut m, i, turn);
+    g.players[0].shop[slot] = m;
+}
+
+#[test]
+fn designer_eyepatch_needs_both_copies_to_be_pirates() {
+    // Era, 2026-11-03 (docs/notes/UNSURE.md): the pair is two copies of a
+    // Pirate only when both copies are, by their printed card or through the
+    // Amalgamation Dark Gift.
+    let mut g = game(97);
+    take(&mut g, 0, "Designer Eyepatch");
+    let a = put_on_board(&mut g, 0, "Titus Rivendare");
+    assert!(g.give_gift(0, a, "Amalgamation", 9), "the board copy is every type");
+    set_shop(&mut g, 0, &["Titus Rivendare"]);
+    gift_shop(&mut g, 0, "Amalgamation");
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    let golden = g
+        .players[0]
+        .hand
+        .iter()
+        .find(|m| m.golden)
+        .copied()
+        .expect("two gifted copies are a pair");
+    assert_eq!(g.data.cards.get(golden.card).name, "Titus Rivendare");
+    assert_eq!(golden.pool_copies, 2, "both copies are in it");
+    assert!(g.players[0].board.is_empty());
+    g.check_invariants().unwrap();
+    // A gifted copy and a plain one are no pair.
+    let mut g = game(98);
+    take(&mut g, 0, "Designer Eyepatch");
+    put_on_board(&mut g, 0, "Titus Rivendare");
+    set_shop(&mut g, 0, &["Titus Rivendare"]);
+    gift_shop(&mut g, 0, "Amalgamation");
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    assert!(
+        g.players[0].hand.iter().chain(&g.players[0].board).all(|m| !m.golden),
+        "one Pirate copy and one plain copy do not pair"
+    );
+    assert_eq!(hand_of(&g, 0, "Titus Rivendare"), 1, "the bought copy stays");
+    assert_eq!(g.players[0].board.len(), 1, "the plain copy stays");
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn goldenizer_supply_hands_out_the_spell_every_three_turns() {
     let mut g = game(96);
