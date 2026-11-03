@@ -30,6 +30,8 @@ use bgcore::{
 use rayon::prelude::*;
 use serde::Deserialize;
 
+mod check_actions;
+mod collect_actions;
 mod collect_boards;
 mod powerlog;
 mod tracker;
@@ -727,6 +729,8 @@ fn main() {
         }
         Some("powerlog") => powerlog::run(&args),
         Some("tracker") => tracker::run(&args),
+        Some("check-actions") => check_actions::run(&args),
+        Some("collect-actions") => collect_actions::run(&args),
         Some("collect-boards") => collect_boards::run(&args),
         Some("games") => bench_games(num(10), real),
         Some("fuzz") => fuzz(num(10_000), real),
@@ -740,6 +744,8 @@ fn main() {
                  \x20      bgbench powerlog FILE [--out FILE] [--time]\n\
                  \x20      bgbench tracker FILE [--out FILE] [--cards FILE] [--time]\n\
                  \x20      bgbench collect-boards [--out DIR] [--cards FILE] [--no-archive]\n\
+                 \x20      bgbench collect-actions [--out DIR] [--cards FILE] [--rewrite]\n\
+                 \x20      bgbench check-actions [--verbose] [PATTERN] [--actions DIR]\n\
                  \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N]"
             );
             std::process::exit(2);

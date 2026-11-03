@@ -1,4 +1,4 @@
-//! Card ids to card names.
+//! Card ids to card names and tribes.
 //!
 //! The tracker's `card_name()` asks python-hearthstone's `cardxml` for the name
 //! of every card it prints, and falls back to the card id for an id no data has
@@ -11,10 +11,28 @@
 
 use std::collections::HashMap;
 
-/// Card ids to names, with the card id itself for an id no data has.
+/// The ten tribes, named the way the engine spells them, from the card data's
+/// race names (the tracker's `TRIBE_NAMES`).
+const TRIBES: [(&str, &str); 10] = [
+    ("beast", "beast"),
+    ("dragon", "dragon"),
+    ("murloc", "murloc"),
+    ("demon", "demon"),
+    ("pirate", "pirate"),
+    ("elemental", "elemental"),
+    ("undead", "undead"),
+    ("quilboar", "quilboar"),
+    ("aberration", "aberration"),
+    // The data spells it `MECHANICAL` and the engine `mech`.
+    ("mechanical", "mech"),
+];
+
+/// Card ids to names and tribes, with the card id itself for a name no data
+/// has.
 #[derive(Clone, Debug, Default)]
 pub struct Cards {
     names: HashMap<String, String>,
+    tribes: HashMap<String, Vec<String>>,
 }
 
 impl Cards {
@@ -32,21 +50,49 @@ impl Cards {
             id: String,
             #[serde(default)]
             name: Option<String>,
+            #[serde(default)]
+            race: Option<String>,
+            #[serde(default)]
+            races: Option<Vec<String>>,
         }
         let raw: Vec<RawCard> = serde_json::from_str(json).map_err(|e| e.to_string())?;
         let mut names = HashMap::with_capacity(raw.len());
+        let mut tribes = HashMap::new();
         for card in raw {
             if let Some(name) = card.name {
-                names.insert(card.id, name);
+                names.insert(card.id.clone(), name);
+            }
+            // `races` holds every tribe of a card and `race` the first, so the
+            // array is the one to read when the data has it.
+            let races = card.races.or(card.race.map(|race| vec![race]));
+            let tribes_of: Vec<String> = races
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|race| tribe(race))
+                .map(str::to_string)
+                .collect();
+            if !tribes_of.is_empty() {
+                tribes.insert(card.id, tribes_of);
             }
         }
-        Ok(Cards { names })
+        Ok(Cards { names, tribes })
     }
 
     /// Build the table from pairs, for tests.
     pub fn from_pairs<I: IntoIterator<Item = (String, String)>>(pairs: I) -> Cards {
         Cards {
             names: pairs.into_iter().collect(),
+            tribes: HashMap::new(),
+        }
+    }
+
+    /// The card's tribes, as the engine names them, in the order the data
+    /// lists them, or nothing when the card has no tribe the engine knows
+    /// (a spell, a hero, or an id no data has).
+    pub fn tribes(&self, card_id: &str) -> &[String] {
+        match self.tribes.get(card_id) {
+            Some(tribes) => tribes,
+            None => &[],
         }
     }
 
@@ -68,6 +114,15 @@ impl Cards {
     }
 }
 
+/// One race name from the card data, in the engine's spelling.
+fn tribe(race: &str) -> Option<&'static str> {
+    let race = race.to_ascii_lowercase();
+    TRIBES
+        .iter()
+        .find(|(data, _)| *data == race)
+        .map(|(_, tribe)| *tribe)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +140,25 @@ mod tests {
         // No name in the data: the id, as the Python does.
         assert_eq!(cards.name("BG_NONAME"), "BG_NONAME");
         assert_eq!(cards.name("BG27_556_Gpe"), "BG27_556_Gpe");
+    }
+
+    #[test]
+    fn tribes_come_from_the_races_the_data_lists() {
+        let cards = Cards::parse(
+            r#"[{"id": "BG31_808", "name": "Runed Progenitor", "race": "BEAST", "races": ["BEAST"]},
+                {"id": "BG_MULTI", "name": "Two Tribes", "race": "BEAST", "races": ["BEAST", "MURLOC"]},
+                {"id": "BG_OLD", "name": "Race Only", "race": "MECHANICAL"},
+                {"id": "BG_AMALGAM", "name": "All of Them", "races": ["ALL"]},
+                {"id": "BG_SPELL", "name": "A Spell", "type": "SPELL"}]"#,
+        )
+        .unwrap();
+        assert_eq!(cards.tribes("BG31_808"), ["beast"]);
+        assert_eq!(cards.tribes("BG_MULTI"), ["beast", "murloc"]);
+        // The engine's word for the data's `MECHANICAL`.
+        assert_eq!(cards.tribes("BG_OLD"), ["mech"]);
+        // A race the engine has no tribe for, a spell, and an id no data has.
+        assert!(cards.tribes("BG_AMALGAM").is_empty());
+        assert!(cards.tribes("BG_SPELL").is_empty());
+        assert!(cards.tribes("BG_NOWHERE").is_empty());
     }
 }

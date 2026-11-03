@@ -68,6 +68,12 @@
 //! Python kept one per gift id. A minion that kept the same gift twice carries
 //! two. The buffs a gift leaves ("+0/+0." and the like) are not gifts.
 //!
+//! The options the client offered me, the ones I took, and the cards of a
+//! Discover or a Choose One are not in the power log: [`Options`] and
+//! [`Choice`] keep what the client prints about them, and [`Handler::line`]
+//! hands every such line over. [`Block`] carries a block's target, which the
+//! power log prints but nothing else reads.
+//!
 //! Card names come from [`Cards`], read from `ref/hsjson-cards.json`
 //! (git-ignored); an id no data names prints as itself, as the Python's
 //! `card_name` does.
@@ -75,6 +81,7 @@
 mod cards;
 mod entity;
 mod game;
+mod options;
 mod parser;
 mod tracker;
 mod views;
@@ -82,7 +89,8 @@ mod views;
 pub use cards::Cards;
 pub use entity::{Entity, TagValue};
 pub use game::Game;
-pub use parser::{Handler, PowerLog};
+pub use options::{Choice, Offer, Options, Ref, choice_start, pick_start, taken};
+pub use parser::{Block, Handler, PowerLog};
 pub use tracker::{Snapshot, Tracker};
 pub use views::{
     Board, DEITY_MINIONS, Deity, Fight, GIFT_TAG, HERO_ENCHANTMENTS, HeroPower, KEYWORDS,

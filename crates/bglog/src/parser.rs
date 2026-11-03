@@ -7,16 +7,19 @@
 //! time through `PowerTaskList`, later, as the client animates it, and we want
 //! the earliest copy.
 //!
-//! A [`Handler`] hears about the four moments the Battlegrounds layer cares
-//! about (a new game, a tag change, a block opening and closing). The handler
-//! is passed to each call rather than held by the reader, so a layer that
-//! owns the reader can keep the handler as a separate value: it gets the block
-//! depth as an argument, so it never has to look back into the reader.
+//! A [`Handler`] hears about the moments the Battlegrounds layer cares about (a
+//! game ending and another starting, a tag change, a block opening and
+//! closing), and about every other `GameState` call the client prints, which is
+//! where the options it offered and the ones I took are written down. The
+//! handler is passed to each call rather than held by the reader, so a layer
+//! that owns the reader can keep the handler as a separate value: it gets the
+//! block depth as an argument, so it never has to look back into the reader.
 
 use std::io::{self, BufRead};
 
 use crate::entity::TagValue;
 use crate::game::Game;
+use crate::options::Ref;
 
 /// The moments the reader reports.
 ///
@@ -52,20 +55,19 @@ pub trait Handler {
     }
 
     /// A block opened. `depth` counts the blocks open now, this one included.
-    /// `entity` is the block's `Entity=`, which may name an entity no line has
-    /// created yet (the reader makes it); `None` when the block's line could
-    /// not be read, though a block still opened.
-    fn block_start(
-        &mut self,
-        game: &mut Game,
-        depth: usize,
-        block_type: &str,
-        entity: Option<i32>,
-    ) {
-    }
+    fn block_start(&mut self, game: &mut Game, depth: usize, block: Block<'_>) {}
 
     /// A block closed. `depth` counts the blocks still open.
     fn block_end(&mut self, game: &mut Game, depth: usize) {}
+
+    /// A `GameState` call that is neither the power log nor the game's header:
+    /// the options the client offers, the option and the card I pick, the
+    /// power lists it prints around them, and the rest.
+    ///
+    /// `body` is the line as printed, indentation and all, since the dumps are
+    /// told apart by how far they are indented. `game` is `None` until the log
+    /// has started a game, and then nothing is reported, as in the Python.
+    fn line(&mut self, game: Option<&mut Game>, call: &str, body: &str) {}
 }
 
 /// Turns log lines into a live [`Game`]: the parser state and the latest game.
@@ -101,6 +103,9 @@ impl PowerLog {
         match split_line(line) {
             Some((Kind::Power, body)) => self.power(body, handler),
             Some((Kind::Header, body)) => self.header(body),
+            Some((Kind::Call(call), body)) => {
+                handler.line(self.game.as_mut(), call, body);
+            }
             None => {}
         }
     }
@@ -176,9 +181,17 @@ impl PowerLog {
             // Battlegrounds layer keeps its own stack in step with this depth.
             self.depth += 1;
             let depth = self.depth;
-            if let Some((block_type, entity)) = block_start(body) {
+            if let Some((kind, entity, target)) = block_line(body) {
                 let entity = resolve(game, entity);
-                handler.block_start(game, depth, block_type, entity);
+                handler.block_start(
+                    game,
+                    depth,
+                    Block {
+                        kind,
+                        entity,
+                        target,
+                    },
+                );
             }
         } else if body == "BLOCK_END" {
             self.depth = self.depth.saturating_sub(1);
@@ -274,16 +287,23 @@ fn learn_name(game: &mut Game, name: &str) -> Option<i32> {
 }
 
 /// Which kind of `GameState.` line this is.
-enum Kind {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind<'a> {
     /// `DebugPrintPower`: the game itself.
     Power,
     /// `DebugPrintGame`: the game's header.
     Header,
+    /// Any other call the client prints, by name: the options it offers, the
+    /// pick I make, and the power lists and debug dumps around them.
+    Call(&'a str),
 }
 
-/// `D <timestamp> GameState.DebugPrintPower() - <body>`: the kind of line and
-/// its body without the indentation.
-fn split_line(line: &str) -> Option<(Kind, &str)> {
+/// `D <timestamp> GameState.<call>() - <body>`: the kind of line and its body.
+///
+/// A power or header line is trimmed, since the client puts no indentation
+/// under those. Any other call keeps its body as printed: the dumps are
+/// indented, and that indentation is how their lines are told apart.
+fn split_line(line: &str) -> Option<(Kind<'_>, &str)> {
     let line = line.trim_end_matches(['\r', '\n']);
     let rest = line.strip_prefix("D ")?;
     let timestamp = rest.find(' ')?;
@@ -291,13 +311,19 @@ fn split_line(line: &str) -> Option<(Kind, &str)> {
         return None;
     }
     let rest = rest[timestamp + 1..].strip_prefix("GameState.")?;
-    if let Some(body) = rest.strip_prefix("DebugPrintPower() - ") {
-        return Some((Kind::Power, body.trim()));
+    let (call, body) = rest.split_once("() - ")?;
+    if call.is_empty()
+        || !call
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return None;
     }
-    if let Some(body) = rest.strip_prefix("DebugPrintGame() - ") {
-        return Some((Kind::Header, body.trim()));
-    }
-    None
+    Some(match call {
+        "DebugPrintPower" => (Kind::Power, body.trim()),
+        "DebugPrintGame" => (Kind::Header, body.trim()),
+        other => (Kind::Call(other), body),
+    })
 }
 
 /// `PlayerID=<id>, PlayerName=<name>`: the header's line for one player.
@@ -324,9 +350,32 @@ fn tag_line(body: &str) -> Option<(&str, TagValue)> {
     Some((tag, TagValue::parse(value)))
 }
 
-/// `BLOCK_START BlockType=<type> Entity=<ref> EffectCardId=...`: the block's
-/// type and the entity reference.
-fn block_start(body: &str) -> Option<(&str, &str)> {
+/// A block the log has just opened.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Block<'a> {
+    /// `BlockType=`: `PLAY`, `MOVE_MINION`, `TRIGGER` and the rest.
+    pub kind: &'a str,
+    /// `Entity=`: the entity the block acts on, resolved to the number the
+    /// reader keeps. It may name an entity no line has created yet, since the
+    /// reader makes one for a bare number.
+    pub entity: Option<i32>,
+    /// `Target=`: what the block is aimed at, as the line spells it out, or
+    /// `None` when the line names nothing or could not be read.
+    ///
+    /// The target is not added to the game, because the Python's Battlegrounds
+    /// layer does not add it either: it is read only by a layer that works out
+    /// what an action did, and that layer looks the entity up itself.
+    pub target: Option<Ref>,
+}
+
+/// `BLOCK_START BlockType=<type> Entity=<ref> EffectCardId=<card>
+/// EffectIndex=<n> Target=<ref> SubOption=<n>`: the block's type, the entity
+/// reference and its target.
+///
+/// Both references run to a fixed word after them, so the log's greedy
+/// `(.+?)` fields are cut at the first word that leaves the rest of the line
+/// well formed, the way the Python's regex backtracks.
+fn block_line(body: &str) -> Option<(&str, &str, Option<Ref>)> {
     let rest = body.strip_prefix("BLOCK_START BlockType=")?;
     let space = rest.find(' ')?;
     let block_type = &rest[..space];
@@ -338,7 +387,44 @@ fn block_start(body: &str) -> Option<(&str, &str)> {
     if end == 0 {
         return None;
     }
-    Some((block_type, &rest[..end]))
+    let entity = &rest[..end];
+    let rest = &rest[end + " EffectCardId=".len()..];
+    let rest = rest.trim_start_matches(|c: char| !c.is_whitespace());
+    let rest = rest.strip_prefix(" EffectIndex=")?;
+    let rest = signed(rest)?;
+    let rest = rest.strip_prefix(" Target=")?;
+    // The target runs to the ` SubOption=` that leaves the rest of the line
+    // well formed; a later one is tried when an earlier one does not.
+    let mut from = 0;
+    loop {
+        let at = rest[from..].find(" SubOption=")? + from;
+        if sub_option(&rest[at + " SubOption=".len()..]) {
+            return Some((block_type, entity, Ref::parse(&rest[..at])));
+        }
+        from = at + 1;
+    }
+}
+
+/// The tail of a block's line after `SubOption=`: the number, then the
+/// keyword the card may have triggered, then the end of the line.
+fn sub_option(rest: &str) -> bool {
+    let Some(rest) = signed(rest) else {
+        return false;
+    };
+    match rest.strip_prefix(" TriggerKeyword=") {
+        Some(rest) => rest.trim_start_matches(|c: char| !c.is_whitespace()).is_empty(),
+        None => rest.is_empty(),
+    }
+}
+
+/// `-?<digits>` at the start of `rest`, and what follows.
+fn signed(rest: &str) -> Option<&str> {
+    let rest = rest.strip_prefix('-').unwrap_or(rest);
+    let len = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    if len == 0 {
+        return None;
+    }
+    Some(&rest[len..])
 }
 
 /// `TAG_CHANGE Entity=<ref> tag=<tag> value=<value>`, with or without the
@@ -501,15 +587,36 @@ mod tests {
 
     #[test]
     fn other_log_lines_are_not_read() {
-        // The later copy of every line, and the option and choice lines.
+        // The later copy of every line, and lines that are not `GameState.`.
         assert!(
             split_line("D 00:57:53.6478530 PowerTaskList.DebugPrintPower() - CREATE_GAME").is_none()
         );
-        assert!(split_line("D 00:57:53.6478530 GameState.DebugPrintPowerList() - Count=44").is_none());
-        assert!(split_line("D 00:57:53.6478530 GameState.DebugPrintOptions() - id=1").is_none());
         assert!(split_line("not a log line").is_none());
         assert!(split_line("D GameState.DebugPrintPower() - CREATE_GAME").is_none());
         assert!(split_line("").is_none());
+    }
+
+    #[test]
+    fn the_other_gamestate_calls_keep_their_indentation() {
+        let (kind, body) = split_line("D 00:57:53.6478530 GameState.DebugPrintOptions() - id=1")
+            .unwrap();
+        assert!(matches!(kind, Kind::Call("DebugPrintOptions")));
+        assert_eq!(body, "id=1");
+        let (kind, body) = split_line(
+            "D 00:57:53.6478530 GameState.DebugPrintOptions() -   option 0 type=END_TURN mainEntity= error=INVALID errorParam=\r\n",
+        )
+        .unwrap();
+        assert!(matches!(kind, Kind::Call("DebugPrintOptions")));
+        assert_eq!(
+            body,
+            "  option 0 type=END_TURN mainEntity= error=INVALID errorParam="
+        );
+        assert!(matches!(
+            split_line("D 00:57:53.6478530 GameState.DebugPrintPowerList() - Count=44")
+                .unwrap()
+                .0,
+            Kind::Call("DebugPrintPowerList")
+        ));
     }
 
     #[test]

@@ -21,7 +21,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 
-use bglog::{Game, Handler, PowerLog, TagValue};
+use bglog::{Game, Handler, PowerLog, Ref, TagValue};
 
 fn fixture(name: &str) -> String {
     let path = format!("{}/tests/data/{name}", env!("CARGO_MANIFEST_DIR"));
@@ -39,11 +39,12 @@ fn read(name: &str, handler: &mut dyn Handler) -> PowerLog {
 
 /// A block opening or closing, in the order the log had them.
 #[derive(Debug, PartialEq, Eq)]
-enum Block {
+enum BlockEvent {
     Start {
         depth: usize,
         block_type: String,
         entity: Option<i32>,
+        target: Option<Ref>,
     },
     End {
         depth: usize,
@@ -57,7 +58,7 @@ struct Recorder {
     new_games: usize,
     games: Vec<Game>,
     tags: Vec<(i32, String, TagValue)>,
-    blocks: Vec<Block>,
+    blocks: Vec<BlockEvent>,
 }
 
 impl Recorder {
@@ -93,24 +94,19 @@ impl Handler for Recorder {
         self.tags.push((entity, tag.to_string(), value.clone()));
     }
 
-    fn block_start(
-        &mut self,
-        game: &mut Game,
-        depth: usize,
-        block_type: &str,
-        entity: Option<i32>,
-    ) {
+    fn block_start(&mut self, game: &mut Game, depth: usize, block: bglog::Block<'_>) {
         self.keep(game);
-        self.blocks.push(Block::Start {
+        self.blocks.push(BlockEvent::Start {
             depth,
-            block_type: block_type.to_string(),
-            entity,
+            block_type: block.kind.to_string(),
+            entity: block.entity,
+            target: block.target,
         });
     }
 
     fn block_end(&mut self, game: &mut Game, depth: usize) {
         self.keep(game);
-        self.blocks.push(Block::End { depth });
+        self.blocks.push(BlockEvent::End { depth });
     }
 }
 
@@ -202,20 +198,21 @@ fn entities_get_their_card_id_and_tags() {
 fn blocks_report_their_depth() {
     let mut rec = Recorder::default();
     let log = read("blocks.log", &mut rec);
-    let trigger = |depth| Block::Start {
+    let trigger = |depth| BlockEvent::Start {
         depth,
         block_type: "TRIGGER".to_string(),
         entity: Some(1),
+        target: None,
     };
     assert_eq!(
         rec.blocks,
         vec![
             trigger(1),
-            Block::End { depth: 0 },
+            BlockEvent::End { depth: 0 },
             trigger(1),
-            Block::End { depth: 0 },
+            BlockEvent::End { depth: 0 },
             trigger(1),
-            Block::End { depth: 0 },
+            BlockEvent::End { depth: 0 },
             trigger(1),
         ]
     );

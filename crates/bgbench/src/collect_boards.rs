@@ -38,7 +38,7 @@ use serde::Deserializer;
 use bglog::{Cards, Fight, Minion, PLAYER_ENCHANTS, Seat, TagValue, Tracker};
 
 /// The Python's `sys.argv[1:]` handling: a flag's value, or a default.
-fn flag(args: &[String], name: &str, default: &str) -> String {
+pub(crate) fn flag(args: &[String], name: &str, default: &str) -> String {
     args.iter()
         .position(|a| a == name)
         .and_then(|k| args.get(k + 1))
@@ -47,12 +47,12 @@ fn flag(args: &[String], name: &str, default: &str) -> String {
 }
 
 /// The home folder, for the paths the command shares with the Python.
-fn home() -> PathBuf {
+pub(crate) fn home() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
 }
 
 /// A path as a flag value.
-fn text(path: &Path) -> String {
+pub(crate) fn text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
@@ -215,7 +215,7 @@ fn folders(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The `Power.log` of every log folder under `dir`, sorted.
-fn log_files(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn log_files(dir: &Path) -> Vec<PathBuf> {
     folders(dir)
         .into_iter()
         .map(|dir| dir.join("Power.log"))
@@ -226,14 +226,14 @@ fn log_files(dir: &Path) -> Vec<PathBuf> {
 /// The `.state.json` incremental state: log folder name to the size of the
 /// `Power.log` last read from it, in the order the Python wrote it.
 #[derive(Default)]
-struct State {
+pub(crate) struct State {
     entries: Vec<(String, u64)>,
 }
 
 impl State {
     /// The state in `path`, or an empty one when it is missing or unreadable
     /// (the Python's `except (OSError, ValueError): state = {}`).
-    fn read(path: &Path) -> State {
+    pub(crate) fn read(path: &Path) -> State {
         let Ok(text) = fs::read_to_string(path) else {
             return State::default();
         };
@@ -242,7 +242,7 @@ impl State {
             .unwrap_or_default()
     }
 
-    fn get(&self, name: &str) -> Option<u64> {
+    pub(crate) fn get(&self, name: &str) -> Option<u64> {
         self.entries
             .iter()
             .find(|(have, _)| have == name)
@@ -250,14 +250,14 @@ impl State {
     }
 
     /// Set a log's size, keeping a name it already knows in its place.
-    fn set(&mut self, name: String, size: u64) {
+    pub(crate) fn set(&mut self, name: String, size: u64) {
         match self.entries.iter_mut().find(|(have, _)| *have == name) {
             Some(slot) => slot.1 = size,
             None => self.entries.push((name, size)),
         }
     }
 
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         render(&Json::Obj(
             self.entries
                 .iter()
@@ -609,13 +609,13 @@ fn deity(fight: &Fight, index: usize) -> Json {
 
 /// The four `TAG_SCRIPT_DATA_NUM_1..4` slots of a minion, hero power, trinket
 /// or reward, as a JSON array.
-fn numbers_json(numbers: &[i64; 4]) -> Json {
+pub(crate) fn numbers_json(numbers: &[i64; 4]) -> Json {
     Json::Arr(numbers.iter().map(|n| Json::Int(*n)).collect())
 }
 
 /// The `{0} {1} {2} {3}` of a minion's text as the file holds it, or `None`
 /// when it has none.
-fn minion_numbers(tags: &HashMap<String, TagValue>) -> Option<[i64; 4]> {
+pub(crate) fn minion_numbers(tags: &HashMap<String, TagValue>) -> Option<[i64; 4]> {
     let mut sd = [0; 4];
     for (i, slot) in sd.iter_mut().enumerate() {
         *slot = tags
@@ -670,7 +670,9 @@ fn minion_json(m: &Minion, reanimate: bool) -> Json {
 /// A JSON value whose object keys keep the order they were added in, so the
 /// files read as the Python's do (and a diff of the two runs shows only what
 /// differs).
-enum Json {
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) enum Json {
+    #[default]
     Null,
     Bool(bool),
     Int(i64),
@@ -682,7 +684,7 @@ enum Json {
 /// `json.dumps(value, indent=1)`, the Python's own text for the same data:
 /// one space of indent per level, `": "` after a key, `,` and a newline between
 /// items, `{}` and `[]` for empty ones, and every non-ASCII byte escaped.
-fn render(value: &Json) -> String {
+pub(crate) fn render(value: &Json) -> String {
     let mut out = String::new();
     write_json(&mut out, value, 0);
     out

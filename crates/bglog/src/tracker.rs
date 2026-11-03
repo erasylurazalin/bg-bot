@@ -28,7 +28,7 @@ use std::mem;
 use crate::cards::Cards;
 use crate::entity::{Entity, TagValue};
 use crate::game::Game;
-use crate::parser::{Handler, PowerLog};
+use crate::parser::{Block, Handler, PowerLog};
 use crate::views::{
     Board, Deity, Fight, HeroPower, LOCK_AND_LOAD, Reward, Seat, Trinket, UPPER_HAND,
     WINGMEN, board, counts, deity, gem, hand, held_entity, hero_power, hidden_in_hand, one_minion,
@@ -177,6 +177,14 @@ impl Tracker {
     /// Goes up every time something a window would show has changed.
     pub fn version(&self) -> u64 {
         self.version
+    }
+
+    /// The blocks open now, the outermost first: each one's `BlockType` and
+    /// the entity it acts on. A block the log opened but the reader could not
+    /// parse keeps its place with an empty type, so a caller can count the
+    /// nesting the log itself printed.
+    pub fn blocks(&self) -> &[(String, Option<i32>)] {
+        &self.blocks
     }
 
     /// Every seat and fight of the log, the finished games first, ending with
@@ -451,13 +459,7 @@ impl Handler for Tracker {
         }
     }
 
-    fn block_start(
-        &mut self,
-        g: &mut Game,
-        depth: usize,
-        block_type: &str,
-        entity: Option<i32>,
-    ) {
+    fn block_start(&mut self, g: &mut Game, depth: usize, block: Block<'_>) {
         // Keep the open blocks in step with the log's own depth, since a
         // BLOCK_START the reader could not parse still counts there.
         let depth = depth.max(1);
@@ -465,6 +467,8 @@ impl Handler for Tracker {
         while self.blocks.len() < depth - 1 {
             self.blocks.push((String::new(), None));
         }
+        let entity = block.entity;
+        let block_type = block.kind;
         self.blocks.push((block_type.to_string(), entity));
 
         // An Upper Hand cast this turn is a pending Start of Combat trigger,

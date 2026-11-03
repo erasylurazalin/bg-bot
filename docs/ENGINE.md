@@ -68,19 +68,25 @@ crates/
                       the fixture folder in tests/data/actions),
                       sandbox.rs; parser tests build small TOML strings inline
   bgbench/            benchmarks, fuzzer, bot matches, the peak-board balance matrix,
-                      `bgbench collect-boards` (Era's board files, a port of
-                      tools/collect_boards.py; the timer still runs the Python
-                      until phase 5)
+                      `bgbench collect-boards` (Era's board files),
+                      `bgbench collect-actions` and `bgbench check-actions` (his
+                      shop actions: src/collect_actions.rs, src/check_actions.rs,
+                      ports of tools/collect_boards.py, tools/collect_actions.py
+                      and tools/check_actions.py; bg-boards.timer still runs the
+                      Python for the boards until phase 5)
   bglog/              Power.log reading, a port of the tracker's Python
                       (docs/briefs/log-reader.md): the parser and entity table
                       (src/parser.rs, game.rs, entity.rs), the Battlegrounds views
                       (src/views.rs: boards, hands, hero powers, trinkets,
                       rewards, Deity, counters, Dark Gifts, Secrets, Rapid
-                      Reanimation's mark, Upper Hands, the player-level numbers)
-                      and the Tracker that follows a log into fights
-                      (src/tracker.rs); card names from ref/hsjson-cards.json
-                      (src/cards.rs). `bgbench powerlog` and `bgbench tracker`
-                      dump a log, to diff against the Python
+                      Reanimation's mark, Upper Hands, the player-level numbers),
+                      the options and choices the client prints (src/options.rs:
+                      what it offered me, what it offered as a Discover or a
+                      Choose One, and the option I took) and the Tracker that
+                      follows a log into fights (src/tracker.rs); card names and
+                      tribes from ref/hsjson-cards.json (src/cards.rs).
+                      `bgbench powerlog` and `bgbench tracker` dump a log, to diff
+                      against the Python
   bgpy/               PyO3 bindings: a batch of games stepped together
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
@@ -1283,6 +1289,9 @@ cargo build --release -p bgbench
 ./target/release/bgbench peak [n]       # peak boards of each build against each other
 ./target/release/bgbench fightcheck      # play Era's real fights, write boards/checks/
 ./target/release/bgbench shopreplay      # replay Era's real shop steps, write boards/checks/
+./target/release/bgbench collect-boards  # write Era's board files, boards/real/
+./target/release/bgbench collect-actions # write Era's action files, boards/actions/
+./target/release/bgbench check-actions   # add up the turns of boards/actions/
 cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 ```
 
