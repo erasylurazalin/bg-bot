@@ -118,6 +118,10 @@ always afford one. A trinket with no cost in the game data is free.
 - **Weighted Gauntlet:** doubles with no cap (+1, +2, +4...).
 - **Honeycomb Ring:** +1/+1 more this turn per spell cast on a minion.
   **Multilayered Shield:** +1/+2 per different minion type on your board.
+- **Chillmere Mosaic (Era, 2026-11-03):** its Spellcraft Refresh deals
+  only Battlecry minions, and nothing can step into that Refresh: no Fodder
+  refill, no arrivals, no other card joining it. The Battlecry minions it
+  deals cost (1); the Tavern spell keeps its normal price.
 - **Snarky Portrait:** whenever a Fishbait dies, every friendly Beast gets
   +4/+4, and the amount improves by +4/+4 per Fishbait death. On top, the
   Fishbait's own Deathrattle gives its killer (the left-most Beast) +5/+5,

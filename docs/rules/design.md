@@ -540,6 +540,8 @@ summoned later). A 1/1 Skeleton with Reborn then comes back as a 12/4.
   your Beasts is separate and comes on top (docs/rules/trinkets.md).
 - Sprightly Scarab: either option may target a Beast on your board or in the
   Tavern (`in_shop = true` means "the Tavern too").
+- A pick from a Triple Reward is a Discover: "after you Discover a card"
+  fires on it (Hooktusk, Master Marauder). Era's logs show it twice.
 
 **Malchezaar and free Refreshes (Era, 2026-11-02; a bug in the real game
 that we copy).** Malchezaar, Prince of Dance makes two Refreshes each turn

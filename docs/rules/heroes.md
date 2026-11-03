@@ -150,6 +150,9 @@ Gifts) and takes nothing from the pool.
   disappear. Steals, so no buy triggers.
 - The Galaxy's Lens, The Perfect Crime: the next press costs 1 less at the
   end of each turn, stacking down to 0. The Lens's copy is made fresh.
+  "The last Tavern spell you cast" reaches back into earlier turns, over
+  the whole game. With Ancient Wishbone the power triggers twice, so one
+  press gives two copies (Era, 2026-11-03).
 
 **Counters** (all passives repeat; none is once per game unless it says
 so)
@@ -189,7 +192,7 @@ so)
   one option per thrown minion's type: a Demon, a Beast and a Mech give one
   of each; three Mechs give three Mechs.
 - Buried Treasure: digs 1 to 3 give nothing; the 4th gives a golden minion
-  up to your tier.
+  up to your tier, straight into your hand: no Discover (Era, 2026-11-03).
 - Kel'Thuzad's Kitty: Discovers from the dead player's board as it was at
   its last moment (not as you saw it), with all buffs and Dark Gifts;
   goldens can be offered. Heroes die at the end of a fight, so
@@ -282,7 +285,9 @@ so)
 - MechGyver: shop deaths and tokens count; repeats every 9.
 - Glory of Combat: only the minion that attacked and killed gets +1.
 - Demon Hunter Training: once it triggers it stays: the first minion each
-  turn is free. A Windfury minion's second attack counts.
+  turn is free. A Windfury minion's second attack counts. A free buy
+  spends no Gold ("spend Gold" cards don't see it) and uses exactly one
+  free-buy charge (Era, 2026-11-03).
 - Bloodfury: the portal gives you 2 random Demons at the start of each
   turn.
 - Conviction: after each fight choose one of Defensive Stance (+1 Health),
