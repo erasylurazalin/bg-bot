@@ -1009,3 +1009,38 @@ fn stealth_beats_taunt() {
         assert_eq!(log.attacks[0].2, db.by_name("Flittering Bat").unwrap());
     }
 }
+
+/// "A friendly minion of each type" shares its buffs so that as many minions
+/// as possible get one (Era 2026-11-03, docs/rules/design.md "Types"): a
+/// Demon/Dragon and a Dragon both get a buff on every seed, the dual one as
+/// the Demon. Two Demons share one buff at random.
+#[test]
+fn each_type_buffs_go_to_as_many_minions_as_possible() {
+    use bgcore::cards::pick_one_per_type;
+    use bgcore::{Rng, Tribe, Tribes};
+    let dual = Tribes::of(Tribe::Demon).with(Tribe::Dragon);
+    let dragon = Tribes::of(Tribe::Dragon);
+    let demon = Tribes::of(Tribe::Demon);
+    for seed in 0..500 {
+        let mut rng = Rng::new(seed);
+        let mut got = pick_one_per_type(&[dual, dragon], &mut rng).to_vec();
+        got.sort();
+        assert_eq!(got, vec![0, 1], "seed {seed}");
+        // An Amalgam always gets one, and so does everyone else here.
+        let mut got = pick_one_per_type(
+            &[dragon, demon.with(Tribe::Quilboar), Tribes::of(Tribe::Quilboar),
+              demon.with(Tribe::Elemental), Tribes::ALL, Tribes::NONE],
+            &mut rng,
+        )
+        .to_vec();
+        got.sort();
+        assert_eq!(got, vec![0, 1, 2, 3, 4], "seed {seed}");
+    }
+    let mut first = [0u32; 2];
+    for seed in 0..400 {
+        let got = pick_one_per_type(&[demon, demon], &mut Rng::new(seed));
+        assert_eq!(got.len(), 1);
+        first[got[0]] += 1;
+    }
+    assert!(first[0] > 100 && first[1] > 100, "two Demons share at random: {first:?}");
+}

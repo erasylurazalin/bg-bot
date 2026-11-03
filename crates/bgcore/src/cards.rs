@@ -151,43 +151,78 @@ impl Tribes {
 }
 
 /// "Give a friendly minion of each type ..." (Misplaced Tea Set, The Last One
-/// Standing): for each type in turn, one random minion of that type that has
-/// not been picked yet, so every minion gets at most one buff, even a dual or
-/// all-type one. `tribes[i]` is the types of board minion `i`, `Tribes::NONE`
-/// for one that can't be picked (dead). Returns the picked indexes.
+/// Standing): each type on the board goes to a different minion that has it,
+/// so every minion gets at most one buff, even a dual or all-type one, and as
+/// many minions as possible get one: a type is never wasted while another
+/// minion could take it (Era 2026-11-03, docs/rules/design.md "Types"). With
+/// a Demon/Dragon and a Dragon, the Demon/Dragon always takes the Demon buff
+/// and the Dragon the Dragon buff. Among equally good sharings (two Demons)
+/// the pick is random. `tribes[i]` is the types of board minion `i`,
+/// `Tribes::NONE` for one that can't be picked (dead). Returns the picked
+/// indexes.
 ///
-/// An all-type minion (Gatekeeper Amalgam) is a type of its own, "all", and
-/// is picked for that type alone: in Era's log a Tea Set on a board of one
-/// Dragon, one Demon+Quilboar, one Quilboar, one Demon+Elemental and one
-/// Amalgam gives each of the five exactly one buff
-/// (`15_25_26-g1` turn 10 step 24), so the Amalgam is not picked again for a
-/// tribe it also has.
+/// It is a maximum matching of minions to types (augmenting paths, minions
+/// and types tried in random order). An all-type minion (Gatekeeper Amalgam)
+/// needs no special case: with ten types and at most seven minions there is
+/// always a type left for it, so it always gets exactly one buff. Era's log
+/// backs this: all 49 Tea Sets in `15_25_26-g1` turns 10 and 11 gave every
+/// typed minion exactly one buff.
 pub fn pick_one_per_type(tribes: &[Tribes], rng: &mut Rng) -> ArrayVec<usize, BOARD> {
-    let mut picked: ArrayVec<usize, BOARD> = ArrayVec::new();
-    let mut all: ArrayVec<usize, BOARD> = ArrayVec::new();
-    for (i, ts) in tribes.iter().enumerate().take(BOARD) {
-        if *ts == Tribes::ALL {
-            all.push(i);
-        }
-    }
-    if !all.is_empty() {
-        let k = if all.len() == 1 { 0 } else { rng.below(all.len() as u32) as usize };
-        picked.push(all[k]);
-    }
-    for t in Tribe::EVERY {
-        let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
-        for (i, ts) in tribes.iter().enumerate().take(BOARD) {
-            if !picked.contains(&i) && ts.has(t) {
-                ok.push(i);
-            }
-        }
-        if ok.is_empty() {
+    const T: usize = Tribe::EVERY.len();
+    let n = tribes.len().min(BOARD);
+    let mut minions: ArrayVec<usize, BOARD> = (0..n).collect();
+    rng.shuffle(&mut minions);
+    // owner[t]: the minion holding type `t`, if any.
+    let mut owner: [Option<usize>; T] = [None; T];
+    for &m in &minions {
+        let mut types: ArrayVec<usize, T> =
+            (0..T).filter(|&t| tribes[m].has(Tribe::EVERY[t])).collect();
+        if types.is_empty() {
             continue;
         }
-        let k = rng.below(ok.len() as u32) as usize;
-        picked.push(ok[k]);
+        rng.shuffle(&mut types);
+        let mut seen = [false; T];
+        augment(m, tribes, &types, &mut owner, &mut seen);
+    }
+    let mut picked: ArrayVec<usize, BOARD> = ArrayVec::new();
+    for &m in &minions {
+        if owner.contains(&Some(m)) {
+            picked.push(m);
+        }
     }
     picked
+}
+
+/// One augmenting-path step for `pick_one_per_type`: give minion `m` one of
+/// `types` (its own types, in its random order), moving a holder to another
+/// of its types if needed. True if `m` got a type.
+fn augment(
+    m: usize,
+    tribes: &[Tribes],
+    types: &[usize],
+    owner: &mut [Option<usize>; Tribe::EVERY.len()],
+    seen: &mut [bool; Tribe::EVERY.len()],
+) -> bool {
+    for &t in types {
+        if seen[t] {
+            continue;
+        }
+        seen[t] = true;
+        let free = match owner[t] {
+            None => true,
+            Some(o) => {
+                let theirs: ArrayVec<usize, { Tribe::EVERY.len() }> = (0..Tribe::EVERY.len())
+                    .filter(|&u| tribes[o].has(Tribe::EVERY[u]))
+                    .collect();
+                augment(o, tribes, &theirs, owner, seen)
+            }
+        };
+        if free {
+            owner[t] = Some(m);
+            return true;
+        }
+    }
+    false
 }
 
 /// Which Tavern minion a consuming minion takes.

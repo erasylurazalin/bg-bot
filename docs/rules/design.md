@@ -250,6 +250,9 @@ asking Era any rule question.
 - **Battlecries:** Brann counts twice; a Choose One is not a Battlecry
   ("Counting Battlecries").
 - **A minion's cast isn't yours** ("A spell a minion casts for you").
+- **"A minion of each type" (Tea Set):** each minion gets at most one buff,
+  and as many minions as possible get one; random only between equal choices
+  like two Demons ("Types").
 - **Gold:** any spend action of any amount counts; Health payments are
   self-damage, not Gold; a free buy spends nothing ("Spending gold",
   docs/rules/trinkets.md).
@@ -413,6 +416,13 @@ picked for such a card uses one of its types at random. "A friendly
 minion of each type" (Misplaced Tea Set) gives each minion at most one
 buff, even a dual or all-type one, and can pick the card itself (The
 Last One Standing). "Each type" means the types on your board.
+The buffs are shared out so that as many minions as possible get one:
+a type is never wasted while another minion could take it (Era,
+2026-11-03). With a Demon/Dragon and a Dragon on board, a Tea Set always
+buffs the Demon/Dragon as the Demon and the Dragon as the Dragon. It is
+random only where the choice doesn't change how many get a buff, as with
+two Demons. Backed by `Hearthstone_2026_10_24_15_25_26-g1` turns 10 and
+11: all 49 Tea Sets buffed every typed minion once.
 
 **Discard** doesn't exist in this lobby (it's Aberration-specific).
 "If you discard this" text does nothing.
