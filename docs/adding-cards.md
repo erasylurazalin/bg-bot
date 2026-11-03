@@ -236,7 +236,7 @@ exactly one legal target and drops the effect when there is none.
 | Dual / all tribes | Treasure Parrot (`tribes = [..]`), `tribe = "all"` | `Tribes` bit set; every filter asks `has` |
 | Effect only while in hand | Bream Counter, Choral Mrrrglr | |
 | Stats that the Tavern can't change | Fishbait (`fixed_stats`) | |
-| A minion that dies in a Tavern attack | Fishbait's Beast | `Game::tavern_attack`: the dead Beasts' pool copies go back to the pool, the survivors keep theirs |
+| A minion that dies in a Tavern attack | Fishbait's Beast | `Game::tavern_attack`: the dead Beasts' pool copies go back to the pool, the survivors keep theirs. A Fishbait that dies there is reported as a one-card death of the attacker's side (`SideOutcome::death_cards`), never as a friendly death |
 
 ## 2b. Adding a hero
 

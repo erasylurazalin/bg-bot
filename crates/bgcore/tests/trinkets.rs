@@ -154,6 +154,17 @@ fn put_on_board(g: &mut Game, p: usize, name: &str) {
     g.players[p].board.push(m);
 }
 
+/// A board minion's current stats, by card name.
+fn stats(g: &Game, name: &str) -> (i32, i32) {
+    let c = id(g, name);
+    let m = g.players[0]
+        .board
+        .iter()
+        .find(|m| m.card == c)
+        .unwrap_or_else(|| panic!("{name} on the board"));
+    (m.attack, m.health)
+}
+
 /// Put a pool minion in hand (a second Murloc for the guarantee, say).
 fn put_in_hand(g: &mut Game, p: usize, name: &str) {
     let c = id(g, name);
@@ -4782,6 +4793,64 @@ fn eternal_portrait_greater_gives_a_golden_knight_and_grows_on_undead_deaths() {
     assert!(da >= 4 && dh >= 2, "the Undead deaths gave every Knight +4/+2 ({da}/{dh})");
     assert_eq!(da % 4, 0, "in +4 steps");
     assert_eq!(dh % 2, 0, "in +2 steps");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn snarky_portraits_fishbait_buffs_every_beast_in_the_tavern() {
+    // A Snarky Shark's sale refreshes the Tavern with a Fishbait in its
+    // left-most slot and the left-most Beast attacks it. The Fishbait's own
+    // Deathrattle gives the killer +5/+5 and the Portrait's rule gives every
+    // Beast +4/+4, then +4 more for the next death (Era, 2026-11-03).
+    let mut g = game_lobby(421, &[Tribe::Beast, Tribe::Pirate]);
+    to_turn(&mut g, 3);
+    take(&mut g, 0, "Snarky Portrait");
+    let slot = slot_of(&g, "Snarky Portrait");
+    assert_eq!(g.players[0].trinkets[slot].value, 4, "the pick starts it at +4/+4");
+    // The Buzzing Vermin (1 Attack) kills the 0/1 Fishbait. The Pirate is no
+    // Beast and takes nothing, which is what the log shows for Sky Admiral
+    // Rogers (Hearthstone_2026_10_28_02_28_32-g5 turn 9 step 9).
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Snarky Shark");
+    put_on_board(&mut g, 0, "Hoarding Hyena");
+    put_on_board(&mut g, 0, "Sky Admiral Rogers");
+    let shark = g.players[0].board.iter().position(|m| m.card == id(&g, "Snarky Shark")).unwrap();
+    act(&mut g, 0, Action::Sell(shark as u8));
+    assert_eq!(stats(&g, "Buzzing Vermin"), (1 + 4 + 5, 1 + 4 + 5), "the killer gets both");
+    assert_eq!(stats(&g, "Hoarding Hyena"), (4 + 4, 6 + 4), "another Beast gets the Portrait's");
+    assert_eq!(stats(&g, "Sky Admiral Rogers"), (4, 5), "a Pirate is no Beast");
+    assert_eq!(g.players[0].trinkets[slot].value, 8, "improved by +4");
+    // A second Fishbait death gives +8/+8: the amount grows, it does not stay.
+    put_on_board(&mut g, 0, "Snarky Shark");
+    let shark = g.players[0].board.iter().position(|m| m.card == id(&g, "Snarky Shark")).unwrap();
+    act(&mut g, 0, Action::Sell(shark as u8));
+    let (a, h) = stats(&g, "Buzzing Vermin");
+    assert_eq!((a, h), (1 + 4 + 5 + 8 + 5, 1 + 4 + 5 + 8 + 5), "the second death's +8/+8 and its +5/+5");
+    assert_eq!(stats(&g, "Hoarding Hyena"), (4 + 4 + 8, 6 + 4 + 8), "and every Beast again");
+    assert_eq!(g.players[0].trinkets[slot].value, 12, "improved again");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_golden_fishbait_gives_its_killer_ten_and_the_portraits_buff_on_top() {
+    let mut g = game_lobby(422, &[Tribe::Beast, Tribe::Pirate]);
+    to_turn(&mut g, 3);
+    take(&mut g, 0, "Snarky Portrait");
+    // A golden Snarky Shark's sale puts a golden Fishbait (0/2) in the Tavern,
+    // and a 5-Attack Beast kills it: +10/+10 to the killer, +4/+4 to every
+    // Beast, which is the log's +14/+14 on the killer.
+    let shark = id(&g, "Snarky Shark");
+    let mut golden = g.players[0].make_card(&g.data.cards, shark, true, 0);
+    golden.golden = true;
+    put_on_board(&mut g, 0, "Turquoise Skitterer");
+    put_on_board(&mut g, 0, "Hoarding Hyena");
+    g.players[0].board.push(golden);
+    let at = g.players[0].board.iter().position(|m| m.card == shark).unwrap();
+    act(&mut g, 0, Action::Sell(at as u8));
+    assert_eq!(stats(&g, "Turquoise Skitterer"), (5 + 10 + 4, 5 + 10 + 4), "+10/+10 and the Portrait's");
+    assert_eq!(stats(&g, "Hoarding Hyena"), (4 + 4, 6 + 4), "the Portrait's alone");
+    let slot = slot_of(&g, "Snarky Portrait");
+    assert_eq!(g.players[0].trinkets[slot].value, 8, "improved by +4");
     g.check_invariants().unwrap();
 }
 

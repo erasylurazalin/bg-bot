@@ -4536,7 +4536,15 @@ pub fn tavern_attack(
     ];
     sides[0].outside = true;
     let me = sides[0].ms[attacker].uid;
+    let target_card = target.card;
     attack_swings(&mut sides, 0, me, db, &mut uid, rng, &mut ());
+    // A Tavern card has no side of its own, so the death of the Fishbait has
+    // to be reported with the attacker's: a trinket that counts one card's
+    // deaths (Snarky Portrait: "Whenever a Fishbait dies") counts this one
+    // like a friendly death in a fight.
+    if sides[1].ms.is_empty() && counters.trinkets.count_deaths {
+        sides[0].out.note_death_card(target_card);
+    }
     TavernAttack {
         board: sides[0].ms.iter().map(|f| f.m).collect(),
         target: sides[1].ms.first().map(|f| f.m),
@@ -4941,5 +4949,21 @@ mod tests {
         weak.attack = 0;
         let out = tavern_attack(&db, &[weak], 0, fishbait, counters, &mut Rng::new(1));
         assert!(out.target.is_some());
+        // A trinket that counts one card's deaths takes this one where the
+        // dead card would report it: the attacker's side (Snarky Portrait
+        // counts Fishbaits that die in the Tavern).
+        let counting = Counters {
+            trinkets: FightTrinkets { count_deaths: true, ..FightTrinkets::default() },
+            ..Counters::default()
+        };
+        let out = tavern_attack(&db, &[beast], 0, fishbait, counting, &mut Rng::new(1));
+        assert_eq!(out.side.n_death_cards, 1);
+        assert_eq!(out.side.death_cards[0], (fishbait.card, 1));
+        // One that survives its attack is no death, and with no trinket
+        // counting deaths nothing is recorded either.
+        let out = tavern_attack(&db, &[beast], 0, gold, counting, &mut Rng::new(1));
+        assert_eq!(out.side.n_death_cards, 0);
+        let out = tavern_attack(&db, &[beast], 0, fishbait, counters, &mut Rng::new(1));
+        assert_eq!(out.side.n_death_cards, 0);
     }
 }

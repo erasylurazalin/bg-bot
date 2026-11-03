@@ -807,7 +807,10 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   (the bulk `friendly_deaths` fire carries no card, so a plain death counter
   never counts them twice), `alternate` makes the two buy lists take turns
   (`TrinketState.value` is the step, Trickster's Sleeve) and `drakkari_end`
-  runs the end-of-turn list once per Drakkari.
+  runs the end-of-turn list once per Drakkari. A Fishbait that dies in a
+  Tavern attack is a Tavern card with no side of its own, so
+  `fight::tavern_attack` reports that death with the attacking side's
+  `death_cards` (Snarky Portrait counts it like a friendly death).
   `Player.trinket_events` is a `u32` for them; the mask test is still the one
   thing every hook pays.
 - **Counting Battlecries (docs/rules/design.md "Counting Battlecries").** One place

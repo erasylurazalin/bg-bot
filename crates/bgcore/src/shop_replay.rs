@@ -940,6 +940,11 @@ fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]
             // "After you cast 3 spells on minions, gain 1 Gold." The number is
             // what is left of the three.
             "BG36_MagicItem_307" => pl.trinkets[slot].count = (3 - n(0)).min(3) as u16,
+            // Snarky Portrait: "give your Beasts +4/+4 and improve this". The
+            // log's first number is the buff the next Fishbait death gives: 4
+            // at the pick, then 4 more per death (4, 8, 12, and 20 after four
+            // of them in Hearthstone_2026_11_03_00_29_06-g5 turn 10).
+            "BG36_MagicItem_450" => pl.trinkets[slot].value = n(0),
             _ => {}
         }
     }

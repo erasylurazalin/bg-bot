@@ -1524,7 +1524,11 @@ impl TrinketDb {
                 } else if let Some(n) = a.grow_value {
                     Act::GrowValue(n)
                 } else if let Some([attack, health]) = a.buff_all_growing {
-                    Act::BuffAllGrowing { tribe: None, attack, health }
+                    Act::BuffAllGrowing {
+                        tribe: a.tribe.as_deref().map(tribe).transpose().map_err(err)?,
+                        attack,
+                        health,
+                    }
                 } else if let Some([attack, health]) = a.buff_leftmost_growing {
                     Act::BuffLeftmostGrowing { attack, health }
                 } else if let Some([attack, health]) = a.buff_all_per_golden {

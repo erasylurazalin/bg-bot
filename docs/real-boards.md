@@ -519,7 +519,9 @@ of a random step is run, since any of them may be the log's.
       copies (`tp.copy_buys`), Magicfin Sticker's uses (`uses_left`), Guiding
       Candle's Tier 6 Refreshes (`tp.refresh_tier6`, its `{0}`) and Wand of
       Divination's count toward the third spell on a minion (`count`, three
-      minus its `{0}`). Every other trinket's numbers are a stat, an
+      minus its `{0}`), and Snarky Portrait's "improve this" (`value`, whose
+      `{0}` is the buff the next Fishbait death gives: 4 at the pick, then 4
+      more per death). Every other trinket's numbers are a stat, an
       improvement count or a card id (Portable Factory) and are left alone;
     - a hero power's count: Tae'thelan's Reliquary Research counts Tavern
       spells bought in `HeroCounts.tavern_spells_bought`, which the log shows
