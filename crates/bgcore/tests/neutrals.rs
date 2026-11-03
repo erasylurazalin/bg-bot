@@ -333,6 +333,29 @@ fn decoy_conjurer_steals_from_the_pool_and_a_sale_returns_it() {
 }
 
 #[test]
+fn decoy_conjurer_breaks_a_tie_for_the_highest_attack_at_random() {
+    // docs/rules/design.md "Shop replay answers": when several Tavern minions
+    // tie for the highest Attack the stolen one is random among them, not the
+    // left-most.
+    let mut seen = [false; 2];
+    for seed in 0..24 {
+        let mut g = game(seed);
+        g.players[0].gold = 10;
+        put_on_board(&mut g, 0, "Decoy Conjurer");
+        // Cord Puller and Buzzing Vermin are both 1/1, so they tie.
+        set_shop(&mut g, 0, &["Cord Puller", "Buzzing Vermin"]);
+        act(&mut g, 0, Action::Activate(0));
+        let stolen_cord = g.players[0]
+            .hand
+            .iter()
+            .any(|m| g.data.cards.get(m.card).name == "Cord Puller");
+        seen[usize::from(!stolen_cord)] = true;
+        g.check_invariants().unwrap();
+    }
+    assert!(seen[0] && seen[1], "both tied minions are stolen by some seed: {seen:?}");
+}
+
+#[test]
 fn enchanted_lasso_steals_a_random_tavern_minion() {
     let mut g = game(6);
     g.players[0].gold = 10;

@@ -225,6 +225,35 @@ fn a_fodder_feeds_a_demon_and_its_slot_is_refilled() {
 }
 
 #[test]
+fn a_golden_wrath_weaver_damages_the_hero_twice() {
+    // "deal 1 damage to your hero and gain +2/+2, twice" (the golden text):
+    // two hits, so a Soul Rewinder takes +2 Health for each and a Devout
+    // Hellcaller +2/+2 for each (2026_10_24_15_25_26-g4 turn 5 step 5).
+    let mut g = game(7);
+    put_on_board(&mut g, 0, "Soul Rewinder");
+    put_on_board(&mut g, 0, "Devout Hellcaller");
+    let weaver = id(&g, "Wrath Weaver");
+    let slot = g.data.cards.get(weaver).pool_slot as usize;
+    g.pool[slot] -= 3;
+    let mut golden = g.players[0].make_card(&g.data.cards, weaver, true, 3);
+    golden.uses_left = golden.turn_uses(&g.data.cards);
+    g.players[0].board.push(golden);
+    let health = g.players[0].health;
+    g.players[0].gold = 10;
+    let weaver = g.data.cards.make(id(&g, "Wrath Weaver"), false);
+    g.players[0].hand.push(weaver);
+    let h = g.players[0].hand.len() as u8 - 1;
+    act(&mut g, 0, Action::Play { hand: h, pos: 3 });
+    // The two hits of 1 come back through the Rewinder, so the hero pays 2 in
+    // all, and each hit is its own: +4 Health, and +2/+2 twice.
+    assert_eq!(g.players[0].health, health, "the Rewinder gives the damage back");
+    assert_eq!(stats(&g.players[0].board[0]), (4, 2 + 4), "two hits, +2 Health each");
+    assert_eq!(stats(&g.players[0].board[1]), (4 + 4, 4 + 4), "two hits, +2/+2 each");
+    assert_eq!(stats(&g.players[0].board[2]), (2 + 4, 6 + 4), "the golden one gained +4/+4");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_waiting_fodder_can_be_bought_and_played() {
     let mut g = game(2);
     g.players[0].gold = 10;

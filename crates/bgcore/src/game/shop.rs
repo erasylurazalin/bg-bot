@@ -932,6 +932,21 @@ impl Game {
     /// Replace the Tavern card in `slot` with a Fishbait and have the
     /// left-most Beast attack it.
     pub(super) fn put_fishbait(&mut self, p: usize, slot: usize, card: CardId, golden: bool) {
+        // The Tavern's spell slot, one past the last minion: the spell is
+        // replaced by the Fishbait, which takes a minion slot (Era,
+        // 2026-11-03: Lionfish may pick a Tavern spell).
+        if slot >= self.players[p].shop.len() {
+            if self.players[p].shop_spell.take().is_none() {
+                return;
+            }
+            let bait = self.data.cards.make(card, golden);
+            if self.players[p].shop.try_push(bait).is_err() {
+                return;
+            }
+            let at = self.players[p].shop.len() - 1;
+            self.tavern_attack(p, at);
+            return;
+        }
         let Game { data, players, pool, .. } = self;
         let pl = &mut players[p];
         let old = std::mem::replace(&mut pl.shop[slot], data.cards.make(card, golden));
@@ -1014,11 +1029,24 @@ impl Game {
             }
         }
         self.apply_side_outcome(p, &out.side, false);
+        // A Rally can summon the third copy of a card (Flittering Bat's 1/1
+        // Beast next to two of them), and in the shop phase that triples at
+        // once. `check_triple` does nothing below three copies.
+        let mut held: ArrayVec<CardId, { crate::BOARD }> = ArrayVec::new();
+        for m in &self.players[p].board {
+            if !m.golden && !held.contains(&m.card) {
+                let _ = held.try_push(m.card);
+            }
+        }
+        for card in held {
+            self.check_triple(p, card);
+        }
     }
 
     /// Steal the `n` highest-Attack Tavern minions into hand (Decoy
-    /// Conjurer); ties go to the left-most. The copies leave the pool like a
-    /// buy and come back when sold.
+    /// Conjurer). Ties go at random among them (Era, docs/rules/design.md
+    /// "Shop replay answers"). The copies leave the pool like a buy and come
+    /// back when sold.
     pub(super) fn steal_highest_tavern(&mut self, p: usize, n: u8) {
         for _ in 0..n {
             if self.players[p].hand.is_full() {
@@ -1026,16 +1054,28 @@ impl Game {
             }
             let cards = &self.data.cards;
             let shop = &self.players[p].shop;
-            let mut best: Option<usize> = None;
+            let mut best: Option<i32> = None;
+            let mut tied: ArrayVec<usize, SHOP> = ArrayVec::new();
             for (i, m) in shop.iter().enumerate() {
                 if cards.get(m.card).is_spell() {
                     continue;
                 }
-                if best.is_none_or(|b| m.attack > shop[b].attack) {
-                    best = Some(i);
+                match best {
+                    Some(a) if m.attack < a => {}
+                    Some(a) if m.attack == a => {
+                        let _ = tied.try_push(i);
+                    }
+                    _ => {
+                        best = Some(m.attack);
+                        tied.clear();
+                        let _ = tied.try_push(i);
+                    }
                 }
             }
-            let Some(i) = best else { break };
+            if tied.is_empty() {
+                break;
+            }
+            let i = tied[self.rng.below(tied.len() as u32) as usize];
             let m = self.players[p].shop.remove(i);
             let card = m.card;
             self.add_to_hand(p, m);
@@ -1105,6 +1145,69 @@ mod tests {
         assert!(g.players[0].board.is_empty(), "the Beast died to the Fishbait");
         assert!(g.players[0].shop.is_empty(), "and it ate the Fishbait on the way");
         assert_eq!(g.pool[slot], before + 1, "its pool copy came back with it");
+        g.check_invariants().unwrap();
+    }
+
+    /// Lurking Lionfish may pick a Tavern spell: the Fishbait takes the spell
+    /// slot's place, as a minion slot (Era, 2026-11-03; log
+    /// 2026_10_28_22_11_50-g2 turn 7 step 13).
+    #[test]
+    fn a_fishbait_may_take_the_tavern_spell_slot() {
+        let mut g = Game::new_with_lobby(
+            Arc::new(Data::bundled()),
+            8,
+            Tribes::NONE.with(Tribe::Beast).with(Tribe::Quilboar),
+        );
+        // No Beast on the board: the Fishbait is not attacked and stays.
+        let spell = g.data.cards.by_name("Blood Gem").expect("Blood Gem");
+        g.players[0].shop_spell = Some(spell);
+        let bait = g.data.cards.by_name("Fishbait").expect("Fishbait");
+        let minions = g.players[0].shop.len();
+        g.put_fishbait(0, minions, bait, false);
+        assert_eq!(g.players[0].shop_spell, None, "the Tavern spell is gone");
+        assert_eq!(g.players[0].shop.len(), minions + 1, "the Fishbait took a minion slot");
+        assert_eq!(
+            g.data.cards.get(g.players[0].shop[minions].card).name,
+            "Fishbait"
+        );
+        g.check_invariants().unwrap();
+    }
+
+    /// A Rally during a Tavern attack can summon the third copy of a card,
+    /// and in the shop phase that triples at once: two Foraging Bats plus the
+    /// one a Flittering Bat's Rally summons make a golden one in hand (log
+    /// 2026_10_28_02_28_32-g5 turn 5 step 1).
+    #[test]
+    fn a_rally_summon_during_a_tavern_attack_triples() {
+        let mut g = Game::new_with_lobby(
+            Arc::new(Data::bundled()),
+            9,
+            Tribes::NONE.with(Tribe::Beast).with(Tribe::Quilboar),
+        );
+        // A token: generated, so no pool copy.
+        let bats = g.data.cards.by_name("Foraging Bat").expect("Foraging Bat");
+        for _ in 0..2 {
+            let m = g.players[0].make_card(&g.data.cards, bats, false, 0);
+            g.players[0].board.push(m);
+        }
+        let flitter = g.data.cards.by_name("Flittering Bat").expect("Flittering Bat");
+        let slot = g.data.cards.get(flitter).pool_slot as usize;
+        g.pool[slot] -= 1;
+        let mut m = g.players[0].make_card(&g.data.cards, flitter, false, 1);
+        m.attack = 4;
+        m.health = 20;
+        g.players[0].board.insert(0, m);
+        let fish = g.data.cards.by_name("Fishbait").expect("Fishbait");
+        let old: ArrayVec<Minion, { crate::BOARD }> = g.players[0].shop.drain(..).collect();
+        for m in &old {
+            give_back(&mut g.pool, &g.data.cards, m);
+        }
+        g.players[0].shop.push(g.data.cards.make(fish, false));
+        g.tavern_attack(0, 0);
+        assert!(
+            g.players[0].hand.iter().any(|m| m.card == bats && m.golden),
+            "the third copy tripled into a golden one in hand"
+        );
         g.check_invariants().unwrap();
     }
 }

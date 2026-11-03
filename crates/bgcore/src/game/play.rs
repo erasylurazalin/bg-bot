@@ -269,21 +269,34 @@ impl Game {
                     }
                     _ => 0,
                 };
-                for k in 0..n {
-                    if pos >= self.players[p].board.len() {
-                        break;
-                    }
-                    let Some(e) = self
+                // A golden card whose text says "twice" runs its whole list
+                // twice with the printed numbers; any other golden card has
+                // its numbers doubled (docs/rules/design.md "Triples").
+                let twice = golden
+                    && self
                         .data
                         .cards
                         .get(card)
                         .after_play_tribe
                         .as_ref()
-                        .map(|t| t.effects[k])
-                    else {
-                        break;
-                    };
-                    self.run_effect(p, &mut pos, e, golden, 1);
+                        .is_some_and(|t| t.golden_twice);
+                for _ in 0..if twice { 2 } else { 1 } {
+                    for k in 0..n {
+                        if pos >= self.players[p].board.len() {
+                            break;
+                        }
+                        let Some(e) = self
+                            .data
+                            .cards
+                            .get(card)
+                            .after_play_tribe
+                            .as_ref()
+                            .map(|t| t.effects[k])
+                        else {
+                            break;
+                        };
+                        self.run_effect(p, &mut pos, e, golden && !twice, 1);
+                    }
                 }
             }
             pos += 1;

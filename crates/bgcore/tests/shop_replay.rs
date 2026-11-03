@@ -83,6 +83,57 @@ fn replay(file: &ShopFileSpec, kind: &str) -> StepResult {
     replay_step(&data(), &ids(), file, turn, i, &ReplayOptions { seeds: 4, seed: 1 })
 }
 
+/// A play that lands a minion in front of its own target shifts the target:
+/// the file's board position is the board before the play, and the engine
+/// asks after the minion has landed (log 2026_10_30_19_45_15-g2 turn 6 step
+/// 18: a Sprightly Scarab played at 3 buffs the Beast that the play pushed
+/// from 5 to 6).
+#[test]
+fn a_played_minions_board_target_moves_past_where_it_lands() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 8,
+       "start": {"board": [
+          {"id": 1, "card_id": "X1", "name": "Wolf Pup", "attack": 1, "health": 1, "position": 1},
+          {"id": 2, "card_id": "X2", "name": "Alleycat", "attack": 1, "health": 1, "position": 2},
+          {"id": 3, "card_id": "X3", "name": "Rockpool Hunter", "attack": 2, "health": 3, "position": 3},
+          {"id": 4, "card_id": "X4", "name": "Murloc Tidehunter", "attack": 2, "health": 1, "position": 4},
+          {"id": 5, "card_id": "BG36_209", "name": "Ravaging Scorpid", "attack": 6, "health": 7, "position": 5}],
+        "hand": [{"id": 6, "card_id": "BG27_084", "name": "Sprightly Scarab", "index": 1, "kind": "minion"}],
+        "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": []},
+       "actions": [{"step": "play", "index": 1, "sub_option": 0,
+          "card": {"id": 6, "card_id": "BG27_084", "name": "Sprightly Scarab"},
+          "moved": {"id": 6, "to": {"where": "board", "position": 3}},
+          "target": {"id": 5, "card_id": "BG36_209", "name": "Ravaging Scorpid",
+                     "kind": "board", "position": 5},
+          "after": {"board": [
+              {"id": 1, "card_id": "X1", "name": "Wolf Pup", "attack": 1, "health": 1, "position": 1},
+              {"id": 2, "card_id": "X2", "name": "Alleycat", "attack": 1, "health": 1, "position": 2},
+              {"id": 6, "card_id": "BG27_084", "name": "Sprightly Scarab", "attack": 3, "health": 1, "position": 3},
+              {"id": 3, "card_id": "X3", "name": "Rockpool Hunter", "attack": 2, "health": 3, "position": 4},
+              {"id": 4, "card_id": "X4", "name": "Murloc Tidehunter", "attack": 2, "health": 1, "position": 5},
+              {"id": 5, "card_id": "BG36_209", "name": "Ravaging Scorpid", "attack": 7, "health": 8,
+               "keywords": ["reborn"], "position": 6}],
+            "hand": [], "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("shift.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert!(
+        r.action.contains("Target(5)"),
+        "the target followed the Beast past the landing: {:?} (verdict {:?}, {:?})",
+        r.action,
+        r.verdict,
+        r.diffs
+    );
+}
+
 /// A logged state loads into the engine and matches the file field by field:
 /// the client's numbers, the board, the hand and the Tavern, the hero power,
 /// the trinkets and the Secret zone.

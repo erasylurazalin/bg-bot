@@ -254,6 +254,15 @@ pub enum ShopTargetKind {
     Fishbait { card: CardId, golden: bool },
 }
 
+impl ShopTargetKind {
+    /// Whether the pick may name the Tavern's spell slot, one past the last
+    /// minion. A Fishbait takes a Tavern spell too: "choose a card in the
+    /// Tavern" is any card there (Era, 2026-11-03).
+    pub fn takes_spell_slot(self) -> bool {
+        matches!(self, ShopTargetKind::Fishbait { .. })
+    }
+}
+
 /// A buff to Tavern minions that also reaches every minion that shows up in
 /// the player's Tavern later.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -312,6 +321,10 @@ pub struct CastAfterChoice {
     /// of each (Balinda's extra cast), any other spell one.
     pub casts: u8,
     pub tavern: bool,
+    /// The "whenever you cast a spell" triggers and the trinket events
+    /// already fired at the play, so only the "after you cast a spell" ones
+    /// are owed (a targeting spell). A Choose One spell owes both.
+    pub at_play: bool,
 }
 
 /// "Discard a card" (Mangled Bandit's Activate) waiting for the player to
@@ -1352,8 +1365,10 @@ impl Game {
             }
             return matches!(a, Action::Target(s) if self.valid_target(p, &pt, s as usize));
         }
-        if pl.pending_shop_target.is_some() && !self.choice_stuck(p) {
-            return matches!(a, Action::TargetShop(s) if (s as usize) < pl.shop.len());
+        if let Some(pst) = pl.pending_shop_target
+            && !self.choice_stuck(p)
+        {
+            return matches!(a, Action::TargetShop(s) if self.valid_tavern_pick(p, &pst, s as usize));
         }
         if pl.pending_discard.is_some() && !self.choice_stuck(p) {
             return matches!(a, Action::Discard(s) if self.valid_discard(p, s as usize));
@@ -1503,9 +1518,10 @@ impl Game {
                 && (0..pl.shop.len()).any(|s| self.valid_shop_target(p, &pt, s));
             return !board && !shop;
         }
-        if pl.pending_shop_target.is_some() {
+        if let Some(pst) = pl.pending_shop_target {
             // The pick points at a Tavern slot that no longer exists.
-            return pl.shop.is_empty();
+            return pl.shop.is_empty()
+                && !(pst.kind.takes_spell_slot() && pl.shop_spell.is_some());
         }
         if pl.pending_discard.is_some() {
             return !(0..pl.hand.len()).any(|s| self.valid_discard(p, s));
@@ -1583,8 +1599,12 @@ impl Game {
                     ask(Action::TargetShop(s));
                 }
             }
-        } else if open && pl.pending_shop_target.is_some() {
-            for s in 0..pl.shop.len() as u8 {
+        } else if open && let Some(pst) = pl.pending_shop_target {
+            let mut last = pl.shop.len();
+            if pst.kind.takes_spell_slot() && pl.shop_spell.is_some() && last < SHOP {
+                last += 1;
+            }
+            for s in 0..last as u8 {
                 ask(Action::TargetShop(s));
             }
         } else if open && pl.pending_discard.is_some() {
@@ -1777,6 +1797,17 @@ impl Game {
     fn valid_spell_target(&self, p: usize, st: SpellTarget, s: usize) -> bool {
         let b = &self.players[p].board;
         s < b.len() && self.spell_target_ok(p, st, &b[s])
+    }
+
+    /// Whether the Tavern pick `s` can be answered: a minion slot, or the
+    /// spell slot when the effect takes any Tavern card.
+    fn valid_tavern_pick(&self, p: usize, pst: &PendingShopTarget, s: usize) -> bool {
+        let pl = &self.players[p];
+        s < pl.shop.len()
+            || (pst.kind.takes_spell_slot()
+                && s == pl.shop.len()
+                && pl.shop_spell.is_some()
+                && s < SHOP)
     }
 
     /// Whether the pending target may be taken on the Tavern minion in

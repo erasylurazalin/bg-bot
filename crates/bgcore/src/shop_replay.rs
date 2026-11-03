@@ -2180,18 +2180,22 @@ fn actions_for(
             };
             out.push(Action::Play { hand: at, pos });
             if let Some(target) = &step.target {
-                let action = target_action(loaded, target)?;
-                // A minion played into a slot pushes the minions at and after
-                // it down one, and the log's target is one of the minions that
-                // stood there before the play (its position is in the state the
-                // step started from): the engine's own index must follow it, or
-                // the Battlecry hits the card just played instead
-                // (Hearthstone_2026_10_28_02_28_32-g1 turn 10 step 2: a
-                // Magicfin token's Tricky Trousers on the Drakkari Enchanter).
-                out.push(match action {
-                    Action::Target(k) if !spell && pos <= k => Action::Target(k + 1),
-                    other => other,
-                });
+                let mut a = target_action(loaded, target)?;
+                // The file's board target is the board before the play; a
+                // minion that lands at or before it pushes it one slot right,
+                // or the Battlecry hits the card just played (a Sprightly
+                // Scarab's Battlecry; Hearthstone_2026_10_28_02_28_32-g1 turn
+                // 10 step 2, a Magicfin token's Tricky Trousers on the
+                // Drakkari Enchanter). A Magnetic merge lands nothing, so it
+                // shifts nothing.
+                let lands = !spell && landed.is_some();
+                if lands
+                    && let Action::Target(t) = a
+                    && t as usize >= pos as usize
+                {
+                    a = Action::Target(t + 1);
+                }
+                out.push(a);
             }
         }
         "activate" => {

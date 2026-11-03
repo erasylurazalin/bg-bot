@@ -322,8 +322,10 @@ fn a_tavern_pick_fizzles_when_the_tavern_empties() {
     turn_of(&mut g, 0);
     // Nothing can empty the Tavern while the pick is open today, so empty it
     // by hand (the state `check_invariants` already knew about): the pick has
-    // nothing left to point at.
+    // nothing left to point at. The spell slot goes too: a Fishbait may take
+    // a Tavern spell, so the empty row alone is not empty.
     set_shop(&mut g, 0, &[]);
+    g.players[0].shop_spell = None;
     assert!(matches!(
         g.players[0].pending_shop_target.map(|pst| pst.kind),
         Some(ShopTargetKind::Fishbait { .. })
