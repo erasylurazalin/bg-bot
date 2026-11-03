@@ -185,7 +185,8 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   options: 86 turns open with a trinket offer and 27 with some other Discover.
 - `start` and `end` hold my hand, my board and Bob's Tavern the way
   `boards/real/` writes a minion (card id, name, attack, health, golden,
-  keywords, dark gifts, script `numbers`) plus where each card sits: `slot` in
+  keywords, dark gifts, script `numbers`, and its own Blood Gem stats as
+  `gem_attack`/`gem_health`) plus where each card sits: `slot` in
   the Tavern, `index` in my hand, `position` on my board. A hand card the log
   does not name is kept with a null card id and counted in `hand_hidden`; none
   of the 47 games has one, so that count is 0 everywhere.
@@ -241,14 +242,19 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     with it: the loader reads Hooktusk, Master Marauder's own numbers (the pair
     it gives now is the printed +1/+1 times one more than the count).
   - A minion's own Blood Gem stats (`Minion::gem_attack`/`gem_health`) are
-    not carried: a card's `numbers` are its script numbers and no key holds
-    them, so the loader seats them at 0. Gem Confiscation therefore steals
-    nothing in a replay: its target stays short of the neighbours' Gem stats
-    and the neighbours keep them (log `2026_10_26_00_48_15-g2` turn 7 step
-    24: the Sly Infiltrator beside the target keeps the +4/+4 of its two Gem
-    casts where the log takes it). Carrying them needs the collector to read
-    the `BG20_GEMe` enchant on each board minion, which it does not write
-    yet.
+    carried as `gem_attack`/`gem_health` on the card, in the board, the hand
+    and the Tavern: the pair of tags the game keeps on the minion itself,
+    which the client prints as the numbers `4270` and `4271` (it has no name
+    for them; a player's Gem *size* is the older named pair
+    `BACON_BLOODGEMBUFF*VALUE`, and that one is in `counters`). The tags move
+    with the minion, so one state says what it holds: log
+    `2026_10_26_00_48_15-g2` turn 7 step 24 has the Sly Infiltrator at
+    `4270`/`4271` 4/4 before the Gem Confiscation and 0/0 after it, and
+    `2026_10_29_22_20_04-g1` turn 11 step 23 the Gatekeeper Amalgam at
+    804/469 and then 0/0, the pair that step takes from its neighbours. The
+    keys are written only when the minion has some, and a file written before
+    they existed has them nowhere: the loader then seats 0, as it always did,
+    and Gem Confiscation steals nothing.
   - `secrets`, the Secret zone by card id in the order the Secrets were got, as
     the board files write it (always written, empty when there is nothing).
   - `waiting` on a hero power: the minion Lock and Load holds, as a board

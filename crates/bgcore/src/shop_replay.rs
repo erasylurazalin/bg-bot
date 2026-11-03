@@ -79,6 +79,16 @@ pub struct ShopMinionSpec {
     pub dark_gifts: Vec<ShopGiftSpec>,
     #[serde(default)]
     pub reanimate: bool,
+    /// The Attack and Health this minion's Blood Gems have given it, from the
+    /// log's own pair of tags on the card (`Minion::gem_attack`/`gem_health`,
+    /// docs/real-boards.md "The action file"). Gem Confiscation steals exactly
+    /// this pair from the neighbours, a Gem adds to it and a triple sums it. A
+    /// file written before the keys existed has it nowhere, and then the
+    /// minion starts at 0, as it always did.
+    #[serde(default)]
+    pub gem_attack: i32,
+    #[serde(default)]
+    pub gem_health: i32,
     /// A Golden minion that gives no Triple Reward when played, the file's
     /// mark: only the sources docs/rules/design.md names say so (Silent
     /// Deliverer's goldens, Sinister Invitation's, Gilding, Aureate Laureate).
@@ -1163,6 +1173,13 @@ fn power_upgrade_extra(data: &Data, powers: &[ShopPowerSpec]) -> i32 {
 fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<String>) {
     let spec = m.real_spec();
     let (mut minion, bad) = RealBoard::build_minion(&spec, turn, &data.cards, &data.gifts);
+    // The Blood Gem stats the card itself carries: the log keeps them per
+    // minion (a copy takes them along, a triple sums them, Gem Confiscation
+    // moves the neighbours' onto its target), and a fresh minion would start
+    // at 0 and steal nothing. A file written before the keys existed leaves
+    // them 0, which is what the loader always seated.
+    minion.gem_attack = m.gem_attack;
+    minion.gem_health = m.gem_health;
     // Magnetic is a card property the board loader drops on purpose (a fight
     // never reads it), but a shop step does: it is what lets a minion be
     // Magnetized onto the board the game built it from.
