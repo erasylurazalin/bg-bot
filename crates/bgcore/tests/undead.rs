@@ -390,21 +390,24 @@ fn bellringer_reborn_destroys_in_the_shop_with_deathrattles_and_one_health_that_
     act(&mut g, 0, Action::Activate(0));
     // the only other Undead: it is picked for you
     assert!(g.players[0].pending_target.is_none());
-    // Caretaker died (three Skeletons in its slot), then came back plain
-    // with 1 Health plus the Health bonus; Bellringer got +4/+4.
-    assert_eq!(
-        board_names(&g, 0),
-        ["Dead Bellringer", "Skeleton", "Skeleton", "Skeleton", "Cadaver Caretaker"]
-    );
+    // Caretaker died (three Skeletons in its slot, which triple into a
+    // Golden one in the hand), then came back plain with 1 Health plus the
+    // Health bonus; Bellringer got +4/+4.
+    assert_eq!(board_names(&g, 0), ["Dead Bellringer", "Cadaver Caretaker"]);
     assert_eq!(stats(&g.players[0].board[0]), (7, 12));
-    assert_eq!(stats(&g.players[0].board[1]), (1, 3), "Skeleton 1/1 with +0/+2");
-    assert_eq!(stats(&g.players[0].board[4]), (3, 3), "1 Health plus the +2 Health bonus");
-    assert!(!g.players[0].board[4].keywords.has(Keywords::REBORN));
+    assert_eq!(stats(&g.players[0].board[1]), (3, 3), "plain 3/3 with 1 Health plus +0/+2");
+    let hand: Vec<String> = g.players[0]
+        .hand
+        .iter()
+        .map(|m| g.data.cards.get(m.card).name.clone())
+        .collect();
+    assert_eq!(hand, ["Skeleton"], "the three Skeletons tripled");
+    assert!(!g.players[0].board[1].keywords.has(Keywords::REBORN));
     assert_eq!(g.players[0].gold, 4);
     g.check_invariants().unwrap();
     // it never heals: the 3 Health goes into the next turns and fights
     end_all_turns(&mut g);
-    assert_eq!(stats(&g.players[0].board[4]), (3, 3));
+    assert_eq!(stats(&g.players[0].board[1]), (3, 3));
     g.check_invariants().unwrap();
 
     // Bellringer is once per turn and golden gains +8/+8.
@@ -1164,14 +1167,15 @@ fn a_knight_destroyed_in_the_shop_makes_the_others_grow() {
     let mut g = game(231);
     put_on_board(&mut g, 0, "Dead Bellringer", false);
     put_on_board(&mut g, 0, "Eternal Knight", false);
-    put_on_board(&mut g, 0, "Eternal Knight", false);
     put_in_hand(&mut g, 0, "Eternal Knight", false);
     set_gold(&mut g, 0, 5);
     act(&mut g, 0, Action::Activate(0));
-    act(&mut g, 0, Action::Target(1));
+    // The Knight beside the Bellringer is the only other Undead: it is picked
+    // for you.
+    assert!(g.players[0].pending_target.is_none());
     assert_eq!(g.players[0].knight_deaths, 1);
-    // the other Knight and the one in hand: 4/2 + 4/2
-    assert_eq!(stats(&g.players[0].board[2]), (8, 4));
+    // the Knight in hand: 4/2 + 4/2. (Two on the board and one in hand would
+    // be a triple, so this is the survivor and one copy.)
     assert_eq!(stats(&g.players[0].hand[0]), (8, 4));
     g.check_invariants().unwrap();
 }
@@ -1402,5 +1406,35 @@ fn a_second_empty_cast_is_not_a_spell_cast() {
     cast(&mut g, "Channel the Devourer");
     act(&mut g, 0, Action::Target(2));
     assert_eq!(g.players[0].undead_bonus, (3, 0));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn three_skeletons_a_shop_destroy_summons_triple_into_the_hand() {
+    // docs/rules/design.md "Triples": three Skeletons a Cadaver Caretaker
+    // leaves make a Golden Skeleton in the hand, and the shop phase does it at
+    // once (log 2026_10_30_19_45_15-g2 turn 5, Disguised Graverobber on a
+    // Cadaver Caretaker). The Graverobber's copy of the Caretaker is a plain
+    // card, and the Golden comes with it.
+    let mut g = game(272);
+    put_on_board(&mut g, 0, "Cadaver Caretaker", false);
+    put_in_hand(&mut g, 0, "Disguised Graverobber", false);
+    play(&mut g, 0, 0, 1);
+    // The Caretaker is the only friendly Undead, so the target is picked for
+    // you.
+    assert!(g.players[0].pending_target.is_none());
+    assert_eq!(board_names(&g, 0), ["Disguised Graverobber"], "the Skeletons tripled away");
+    let hand: Vec<(String, bool, (i32, i32))> = g.players[0]
+        .hand
+        .iter()
+        .map(|m| (g.data.cards.get(m.card).name.clone(), m.golden, stats(m)))
+        .collect();
+    assert_eq!(
+        hand,
+        [
+            ("Skeleton".to_string(), true, (2, 2)),
+            ("Cadaver Caretaker".to_string(), false, (3, 3)),
+        ]
+    );
     g.check_invariants().unwrap();
 }
