@@ -96,6 +96,11 @@ pub struct Gift {
     /// fires once and is gone). `game::darkgifts::dark_gift_end_of_turn`
     /// reads it, and a gift with no countdown ignores it.
     pub repeats: bool,
+    /// Whether the gift turns its host golden (Gilding; the effect card's own
+    /// `makes_golden`). An offer of an already golden minion gets none of
+    /// these: the gift would have nothing to do (Era 2026-11-03,
+    /// docs/rules/darkgifts.md "Sinister Invitation never offers Gilding").
+    pub makes_golden: bool,
 }
 
 impl Gift {
@@ -365,6 +370,7 @@ impl GiftDb {
                 weight: g.weight,
                 cond: condition(&g.condition, &err)?,
                 repeats: g.repeats,
+                makes_golden: cards.get(card).makes_golden,
             });
         }
         db.by_card = vec![0; cards.cards.len()];
@@ -426,7 +432,11 @@ impl GiftDb {
     /// One gift for an offered minion: at random among the gifts whose
     /// window holds `turn` and whose condition the host meets, never one in
     /// `used` (the gifts already on this press's other offers). The four
-    /// weight-50 gifts are half as likely; weight 200 is ignored.
+    /// weight-50 gifts are half as likely; weight 200 is ignored. `golden`
+    /// says the offer is of an already golden minion (Sinister Invitation),
+    /// and then the gifts that would make it golden are not in the pool at
+    /// all: they would change nothing on it.
+    #[allow(clippy::too_many_arguments)]
     pub fn pick(
         &self,
         turn: u32,
@@ -434,12 +444,14 @@ impl GiftDb {
         tribes: crate::cards::Tribes,
         deity: bool,
         used: &[u8],
+        golden: bool,
         rng: &mut Rng,
     ) -> Option<usize> {
         let candidates = self.candidates(turn, card, tribes, deity);
+        let skip = |i: u8| used.contains(&i) || (golden && self.gifts[i as usize].makes_golden);
         let mut total = 0u32;
         for &i in &candidates {
-            if used.contains(&i) {
+            if skip(i) {
                 continue;
             }
             total += self.weight_of(i as usize);
@@ -449,7 +461,7 @@ impl GiftDb {
         }
         let mut r = rng.below(total);
         for &i in &candidates {
-            if used.contains(&i) {
+            if skip(i) {
                 continue;
             }
             let w = self.weight_of(i as usize);

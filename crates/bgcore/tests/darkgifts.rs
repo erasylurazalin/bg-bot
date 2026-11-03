@@ -256,7 +256,7 @@ fn the_weight_fifty_gifts_are_half_as_likely() {
     let mut rng = Rng::new(11);
     let mut counts = [0u32; 2];
     for _ in 0..2000 {
-        let pick = gifts.pick(11, host, host.tribes, false, &[], &mut rng).unwrap();
+        let pick = gifts.pick(11, host, host.tribes, false, &[], false, &mut rng).unwrap();
         if pick as u8 == titanic {
             counts[0] += 1;
         } else {
@@ -1511,6 +1511,63 @@ fn the_gift_trinkets_open_a_gift_offer() {
     assert!(m.golden, "a Golden offer");
     assert!(m.no_reward, "it gives no Triple Reward");
     assert!(g.data.cards.tribes_of(&m).has(Tribe::Mech));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn no_sinister_invitation_offer_ever_holds_gilding() {
+    // Era's rule (docs/rules/darkgifts.md, 2026-11-03): Sinister Invitation's
+    // minion is already golden, so its gift offers never include Gilding, the
+    // gift that turns a minion golden. Gilding's window holds turns 4 to 8,
+    // so a plain offer on the same turn still gets it: the exclusion belongs
+    // to the Golden offer, not to the turn.
+    let mut g = game(53);
+    to_turn(&mut g, 4);
+    settle(&mut g, 0);
+    // Sinister Invitation offers minions of the player's most common type.
+    put_on_board(&mut g, 0, "Cord Puller");
+    put_on_board(&mut g, 0, "Cord Puller");
+    let gilding = id(&g, "Gift: Gilding");
+    assert!(g.data.cards.get(gilding).makes_golden, "the data's own flag");
+    // Every press takes pool copies (a Golden offer holds three), so the pool
+    // goes back after each one and every press offers three minions.
+    let pool = g.pool.clone();
+    let mut presses = 0u32;
+    let mut plain_gildings = 0u32;
+    for _ in 0..300 {
+        g.pool.clone_from(&pool);
+        g.open_dark_gift_trinket(0, None, true, true, true);
+        assert!(g.players[0].dark_offer_golden, "Sinister Invitation is Golden");
+        let n = g.players[0].discover.len();
+        assert_eq!(n, 3, "three offers");
+        presses += 1;
+        for k in 0..n {
+            assert_ne!(
+                g.players[0].discover_gifts[k].card(),
+                gilding,
+                "Gilding among the gifts of a Golden offer"
+            );
+        }
+        g.players[0].discover.clear();
+        g.players[0].clear_dark_offer();
+        g.players[0].discover_queue.clear();
+        // Ominous Stone: the same turn's gifts on plain Tier 4 minions, where
+        // Gilding is in the pool.
+        g.open_dark_gift_trinket(0, Some(4), true, false, false);
+        let n = g.players[0].discover.len();
+        for k in 0..n {
+            if g.players[0].discover_gifts[k].card() == gilding {
+                plain_gildings += 1;
+            }
+        }
+        g.players[0].discover.clear();
+        g.players[0].clear_dark_offer();
+        g.players[0].discover_queue.clear();
+    }
+    assert_eq!(presses, 300);
+    assert!(plain_gildings > 0, "a plain offer on turn 4 still gets Gilding");
+    // The offers cleared without a pick left their copies out of the pool.
+    g.pool.clone_from(&pool);
     g.check_invariants().unwrap();
 }
 

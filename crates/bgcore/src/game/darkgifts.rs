@@ -259,7 +259,12 @@ impl Game {
             let gift = {
                 let c = self.data.cards.get(card);
                 let deity = self.players[p].deity.is_some();
-                self.data.gifts.pick(plan.gift_turn, c, c.tribes, deity, &used, &mut self.rng)
+                // A Golden offer's minion is already golden, so the gifts that
+                // make it golden (Gilding) are not offered on it (Era
+                // 2026-11-03, docs/rules/darkgifts.md).
+                self.data
+                    .gifts
+                    .pick(plan.gift_turn, c, c.tribes, deity, &used, plan.golden, &mut self.rng)
             };
             let Some(gift) = gift else {
                 // Nothing fits it (a pool this thin): the copy goes back.
@@ -342,7 +347,7 @@ impl Game {
             let gift = self
                 .data
                 .gifts
-                .pick(turn, self.data.cards.get(card), tribes, deity, &used, &mut self.rng);
+                .pick(turn, self.data.cards.get(card), tribes, deity, &used, false, &mut self.rng);
             // No gift fits it (only on a turn with fewer than three gifts
             // open): the offer has fewer options.
             let Some(gift) = gift else { continue };

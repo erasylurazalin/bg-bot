@@ -431,7 +431,10 @@ passes the slot through.
 3. A gift can only be offered from turn 1 or its window, and only on a host
    its condition fits (`GiftCond::fits`). A source with its own tiers calls
    `Game::open_dark_gift_trinket` (trinkets) or pushes a
-   `DiscoverRequest::DarkGift(DarkGiftPlan)` itself (a hero power).
+   `DiscoverRequest::DarkGift(DarkGiftPlan)` itself (a hero power). A gift
+   whose token sets `makes_golden` (Gilding) is never offered by a Golden
+   source: the offer's minion is golden already, so `GiftDb::pick` leaves
+   every such gift out when the plan is golden.
 4. Tests in `crates/bgcore/tests/darkgifts.rs`: `board_with_gift` gives a
    board minion a gift through `Game::give_gift`, `gifted` builds one for a
    fight (`bgcore::game::darkgifts::land_gift`), and `every_gift_effect_card_

@@ -420,6 +420,54 @@ fn roogug_plays_gems_from_hand_only_and_never_loops() {
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn a_golden_roogug_reacts_once_per_extra_gem_cast() {
+    // docs/rules/design.md "Geomagus Roogug reacts only to Gems cast from
+    // hand (extra casts included)": a golden Hot-Air Surveyor makes one gem
+    // play three casts, each cast lands on the Roogug and makes it react, so
+    // a golden Roogug's two gems fire three times. A Gem from Roogug is not
+    // from hand, so nothing chains: 3 gems on the Roogug itself and 6 over
+    // the rest of the board, and no more.
+    let mut g = game(19);
+    put_on_board(&mut g, 0, "Geomagus Roogug", true);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", true);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 0);
+    assert_eq!(g.players[0].board[0].gem_attack, 3, "three casts on the Roogug");
+    let spread: i32 = g.players[0].board[1..].iter().map(|m| m.gem_attack).sum();
+    assert_eq!(spread, 6, "two gems from each of the three casts, and no chain");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn every_extra_gem_cast_makes_the_gatekeeper_cast_its_tea_set_again() {
+    // A gem that lands on a Gatekeeper Amalgam makes it cast its Misplaced Tea
+    // Set, and one gem play with a golden Hot-Air Surveyor is three casts, so
+    // three Tea Sets: the Gems give the Amalgam +1/+1 three times and its own
+    // Tea Sets +4/+4 three times, and the Tea Set's one-pick-per-type rule
+    // gives the three Quilboar hosts +4/+4 a cast between them.
+    let mut g = game(20);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", true);
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    put_on_board(&mut g, 0, "Tusked Camper", false);
+    let before: Vec<(i32, i32)> = g.players[0].board.iter().map(stats).collect();
+    g.give(0, "Blood Gem").unwrap();
+    cast_gem(&mut g, 0, 1);
+    let delta = |i: usize| {
+        let now = stats(&g.players[0].board[i]);
+        (now.0 - before[i].0, now.1 - before[i].1)
+    };
+    assert_eq!(delta(1), (15, 15), "three Gems and three Tea Sets on the Amalgam");
+    let quilboar: (i32, i32) = [0, 2, 3]
+        .into_iter()
+        .map(delta)
+        .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+    assert_eq!(quilboar, (12, 12), "three +4/+4 Tea Set picks over the Quilboars");
+    g.check_invariants().unwrap();
+}
+
 // ================= Gem Confiscation and Barrage =================
 
 #[test]

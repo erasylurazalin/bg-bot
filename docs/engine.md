@@ -1083,7 +1083,11 @@ through exactly that card's code. The engine never matches a gift by name:
   Spore).
 - **Who gets a gift.** `GiftDb::pick` chooses at random among the gifts whose
   window holds the turn and whose condition the host meets, never one already
-  on another offer of the press; the four weight-50 gifts count half.
+  on another offer of the press; the four weight-50 gifts count half. A Golden
+  offer (Sinister Invitation) also leaves out every gift that makes its host
+  golden (`Gift.makes_golden`, from the effect card's own flag: Gilding): the
+  minion is golden already (Era 2026-11-03,
+  `crates/bgcore/tests/darkgifts.rs` `no_sinister_invitation_offer_ever_holds_gilding`).
 - **Countdowns.** `dark_gift_end_of_turn` (called from `run_end_of_turn`)
   ticks Incubation, Replication and Affinity and runs the countdown's effect
   at 0. A gift marked `repeats = true` in darkgifts.toml (Replication and
