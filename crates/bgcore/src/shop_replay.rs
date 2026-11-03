@@ -1062,7 +1062,85 @@ pub fn load(
             stored_h - (total_h - stored_h),
         );
     }
+    // A Tavern spell whose price the log shows on the card itself: the same
+    // override and reduction a Tavern minion carries (Chillmere Mosaic's
+    // Spellcraft, a free buy). The engine's price for a spell is its own rule's
+    // minus the player's next-spell discount, so the log's price goes in as
+    // that discount. What makes a spell cheaper without saying so on the card
+    // (the buys of a printed 1 to 4 for 0 or 1 in the frozen games) is left to
+    // the step's own `paid` (`seat_spell_paid`).
+    if let (Some(spec), Some(card)) = (spell_slot, spell_card)
+        && !spec.costs_health
+        && let Some(price) = logged_spell_price(data, spec, card)
+    {
+        let pl = &mut game.players[ME];
+        if let Some(engine) = pl.spell_cost(&data.cards)
+            && price < engine
+        {
+            pl.spell_discount = pl.spell_discount.saturating_add(engine - price);
+        }
+    }
     LoadedShop { game, missing, tavern_ids, hand_ids, board_ids, spell_id }
+}
+
+/// The Gold price the log shows on a Tavern spell, when it shows one that is
+/// not the card's printed cost: the card's own override (the whole new price)
+/// or what a reduction takes off the printed one.
+fn logged_spell_price(data: &Data, spec: &ShopMinionSpec, card: CardId) -> Option<u8> {
+    let printed = data.cards.get(card).cost;
+    match spec.cost_override {
+        Some(p) => Some(p.clamp(0, u8::MAX as i32) as u8),
+        None => {
+            let reduce = spec.cost_reduce.unwrap_or(0).clamp(0, u8::MAX as i32) as u8;
+            (reduce > 0).then(|| printed.saturating_sub(reduce))
+        }
+    }
+}
+
+/// The log's Tavern spell bonus is the whole bonus the next spell gets, and
+/// the game keeps what this turn's spells on a minion improved inside it
+/// (Honeycomb Ring's "+1/+1 more this turn": `Hearthstone_2026_11_03_15_22_36-g4`
+/// turn 10 starts at 2/3 and reaches 38/39 by its end, then drops back next
+/// turn). `load` seats that whole number as the player's own bonus, so the
+/// total is the log's; this moves the part the turn added into the bonus that
+/// is only this turn's, which is what the engine's own improve-for-this-turn
+/// writes and what the end of the turn drops. It needs the turn's start state
+/// (the counter there is the standing part), which `load` does not take.
+pub fn seat_spell_bonus_turn(pl: &mut Player, state: &ShopStateSpec, turn_start: &ShopStateSpec) {
+    let added = |key: &str| {
+        let now = state.counters.get(key).copied().unwrap_or(0);
+        let start = turn_start.counters.get(key).copied().unwrap_or(0);
+        (now - start).max(0)
+    };
+    let (attack, health) = (added("spell_attack"), added("spell_health"));
+    pl.spell_bonus.0 -= attack;
+    pl.spell_bonus.1 -= health;
+    pl.tp.spell_bonus_turn.0 += attack;
+    pl.tp.spell_bonus_turn.1 += health;
+}
+
+/// A Tavern spell the step bought for less than the engine's price: the file
+/// says what the log charged (`paid.gold`) and nothing about why (a hero
+/// power or a rule this engine does not model; docs/briefs/
+/// replay-night-triage-report.md's rule question 3), so the shortfall goes in
+/// as the player's next-spell discount, which is the engine's own state for
+/// "the next Tavern spell costs less". Nothing is seated for a spell paid in
+/// Health, or for one the engine already prices at or under what the log took.
+fn seat_spell_paid(game: &mut Game, data: &Data, step: &ShopStepSpec) {
+    let Some(paid) = step.paid.filter(|p| p.health <= 0 && p.gold >= 0) else {
+        return;
+    };
+    let pl = &mut game.players[ME];
+    let Some(card) = pl.shop_spell else { return };
+    let c = data.cards.get(card);
+    if c.pay_health || pl.tp.spell_health_left > 0 {
+        return;
+    }
+    let Some(price) = pl.spell_cost(&data.cards) else { return };
+    let paid = paid.gold.min(u8::MAX as i32) as u8;
+    if paid < price {
+        pl.spell_discount = pl.spell_discount.saturating_add(price - paid);
+    }
 }
 
 /// What a logged hero power adds to the tier-up price (Manastorm's prices:
@@ -1923,10 +2001,11 @@ fn trinket_text(t: &[(String, bool)]) -> String {
 }
 
 /// The shape of a state, which a random step is compared on: the client's
-/// numbers, how many cards each zone holds, which of them are spells, and how
-/// the stats of the cards the step did not replace moved. A random step deals
-/// different cards every time (a Refresh, a random minion from the pool), so
-/// the cards themselves cannot be compared; what they did to the state can.
+/// numbers, how many cards each zone holds, which of them are spells, and what
+/// the step changed on the cards the zones held. A random step deals different
+/// cards every time (a Refresh, a random minion from the pool) and hands its
+/// buffs out to a card it picks, so the cards themselves cannot be compared;
+/// what they did to the state can.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShopShape {
     pub gold: i32,
@@ -1945,10 +2024,11 @@ pub struct ShopShape {
     pub board: (usize, usize),
     pub hand: (usize, usize),
     pub tavern: (usize, usize),
-    /// The stat change of every card that is in the same place before and
-    /// after with the same name: a buff that landed, which is comparable even
-    /// when the cards around it are random ones.
-    pub deltas: Vec<(String, i32, i32)>,
+    /// Every change the step made to a card of a zone, as a multiset (see
+    /// [`ShopChange`]): a buff that landed, a keyword it gave or took, a card
+    /// made golden. Which card of the zone got the change is not part of it,
+    /// so the same set of changes on other cards has the same shape.
+    pub changes: Vec<ShopChange>,
 }
 
 impl ShopShape {
@@ -1968,7 +2048,7 @@ impl ShopShape {
             board: (after.board.len(), spells(&after.board)),
             hand: (after.hand.len(), spells(&after.hand)),
             tavern: (after.tavern.len(), spells(&after.tavern)),
-            deltas: buff_deltas(after, before),
+            changes: zone_changes(after, before),
         }
     }
 
@@ -2018,84 +2098,155 @@ impl ShopShape {
                 ));
             }
         }
-        out.extend(delta_diffs(&self.deltas, &other.deltas));
+        out.extend(change_diffs(&self.changes, &other.changes));
         out
     }
 }
 
-/// How two sets of buffs differ, in both directions. A random step can give
+/// One change a step made to a card that was in a zone before it and is still
+/// there: the stats it gained or lost, the keywords it gained or lost, and
+/// whether it is golden. A random step hands its buffs to a card it picks, so
+/// which card of the zone got a change is the only thing the comparison is
+/// allowed to differ on: the change itself (its zone, golden mark, stats and
+/// keywords) is compared as a multiset, the card it landed on is only there
+/// for the report, and a change with a different size, or one the other side
+/// does not have, is a difference.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ShopChange {
+    /// `board`, `hand` or `Tavern`.
+    pub zone: &'static str,
+    /// The card the change landed on, for the report.
+    pub name: String,
+    /// Whether that card is golden.
+    pub golden: bool,
+    pub attack: i32,
+    pub health: i32,
+    /// The keywords the card gained and lost, sorted.
+    pub gained: Vec<String>,
+    pub lost: Vec<String>,
+}
+
+/// What a change is, without the card it landed on: the two sides of a random
+/// step may give the same change to different cards.
+type ChangeKey<'a> = (&'static str, bool, i32, i32, &'a [String], &'a [String]);
+
+fn change_key(c: &ShopChange) -> ChangeKey<'_> {
+    (c.zone, c.golden, c.attack, c.health, &c.gained, &c.lost)
+}
+
+/// How two sets of changes differ, in both directions. A random step can give
 /// its stats to a random card too (a random friendly minion, a random Tavern
-/// minion), so which card got them is not compared: the stat changes are
-/// compared as a multiset, and a change one side has and the other does not is
-/// a difference.
-fn delta_diffs(a: &[(String, i32, i32)], b: &[(String, i32, i32)]) -> Vec<String> {
-    let mut left: Vec<(i32, i32)> = a.iter().map(|(_, da, dh)| (*da, *dh)).collect();
-    let mut right: Vec<(i32, i32)> = b.iter().map(|(_, da, dh)| (*da, *dh)).collect();
-    left.sort_unstable();
-    right.sort_unstable();
+/// minion), so which card got them is not compared: the changes are compared
+/// as a multiset, and a change one side has and the other does not (or has at
+/// another size, or on a card of another kind) is a difference.
+fn change_diffs(a: &[ShopChange], b: &[ShopChange]) -> Vec<String> {
+    let mut left: Vec<&ShopChange> = a.iter().collect();
+    let mut right: Vec<&ShopChange> = b.iter().collect();
+    left.sort_by_key(|c| change_key(c));
+    right.sort_by_key(|c| change_key(c));
     let mut out = Vec::new();
-    let names = |v: &[(String, i32, i32)], d: (i32, i32)| {
-        let mut found: Vec<String> = v
+    let mut rest: Vec<Option<&ShopChange>> = right.iter().map(|c| Some(*c)).collect();
+    for c in &left {
+        let found = rest
             .iter()
-            .filter(|(_, da, dh)| (*da, *dh) == d)
-            .map(|(name, ..)| name.clone())
-            .collect();
-        found.sort();
-        found.dedup();
-        found.join(", ")
-    };
-    let mut rest = right.clone();
-    for d in &left {
-        match rest.iter().position(|x| x == d) {
-            Some(i) => {
-                rest.remove(i);
-            }
+            .position(|o| o.is_some_and(|o| change_key(o) == change_key(c)));
+        match found {
+            Some(i) => rest[i] = None,
             None => out.push(format!(
-                "a buff {:+}/{:+} on {} vs no such change (shape)",
-                d.0,
-                d.1,
-                names(a, *d)
+                "a change {} on {} in the {} vs no such change (shape)",
+                describe_change(c),
+                c.name,
+                c.zone
             )),
         }
     }
-    let mut rest = left;
-    for d in &right {
-        match rest.iter().position(|x| x == d) {
-            Some(i) => {
-                rest.remove(i);
-            }
-            None => out.push(format!(
-                "no buff {:+}/{:+} vs one on {} (shape)",
-                d.0,
-                d.1,
-                names(b, *d)
-            )),
-        }
+    for c in rest.into_iter().flatten() {
+        out.push(format!(
+            "no change {} vs one on {} in the {} (shape)",
+            describe_change(c),
+            c.name,
+            c.zone
+        ));
     }
     out
 }
 
-/// The stat change of every card that was in a zone before the step and is
-/// still there, at the same place and with the same name: a buff that landed,
-/// which is comparable even when the cards around it are random ones.
-fn buff_deltas(after: &ShopSnapshot, before: &ShopSnapshot) -> Vec<(String, i32, i32)> {
+/// A change's numbers, as the report prints them: `+2/+2`, plus the keywords
+/// it gave or took and the golden mark when it has them.
+fn describe_change(c: &ShopChange) -> String {
+    let mut out = format!("{:+}/{:+}", c.attack, c.health);
+    if !c.gained.is_empty() {
+        out.push_str(&format!(" gained [{}]", c.gained.join(" ")));
+    }
+    if !c.lost.is_empty() {
+        out.push_str(&format!(" lost [{}]", c.lost.join(" ")));
+    }
+    if c.golden {
+        out.push_str(" (golden)");
+    }
+    out
+}
+
+/// Every change a step made to a card of a zone: the three zones' own changes,
+/// sorted so two runs of the same engine compare equal.
+fn zone_changes(after: &ShopSnapshot, before: &ShopSnapshot) -> Vec<ShopChange> {
     let mut out = Vec::new();
-    for (now, was) in [
-        (&after.board, &before.board),
-        (&after.hand, &before.hand),
-        (&after.tavern, &before.tavern),
-    ] {
-        for (new, old) in now.iter().zip(was.iter()) {
-            if new.name != old.name {
-                continue;
-            }
-            let (da, dh) = (new.attack - old.attack, new.health - old.health);
-            if da != 0 || dh != 0 {
-                out.push((old.name.clone(), da, dh));
-            }
+    out.extend(name_changes("board", &after.board, &before.board));
+    out.extend(name_changes("hand", &after.hand, &before.hand));
+    out.extend(name_changes("Tavern", &after.tavern, &before.tavern));
+    out.sort();
+    out
+}
+
+/// The changes one zone's cards went through. A card is paired with the copy
+/// of its own name on the other side, so a minion that moved, or that another
+/// minion was sold from under, is still the same card (pairing by position
+/// drops that pairing and reports a change the step did not make). When one
+/// name has several copies on a side the pairings are by stats, keywords and
+/// golden mark: the smallest change wins, so two copies that swapped their
+/// stats are two no-changes and not one buff and one loss.
+fn name_changes(zone: &'static str, now: &[SnapMinion], was: &[SnapMinion]) -> Vec<ShopChange> {
+    let mut names: Vec<&str> = Vec::new();
+    for m in was.iter().chain(now.iter()) {
+        if !names.contains(&m.name.as_str()) {
+            names.push(m.name.as_str());
         }
     }
-    out.sort();
+    let key = |m: &&SnapMinion| (m.attack, m.health, m.golden, m.keywords.clone());
+    let mut out = Vec::new();
+    for name in names {
+        let mut old: Vec<&SnapMinion> = was.iter().filter(|m| m.name == name).collect();
+        let mut new: Vec<&SnapMinion> = now.iter().filter(|m| m.name == name).collect();
+        old.sort_by_key(key);
+        new.sort_by_key(key);
+        for (a, b) in new.iter().zip(old.iter()) {
+            let gained: Vec<String> = a
+                .keywords
+                .iter()
+                .filter(|k| !b.keywords.contains(k))
+                .cloned()
+                .collect();
+            let lost: Vec<String> = b
+                .keywords
+                .iter()
+                .filter(|k| !a.keywords.contains(k))
+                .cloned()
+                .collect();
+            let (da, dh) = (a.attack - b.attack, a.health - b.health);
+            if da == 0 && dh == 0 && gained.is_empty() && lost.is_empty() && a.golden == b.golden {
+                continue;
+            }
+            out.push(ShopChange {
+                zone,
+                name: name.to_string(),
+                golden: a.golden,
+                attack: da,
+                health: dh,
+                gained,
+                lost,
+            });
+        }
+    }
     out
 }
 
@@ -2610,6 +2761,9 @@ fn actions_for(
                 if loaded.game.players[ME].shop_spell.is_none() {
                     return Err("the Tavern has no spell slot to buy".to_string());
                 }
+                // The log's own price for the spell, when the card does not
+                // say what made it cheaper (`seat_spell_paid`).
+                seat_spell_paid(&mut loaded.game, data, step);
                 out.push(Action::BuySpell);
             } else {
                 let at = shop_index(loaded, target_id, step.slot).ok_or_else(|| {
@@ -2786,6 +2940,11 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     let mut loaded = load(data, before, hero, file.lobby(), turn, seed, previous);
     loaded.game.players[ME].tp.whistle = armed;
     loaded.game.players[ME].last_spell = last_spell;
+    // What the turn's own spells improved the Tavern spell bonus by: the log's
+    // counter now against the one the turn started with.
+    if let Some(start) = file.turns.get(turn_index).map(|t| &t.start) {
+        seat_spell_bonus_turn(&mut loaded.game.players[ME], before, start);
+    }
     let mut missing = std::mem::take(&mut loaded.missing);
     if step.step == "end_turn" {
         // The end of turn effects, without the fight that follows them: the
@@ -3535,7 +3694,7 @@ fn diff_cause(diff: &str) -> String {
                 format!("a random step's {head}")
             }
             "board" | "hand" => format!("a random step's {head} count"),
-            _ => "a random step's buff".to_string(),
+            _ => "a random step's change".to_string(),
         };
     }
     let first = diff.split_whitespace().next().unwrap_or("");

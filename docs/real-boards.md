@@ -71,7 +71,7 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
   | `beetle_attack`, `beetle_health` | `BG31_808pe` (Beetle Army player enchant) numbers 1 and 2 |
   | `undead_attack` | `BG25_011pe` (Undead Bonus Attack player enchant) number 1 |
   | `undead_health` | the `Undead Army` enchant (`BG25_011e2`) on any Undead of mine, number 2: the game has no player-level enchant for the Health half, and every Undead on my board carries the whole pair (number 1 is the Attack). A board with no Undead of mine shows no pair, and the Attack then comes from the player enchant above. The shop replay's collector writes it; the board files do not yet |
-  | `spell_attack`, `spell_health` | `TAVERN_SPELL_ATTACK_INCREASE` / `TAVERN_SPELL_HEALTH_INCREASE` on the player. This is the total the game gives every Tavern spell, so it already holds a minion's aura (Humon'gozz's +1/+2: the tag drops by exactly that pair when the Humon'gozz is sold, `Hearthstone_2026_10_27_17_42_08-g1` turn 9) and a trinket's standing rule (Honeycomb Ring's +1/+1 on the pick). The replay's loader takes the engine's own part back out |
+  | `spell_attack`, `spell_health` | `TAVERN_SPELL_ATTACK_INCREASE` / `TAVERN_SPELL_HEALTH_INCREASE` on the player. This is the total the game gives every Tavern spell, so it already holds a minion's aura (Humon'gozz's +1/+2: the tag drops by exactly that pair when the Humon'gozz is sold, `Hearthstone_2026_10_27_17_42_08-g1` turn 9) and a trinket's standing rule (Honeycomb Ring's +1/+1 on the pick). It also holds what this turn's spells on a minion improved, which the start of a turn drops: `Hearthstone_2026_11_03_15_22_36-g4` turn 10 starts at 2/3 and its last step is 38/39. The replay's loader takes the engine's own part back out, and seats the part the turn added as the bonus that is this turn's only (`Player.tp.spell_bonus_turn`) |
   | `spells_cast` | `NUM_SPELLS_PLAYED_THIS_GAME` on the player (mine only: the stand-in player carries none for the opponent) |
   | `knight_deaths` | `BG25_008pe` (Eternal Knight player enchant) number 1 |
   | `baller` | `BG31_816pe` (Baller player enchant) number 1 |
@@ -203,7 +203,12 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   the whole 3 off every Tavern minion until it is used: Aranna's Spectral
   Sight), and `costs_health` says the card is paid in Health
   (`BACON_COSTS_HEALTH_TO_BUY`: Bazaar Sticker's one spell a turn, Hasty
-  Excavation, Demonic Tapestry).
+  Excavation, Demonic Tapestry). The shop replay seats a card's price from
+  those marks, the Tavern spell's included: a minion's is the Tavern's price
+  or a free buy, and a spell's is the player's next-spell discount. A Tavern
+  spell the log bought for less than the card itself says (the step's own
+  `paid.gold`) is seated the same way, because the file cannot say what made
+  it cheaper.
 - `fodder_refreshes` is the Demon Fodder queue: one number per coming Refresh,
   how many Fodders that Refresh gets, read off the game's own "Fodder Player
   Enchant" (`BG35_150pe`, one number per Refresh in its four script numbers).
@@ -637,8 +642,10 @@ of a random step is run, since any of them may be the log's.
     gives them back.
 - **Not compared:** a hero power's presses left (the client's counter moves at
   whichever of a press's clicks it chooses, and not at all for a chooser), the
-  MAGNETIC keyword (a card property), which card a random buff landed on, and
-  the client's freeze button (the per-card flags say the same thing).
+  MAGNETIC keyword (a card property), which card of a zone a random change
+  landed on (a random step's shape is the set of changes, not the cards they
+  fell on), and the client's freeze button (the per-card flags say the same
+  thing).
 - **A minion's target is a place on the board before it lands.** A Battlecry
   or Choose One picks its target before the played minion is in its slot, so
   the log's board place for the target is the board as it stood; the engine has
@@ -673,11 +680,17 @@ of a random step is run, since any of them may be the log's.
   If not, it is random, and every seed's outcome is looked at, not the first
   one's: it passes when one of them is the log's, or, for a large random space
   (a Refresh, a random minion out of the pool), when one of them has the same
-  shape: Gold, Health, armor, the tier and its price, the free
-  Refreshes, how many cards each zone holds, how many of them are spells, and
-  every stat change that landed on a card that was there before and still is.
-  Which card a random buff lands on is not compared (one seed picks the
-  Tea Set's Dragon, another the other one).
+  shape: Gold, Health, armor, the tier and its price, the free Refreshes, how
+  many cards each zone holds, how many of them are spells, and every change
+  the step made to a card that was there before and still is, as a multiset
+  per zone: the stat delta, the keywords it gained or lost, and whether the
+  card is golden. Which card of a zone a change landed on is not part of it
+  (one seed picks the Tea Set's Dragon, another the other one; one gives a
+  buff to the first of two same-named minions, another to the second), and a
+  card is paired with the copies of its own name rather than by position, so
+  a minion that moved, or that another minion was sold from under, is still
+  the same card. A change the other side does not have, or one of another
+  size, is still a difference.
 - **Incomplete, not flagged.** A step is incomplete when the state or the step
   involves something the engine does not build (a minion, a hero power, a
   trinket, a Dark Gift, an option no card set has) or something the log does
@@ -697,10 +710,12 @@ of a random step is run, since any of them may be the log's.
 
 What the replay cannot see, and so cannot blame on the engine: the lobby's real
 tribes (the file's `tribes` are the ones the log showed), the client's own
-prices where a discount is invisible (a Tavern spell's price comes from the
-engine's own rule, and so does a standing "minions cost (1)" from a played
-Friends and Family Discount or the Chillmere Mosaic spell: the logged Tavern
-minions carry no price, so a buy's Gold comes out of the engine's rule), a
+prices where a discount is invisible (a Tavern spell is priced from the card's
+own marks or, failing those, from what its buy step paid, so a discount the
+log applied is the log's number; a minion's price comes from the engine's own
+rule, and so does a standing "minions cost (1)" from a played Friends and
+Family Discount or the Chillmere Mosaic spell, because a logged Tavern minion
+carries no price unless the game wrote one on it), a
 trinket's per-option price at a pick (the file only says what the pick paid), a
 Dark Gift's countdown (Incubation, Replication and Affinity keep "turns left" on
 the gift's enchantment, which the log does not number, so a start of turn and an

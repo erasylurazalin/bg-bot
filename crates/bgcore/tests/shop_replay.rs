@@ -9,8 +9,9 @@
 use std::sync::Arc;
 
 use bgcore::shop_replay::{
-    LoadedShop, ReplayOptions, ShopFileSpec, ShopSnapshot, ShopStepSpec, StepResult, Verdict,
-    load, parse_action_files, replay_step, replay_turn, seat_taught_spells,
+    LoadedShop, ReplayOptions, ShopFileSpec, ShopShape, ShopSnapshot, ShopStepSpec, SnapMinion,
+    StepResult, Verdict, load, parse_action_files, replay_step, replay_turn,
+    seat_spell_bonus_turn, seat_taught_spells,
 };
 use bgcore::real_boards::CardIdMap;
 use bgcore::trinkets::CardMod;
@@ -1836,5 +1837,218 @@ fn a_seated_surveyor_portraits_gem_bonus_is_for_the_hand() {
         (pl.gem_hand_attack, pl.gem_hand_health),
         (6, 6),
         "and the Portrait's +6/+6 is read off the trinket"
+    );
+}
+
+/// A minion as the comparison sees one, for the shape tests below.
+fn snap(name: &str, attack: i32, health: i32) -> SnapMinion {
+    SnapMinion {
+        name: name.to_string(),
+        golden: false,
+        attack,
+        health,
+        keywords: Vec::new(),
+        gifts: Vec::new(),
+        frozen: false,
+        spell: false,
+    }
+}
+
+/// The change a step made, as a shape: what the sum of its buffs was, and
+/// which cards they landed on, are told apart.
+#[test]
+fn a_buff_on_another_copy_of_the_same_card_keeps_the_shape() {
+    // Before: a Wolf Pup and two Bristleback Brutes. The step sells the Wolf
+    // Pup and buffs one Brute, and the two sides pick different Brutes: the
+    // same set of changes, only another copy of the card.
+    let before = ShopSnapshot {
+        board: vec![
+            snap("Wolf Pup", 1, 1),
+            snap("Bristleback Brute", 10, 10),
+            snap("Bristleback Brute", 5, 5),
+        ],
+        ..Default::default()
+    };
+    let ours = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 12, 12), snap("Bristleback Brute", 5, 5)],
+        ..Default::default()
+    };
+    let log = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 10, 10), snap("Bristleback Brute", 7, 7)],
+        ..Default::default()
+    };
+    let diffs = ShopShape::of(&ours, &before).diffs(&ShopShape::of(&log, &before));
+    assert_eq!(diffs, Vec::<String>::new(), "one +2/+2 on a copy either way");
+
+    // The same with a random receiver of another name: a Tea Set spread that
+    // landed on another Quilboar.
+    let before = ShopSnapshot {
+        board: vec![snap("Bramble Tunneler", 10, 10), snap("Victorious Geomant", 3, 3)],
+        ..Default::default()
+    };
+    let ours = ShopSnapshot {
+        board: vec![snap("Bramble Tunneler", 14, 14), snap("Victorious Geomant", 3, 3)],
+        ..Default::default()
+    };
+    let log = ShopSnapshot {
+        board: vec![snap("Bramble Tunneler", 10, 10), snap("Victorious Geomant", 7, 7)],
+        ..Default::default()
+    };
+    let diffs = ShopShape::of(&ours, &before).diffs(&ShopShape::of(&log, &before));
+    assert_eq!(diffs, Vec::<String>::new(), "the same +4/+4 on another Quilboar");
+}
+
+/// The other way: a change of another size, a change one side does not have,
+/// a keyword one side gave and the other did not, and a card made golden are
+/// all differences, so a step whose changes only look alike is still flagged.
+#[test]
+fn a_buff_that_is_not_the_same_change_is_a_difference() {
+    let before = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 10, 10), snap("Bristleback Brute", 5, 5)],
+        ..Default::default()
+    };
+    let shape = |after: &ShopSnapshot| ShopShape::of(after, &before);
+    let ours = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 12, 12), snap("Bristleback Brute", 5, 5)],
+        ..Default::default()
+    };
+    // Another size.
+    let log = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 14, 14), snap("Bristleback Brute", 5, 5)],
+        ..Default::default()
+    };
+    assert!(!shape(&ours).diffs(&shape(&log)).is_empty(), "a +2/+2 is not a +4/+4");
+    // A change that is missing: the log buffed both copies.
+    let log = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 12, 12), snap("Bristleback Brute", 7, 7)],
+        ..Default::default()
+    };
+    assert!(
+        !shape(&ours).diffs(&shape(&log)).is_empty(),
+        "the second copy's buff is missing"
+    );
+    // An extra change on our side.
+    let ours = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 12, 12), snap("Bristleback Brute", 7, 7)],
+        ..Default::default()
+    };
+    let log = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 12, 12), snap("Bristleback Brute", 5, 5)],
+        ..Default::default()
+    };
+    assert!(!shape(&ours).diffs(&shape(&log)).is_empty(), "one buff too many");
+    // A keyword only one side gave, at the same size.
+    let ours = ShopSnapshot {
+        board: vec![snap("Bristleback Brute", 12, 12), snap("Bristleback Brute", 5, 5)],
+        ..Default::default()
+    };
+    let mut taunt = snap("Bristleback Brute", 12, 12);
+    taunt.keywords.push("taunt".to_string());
+    let log = ShopSnapshot {
+        board: vec![taunt, snap("Bristleback Brute", 5, 5)],
+        ..Default::default()
+    };
+    assert!(!shape(&ours).diffs(&shape(&log)).is_empty(), "the Taunt is missing");
+    // A card made golden that the other side left alone.
+    let mut golden = snap("Bristleback Brute", 12, 12);
+    golden.golden = true;
+    let log = ShopSnapshot {
+        board: vec![golden, snap("Bristleback Brute", 5, 5)],
+        ..Default::default()
+    };
+    assert!(!shape(&ours).diffs(&shape(&log)).is_empty(), "the golden mark differs");
+}
+
+/// A Tavern spell the log buys for less than its printed cost: the price on
+/// the card (a reduction off the rule's) or, when the card says nothing, what
+/// the step itself paid. Without the seat the engine charges the printed cost
+/// and the buy is illegal when that is all the Gold there is.
+#[test]
+fn a_tavern_spells_price_is_the_logs_own() {
+    // Enchanted Lasso costs 2; a reduction takes 1 off it.
+    let reduce = r#"{"source": "spell-price", "game": 1, "turns": [
+      {"turn": 6,
+       "start": {"board": [], "hand": [], "hand_hidden": 0,
+                 "tavern": [{"id": 9, "slot": 1, "card_id": "BG28_512", "name": "Enchanted Lasso",
+                             "kind": "spell", "cost_reduce": 1, "frozen": false}],
+                 "gold": 1, "tier": 4, "upgrade_cost": null, "health": 30,
+                 "armor": 0, "free_refreshes": 0, "frozen": false,
+                 "hero_powers": [], "trinkets": []},
+       "actions": [{"step": "buy", "slot": 1, "spell": true,
+                    "target": {"id": 9, "card_id": "BG28_512", "name": "Enchanted Lasso",
+                               "kind": "slot", "slot": 1},
+                    "paid": {"gold": 1, "health": 0},
+                    "after": {"board": [], "tavern": [], "hand_hidden": 0, "gold": 0,
+                              "tier": 4, "upgrade_cost": null, "health": 30,
+                              "armor": 0, "free_refreshes": 0, "frozen": false,
+                              "hero_powers": [], "trinkets": []}}],
+       "end": null}]}"#;
+    // Tavern Coin costs 1 and the log bought it for 0 with no Gold at all, and
+    // nothing on the card says why (the frozen games' 8 illegal buys).
+    let paid = r#"{"source": "spell-paid", "game": 1, "turns": [
+      {"turn": 1,
+       "start": {"board": [], "hand": [], "hand_hidden": 0,
+                 "tavern": [{"id": 3, "slot": 1, "card_id": "BG28_810", "name": "Tavern Coin",
+                             "kind": "spell", "frozen": false}],
+                 "gold": 0, "tier": 1, "upgrade_cost": null, "health": 30,
+                 "armor": 0, "free_refreshes": 0, "frozen": false,
+                 "hero_powers": [], "trinkets": []},
+       "actions": [{"step": "buy", "slot": 1, "spell": true,
+                    "target": {"id": 3, "card_id": "BG28_810", "name": "Tavern Coin",
+                               "kind": "slot", "slot": 1},
+                    "paid": {"gold": 0, "health": 0},
+                    "after": {"board": [], "tavern": [], "hand_hidden": 0, "gold": 0,
+                              "tier": 1, "upgrade_cost": null, "health": 30,
+                              "armor": 0, "free_refreshes": 0, "frozen": false,
+                              "hero_powers": [], "trinkets": []}}],
+       "end": null}]}"#;
+    for (name, text, left) in [("reduce", reduce, 0), ("paid", paid, 0)] {
+        let files = parse_action_files(&[(format!("{name}.json"), text.to_string())]).unwrap();
+        let file = &files[0];
+        let turn = &file.turns[0];
+        let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+        assert_ne!(r.verdict, Verdict::Illegal, "{name}: {} {:?}", r.action, r.diffs);
+        assert_eq!(r.ours.gold, left, "{name}: the buy left {left} Gold: {:?}", r.diffs);
+    }
+}
+
+/// The log's Tavern spell bonus is the whole bonus, and the part this turn's
+/// spells on a minion added (Honeycomb Ring) belongs to the bonus that is this
+/// turn's only: the loader seats the standing part and moves the rest, so the
+/// total stays the log's (Hearthstone_2026_11_03_15_22_36-g4 turn 10: 2/3 at
+/// the turn's start, 8/9 by its 27th step).
+#[test]
+fn the_logged_tavern_spell_bonus_this_turn_is_seated_as_this_turns() {
+    let text = r#"{"source": "honeycomb", "game": 1, "turns": [
+        {"turn": 9,
+          "start": {"board": [], "hand": [], "tavern": [],
+                     "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": 5,
+                     "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                     "hero_powers": [], "trinkets": [],
+                     "counters": {"spell_attack": 2, "spell_health": 3}},
+          "actions": [], "end": null},
+        {"turn": 10,
+          "start": {"board": [], "hand": [], "tavern": [],
+                     "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": 5,
+                     "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                     "hero_powers": [],
+                     "trinkets": [{"card_id": "BG36_MagicItem_371", "name": "Honeycomb Ring",
+                                   "greater": true, "numbers": [1, 1, 0, 43]}],
+                     "counters": {"spell_attack": 8, "spell_health": 9}},
+          "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("honeycomb.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[1];
+    let mut loaded = load(&data(), &turn.start, None, None, turn.turn, 7, None);
+    let pl = &mut loaded.game.players[bgcore::shop_replay::ME];
+    let total = pl.total_spell_bonus(&loaded.game.data.cards);
+    assert_eq!(total, (8, 9), "the log's whole number");
+    assert_eq!(pl.tp.spell_bonus_turn, (0, 0), "nothing seated before the step");
+    seat_spell_bonus_turn(pl, &turn.start, &file.turns[0].start);
+    assert_eq!(pl.tp.spell_bonus_turn, (6, 6), "what this turn's spells added");
+    assert_eq!(
+        pl.total_spell_bonus(&loaded.game.data.cards),
+        (8, 9),
+        "the total is still the log's number"
     );
 }
