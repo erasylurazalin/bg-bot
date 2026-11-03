@@ -247,27 +247,22 @@ impl Game {
         }
     }
 
-    /// A minion of `tribes` was just played into board slot `played`: every
-    /// other minion with an "after you play a minion of this tribe" trigger
-    /// runs its effects (Wrath Weaver, Insatiable Ur'zul, Ultraviolet
-    /// Ascendant). The one just played never counts for itself. This runs
-    /// right after it lands, before its Battlecry.
+    /// A minion of `tribes` was just played: every other minion with an
+    /// "after you play a minion of this tribe" trigger runs its effects
+    /// (Wrath Weaver, Insatiable Ur'zul, Ultraviolet Ascendant). The one just
+    /// played never counts for itself (`Minion::just_played`). This runs once
+    /// the play's Battlecry has fully resolved (`resolve_after_play`).
     pub(super) fn fire_after_play_tribe(
         &mut self,
         p: usize,
         tribes: crate::cards::Tribes,
-        played: usize,
     ) {
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             let m = self.players[p].board[pos];
             for (card, golden) in m.parts() {
                 let n = match self.data.cards.get(card).after_play_tribe {
-                    Some(ref t)
-                        if tribes.has(t.tribe) && pos != played =>
-                    {
-                        t.effects.len()
-                    }
+                    Some(ref t) if tribes.has(t.tribe) && !m.just_played => t.effects.len(),
                     _ => 0,
                 };
                 // A golden card whose text says "twice" runs its whole list
@@ -301,6 +296,30 @@ impl Game {
                 }
             }
             pos += 1;
+        }
+    }
+
+    /// Fire the "after you play an X" triggers a play still owes, once nothing
+    /// it started is waiting for an answer: the played minion's Battlecry (a
+    /// Brann repeat included) resolves first, and so does whatever it asks (a
+    /// Choose One, a target, a Discover). The raw log is clear on both: in
+    /// `11_01_17_59_13-g1` turn 8 step 26 (Mind Muck) the three Brann runs
+    /// eat the Tavern (11/9, 14/13 and 12/12, no Ashen buff yet) before the
+    /// Wrath Weaver's two hits give the two survivors their +2/+2 twice, and
+    /// in `10_24_15_25_26` an Imposing Percussionist's Discover pick and its
+    /// hero damage come before the Wrath Weavers' trigger blocks.
+    pub(super) fn resolve_after_play(&mut self, p: usize) {
+        let pl = &self.players[p];
+        if pl.pending_after_play.is_none() || !pl.alive || Self::choice_open(pl) {
+            return;
+        }
+        let Some(tribes) = self.players[p].pending_after_play.take() else { return };
+        self.fire_after_play_tribe(p, tribes);
+        // The play is done: from now on even the minion it played is an
+        // ordinary one, wherever its Battlecry left it (the mark is on the
+        // minion, not on a slot the effects may have moved).
+        for m in &mut self.players[p].board {
+            m.just_played = false;
         }
     }
 

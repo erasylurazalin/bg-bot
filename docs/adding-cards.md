@@ -75,7 +75,7 @@ legality in mod.rs.
 | Gold spent / hero damage / sold / bought / Elementals played / discarded | `on_event = { event = "gold_spent" / "hero_damage" / "minions_sold" / "cards_bought" / "elementals_played" / "discarded", every, effect }` | `Game::fire_event` (count in `improvements`, remainder kept, can fire several times; an every-1 trigger leaves `improvements` alone so a self-improving effect can use it) | Gunpowder Courier |
 | Sell | `on_sell = {..}` | `Game::sell_minion` (`OnSell`) | Greedy Conniver |
 | Buy | `Action::Buy`/`BuySpell` in `apply`; triple via `check_triple` | `apply` | none yet |
-| Play a minion of a tribe | `after_play_tribe = { tribe, effects }` (never counts the minion being played, no flag; runs right after it lands, before its Battlecry). `golden_twice = true` when the golden text says ", twice": the whole list then runs twice with the printed numbers, so a golden Wrath Weaver's two hits are two hero-damage events (a Soul Rewinder takes +2 Health for each) | `fire_after_play_tribe` | Wrath Weaver |
+| Play a minion of a tribe | `after_play_tribe = { tribe, effects }` (never counts the minion being played: its own play marks it `Minion::just_played` while the trigger waits; runs once the play's Battlecry, and whatever it asks, has resolved). `golden_twice = true` when the golden text says ", twice": the whole list then runs twice with the printed numbers, so a golden Wrath Weaver's two hits are two hero-damage events (a Soul Rewinder takes +2 Health for each) | `fire_after_play_tribe`, `resolve_after_play` | Wrath Weaver |
 | While in hand, after a tribe is played | `while_in_hand` | `trigger_in_hand_on_play` | Bream Counter |
 | After you trigger a Battlecry | `after_battlecry` | `fire_after_battlecry` | Kalecgos |
 | Discover (the effect) | `discover_spell`, `discover_tribe_if_another`, `Effect::Discover*`, spell `discover = ..` | `discover_queue` of `DiscoverRequest`, `maybe_start_discover`, `resolve_choose`. A Discover a Battlecry an Activate triggers opens is the exception: it gives a random card of its pool with no offer (`QueuedRepeat.random_discover`, `Player.repeat_discover`; docs/rules/design.md "Shop replay answers") | Rodeo Performer |
@@ -644,10 +644,13 @@ Triple Reward spell.
 - **Elemental plays.** In `Action::Play`, right after the board insert:
   `Player.elementals_played_turn` (Conflagration, reset in `start_turn`) and
   `give_play_shield`, then, before the Battlecry, `fire_event(ElementalsPlayed)`
-  (Unbound Tempest) and every `after_play_tribe` card (Wrath Weaver, Insatiable
-  Ur'zul, Ultraviolet Ascendant). None counts the minion being played (docs/rules/design.md);
-  `fire_after_play_tribe` skips its board slot, and they all run before the
-  Battlecry. Only minions played from hand count.
+  (Unbound Tempest). Every `after_play_tribe` card (Wrath Weaver, Insatiable
+  Ur'zul, Ultraviolet Ascendant) waits in `Player.pending_after_play` instead:
+  `resolve_after_play` fires it once the Battlecry, and whatever that asks (a
+  Choose One, a target, a Discover), is done. None counts the minion being
+  played (docs/rules/design.md): its own play marks it `just_played`, and
+  `fire_after_play_tribe` skips that minion, not a board slot. Only minions
+  played from hand count.
 - **Triples with a stand-in.** `check_triple_tracking` builds a `TriplePlan`:
   three plain copies first, else two of a card plus one stand-in, else one
   plus two. Each source minion's buffs are measured against its own card,

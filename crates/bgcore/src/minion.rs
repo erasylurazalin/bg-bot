@@ -177,6 +177,10 @@ pub struct Minion {
     /// that happens in the turn it was Discovered (the flag comes off in
     /// hand at the end of the turn).
     pub doomed: bool,
+    /// Played from hand into this slot and its "after you play an X" triggers
+    /// have not fired yet: it never counts for itself, whatever its own play
+    /// moved around on the board (`resolve_after_play` clears it).
+    pub just_played: bool,
     /// Whether its Activate was already used this turn. Cleared at the start
     /// of its owner's turn; a copy bought or made later starts unused.
     pub activated: bool,
