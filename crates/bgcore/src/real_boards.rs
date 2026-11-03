@@ -817,6 +817,8 @@ struct RawRefCard {
     card_id: String,
     name: String,
     #[serde(default)]
+    dbf_id: u32,
+    #[serde(default)]
     is_golden: bool,
     #[serde(default)]
     normal_card_id: Option<String>,
@@ -828,6 +830,10 @@ struct RawRefCard {
 #[derive(Debug, Default)]
 pub struct CardIdMap {
     by_id: HashMap<String, (String, bool)>,
+    /// The game's dbf id to the card it names: a log tag can hold a dbf id
+    /// rather than a name (a Magicfin token's taught spell is one, in its
+    /// first number).
+    by_dbf: HashMap<u32, String>,
 }
 
 /// Dark Paradox: the game's five versions are all named "Dark Paradox" in the
@@ -876,12 +882,16 @@ impl CardIdMap {
             }
         }
         let mut by_id = HashMap::new();
+        let mut by_dbf = HashMap::new();
         for c in raw.cards {
             // The ids whose logged name does not name the card we build.
             if RENAMED_BY_ID.iter().any(|(id, _)| *id == c.card_id)
                 || paradox_name(&c.card_id).is_some()
             {
                 let name = resolved_name(&c.card_id, &c.name);
+                if c.dbf_id != 0 {
+                    by_dbf.insert(c.dbf_id, name.clone());
+                }
                 by_id.insert(c.card_id, (name, c.is_golden));
                 continue;
             }
@@ -895,15 +905,26 @@ impl CardIdMap {
             } else {
                 c.name
             };
+            if c.dbf_id != 0 {
+                by_dbf.insert(c.dbf_id, name.clone());
+            }
             by_id.insert(c.card_id, (name, c.is_golden));
         }
-        Ok(CardIdMap { by_id })
+        Ok(CardIdMap { by_id, by_dbf })
     }
 
     /// The card a file minion's id stands for: its name, and whether the id
     /// itself is a golden card.
     pub fn get(&self, card_id: &str) -> Option<(&str, bool)> {
         self.by_id.get(card_id).map(|(name, golden)| (name.as_str(), *golden))
+    }
+
+    /// The name of the card the game's dbf id names, when the ref data has
+    /// one: a log tag can hold the id rather than the name (a Magicfin
+    /// token's taught spell is the first of its numbers).
+    pub fn name_of_dbf(&self, dbf_id: i32) -> Option<&str> {
+        let dbf_id = u32::try_from(dbf_id).ok()?;
+        self.by_dbf.get(&dbf_id).map(String::as_str)
     }
 }
 

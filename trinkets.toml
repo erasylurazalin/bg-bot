@@ -295,6 +295,7 @@ name = "Sphere of Memory"
 card_id = "BG36_MagicItem_372"
 slot = "greater"
 cost = 2
+drakkari_end = true
 end_of_turn = [{ last_spell_copies = 3 }]
 
 [[trinket]]
@@ -1200,6 +1201,7 @@ on_pick = [{ triple_need_two_pirate = true }]
 name = "Goldenizer Supply"
 card_id = "BG30_MagicItem_435"
 slot = "lesser"
+drakkari_end = true
 rule = { event = "turns", every = 3, acts = [{ get = "The Goldenizer" }] }
 
 [[trinket]]

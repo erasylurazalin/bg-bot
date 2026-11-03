@@ -190,7 +190,9 @@ impl Game {
             return;
         };
         let tavern = c.tavern_spell;
-        self.players[p].last_spell = Some(card);
+        if tavern {
+            self.players[p].last_spell = Some(card);
+        }
         let pt = PendingTarget {
             by_minion: false,
             source: None,
@@ -556,9 +558,16 @@ impl Game {
     /// effect. `by_minion` says whether a minion's effect cast it, and then no
     /// "whenever you cast a spell" card sees it.
     fn cast_spell_inner(&mut self, p: usize, m: Minion, by_minion: bool) {
-        self.players[p].last_spell = Some(m.card);
         let c = self.data.cards.get(m.card);
         let tavern = c.tavern_spell;
+        // "The last Tavern spell you cast" (Cataclysmic Harbinger, the
+        // Galaxy's Lens): a spell a minion casts for the player is not the
+        // player's cast (docs/rules/design.md "A spell a minion casts for
+        // you"), and neither is a Blood Gem or another non-Tavern spell, so
+        // neither takes the place of the one those cards copy.
+        if !by_minion && tavern {
+            self.players[p].last_spell = Some(m.card);
+        }
         if let Some(st) = c.spell_target {
             if !self.spell_castable(p, m.card) {
                 return;

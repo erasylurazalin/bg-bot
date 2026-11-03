@@ -131,20 +131,25 @@ impl Game {
 
     fn run_end_of_turn(&mut self, p: usize) {
         let runs = self.drakkari_mult(p);
+        // The trinkets' end-of-turn triggers run before the board's: the log
+        // of Hearthstone_2026_10_24_04_08_00-g1 turn 10 runs Sphere of
+        // Memory's three copies before any Nightmare Corroder's Sludge
+        // Corrosion, which the hand's ten-card limit makes visible.
+        // docs/rules/design.md "Settled" has the rest of the end of turn.
+        self.trinket_end_of_turn(p);
         let mut pos = 0;
         while pos < self.players[p].board.len() {
             self.run_minion_end_of_turn(p, &mut pos, runs);
             pos += 1;
         }
         // The Dark Gift countdowns (Incubation, Replication, Affinity) tick
-        // and fire here, at the end of the turn (docs/rules/darkgifts.md).
+        // and fire after the board's own effects (Hearthstone_2026_10_26
+        // _00_48_15-g2 turn 5: Trench Fighter's Gem Confiscation lands before
+        // the Replication gift's copy).
         self.dark_gift_end_of_turn(p);
         // The powers' own end-of-turn effects (Sulfuras gives your ends
-        // +8/+8), then the trinkets'.
+        // +8/+8).
         self.power_end_of_turn(p);
-        // Trinkets at the end of the turn: their own end-of-turn effects,
-        // then an "every N turns" rule that has counted up to N.
-        self.trinket_end_of_turn(p);
         // A Lockbox is an end of turn countdown too, so Drakkari doubles it.
         self.tick_lockboxes(p, runs);
         // The Unlimited Coin comes back to hand at the end of every turn (a
@@ -370,6 +375,14 @@ impl Game {
                 self.pick_trinket(p, k);
             } else if !pl.choose_queue.is_empty() {
                 // Both-effects Choose One options still waiting.
+                self.maybe_start_discover(p);
+            } else if !pl.discover_queue.is_empty() {
+                // A Discover a Battlecry queued and nothing had started yet:
+                // an end-of-turn Battlecry (a Dark Gift's Echoing Voice, Young
+                // Murk-Eye triggering a Magicfin token's) leaves its Discover
+                // in the queue, and the end of the turn cannot leave it
+                // unanswered. The next turn of this loop takes its first
+                // option, like every other choice here.
                 self.maybe_start_discover(p);
             } else {
                 break;

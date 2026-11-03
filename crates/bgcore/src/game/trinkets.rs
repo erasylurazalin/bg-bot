@@ -836,6 +836,11 @@ impl Game {
                 .map(|r| (r.every, r.once))
             };
             let Some((every, once)) = every else { continue };
+            // The rule is an end-of-turn effect too, so a Drakkari doubles what
+            // it hands out (Goldenizer Supply gives two Goldenizers with one on
+            // the board: Hearthstone_2026_10_28_22_11_50-g2 turn 8). The count
+            // itself still resets once: only the payout repeats.
+            let runs = if self.data.trinkets.get(i).drakkari_end { self.drakkari_mult(p) } else { 1 };
             let st = &mut self.players[p].trinkets[slot];
             if st.done || st.count < every as u16 {
                 continue;
@@ -844,7 +849,9 @@ impl Game {
             if once {
                 st.done = true;
             }
-            self.run_trinket_hook(p, slot, i, Hook::Rule);
+            for _ in 0..runs {
+                self.run_trinket_hook(p, slot, i, Hook::Rule);
+            }
         }
     }
 

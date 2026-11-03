@@ -881,6 +881,10 @@ pub struct Player {
     pub refresh_buff: (i32, i32),
     pub spell_bonus: (i32, i32),
     pub spell_discount: u8,
+    /// The last Tavern spell this player cast themselves: what Cataclysmic
+    /// Harbinger, the Galaxy's Lens and Lens Case copy. A spell a minion cast
+    /// for them, a Blood Gem or any other non-Tavern spell does not replace
+    /// it.
     pub last_spell: Option<CardId>,
     pub shop_spell: Option<CardId>,
     pub shop: ArrayVec<Minion, SHOP>,
