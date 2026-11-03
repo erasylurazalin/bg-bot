@@ -503,8 +503,12 @@ of a random step is run, since any of them may be the log's.
   - **The freeze** is one state on the player (`pl.frozen`) and off the cards,
     because the engine toggles the player's flag when Freeze is pressed.
   - **The standing rules** a power or trinket sets are recomputed on the seat
-    (`Game::sync_seat_rules`), or a Tavern dealt by a Refresh would ignore
-    Stay Frosty, Enhancification, Glowing Gauntlet and the like.
+    (`Game::sync_seat_rules` for the powers; for a trinket,
+    `Game::seat_trinket_pick_state` runs its `on_pick` acts that leave a rule
+    standing, through the pick's own code), or a Tavern dealt by a Refresh
+    would ignore Stay Frosty, Enhancification, Glowing Gauntlet and the like.
+    A trinket's `on_pick` acts that hand out a card, Gold or stats once are
+    skipped: the logged board, hand and numbers are already theirs.
   - **Magnetic** is put back on a loaded card (the board loader drops it, since
     a fight never reads it), and a Lockbox's turns left are its `{0}`.
   - **The counters a card keeps** are read off the logged numbers, card by

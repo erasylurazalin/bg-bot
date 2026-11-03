@@ -366,7 +366,11 @@ passes the slot through.
    turn it reaches N, which is wrong for Gold, so use `start_every` there).
 3. Only add a key to `Act` when no `Effect` or `SpellEffect` arm does the job,
    and then add the arm to `Game::run_trinket_act` calling the same helper the
-   card path calls. A trinket's in-fight effects go in `fight`, not into
+   card path calls, plus one arm to `Game::seat_trinket_act`: the shop replay
+   seats a logged trinket without its pick, and that match says whether the new
+   key is a rule a state cannot carry (it runs) or something the logged board,
+   hand, numbers or Secret zone already holds (it is skipped). The compiler
+   makes you choose. A trinket's in-fight effects go in `fight`, not into
    `run_trinket_act`: a fight cannot run a shop effect. Each `fight` table is
    one `FightAct` (`crates/bgcore/src/trinkets.rs`) and one hook in
    `Side::trinket_hook` / `Side::run_fight_act` (`crates/bgcore/src/fight.rs`);
@@ -383,7 +387,10 @@ passes the slot through.
    without its pick effects (`Game::set_trinket`, which also refreshes the
    player's event mask), `take` picks it through the real offer (so `on_pick`
    runs). The shared helpers there answer a prompt before passing the turn,
-   because a trinket can open a Discover at the start of a turn.
+   because a trinket can open a Discover at the start of a turn. What the
+   replay loader has to seat from a log has its own test in
+   `crates/bgcore/tests/shop_replay.rs`: a one-turn state that names the
+   trinket, loaded through `load`, then the step it changes.
 5. A trinket that hands out a minion no card has yet needs a `[[token]]` in
    cards.toml (the "--- Trinket-only minions" block): stats, `golden_stats` and
    the text's mechanic as a card field, so a real card could reuse it. A token

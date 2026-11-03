@@ -676,6 +676,17 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   counter, the start-of-turn effects) and `trinket_end_of_turn` (the
   end-of-turn effects, then an "every N turns" rule that reached N). A hook
   list with `uses_per_turn` is capped per turn.
+- **A seated trinket** (a logged shop state, a real-board seat) never ran its
+  pick. `Player::hold_trinket` puts the trinket in its slot and sets only what
+  a fight reads (the power's extra triggers, the Hammer's numbers), because it
+  has no `Game`. The shop replay then calls
+  `Game::seat_trinket_pick_state`, which runs the `on_pick` acts that leave a
+  rule standing through `run_trinket_act` (the code the pick runs, so the two
+  cannot drift): a `CardMod`, Lovely Locket, War Drum, the Tavern's shape, the
+  Gold cap, the offer turns, the standing counters. The acts the logged state
+  already carries are skipped: cards, Gold, stats given once, the counters the
+  file gives and the Secret zone. `Game::seat_trinket_act` is where that split
+  lives, so a new `Act` goes on one side of it.
 - **The effects.** `Act` mirrors the effect keys of cards.toml (`get`,
   `get_gems`, `cast`, ...) and `Game::run_trinket_act` runs each through the
   same `Effect`/`SpellEffect` arm the card path runs, with no host slot (`pos`

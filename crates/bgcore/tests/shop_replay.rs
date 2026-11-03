@@ -9,11 +9,12 @@
 use std::sync::Arc;
 
 use bgcore::shop_replay::{
-    ReplayOptions, ShopFileSpec, ShopSnapshot, ShopStepSpec, StepResult, Verdict, load,
-    parse_action_files, replay_step, replay_turn,
+    LoadedShop, ReplayOptions, ShopFileSpec, ShopSnapshot, ShopStepSpec, StepResult, Verdict,
+    load, parse_action_files, replay_step, replay_turn,
 };
 use bgcore::real_boards::CardIdMap;
-use bgcore::{Data, Game};
+use bgcore::trinkets::CardMod;
+use bgcore::{Action, Data, Game, Tribe};
 
 fn data() -> Arc<Data> {
     Arc::new(Data::bundled())
@@ -514,4 +515,179 @@ fn a_second_power_is_seated_by_its_mark_not_its_place_in_the_list() {
         Some("TB_BaconShop_HP_072".to_string()),
         "the marked one is the second"
     );
+}
+
+/// A logged state loaded the way the replay loads one, from a one-turn file
+/// with no step in it: the board, the hand, the tier and the trinkets are the
+/// state's own. The state names no hero power, so the loader seats the player
+/// without a hero, which none of these tests reads.
+fn seat(board: &str, hand: &str, trinkets: &str, tier: u8) -> LoadedShop {
+    let text = format!(
+        r#"{{"source": "seat", "game": 1, "turns": [
+        {{"turn": 8,
+          "start": {{"board": [{board}], "hand": [{hand}], "tavern": [],
+                     "hand_hidden": 0, "gold": 10, "tier": {tier},
+                     "upgrade_cost": 5, "health": 30, "armor": 0,
+                     "free_refreshes": 0, "frozen": false,
+                     "hero_powers": [], "trinkets": [{trinkets}]}},
+          "actions": [], "end": null}}]}}"#
+    );
+    let files = parse_action_files(&[("seat.json".to_string(), text)]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let data = data();
+    load(&data, &turn.start, None, None, turn.turn, 7)
+}
+
+/// One board minion's (attack, health) on the replay's player.
+fn stats(g: &Game, at: usize) -> (i32, i32) {
+    let m = g.players[bgcore::shop_replay::ME].board[at];
+    (m.attack, m.health)
+}
+
+/// Lovely Locket: a trinket the loader seats still casts the same spell on
+/// another friendly minion after a spell is cast on one. The replay dropped
+/// its `locket` rule, so the second minion never took the spell (triage group
+/// 1: every `board stats` step of the game that holds it).
+#[test]
+fn a_seated_lovely_locket_casts_the_spell_on_another_minion() {
+    let mut loaded = seat(
+        r#"{"name": "Sellemental", "attack": 2, "health": 2},
+           {"name": "Sellemental", "attack": 2, "health": 2}"#,
+        r#"{"name": "Repair Job", "kind": "spell"}"#,
+        r#"{"card_id": "BG36_MagicItem_211", "name": "Lovely Locket"}"#,
+        4,
+    );
+    let g = &mut loaded.game;
+    let me = bgcore::shop_replay::ME;
+    assert!(g.players[me].tp.locket, "the seated trinket's rule is set");
+    let before = [stats(g, 0), stats(g, 1)];
+    g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+    g.step(Action::Target(0)).unwrap();
+    let after = [stats(g, 0), stats(g, 1)];
+    let first = (after[0].0 - before[0].0, after[0].1 - before[0].1);
+    let second = (after[1].0 - before[1].0, after[1].1 - before[1].1);
+    assert_eq!(first, (4, 8), "Repair Job's own +4/+8 lands on the minion it was cast on");
+    assert_eq!(second, first, "the Locket casts the same spell again, on the other minion");
+    g.check_invariants().unwrap();
+}
+
+/// Azerite Portrait: "your Living Azerites also give stats to friendly
+/// Elementals" (`CardMod::AlsoBoard`). A seated portrait used to leave the
+/// board's Elementals out of the Tavern buff (triage group 1: 63 steps in one
+/// game, 50 of them on Wildfire Elemental).
+#[test]
+fn a_seated_azerite_portrait_buffs_the_board_elementals() {
+    let mut loaded = seat(
+        r#"{"name": "Living Azerite", "attack": 8, "health": 6},
+           {"name": "Sellemental", "attack": 2, "health": 2}"#,
+        r#"{"name": "Repair Job", "kind": "spell"}"#,
+        r#"{"card_id": "BG30_MagicItem_431", "name": "Azerite Portrait", "greater": true}"#,
+        5,
+    );
+    let g = &mut loaded.game;
+    let me = bgcore::shop_replay::ME;
+    let azerite = g.data.cards.by_name("Living Azerite").unwrap();
+    assert_eq!(
+        g.player_card_mod(me, azerite),
+        Some(CardMod::AlsoBoard(Tribe::Elemental)),
+        "the portrait's rewrite of the card is seated"
+    );
+    assert_eq!(g.players[me].hand.len(), 1, "only the logged spell is in hand");
+    let before = stats(g, 1);
+    g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+    g.step(Action::Target(0)).unwrap();
+    let after = stats(g, 1);
+    assert_eq!(
+        (after.0 - before.0, after.1 - before.1),
+        (4, 3),
+        "the Living Azerite's Tavern buff reaches the board's Elemental too"
+    );
+    g.check_invariants().unwrap();
+}
+
+/// Innkeeper's Stein: "the Tavern offers an extra minion of a higher Tier
+/// whenever it is Refreshed". Without its rule a Refresh dealt one card too
+/// few, which is the `Tavern count` signature of triage group 1.
+#[test]
+fn a_seated_innkeepers_stein_deals_one_more_card() {
+    let mut loaded = seat(
+        "",
+        "",
+        r#"{"card_id": "BG30_MagicItem_423", "name": "Innkeeper's Stein"}"#,
+        4,
+    );
+    let g = &mut loaded.game;
+    let me = bgcore::shop_replay::ME;
+    assert!(g.players[me].tp.extra_high_tier, "the seated trinket's rule is set");
+    let size = g.players[me].shop_size(&g.data.rules);
+    g.step(Action::Roll).unwrap();
+    let shop = &g.players[me].shop;
+    assert_eq!(shop.len(), size, "the Tavern holds the size the rule gives it");
+    assert_eq!(
+        shop.len(),
+        g.data.rules.shop_size(g.players[me].tier) + 1,
+        "one card more than a Tavern without the Stein"
+    );
+    let high = shop
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).tier == g.players[me].tier + 1)
+        .count();
+    assert_eq!(high, 1, "the extra card is one Tier above yours");
+    g.check_invariants().unwrap();
+}
+
+/// Mindslasher Portrait: "your Vicious Mindslashers also give stats to the
+/// minions beside them" (`CardMod::AlsoNeighbors`). Triage group 1: the
+/// neighbours of the Mindslasher stayed a buff behind on every step.
+#[test]
+fn a_seated_mindslasher_portrait_buffs_the_neighbours() {
+    let mut loaded = seat(
+        r#"{"name": "Sellemental", "attack": 2, "health": 2},
+           {"name": "Vicious Mindslasher", "attack": 1, "health": 2},
+           {"name": "Sellemental", "attack": 2, "health": 2}"#,
+        r#"{"name": "Repair Job", "kind": "spell"}"#,
+        r#"{"card_id": "BG36_MagicItem_402", "name": "Mindslasher Portrait"}"#,
+        5,
+    );
+    let g = &mut loaded.game;
+    let me = bgcore::shop_replay::ME;
+    let mindslasher = g.data.cards.by_name("Vicious Mindslasher").unwrap();
+    assert_eq!(
+        g.player_card_mod(me, mindslasher),
+        Some(CardMod::AlsoNeighbors),
+        "the portrait's rewrite of the card is seated"
+    );
+    let before = [stats(g, 0), stats(g, 2)];
+    // The spell's target is the Mindslasher, whose own "after you cast a spell"
+    // buff is the one the portrait hands to its neighbours.
+    g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+    g.step(Action::Target(1)).unwrap();
+    let after = [stats(g, 0), stats(g, 2)];
+    assert_eq!(after[0], (before[0].0 + 1, before[0].1 + 2), "the left neighbour takes it");
+    assert_eq!(after[1], (before[1].0 + 1, before[1].1 + 2), "and so does the right one");
+    g.check_invariants().unwrap();
+}
+
+/// A trinket that hands out a card gives none when it is seated: the pick's
+/// `get` is already in the logged hand, and dealing it again would be a card
+/// the real game never had.
+#[test]
+fn seating_a_card_granting_trinket_gives_no_card() {
+    let loaded = seat(
+        "",
+        "",
+        r#"{"card_id": "BG32_MagicItem_831", "name": "Sellemental Portrait"}"#,
+        4,
+    );
+    let game = &loaded.game;
+    let me = bgcore::shop_replay::ME;
+    let i = game.data.trinkets.by_card_id("BG32_MagicItem_831").unwrap();
+    assert_eq!(game.players[me].trinkets[0].of, i + 1, "the trinket is in its slot");
+    assert!(
+        game.players[me].hand.is_empty(),
+        "the pick's Sellemental is the file's business: {:?}",
+        game.players[me].hand.len()
+    );
+    game.check_invariants().unwrap();
 }

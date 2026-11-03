@@ -531,6 +531,205 @@ impl Game {
         }
     }
 
+    /// The rules a pick leaves standing, for a trinket the loader seated
+    /// instead of picked: the shop replay and a real board carry a trinket a
+    /// real game had won, and its pick never ran (`Player::hold_trinket`).
+    ///
+    /// `hold_trinket` is a `Player` method with no `Game` in hand, so it sets
+    /// only what a fight reads (the power's extra triggers, the Hammer's
+    /// numbers). Everything else the pick leaves behind is set here, one act
+    /// at a time through `run_trinket_act`, the code the pick itself runs, so
+    /// the seat and the pick cannot drift apart.
+    pub fn seat_trinket_pick_state(&mut self, p: usize) {
+        for slot in 0..TRINKET_SLOTS {
+            let Some(i) = self.trinket_of(p, slot) else { continue };
+            for k in 0..self.trinket_list(i, Hook::OnPick).len() {
+                let act = self.trinket_list(i, Hook::OnPick)[k];
+                self.seat_trinket_act(p, slot, act);
+            }
+        }
+    }
+
+    /// One `on_pick` act of a seated trinket, and the split it sits on: the
+    /// rules a logged state cannot carry run (the first group, through the
+    /// pick's own code), and the things the state already holds do not (the
+    /// last group: the board, hand, Gold, counters and Secret zone carry
+    /// them, so running them again would double them). A few acts are both,
+    /// and only their standing half is set.
+    fn seat_trinket_act(&mut self, p: usize, slot: usize, act: Act) {
+        match act {
+            // ---- a rule that outlasts the step: the pick's own code ----
+            // The Gold cap, a price rule ("every 4th buy costs Health"), a
+            // payout or an offer still to come, and queued Fodders.
+            Act::MaxGold(_)
+            | Act::HealthPriceHighestTier
+            | Act::EveryNthBuyHealth(_)
+            | Act::GoldOnTier6(_)
+            | Act::NextTrinketLesser
+            | Act::GreaterOfferOnTurn(_)
+            | Act::LockboxSooner(_)
+            | Act::AddFodderRefreshes(_)
+            // The Tavern's own rules (Glowing Gauntlet, Innkeeper's Stein,
+            // Electrode Attractor, Bob-blehead).
+            | Act::Gauntlet
+            | Act::ExtraHighTier
+            | Act::ExtraMagnetic
+            | Act::MagneticCost(_)
+            | Act::MinTier(_)
+            // An event rule or a standing bonus, none of it in the counters.
+            | Act::EndOfTurnTwice
+            | Act::WarDrum(_)
+            | Act::DragonBattlecry(_)
+            | Act::Locket
+            | Act::ConsumeClaw { .. }
+            | Act::SpellBonusPerType { .. }
+            | Act::SpellBonusThisTurn { .. }
+            // A portrait's rewrite of every copy of a card (also written onto
+            // the copies already on the board and in the hand).
+            | Act::CardMod { .. }
+            // A standing choice, the Eyepatch's triple rule, the Souvenir,
+            // the Compass's next Golden.
+            | Act::ChooseOneAll
+            | Act::TripleNeedTwoPirate
+            | Act::Souvenir
+            | Act::GoldenBoughtType
+            // The hero power's rule. `hold_trinket` sets the triggers too (a
+            // fight reads them), to the same value.
+            | Act::PowerTriggers(_)
+            | Act::PowerGold(_) => self.run_trinket_act(p, slot, act),
+            // ---- both, and only the standing half here ----
+            // The flag stays; the Golden minion it pays out and the card in
+            // hand are the file's.
+            Act::GoldenWhenRich(tier) => self.players[p].tp.golden_when_rich = tier,
+            Act::TriplePrize(card) => self.players[p].tp.triple_prize = Some(card),
+            // The extra press stays; the presses left this turn are the
+            // file's.
+            Act::PowerExtraUses(n) => {
+                let tp = &mut self.players[p].tp;
+                tp.power_extra_uses = tp.power_extra_uses.saturating_add(n);
+            }
+            // The Whistle stays; the free Refresh it adds is the file's.
+            Act::WarbandWhistle => self.players[p].tp.whistle = true,
+            // `hold_trinket` set the numbers a fight reads, and the logged
+            // board carries the buff the pick gives it.
+            Act::Hammer { .. } => {}
+            // ---- the logged state already carries these ----
+            // A card, a Discover, or a trigger that hands one out.
+            Act::Get { .. }
+            | Act::GetLockbox(_)
+            | Act::LinkedSpells(_)
+            | Act::GetRemembered(_)
+            | Act::GetGolden { .. }
+            | Act::GetWithStats { .. }
+            | Act::SatelliteOfBought(_)
+            | Act::LastSpellCopies(_)
+            | Act::PlainCopyRandomFriendly(_)
+            | Act::CopyLastDiscarded
+            | Act::RandomBounty(_)
+            | Act::RandomBattlecry(_)
+            | Act::RandomTierMinion { .. }
+            | Act::RandomMinion { .. }
+            | Act::RandomSpell(_)
+            | Act::RandomChromadrake(_)
+            | Act::RandomVolumizer(_)
+            | Act::RandomChooseOne(_)
+            | Act::RandomMostCommonType(_)
+            | Act::RandomMagnetic(_)
+            | Act::RandomPrize(_)
+            | Act::MechaDemon(_)
+            | Act::OneOf { .. }
+            | Act::OneOf3 { .. }
+            | Act::MakeGoldenRandom(_)
+            | Act::DiscoverSpell(_)
+            | Act::DiscoverDeathrattle(_)
+            | Act::DiscoverTier(_)
+            | Act::DiscoverRemember { .. }
+            | Act::DiscoverTierStats { .. }
+            | Act::DiscoverPrize(_)
+            | Act::DarkGift { .. }
+            | Act::DarkGiftCopies
+            | Act::Cast { .. }
+            | Act::CastOnLeftmost { .. }
+            | Act::CastOnRandom { .. }
+            | Act::TriggerBattlecriesEnds
+            | Act::TriggerBattlecriesOf(_)
+            | Act::TriggerAllRallies
+            | Act::TriggerDeathrattlesLeftmost(_)
+            | Act::TeachBoughtSpell(_)
+            | Act::MagnetizeEnds { .. }
+            | Act::GemsEachType(_)
+            | Act::SecondPower
+            // A die or a result the log rolled its own way: the wheel, the
+            // Surprise's 5%, a random Tavern or a random spell.
+            | Act::YoggWheel
+            | Act::CurseOfFlesh
+            | Act::DevouringHunger
+            | Act::RodOfRoasting { .. }
+            | Act::GoldenTavern
+            | Act::CastRandomSpells(_)
+            | Act::Surprise(_)
+            // Gold, now.
+            | Act::Gold(_)
+            | Act::GoldPerType(_)
+            | Act::GoldPerGolden(_)
+            // Stats given once, now.
+            | Act::Gems(_)
+            | Act::GemBonus { .. }
+            | Act::SpellBonus { .. }
+            | Act::UndeadBonus { .. }
+            | Act::BuffAll { .. }
+            | Act::BuffLeftmostHand { .. }
+            | Act::BuffTavernThisTurn { .. }
+            | Act::BuffLeftmostBoard { .. }
+            | Act::BuffAllGrowing { .. }
+            | Act::BuffLeftmostGrowing { .. }
+            | Act::BuffAllPerGolden { .. }
+            | Act::BuffLeftmostTwoPerBattlecry { .. }
+            | Act::BuffRandomOther { .. }
+            | Act::BuffEnds { .. }
+            | Act::BuffCardHandAndBoard { .. }
+            | Act::BuffDeity { .. }
+            | Act::HammerDiscarded
+            | Act::GemsOnBoard(_)
+            | Act::TavernBuff { .. }
+            | Act::DemonsConsume(_)
+            | Act::ConsumeShopHit
+            | Act::DoubleHighestTavern
+            | Act::StealHighestTierTavern
+            // A count the file gives (`seat_trinket_counters`) or one that
+            // starts over each turn, and the upgrade's discount (the file
+            // shows the button's price).
+            | Act::FreeBuys(_)
+            | Act::FreeTribeBuys { .. }
+            | Act::CopyBuys(_)
+            | Act::HealthPriceMinions { .. }
+            | Act::HealthPriceSpell(_)
+            | Act::Tier6Refreshes(_)
+            | Act::FirstPlayShield(_)
+            | Act::FirstSpellTwice(_)
+            | Act::DiscoverCopyBonus(_)
+            | Act::FreeRefreshes(_)
+            | Act::UpgradeDiscount(_)
+            // The trinket's own number, which the file gives.
+            | Act::GrowValue(_)
+            | Act::DoubleValue
+            | Act::FlipAlternate
+            // The slots ahead: the file shows the trinket that replaced this
+            // one, or the offer it opened.
+            | Act::GreaterOfferIntoLesser(_)
+            | Act::ReplaceWithRandom { .. }
+            | Act::OfferReplace(_)
+            // The Secret zone is the file's.
+            | Act::IceBlock
+            // The Deity's golden flag: the shop loader seats no Deity, and
+            // the file's numbers carry the +1/+1 a golden one has.
+            | Act::GoldenDeity
+            // The type a Compass locks in is not in the file: the acts that
+            // read it read the board when they run.
+            | Act::LockType => {}
+        }
+    }
+
     /// The Mystery Cube's turn-start offer: two free Lesser trinkets to
     /// replace the one the slot holds (DESIGN.md). Nothing is dealt while
     /// another offer is open, and `cube_pending` remembers the slot until

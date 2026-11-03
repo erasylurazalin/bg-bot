@@ -821,6 +821,11 @@ pub fn load(
         .collect();
     let hit = seat_trinkets(data, &mut game.players[ME], &trinkets);
     missing.extend(hit);
+    // A trinket's pick never ran, so the rules it leaves standing (Lovely
+    // Locket, a portrait's rewrite, Innkeeper's Stein's extra card, the
+    // Tavern's shape) come from the pick's own code, before the counters the
+    // file gives go on top.
+    game.seat_trinket_pick_state(ME);
     seat_trinket_counters(data, &mut game.players[ME], &spec.trinkets);
     seat_power_counters(data, &mut game.players[ME], &spec.hero_powers);
     match &spec.secrets {

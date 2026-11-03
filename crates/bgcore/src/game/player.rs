@@ -609,8 +609,10 @@ impl Player {
 
     /// Put a trinket of the trinket table in one of the player's slots, with
     /// its current "improve this" number, as a board that went into the fight
-    /// carried it. Its pick effects never ran, so nothing but the trinket and
-    /// the events it listens for is set here.
+    /// carried it. Its pick effects never ran: the trinket, the events it
+    /// listens for and the two rules a fight reads are set here, and a shop
+    /// replay runs the rest of its standing rules through
+    /// `Game::seat_trinket_pick_state`.
     pub fn hold_trinket(&mut self, data: &Data, slot: usize, i: u8, value: u8) {
         let t = data.trinkets.get(i);
         self.trinkets[slot] = TrinketState {
