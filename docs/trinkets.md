@@ -117,7 +117,10 @@ always afford one. A trinket with no cost in the game data is free.
 - **Weighted Gauntlet:** doubles with no cap (+1, +2, +4...).
 - **Honeycomb Ring:** +1/+1 more this turn per spell cast on a minion.
   **Multilayered Shield:** +1/+2 per different minion type on your board.
-- **Snarky Portrait:** improves by +4/+4 per Fishbait death.
+- **Snarky Portrait:** whenever a Fishbait dies, every friendly Beast gets
+  +4/+4, and the amount improves by +4/+4 per Fishbait death. On top, the
+  Fishbait's own Deathrattle gives its killer (the left-most Beast) +5/+5,
+  or +10/+10 golden (Era, 2026-11-03).
 - **Soul Fermenter:** the 3 destroyed minions are real deaths: Deathrattles,
   Reborn and every other death trigger fire. After your last minion dies
   they come back exactly as they were at Start of Combat.

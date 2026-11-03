@@ -95,13 +95,26 @@ fight phase.
   Discovers tier 5 even if you level before casting it. You can also keep
   it and never cast it. It comes before anything the golden minion's
   Battlecry adds to your hand; with a full hand it's lost.
-- **Which goldens give no Triple Reward (Era, 2026-11-02).** Only those whose
-  own text says so: Aureate Laureate, Silent Deliverer's goldens, Sinister
-  Invitation's golden, and a minion made golden by the Gilding gift. A golden
-  that carries any other Dark Gift gives one as usual: three copies where one
-  happened to have a gift still make a normal triple. Summoned tokens triple
-  too (three Skeletons from Cadaver Caretaker make a golden Skeleton in hand,
-  with its Triple Reward when played).
+- **THE GOLDEN RULE (Era, 2026-11-03; asked too many times, do not re-ask):
+  every golden minion gives a Triple Reward when played from hand. The only
+  exception is a golden whose card or effect EXPLICITLY says it gives none.**
+  The ones we know:
+  - Aureate Laureate,
+  - Silent Deliverer's goldens,
+  - Sinister Invitation's golden,
+  - the Dark Gift that makes a minion golden without a Triple Reward
+    (Gilding).
+
+  There may be other ways to get a golden without a reward that Era doesn't
+  remember; each one must say so in its own text. Everything else gives one:
+  a golden that carries any other Dark Gift, a golden from three copies where
+  one had a gift, a Lockbox's golden, a Tavern minion Golden Touch made golden
+  and then bought, and summoned tokens (three Skeletons from Cadaver Caretaker
+  make a golden Skeleton in hand, with its Triple Reward when played). Code,
+  collectors and replays default to "gives a reward" and need a named
+  exception to say otherwise. (A minion that turns golden on the board, like
+  Elite Navigator or Captain Sanders, was never played golden, so it gives
+  nothing: see "Triple rewards" below.)
 
 ### Spells
 
@@ -391,8 +404,9 @@ the action that put it there), every waiting Fodder feeds.
 **Golden cards** follow their real golden card text.
 
 **Triple rewards.** Any golden minion played from hand to the board gives
-a triple reward, unless its text says otherwise (Aureate Laureate, Silent
-Deliverer). That includes a Lockbox's minion and a Tavern minion that
+a triple reward, unless its text explicitly says otherwise (THE GOLDEN RULE
+under "Triples": Aureate Laureate, Silent Deliverer, Sinister Invitation,
+Gilding). That includes a Lockbox's minion and a Tavern minion that
 Golden Touch made golden, then bought and played. A minion that becomes
 golden on the board (Elite Navigator, Captain Sanders) gives nothing, and
 it doesn't count as a golden minion "played" (Maritime Extortionist,
@@ -434,8 +448,23 @@ Set), and only then is the minion eaten or destroyed, so the eater gains the
 buffed stats. "After you cast a spell" triggers fire after the spell has
 resolved.
 
-**Butchering and spell power (Era, 2026-11-02).** Butchering's "+8 Attack
-this game" is a Tavern spell number, so Tavern spell power adds to it.
+**Butchering and spell power (Era, 2026-11-02, 2026-11-03).** Butchering's
+"+8 Attack this game" is a Tavern spell number, so ALL Tavern spell power adds
+to it, Health included: with +3/+3 spell power it gives your Undead +11/+3
+"wherever they are" (this game, every Undead, on the board, in hand, or
+summoned later). A 1/1 Skeleton with Reborn then comes back as a 12/4.
+
+**Shop replay answers (Era, 2026-11-03).**
+- Lurking Lionfish: "choose a card in the Tavern" may pick a Tavern spell too.
+- Kelp Keeper: its Activate on a minion whose Battlecry Discovers gives a
+  random card from that Discover's pool instead of opening the Discover.
+- Decoy Conjurer: when several Tavern minions tie for the highest Attack, the
+  stolen one is random among them.
+- Fishbait: the minion that kills it (your left-most Beast, which attacks it)
+  gets +5/+5, +10/+10 for a golden Fishbait. Snarky Portrait's +4/+4 to all
+  your Beasts is separate and comes on top (docs/trinkets.md).
+- Sprightly Scarab: either option may target a Beast on your board or in the
+  Tavern (`in_shop = true` means "the Tavern too").
 
 **Malchezaar and free Refreshes (Era, 2026-11-02; a bug in the real game
 that we copy).** Malchezaar, Prince of Dance makes two Refreshes each turn

@@ -64,6 +64,9 @@ turn effects do: Drakkari Enchanter sets that to 2 (3 golden; two Drakkari
 still make 2), and Ghastly Sticker adds one on top (Drakkari plus Sticker:
 3). Nothing doubles; see DESIGN.md "'Twice' versus 'an extra time'". It
 never speeds up the count, which stays every 2 turns (Era, 2026-11-02).
+After paying out, **Replication and Affinity stay on the minion and start
+their 2-turn count again; Incubation does not restart** (it fires once and
+is gone) (Era, 2026-11-03).
 
 The pool the offers come from:
 - No Battlecry or Choose One minions before turn 5.
