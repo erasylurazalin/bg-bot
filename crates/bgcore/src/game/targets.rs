@@ -3,6 +3,7 @@
 use arrayvec::ArrayVec;
 use crate::trinkets::Event;
 use crate::cards::{
+    ChooseOption,
     ConsumePick,
     DoubleStat,
     Effect,
@@ -23,6 +24,8 @@ use super::{
     DiscoverRequest,
     Game,
     PendingTarget,
+    QueuedRepeat,
+    RepeatWhat,
     ShopTargetKind,
     TargetKind,
     TavernBuff,
@@ -601,7 +604,11 @@ impl Game {
             }
             TargetKind::MakeGolden { .. } => {
                 // A minion made Golden on the board gives no Triple Reward
-                // and doesn't count as a Golden minion played.
+                // and doesn't count as a Golden minion played. A repeat of the
+                // Battlecry or cast made the pick again only for the card's own
+                // count (a golden Elite Navigator picks two Pirates): the
+                // golden itself happens once (docs/rules/design.md "Set versus
+                // add").
                 golden_up(&self.data.cards, &mut self.players[p].board[s]);
                 if pt.runs > 1 {
                     let again = PendingTarget { runs: pt.runs - 1, ..*pt };
@@ -778,18 +785,20 @@ impl Game {
                 }
             }
             TargetKind::TriggerBattlecry => {
-                for _ in 0..pt.runs {
-                    if s >= self.players[p].board.len() {
-                        break;
+                // Every trigger is owed, even when one asks for a target: the
+                // queue runs them in turn, the repeats landing on the target
+                // the first one picked (docs/rules/design.md "Set versus add").
+                if pt.runs > 0 {
+                    if !self.players[p].repeats.is_full() {
+                        self.players[p].repeats.try_push(QueuedRepeat {
+                            what: RepeatWhat::Battlecry { slot: s as u8 },
+                            runs: pt.runs,
+                            started: false,
+                            at: None,
+                        })
+                        .ok();
                     }
-                    self.battlecry_or_choose_one(p, s);
-                    // A targeting Battlecry or a Choose One waits for its
-                    // own choice; don't run it again.
-                    if self.players[p].pending_target.is_some()
-                        || self.players[p].pending_choose_one.is_some()
-                    {
-                        break;
-                    }
+                    self.run_queued_repeats(p);
                 }
                 self.maybe_start_discover(p);
             }
@@ -1373,7 +1382,116 @@ impl Game {
 
     pub(super) fn resolve_target(&mut self, p: usize, s: usize) {
         let pt = self.players[p].pending_target.take().unwrap();
+        // The target a repeated Battlecry trigger or cast picked: every repeat
+        // lands on it (docs/rules/design.md "Set versus add").
+        if let Some(q) = self.players[p].repeats.first_mut()
+            && q.started
+            && q.at.is_none()
+            && q.source() == pt.source
+        {
+            q.at = Some(s as u8);
+        }
         self.apply_target(p, &pt, s);
         self.maybe_start_discover(p);
+    }
+
+    /// Run the repeats a Battlecry trigger or a spell cast still owes, the
+    /// ones in `Player.repeats`, until a prompt is left open. The first run of
+    /// an entry is the one that asks, so the player answers it; every repeat
+    /// lands on the target that run picked, and a Choose One's option is
+    /// picked at random (docs/rules/design.md "Set versus add", Era
+    /// 2026-11-04). Called by `maybe_start_discover` and by whoever queues the
+    /// first run.
+    pub(super) fn run_queued_repeats(&mut self, p: usize) {
+        // Nothing runs while the player still has a prompt to answer: the
+        // driver picks up again when the answer lands.
+        if self.players[p].repeating || Game::other_choice_open(&self.players[p]) {
+            return;
+        }
+        self.players[p].repeating = true;
+        while !self.players[p].repeats.is_empty() {
+            let mut q = self.players[p].repeats[0];
+            if q.runs == 0 {
+                self.players[p].repeats.remove(0);
+                continue;
+            }
+            q.runs -= 1;
+            let first = !q.started;
+            q.started = true;
+            self.players[p].repeats[0] = q;
+            // One run of the entry.
+            match q.what {
+                RepeatWhat::Battlecry { slot } => {
+                    if slot as usize >= self.players[p].board.len() {
+                        self.players[p].repeats.remove(0);
+                        continue;
+                    }
+                    self.battlecry_or_choose_one(p, slot as usize);
+                }
+                RepeatWhat::ChooseOne { source, options, both, tavern, by_minion } => {
+                    if both {
+                        self.resolve_choose_options(p, source, options, tavern, by_minion, true);
+                    } else {
+                        let Some(k) = self.random_choose_option(p, options) else {
+                            self.players[p].repeats.remove(0);
+                            continue;
+                        };
+                        self.apply_choose_option(p, source, options[k], tavern, by_minion);
+                    }
+                }
+            }
+            // A Choose One a repeat opened is the repeat's own choice: random,
+            // on the same target.
+            if !first
+                && let Some(pco) = self.players[p].pending_choose_one
+            {
+                match self.random_choose_option(p, pco.options) {
+                    Some(k) => self.resolve_choose(p, k),
+                    None => self.players[p].pending_choose_one = None,
+                }
+            }
+            // The first run's own target goes to the player; a repeat's is
+            // answered here.
+            if self.players[p].pending_target.is_some() {
+                if first {
+                    break;
+                }
+                self.answer_repeat_target(p, q.at);
+            }
+            if Game::other_choice_open(&self.players[p]) {
+                break;
+            }
+        }
+        self.players[p].repeating = false;
+    }
+
+    /// Answer the target a repeat asks for with the slot its entry's first run
+    /// picked, or a random legal one when it picked none or that one is gone.
+    fn answer_repeat_target(&mut self, p: usize, at: Option<u8>) {
+        let Some(pt) = self.players[p].pending_target else { return };
+        if let Some(s) = at
+            && self.valid_target(p, &pt, s as usize)
+        {
+            self.players[p].pending_target = None;
+            self.apply_target(p, &pt, s as usize);
+            return;
+        }
+        self.answer_target_at_random(p);
+    }
+
+    /// One of a Choose One's options at random, out of those the board can
+    /// answer: what a repeat picks (Era 2026-11-04: "you choose a target, and
+    /// the choice is random").
+    fn random_choose_option(&mut self, p: usize, options: [ChooseOption; 2]) -> Option<usize> {
+        let mut ok: ArrayVec<usize, 2> = ArrayVec::new();
+        for k in 0..2 {
+            if self.can_choose_option(p, options[k]) {
+                let _ = ok.try_push(k);
+            }
+        }
+        if ok.is_empty() {
+            return None;
+        }
+        Some(ok[self.rng.below(ok.len() as u32) as usize])
     }
 }

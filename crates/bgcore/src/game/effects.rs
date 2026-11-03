@@ -26,6 +26,8 @@ use super::{
     Game,
     PendingShopTarget,
     PendingTarget,
+    QueuedRepeat,
+    RepeatWhat,
     ShopTargetKind,
     TargetKind,
     TavernBuff,
@@ -706,19 +708,24 @@ impl Game {
             Effect::TriggerAdjacentBattlecries(count) => {
                 let times = count.saturating_mul(mul as u8).saturating_mul(runs);
                 let here = *pos;
+                // Every neighbour's Battlecry runs `times` times, and nothing
+                // is dropped when one asks for a target: the queue runs them
+                // in turn, a neighbour's repeat on the target its own first
+                // run picked (docs/rules/design.md "Set versus add"). A
+                // second neighbour's prompt never replaces the one before it.
                 for neighbour in [here.checked_sub(1), Some(here + 1)].into_iter().flatten() {
-                    for _ in 0..times {
-                        if neighbour >= self.players[p].board.len() {
-                            break;
-                        }
-                        self.battlecry_or_choose_one(p, neighbour);
-                        if self.players[p].pending_target.is_some()
-                            || self.players[p].pending_choose_one.is_some()
-                        {
-                            break;
-                        }
+                    if neighbour < self.players[p].board.len() && !self.players[p].repeats.is_full()
+                    {
+                        self.players[p].repeats.try_push(QueuedRepeat {
+                            what: RepeatWhat::Battlecry { slot: neighbour as u8 },
+                            runs: times,
+                            started: false,
+                            at: None,
+                        })
+                        .ok();
                     }
                 }
+                self.run_queued_repeats(p);
                 self.maybe_start_discover(p);
             }
             // A Magicfin token casts the spell it was taught: the minion's
@@ -808,11 +815,17 @@ impl Game {
                 self.offer_target(p, pt);
             }
             Effect::MakeGoldenChosen { tribe, max_tier, count } => {
+                // The golden happens once: a repeat still counts as a trigger
+                // or a cast, but it never makes a second minion Golden
+                // (docs/rules/design.md "Set versus add", Era 2026-11-04), so
+                // `runs` adds no pick. `count` is the card's own number (a
+                // golden Elite Navigator makes two Pirates Golden) and `mul`
+                // doubles it.
                 let pt = PendingTarget {
                     by_minion: false,
                     source: Some(*pos as u8),
                     kind: TargetKind::MakeGolden { tribe, max_tier },
-                    runs: count.saturating_mul(mul as u8).saturating_mul(runs),
+                    runs: count.saturating_mul(mul as u8).max(1),
                         tavern: true,
                         gem: false,
                 };

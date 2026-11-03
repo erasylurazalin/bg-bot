@@ -96,7 +96,7 @@ impl Game {
     /// Run one option of a Choose One (the shared body of `resolve_choose`
     /// and the both-effects paths). `by_minion` says a minion's effect cast
     /// the spell: its target then fires no "you cast a spell" trigger.
-    fn apply_choose_option(
+    pub(super) fn apply_choose_option(
         &mut self,
         p: usize,
         source: Option<u8>,
@@ -176,6 +176,7 @@ impl Game {
                 options,
                 tavern,
                 by_minion,
+                repeats: 1,
             });
             return;
         }
@@ -202,6 +203,11 @@ impl Game {
     }
 
     pub(super) fn maybe_start_discover(&mut self, p: usize) {
+        // A prompt `run_queued_repeats` answers re-enters here; the repeat
+        // driver is already on the stack and carries on with what is left.
+        if self.players[p].repeating {
+            return;
+        }
         loop {
             {
                 let pl = &self.players[p];
@@ -218,6 +224,16 @@ impl Game {
             if let Some(q) = self.players[p].choose_queue.first().copied() {
                 self.players[p].choose_queue.remove(0);
                 self.apply_choose_option(p, q.source, q.option, q.tavern, q.by_minion);
+                continue;
+            }
+            // The repeats a Battlecry trigger or a cast still owes, before its
+            // "after" triggers (docs/rules/design.md "Set versus add"). They
+            // wait while any other choice is open: what the first run opened
+            // comes first.
+            if !self.players[p].repeats.is_empty()
+                && !Game::other_choice_open(&self.players[p])
+            {
+                self.run_queued_repeats(p);
                 continue;
             }
             if self.players[p].discover_queue.is_empty() {

@@ -198,6 +198,7 @@ fn a_choose_one_nothing_can_answer_fizzles() {
         options: [needs_a_minion(1, 1), needs_a_minion(2, 2)],
         tavern: true,
         by_minion: false,
+        repeats: 1,
     });
     // Answering the choice is illegal (that is what used to strand the bots)...
     assert!(!g.is_legal(Action::Choose(0)));

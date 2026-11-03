@@ -400,6 +400,10 @@ impl Game {
                     options: scaled,
                     tavern: true,
                     by_minion: false,
+                    // A Choose One minion's choice is not a Battlecry, so no
+                    // repeat count ever reaches it (docs/rules/design.md
+                    // "Counting Battlecries").
+                    repeats: 1,
                 });
             }
             return;
