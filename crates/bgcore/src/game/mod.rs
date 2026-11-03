@@ -996,6 +996,12 @@ pub struct Player {
     /// Choose One cards played whose choice is still open: Turbo Hogrider
     /// reacts once the card is fully resolved (`resolve_hogrider`).
     pub hogrider_pending: u8,
+    /// The tribes of a just-played minion whose "after you play an X"
+    /// triggers are still owed: its Battlecry, and whatever that asks (a
+    /// Choose One, a target, a Discover), resolves first, then they fire
+    /// (`resolve_after_play`). One at a time: a play never happens while a
+    /// choice is open, so an earlier play's triggers are always done.
+    pub pending_after_play: Option<crate::cards::Tribes>,
     /// Options of a "both effects combined" Choose One that still have to
     /// run, after the one before them is done waiting on its target.
     pub choose_queue: ArrayVec<QueuedOption, 2>,
@@ -2106,6 +2112,9 @@ impl Game {
         self.apply(p, a);
         self.resolve_doomed(p);
         self.resolve_hogrider(p);
+        // A play whose Battlecry asked for an answer fires its "after you
+        // play an X" triggers once the last one is in.
+        self.resolve_after_play(p);
         // A hero knocked out mid-action may still collect cards from effects
         // that were running when it died.
         for q in 0..PLAYERS {
@@ -2417,7 +2426,15 @@ impl Game {
                         // Avalanche: 3 off the upgrade every third Elemental.
                         self.power_elemental_played(p);
                     }
-                    self.fire_after_play_tribe(p, t, pos);
+                    // "After you play an X" triggers (Wrath Weaver, Insatiable
+                    // Ur'zul, Ultraviolet Ascendant) wait for the Battlecry to
+                    // resolve: the raw log puts them after it, and after
+                    // whatever it asks (2026-11-01_17_59_13-g1 t8s26,
+                    // 2026-10-24_15_25_26's Imposing Percussionist Discover).
+                    // `just_played` keeps the played minion out of its own
+                    // trigger, wherever its Battlecry left it on the board.
+                    self.players[p].board[pos].just_played = true;
+                    self.players[p].pending_after_play = Some(t);
                     // A trinket that watches every minion played.
                     self.trinket_event_minion(p, Event::Play, &m, 1);
                     // Hammer of Twilight: "your minions have +X" reaches the
@@ -2448,6 +2465,10 @@ impl Game {
                     if self.data.cards.get(m.card).battlecry.is_some() {
                         self.trinket_event(p, Event::PlayBattlecry, Some(m.card), 1);
                     }
+                    // The play is over: its "after you play an X" triggers
+                    // fire now, or, if it left a prompt open, when the last
+                    // answer comes (`step`, `finish_shop`).
+                    self.resolve_after_play(p);
                 }
                 if m.golden {
                     // A Golden minion played from hand counts for Maritime

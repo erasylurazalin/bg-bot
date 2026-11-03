@@ -397,6 +397,7 @@ impl Game {
         self.resolve_open_choices(p);
         self.resolve_doomed(p);
         self.resolve_hogrider(p);
+        self.resolve_after_play(p);
         // A Tomb Turning Undead that wasn't played this turn is a normal one.
         for m in &mut self.players[p].hand {
             m.doomed = false;

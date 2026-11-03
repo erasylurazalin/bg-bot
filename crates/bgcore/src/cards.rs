@@ -4958,6 +4958,7 @@ impl CardDb {
             locked_tier: 0,
             locked_gold: 0,
             doomed: false,
+            just_played: false,
             activated: false,
             uses_left: 0,
             gem_attack: 0,

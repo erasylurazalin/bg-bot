@@ -781,6 +781,105 @@ fn insatiable_ur_zul_consumes_when_it_is_played_and_returns_the_copy() {
 }
 
 #[test]
+fn after_you_play_a_demon_waits_for_the_battlecry_to_consume() {
+    // Mind Muck's Battlecry asks for a Demon, which then eats a Tavern
+    // minion. The raw log puts the Wrath Weaver's "after you play a Demon"
+    // after the consume (2026_11_01_17_59_13-g1 turn 8 step 26: the eaten
+    // minions carry no Ashen buff), so the Tavern is unbuffed when the
+    // Demon eats and only what is left takes the +2/+2.
+    let mut g = game(46);
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    put_on_board(&mut g, 0, "Ashen Corruptor");
+    put_on_board(&mut g, 0, "Deft Deserter");
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Cord Puller"]);
+    g.players[0].health = 30;
+    g.give(0, "Mind Muck").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 3 });
+    // three Demons could eat (Mind Muck itself never counts), so the play
+    // waits for the pick, and the Weaver has not fired
+    assert!(g.players[0].pending_target.is_some());
+    assert_eq!(stats(&g.players[0].board[0]), (1, 3), "nothing fired yet");
+    act(&mut g, 0, Action::Target(2));
+    // 8/8 plus the 1/1 it ate as it stood: had the Weaver fired first, the
+    // Tavern would already be 3/3 and the Deserter 11/11
+    assert_eq!(stats(&g.players[0].board[2]), (9, 9));
+    assert_eq!(stats(&g.players[0].board[0]), (3, 5), "and then the Weaver's hit");
+    // Ashen Corruptor rewinds that damage and gives the Tavern's survivor
+    // the +2/+2 once
+    assert_eq!(g.players[0].health, 30);
+    assert_eq!(g.players[0].shop.len(), 1);
+    assert_eq!(stats(&g.players[0].shop[0]), (3, 3), "the survivor takes the buff");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_golden_wrath_weaver_buffs_the_tavern_only_after_the_consume() {
+    // The same play with the golden Weaver: two hits, so the survivor takes
+    // +2/+2 twice (+4/+4, the log's survivors) while the eaten minion still
+    // carries none of it.
+    let mut g = game(47);
+    let weaver = id(&g, "Wrath Weaver");
+    let slot = g.data.cards.get(weaver).pool_slot as usize;
+    g.pool[slot] -= 3;
+    let golden = g.players[0].make_card(&g.data.cards, weaver, true, 3);
+    g.players[0].board.push(golden);
+    put_on_board(&mut g, 0, "Ashen Corruptor");
+    put_on_board(&mut g, 0, "Deft Deserter");
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Cord Puller"]);
+    g.players[0].health = 30;
+    g.give(0, "Mind Muck").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 3 });
+    act(&mut g, 0, Action::Target(2));
+    assert_eq!(stats(&g.players[0].board[2]), (9, 9), "the eaten 1/1 came unbuffed");
+    assert_eq!(g.players[0].shop.len(), 1);
+    assert_eq!(stats(&g.players[0].shop[0]), (5, 5), "two hits, +2/+2 each");
+    assert_eq!(stats(&g.players[0].board[0]), (2 + 4, 6 + 4));
+    assert_eq!(g.players[0].health, 30, "both hits are rewound");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn after_you_play_a_demon_waits_for_the_discover_pick() {
+    // Imposing Percussionist's Battlecry Discovers a Demon and then damages
+    // the hero for its tier. The raw log puts the Wrath Weaver's trigger
+    // after the pick and its damage (2026_10_24_15_25_26, 16:31:00: the
+    // Weaver's blocks follow the whole play block), so the Weaver fires on
+    // the answer, not on the play.
+    let mut g = game(48);
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.players[0].tier = 3;
+    g.players[0].health = 30;
+    g.give(0, "Imposing Percussionist").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(g.players[0].discover.len(), 3);
+    assert_eq!(stats(&g.players[0].board[0]), (1, 3), "nothing fired yet");
+    assert_eq!(g.players[0].health, 30, "the damage follows the pick");
+    let tier = g.data.cards.get(g.players[0].discover[0]).tier as i32;
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(stats(&g.players[0].board[0]), (3, 5), "the Weaver fires on the answer");
+    assert_eq!(g.players[0].health, 30 - tier - 1, "the pick's damage, then the Weaver's");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_played_demon_never_counts_for_its_own_after_play_trigger() {
+    let mut g = game(49);
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.players[0].health = 30;
+    g.give(0, "Wrath Weaver").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(stats(&g.players[0].board[0]), (3, 5), "the one on the board fired");
+    assert_eq!(stats(&g.players[0].board[1]), (1, 3), "the one just played did not");
+    assert_eq!(g.players[0].health, 29);
+    // and the mark is gone: the next Demon played fires the one played here
+    g.give(0, "Deft Deserter").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+    assert_eq!(stats(&g.players[0].board[0]), (5, 7));
+    assert_eq!(stats(&g.players[0].board[1]), (3, 5));
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn soulkeeping_jailer_has_every_demon_consume_one() {
     let mut g = game(15);
     g.players[0].gold = 2;

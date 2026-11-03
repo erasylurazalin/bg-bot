@@ -147,6 +147,7 @@ impl Player {
             pending_shop_target: None,
             pending_discard: None,
             hogrider_pending: 0,
+            pending_after_play: None,
             choose_queue: ArrayVec::new(),
             repeats: ArrayVec::new(),
             repeating: false,
