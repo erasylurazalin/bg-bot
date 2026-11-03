@@ -592,7 +592,9 @@ pub const PLAYER_ENCHANTS: [(&str, Option<&str>, Option<&str>); 3] = [
     ("BG31_808pe", Some("beetle_attack"), Some("beetle_health")),
     // Undead Bonus Attack: "Your Undead have +{0} Attack this game, wherever
     // they are" (Nerubian Deathswarmer, Plaguerunner, Forsaken Weaver,
-    // Butchering). There is no health one.
+    // Butchering). There is no health one on the player: the health half rides
+    // on each Undead's own `Undead Army` enchant (`BG25_011e2`, numbers 1 and
+    // 2), which the shop collector reads.
     ("BG25_011pe", Some("undead_attack"), None),
     // Baller: how many Ballers were sold, the "improve your future Ballers"
     // count.

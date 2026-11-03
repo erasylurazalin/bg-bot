@@ -237,7 +237,7 @@ exactly one legal target and drops the effect when there is none.
 | Dual / all tribes | Treasure Parrot (`tribes = [..]`), `tribe = "all"` | `Tribes` bit set; every filter asks `has` |
 | Effect only while in hand | Bream Counter, Choral Mrrrglr | |
 | Stats that the Tavern can't change | Fishbait (`fixed_stats`) | |
-| A minion that dies in a Tavern attack | Fishbait's Beast | `Game::tavern_attack`: the dead Beasts' pool copies go back to the pool, the survivors keep theirs. A Fishbait that dies there is reported as a one-card death of the attacker's side (`SideOutcome::death_cards`), never as a friendly death. The attack is a real swing, so the attacker's Rally fires and can summon a third copy: `tavern_attack` runs `check_triple` for the board's cards afterwards | Lionfish's Fishbait, Flittering Bat's Rally |
+| A minion that dies in a Tavern attack | Fishbait's Beast | `Game::tavern_attack`: the dead Beasts' pool copies go back to the pool, the survivors keep theirs. A Fishbait that dies there is reported as a one-card death of the attacker's side (`SideOutcome::death_cards`), never as a friendly death. The attack is a real swing, so the attacker's Rally fires and can summon a third copy: `tavern_attack` runs `check_board_triples` afterwards (the same check a shop destroy runs) | Lionfish's Fishbait, Flittering Bat's Rally |
 | A pick of "a card in the Tavern" that may name a Tavern spell | `ShopTargetKind::takes_spell_slot` (`Fishbait`) | `valid_tavern_pick` (the spell slot is one past the last minion) and `put_fishbait`: the spell is dropped and the Fishbait takes a minion slot. A pick of a Tavern *minion* (a consume) still stops at the last minion | Lurking Lionfish (Era, 2026-11-03) |
 
 ## 2b. Adding a hero
@@ -695,7 +695,11 @@ Triple Reward spell.
   (`TargetKind::DestroyCopy`: destroy, then `give_generated` the plain card, golden
   gives two, lost when the hand is full), Dead Bellringer
   (`TargetKind::RebornDestroy`), Butchering (`SpellTarget::Butchering`) and Tomb
-  Turning's death all use it.
+  Turning's death all use it. A Deathrattle a destroy fires can summon the third copy
+  of a card (Cadaver Caretaker's three Skeletons, Eternal Summoner's Eternal Knight):
+  `destroy_in_shop` and `trigger_one_deathrattle` run `check_board_triples`, so the
+  Golden joins the hand in the same step (docs/rules/design.md "Triples", log
+  `2026_10_30_19_45_15-g2` turn 5).
 - **Tomb Turning.** The Discovered minion has `Minion.doomed`
   (`DiscoverRequest::DoomedTribeMinion`, `Player.discover_doomed`). Played, the flag
   stays on the board minion until `Game::resolve_doomed` finds no pending choice or

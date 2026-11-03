@@ -116,6 +116,10 @@ const WATCHED: [&str; 7] = [
 
 const SILENT_DELIVERER: &str = "BG36_343";
 
+/// `Undead Army`, the enchant an Undead minion carries for the player's "your
+/// Undead have +A/+H this game, wherever they are" (`undead_army_numbers`).
+const UNDEAD_ARMY: &str = "BG25_011e2";
+
 /// Aureate Laureate: `always_golden`, so the game shows it Golden without three
 /// copies, and its text says it gives no Triple Reward. The golden card id is
 /// listed too, against a log that names that one.
@@ -130,10 +134,13 @@ const BOARD_BLOCKS: [&str; 2] = ["PLAY", "MOVE_MINION"];
 
 /// The player enchantments whose two script numbers are a pair of counters, in
 /// the order the Python writes them.
-const PLAYER_ENCHANTS: [(&str, (&str, Option<&str>)); 7] = [
+const PLAYER_ENCHANTS: [(&str, (&str, Option<&str>)); 8] = [
     ("BG31_808pe", ("beetle_attack", Some("beetle_health"))),
     ("BG25_011pe", ("undead_attack", None)),
     ("BG31_816pe", ("baller", None)),
+    // Eternal Knight: how many of them died this game, which every one of them
+    // reads "wherever this is".
+    ("BG25_008pe", ("knight_deaths", None)),
     ("BG_ShopBuff", ("tavern_attack", Some("tavern_health"))),
     (
         "BG_ShopBuff_Elemental",
@@ -610,6 +617,41 @@ fn dummy(game: &Game) -> Option<i32> {
 
 fn my_player(game: &Game) -> Option<&Entity> {
     me(game).and_then(|me| game.player_entity(me))
+}
+
+/// The "Undead Army" enchant a minion carries for the player's "your Undead
+/// have +A/+H this game, wherever they are": its number 1 is the Attack and
+/// its number 2 the Health. Every Undead of mine on the board holds the same
+/// pair, so the newest one answers for all of them; the game keeps no
+/// player-level enchant for the Health half (`BG25_011pe` has the Attack
+/// alone), so this is the only place the log shows it. `None` when no Undead
+/// of mine is on the board.
+fn undead_army_numbers(game: &Game) -> Option<[i64; 4]> {
+    let me = me(game)? as i64;
+    let mine: HashSet<i64> = game
+        .entities_in_order()
+        .filter(|e| {
+            e.text("CARDTYPE") == "MINION"
+                && e.text("ZONE") == "PLAY"
+                && e.int("CONTROLLER") == me
+        })
+        .map(|e| e.id as i64)
+        .collect();
+    game.entities_in_order()
+        .filter(|x| {
+            x.card_id == UNDEAD_ARMY
+                && x.text("ZONE") == "PLAY"
+                && mine.contains(&x.int("ATTACHED"))
+        })
+        .max_by_key(|x| x.id)
+        .map(|x| {
+            [
+                x.int("TAG_SCRIPT_DATA_NUM_1"),
+                x.int("TAG_SCRIPT_DATA_NUM_2"),
+                x.int("TAG_SCRIPT_DATA_NUM_3"),
+                x.int("TAG_SCRIPT_DATA_NUM_4"),
+            ]
+        })
 }
 
 fn hero_entity(game: &Game) -> Option<&Entity> {
@@ -2567,6 +2609,15 @@ impl Collector {
                 put(&mut out, health, Json::Int(sd[1]));
             }
         }
+        // The Health half of "your Undead have +A/+H this game, wherever they
+        // are": the player enchant above carries the Attack alone, and every
+        // Undead on my board carries the whole pair on its own `Undead Army`
+        // enchant (docs/real-boards.md "counters").
+        if let Some(sd) = undead_army_numbers(game)
+            && sd[1] != 0
+        {
+            put(&mut out, "undead_health", Json::Int(sd[1]));
+        }
         if player.int("NUM_SPELLS_PLAYED_THIS_GAME") != 0 {
             put(
                 &mut out,
@@ -2772,5 +2823,81 @@ mod tests {
             ..Default::default()
         };
         assert!(!no_triple_reward(&normal, None));
+    }
+
+    /// The Health half of "your Undead have +A/+H this game, wherever they
+    /// are" is not on the player enchant (`BG25_011pe` has the Attack alone):
+    /// it rides on every Undead minion's own `Undead Army` enchant, and any one
+    /// of mine answers for the pair.
+    #[test]
+    fn the_undead_army_enchant_carries_the_undead_health_bonus() {
+        fn tag(value: &str) -> TagValue {
+            TagValue::Text(value.to_string())
+        }
+        fn number(value: i64) -> TagValue {
+            TagValue::Int(value)
+        }
+        let minion = |controller: i64| {
+            vec![
+                ("CARDTYPE", tag("MINION")),
+                ("ZONE", tag("PLAY")),
+                ("CONTROLLER", number(controller)),
+            ]
+        };
+        let army = |attack: i64, health: i64| {
+            vec![
+                ("ZONE", tag("PLAY")),
+                ("TAG_SCRIPT_DATA_NUM_1", number(attack)),
+                ("TAG_SCRIPT_DATA_NUM_2", number(health)),
+            ]
+        };
+        let mut g = bglog::Game::new();
+        g.real_players = [1].into_iter().collect();
+        let mut add = |id: i32, card_id: &str, tags: Vec<(&str, TagValue)>| {
+            let e = g.entity(id);
+            e.card_id = card_id.to_string();
+            for (k, v) in tags {
+                e.set(k, v);
+            }
+        };
+        // My two Undead and the opponent's one, which the log also enchants.
+        add(100, "BG25_008", minion(1));
+        add(101, "BG28_309", minion(1));
+        add(200, "BG25_008", minion(2));
+        // An older pair on one of mine, the current one on the other, and the
+        // opponent's pair much bigger: the newest of mine wins and theirs is
+        // never read.
+        let mut older = army(12, 3);
+        older.push(("ATTACHED", number(100)));
+        add(300, UNDEAD_ARMY, older);
+        let mut current = army(23, 6);
+        current.push(("ATTACHED", number(101)));
+        add(310, UNDEAD_ARMY, current);
+        let mut theirs = army(99, 99);
+        theirs.push(("ATTACHED", number(200)));
+        add(320, UNDEAD_ARMY, theirs);
+        // One that left play is not the current pair.
+        let mut gone = army(70, 70);
+        gone.push(("ATTACHED", number(101)));
+        gone.push(("ZONE", tag("REMOVEDFROMGAME")));
+        add(330, UNDEAD_ARMY, gone);
+        assert_eq!(undead_army_numbers(&g), Some([23, 6, 0, 0]));
+
+        // No Undead of mine on the board: the log shows no pair at all (`the
+        // Attack comes from the player enchant`).
+        let mut g = bglog::Game::new();
+        g.real_players = [1].into_iter().collect();
+        let mut add = |id: i32, card_id: &str, tags: Vec<(&str, TagValue)>| {
+            let e = g.entity(id);
+            e.card_id = card_id.to_string();
+            for (k, v) in tags {
+                e.set(k, v);
+            }
+        };
+        add(200, "BG25_008", minion(2));
+        let mut theirs = army(99, 99);
+        theirs.push(("ATTACHED", number(200)));
+        add(320, UNDEAD_ARMY, theirs);
+        assert_eq!(undead_army_numbers(&g), None);
     }
 }

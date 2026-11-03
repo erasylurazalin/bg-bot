@@ -742,7 +742,28 @@ impl Game {
         for m in &out.dead {
             self.trinket_event(p, Event::Destroy, Some(m.card), 1);
         }
+        // A Deathrattle can summon the third copy of a card: Cadaver
+        // Caretaker's three Skeletons make a Golden Skeleton in the hand
+        // (docs/rules/design.md "Triples", log 2026_10_30_19_45_15-g2 turn 5).
+        self.check_board_triples(p);
         out.tracked
+    }
+
+    /// Check every card on the board that could have a third copy there: a
+    /// summon (a Deathrattle's Skeletons, a Rally's Beast) lands next to its
+    /// copies and triples at once, and the Golden joins the hand
+    /// (docs/rules/design.md "Triples"). `check_triple` does nothing below
+    /// three copies.
+    pub(super) fn check_board_triples(&mut self, p: usize) {
+        let mut held: ArrayVec<CardId, { crate::BOARD }> = ArrayVec::new();
+        for m in &self.players[p].board {
+            if !m.golden && !held.contains(&m.card) {
+                let _ = held.try_push(m.card);
+            }
+        }
+        for card in held {
+            self.check_triple(p, card);
+        }
     }
 
     /// Fire the Deathrattles of the `n` left-most friendly minions that have
@@ -780,6 +801,9 @@ impl Game {
         pl.board.clear();
         pl.board.extend(out.board);
         self.apply_side_outcome(p, &out.side, false);
+        // A summon the Deathrattles made can be the third copy (see
+        // `destroy_in_shop`).
+        self.check_board_triples(p);
     }
 
     /// A minion was just bought into the last hand slot (before it can
@@ -1031,16 +1055,8 @@ impl Game {
         self.apply_side_outcome(p, &out.side, false);
         // A Rally can summon the third copy of a card (Flittering Bat's 1/1
         // Beast next to two of them), and in the shop phase that triples at
-        // once. `check_triple` does nothing below three copies.
-        let mut held: ArrayVec<CardId, { crate::BOARD }> = ArrayVec::new();
-        for m in &self.players[p].board {
-            if !m.golden && !held.contains(&m.card) {
-                let _ = held.try_push(m.card);
-            }
-        }
-        for card in held {
-            self.check_triple(p, card);
-        }
+        // once.
+        self.check_board_triples(p);
     }
 
     /// Steal the `n` highest-Attack Tavern minions into hand (Decoy

@@ -69,7 +69,8 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
   |---|---|
   | `gem_attack`, `gem_health` | `BACON_BLOODGEMBUFFATKVALUE` / `_HEALTHVALUE` on the player (the `BG26_159pe` enchantment carries the same pair) |
   | `beetle_attack`, `beetle_health` | `BG31_808pe` (Beetle Army player enchant) numbers 1 and 2 |
-  | `undead_attack` | `BG25_011pe` (Undead Bonus Attack player enchant) number 1; there is no health one |
+  | `undead_attack` | `BG25_011pe` (Undead Bonus Attack player enchant) number 1 |
+  | `undead_health` | the `Undead Army` enchant (`BG25_011e2`) on any Undead of mine, number 2: the game has no player-level enchant for the Health half, and every Undead on my board carries the whole pair (number 1 is the Attack). A board with no Undead of mine shows no pair, and the Attack then comes from the player enchant above. The shop replay's collector writes it; the board files do not yet |
   | `spell_attack`, `spell_health` | `TAVERN_SPELL_ATTACK_INCREASE` / `TAVERN_SPELL_HEALTH_INCREASE` on the player |
   | `spells_cast` | `NUM_SPELLS_PLAYED_THIS_GAME` on the player (mine only: the stand-in player carries none for the opponent) |
   | `knight_deaths` | `BG25_008pe` (Eternal Knight player enchant) number 1 |
