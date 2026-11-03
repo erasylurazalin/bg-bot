@@ -152,8 +152,11 @@ pub struct ShopPowerSpec {
     pub name: Option<String>,
     #[serde(default)]
     pub numbers: Vec<i32>,
+    /// The price the log shows on the button, when it shows one: the card's
+    /// own cost plus whatever the power's discounts and surcharges have made
+    /// of it (Pirate Parrrrty!'s Pirates, The Galaxy's Lens's turns).
     #[serde(default)]
-    pub cost: i32,
+    pub cost: Option<i32>,
     #[serde(default)]
     pub used_this_turn: u8,
     #[serde(default)]
@@ -627,7 +630,10 @@ pub const ME: usize = 0;
 /// Tavern, Gold, the Tavern tier and its upgrade price, the free Refreshes and
 /// the freeze, Health and armor, the player-level numbers, the hero power, the
 /// trinkets and the Secret zone. `seed` drives the game's randomness, which is
-/// what makes a step deterministic or random.
+/// what makes a step deterministic or random. `previous` is the state the
+/// logged state follows (the turn before, for a turn's start), which one
+/// turn-start trigger needs: a chosen hero power that completes at the start
+/// of the turn (Galewing's flightpaths).
 pub fn load(
     data: &Arc<Data>,
     spec: &ShopStateSpec,
@@ -635,6 +641,7 @@ pub fn load(
     lobby: Option<crate::cards::Tribes>,
     turn: u32,
     seed: u64,
+    previous: Option<&ShopStateSpec>,
 ) -> LoadedShop {
     let mut missing = Vec::new();
     // A sandbox game has one player and no opponents, which is all a shop step
@@ -793,7 +800,8 @@ pub fn load(
             continue;
         }
         let real = RealPowerSpec {
-            card_id: power.card_id.clone().unwrap_or_default(),
+            card_id: completed_power(data, previous, power)
+                .unwrap_or_else(|| power.card_id.clone().unwrap_or_default()),
             name: power.name.clone().unwrap_or_default(),
             numbers: power.numbers.clone(),
             waiting: power.waiting.as_ref().map(|w| w.real_spec()),
@@ -1017,18 +1025,84 @@ fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]
 /// Tae'thelan's Reliquary Research counts Tavern spells bought toward the free
 /// third one, and the log's number is how many more it takes. The count lives
 /// on the player (`HeroCounts`), which every card that reads it looks at.
+///
+/// Buried Treasure's number is the digs left ("(1 left!)" is the fourth dig),
+/// which the engine keeps the other way round as `PowerState.progress`.
+///
+/// So is the price on the button: the engine adds the standing change a power
+/// carries (`PowerState.cost_delta`, Lead Explorer's +1, Pirate Parrrrty!'s
+/// -1 a Pirate bought, The Galaxy's Lens's -1 a turn waited) to the card's own
+/// cost, and the log's price is the two together as the game shows them.
 fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPowerSpec]) {
     for power in powers {
         let Some(card_id) = power.card_id.as_deref() else { continue };
-        if data.heroes.power_by_card_id(card_id).is_none() {
-            continue;
-        }
+        let Some(i) = data.heroes.power_by_card_id(card_id) else { continue };
+        let effect = data.heroes.power(i).effect;
         let left = power.numbers.first().copied().unwrap_or(0).clamp(0, 2);
         if card_id.starts_with("BG28_HERO_800p") {
             // "(3 left!)" is nothing bought yet, "(1 left!)" one bought.
             pl.counts.tavern_spells_bought = (2 - left) as u32;
         }
+        // The slot the file's power sits in, by its card id.
+        let slot = [false, true]
+            .into_iter()
+            .find(|&second| {
+                pl.power_at(second)
+                    .is_some_and(|st| data.heroes.power(st.of).card_id == card_id)
+            });
+        let Some(second) = slot else { continue };
+        let Some(st) = pl.power_at_mut(second) else { continue };
+        if let crate::heroes::PowerEffect::DigForGolden { digs } = effect {
+            // The log counts the digs left, the engine the digs done.
+            let done = power.numbers.first().copied().unwrap_or(0);
+            st.progress = (digs as i32 - done).clamp(0, digs as i32) as u32;
+        }
+        if let Some(cost) = power.cost {
+            let base = data.heroes.power(i).cost as i32;
+            st.cost_delta = (cost - base).clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        }
     }
+}
+
+/// The power a chosen one has completed into, when the state is the start of
+/// the turn that completes it. A chooser's power (Galewing's flightpaths)
+/// counts down one `PowerState.progress` at the start of every turn and
+/// completes when the count runs out: the effect fires and the chooser comes
+/// back. The turn-start state the log writes is taken before that trigger, so
+/// the file still names the chosen power with its last number, and the state
+/// before this one (the turn before) says the same number only when the count
+/// had already reached it: the next count is the one that completes. The
+/// parent's own effect is not run: a Discover it opens is the step the file
+/// writes next, and every other one (Gold, a spell) is already in the logged
+/// state.
+fn completed_power(
+    data: &Data,
+    previous: Option<&ShopStateSpec>,
+    power: &ShopPowerSpec,
+) -> Option<String> {
+    let card_id = power.card_id.as_deref()?;
+    let i = data.heroes.power_by_card_id(card_id)?;
+    let chosen = data.heroes.power(i);
+    let parent = chosen.parent?;
+    if chosen.complete_turns == 0 || power.numbers.first().copied().unwrap_or(0) > 1 {
+        return None;
+    }
+    let before = previous?
+        .hero_powers
+        .iter()
+        .find(|p| p.card_id.as_deref() == Some(card_id))?;
+    (before.numbers.first().copied().unwrap_or(0) == 1)
+        .then(|| data.heroes.power(parent).card_id.clone())
+}
+
+/// The state a turn's start follows: the turn before's `end` state, or the
+/// last state it wrote when it has no `end`.
+fn state_before_turn(file: &ShopFileSpec, turn_index: usize) -> Option<&ShopStateSpec> {
+    let before = file.turns.get(turn_index.checked_sub(1)?)?;
+    before
+        .end
+        .as_ref()
+        .or_else(|| before.actions.iter().rev().find_map(|s| s.after.as_ref()))
 }
 
 /// One zone (the board or the hand) of a logged state, in position order.
@@ -1884,7 +1958,11 @@ fn target_action(loaded: &LoadedShop, target: &ShopPlace) -> Result<Action, Stri
         Some("board") => zone_index(&loaded.board_ids, target.id, target.position)
             .map(Action::Target)
             .ok_or_else(|| "a board target that is not on the board".to_string()),
+        // The action names a Tavern slot out of `SHOP` of them, the spell slot
+        // included, so a full Tavern's spell slot (a card the game cannot show
+        // anyway) is not one the replay can point at.
         Some("slot") => shop_index(loaded, target.id, target.slot)
+            .filter(|s| (*s as usize) < crate::SHOP)
             .map(Action::TargetShop)
             .ok_or_else(|| "a Tavern target that is not in the Tavern".to_string()),
         other => Err(format!(
@@ -2285,6 +2363,9 @@ struct OneStep<'a> {
     before: &'a ShopStateSpec,
     step: &'a ShopStepSpec,
     turn: u32,
+    /// The turn's place in the file, and the step's place in its turn.
+    turn_index: usize,
+    index: usize,
     armed: bool,
     /// The last Tavern spell the player had cast when this step began, from
     /// the file's own history: Cataclysmic Harbinger and the Galaxy's Lens
@@ -2293,9 +2374,14 @@ struct OneStep<'a> {
 }
 
 fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<StepRun, StepError> {
-    let OneStep { file, before, step, turn, armed, last_spell } = *one;
+    let OneStep { file, before, step, turn, turn_index, index, armed, last_spell } = *one;
     let hero = file.hero(data, before);
-    let mut loaded = load(data, before, hero, file.lobby(), turn, seed);
+    // The start of a turn follows the turn before's last state, which one
+    // start-of-turn trigger needs (a chosen power's countdown).
+    let previous = (index == 0)
+        .then(|| state_before_turn(file, turn_index))
+        .flatten();
+    let mut loaded = load(data, before, hero, file.lobby(), turn, seed, previous);
     loaded.game.players[ME].tp.whistle = armed;
     loaded.game.players[ME].last_spell = last_spell;
     let mut missing = std::mem::take(&mut loaded.missing);
@@ -2380,11 +2466,15 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         // target itself (`offer_target`), so the step's own target click has
         // nothing left to answer in the replay. The state the game left still
         // says whether the engine picked the same target.
+        //
+        // A Discover is not a target prompt: an effect can apply its one
+        // target and open a Discover from it in the same click (Kelp Keeper's
+        // trigger of a Battlecry that Discovers, Trash for Treasure), and the
+        // step's target click is still one the engine has already answered.
         let pl = &loaded.game.players[ME];
         let nothing_open = pl.pending_target.is_none()
             && pl.pending_shop_target.is_none()
-            && pl.pending_choose_one.is_none()
-            && pl.discover.is_empty();
+            && pl.pending_choose_one.is_none();
         if matches!(a, Action::Target(_) | Action::TargetShop(_)) && nothing_open {
             text.push(format!("{a:?} (one answer, so the engine took it)"));
             continue;
@@ -2489,11 +2579,9 @@ fn last_tavern_spell(
             if a.step != "play" {
                 continue;
             }
-            let Some(card_id) = a.card.as_ref().and_then(|c| c.card_id.as_deref()) else {
+            let Some(card) = a.card.as_ref().and_then(|c| resolve_card(data, ids, c)) else {
                 continue;
             };
-            let Some((name, _)) = ids.get(card_id) else { continue };
-            let Some(card) = data.cards.by_name(name) else { continue };
             if data.cards.get(card).tavern_spell {
                 return Some(card);
             }
@@ -2562,7 +2650,7 @@ pub fn replay_step(
     let turn_index = file.turns.iter().position(|t| t.turn == turn.turn).unwrap_or(0);
     let armed = whistle_armed(file, turn_index, i);
     let last_spell = last_tavern_spell(data, ids, file, turn_index, i);
-    let one = OneStep { file, before, step, turn: turn.turn, armed, last_spell };
+    let one = OneStep { file, before, step, turn: turn.turn, turn_index, index: i, armed, last_spell };
     let first = run_once(data, ids, &one, opts.seed);
     let (ours, load_missing, action) = match first {
         Ok(v) => v,

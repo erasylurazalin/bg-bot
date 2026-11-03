@@ -1780,8 +1780,12 @@ impl Game {
             SpellTarget::Confiscation { .. } => true,
             SpellTarget::PlainCopy { max_tier } => c.tier <= max_tier,
             SpellTarget::DestroyGetRandom { tribe, .. } => tribes.has(tribe),
-            // There is no tier above 6, so such a minion is not a target.
-            SpellTarget::TransformHigher => c.tier < crate::MAX_TIER,
+            // Token of the Old Gods: the first pick takes any minion, and
+            // the Tier-higher pick is the second one, so a top-Tier minion
+            // is chosen and nothing follows (the log,
+            // Hearthstone_2026_10_28_22_11_50-g3 turn 8: a Tier 6 pick and
+            // the board unchanged).
+            SpellTarget::TransformHigher => true,
             SpellTarget::WatchStats => true,
             SpellTarget::GemKeyword { .. } | SpellTarget::TriggerDeathrattle => true,
             // A "then double it" buff takes any minion.

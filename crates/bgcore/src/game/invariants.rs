@@ -74,7 +74,8 @@ impl Game {
                 return Err(format!("player {i}: pending target source off the board"));
             }
             if let Some(pst) = pl.pending_shop_target
-                && (pst.source as usize >= pl.board.len() || pl.shop.is_empty())
+                && (pst.source as usize >= pl.board.len()
+                    || (pl.shop.is_empty() && pl.shop_spell.is_none()))
             {
                 return Err(format!("player {i}: pending shop target has nothing to act on"));
             }

@@ -146,7 +146,7 @@ fn a_logged_state_loads_field_by_field() {
     let want = ShopSnapshot::of_state(&data, &turn.start, turn.turn, &mut missing);
     assert!(missing.is_empty(), "the fixture's state is all built: {missing:?}");
 
-    let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1);
+    let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1, None);
     assert!(loaded.missing.is_empty(), "loaded with: {:?}", loaded.missing);
     let got = ShopSnapshot::of_game(&data, &loaded.game, bgcore::shop_replay::ME);
     assert_eq!(got, want);
@@ -356,7 +356,7 @@ fn the_loader_gives_a_one_player_game() {
     let file = fixture();
     let data = data();
     let turn = &file.turns[0];
-    let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 7);
+    let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 7, None);
     let game: &Game = &loaded.game;
     assert_eq!(game.current_player(), Some(bgcore::shop_replay::ME));
     assert_eq!(game.turn, turn.turn);
@@ -428,7 +428,7 @@ fn a_golden_the_file_marks_with_no_reward_gives_no_triple_reward() {
     minion.golden = true;
     minion.no_reward = true;
     let name = minion.name.clone().unwrap();
-    let loaded = load(&data, &turn.start, None, None, turn.turn, 1);
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 1, None);
     let at = loaded
         .game
         .players[0]
@@ -442,7 +442,7 @@ fn a_golden_the_file_marks_with_no_reward_gives_no_triple_reward() {
     for m in &mut other.hand {
         m.no_reward = false;
     }
-    let loaded = load(&data, &other, None, None, file.turns[0].turn, 1);
+    let loaded = load(&data, &other, None, None, file.turns[0].turn, 1, None);
     let at = loaded
         .game
         .players[0]
@@ -476,7 +476,7 @@ fn a_logged_aureate_laureate_gives_no_triple_reward_whatever_the_file_says() {
     logged.health = 2;
     logged.golden = true;
     logged.no_reward = false;
-    let loaded = load(&data, &turn.start, None, None, turn.turn, 1);
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 1, None);
     let at = loaded
         .game
         .players[0]
@@ -523,7 +523,7 @@ fn steady_growth_grows_by_the_pair_of_the_turn_it_landed() {
     let file = &files[0];
     let data = data();
     let turn = &file.turns[1];
-    let mut loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1);
+    let mut loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1, None);
     assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
     let gift = data.gifts.gifts.iter().find(|g| g.id == "BG36_MidGameEffect_000t51").unwrap();
     assert_eq!(loaded.game.players[0].board[0].gift_state(gift.card), Some(3),
@@ -557,7 +557,7 @@ fn steady_growth_grows_once_per_end_of_turn() {
     let files = parse_action_files(&[("steady.json".to_string(), text.to_string())]).unwrap();
     let data = data();
     let turn = &files[0].turns[0];
-    let mut loaded = load(&data, &turn.start, None, files[0].lobby(), turn.turn, 1);
+    let mut loaded = load(&data, &turn.start, None, files[0].lobby(), turn.turn, 1, None);
     assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
     loaded.game.shop_end_of_turn(0);
     let m = loaded.game.players[0].board[0];
@@ -590,7 +590,7 @@ fn a_second_power_is_seated_by_its_mark_not_its_place_in_the_list() {
     let file = &files[0];
     let data = data();
     let turn = &file.turns[0];
-    let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1);
+    let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1, None);
     assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
     let power = loaded.game.players[0].power.map(|p| p.of);
     let power2 = loaded.game.players[0].power2.map(|p| p.of);
@@ -625,7 +625,7 @@ fn seat(board: &str, hand: &str, trinkets: &str, tier: u8) -> LoadedShop {
     let file = &files[0];
     let turn = &file.turns[0];
     let data = data();
-    load(&data, &turn.start, None, None, turn.turn, 7)
+    load(&data, &turn.start, None, None, turn.turn, 7, None)
 }
 
 /// One board minion's (attack, health) on the replay's player.
@@ -801,7 +801,7 @@ fn a_magicfin_tokens_taught_spell_is_seated_from_its_number() {
     let file = &files[0];
     let data = data();
     let turn = &file.turns[0];
-    let loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1);
+    let loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1, None);
     assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
     let m = loaded.game.players[0].board[0];
     assert_eq!(m.taught_spell, data.cards.by_name("Tricky Trousers"));
@@ -832,7 +832,7 @@ fn the_turns_trinket_and_the_mycologists_teachings_come_from_the_log_numbers() {
     let file = &files[0];
     let data = data();
     let turn = &file.turns[0];
-    let mut loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1);
+    let mut loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1, None);
     assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
     assert_eq!(loaded.game.players[0].board[0].uses_left, 0, "the log shows no number: spent");
     assert_eq!(loaded.game.players[0].board[1].uses_left, 1, "one teaching left");
@@ -955,4 +955,302 @@ fn the_last_tavern_spell_comes_from_the_files_history() {
     );
     assert_eq!(result.ours.hand.len(), 1, "one copy in hand");
     assert_eq!(result.ours.hand[0].name, "Tricky Trousers");
+}
+
+/// A power's button price is the log's, not the card's own: the standing
+/// change (`PowerState.cost_delta`) the power carries (Pirate Parrrrty!'s -1
+/// a Pirate bought, The Galaxy's Lens's -1 a turn waited) is seated from the
+/// price the file shows (Hearthstone_2026_10_27_04_30_04-g1 turn 3: a 3 Gold
+/// power at 2).
+#[test]
+fn a_hero_powers_button_price_is_seated_from_the_log() {
+    let text = r#"{"source": "price", "game": 1,
+        "hero": {"card_id": "TB_BaconShop_HERO_18", "name": "Patches the Pirate"},
+        "turns": [
+        {"turn": 3,
+         "start": {"board": [], "hand": [], "tavern": [], "gold": 2, "tier": 2,
+                   "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+                   "frozen": false, "secrets": [],
+                   "hero_powers": [{"card_id": "TB_BaconShop_HP_072",
+                                    "name": "Pirate Parrrrty!", "numbers": [0, 0, 0, 0],
+                                    "cost": 2, "used_this_turn": 0}],
+                   "trinkets": []},
+         "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("price.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let data = data();
+    let turn = &file.turns[0];
+    let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1, None);
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    let me = bgcore::shop_replay::ME;
+    assert_eq!(loaded.game.power_cost(me, false), 2, "the log's price");
+    assert!(loaded.game.power_usable(me), "2 Gold is enough for it");
+}
+
+/// Buried Treasure's number is the digs left, and the engine counts the digs
+/// done, so "(1 left!)" is the fourth dig and hands out a Golden minion
+/// (Hearthstone_2026_11_02_00_10_22-g4 turn 4: a Golden Tusked Camper).
+#[test]
+fn buried_treasure_seats_the_digs_it_has_left() {
+    let text = r#"{"source": "digs", "game": 1,
+        "hero": {"card_id": "TB_BaconShop_HERO_64", "name": "Captain Eudora"},
+        "turns": [
+        {"turn": 4,
+         "start": {"board": [], "hand": [], "tavern": [], "gold": 5, "tier": 2,
+                   "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+                   "frozen": false, "secrets": [],
+                   "hero_powers": [{"card_id": "TB_BaconShop_HP_074",
+                                    "name": "Buried Treasure", "numbers": [1, 0, 0, 0],
+                                    "cost": 1, "used_this_turn": 0}],
+                   "trinkets": []},
+         "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("digs.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let data = data();
+    let turn = &file.turns[0];
+    let mut loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1, None);
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    let me = bgcore::shop_replay::ME;
+    assert_eq!(loaded.game.players[me].power.unwrap().progress, 3, "three digs done");
+    loaded.game.step(Action::HeroPower).expect("the fourth dig");
+    let dug = loaded.game.players[me].hand.last().copied().expect("a card in hand");
+    assert!(dug.golden, "the fourth dig is Golden");
+    assert!(loaded.game.players[me].power.unwrap().progress == 0, "the digging starts over");
+}
+
+/// "The last Tavern spell you cast" (The Galaxy's Lens) is in no logged state,
+/// so the loader reads it off the steps before the press: the last play of a
+/// Tavern spell in the game, earlier turns included
+/// (docs/rules/heroes.md, Era 2026-11-03).
+#[test]
+fn the_last_tavern_spell_comes_from_the_steps_before_the_press() {
+    let text = r#"{"source": "lens", "game": 1,
+        "hero": {"card_id": "BG31_HERO_003", "name": "Farseer Nobundo"},
+        "turns": [
+        {"turn": 5,
+         "start": {"board": [], "hand": [
+                       {"id": 11, "index": 1, "card_id": "BG28_810", "name": "Tavern Coin",
+                        "attack": 0, "health": 0, "golden": false, "keywords": []}],
+                   "tavern": [], "gold": 5, "tier": 2, "upgrade_cost": 5, "health": 30,
+                   "armor": 0, "free_refreshes": 0, "frozen": false, "secrets": [],
+                   "hero_powers": [{"card_id": "BG31_HERO_003p",
+                                    "name": "The Galaxy's Lens", "numbers": [0, 0, 0, 0],
+                                    "cost": 3, "used_this_turn": 0}],
+                   "trinkets": []},
+         "actions": [
+            {"step": "play", "index": 1,
+             "card": {"id": 11, "card_id": "BG28_810", "name": "Tavern Coin",
+                      "attack": 0, "health": 0, "golden": false},
+             "moved": {"id": 11, "from": {"where": "hand", "index": 1}, "to": null},
+             "paid": {"gold": 0, "health": 0},
+             "after": {"board": [], "hand": [], "tavern": [], "gold": 6, "tier": 2,
+                       "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+                       "frozen": false, "secrets": [],
+                       "hero_powers": [{"card_id": "BG31_HERO_003p",
+                                        "name": "The Galaxy's Lens", "numbers": [0, 0, 0, 0],
+                                        "cost": 3, "used_this_turn": 0}],
+                       "trinkets": []}},
+            {"step": "hero_power",
+             "paid": {"gold": 3, "health": 0},
+             "after": {"board": [], "hand": [
+                           {"id": 12, "index": 1, "card_id": "BG28_810", "name": "Tavern Coin",
+                            "attack": 0, "health": 0, "golden": false, "keywords": []}],
+                       "tavern": [], "gold": 3, "tier": 2, "upgrade_cost": 5, "health": 30,
+                       "armor": 0, "free_refreshes": 0, "frozen": false, "secrets": [],
+                       "hero_powers": [{"card_id": "BG31_HERO_003p",
+                                        "name": "The Galaxy's Lens", "numbers": [0, 0, 0, 0],
+                                        "cost": 3, "used_this_turn": 1}],
+                       "trinkets": []}}
+         ], "end": null}]}"#;
+    let files = parse_action_files(&[("lens.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        turn,
+        1,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {}", r.diffs, r.action);
+    assert!(r.action.contains("HeroPower"), "{}", r.action);
+}
+
+/// A minion's Battlecry or Choose One picks its target before the minion
+/// lands, so the log's board place for the target is the board as it stood;
+/// the engine has already put the played minion in its slot, so a pick from
+/// that slot on is one place further along
+/// (Hearthstone_2026_10_24_00_56_06-g1 turn 11: a Drustfallen Butcher taken
+/// by Disguised Graverobber).
+#[test]
+fn a_played_minions_target_counts_the_card_that_landed() {
+    let text = r#"{"source": "landing", "game": 1,
+        "hero": {"card_id": "TB_BaconShop_HERO_57", "name": "Nozdormu"},
+        "turns": [
+        {"turn": 6,
+         "start": {"board": [
+                       {"id": 21, "position": 1, "card_id": "BG25_011",
+                        "name": "Nerubian Deathswarmer", "attack": 1, "health": 4,
+                        "golden": false, "keywords": []},
+                       {"id": 22, "position": 2, "card_id": "BG25_011",
+                        "name": "Nerubian Deathswarmer", "attack": 1, "health": 4,
+                        "golden": false, "keywords": []}],
+                   "hand": [
+                       {"id": 31, "index": 1, "card_id": "BG28_303",
+                        "name": "Disguised Graverobber", "attack": 4, "health": 4,
+                        "golden": false, "keywords": []}],
+                   "tavern": [], "gold": 3, "tier": 3, "upgrade_cost": 6, "health": 30,
+                   "armor": 0, "free_refreshes": 0, "frozen": false, "secrets": [],
+                   "hero_powers": [], "trinkets": []},
+         "actions": [
+            {"step": "play", "index": 1,
+             "card": {"id": 31, "card_id": "BG28_303", "name": "Disguised Graverobber",
+                      "attack": 4, "health": 4, "golden": false},
+             "moved": {"id": 31, "from": {"where": "hand", "index": 1},
+                       "to": {"where": "board", "position": 2}},
+             "target": {"id": 22, "card_id": "BG25_011", "name": "Nerubian Deathswarmer",
+                        "kind": "board", "position": 2},
+             "paid": {"gold": 0, "health": 0},
+             "after": {"board": [
+                           {"id": 21, "position": 1, "card_id": "BG25_011",
+                            "name": "Nerubian Deathswarmer", "attack": 1, "health": 4,
+                            "golden": false, "keywords": []},
+                           {"id": 31, "position": 2, "card_id": "BG28_303",
+                            "name": "Disguised Graverobber", "attack": 4, "health": 4,
+                            "golden": false, "keywords": []}],
+                       "hand": [
+                           {"id": 41, "index": 1, "card_id": "BG25_011",
+                            "name": "Nerubian Deathswarmer", "attack": 1, "health": 4,
+                            "golden": false, "keywords": []}],
+                       "tavern": [], "gold": 3, "tier": 3, "upgrade_cost": 6, "health": 30,
+                       "armor": 0, "free_refreshes": 0, "frozen": false, "secrets": [],
+                       "hero_powers": [], "trinkets": []}}
+         ], "end": null}]}"#;
+    let files = parse_action_files(&[("landing.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        turn,
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert!(r.action.contains("Target(2)"), "the pick moved with the card: {}", r.action);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {}", r.diffs, r.action);
+}
+
+/// A chooser's power completes at the start of the turn its count runs out,
+/// and the turn-start state the log writes is taken before that trigger: the
+/// file still names Eastern Plaguelands with one turn left, and the step it
+/// opens is the Discover that comes with the chooser's return (Galewing,
+/// Hearthstone_2026_10_27_04_30_04-g2 turn 4). The state before it says the
+/// same number, which is what tells the loader the count is due.
+#[test]
+fn a_chosen_power_that_completes_at_the_start_of_the_turn_goes_back_to_its_chooser() {
+    let power = |card_id: &str, name: &str, numbers: &str| {
+        format!(
+            r#"{{"card_id": "{card_id}", "name": "{name}", "numbers": {numbers},
+                "cost": 0, "used_this_turn": 0}}"#
+        )
+    };
+    let state = |hand: &str, power: &str| {
+        format!(
+            r#"{{"board": [], "hand": [{hand}], "tavern": [], "gold": 4, "tier": 2,
+                "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+                "frozen": false, "secrets": [], "hero_powers": [{power}], "trinkets": []}}"#
+        )
+    };
+    let minion = r#"{"id": 51, "index": 1, "card_id": "BG36_098", "name": "Zoatroid",
+                     "attack": 2, "health": 2, "golden": false, "keywords": []}"#;
+    let text = format!(
+        r#"{{"source": "galewing", "game": 1,
+        "hero": {{"card_id": "BG20_HERO_283", "name": "Galewing"}},
+        "turns": [
+        {{"turn": 4,
+          "start": {},
+          "actions": [{{"step": "end_turn", "paid": {{"gold": 0, "health": 0}}}}],
+          "end": {}}},
+        {{"turn": 5,
+          "start": {},
+          "actions": [
+             {{"step": "discover",
+               "options": [{{"id": 71, "card_id": "BG36_098", "name": "Zoatroid",
+                             "attack": 2, "health": 2, "golden": false}}],
+               "picked": {{"id": 71, "card_id": "BG36_098", "name": "Zoatroid"}},
+               "option": 0, "paid": {{"gold": 0, "health": 0}},
+               "after": {}}}],
+          "end": null}}]}}"#,
+        state("", &power("BG20_HERO_283p_t3", "Eastern Plaguelands", "[1, 0, 0, 0]")),
+        state("", &power("BG20_HERO_283p_t3", "Eastern Plaguelands", "[1, 0, 0, 0]")),
+        state("", &power("BG20_HERO_283p_t3", "Eastern Plaguelands", "[1, 0, 0, 0]")),
+        state(minion, &power("BG20_HERO_283p", "Dungar's Gryphon", "[0, 0, 0, 0]")),
+    );
+    let files = parse_action_files(&[("galewing.json".to_string(), text)]).unwrap();
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[1],
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert!(
+        !r.diffs.iter().any(|d| d.contains("hero power")),
+        "the chooser is back: {:?}",
+        r.diffs
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {}", r.diffs, r.action);
+}
+
+/// A prompt with one answer is no prompt: Trash for Treasure on a board of one
+/// minion takes it itself and opens the Discover from the Tier below, so the
+/// step's own target click is one the engine has already answered and must not
+/// be sent again (Hearthstone_2026_10_24_17_59_26-g1 turns 1 to 3).
+#[test]
+fn a_one_answer_target_is_not_sent_again_even_with_a_discover_open() {
+    let state = |board: &str| {
+        format!(
+            r#"{{"board": [{board}], "hand": [], "tavern": [], "gold": 2, "tier": 2,
+                "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+                "frozen": false, "secrets": [],
+                "hero_powers": [{{"card_id": "TB_BaconShop_HP_075", "name": "Trash for Treasure",
+                                  "numbers": [0, 0, 0, 0], "cost": 0, "used_this_turn": 0}}],
+                "trinkets": []}}"#
+        )
+    };
+    let undead = r#"{"id": 61, "position": 1, "card_id": "BG25_011",
+                     "name": "Nerubian Deathswarmer", "attack": 1, "health": 4,
+                     "golden": false, "keywords": []}"#;
+    let text = format!(
+        r#"{{"source": "trash", "game": 1,
+        "hero": {{"card_id": "TB_BaconShop_HERO_67", "name": "Captain Hooktusk"}},
+        "turns": [
+        {{"turn": 3,
+          "start": {},
+          "actions": [
+             {{"step": "hero_power",
+               "target": {{"id": 61, "card_id": "BG25_011",
+                           "name": "Nerubian Deathswarmer", "kind": "board", "position": 1}},
+               "paid": {{"gold": 0, "health": 0}},
+               "after": {}}}],
+          "end": null}}]}}"#,
+        state(undead),
+        state(""),
+    );
+    let files = parse_action_files(&[("trash.json".to_string(), text)]).unwrap();
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert!(r.action.contains("one answer"), "{}", r.action);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {}", r.diffs, r.action);
 }

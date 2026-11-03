@@ -930,7 +930,8 @@ impl Game {
     }
 
     /// Replace the Tavern card in `slot` with a Fishbait and have the
-    /// left-most Beast attack it.
+    /// left-most Beast attack it. The spell slot, one past the minions, is a
+    /// Tavern card too: the Fishbait takes its place at the end.
     pub(super) fn put_fishbait(&mut self, p: usize, slot: usize, card: CardId, golden: bool) {
         // The Tavern's spell slot, one past the last minion: the spell is
         // replaced by the Fishbait, which takes a minion slot (Era,
@@ -957,8 +958,12 @@ impl Game {
     /// A Fishbait effect that picks the Tavern card: ask, unless there is
     /// only one card.
     pub(super) fn start_fishbait(&mut self, p: usize, source: usize, card: CardId, golden: bool) {
-        match self.players[p].shop.len() {
+        let cards = self.players[p].shop.len()
+            + usize::from(self.players[p].shop_spell.is_some());
+        match cards {
+            // Nothing to replace.
             0 => {}
+            // One card, a minion or the spell: no question to ask.
             1 => self.put_fishbait(p, 0, card, golden),
             _ => {
                 self.players[p].pending_shop_target = Some(PendingShopTarget {

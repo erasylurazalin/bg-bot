@@ -209,12 +209,20 @@ fn galakronds_greed_replaces_a_tavern_minion_with_a_discover_one_tier_higher() {
     assert_eq!(g.players[0].shop[0].card, picked);
     assert_eq!(g.players[0].shop[0].pool_copies, 1, "a pool copy, as drawn");
     g.check_invariants().unwrap();
-    // Nothing above Tier 6: a Tier 6 minion is not a target.
+    // Nothing above Tier 6: the press is still one the game allows and it
+    // does nothing, having spent the Gold (Hearthstone_2026_11_01_04_27_54-g2
+    // turn 8: a Tavern of Tier 6 minions and a press at 1 Gold).
     set_shop(&mut g, 0, &["Crimson Vindicator"]);
     g.players[0].tier = 6;
     g.players[0].gold = 5;
     g.players[0].pending_target = None;
-    assert!(!legal_for_0(&mut g, Action::HeroPower), "no Tier 7 to draw from");
+    again(&mut g, 0);
+    assert!(legal_for_0(&mut g, Action::HeroPower), "the press is allowed");
+    act(&mut g, 0, Action::HeroPower);
+    assert!(g.players[0].pending_target.is_none(), "no minion has a Tier above it");
+    assert!(g.players[0].discover.is_empty());
+    assert_eq!(g.players[0].gold, 4, "the press is spent");
+    g.check_invariants().unwrap();
 }
 
 #[test]
@@ -733,6 +741,26 @@ fn major_hymn_gives_attack_and_minor_hymn_health_the_next_turn() {
     press(&mut g, 0);
     let m = g.players[0].board[0];
     assert_eq!((m.attack, m.health), (a, h + 1), "Health equal to the Tier");
+    g.check_invariants().unwrap();
+}
+
+/// Master Nguyen borrows a hero power for the turn, so a borrowed Major Hymn
+/// does not turn into Minor Hymn at the end of it: the game ends the turn on
+/// the power it borrowed and hands out a new one at the start of the next
+/// (Hearthstone_2026_11_02_00_10_22-g6 turn 6 ends on Major Hymn).
+#[test]
+fn a_borrowed_hymn_does_not_turn_over_at_the_end_of_the_turn() {
+    let mut g = hero_game(200, "Master Nguyen");
+    turn_of(&mut g, 0);
+    let data = g.data.clone();
+    // The power the turn borrowed is Major Hymn: the offer Master Nguyen
+    // opens at the start of the turn is already answered.
+    g.players[0].power_offer.clear();
+    let hymn = data.heroes.power_by_card_id("BG26_HERO_102p").expect("Major Hymn");
+    g.players[0].hold_power(&data, hymn, 0, 6);
+    g.players[0].storm_power[0] = true;
+    g.shop_end_of_turn(0);
+    assert_eq!(power(&g, 0).name, "Major Hymn", "still the borrowed power");
     g.check_invariants().unwrap();
 }
 

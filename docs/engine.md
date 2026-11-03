@@ -423,7 +423,10 @@ build hero-less games so old tests pass unchanged, and
     Lock, & Shop It: the Tavern minion takes the board slot, no buy and no
     play) and `ThrowInPot { count }` (Stir the Pot: the minion is gone for
     good, its copies go to `Game.consumed`). The Perfect Crime's leftovers go
-    the same way.
+    the same way. A Tavern pick is `Player.pending_shop_target` (Consume, and
+    a Fishbait's "a card in the Tavern"): the Fishbait counts the spell slot,
+    one past the minion slots, and takes its place (`Game::put_fishbait`);
+    Consume eats minions only.
   - Reliquary Research reads `Game::spell_price` (0 for every third Tavern
     spell bought) in both spell buy paths, and The Galaxy's Lens hands over a
     fresh copy of `Player.last_spell`.
@@ -470,7 +473,10 @@ build hero-less games so old tests pass unchanged, and
       (slot + 1) sends the pick into that Tavern slot instead of the hand:
       Galakrond's Greed Discovers from exactly one Tier higher into its slot,
       and the pick lands in the Tavern, so it gets the Tavern's standing
-      "this game" buffs like any card dealt there (Era, 2026-11-02). The old
+      "this game" buffs like any card dealt there (Era, 2026-11-02). Its
+      button asks only for a Tavern minion, so with every Tavern minion
+      already at Tier 6 the press spends and nothing happens
+      (`11_01_04_27_54-g2` turn 8). The old
       card stays on show in the slot until the pick lands (the game's own
       client keeps it there too); the pick then puts it back in the pool,
       buffs and all. Arcane
@@ -502,7 +508,10 @@ build hero-less games so old tests pass unchanged, and
       Saturday C'Thuns!'s press and spent in `power_end_of_turn`, where the
       repeats are the power's own turn count. `HeroPower.swaps_to`
       (`swaps_each_turn` in heroes.toml) is how Major Hymn becomes Minor Hymn
-      at the end of every turn.
+      at the end of every turn, except in a Power of the Storm slot: the power
+      Master Nguyen borrowed is handed back at the start of the next turn, and
+      the game ends the turn still holding it (`11_02_00_10_22-g6` turn 6
+      ends on Major Hymn).
     - `cast_spell` ends by dropping a target prompt nothing can answer, so a
       spell's own "after you cast" triggers can never leave the player
       stranded.
