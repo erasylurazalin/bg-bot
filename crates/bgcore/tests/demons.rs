@@ -734,18 +734,19 @@ fn deathstrider_triggers_the_wrathguard_in_the_shop_through_a_fishbait_attack() 
 // ---- Demons consuming ----
 
 #[test]
-fn mind_muck_has_a_demon_consume_the_minion_you_choose() {
+fn mind_muck_has_a_demon_consume_a_random_tavern_minion() {
+    // "Choose a friendly Demon. It consumes a minion in the Tavern to gain
+    // its stats." The Demon is the only pick: the game takes the Tavern
+    // minion itself, so nothing waits on the player (log
+    // 2026_11_01_17_59_13-g1 turn 8 step 26, where one play with Brann took
+    // three Tavern minions and the log shows no choice prompt between them).
     let mut g = game(12);
     put_on_board(&mut g, 0, "Devout Hellcaller");
     set_shop(&mut g, 0, &["Buzzing Vermin", "Cord Puller"]);
     g.give(0, "Mind Muck").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
-    // only the Hellcaller can be chosen (the source is not)
-    assert!(g.players[0].pending_shop_target.is_some());
-    // and the waiting pick must be answered before anything else
-    assert!(!is_legal(&mut g, 0, Action::EndTurn));
-    act(&mut g, 0, Action::TargetShop(1));
-    // Cord Puller is a 1/1
+    assert!(g.players[0].pending_shop_target.is_none(), "the game picks the Tavern minion");
+    // either 1/1 is a legal pick
     assert_eq!(stats(&g.players[0].board[0]), (5, 5));
     assert_eq!(g.players[0].shop.len(), 1);
     g.check_invariants().unwrap();
@@ -757,7 +758,7 @@ fn mind_muck_has_a_demon_consume_the_minion_you_choose() {
     g.give(0, "Mind Muck").unwrap();
     g.players[0].hand[0].golden = true;
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
-    // with one Tavern card there is nothing to ask
+    // with one Tavern card there is nothing to ask either way
     assert!(g.players[0].pending_shop_target.is_none());
     assert_eq!(stats(&g.players[0].board[0]), (6, 6));
     g.check_invariants().unwrap();
@@ -1246,18 +1247,23 @@ fn random_murlocs_and_discovers_stay_within_the_players_tier() {
 
 #[test]
 fn a_waiting_tavern_pick_takes_the_first_when_the_turn_runs_out() {
+    // A Fishbait asks which Tavern card it replaces when there are two.
     let mut g = game(29);
-    put_on_board(&mut g, 0, "Devout Hellcaller");
+    put_on_board(&mut g, 0, "Lurking Lionfish");
     set_shop(&mut g, 0, &["Buzzing Vermin", "Cord Puller"]);
-    g.give(0, "Mind Muck").unwrap();
     turn_of(&mut g, 0);
+    g.players[0].gold = 10;
     g.players[0].actions = g.data.rules.max_actions_per_turn - 1;
-    g.step(Action::Play { hand: 0, pos: 1 }).unwrap();
-    // the turn is over and the waiting pick took the left-most Tavern minion
+    g.step(Action::Activate(0)).unwrap();
+    // the turn is over and the waiting pick took the left-most Tavern card
     assert!(g.players[0].done);
     assert!(g.players[0].pending_shop_target.is_none());
-    assert_eq!(g.players[0].shop.len(), 1);
-    assert_eq!(stats(&g.players[0].board[0]), (4 + 1, 4 + 1));
+    let names: Vec<String> = g.players[0]
+        .shop
+        .iter()
+        .map(|m| g.data.cards.get(m.card).name.clone())
+        .collect();
+    assert!(!names.contains(&"Buzzing Vermin".to_string()), "the left-most card was replaced: {names:?}");
     g.check_invariants().unwrap();
 }
 

@@ -235,6 +235,15 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     before the key existed has the count nowhere but on a card that improves
     with it: the loader reads Hooktusk, Master Marauder's own numbers (the pair
     it gives now is the printed +1/+1 times one more than the count).
+  - A minion's own Blood Gem stats (`Minion::gem_attack`/`gem_health`) are
+    not carried: a card's `numbers` are its script numbers and no key holds
+    them, so the loader seats them at 0. Gem Confiscation therefore steals
+    nothing in a replay: its target stays short of the neighbours' Gem stats
+    and the neighbours keep them (log `2026_10_26_00_48_15-g2` turn 7 step
+    24: the Sly Infiltrator beside the target keeps the +4/+4 of its two Gem
+    casts where the log takes it). Carrying them needs the collector to read
+    the `BG20_GEMe` enchant on each board minion, which it does not write
+    yet.
   - `secrets`, the Secret zone by card id in the order the Secrets were got, as
     the board files write it (always written, empty when there is nothing).
   - `waiting` on a hero power: the minion Lock and Load holds, as a board
