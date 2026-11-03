@@ -740,6 +740,41 @@ fn stats(g: &Game, at: usize) -> (i32, i32) {
     (m.attack, m.health)
 }
 
+/// The Blood Gem stats a logged card carries (`gem_attack`/`gem_health`, the
+/// log's `4270`/`4271` pair) are the engine's `Minion::gem_attack`/
+/// `gem_health`, and Gem Confiscation takes exactly that pair from the
+/// target's neighbours onto the target. A loader that seats a minion at 0
+/// steals nothing: log `2026_10_26_00_48_15-g2` turn 7 step 24 (the Sly
+/// Infiltrator beside the target at 4/4 Gem stats, which the step takes).
+#[test]
+fn a_seated_minions_blood_gem_stats_are_what_confiscation_takes() {
+    let mut loaded = seat(
+        r#"{"name": "Roadboar", "attack": 10, "health": 12, "gem_attack": 4, "gem_health": 4},
+           {"name": "Roadboar", "attack": 6, "health": 6},
+           {"name": "Roadboar", "attack": 8, "health": 8, "gem_attack": 2, "gem_health": 2}"#,
+        r#"{"name": "Gem Confiscation", "kind": "spell"}"#,
+        "",
+        4,
+    );
+    let me = bgcore::shop_replay::ME;
+    let gems = |g: &Game, at: usize| {
+        let m = g.players[me].board[at];
+        ((m.attack, m.health), (m.gem_attack, m.gem_health))
+    };
+    let g = &mut loaded.game;
+    assert_eq!(gems(g, 0), ((10, 12), (4, 4)), "the file's pair is the engine's");
+    assert_eq!(gems(g, 1), ((6, 6), (0, 0)), "a minion the file gives none starts at 0");
+    assert_eq!(gems(g, 2), ((8, 8), (2, 2)));
+    g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+    g.step(Action::Target(1)).unwrap();
+    // 3 Gems of the player's +1/+1 land on the target, then the two
+    // neighbours' pairs move onto it and are cleared off them.
+    assert_eq!(gems(g, 1), ((6 + 3 + 4 + 2, 6 + 3 + 4 + 2), (3 + 4 + 2, 3 + 4 + 2)));
+    assert_eq!(gems(g, 0), ((10 - 4, 12 - 4), (0, 0)));
+    assert_eq!(gems(g, 2), ((8 - 2, 8 - 2), (0, 0)));
+    g.check_invariants().unwrap();
+}
+
 /// Lovely Locket: a trinket the loader seats still casts the same spell on
 /// another friendly minion after a spell is cast on one. The replay dropped
 /// its `locket` rule, so the second minion never took the spell (triage group

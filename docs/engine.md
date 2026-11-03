@@ -156,7 +156,12 @@ rules behind each are in docs/rules/design.md Part 2.
   A Malchezaar's Health Refreshes left are the same kind of number (its
   first, no number at all when both are spent), and so is the Demon Fodder
   queue, which the game keeps on its own player enchant (`fodder_refreshes`,
-  one number per coming Refresh). The price the game charges for a Tavern
+  one number per coming Refresh). The card itself also carries the Attack and
+  Health its Blood Gems gave it (`gem_attack`/`gem_health`, the log's
+  `4270`/`4271` pair on the minion): the loader seats them as
+  `Minion.gem_attack`/`gem_health` in the board, the hand and the Tavern, so
+  a replayed Gem Confiscation takes the neighbours' pair onto its target as
+  the log does. The price the game charges for a Tavern
   card when it is not the rule's is on the card too (`cost_override` for
   Chillmere Mosaic's (1), `cost_reduce` for a free buy), and the loader turns
   a Tavern that all costs the same into the engine's own state: the shop's

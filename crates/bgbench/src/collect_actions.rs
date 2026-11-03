@@ -134,6 +134,13 @@ const GILDING: &str = "BG36_MidGameEffect_000t14";
 /// four Refreshes gets (`Player.fodder_refreshes`).
 const FODDER_ENCHANT: &str = "BG35_150pe";
 
+/// The pair of tags a minion carries for the Attack and Health its Blood Gems
+/// have given it, from every source: `Minion::gem_attack`/`gem_health`, and
+/// exactly what Gem Confiscation takes from the neighbours. The client prints
+/// this pair as numbers (it has no name for them); the player's own Gem size
+/// is a different pair (`BACON_BLOODGEMBUFF*VALUE`, docs/real-boards.md).
+const GEM_TAGS: [&str; 2] = ["4270", "4271"];
+
 /// The blocks a click on my own board turns into a step, and the step it makes.
 const BOARD_BLOCKS: [&str; 2] = ["PLAY", "MOVE_MINION"];
 
@@ -830,6 +837,25 @@ fn no_triple_reward(m: &bglog::Minion, creator: Option<&str>) -> bool {
             || creator == Some(DARK_DISCOVERY)
             || AUREATE_LAUREATE.contains(&m.card_id.as_str())
             || m.dark_gifts.iter().any(|gift| gift == GILDING))
+}
+
+/// The Attack and Health this minion's Blood Gems have given it (`GEM_TAGS`),
+/// or `None` when the log shows none: the card's own key stays out then.
+///
+/// The game keeps the pair on the minion itself and moves it as the minion
+/// does (a copy carries it, a triple's sum, a steal clears the neighbour's),
+/// so one state's tags answer for it: log `2026_10_26_00_48_15-g2` turn 7
+/// step 24 has the Sly Infiltrator at 4/4 and 0/0 either side of a Gem
+/// Confiscation, `2026_10_29_22_20_04-g1` turn 11 step 23 the Amalgam at
+/// 804/469 and then 0/0.
+fn gem_stats(tags: &HashMap<String, TagValue>) -> Option<(i64, i64)> {
+    let read = |tag: &str| tags.get(tag).map(TagValue::as_int).unwrap_or(0);
+    let (attack, health) = (read(GEM_TAGS[0]), read(GEM_TAGS[1]));
+    if attack == 0 && health == 0 {
+        None
+    } else {
+        Some((attack, health))
+    }
 }
 
 impl Handler for Collector {
@@ -2545,6 +2571,13 @@ impl Collector {
         if let Some(sd) = minion_numbers(&m.tags) {
             put(&mut d, "numbers", numbers_json(&sd));
         }
+        // What this minion's Blood Gems gave it: the replay seats it as
+        // `Minion::gem_attack`/`gem_health`, which Gem Confiscation takes from
+        // the neighbours (`gem_stats`).
+        if let Some((attack, health)) = gem_stats(&m.tags) {
+            put(&mut d, "gem_attack", Json::Int(attack));
+            put(&mut d, "gem_health", Json::Int(health));
+        }
         // A Golden minion gives a Triple Reward when it is played, unless its
         // own source says otherwise (`no_triple_reward`).
         if no_triple_reward(&m, creator.map(|c| c.card_id.as_str())) {
@@ -3118,5 +3151,65 @@ mod tests {
         theirs.push(("ATTACHED", number(200)));
         add(320, UNDEAD_ARMY, theirs);
         assert_eq!(undead_army_numbers(&g), None);
+    }
+
+    /// A minion's own Blood Gem stats are the log's `4270`/`4271` pair on the
+    /// card, written as `gem_attack`/`gem_health` in every state: the replay
+    /// seats them as `Minion::gem_attack`/`gem_health`, which is what Gem
+    /// Confiscation takes from the target's neighbours (log
+    /// `2026_10_26_00_48_15-g2` turn 7 step 24, the Sly Infiltrator at 4/4
+    /// and then 0/0). A card with none keeps the keys out.
+    #[test]
+    fn a_minions_blood_gem_stats_are_written_with_its_card() {
+        fn tag(value: &str) -> TagValue {
+            TagValue::Text(value.to_string())
+        }
+        fn number(value: i64) -> TagValue {
+            TagValue::Int(value)
+        }
+        let cards = Cards::from_pairs([("BG20_101".to_string(), "Roadboar".to_string())]);
+        let mut g = bglog::Game::new();
+        g.real_players = [1].into_iter().collect();
+        let mut add = |id: i32, tags: Vec<(&str, TagValue)>| {
+            let e = g.entity(id);
+            e.card_id = "BG20_101".to_string();
+            for (k, v) in tags {
+                e.set(k, v);
+            }
+        };
+        let board = |position: i64, attack: i64, health: i64| {
+            vec![
+                ("CARDTYPE", tag("MINION")),
+                ("ZONE", tag("PLAY")),
+                ("CONTROLLER", number(1)),
+                ("ZONE_POSITION", number(position)),
+                ("ATK", number(attack)),
+                ("HEALTH", number(health)),
+            ]
+        };
+        let mut keeps = board(1, 10, 12);
+        keeps.push((GEM_TAGS[0], number(4)));
+        keeps.push((GEM_TAGS[1], number(4)));
+        add(100, keeps);
+        let mut none = board(2, 6, 6);
+        none.push((GEM_TAGS[0], number(0)));
+        none.push((GEM_TAGS[1], number(0)));
+        add(101, none);
+
+        let mut collector = Collector::new(cards);
+        let state = collector.state(&g);
+        let got: serde_json::Value = serde_json::from_str(&render(&Json::Obj(state))).unwrap();
+        let board = got["board"].as_array().unwrap();
+        assert_eq!(board[0]["gem_attack"], 4, "{got}");
+        assert_eq!(board[0]["gem_health"], 4);
+        assert!(
+            board[1].get("gem_attack").is_none() && board[1].get("gem_health").is_none(),
+            "a minion the log gives no Blood Gem stats has no key: {got}"
+        );
+        // The pair is read as one: a minion with only one half still says both.
+        let mut only = HashMap::new();
+        only.insert(GEM_TAGS[0].to_string(), TagValue::Int(0));
+        only.insert(GEM_TAGS[1].to_string(), TagValue::Int(5));
+        assert_eq!(gem_stats(&only), Some((0, 5)));
     }
 }
