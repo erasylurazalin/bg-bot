@@ -713,13 +713,29 @@ or a Mukla Banana; Forsaken Weaver (Tier 6 Undead) doesn't. The engine
 already tells the two apart (built with Blood Gems); keep it that way for
 every new card and every new spell.
 
-**A spell a minion casts for you is not your cast (Era, 2026-11-02).** When
-a minion's effect casts a spell (Gatekeeper Amalgam's Misplaced Tea Set, Air
-Revenant's Easterly Winds, a Magicfin token's taught spell), the spell happens
-and does what it says, but it doesn't count as a spell you cast: no "after you
-cast a spell" trigger and no cast counter (Felboar) sees it. Your own casts
-do count, including Balinda's and Hot-Air Surveyor's extra casts. From Era's
-logs; Era is skeptical about Felboar and will watch it (docs/notes/UNSURE.md).
+**A spell a minion casts for you is not your cast (Era, 2026-11-02,
+2026-11-03).** When a minion's effect casts a spell (Gatekeeper Amalgam's
+Misplaced Tea Set, Air Revenant's Easterly Winds, a Magicfin token's taught
+spell), the spell happens and does what it says, but it doesn't count as a
+spell you cast: no "after you cast a spell" or "whenever you cast a Tavern
+spell" trigger and no cast counter sees it. Your own casts do count,
+including Balinda's and Hot-Air Surveyor's extra casts. The evidence:
+- Era's log `Hearthstone_2026_11_03_15_22_36-g3` turn 10: ten Blood Gems on
+  a Gatekeeper Amalgam, each firing its Tea Set (a Tavern spell). Both
+  Felboars' counters drop by exactly one per gem, and a golden Timecap'n
+  Hooktail gives nothing for the Tea Sets, while it fires on Era's own Tavern
+  spells the same turn.
+- Era knows for sure: a Magicfin token's spells don't count for Living
+  Azerite or Forsaken Weaver.
+
+The open part is a spell a minion casts **on** another minion and that
+minion's own "whenever you cast a spell on this" (Gatekeeper Amalgam,
+Glambot's "on a Mech"). The rotated-out Fauna Whisperer (Naga, "at the end
+of your turn, cast Natural Blessing on adjacent minions") did fire an
+adjacent Amalgam's Tea Set: a confirmed interaction. Whether today's minion
+casts do the same (a Magicfin token's Banana cast on an Amalgam) is
+untested; see docs/notes/UNSURE.md. The engine today hides minion casts from
+every cast trigger, "cast on this" included.
 
 **Quilboar (2026-10-24).**
 - **Blood Gem:** a 0-cost plain spell, "Give a minion +1/+1", generated,
