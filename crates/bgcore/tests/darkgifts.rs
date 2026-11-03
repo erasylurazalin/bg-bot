@@ -664,6 +664,9 @@ fn incalculable_countdowns_tick_two_turns_at_the_end_of_the_turn() {
     assert_eq!(g.players[0].board[0].n_gifts, 0);
 }
 
+/// Replication hands over the base card, never the host as it stands: a
+/// buffed host gives its printed stats (Era's logs: a golden Fruit Vendor
+/// 46/54 gives Fruit Vendor 3/6, a Trench Fighter 6/6 a plain 3/3).
 #[test]
 fn replication_and_affinity_count_down_then_hand_over_a_card() {
     let mut g = game(17);
@@ -677,7 +680,11 @@ fn replication_and_affinity_count_down_then_hand_over_a_card() {
     g.dark_gift_end_of_turn(0);
     assert_eq!(g.players[0].hand.len(), 1, "a plain copy");
     let copy = g.players[0].hand[0];
-    assert_eq!((copy.card, copy.attack, copy.health), (id(&g, "Cord Puller"), 9, 9));
+    assert_eq!(
+        (copy.card, copy.attack, copy.health),
+        (id(&g, "Cord Puller"), 1, 1),
+        "the base card, not the 9/9 host"
+    );
     assert_eq!(copy.n_gifts, 0, "a plain copy carries no gift");
     // Affinity hands over a minion of the host's type.
     let mut g = game(20);
@@ -689,6 +696,64 @@ fn replication_and_affinity_count_down_then_hand_over_a_card() {
     assert_eq!(g.players[0].hand.len(), 1);
     let card = g.data.cards.get(g.players[0].hand[0].card);
     assert!(card.tribes.has(Tribe::Mech), "{} is not a Mech", card.name);
+}
+
+/// A golden host gives a plain, non-golden copy: base stats, none of the
+/// keywords the host gained, no gift (Era's logs: a golden Disguised
+/// Graverobber 9/9 gives a plain 4/4, a golden Bronze Timewalker 12/5 a 4/5).
+#[test]
+fn replication_of_a_golden_host_gives_a_plain_non_golden_copy() {
+    let mut g = game(22);
+    let replication = gift(&g, "Replication");
+    let c = id(&g, "Cord Puller");
+    let m = g.players[0].make_card(&g.data.cards, c, true, 0);
+    g.players[0].board.push(m);
+    let pos = g.players[0].board.len() - 1;
+    g.players[0].board[pos].attack = 12;
+    g.players[0].board[pos].health = 20;
+    g.players[0].board[pos].keywords.set(Keywords::TAUNT);
+    assert!(g.give_gift(0, pos, g.data.gifts.gifts[replication].name.clone().as_str(), 4));
+    g.dark_gift_end_of_turn(0);
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 1);
+    let copy = g.players[0].hand[0];
+    assert_eq!(copy.card, c);
+    assert!(!copy.golden, "a plain copy is never golden");
+    assert_eq!((copy.attack, copy.health), (1, 1), "the printed stats");
+    assert!(!copy.keywords.has(Keywords::TAUNT), "none of the host's added keywords");
+    assert_eq!(copy.n_gifts, 0, "no gift");
+    assert!(copy.parts().all(|(_, golden)| !golden), "and no golden part");
+    assert!(g.players[0].board[pos].golden, "the host is still golden");
+    g.check_invariants().unwrap();
+}
+
+/// The copy lands in the hand apart from the host and a second copy on the
+/// board, and the three become a golden one at the start of the next turn:
+/// nothing triples during the fights (Era 2026-11-03). In 8 of Era's games
+/// the turn's start has the golden in hand and neither board copy.
+#[test]
+fn the_replication_copy_triples_at_the_start_of_the_next_turn() {
+    let mut g = game(23);
+    let pos = board_with_gift(&mut g, 0, "Cord Puller", "Replication");
+    put_on_board(&mut g, 0, "Cord Puller");
+    g.dark_gift_end_of_turn(0);
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 1, "the copy");
+    assert!(!g.players[0].hand[0].golden, "not golden at the end of the turn");
+    assert_eq!(g.players[0].board.len(), 2, "both plain copies still on the board");
+    assert_eq!(g.players[0].board[pos].n_gifts, 1, "the gift stays on the host");
+    g.check_invariants().unwrap();
+    // The turn is over, so the merge waits for the next one to start.
+    g.dark_gift_start_of_turn(0);
+    assert!(g.players[0].board.is_empty(), "the three copies merged into one");
+    assert_eq!(g.players[0].hand.len(), 1);
+    let gold = g.players[0].hand[0];
+    assert_eq!(gold.card, id(&g, "Cord Puller"));
+    assert!(gold.golden, "a golden Cord Puller in the hand");
+    assert_eq!((gold.attack, gold.health), (2, 2), "double the printed 1/1");
+    assert_eq!(gold.n_gifts, 1, "the golden keeps the gift of the copy that had it");
+    assert_eq!(gold.gift_slice()[0].state(), 2, "and its count");
+    g.check_invariants().unwrap();
 }
 
 /// Replication and Affinity stay on the minion after paying out and start

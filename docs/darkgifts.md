@@ -66,7 +66,9 @@ still make 2), and Ghastly Sticker adds one on top (Drakkari plus Sticker:
 never speeds up the count, which stays every 2 turns (Era, 2026-11-02).
 After paying out, **Replication and Affinity stay on the minion and start
 their 2-turn count again; Incubation does not restart** (it fires once and
-is gone) (Era, 2026-11-03).
+is gone) (Era, 2026-11-03). Replication's copy is a plain copy (the base card), and if it is your
+third copy the three merge at the start of your next turn, not at the end of
+this one (DESIGN.md "Nothing triples during combat").
 
 The pool the offers come from:
 - No Battlecry or Choose One minions before turn 5.

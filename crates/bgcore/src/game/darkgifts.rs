@@ -442,11 +442,19 @@ impl Game {
         Some(candidates[self.rng.below(candidates.len() as u32) as usize])
     }
 
-    /// The start-of-turn gift work for one player: a minion's Time Turning
-    /// runs its end of turn effects again. The countdown gifts (Incubation,
-    /// Replication and Affinity) do *not* tick here: they count down and fire
-    /// at the END of the turn (docs/darkgifts.md, Era 2026-11-02).
+    /// The start-of-turn gift work for one player: a copy a Replication
+    /// payout handed over at the end of the last turn gets the triple check
+    /// it could not have then, and a minion's Time Turning runs its end of
+    /// turn effects again. The countdown gifts (Incubation, Replication and
+    /// Affinity) do *not* tick here: they count down and fire at the END of
+    /// the turn (docs/darkgifts.md, Era 2026-11-02).
     pub fn dark_gift_start_of_turn(&mut self, p: usize) {
+        // Nothing triples during the fights, so a payout's copy that makes a
+        // third copy merges now: three copies become the golden one in the
+        // hand, gifts and all (Era 2026-11-03, `check_triple`).
+        while let Some(card) = self.players[p].triples_next_turn.pop() {
+            self.check_triple(p, card);
+        }
         if self.data.gifts.is_empty() {
             return;
         }
@@ -541,13 +549,24 @@ impl Game {
                 }
             }
             CountdownEffect::PlainCopy => {
-                if let Some(m) = self.players[p].board.get(pos).copied() {
-                    let mut copy = m;
-                    copy.pool_copies = 0;
-                    copy.gifts = [GiftOn::default(); crate::MAX_GIFTS];
-                    copy.n_gifts = 0;
-                    copy.shield_hits = 0;
-                    self.add_to_hand(p, copy);
+                // "get a plain copy of this": the base card, never the host
+                // as it stands (DESIGN.md "Lichling Hoarder": no golden, no
+                // buffs, no added keywords, no gift). The same shape a
+                // spell's `plain_copy` target and Funeral Wreath use
+                // (`make_card`, no pool copy). The copy does not go through
+                // `check_triple_tracking` now: the turn is over and nothing
+                // triples during the fights, so a triple it completes merges
+                // at the start of the next turn (Era 2026-11-03).
+                let Some(m) = self.players[p].board.get(pos).copied() else { return };
+                let copy = self.players[p].make_card(&self.data.cards, m.card, false, 0);
+                let card = copy.card;
+                let joined = self.add_to_hand(p, copy);
+                let cards = &self.data.cards;
+                if joined && !cards.get(card).is_spell() && !cards.get(card).no_triple {
+                    let wait = &mut self.players[p].triples_next_turn;
+                    if !wait.contains(&card) {
+                        let _ = wait.try_push(card);
+                    }
                 }
             }
             CountdownEffect::RandomMinionOfType => {

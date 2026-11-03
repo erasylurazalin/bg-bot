@@ -892,6 +892,11 @@ pub struct Player {
     /// Whether a card got now is queued rather than lost: on through the
     /// start of the turn's own effects, off after them.
     pub hand_queue_on: bool,
+    /// Cards a countdown payout (Replication) handed over at the end of the
+    /// last turn: its copy arrives when the turn is over and nothing triples
+    /// during the fights, so its triple check waits for the start of this
+    /// turn (`dark_gift_start_of_turn` runs it; Era 2026-11-03).
+    pub triples_next_turn: ArrayVec<CardId, BOARD>,
     pub board: ArrayVec<Minion, BOARD>,
     pub pending_choose_one: Option<PendingChooseOne>,
     pub pending_target: Option<PendingTarget>,

@@ -1092,8 +1092,16 @@ through exactly that card's code. The engine never matches a gift by name:
   (Incubation) comes off. It ticks once a turn whatever a Drakkari
   Enchanter does: the Drakkari makes the *payout* run twice on the turn it
   fires, never the count. `dark_gift_start_of_turn` (called from
-  `start_turn`) only gives every Time Turning minion its end of turn effects
+  `start_turn`) gives every Time Turning minion its end of turn effects
   again (`run_minion_end_of_turn`, the same code the end of the turn runs).
+  Replication's `plain_copy` payout hands over the base card, never the host
+  as it stands: `Player::make_card` with no golden, no buffs, no added
+  keywords and no gift. It goes into the hand unmerged, because the turn is
+  over and nothing triples during the fights: the card is recorded on
+  `Player.triples_next_turn` and `dark_gift_start_of_turn` runs its
+  `check_triple` as the next turn starts, so the three copies become the
+  golden in hand there, gifts and all (Era 2026-11-03; every logged payout
+  that made a third copy shows the golden at the turn's start).
 - **The other hooks.** `dark_gift_card_played` ("whenever you play a card":
   Dexterity, Sharpened Sword, Toughened Shield) runs from `Action::Play`;
   `dark_gift_count` grows the "for each Battlecry / Tavern spell / discard"
