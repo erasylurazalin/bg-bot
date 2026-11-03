@@ -680,15 +680,60 @@ fn replication_and_affinity_count_down_then_hand_over_a_card() {
     assert_eq!((copy.card, copy.attack, copy.health), (id(&g, "Cord Puller"), 9, 9));
     assert_eq!(copy.n_gifts, 0, "a plain copy carries no gift");
     // Affinity hands over a minion of the host's type.
+    let mut g = game(20);
     let affinity = gift(&g, "Affinity");
     let pos = put_on_board(&mut g, 0, "Cord Puller");
     assert!(g.give_gift(0, pos, g.data.gifts.gifts[affinity].name.clone().as_str(), 3));
-    g.players[0].hand.clear();
     g.dark_gift_end_of_turn(0);
     g.dark_gift_end_of_turn(0);
     assert_eq!(g.players[0].hand.len(), 1);
     let card = g.data.cards.get(g.players[0].hand[0].card);
     assert!(card.tribes.has(Tribe::Mech), "{} is not a Mech", card.name);
+}
+
+/// Replication and Affinity stay on the minion after paying out and start
+/// their 2-turn count again, while Incubation fires once and is gone (Era
+/// 2026-11-03, docs/darkgifts.md).
+#[test]
+fn replication_and_affinity_start_their_count_again() {
+    let mut g = game(20);
+    let pos = board_with_gift(&mut g, 0, "Cord Puller", "Replication");
+    g.players[0].board[pos].attack = 3;
+    g.players[0].board[pos].health = 3;
+    // Two end of turns to the first payout.
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 0, "one turn to go");
+    assert_eq!(g.players[0].board[pos].gift_slice()[0].state(), 1);
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 1, "a plain copy");
+    assert_eq!(g.players[0].board[pos].n_gifts, 1, "and the gift stays on the minion");
+    assert_eq!(g.players[0].board[pos].gift_slice()[0].state(), 2, "the count starts again");
+    // The end of turn after that only counts, and the one after pays out.
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 1, "no payout one turn after the last");
+    assert_eq!(g.players[0].board[pos].gift_slice()[0].state(), 1);
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 2, "two turns later it pays out again");
+    assert_eq!(g.players[0].board[pos].n_gifts, 1, "still on the minion");
+    assert_eq!(g.players[0].board[pos].gift_slice()[0].state(), 2);
+    g.check_invariants().unwrap();
+
+    // Affinity, the same count.
+    let mut g = game(21);
+    let pos = board_with_gift(&mut g, 0, "Cord Puller", "Affinity");
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 0);
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 1);
+    assert_eq!(g.players[0].board[pos].n_gifts, 1);
+    assert_eq!(g.players[0].board[pos].gift_slice()[0].state(), 2);
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 1, "no payout one turn after the last");
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 2, "two turns later it pays out again");
+    assert_eq!(g.players[0].board[pos].n_gifts, 1);
+    assert_eq!(g.players[0].board[pos].gift_slice()[0].state(), 2);
+    g.check_invariants().unwrap();
 }
 
 /// Drakkari Enchanter makes a countdown's payout run twice on the turn it
@@ -712,7 +757,13 @@ fn drakkari_doubles_the_payout_not_the_count() {
     g.dark_gift_end_of_turn(0);
     assert_eq!(g.players[0].hand.len(), 2, "two plain copies from one payout");
     assert!(g.players[0].hand.iter().all(|m| m.card == id(&g, "Cord Puller") && m.n_gifts == 0));
-    assert_eq!(g.players[0].board[pos].n_gifts, 0, "and the gift is spent");
+    assert_eq!(g.players[0].board[pos].n_gifts, 1, "and the gift stays on the minion");
+    assert_eq!(g.players[0].board[pos].gift_slice()[0].state(), 2, "its count starts again");
+    // A second payout two turns later, twice again.
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 2, "the count is not doubled");
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 4, "two more plain copies");
 
     // Incubation doubles the minion's stats twice with a Drakkari.
     let mut g = game(19);

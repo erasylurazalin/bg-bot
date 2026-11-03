@@ -409,7 +409,9 @@ passes the slot through.
    `darkgifts.toml`: `name`, `id` (the game data's card_id, for the real-board
    files and the docs), `card` (the token that does the work, see step 2),
    `window = [first, last]` (one number for "no last turn" left out),
-   `weight = 50` if it is one of the half-as-likely ones, and `condition`
+   `weight = 50` if it is one of the half-as-likely ones, `repeats = true` if
+   it is a countdown gift that starts its count again after paying out
+   (Replication, Affinity; Incubation has none), and `condition`
    (`any`, `battlecry`, `deathrattle`, `tribe:<name>`, `typeless`,
    `end_of_turn`, `murloc_not_venomous`, `activate`, `deity`, `spellcraft`,
    `not_dragon`, `not_typeless`, `not_taunt_or_typeless`).

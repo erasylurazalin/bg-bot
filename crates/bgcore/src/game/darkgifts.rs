@@ -470,10 +470,12 @@ impl Game {
     }
 
     /// The end-of-turn gift work for one player: every countdown gift ticks
-    /// down a turn, and the one that reaches 0 fires. The payout runs
-    /// `drakkari_mult` times (Drakkari Enchanter sets 2, golden 3; Ghastly
-    /// Sticker adds one), never the count: a gift fires on one end of turn
-    /// only (docs/darkgifts.md).
+    /// down a turn, and the one that reaches 0 fires. A gift marked
+    /// `repeats` in darkgifts.toml (Replication, Affinity) stays on the
+    /// minion and starts its count again; the rest (Incubation) comes off.
+    /// The payout runs `drakkari_mult` times (Drakkari Enchanter sets 2,
+    /// golden 3; Ghastly Sticker adds one), never the count: a gift fires on
+    /// one end of turn only (docs/darkgifts.md).
     pub fn dark_gift_end_of_turn(&mut self, p: usize) {
         if self.data.gifts.is_empty() {
             return;
@@ -484,19 +486,26 @@ impl Game {
             let m = self.players[p].board[pos];
             let mut fire: ArrayVec<(usize, CountdownEffect), { crate::MAX_GIFTS }> =
                 ArrayVec::new();
+            let mut spent: ArrayVec<usize, { crate::MAX_GIFTS }> = ArrayVec::new();
             if m.n_gifts > 0 {
                 for (k, g) in m.gift_slice().iter().enumerate() {
                     let Some(cd) = self.data.cards.get(g.card()).countdown else { continue };
                     let left = g.state().saturating_sub(1);
                     self.players[p].board[pos].set_gift_state_at(k, left);
-                    if left == 0 {
-                        let _ = fire.try_push((k, cd.effect));
+                    if left > 0 {
+                        continue;
                     }
+                    if self.gift_repeats(g.card()) {
+                        self.players[p].board[pos].set_gift_state_at(k, cd.turns);
+                    } else {
+                        let _ = spent.try_push(k);
+                    }
+                    let _ = fire.try_push((k, cd.effect));
                 }
             }
             // A spent countdown comes off (highest index first, so the ones
-            // below it stay where they are), then it fires.
-            for &(k, _) in fire.iter().rev() {
+            // below it stay where they are), then the payouts run.
+            for &k in spent.iter().rev() {
                 self.players[p].board[pos].remove_gift_at(k);
             }
             for &(_, effect) in &fire {
@@ -508,8 +517,20 @@ impl Game {
         }
     }
 
-    /// A countdown gift fired: its effect runs (the caller takes the spent
-    /// gift off the minion first).
+    /// Whether the countdown gift whose effect card is `card` starts its
+    /// count again after paying out instead of coming off the minion
+    /// (darkgifts.toml's `repeats`: Replication and Affinity, while
+    /// Incubation fires once and is gone).
+    fn gift_repeats(&self, card: CardId) -> bool {
+        self.data
+            .gifts
+            .gift_of_card(card)
+            .is_some_and(|i| self.data.gifts.gifts[i].repeats)
+    }
+
+    /// A countdown gift fired: its effect runs (the caller has already taken
+    /// a spent gift off the minion, and left a repeating one in place with
+    /// its count reset).
     fn run_countdown(&mut self, p: usize, pos: usize, effect: CountdownEffect) {
         match effect {
             CountdownEffect::DoubleStats => {

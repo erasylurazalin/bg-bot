@@ -1615,14 +1615,15 @@ pub struct Card {
     /// Its end of turn effects also trigger at the start of its owner's turn
     /// (Dark Gifts Time Turning).
     pub end_of_turn_at_start: bool,
-    /// A countdown the gift runs at the start of its owner's turn (Dark Gifts
+    /// A countdown the gift runs at the end of its owner's turn (Dark Gifts
     /// Incubation, Replication, Affinity).
     pub countdown: Option<Countdown>,
 }
 
-/// "Count down N turns at the start of your turn, then do this" (Dark Gifts
-/// Incubation, Replication, Affinity). The turns left live in the gift's own
-/// counter on the minion (`GiftOn::state`).
+/// "Count down N turns, then do this" (Dark Gifts Incubation, Replication,
+/// Affinity). The turns left live in the gift's own counter on the minion
+/// (`GiftOn::state`); whether the gift starts the count again after paying
+/// out is darkgifts.toml's `repeats`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Countdown {
     pub turns: u8,

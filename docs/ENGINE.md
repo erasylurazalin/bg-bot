@@ -1087,7 +1087,9 @@ through exactly that card's code. The engine never matches a gift by name:
   on another offer of the press; the four weight-50 gifts count half.
 - **Countdowns.** `dark_gift_end_of_turn` (called from `run_end_of_turn`)
   ticks Incubation, Replication and Affinity and runs the countdown's effect
-  at 0 (the gift then comes off). It ticks once a turn whatever a Drakkari
+  at 0. A gift marked `repeats = true` in darkgifts.toml (Replication and
+  Affinity) stays on the minion and starts its count again; the rest
+  (Incubation) comes off. It ticks once a turn whatever a Drakkari
   Enchanter does: the Drakkari makes the *payout* run twice on the turn it
   fires, never the count. `dark_gift_start_of_turn` (called from
   `start_turn`) only gives every Time Turning minion its end of turn effects

@@ -2,13 +2,15 @@
 # of the game data (`ref/bg-meta.json` `dark_gifts`): its card_id, its name,
 # the turn window it can be offered in (game tags 4853 and 4854), its weight
 # (4856, 50 means half as likely to be picked for an offer) and the condition
-# its host has to meet. What a gift *does* is a token in cards.toml's
-# "Dark Gifts" section (`card = "<token name>"`), so a gift whose text matches
-# a card's runs through exactly the same code as that card.
+# its host has to meet. `repeats = true` on a countdown gift means the gift
+# stays on the minion and starts its count again after paying out. What a gift
+# *does* is a token in cards.toml's "Dark Gifts" section (`card = "<token
+# name>"`), so a gift whose text matches a card's runs through exactly the same
+# code as that card.
 #
-# The engine never matches a gift by name. Windows, weights and conditions
-# are read here; `crates/bgcore/src/darkgifts.rs` holds the loader and the
-# offer rules.
+# The engine never matches a gift by name. Windows, weights, conditions and
+# `repeats` are read here; `crates/bgcore/src/darkgifts.rs` holds the loader
+# and the offer rules.
 
 # The pool the Dark Discovery draws its minions from (docs/darkgifts.md).
 # On top of these: never a Magnetic minion, never one with a "when you sell
@@ -202,6 +204,9 @@ id = "BG36_MidGameEffect_000t18"
 card = "Gift: Replication"
 window = [4, 7]
 condition = "any"
+# A countdown gift that starts its 2-turn count again after paying out
+# (docs/darkgifts.md, Era 2026-11-03). Incubation has no `repeats`.
+repeats = true
 
 [[gift]]
 name = "Time Turning"
@@ -416,6 +421,7 @@ id = "BG36_MidGameEffect_000t82"
 card = "Gift: Affinity"
 window = [3, 4]
 condition = "any"
+repeats = true
 
 [[gift]]
 name = "Desecration"

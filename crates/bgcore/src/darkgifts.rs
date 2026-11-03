@@ -91,6 +91,11 @@ pub struct Gift {
     /// 200s are not used (the logs show they are not more common).
     pub weight: u8,
     pub cond: GiftCond,
+    /// Whether a countdown gift starts its count again after paying out
+    /// instead of coming off the minion (Replication, Affinity; Incubation
+    /// fires once and is gone). `game::darkgifts::dark_gift_end_of_turn`
+    /// reads it, and a gift with no countdown ignores it.
+    pub repeats: bool,
 }
 
 impl Gift {
@@ -234,6 +239,8 @@ struct RawGift {
     #[serde(default)]
     weight: u8,
     condition: String,
+    #[serde(default)]
+    repeats: bool,
 }
 
 fn condition(name: &str, err: &impl Fn(String) -> String) -> Result<GiftCond, String> {
@@ -357,6 +364,7 @@ impl GiftDb {
                 last,
                 weight: g.weight,
                 cond: condition(&g.condition, &err)?,
+                repeats: g.repeats,
             });
         }
         db.by_card = vec![0; cards.cards.len()];
