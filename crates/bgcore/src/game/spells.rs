@@ -254,7 +254,11 @@ impl Game {
     /// "Set versus add, as one mechanic" (docs/rules/design.md): every "how many times"
     /// count is the highest value a setter on the board sets (1 if none),
     /// plus what each adder adds. See `cards::how_many_times`.
-    fn times_count(&self, p: usize, role: impl Fn(Aura) -> Option<TimesRole> + Copy) -> u8 {
+    pub(super) fn times_count(
+        &self,
+        p: usize,
+        role: impl Fn(Aura) -> Option<TimesRole> + Copy,
+    ) -> u8 {
         let cards = &self.data.cards;
         let parts = self.players[p].board.iter().flat_map(|m| m.parts());
         how_many_times(cards, parts, role)

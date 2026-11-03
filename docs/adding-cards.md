@@ -746,7 +746,11 @@ Triple Reward spell.
   gems). Fight gems are plain buffs unless `permanent` (Vineweaver), which
   leaves through `SideOutcome::permanent_gems`. A hand cast on a friendly
   minion plays `gem_casts` times: Balinda sets, each Hot-Air Surveyor adds
-  ("Set versus add", `cards::how_many_times`). A card that reads "Blood Gems
+  ("Set versus add", `cards::how_many_times`). A hand cast on a Tavern
+  minion gets no Balinda ("on a friendly minion") but each Hot-Air
+  Surveyor's extra cast does reach it: the log
+  `10_28_19_47_59-g1` turn 8 gives a Tavern minion +2/+2 for one Gem with a
+  Surveyor up. A card that reads "Blood Gems
   played from your hand give an extra +X/+Y" (Surveyor Portrait) raises
   `Player.gem_hand_attack/gem_hand_health` instead, and only a cast from the
   hand adds it: a Gem a minion plays (Hogrider, Confiscation, Roogug) gets

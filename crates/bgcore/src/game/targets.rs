@@ -3,12 +3,14 @@
 use arrayvec::ArrayVec;
 use crate::trinkets::Event;
 use crate::cards::{
+    Aura,
     ChooseOption,
     ConsumePick,
     DoubleStat,
     Effect,
     EventKind,
     SpellTarget,
+    TimesRole,
     Tribe,
     TriggerWhen,
 };
@@ -286,17 +288,30 @@ impl Game {
                             ..
                         } => {
                             if pt.gem {
-                                // A Blood Gem on a Tavern minion: one cast,
-                                // the player's Gem value, tracked as Blood
-                                // Gem stats. A Roogug there reacts below.
-                                let (ga, gh) =
-                                    (self.players[p].gem_attack, self.players[p].gem_health);
-                                let m = &mut self.players[p].shop[target];
-                                m.attack += ga;
-                                m.health += gh;
-                                m.gem_attack += ga;
-                                m.gem_health += gh;
-                                gems_played = gems_played.saturating_add(1);
+                                // A Blood Gem on a Tavern minion: the
+                                // player's Gem value, tracked as Blood Gem
+                                // stats. Balinda does not double it (her
+                                // text says "on a friendly minion"), but a
+                                // Hot-Air Surveyor's "Blood Gems played from
+                                // your hand cast an extra time" has no such
+                                // qualifier, and the log shows two casts on a
+                                // Tavern minion (`10_28_19_47_59-g1` turn 8,
+                                // a Gem on Relentless Deflector with a
+                                // Surveyor up: +2/+2). A Roogug there reacts
+                                // below, once per cast.
+                                let casts = self.times_count(p, |a| {
+                                    (a == Aura::HotAirSurveyor).then_some(TimesRole::Adder)
+                                });
+                                for _ in 0..casts {
+                                    let (ga, gh) =
+                                        (self.players[p].gem_attack, self.players[p].gem_health);
+                                    let m = &mut self.players[p].shop[target];
+                                    m.attack += ga;
+                                    m.health += gh;
+                                    m.gem_attack += ga;
+                                    m.gem_health += gh;
+                                    gems_played = gems_played.saturating_add(1);
+                                }
                             } else {
                                 let m = &mut self.players[p].shop[target];
                                 for _ in 0..times {
