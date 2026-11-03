@@ -596,13 +596,19 @@ same: the spell casts twice (both casts count), the golden happens once
 A repeated Choose One works normally: it remembers your choice, so every
 repeat (Brann, Balinda) uses the same option on the same target.
 
-A spell a Magicfin token casts gets no choices at all (Era, 2026-11-04): if
-the taught spell is a Choose One (Boundless Potential), its option is
-random; a Discover inside it is resolved at random, with no Discover
-offered to you, and those random picks are not a Discover for "after you
-Discover" cards (Hooktusk). With Brann the token's Battlecry triggers
-twice, so it makes two separate random casts. A target the spell needs is
-still yours to pick (Tricky Trousers above).
+A spell a Magicfin token casts gets no Choose One choice (Era,
+2026-11-04): if the taught spell is a Choose One (Boundless Potential), its
+option is random. A Discover inside it is a normal Discover that you pick
+(log `Hearthstone_2026_10_28_02_28_32` 02:41: the token's Boundless
+Potential offers three Tavern spells and Era picks one), and it counts for
+"after you Discover" cards. With Brann the token's Battlecry triggers
+twice: two casts, each with its own random option. A target the spell
+needs is still yours to pick (Tricky Trousers above).
+
+Kelp Keeper activating a minion whose Battlecry Discovers (a Rodeo
+Performer's Discover a spell) gives a random card from that Discover's pool
+with no Discover offered, and that random card is not a Discover for
+"after you Discover" cards (Hooktusk) (Era, 2026-11-04).
 
 **Spending gold.** Anything that actually uses gold counts: buying,
 upgrading, rolling, Activate costs. Health paid instead of gold and free
