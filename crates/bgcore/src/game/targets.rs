@@ -838,9 +838,18 @@ impl Game {
                         } => {
                             if pt.gem {
                                 // A Blood Gem: the player's Gem value, no
-                                // spell power, tracked as Blood Gem stats.
-                                let (ga, gh) =
-                                    (self.players[p].gem_attack, self.players[p].gem_health);
+                                // spell power, tracked as Blood Gem stats. A
+                                // Gem the player played from the hand gets
+                                // Surveyor Portrait's from-hand bonus too; one
+                                // a minion plays (Turbo Hogrider, Gem
+                                // Confiscation) does not.
+                                let pl = &self.players[p];
+                                let mut ga = pl.gem_attack;
+                                let mut gh = pl.gem_health;
+                                if pt.source.is_none() {
+                                    ga += pl.gem_hand_attack;
+                                    gh += pl.gem_hand_health;
+                                }
                                 let m = &mut self.players[p].board[target_pos];
                                 m.attack += ga;
                                 m.health += gh;
@@ -1196,6 +1205,31 @@ impl Game {
                     if let Some(gen_c) = generated {
                         self.give_generated_tracking(p, gen_c, &mut target_pos);
                     }
+                    // Lovely Locket: after each cast on a friendly minion the
+                    // trinket casts the same spell on another one, picked at
+                    // random and ignoring the spell's own target rules
+                    // (docs/rules/trinkets.md). One copy per cast, so a Gem
+                    // that casts three times gets three copies. The copy is a
+                    // real cast, and it never chains.
+                    if self.players[p].tp.locket && !self.players[p].tp.locket_copy {
+                        let n = self.players[p].board.len();
+                        if n > 1 {
+                            let hit = target_pos.min(n - 1);
+                            let k = self.rng.below((n - 1) as u32) as usize;
+                            let at = if k < hit { k } else { k + 1 };
+                            self.players[p].tp.locket_copy = true;
+                            let copy = PendingTarget {
+                                source: None,
+                                kind: TargetKind::Spell(st),
+                                runs: 1,
+                                tavern: pt.tavern,
+                                gem: pt.gem,
+                                by_minion: pt.by_minion,
+                            };
+                            self.apply_target(p, &copy, at);
+                            self.players[p].tp.locket_copy = false;
+                        }
+                    }
                     if stop_after {
                         break;
                     }
@@ -1203,29 +1237,6 @@ impl Game {
                 // A Blood Gem cast from the hand (Ruby Tusk counts them).
                 if pt.gem && pt.source.is_none() {
                     self.trinket_event(p, Event::Gem, None, 1);
-                }
-                // Lovely Locket: the trinket casts the same spell on another
-                // friendly minion, picked at random and ignoring the spell's
-                // own target rules (docs/rules/trinkets.md). The copy is a real
-                // cast, and it never chains.
-                if self.players[p].tp.locket && !self.players[p].tp.locket_copy {
-                    let n = self.players[p].board.len();
-                    let hit = s.min(n.saturating_sub(1));
-                    if n > 1 {
-                        let k = self.rng.below((n - 1) as u32) as usize;
-                        let at = if k < hit { k } else { k + 1 };
-                        self.players[p].tp.locket_copy = true;
-                        let copy = PendingTarget {
-                            source: None,
-                            kind: TargetKind::Spell(st),
-                            runs: 1,
-                            tavern: pt.tavern,
-                            gem: pt.gem,
-                            by_minion: pt.by_minion,
-                        };
-                        self.apply_target(p, &copy, at);
-                        self.players[p].tp.locket_copy = false;
-                    }
                 }
             }
         }

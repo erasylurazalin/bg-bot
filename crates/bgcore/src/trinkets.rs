@@ -172,6 +172,11 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     Gems(u8),
     /// Your Blood Gems give more for good (`gem_bonus`).
     GemBonus { attack: i32, health: i32 },
+    /// Blood Gems played from your hand give more for good
+    /// (`gem_bonus_hand`: Surveyor Portrait's "Blood Gems played from your
+    /// hand give an extra +6/+6"). A Gem a minion plays (Turbo Hogrider, Gem
+    /// Confiscation) does not get it.
+    GemBonusHand { attack: i32, health: i32 },
     /// Your Tavern spells give more for good (`spell_bonus`).
     SpellBonus { attack: i32, health: i32 },
     /// Discover this many Tavern spells (`discover_spell`).
@@ -1003,6 +1008,7 @@ struct RawAct {
     upgrade_discount: Option<u8>,
     get_gems: Option<u8>,
     gem_bonus: Option<[i32; 2]>,
+    gem_bonus_hand: Option<[i32; 2]>,
     spell_bonus: Option<[i32; 2]>,
     discover_spell: Option<u8>,
     discover_deathrattle: Option<u8>,
@@ -1433,6 +1439,8 @@ impl TrinketDb {
                     Act::Gems(n)
                 } else if let Some([attack, health]) = a.gem_bonus {
                     Act::GemBonus { attack, health }
+                } else if let Some([attack, health]) = a.gem_bonus_hand {
+                    Act::GemBonusHand { attack, health }
                 } else if let Some([attack, health]) = a.spell_bonus {
                     Act::SpellBonus { attack, health }
                 } else if let Some(n) = a.discover_spell {

@@ -1004,6 +1004,26 @@ pub fn load(
         }
         None => missing.push("Secrets not in the file (the Secret zone)".to_string()),
     }
+    // The log's Tavern spell bonus (`spell_attack`/`spell_health`) is the
+    // total the game gives every spell, and it already holds what a minion on
+    // the board adds (Humon'gozz, Enchanted Sentinel) and what a trinket's
+    // standing rule adds (Honeycomb Ring's +1/+1, Multilayered Shield's per
+    // type). The engine adds those itself, so the stored value takes the
+    // engine's own part back out and the total stays the log's number. The
+    // evidence: in `Hearthstone_2026_10_27_17_42_08-g1` turn 8 the counter
+    // reads 4/5 with Humon'gozz on the board, the Tavern Dish Banana gives
+    // +6/+7 (2/2 plus 4/5, no +1/+2 on top), and selling the Humon'gozz drops
+    // the counter by exactly 1/2 (turn 9).
+    {
+        let cards = &game.data.cards;
+        let pl = &mut game.players[ME];
+        let (total_a, total_h) = pl.total_spell_bonus(cards);
+        let (stored_a, stored_h) = pl.spell_bonus;
+        pl.spell_bonus = (
+            stored_a - (total_a - stored_a),
+            stored_h - (total_h - stored_h),
+        );
+    }
     LoadedShop { game, missing, tavern_ids, hand_ids, board_ids, spell_id }
 }
 

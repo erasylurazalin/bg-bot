@@ -584,6 +584,12 @@ impl Game {
             | Act::ConsumeClaw { .. }
             | Act::SpellBonusPerType { .. }
             | Act::SpellBonusThisTurn { .. }
+            // Surveyor Portrait's from-hand Gem bonus: the log's `gem_attack`
+            // counter leaves it out (the Gem cards in hand carry it instead,
+            // 3/5 in the counter against 9/11 given in
+            // `Hearthstone_2026_11_03_00_29_06-g2` turn 9), so it is read off
+            // the trinket rather than off the state.
+            | Act::GemBonusHand { .. }
             // A portrait's rewrite of every copy of a card (also written onto
             // the copies already on the board and in the hand).
             | Act::CardMod { .. }
@@ -1032,6 +1038,11 @@ impl Game {
             Act::Gems(n) => self.run_effect(p, &mut pos, Effect::GetGems(n), false, 1),
             Act::GemBonus { attack, health } => {
                 self.run_effect(p, &mut pos, Effect::GemBonus { attack, health }, false, 1)
+            }
+            Act::GemBonusHand { attack, health } => {
+                let pl = &mut self.players[p];
+                pl.gem_hand_attack = pl.gem_hand_attack.saturating_add(attack);
+                pl.gem_hand_health = pl.gem_hand_health.saturating_add(health);
             }
             Act::SpellBonus { attack, health } => {
                 self.run_effect(p, &mut pos, Effect::SpellBonus { attack, health }, false, 1)

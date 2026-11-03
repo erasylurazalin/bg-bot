@@ -1673,3 +1673,67 @@ fn a_tavern_price_the_log_shows_is_the_engines_price() {
         assert_eq!(r.ours.gold, left, "the buy cost {paid} Gold: {:?}", r.diffs);
     }
 }
+
+/// The log's Tavern spell bonus is the total the game gives every spell, so a
+/// minion's own aura is already inside it: the loader takes the engine's part
+/// back out and the total stays the log's number. Evidence
+/// `Hearthstone_2026_10_27_17_42_08-g1` turn 8: the counter reads 4/5 with a
+/// Humon'gozz on the board, the Tavern Dish Banana gives +6/+7 (2/2 plus 4/5,
+/// no +1/+2 on top), and selling the Humon'gozz drops the counter by exactly
+/// 1/2 (turn 9).
+#[test]
+fn the_logged_tavern_spell_bonus_is_the_total_an_aura_is_already_in() {
+    let text = r#"{"source": "aura", "game": 1, "turns": [
+        {"turn": 8,
+          "start": {"board": [{"name": "Humon'gozz", "attack": 5, "health": 5, "position": 1}],
+                     "hand": [], "tavern": [],
+                     "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": 5,
+                     "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                     "hero_powers": [], "trinkets": [],
+                     "counters": {"spell_attack": 4, "spell_health": 5}},
+          "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("aura.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let loaded = load(&data(), &turn.start, None, None, turn.turn, 7, None);
+    let pl = &loaded.game.players[bgcore::shop_replay::ME];
+    assert_eq!(
+        pl.total_spell_bonus(&loaded.game.data.cards),
+        (4, 5),
+        "the log's number is the whole bonus, Humon'gozz's +1/+2 included"
+    );
+}
+
+/// A seated trinket's from-hand Gem bonus is not in the log's `gem_attack`
+/// counter (Surveyor Portrait writes it on the Gem cards: 3/5 in the counter
+/// against 9/11 given, `Hearthstone_2026_11_03_00_29_06-g2` turn 9), so the
+/// loader runs that `on_pick` act while the player value stays the log's.
+#[test]
+fn a_seated_surveyor_portraits_gem_bonus_is_for_the_hand() {
+    let text = r#"{"source": "gem", "game": 1, "turns": [
+        {"turn": 9,
+          "start": {"board": [{"name": "Lullabot", "attack": 1, "health": 1, "position": 1}],
+                     "hand": [], "tavern": [],
+                     "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": 5,
+                     "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                     "hero_powers": [],
+                     "trinkets": [{"card_id": "BG30_MagicItem_943", "name": "Surveyor Portrait",
+                                   "numbers": [6, 6, 0, 43]}],
+                     "counters": {"gem_attack": 3, "gem_health": 5}},
+          "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("gem.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let loaded = load(&data(), &turn.start, None, None, turn.turn, 7, None);
+    let pl = &loaded.game.players[bgcore::shop_replay::ME];
+    assert_eq!(
+        (pl.gem_attack, pl.gem_health),
+        (3, 5),
+        "the counter is the player's own Gem value"
+    );
+    assert_eq!(
+        (pl.gem_hand_attack, pl.gem_hand_health),
+        (6, 6),
+        "and the Portrait's +6/+6 is read off the trinket"
+    );
+}
