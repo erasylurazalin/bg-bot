@@ -99,6 +99,8 @@ The pool the offers come from:
   Maldraxxus Dagger, Tras'tath, Xavius) use the same gift rules, with the
   minion rules from their own text. Tras'tath's Discover of a Tier 5
   minion picks its gifts as if it were turn 7.
+- **Sinister Invitation never offers Gilding** (Era, 2026-11-03): its
+  minion is already golden, so Gilding is not in its gift pool.
 - **Gifts stack.** A triple's golden keeps every copy's gifts, duplicates
   included: three copies with Toughened Shield, Fresh Perspective and
   Toughened Shield give a golden with two Toughened Shields and one Fresh
