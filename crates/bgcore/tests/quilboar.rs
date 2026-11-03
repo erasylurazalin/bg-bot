@@ -313,6 +313,59 @@ fn a_gem_on_the_amalgam_feeds_felboar_once_per_player_cast() {
 }
 
 #[test]
+fn felboar_eats_the_tavern_minion_the_same_gem_buffed() {
+    // docs/rules/design.md "Eating a minion with a spell": Felboar's "After
+    // you cast 3 spells" fires once the spell has resolved, so it takes the
+    // minion the gem itself buffed. The old order fired the trigger on the
+    // play and ate the minion as it stood before the gem landed (log
+    // 2026_11_02_00_10_22-g4 turn 9 step 39).
+    let mut g = game(30);
+    put_on_board(&mut g, 0, "Felboar", false);
+    set_shop(&mut g, 0, &["Wolf Pup"]);
+    g.players[0].board[0].improvements = 2;
+    g.players[0].gold = 10;
+    g.give(0, "Blood Gem").unwrap();
+    let gem = id(&g.data.cards, "Blood Gem");
+    let h = g.players[0].hand.iter().position(|m| m.card == gem).unwrap() as u8;
+    play(&mut g, 0, h, 0);
+    let before = (
+        stats(&g.players[0].board[0]),
+        stats(&g.players[0].shop[0]),
+        (g.players[0].gem_attack, g.players[0].gem_health),
+    );
+    act(&mut g, 0, Action::TargetShop(0));
+    let (felboar, pup, gem) = before;
+    assert_eq!(
+        stats(&g.players[0].board[0]),
+        (felboar.0 + pup.0 + gem.0, felboar.1 + pup.1 + gem.1),
+        "the eaten minion had the gem's stats on it"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_whenever_tavern_spell_trigger_fires_before_the_spell_resolves() {
+    // Living Azerite: "Whenever you cast a Tavern spell, give Elementals in
+    // the Tavern +4/+3". "Whenever" is on the cast, so a spell that reads the
+    // Tavern (Arcane Absorption) sees the buffed minion.
+    let mut g = game(31);
+    put_on_board(&mut g, 0, "Living Azerite", false);
+    put_on_board(&mut g, 0, "Living Azerite", false);
+    set_shop(&mut g, 0, &["Dune Dweller"]);
+    g.players[0].tier = 6;
+    g.players[0].gold = 10;
+    g.give(0, "Arcane Absorption").unwrap();
+    let h = g.players[0].hand.len() as u8 - 1;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::Target(1));
+    // Dune Dweller 3/3 takes two +4/+3 (two Azerites): 11/9. Half of it,
+    // rounded up, is 6/5.
+    assert_eq!(stats(&g.players[0].shop[0]), (11, 9), "both Azerites buffed the Tavern");
+    assert_eq!(stats(&g.players[0].board[1]), (8 + 6, 6 + 5), "the spell read the buffed Tavern");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_taught_choose_one_spell_is_the_minions_cast_too() {
     // A Magicfin Apprentice casts the Tavern spell it was taught: Alliance
     // Flag is a Choose One spell, so its option and its target still wait for

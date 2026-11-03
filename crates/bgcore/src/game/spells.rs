@@ -12,6 +12,7 @@ use crate::cards::{
     TimesRole,
     Tribe,
     Tribes,
+    TriggerWhen,
     how_many_times,
     pick_one_per_type,
 };
@@ -433,27 +434,57 @@ impl Game {
         if self.players[p].tp.first_spell_double > 0 {
             self.players[p].tp.first_spell_double -= 1;
         }
-        // A Choose One spell is cast, then its option is picked, then its
-        // target: only then do the "after you cast a spell" triggers fire
-        // (docs/rules/design.md "Targets in the shop", Era 2026-11-02). The counters of
-        // the cast itself are taken now, as the log shows them moving on the
-        // play; the triggers wait for the choice to be answered.
+        // A spell is cast, then a Choose One picks its option and a targeting
+        // spell picks its target: the card's "whenever you cast a spell"
+        // triggers fire as it is cast, its "after you cast a spell" ones once
+        // it has resolved (docs/rules/design.md "Targets in the shop", Era
+        // 2026-11-02, and "Eating a minion with a spell": Felboar's consume
+        // takes the minion the same cast buffed). The counters of the cast
+        // itself are taken now, as the log shows them moving on the play.
         let waits = matches!(self.players[p].pending_choose_one, Some(pco) if pco.source.is_none());
-        if waits {
-            self.players[p].cast_after_choice = Some(CastAfterChoice { card: m.card, casts, tavern });
-        }
+        // A targeting spell is cast once per target its prompt asks for
+        // (Balinda, and a Gem the Hot-Air Surveyors copied).
+        let targeting = self.players[p].pending_target.map(|pt| pt.runs);
+        let casts = targeting.unwrap_or(casts);
         // Every spell is a spell cast: a Tavern spell, a Blood Gem, a Gem
         // Day, a Banana, a Spellcraft spell (docs/rules/design.md). "Tavern spell" is
         // the narrower one, and only those touch the Tavern spell counters.
+        if (waits || targeting.is_some()) && tavern {
+            let n = casts as u32;
+            let pl = &mut self.players[p];
+            pl.spells_cast = pl.spells_cast.saturating_add(n);
+            pl.spells_cast_turn = pl.spells_cast_turn.saturating_add(1);
+        }
+        let all_casts = if tavern { casts } else { 1 };
         if waits {
+            // A Choose One spell owes every trigger to the choice.
+            self.players[p].cast_after_choice = Some(CastAfterChoice {
+                card: m.card,
+                casts,
+                tavern,
+                at_play: false,
+            });
+        } else if targeting.is_some() {
+            // A targeting spell fires its "whenever" triggers and its trinket
+            // events now, and owes the "after" ones to the target.
+            self.players[p].cast_after_choice = Some(CastAfterChoice {
+                card: m.card,
+                casts,
+                tavern,
+                at_play: true,
+            });
+            // One cast's worth now; the loop in `apply_target` fires them
+            // again before each extra cast (Balinda casts twice, so a
+            // "whenever you cast a Tavern spell" trigger fires twice too).
+            self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Now);
+            self.trinket_event(p, Event::SpellCast, Some(m.card), 1);
             if tavern {
-                let n = casts as u32;
-                let pl = &mut self.players[p];
-                pl.spells_cast = pl.spells_cast.saturating_add(n);
-                pl.spells_cast_turn = pl.spells_cast_turn.saturating_add(1);
+                self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Now);
+                self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
+                self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
             }
         } else {
-            for _ in 0..if tavern { casts } else { 1 } {
+            for _ in 0..all_casts {
                 self.fire_event(p, EventKind::AllSpellsCast, 1);
             }
             self.trinket_event(p, Event::SpellCast, Some(m.card), 1);
@@ -467,6 +498,16 @@ impl Game {
                 // Gem or a Banana (docs/rules/design.md "Spells versus Tavern spells").
                 self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
             }
+            // A spell with nothing to wait for has landed: its "after you
+            // cast a spell" triggers fire now.
+            for _ in 0..all_casts {
+                self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
+            }
+            if tavern {
+                for _ in 0..casts {
+                    self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Resolved);
+                }
+            }
         }
         // A cast never leaves a prompt nothing can answer: the spell's own
         // "after you cast" triggers can take away its last target (the only
@@ -477,25 +518,33 @@ impl Game {
         }
     }
 
-    /// Fire the triggers a Choose One spell's cast owed: the board's "after
-    /// you cast a spell" minions, the trinkets that count casts and the Dark
-    /// Gifts that buff on a Tavern spell. Called once the option and its
+    /// Fire the triggers a Choose One or targeting spell's cast owed. A
+    /// targeting spell fired its "whenever" triggers and trinket events at the
+    /// play (`at_play`), so only its "after you cast a spell" triggers are
+    /// left; a Choose One spell owes those too. Called once the option and its
     /// target are answered (`maybe_start_discover`).
     pub(super) fn fire_cast_after_choice(&mut self, p: usize, what: CastAfterChoice) {
-        if !what.tavern {
-            self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None);
+        if !what.at_play {
+            for _ in 0..what.casts {
+                self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Now);
+            }
             self.trinket_event(p, Event::SpellCast, Some(what.card), 1);
-            return;
+            if what.tavern {
+                for _ in 0..what.casts {
+                    self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Now);
+                }
+                self.trinket_event(p, Event::CastSpell, Some(what.card), 1);
+                self.dark_gift_count(p, what.casts as i32, |c| c.buff_per_tavern_spell);
+            }
         }
         for _ in 0..what.casts {
-            self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None);
+            self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
         }
-        self.trinket_event(p, Event::SpellCast, Some(what.card), 1);
-        for _ in 0..what.casts {
-            self.run_event_triggers(p, EventKind::SpellsCast, 1, None);
+        if what.tavern {
+            for _ in 0..what.casts {
+                self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Resolved);
+            }
         }
-        self.trinket_event(p, Event::CastSpell, Some(what.card), 1);
-        self.dark_gift_count(p, what.casts as i32, |c| c.buff_per_tavern_spell);
     }
 
     /// Whether a spell has anything to land on right now. A spell cast

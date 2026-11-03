@@ -864,7 +864,16 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   Faceless Converter's per-Tavern-spell improvement) stay Tavern-only, and
   `EventKind::AllSpellsCast` is the "after you cast N spells" counter (Felboar)
   with no player scalar. `on_cast_spell_on_self` and `on_cast_spell_on_tribe`
-  were always any-spell (they fire from `trigger_on_cast_spell_on_target`). In
+  were always any-spell (they fire from `trigger_on_cast_spell_on_target`).
+- **The two halves of a spell-event trigger.** A card's `on_event` for a
+  spell event fires either as the spell is cast ("whenever", `TriggerWhen::Now`)
+  or once it has resolved (`after = true` in cards.toml,
+  `TriggerWhen::Resolved`). `cast_spell_as` fires the "whenever" half once per
+  cast (the first at the play, the rest in `apply_target`'s cast loop, so a
+  Balinda double cast sees two) and the "after" half from
+  `fire_cast_after_choice`, which `maybe_start_discover` calls once no prompt
+  is left: a targeting spell's target and a Choose One spell's option come
+  first (docs/rules/design.md "Eating a minion with a spell"). In
   a fight, `Effect::CastSpell` fires the Tavern counter and the Tavern-only
   minion triggers only for a Tavern spell, and the trinket's `when = "cast"`
   hook for every spell. Replica Cathedral's "your first spell each turn casts

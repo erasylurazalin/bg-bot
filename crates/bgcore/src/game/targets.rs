@@ -9,6 +9,7 @@ use crate::cards::{
     EventKind,
     SpellTarget,
     Tribe,
+    TriggerWhen,
 };
 use crate::minion::{
     CardId,
@@ -75,8 +76,12 @@ impl Game {
     pub(super) fn resolve_shop_target(&mut self, p: usize, slot: usize) {
         if let Some(pst) = self.players[p].pending_shop_target.take() {
             // The Tavern emptied while the pick was open (nothing does that
-            // today): there is nothing to point at, so the pick fizzles.
-            if slot >= self.players[p].shop.len() {
+            // today): there is nothing to point at, so the pick fizzles. A
+            // pick that takes any Tavern card may name the spell slot.
+            let spell_slot = slot == self.players[p].shop.len()
+                && pst.kind.takes_spell_slot()
+                && self.players[p].shop_spell.is_some();
+            if slot > self.players[p].shop.len() || (slot == self.players[p].shop.len() && !spell_slot) {
                 self.maybe_start_discover(p);
                 return;
             }
@@ -795,15 +800,16 @@ impl Game {
                     if target_pos >= self.players[p].board.len() {
                         break;
                     }
-                    // Every extra cast (Balinda) is another spell cast: one
-                    // more for the "every spell" counters always, and one
-                    // more for the Tavern ones only (a Blood Gem does not
-                    // count there). A minion's cast for the player counts
-                    // none of them (Era 2026-11-02).
+                    // Every extra cast is another spell cast: the "whenever
+                    // you cast a spell" triggers fire before it, one cast's
+                    // worth each (the first cast fired them at the play). A
+                    // minion's cast for the player fires none (Era 2026-11-02).
+                    // The "after you cast a spell" triggers wait for the whole
+                    // spell (`fire_cast_after_choice`).
                     if k > 0 && !pt.by_minion {
-                        self.fire_event(p, EventKind::AllSpellsCast, 1);
+                        self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Now);
                         if pt.tavern {
-                            self.fire_event(p, EventKind::SpellsCast, 1);
+                            self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Now);
                         }
                         if target_pos >= self.players[p].board.len() {
                             break;

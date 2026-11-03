@@ -2117,7 +2117,19 @@ fn actions_for(
             };
             out.push(Action::Play { hand: at, pos });
             if let Some(target) = &step.target {
-                out.push(target_action(loaded, target)?);
+                let mut a = target_action(loaded, target)?;
+                // The file's board target is the board before the play; a
+                // minion that lands before it pushes it one slot right (a
+                // Sprightly Scarab's Battlecry, a Beast played in front of
+                // the Beast it buffs).
+                let lands = !spell && landed.is_some();
+                if lands
+                    && let Action::Target(t) = a
+                    && t as usize >= pos as usize
+                {
+                    a = Action::Target(t + 1);
+                }
+                out.push(a);
             }
         }
         "activate" => {

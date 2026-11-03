@@ -9,6 +9,7 @@ use crate::cards::{
     EventKind,
     Tribe,
     Tribes,
+    TriggerWhen,
     pick_one_per_type,
 };
 use crate::minion::{
@@ -1362,19 +1363,23 @@ impl Game {
             // The hero powers' own Gold count (Choose Your Champion).
             self.power_gold_spent(p, amount);
         }
-        self.run_event_triggers(p, kind, amount, skip);
+        self.run_event_triggers(p, kind, amount, skip, TriggerWhen::Now);
     }
 
     /// The board minions' own triggers for an event, without the player-level
     /// counters and trinkets `fire_event` takes first. A Choose One spell's
     /// cast counts itself at the play but its triggers wait for the choice
     /// (docs/rules/design.md "Targets in the shop"), so the two halves are fired apart.
+    /// `when` picks the half: a "whenever you cast a spell" trigger fires as
+    /// the spell is cast, an "after you cast a spell" one once it has
+    /// resolved (`EventTrigger::resolved`).
     pub(super) fn run_event_triggers(
         &mut self,
         p: usize,
         kind: EventKind,
         amount: u32,
         skip: Option<usize>,
+        when: TriggerWhen,
     ) {
         if amount == 0 {
             return;
@@ -1388,7 +1393,10 @@ impl Game {
             let m = self.players[p].board[pos];
             for (card, golden) in m.parts() {
                 let Some(t) = self.data.cards.get(card).on_event else { continue };
-                if t.kind != kind || pos >= self.players[p].board.len() {
+                if t.kind != kind
+                    || t.resolved != (when == TriggerWhen::Resolved)
+                    || pos >= self.players[p].board.len()
+                {
                     continue;
                 }
                 let imp = &mut self.players[p].board[pos].improvements;

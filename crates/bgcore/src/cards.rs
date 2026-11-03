@@ -737,6 +737,18 @@ pub enum EventKind {
     CardGot(Tribe),
 }
 
+/// Which half of a spell-event trigger fires: "Whenever you cast a spell"
+/// happens as the spell is cast, "After you cast a spell" once it has
+/// resolved and its target is answered (docs/rules/design.md "Eating a
+/// minion with a spell").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TriggerWhen {
+    /// The event happens (a "whenever" trigger, and every non-spell event).
+    Now,
+    /// The spell that caused it has resolved (an "after" trigger).
+    Resolved,
+}
+
 /// "After N events, do the effect (N left!)". The count lives in the
 /// minion's `improvements`. Going past N keeps the remainder, so one big
 /// event can fire it more than once.
@@ -745,6 +757,10 @@ pub struct EventTrigger {
     pub kind: EventKind,
     pub every: u8,
     pub effect: Effect,
+    /// The card says "After you cast ...", so it fires once the spell has
+    /// resolved rather than as it is cast. Non-spell events have no second
+    /// half: they fire with `TriggerWhen::Now` only.
+    pub resolved: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1127,6 +1143,10 @@ pub enum Deathrattle {
 pub struct AfterPlayTribe {
     pub tribe: Tribe,
     pub effects: Vec<Effect>,
+    /// The golden card says "..., twice": its whole list runs twice rather
+    /// than with doubled numbers, so each `damage_hero` is its own hit and
+    /// everything that watches hero damage sees two of them.
+    pub golden_twice: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2117,6 +2137,9 @@ fn default_true() -> bool {
 struct RawAfterPlayTribe {
     tribe: String,
     effects: Vec<RawEffect>,
+    /// The golden text says "twice" instead of doubling the numbers.
+    #[serde(default)]
+    golden_twice: bool,
 }
 
 #[derive(Deserialize)]
@@ -2790,6 +2813,9 @@ struct RawOnEvent {
     /// "spells_cast", "gold_spent", "hero_damage", "minions_sold" or "cards_bought".
     event: String,
     every: u8,
+    /// The card says "After you cast ...": fire once the spell resolved.
+    #[serde(default)]
+    after: bool,
     effect: RawEffect,
 }
 
@@ -3640,6 +3666,7 @@ impl CardDb {
                         kind: parse_event(&e.event).map_err(&err)?,
                         every: e.every,
                         effect,
+                        resolved: e.after,
                     })
                 }
             };
@@ -3694,6 +3721,7 @@ impl CardDb {
                     Some(AfterPlayTribe {
                         tribe: tribe(&p.tribe).map_err(&err)?,
                         effects,
+                        golden_twice: p.golden_twice,
                     })
                 }
             };
