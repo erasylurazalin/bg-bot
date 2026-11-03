@@ -344,6 +344,40 @@ fn felboar_eats_the_tavern_minion_the_same_gem_buffed() {
 }
 
 #[test]
+fn a_three_cast_gem_feeds_felboar_between_its_casts() {
+    // Hearthstone_2026_11_02_00_10_22-g4 turn 9 step 39: a Gem played from
+    // hand with Balinda (two casts) and a Hot-Air Surveyor (one more) is a
+    // three-cast play, and the log's Felboar counter reaches 3 on the first
+    // of the three. So the minion it eats carries the Devilish Distractor's
+    // buff from that cast alone (+1/+2), not the play's three (+3/+6): a
+    // cast's "after you cast a spell" trigger fires as that cast resolves,
+    // before the next one starts (docs/rules/design.md "Eating a minion with
+    // a spell"). The old order fired all three after the last cast and ate
+    // the minion with all three buffs on it.
+    let mut g = game(33);
+    put_on_board(&mut g, 0, "Felboar", false);
+    put_on_board(&mut g, 0, "Devilish Distractor", false);
+    put_on_board(&mut g, 0, "Balinda Stonehearth", false);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", false);
+    set_shop(&mut g, 0, &["Wolf Pup"]);
+    // Two spells already counted: this play's first cast is the third.
+    g.players[0].board[0].improvements = 2;
+    g.players[0].gold = 10;
+    g.give(0, "Blood Gem").unwrap();
+    let before = (stats(&g.players[0].board[0]), stats(&g.players[0].shop[0]));
+    let h = gem_slot(&g, 0).expect("a Blood Gem in hand") as u8;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::Target(1)); // the Distractor
+    let (felboar, pup) = before;
+    assert_eq!(
+        stats(&g.players[0].board[0]),
+        (felboar.0 + pup.0 + 1, felboar.1 + pup.1 + 2),
+        "one cast's Tavern buff on the eaten minion, not the play's three"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_whenever_tavern_spell_trigger_fires_before_the_spell_resolves() {
     // Living Azerite: "Whenever you cast a Tavern spell, give Elementals in
     // the Tavern +4/+3". "Whenever" is on the cast, so a spell that reads the

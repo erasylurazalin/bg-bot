@@ -21,6 +21,7 @@ use crate::{
     SHOP,
 };
 use super::{
+    CastAfterChoice,
     DiscoverRequest,
     Game,
     PendingTarget,
@@ -804,6 +805,21 @@ impl Game {
             }
             TargetKind::Spell(st) => {
                 let mut target_pos = s;
+                // A cast's own "after you cast a spell" triggers fire as that
+                // cast resolves, before the next one starts (docs/rules/design.md
+                // "Eating a minion with a spell"): Felboar's "After you cast 3
+                // spells" eats the Tavern minion with that one cast's Tavern
+                // buff on it, not with the whole play's (log
+                // 2026_11_02_00_10_22-g4 turn 9 step 39, where its counter
+                // reaches 3 on the first of the play's three casts and the
+                // Distractor's buff of that cast is the only one it has seen).
+                // This cast's "whenever" half already fired at the play, so
+                // each of the play's casts is owed one (`cast_after_choice`,
+                // at_play). A Locket's copy is inside its own cast and fires
+                // none.
+                let owe_after = !pt.by_minion
+                    && !self.players[p].tp.locket_copy
+                    && self.players[p].cast_after_choice.is_some_and(|w| w.at_play);
                 for k in 0..pt.runs {
                     if target_pos >= self.players[p].board.len() {
                         break;
@@ -812,8 +828,8 @@ impl Game {
                     // you cast a spell" triggers fire before it, one cast's
                     // worth each (the first cast fired them at the play). A
                     // minion's cast for the player fires none (Era 2026-11-02).
-                    // The "after you cast a spell" triggers wait for the whole
-                    // spell (`fire_cast_after_choice`).
+                    // The "after you cast a spell" triggers follow the cast
+                    // below (`fire_cast_after_choice`).
                     if k > 0 && !pt.by_minion {
                         self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Now);
                         if pt.tavern {
@@ -1224,6 +1240,21 @@ impl Game {
                             self.apply_target(p, &copy, at);
                             self.players[p].tp.locket_copy = false;
                         }
+                    }
+                    // This cast has resolved: its "after you cast a spell"
+                    // triggers fire now, before the next cast of the play. A
+                    // cast that still has something open (a Discover it
+                    // opened, a choice, a discard) keeps them owed:
+                    // `fire_cast_after_choice` runs whatever is left once the
+                    // player has answered.
+                    if owe_after
+                        && self.players[p].cast_after_choice.is_some_and(|w| w.casts > 0)
+                        && !Game::other_choice_open(&self.players[p])
+                        && let Some(mut what) = self.players[p].cast_after_choice
+                    {
+                        self.fire_cast_after_choice(p, CastAfterChoice { casts: 1, ..what });
+                        what.casts -= 1;
+                        self.players[p].cast_after_choice = (what.casts > 0).then_some(what);
                     }
                     if stop_after {
                         break;

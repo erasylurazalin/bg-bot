@@ -928,10 +928,17 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   or once it has resolved (`after = true` in cards.toml,
   `TriggerWhen::Resolved`). `cast_spell_as` fires the "whenever" half once per
   cast (the first at the play, the rest in `apply_target`'s cast loop, so a
-  Balinda double cast sees two) and the "after" half from
+  Balinda double cast sees two) and the "after" half once per cast too, at
+  the end of the cast it belongs to: `apply_target`'s cast loop fires it when
+  that cast left no prompt open, so a three-cast Gem play (Balinda and a
+  Hot-Air Surveyor) gives Felboar its third count, and eats the Tavern minion
+  with that cast's Tavern buff on it, between the play's first and second
+  casts (log `2026_11_02_00_10_22-g4` turn 9 step 39). Whatever a cast leaves
+  owed (a Discover it opened, a choice, a target) is fired by
   `fire_cast_after_choice`, which `maybe_start_discover` calls once no prompt
-  is left: a targeting spell's target and a Choose One spell's option come
-  first (docs/rules/design.md "Eating a minion with a spell"). In
+  is left, and so is a Choose One spell's whole "after" half: its option and
+  its target come first (docs/rules/design.md "Eating a minion with a
+  spell"). In
   a fight, `Effect::CastSpell` fires the Tavern counter and the Tavern-only
   minion triggers only for a Tavern spell, and the trinket's `when = "cast"`
   hook for every spell. Replica Cathedral's "your first spell each turn casts

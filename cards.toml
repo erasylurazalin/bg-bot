@@ -1025,7 +1025,11 @@ name = "Mind Muck"
 tier = 2
 tribe = "demon"
 stats = [3, 2]
-battlecry = { tribe = "demon", consume = "chosen", consume_by_chosen = true }
+# "Choose a friendly Demon. It consumes a minion in the Tavern to gain its
+# stats." The only pick is the Demon; the game picks the Tavern minion itself
+# (log 2026_11_01_17_59_13-g1 turn 8 step 26: one play, three Brann repeats,
+# three different Tavern minions gone, and no choice prompt between them).
+battlecry = { tribe = "demon", consume = "random", consume_by_chosen = true }
 
 [[minion]]
 name = "Soul Rewinder"
