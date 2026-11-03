@@ -2,7 +2,7 @@
 //! per game.
 //!
 //! Ported from the Python `tools/collect_actions.py` (removed 2026-11-03). It
-//! is run by hand, not by a timer. It reads the logs
+//! runs from bg-boards.timer after collect-boards. It reads the logs
 //! the way `collect-boards` does (the same games, numbered the same way), follows
 //! the shop phase turn by turn, and writes what I did there:
 //!

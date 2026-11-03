@@ -71,7 +71,7 @@ crates/
                       `bgbench collect-boards` (Era's board files),
                       `bgbench collect-actions` and `bgbench check-actions` (Era's
                       shop actions: src/collect_actions.rs, src/check_actions.rs;
-                      bg-boards.timer runs collect-boards from
+                      bg-boards.timer runs collect-boards and collect-actions from
                       ~/.local/bin/bgbench-collect)
   bglog/              Power.log reading, a port of the tracker's Python
                       (docs/briefs/log-reader.md): the parser and entity table

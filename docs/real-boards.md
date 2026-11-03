@@ -147,8 +147,8 @@ what I did in every shop phase, as named steps. It writes
 (62 games, 717 turns, 15,674 steps in `boards/actions` on 2026-11-03; the
 board folder grows every 15 minutes). It keeps its own `.state.json` and
 skips a log whose size has not changed; `--rewrite` reads them all again. A
-full run is about 30 seconds. No player names are stored. No timer runs it: run
-`./target/release/bgbench collect-actions` by hand before a shop replay.
+full run is about 30 seconds. No player names are stored. The same timer runs
+it right after `collect-boards` (a second `ExecStart` in `bg-boards.service`).
 
 The command is `crates/bgbench/src/collect_actions.rs`, ported from the
 Python `tools/collect_actions.py` (removed 2026-11-03), which wrote the same
