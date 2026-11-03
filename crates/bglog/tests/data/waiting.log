@@ -1,0 +1,45 @@
+D 00:49:49.4027600 GameState.DebugPrintPower() - CREATE_GAME
+D 00:49:49.4027600 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 02:03:56.2986430 GameState.DebugPrintPower() -     Player EntityID=17 PlayerID=6 GameAccountId=[hi=111111111111111111 lo=222222222]
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=CONTROLLER value=6
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=PLAYER_ID value=6
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=LAST_AFFECTED_BY value=17
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=HERO_ENTITY value=35
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=MAXHANDSIZE value=10
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=STARTHANDSIZE value=4
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=TEAM_ID value=6
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=ZONE value=PLAY
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=ENTITY_ID value=17
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=CANT_DRAW value=1
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_0 value=15
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_1 value=16
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_2 value=17
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_3 value=18
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_4 value=19
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=OVERRIDE_EMOTE_5 value=20
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=1355 value=1
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=NEXT_OPPONENT_PLAYER_ID value=7
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=PLAYER_TECH_LEVEL value=1
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=BACON_MAX_PLAYER_TECH_LEVEL value=6
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=MAX_EXCAVATE_TIER value=2
+D 02:03:56.2986430 GameState.DebugPrintPower() -         tag=4741 value=2
+D 02:23:41.6827590 GameState.DebugPrintPower() -     FULL_ENTITY - Creating ID=17328 CardID=
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=CONTROLLER value=6
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=ENTITY_ID value=17328
+D 02:23:41.6827590 GameState.DebugPrintPower() -     SHOW_ENTITY - Updating Entity=17328 CardID=BG27_556pe
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=CONTROLLER value=6
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=CARDTYPE value=ENCHANTMENT
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=ATTACHED value=17
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=ZONE value=SETASIDE
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=ENTITY_ID value=17328
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=CLASS value=NEUTRAL
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=CREATOR value=15807
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=1037 value=6
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=1068 value=0
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=CREATOR_DBID value=108922
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=SPAWN_TIME_COUNT value=1
+D 02:23:41.6827590 GameState.DebugPrintPower() -         tag=4901 value=0
+D 02:23:41.6827590 GameState.DebugPrintPower() -     TAG_CHANGE Entity=17328 tag=ZONE value=PLAY 

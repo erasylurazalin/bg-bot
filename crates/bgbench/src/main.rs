@@ -7,6 +7,10 @@
 //!   bgbench peak [n]        peak board balance matrix (n fights each way per pair)
 //!   bgbench fightcheck      play Era's real fights N times each, write boards/checks/
 //!                           [--boards DIR] [--runs N] [--out DIR] [--flag PCT]
+//!   bgbench powerlog FILE   every game of a Power.log as its entities and tags stood
+//!                           [--out FILE] [--time]
+//!   bgbench tracker FILE    the Battlegrounds seats and fights of a Power.log
+//!                           [--out FILE] [--cards FILE] [--time]
 //!
 //! `fuzz` and `games` also take --real-boards DIR [--real-seats N] to seat
 //! real-board seats playing the boards of DIR (docs/real-boards.md), the
@@ -25,6 +29,12 @@ use bgcore::{
 };
 use rayon::prelude::*;
 use serde::Deserialize;
+
+mod check_actions;
+mod collect_actions;
+mod collect_boards;
+mod powerlog;
+mod tracker;
 
 /// The boards real seats play, and how many seats of a game are real.
 type Real = Option<(Arc<RealBoards>, usize)>;
@@ -717,6 +727,11 @@ fn main() {
                 .cloned();
             shop_replay(&actions, seeds, &out, card.as_deref());
         }
+        Some("powerlog") => powerlog::run(&args),
+        Some("tracker") => tracker::run(&args),
+        Some("check-actions") => check_actions::run(&args),
+        Some("collect-actions") => collect_actions::run(&args),
+        Some("collect-boards") => collect_boards::run(&args),
         Some("games") => bench_games(num(10), real),
         Some("fuzz") => fuzz(num(10_000), real),
         Some("match") => bot_match(num(10_000)),
@@ -726,6 +741,11 @@ fn main() {
                 "usage: bgbench fight [n] | games [secs] | fuzz [games] | match [games] | peak [n]\n\
                  \x20      bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]\n\
                  \x20      bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME]\n\
+                 \x20      bgbench powerlog FILE [--out FILE] [--time]\n\
+                 \x20      bgbench tracker FILE [--out FILE] [--cards FILE] [--time]\n\
+                 \x20      bgbench collect-boards [--out DIR] [--cards FILE] [--no-archive]\n\
+                 \x20      bgbench collect-actions [--out DIR] [--cards FILE] [--rewrite]\n\
+                 \x20      bgbench check-actions [--verbose] [PATTERN] [--actions DIR]\n\
                  \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N]"
             );
             std::process::exit(2);

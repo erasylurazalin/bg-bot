@@ -1,0 +1,20 @@
+D 18:00:39.2695330 GameState.DebugPrintPower() - CREATE_GAME
+D 18:00:39.2695330 GameState.DebugPrintPower() -     GameEntity EntityID=19
+D 18:00:39.2695330 GameState.DebugPrintPower() -     Player EntityID=20 PlayerID=7 GameAccountId=[hi=111111111111111111 lo=222222222]
+D 18:00:39.2695330 GameState.DebugPrintPower() -         tag=CONTROLLER value=7
+D 18:00:39.2695330 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 18:00:39.2695330 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=37 CardID=TB_BaconShop_HERO_PH
+D 18:00:39.2695330 GameState.DebugPrintPower() -     tag=CONTROLLER value=7
+D 18:00:39.2695330 GameState.DebugPrintPower() -     tag=CARDTYPE value=HERO
+D 18:00:39.2695330 GameState.DebugPrintGame() - PlayerID=7, PlayerName=Alice#1919
+D 18:00:39.2695330 GameState.DebugPrintGame() - PlayerID=15, PlayerName=Eve
+D 18:56:17.2727570 GameState.DebugPrintPower() - CREATE_GAME
+D 18:56:17.2727570 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 18:56:17.2727570 GameState.DebugPrintPower() -     Player EntityID=2 PlayerID=1 GameAccountId=[hi=111111111111111111 lo=222222222]
+D 18:56:17.2727570 GameState.DebugPrintPower() -         tag=CONTROLLER value=1
+D 18:56:17.2727570 GameState.DebugPrintPower() -         tag=CARDTYPE value=PLAYER
+D 18:56:17.2727570 GameState.DebugPrintPower() - FULL_ENTITY - Creating ID=25 CardID=TB_BaconShop_HERO_PH
+D 18:56:17.2727570 GameState.DebugPrintPower() -     tag=CONTROLLER value=1
+D 18:56:17.2727570 GameState.DebugPrintPower() -     tag=CARDTYPE value=HERO
+D 18:56:17.2727570 GameState.DebugPrintGame() - PlayerID=1, PlayerName=Alice#1919
+D 18:56:17.2727570 GameState.DebugPrintGame() - PlayerID=9, PlayerName=Carol

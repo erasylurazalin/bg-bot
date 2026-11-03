@@ -1,0 +1,11 @@
+D 00:57:53.6478530 GameState.DebugPrintPower() - CREATE_GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 00:57:53.6478530 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=1 EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=0 Target=0 SubOption=-1 TriggerKeyword=3169
+D 00:57:53.6478530 GameState.DebugPrintPower() - BLOCK_END
+D 00:57:53.6478530 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=1 EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=0 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:57:53.6478530 GameState.DebugPrintPower() - BLOCK_END
+D 00:57:53.6478530 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=1 EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=0 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:57:53.6478530 GameState.DebugPrintPower() - BLOCK_END
+D 00:57:53.6478530 GameState.DebugPrintPower() - BLOCK_START BlockType=TRIGGER Entity=1 EffectCardId=System.Collections.Generic.List`1[System.String] EffectIndex=0 Target=0 SubOption=-1 TriggerKeyword=TAG_NOT_SET
+D 00:57:53.6478530 GameState.DebugPrintPower() -     TAG_CHANGE Entity=3 tag=CURRENT_PLAYER value=1 
+D 00:57:53.6478530 GameState.DebugPrintPower() -     TAG_CHANGE Entity=3 tag=FIRST_PLAYER value=1 

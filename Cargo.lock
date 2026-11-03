@@ -19,8 +19,10 @@ name = "bgbench"
 version = "0.1.0"
 dependencies = [
  "bgcore",
+ "bglog",
  "rayon",
  "serde",
+ "serde_json",
  "toml",
 ]
 
@@ -32,6 +34,14 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "bglog"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

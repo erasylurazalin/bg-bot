@@ -7,7 +7,21 @@ sessions, so the script first copies them to `~/bg-logs/`. Then it reads
 each new or grown log with the tracker's parser (`~/projects/bg`) and writes
 one file per game to `boards/real/<log folder>-g<N>.json` (git-ignored).
 
-A systemd user timer runs it every 15 minutes:
+The same collector is also a Rust subcommand now, `bgbench collect-boards`
+(`crates/bgbench/src/collect_boards.rs`, on the Rust log reader in
+`crates/bglog`): the same files, the same archive, the same
+`<out>/.state.json` (log folder name to the size of the `Power.log` last read
+from it, so a rerun only reads logs that are new or grown; delete it to
+rewrite every file). `--out DIR` is where the files and the state go
+(`boards/real` by default) and `--no-archive` skips the copy into `~/bg-logs`.
+The one thing it writes differently is `dark_gifts`: `bglog` counts a Dark
+Gift once per copy (a golden that kept the same gift twice carries two, and
+the "+0/+0" buff a gift leaves is not a gift, see `gifts_by_minion`), where
+the Python keeps one id per gift. Until the switch-over (phase 5) the timer
+still runs the Python script, so run the subcommand by hand, with
+`--no-archive --out` on a scratch folder.
+
+A systemd user timer runs the Python script every 15 minutes:
 
 ```
 systemctl --user list-timers bg-boards.timer    # when it runs next
@@ -39,7 +53,7 @@ laptop with `systemctl --user disable --now bg-logs.timer`.
    "counters": {"gem_attack": 3, "gem_health": 2, "beetle_attack": 4,
                 "beetle_health": 2, "undead_attack": 6, "spell_attack": 1,
                 "spells_cast": 4, "knight_deaths": 2, "baller": 1,
-                "tasty_lobster": 6},
+                "upper_hand": 1},
    "deity": {"card_id": "BGFYM_000", "name": "C'Thun", "attack": 4, "health": 6},
    "hand": [{"card_id": "BG36_202", "name": "Tasty Lobster", "attack": 6,
              "health": 3, "golden": false, "keywords": ["DEATHRATTLE"],
@@ -66,11 +80,16 @@ laptop with `systemctl --user disable --now bg-logs.timer`.
   |---|---|
   | `gem_attack`, `gem_health` | `BACON_BLOODGEMBUFFATKVALUE` / `_HEALTHVALUE` on the player (the `BG26_159pe` enchantment carries the same pair) |
   | `beetle_attack`, `beetle_health` | `BG31_808pe` (Beetle Army player enchant) numbers 1 and 2 |
-  | `undead_attack`, `undead_health` | `BG25_011pe` (Undead Bonus Attack player enchant) number 1 |
+  | `undead_attack` | `BG25_011pe` (Undead Bonus Attack player enchant) number 1; there is no health one |
   | `spell_attack`, `spell_health` | `TAVERN_SPELL_ATTACK_INCREASE` / `TAVERN_SPELL_HEALTH_INCREASE` on the player |
   | `spells_cast` | `NUM_SPELLS_PLAYED_THIS_GAME` on the player (mine only: the stand-in player carries none for the opponent) |
   | `knight_deaths` | `BG25_008pe` (Eternal Knight player enchant) number 1 |
-  | `tasty_lobster`, `baller` | the `Counter` counts: a Tasty Lobster's numbers on the board or in hand, and `BG31_816pe` (Baller player enchant) number 1 |
+  | `baller` | `BG31_816pe` (Baller player enchant) number 1 |
+  | `upper_hand` | not a number in the log: the Upper Hands the side cast this turn (the spell's card goes back to SETASIDE), counted from the `PLAY` blocks of `BG28_573` |
+
+  A Tasty Lobster's count is not in `counters`: the loader reads it off the
+  card's own numbers, on the board or in the hand (see the paragraph about
+  `numbers` below).
 
 - `deity` is the side's Deity at the first attack (`BG_OldGod` in SECRET:
   the minion it awakens, its stats) or `null`. Its Aberration deaths still
@@ -124,10 +143,24 @@ by the game): 566 boards carry counters, 379 a hand, 486 a Deity.
 `tools/collect_actions.py` reads the same logs for the other half of a game:
 what I did in every shop phase, as named steps. It writes
 `boards/actions/<log folder>-g<N>.json`, numbered exactly like `boards/real/`
-(56 games, 638 turns, about 13,900 steps on 2026-11-02; the folders grow every
-15 minutes). It keeps its own `.state.json` and
+(56 games, 650 turns, 14,247 steps in `boards/actions` on 2026-11-03; the
+folders grow every 15 minutes). It keeps its own `.state.json` and
 skips a log whose size has not changed; `--rewrite` reads them all again. A run
 is about a minute. No player names are stored.
+
+`bgbench collect-actions` is the same command in Rust
+(`crates/bgbench/src/collect_actions.rs`): the same files from the same logs,
+byte for byte but for the Dark Gift count below, its own `.state.json` in its
+`--out` folder (also
+`boards/actions` by default, which must not be written while the Python still
+owns it), `--rewrite`, and the same printed line per log. Read over every log in
+the archive on 2026-11-03 it writes 62 games, 717 turns and 15,674 steps; the
+six games it has and `boards/actions` does not are the newest log's five and the
+laptop's `Hearthstone_2026_11_02_17_12_47`, which the timer has not reached.
+A difference it keeps on purpose: a minion that carries the same Dark Gift twice
+(two gift cards gave it) lists the gift twice, where the Python listed one id per
+gift (docs/ENGINE.md, `gifts_by_minion`). Two golden minions in those logs carry
+one of their gifts twice.
 
 ```json
 {"source": "Hearthstone_2026_10_24_04_08_00", "game": 1,
@@ -276,8 +309,10 @@ Every step says what it was and, where there is one, on which card or slot:
 adds every turn up: the Gold the steps took against the Gold the turn started
 and ended with (and Health the same way), and my hand and board at the end
 against the start plus everything the steps moved. On the logs read for this
-round (2026-11-02, 56 games) it finds 635 of 638 turns balancing (99.5%); the
-three that do not are turns the log ends inside, before the fight.
+round (2026-11-03, 62 games) it finds 715 of 717 turns balancing (99.7%); the
+two that do not are turns the log ends inside, before the fight. Its port is
+`bgbench check-actions [--verbose] [PATTERN] [--actions DIR]`, which prints the
+same summary; `--actions` is ours (the Python reads `boards/actions` only).
 
 Every price the client printed that the steps did not pay as printed is named
 by the file but one: a free Refresh in one of the new games, which the log
@@ -432,9 +467,9 @@ with what the real game did. It is a bug finder like the fight check
 
 Defaults: `boards/actions`, 64 seeds, `boards/checks` (git-ignored), no card
 filter. It needs no `ref/bg-cards.json`: the file names every card it writes.
-Every step in the folder (56 games, 638 turns, about 13,900 steps on
-2026-11-02) takes about two seconds on 32 cores: every seed of a random step
-is run, since any of them may be the log's.
+Every step in the folder (56 games, 650 turns, 14,247 steps in
+`boards/actions` on 2026-11-03) takes about two seconds on 32 cores: every seed
+of a random step is run, since any of them may be the log's.
 
 - **Reset before every step.** Replaying a whole turn would let one early
   mismatch spoil every later step, and forcing the log's randomness into the

@@ -1,0 +1,14 @@
+D 00:57:53.6478530 GameState.DebugPrintPower() - CREATE_GAME
+D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1
+D 00:57:53.6478530 GameState.DebugPrintPowerList() - Count=44
+D 00:57:53.9062180 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=BEGIN_MULLIGAN 
+D 00:58:24.6733250 GameState.DebugPrintEntitiesChosen() - id=1 Player=Alice#1919 EntitiesCount=1
+D 00:58:24.6733250 GameState.DebugPrintEntitiesChosen() -   Entities[0]=[entityName=Loh, the Living Legend id=102 zone=HAND zonePos=3 cardId=BG33_HERO_001 player=1]
+D 00:58:25.7804380 GameState.DebugPrintOptions() - id=1
+D 00:58:25.7804380 GameState.DebugPrintOptions() -   option 0 type=END_TURN mainEntity= error=INVALID errorParam=
+D 00:57:53.6478530 PowerTaskList.DebugPrintPower() -         Player EntityID=3 PlayerID=9 GameAccountId=[hi=0 lo=0]
+D 00:57:53.6478530 PowerTaskList.DebugPrintPower() -     FULL_ENTITY - Updating [entityName=BaconPHhero id=25 zone=PLAY zonePos=0 cardId=TB_BaconShop_HERO_PH player=1] CardID=TB_BaconShop_HERO_PH
+D 00:57:53.6478530 PowerTaskList.DebugPrintPower() -         tag=CONTROLLER value=1
+D 00:57:53.6478530 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=STATE value=RUNNING 
+D 00:57:53.6478530 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=PLAYSTATE value=PLAYING 
+D 00:57:53.6478530 PowerTaskList.DebugPrintPower() -     TAG_CHANGE Entity=Eve tag=PLAYSTATE value=PLAYING 
