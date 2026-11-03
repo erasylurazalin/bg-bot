@@ -75,8 +75,17 @@ impl Game {
     pub(super) fn resolve_shop_target(&mut self, p: usize, slot: usize) {
         if let Some(pst) = self.players[p].pending_shop_target.take() {
             // The Tavern emptied while the pick was open (nothing does that
-            // today): there is nothing to point at, so the pick fizzles.
-            if slot >= self.players[p].shop.len() {
+            // today): there is nothing to point at, so the pick fizzles. The
+            // spell slot, one past the minions, is a Tavern card and a
+            // Fishbait takes it ("a card in the Tavern": Lurking Lionfish in
+            // Hearthstone_2026_11_03_00_29_06-g5 turn 7 replaced Cloning
+            // Conch); a Consume eats minions only.
+            let spell_slot = slot == self.players[p].shop.len()
+                && slot < crate::SHOP
+                && self.players[p].shop_spell.is_some()
+                && matches!(pst.kind, ShopTargetKind::Fishbait { .. });
+            if slot > self.players[p].shop.len() || (slot == self.players[p].shop.len() && !spell_slot)
+            {
                 self.maybe_start_discover(p);
                 return;
             }

@@ -525,7 +525,22 @@ of a random step is run, since any of them may be the log's.
       improvement count or a card id (Portable Factory) and are left alone;
     - a hero power's count: Tae'thelan's Reliquary Research counts Tavern
       spells bought in `HeroCounts.tavern_spells_bought`, which the log shows
-      as how many more spells it takes.
+      as how many more spells it takes; Buried Treasure's number is the digs
+      left ("(1 left!)" is the fourth dig) and the engine counts the digs done
+      in `PowerState.progress`; and the price on the button is the log's own
+      (`ShopPowerSpec::cost`), which seats `PowerState.cost_delta` as its
+      difference from the card's cost (Pirate Parrrrty!'s Pirates bought, The
+      Galaxy's Lens's turns waited).
+  - **The last Tavern spell you cast** (The Galaxy's Lens) is in no state, and
+    the log's press only shows the copy it gave: `replay_step` reads it off the
+    steps before the press, the last `play` of a Tavern spell in the game,
+    earlier turns included (docs/rules/heroes.md, Era 2026-11-03).
+  - **A chosen power that completes at the start of a turn** (Galewing's
+    flightpaths) is the one turn-start trigger the counters cannot carry: the
+    log's turn-start state is taken before the countdown. A state whose chosen
+    power shows one turn left, after a turn that ended on the same number, is
+    the turn the count runs out, and the loader seats the parent the power
+    completes into (the Discover the chooser's effect opened is the step).
   - **Steady Growth's turn** ("At the end of your turn, gain +X/+Y", the pair
     fixed by the turn the gift landed) is the first turn the file shows that
     card with that gift (`parse_action_files` seats `ShopGiftSpec::landed`
@@ -548,9 +563,18 @@ of a random step is run, since any of them may be the log's.
   whichever of a press's clicks it chooses, and not at all for a chooser), the
   MAGNETIC keyword (a card property), which card a random buff landed on, and
   the client's freeze button (the per-card flags say the same thing).
+- **A minion's target is a place on the board before it lands.** A Battlecry
+  or Choose One picks its target before the played minion is in its slot, so
+  the log's board place for the target is the board as it stood; the engine has
+  already put the minion where the file says it landed, and `actions_for` moves
+  every board pick from that slot on one place along. Without it the pick lands
+  on the played minion itself (Disguised Graverobber in
+  `10_24_00_56_06-g1` turn 11, Sprightly Scarab's Choose One).
 - **Steps the file cannot carry.** A prompt with one answer is no prompt: the
   engine applies the only target itself, so the step's own target click has
-  nothing left to answer and the state it left is compared instead. A pick of a
+  nothing left to answer and the state it left is compared instead. A Discover
+  the one target opened (Kelp Keeper triggering a Battlecry that Discovers,
+  Trash for Treasure) is not a target prompt and does not change that. A pick of a
   two-step effect (Spirit Swap's second minion) answers the prompt the game
   opened in the step before, which one state cannot carry: that step is
   incomplete. So is that power's second click when the log writes it as a

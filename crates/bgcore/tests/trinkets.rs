@@ -3141,6 +3141,28 @@ fn the_token_of_the_old_gods_transforms_into_a_higher_tier() {
     g.check_invariants().unwrap();
 }
 
+/// "Choose a minion. Then choose a minion from a Tier higher": the first
+/// pick is any minion, and with nothing above Tier 6 the second pick gives
+/// nothing (the log's game ends the step with the board unchanged:
+/// Hearthstone_2026_10_28_22_11_50-g3 turn 8, Sanguine Champion).
+#[test]
+fn the_token_of_the_old_gods_takes_a_top_tier_minion_and_the_pick_gives_nothing() {
+    let mut g = game(1930);
+    take(&mut g, 0, "Token of the Old Gods");
+    put_on_board(&mut g, 0, "Sanguine Champion");
+    assert_eq!(g.data.cards.get(id(&g, "Sanguine Champion")).tier, 6);
+    cast_from_hand(&mut g, 0, "Token of the Old Gods");
+    act(&mut g, 0, Action::Target(0));
+    assert!(g.players[0].discover.is_empty(), "there is no Tier above 6");
+    assert_eq!(g.players[0].board.len(), 1);
+    assert_eq!(
+        g.data.cards.get(g.players[0].board[0].card).name,
+        "Sanguine Champion",
+        "the board is unchanged"
+    );
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn the_chillmere_mosaic_refreshes_with_battlecry_minions_at_one_gold() {
     let mut g = game(194);

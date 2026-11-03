@@ -930,8 +930,27 @@ impl Game {
     }
 
     /// Replace the Tavern card in `slot` with a Fishbait and have the
-    /// left-most Beast attack it.
+    /// left-most Beast attack it. The spell slot, one past the minions, is a
+    /// Tavern card too: the Fishbait takes its place at the end.
     pub(super) fn put_fishbait(&mut self, p: usize, slot: usize, card: CardId, golden: bool) {
+        if slot >= crate::SHOP {
+            return;
+        }
+        if slot >= self.players[p].shop.len() {
+            let at = self.players[p].shop.len();
+            {
+                let Game { data, players, .. } = self;
+                let pl = &mut players[p];
+                if pl.shop_spell.is_none() || pl.shop.is_full() {
+                    return;
+                }
+                // A spell carries no pool copy to give back.
+                pl.shop_spell = None;
+                let _ = pl.shop.try_push(data.cards.make(card, golden));
+            }
+            self.tavern_attack(p, at);
+            return;
+        }
         let Game { data, players, pool, .. } = self;
         let pl = &mut players[p];
         let old = std::mem::replace(&mut pl.shop[slot], data.cards.make(card, golden));
@@ -942,8 +961,12 @@ impl Game {
     /// A Fishbait effect that picks the Tavern card: ask, unless there is
     /// only one card.
     pub(super) fn start_fishbait(&mut self, p: usize, source: usize, card: CardId, golden: bool) {
-        match self.players[p].shop.len() {
+        let cards = self.players[p].shop.len()
+            + usize::from(self.players[p].shop_spell.is_some());
+        match cards {
+            // Nothing to replace.
             0 => {}
+            // One card, a minion or the spell: no question to ask.
             1 => self.put_fishbait(p, 0, card, golden),
             _ => {
                 self.players[p].pending_shop_target = Some(PendingShopTarget {

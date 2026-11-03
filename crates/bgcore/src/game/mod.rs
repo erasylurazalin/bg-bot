@@ -1349,7 +1349,7 @@ impl Game {
             return matches!(a, Action::Target(s) if self.valid_target(p, &pt, s as usize));
         }
         if pl.pending_shop_target.is_some() && !self.choice_stuck(p) {
-            return matches!(a, Action::TargetShop(s) if (s as usize) < pl.shop.len());
+            return matches!(a, Action::TargetShop(s) if self.valid_shop_pick(p, s as usize));
         }
         if pl.pending_discard.is_some() && !self.choice_stuck(p) {
             return matches!(a, Action::Discard(s) if self.valid_discard(p, s as usize));
@@ -1580,7 +1580,7 @@ impl Game {
                 }
             }
         } else if open && pl.pending_shop_target.is_some() {
-            for s in 0..pl.shop.len() as u8 {
+            for s in 0..self.shop_pick_slots(pl) {
                 ask(Action::TargetShop(s));
             }
         } else if open && pl.pending_discard.is_some() {
@@ -1756,8 +1756,12 @@ impl Game {
             SpellTarget::Confiscation { .. } => true,
             SpellTarget::PlainCopy { max_tier } => c.tier <= max_tier,
             SpellTarget::DestroyGetRandom { tribe, .. } => tribes.has(tribe),
-            // There is no tier above 6, so such a minion is not a target.
-            SpellTarget::TransformHigher => c.tier < crate::MAX_TIER,
+            // Token of the Old Gods: the first pick takes any minion, and
+            // the Tier-higher pick is the second one, so a top-Tier minion
+            // is chosen and nothing follows (the log,
+            // Hearthstone_2026_10_28_22_11_50-g3 turn 8: a Tier 6 pick and
+            // the board unchanged).
+            SpellTarget::TransformHigher => true,
             SpellTarget::WatchStats => true,
             SpellTarget::GemKeyword { .. } | SpellTarget::TriggerDeathrattle => true,
             // A "then double it" buff takes any minion.
@@ -1885,6 +1889,36 @@ impl Game {
                 None => false,
             }
         }
+    }
+
+    /// Whether a pending Tavern pick (`pending_shop_target`) may be answered
+    /// on `slot`: a Tavern card, the spell slot (one past the minions)
+    /// included when the pick takes any card, which is a Fishbait's "a card in
+    /// the Tavern". A Consume eats minions only.
+    fn valid_shop_pick(&self, p: usize, slot: usize) -> bool {
+        let pl = &self.players[p];
+        slot < pl.shop.len()
+            || (slot == pl.shop.len()
+                && slot < SHOP
+                && pl.shop_spell.is_some()
+                && self.shop_pick_takes_spell(pl))
+    }
+
+    /// Whether the open Tavern pick takes any Tavern card (see
+    /// `valid_shop_pick`).
+    fn shop_pick_takes_spell(&self, pl: &Player) -> bool {
+        pl.pending_shop_target
+            .is_some_and(|t| matches!(t.kind, ShopTargetKind::Fishbait { .. }))
+    }
+
+    /// How many Tavern slots an open pick may be answered on.
+    fn shop_pick_slots(&self, pl: &Player) -> u8 {
+        // The action holds SHOP Tavern slots, and the spell slot is one past
+        // the minions: a full Tavern has no room left to name it (a Tavern of
+        // seven cards and a spell is one the game cannot show anyway).
+        let spell =
+            pl.shop_spell.is_some() && pl.shop.len() < SHOP && self.shop_pick_takes_spell(pl);
+        (pl.shop.len() + usize::from(spell)) as u8
     }
 
     fn valid_target(&self, p: usize, pt: &PendingTarget, s: usize) -> bool {

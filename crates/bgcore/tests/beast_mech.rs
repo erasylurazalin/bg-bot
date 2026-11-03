@@ -426,6 +426,29 @@ fn snarky_shark_without_a_beast_leaves_a_buyable_fishbait() {
     g.check_invariants().unwrap();
 }
 
+/// "Choose a card in the Tavern": the spell slot is a Tavern card, and the
+/// Fishbait takes its place, the last slot (Hearthstone_2026_11_03_00_29_06-g5
+/// turn 7 replaced Cloning Conch).
+#[test]
+fn a_lurking_lionfish_replaces_the_spell_slot_with_its_fishbait() {
+    let mut g = game(2001);
+    put_on_board(&mut g, 0, "Lurking Lionfish");
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Southsea Busker"]);
+    let spell = g.data.cards.by_name("Tavern Coin").expect("Tavern Coin");
+    g.players[0].shop_spell = Some(spell);
+    g.players[0].gold = 5;
+    let (a, h) = stats(&g.players[0].board[0]);
+    act(&mut g, 0, Action::Activate(0));
+    // Two minions and the spell: the pick asks, and the spell slot is one of
+    // the answers.
+    act(&mut g, 0, Action::TargetShop(2));
+    assert!(g.players[0].shop_spell.is_none(), "the spell slot is the Fishbait's now");
+    assert_eq!(g.players[0].shop.len(), 2, "the Lionfish ate the 0/1 Fishbait");
+    let m = g.players[0].board[0];
+    assert_eq!((m.attack, m.health), (a + 5, h + 5), "the Fishbait's Deathrattle: +5/+5");
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn golden_fishbait_has_2_health_and_the_shark_may_fail_to_kill_it() {
     let mut g = game(3);

@@ -341,15 +341,6 @@ impl Game {
         3
     }
 
-    /// Whether a Tavern minion has a Tier below the top, so Galakrond's Greed
-    /// has one above it to draw from.
-    fn shop_has_higher(&self, p: usize) -> bool {
-        self.players[p]
-            .shop
-            .iter()
-            .any(|m| !self.data.cards.get(m.card).is_spell() && self.data.cards.get(m.card).tier < crate::MAX_TIER)
-    }
-
     /// Whether the Tavern holds any card at all, the spell slot included.
     fn shop_has_card(&self, p: usize) -> bool {
         !self.players[p].shop.is_empty() || self.players[p].shop_spell.is_some()
@@ -536,8 +527,11 @@ impl Game {
             }
             // The fourth dig hands out a Golden minion.
             PowerEffect::DigForGolden { .. } => hand_room,
-            // A Tavern minion with one Tier above it to draw from.
-            PowerEffect::ReplaceShopHigher => self.shop_has_higher(p),
+            // A Tavern minion to replace, whether or not one has a Tier
+            // above it: Galakrond's Greed was pressed on a Tavern of Tier 6
+            // minions and did nothing but spend the press
+            // (Hearthstone_2026_11_01_04_27_54-g2 turn 8).
+            PowerEffect::ReplaceShopHigher => shop_minion,
             // Any minion, the Tavern's included.
             PowerEffect::TempReborn => shop_minion || !pl.board.is_empty(),
             PowerEffect::RefreshHighTier { .. } => true,
@@ -1533,7 +1527,12 @@ impl Game {
             }
             // Major and Minor Hymn: the power is the other one after this
             // turn (Attack on the first turn, then Health, docs/rules/heroes.md).
+            // A power Master Nguyen borrowed for the turn does not turn over:
+            // the game ends the turn still holding it and hands out a new one
+            // at the start of the next (Hearthstone_2026_11_02_00_10_22-g6
+            // turn 6 ends on Major Hymn, not on Minor).
             if matches!(effect, PowerEffect::Hymn { .. })
+                && !self.players[p].storm_power[second as usize]
                 && let Some(next) = self.data.heroes.power(st.of).swaps_to
             {
                 self.set_power(p, second, Some(next));
