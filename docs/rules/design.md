@@ -593,10 +593,16 @@ Navigator picks two Pirates. Eyes of the Earth Mother with Balinda is the
 same: the spell casts twice (both casts count), the golden happens once
 (Era, 2026-11-04).
 
-A repeated Choose One: you choose the option and the target once; the
-repeat's choice is random (Era, 2026-11-04: "you choose a target, and the
-choice is random"; read as the repeat picking a random option on the same
-target, see the private notes).
+A repeated Choose One works normally: it remembers your choice, so every
+repeat (Brann, Balinda) uses the same option on the same target.
+
+A spell a Magicfin token casts gets no choices at all (Era, 2026-11-04): if
+the taught spell is a Choose One (Boundless Potential), its option is
+random; a Discover inside it is resolved at random, with no Discover
+offered to you, and those random picks are not a Discover for "after you
+Discover" cards (Hooktusk). With Brann the token's Battlecry triggers
+twice, so it makes two separate random casts. A target the spell needs is
+still yours to pick (Tricky Trousers above).
 
 **Spending gold.** Anything that actually uses gold counts: buying,
 upgrading, rolling, Activate costs. Health paid instead of gold and free
