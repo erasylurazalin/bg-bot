@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use bgcore::shop_replay::{
     LoadedShop, ReplayOptions, ShopFileSpec, ShopSnapshot, ShopStepSpec, StepResult, Verdict,
-    load, parse_action_files, replay_step, replay_turn,
+    load, parse_action_files, replay_step, replay_turn, seat_taught_spells,
 };
 use bgcore::real_boards::CardIdMap;
 use bgcore::trinkets::CardMod;
@@ -30,7 +30,8 @@ fn ids() -> CardIdMap {
             {"card_id": "TB_BaconShop_HP_063", "name": "Clairvoyance"},
             {"card_id": "BG26_135", "name": "Southsea Busker"},
             {"card_id": "BG35_951", "name": "Might of Stormwind"},
-            {"card_id": "BG36_733", "name": "Eredar Escapist"}
+            {"card_id": "BG36_733", "name": "Eredar Escapist"},
+            {"card_id": "BG28_520", "name": "Tricky Trousers", "dbf_id": 105667}
         ]}"#,
     )
     .unwrap()
@@ -727,4 +728,180 @@ fn seating_a_card_granting_trinket_gives_no_card() {
         game.players[me].hand.len()
     );
     game.check_invariants().unwrap();
+}
+
+/// A Magicfin token's taught spell is a dbf id in its first number in the
+/// log, and only `ref/bg-cards.json` can turn that into a card: the loader
+/// seats it before the replay runs, so the token's Battlecry casts the spell
+/// the game taught it instead of nothing.
+#[test]
+fn a_magicfin_tokens_taught_spell_is_seated_from_its_number() {
+    let text = r#"{"source": "taught", "game": 1, "turns": [
+        {"turn": 9,
+         "start": {"board": [{"id": 5, "card_id": "BG33_890t", "name": "Magicfin Apprentice",
+                              "attack": 1, "health": 1, "golden": false, "keywords": [],
+                              "numbers": [105667, 0, 0, 0], "position": 1}],
+                   "hand": [], "tavern": [], "gold": 5, "tier": 4, "upgrade_cost": 6,
+                   "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                   "hero_powers": [], "trinkets": [], "secrets": []},
+         "actions": [], "end": null}]}"#;
+    let mut files = parse_action_files(&[("taught.json".to_string(), text.to_string())]).unwrap();
+    seat_taught_spells(&mut files, &ids());
+    let file = &files[0];
+    let data = data();
+    let turn = &file.turns[0];
+    let loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1);
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    let m = loaded.game.players[0].board[0];
+    assert_eq!(m.taught_spell, data.cards.by_name("Tricky Trousers"));
+}
+
+/// Two of the loader's numbers are a count the engine would otherwise start
+/// full: Goldenizer Supply's first number is the turns left of its "every 3
+/// turns" rule (1 left is the turn it hands the Goldenizer out, the log of
+/// Hearthstone_2026_10_28_22_11_50-g2 turn 8), and a Magicfin Mycologist's
+/// is the teachings it has left this turn (no number at all means none).
+#[test]
+fn the_turns_trinket_and_the_mycologists_teachings_come_from_the_log_numbers() {
+    let text = r#"{"source": "numbers", "game": 1, "turns": [
+        {"turn": 8,
+         "start": {"board": [{"id": 5, "card_id": "BG33_891", "name": "Magicfin Mycologist",
+                              "attack": 4, "health": 8, "golden": false, "keywords": [],
+                              "position": 1},
+                             {"id": 6, "card_id": "BG33_891", "name": "Magicfin Mycologist",
+                              "attack": 4, "health": 8, "golden": false, "keywords": [],
+                              "numbers": [1, 0, 0, 0], "position": 2}],
+                   "hand": [], "tavern": [], "gold": 5, "tier": 6, "upgrade_cost": 10,
+                   "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                   "hero_powers": [], "secrets": [],
+                   "trinkets": [{"card_id": "BG30_MagicItem_435", "name": "Goldenizer Supply",
+                                 "numbers": [1, 3, 0, 11]}]},
+         "actions": [{"step": "end_turn", "paid": {"gold": 0, "health": 0}}], "end": null}]}"#;
+    let files = parse_action_files(&[("numbers.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let data = data();
+    let turn = &file.turns[0];
+    let mut loaded = load(&data, &turn.start, None, file.lobby(), turn.turn, 1);
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    assert_eq!(loaded.game.players[0].board[0].uses_left, 0, "the log shows no number: spent");
+    assert_eq!(loaded.game.players[0].board[1].uses_left, 1, "one teaching left");
+    // One turn left of the rule: the end of this turn hands out the Goldenizer.
+    loaded.game.shop_end_of_turn(0);
+    let goldenizer = data.cards.by_name("The Goldenizer").unwrap();
+    let n = loaded.game.players[0].hand.iter().filter(|m| m.card == goldenizer).count();
+    assert_eq!(n, 1, "the end of the turn the rule names");
+}
+
+/// A minion played into a board slot pushes the minions after it down one,
+/// and the target a play step names is one of the minions that stood there
+/// before the play: the engine's index must follow it, or a Battlecry hits
+/// the card just played (Hearthstone_2026_10_28_02_28_32-g1 turn 10 step 2,
+/// a Magicfin token's Tricky Trousers on the Drakkari Enchanter).
+#[test]
+fn a_played_minions_target_moves_with_the_insert() {
+    let text = r#"{"source": "insert", "game": 1, "turns": [
+        {"turn": 10,
+         "start": {"board": [{"id": 4, "card_id": "BG26_ICC_901", "name": "Drakkari Enchanter",
+                              "attack": 1, "health": 5, "golden": false, "keywords": [],
+                              "position": 1}],
+                   "hand": [{"id": 5, "card_id": "BG33_890t", "name": "Magicfin Apprentice",
+                             "attack": 1, "health": 1, "golden": false, "keywords": [],
+                             "numbers": [105667, 0, 0, 0], "index": 1, "kind": "minion"}],
+                   "tavern": [], "gold": 5, "tier": 5, "upgrade_cost": 10,
+                   "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                   "hero_powers": [], "trinkets": [], "secrets": []},
+         "actions": [
+           {"step": "play", "paid": {"gold": 0, "health": 0},
+            "card": {"id": 5, "card_id": "BG33_890t", "name": "Magicfin Apprentice"},
+            "moved": {"id": 5, "from": {"where": "hand", "index": 1},
+                      "to": {"where": "board", "position": 1}},
+            "target": {"id": 4, "card_id": "BG26_ICC_901", "name": "Drakkari Enchanter",
+                       "kind": "board", "position": 1},
+            "after": {"board": [{"id": 5, "card_id": "BG33_890t", "name": "Magicfin Apprentice",
+                                 "attack": 1, "health": 1, "golden": false, "keywords": [],
+                                 "position": 1},
+                                {"id": 4, "card_id": "BG26_ICC_901", "name": "Drakkari Enchanter",
+                                 "attack": 2, "health": 7, "golden": false,
+                                 "keywords": ["taunt"], "position": 2}],
+                      "hand": [], "tavern": [], "gold": 5, "tier": 5, "upgrade_cost": 10,
+                      "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                      "hero_powers": [], "trinkets": [], "secrets": []}}],
+         "end": null}]}"#;
+    let mut files = parse_action_files(&[("insert.json".to_string(), text.to_string())]).unwrap();
+    seat_taught_spells(&mut files, &ids());
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let result = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_eq!(
+        result.verdict,
+        Verdict::Ok,
+        "the Tricky Trousers land on the Drakkari: {:?} {:?}",
+        result.diffs,
+        result.missing
+    );
+    let target = &result.ours.board[1];
+    assert_eq!((target.attack, target.health), (2, 7), "the Drakkari has the buff");
+}
+
+/// "The last Tavern spell you cast" (Cataclysmic Harbinger): no logged state
+/// carries it, so the replay reads it from the file's own history. A Blood
+/// Gem played after the Tavern spell is not one.
+#[test]
+fn the_last_tavern_spell_comes_from_the_files_history() {
+    let text = r#"{"source": "last", "game": 1, "turns": [
+        {"turn": 6,
+         "start": {"board": [{"id": 3, "card_id": "BG28_300", "name": "Harmless Bonehead",
+                              "attack": 3, "health": 4, "golden": false, "keywords": [],
+                              "position": 1}],
+                   "hand": [{"id": 4, "card_id": "BG28_520", "name": "Tricky Trousers",
+                             "index": 1, "kind": "spell"}],
+                   "tavern": [], "gold": 5, "tier": 5, "upgrade_cost": 10,
+                   "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                   "hero_powers": [], "trinkets": [], "secrets": []},
+         "actions": [
+           {"step": "play", "paid": {"gold": 0, "health": 0},
+            "card": {"id": 4, "card_id": "BG28_520", "name": "Tricky Trousers"},
+            "moved": {"id": 4, "from": {"where": "hand", "index": 1}, "to": null},
+            "target": {"id": 3, "card_id": "BG28_300", "name": "Harmless Bonehead",
+                       "kind": "board", "position": 1},
+            "after": {"board": [{"id": 3, "card_id": "BG28_300", "name": "Harmless Bonehead",
+                                 "attack": 4, "health": 6, "golden": false,
+                                 "keywords": ["taunt"], "position": 1}],
+                      "hand": [], "tavern": [], "gold": 5, "tier": 5, "upgrade_cost": 10,
+                      "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                      "hero_powers": [], "trinkets": [], "secrets": []}}],
+         "end": null},
+        {"turn": 7,
+         "start": {"board": [{"id": 5, "card_id": "BG35_123", "name": "Cataclysmic Harbinger",
+                              "attack": 6, "health": 10, "golden": false, "keywords": [],
+                              "position": 1}],
+                   "hand": [], "tavern": [], "gold": 5, "tier": 5, "upgrade_cost": 10,
+                   "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                   "hero_powers": [], "trinkets": [], "secrets": []},
+         "actions": [{"step": "end_turn", "paid": {"gold": 0, "health": 0},
+            "after": {"board": [{"id": 5, "card_id": "BG35_123", "name": "Cataclysmic Harbinger",
+                                 "attack": 6, "health": 10, "golden": false, "keywords": [],
+                                 "position": 1}],
+                      "hand": [{"id": 9, "card_id": "BG28_520", "name": "Tricky Trousers",
+                                "index": 1, "kind": "spell"}],
+                      "tavern": [], "gold": 5, "tier": 5, "upgrade_cost": 10,
+                      "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                      "hero_powers": [], "trinkets": [], "secrets": []}}],
+         "end": null}]}"#;
+    let files = parse_action_files(&[("last.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let t6 = &file.turns[0];
+    let cast = replay_step(&data(), &ids(), file, t6, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_eq!(cast.verdict, Verdict::Ok, "the play itself: {:?}", cast.diffs);
+    let t7 = &file.turns[1];
+    let result = replay_step(&data(), &ids(), file, t7, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_eq!(
+        result.verdict,
+        Verdict::Ok,
+        "the Harbinger copies the Tricky Trousers: {:?} {:?}",
+        result.diffs,
+        result.missing
+    );
+    assert_eq!(result.ours.hand.len(), 1, "one copy in hand");
+    assert_eq!(result.ours.hand[0].name, "Tricky Trousers");
 }

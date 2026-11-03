@@ -525,7 +525,20 @@ of a random step is run, since any of them may be the log's.
       improvement count or a card id (Portable Factory) and are left alone;
     - a hero power's count: Tae'thelan's Reliquary Research counts Tavern
       spells bought in `HeroCounts.tavern_spells_bought`, which the log shows
-      as how many more spells it takes.
+      as how many more spells it takes;
+    - Goldenizer Supply's "every 3 turns" count (`TrinketState.count`, from
+      the turns left in its `{0}`: 3 left is the turn after the pick, 1 left
+      is the turn it fires on), and a Magicfin Mycologist's teachings left
+      this turn (`uses_left`, its `{0}`, and no number at all means none).
+  - **A Magicfin token's taught spell** is a dbf id in the token's `{0}`, not
+    a name: `shop_replay::seat_taught_spells` turns it into the card through
+    the ref file's own dbf ids (before the replay runs, since `load` has no
+    ref data) and the loader hands it to `Minion.taught_spell`.
+  - **"The last Tavern spell you cast"** (`Player.last_spell`, which
+    Cataclysmic Harbinger, the Galaxy's Lens and Lens Case copy) is in no
+    state: `replay_step` reads it off the file's history, the last `play`
+    step of a Tavern spell before the step being replayed. A spell a minion
+    cast for the player and a Blood Gem are not it.
   - **Steady Growth's turn** ("At the end of your turn, gain +X/+Y", the pair
     fixed by the turn the gift landed) is the first turn the file shows that
     card with that gift (`parse_action_files` seats `ShopGiftSpec::landed`

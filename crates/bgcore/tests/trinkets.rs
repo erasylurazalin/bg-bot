@@ -5368,3 +5368,49 @@ fn a_full_hand_queues_the_start_of_turns_card_and_loses_the_rest() {
     assert_eq!(full.players[0].hand.len(), 10, "a full hand loses the fight's cards");
     assert!(full.players[0].hand_queue.is_empty(), "combat queues nothing");
 }
+
+/// The "every N turns" rule is an end-of-turn effect, so Drakkari Enchanter
+/// doubles what it hands out on the turn it fires: Goldenizer Supply gives
+/// two Goldenizers with one on the board (Hearthstone_2026_10_28_22_11_50-g2
+/// turn 8; without the Drakkari on turn 14 it gives one).
+#[test]
+fn a_drakkari_doubles_the_turns_rule_at_the_end_of_the_turn() {
+    let mut g = game(101);
+    to_turn(&mut g, 4);
+    turn_of(&mut g, 0);
+    equip(&mut g, 0, 0, "Goldenizer Supply");
+    put_on_board(&mut g, 0, "Drakkari Enchanter");
+    // Three turns from the pick: the rule fires at the end of this one.
+    let next = g.turn + 3;
+    to_turn(&mut g, next);
+    assert_eq!(hand_of(&g, 0, "The Goldenizer"), 2, "the Drakkari doubled it");
+    g.check_invariants().unwrap();
+}
+
+/// The end of the turn runs the trinkets' effects before the board's: Sphere
+/// of Memory's copies of the last Tavern spell join the hand before Nightmare
+/// Corroder's Sludge Corrosion, as the log of Hearthstone_2026_10_24
+/// _04_08_00-g1 turn 10 shows (there the hand's ten-card limit makes the
+/// order the difference between three spells and five).
+#[test]
+fn the_end_of_the_turn_runs_trinkets_before_minions() {
+    let mut g = game(102);
+    equip(&mut g, 0, 1, "Sphere of Memory");
+    g.players[0].last_spell = Some(id(&g, "Tricky Trousers"));
+    put_on_board(&mut g, 0, "Nightmare Corroder");
+    let t = g.turn;
+    next_turn(&mut g);
+    assert!(g.turn > t, "the turn ended");
+    let names: Vec<String> = {
+        let cards = &g.data.cards;
+        g.players[0].hand.iter().map(|m| cards.get(m.card).name.clone()).collect()
+    };
+    let trousers = names.iter().filter(|n| *n == "Tricky Trousers").count();
+    let sludge = names.iter().filter(|n| *n == "Sludge Corrosion").count();
+    assert_eq!((trousers, sludge), (3, 1), "the trinket's three copies and the Corroder's one");
+    assert_eq!(
+        names.iter().position(|n| n == "Sludge Corrosion"),
+        Some(3),
+        "the Corroder's spell comes after the trinket's three: {names:?}"
+    );
+}

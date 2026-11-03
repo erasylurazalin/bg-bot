@@ -584,10 +584,13 @@ fn shop_replay(dir: &str, seeds: u32, out: &str, card: Option<&str>) {
         eprintln!("{e}");
         std::process::exit(2);
     });
-    let specs = bgcore::shop_replay::parse_action_files(&files).unwrap_or_else(|e| {
+    let mut specs = bgcore::shop_replay::parse_action_files(&files).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
     });
+    // A Magicfin token's taught spell is a dbf id in the log; the ref card map
+    // is the only thing that can say which card that is.
+    bgcore::shop_replay::seat_taught_spells(&mut specs, &ids);
     let data = Arc::new(Data::bundled());
     let opts = bgcore::shop_replay::ReplayOptions { seeds: seeds.max(1), seed: 1 };
     let turns: Vec<(&bgcore::shop_replay::ShopFileSpec, &bgcore::shop_replay::ShopTurnSpec)> =

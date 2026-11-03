@@ -1206,3 +1206,36 @@ fn patient_scout_improves_and_discovers_its_tier() {
     );
     g.check_invariants().unwrap();
 }
+
+/// Cataclysmic Harbinger: "At the end of your turn, get a copy of the last
+/// Tavern spell you cast." The one it copies is the last Tavern spell the
+/// player cast themselves: a Blood Gem or another non-Tavern spell played
+/// after it does not take its place (docs/rules/design.md "Spells versus
+/// Tavern spells"), and neither does a spell a minion cast for them ("A
+/// spell a minion casts for you").
+#[test]
+fn cataclysmic_harbinger_copies_the_last_tavern_spell_you_cast() {
+    let mut g = game(41);
+    put_on_board(&mut g, 0, "Cataclysmic Harbinger");
+    let target = put_on_board(&mut g, 0, "Cord Puller");
+    let trousers = id(&g, "Tricky Trousers");
+    let gem = id(&g, "Blood Gem");
+    g.give(0, "Tricky Trousers").unwrap();
+    play_card(&mut g, 0, "Tricky Trousers");
+    act(&mut g, 0, Action::Target(target as u8));
+    // A Blood Gem played after it is a spell, but not a Tavern spell.
+    g.give(0, "Blood Gem").unwrap();
+    play_card(&mut g, 0, "Blood Gem");
+    act(&mut g, 0, Action::Target(target as u8));
+    let count = |g: &Game, c: CardId| g.players[0].hand.iter().filter(|m| m.card == c).count();
+    let before = count(&g, trousers);
+    assert_eq!(count(&g, gem), 0, "the Gem was played, not kept");
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(
+        count(&g, trousers),
+        before + 1,
+        "the end of the turn copies the Tricky Trousers, the last Tavern spell"
+    );
+    assert_eq!(count(&g, gem), 0, "the Gem is not a Tavern spell to copy");
+    g.check_invariants().unwrap();
+}

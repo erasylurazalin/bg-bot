@@ -147,7 +147,18 @@ rules behind each are in docs/rules/design.md Part 2.
   Totem's free Battlecry minions, Transcribing Typewriter's copies, Magicfin
   Sticker's uses, Guiding Candle's Tier 6 Refreshes, Wand of Divination's
   third spell) card by card, since the same number means something else on
-  each trinket (docs/real-boards.md "The shop replay").
+  each trinket (docs/real-boards.md "The shop replay"). The same pass reads
+  the counts that are the game's own: Goldenizer Supply's turns left in its
+  first number, and a Magicfin Mycologist's teachings left (no number means
+  none, and a fresh card would otherwise teach once more than the log did).
+  The spell a Magicfin token was taught is a dbf id in the token's first
+  number, so `shop_replay::seat_taught_spells` (with `ref/bg-cards.json`)
+  fills `ShopMinionSpec::taught` before the replay runs, and the loader hands
+  it to `Minion.taught_spell`. "The last Tavern spell you cast"
+  (`Player.last_spell`, which Cataclysmic Harbinger and the Galaxy's Lens
+  copy) is in no logged state: `shop_replay` reads it off the file's own
+  history, the last `play` step of a Tavern spell before the step being
+  replayed, because only the player's own casts count.
 - **The hand in combat.** `fight_with_hands` passes a side's hand only when
   something on that side reads it. Murlocs summoned from hand come back
   unchanged; Winterfinner's hand buffs are kept.
@@ -286,6 +297,13 @@ build hero-less games so old tests pass unchanged, and
   A power in a family (`family` in heroes.toml, the ten King powers) rotates
   in `rotate_family_power` to a random other power of the family whose tribe
   is in the lobby, never the tribe it has now.
+- **Choices at the end of the turn.** `finish_shop` answers everything the
+  player left open (`resolve_open_choices`, first option that can be taken)
+  before and after the end-of-turn effects, so no prompt outlives the turn:
+  that includes a Discover a Battlecry opened during the end of the turn (a
+  Dark Gift's Echoing Voice, Young Murk-Eye re-running a Magicfin token's
+  Battlecry), which is still sitting in `discover_queue` when the effects
+  finish.
 - **Skipped turns**: a power with `skip_turns` leaves only Freeze and End
   Turn legal for the player's first turns (`Player.skipped`, kept by
   `refresh_skip`, read by `turn_skipped` in `is_legal` and `legal_mask`); the
@@ -674,7 +692,11 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   The turn flow calls `trinket_start_of_turn` (offers, uses back, the Turns
   counter, the start-of-turn effects) and `trinket_end_of_turn` (the
   end-of-turn effects, then an "every N turns" rule that reached N). A hook
-  list with `uses_per_turn` is capped per turn.
+  list with `uses_per_turn` is capped per turn. Both kinds are end-of-turn
+  effects, so a `drakkari_end` trinket's list and the payout of its rule run
+  once more per Drakkari Enchanter (Goldenizer Supply with one on the board
+  hands out two Goldenizers), and `run_end_of_turn` calls
+  `trinket_end_of_turn` before the board's minions, the order the log shows.
 - **A seated trinket** (a logged shop state, a real-board seat) never ran its
   pick. `Player::hold_trinket` puts the trinket in its slot and sets only what
   a fight reads (the power's extra triggers, the Hammer's numbers), because it

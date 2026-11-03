@@ -2188,3 +2188,23 @@ fn a_brann_doubled_discover_battlecry_counts_twice_at_the_picks() {
         "+3/+3 for each of the two triggers"
     );
 }
+
+/// A Battlecry the gift runs at the end of the turn can open a Discover
+/// (Rodeo Performer's "Discover a spell"): the end of the turn cannot ask,
+/// so it takes the first option there and then, once per run, instead of
+/// leaving the Discover queued with nothing to answer it. Drakkari makes it
+/// twice, and the log of Hearthstone_2026_10_24_17_59_26-g1 turn 8 shows
+/// both picks in hand at the end of the same step.
+#[test]
+fn echoing_voice_answers_a_discover_battlecry_at_the_end_of_the_turn() {
+    let mut g = game(33);
+    board_with_gift(&mut g, 0, "Rodeo Performer", "Echoing Voice");
+    put_on_board(&mut g, 0, "Drakkari Enchanter");
+    let spells = |g: &Game| {
+        g.players[0].hand.iter().filter(|m| g.data.cards.get(m.card).is_spell()).count()
+    };
+    assert_eq!(spells(&g), 0, "nothing in hand before the turn ends");
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(spells(&g), 2, "two Discovers, both answered");
+    assert!(g.players[0].discover_queue.is_empty(), "nothing left waiting");
+}

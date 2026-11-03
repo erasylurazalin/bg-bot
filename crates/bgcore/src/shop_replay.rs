@@ -102,6 +102,13 @@ pub struct ShopMinionSpec {
     /// A Tavern card priced in Health (Bazaar Sticker, Hasty Excavation).
     #[serde(default)]
     pub costs_health: bool,
+    /// The spell a Magicfin token was taught, by the name cards.toml builds
+    /// it under. The log keeps it as a dbf id in the token's first number and
+    /// only `ref/bg-cards.json` can say which card that is, so
+    /// `seat_taught_spells` fills this in before the replay runs; a file may
+    /// also carry it.
+    #[serde(default)]
+    pub taught: Option<String>,
 }
 
 impl ShopMinionSpec {
@@ -494,6 +501,38 @@ pub fn parse_action_files(
     Ok(out)
 }
 
+/// Seat the spell each Magicfin token was taught. "After you buy a Tavern
+/// spell, get a 1/1 Murloc and teach it that spell" (Magicfin Sticker,
+/// Magicfin Mycologist): the log keeps the taught spell as a dbf id in the
+/// token's first number, and only `ref/bg-cards.json` can turn that into the
+/// card. The loader cannot ask it (a file names its cards, and the replay may
+/// run without ref data), so the caller that has the card id map fills the
+/// token's `taught` in first. A number that names no card leaves the token
+/// with nothing to cast, as before.
+pub fn seat_taught_spells(specs: &mut [ShopFileSpec], ids: &CardIdMap) {
+    fn note(state: &mut ShopStateSpec, ids: &CardIdMap) {
+        for zone in [&mut state.board, &mut state.hand, &mut state.tavern] {
+            for m in zone {
+                let Some(first) = m.numbers.first().copied() else { continue };
+                m.taught = ids.name_of_dbf(first).map(str::to_string);
+            }
+        }
+    }
+    for f in specs {
+        for t in &mut f.turns {
+            note(&mut t.start, ids);
+            for a in &mut t.actions {
+                if let Some(state) = a.after.as_mut() {
+                    note(state, ids);
+                }
+            }
+            if let Some(end) = t.end.as_mut() {
+                note(end, ids);
+            }
+        }
+    }
+}
+
 /// When a Dark Gift landed, from the file itself: a countdown gift's turns
 /// left are in its own `state`, but Steady Growth's growth is fixed by the
 /// turn it landed and no one state says that turn. What does say it is the
@@ -867,6 +906,23 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
     if card.keywords.has(Keywords::MAGNETIC) {
         minion.keywords.set(Keywords::MAGNETIC);
     }
+    // A Magicfin token casts the spell it was taught (its Battlecry, and
+    // Young Murk-Eye re-running that Battlecry at the end of the turn). The
+    // log keeps the spell as the token's first number, a dbf id, and
+    // `seat_taught_spells` has already turned that into a card name.
+    if card.taught_token
+        && let Some(name) = m.taught.as_deref()
+    {
+        minion.taught_spell = data.cards.by_name(name);
+    }
+    // A Magicfin Mycologist's teachings left this turn ("(1 left!)"), the
+    // game's own count: the log's first number, and none at all when it has
+    // none left. A fresh card would start the replay with its full use and
+    // teach once more than the log did.
+    if card.teaches_spell {
+        let left = m.numbers.first().copied().unwrap_or(0).clamp(0, u8::MAX as i32);
+        minion.uses_left = left as u8;
+    }
     // A card whose trigger counts its events ("After you spend 9 Gold, get a
     // random Bounty. (6 Gold left!)"): the engine keeps how far the count has
     // come in `improvements` (`Minion::events_left`), and the logged card's
@@ -945,6 +1001,13 @@ fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]
             // at the pick, then 4 more per death (4, 8, 12, and 20 after four
             // of them in Hearthstone_2026_11_03_00_29_06-g5 turn 10).
             "BG36_MagicItem_450" => pl.trinkets[slot].value = n(0),
+            // Goldenizer Supply: "every 3 turns, get The Goldenizer". The log's
+            // first number is the turns left, and the count the engine keeps
+            // is how many turns have come: 3 left is the turn after the pick
+            // (1), 1 left is the turn it fires on (3). Hearthstone_2026_10_28
+            // _22_11_50-g2 gives one at the end of turns 8, 11 and 14, with
+            // the number at 1, 2 and 3 left.
+            "BG30_MagicItem_435" => pl.trinkets[slot].count = (3 - n(0) + 1).clamp(0, 3) as u16,
             _ => {}
         }
     }
@@ -2117,7 +2180,18 @@ fn actions_for(
             };
             out.push(Action::Play { hand: at, pos });
             if let Some(target) = &step.target {
-                out.push(target_action(loaded, target)?);
+                let action = target_action(loaded, target)?;
+                // A minion played into a slot pushes the minions at and after
+                // it down one, and the log's target is one of the minions that
+                // stood there before the play (its position is in the state the
+                // step started from): the engine's own index must follow it, or
+                // the Battlecry hits the card just played instead
+                // (Hearthstone_2026_10_28_02_28_32-g1 turn 10 step 2: a
+                // Magicfin token's Tricky Trousers on the Drakkari Enchanter).
+                out.push(match action {
+                    Action::Target(k) if !spell && pos <= k => Action::Target(k + 1),
+                    other => other,
+                });
             }
         }
         "activate" => {
@@ -2208,13 +2282,18 @@ struct OneStep<'a> {
     step: &'a ShopStepSpec,
     turn: u32,
     armed: bool,
+    /// The last Tavern spell the player had cast when this step began, from
+    /// the file's own history: Cataclysmic Harbinger and the Galaxy's Lens
+    /// copy it, and no single logged state carries it.
+    last_spell: Option<CardId>,
 }
 
 fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<StepRun, StepError> {
-    let OneStep { file, before, step, turn, armed } = *one;
+    let OneStep { file, before, step, turn, armed, last_spell } = *one;
     let hero = file.hero(data, before);
     let mut loaded = load(data, before, hero, file.lobby(), turn, seed);
     loaded.game.players[ME].tp.whistle = armed;
+    loaded.game.players[ME].last_spell = last_spell;
     let mut missing = std::mem::take(&mut loaded.missing);
     if step.step == "end_turn" {
         // The end of turn effects, without the fight that follows them: the
@@ -2386,6 +2465,39 @@ fn whistle_armed(file: &ShopFileSpec, turn: usize, step: usize) -> bool {
     false
 }
 
+/// The last Tavern spell the player had cast when step `step` of turn `turn`
+/// began, from the steps before it in the same file. The engine keeps it
+/// (`Player::last_spell`) and two cards read it (Cataclysmic Harbinger's
+/// end of turn, the Galaxy's Lens), but no logged state carries it: only the
+/// history does. A spell the player played from hand is a `play` step whose
+/// card is a Tavern spell; a spell a minion cast for them never is.
+fn last_tavern_spell(
+    data: &Data,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: usize,
+    step: usize,
+) -> Option<CardId> {
+    for t in (0..=turn).rev() {
+        let Some(turn_spec) = file.turns.get(t) else { continue };
+        let last = if t == turn { step } else { turn_spec.actions.len() };
+        for a in turn_spec.actions[..last.min(turn_spec.actions.len())].iter().rev() {
+            if a.step != "play" {
+                continue;
+            }
+            let Some(card_id) = a.card.as_ref().and_then(|c| c.card_id.as_deref()) else {
+                continue;
+            };
+            let Some((name, _)) = ids.get(card_id) else { continue };
+            let Some(card) = data.cards.by_name(name) else { continue };
+            if data.cards.get(card).tavern_spell {
+                return Some(card);
+            }
+        }
+    }
+    None
+}
+
 /// Replay one step of one logged turn and judge it.
 pub fn replay_step(
     data: &Arc<Data>,
@@ -2445,7 +2557,8 @@ pub fn replay_step(
     // next Refresh.
     let turn_index = file.turns.iter().position(|t| t.turn == turn.turn).unwrap_or(0);
     let armed = whistle_armed(file, turn_index, i);
-    let one = OneStep { file, before, step, turn: turn.turn, armed };
+    let last_spell = last_tavern_spell(data, ids, file, turn_index, i);
+    let one = OneStep { file, before, step, turn: turn.turn, armed, last_spell };
     let first = run_once(data, ids, &one, opts.seed);
     let (ours, load_missing, action) = match first {
         Ok(v) => v,
