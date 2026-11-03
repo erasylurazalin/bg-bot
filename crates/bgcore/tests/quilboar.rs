@@ -198,6 +198,39 @@ fn razorfen_geomancer_gets_gems_and_a_gem_casts_on_board_and_tavern() {
     g.check_invariants().unwrap();
 }
 
+/// "Blood Gems played from your hand cast an extra time" (Hot-Air Surveyor)
+/// has no "friendly minion" in it, so it casts again on a Tavern minion too,
+/// where Balinda's does not (docs/rules/design.md: her text says "on a
+/// friendly minion"). The log `10_28_19_47_59-g1` turn 8 gives Relentless
+/// Deflector +2/+2 for one Gem with a Surveyor on the board.
+#[test]
+fn a_gem_on_a_tavern_minion_casts_again_per_surveyor() {
+    let mut g = game(41);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", false);
+    g.give(0, "Blood Gem").unwrap();
+    set_shop(&mut g, 0, &["Wolf Pup"]);
+    let before = stats(&g.players[0].shop[0]);
+    let h = gem_slot(&g, 0).unwrap() as u8;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::TargetShop(0));
+    assert_eq!(
+        stats(&g.players[0].shop[0]),
+        (before.0 + 2, before.1 + 2),
+        "two casts of a 1/1 Gem"
+    );
+    // Balinda keeps her hands off a Tavern minion.
+    let mut g = game(42);
+    put_on_board(&mut g, 0, "Balinda Stonehearth", false);
+    g.give(0, "Blood Gem").unwrap();
+    set_shop(&mut g, 0, &["Wolf Pup"]);
+    let before = stats(&g.players[0].shop[0]);
+    let h = gem_slot(&g, 0).unwrap() as u8;
+    play(&mut g, 0, h, 0);
+    act(&mut g, 0, Action::TargetShop(0));
+    assert_eq!(stats(&g.players[0].shop[0]), (before.0 + 1, before.1 + 1));
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn the_gem_value_grows_this_game_from_every_source() {
     let mut g = game(3);
