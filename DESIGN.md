@@ -226,6 +226,65 @@ The game the bot learns now. Everything in Part 1 applies, with the
 choices below fixed. Where Part 1 says **(check)**, the engine uses the
 value in `rules.toml`.
 
+## Settled: read before asking Era
+
+These come up again and again. Each line is settled; the full rule is in the
+section named. Grep this file, `docs/heroes.md`, `docs/trinkets.md`,
+`docs/darkgifts.md` and `docs/UNSURE.md` before asking Era any rule question.
+
+- **Goldens and Triple Rewards:** every golden gives one unless its own text
+  explicitly says not (Laureate, Silent Deliverer, Sinister Invitation,
+  Gilding). See THE GOLDEN RULE under "Triples".
+- **Nothing triples during combat:** an end-of-turn or in-fight third copy
+  merges at the start of the next turn ("Nothing triples during combat").
+- **Spell versus Tavern spell:** "cast a spell" counts every spell (Blood
+  Gems, Bananas, Gem Day, Spellcraft); "cast a Tavern spell" only
+  BATTLEGROUND_SPELL ("Tavern spells versus other spells", "Read the card's
+  exact words").
+- **Targets:** a spell, Battlecry or Activate may pick your board AND the
+  Tavern unless the text limits it ("Targets in the shop", "Who a card can
+  reach").
+- **How many times:** Drakkari and Balinda SET a count (2, golden 3); Hot-Air
+  Surveyor and Ghastly Sticker ADD one. Nothing doubles ("Set versus add",
+  "'Twice' versus 'an extra time'").
+- **Battlecries:** Brann counts twice; a Choose One is not a Battlecry
+  ("Counting Battlecries").
+- **A minion's cast isn't yours** ("A spell a minion casts for you").
+- **Gold:** any spend action of any amount counts; Health payments are
+  self-damage, not Gold; a free buy spends nothing ("Spending gold",
+  docs/trinkets.md).
+- **Copies:** an exact copy copies the state right now (damaged, a popped
+  shield stays popped); a plain copy is the base card, not golden, no buffs
+  ("Exact copies", Lichling Hoarder under "Undead", Replication in
+  docs/darkgifts.md).
+- **Full hand:** 10 cards. A card you get in the shop or a fight with a full
+  hand is lost; one you get at the start of your turn waits in a queue ("A full
+  hand", Part 1 "Hand and board").
+- **Cards locked in hand and the Lockbox** ("Cards locked in hand",
+  "Lockbox").
+- **Limited uses run out per minion; a golden from a triple starts fresh**
+  ("Uses run out per minion").
+- **Refreshes:** the button versus "Refresh" effects; Malchezaar's bug is
+  copied ("Two kinds of Refresh", "Malchezaar and free Refreshes").
+- **Demon Fodder:** stays in the Tavern while you have no Demon; feeds itself
+  as soon as you have one ("Demon Fodder").
+- **Generated versus pool cards** ("Generated versus pool").
+- **Eating a minion with a spell:** its "whenever you play a card" gift
+  procs first ("Eating a minion with a spell").
+- **Butchering:** all Tavern spell power, Health included, "wherever they
+  are" ("Butchering and spell power").
+- **Halves round up** ("Halves round up").
+- **Dark Gifts:** they stack (duplicates too), travel with the card, work the
+  same on a golden; countdowns fire at the end of your turn, Replication and
+  Affinity restart, Incubation doesn't (docs/darkgifts.md).
+- **Trinkets:** the Compass locks its type at the pick; Mystery Cube fires
+  the old trinket's start of turn first, then switches; offers on turns 6
+  and 9 (docs/trinkets.md).
+- **Heroes:** Genn's first pick is the second power; A. F. Kay only freezes
+  turns 1 and 2; the rest in docs/heroes.md.
+- **Shop replay answers from 2026-11-03** (Lionfish, Kelp Keeper, Decoy
+  Conjurer, Fishbait, Scarab): "Shop replay answers".
+
 ## The pool
 
 - All ten tribes of the current patch: Beast, Mech, Dragon, Murloc, Demon,
@@ -376,6 +435,12 @@ Tasty Lobster's count of every Lobster Deathrattle this game (shop or
 fight, golden or not) is the player's, so every Lobster, already on the
 board or made later, reads the same number. A base Lobster gives +2/+1
 times (count + 1), golden double.
+
+**Nothing triples during combat (Era, 2026-11-03).** A third copy can only
+merge into a golden during your shop phase. A copy that arrives at the end of
+your turn (Replication's plain copy) or during a fight waits: the three merge
+at the start of your next turn, and the golden lands in your hand then, with
+its Triple Reward as usual (THE GOLDEN RULE).
 
 **Balinda** doubles every spell cast on a friendly minion (not spells
 with no target, nor spells cast on a Tavern minion), including
@@ -647,6 +712,14 @@ Tavern spells. Devilish Distractor (Tier 5 Demon) works with a Blood Gem
 or a Mukla Banana; Forsaken Weaver (Tier 6 Undead) doesn't. The engine
 already tells the two apart (built with Blood Gems); keep it that way for
 every new card and every new spell.
+
+**A spell a minion casts for you is not your cast (Era, 2026-11-02).** When
+a minion's effect casts a spell (Gatekeeper Amalgam's Misplaced Tea Set, Air
+Revenant's Easterly Winds, a Magicfin token's taught spell), the spell happens
+and does what it says, but it doesn't count as a spell you cast: no "after you
+cast a spell" trigger and no cast counter (Felboar) sees it. Your own casts
+do count, including Balinda's and Hot-Air Surveyor's extra casts. From Era's
+logs; Era is skeptical about Felboar and will watch it (docs/UNSURE.md).
 
 **Quilboar (2026-10-24).**
 - **Blood Gem:** a 0-cost plain spell, "Give a minion +1/+1", generated,
