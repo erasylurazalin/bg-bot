@@ -31,7 +31,9 @@ use super::{
     Game,
     PendingChooseOne,
     PendingTarget,
+    QueuedRepeat,
     RefreshKind,
+    RepeatWhat,
     TargetKind,
     TavernBuff,
 };
@@ -486,10 +488,17 @@ impl Game {
         // takes the minion the same cast buffed). The counters of the cast
         // itself are taken now, as the log shows them moving on the play.
         let waits = matches!(self.players[p].pending_choose_one, Some(pco) if pco.source.is_none());
+        // A repeated Choose One is cast once per repeat too: the player picks
+        // once, every cast after it is still a cast (docs/rules/design.md "Set
+        // versus add").
+        let choosing = self.players[p]
+            .pending_choose_one
+            .filter(|pco| pco.source.is_none())
+            .map(|pco| pco.repeats.max(1));
         // A targeting spell is cast once per target its prompt asks for
         // (Balinda, and a Gem the Hot-Air Surveyors copied).
         let targeting = self.players[p].pending_target.map(|pt| pt.runs);
-        let casts = targeting.unwrap_or(casts);
+        let casts = targeting.or(choosing).unwrap_or(casts);
         // Every spell is a spell cast: a Tavern spell, a Blood Gem, a Gem
         // Day, a Banana, a Spellcraft spell (docs/rules/design.md). "Tavern spell" is
         // the narrower one, and only those touch the Tavern spell counters.
@@ -686,9 +695,28 @@ impl Game {
             if !options.iter().any(|&opt| self.can_choose_option(p, opt)) {
                 return;
             }
+            // A Choose One cast more than once asks once: the player picks the
+            // option and its target, and every cast after the first picks its
+            // option at random on the same target (docs/rules/design.md "Set
+            // versus add", Era 2026-11-04). That is a Battlecry's repeats, a
+            // Magicfin token's taught Choose One spell doubled by Brann.
+            // Balinda is not one of them: `apply_choose_option` runs the option
+            // she doubles again, the same option on the same target (log
+            // Hearthstone_2026_11_02_00_10_22-g4 turn 12 step 0: two casts of
+            // Alliance Flag's second option on one minion, one "spells cast").
+            let runs = repeats.max(1);
             // A Trailblazer's coverage runs both effects instead of asking,
             // and Trailblazer Sticker covers every Choose One card.
-            if self.players[p].tp.choose_one_all || self.take_trailblazer_cover(p) {
+            let both = self.players[p].tp.choose_one_all || self.take_trailblazer_cover(p);
+            if runs > 1 {
+                let _ = self.players[p].repeats.try_push(QueuedRepeat {
+                    what: RepeatWhat::ChooseOne { source: None, options, both, tavern, by_minion },
+                    runs: runs - 1,
+                    started: true,
+                    at: None,
+                });
+            }
+            if both {
                 self.resolve_choose_options(p, None, options, tavern, by_minion, true);
             } else {
                 self.players[p].pending_choose_one = Some(PendingChooseOne {
@@ -697,6 +725,7 @@ impl Game {
                     options,
                     tavern,
                     by_minion,
+                    repeats: runs,
                 });
             }
         } else if let Some(se) = c.spell_effect {

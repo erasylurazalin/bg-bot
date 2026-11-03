@@ -660,11 +660,14 @@ impl Game {
                 }
             }
             PowerEffect::MakeGolden => {
+                // The golden happens once: a power that triggers twice (Ancient
+                // Wishbone, Reno Jackson) still makes one minion Golden
+                // (docs/rules/design.md "Set versus add").
                 let pt = PendingTarget {
                     by_minion: false,
                     source: None,
                     kind: TargetKind::MakeGolden { tribe: None, max_tier: crate::CARD_MAX_TIER },
-                    runs,
+                    runs: 1,
                     tavern: false,
                     gem: false,
                 };

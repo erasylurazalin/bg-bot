@@ -295,6 +295,61 @@ pub struct PendingChooseOne {
     /// `PendingTarget::by_minion`): the option runs, but no "spells you cast"
     /// trigger or counter sees it.
     pub by_minion: bool,
+    /// How many times the card is cast by this one choice: the player picks the
+    /// option and its target once, and every cast after the first picks its
+    /// option at random (docs/rules/design.md "Set versus add", Era
+    /// 2026-11-04). The runs still owed are the `Player.repeats` queue.
+    pub repeats: u8,
+}
+
+/// A repeat a Battlecry trigger or a spell cast still owes after its first run
+/// asked for a target or a Choose One option: it lands on the target that was
+/// picked there, and a Choose One's option is random (docs/rules/design.md
+/// "Set versus add", Era 2026-11-04). No heap: the queue is a fixed array on
+/// `Player`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct QueuedRepeat {
+    pub what: RepeatWhat,
+    /// Runs still owed. The first run of an entry is not one of them: it is
+    /// the one that asked.
+    pub runs: u8,
+    /// Whether the first run has happened. Until it has, the player answers
+    /// what that run asks; after it, every prompt is answered from `at`.
+    pub started: bool,
+    /// The board slot the first run picked, when it picked one: every repeat
+    /// lands on it. A repeat whose own Battlecry asks for a target it was
+    /// never given picks a random one.
+    pub at: Option<u8>,
+}
+
+/// What a `QueuedRepeat` repeats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RepeatWhat {
+    /// The Battlecry of the minion in this board slot, triggered again (a
+    /// golden Kelp Keeper, Drakkari on Young Murk-Eye's neighbours).
+    Battlecry { slot: u8 },
+    /// A Choose One cast again: the option is picked at random, or both run
+    /// again when the card covers both (Trailblazer Sticker).
+    ChooseOne {
+        source: Option<u8>,
+        options: [ChooseOption; 2],
+        both: bool,
+        tavern: bool,
+        by_minion: bool,
+    },
+}
+
+impl QueuedRepeat {
+    /// The board slot whose effect this repeat is: the minion whose Battlecry
+    /// it triggers, or the minion that cast the spell. A target prompt from
+    /// that source is the one the first run picked, so its answer is what
+    /// every repeat lands on.
+    pub fn source(&self) -> Option<u8> {
+        match self.what {
+            RepeatWhat::Battlecry { slot } => Some(slot),
+            RepeatWhat::ChooseOne { source, .. } => source,
+        }
+    }
 }
 
 /// One option of a "both effects combined" Choose One that still has to run,
@@ -934,6 +989,12 @@ pub struct Player {
     /// Options of a "both effects combined" Choose One that still have to
     /// run, after the one before them is done waiting on its target.
     pub choose_queue: ArrayVec<QueuedOption, 2>,
+    /// Repeats a Battlecry trigger or a spell cast still owes after the first
+    /// run asked for a target or a Choose One option (see `QueuedRepeat`).
+    pub repeats: ArrayVec<QueuedRepeat, 8>,
+    /// Whether `run_queued_repeats` is on the stack: a prompt it answers must
+    /// not re-enter it.
+    pub repeating: bool,
     /// Discover options waiting for a choice. Minion cards here are out of the pool.
     pub discover: ArrayVec<CardId, DISCOVER>,
     /// Queued Discover requests to offer once pending choices finish.
@@ -1560,6 +1621,8 @@ impl Game {
         pl.pending_shop_target = None;
         pl.pending_discard = None;
         pl.pending_choose_one = None;
+        // The repeats a fizzled choice owed have no target left to land on.
+        pl.repeats.clear();
         // A Choose One spell whose choice files away has no "after" left to
         // fire: the cast counted itself already.
         pl.cast_after_choice = None;

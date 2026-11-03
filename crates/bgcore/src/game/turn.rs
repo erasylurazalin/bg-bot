@@ -120,6 +120,7 @@ impl Game {
         pl.pending_shop_target = None;
         pl.pending_discard = None;
         pl.choose_queue.clear();
+        pl.repeats.clear();
         pl.discover_damage_from = None;
         pl.discover_locked = false;
         pl.discover_locked_tier = 0;
@@ -1202,6 +1203,7 @@ impl Game {
             pl.pending_shop_target = None;
             pl.pending_discard = None;
             pl.choose_queue.clear();
+            pl.repeats.clear();
             pl.tavern_buffs.clear();
             pl.discover_queue.clear();
             pl.power_offer.clear();

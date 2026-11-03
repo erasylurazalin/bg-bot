@@ -1429,6 +1429,7 @@ fn clear_choices(pool: &mut [u8], cards: &crate::cards::CardDb, pl: &mut Player)
     pl.pending_shop_target = None;
     pl.pending_discard = None;
     pl.pending_choose_one = None;
+    pl.repeats.clear();
     pl.hero_offer = [u8::MAX; crate::DISCOVER];
 }
 

@@ -148,6 +148,8 @@ impl Player {
             pending_discard: None,
             hogrider_pending: 0,
             choose_queue: ArrayVec::new(),
+            repeats: ArrayVec::new(),
+            repeating: false,
             discover: ArrayVec::new(),
             discover_queue: ArrayVec::new(),
             discover_damage_from: None,

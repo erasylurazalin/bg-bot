@@ -609,7 +609,9 @@ Triple Reward spell.
   from the card's `always_golden`, so a Laureate does not depend on the file; a
   golden carrying any other Dark Gift, a triple's golden, a Lockbox's and a
   Golden bought do give one. `TargetKind::MakeGolden` makes a board minion
-  Golden with no reward and no count (Elite Navigator, Captain Sanders).
+  Golden with no reward and no count (Elite Navigator, Captain Sanders); the
+  golden happens once however often the Battlecry triggers, so its `runs` is
+  the card's own count only.
 - **Golden draws from the pool.** `draw_golden` (game/shop.rs) takes up to three copies for
   one Golden minion (Lockbox, Silent Deliverer).
 - **Gold spent.** Every payment goes through `fire_event(GoldSpent, n)`, which also
@@ -782,7 +784,13 @@ Triple Reward spell.
   target uses the same target every time (docs/rules/design.md "Set versus
   add", Era 2026-11-04): put the count in `PendingTarget.runs` (a Battlecry)
   or pass it to `cast_spell_as` as `repeats` (a named spell), never loop a
-  second prompt.
+  second prompt. A repeat that only starts after the first one's answer comes
+  back (a golden Kelp Keeper, Drakkari on Young Murk-Eye's neighbours, a
+  Choose One cast twice) goes on `Player.repeats` instead:
+  `Game::run_queued_repeats` runs it once the prompt is answered, on the slot
+  the first run picked, and a repeated Choose One's option is random
+  (`QueuedRepeat`, `RepeatWhat`). Making a minion Golden never repeats: the
+  prompt carries only the card's own count.
 - **Discard.** `Action::Discard(i)` answers `Player.pending_discard`, opened
   by an Activate with `discard = true` (Mangled Bandit): the reward effect
   runs after the pick. Any playable card is discardable (a Blood Gem

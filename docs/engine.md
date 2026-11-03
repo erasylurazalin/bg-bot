@@ -60,7 +60,9 @@ crates/
                       deathrattles.rs (a loop over every Deathrattle card),
                       lobby.rs (the 5-tribe lobby and every draw that respects it),
                       core_rules.rs (the generic rules on the real data), fight.rs,
-                      game.rs, real_boards.rs (real-board seats; its small fixture
+                      game.rs, repeats.rs (golden-making once, a repeated Choose One,
+                      the repeat queue on Battlecry triggers),
+                      real_boards.rs (real-board seats; its small fixture
                       folder tests/data/real-boards stands in for boards/real),
                       fight_check.rs (one real fight seated and played, the
                       fixture folder through the checker, the three files),
@@ -959,23 +961,53 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   "how many times" count is `cards::how_many_times` ("Set versus add"), and a
   spell or Battlecry that asks for a target asks once: the repeats land on
   the minion picked for the first (docs/rules/design.md "Set versus add", Era
-  2026-11-04). A played minion's targeted Battlecry already does this:
-  `run_effect` puts the count in `PendingTarget.runs` and `apply_target` runs
-  the effect that many times on the one pick. A named spell does it through
+  2026-11-04). A played minion's targeted Battlecry does this: `run_effect`
+  puts the count in `PendingTarget.runs` and `apply_target` runs the effect
+  that many times on the one pick. A named spell does it through
   `cast_named_spell`: it passes the casts it still owes to `cast_spell_as`
   (`repeats`), and `cast_spell_inner` folds them into the prompt's `runs`
   beside Balinda's own count, so a Battlecry doubled by Brann asks for one
-  target and casts the spell twice on it. A Choose One is still picked once
-  and the casts after it are lost, and a spell that removes its target stops
-  the loop (`stop_after`). Three paths do not follow it yet, and no replay
-  verdict turns on them. `TargetKind::MakeGolden` asks for a second pick
-  for each repeat, so Brann plus Elite Navigator goldens two minions; under
-  the rule as written the second trigger would land on the minion the first
-  made Golden and do nothing (an open question, no log either way). A golden
-  `Effect::TriggerBattlecry` and Young Murk-Eye's adjacent Battlecries (with
-  Drakkari) drop the triggers after the first, because the answer comes
-  after the trigger has returned, and a target the second neighbour asks for
-  replaces the first one's prompt; folding those needs a queued trigger.
+  target and casts the spell twice on it. A spell that removes its target
+  stops the loop (`stop_after`).
+- **The repeat queue.** What a repeat still owes after its first run asked a
+  question waits in `Player.repeats`, a fixed `ArrayVec<QueuedRepeat, 8>` (no
+  heap), and `Game::run_queued_repeats` runs one run at a time. An entry is
+  either a `RepeatWhat::Battlecry` (that minion's Battlecry triggered again:
+  a golden Kelp Keeper, Drakkari on Young Murk-Eye's neighbours) or a
+  `RepeatWhat::ChooseOne` (the option picked at random). The first run of an
+  entry asks the player, and `resolve_target` writes its answer into
+  `QueuedRepeat.at`: every repeat lands on it, and one whose own Battlecry asks
+  for a target the first run never picked answers at random
+  (`answer_target_at_random`). A different minion's Battlecry has its own
+  entry with its own first pick, so a second neighbour's prompt never replaces
+  the one before it. `maybe_start_discover` runs the queue once nothing else
+  is open, before the "after" triggers of the Battlecry or cast, and
+  `Player.repeating` keeps the driver from re-entering itself when it answers
+  a prompt. Cleared with the other pending choices at the end of a turn, in
+  `fizzle_stuck_choice` and by the replay's state loader.
+- **A repeated Choose One.** The player picks the option and its target once;
+  every cast after the first picks its option at random on the same target
+  (docs/rules/design.md "Set versus add", Era 2026-11-04: "you choose a
+  target, and the choice is random"). A Battlecry's repeats are the ones that
+  reach a Choose One spell (`cast_spell_inner`): `PendingChooseOne.repeats` is
+  how many casts the one choice stands for, each of them counted as a cast in
+  `cast_spell_as` (`CastAfterChoice.casts`), and the runs themselves are a
+  `RepeatWhat::ChooseOne` entry in the queue. Balinda is not one of them:
+  `apply_choose_option` runs the option she doubles again, the same option on
+  the same target, which is what the log shows: turn 12 step 0 of
+  `Hearthstone_2026_11_02_00_10_22-g4`, Alliance Flag cast twice with the
+  second option on one minion and one "spells cast". A Choose One minion's
+  choice is its Battlecry, so a trigger that repeats it (a golden Kelp Keeper)
+  goes through the same queue. A Choose One played from the hand is not a
+  Battlecry and Brann never repeats it ("Counting Battlecries").
+- **Making a minion Golden happens once.** A repeat still counts as a trigger
+  or a cast, but it makes no second minion Golden (docs/rules/design.md "Set
+  versus add"). So `Effect::MakeGoldenChosen` puts only the card's own count
+  in `PendingTarget.runs` (`count` times `mul`, so a golden Elite Navigator
+  picks two Pirates), never the Battlecry's repeats, and Reno Jackson's power
+  offers one pick whatever made it trigger twice. A
+  `SpellTarget::MakeGolden` cast twice (Eyes of the Earth Mother with
+  Balinda) is guarded by `!m.golden`, and the second cast still counts.
 - **The numbers that grow (block 4).** `tp.spell_bonus_per_type`
   (Multilayered Shield: the bonus per different friendly minion type) and
   `tp.spell_bonus_turn` (Honeycomb Ring: this turn only, cleared in
