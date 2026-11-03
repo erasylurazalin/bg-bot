@@ -195,7 +195,23 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   at the top tier), `hero_powers` are the hero power entities in play with
   their current numbers, cost and uses this turn, `trinkets` are my trinkets.
 - A Tavern spell carries its Gold price as `cost`; a minion has none, because
-  the log does not print one (a minion costs 3 Gold by the game's rule).
+  the log does not print one (a minion costs 3 Gold by the game's rule). A
+  card the game is charging something else for says so on itself:
+  `cost_override` is the whole new price (`BACON_OVERRIDE_BG_COST`, Chillmere
+  Mosaic's Spellcraft deals Battlecry minions that cost (1)), `cost_reduce` is
+  what comes off the rule's price (`BACON_REDUCE_BUY_COST`, a free buy takes
+  the whole 3 off every Tavern minion until it is used: Aranna's Spectral
+  Sight), and `costs_health` says the card is paid in Health
+  (`BACON_COSTS_HEALTH_TO_BUY`: Bazaar Sticker's one spell a turn, Hasty
+  Excavation, Demonic Tapestry).
+- `fodder_refreshes` is the Demon Fodder queue: one number per coming Refresh,
+  how many Fodders that Refresh gets, read off the game's own "Fodder Player
+  Enchant" (`BG35_150pe`, one number per Refresh in its four script numbers).
+  A Trapped Clapper's Deathrattle gives one to each of the next three Refreshes
+  (`[1, 1, 1]`), the Refresh that follows takes the first number and leaves the
+  rest, and a Laboratory Assistant run twice by Brann gives two to each of the
+  same three (`[2, 2, 2]`). A writer that does not read the enchant leaves the
+  key out, and then the replay's step is judged without the queue.
 - `start`, the `after` of every step and `end` hold the same things, so the
   replay (below) loads any of them the same way. Beyond the cards and the
   numbers above they carry the marks and the player-level numbers a step reads:

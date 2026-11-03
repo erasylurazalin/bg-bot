@@ -102,6 +102,16 @@ pub struct ShopMinionSpec {
     /// A Tavern card priced in Health (Bazaar Sticker, Hasty Excavation).
     #[serde(default)]
     pub costs_health: bool,
+    /// The Gold price the log shows on a Tavern card when it is not the
+    /// rule's: the override Chillmere Mosaic's Spellcraft puts on the minions
+    /// it deals (BACON_OVERRIDE_BG_COST, the whole price).
+    #[serde(default)]
+    pub cost_override: Option<i32>,
+    /// What a Tavern card's price is reduced by (BACON_REDUCE_BUY_COST): a
+    /// free buy takes the whole buy cost off every card until it is used
+    /// (Aranna's Spectral Sight).
+    #[serde(default)]
+    pub cost_reduce: Option<i32>,
     /// The spell a Magicfin token was taught, by the name cards.toml builds
     /// it under. The log keeps it as a dbf id in the token's first number and
     /// only `ref/bg-cards.json` can say which card that is, so
@@ -207,6 +217,12 @@ pub struct ShopStateSpec {
     pub armor: i32,
     #[serde(default)]
     pub free_refreshes: u8,
+    /// The Demon Fodders queued for the coming Refreshes, one number per
+    /// Refresh (`Player.fodder_refreshes`): the log's "Fodder Player Enchant"
+    /// numbers. None in a file written before the collector read them, and
+    /// then the step is judged without the queue.
+    #[serde(default)]
+    pub fodder_refreshes: Option<Vec<u8>>,
     #[serde(default)]
     pub frozen: bool,
     #[serde(default)]
@@ -672,7 +688,7 @@ pub fn load(
     let spell_id = spell_slot.map(|m| m.id);
     let mut tavern_ids = Vec::new();
     let mut tavern: Vec<Minion> = Vec::new();
-    for m in tavern_slots {
+    for m in &tavern_slots {
         let (minion, bad) = build_minion(data, m, turn);
         if let Some(name) = bad {
             missing.push(format!("minion not built: {name} (a Stand-in with its stats)"));
@@ -728,6 +744,15 @@ pub fn load(
         };
         pl.armor = spec.armor;
         pl.free_rolls = spec.free_refreshes;
+        // The Fodders queued for the coming Refreshes. The engine keeps the
+        // queue in the player, and only the player's own Refresh takes from
+        // it (`Shop::fill_shop`); the file's numbers are the same queue.
+        pl.fodder_refreshes.clear();
+        for n in spec.fodder_refreshes.iter().flatten() {
+            if pl.fodder_refreshes.try_push(*n).is_err() {
+                break;
+            }
+        }
         // The sandbox's own turn 1 may have marked the player skipped (a
         // Procrastinate hero skips his first turn); the logged state is a turn
         // Era acted in, or the file would have no step to replay.
@@ -750,6 +775,68 @@ pub fn load(
             let _ = pl.shop.try_push(*m);
         }
         pl.shop_spell = spell_card;
+        // A Tavern spell priced in Health: the log marks the card itself
+        // (`costs_health`, BACON_COSTS_HEALTH_TO_BUY), which is either the
+        // card's own price (Hasty Excavation, which pays Health whenever it is
+        // bought) or a charge of the turn that a trinket gives the next spell
+        // (Bazaar Sticker's one a turn). The engine keeps the charge as
+        // `spell_health_left`, and the state's cards say whether it is still
+        // there: nothing marks a card once the charge is spent.
+        let charged = |spec: &ShopMinionSpec, card: CardId| {
+            let c = data.cards.get(card);
+            spec.costs_health && c.is_spell() && !c.pay_health
+        };
+        let health_price = tavern_slots
+            .iter()
+            .zip(tavern.iter())
+            .any(|(spec, m)| charged(spec, m.card))
+            || spell_slot.zip(spell_card).is_some_and(|(spec, card)| charged(spec, card));
+        if health_price {
+            pl.tp.spell_health_left = 1;
+        }
+        // A Tavern minion priced in Health (Demonic Tapestry, Pilgrimp
+        // Sticker, The Eye of Sargeras): one charge, taken by the next minion
+        // bought, which is what `health_price_left` is.
+        let health_minion = tavern_slots.iter().zip(tavern.iter()).any(|(spec, m)| {
+            let card = data.cards.get(m.card);
+            spec.costs_health && !card.is_spell()
+        });
+        if health_minion {
+            pl.tp.health_price_left = 1;
+            pl.tp.health_price_tribe = None;
+        }
+        // The Tavern's price when the log shows one that is not the rule's.
+        // The game writes it on the cards: an override (Chillmere Mosaic's
+        // Spellcraft deals Battlecry minions that cost (1), docs/rules/
+        // trinkets.md) or a reduction (a free buy leaves the whole buy cost
+        // off every Tavern minion until it is used: Aranna's Spectral Sight).
+        let buy_cost = data.rules.buy_cost;
+        let prices: Vec<u8> = tavern_slots
+            .iter()
+            .zip(tavern.iter())
+            .filter(|(_, m)| !data.cards.get(m.card).is_spell())
+            .map(|(spec, _)| match spec.cost_override {
+                Some(p) => p.clamp(0, u8::MAX as i32) as u8,
+                None => buy_cost.saturating_sub(
+                    spec.cost_reduce
+                        .unwrap_or(0)
+                        .clamp(0, u8::MAX as i32) as u8,
+                ),
+            })
+            .collect();
+        // Every minion the same price is the Tavern's own price: the whole
+        // shop costs (1) until the next Refresh, or the next buy is free.
+        // A price that differs card by card is a rule this engine has no
+        // state for, and is left to the step's own comparison.
+        if let Some(&price) = prices.first()
+            && prices.iter().all(|&p| p == price)
+        {
+            if price == 0 && buy_cost > 0 {
+                pl.free_minion_left = pl.free_minion_left.max(1);
+            } else if price != buy_cost {
+                pl.tp.tavern_price = price;
+            }
+        }
         // The freeze is one state: the engine keeps it on the player, the game
         // on each card. It is loaded on the player and off the cards, so a
         // Freeze click (which toggles the player's flag) turns the whole
@@ -928,6 +1015,15 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
     // none left. A fresh card would start the replay with its full use and
     // teach once more than the log did.
     if card.teaches_spell {
+        let left = m.numbers.first().copied().unwrap_or(0).clamp(0, u8::MAX as i32);
+        minion.uses_left = left as u8;
+    }
+    // A Malchezaar's Health Refreshes left this turn ("(2 left!)"), the same
+    // per-turn use: the log's first number, and no number at all when they
+    // are spent. A fresh card would start the replay with both back, which
+    // gives the state a Health Refresh the log had already paid Gold for
+    // (Hearthstone_2026_11_01_17_59_13-g1 turn 8 step 23).
+    if card.health_refreshes > 0 {
         let left = m.numbers.first().copied().unwrap_or(0).clamp(0, u8::MAX as i32);
         minion.uses_left = left as u8;
     }
@@ -1283,6 +1379,18 @@ impl SnapMinion {
     }
 }
 
+/// The Fodder queue with its trailing empty Refreshes dropped: the length of
+/// the queue is how far ahead the last Fodder is queued, so a `0` at the end
+/// says what no entry at all says, and a file that writes four numbers holds
+/// the same queue as one that writes the two that matter.
+fn fodder_queue(queue: impl Iterator<Item = u8>) -> Vec<u8> {
+    let mut out: Vec<u8> = queue.collect();
+    while out.last() == Some(&0) {
+        out.pop();
+    }
+    out
+}
+
 /// A hero power as the comparison sees it: the card id, the presses left and
 /// the number the power carries (its `{0}` in the file's reading).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1302,6 +1410,9 @@ pub struct ShopSnapshot {
     pub health: i32,
     pub armor: i32,
     pub free_refreshes: u8,
+    /// The Fodders queued for the coming Refreshes (`fodder_queue`), when
+    /// the file carries the queue at all.
+    pub fodder_refreshes: Option<Vec<u8>>,
     pub frozen: bool,
     pub board: Vec<SnapMinion>,
     pub hand: Vec<SnapMinion>,
@@ -1361,6 +1472,7 @@ impl ShopSnapshot {
             health: pl.health,
             armor: pl.armor,
             free_refreshes: pl.free_rolls,
+            fodder_refreshes: Some(fodder_queue(pl.fodder_refreshes.iter().copied())),
             frozen: pl.frozen,
             board: pl.board.iter().map(|m| SnapMinion::of(data, m, false)).collect(),
             hand: pl.hand.iter().map(|m| SnapMinion::of(data, m, false)).collect(),
@@ -1439,6 +1551,10 @@ impl ShopSnapshot {
             health: state.health,
             armor: state.armor,
             free_refreshes: state.free_refreshes,
+            fodder_refreshes: state
+                .fodder_refreshes
+                .as_ref()
+                .map(|queue| fodder_queue(queue.iter().copied())),
             frozen: state.frozen,
             board: zone_snapshot(data, &state.board, ZoneOrder::Board, turn, missing),
             hand: zone_snapshot(data, &state.hand, ZoneOrder::Hand, turn, missing),
@@ -1562,6 +1678,18 @@ pub fn compare_pressed(
             ours.free_refreshes, log.free_refreshes
         ));
     }
+    // The Fodder queue, which only a file the collector wrote for it holds:
+    // an older file says nothing, so a step it was replayed from is not
+    // judged on it.
+    if let Some(log_queue) = &log.fodder_refreshes
+        && ours.fodder_refreshes.as_ref() != Some(log_queue)
+    {
+        out.push(format!(
+            "Fodders queued {:?} vs {:?}",
+            ours.fodder_refreshes.as_ref().map_or(&[][..], |q| q.as_slice()),
+            log_queue
+        ));
+    }
     for (zi, (zone, _)) in ZONES.iter().enumerate() {
         let (a, b) = (zone_of(ours, zi), zone_of(log, zi));
         // A card that is not there on one side and is on the other, or a card
@@ -1677,6 +1805,10 @@ pub struct ShopShape {
     pub tier: u8,
     pub upgrade_cost: Option<u8>,
     pub free_refreshes: u8,
+    /// The Fodders queued for the coming Refreshes: a Refresh that was given
+    /// them takes the first number, so the queue's own shape says whether the
+    /// Fodders reached the Tavern. None when the file does not carry it.
+    pub fodder_refreshes: Option<Vec<u8>>,
     pub frozen: bool,
     /// How many cards each zone holds, and how many of them are spells (the
     /// kind of a card a random step brings in is part of its shape).
@@ -1701,6 +1833,7 @@ impl ShopShape {
             tier: after.tier,
             upgrade_cost: after.upgrade_cost,
             free_refreshes: after.free_refreshes,
+            fodder_refreshes: after.fodder_refreshes.clone(),
             frozen: after.frozen,
             board: (after.board.len(), spells(&after.board)),
             hand: (after.hand.len(), spells(&after.hand)),
@@ -1735,6 +1868,12 @@ impl ShopShape {
             out.push(format!(
                 "free Refreshes {} vs {} (shape)",
                 self.free_refreshes, other.free_refreshes
+            ));
+        }
+        if other.fodder_refreshes.is_some() && self.fodder_refreshes != other.fodder_refreshes {
+            out.push(format!(
+                "Fodders queued {:?} vs {:?} (shape)",
+                self.fodder_refreshes, other.fodder_refreshes
             ));
         }
         for (name, a, b) in [

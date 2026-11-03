@@ -341,9 +341,15 @@ impl Game {
                 }
             }
             Effect::AddFodderRefreshes(n) => {
-                let per = mul as u8;
-                let times = (n as u32).saturating_mul(runs as u32);
-                self.players[p].add_fodder_refreshes(per, times);
+                // "Add a Fodder to your next 3 Refreshes" says how many
+                // Refreshes and how many Fodders each of them gets: the
+                // golden card deals two a Refresh, and a Battlecry that runs
+                // twice (Brann) deals two as well, to the same three
+                // Refreshes. Hearthstone_2026_10_28_22_11_50-g4 turn 12 step
+                // 47 shows the log's queue as [2, 2, 2], not six Refreshes of
+                // one.
+                let per = (mul as u8).saturating_mul(runs);
+                self.players[p].add_fodder_refreshes(per, n as u32);
             }
             Effect::AddFodderToNextRefresh(n) => {
                 let add = n.saturating_mul(mul as u8).saturating_mul(runs);

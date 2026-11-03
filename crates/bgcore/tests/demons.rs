@@ -1429,3 +1429,25 @@ fn combat_damage_is_not_rewound_and_triggers_nothing() {
     assert!(!g.players[0].alive);
     g.check_invariants().unwrap();
 }
+
+/// A Fodder-adding Battlecry that runs twice (Brann) gives two Fodders to each
+/// of the same three Refreshes, not one to each of six: "Add a Fodder to your
+/// next 3 Refreshes" names the Refreshes, so the doubling doubles what each of
+/// them gets. The log writes the queue as such (Hearthstone_2026_10_28_22_11_
+/// 50-g4 turn 12 step 47: [2, 2, 2], where a golden Assistant's two a Refresh
+/// reads the same way).
+#[test]
+fn a_doubled_fodder_battlecry_adds_two_to_each_refresh() {
+    let mut g = game(71);
+    g.players[0].gold = 10;
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    g.give(0, "Laboratory Assistant").unwrap();
+    let hand = (g.players[0].hand.len() - 1) as u8;
+    act(&mut g, 0, Action::Play { hand, pos: 0 });
+    assert_eq!(
+        g.players[0].fodder_refreshes.as_slice(),
+        [2, 2, 2],
+        "two Fodders to each of three Refreshes"
+    );
+    g.check_invariants().unwrap();
+}

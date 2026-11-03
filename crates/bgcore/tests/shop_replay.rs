@@ -148,7 +148,11 @@ fn a_logged_state_loads_field_by_field() {
 
     let loaded = load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1, None);
     assert!(loaded.missing.is_empty(), "loaded with: {:?}", loaded.missing);
-    let got = ShopSnapshot::of_game(&data, &loaded.game, bgcore::shop_replay::ME);
+    let mut got = ShopSnapshot::of_game(&data, &loaded.game, bgcore::shop_replay::ME);
+    // The Fodder queue is a key the fixture predates: the engine always has
+    // one (empty when nothing is queued), and a file without the key says
+    // nothing about it (`None`), so it is not part of this comparison.
+    got.fodder_refreshes = want.fodder_refreshes.clone();
     assert_eq!(got, want);
     assert_eq!(got.gold, turn.start.gold);
     assert_eq!(got.tier, turn.start.tier);
@@ -1253,4 +1257,223 @@ fn a_one_answer_target_is_not_sent_again_even_with_a_discover_open() {
     );
     assert!(r.action.contains("one answer"), "{}", r.action);
     assert_eq!(r.verdict, Verdict::Ok, "{:?} {}", r.diffs, r.action);
+}
+
+/// The Fodders queued for the coming Refreshes are the file's numbers, one per
+/// Refresh (`Player.fodder_refreshes`): the queue the collector reads off the
+/// log's "Fodder Player Enchant". A Refresh takes the first number and leaves
+/// the rest, which is what makes a Trapped Clapper's three land in three
+/// Refreshes and what the replay has to carry from the state.
+#[test]
+fn the_queued_fodders_load_into_the_player() {
+    let text = r#"{"source": "fodder", "game": 1, "turns": [
+      {"turn": 8,
+       "start": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+                 "gold": 10, "tier": 5, "upgrade_cost": null, "health": 30,
+                 "armor": 0, "free_refreshes": 0, "fodder_refreshes": [2, 1],
+                 "frozen": false, "hero_powers": [], "trinkets": [], "secrets": []},
+       "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("fodder.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let data = data();
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 1, None);
+    let queue: Vec<u8> = loaded.game.players[bgcore::shop_replay::ME]
+        .fodder_refreshes
+        .iter()
+        .copied()
+        .collect();
+    assert_eq!(queue, vec![2, 1], "the file's queue is the player's");
+    // A file written before the collector read the queue says nothing about
+    // it, and the player starts with none.
+    let mut bare = turn.start.clone();
+    bare.fodder_refreshes = None;
+    let loaded = load(&data, &bare, None, None, turn.turn, 1, None);
+    assert!(loaded.game.players[bgcore::shop_replay::ME].fodder_refreshes.is_empty());
+}
+
+/// A queued Fodder lands in the Refresh's Tavern and feeds itself to the one
+/// Demon on the board, and its slot refills: the Demon gains the Fodder's
+/// 2/2 and the Tavern's card count does not change. The queue is the state's
+/// (the log's own numbers), and the Refresh takes it.
+#[test]
+fn a_queued_fodder_feeds_itself_on_the_refresh() {
+    let demon = r#"{"id": 5, "position": 1, "card_id": "BG26_174", "name": "Soul Rewinder",
+                    "attack": 4, "health": 10, "golden": false, "keywords": []}"#;
+    let text = format!(
+        r#"{{"source": "fodder", "game": 1, "turns": [
+        {{"turn": 8,
+          "start": {{"board": [{demon}], "hand": [], "tavern": [], "hand_hidden": 0,
+                    "gold": 10, "tier": 5, "upgrade_cost": null, "health": 30,
+                    "armor": 0, "free_refreshes": 0, "fodder_refreshes": [1],
+                    "frozen": false, "hero_powers": [], "trinkets": [], "secrets": []}},
+          "actions": [
+             {{"step": "roll", "paid": {{"gold": 1, "health": 0}}, "after": {{}}}}],
+          "end": null}}]}}"#,
+    );
+    let files = parse_action_files(&[("fodder-feed.json".to_string(), text)]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    // The state's snapshot is what a step is compared against; the engine's
+    // own result is what this test reads.
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        turn,
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    let demon = &r.ours.board[0];
+    assert_eq!(
+        (demon.attack, demon.health),
+        (6, 12),
+        "the Fodder fed the one Demon: {:?}",
+        r.diffs
+    );
+    // Tier 5 deals five minions and a spell, and the Fodder took a minion
+    // slot for a moment and refilled it: the Tavern's shape is the tier's.
+    assert_eq!(r.ours.tavern.len(), 6, "five minions and the spell: {:?}", r.ours.tavern);
+    assert_eq!(r.ours.fodder_refreshes, Some(Vec::new()), "the Refresh took the queue");
+    assert_eq!(r.ours.gold, 9, "the Refresh cost its Gold");
+}
+
+/// A Malchezaar's Health Refreshes left this turn are the log's first number:
+/// the card carries "(2 left!)", "(1 left!)" and no number at all, and a fresh
+/// copy would give the state both back, which makes a Refresh paid in Gold
+/// look free.
+#[test]
+fn malchezaars_health_refreshes_left_are_the_logged_number() {
+    let malchezaar = |numbers: &str| {
+        format!(
+            r#"{{"id": 7, "position": 1, "card_id": "BG26_524",
+                 "name": "Malchezaar, Prince of Dance", "attack": 4, "health": 3,
+                 "golden": false, "keywords": []{numbers}}}"#,
+            numbers = if numbers.is_empty() {
+                String::new()
+            } else {
+                format!(r#", "numbers": {numbers}"#)
+            }
+        )
+    };
+    let text = |numbers: &str| {
+        format!(
+            r#"{{"source": "malchezaar", "game": 1, "turns": [
+            {{"turn": 8,
+              "start": {{"board": [{}], "hand": [], "tavern": [], "hand_hidden": 0,
+                        "gold": 3, "tier": 5, "upgrade_cost": null, "health": 30,
+                        "armor": 0, "free_refreshes": 0, "frozen": false,
+                        "hero_powers": [], "trinkets": []}},
+              "actions": [], "end": null}}]}}"#,
+            malchezaar(numbers)
+        )
+    };
+    let data = data();
+    for (numbers, left) in [("[2, 0, 0, 0]", 2), ("[1, 0, 0, 0]", 1), ("", 0)] {
+        let files =
+            parse_action_files(&[("malchezaar.json".to_string(), text(numbers))]).unwrap();
+        let file = &files[0];
+        let turn = &file.turns[0];
+        let loaded = load(&data, &turn.start, None, None, turn.turn, 1, None);
+        let pl = &loaded.game.players[bgcore::shop_replay::ME];
+        assert_eq!(
+            pl.health_refreshes_left(&data.cards),
+            left,
+            "the log says {left} Health Refreshes left ({numbers})"
+        );
+    }
+}
+
+/// A Tavern spell the log marks as paid in Health (`costs_health`, Bazaar
+/// Sticker's one spell a turn) is bought for Health, not Gold: the state's own
+/// card says the trinket's charge is still there, and the buy is legal with no
+/// Gold at all (Hearthstone_2026_10_24_15_25_26-g4 turn 6 step 4).
+#[test]
+fn a_tavern_spell_priced_in_health_is_bought_for_health() {
+    let text = r#"{"source": "bazaar", "game": 1, "turns": [
+      {"turn": 6,
+       "start": {"board": [], "hand": [], "hand_hidden": 0,
+                 "tavern": [{"id": 9, "slot": 1, "card_id": "BG28_521", "name": "Hired Headhunter",
+                             "kind": "spell", "cost": 3, "costs_health": true, "frozen": false}],
+                 "gold": 0, "tier": 4, "upgrade_cost": null, "health": 30,
+                 "armor": 0, "free_refreshes": 0, "frozen": false,
+                 "hero_powers": [], "trinkets": []},
+       "actions": [{"step": "buy", "slot": 1, "spell": true,
+                    "target": {"id": 9, "card_id": "BG28_521", "name": "Hired Headhunter",
+                               "kind": "slot", "slot": 1},
+                    "paid": {"gold": 0, "health": 3},
+                    "after": {"board": [], "tavern": [], "hand_hidden": 0, "gold": 0,
+                              "tier": 4, "upgrade_cost": null, "health": 27,
+                              "armor": 0, "free_refreshes": 0, "frozen": false,
+                              "hero_powers": [], "trinkets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("bazaar.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        turn,
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert_ne!(r.verdict, Verdict::Illegal, "{} {:?}", r.action, r.diffs);
+}
+
+/// A Tavern price the log shows on the cards themselves: Chillmere Mosaic's
+/// Spellcraft deals Battlecry minions that cost (1) (docs/rules/trinkets.md),
+/// which the game writes as the card's own override, and a free buy (Aranna's
+/// Spectral Sight) takes the whole buy cost off every Tavern minion until it
+/// is used. The state's cards say which, and the buy is one the engine can
+/// pay for.
+#[test]
+fn a_tavern_price_the_log_shows_is_the_engines_price() {
+    let tavern = |price: &str| {
+        format!(
+            r#"[{{"id": 21, "slot": 1, "card_id": "BG31_816", "name": "Fire Baller",
+                 "attack": 4, "health": 3, "kind": "minion"{price}}},
+                {{"id": 22, "slot": 2, "card_id": "BG31_815", "name": "Dune Dweller",
+                 "attack": 3, "health": 3, "kind": "minion"{price}}}]"#
+        )
+    };
+    for (price, gold, paid, left) in [
+        // Chillmere Mosaic: the whole Tavern costs (1).
+        (r#", "cost_override": 1"#, 1, 1, 0),
+        // Aranna's free first minion of the turn.
+        (r#", "cost_reduce": 3"#, 0, 0, 0),
+    ] {
+        let text = format!(
+            r#"{{"source": "price", "game": 1, "turns": [
+            {{"turn": 8,
+              "start": {{"board": [], "hand": [], "tavern": {}, "hand_hidden": 0,
+                        "gold": {gold}, "tier": 5, "upgrade_cost": null, "health": 30,
+                        "armor": 0, "free_refreshes": 0, "frozen": false,
+                        "hero_powers": [], "trinkets": [], "secrets": []}},
+              "actions": [
+                 {{"step": "buy", "slot": 1,
+                   "target": {{"id": 21, "card_id": "BG31_816", "name": "Fire Baller",
+                              "kind": "slot", "slot": 1}},
+                   "paid": {{"gold": {paid}, "health": 0}},
+                   "after": {{"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+                             "gold": {left}, "tier": 5, "upgrade_cost": null,
+                             "health": 30, "armor": 0, "free_refreshes": 0,
+                             "frozen": false, "hero_powers": [], "trinkets": []}}}}],
+              "end": null}}]}}"#,
+            tavern(price)
+        );
+        let files = parse_action_files(&[("price.json".to_string(), text)]).unwrap();
+        let file = &files[0];
+        let turn = &file.turns[0];
+        let r = replay_step(
+            &data(),
+            &ids(),
+            file,
+            turn,
+            0,
+            &ReplayOptions { seeds: 1, seed: 1 },
+        );
+        assert_ne!(r.verdict, Verdict::Illegal, "{} {:?}", r.action, r.diffs);
+        assert_eq!(r.ours.gold, left, "the buy cost {paid} Gold: {:?}", r.diffs);
+    }
 }

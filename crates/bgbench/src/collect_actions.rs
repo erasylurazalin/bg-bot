@@ -129,6 +129,11 @@ const AUREATE_LAUREATE: [&str; 2] = ["BG32_236", "BG32_236_G"];
 /// Golden, and that Golden gives no Triple Reward.
 const GILDING: &str = "BG36_MidGameEffect_000t14";
 
+/// The enchant the game keeps the Demon Fodder queue on ("Fodder Player
+/// Enchant [DNT]"): its four script numbers are the Fodders each of the next
+/// four Refreshes gets (`Player.fodder_refreshes`).
+const FODDER_ENCHANT: &str = "BG35_150pe";
+
 /// The blocks a click on my own board turns into a step, and the step it makes.
 const BOARD_BLOCKS: [&str; 2] = ["PLAY", "MOVE_MINION"];
 
@@ -2239,6 +2244,8 @@ impl Collector {
         let trinkets = self.trinket_list(game);
         put(&mut state, "trinkets", trinkets);
         put(&mut state, "free_refreshes", Json::Int(self.free));
+        let fodder = self.fodder_refreshes(game);
+        put(&mut state, "fodder_refreshes", fodder);
         let frozen = self.frozen(game);
         put(&mut state, "frozen", Json::Bool(frozen));
         let counters = self.counters(game);
@@ -2294,6 +2301,18 @@ impl Collector {
                 put(&mut d, "frozen", Json::Bool(e.int("FROZEN") != 0));
                 if e.int("BACON_COSTS_HEALTH_TO_BUY") != 0 {
                     put(&mut d, "costs_health", Json::Bool(true));
+                }
+                // The price the game charges for this card when it is not the
+                // rule's: the override that Chillmere Mosaic's Spellcraft puts
+                // on every minion it deals (BACON_OVERRIDE_BG_COST, the whole
+                // price) and the reduction a free buy leaves on the Tavern's
+                // minions (BACON_REDUCE_BUY_COST, taken off the buy cost:
+                // Aranna's Spectral Sight takes the whole 3 off).
+                if e.int("BACON_OVERRIDE_BG_COST") != 0 {
+                    put(&mut d, "cost_override", Json::Int(e.int("BACON_OVERRIDE_BG_COST")));
+                }
+                if e.int("BACON_REDUCE_BUY_COST") != 0 {
+                    put(&mut d, "cost_reduce", Json::Int(e.int("BACON_REDUCE_BUY_COST")));
                 }
                 tribes.extend(card_tribes(&self.cards, &e.card_id));
                 tavern.push(Json::Obj(d));
@@ -2636,6 +2655,32 @@ impl Collector {
             put(&mut out, "upper_hand", Json::Int(self.upper));
         }
         Json::Obj(out)
+    }
+
+    /// The Demon Fodders queued for the coming Refreshes: the game keeps the
+    /// queue on its own player enchant, one number per upcoming Refresh in
+    /// the four script numbers. A Trapped Clapper's Deathrattle gives one
+    /// Fodder to each of the next three Refreshes, which the log writes as
+    /// `[1, 1, 1]`, and the Refresh that follows takes the first number only
+    /// (the count the Fodders of Hearthstone_2026_10_27_04_30_04 give a
+    /// single Refresh). The numbers are the engine's `fodder_refreshes`, so
+    /// the file carries them as they stand, trailing empty Refreshes dropped
+    /// (`[5, 5, 0]` is `[5, 5]`).
+    fn fodder_refreshes(&self, game: &Game) -> Json {
+        let mine = me(game).map(|m| m as i64);
+        let Some(e) = game
+            .entities_in_order()
+            .find(|x| x.card_id == FODDER_ENCHANT && Some(x.int("CONTROLLER")) == mine)
+        else {
+            return Json::Arr(Vec::new());
+        };
+        let mut out: Vec<i64> = (1..=4)
+            .map(|i| e.int(&format!("TAG_SCRIPT_DATA_NUM_{i}")))
+            .collect();
+        while out.last() == Some(&0) {
+            out.pop();
+        }
+        Json::Arr(out.into_iter().map(Json::Int).collect())
     }
 
     /// The Tavern's lock: whether its offers are frozen.
