@@ -1742,7 +1742,6 @@ name = "Zoatroid"
 tier = 1
 tribe = "aberration"
 stats = [3, 2]
-keywords = ["taunt"]
 on_sell = { get = "Aberrant Tentacle" }
 
 [[minion]]
@@ -1757,7 +1756,6 @@ name = "Underrot Spawn"
 tier = 2
 tribe = "aberration"
 stats = [2, 2]
-keywords = ["taunt"]
 deathrattle = { effect = { summon_and_buff = "Aberrant Tentacle", buff = [1, 0], golden_doubles_count = true } }
 
 [[minion]]

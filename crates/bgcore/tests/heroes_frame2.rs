@@ -473,7 +473,7 @@ fn the_water_invocation_shields_the_rightmost_minion() {
     // kills my 2/3 in one swing. With the shield on the right-most (my only)
     // minion the blow is absorbed and my side is still there after it.
     let mine = [mk("Clever Castaway")];
-    let enemy = [mk("Zoatroid"), mk("Zoatroid")]; // 3/2 Taunt
+    let enemy = [mk("Zoatroid"), mk("Zoatroid")]; // 3/2
     let water = Counters {
         soc_rightmost: Keywords::DIVINE_SHIELD | Keywords::TAUNT,
         ..Counters::default()
