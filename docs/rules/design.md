@@ -65,6 +65,9 @@ fight phase.
   Fewer copies left means lower odds of seeing that minion.
 - The shop refreshes at the start of each turn and on every roll. A frozen
   shop keeps its minions for the next turn, and its empty slots fill up.
+  Moving a minion on your board doesn't touch the freeze: the Tavern stays
+  frozen (Era, 2026-11-04; the logs that show it unfrozen after a move are
+  a log quirk).
 - Selling a minion returns it to the pool. Tokens (summoned minions that
   aren't in the pool) just disappear.
 
@@ -576,6 +579,10 @@ the same way: the count is the highest value any setter gives (1 if none),
 plus what each adder adds (one, or its golden number). Setters: Brann, Drakkari, Balinda, Proud
 Privateer ("twice", golden "three times"). Adders: Titus, Hot-Air
 Surveyor ("an extra time"). Future cards slot into one side or the other.
+A repeated Battlecry or spell that picks a target uses the same target
+every time: Brann doubling a Magicfin token's taught Tricky Trousers casts
+it twice on the one minion picked (Era, 2026-11-04; log
+`Hearthstone_2026_10_28_02_28_32-g1` turn 10 step 2).
 
 **Spending gold.** Anything that actually uses gold counts: buying,
 upgrading, rolling, Activate costs. Health paid instead of gold and free
@@ -777,9 +784,14 @@ every cast trigger, "cast on this" included.
   sets a Gem cast on your minion to 2 casts (golden 3), each Hot-Air
   Surveyor adds one. Balinda plus one Surveyor: 3 casts. Each cast is a
   Gem played.
-- **Geomagus Roogug** reacts only to Gems cast from hand (extra casts
-  included), and plays its Gem on a random different friendly minion. A
-  Gem from Roogug isn't from hand, so two Roogugs never loop.
+- **Geomagus Roogug** reacts to every Gem played on it (from hand, extra
+  casts, and Gems a minion or spell plays: Turbo Hogrider, Gem
+  Confiscation, Blood Gem Barrage) except a Gem another Roogug played, and
+  plays its Gem on a random different friendly minion. So two Roogugs never
+  loop (Era, 2026-11-04; Hogrider confirmed in
+  `Hearthstone_2026_10_28_02_28_32`: each Hogrider Gem on a Roogug opens a
+  Roogug trigger. No log shows one Roogug's Gem landing on the other, so
+  the Roogug exception is Era's rule, not log-backed).
 - **Stats from Blood Gems** are tracked per minion (stats, not a gem
   count, so bigger Gems count fully), from every source, Barrage included.
 - **Gem Confiscation:** plays 3 Gems on the target, then takes all the
