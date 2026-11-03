@@ -39,8 +39,8 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use bglog::{
-    Block, Cards, Choice, Entity, Game, Handler, Offer, Options, PowerLog, REANIMATE_MARK, Ref,
-    SECRET_CARDS, TagValue, Tracker, choice_start, enchant_numbers, gifts_by_minion,
+    Block, Cards, Choice, Entity, Game, Handler, Minion, Offer, Options, PowerLog, REANIMATE_MARK,
+    Ref, SECRET_CARDS, TagValue, Tracker, choice_start, enchant_numbers, gifts_by_minion,
     hero_enchants_by_minion, minion, pick_start, taken, trinkets,
 };
 
@@ -744,6 +744,75 @@ fn is_system(card_id: &str) -> bool {
 fn plain_minion<'a>(game: &'a Game, cards: &Cards, e: &'a Entity) -> bglog::Minion {
     let gifts: HashMap<i32, Vec<String>> = HashMap::new();
     minion(e, game, cards, &gifts, &gifts)
+}
+
+/// The warband of the opponent I last fought, as the log last showed it in
+/// combat: the board that went into the fight, before start-of-combat effects,
+/// in the shape a state's own `board` has. Null before the first fight. The
+/// last fight with a result is the one I last fought, so a fight the log has
+/// already staged for the round to come is not it (the tracker keeps the
+/// latest fight staged, complete or not).
+fn last_opponent_board(cards: &Cards, fights: &[bglog::Fight]) -> Json {
+    let Some(fight) = fights.iter().rev().find(|f| !f.result.is_empty()) else {
+        return Json::Null;
+    };
+    warband_json(cards, fight)
+}
+
+/// The other side of one fight, as a state's `board` writes a board. An empty
+/// board is null: the game has no warband to copy, and the powers that copy one
+/// then cannot be pressed (`burgle_has_board`, `IspyNextOpponent`).
+fn warband_json(cards: &Cards, fight: &bglog::Fight) -> Json {
+    if fight.theirs.is_empty() {
+        return Json::Null;
+    }
+    let marks = &fight.reanimates.1;
+    let board: Vec<Json> = fight
+        .theirs
+        .iter()
+        .enumerate()
+        .map(|(i, m)| Json::Obj(minion_json(cards, i, m, marks.get(i).copied().unwrap_or(false))))
+        .collect();
+    Json::Arr(board)
+}
+
+/// One minion of that board, as `state` writes one of mine, without the entity
+/// id: the copy the log staged for the fight is gone by the time the state is
+/// written. Its Dark Gifts are the gifts' own card ids, the shape a state's
+/// board holds (`ShopGiftSpec`), so the loader reads it the same way.
+fn minion_json(cards: &Cards, i: usize, m: &Minion, reanimate: bool) -> Obj {
+    let mut d = vec![
+        ("position".to_string(), Json::Int(i as i64 + 1)),
+        ("card_id".to_string(), str_(&m.card_id)),
+        ("name".to_string(), str_(&m.name)),
+        ("attack".to_string(), Json::Int(m.attack)),
+        ("health".to_string(), Json::Int(m.health)),
+        ("golden".to_string(), Json::Bool(m.golden)),
+        (
+            "keywords".to_string(),
+            Json::Arr(m.keywords.iter().map(|k| str_(k)).collect()),
+        ),
+    ];
+    if !m.dark_gifts.is_empty() {
+        let gifts: Vec<Json> = m
+            .dark_gifts
+            .iter()
+            .map(|card| {
+                Json::Obj(vec![
+                    ("card_id".to_string(), str_(card)),
+                    ("name".to_string(), str_(cards.name(card))),
+                ])
+            })
+            .collect();
+        put(&mut d, "dark_gifts", Json::Arr(gifts));
+    }
+    if let Some(sd) = minion_numbers(&m.tags) {
+        put(&mut d, "numbers", numbers_json(&sd));
+    }
+    if reanimate {
+        put(&mut d, "reanimate", Json::Bool(true));
+    }
+    d
 }
 
 /// Whether a Golden minion gives no Triple Reward when it is played.
@@ -2284,6 +2353,8 @@ impl Collector {
         put(&mut state, "secrets", secrets);
         let won = self.won_last_combat(game);
         put(&mut state, "won_last_combat", won);
+        let theirs = last_opponent_board(&self.cards, self.tracker.fights());
+        put(&mut state, "last_opponent_board", theirs);
         Json::Obj(state)
     }
 
@@ -2848,6 +2919,76 @@ mod tests {
         tally.bump("buy");
         assert_eq!(tally.render(), "{'buy': 2, 'other': 1}");
         assert_eq!(Tally::new().render(), "{}");
+    }
+
+    /// The warband of the opponent I last fought goes into a state in the shape
+    /// the state's own `board` has, from the fight that has a result: a fight
+    /// the log has already staged for the round to come is not the one I last
+    /// fought, and an empty warband is null, which leaves the powers that copy
+    /// one unpressed (`burgle_has_board`, `IspyNextOpponent`).
+    #[test]
+    fn the_last_opponents_warband_is_written_in_the_board_shape() {
+        let cards = Cards::from_pairs([
+            ("BG31_149".to_string(), "Bubble Gunner".to_string()),
+            ("BG31_803".to_string(), "Buzzing Vermin".to_string()),
+            ("BG36_MidGameEffect_000t82".to_string(), "Affinity".to_string()),
+        ]);
+        let mut tags = HashMap::new();
+        tags.insert("TAG_SCRIPT_DATA_NUM_1".to_string(), TagValue::Int(2));
+        let mut fought = bglog::Fight::new(
+            2,
+            3,
+            Vec::new(),
+            vec![
+                bglog::Minion {
+                    card_id: "BG31_149".to_string(),
+                    name: "Bubble Gunner".to_string(),
+                    attack: 4,
+                    health: 3,
+                    keywords: vec!["VENOMOUS"],
+                    ..Default::default()
+                },
+                bglog::Minion {
+                    card_id: "BG31_803".to_string(),
+                    name: "Buzzing Vermin".to_string(),
+                    attack: 2,
+                    health: 2,
+                    golden: true,
+                    dark_gifts: vec!["BG36_MidGameEffect_000t82".to_string()],
+                    tags,
+                    ..Default::default()
+                },
+            ],
+        );
+        fought.result = "win".to_string();
+        fought.reanimates = (Vec::new(), vec![false, true]);
+        // A fight for the round to come, staged but not played out.
+        let staged = bglog::Fight::new(
+            3,
+            4,
+            Vec::new(),
+            vec![bglog::Minion {
+                card_id: "BG31_149".to_string(),
+                ..Default::default()
+            }],
+        );
+        let json = last_opponent_board(&cards, &[fought.clone(), staged]);
+        let got: serde_json::Value = serde_json::from_str(&render(&json)).unwrap();
+        let want = serde_json::json!([
+            {"position": 1, "card_id": "BG31_149", "name": "Bubble Gunner",
+             "attack": 4, "health": 3, "golden": false, "keywords": ["VENOMOUS"]},
+            {"position": 2, "card_id": "BG31_803", "name": "Buzzing Vermin",
+             "attack": 2, "health": 2, "golden": true, "keywords": [],
+             "dark_gifts": [{"card_id": "BG36_MidGameEffect_000t82", "name": "Affinity"}],
+             "numbers": [2, 0, 0, 0], "reanimate": true}
+        ]);
+        assert_eq!(got, want, "the warband as the state's board holds it");
+        // Nothing fought yet: the state says null, not an empty board.
+        assert_eq!(last_opponent_board(&cards, &[]), Json::Null);
+        // A fight with no warband on the other side (an empty board).
+        let mut empty = bglog::Fight::new(1, 3, Vec::new(), Vec::new());
+        empty.result = "tie".to_string();
+        assert_eq!(last_opponent_board(&cards, &[empty]), Json::Null);
     }
 
     /// The `no_reward` mark: only the sources whose own card says a Golden

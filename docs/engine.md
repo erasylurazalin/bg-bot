@@ -525,6 +525,9 @@ build hero-less games so old tests pass unchanged, and
     - **The next warband at the start of the round.** `Game::pair` copies each
       player's opponent's board into `Player.next_board`, so I Spy (and the
       button's legality) reads the warband as it stood before anyone played.
+      A replay has no pairing to copy from: the shop replay seats the warband
+      of the opponent I last fought there, the closest board its file holds
+      (docs/real-boards.md "The shop replay").
     - **A power that arms an end of turn.** `PowerState.armed` is set by
       Saturday C'Thuns!'s press and spent in `power_end_of_turn`, where the
       repeats are the power's own turn count. `HeroPower.swaps_to`
