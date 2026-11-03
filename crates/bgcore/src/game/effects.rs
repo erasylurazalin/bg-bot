@@ -39,6 +39,14 @@ pub(super) fn buff(m: &mut Minion, attack: i32, health: i32) {
 }
 
 impl Game {
+    /// Improve every Magnetization to come by `da`/`dh`: a Volumizer this
+    /// player holds, in the Tavern, in hand or inside a minion, grows by that
+    /// much, and a later one starts that much bigger. A Magnetization calls
+    /// this before it merges the Volumizer in: the improvement is for the
+    /// Magnetizations after this one, so the minion it went into takes the
+    /// card's own stats and the improvement only for the Volumizers it
+    /// already held (log 2026_10_28_22_11_50-g5 turn 6: Relentless Deflector
+    /// 13/19 to 16/28 for a Green Volumizer's 3/9).
     pub(super) fn add_volumizer_bonus(&mut self, p: usize, da: i32, dh: i32) {
         let pl = &mut self.players[p];
         pl.volumizer_bonus.0 += da;
@@ -599,6 +607,10 @@ impl Game {
                     m.uses_left = m.turn_uses(&self.data.cards);
                     self.players[p].board.insert(at, m);
                     at += 1;
+                }
+                // Three summoned copies of one card are a triple too.
+                if n > 1 {
+                    self.check_triples_on_board(p);
                 }
             }
             Effect::SpellBonus { attack, health } => {

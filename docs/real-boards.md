@@ -208,9 +208,16 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     Enrichment and its kin) and `tavern_elemental_attack`/
     `tavern_elemental_health` (`BG_ShopBuff_Elemental`, Obsidian Ravager);
     `refresh_attack`/`refresh_health` (`BG34_854pe`, "after the Tavern is
-    Refreshed this game": Waveling, En-Djinn Blazer, Easterly Winds); and
-    `barrage_attack`/`barrage_health` (`BG34_689e2`, Blood Gem Barrage casts). A
-    key is written only when the log shows a number.
+    Refreshed this game": Waveling, En-Djinn Blazer, Easterly Winds);
+    `barrage_attack`/`barrage_health` (`BG34_689e2`, Blood Gem Barrage casts);
+    and `golden_played`, the Golden minions I played from hand this game, which
+    no tag holds: the collector counts my `play` steps whose card is Golden and
+    still on my board after it (a Magnetic minion that merged into a host is a
+    Magnetization, not a play). A key is written only when the game has a
+    number for it, and one Golden minion played is a number. A file written
+    before the key existed has the count nowhere but on a card that improves
+    with it: the loader reads Hooktusk, Master Marauder's own numbers (the pair
+    it gives now is the printed +1/+1 times one more than the count).
   - `secrets`, the Secret zone by card id in the order the Secrets were got, as
     the board files write it (always written, empty when there is nothing).
   - `waiting` on a hero power: the minion Lock and Load holds, as a board
@@ -546,13 +553,29 @@ of a random step is run, since any of them may be the log's.
     a minion a new entity id every turn, so the ids cannot follow it). The
     growth then comes from darkgifts.toml's table for that turn, and the
     doubling for Drakkari the engine already does.
-  - **A Discover that takes a slot** is seated from the pick's `moved.to`: the
-    engine's `discover_into_shop` for a Tavern slot (Galakrond's Greed) and
-    `tp.transform_slot` for a board minion (Token of the Old Gods). The slot is
-    the file's, which counts the spell slot; the engine's shop holds the minion
-    slots alone. The old card is still in the Tavern in the state before the
-    pick (the game keeps it on show while the Discover is open) and the
-    engine's pick puts it back in the pool, so nothing is removed twice.
+  - **A Discover that takes a slot** is seated from the pick's `moved.to` when
+    the file writes one, and otherwise from the state it left (a pick that
+    turns a minion into itself adds no copy to the hand, and the state shows
+    the pick where another card stood: the transformed card keeps its entity
+    id): the engine's `discover_into_shop` for a Tavern slot (Galakrond's Greed
+    and Token of the Old Gods on a Tavern minion) and `tp.transform_slot` for a
+    board minion. The slot is the file's, which counts the spell slot; the
+    engine's shop holds the minion slots alone. The old card is still in the
+    Tavern in the state before the pick (the game keeps it on show while the
+    Discover is open) and the engine's pick puts it back in the pool, so
+    nothing is removed twice.
+  - **A played minion's slot** (`play_slot`) is where it stands in the state
+    the step left, among the cards the loader already knows: the file's
+    `moved.to` is the position the log showed when it landed, which is before
+    a Battlecry's summons push it and before the minions it killed leave, so
+    with a full board it is even past the board. A card the step destroyed and
+    brought back to the slot it stood in (a Reborn minion, whose new entity id
+    the step's `left` and `entered` say) still holds that slot.
+  - **A Magnetized minion's host** (`magnetize_host`) is the card the played
+    minion's own stats went into: the step's `changed` list is in no order of
+    its own, and a stat static the play set off comes before the host. It must
+    be a card the played minion can Magnetize onto and its stats must have
+    grown by at least the played card's.
   - A game with one player is a sandbox game, so nothing else acts in it. The
     pool is the lobby's minus the copies this player holds, so a Refresh draws
     from what the game had left, and the cards hold those copies so a sale

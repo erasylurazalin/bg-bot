@@ -141,6 +141,11 @@ pub struct RealCounters {
     pub spell_health: i32,
     pub spells_cast: u32,
     pub knight_deaths: u32,
+    /// Golden minions this player played from hand this game (Hooktusk,
+    /// Master Marauder's "Improved by Golden minions you played this game!").
+    /// Only a shop step reads it: a board file's minions already carry the
+    /// stats the count gave them.
+    pub golden_played: u32,
     /// The "improve your future ..." counts (`Counter::index`), which the
     /// fight scales their next buff by.
     pub improve: [u16; N_COUNTERS],
@@ -189,6 +194,7 @@ impl Default for RealCounters {
             spell_health: 0,
             spells_cast: 0,
             knight_deaths: 0,
+            golden_played: 0,
             improve: [0; N_COUNTERS],
             gold_spent: 0,
             tavern_attack: 0,
@@ -211,7 +217,7 @@ impl RealCounters {
     /// `gem_health`, `beetle_attack`, `beetle_health`, `undead_attack`,
     /// `undead_health`, `spell_attack`, `spell_health`, `spells_cast`,
     /// `knight_deaths`, `tasty_lobster`, `baller`, and the numbers only a shop
-    /// step reads: `gold_spent`, `tavern_attack`, `tavern_health`,
+    /// step reads: `golden_played`, `gold_spent`, `tavern_attack`, `tavern_health`,
     /// `tavern_elemental_attack`, `tavern_elemental_health`, `refresh_attack`,
     /// `refresh_health`, `barrage_attack`, `barrage_health`. A key that is not
     /// in the file leaves its field at the base value; a key no engine number
@@ -230,6 +236,7 @@ impl RealCounters {
             "spell_health" => self.spell_health = value,
             "spells_cast" => self.spells_cast = count(value),
             "knight_deaths" => self.knight_deaths = count(value),
+            "golden_played" => self.golden_played = count(value),
             "tasty_lobster" => self.improve[Counter::TastyLobster.index()] = step(value),
             "baller" => self.improve[Counter::Baller.index()] = step(value),
             "gold_spent" => self.gold_spent = count(value),

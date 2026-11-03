@@ -956,3 +956,199 @@ fn the_last_tavern_spell_comes_from_the_files_history() {
     assert_eq!(result.ours.hand.len(), 1, "one copy in hand");
     assert_eq!(result.ours.hand[0].name, "Tricky Trousers");
 }
+
+/// A played minion goes into the slot it stands behind in the state the step
+/// left, not the position the log showed when it landed: a Battlecry's summons
+/// come after it and a minion it kills leaves a gap before it, so the file's
+/// `moved.to` is past where it went (triage group D3; with a full board it is
+/// even past the board, group I5).
+#[test]
+fn a_played_minion_goes_where_it_stands_in_the_state_the_step_left() {
+    let text = r#"{"source": "slot", "game": 1, "turns": [
+      {"turn": 8,
+       "start": {"board": [
+          {"id": 1, "card_id": "X1", "name": "Wolf Pup", "attack": 1, "health": 1, "position": 1},
+          {"id": 2, "card_id": "X2", "name": "Alleycat", "attack": 1, "health": 1, "position": 2},
+          {"id": 3, "card_id": "X3", "name": "Rockpool Hunter", "attack": 2, "health": 3, "position": 3}],
+        "hand": [{"id": 4, "card_id": "BG36_367", "name": "Auto Reveille",
+                  "index": 1, "kind": "minion"}],
+        "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": []},
+       "actions": [{"step": "play", "index": 1, "sub_option": 0,
+          "card": {"id": 4, "card_id": "BG36_367", "name": "Auto Reveille"},
+          "moved": {"id": 4, "to": {"where": "board", "position": 4}},
+          "after": {"board": [
+              {"id": 1, "card_id": "X1", "name": "Wolf Pup", "attack": 1, "health": 1, "position": 1},
+              {"id": 2, "card_id": "X2", "name": "Alleycat", "attack": 1, "health": 1, "position": 2},
+              {"id": 4, "card_id": "BG36_367", "name": "Auto Reveille", "attack": 4, "health": 8,
+               "position": 3},
+              {"id": 9, "card_id": "BG36_515", "name": "Snazzy Phantom", "attack": 1, "health": 7,
+               "position": 4},
+              {"id": 3, "card_id": "X3", "name": "Rockpool Hunter", "attack": 2, "health": 3,
+               "position": 5}],
+            "hand": [], "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("slot.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert!(
+        r.action.contains("Play { hand: 0, pos: 2 }"),
+        "the slot is behind the minion it stands after, not the logged position: {:?} ({:?})",
+        r.action,
+        r.verdict
+    );
+}
+
+/// A card the game destroyed and brought back to the slot it stood in (a
+/// Reborn minion) still holds that slot when a minion is played past it: the
+/// step's `left` says which card was there, and its new entity id is the same
+/// card (triage group D3; the Reborn Dead Bellringer of
+/// `2026_10_24_15_25_26-g6` turn 9 step 47).
+#[test]
+fn a_reborn_card_still_holds_the_slot_it_stood_in() {
+    let text = r#"{"source": "reborn", "game": 1, "turns": [
+      {"turn": 9,
+       "start": {"board": [
+          {"id": 1, "card_id": "X1", "name": "Wolf Pup", "attack": 1, "health": 1, "position": 1},
+          {"id": 2, "card_id": "X2", "name": "Alleycat", "attack": 1, "health": 1, "position": 2},
+          {"id": 3, "card_id": "BG36_511", "name": "Dead Bellringer", "attack": 4, "health": 4,
+           "position": 3}],
+        "hand": [{"id": 4, "card_id": "BG36_367", "name": "Auto Reveille",
+                  "index": 1, "kind": "minion"}],
+        "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": []},
+       "actions": [{"step": "play", "index": 1, "sub_option": 0,
+          "card": {"id": 4, "card_id": "BG36_367", "name": "Auto Reveille"},
+          "moved": {"id": 4, "to": {"where": "board", "position": 3}},
+          "left": [{"id": 3, "where": "board", "card_id": "BG36_511", "name": "Dead Bellringer",
+                    "position": 3}],
+          "entered": [{"id": 9, "where": "board", "card_id": "BG36_511", "name": "Dead Bellringer",
+                       "position": 3}],
+          "after": {"board": [
+              {"id": 1, "card_id": "X1", "name": "Wolf Pup", "attack": 1, "health": 1, "position": 1},
+              {"id": 2, "card_id": "X2", "name": "Alleycat", "attack": 1, "health": 1, "position": 2},
+              {"id": 9, "card_id": "BG36_511", "name": "Dead Bellringer", "attack": 8, "health": 8,
+               "position": 3},
+              {"id": 4, "card_id": "BG36_367", "name": "Auto Reveille", "attack": 4, "health": 8,
+               "position": 4}],
+            "hand": [], "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("reborn.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert!(
+        r.action.contains("Play { hand: 0, pos: 3 }"),
+        "the played minion lands after the Reborn card that still stands at 3: {:?}",
+        r.action
+    );
+}
+
+/// A Magnetized minion merges into the host the file's `changed` list shows,
+/// not the first card it lists: a stat static the play set off comes first
+/// (triage group M1; `2026_10_28_22_11_50-g5` turn 6 step 12 merges a Red
+/// Volumizer into Relentless Deflector, and Timecap'n Hooktail's +3 is the
+/// first entry).
+#[test]
+fn a_magnetized_minion_merges_into_the_host_the_step_changed() {
+    let text = r#"{"source": "magnet", "game": 1, "turns": [
+      {"turn": 6,
+       "start": {"board": [
+          {"id": 1, "card_id": "BG27_005", "name": "Timecap'n Hooktail", "attack": 43, "health": 4,
+           "position": 1},
+          {"id": 2, "card_id": "BG34_405", "name": "Relentless Deflector", "attack": 13, "health": 19,
+           "position": 2}],
+        "hand": [{"id": 4, "card_id": "BG34_170t", "name": "Red Volumizer", "attack": 4, "health": 8,
+                  "index": 1, "kind": "minion"}],
+        "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": []},
+       "actions": [{"step": "play", "index": 1, "sub_option": 0,
+          "card": {"id": 4, "card_id": "BG34_170t", "name": "Red Volumizer",
+                   "attack": 4, "health": 8},
+          "moved": {"id": 4, "to": null},
+          "changed": [
+            {"position": 1, "card_id": "BG27_005", "name": "Timecap'n Hooktail",
+             "was": {"card_id": "BG27_005", "attack": 43, "health": 4},
+             "now": {"card_id": "BG27_005", "attack": 46, "health": 4}},
+            {"position": 2, "card_id": "BG34_405", "name": "Relentless Deflector",
+             "was": {"card_id": "BG34_405", "attack": 13, "health": 19},
+             "now": {"card_id": "BG34_405", "attack": 17, "health": 27}}],
+          "after": {"board": [
+              {"id": 1, "card_id": "BG27_005", "name": "Timecap'n Hooktail", "attack": 46, "health": 4,
+               "position": 1},
+              {"id": 2, "card_id": "BG34_405", "name": "Relentless Deflector", "attack": 17, "health": 27,
+               "position": 2}],
+            "hand": [], "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("magnet.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert!(
+        r.action.contains("Play { hand: 0, pos: 1 }"),
+        "the Volumizer merges into the minion its own stats went into: {:?} ({:?})",
+        r.action,
+        r.verdict
+    );
+}
+
+/// "Golden minions you played this game" (Hooktusk, Master Marauder) is not a
+/// number the log tags: a file the collector wrote carries it in the counters,
+/// and an older one still shows it on the card that improves with it (triage
+/// group D1; Hooktusk's script numbers hold the pair it gives now, which is the
+/// printed +1/+1 times one more than the count).
+#[test]
+fn golden_minions_played_come_from_the_counters_or_from_hooktusks_own_numbers() {
+    let loaded = seat(
+        r#"{"name": "Hooktusk, Master Marauder", "attack": 4, "health": 4, "numbers": [6, 6, 0, 0]}"#,
+        "",
+        "",
+        6,
+    );
+    assert_eq!(
+        loaded.game.players[bgcore::shop_replay::ME].golden_played,
+        5,
+        "a Hooktusk giving +6/+6 says five Golden minions were played"
+    );
+    let mut with_counter = seat(
+        r#"{"name": "Cord Puller", "attack": 1, "health": 1}"#,
+        "",
+        "",
+        6,
+    );
+    with_counter.game.players[bgcore::shop_replay::ME].golden_played = 0;
+    let text = r#"{"source": "counter", "game": 1, "turns": [
+        {"turn": 8,
+          "start": {"board": [{"name": "Cord Puller", "attack": 1, "health": 1}],
+                     "hand": [], "tavern": [],
+                     "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": 5,
+                     "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                     "hero_powers": [], "trinkets": [],
+                     "counters": {"golden_played": 7}},
+          "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("counter.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let loaded = load(&data(), &turn.start, None, None, turn.turn, 7);
+    assert_eq!(
+        loaded.game.players[bgcore::shop_replay::ME].golden_played,
+        7,
+        "the collector's own count is what the loader reads first"
+    );
+}

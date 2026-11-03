@@ -44,6 +44,11 @@ impl Game {
     /// when `m` was played from hand, and false when attached directly by an
     /// effect (Spark Snapper, Resourceful Robot, Auto Reveille, Glambot).
     pub(super) fn magnetize_to(&mut self, p: usize, pos: usize, m: Minion, from_play: bool) {
+        let volumizer = self.data.cards.get(m.card).volumizer_buff;
+        if let Some((da, dh)) = volumizer {
+            let mul = if m.golden { 2 } else { 1 };
+            self.add_volumizer_bonus(p, da * mul, dh * mul);
+        }
         let cards = &self.data.cards;
         if m.pool_copies > 0 && !cards.get(m.card).token && !cards.get(m.card).is_spell() {
             let slot = cards.get(m.card).pool_slot as usize;
@@ -54,10 +59,6 @@ impl Game {
         {
             let pl = &mut self.players[p];
             pl.magnetizations = pl.magnetizations.saturating_add(1);
-        }
-        if let Some((da, dh)) = cards.get(m.card).volumizer_buff {
-            let mul = if m.golden { 2 } else { 1 };
-            self.add_volumizer_bonus(p, da * mul, dh * mul);
         }
         // A Magnetic minion played as a Magnetization (Spell-powered Wrench
         // casts Repair Job on a random Mech).
@@ -126,12 +127,12 @@ impl Game {
                 .map(|(_, golden)| if golden { 2 } else { 1 })
                 .sum();
             for _ in 0..copies {
-                self.players[p].board[j].magnetize(&self.data.cards, m);
-                self.note_magnetized(p);
                 if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
                     let mul = if m.golden { 2 } else { 1 };
                     self.add_volumizer_bonus(p, da * mul, dh * mul);
                 }
+                self.players[p].board[j].magnetize(&self.data.cards, m);
+                self.note_magnetized(p);
             }
         }
     }

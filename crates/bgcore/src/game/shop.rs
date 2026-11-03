@@ -742,6 +742,12 @@ impl Game {
         for m in &out.dead {
             self.trinket_event(p, Event::Destroy, Some(m.card), 1);
         }
+        // A Deathrattle or a Reborn the destroy fired can put three plain
+        // copies on the board, and those are a triple like any other three (a
+        // Disguised Graverobber killing a Cadaver Caretaker: its three
+        // Skeletons merge and the Golden one goes to the hand, log
+        // 2026_10_30_19_45_15-g2 turn 6 step 5).
+        self.check_triples_on_board(p);
         out.tracked
     }
 
@@ -780,6 +786,9 @@ impl Game {
         pl.board.clear();
         pl.board.extend(out.board);
         self.apply_side_outcome(p, &out.side, false);
+        // The summons are on the board: three plain copies of one are a
+        // triple, as any other three are (a Cadaver Caretaker's Skeletons).
+        self.check_triples_on_board(p);
     }
 
     /// A minion was just bought into the last hand slot (before it can

@@ -5414,3 +5414,35 @@ fn the_end_of_the_turn_runs_trinkets_before_minions() {
         "the Corroder's spell comes after the trinket's three: {names:?}"
     );
 }
+
+/// Three plain copies a shop-phase summon made are a triple like any other
+/// three: Floating Candle Set fires a Cadaver Caretaker's Deathrattle, its
+/// three Skeletons merge, and the Golden one joins the hand (triage group D3;
+/// log 2026_10_26_00_48_15-g2 turn 8 step 3).
+#[test]
+fn three_summoned_copies_triple_into_a_golden_card_in_hand() {
+    let mut g = game(346);
+    take(&mut g, 0, "Floating Candle Set");
+    let skeleton = id(&g, "Skeleton");
+    put_on_board(&mut g, 0, "Cadaver Caretaker");
+    let candle = g
+        .players[0]
+        .hand
+        .iter()
+        .position(|m| m.card == id(&g, "Floating Candle"))
+        .expect("the Spellcraft spell is in hand");
+    turn_of(&mut g, 0);
+    act(&mut g, 0, Action::Play { hand: candle as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    let on_board = g.players[0].board.iter().filter(|m| m.card == skeleton).count();
+    assert_eq!(on_board, 0, "the three Skeletons merged instead of standing");
+    let golden = g
+        .players[0]
+        .hand
+        .iter()
+        .filter(|m| m.card == skeleton)
+        .collect::<Vec<_>>();
+    assert_eq!(golden.len(), 1, "one Golden Skeleton in hand");
+    assert!(golden[0].golden, "and it is the Golden one");
+    g.check_invariants().unwrap();
+}

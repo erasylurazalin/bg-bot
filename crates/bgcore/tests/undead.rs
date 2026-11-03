@@ -390,21 +390,24 @@ fn bellringer_reborn_destroys_in_the_shop_with_deathrattles_and_one_health_that_
     act(&mut g, 0, Action::Activate(0));
     // the only other Undead: it is picked for you
     assert!(g.players[0].pending_target.is_none());
-    // Caretaker died (three Skeletons in its slot), then came back plain
-    // with 1 Health plus the Health bonus; Bellringer got +4/+4.
-    assert_eq!(
-        board_names(&g, 0),
-        ["Dead Bellringer", "Skeleton", "Skeleton", "Skeleton", "Cadaver Caretaker"]
-    );
+    // Caretaker died, its three Skeletons tripled into a Golden one in the
+    // hand (a shop-phase summon that makes a third plain copy triples, as the
+    // log shows for a Graverobber into a Cadaver Caretaker,
+    // 2026_10_30_19_45_15-g2 turn 6 step 5), and it came back plain with 1
+    // Health plus the Health bonus; Bellringer got +4/+4.
+    assert_eq!(board_names(&g, 0), ["Dead Bellringer", "Cadaver Caretaker"]);
     assert_eq!(stats(&g.players[0].board[0]), (7, 12));
-    assert_eq!(stats(&g.players[0].board[1]), (1, 3), "Skeleton 1/1 with +0/+2");
-    assert_eq!(stats(&g.players[0].board[4]), (3, 3), "1 Health plus the +2 Health bonus");
-    assert!(!g.players[0].board[4].keywords.has(Keywords::REBORN));
+    assert_eq!(g.players[0].hand.len(), 1, "the Golden Skeleton joined the hand");
+    let golden = g.players[0].hand[0];
+    assert_eq!(g.data.cards.get(golden.card).name, "Skeleton");
+    assert!(golden.golden);
+    assert_eq!(stats(&g.players[0].board[1]), (3, 3), "1 Health plus the +2 Health bonus");
+    assert!(!g.players[0].board[1].keywords.has(Keywords::REBORN));
     assert_eq!(g.players[0].gold, 4);
     g.check_invariants().unwrap();
     // it never heals: the 3 Health goes into the next turns and fights
     end_all_turns(&mut g);
-    assert_eq!(stats(&g.players[0].board[4]), (3, 3));
+    assert_eq!(stats(&g.players[0].board[1]), (3, 3));
     g.check_invariants().unwrap();
 
     // Bellringer is once per turn and golden gains +8/+8.
@@ -1165,14 +1168,14 @@ fn a_knight_destroyed_in_the_shop_makes_the_others_grow() {
     put_on_board(&mut g, 0, "Dead Bellringer", false);
     put_on_board(&mut g, 0, "Eternal Knight", false);
     put_on_board(&mut g, 0, "Eternal Knight", false);
-    put_in_hand(&mut g, 0, "Eternal Knight", false);
     set_gold(&mut g, 0, 5);
     act(&mut g, 0, Action::Activate(0));
     act(&mut g, 0, Action::Target(1));
     assert_eq!(g.players[0].knight_deaths, 1);
-    // the other Knight and the one in hand: 4/2 + 4/2
+    // The Knight comes back through Reborn and the other one grows by 4/2; a
+    // third plain copy in the hand would be a triple (the destroy checks the
+    // board for one), so the test keeps two.
     assert_eq!(stats(&g.players[0].board[2]), (8, 4));
-    assert_eq!(stats(&g.players[0].hand[0]), (8, 4));
     g.check_invariants().unwrap();
 }
 

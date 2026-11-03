@@ -64,6 +64,23 @@ impl Game {
         self.check_triple_tracking(p, card, &mut dummy);
     }
 
+    /// Check every minion on the board for a triple. A shop-phase summon can
+    /// bring the third plain copy without a buy or a play (a Cadaver
+    /// Caretaker's three Skeletons), and the game merges those like any other
+    /// three (log 2026_10_26_00_48_15-g2 turn 8 step 3: the Golden Skeleton
+    /// went to the hand).
+    pub(super) fn check_triples_on_board(&mut self, p: usize) {
+        let mut cards: ArrayVec<CardId, { crate::BOARD }> = ArrayVec::new();
+        for m in &self.players[p].board {
+            if !cards.contains(&m.card) {
+                let _ = cards.try_push(m.card);
+            }
+        }
+        for card in cards {
+            self.check_triple(p, card);
+        }
+    }
+
     pub(super) fn check_triple_tracking(&mut self, p: usize, card: CardId, tracked_pos: &mut usize) {
         let cards = &self.data.cards;
         if cards.get(card).is_spell() || cards.get(card).no_triple {

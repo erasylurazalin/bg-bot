@@ -276,14 +276,21 @@ fn graverobber_destroys_a_chosen_undead_fully_and_gets_a_plain_copy() {
     let pool_before = g.pool[slot];
     put_in_hand(&mut g, 0, "Disguised Graverobber", false);
     play(&mut g, 0, 0, 2);
-    // Only one Undead, so no choice is asked. Its Deathrattle ran.
+    // Only one Undead, so no choice is asked. Its Deathrattle ran: three of
+    // its four Skeletons are a triple, which goes Golden into the hand and
+    // leaves one Skeleton on the board (the game does the same: a shop-phase
+    // summon that makes a third plain copy triples, log
+    // 2026_10_30_19_45_15-g2 turn 6 step 5, a Graverobber into a Cadaver
+    // Caretaker).
     assert_eq!(
         names(&g, &g.players[0].board),
-        ["Skeleton", "Skeleton", "Skeleton", "Skeleton", "Wolf Pup", "Disguised Graverobber"]
-            .map(String::from)
+        ["Skeleton", "Wolf Pup", "Disguised Graverobber"].map(String::from)
     );
-    assert_eq!(g.players[0].hand.len(), 1);
-    let copy = g.players[0].hand[0];
+    assert_eq!(g.players[0].hand.len(), 2);
+    let golden = g.players[0].hand[0];
+    assert_eq!(g.data.cards.get(golden.card).name, "Skeleton");
+    assert!(golden.golden, "the third Skeleton turned the triples Golden");
+    let copy = g.players[0].hand[1];
     assert_eq!(g.data.cards.get(copy.card).name, "Harmless Bonehead");
     assert!(!copy.golden);
     assert_eq!(stats(&copy), (1, 1));
