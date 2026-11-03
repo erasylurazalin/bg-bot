@@ -582,7 +582,21 @@ Surveyor ("an extra time"). Future cards slot into one side or the other.
 A repeated Battlecry or spell that picks a target uses the same target
 every time: Brann doubling a Magicfin token's taught Tricky Trousers casts
 it twice on the one minion picked (Era, 2026-11-04; log
-`Hearthstone_2026_10_28_02_28_32-g1` turn 10 step 2).
+`Hearthstone_2026_10_28_02_28_32-g1` turn 10 step 2). A Magicfin token's
+cast is its Battlecry, so Brann doubles it.
+
+Making a minion golden is the exception: a repeat still counts as a
+trigger or a cast, but the golden happens once. Brann plus Elite Navigator
+makes one Pirate golden, while the Battlecry still counts twice for
+Kalecgos and every other "Battlecry triggered" card. A golden Elite
+Navigator picks two Pirates. Eyes of the Earth Mother with Balinda is the
+same: the spell casts twice (both casts count), the golden happens once
+(Era, 2026-11-04).
+
+A repeated Choose One: you choose the option and the target once; the
+repeat's choice is random (Era, 2026-11-04: "you choose a target, and the
+choice is random"; read as the repeat picking a random option on the same
+target, see the private notes).
 
 **Spending gold.** Anything that actually uses gold counts: buying,
 upgrading, rolling, Activate costs. Health paid instead of gold and free
