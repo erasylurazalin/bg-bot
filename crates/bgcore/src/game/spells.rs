@@ -349,8 +349,8 @@ impl Game {
     /// another Roogug's, so two Roogugs never loop (docs/rules/design.md
     /// "Geomagus Roogug"). A Gem the player plays from the hand gets Surveyor
     /// Portrait's bonus where it lands instead (`Player::add_gem_stats` then
-    /// `Game::roogug_reacts`). Shop only: a fight plays its Gems through the
-    /// fight's own counters.
+    /// `Game::roogug_reacts`). The shop only: a fight plays its Gems through
+    /// the fight's own `Side::gem_at`, which carries the same mark.
     fn gem_on_board(&mut self, p: usize, pos: usize, from_roogug: bool) {
         self.players[p].add_gem_stats(pos, 1, false);
         if !from_roogug {

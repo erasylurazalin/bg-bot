@@ -97,7 +97,7 @@ legality in mod.rs.
 | Player bonus "wherever they are" | `undead_bonus = [a, h]` effect, `on_cast_spell = { undead_bonus }`, `buff_per_kind_death` | `Game::add_undead_bonus`, `add_knight_deaths`, `Player::make_card`, `Side::summon` | Nerubian Deathswarmer |
 | Activate (N) | `activate = { cost, effect }` | `Action::Activate` in `apply`; legality in `is_legal` (needs_* checks on `Effect`) | Suspicious Prisonguard |
 | Activate with a discard | `activate = { cost, discard = true, effect }` | opens `pending_discard`, answered by `Action::Discard`; needs a discardable card | Mangled Bandit |
-| A Blood Gem lands on this | `on_gem_played_on_self = 1` | `Game::roogug_on_gem`, called by `gem_on_board` / `roogug_reacts` for every Gem but another Roogug's | Geomagus Roogug |
+| A Blood Gem lands on this | `on_gem_played_on_self = 1` | `Game::roogug_on_gem` (shop: `gem_on_board` / `roogug_reacts`) and `Side::roogug_on_gem` (fight: `gem_at`), for every Gem but another Roogug's | Geomagus Roogug |
 | A Choose One card each turn gets both effects | `choose_one_cover = 1` | one combine in `Minion.uses_left` per Trailblazer on the board, spent by `take_trailblazer_cover`, `resolve_choose_options` | Thorned Trailblazer |
 | After a Choose One card is played | `after_choose_one_play = 2` | `Player.hogrider_pending`, fired by `Game::resolve_hogrider` once no choice is open (from `step` and `finish_shop`) | Turbo Hogrider |
 | Rally: summon a stat copy that attacks first | `rally = { summon_stat_copy = "Golem" }` | `attack_triggers` + `attack_swings_at` (fight); shop copy summons only | Jailbird Juggernaut |
@@ -758,7 +758,14 @@ Triple Reward spell.
   minion's or a spell's effect. A Roogug in the Tavern doesn't react (open,
   in the private notes). The Gems it plays carry the from-Roogug mark
   (`from_roogug`), the one kind no Roogug reacts to, so two Roogugs never
-  loop. Blood Gem
+  loop. The fight reacts the same way: every Gem a fight plays goes through
+  `Side::gem_at`, which adds the stats and then, for a Gem that is not from
+  a Roogug, lets a Roogug there play its own (`Side::roogug_on_gem`) on a
+  random different living friendly minion, one per Gem, through the fight's
+  own RNG. Its Gems carry the same mark. The fight adds a Gem's stats
+  straight to the minion and keeps no `Minion.gem_attack` (that field is the
+  board's, from the shop).
+  Blood Gem
   Barrage adds to `Player.barrage` per cast; every Refresh gives it to every
   Tavern minion (`apply_barrage`), the turn-start roll included when the
   Tavern changed (see docs/rules/design.md "Two kinds of Refresh").

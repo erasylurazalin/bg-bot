@@ -1566,7 +1566,7 @@ impl<'a> Side<'a> {
             }
             FightAct::Gems { pick, count } => {
                 for i in self.pick(db, pick, target, rng) {
-                    self.gem_at(db, i, count as i32, false);
+                    self.gem_at(db, i, count as i32, false, false, rng);
                 }
             }
             FightAct::Summon { card, count, keywords } => {
@@ -2190,10 +2190,34 @@ impl<'a> Side<'a> {
         n + u32::from(!self.outside && self.counters.trinkets.take_first_deathrattle())
     }
 
+    /// How many Blood Gems a minion plays when one lands on it (Geomagus
+    /// Roogug, either part of a multi-part card). Golden doubles it.
+    fn gem_reaction(&self, db: &CardDb, m: &Minion) -> u8 {
+        m.parts()
+            .find_map(|(c, g)| {
+                db.get(c).on_gem_played_on_self.map(|n| n * if g { 2 } else { 1 })
+            })
+            .unwrap_or(0)
+    }
+
     /// Play `times` Blood Gems on the minion in slot `i`: its stats for this
     /// fight and, when `permanent` (Razorfen Vineweaver), stats and Blood Gem
-    /// stats the game gives the board minion after the fight.
-    fn gem_at(&mut self, db: &CardDb, i: usize, times: i32, permanent: bool) {
+    /// stats the game gives the board minion after the fight. Every Gem
+    /// played on a Geomagus Roogug makes it play its own on a random
+    /// different living friendly minion, the same as in the shop
+    /// (`Game::gem_on_board`, docs/rules/design.md "Geomagus Roogug").
+    /// `from_roogug` is the mark a Gem carries when a Roogug played it: a
+    /// Roogug there reacts to every Gem but another Roogug's, so two Roogugs
+    /// never loop.
+    fn gem_at(
+        &mut self,
+        db: &CardDb,
+        i: usize,
+        times: i32,
+        permanent: bool,
+        from_roogug: bool,
+        rng: &mut Rng,
+    ) {
         let da = self.counters.gem_attack.saturating_mul(times);
         let dh = self.counters.gem_health.saturating_mul(times);
         if db.get(self.ms[i].m.card).fixed_stats {
@@ -2210,6 +2234,37 @@ impl<'a> Side<'a> {
             self.out.permanent_stats[s].1 = self.out.permanent_stats[s].1.saturating_add(dh);
             self.out.permanent_gems[s].0 = self.out.permanent_gems[s].0.saturating_add(da);
             self.out.permanent_gems[s].1 = self.out.permanent_gems[s].1.saturating_add(dh);
+        }
+        if !from_roogug {
+            self.roogug_on_gem(db, i, times, rng);
+        }
+    }
+
+    /// Each of the `gems` Blood Gems just played on the minion in slot
+    /// `i` makes a Geomagus Roogug there play its own Gems, on a random
+    /// different living friendly minion. Those Gems carry the from-Roogug
+    /// mark, so they never make another Roogug react and never carry on
+    /// into the game (`permanent` is false).
+    fn roogug_on_gem(&mut self, db: &CardDb, i: usize, gems: i32, rng: &mut Rng) {
+        if gems <= 0 || self.ms[i].m.health <= 0 {
+            return;
+        }
+        let times = self.gem_reaction(db, &self.ms[i].m) as i32;
+        if times == 0 {
+            return;
+        }
+        let mut others: ArrayVec<usize, BOARD> = ArrayVec::new();
+        for j in 0..self.ms.len() {
+            if j != i && self.ms[j].m.health > 0 {
+                others.push(j);
+            }
+        }
+        if others.is_empty() {
+            return;
+        }
+        for _ in 0..gems.saturating_mul(times) {
+            let at = others[rng.below(others.len() as u32) as usize];
+            self.gem_at(db, at, 1, false, true, rng);
         }
     }
 
@@ -2716,14 +2771,14 @@ impl<'a> Side<'a> {
             }
             Effect::GemSelf { count, permanent } => {
                 if let Some(i) = self.index_of(fx.host) {
-                    self.gem_at(db, i, count as i32 * mul, permanent);
+                    self.gem_at(db, i, count as i32 * mul, permanent, false, rng);
                 }
             }
             Effect::GemOthers(count) => {
                 let n = count as i32 * mul;
                 for i in 0..self.ms.len() {
                     if self.ms[i].uid != fx.host && self.ms[i].m.health > 0 {
-                        self.gem_at(db, i, n, false);
+                        self.gem_at(db, i, n, false, false, rng);
                     }
                 }
             }
@@ -2732,7 +2787,7 @@ impl<'a> Side<'a> {
                     && let Some(i) = self.index_of(a)
                     && self.ms[i].m.health > 0
                 {
-                    self.gem_at(db, i, count as i32 * mul, false);
+                    self.gem_at(db, i, count as i32 * mul, false, false, rng);
                 }
             }
             Effect::GemBonus { attack, health } => {
@@ -4968,5 +5023,112 @@ mod tests {
         assert_eq!(out.side.n_death_cards, 0);
         let out = tavern_attack(&db, &[beast], 0, fishbait, counters, &mut Rng::new(1));
         assert_eq!(out.side.n_death_cards, 0);
+    }
+
+    /// A Side built from card names, golden marked with a trailing '!'.
+    fn gem_side(db: &CardDb, names: &[&str]) -> (Side<'static>, u16) {
+        let mut uid = 0;
+        let board: Vec<Minion> = names
+            .iter()
+            .map(|n| {
+                let (n, golden) = match n.strip_suffix('!') {
+                    Some(plain) => (plain, true),
+                    None => (*n, false),
+                };
+                db.make(db.by_name(n).unwrap(), golden)
+            })
+            .collect();
+        (Side::new(db, &board, &[], Counters::default(), &mut uid), uid)
+    }
+
+    /// A fight's Gems on every other friendly minion (Bonker's Rally, a
+    /// trinket's act), played the way `run_effect` plays them.
+    fn gem_others(
+        db: &CardDb,
+        s: &mut Side,
+        host: usize,
+        count: u8,
+        uid: &mut u16,
+        rng: &mut Rng,
+    ) {
+        let h = s.ms[host].uid;
+        let fx = Fx { side: 0, host: h, killer: None, attacker: None, skip_ptr: false };
+        let mut at = s.ms.len();
+        s.run_effect(db, Effect::GemOthers(count), false, fx, &mut at, uid, rng, &mut ());
+    }
+
+    /// The Gems each minion has taken, counted as the stats it gained: a
+    /// fight does not keep `Minion::gem_attack` (that is the board's, from
+    /// the shop), it adds the Gem's stats straight away.
+    fn gems_taken(before: &[(i32, i32)], s: &Side) -> Vec<i32> {
+        s.ms.iter()
+            .zip(before)
+            .map(|(f, &(a, h))| (f.m.attack - a).min(f.m.health - h))
+            .collect()
+    }
+
+    fn stats(s: &Side) -> Vec<(i32, i32)> {
+        s.ms.iter().map(|f| (f.m.attack, f.m.health)).collect()
+    }
+
+    #[test]
+    fn a_fight_gem_on_a_roogug_plays_one_on_another_minion() {
+        // docs/rules/design.md "Geomagus Roogug": every Blood Gem played on it
+        // makes it play its own Gems on a random different friendly minion,
+        // in a fight as in the shop (`Game::gem_on_board`). Bonker's Gem
+        // others puts one Gem on each of the other two.
+        let db = db();
+        let (mut s, mut uid) = gem_side(&db, &["Bonker", "Geomagus Roogug", "Tusked Camper"]);
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        gem_others(&db, &mut s, 0, 1, &mut uid, &mut rng);
+        let gems = gems_taken(&before, &s);
+        assert_eq!(gems[1], 1, "the Gem played on the Roogug");
+        assert_eq!(gems[0] + gems[2], 2, "Bonker's own Gem plus the Roogug's one");
+        assert_eq!(gems[0].max(gems[2]), 2, "the Roogug's Gem landed on one of them");
+    }
+
+    #[test]
+    fn a_fight_gem_on_a_golden_roogug_plays_two() {
+        let db = db();
+        let (mut s, mut uid) = gem_side(&db, &["Bonker", "Geomagus Roogug!", "Tusked Camper"]);
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        gem_others(&db, &mut s, 0, 1, &mut uid, &mut rng);
+        let gems = gems_taken(&before, &s);
+        assert_eq!(gems[1], 1, "the Gem played on the golden Roogug");
+        assert_eq!(gems[0] + gems[2], 3, "Bonker's own Gem plus the golden Roogug's two");
+    }
+
+    #[test]
+    fn two_roogugs_in_a_fight_never_loop() {
+        // Each Roogug reacts to Bonker's Gem, and each Gem it plays carries
+        // the from-Roogug mark: the other Roogug it lands on does not react,
+        // so the board takes exactly 2 + 2 Gems and never one more.
+        let db = db();
+        let (mut s, mut uid) = gem_side(&db, &["Bonker", "Geomagus Roogug", "Geomagus Roogug"]);
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        gem_others(&db, &mut s, 0, 1, &mut uid, &mut rng);
+        let gems = gems_taken(&before, &s);
+        assert_eq!(gems.iter().sum::<i32>(), 4, "Bonker's two Gems and one reaction each");
+        assert!(gems[1].min(gems[2]) >= 1, "each Roogug kept its own Gem");
+    }
+
+    #[test]
+    fn a_roogugs_own_gem_on_a_roogug_does_not_trigger_it() {
+        // The Gem a Roogug plays carries the from-Roogug mark, so on a
+        // Roogug it is stats and nothing else.
+        let db = db();
+        let (mut s, _uid) = gem_side(&db, &["Geomagus Roogug", "Tusked Camper"]);
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        s.gem_at(&db, 0, 1, false, true, &mut rng);
+        assert_eq!(gems_taken(&before, &s), [1, 0], "stats only, no reaction");
+        // The same Gem without the mark makes the Roogug play its own on the
+        // Camper.
+        let before = stats(&s);
+        s.gem_at(&db, 0, 1, false, false, &mut rng);
+        assert_eq!(gems_taken(&before, &s), [1, 1]);
     }
 }
