@@ -2974,6 +2974,12 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     let mut loaded = load(data, before, hero, file.lobby(), turn, seed, previous);
     loaded.game.players[ME].tp.whistle = armed;
     loaded.game.players[ME].last_spell = last_spell;
+    // A Gold-plated Compass's type is spent once the file has shown the Golden
+    // minion it named; the state the loader seats says nothing about it
+    // (`compass_spent`).
+    if compass_spent(file, turn_index, index) {
+        forget_compass_types(&mut loaded.game, data);
+    }
     // What the turn's own spells improved the Tavern spell bonus by: the log's
     // counter now against the one the turn started with.
     if let Some(start) = file.turns.get(turn_index).map(|t| &t.start) {
@@ -3153,6 +3159,74 @@ fn whistle_armed(file: &ShopFileSpec, turn: usize, step: usize) -> bool {
         }
     }
     false
+}
+
+/// Whether the Gold-plated Compass has spent its type by step `step` of turn
+/// `turn`. It makes the next minion of its type the player buys Golden where it
+/// stands in the Tavern, once, and no logged state says whether that has
+/// happened: the steps before this one do. The payout is a `buy` whose Tavern
+/// card was plain and whose hand holds that same entity Golden, unless the two
+/// plain copies a triple needs were already in the hand or on the board: a buy
+/// that completes a triple keeps the Compass armed
+/// (docs/notes/UNSURE.md, "Gold-plated Compass and triples"). A Tavern card
+/// Golden Touch made Golden is plain at no buy, so it reads as no payout.
+fn compass_spent(file: &ShopFileSpec, turn: usize, step: usize) -> bool {
+    for t in 0..=turn {
+        let Some(turn_spec) = file.turns.get(t) else { continue };
+        let last = if t == turn {
+            step.min(turn_spec.actions.len())
+        } else {
+            turn_spec.actions.len()
+        };
+        let mut before: &ShopStateSpec = &turn_spec.start;
+        for a in &turn_spec.actions[..last] {
+            if golden_bought(before, a) {
+                return true;
+            }
+            if let Some(aft) = &a.after {
+                before = aft;
+            }
+        }
+    }
+    false
+}
+
+/// Whether the buy step `a`, taken from the state `before` it, left the Tavern
+/// card it bought Golden in hand, with no triple behind it: the copies the
+/// triple would have taken were not owned before the buy.
+fn golden_bought(before: &ShopStateSpec, a: &ShopStepSpec) -> bool {
+    if a.step != "buy" {
+        return false;
+    }
+    let Some(card) = a.card.as_ref().filter(|c| !c.golden) else { return false };
+    let Some(after) = a.after.as_ref() else { return false };
+    if !after.hand.iter().any(|m| m.id == card.id && m.golden) {
+        return false;
+    }
+    let owned = before
+        .hand
+        .iter()
+        .chain(&before.board)
+        .filter(|m| m.card_id == card.card_id && !m.golden)
+        .count();
+    owned < 2
+}
+
+/// Empty the type a Compass holds, the way its own buy does once the Golden
+/// minion it named is bought.
+fn forget_compass_types(game: &mut Game, data: &Data) {
+    for slot in 0..crate::TRINKET_SLOTS {
+        let Some(i) = game.trinket_of(ME, slot) else { continue };
+        let makes_golden = data
+            .trinkets
+            .get(i)
+            .on_buy
+            .iter()
+            .any(|a| matches!(a, crate::trinkets::Act::GoldenBoughtType));
+        if makes_golden {
+            game.players[ME].trinkets[slot].tribe = None;
+        }
+    }
 }
 
 /// The last Tavern spell the player had cast when step `step` of turn `turn`

@@ -250,12 +250,30 @@ pub fn seat_trinkets(data: &Data, pl: &mut Player, trinkets: &[RealTrinketSpec])
         };
         slot = want + 1;
         match data.trinkets.by_card_id(&spec_trinket.card_id) {
-            Some(i) => pl.hold_trinket(
-                data,
-                want,
-                i,
-                trinket_value(data.trinkets.get(i), &spec_trinket.numbers),
-            ),
+            Some(i) => {
+                pl.hold_trinket(
+                    data,
+                    want,
+                    i,
+                    trinket_value(data.trinkets.get(i), &spec_trinket.numbers),
+                );
+                // A trinket that reads the player's type at the pick (a
+                // Compass) writes the type it locked in its own first number
+                // as the game's race code (43 for a Quilboar: the tag the card
+                // export calls `RACES`), which is the only trace of a pick the
+                // loader never ran. A number that names no tribe leaves it
+                // unread, as before.
+                let locks = data
+                    .trinkets
+                    .get(i)
+                    .on_pick
+                    .iter()
+                    .any(|a| matches!(a, crate::trinkets::Act::LockType));
+                if locks {
+                    pl.trinkets[want].tribe =
+                        race_code_tribe(spec_trinket.numbers.first().copied());
+                }
+            }
             None => missing.push(format!(
                 "trinket not built: {} ({})",
                 spec_trinket.name, spec_trinket.card_id
@@ -263,6 +281,27 @@ pub fn seat_trinkets(data: &Data, pl: &mut Player, trinkets: &[RealTrinketSpec])
         }
     }
     missing
+}
+
+/// The minion type a Compass locked in, from the game's race code: the numbers
+/// `ref/carddefs/CardDefs.xml` writes as `CARDRACE` and `tools/export_cards.py`
+/// names (20 a Beast, 43 a Quilboar). A code with no tribe in this card set
+/// (`ALL`, or one the engine has no name for) reads as none.
+fn race_code_tribe(code: Option<i32>) -> Option<crate::cards::Tribe> {
+    use crate::cards::Tribe;
+    match code? {
+        11 => Some(Tribe::Undead),
+        14 => Some(Tribe::Murloc),
+        15 => Some(Tribe::Demon),
+        17 => Some(Tribe::Mech),
+        18 => Some(Tribe::Elemental),
+        20 => Some(Tribe::Beast),
+        23 => Some(Tribe::Pirate),
+        24 => Some(Tribe::Dragon),
+        43 => Some(Tribe::Quilboar),
+        126 => Some(Tribe::Aberration),
+        _ => None,
+    }
 }
 
 /// Seat one side of a real fight: `RealBoard::build_one` makes the board, a

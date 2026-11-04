@@ -1043,18 +1043,23 @@ impl Game {
             }
             SpellEffect::GoldenTouch => {
                 let cards = &self.data.cards;
-                let shop = &mut self.players[p].shop;
                 let ok = |m: &Minion| !m.golden && !cards.get(m.card).fixed_stats;
-                let n = shop.iter().filter(|m| ok(m)).count() as u32;
+                let n = self.players[p].shop.iter().filter(|m| ok(m)).count() as u32;
                 if n > 0 {
                     let k = self.rng.below(n) as usize;
-                    let m = shop.iter_mut().filter(|m| ok(m)).nth(k).unwrap();
-                    let base = cards.get(m.card);
-                    let (ga, gh) =
-                        base.golden_stats.unwrap_or((base.attack * 2, base.health * 2));
-                    m.golden = true;
-                    m.attack += ga - base.attack;
-                    m.health += gh - base.health;
+                    let at = self.players[p]
+                        .shop
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, m)| ok(m))
+                        .nth(k)
+                        .unwrap()
+                        .0;
+                    // A Tavern minion turns Golden where it stands, by the one
+                    // `golden_up` rule.
+                    let mut m = self.players[p].shop[at];
+                    super::shop::golden_up(&self.players[p], cards, &mut m);
+                    self.players[p].shop[at] = m;
                 }
             }
             SpellEffect::SharingIsCaring => {
