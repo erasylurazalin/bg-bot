@@ -921,7 +921,14 @@ impl Game {
                         st,
                         SpellTarget::Devourer | SpellTarget::Butchering { .. }
                     );
-                    if !pt.by_minion && !eats_target {
+                    // The Lovely Locket's copy is the trinket's cast, not the
+                    // player's, so the minion it lands on does not answer it
+                    // with its own "whenever you cast a spell on this": in
+                    // `Hearthstone_2026_11_02_00_10_22-g2` turn 12 a Gem
+                    // play's six copies land on a Glambot and give it +1/+1
+                    // each, and its Magnetize never fires (steps 24 to 31).
+                    let locket_copy = self.players[p].tp.locket_copy;
+                    if !pt.by_minion && !locket_copy && !eats_target {
                         self.trigger_on_cast_spell_on_watchers(p, target_pos);
                         if target_pos >= self.players[p].board.len() {
                             break;
@@ -1296,7 +1303,7 @@ impl Game {
                             .cards
                             .tribes_of(&self.players[p].board[target_pos])
                             .has(Tribe::Mech);
-                        if is_mech && !pt.by_minion {
+                        if is_mech && !pt.by_minion && !locket_copy {
                             self.trigger_on_cast_spell_on_mech(p, target_pos);
                         }
                     }

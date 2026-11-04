@@ -1649,3 +1649,61 @@ fn razorfen_flappers_deathrattle_gets_a_barrage_spell() {
         .iter()
         .any(|&c| dbc.get(c).name == "Blood Gem Barrage"));
 }
+
+// ================= Victorious Geomant's leftover Gems =================
+
+/// Victorious Geomant's Activate hands Gems over and casts the ones that do
+/// not fit on the left-most minion. Each of those is a real cast, so the
+/// minion it lands on answers with its own "whenever you cast a spell on
+/// this": the log's golden Geomant casts four Gems on a Gatekeeper Amalgam and
+/// the Amalgam's four Misplaced Tea Sets run
+/// (`Hearthstone_2026_10_24_17_59_26-g1` turn 12 step 40, where the Amalgam
+/// gains +76/+124 and not the Gems' +56/+104; triage group E10). A gem the
+/// Activate casts is not one played from the hand, so a Hot-Air Surveyor adds
+/// no cast to it.
+#[test]
+fn a_geomants_leftover_gems_are_casts_the_target_sees() {
+    let mut g = game(21);
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam", false);
+    put_on_board(&mut g, 0, "Victorious Geomant", false);
+    // The hand is full, so every Gem goes on the left-most minion.
+    for _ in 0..10 {
+        g.give(0, "Blood Gem").unwrap();
+    }
+    let before = stats(&g.players[0].board[0]);
+    act(&mut g, 0, Action::Activate(1));
+    let now = stats(&g.players[0].board[0]);
+    // Six Gems of +1/+1, and a Misplaced Tea Set for each of them: the Amalgam
+    // is every type and the only minion, so it takes one +4/+4 a cast.
+    assert_eq!(
+        (now.0 - before.0, now.1 - before.1),
+        (6 + 6 * 4, 6 + 6 * 4),
+        "six Gems and their six Tea Sets"
+    );
+    g.check_invariants().unwrap();
+}
+
+/// The same cast with a golden Hot-Air Surveyor up: the extra cast is for
+/// Blood Gems played from the hand, so the Activate's leftover Gems still go
+/// once each.
+#[test]
+fn a_surveyor_adds_no_cast_to_a_geomants_leftover_gems() {
+    let mut g = game(22);
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam", false);
+    put_on_board(&mut g, 0, "Hot-Air Surveyor", true);
+    put_on_board(&mut g, 0, "Victorious Geomant", false);
+    for _ in 0..10 {
+        g.give(0, "Blood Gem").unwrap();
+    }
+    let before = stats(&g.players[0].board[0]);
+    act(&mut g, 0, Action::Activate(2));
+    let now = stats(&g.players[0].board[0]);
+    // Six Gems, each with its own Tea Set (the Surveyor's three casts are for
+    // the hand and do not reach them).
+    assert_eq!(
+        (now.0 - before.0, now.1 - before.1),
+        (6 + 6 * 4, 6 + 6 * 4),
+        "the Surveyor's extra casts are for Gems played from the hand"
+    );
+    g.check_invariants().unwrap();
+}

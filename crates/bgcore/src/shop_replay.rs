@@ -1339,14 +1339,48 @@ fn start_of_turn_cards(data: &Data, pl: &Player, start: &ShopStateSpec) -> Vec<C
 /// `Hearthstone_2026_10_30_19_45_15-g2` turn 9 hand a Floating Candle and a
 /// Token of the Old Gods over beside the step's own pick). A queued card joins
 /// at the end of the step's action, which is where the log shows it.
-fn seat_queued_start_of_turn(
+/// How many Elementals this turn has played before step `index`: no state in
+/// the file carries the count (the counters hold Gold, the Gem value, spell
+/// power and the spell counts), and the turn's own earlier steps do, a `play`
+/// of a minion of the tribe. Conflagration's "improved by each Elemental you
+/// played this turn" reads it (`Hearthstone_2026_11_03_00_29_06-g3` turn 9
+/// step 36: one Firelands Fugitive played at step 34, and the log's
+/// Conflagration gives +8/+10 a cast, the base +4/+4, the Elemental's +4/+4
+/// and the turn's +0/+2 spell bonus).
+fn seat_elementals_played_turn(
     data: &Data,
+    ids: &CardIdMap,
     pl: &mut Player,
     file: &ShopFileSpec,
     turn: usize,
     index: usize,
 ) {
     let Some(turn_spec) = file.turns.get(turn) else { return };
+    let mut played: u16 = 0;
+    for step in turn_spec.actions.iter().take(index) {
+        if step.step != "play" {
+            continue;
+        }
+        let Some(card) = step.card.as_ref().and_then(|c| resolve_card(data, ids, c)) else {
+            continue;
+        };
+        if data.cards.get(card).is_spell() {
+            continue;
+        }
+        if data.cards.get(card).tribes.has(Tribe::Elemental) {
+            played = played.saturating_add(1);
+        }
+    }
+    pl.elementals_played_turn = played;
+}
+
+fn seat_queued_start_of_turn(
+    data: &Data,
+    pl: &mut Player,
+    file: &ShopFileSpec,
+    turn: usize,
+    index: usize,
+) {    let Some(turn_spec) = file.turns.get(turn) else { return };
     let due = start_of_turn_cards(data, pl, &turn_spec.start);
     // Whether a card of the state's is the one the trinket hands out, by the
     // name the loader builds it under (the log writes Floating Candle Set's
@@ -3649,6 +3683,10 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     // A start-of-turn card the hand had no room for: queued again, so this
     // step can hand it over when it frees a slot.
     seat_queued_start_of_turn(data, &mut loaded.game.players[ME], file, turn_index, index);
+    // How many Elementals this turn has played so far: no state in the file
+    // carries it, and the turn's own earlier steps do (Conflagration's
+    // "improved by each Elemental you played this turn").
+    seat_elementals_played_turn(data, ids, &mut loaded.game.players[ME], file, turn_index, index);
     let mut missing = std::mem::take(&mut loaded.missing);
     // The way the log answered a Choose One this step plays. A card that gives
     // both options (a Thorned Trailblazer, a Trailblazer Sticker) has to know
@@ -3723,11 +3761,20 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
             .and_then(|p| p.card_id.as_deref())
             .is_some_and(|id| data.heroes.power_by_card_id(id).is_none());
     let mut text = Vec::new();
+    // The card this step plays is a Choose One card, so the step answers its
+    // choice whether or not the file says which option ran (`logged_choose_one`
+    // reads that when it can).
+    let plays_choose_one = step.step == "play"
+        && step
+            .card
+            .as_ref()
+            .and_then(|c| resolve_card(data, ids, c))
+            .is_some_and(|c| data.cards.get(c).choose_one.is_some());
     // A Choose One with a target asks the option first, then the target
     // (docs/rules/design.md "Targets in the shop"): the play's own sub-option is answered
     // before the step's target, not after it.
-    let choose_first = step.step == "play"
-        && answer.is_some_and(|a| !a.both)
+    let choose_first = plays_choose_one
+        && !answer.is_some_and(|a| a.both)
         && actions.len() > 1;
     let mut chosen = false;
     for a in &actions {
@@ -3797,22 +3844,26 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     // in the game, and the client's own sub-option says which one it was (or,
     // when the game picked the way itself, the log's own step does: see
     // `logged_choose_one`): the engine opens the two options after the play.
-    if step.step == "play"
+    //
+    // The game always answers it, so the replay does too: a Choose One whose
+    // options change nothing the file carries (Intrepid Botanist's "+1 Attack
+    // or +1 Health to your Tavern spells this game") still resolved, and what
+    // it set off landed in the same step (a Turbo Hogrider's Gems on every
+    // Quilboar, `Hearthstone_2026_10_28_02_28_32-g4` turn 13 step 27). Its
+    // first option answers it, since the file gives neither one's outcome.
+    if plays_choose_one
         && !chosen
-        && let Some(a) = answer
-        && !a.both
+        && !answer.is_some_and(|a| a.both)
         && loaded.game.players[ME].pending_choose_one.is_some()
     {
-        if loaded.game.step(Action::Choose(a.option)).is_err() {
+        let option = answer.map_or(0, |a| a.option);
+        if loaded.game.step(Action::Choose(option)).is_err() {
             return Err((
-                format!(
-                    "the engine does not allow {:?} of the Choose One",
-                    a.option
-                ),
+                format!("the engine does not allow {option:?} of the Choose One"),
                 missing,
             ));
         }
-        text.push(format!("Choose({})", a.option));
+        text.push(format!("Choose({option})"));
     }
     let snap = ShopSnapshot::of_game(data, &loaded.game, ME);
     Ok((snap, missing, text.join(", ")))

@@ -3376,3 +3376,108 @@ fn glaive_ricochet_copies_one_of_the_turns_three_buys() {
     );
     assert_eq!(third.ours.hand.len(), 4, "three buys and the plain copy: {:?}", third.ours.hand);
 }
+
+/// The game always answers a Choose One it offers, so the replay does too: an
+/// Intrepid Botanist's "+1 Attack or +1 Health to your Tavern spells this game"
+/// changes no number the file carries, and its step still shows what the play
+/// set off. The log's Turbo Hogrider plays its Gems on the played card and on
+/// every Quilboar in the same step (`Hearthstone_2026_10_28_02_28_32-g4` turn
+/// 13 step 27, triage group E8), so the answer is the first option when the
+/// file gives no way to tell them apart.
+#[test]
+fn a_choose_one_the_file_cannot_read_is_still_answered() {
+    let botanist = r#"{"id": 21, "index": 1, "card_id": "BG32_237", "name": "Intrepid Botanist",
+                       "attack": 3, "health": 4, "golden": false, "keywords": [],
+                       "kind": "minion"}"#;
+    let hog = r#"{"id": 22, "position": 1, "card_id": "BG31_323", "name": "Turbo Hogrider",
+                  "attack": 6, "health": 8, "golden": true, "keywords": [],
+                  "kind": "minion"}"#;
+    let played = r#"{"id": 21, "position": 1, "card_id": "BG32_237", "name": "Intrepid Botanist",
+                     "attack": 3, "health": 4, "golden": false, "keywords": [],
+                     "kind": "minion"}"#;
+    let hog_after = r#"{"id": 22, "position": 2, "card_id": "BG31_323", "name": "Turbo Hogrider",
+                        "attack": 10, "health": 12, "golden": true, "keywords": [],
+                        "gem_attack": 4, "gem_health": 4, "kind": "minion"}"#;
+    let text = format!(
+        r#"{{"source": "botanist", "game": 1, "turns": [
+        {{"turn": 5,
+          "start": {},
+          "actions": [{{"step": "play", "paid": {{"gold": 3, "health": 0}},
+            "card": {{"id": 21, "index": 1, "card_id": "BG32_237", "name": "Intrepid Botanist"}},
+            "moved": {{"id": 21, "from": {{"where": "hand", "index": 1}},
+                      "to": {{"where": "board", "position": 1}}}},
+            "changed": [{hog_after}],
+            "after": {}}}],
+          "end": null}}]}}"#,
+        choose_state(hog, botanist, "", 0, ""),
+        choose_state(
+            &format!("{played}, {hog_after}"),
+            "",
+            "",
+            0,
+            ""
+        ),
+    );
+    let r = one_step(&text);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+}
+
+/// Conflagration's "improved by each Elemental you played this turn" reads a
+/// count no logged state carries, and the turn's own earlier steps do: one
+/// Elemental played before it, and a +0/+2 Tavern spell bonus, is the log's
+/// +8/+10 a cast (`Hearthstone_2026_11_03_00_29_06-g3` turn 9 step 36, triage
+/// group E19).
+#[test]
+fn conflagration_counts_the_turns_earlier_elemental_plays() {
+    let puller = r#"{"id": 31, "position": 1, "card_id": "BG29_611", "name": "Cord Puller",
+                     "attack": 1, "health": 1, "golden": false,
+                     "keywords": ["divine_shield"], "kind": "minion"}"#;
+    let cyclone = r#"{"id": 32, "index": 1, "card_id": "BGS_119", "name": "Crackling Cyclone",
+                      "attack": 2, "health": 1, "golden": false,
+                      "keywords": ["divine_shield", "windfury"], "kind": "minion"}"#;
+    let cyclone_board = r#"{"id": 32, "position": 2, "card_id": "BGS_119", "name": "Crackling Cyclone",
+                            "attack": 2, "health": 1, "golden": false,
+                            "keywords": ["divine_shield", "windfury"], "kind": "minion"}"#;
+    let conflagration = r#"{"id": 33, "index": 1, "card_id": "BG35_910", "name": "Conflagration",
+                            "attack": 0, "health": 0, "golden": false, "keywords": [],
+                            "numbers": [8, 10, 0, 0], "kind": "spell"}"#;
+    let fed = r#"{"id": 31, "position": 1, "card_id": "BG29_611", "name": "Cord Puller",
+                  "attack": 9, "health": 9, "golden": false,
+                  "keywords": ["divine_shield"], "kind": "minion"}"#;
+    let start = choose_state(
+        puller,
+        &format!("{cyclone}, {conflagration}"),
+        "",
+        0,
+        "",
+    );
+    let after_one = choose_state(&format!("{puller}, {cyclone_board}"), conflagration, "", 0, "");
+    let after_two = choose_state(&format!("{fed}, {cyclone_board}"), "", "", 0, "");
+    let actions = format!(
+        r#"[{{"step": "play", "paid": {{"gold": 3, "health": 0}},
+             "card": {{"id": 32, "index": 1, "card_id": "BGS_119", "name": "Crackling Cyclone"}},
+             "moved": {{"id": 32, "from": {{"where": "hand", "index": 1}},
+                       "to": {{"where": "board", "position": 2}}}},
+             "after": {after_one}}},
+            {{"step": "play", "paid": {{"gold": 2, "health": 0}},
+             "card": {{"id": 33, "index": 1, "card_id": "BG35_910", "name": "Conflagration"}},
+             "target": {{"id": 31, "kind": "board", "position": 1}},
+             "after": {after_two}}}]"#
+    );
+    let text = format!(
+        r#"{{"source": "conflagration", "game": 1, "turns": [
+        {{"turn": 9, "start": {start}, "actions": {actions}, "end": null}}]}}"#
+    );
+    let files = parse_action_files(&[("one.json".to_string(), text.clone())])
+        .unwrap_or_else(|e| panic!("{e}\n{text}"));
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        1,
+        &ReplayOptions { seeds: 2, seed: 1 },
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+}

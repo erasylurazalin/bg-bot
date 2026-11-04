@@ -2860,7 +2860,10 @@ name = "Conflagration"
 tier = 4
 cost = 2
 token = true
-effect = { target = "chosen", buff = [4, 4], per_played_this_turn = [2, 2], tribe = "elemental" }
+# Each Elemental played this turn improves it by its whole +4/+4, not half:
+# `Hearthstone_2026_11_03_00_29_06-g3` turn 9 step 36, one Elemental played
+# and a +0/+2 Tavern spell bonus, the log's two casts +8/+10 each.
+effect = { target = "chosen", buff = [4, 4], per_played_this_turn = [4, 4], tribe = "elemental" }
 
 # --- Spells: Undead ---
 

@@ -5663,3 +5663,55 @@ fn three_summoned_copies_triple_into_a_golden_card_in_hand() {
     assert!(golden[0].golden, "and it is the Golden one");
     g.check_invariants().unwrap();
 }
+
+/// A Lovely Locket's copy is the trinket's cast, not the player's, so the
+/// minion it lands on does not answer it with its own "whenever you cast a
+/// spell on this": in `Hearthstone_2026_11_02_00_10_22-g2` turn 12 a Gem
+/// play's six copies land on a Glambot and give it +1/+1 each, and its
+/// Magnetize never fires (steps 24 to 31; the copies the report said "grow").
+#[test]
+fn a_locket_copy_does_not_fire_the_minion_it_lands_on() {
+    let mut g = game(314);
+    take(&mut g, 0, "Lovely Locket");
+    put_on_board(&mut g, 0, "Tusked Camper");
+    let mech = put_on_board(&mut g, 0, "Glambot");
+    g.give(0, "Blood Gem").unwrap();
+    let hand = (g.players[0].hand.len() - 1) as u8;
+    let before = stats(&g, "Glambot");
+    let mags = g.players[0].board[mech].magnetizations;
+    act(&mut g, 0, Action::Play { hand, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    let after = stats(&g, "Glambot");
+    assert_eq!(
+        (after.0 - before.0, after.1 - before.1),
+        (1, 1),
+        "the copy is the Gem and nothing else: no Satellite for it"
+    );
+    assert_eq!(
+        g.players[0].board[mech].magnetizations, mags,
+        "the Glambot's own trigger does not see the trinket's cast"
+    );
+    g.check_invariants().unwrap();
+}
+
+/// Balinda Stonehearth's "your spells that target friendly minions cast
+/// twice" is for the player's spells: a Magicfin Apprentice's taught Fortify
+/// is the minion's cast, and the log gives it +3 Health once
+/// (`Hearthstone_2026_11_03_00_29_06-g1` turn 11 step 17, ours +6).
+#[test]
+fn balinda_does_not_double_a_spell_a_minion_casts() {
+    let mut g = game(315);
+    put_on_board(&mut g, 0, "Balinda Stonehearth");
+    g.give(0, "Magicfin Apprentice").unwrap();
+    let hand = (g.players[0].hand.len() - 1) as u8;
+    let fortify = id(&g, "Fortify");
+    g.players[0].hand[hand as usize].taught_spell = Some(fortify);
+    act(&mut g, 0, Action::Play { hand, pos: 1 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(
+        stats(&g, "Balinda Stonehearth"),
+        (6, 6 + 3),
+        "Fortify's +3 Health, cast once"
+    );
+    g.check_invariants().unwrap();
+}

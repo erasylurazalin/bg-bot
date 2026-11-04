@@ -284,6 +284,40 @@ impl Game {
         self.maybe_start_discover(p);
     }
 
+    /// A Blood Gem the player's own Activate casts on the friendly minion in
+    /// board slot `target`: Victorious Geomant's "Cast any that don't fit on
+    /// your left-most minion". It is a real cast, so the minion's own
+    /// "whenever you cast a spell on this" fires (a Gatekeeper Amalgam's
+    /// Misplaced Tea Set, a Glambot's Satellite) and the "after you cast a
+    /// spell" counters see it (`Hearthstone_2026_10_24_17_59_26-g1` turn 12
+    /// step 40: the log's Amalgam gains the four Gems and their four Tea
+    /// Sets, and the Felboars eat). It is not a Gem played from the hand, so
+    /// a Hot-Air Surveyor adds no cast and Surveyor Portrait's from-hand
+    /// bonus does not reach it. `source` is the minion whose Activate cast
+    /// it.
+    pub(super) fn cast_gem_on(&mut self, p: usize, target: usize, source: Option<u8>) {
+        let Some(gem) = self.data.cards.blood_gem else { return };
+        if target >= self.players[p].board.len() {
+            return;
+        }
+        let Some(st) = self.data.cards.get(gem).spell_target else { return };
+        let pt = PendingTarget {
+            source,
+            kind: TargetKind::Spell(st),
+            runs: 1,
+            tavern: false,
+            gem: true,
+            by_minion: false,
+        };
+        // "Whenever you cast a spell" fire before the spell's own effect, and
+        // "after you cast a spell" once it has resolved.
+        self.fire_event(p, EventKind::AllSpellsCast, 1);
+        self.trinket_event(p, Event::SpellCast, Some(gem), 1);
+        self.apply_target(p, &pt, target);
+        self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
+        self.maybe_start_discover(p);
+    }
+
     /// Get `count` 1/1 Murloc tokens taught `spell` (Magicfin Sticker's
     /// "get a 1/1 Murloc and teach it that spell").
     pub(super) fn teach_murloc(&mut self, p: usize, spell: CardId, count: u8) {
@@ -824,8 +858,14 @@ impl Game {
                 return false;
             }
             // A Blood Gem plays once per cast: Balinda sets the count and
-            // each Hot-Air Surveyor adds one ("Set versus add").
-            let (runs, gem) = if c.blood_gem {
+            // each Hot-Air Surveyor adds one ("Set versus add"). A spell a
+            // minion casts for the player is not the player's, so neither
+            // reaches it: the log's Magicfin Apprentice casting Fortify with
+            // Balinda on the board gives +3 Health, not +6
+            // (`Hearthstone_2026_11_03_00_29_06-g1` turn 11 step 17).
+            let (runs, gem) = if by_minion {
+                (1, c.blood_gem)
+            } else if c.blood_gem {
                 (self.gem_casts(p), true)
             } else {
                 (self.balinda_mult(p), false)
