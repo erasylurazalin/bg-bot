@@ -896,7 +896,10 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `tier6_refreshes`, which the turn-start roll counts down too when the
   Tavern changed). The spell slot is the Tavern's last card: `fill_shop`
   deals it whenever fewer than `SHOP` cards are there, so a fill that takes
-  all seven leaves no spell. A Refresh with more Demon Fodders than the
+  all seven leaves no spell. The spell also follows the tier range where the
+  rules name one: a Guiding Candle Refresh deals a Tier 6 Tavern spell
+  (`random_tier_spell`), every other Refresh one up to the player's tier. A
+  Refresh with more Demon Fodders than the
   tier's slots grows the Tavern to hold them all (six Fodders at tier 4 put
   the spell seventh, seven take every card), and each Fodder's refilled slot
   draws inside the same tier range as the Refresh, Tier 6 alone during one of

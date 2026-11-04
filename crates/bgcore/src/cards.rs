@@ -4873,6 +4873,9 @@ impl CardDb {
         Some(self.resolve_bounty(id, exclude, rng))
     }
 
+    /// A random Tavern spell of exactly `tier`, other than the cards in
+    /// `exclude` (Evolving Tavern's one tier up, and Guiding Candle's Tier 6
+    /// Refreshes). The lobby filters it, and a Bounty slot resolves.
     pub fn random_tier_spell(
         &self,
         tier: u8,
