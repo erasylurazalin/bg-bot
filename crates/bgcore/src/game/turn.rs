@@ -116,6 +116,7 @@ impl Game {
         pl.pending_choose_one = None;
         pl.cast_after_choice = None;
         pl.pending_battlecries = 0;
+        pl.pending_gold_spent = 0;
         pl.pending_target = None;
         pl.pending_shop_target = None;
         pl.pending_discard = None;
@@ -1211,6 +1212,7 @@ impl Game {
             pl.pending_choose_one = None;
             pl.cast_after_choice = None;
             pl.pending_battlecries = 0;
+            pl.pending_gold_spent = 0;
             pl.pending_target = None;
             pl.pending_shop_target = None;
             pl.pending_discard = None;

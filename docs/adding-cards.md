@@ -619,6 +619,9 @@ Triple Reward spell.
   Refreshes never count. The shop replay seats the turn's own part of it from the
   log's `gold_spent` counter, the difference against the turn's start state
   (`shop_replay::seat_spell_bonus_turn`); the counter itself is the game's total.
+  An Activate whose effect leaves a choice open hands its Gold to
+  `Player.pending_gold_spent` instead, and `maybe_start_discover` fires it at
+  the pick (see docs/engine.md "Activate").
 - **Lockbox.** A generated spell in hand whose `improvements` is the turns left.
   `give_lockbox(p, sooner)` gets one or shortens the held one, `tick_lockboxes` runs
   at the end of the turn, before that turn's fight (Drakkari doubles it). A

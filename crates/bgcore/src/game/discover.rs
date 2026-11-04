@@ -268,6 +268,14 @@ impl Game {
                 continue;
             }
             if self.players[p].discover_queue.is_empty() {
+                // The Gold an Activate spent before the choice it opened
+                // counts now, its counters and the cards that watch it
+                // (`Action::Activate`).
+                if self.players[p].pending_gold_spent > 0 {
+                    let owed = std::mem::take(&mut self.players[p].pending_gold_spent);
+                    self.fire_event(p, EventKind::GoldSpent, owed);
+                    continue;
+                }
                 // Nothing the cast opened is left: a Choose One spell's "after
                 // you cast a spell" triggers fire now, the option and its
                 // target behind them (docs/rules/design.md "Targets in the shop").

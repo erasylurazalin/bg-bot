@@ -1707,3 +1707,36 @@ fn a_surveyor_adds_no_cast_to_a_geomants_leftover_gems() {
     );
     g.check_invariants().unwrap();
 }
+
+/// Balinda Stonehearth's "Your spells that target friendly minions cast
+/// twice" reaches the leftover Gem, which does target a friendly minion. The
+/// log's plain Geomant with one Gem more than the hand holds puts it on the
+/// left-most minion twice: +2/+4 on a golden Bramble Tunneler whose Gems are
+/// worth +1/+2 (`Hearthstone_2026_11_03_15_22_36-g4` turn 12 step 8), and the
+/// `Hearthstone_2026_10_24_17_59_26-g1` turn 13 step 28 Gatekeeper Amalgam
+/// takes +114/+186 where its three leftover Gems alone give +57/+93. A golden
+/// Balinda casts it three times.
+#[test]
+fn a_balinda_casts_a_geomants_leftover_gems_twice() {
+    for (golden_balinda, casts) in [(false, 2), (true, 3)] {
+        let mut g = game(23);
+        put_on_board(&mut g, 0, "Bramble Tunneler", false);
+        put_on_board(&mut g, 0, "Balinda Stonehearth", golden_balinda);
+        put_on_board(&mut g, 0, "Victorious Geomant", false);
+        // The hand is full, so every one of the six Gems is cast on the
+        // left-most minion.
+        for _ in 0..10 {
+            g.give(0, "Blood Gem").unwrap();
+        }
+        let before = stats(&g.players[0].board[0]);
+        act(&mut g, 0, Action::Activate(2));
+        let now = stats(&g.players[0].board[0]);
+        // The Gems are +1/+1: six of them, each cast `casts` times.
+        assert_eq!(
+            (now.0 - before.0, now.1 - before.1),
+            (6 * casts, 6 * casts),
+            "Balinda casts each leftover Gem {casts} times"
+        );
+        g.check_invariants().unwrap();
+    }
+}

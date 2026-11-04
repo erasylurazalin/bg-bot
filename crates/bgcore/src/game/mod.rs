@@ -1036,6 +1036,12 @@ pub struct Player {
     /// nothing is left to answer (docs/rules/design.md "Counting Battlecries": a
     /// Discover Battlecry counts at the pick, not on the play).
     pub pending_battlecries: u8,
+    /// Gold an Activate paid whose "after you spend Gold" triggers wait for
+    /// the choice it opened: they count once nothing is left to answer
+    /// (`maybe_start_discover`). The log's Sky Admiral Rogers hands its
+    /// Bounty over at the pick, not on the Activate
+    /// (`Hearthstone_2026_10_26_00_48_15-g3` turn 7 steps 29 and 30).
+    pub pending_gold_spent: u32,
     /// Choose One cards played whose choice is still open: Turbo Hogrider
     /// reacts once the card is fully resolved (`resolve_hogrider`).
     pub hogrider_pending: u8,
@@ -2425,7 +2431,21 @@ impl Game {
                     self.run_effect(p, &mut pos, act.effect, golden, runs);
                     self.maybe_start_discover(p);
                 }
-                self.fire_event(p, EventKind::GoldSpent, act.cost as u32);
+                // The Gold leaves the purse on the click, but what watches
+                // Gold spent waits for the choice the Activate opened to be
+                // answered: the log's Sky Admiral Rogers hands its Bounty
+                // over at the pick, not on the Activate
+                // (`Hearthstone_2026_10_26_00_48_15-g3` turn 7 steps 29 and
+                // 30), and an Enterprising Escapee's Lockbox opens there too
+                // (`Hearthstone_2026_11_02_00_10_22-g5` turn 10 steps 78 to
+                // 80).
+                if Self::choice_open(&self.players[p]) {
+                    let pl = &mut self.players[p];
+                    pl.pending_gold_spent =
+                        pl.pending_gold_spent.saturating_add(act.cost as u32);
+                } else {
+                    self.fire_event(p, EventKind::GoldSpent, act.cost as u32);
+                }
             }
             Action::Play { hand, pos } => {
                 let m = self.players[p].hand.remove(hand as usize);

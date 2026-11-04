@@ -803,7 +803,11 @@ of a random step is run, since any of them may be the log's.
     the player cast (`shop_replay::seat_cast_after_pick`: the "after you cast a
     spell" triggers and the Spell Siphon Dark Gift count, log
     `10_24_17_59_26-g1` turn 10 step 43 to 44) and for a Discover a Battlecry
-    opened (`owe_battlecry_count`, "for each Battlecry" counting at the pick).
+    opened (`owe_battlecry_count`, "for each Battlecry" counting at the pick)
+    and for the Gold an Activate spent (`seat_gold_spent_at_pick`: it seats
+    `Player.pending_gold_spent` and the watchers' counts as the Activate found
+    them, since the state already holds the click's own count, log
+    `10_26_00_48_15-g3` turn 7 steps 29 and 30).
     Three more of the game's own flags are seated the same way, at the pick
     that pays them: `Player.pending_after_play` (`owe_after_play`: the played
     minion's "after you play an X" triggers, which wait for its Battlecry and

@@ -130,7 +130,14 @@ rules behind each are in docs/rules/design.md Part 2.
   effect is lost, the normal actions stay legal, and one warning line goes
   to stderr.
 - **Activate (N).** Pays gold, once per turn per minion (`Minion.activated`,
-  cleared at the start of the owner's turn), with or without a target.
+  cleared at the start of the owner's turn), with or without a target. The
+  Gold leaves the purse on the click, but what watches Gold spent waits for
+  the choice the Activate opened: `Action::Activate` hands it to
+  `Player.pending_gold_spent` and `maybe_start_discover` fires it once
+  nothing is left to answer, because the log counts the Gold on the click
+  and gives the card at the pick (a Sky Admiral Rogers going `[2, 0, 9, 0]`
+  to `[9, 1, 9, 0]` on the Activate and its Bounty landing in the hand at
+  the pick, `Hearthstone_2026_10_26_00_48_15-g3` turn 7 steps 29 and 30).
 - **Triggering in the shop.** Rally (Sky-hatch Runaway), Battlecries
   (Kelp Keeper, Young Murk-Eye; counted for Kalecgos, doubled by Brann),
   Deathrattles (Deathstrider after a Fishbait attack).
@@ -1152,7 +1159,14 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   Amalgam and the Amalgam's four Misplaced Tea Sets run, so it gains +76/+124
   and not the Gems' +56/+104 (`Hearthstone_2026_10_24_17_59_26-g1` turn 12
   step 40). They are not Gems played from the hand, so a Hot-Air Surveyor adds
-  no cast and no from-hand bonus reaches them: one cast each.
+  no cast and no from-hand bonus reaches them: one cast each. They do target a
+  friendly minion, so a Balinda Stonehearth casts each twice (golden: three
+  times): the plain Geomant of `Hearthstone_2026_11_03_15_22_36-g4` turn 12
+  step 8 gives the golden Bramble Tunneler +2/+4 with a Gem worth +1/+2, and
+  the golden Sanguine Refiner of `Hearthstone_2026_10_28_22_11_50-g1` turn 12
+  step 22 takes +40/+72 with a Gem worth +20/+36. Each is a cast of its own,
+  its "after you cast a spell" triggers included (that step's Felboar counts
+  them apart).
   **A Choose One minion's play casts nothing.** The option a minion's Battlecry
   picks is not a spell at all, so `apply_choose_option` fires
   `trigger_on_cast_spell` only for a Choose One whose `source` is none (a
