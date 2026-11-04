@@ -3092,3 +3092,287 @@ fn a_start_of_turn_gold_lands_on_the_step_the_log_shows_it() {
     let r = one_step(&text);
     assert_eq!(r.ours.gold, 10, "the start-of-turn Gold paid: {:?}", r.diffs);
 }
+
+/// A Discover's pick is the card as the effect that made it left it, not as
+/// the offer shows it: Innkeeper's Hearth's "Set their stats to 30/30" leaves
+/// the offer at its printed 8/9 and writes 30/30 on the pick
+/// (`Hearthstone_2026_10_28_22_11_50-g5` turn 9 steps 2 and 3). The engine's
+/// own stat set only runs when the trinket's pick state is in the loaded
+/// state, so the loader takes the pick's own numbers.
+#[test]
+fn a_discover_pick_lands_with_the_stats_the_step_shows_on_it() {
+    let option = |id: u64, card: &str, name: &str, a: i32, h: i32| {
+        format!(
+            r#"{{"id": {id}, "card_id": "{card}", "name": "{name}", "attack": {a},
+                "health": {h}, "golden": false, "keywords": [], "kind": "minion"}}"#
+        )
+    };
+    let options = [
+        option(11809, "BG36_245", "Runic Arcanist", 2, 4),
+        option(12090, "BG36_241", "Crimson Vindicator", 8, 9),
+        option(12092, "BGS_040", "Nadina the Red", 8, 4),
+    ]
+    .join(",");
+    let picked = option(12090, "BG36_241", "Crimson Vindicator", 30, 30);
+    let state = |hand: &str| {
+        format!(
+            r#"{{"board": [], "hand": [{hand}], "tavern": [
+              {{"id": 700, "slot": 1, "card_id": "BG20_101", "name": "Roadboar",
+                "attack": 2, "health": 4, "kind": "minion", "frozen": false}}],
+              "hand_hidden": 0, "gold": 12, "gold_max": 10, "tier": 4,
+              "upgrade_cost": 8, "health": 11, "armor": 0, "free_refreshes": 0,
+              "frozen": false, "hero_powers": [], "trinkets": [], "counters": {{}},
+              "secrets": [], "won_last_combat": null}}"#
+        )
+    };
+    let text = format!(
+        r#"{{"source": "hearth", "game": 1, "turns": [
+        {{"turn": 9, "start": {},
+          "actions": [{{"step": "discover",
+            "source": {{"id": 447, "card_id": "BG32_MagicItem_362t", "name": "Innkeeper's Hearth"}},
+            "options": [{options}],
+            "picked": {picked},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        state(""),
+        state(r#"{"id": 12090, "index": 1, "card_id": "BG36_241", "name": "Crimson Vindicator",
+                   "attack": 30, "health": 30, "golden": false, "keywords": ["DIVINE_SHIELD"],
+                   "kind": "minion"}"#),
+    );
+    let r = one_step(&text);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    let picked = r.ours.hand.iter().find(|m| m.name == "Crimson Vindicator");
+    let picked = picked.unwrap_or_else(|| panic!("the pick is in the hand: {:?}", r.ours.hand));
+    assert_eq!((picked.attack, picked.health), (30, 30), "the pick's own stats");
+}
+
+/// Two pairs from one source are two linked pairs, in the order the hand took
+/// them: Kith'ix's Dark Ritual pressed twice leaves four minions, and playing
+/// one of the first pair discards its neighbour there, not a card of the
+/// other pair (`Hearthstone_2026_11_03_13_59_12-g2` turn 12 has Brann
+/// Bronzebeard next to Runic Arcanist and Hoarding Hyena next to Sin'dorei
+/// Straight Shot, and the log loses a card of the same pair each time).
+#[test]
+fn two_pairs_from_one_source_pair_up_in_hand_order() {
+    let card = |id: u64, index: u64, card_id: &str, name: &str, a: i32, h: i32| {
+        format!(
+            r#"{{"id": {id}, "index": {index}, "card_id": "{card_id}", "name": "{name}",
+                "attack": {a}, "health": {h}, "golden": false, "keywords": [],
+                "kind": "minion", "from": {{"card_id": "BG36_HERO_002p", "name": "Dark Ritual"}}}}"#
+        )
+    };
+    let hand = [
+        card(11, 1, "BG23_350", "Brann Bronzebeard", 2, 4),
+        card(12, 2, "BG36_245", "Runic Arcanist", 2, 4),
+        card(13, 3, "BG36_210", "Hoarding Hyena", 4, 6),
+        card(14, 4, "BG25_016", "Sin'dorei Straight Shot", 3, 4),
+    ]
+    .join(",");
+    let text = format!(
+        r#"{{"source": "links", "game": 1, "turns": [
+        {{"turn": 12,
+          "start": {{"board": [], "hand": [{hand}], "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 4, "upgrade_cost": 5,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": []}},
+          "actions": [], "end": null}}]}}"#
+    );
+    let files = parse_action_files(&[("links.json".to_string(), text)]).unwrap();
+    let turn = &files[0].turns[0];
+    let data = data();
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 1, None);
+    let me = bgcore::shop_replay::ME;
+    let mut game = loaded.game.clone();
+    assert_eq!(game.players[me].hand.len(), 4);
+    // Brann Bronzebeard goes down: its own pair's other half leaves with it.
+    game.step(Action::Play { hand: 0, pos: 0 }).expect("Brann is played");
+    let left: Vec<String> = game.players[me]
+        .hand
+        .iter()
+        .map(|m| data.cards.get(m.card).name.clone())
+        .collect();
+    assert_eq!(left, ["Hoarding Hyena", "Sin'dorei Straight Shot"], "the second pair stays");
+}
+
+/// "Improved by each Gold you spent this turn" reads the Gold this turn has
+/// spent, which the log's `gold_spent` counter carries as the game's total
+/// against the turn's start (`Hearthstone_2026_10_28_02_28_32-g4` turn 11
+/// step 19 buffs a Tavern Pirate +0/+40 with 19 Gold behind it, and the golden
+/// Balladist of `Hearthstone_2026_11_03_00_29_06-g4` turn 11 step 47 gives
+/// +0/+76 with 18). The loader seats the difference; the card gives +2 Health
+/// per Gold.
+#[test]
+fn a_lovesick_balladist_reads_the_gold_the_turn_has_spent() {
+    let state = |counters: &str, health: i32, played: bool| {
+        let (board, hand) = if played {
+            (
+                r#"{"id": 900, "position": 1, "card_id": "BG26_814", "name": "Lovesick Balladist",
+                    "attack": 3, "health": 4, "golden": false, "keywords": [], "kind": "minion"}"#,
+                String::new(),
+            )
+        } else {
+            (
+                "",
+                r#"{"id": 900, "index": 1, "card_id": "BG26_814", "name": "Lovesick Balladist",
+                    "attack": 3, "health": 4, "golden": false, "keywords": [], "kind": "minion"}"#
+                    .to_string(),
+            )
+        };
+        format!(
+            r#"{{"board": [{board}], "hand": [{hand}],
+              "tavern": [
+              {{"id": 700, "slot": 1, "card_id": "BG26_817", "name": "Bilgewater Breakout",
+                "attack": 3, "health": {health}, "kind": "minion", "frozen": false}}],
+              "hand_hidden": 0, "gold": 2, "gold_max": 10, "tier": 6,
+              "upgrade_cost": null, "health": 28, "armor": 5, "free_refreshes": 0,
+              "frozen": false, "hero_powers": [], "trinkets": [],
+              "counters": {counters}, "secrets": [], "won_last_combat": null}}"#
+        )
+    };
+    let text = format!(
+        r#"{{"source": "balladist", "game": 1, "turns": [
+        {{"turn": 11, "start": {},
+          "actions": [
+            {{"step": "roll", "after": {}}},
+            {{"step": "play", "paid": {{"gold": 0, "health": 0}},
+              "card": {{"id": 900, "index": 1, "card_id": "BG26_814", "name": "Lovesick Balladist"}},
+              "after": {}}}],
+          "end": null}}]}}"#,
+        state(r#"{"gold_spent": 114}"#, 2, false),
+        state(r#"{"gold_spent": 124}"#, 2, false),
+        state(r#"{"gold_spent": 124}"#, 24, true),
+    );
+    let files = parse_action_files(&[("balladist.json".to_string(), text)]).unwrap();
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        1,
+        &ReplayOptions { seeds: 2, seed: 1 },
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    let tavern = r
+        .ours
+        .tavern
+        .iter()
+        .find(|m| m.name == "Bilgewater Breakout")
+        .unwrap_or_else(|| panic!("the Pirate is in the Tavern: {:?}", r.ours.tavern));
+    assert_eq!(tavern.health, 24, "2 plus +2 for each of the 10 Gold the turn spent");
+}
+
+/// Glaive Ricochet's "after you buy 3 minions, get a plain copy of one of
+/// them" counts the minions the turn has bought, which the log shows as
+/// "(1 left!)" on the power and never in the state: every step loads a fresh
+/// state, so the loader seats the count from the power's own number and the
+/// three minions from the turn's own buy steps
+/// (`Hearthstone_2026_10_27_04_30_04-g3` turn 10: buys at steps 0, 7 and 15,
+/// and the third adds a plain copy to the hand).
+#[test]
+fn glaive_ricochet_copies_one_of_the_turns_three_buys() {
+    // Three minions of 2/4 so that whichever one the copy takes, the hand
+    // grows by the same change, and none of them is a third copy of another.
+    let names = ["Roadboar", "Fearless Foodie", "Runic Arcanist"];
+    let hand_card = |id: u64, index: u64, name: &str| {
+        format!(
+            r#"{{"id": {id}, "index": {index}, "card_id": "BG00_000", "name": "{name}",
+                "attack": 2, "health": 4, "golden": false, "keywords": [], "kind": "minion"}}"#
+        )
+    };
+    let slot = |id: u64, at: u64, name: &str| {
+        format!(
+            r#"{{"id": {id}, "slot": {at}, "card_id": "BG00_000", "name": "{name}",
+                "attack": 2, "health": 4, "kind": "minion", "frozen": false}}"#
+        )
+    };
+    let state = |hand: Vec<String>, tavern: Vec<String>, left: i32, gold: i32| {
+        format!(
+            r#"{{"board": [], "hand": [{}], "tavern": [{}], "hand_hidden": 0,
+              "gold": {gold}, "gold_max": 10, "tier": 4, "upgrade_cost": 5,
+              "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+              "hero_powers": [{{"card_id": "BG20_HERO_280p5", "name": "Glaive Ricochet",
+                                "numbers": [{left}, 1, 0, 0], "cost": 0,
+                                "used_this_turn": 0, "waiting": null}}],
+              "trinkets": [], "counters": {{}}, "secrets": [], "won_last_combat": null}}"#,
+            hand.join(","),
+            tavern.join(",")
+        )
+    };
+    let buy = |id: u64, at: u64, name: &str, after: String| {
+        format!(
+            r#"{{"step": "buy", "slot": {at},
+              "target": {{"id": {id}, "card_id": "BG00_000", "name": "{name}", "kind": "slot", "slot": {at}}},
+              "card": {{"id": {id}, "card_id": "BG00_000", "name": "{name}"}},
+              "paid": {{"gold": 3, "health": 0}},
+              "after": {after}}}"#
+        )
+    };
+    let text = format!(
+        r#"{{"source": "glaive", "game": 1, "turns": [
+        {{"turn": 10, "start": {},
+          "actions": [
+            {},
+            {},
+            {}],
+          "end": null}}]}}"#,
+        state(
+            vec![],
+            vec![slot(700, 1, names[0]), slot(701, 2, names[1]), slot(702, 3, names[2])],
+            3,
+            9
+        ),
+        buy(
+            700,
+            1,
+            names[0],
+            state(vec![hand_card(700, 1, names[0])], vec![slot(701, 1, names[1]), slot(702, 2, names[2])], 2, 6)
+        ),
+        buy(
+            701,
+            1,
+            names[1],
+            state(
+                vec![hand_card(700, 1, names[0]), hand_card(701, 2, names[1])],
+                vec![slot(702, 1, names[2])],
+                1,
+                3
+            )
+        ),
+        buy(
+            702,
+            1,
+            names[2],
+            state(
+                vec![
+                    hand_card(700, 1, names[0]),
+                    hand_card(701, 2, names[1]),
+                    hand_card(702, 3, names[2]),
+                    hand_card(900, 4, "Roadboar"),
+                ],
+                vec![],
+                3,
+                0
+            )
+        ),
+    );
+    let files = parse_action_files(&[("glaive.json".to_string(), text)]).unwrap();
+    let file = &files[0];
+    let third = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        2,
+        &ReplayOptions { seeds: 8, seed: 1 },
+    );
+    // Which of the three the copy takes is the engine's own draw, so the
+    // change's shape is what is compared; the hand still grows by one card.
+    assert!(
+        matches!(third.verdict, Verdict::Ok | Verdict::OkShape),
+        "{:?} {:?}",
+        third.diffs,
+        third.missing
+    );
+    assert_eq!(third.ours.hand.len(), 4, "three buys and the plain copy: {:?}", third.ours.hand);
+}

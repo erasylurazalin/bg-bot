@@ -1342,7 +1342,14 @@ name = "Lovesick Balladist"
 tier = 4
 tribe = "pirate"
 stats = [3, 4]
-battlecry = { buff = [0, 2], target = "chosen", tribe = "pirate", per_gold_spent = [0, 1], in_shop = true }
+# "Give a Pirate +2 Health. (Improved by each Gold you spent this turn!)": the
+# log gives +2 Health per Gold, not +1. `Hearthstone_2026_10_28_02_28_32-g4`
+# turn 11 step 19 buffs the Tavern's Bilgewater Breakout +0/+40 with 19 Gold
+# spent that turn, and the golden one in
+# `Hearthstone_2026_11_03_00_29_06-g4` turn 11 step 47 +0/+76, which is
+# (2 + 2 x 18) twice. The loader seats the turn's Gold from the log's own
+# `gold_spent` counter (`seat_spell_bonus_turn`).
+battlecry = { buff = [0, 2], target = "chosen", tribe = "pirate", per_gold_spent = [0, 2], in_shop = true }
 
 [[minion]]
 name = "Maritime Extortionist"
