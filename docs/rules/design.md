@@ -642,7 +642,12 @@ summoned later). A 1/1 Skeleton with Reborn then comes back as a 12/4.
 - **Shop replay answers (Era, 2026-11-04).**
   - A Battlecry triggered at the end of the turn (Young Murk-Eye, Drakkari)
     on a Discover Battlecry gives a random card, the same as Kelp Keeper:
-    no Discover opens.
+    no Discover opens It doesn't count for "after you Discover". This
+    includes a Magicfin token's taught spell run at the end of the turn:
+    the raw log makes its three options and takes one in the same instant,
+    with no choice offered (`10_28_02_28_32`, 02:41:12, Young Murk-Eye on a
+    Magicfin Apprentice; Rodeo Performer through Echoing Voice and Drakkari
+    in `10_24_17_59_26` at 18:12:53 the same way).
   - Mind Muck: you choose the Demon; the Tavern minion it eats is random.
   - A minion's own Choose One or Battlecry can't target the minion itself
     (Sprightly Scarab played as your only Beast buffs nothing; log
