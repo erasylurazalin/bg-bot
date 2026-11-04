@@ -873,7 +873,8 @@ of a random step is run, since any of them may be the log's.
   engine applies the only target itself, so the step's own target click has
   nothing left to answer and the state it left is compared instead. A Discover
   the one target opened (Kelp Keeper triggering a Battlecry that Discovers,
-  Trash for Treasure) is not a target prompt and does not change that. A pick of a
+  which gives a random card with no Discover offered, Trash for Treasure) is
+  not a target prompt and does not change that. A pick of a
   two-step effect (Spirit Swap's second minion) answers the prompt the game
   opened in the step before, which one state cannot carry: that step is
   incomplete. So is that power's second click when the log writes it as a

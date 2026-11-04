@@ -413,10 +413,11 @@ build hero-less games so old tests pass unchanged, and
 - **Choices at the end of the turn.** `finish_shop` answers everything the
   player left open (`resolve_open_choices`, first option that can be taken)
   before and after the end-of-turn effects, so no prompt outlives the turn:
-  that includes a Discover a Battlecry opened during the end of the turn (a
-  Dark Gift's Echoing Voice, Young Murk-Eye re-running a Magicfin token's
-  Battlecry), which is still sitting in `discover_queue` when the effects
-  finish.
+  that includes a Discover an end-of-turn effect itself opens (a target or a
+  cast, a trinket's), which is still sitting in `discover_queue` when the
+  effects finish. A Discover a Battlecry an end-of-turn trigger runs never
+  asks: it is answered at random (see "A Discover a Battlecry that was not
+  played opens").
 - **Skipped turns**: a power with `skip_turns` leaves only Freeze and End
   Turn legal for the player's first turns (`Player.skipped`, kept by
   `refresh_skip`, read by `turn_skipped` in `is_legal` and `legal_mask`); the
@@ -1018,11 +1019,14 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   plus `tp.war_drum` (War Drum's two extra, spent from that trinket's own
   `uses_left` by `take_war_drum`) plus `tp.dragon_battlecry` for a Dragon
   (Dragon's Eye). `Game::run_battlecry_at(p, pos, random)` triggers a
-  Battlecry outside a play (Young Murk-Eye Sticker, Hackerfin Portrait), and
+  Battlecry outside a play (Young Murk-Eye Sticker, Hackerfin Portrait, a Dark
+  Gift's Echoing Voice), and
   with `random` it answers the target the Battlecry asked for at random out of
   the board and the Tavern (`answer_target_at_random`,
   `valid_battlecry_shop_target`: only a plain "a minion" buff reaches the
-  Tavern that way). A Battlecry never panics on a slot that a hook before it
+  Tavern that way). A Discover it opens gives a random card too, with no
+  Discover offered (see "A Discover a Battlecry that was not played opens").
+  A Battlecry never panics on a slot that a hook before it
   moved: the lookup is a `get` (2026-10-31).
 - **Trinkets that cast and trigger (block 4).** `Game::cast_spell_on` casts a
   named card on a given friendly minion as a real cast (Emergency Gearblade,
@@ -1262,7 +1266,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `QueuedRepeat.option`. Every repeat lands on them, and one whose own
   Battlecry asks for a target the first run never picked answers at random
   (`answer_target_at_random`). `QueuedRepeat.random_discover` marks the
-  entries a Kelp Keeper's Activate makes (see "A Discover an Activate opens"
+  entries a Battlecry that was not played makes (a Kelp Keeper's Activate, an
+  end-of-turn trigger; see "A Discover a Battlecry that was not played opens"
   below): the Discover requests such a run queues go into
   `Player.repeat_discover`, and `maybe_start_discover` answers each with a
   random card of the offer instead of showing it, `Player.discover_silent`
@@ -1273,23 +1278,32 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `Player.repeating` keeps the driver from re-entering itself when it answers
   a prompt. Cleared with the other pending choices at the end of a turn, in
   `fizzle_stuck_choice` and by the replay's state loader.
-- **A Discover an Activate opens is random and silent.** A Battlecry an
-  Activate (or a hero power) triggers is not a Battlecry you played, and a
-  Discover it opens is answered for you: Kelp Keeper's Activate on a Rodeo
-  Performer gives a random card from that Discover's pool with no Discover
-  offered, and that card is not a Discover for "after you Discover" cards
-  (docs/rules/design.md "Shop replay answers" and "Set versus add", Era
-  2026-11-03 and 2026-11-04). `Game::run_queued_repeats` counts the requests
-  such a run queues (`QueuedRepeat.random_discover`, then
-  `Player.repeat_discover`), `maybe_start_discover` picks one of the offers
-  with the RNG, and `Player.discover_silent` stops `fire_after_discover`, so
-  Hooktusk and Master Marauder do not react. A Battlecry you play yourself,
-  Brann's double included, keeps its normal Discover, and so does a Magicfin
-  token's taught spell. Only the `TargetKind::TriggerBattlecry` entries carry
-  `random_discover`; the ones Young Murk-Eye makes
-  (`Effect::TriggerAdjacentBattlecries`) keep the normal Discover, because the
-  docs name only the Activate (open question: whether a Battlecry triggered at
-  the end of the turn picks its Discover at random too).
+- **A Discover a Battlecry that was not played opens is random and silent.**
+  A Battlecry an Activate, a hero power or an end-of-turn trigger runs is not
+  a Battlecry you played, and a Discover it opens is answered for you: Kelp
+  Keeper's Activate on a Rodeo Performer, and Young Murk-Eye, its Sticker, a
+  Hackerfin Portrait or Echoing Voice running one at the end of the turn, give
+  a random card from that Discover's pool with no Discover offered, and that
+  card is not a Discover for "after you Discover" cards (docs/rules/design.md
+  "Shop replay answers" and "Set versus add", Era 2026-11-03 and 2026-11-04).
+  `Game::run_queued_repeats` counts the requests such a run queues
+  (`QueuedRepeat.random_discover`, then `Player.repeat_discover`), and
+  `Game::run_battlecry_at` counts them the same way for the triggers that do
+  not go through the queue, holding the driver off (`Player.repeating`) until
+  the run has asked and answered its target. `maybe_start_discover` picks one
+  of the offers with the RNG, and `Player.discover_silent` stops
+  `fire_after_discover`, so Hooktusk and Master Marauder do not react. A
+  Battlecry you play yourself, Brann's double included, keeps its normal
+  Discover, and so does a Magicfin token's taught spell when the player plays
+  the token. The counting takes every request the run queues, a taught spell a
+  token casts included: docs/rules/design.md "Set versus add" makes a taught
+  spell's Discover a normal pick, while an end-of-turn trigger's Discovers are
+  folded into the turn's own step (a Rodeo Performer's two picks with Echoing
+  Voice, `Hearthstone_2026_10_24_17_59_26-g1` turn 8; a Magicfin token's
+  Boundless Potential at `Hearthstone_2026_10_28_02_28_32` 02:41:12, inside a
+  Young Murk-Eye trigger), so the replay has no step for the pick either way
+  and the trigger's Discovers all go random (open question for Era: whether
+  the taught-spell rule should win there).
 - **A repeated Choose One remembers the pick.** The player picks the option
   and its target once, and every cast after the first uses the SAME option on
   the SAME target (docs/rules/design.md "Set versus add", Era 2026-11-04).

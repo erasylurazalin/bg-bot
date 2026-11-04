@@ -4,10 +4,10 @@
 //! picked; a repeat that asks for a target lands on the one the first run
 //! picked; a spell a minion casts gets no Choose One choice (its option is
 //! random) but a Discover it opens is a normal Discover the player answers,
-//! Hooktusk included; and a Discover a Battlecry an Activate triggers opens
-//! gives a random card with no Discover offered, which Hooktusk does not see
-//! (docs/rules/design.md "Set versus add" and "Shop replay answers", Era
-//! 2026-11-04 and 2026-11-03).
+//! Hooktusk included; and a Discover a Battlecry that was not played opens
+//! (an Activate's, an end-of-turn trigger's) gives a random card with no
+//! Discover offered, which Hooktusk does not see (docs/rules/design.md "Set
+//! versus add" and "Shop replay answers", Era 2026-11-04 and 2026-11-03).
 
 use std::sync::Arc;
 
@@ -487,6 +487,37 @@ fn a_kelp_keeper_answers_a_battlecrys_discover_with_a_random_silent_card() {
     assert_eq!(g.players[0].repeat_discover, 0, "the repeat counter is spent");
     assert_eq!(g.players[0].hand.len(), hand + 2, "both triggers gave a random card");
     for m in &g.players[0].hand {
+        assert!(g.data.cards.get(m.card).is_spell(), "a Tavern spell: {:?}", m.card);
+    }
+    assert_eq!(stats(&g, 0, 3), busker, "Hooktusk did not fire");
+    g.check_invariants().unwrap();
+}
+
+// ---- a Discover an end-of-turn Battlecry opens ----
+
+#[test]
+fn young_murk_eye_answers_a_battlecrys_discover_with_a_random_silent_card() {
+    // A Battlecry triggered at the end of the turn is not a Battlecry you
+    // played either, so a Discover it opens is answered the same way as a
+    // Kelp Keeper's Activate: a random card of the Discover's pool with no
+    // Discover offered, and not a Discover for "after you Discover" cards
+    // (docs/rules/design.md "Shop replay answers", Era 2026-11-04). A golden
+    // Young Murk-Eye runs each neighbour's Battlecry twice (Drakkari does the
+    // same), so two random cards arrive and Hooktusk sees neither.
+    let mut g = game(7013);
+    put_on_board(&mut g, 0, "Rodeo Performer", false);
+    put_on_board(&mut g, 0, "Young Murk-Eye", true);
+    put_on_board(&mut g, 0, "Hooktusk, Master Marauder", false);
+    put_on_board(&mut g, 0, "Southsea Busker", false);
+    g.players[0].golden_played = 1;
+    let busker = stats(&g, 0, 3);
+    let hand = g.players[0].hand.len();
+    act(&mut g, 0, Action::EndTurn);
+    assert!(g.players[0].discover.is_empty(), "no Discover is offered");
+    assert!(g.players[0].discover_queue.is_empty(), "and none is left waiting");
+    assert_eq!(g.players[0].repeat_discover, 0, "both repeats are spent");
+    assert_eq!(g.players[0].hand.len(), hand + 2, "both triggers gave a random card");
+    for m in g.players[0].hand.iter().skip(hand) {
         assert!(g.data.cards.get(m.card).is_spell(), "a Tavern spell: {:?}", m.card);
     }
     assert_eq!(stats(&g, 0, 3), busker, "Hooktusk did not fire");

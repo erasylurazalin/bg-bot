@@ -716,6 +716,10 @@ impl Game {
                 // in turn, a neighbour's repeat on the target its own first
                 // run picked (docs/rules/design.md "Set versus add"). A
                 // second neighbour's prompt never replaces the one before it.
+                // A Discover one of them opens gives a random card of its
+                // pool with no Discover offered, the same as a Kelp Keeper's
+                // Activate (docs/rules/design.md "Shop replay answers", Era
+                // 2026-11-04: an end-of-turn trigger).
                 for neighbour in [here.checked_sub(1), Some(here + 1)].into_iter().flatten() {
                     if neighbour < self.players[p].board.len() && !self.players[p].repeats.is_full()
                     {
@@ -725,7 +729,7 @@ impl Game {
                             started: false,
                             at: None,
                             option: None,
-                            random_discover: false,
+                            random_discover: true,
                         })
                         .ok();
                     }
