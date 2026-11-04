@@ -370,6 +370,11 @@ asking Era any rule question.
   minion" means not another Stalwart Kodo. Last One Standing's "improve
   this" adds +10/+10 each Rally (+10/+10, then +20/+20, +30/+30, ...).
   The full change list is `docs/notes/patch-37.0.2.md`.
+  In the engine: `out_of_pool = true` in `cards.toml` or `trinkets.toml`
+  (no Tavern, Discover, random draw, Dark Gift pool or trinket offer hands
+  it out); `banned_tribes` on a trinket (Wand of Divination in a Quilboar
+  lobby); `exclude` on a Dark Gift (Furtiveness never on Relentless
+  Deflector).
 - Some groups share one pool slot: the three Volumizers are one slot and a
   drawn one gets a random color. The five Bounty spells are one slot the
   same way, and a drawn Bounty is a random one of the five.
