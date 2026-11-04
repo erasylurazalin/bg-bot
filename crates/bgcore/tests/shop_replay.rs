@@ -2540,3 +2540,529 @@ fn a_pick_that_ends_a_spell_carries_what_the_cast_still_owed() {
     let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
     assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
 }
+
+/// Two states the comparison sees: a Tavern whose cards stand in another order,
+/// one card frozen on one side only, and the same card in the wrong hand place.
+fn tavern_snap(cards: &[(&str, i32, i32, bool, bool)]) -> ShopSnapshot {
+    ShopSnapshot {
+        gold: 3,
+        tier: 4,
+        health: 30,
+        board: Vec::new(),
+        hand: Vec::new(),
+        tavern: cards
+            .iter()
+            .map(|&(name, attack, health, frozen, spell)| SnapMinion {
+                name: name.to_string(),
+                golden: false,
+                attack,
+                health,
+                keywords: Vec::new(),
+                gifts: Vec::new(),
+                frozen,
+                spell,
+            })
+            .collect(),
+        ..ShopSnapshot::default()
+    }
+}
+
+/// A Tavern's slot is the game's own display order, and the logged before state
+/// does not always agree with it: the turn-start state can hold one order and
+/// the step's own Tavern another (a buy at `10_28_19_47_59-g1` turn 1 names a
+/// card at slot 2 that the turn's start state shows at slot 1). The hand's index
+/// is the player's own arrangement. Both are compared without their order, so a
+/// Tavern that only reordered is the same Tavern.
+#[test]
+fn a_tavern_that_only_changed_its_order_is_the_same_tavern() {
+    let ours = tavern_snap(&[
+        ("Glim Guardian", 1, 4, false, false),
+        ("Suspicious Prisonguard", 3, 3, false, false),
+        ("Tavern Coin", 0, 0, false, true),
+    ]);
+    let log = tavern_snap(&[
+        ("Suspicious Prisonguard", 3, 3, false, false),
+        ("Glim Guardian", 1, 4, false, false),
+        ("Tavern Coin", 0, 0, false, true),
+    ]);
+    assert_eq!(bgcore::shop_replay::compare(&ours, &log), Vec::<String>::new());
+    // The board keeps its order: a position is where a minion stands.
+    let board = |names: [&str; 2]| ShopSnapshot {
+        board: names
+            .iter()
+            .map(|name| SnapMinion {
+                name: name.to_string(),
+                golden: false,
+                attack: 1,
+                health: 1,
+                keywords: Vec::new(),
+                gifts: Vec::new(),
+                frozen: false,
+                spell: false,
+            })
+            .collect(),
+        ..ShopSnapshot::default()
+    };
+    assert_eq!(
+        bgcore::shop_replay::compare(&board(["A", "B"]), &board(["B", "A"])).len(),
+        2
+    );
+}
+
+/// The per-card frozen flag is not compared: the engine keeps one flag on the
+/// player and the game one on each card, and the log's cards read unfrozen after
+/// a board move (design.md settles that the Tavern stays frozen), after a Freeze
+/// press the log's own state shows unfrozen (`10_28_02_28_32-g4` turn 8 step 27)
+/// and on the Tavern's spell slot, which the game never marks
+/// (`10_30_19_45_15-g2` turn 3 step 6).
+#[test]
+fn the_per_card_freeze_is_not_a_difference() {
+    let ours = tavern_snap(&[
+        ("Razorfen Geomancer", 281, 487, true, false),
+        ("Tavern Coin", 0, 0, true, true),
+    ]);
+    let log = tavern_snap(&[
+        ("Razorfen Geomancer", 281, 487, false, false),
+        ("Tavern Coin", 0, 0, false, true),
+    ]);
+    assert_eq!(bgcore::shop_replay::compare(&ours, &log), Vec::<String>::new());
+    // A stat the step changed is still one.
+    let buffed = tavern_snap(&[
+        ("Razorfen Geomancer", 283, 487, true, false),
+        ("Tavern Coin", 0, 0, true, true),
+    ]);
+    assert_eq!(bgcore::shop_replay::compare(&buffed, &log).len(), 1);
+}
+
+/// One logged state of a fixture file, with a hand, a board, a Tavern and the
+/// trinkets a step needs.
+fn choose_state(
+    board: &str,
+    hand: &str,
+    tavern: &str,
+    free_refreshes: u8,
+    trinkets: &str,
+) -> String {
+    format!(
+        r#"{{"board": [{board}], "hand": [{hand}], "tavern": [{tavern}],
+         "hand_hidden": 0, "gold": 10, "tier": 5, "upgrade_cost": 8,
+         "health": 30, "armor": 0, "free_refreshes": {free_refreshes},
+         "frozen": false, "hero_powers": [], "trinkets": [{trinkets}], "secrets": []}}"#
+    )
+}
+
+/// One replay of the single step of a one-turn file.
+fn one_step(text: &str) -> StepResult {
+    let files = parse_action_files(&[("one.json".to_string(), text.to_string())])
+        .unwrap_or_else(|e| panic!("{e}\n{text}"));
+    let file = &files[0];
+    replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        0,
+        &ReplayOptions { seeds: 2, seed: 1 },
+    )
+}
+
+/// The client does not write a sub-option when the game picks a Choose One's way
+/// itself, so the loader reads the way off the log's own step: a Snare Trapper
+/// whose step shows a Quilboar arriving in the hand (the card's first option) and
+/// no Gold change took the Quilboar option (`11_02_00_10_22-g4` turn 12 step 68).
+#[test]
+fn a_choose_one_with_no_sub_option_is_read_off_the_log() {
+    let trapper = r#"{"id": 10, "index": 1, "card_id": "BG36_332", "name": "Snare Trapper",
+                      "attack": 4, "health": 4, "golden": false, "keywords": [],
+                      "kind": "minion"}"#;
+    let entered = r#"{"id": 11, "where": "hand", "index": 2, "card_id": "BG28_582",
+                      "name": "Mangled Bandit",
+                      "from": {"card_id": "BG36_332", "name": "Snare Trapper"}}"#;
+    let text = format!(
+        r#"{{"source": "choose", "game": 1, "turns": [
+        {{"turn": 8,
+          "start": {},
+          "actions": [{{"step": "play", "paid": {{"gold": 0, "health": 0}},
+            "card": {{"id": 10, "index": 1, "card_id": "BG36_332", "name": "Snare Trapper"}},
+            "moved": {{"id": 10, "from": {{"where": "hand", "index": 1}},
+                      "to": {{"where": "board", "position": 1}}}},
+            "entered": [{entered}],
+            "after": {}}}],
+          "end": null}}]}}"#,
+        choose_state("", trapper, "", 0, ""),
+        choose_state(
+            r#"{"id": 10, "position": 1, "card_id": "BG36_332", "name": "Snare Trapper",
+                "attack": 4, "health": 4, "golden": false, "keywords": [],
+                "kind": "minion"}"#,
+            r#"{"id": 11, "index": 1, "card_id": "BG28_582", "name": "Mangled Bandit",
+                "attack": 3, "health": 3, "golden": false, "keywords": [],
+                "kind": "minion"}"#,
+            "",
+            0,
+            ""
+        ),
+    );
+    let r = one_step(&text);
+    // The option the log took gives a random Quilboar: one card more in hand,
+    // and the card that arrived is that tribe.
+    assert_eq!(r.ours.hand.len(), 1, "{:?} {:?}", r.ours.hand, r.missing);
+    let gem = r.ours.hand[0].name.clone();
+    assert_ne!(gem, "Snare Trapper", "the pick joined nothing: {gem}");
+}
+
+/// The two options show together when the log's step holds both their outcomes:
+/// a Sly Infiltrator whose step gains 2 free Refreshes and 3 Blood Gems took
+/// both, the way a Thorned Trailblazer or a Trailblazer Sticker combines them
+/// (`10_30_19_45_15-g2` turn 12 step 3, where the raw log writes both
+/// `BACON_FREE_REFRESH_COUNT 2` and the three Gems).
+#[test]
+fn a_choose_one_the_log_combined_gives_both_options() {
+    let card = r#"{"id": 10, "index": 1, "card_id": "BG36_330", "name": "Sly Infiltrator",
+                   "attack": 4, "health": 5, "golden": false, "keywords": [],
+                   "kind": "minion"}"#;
+    let gem = |i: usize| {
+        format!(
+            r#"{{"id": {i}, "where": "hand", "index": {}, "card_id": "BG20_GEM",
+             "name": "Blood Gem",
+             "from": {{"card_id": "BG36_330", "name": "Sly Infiltrator"}}}}"#,
+            i - 10
+        )
+    };
+    let entered: Vec<String> = (11..=13).map(gem).collect();
+    let text = format!(
+        r#"{{"source": "both", "game": 1, "turns": [
+        {{"turn": 8,
+          "start": {},
+          "actions": [{{"step": "play", "paid": {{"gold": 0, "health": 0}},
+            "card": {{"id": 10, "index": 1, "card_id": "BG36_330", "name": "Sly Infiltrator"}},
+            "moved": {{"id": 10, "from": {{"where": "hand", "index": 1}},
+                      "to": {{"where": "board", "position": 1}}}},
+            "entered": [{}],
+            "after": {}}}],
+          "end": null}}]}}"#,
+        choose_state("", card, "", 0, ""),
+        entered.join(","),
+        choose_state(
+            r#"{"id": 10, "position": 1, "card_id": "BG36_330", "name": "Sly Infiltrator",
+                "attack": 4, "health": 5, "golden": false, "keywords": [],
+                "kind": "minion"}"#,
+            r#"{"id": 15, "index": 1, "card_id": "BG20_GEM", "name": "Blood Gem",
+                "attack": 0, "health": 0, "golden": false, "keywords": [],
+                "numbers": [1, 1, 0, 0], "kind": "spell"}"#,
+            "",
+            2,
+            ""
+        ),
+    );
+    let r = one_step(&text);
+    assert_eq!(r.ours.free_refreshes, 2, "the free Refreshes option ran");
+    assert!(
+        r.ours.hand.iter().any(|m| m.name == "Blood Gem"),
+        "the Gems option ran too: {:?}",
+        r.ours.hand.iter().map(|m| m.name.clone()).collect::<Vec<_>>()
+    );
+}
+
+/// A Thorned Trailblazer's "One Choose One card each turn has both effects
+/// combined. (@ left!)" is a once-a-turn use, and the log shows no number on the
+/// card once it is spent (`11_03_15_22_36-g4` turn 8 step 30 has `[1, 0, 0, 0]`
+/// and step 31 has none): a replay that reads a missing number as a full use
+/// combines two options the log combined one of (that game's turn 10 step 14).
+#[test]
+fn a_spent_trailblazer_cover_is_not_taken_again() {
+    // The log shows no number at all on a card whose uses are spent.
+    let trapper = |spent: bool| {
+        let numbers = if spent { "" } else { r#""numbers": [1, 0, 0, 0],"# };
+        format!(
+            r#"{{"id": 9, "position": 1, "card_id": "BG31_327", "name": "Thorned Trailblazer",
+             "attack": 4, "health": 5, "golden": false, "keywords": [], {numbers}
+             "kind": "minion"}}"#
+        )
+    };
+    let card = r#"{"id": 10, "index": 1, "card_id": "BG36_330", "name": "Sly Infiltrator",
+                   "attack": 4, "health": 5, "golden": false, "keywords": [],
+                   "kind": "minion"}"#;
+    let file = |spent: bool| {
+        format!(
+            r#"{{"source": "cover", "game": 1, "turns": [
+            {{"turn": 8,
+              "start": {},
+              "actions": [{{"step": "play", "paid": {{"gold": 0, "health": 0}},
+                "sub_option": 1,
+                "card": {{"id": 10, "index": 1, "card_id": "BG36_330", "name": "Sly Infiltrator"}},
+                "moved": {{"id": 10, "from": {{"where": "hand", "index": 1}},
+                          "to": {{"where": "board", "position": 2}}}},
+                "after": {}}}],
+              "end": null}}]}}"#,
+            choose_state(&trapper(spent), card, "", 0, ""),
+            choose_state(
+                &format!(
+                    "{},{}",
+                    trapper(spent),
+                    r#"{"id": 10, "position": 2, "card_id": "BG36_330",
+                        "name": "Sly Infiltrator", "attack": 4, "health": 5,
+                        "golden": false, "keywords": [], "kind": "minion"}"#
+                ),
+                r#"{"id": 15, "index": 1, "card_id": "BG20_GEM", "name": "Blood Gem",
+                    "attack": 0, "health": 0, "golden": false, "keywords": [],
+                    "numbers": [1, 1, 0, 0], "kind": "spell"}"#,
+                "",
+                0,
+                ""
+            ),
+        )
+    };
+    let spent = one_step(&file(true));
+    assert_eq!(spent.ours.free_refreshes, 0, "the cover was already spent");
+    assert!(spent.ours.hand.iter().any(|m| m.name == "Blood Gem"));
+    let fresh = one_step(&file(false));
+    assert_eq!(fresh.ours.free_refreshes, 2, "a fresh cover gives both");
+}
+
+/// A Stone Age Slab's "after you buy a minion" effect is once a turn, and the
+/// log keeps the use in the card's third number (`[20, 20, 1, 0]` while it is
+/// there and `[20, 20, 0, 0]` after the buy that spent it,
+/// `11_02_00_10_22-g8` turn 11 step 5 to 9).
+#[test]
+fn a_spent_stone_age_slab_does_not_double_the_next_buy() {
+    let slab = |left: i32| {
+        format!(
+            r#"{{"id": 9, "position": 1, "card_id": "BG34_950", "name": "Stone Age Slab",
+             "attack": 10, "health": 10, "golden": false, "keywords": [],
+             "numbers": [20, 20, {left}, 0], "kind": "minion"}}"#
+        )
+    };
+    let bought = |attack: i32, health: i32| {
+        format!(
+            r#"{{"id": 20, "slot": 1, "card_id": "BG36_332", "name": "Snare Trapper",
+             "attack": {attack}, "health": {health}, "golden": false, "keywords": [],
+             "kind": "minion"}}"#
+        )
+    };
+    let file = |left: i32| {
+        format!(
+            r#"{{"source": "slab", "game": 1, "turns": [
+            {{"turn": 8,
+              "start": {},
+              "actions": [{{"step": "buy", "slot": 1, "paid": {{"gold": 3, "health": 0}},
+                "card": {{"id": 20, "slot": 1, "card_id": "BG36_332", "name": "Snare Trapper"}},
+                "target": {{"id": 20, "kind": "slot", "slot": 1, "card_id": "BG36_332"}},
+                "moved": {{"id": 20, "from": {{"where": "tavern", "slot": 1}},
+                          "to": {{"where": "hand", "index": 2}}}},
+                "after": {}}}],
+              "end": null}}]}}"#,
+            choose_state(&slab(left), "", &bought(4, 4), 0, ""),
+            choose_state(
+                &slab(left),
+                &format!(
+                    r#"{{"id": 20, "index": 1, "card_id": "BG36_332",
+                        "name": "Snare Trapper", "attack": {},
+                        "health": {}, "golden": false, "keywords": [], "kind": "minion"}}"#,
+                    if left > 0 { (4 + 20) * 2 } else { 4 },
+                    if left > 0 { (4 + 20) * 2 } else { 4 }
+                ),
+                "",
+                0,
+                ""
+            ),
+        )
+    };
+    let fresh = one_step(&file(1));
+    let (a, h) = (fresh.ours.hand[0].attack, fresh.ours.hand[0].health);
+    assert_eq!((a, h), (48, 48), "a fresh Slab doubles the bought card");
+    let spent = one_step(&file(0));
+    let (a, h) = (spent.ours.hand[0].attack, spent.ours.hand[0].health);
+    assert_eq!((a, h), (4, 4), "a spent Slab leaves the bought card alone");
+}
+
+/// A Tavern spell in a minion slot is priced from the card like the spell
+/// slot's, and the log's own price is what it took: a Tavern Coin bought at 0
+/// Gold is legal in the log (`11_02_00_10_22-g6` turn 1 step 4) and the engine
+/// refused the buy.
+#[test]
+fn a_tavern_spell_in_a_minion_slot_is_bought_at_the_logs_price() {
+    // Tavern Coin sits in a minion slot: the Tavern's own spell slot is the
+    // last spell in slot order, which is the Banana here.
+    let coin = r#"{"id": 20, "slot": 1, "card_id": "BG28_810", "name": "Tavern Coin",
+                   "attack": 0, "health": 0, "golden": false, "keywords": [],
+                   "kind": "spell", "cost": 1},
+                  {"id": 21, "slot": 2, "card_id": "BG28_897",
+                   "name": "Tavern Dish Banana", "attack": 0, "health": 0,
+                   "golden": false, "keywords": [], "kind": "spell", "cost": 1}"#;
+    let text = format!(
+        r#"{{"source": "coin", "game": 1, "turns": [
+        {{"turn": 1,
+          "start": {},
+          "actions": [{{"step": "buy", "slot": 1, "spell": true,
+            "paid": {{"gold": 0, "health": 0}},
+            "card": {{"id": 20, "slot": 1, "card_id": "BG28_810", "name": "Tavern Coin"}},
+            "target": {{"id": 20, "kind": "slot", "slot": 1, "card_id": "BG28_810"}},
+            "moved": {{"id": 20, "from": {{"where": "tavern", "slot": 1}},
+                      "to": {{"where": "hand", "index": 1}}}},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        choose_state("", "", coin, 0, "").replace(r#""gold": 10"#, r#""gold": 0"#),
+        choose_state(
+            "",
+            r#"{"id": 20, "index": 1, "card_id": "BG28_810", "name": "Tavern Coin",
+                "attack": 0, "health": 0, "golden": false, "keywords": [],
+                "kind": "spell"}"#,
+            "",
+            0,
+            ""
+        )
+        .replace(r#""gold": 10"#, r#""gold": 0"#),
+    );
+    let r = one_step(&text);
+    assert_ne!(r.verdict, Verdict::Illegal, "{:?}", r.diffs);
+    assert_eq!(r.ours.gold, 0, "the step took no Gold");
+    assert_eq!(r.ours.hand.len(), 1, "the Coin joined the hand");
+}
+
+/// Detective for Hire's two cards are a guess at the opponent's warband: the
+/// pick joins nothing, and a right guess hands a Tavern Coin over instead
+/// (`resolve_choose`; `11_02_00_10_22-g6` turn 7 step 2 has the Coin in the
+/// hand and the picked card nowhere).
+#[test]
+fn a_detective_offer_hands_over_the_coin_and_not_the_pick() {
+    let power = r#"{"card_id": "BG23_HERO_303p2", "name": "Detective for Hire",
+                    "used_this_turn": 0, "numbers": [0, 0, 0, 0]}"#;
+    let options = r#"[
+        {"id": 30, "card_id": "BG36_730", "name": "Trapped Clapper",
+         "attack": 2, "health": 2, "golden": false, "keywords": []},
+        {"id": 31, "card_id": "BGS_115t", "name": "Water Droplet",
+         "attack": 3, "health": 3, "golden": false, "keywords": []}]"#;
+    let coin = r#"{"id": 32, "where": "hand", "index": 1, "card_id": "BG28_810",
+                   "name": "Tavern Coin",
+                   "from": {"card_id": "BG23_HERO_303p2", "name": "Detective for Hire"}}"#;
+    let text = format!(
+        r#"{{"source": "holmes", "game": 1, "turns": [
+        {{"turn": 7,
+          "start": {},
+          "actions": [{{"step": "discover", "kind": "discover",
+            "paid": {{"gold": 0, "health": 0}},
+            "source": {{"id": 29, "card_id": "BG23_HERO_303p2", "name": "Detective for Hire"}},
+            "options": {options},
+            "picked": {{"id": 30, "card_id": "BG36_730", "name": "Trapped Clapper",
+                        "attack": 2, "health": 2, "golden": false, "keywords": []}},
+            "entered": [{coin}],
+            "after": {}}}],
+          "end": null}}]}}"#,
+        choose_state("", "", "", 0, "").replace(r#""hero_powers": []"#, &format!(r#""hero_powers": [{power}]"#)),
+        choose_state(
+            "",
+            r#"{"id": 32, "index": 1, "card_id": "BG28_810", "name": "Tavern Coin",
+                "attack": 0, "health": 0, "golden": false, "keywords": [],
+                "kind": "spell"}"#,
+            "",
+            0,
+            ""
+        )
+        .replace(r#""hero_powers": []"#, &format!(r#""hero_powers": [{power}]"#)),
+    );
+    let r = one_step(&text);
+    let names: Vec<&str> = r.ours.hand.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, vec!["Tavern Coin"], "the right guess pays a Coin: {names:?}");
+}
+
+/// The client hands a trinket's start-of-turn card out with the turn's first
+/// board update, so the logged start state is taken before it and the turn's
+/// first step already shows it in the hand beside its own pick
+/// (`10_30_19_45_15-g2` turn 9 step 1). The step's own `entered` list is what
+/// says the handout is this step's.
+#[test]
+fn a_start_of_turn_card_the_turn_start_lacks_joins_with_the_first_step() {
+    let trinket = r#"{"card_id": "BG30_MagicItem_416", "name": "Token of the Old Gods",
+                      "greater": false, "numbers": [0, 0, 0, 0]}"#;
+    let token = r#"{"id": 40, "where": "hand", "index": 1, "card_id": "BG30_MagicItem_416t",
+                    "name": "Token of the Old Gods",
+                    "from": {"card_id": "BG30_MagicItem_416", "name": "Token of the Old Gods"}}"#;
+    let text = format!(
+        r#"{{"source": "handout", "game": 1, "turns": [
+        {{"turn": 9,
+          "start": {},
+          "actions": [{{"step": "roll", "paid": {{"gold": 1, "health": 0}},
+            "entered": [{token}],
+            "after": {}}}],
+          "end": null}}]}}"#,
+        choose_state("", "", "", 0, trinket),
+        choose_state(
+            "",
+            r#"{"id": 40, "index": 1, "card_id": "BG30_MagicItem_416t",
+                "name": "Token of the Old Gods", "attack": 0, "health": 0,
+                "golden": false, "keywords": [], "kind": "spell"}"#,
+            "",
+            0,
+            trinket
+        ),
+    );
+    let r = one_step(&text);
+    let names: Vec<&str> = r.ours.hand.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["Token of the Old Gods"],
+        "the handout joins the hand: {names:?}"
+    );
+}
+
+/// Souvenir Stand: "When you buy a Greater Trinket, this transforms into a copy
+/// of it." The game writes the transformation a step or two after the pick, and
+/// the state the step starts from still names the Stand
+/// (`11_03_00_29_06-g4` turn 9 step 1, whose greater Maldraxxus Dagger was
+/// picked at turn 6): the loader does it where the log shows it.
+#[test]
+fn a_souvenir_stand_becomes_the_greater_trinket_the_log_shows() {
+    let stand = r#"{"card_id": "BG30_MagicItem_888", "name": "Souvenir Stand",
+                    "greater": false, "numbers": [0, 0, 0, 0]}"#;
+    let dagger = |greater: bool| {
+        format!(
+            r#"{{"card_id": "BG36_MagicItem_370", "name": "Maldraxxus Dagger",
+             "greater": {greater}, "numbers": [2, 0, 0, 17]}}"#
+        )
+    };
+    let text = format!(
+        r#"{{"source": "souvenir", "game": 1, "turns": [
+        {{"turn": 9,
+          "start": {},
+          "actions": [{{"step": "roll", "paid": {{"gold": 1, "health": 0}},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        choose_state("", "", "", 0, &format!("{stand},{}", dagger(true))),
+        choose_state("", "", "", 0, &format!("{},{}", dagger(false), dagger(true))),
+    );
+    let r = one_step(&text);
+    let ours: Vec<String> = r.ours.trinkets.iter().map(|(id, _)| id.clone()).collect();
+    assert_eq!(
+        ours,
+        vec!["BG36_MagicItem_370".to_string(), "BG36_MagicItem_370".to_string()],
+        "the Stand is a copy of the greater Dagger: {ours:?} {:?}",
+        r.diffs
+    );
+}
+
+/// Gold a card's own trigger gives at the start of the turn lands on the step
+/// after it: the client's tag moves with the turn's first board update, so the
+/// logged turn-start state is taken before it. Accord-o-Tron's "At the start of
+/// your turn, gain 1 Gold" is what `10_27_04_30_04-g2` turn 6 step 1 gains, and
+/// the file's `gold_gain` names the card.
+#[test]
+fn a_start_of_turn_gold_lands_on_the_step_the_log_shows_it() {
+    let tron = r#"{"id": 9, "position": 1, "card_id": "BG26_147", "name": "Accord-o-Tron",
+                   "attack": 3, "health": 3, "golden": false, "keywords": [],
+                   "kind": "minion"}"#;
+    let text = format!(
+        r#"{{"source": "gold", "game": 1, "turns": [
+        {{"turn": 6,
+          "start": {},
+          "actions": [{{"step": "freeze", "on": true,
+            "paid": {{"gold": 0, "health": 0}},
+            "gold_gain": {{"gold": 1,
+                           "by": {{"card_id": "BG26_147", "name": "Accord-o-Tron"}}}},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        choose_state(tron, "", "", 0, "").replace(r#""gold": 10"#, r#""gold": 9"#),
+        choose_state(tron, "", "", 0, ""),
+    );
+    let r = one_step(&text);
+    assert_eq!(r.ours.gold, 10, "the start-of-turn Gold paid: {:?}", r.diffs);
+}
