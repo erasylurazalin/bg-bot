@@ -910,6 +910,56 @@ fn a_choose_one_with_a_target_asks_the_option_then_a_tavern_target() {
     g.check_invariants().unwrap();
 }
 
+/// A minion's own Choose One can't pick the minion it is on: the just-played
+/// Sprightly Scarab, with no other Beast on the board or in the Tavern, is the
+/// only Beast there is, and the game fizzles the effect rather than buff
+/// itself. Era's log `Hearthstone_2026_10_28_02_28_32` 03:49:49.58 (game 4,
+/// turn 10): the Scarab is played with the option "SubOption=1" and its POWER
+/// block is empty right after "BLOCK_START" (the board's Bramble Tunnelers,
+/// Geomagus Roogug, Hot-Air Surveyor and Turbo Hogriders are all Quilboar, and
+/// the Tavern has no Beast), and the Scarab stays 3/1 with no Windfury.
+#[test]
+fn a_choose_one_minion_cannot_target_itself() {
+    let mut g = game(75);
+    g.players[0].gold = 10;
+    // Murlocs only: the Tavern holds no Beast either.
+    set_shop(&mut g, 0, &["Bile Spitter", "Bile Spitter"]);
+    g.give(0, "Sprightly Scarab").unwrap();
+    play_card(&mut g, 0, "Sprightly Scarab");
+    assert!(
+        g.players[0].pending_choose_one.is_some(),
+        "the game still offers the option (the log picks one)"
+    );
+    act(&mut g, 0, Action::Choose(1));
+    assert!(
+        g.players[0].pending_target.is_none(),
+        "the only Beast is the Scarab itself, so no target prompt opens"
+    );
+    let m = g.players[0].board[0];
+    assert_eq!((m.attack, m.health), (3, 1), "no legal target: the effect fizzles");
+    assert!(!m.keywords.has(Keywords::WINDFURY), "and gives no keyword");
+    g.check_invariants().unwrap();
+}
+
+/// The same rule for a plain Battlecry: Lovesick Balladist is a Pirate and the
+/// only one, on the board and in the Tavern, so "Give a Pirate +2 Health" has
+/// nowhere to land and the Balladist keeps its own stats.
+#[test]
+fn a_battlecry_minion_cannot_target_itself() {
+    let mut g = game(76);
+    g.players[0].gold = 10;
+    set_shop(&mut g, 0, &["Bile Spitter", "Bile Spitter"]);
+    g.give(0, "Lovesick Balladist").unwrap();
+    play_card(&mut g, 0, "Lovesick Balladist");
+    assert!(
+        g.players[0].pending_target.is_none(),
+        "the Balladist is not a legal target for its own Battlecry"
+    );
+    let m = g.players[0].board[0];
+    assert_eq!((m.attack, m.health), (3, 4), "its own printed stats");
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn malchezaars_last_free_refresh_spends_one_of_his_health_refreshes() {
     // docs/rules/design.md "Malchezaar and free Refreshes" (a bug in the real game we
