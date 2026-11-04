@@ -1470,16 +1470,15 @@ impl Game {
                     fires += 1;
                 }
                 if t.every > 1 {
-                    // A card whose countdown takes the overshoot keeps that,
-                    // not what the count had left: Eredar Escapist at "(4
-                    // left!)" taking the 5 damage of one Imposing
-                    // Percussionist pick prints "(1 left!)" and fires again on
-                    // the 1 damage of the Wrath Weaver after it, so the one step
-                    // gets two Corrupted Cupcakes
-                    // (`Hearthstone_2026_10_27_04_30_04` turn 10 step 25).
-                    // Every other card keeps the remainder
-                    // (`EventTrigger::overshoot`).
-                    *imp = if t.overshoot && fires > 0 && count > 0 {
+                    // After a fire the countdown takes the overshoot, not
+                    // what the count had left: Eredar Escapist at "(4 left!)"
+                    // taking the 5 damage of one Imposing Percussionist pick
+                    // prints "(1 left!)" and fires again on the 1 damage of
+                    // the Wrath Weaver after it, so the one step gets two
+                    // Corrupted Cupcakes (`Hearthstone_2026_10_27_04_30_04`
+                    // turn 10 step 25). Every counter card works this way
+                    // (Era, 2026-11-04).
+                    *imp = if fires > 0 && count > 0 {
                         (t.every as u32 - count) as u16
                     } else {
                         count as u16

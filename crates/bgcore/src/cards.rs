@@ -750,9 +750,10 @@ pub enum TriggerWhen {
 }
 
 /// "After N events, do the effect (N left!)". The count lives in the
-/// minion's `improvements`. Going past N keeps the remainder, so one big
-/// event can fire it more than once, unless the card's countdown takes the
-/// overshoot instead (`overshoot`).
+/// minion's `improvements`. One big event can fire it more than once, and
+/// after a fire the countdown takes the overshoot of the batch, not the
+/// remainder (Era, 2026-11-04, for every counter card; see
+/// `fire_event`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EventTrigger {
     pub kind: EventKind,
@@ -762,13 +763,6 @@ pub struct EventTrigger {
     /// resolved rather than as it is cast. Non-spell events have no second
     /// half: they fire with `TriggerWhen::Now` only.
     pub resolved: bool,
-    /// The game's own countdown after a fire is the overshoot of the batch
-    /// that fired it, not what the count had left: Eredar Escapist at
-    /// "(4 left!)" taking one 5 damage batch prints "(1 left!)" and fires
-    /// again on the next point of damage (`Hearthstone_2026_10_27_04_30_04`
-    /// turn 10 step 25). Only that card's log shows a batch past its
-    /// countdown with the counter printed, so only its card sets this.
-    pub overshoot: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2834,10 +2828,6 @@ struct RawOnEvent {
     /// The card says "After you cast ...": fire once the spell resolved.
     #[serde(default)]
     after: bool,
-    /// The countdown after a fire takes the batch's overshoot
-    /// (`EventTrigger::overshoot`).
-    #[serde(default)]
-    overshoot: bool,
     effect: RawEffect,
 }
 
@@ -3689,7 +3679,6 @@ impl CardDb {
                         every: e.every,
                         effect,
                         resolved: e.after,
-                        overshoot: e.overshoot,
                     })
                 }
             };

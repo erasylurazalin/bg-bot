@@ -1153,12 +1153,7 @@ name = "Eredar Escapist"
 tier = 6
 tribe = "demon"
 stats = [6, 8]
-# `overshoot`: the game's own countdown after a fire takes the overshoot of
-# the damage batch, not what the count had left. "(4 left!)" taking a single
-# 5 damage hit prints "(1 left!)", so the next point of damage fires it again
-# and one turn's pick gets two Corrupted Cupcakes (`Hearthstone_2026_10_27_04_30_04`
-# turn 10 step 25), where the remainder would leave three and give one.
-on_event = { event = "hero_damage", every = 4, overshoot = true, effect = { get = "Corrupted Cupcakes" } }
+on_event = { event = "hero_damage", every = 4, effect = { get = "Corrupted Cupcakes" } }
 
 [[minion]]
 name = "Twisted Wrathguard"

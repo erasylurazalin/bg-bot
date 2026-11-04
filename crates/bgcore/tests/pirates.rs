@@ -472,13 +472,14 @@ fn gold_spent_counters_carry_over_turns_and_ignore_health_and_free_refreshes() {
 fn one_big_payment_fires_a_threshold_more_than_once() {
     let mut g = game(11);
     put_on_board(&mut g, 0, "Gunpowder Courier", false);
-    // one payment of 12 Gold (a Level) at 5 per trigger: twice, 2 left over
+    // one payment of 12 Gold (a Level) at 5 per trigger: twice, and the
+    // countdown takes the overshoot (Era, 2026-11-04): 3 counted, 2 left
     g.players[0].gold = 12;
     g.players[0].upgrade_cost = 12;
     act(&mut g, 0, Action::Level);
     assert_eq!(g.players[0].gold, 0);
     assert_eq!(stats(&g.players[0].board[0]), (2 + 6, 5 + 2));
-    assert_eq!(g.players[0].board[0].improvements, 2);
+    assert_eq!(g.players[0].board[0].improvements, 3);
 }
 
 #[test]
