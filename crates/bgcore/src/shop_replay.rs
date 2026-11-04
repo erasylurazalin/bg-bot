@@ -104,6 +104,18 @@ pub struct ShopMinionSpec {
     /// the minion holds none, as it always did.
     #[serde(default)]
     pub extra_magnetize: u8,
+    /// The +A/+H a Holy Vanguard's own aura ("Has +30/+30 if you have 15 or
+    /// less Health") has put into this card's attack and health, the file's
+    /// `vanguard_aura`: the pair the log keeps on the minion's `Vanguard's
+    /// Valor` enchantment, 30/30 on a plain one and 60/60 on a Golden one. The
+    /// engine applies the aura where it is read, at the start of a fight, and
+    /// keeps it out of a minion's own stats, so the loader records the pair on
+    /// `Minion::vanguard_aura` (`RealMinionSpec::vanguard_aura`) and a triple
+    /// leaves it out of its sum: kept, it counted once per copy (log
+    /// `Hearthstone_2026_10_28_22_11_50` game 5 turn 10 step 12). Empty or
+    /// zero in a file written before the key existed, and on every other card.
+    #[serde(default)]
+    pub vanguard_aura: Vec<i32>,
     /// A Golden minion that gives no Triple Reward when played, the file's
     /// mark: only the sources docs/rules/design.md names say so (Silent
     /// Deliverer's goldens, Sinister Invitation's, Gilding, Aureate Laureate).
@@ -178,6 +190,10 @@ impl ShopMinionSpec {
             dark_gift_states: self.dark_gifts.iter().map(|g| g.state.unwrap_or(-1)).collect(),
             reanimate: self.reanimate,
             no_reward: self.no_reward,
+            vanguard_aura: [
+                self.vanguard_aura.first().copied().unwrap_or(0),
+                self.vanguard_aura.get(1).copied().unwrap_or(0),
+            ],
         }
     }
 }

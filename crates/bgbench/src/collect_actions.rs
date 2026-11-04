@@ -126,6 +126,12 @@ const UNDEAD_ARMY: &str = "BG25_011e2";
 /// the Health, and every Volumizer of mine holds the running pair.
 const VOLUMIZED: &str = "BG34_170e";
 
+/// `Vanguard's Valor`, the aura Holy Vanguard ("Has +30/+30 if you have 15 or
+/// less Health") carries while the condition holds: its first number is the
+/// Attack and its second the Health the game has added to the minion's own
+/// (`vanguard_aura_numbers`). The card's Golden one doubles it (60/60).
+const VANGUARD_AURA: &str = "BG36_372e";
+
 /// Aureate Laureate: `always_golden`, so the game shows it Golden without three
 /// copies, and its text says it gives no Triple Reward. The golden card id is
 /// listed too, against a log that names that one.
@@ -762,6 +768,45 @@ fn magnetization_count(game: &Game, host: &Entity) -> i64 {
     };
     let own = i64::from(host.int("MAGNETIC") != 0);
     (count.as_int() - own).max(0)
+}
+
+/// The +A/+H Holy Vanguard's aura has put into a minion's logged stats, or
+/// `None` when it has none: the pair on the `Vanguard's Valor` enchantment the
+/// minion carries while "you have 15 or less Health" holds, 30/30 on a plain
+/// one and 60/60 on a Golden one. A triple carries one such enchantment per
+/// copy over onto the Golden one (a Golden Holy Vanguard ends up with three,
+/// two of 30/30 and its own 60/60), so the largest pair is the one the
+/// minion's own card adds and the one to take off; the game never adds the
+/// copies' pairs up.
+///
+/// The file writes it beside `attack` and `health` because the engine applies
+/// that aura where it is read, at the start of a fight (`Counters.health` and
+/// `obs::vanguard_bonus`), and keeps it out of a minion's own stats: the loader
+/// records the pair on `Minion::vanguard_aura`, which a triple then leaves out
+/// of its sum, since the Golden one is given its own once (log
+/// `Hearthstone_2026_10_28_22_11_50` game 5 turn 10 step 12: the Golden Holy
+/// Vanguard 208/116, where counting each copy's aura said 238/146).
+fn vanguard_aura_numbers(game: &Game, host: &Entity) -> Option<(i64, i64)> {
+    let mut best: Option<(i64, i64)> = None;
+    for x in game.entities_in_order() {
+        if x.card_id != VANGUARD_AURA
+            || x.text("ZONE") != "PLAY"
+            || x.int("ATTACHED") != host.id as i64
+        {
+            continue;
+        }
+        let pair = (
+            x.int("TAG_SCRIPT_DATA_NUM_1"),
+            x.int("TAG_SCRIPT_DATA_NUM_2"),
+        );
+        if pair == (0, 0) {
+            continue;
+        }
+        if best.is_none_or(|b| pair.0 > b.0 || pair.1 > b.1) {
+            best = Some(pair);
+        }
+    }
+    best
 }
 
 fn hero_entity(game: &Game) -> Option<&Entity> {
@@ -2686,6 +2731,21 @@ impl Collector {
         let extra = extra_magnetizations(e, m.golden);
         if extra != 0 {
             put(&mut d, "extra_magnetize", Json::Int(extra));
+        }
+        // Holy Vanguard's "+30/+30 if you have 15 or less Health" is the
+        // card's own aura, not a buff of the minion: the log counts it in
+        // ATK/HEALTH and keeps it on the minion's `Vanguard's Valor`
+        // enchantment. The file writes the pair beside the stats, and the
+        // loader seats it as `Minion::vanguard_aura`, because the engine
+        // applies the aura where it is read (a fight's start) and a triple
+        // must not add up one copy's aura per copy. A file from before the key
+        // existed reads as no aura, which is what the loader always seated.
+        if let Some((attack, health)) = vanguard_aura_numbers(game, e) {
+            put(
+                &mut d,
+                "vanguard_aura",
+                Json::Arr(vec![Json::Int(attack), Json::Int(health)]),
+            );
         }
         // A Golden minion gives a Triple Reward when it is played, unless its
         // own source says otherwise (`no_triple_reward`).

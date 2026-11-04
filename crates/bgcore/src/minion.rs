@@ -251,6 +251,16 @@ pub struct Minion {
     /// sees them: board, hand, the most common type, tribe synergies and a
     /// fight.
     pub extra_tribes: crate::cards::Tribes,
+    /// The +A/+H of its own Holy Vanguard aura ("Has +30/+30 if you have 15 or
+    /// less Health", +60/+60 on the Golden one) that `attack` and `health`
+    /// already hold, 0/0 for a minion without one. The engine's own minions
+    /// keep 0: the aura is applied where it is read, at the start of a fight
+    /// (`crate::obs::vanguard_bonus`). A minion seated from a log carries the
+    /// pair the log's `Vanguard's Valor` enchantment shows it wearing, so a
+    /// triple can leave it out of the sum and give the Golden one its own
+    /// instead (`game/triples.rs`; log `Hearthstone_2026_10_28_22_11_50`
+    /// game 5 turn 10 step 12).
+    pub vanguard_aura: [u8; 2],
 }
 
 impl Minion {

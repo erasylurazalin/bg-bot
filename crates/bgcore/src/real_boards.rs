@@ -55,6 +55,17 @@ pub struct RealMinionSpec {
     /// a gift whose countdown the file does not say (the log numbers it in
     /// the gift's own enchantment, TAG_SCRIPT_DATA_NUM_1).
     pub dark_gift_states: Vec<i32>,
+    /// The +A/+H a Holy Vanguard's own aura ("Has +30/+30 if you have 15 or
+    /// less Health") has put into `attack` and `health`: the pair on the
+    /// `Vanguard's Valor` enchantment the log shows on the minion, which the
+    /// action files write as `vanguard_aura`. The engine applies that aura
+    /// where it is read (at the start of a fight, `crate::obs::vanguard_bonus`)
+    /// rather than keeping it in a minion's stats, so a loader records the pair
+    /// on `Minion::vanguard_aura` and a triple leaves it out of its sum: with
+    /// the Golden one's own aura counted on top, the log's Golden Holy Vanguard
+    /// is 208/116 where counting every copy's aura made our 238/146. Zero for
+    /// every other card, and for a file written before the key existed.
+    pub vanguard_aura: [i32; 2],
 }
 
 /// A real board's Deity: the minion it awakens and the stats it has now.
@@ -472,6 +483,14 @@ fn make_real_minion(
     let mut minion = db.make(id, m.golden);
     minion.attack = m.attack;
     minion.health = m.health;
+    // How much of those stats is Holy Vanguard's own aura, which the engine's
+    // own minions never carry (they apply it where it is read, at the start of
+    // a fight) and the log's do: a triple leaves the pair out of its sum
+    // (`Minion::vanguard_aura`).
+    minion.vanguard_aura = [
+        m.vanguard_aura[0].clamp(0, u8::MAX as i32) as u8,
+        m.vanguard_aura[1].clamp(0, u8::MAX as i32) as u8,
+    ];
     minion.improvements = improvements(&m.name, m.golden, &m.numbers);
     let mut keywords = Keywords(0);
     for kw in &m.keywords {
@@ -1075,6 +1094,9 @@ fn real_minion(m: RawMinion, ids: &CardIdMap, unknown: &mut Vec<String>) -> Real
         reanimate: m.reanimate,
         no_reward: m.no_reward,
         dark_gift_states: Vec::new(),
+        // The board files carry no `vanguard_aura` key: only the shop actions
+        // collector writes it, so a real board reads as no aura, as before.
+        vanguard_aura: [0, 0],
     }
 }
 

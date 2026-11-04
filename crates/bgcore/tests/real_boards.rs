@@ -36,6 +36,7 @@ fn spec(turn: u32, tier: u8, minions: &[(&str, i32, i32, bool, &[&str])]) -> Rea
                 reanimate: false,
                 no_reward: false,
                 dark_gift_states: Vec::new(),
+                vanguard_aura: [0, 0],
             })
             .collect(),
         ..RealBoardSpec::default()
@@ -453,6 +454,7 @@ fn a_real_seat_takes_the_boards_numbers() {
         reanimate: false,
         no_reward: false,
         dark_gift_states: Vec::new(),
+        vanguard_aura: [0, 0],
     }];
     b.counters.set("gem_attack", 5);
     b.counters.set("gem_health", 4);
@@ -566,6 +568,7 @@ fn a_real_seat_hand_reaches_the_fight() {
         reanimate: false,
         no_reward: false,
         dark_gift_states: Vec::new(),
+        vanguard_aura: [0, 0],
     }];
     let boards = single_board_folder(&b);
     let mut g = Game::new_random_heroes_real(d.clone(), 11, &[0], boards);

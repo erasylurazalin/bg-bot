@@ -306,6 +306,21 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     happens three times, +4128/+5793 on a host at 74/100). The key is written
     only while one is held, and a file written before it existed holds none:
     the loader then seats 0, as it always did.
+  - `vanguard_aura` on a minion: the +A/+H Holy Vanguard's own aura ("Has
+    +30/+30 if you have 15 or less Health", +60/+60 on the Golden one) has put
+    into the card's `attack` and `health`, the pair on the `Vanguard's Valor`
+    enchantment (`BG36_372e`) the log shows on it. The engine applies that aura
+    where it is read, at the start of a fight (`Counters.health`,
+    `obs::vanguard_bonus`), and never keeps it in a minion's stats, so the
+    loader records the pair on `Minion::vanguard_aura` and a triple leaves it
+    out of its sum: the Golden one gets its own once, at its doubled +60/+60
+    (log `2026_10_28_22_11_50` game 5 turn 10 step 12, where counting the three
+    copies' auras gave our Golden Holy Vanguard 238/146 against the log's
+    208/116). The game puts the aura on the card wherever it is (board, hand
+    and Tavern alike), and a Golden one can carry three such enchantments (two
+    30/30 copies' and its own 60/60), so the collector takes the largest pair.
+    The key is written only when the minion has one, and a file written before
+    it existed has it nowhere: the loader then records 0, as it always seated.
   - `secrets`, the Secret zone by card id in the order the Secrets were got, as
     the board files write it (always written, empty when there is nothing).
   - `waiting` on a hero power: the minion Lock and Load holds, as a board
