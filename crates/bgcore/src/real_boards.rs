@@ -30,8 +30,8 @@ pub struct RealMinionSpec {
     pub attack: i32,
     pub health: i32,
     pub golden: bool,
-    /// Keyword names as the file writes them (case-insensitive here;
-    /// POISONOUS counts as Venomous, anything unknown is dropped).
+    /// Keyword names as the file writes them (case-insensitive here; anything
+    /// unknown is dropped, and POISONOUS is its own keyword, not Venomous).
     pub keywords: Vec<String>,
     /// The card's current numbers, the {0} {1} {2} {3} of its text
     /// (TAG_SCRIPT_DATA_NUM_1..4 in the log): Lurking Leviathan's growth,
@@ -673,15 +673,10 @@ impl RealBoards {
 
 /// Set the keyword `name` stands for, ignoring anything the engine has no
 /// keyword for (the tracker also writes CLEAVE, which is a card property
-/// here, not a minion keyword).
+/// here, not a minion keyword). POISONOUS and VENOMOUS are two keywords
+/// (docs/rules/design.md "Keywords"), so a minion can carry both and each name
+/// sets its own bit.
 fn set_keyword(keywords: &mut Keywords, name: &str) {
-    let upper = name.to_ascii_uppercase();
-    if upper == "POISONOUS" {
-        // The engine has one Venomous keyword; Poisonous only loses its
-        // permanence.
-        keywords.set(Keywords::VENOMOUS);
-        return;
-    }
     if let Some(&(bit, _)) = Keywords::ALL.iter().find(|&&(bit, k)| {
         bit != Keywords::MAGNETIC && k.eq_ignore_ascii_case(name)
     }) {

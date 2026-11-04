@@ -165,7 +165,7 @@
 //!   their Blood Gem value and Tavern spell bonus at that moment (attack,
 //!   health each); then that board (BOARD = 7 card slots).
 //!
-//! A card slot is SLOT_FEATURES (90) values:
+//! A card slot is SLOT_FEATURES (91) values:
 //!   0  present (1 if occupied)
 //!   1  card id + 1 (one id space covering minions, tokens and spells)
 //!   2  is_spell
@@ -180,46 +180,47 @@
 //!   8  tier (1 to 7)
 //!   9..18 tribes, multi-hot over `Tribe::EVERY` (an all-type minion sets all
 //!          ten, a neutral none)
-//!   19..25 keywords: taunt, divine_shield, windfury, venomous, reborn,
-//!          magnetic, stealth
-//!   26 magnetizations (total Magnetizations on this minion)
-//!   27 volumizers (Volumizers this minion is or carries)
-//!   28 improvements (the minion's own count: Leviathan, Spark Snapper, Patient
+//!   19..26 keywords: taunt, divine_shield, windfury, venomous, reborn,
+//!          magnetic, stealth, poisonous (poisonous is its own keyword, not a
+//!          Bonus Keyword, docs/rules/design.md "Keywords")
+//!   27 magnetizations (total Magnetizations on this minion)
+//!   28 volumizers (Volumizers this minion is or carries)
+//!   29 improvements (the minion's own count: Leviathan, Spark Snapper, Patient
 //!      Scout, Hopebringer, Sacrificial Wrathguard, event counters)
-//!   29 events_left (the "(N left!)" of its event trigger, 0 if it has none)
-//!   30 from_pool (1 if backed by pool copies, 0 if generated, token or spell)
-//!   31 winners_bread (pending Winner's Bread stacks)
-//!   32 taught_spell (card id + 1 of the spell a Magicfin token casts, 0 if none)
-//!   33 locked (turns it stays locked in hand for, Search Through Time; 1
+//!   30 events_left (the "(N left!)" of its event trigger, 0 if it has none)
+//!   31 from_pool (1 if backed by pool copies, 0 if generated, token or spell)
+//!   32 winners_bread (pending Winner's Bread stacks)
+//!   33 taught_spell (card id + 1 of the spell a Magicfin token casts, 0 if none)
+//!   34 locked (turns it stays locked in hand for, Search Through Time; 1
 //!      while a Tavern tier or a Gold count holds it, docs/rules/design.md "Cards
 //!      locked in hand")
-//!   34 activate_cost (Gold of its Activate, 0 if it has none or it was
+//!   35 activate_cost (Gold of its Activate, 0 if it has none or it was
 //!      already used this turn: once per turn per minion)
-//!   35 extra_magnetize (extra times the next Magnetization to it happens, Drone Duplicator)
-//!   36 cost (a spell's printed cost; the buy cost for a minion)
-//!   37 gem_attack (Attack this minion has gained from Blood Gems)
-//!   38 gem_health
-//!   39 temp_shield (its Divine Shield is Ichoron's, off at the start of the
+//!   36 extra_magnetize (extra times the next Magnetization to it happens, Drone Duplicator)
+//!   37 cost (a spell's printed cost; the buy cost for a minion)
+//!   38 gem_attack (Attack this minion has gained from Blood Gems)
+//!   39 gem_health
+//!   40 temp_shield (its Divine Shield is Ichoron's, off at the start of the
 //!      next turn)
-//!   40 doomed (dies right after it is played this turn, Tomb Turning)
-//!   41 both_effects (a Choose One card with both effects combined, Fandral's
+//!   41 doomed (dies right after it is played this turn, Tomb Turning)
+//!   42 both_effects (a Choose One card with both effects combined, Fandral's
 //!      Fortune's pick or a Trailblazer cover)
-//!   42 linked (one of a group of cards that came together; playing one
+//!   43 linked (one of a group of cards that came together; playing one
 //!      discards the others)
-//!   43 link_group (the group id it shares with them)
-//!   44 tavern_spell (a spell that is a Tavern spell, not a plain one: Blood
+//!   44 link_group (the group id it shares with them)
+//!   45 tavern_spell (a spell that is a Tavern spell, not a plain one: Blood
 //!      Gem, Triple Reward)
-//!   45 no_reward (a Golden play of it gives no Triple Reward, Aureate
+//!   46 no_reward (a Golden play of it gives no Triple Reward, Aureate
 //!      Laureate and Silent Deliverer's minions)
-//!   46..61 attached: card id + 1 of each effect-carrying card Magnetized
+//!   47..62 attached: card id + 1 of each effect-carrying card Magnetized
 //!          into it, in the order they merged (0 for an empty slot)
-//!   62..77 attached_golden: whether that attachment is golden
-//!   78..85 the Dark Gifts on the minion, as their effect card id + 1
-//!   86 hats (Hat Trick: each is +1/+1, already in its stats)
-//!   87 ticket (1 when the Tavern card carries a Darkmoon Ticket, Come One,
+//!   63..78 attached_golden: whether that attachment is golden
+//!   79..86 the Dark Gifts on the minion, as their effect card id + 1
+//!   87 hats (Hat Trick: each is +1/+1, already in its stats)
+//!   88 ticket (1 when the Tavern card carries a Darkmoon Ticket, Come One,
 //!      Come All!)
-//!   88 frozen (frozen on its own in the Tavern, Twice as Nice)
-//!   89 reanimate (1 when marked by Rapid Reanimation for Start of Combat)
+//!   89 frozen (frozen on its own in the Tavern, Twice as Nice)
+//!   90 reanimate (1 when marked by Rapid Reanimation for Start of Combat)
 //! An empty slot is all zeros.
 
 use crate::cards::{Aura, CardDb, ChooseOption, Counter, DeityKind, SpellEffect, SpellTarget, Tribe};
@@ -230,7 +231,7 @@ use crate::minion::{Keywords, MAX_ATTACHED, Minion};
 use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 
 pub const SHOP_SPELL: usize = 1;
-pub const SLOT_FEATURES: usize = 90;
+pub const SLOT_FEATURES: usize = 91;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
 pub const OPP_SCALARS: usize = 33;
 
@@ -500,41 +501,42 @@ pub const SLOT_ELEMENTAL: usize = SLOT_TRIBES + 6;
 pub const SLOT_UNDEAD: usize = SLOT_TRIBES + 7;
 pub const SLOT_QUILBOAR: usize = SLOT_TRIBES + 8;
 pub const SLOT_ABERRATION: usize = SLOT_TRIBES + 9;
-/// Seven values, `Keywords::ALL` order.
+/// Eight values, `Keywords::ALL` order.
 pub const SLOT_KEYWORDS: usize = 19;
 pub const SLOT_STEALTH: usize = SLOT_KEYWORDS + 6;
-pub const SLOT_MAGNETIZATIONS: usize = 26;
-pub const SLOT_VOLUMIZERS: usize = 27;
-pub const SLOT_IMPROVEMENTS: usize = 28;
-pub const SLOT_EVENTS_LEFT: usize = 29;
-pub const SLOT_FROM_POOL: usize = 30;
-pub const SLOT_WINNERS_BREAD: usize = 31;
-pub const SLOT_TAUGHT_SPELL: usize = 32;
-pub const SLOT_LOCKED: usize = 33;
-pub const SLOT_ACTIVATE_COST: usize = 34;
-pub const SLOT_EXTRA_MAGNETIZE: usize = 35;
-pub const SLOT_COST: usize = 36;
+pub const SLOT_POISONOUS: usize = SLOT_KEYWORDS + 7;
+pub const SLOT_MAGNETIZATIONS: usize = 27;
+pub const SLOT_VOLUMIZERS: usize = 28;
+pub const SLOT_IMPROVEMENTS: usize = 29;
+pub const SLOT_EVENTS_LEFT: usize = 30;
+pub const SLOT_FROM_POOL: usize = 31;
+pub const SLOT_WINNERS_BREAD: usize = 32;
+pub const SLOT_TAUGHT_SPELL: usize = 33;
+pub const SLOT_LOCKED: usize = 34;
+pub const SLOT_ACTIVATE_COST: usize = 35;
+pub const SLOT_EXTRA_MAGNETIZE: usize = 36;
+pub const SLOT_COST: usize = 37;
 /// Attack and Health this minion has gained from Blood Gems.
-pub const SLOT_GEM_ATTACK: usize = 37;
-pub const SLOT_GEM_HEALTH: usize = 38;
+pub const SLOT_GEM_ATTACK: usize = 38;
+pub const SLOT_GEM_HEALTH: usize = 39;
 /// Its Divine Shield lasts only until the next turn (Ichoron the Protector).
-pub const SLOT_TEMP_SHIELD: usize = 39;
+pub const SLOT_TEMP_SHIELD: usize = 40;
 /// It dies right after it is played this turn (Tomb Turning).
-pub const SLOT_DOOMED: usize = 40;
+pub const SLOT_DOOMED: usize = 41;
 /// A Choose One card with both effects combined (Fandral's Fortune pick).
-pub const SLOT_BOTH_EFFECTS: usize = 41;
+pub const SLOT_BOTH_EFFECTS: usize = 42;
 /// One of a group of cards that came linked; playing one discards the rest.
-pub const SLOT_LINKED: usize = 42;
+pub const SLOT_LINKED: usize = 43;
 /// The id its group shares.
-pub const SLOT_LINK_GROUP: usize = 43;
+pub const SLOT_LINK_GROUP: usize = 44;
 /// A Tavern spell (not a plain spell like a Blood Gem or Triple Reward).
-pub const SLOT_TAVERN_SPELL: usize = 44;
+pub const SLOT_TAVERN_SPELL: usize = 45;
 /// A Golden play of it gives no Triple Reward (Aureate Laureate, Silent
 /// Deliverer's minions).
-pub const SLOT_NO_REWARD: usize = 45;
+pub const SLOT_NO_REWARD: usize = 46;
 /// MAX_ATTACHED values: card id + 1 of each effect-carrying card Magnetized
 /// into it, in merge order (0 for an empty slot).
-pub const SLOT_ATTACHED: usize = 46;
+pub const SLOT_ATTACHED: usize = 47;
 /// MAX_ATTACHED values: whether each attachment is golden.
 pub const SLOT_ATTACHED_GOLDEN: usize = SLOT_ATTACHED + MAX_ATTACHED;
 /// MAX_GIFTS values: the Dark Gifts on the minion, as the gift's effect card

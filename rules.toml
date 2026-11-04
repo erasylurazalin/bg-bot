@@ -63,6 +63,6 @@ dark_gift_uses = 3
 dark_gift_turn = 3
 
 # The Bonus Keywords: what "gain a random Bonus Keyword" picks from and what
-# "different Bonus Keywords in your warband" counts. Magnetic is a keyword
-# but not a Bonus Keyword.
+# "different Bonus Keywords in your warband" counts. Magnetic and Poisonous
+# are keywords but not Bonus Keywords (docs/rules/design.md "Keywords").
 bonus_keywords = ["taunt", "divine_shield", "windfury", "venomous", "reborn", "stealth"]

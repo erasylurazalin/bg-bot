@@ -114,6 +114,7 @@ fn tags(m: &Minion, g: &Game) -> String {
         (Keywords::REBORN, "R"),
         (Keywords::STEALTH, "S"),
         (Keywords::MAGNETIC, "M"),
+        (Keywords::POISONOUS, "P"),
     ] {
         if m.keywords.has(bit) {
             add(tag);

@@ -379,6 +379,9 @@ fn board(db: &CardDb, names: &[&str]) -> Vec<Minion> {
 #[derive(Default)]
 struct Log {
     attacks: Vec<(usize, String, String)>,
+    /// The attacker's keywords at each attack (Venomous is spent by the hit
+    /// that kills, so this shows it going).
+    attacker_keywords: Vec<Keywords>,
     deaths: Vec<(usize, String)>,
     summons: Vec<(usize, usize, Minion)>,
     db: Option<CardDb>,
@@ -387,6 +390,7 @@ struct Log {
 impl Watch for Log {
     fn attack(&mut self, side: usize, a: &Minion, d: &Minion) {
         let db = self.db.as_ref().unwrap();
+        self.attacker_keywords.push(a.keywords);
         self.attacks.push((side, db.get(a.card).name.clone(), db.get(d.card).name.clone()));
     }
     fn death(&mut self, side: usize, _pos: usize, m: &Minion) {
@@ -507,6 +511,85 @@ fn venomous_kills_anything_it_damages() {
     for seed in 0..50 {
         let (out, _) = watched(&plain, &big, seed);
         assert_eq!(out.winner, None, "seed {seed}");
+    }
+}
+
+/// 0-Attack walls, so the other side does all the attacking and nothing kills
+/// the attacker. Their 1000 Health outlasts the whole fight (500 attacks), so
+/// only a keyword can kill one.
+fn walls(db: &CardDb, n: usize) -> Vec<Minion> {
+    // Water Droplet is a plain token: no effect, no keyword, no Deathrattle.
+    let mut out = board(db, &vec!["Water Droplet"; n]);
+    for w in out.iter_mut() {
+        w.attack = 0;
+        w.health = 1000;
+        w.keywords.clear(Keywords::TAUNT);
+    }
+    out
+}
+
+#[test]
+fn poisonous_kills_every_time_it_damages() {
+    // Tide Oracle Morgl is Poisonous: it kills the minion it damages and is
+    // never used up, so it kills a second one too (docs/rules/design.md
+    // "Keywords"). Venomous would be spent by the first kill.
+    let db = db();
+    let morgl = board(&db, &["Tide Oracle Morgl"]);
+    assert!(morgl[0].keywords.has(Keywords::POISONOUS));
+    assert!(!morgl[0].keywords.has(Keywords::VENOMOUS));
+    let two = walls(&db, 2);
+    for seed in 0..20 {
+        let (out, log) = watched(&morgl, &two, seed);
+        assert_eq!(out.winner, Some(0), "seed {seed}");
+        assert_eq!(log.deaths.iter().filter(|d| d.0 == 1).count(), 2, "both walls died, seed {seed}");
+        assert_eq!(log.attacker_keywords.len(), 2, "one swing each, seed {seed}");
+        assert!(
+            log.attacker_keywords[1].has(Keywords::POISONOUS),
+            "still Poisonous after the first kill, seed {seed}"
+        );
+    }
+    // Divine Shield takes the hit and leaves the Poisonous unused, like the
+    // Venomous: the shield pops, the next swing kills.
+    let mut shielded = walls(&db, 1);
+    shielded[0].keywords.set(Keywords::DIVINE_SHIELD);
+    for seed in 0..20 {
+        let (out, log) = watched(&morgl, &shielded, seed);
+        assert_eq!(out.winner, Some(0), "seed {seed}");
+        assert_eq!(log.deaths.iter().filter(|d| d.0 == 1).count(), 1, "seed {seed}");
+        assert!(
+            log.attacker_keywords.iter().all(|k| k.has(Keywords::POISONOUS)),
+            "the shield's hit did not spend it, seed {seed}"
+        );
+    }
+}
+
+#[test]
+fn a_minion_with_venomous_and_poisonous_keeps_its_venomous() {
+    // A minion can wear both (Era, 2026-11-04). The Poisonous is permanent, so
+    // an assumed rule has it do the killing and leave the Venomous unused:
+    // nothing in the docs or the logs says which of the two is spent.
+    let db = db();
+    let mut both = board(&db, &["Deadly Spore"]);
+    both[0].keywords.set(Keywords::POISONOUS);
+    let two = walls(&db, 2);
+    for seed in 0..20 {
+        let (out, log) = watched(&both, &two, seed);
+        assert_eq!(out.winner, Some(0), "seed {seed}");
+        assert_eq!(log.deaths.iter().filter(|d| d.0 == 1).count(), 2, "seed {seed}");
+        let second = log.attacker_keywords[1];
+        assert!(second.has(Keywords::POISONOUS), "seed {seed}");
+        assert!(second.has(Keywords::VENOMOUS), "the Venomous was not needed, seed {seed}");
+    }
+    // The control: Venomous alone is spent by the first kill, so the second
+    // swing is a plain 1 damage and the wall lives.
+    let venomous = board(&db, &["Deadly Spore"]);
+    for seed in 0..20 {
+        let (_, log) = watched(&venomous, &two, seed);
+        assert_eq!(log.deaths.len(), 1, "one kill only, seed {seed}");
+        assert!(
+            !log.attacker_keywords[1].has(Keywords::VENOMOUS),
+            "Venomous is gone after it kills, seed {seed}"
+        );
     }
 }
 

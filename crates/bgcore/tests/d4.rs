@@ -134,7 +134,8 @@ fn slots_show_tribes_keywords_and_counters() {
     put_on_board(&mut g, 0, "Holy Vanguard"); // 0: neutral 10/10, Divine Shield
     put_on_board(&mut g, 0, "Gatekeeper Amalgam"); // 1: all types
     put_on_board(&mut g, 0, "Heroic Underdog"); // 2: Stealth
-    put_on_board(&mut g, 0, "Deadly Spore"); // 3: Venomous
+    put_on_board(&mut g, 0, "Deadly Spore"); // 3: Venomous, and Poisonous too
+    g.players[0].board[3].keywords.set(bgcore::Keywords::POISONOUS);
     put_on_board(&mut g, 0, "Suspicious Prisonguard"); // 4: Activate (1)
     put_on_board(&mut g, 0, "Eredar Escapist"); // 5: "after 4 damage (N left!)"
     g.players[0].board[5].improvements = 3;
@@ -157,6 +158,8 @@ fn slots_show_tribes_keywords_and_counters() {
     assert_eq!(board_slot(&out, 2)[SLOT_STEALTH], 1.0);
     assert_eq!(board_slot(&out, 2)[SLOT_KEYWORDS + 3], 0.0);
     assert_eq!(board_slot(&out, 3)[SLOT_KEYWORDS + 3], 1.0, "venomous");
+    assert_eq!(board_slot(&out, 3)[SLOT_POISONOUS], 1.0, "poisonous, its own slot");
+    assert_eq!(board_slot(&out, 2)[SLOT_POISONOUS], 0.0);
     assert_eq!(board_slot(&out, 4)[SLOT_ACTIVATE_COST], 1.0);
     assert_eq!(board_slot(&out, 3)[SLOT_ACTIVATE_COST], 0.0);
     let escapist = board_slot(&out, 5);

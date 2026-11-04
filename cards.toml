@@ -2172,14 +2172,16 @@ deathrattle = { effect = { summon_dead_aberrations = 2 } }
 # trinket, like Beetles. Stats and text are the game data's.
 
 # Morgl Portrait (BG32_MagicItem_926). Poisonous, and the minion it attacks
-# and kills gives its maximum stats to a card in its owner's hand.
+# and kills gives its maximum stats to a card in its owner's hand. Poisonous,
+# not Venomous: it kills what it damages every time and is never used up
+# (docs/rules/design.md "Keywords").
 [[token]]
 name = "Tide Oracle Morgl"
 tier = 7
 tribe = "murloc"
 stats = [1, 10]
 golden_stats = [2, 20]
-keywords = ["venomous"]
+keywords = ["poisonous"]
 on_kill = "max_stats_to_hand"
 
 # Behemoth Portrait (BG32_MagicItem_998).
