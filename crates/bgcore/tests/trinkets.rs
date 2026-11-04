@@ -5695,9 +5695,17 @@ fn three_summoned_copies_triple_into_a_golden_card_in_hand() {
 
 /// A Lovely Locket's copy is the trinket's cast, not the player's, so the
 /// minion it lands on does not answer it with its own "whenever you cast a
-/// spell on this": in `Hearthstone_2026_11_02_00_10_22-g2` turn 12 a Gem
-/// play's six copies land on a Glambot and give it +1/+1 each, and its
-/// Magnetize never fires (steps 24 to 31; the copies the report said "grow").
+/// spell on this". Read from the raw log (`Hearthstone_2026_11_02_00_10_22-g2`
+/// turn 12, steps 24 to 31, Power.log): three Hot-Air Surveyors make each Gem
+/// play six casts (six POWER blocks of the hand's Gem, 772266 onwards) and
+/// the Locket fires on every one of them, six copies per play on other
+/// friendly minions picked at random. Every real cast has its two Glambot
+/// triggers before its own POWER block (772280 and 772634, then the cast at
+/// 772821); a copy has none: the two that land on the board's second Glambot
+/// (772873 and 773521) give it +1/+1 each and no Satellite, and the pair
+/// after them (772939, 773293) belongs to the next cast. Not one of the
+/// game's 140 copies spawns a trigger block, so the +1/+1 the old reading
+/// "grew" on a Glambot is the Gem's own buff and nothing else.
 #[test]
 fn a_locket_copy_does_not_fire_the_minion_it_lands_on() {
     let mut g = game(314);
