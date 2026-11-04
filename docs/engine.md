@@ -873,6 +873,18 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   slot counter that carries across turns. A shop destroy counts deaths but
   not Avenge: a trinket's Avenge is Avenge, and its counts start from 0 in
   every fight.
+- **Cards a fight gives the hand.** `SideOutcome.cards` (a Rally's Beast, a
+  Deathrattle's card, GetLockbox's Lockbox) is handed over in
+  `apply_side_outcome` through `give_generated`, and the trinket and hero
+  power hooks it fires there (those same "after N deaths / summons"
+  counters, MechGyver's deaths, Friendly Wager's coins) hand theirs over
+  through `add_to_hand` like every card. Nothing triples during a fight
+  (docs/rules/design.md "Nothing triples during combat"), so `Game.defer_triples`
+  is set while that carry-over runs: `add_to_hand` records each minion card
+  on `Player.triples_next_turn` (`defer_triple`) and `check_triple_tracking`
+  merges nothing. `dark_gift_start_of_turn` runs those checks as the next
+  turn starts, so the golden lands in the hand in the shop phase, and the
+  golden's own Triple Reward follows from playing it as usual.
 - **Block 4: the player-level hooks.** The frame grew the events this block
   needed instead of a field per card: `on_card_play` (any card played from the
   hand, a Blood Gem or a Banana included), `on_battlecry` (once per Battlecry
@@ -1300,10 +1312,11 @@ through exactly that card's code. The engine never matches a gift by name:
   as it stands: `Player::make_card` with no golden, no buffs, no added
   keywords and no gift. It goes into the hand unmerged, because the turn is
   over and nothing triples during the fights: the card is recorded on
-  `Player.triples_next_turn` and `dark_gift_start_of_turn` runs its
-  `check_triple` as the next turn starts, so the three copies become the
-  golden in hand there, gifts and all (Era 2026-11-03; every logged payout
-  that made a third copy shows the golden at the turn's start).
+  `Player.triples_next_turn` (`defer_triple`, the list a fight's own grants
+  use) and `dark_gift_start_of_turn` runs its `check_triple` as the next
+  turn starts, so the three copies become the golden in hand there, gifts
+  and all (Era 2026-11-03; every logged payout that made a third copy shows
+  the golden at the turn's start).
 - **The other hooks.** `dark_gift_card_played` ("whenever you play a card":
   Dexterity, Sharpened Sword, Toughened Shield) runs from `Action::Play`;
   `dark_gift_count` grows the "for each Battlecry / Tavern spell / discard"

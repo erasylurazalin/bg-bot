@@ -974,11 +974,13 @@ pub struct Player {
     /// Whether a card got now is queued rather than lost: on through the
     /// start of the turn's own effects, off after them.
     pub hand_queue_on: bool,
-    /// Cards a countdown payout (Replication) handed over at the end of the
-    /// last turn: its copy arrives when the turn is over and nothing triples
-    /// during the fights, so its triple check waits for the start of this
-    /// turn (`dark_gift_start_of_turn` runs it; Era 2026-11-03).
-    pub triples_next_turn: ArrayVec<CardId, BOARD>,
+    /// Minion cards that arrived in the hand when the turn was over (a
+    /// countdown payout a Replication handed over at the end of the turn, a
+    /// Beast a Rally gave in the fight): nothing triples during the fights,
+    /// so their triple check waits for the start of this turn
+    /// (`dark_gift_start_of_turn` runs it; Era 2026-11-03). One entry per
+    /// card, so it can hold a full hand's worth of them.
+    pub triples_next_turn: ArrayVec<CardId, HAND>,
     pub board: ArrayVec<Minion, BOARD>,
     pub pending_choose_one: Option<PendingChooseOne>,
     pub pending_target: Option<PendingTarget>,
@@ -1168,6 +1170,11 @@ pub struct Game {
     pub kitty_warbands: ArrayVec<(u32, ArrayVec<Minion, BOARD>), { PLAYERS - 1 }>,
     order: ArrayVec<u8, PLAYERS>,
     cursor: usize,
+    /// Set while a fight's carry-over is applied (`apply_side_outcome`): a
+    /// minion card the fight gives the hand then waits to triple until the
+    /// start of the next turn (docs/rules/design.md "Nothing triples during
+    /// combat").
+    defer_triples: bool,
 }
 
 /// Settings and results of a sandbox game (see `Game::new_sandbox`).
@@ -1385,6 +1392,7 @@ impl Game {
             kitty_warbands: ArrayVec::new(),
             order: ArrayVec::new(),
             cursor: 0,
+            defer_triples: false,
         }
     }
 
@@ -2592,7 +2600,17 @@ impl Game {
         // the card: a card that leaves it carries neither.
         m.tickets = 0;
         m.frozen = false;
+        let card = m.card;
         self.players[p].hand.push(m);
+        // Nothing triples during the fights (docs/rules/design.md "Nothing
+        // triples during combat"): a minion card that lands in the hand while
+        // a fight's carry-over is applied (a Rally's Beast, a Deathrattle's
+        // card, a trinket's or a hero power's) is recorded, and
+        // `dark_gift_start_of_turn` runs its triple check as the next turn
+        // starts.
+        if self.defer_triples {
+            self.defer_triple(p, card);
+        }
         // "Whenever you get a Pirate" (Doubloon Grifter's event trigger, and a
         // trinket's `on_get`): a card of that tribe entered the hand, from
         // anywhere (bought, generated, Discovered, copied).

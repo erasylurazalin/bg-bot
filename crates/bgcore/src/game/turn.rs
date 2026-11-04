@@ -774,6 +774,11 @@ impl Game {
     /// leaves behind. After a Tavern attack the board is already up to date,
     /// so only the hand and the Tavern take the bonuses.
     pub fn apply_side_outcome(&mut self, p: usize, so: &SideOutcome, after_fight: bool) {
+        // Nothing triples during the fights (docs/rules/design.md "Nothing
+        // triples during combat"): what a fight gives the hand here (a Rally's
+        // Beast, a Deathrattle's card, a trinket's or a hero power's) only
+        // gets its triple check at the start of the next turn.
+        let defer_triples = std::mem::replace(&mut self.defer_triples, after_fight);
         if after_fight {
             for (slot, &imp) in so.permanent_improvements.iter().enumerate() {
                 if imp > 0 && slot < self.players[p].board.len() {
@@ -880,6 +885,7 @@ impl Game {
         // already gone (knockouts drained it), and a card given after that
         // would leave a dead player holding cards.
         if !self.players[p].alive {
+            self.defer_triples = defer_triples;
             return;
         }
         // Trinket gains from the fight: free Refreshes (Herding Horn), the
@@ -940,6 +946,7 @@ impl Game {
         for &n in so.lockboxes_gained() {
             self.give_lockbox(p, n);
         }
+        self.defer_triples = defer_triples;
     }
 
     pub(super) fn combat(&mut self) {
