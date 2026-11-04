@@ -111,7 +111,11 @@ fight phase.
   10). A copy's own aura isn't one of its bonus stats: Holy Vanguard's
   "+30/+30 if you have 15 or less Health" stays out of the sum, and the
   golden gets its own once, at its doubled +60/+60 (log `10_28_22_11_50-g5`
-  turn 10: golden Holy Vanguard 208/116, not 238/146; 2026-11-04). Its effect is doubled (twice the numbers, or the
+  turn 10: golden Holy Vanguard 208/116, not 238/146; 2026-11-04). Holy Vanguard's
+  +30/+30 is part of its stats wherever it is (board, hand, Tavern) while
+  you have 15 or less Health, and leaves when you go above: a Demon that
+  eats a Tavern Holy Vanguard gains the +30/+30 too (Era, 2026-11-04; the
+  logs show it in the card's stats in all three places). Its effect is doubled (twice the numbers, or the
   effect triggers twice).
 - Playing a golden minion gives a Triple Reward: a 0-cost plain spell (not
   a Tavern spell) that goes to your hand. Casting it is casting a spell:
@@ -857,7 +861,10 @@ the JSON flags it.
   countdown it shows the overshoot, not what was left. On "(4 left!)", 5
   damage fires it once and leaves "(1 left!)", so the next point fires it
   again (`10_27_04_30_04-g3` turn 10 step 25: two Cupcakes, from a 5 and a
-  1). Whether every "after N" counter works this way is open (UNSURE).
+  1). Every counter card works this way (Era, 2026-11-04): Enterprising
+  Escapee, Sky Admiral Rogers, Gunpowder Courier and the rest keep the
+  overshoot too. Counter cards count only on the board, never in hand
+  (Era, 2026-11-04).
 - **Tomb Turning:** the Discovered Undead dies right after it's played
   that turn, after its Battlecry (in docs/notes/UNSURE.md). Kept in hand to a
   later turn, it's a normal minion.
