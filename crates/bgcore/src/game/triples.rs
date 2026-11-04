@@ -245,7 +245,31 @@ impl Game {
                 // (docs/rules/darkgifts.md), and gifts stack: two copies with the
                 // same gift give two of it, except a gift that sets a state.
                 for &g in m.gift_slice() {
-                    if cards.get(g.card()).gift_unique {
+                    let gift = cards.get(g.card());
+                    // A gift that hands out only keywords leaves them on the
+                    // copy, and the golden takes them over with the rest of the
+                    // copy's keywords, but the game keeps no gift behind: no
+                    // golden in Era's logs carries Harpy's Talons, Toxicity or
+                    // Furtiveness. `Hearthstone_2026_10_24_15_25_26-g4` turn
+                    // 10 has a golden Eredar Escapist with Divine Shield and
+                    // Windfury and no gift where the copy it came from had
+                    // Harpy's Talons.
+                    if keyword_gift(gift) {
+                        continue;
+                    }
+                    // A countdown gift is one counter, not two per copy: the
+                    // golden keeps one Replication (`Hearthstone_2026_10_26_
+                    // 00_48_15-g2` turn 6, where two copies carried it and the
+                    // golden shows one, counted down). Two Toughened Shields
+                    // the game does keep (docs/rules/darkgifts.md), so this is
+                    // only the countdown ones. Which copy's count is kept is
+                    // the log's to say and it says nothing: the first.
+                    if gift.countdown.is_some()
+                        && gold.gift_slice().iter().any(|o| o.card() == g.card())
+                    {
+                        continue;
+                    }
+                    if gift.gift_unique {
                         gold.push_gift_unique(g);
                     } else {
                         gold.push_gift(g);
@@ -294,4 +318,20 @@ impl Game {
             give_back(&mut self.pool, &self.data.cards, &m);
         }
     }
+}
+
+/// A Dark Gift whose landing gives the minion nothing but keywords (Harpy's
+/// Talons, Toxicity, Furtiveness): the keywords stay on the minion and a
+/// golden made from its copies takes them over, but the game keeps no gift of
+/// that kind on a golden (no golden in Era's logs carries one). The three
+/// `gift_unique` gifts that are not just keywords each set something else
+/// (Gilding makes the minion golden, Toreth's Blessing brings its shield hits,
+/// Amalgamation its types) and are kept as before.
+fn keyword_gift(c: &crate::cards::Card) -> bool {
+    c.gift_unique
+        && c.keywords.0 != 0
+        && c.shield_hits == 0
+        && !c.makes_golden
+        && !c.all_types
+        && c.countdown.is_none()
 }

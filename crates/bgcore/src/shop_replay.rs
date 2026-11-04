@@ -138,6 +138,11 @@ pub struct ShopMinionSpec {
     /// also carry it.
     #[serde(default)]
     pub taught: Option<String>,
+    /// The card this one came from (the `from` the collector writes on a card
+    /// a source handed out): a linked pair is read off it (`seat_links`). No
+    /// file written before the key existed has it.
+    #[serde(default)]
+    pub from: Option<ShopPlace>,
 }
 
 impl ShopMinionSpec {
@@ -829,6 +834,12 @@ pub fn load(
         for m in &hand {
             let _ = pl.hand.try_push(*m);
         }
+        // The linked pairs a source handed out (Faceless Operative, Kith'ix's
+        // Dark Ritual): playing one discards the other.
+        {
+            let (hand_slots, specs) = (&mut pl.hand[..], &spec.hand[..]);
+            seat_links(data, hand_slots, specs);
+        }
         pl.shop.clear();
         for m in &tavern {
             let _ = pl.shop.try_push(*m);
@@ -1137,6 +1148,92 @@ pub fn seat_spell_bonus_turn(pl: &mut Player, state: &ShopStateSpec, turn_start:
     pl.tp.spell_bonus_turn.1 += health;
 }
 
+/// The cards the state's trinkets hand out at the start of the turn: a
+/// Spellcraft spell, or a Lockbox.
+fn start_of_turn_cards(data: &Data, pl: &Player) -> Vec<CardId> {
+    let mut out: Vec<CardId> = Vec::new();
+    for st in pl.trinkets.iter() {
+        if st.of == 0 {
+            continue;
+        }
+        for act in data.trinkets.get(st.of - 1).start_of_turn.iter() {
+            match *act {
+                crate::trinkets::Act::Get { card, .. } => out.push(card),
+                crate::trinkets::Act::GetLockbox(_) => out.extend(data.cards.lockbox),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// A card a trinket hands out at the start of the turn that the hand had no
+/// room for: the game queues it and lets it join at the first step that frees
+/// a slot (docs/rules/design.md "A full hand", the Lockbox Portrait and the
+/// Token of the Old Gods in `Hearthstone_2026_10_28_22_11_50-g6` turn 8 and
+/// `Hearthstone_2026_10_29_22_20_04-g3` turn 10). A queued card is not in the
+/// logged state and cannot be, so a replay of that step would never hand it
+/// over: it is queued again here, from the trinket the state does show.
+/// Nothing is queued for a card the hand still holds, or one this turn already
+/// shows arriving or being played: that is how a state behind an early cast
+/// says the handout was delivered.
+fn seat_queued_start_of_turn(
+    data: &Data,
+    pl: &mut Player,
+    file: &ShopFileSpec,
+    turn: usize,
+    index: usize,
+) {
+    if !pl.hand.is_full() {
+        return;
+    }
+    let due = start_of_turn_cards(data, pl);
+    let Some(turn_spec) = file.turns.get(turn) else { return };
+    // Whether a card of the state's is the one the trinket hands out, by the
+    // name the loader builds it under (the log writes Floating Candle Set's
+    // spell with the trinket's name, and the greater Jailer Sticker's with the
+    // lesser one's).
+    let named = |place_id: Option<&str>, place_name: Option<&str>, card: CardId| {
+        let name = data.cards.get(card).name.as_str();
+        match place_id {
+            Some(id) => crate::real_boards::resolved_name(id, place_name.unwrap_or_default()) == name,
+            None => place_name == Some(name),
+        }
+    };
+    let due: Vec<CardId> = due
+        .into_iter()
+        .filter(|&card| {
+            if pl.hand.iter().any(|m| m.card == card) || pl.hand_queue.iter().any(|m| m.card == card)
+            {
+                return false;
+            }
+            let held = |state: &ShopStateSpec| {
+                state
+                    .hand
+                    .iter()
+                    .any(|m| named(m.card_id.as_deref(), m.name.as_deref(), card))
+            };
+            if held(&turn_spec.start) {
+                return false;
+            }
+            !turn_spec.actions[..index.min(turn_spec.actions.len())].iter().any(|a| {
+                let played = a
+                    .card
+                    .as_ref()
+                    .is_some_and(|c| named(c.card_id.as_deref(), c.name.as_deref(), card));
+                played || a.after.as_ref().is_some_and(held)
+            })
+        })
+        .collect();
+    for card in due {
+        let m = pl.make_card(&data.cards, card, false, 0);
+        if pl.hand_queue.is_full() {
+            break;
+        }
+        let _ = pl.hand_queue.try_push(m);
+    }
+}
+
 /// A Tavern spell the step bought for less than the engine's price: the file
 /// says what the log charged (`paid.gold`) and nothing about why (a hero
 /// power or a rule this engine does not model; docs/briefs/
@@ -1354,6 +1451,17 @@ fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPowerSpec]) {
             let done = power.numbers.first().copied().unwrap_or(0);
             st.progress = (digs as i32 - done).clamp(0, digs as i32) as u32;
         }
+        if let crate::heroes::PowerEffect::RandomTribeAfterSells { every, .. } = effect {
+            // Gone Fishing counts the sells left ("5" is none since the last
+            // Murloc, then 4, 3, 2, 1 and a Murloc at 0, back to 5: the log
+            // of 2026-10-28 22:11:50 game 4, turn 12), the engine the sells
+            // done, so the two turn around. Every step loads a fresh state,
+            // and without this the count would start again at 0 each step and
+            // the power could never fire inside one.
+            let left = power.numbers.first().copied().unwrap_or(0);
+            let left = left.clamp(1, every as i32) as u32;
+            st.progress = every as u32 - left;
+        }
         if let Some(cost) = power.cost {
             let base = data.heroes.power(i).cost as i32;
             st.cost_delta = (cost - base).clamp(i8::MIN as i32, i8::MAX as i32) as i8;
@@ -1438,6 +1546,61 @@ fn golden_played_shown(
         }
     }
     best
+}
+
+/// The pair of cards one effect hands out: a sold Faceless Operative gives two
+/// random Aberrations, a sold Wandering Willbreaker two random Tavern spells
+/// and Kith'ix's Dark Ritual two random minions, and playing one discards the
+/// other (docs/rules/design.md "Linked cards"). The engine keeps the pair as a
+/// group number on the cards (`Minion::linked`), and the one thing a logged
+/// state still says about it is the card each came from (`from`), so the loader
+/// links the hand again: exactly two hand cards from a source that hands out a
+/// pair are that pair. Four (two presses, or a golden source sold twice) do not
+/// say who goes with whom, and are left unlinked.
+fn seat_links(data: &Data, hand: &mut [Minion], specs: &[ShopMinionSpec]) {
+    let mut sorted: Vec<&ShopMinionSpec> = specs.iter().collect();
+    sorted.sort_by_key(|m| (m.position.or(m.index).unwrap_or(0), m.id));
+    let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
+    for (slot, spec) in sorted.iter().take(hand.len()).enumerate() {
+        let Some(from) = spec.from.as_ref() else { continue };
+        if !hands_out_a_pair(data, from) {
+            continue;
+        }
+        let key = from.card_id.as_deref().or(from.name.as_deref()).unwrap_or_default();
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, slots)) => slots.push(slot),
+            None => groups.push((key, vec![slot])),
+        }
+    }
+    let mut next = 1u16;
+    for (_, slots) in groups {
+        if slots.len() != 2 {
+            continue;
+        }
+        for slot in slots {
+            hand[slot].linked = next;
+        }
+        next += 1;
+    }
+}
+
+/// Whether a card hands out its cards as a linked pair: a minion whose sale is
+/// `linked_minions` or `linked_spells`, or the hero power `GetLinkedMinions`.
+fn hands_out_a_pair(data: &Data, from: &ShopPlace) -> bool {
+    let Some(name) = from.name.as_deref() else { return false };
+    let linked_sale = data.cards.by_name(name).is_some_and(|c| {
+        matches!(
+            data.cards.get(c).on_sell,
+            Some(crate::cards::OnSell::Effect(
+                crate::cards::Effect::GetLinkedMinions { .. }
+                    | crate::cards::Effect::GetLinkedSpells { .. }
+            ))
+        )
+    });
+    linked_sale
+        || data.heroes.powers.iter().any(|p| {
+            p.name == name && matches!(p.effect, crate::heroes::PowerEffect::GetLinkedMinions(_))
+        })
 }
 
 /// One zone (the board or the hand) of a logged state, in position order.
@@ -2979,6 +3142,9 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     if let Some(start) = file.turns.get(turn_index).map(|t| &t.start) {
         seat_spell_bonus_turn(&mut loaded.game.players[ME], before, start);
     }
+    // A start-of-turn card the hand had no room for: queued again, so this
+    // step can hand it over when it frees a slot.
+    seat_queued_start_of_turn(data, &mut loaded.game.players[ME], file, turn_index, index);
     let mut missing = std::mem::take(&mut loaded.missing);
     if step.step == "end_turn" {
         // The end of turn effects, without the fight that follows them: the

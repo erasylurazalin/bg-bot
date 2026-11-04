@@ -879,7 +879,14 @@ fn paradox_name(card_id: &str) -> Option<String> {
 /// Floating Candle Set is a trinket whose Spellcraft spell is written with
 /// the trinket's name in the log (`BG36_MagicItem_208t`, "Floating Candle
 /// Set"); `cards.toml` builds the spell as the "Floating Candle" token.
-const RENAMED_BY_ID: &[(&str, &str)] = &[("BG36_MagicItem_208t", "Floating Candle")];
+/// The greater Jailer Sticker's spell prints the lesser one's name in the log
+/// (both are "Jailer Sticker") but says "2 random Undead" where the lesser
+/// says "a random Undead": `cards.toml` builds it as "Jailer Sticker
+/// (Greater)", and only the card id tells the two apart.
+const RENAMED_BY_ID: &[(&str, &str)] = &[
+    ("BG36_MagicItem_208t", "Floating Candle"),
+    ("BG35_MagicItem_733t", "Jailer Sticker (Greater)"),
+];
 
 /// The name to build a card under, given its id and the name the file shows:
 /// a card id that says more than its logged name does (a Dark Paradox version,

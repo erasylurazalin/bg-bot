@@ -189,7 +189,9 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   `gem_attack`/`gem_health`) plus where each card sits: `slot` in
   the Tavern, `index` in my hand, `position` on my board. A hand card the log
   does not name is kept with a null card id and counted in `hand_hidden`; none
-  of the 47 games has one, so that count is 0 everywhere.
+  of the 47 games has one, so that count is 0 everywhere. A card a source
+  handed out carries `from`, the log's CREATOR (the card that made it), which
+  is what the replay reads a linked pair off (below).
 - `gold` is `RESOURCES + TEMP_RESOURCES - RESOURCES_USED` on my player entity,
   the number the client shows; `gold_max` is `RESOURCES`. `health` and `armor`
   are my hero's, apart. `upgrade_cost` is the COST of the tier up button (null
@@ -564,7 +566,12 @@ of a random step is run, since any of them may be the log's.
     and the shop replay's own loader does the same through
     `real_boards::resolved_name`. Floating Candle Set's Spellcraft spell is
     logged under the trinket's name (`BG36_MagicItem_208t`); `cards.toml`
-    builds it as the "Floating Candle" token, and the same table maps it.
+    builds it as the "Floating Candle" token, and the same table maps it. The
+    greater Jailer Sticker's spell prints the lesser one's name in the log
+    (both are "Jailer Sticker", `BG35_MagicItem_306t` and `BG35_MagicItem_733t`)
+    but says "2 random Undead" where the lesser says "a random Undead":
+    `cards.toml` builds it as "Jailer Sticker (Greater)", and only the card id
+    tells the two apart.
   - **The Tavern's spell slot** is the engine's own (`Player.shop_spell`), not
     a minion slot: the game's spell slot is the last spell in slot order, and
     putting it in `shop` let a card that picks a random Tavern minion pick the
@@ -611,7 +618,10 @@ of a random step is run, since any of them may be the log's.
       improvement count or a card id (Portable Factory) and are left alone;
     - a hero power's count: Tae'thelan's Reliquary Research counts Tavern
       spells bought in `HeroCounts.tavern_spells_bought`, which the log shows
-      as how many more spells it takes;
+      as how many more spells it takes, and Gone Fishing counts the minions
+      sold in `PowerState.progress`, which the log shows the other way round
+      as the sells left ("5" is none since the last Murloc, then 4, 3, 2, 1
+      and a Murloc at 0: `Hearthstone_2026_10_28_22_11_50-g4` turn 12);
     - Goldenizer Supply's "every 3 turns" count (`TrinketState.count`, from
       the turns left in its `{0}`: 3 left is the turn after the pick, 1 left
       is the turn it fires on), and a Magicfin Mycologist's teachings left
@@ -625,6 +635,26 @@ of a random step is run, since any of them may be the log's.
     state: `replay_step` reads it off the file's history, the last `play`
     step of a Tavern spell before the step being replayed. A spell a minion
     cast for the player and a Blood Gem are not it.
+  - **Linked cards** (a sold Faceless Operative or Wandering Willbreaker,
+    Kith'ix's Dark Ritual) are a pair the state carries only through the card
+    each came from: `shop_replay::seat_links` links two hand cards with one
+    `from` that came from a source handing out a pair, so playing one
+    discards the other (`Minion.linked`, docs/rules/design.md "Linked
+    cards"). Four cards from one source (two presses, a golden source sold
+    twice) do not say who goes with whom and stay unlinked.
+  - **A start-of-turn card a full hand refused** (a Spellcraft spell, a
+    Lockbox) waits for room and joins at the first step that frees a slot
+    (docs/rules/design.md "A full hand"), and no state can show a card that is
+    not in the hand yet: `shop_replay::seat_queued_start_of_turn` queues it
+    again from the trinket the state does show, unless the hand holds it or
+    the turn already shows it arriving or being played
+    (`Hearthstone_2026_10_28_22_11_50-g6` turn 8's Lockbox). The same log
+    shows the gap this cannot close: a trinket's start-of-turn trigger the
+    game resolves after a trinket pick or a pending Discover fires at
+    `MAIN_START`, behind the logged step boundary
+    (`Hearthstone_2026_10_26_00_48_15-g2` turn 9's Floating Candle,
+    `Hearthstone_2026_10_30_19_45_15-g2` turn 9's Token of the Old Gods), and
+    that one is the collector's boundary to move.
 
       as how many more spells it takes; Buried Treasure's number is the digs
       left ("(1 left!)" is the fourth dig) and the engine counts the digs done

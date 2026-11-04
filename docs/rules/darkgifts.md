@@ -109,6 +109,17 @@ The pool the offers come from:
   nothing: keyword gifts (Harpy's Talons, Furtiveness, Toxicity,
   Amalgamation) and gifts that set a state (Toreth's Blessing's three
   hits, Gilding) don't add up.
+  Two more things show in the logs, and the engine follows them
+  (2026-11-04): a golden shows **no** keyword gift at all, not one copy of
+  it, with the keywords on it and its gift list empty
+  (`Hearthstone_2026_10_24_15_25_26-g4` turn 10: a golden Eredar Escapist
+  with Divine Shield and Windfury, from a Harpy's Talons copy, and no
+  gift); and of two **countdown** gifts the golden keeps one
+  (`Hearthstone_2026_10_26_00_48_15-g2` turn 6: two copies with
+  Replication, the golden with one). Across the 68 games, no golden carries
+  Harpy's Talons, Toxicity or Furtiveness, or two of Replication,
+  Incubation or Affinity, while two Toughened Shields and two Golemancy do
+  appear.
 - **Magnetic minions and gifts.** A Magnetic minion is never offered with a
   gift. The only way one gets a gift is Maldraxxus Dagger (a copy of a
   friendly minion). When a gifted Magnetic minion is Magnetized onto a
