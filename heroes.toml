@@ -742,7 +742,7 @@ armor = 18
 power = { name = "I Spy", card_id = "BG21_HERO_010p", cost = 2, effect = { ispy_next_opponent = true } }
 
 # Twice as Nice: after a Refresh, copy its highest-Tier minion and Freeze both
-# cards; the copy sits outside the normal slots.
+# cards; the copy takes one of the Tavern's normal slots.
 [[hero]]
 name = "Varden Dawngrasp"
 card_id = "BG22_HERO_004"

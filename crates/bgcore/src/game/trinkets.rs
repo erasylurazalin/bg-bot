@@ -1509,8 +1509,8 @@ impl Game {
                 // spell slot too), ties at random. A steal, so it leaves the
                 // pool like a bought copy but fires no buy trigger.
                 let cards = &self.data.cards;
-                // SHOP + 1: the spell slot ties in too, and the Tavern can hold
-                // one card more than its size (Twice as Nice's copy).
+                // SHOP + 1: every minion slot can tie in, and the spell slot
+                // is the index past the last one (`shop.len()`).
                 let mut best: ArrayVec<usize, { crate::SHOP + 1 }> = ArrayVec::new();
                 let mut best_tier = 0u8;
                 for (i, m) in self.players[p].shop.iter().enumerate() {
@@ -1930,8 +1930,9 @@ impl Game {
                 // (Era's rule names both and no odds).
                 if self.rng.below(2) == 0 {
                     // One joins the Tavern, in a free slot or the spell slot.
-                    // A Tavern can hold one card more than its size (Twice as
-                    // Nice's copy), so the array's own bound is the guard.
+                    // A Tavern can hold more cards than its minion slots (a
+                    // Warband Whistle Refresh, seven Fodders), so the array's
+                    // own bound is the guard.
                     let size = self.players[p].shop_size(&self.data.rules);
                     let room = self.players[p].shop.len() < size
                         || (self.players[p].shop.len() == size

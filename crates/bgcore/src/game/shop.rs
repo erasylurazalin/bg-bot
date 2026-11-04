@@ -247,7 +247,7 @@ impl Game {
         let range = Self::fill_shop(pl, pool, cards, rules, size, rng, lobby, kind);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards, rng);
-        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
+        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask);
         range
     }
 
@@ -281,7 +281,6 @@ impl Game {
         cards: &CardDb,
         rng: &mut Rng,
         bonus_mask: u8,
-        size: usize,
     ) {
         // A Ticket roll: 1 for a card that carries one, 2 for one that was
         // rolled for without getting one, 0 for a card the Tavern never
@@ -298,8 +297,13 @@ impl Game {
             }
         }
         // Twice as Nice: the highest-Tier minion in the Tavern, and an exact
-        // copy of it, both frozen. The copy sits outside the normal slots.
-        if pl.twice_nice && pl.shop.len() <= size && !pl.shop.is_full() {
+        // copy of it, both frozen. The copy takes one of the Tavern's normal
+        // slots, which the fill of a Refresh left empty for it, so the Tavern
+        // keeps its size (docs/rules/heroes.md). A Tavern with no slot left
+        // (its minions and its spell make seven cards) gets no copy.
+        if pl.twice_nice
+            && pl.shop.len() + usize::from(pl.shop_spell.is_some()) < crate::SHOP
+        {
             let mut best: Option<usize> = None;
             for i in 0..pl.shop.len() {
                 let c = cards.get(pl.shop[i].card);
@@ -444,6 +448,16 @@ impl Game {
         let base = base.saturating_sub(pl.shop_fewer as usize);
         // New Recruit: the extra slot is drawn with the rest of them.
         let base = base + u8::from(pl.prize.extra_shop) as usize;
+        // Twice as Nice's copy takes one of the Tavern's normal slots, so this
+        // fill leaves the last of them empty for it: `after_refresh_powers`
+        // runs once the Refresh is done and copies a card that is there, so
+        // the game deals one minion fewer and then the copy, not one more
+        // (docs/rules/heroes.md). `Hearthstone_2026_10_24_17_59_26-g1` turn
+        // 15: a Tier 6 Refresh creates five fresh minions and the copy, where
+        // a Tier 6 Refresh without the power creates six.
+        let reserved = usize::from(pl.twice_nice);
+        let base = base.saturating_sub(reserved);
+        let size = size.saturating_sub(reserved);
         // Fodders take the first slots, and more of them than the tier has
         // slots widen the Tavern to hold them all: the Tavern holds at most
         // seven cards, so seven Fodders leave no spell slot
@@ -547,8 +561,9 @@ impl Game {
         // The spell slot is the Tavern's last card, so it appears whenever
         // fewer than seven cards are there and disappears when the minions
         // fill all seven (seven Fodders, seven copies from the Warband
-        // Whistle); a frozen Tavern keeps the spell it already had.
-        let room = pl.shop.len() < crate::SHOP;
+        // Whistle); a frozen Tavern keeps the spell it already had. The slot
+        // held for Twice as Nice's copy counts as taken.
+        let room = pl.shop.len() + reserved < crate::SHOP;
         if room {
             if pl.shop_spell.is_none() {
                 pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
@@ -643,7 +658,7 @@ impl Game {
         pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards, rng);
-        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
+        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask);
     }
 
     /// Chillmere Mosaic's Spellcraft spell: refresh the Tavern with Battlecry
@@ -665,7 +680,10 @@ impl Game {
         }
         pl.shop_spell = None;
         let size = pl.shop_size(rules);
-        while pl.shop.len() < size {
+        // Twice as Nice's copy takes one of the Tavern's normal slots, so this
+        // fill stops one short and leaves it for the copy (see `fill_shop`).
+        let fill = size.saturating_sub(usize::from(pl.twice_nice));
+        while pl.shop.len() < fill {
             let drawn =
                 draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |c| c.battlecry.is_some());
             match drawn {
@@ -681,7 +699,7 @@ impl Game {
         pl.tp.tavern_price = price;
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards, rng);
-        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
+        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask);
     }
 
     /// Lost Staff of Hamuul: refresh the Tavern with minions of one type,
@@ -703,7 +721,10 @@ impl Game {
         }
         pl.shop_spell = None;
         let size = pl.shop_size(rules);
-        while pl.shop.len() < size {
+        // Twice as Nice's copy takes one of the Tavern's normal slots, so this
+        // fill stops one short and leaves it for the copy (see `fill_shop`).
+        let fill = size.saturating_sub(usize::from(pl.twice_nice));
+        while pl.shop.len() < fill {
             match draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |c| c.tribes.has(tribe)) {
                 Some(c) => {
                     let mut m = pl.make_card(cards, c, false, 1);
@@ -716,7 +737,7 @@ impl Game {
         pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards, rng);
-        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
+        Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask);
     }
 
     /// The game's own triple check, as the action ends: three copies a summon

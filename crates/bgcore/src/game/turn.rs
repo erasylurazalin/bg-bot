@@ -660,7 +660,7 @@ impl Game {
                 Self::apply_refresh_buff(pl, &data.cards, rng);
                 Self::apply_barrage(pl, &data.cards, rng);
                 let bonus = data.rules.bonus_mask;
-                Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
+                Self::after_refresh_powers(pl, &data.cards, rng, bonus);
                 pl.tp.refresh_tier6 = pl.tp.refresh_tier6.saturating_sub(1);
             }
         }

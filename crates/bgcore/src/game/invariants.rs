@@ -58,18 +58,17 @@ impl Game {
             if !pl.late_tavern.is_empty() {
                 return Err(format!("player {i}: a Tavern buff still held back"));
             }
-            // The minion slots plus the spell slot, which a Fodder can take
-            // (and fill with a minion once it feeds).
             // The Tavern holds its minion slots plus the spell slot, which a
-            // Fodder can take: one card more. Twice as Nice's copy sits
-            // outside the normal slots, one more again, and a Tavern filled
-            // before a power or trinket changed its size (Stay Frosty takes a
-            // slot away, a trinket adds one) keeps what it had.
+            // Fodder can take: one card more. Twice as Nice's copy takes one
+            // of the normal slots rather than sitting outside them, so it adds
+            // no card of its own, and a Tavern filled before a power or
+            // trinket changed its size (Stay Frosty takes a slot away, a
+            // trinket adds one) keeps what it had.
             // The Warband Whistle's Refresh holds one copy per warband
             // minion, up to the seven slots and with no spell then, so its
             // Tavern can be bigger than the tier's size (`fill_shop`).
             let size = pl.shop_size(&self.data.rules).max(crate::SHOP - 1);
-            if pl.shop.len() > size + 2 {
+            if pl.shop.len() > size + 1 {
                 return Err(format!("player {i}: shop too big"));
             }
             if let Some(pt) = pl.pending_target

@@ -569,8 +569,8 @@ build hero-less games so old tests pass unchanged, and
       `refresh_with_battlecries`, `refresh_with_tribe`, Temporal Tavern's own
       fill, the turn-start roll when the Tavern changed, Bob's Burgles): it
       marks Darkmoon Tickets on the new cards, gives Twice as Nice's copy
-      (the highest-Tier minion, frozen, outside the normal slots) and
-      Enhancification's two random Bonus Keywords.
+      (the highest-Tier minion, frozen, into one of the normal slots the fill
+      left empty for it) and Enhancification's two random Bonus Keywords.
     - **Frozen on its own.** `Minion.frozen` is a per-card Freeze (Twice as
       Nice freezes the two cards it names): the turn-start roll in
       `start_turn` keeps those cards and drops the rest, the same one-turn
