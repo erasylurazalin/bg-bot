@@ -651,6 +651,9 @@ summoned later). A 1/1 Skeleton with Reborn then comes back as a 12/4.
     costs (1) less") is what makes Tavern spells cost 0 or 1 in the logs.
   - Victorious Geomant's Activate costs 2; the one log step that showed 1
     was a misread step, not a discount.
+  - A Tavern spell dealt into a minion slot (Mana Per Minute, Saloon's
+    Finest: "Refresh the Tavern with Tavern spells") costs its normal spell
+    price, the same as in the spell slot.
   - Two casts on one minion versus one each on two (Misplaced Tea Set) are
     both fine random outcomes; only the replay's comparison tells them
     apart.
