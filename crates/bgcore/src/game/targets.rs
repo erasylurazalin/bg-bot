@@ -520,7 +520,7 @@ impl Game {
                     // player's cast (Era 2026-11-02): no Tavern spell trigger
                     // and no "cast on a Tavern Mech" watcher sees it.
                     if pt.tavern && !pt.by_minion {
-                        self.trigger_on_cast_spell(p);
+                        self.trigger_on_cast_spell(p, TriggerWhen::Now);
                     }
                     // A Roogug in the Tavern doesn't react to a Gem cast on
                     // it: whether a Tavern Roogug reacts at all is open
@@ -620,7 +620,7 @@ impl Game {
             return;
         }
         if tavern && !by_minion {
-            self.trigger_on_cast_spell(p);
+            self.trigger_on_cast_spell(p, TriggerWhen::Now);
         }
         if !by_minion {
             self.trigger_on_cast_spell_on_target(p, target_pos);
@@ -1248,7 +1248,7 @@ impl Game {
                         }
                     }
                     if pt.tavern && !pt.by_minion && !cast_triggers_done {
-                        self.trigger_on_cast_spell(p);
+                        self.trigger_on_cast_spell(p, TriggerWhen::Now);
                     }
                     if !target_removed && target_pos < self.players[p].board.len() {
                         // "Whenever you cast a spell on" cards and the
@@ -1318,6 +1318,13 @@ impl Game {
                         self.players[p].cast_after_choice = (what.casts > 0).then_some(what);
                     }
                     if stop_after {
+                        // The casts still to come do nothing (the target is
+                        // gone, or the spell moved it out of reach), and a
+                        // cast that does nothing is not a spell cast
+                        // (docs/rules/design.md "Undead": Balinda on Butchering
+                        // or Channel the Devourer). What is left of this
+                        // play's "after you cast" triggers is not owed.
+                        self.players[p].cast_after_choice = None;
                         break;
                     }
                 }

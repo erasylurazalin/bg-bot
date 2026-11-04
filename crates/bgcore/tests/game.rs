@@ -559,6 +559,69 @@ fn a_discover_spells_cast_triggers_wait_for_the_pick() {
 }
 
 #[test]
+fn a_spell_siphon_gift_grows_after_the_pick_not_on_the_play() {
+    // The Dark Gift Spell Siphon is "has +2/+2 for each Tavern spell you've
+    // cast this game", and the game grows the minion once the spell has
+    // resolved. A spell whose own effect opens a Discover has not resolved
+    // until the pick, so the growth lands there, not on the play: raw log
+    // Hearthstone_2026_10_27_04_30_04 turn 7 (Planar Telescope cast at
+    // Power.log 68792, its Discover picked at 69231, the Spell Siphon tag at
+    // 69283), and 2026_10_24_17_59_26 turn 10 step 43 to 44 (Fandral's
+    // Fortune, Mangled Bandit +2/+2 at the pick).
+    let mut g = game(149);
+    put_on_board(&mut g, 0, "Wolf Pup");
+    set_shop(&mut g, 0, &["Cord Puller", "Cord Puller"]);
+    let gift = g.data.cards.by_name("Gift: Spell Siphon strong").unwrap();
+    let index = g.data.gifts.gift_of_card(gift).unwrap();
+    let mut m = g.players[0].board[0];
+    bgcore::game::darkgifts::land_gift(&g.data, &g.players[0], &mut m, index, 1);
+    g.players[0].board[0] = m;
+    let before = g.players[0].board[0].attack;
+    g.give(0, "A New Sprout").unwrap();
+    let hand = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
+    assert!(!g.players[0].discover.is_empty(), "the Discover is offered");
+    assert_eq!(
+        g.players[0].board[0].attack, before,
+        "the gift's count waits for the pick"
+    );
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(
+        g.players[0].board[0].attack, before + 2,
+        "and it counts the Tavern spell once the cast has resolved"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_forsaken_weavers_undead_bonus_waits_for_the_pick() {
+    // Forsaken Weaver says "After you cast a Tavern spell", so its Undead
+    // bonus fires once the spell has resolved, after a pick the spell opened
+    // (raw log Hearthstone_2026_10_27_04_30_04 turn 10 step 9 to 10: Tomb
+    // Turning's play changes no minion, the +3 Attack lands at the pick).
+    // An Undead is not in this file's lobby, so the sandbox (every tribe) is.
+    let all = Tribe::EVERY.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t));
+    let mut g = Game::new_sandbox(Arc::new(Data::bundled()), 150, Some(all), 0);
+    put_on_board(&mut g, 0, "Forsaken Weaver");
+    put_on_board(&mut g, 0, "Cadaver Caretaker"); // Undead, 2/4
+    let before = g.players[0].board[1].attack;
+    g.give(0, "A New Sprout").unwrap();
+    let hand = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
+    assert!(!g.players[0].discover.is_empty(), "the Discover is offered");
+    assert_eq!(
+        g.players[0].board[1].attack, before,
+        "an \"after you cast\" card waits for the pick"
+    );
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(
+        g.players[0].board[1].attack, before + 3,
+        "and gives its Undead +3 Attack once the cast has resolved"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn sprightly_scarab_choose_one_and_patient_scout_discover() {
     let mut g = game(107);
     put_on_board(&mut g, 0, "Buzzing Vermin"); // 1/1 at slot 0

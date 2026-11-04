@@ -6,6 +6,7 @@ use crate::cards::{
     EventKind,
     OnDiscard,
     Tribe,
+    TriggerWhen,
 };
 use crate::minion::{Keywords, Minion};
 use crate::{BOARD, DISCOVER};
@@ -169,7 +170,7 @@ impl Game {
                 // A spell a minion casts for the player is not the player's
                 // cast: no "whenever you cast a spell" card sees it.
                 if tavern && !by_minion {
-                    self.trigger_on_cast_spell(p);
+                    self.trigger_on_cast_spell(p, TriggerWhen::Now);
                 }
                 self.execute_spell_effect(p, se, tavern);
             }

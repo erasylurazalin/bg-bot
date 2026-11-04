@@ -2662,6 +2662,47 @@ fn owe_battlecry_count(data: &Data, ids: &CardIdMap, game: &mut Game, step: &Sho
     pl.pending_battlecries = pl.pending_battlecries.saturating_add(n);
 }
 
+/// A pick that ends a *spell* the player cast (a Discover it opened, or the
+/// Choose One option it asked for) was logged as its own step, with the play in
+/// the step before, so the game's own action is split in two here: the pick
+/// step has to carry what the cast still owed, or those triggers never fire at
+/// all. What waits for the spell to resolve fires at the pick,
+/// inside the cast: the "after you cast a spell" triggers and the Dark Gift
+/// count (docs/rules/design.md "Targets in the shop"; log
+/// Hearthstone_2026_10_27_04_30_04 turn 7: Planar Telescope is cast at
+/// Power.log 68792, its Discover is picked at 69231 and the Spell Siphon Dark
+/// Gift's count only grows at 69283, and 2026_10_24_17_59_26 turn 10 step 43
+/// to 44, Fandral's Fortune's pick and its Felboar's consume). The "whenever"
+/// half and the counters were taken on the play, which is why this seats
+/// `at_play: true` and no counter of its own.
+///
+/// The number of casts is one: a spell the player doubled with Balinda is not
+/// in a file this reads (`cast_spell_as` folds the extra casts into the play).
+pub fn seat_cast_after_pick(data: &Data, ids: &CardIdMap, game: &mut Game, step: &ShopStepSpec) {
+    if !matches!(step.kind.as_deref(), Some("discover" | "choose_one")) {
+        // A Triple Reward or a Dark Gift offer.
+        return;
+    }
+    let Some(card) = step.source.as_ref().and_then(|s| resolve_card(data, ids, s)) else {
+        return;
+    };
+    let c = data.cards.get(card);
+    if !c.is_spell() || matches!(c.spell_effect, Some(crate::cards::SpellEffect::TripleReward)) {
+        return;
+    }
+    // The board's "after you cast a Tavern spell" cards as this step shows
+    // them: the play that owed them is behind us in the file.
+    let after = game.gather_on_cast_spell(ME, true);
+    game.players[ME].cast_after_choice = Some(crate::game::CastAfterChoice {
+        card,
+        casts: 1,
+        tavern: c.tavern_spell,
+        at_play: true,
+        count_owed: c.tavern_spell,
+        after,
+    });
+}
+
 /// Where a Discover's pick went when it did not join the hand, as a zone and
 /// a place in it: `board` and the 1-based position, or `tavern` and the file's
 /// 1-based slot. The file says it in the pick's `moved.to` when it writes one;
@@ -3128,6 +3169,7 @@ fn actions_for(
             if step.step == "discover" {
                 owe_battlecry_count(data, ids, &mut loaded.game, step);
             }
+            seat_cast_after_pick(data, ids, &mut loaded.game, step);
             let at = force_offer(data, ids, &mut loaded.game, step, turn, landing, missing)?;
             out.push(Action::Choose(at as u8));
         }

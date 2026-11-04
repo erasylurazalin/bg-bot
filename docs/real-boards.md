@@ -718,6 +718,18 @@ of a random step is run, since any of them may be the log's.
     (`Game::note_triples_due`) when `board_triple_due` reads it in the two
     states: three plain copies of one name on the board before, and a Golden
     card of that name in the hand after that the state before did not hold.
+  - **What a pick still owes the action that opened it.** The game resolves a
+    Discover or a Choose One inside the play that asked for it, but the log
+    makes the pick a step of its own, and `replay_step` replays the pick alone
+    from the state before it: nothing of the play is owed any more. The loader
+    seats it back from the step's `source` card, for a pick that ends a spell
+    the player cast (`shop_replay::seat_cast_after_pick`: the "after you cast a
+    spell" triggers and the Spell Siphon Dark Gift count, log
+    `10_24_17_59_26-g1` turn 10 step 43 to 44) and for a Discover a Battlecry
+    opened (`owe_battlecry_count`, "for each Battlecry" counting at the pick).
+    A pick that is not the play's last word (a Discover a Battlecry opened and
+    a target it asks for after it) is still one step here, so the rest of the
+    play is behind the boundary.
   - **A Magnetized minion's host** (`magnetize_host`) is the card the played
     minion's own stats went into: the step's `changed` list is in no order of
     its own, and a stat static the play set off comes before the host. It must
