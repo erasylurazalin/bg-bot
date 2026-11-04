@@ -658,10 +658,26 @@ fn incalculable_countdowns_tick_two_turns_at_the_end_of_the_turn() {
     g.dark_gift_end_of_turn(0);
     assert_eq!(g.players[0].board[0].gift_slice()[0].state(), 1);
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 10));
-    // Second tick: it fires and the gift comes off.
+    // Second tick: the count runs out, but the doubling waits for the start
+    // of the next turn (log `Hearthstone_2026_10_28_19_47_59-g1` turn 7: the
+    // end of turn leaves the minion alone, and the next turn's board carries
+    // the double). The gift stays for that payout.
     g.dark_gift_end_of_turn(0);
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 10));
+    assert_eq!(g.players[0].board[0].n_gifts, 1);
+    // The start of the next turn: it fires and the gift comes off.
+    g.dark_gift_start_of_turn(0);
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (20, 20));
     assert_eq!(g.players[0].board[0].n_gifts, 0);
+    // And it never fires again: two more turns of ticks and starts do
+    // nothing (the gift is gone; a gift the log shows at 0 is one that has
+    // already paid).
+    g.dark_gift_end_of_turn(0);
+    g.dark_gift_start_of_turn(0);
+    g.dark_gift_end_of_turn(0);
+    g.dark_gift_start_of_turn(0);
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (20, 20));
+    g.check_invariants().unwrap();
 }
 
 /// Replication hands over the base card, never the host as it stands: a
@@ -804,7 +820,7 @@ fn replication_and_affinity_start_their_count_again() {
 /// Drakkari Enchanter makes a countdown's payout run twice on the turn it
 /// fires, and never speeds the count itself (docs/rules/darkgifts.md, Era
 /// 2026-11-02): two plain copies from Replication, and Incubation's doubling
-/// twice.
+/// twice (at the start of the next turn, where its payout lands).
 #[test]
 fn drakkari_doubles_the_payout_not_the_count() {
     let mut g = game(18);
@@ -844,6 +860,10 @@ fn drakkari_doubles_the_payout_not_the_count() {
     g.dark_gift_end_of_turn(0);
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 10));
     g.dark_gift_end_of_turn(0);
+    // The count runs out at the end of the turn; the doubling lands as the
+    // next turn starts, and the Drakkari doubles it there too.
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 10));
+    g.dark_gift_start_of_turn(0);
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (40, 40));
 }
 

@@ -162,9 +162,15 @@ rules behind each are in docs/rules/design.md Part 2.
   `Minion.gem_attack`/`gem_health` in the board, the hand and the Tavern, so
   a replayed Gem Confiscation takes the neighbours' pair onto its target as
   the log does. A minion's own Magnetization count is on the card too
-  (`magnetizations`, one `Magnetic` enchantment per merge), seated as
+  (`magnetizations`), and it is the game's own count, the log's unnamed tag
+  `3670`: one for every Magnetic that merged into the minion and one for the
+  minion itself when the minion is Magnetic (the collector takes that one off,
+  since `Minion.magnetizations` counts what merged in). It is seated as
   `Minion.magnetizations` so Utility Drone's end of turn has a count to
-  read. The player's "your Volumizers have +A/+H this game (wherever they
+  read: the game's Drone reads that same tag, and one `Magnetic` enchantment
+  is not one Magnetization (a Satellite's stats all pile into one
+  `BG31_171te`, so a Glambot with 94 Magnetizations shows a single
+  enchantment). The player's "your Volumizers have +A/+H this game (wherever they
   are)" is on no player entity in the log, only on each Volumizer's own
   `Volumized` enchantment: the loader seats the pair the collector reads
   there as `Player.volumizer_bonus`, and the next Volumizer played adds to
@@ -752,9 +758,11 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   "after the Tavern is Refreshed this game" fires), `cast_spell` and
   `cast_spell_on` (SpellCast for every spell, CastSpell for a Tavern spell
   only: see "Spells versus Tavern spells" below), `trigger_on_cast_spell_on_target`
-  (CastSpellOnMinion, after the minions' own watchers for that cast: a
-  Honeycomb Ring's this-turn +1/+1 lands after the Misplaced Tea Set the cast
-  made the Amalgam cast), `discard_card` (Discard) and `fire_event(GoldSpent)`.
+  and the Tavern arm of `apply_target_shop` (CastSpellOnMinion, after the
+  minions' own watchers for that cast: a Honeycomb Ring's this-turn +1/+1
+  lands after the Misplaced Tea Set the cast made the Amalgam cast; one event
+  per cast on either path, so a Hot-Air Surveyor's extra Gem cast counts
+  twice), `discard_card` (Discard) and `fire_event(GoldSpent)`.
   The turn flow calls `trinket_start_of_turn` (offers, uses back, the Turns
   counter, the start-of-turn effects) and `trinket_end_of_turn` (the
   end-of-turn effects, then an "every N turns" rule that reached N). A hook
@@ -1345,8 +1353,13 @@ through exactly that card's code. The engine never matches a gift by name:
   Affinity) stays on the minion and starts its count again; the rest
   (Incubation) comes off. It ticks once a turn whatever a Drakkari
   Enchanter does: the Drakkari makes the *payout* run twice on the turn it
-  fires, never the count. `dark_gift_start_of_turn` (called from
-  `start_turn`) gives every Time Turning minion its end of turn effects
+  fires, never the count. Incubation is the one payout that waits: its count
+  runs out at the end of the turn, the gift is marked `PAYOUT_PENDING` and
+  stays, and `dark_gift_start_of_turn` doubles the minion as the next turn
+  starts (log `Hearthstone_2026_10_28_19_47_59-g1` turn 7: the end of the
+  turn sets `TAG_SCRIPT_DATA_NUM_1` to 0 with the minion still 12/16, and
+  the next turn's board is 24/32). `dark_gift_start_of_turn` (called from
+  `start_turn`) also gives every Time Turning minion its end of turn effects
   again (`run_minion_end_of_turn`, the same code the end of the turn runs).
   Replication's `plain_copy` payout hands over the base card, never the host
   as it stands: `Player::make_card` with no golden, no buffs, no added

@@ -16,6 +16,13 @@ use crate::{BOARD, DISCOVER};
 use super::shop::golden_up;
 use super::{DiscoverRequest, Game, Player};
 
+/// A countdown gift whose count ran out at the end of the last turn and whose
+/// effect waits for the start of this one, in the gift's own counter
+/// (`GiftOn::state`). No countdown gift's count ever reaches it (they hold
+/// two turns at most), so it marks a spent gift that has not paid out yet,
+/// and a gift the log shows at 0 keeps meaning one that already paid.
+const PAYOUT_PENDING: u8 = crate::minion::GIFT_STATE_MAX;
+
 /// A gift lands on `m`: its stats, its keywords, its counter and whatever
 /// the landing itself applies (Gilding makes the minion Golden; the "for
 /// each ... this game" gifts take their count now). `turn` is the turn the
@@ -447,13 +454,51 @@ impl Game {
         Some(candidates[self.rng.below(candidates.len() as u32) as usize])
     }
 
-    /// The start-of-turn gift work for one player: a copy a Replication
-    /// payout handed over at the end of the last turn gets the triple check
-    /// it could not have then, and a minion's Time Turning runs its end of
-    /// turn effects again. The countdown gifts (Incubation, Replication and
-    /// Affinity) do *not* tick here: they count down and fire at the END of
-    /// the turn (docs/rules/darkgifts.md, Era 2026-11-02).
+    /// The start-of-turn gift work for one player: the countdown payouts that
+    /// wait for the start of the turn (see `PAYOUT_PENDING`), a copy a
+    /// Replication payout handed over at the end of the last turn gets the
+    /// triple check it could not have then, and a minion's Time Turning runs
+    /// its end of turn effects again. The countdown gifts (Incubation,
+    /// Replication and Affinity) do *not* tick here: they count down at the
+    /// END of the turn (docs/rules/darkgifts.md, Era 2026-11-02).
     pub fn dark_gift_start_of_turn(&mut self, p: usize) {
+        // The payouts a gift's count ran out on at the end of the last turn,
+        // before anything can move the minions they sit on: Incubation's
+        // doubling, which the game lands on the next turn's board (see
+        // `dark_gift_end_of_turn`). Same multiplier as an end-of-turn payout
+        // (docs/notes/UNSURE.md "Incubation with Drakkari Enchanter").
+        if !self.data.gifts.is_empty() {
+            let runs = self.drakkari_mult(p);
+            let mut pos = 0;
+            while pos < self.players[p].board.len() {
+                let m = self.players[p].board[pos];
+                let mut fire: ArrayVec<CountdownEffect, { crate::MAX_GIFTS }> = ArrayVec::new();
+                let mut spent: ArrayVec<usize, { crate::MAX_GIFTS }> = ArrayVec::new();
+                if m.n_gifts > 0 {
+                    for (k, g) in m.gift_slice().iter().enumerate() {
+                        if g.state() != PAYOUT_PENDING {
+                            continue;
+                        }
+                        let Some(cd) = self.data.cards.get(g.card()).countdown else { continue };
+                        if self.gift_repeats(g.card()) {
+                            self.players[p].board[pos].set_gift_state_at(k, cd.turns);
+                        } else {
+                            let _ = spent.try_push(k);
+                        }
+                        let _ = fire.try_push(cd.effect);
+                    }
+                }
+                for &k in spent.iter().rev() {
+                    self.players[p].board[pos].remove_gift_at(k);
+                }
+                for &effect in &fire {
+                    for _ in 0..runs {
+                        self.run_countdown(p, pos, effect);
+                    }
+                }
+                pos += 1;
+            }
+        }
         // Nothing triples during the fights, so a payout's copy that makes a
         // third copy merges now: three copies become the golden one in the
         // hand, gifts and all (Era 2026-11-03, `check_triple`).
@@ -489,6 +534,15 @@ impl Game {
     /// The payout runs `drakkari_mult` times (Drakkari Enchanter sets 2,
     /// golden 3; Ghastly Sticker adds one), never the count: a gift fires on
     /// one end of turn only (docs/rules/darkgifts.md).
+    ///
+    /// Incubation is the exception: its count runs out here but its doubling
+    /// lands with the start of the next turn (`dark_gift_start_of_turn`), so
+    /// the gift is marked `PAYOUT_PENDING` and stays on the minion. Log
+    /// `Hearthstone_2026_10_28_19_47_59-g1` turn 7 (my seat is `player=2`,
+    /// `Diverge#21215`): the end of the turn sets the gift's
+    /// `TAG_SCRIPT_DATA_NUM_1` to 0 at `19:59:50.8835530` and the Hot-Air
+    /// Surveyor is still 12/16; the next turn's board is 24/32, the double
+    /// landing in its own block at `19:59:53.5441960`, after the fight.
     pub fn dark_gift_end_of_turn(&mut self, p: usize) {
         if self.data.gifts.is_empty() {
             return;
@@ -503,9 +557,20 @@ impl Game {
             if m.n_gifts > 0 {
                 for (k, g) in m.gift_slice().iter().enumerate() {
                     let Some(cd) = self.data.cards.get(g.card()).countdown else { continue };
+                    // A gift already waiting for its payout is not counted
+                    // down again.
+                    if g.state() == PAYOUT_PENDING {
+                        continue;
+                    }
                     let left = g.state().saturating_sub(1);
                     self.players[p].board[pos].set_gift_state_at(k, left);
                     if left > 0 {
+                        continue;
+                    }
+                    if matches!(cd.effect, CountdownEffect::DoubleStats) {
+                        // Incubation: the count ran out, the double waits for
+                        // the next turn to start.
+                        self.players[p].board[pos].set_gift_state_at(k, PAYOUT_PENDING);
                         continue;
                     }
                     if self.gift_repeats(g.card()) {

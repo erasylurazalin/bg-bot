@@ -153,6 +153,17 @@ impl Game {
     /// cast gets the +1/+1. `Hearthstone_2026_11_03_15_22_36-g4` turn 10
     /// step 27 (two Gem casts from Balinda): the total is 8/9 at the play,
     /// the first Tea Set is 12/13 (4 + 8/9), the second 13/14 (4 + 9/10).
+    ///
+    /// The game puts these watchers a step earlier still, before the spell's
+    /// own effect lands: the same log's block runs PLAY Blood Gem -> the
+    /// Amalgam's watcher -> POWER Misplaced Tea Set -> POWER Blood Gem (the
+    /// Gem's stats on the target) -> TRIGGER Honeycomb Ring. This call is
+    /// made after the effect instead, and that changes nothing: every
+    /// "whenever you cast a spell on this" and "on a <tribe>" effect reads
+    /// nothing from the target (`cards.toml`: the Tea Set's own fixed stats
+    /// plus the player's spell bonus, a hand minion's +8/+8, the Tavern's
+    /// +1/+2, the Tidecaller's own +3/+3), so no spell and no watcher can
+    /// tell the two orders apart.
     pub(super) fn trigger_on_cast_spell_on_target(&mut self, p: usize, target_pos: usize) {
         if target_pos >= self.players[p].board.len() {
             return;

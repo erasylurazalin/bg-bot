@@ -4269,6 +4269,34 @@ fn every_extra_cast_improves_the_ring_after_its_own_tea_set() {
 }
 
 #[test]
+fn every_extra_cast_on_a_tavern_minion_improves_the_ring_too() {
+    // A Hot-Air Surveyor's "Blood Gems played from your hand cast an extra
+    // time" is a second cast on the Tavern minion, so the Ring improves
+    // twice, as it does for two casts on the board. No log has the pair (the
+    // brief's leftover): this keeps the Tavern path the same as the board's.
+    let mut g = game(333);
+    take(&mut g, 0, "Honeycomb Ring");
+    put_on_board(&mut g, 0, "Hot-Air Surveyor");
+    set_shop(&mut g, 0, &["Tusked Camper", "Mangled Bandit"]);
+    assert_eq!(g.total_spell_bonus(0), (1, 1), "the pick's own +1/+1");
+    g.give(0, "Blood Gem").unwrap();
+    let h = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::TargetShop(0));
+    assert_eq!(
+        g.total_spell_bonus(0),
+        (3, 3),
+        "one improvement for each of the two casts"
+    );
+    assert_eq!(
+        (g.players[0].shop[0].attack, g.players[0].shop[0].health),
+        (4, 5),
+        "the Gem landed twice on the Camper (2/3 and +1/+1 twice)"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn the_chromatic_tear_greater_pays_per_seventh_battlecry() {
     let mut g = game(330);
     take_id(&mut g, 0, "BG35_MagicItem_840t");
