@@ -3481,3 +3481,87 @@ fn conflagration_counts_the_turns_earlier_elemental_plays() {
     );
     assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
 }
+
+/// A pick that ends an Activate is logged as its own step, and the Gold the
+/// Activate spent is only counted once that pick is answered: the game moves a
+/// "after you spend Gold" counter on the click but hands the card over at the
+/// pick (log `Hearthstone_2026_10_26_00_48_15-g3` turn 7 steps 29 and 30, a
+/// Sky Admiral Rogers going `[2, 0, 9, 0]` to `[9, 1, 9, 0]` on the Activate
+/// and the Bounty landing in the hand at the pick). The Activate step's own
+/// state shows the hand unchanged, so the pick step has to seat the Gold
+/// again, with the counters as the Activate found them, or the Bounty never
+/// comes.
+#[test]
+fn a_pick_that_ends_an_activate_carries_the_gold_it_spent() {
+    let start = r#"{"board": [
+          {"id": 1, "card_id": "BG33_823", "name": "Sky Admiral Rogers", "attack": 4, "health": 5,
+           "position": 1, "numbers": [2, 0, 9, 0]},
+          {"id": 2, "card_id": "BG36_342", "name": "Clever Castaway", "attack": 2, "health": 3,
+           "position": 2, "numbers": [2, 0, 0, 0]}],
+        "hand": [], "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": [], "secrets": []}"#;
+    // The Activate: the Gold is gone, the counter has taken it, and the hand is
+    // untouched.
+    let after_activate = r#"{"board": [
+          {"id": 1, "card_id": "BG33_823", "name": "Sky Admiral Rogers", "attack": 4, "health": 5,
+           "position": 1, "numbers": [9, 1, 9, 0]},
+          {"id": 2, "card_id": "BG36_342", "name": "Clever Castaway", "attack": 2, "health": 3,
+           "position": 2, "numbers": [2, 0, 0, 0]}],
+        "hand": [], "tavern": [],
+        "hand_hidden": 0, "gold": 8, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": [], "secrets": []}"#;
+    // The pick: the spell the Discover offered, and the Bounty the Gold owed.
+    let after_pick = r#"{"board": [
+          {"id": 1, "card_id": "BG33_823", "name": "Sky Admiral Rogers", "attack": 4, "health": 5,
+           "position": 1, "numbers": [9, 0, 9, 0]},
+          {"id": 2, "card_id": "BG36_342", "name": "Clever Castaway", "attack": 2, "health": 3,
+           "position": 2, "numbers": [2, 0, 0, 0]}],
+        "hand": [
+          {"id": 7, "card_id": "BG36_884", "name": "Weapons Forge", "index": 1},
+          {"id": 8, "card_id": "BG33_814", "name": "Friendly Bounty", "index": 2}],
+        "tavern": [],
+        "hand_hidden": 0, "gold": 8, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": [], "secrets": []}"#;
+    let text = format!(
+        r#"{{"source": "activate", "game": 1, "turns": [
+        {{"turn": 7, "start": {start}, "actions": [
+          {{"step": "activate", "target": null, "paid": {{"gold": 2, "health": 0}}, "position": 2,
+            "card": {{"id": 2, "card_id": "BG36_342", "name": "Clever Castaway", "attack": 2,
+                      "health": 3, "golden": false, "numbers": [2, 0, 0, 0]}},
+            "after": {after_activate}}},
+          {{"step": "discover", "kind": "discover",
+            "source": {{"id": 2, "card_id": "BG36_342", "name": "Clever Castaway", "attack": 2,
+                        "health": 3, "numbers": [2, 0, 0, 0]}},
+            "options": [
+              {{"id": 7, "card_id": "BG36_884", "name": "Weapons Forge", "cost": 2}},
+              {{"id": 9, "card_id": "BG28_825", "name": "Defender's Rites", "cost": 2}},
+              {{"id": 10, "card_id": "BG28_521", "name": "Planar Telescope", "cost": 4}}],
+            "picked": {{"id": 7, "card_id": "BG36_884", "name": "Weapons Forge", "cost": 2}},
+            "after": {after_pick}}}],
+         "end": null}}]}}"#
+    );
+    let files = parse_action_files(&[("activate-pick.json".to_string(), text.clone())])
+        .unwrap_or_else(|e| panic!("{e}\n{text}"));
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        1,
+        &ReplayOptions { seeds: 4, seed: 1 },
+    );
+    // The Bounty is a random one, so the engine may hand over another: what
+    // matters is that the pick hands over two cards, as the log's does.
+    assert!(
+        matches!(r.verdict, Verdict::Ok | Verdict::OkRandom),
+        "{:?} {:?}",
+        r.diffs,
+        r.missing
+    );
+    assert_eq!(r.ours.hand.len(), 2, "the spell and the Bounty");
+}

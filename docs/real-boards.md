@@ -802,8 +802,12 @@ of a random step is run, since any of them may be the log's.
     seats it back from the step's `source` card, for a pick that ends a spell
     the player cast (`shop_replay::seat_cast_after_pick`: the "after you cast a
     spell" triggers and the Spell Siphon Dark Gift count, log
-    `10_24_17_59_26-g1` turn 10 step 43 to 44) and for a Discover a Battlecry
-    opened (`owe_battlecry_count`, "for each Battlecry" counting at the pick).
+    `10_24_17_59_26-g1` turn 10 step 43 to 44), for a Discover a Battlecry
+    opened (`owe_battlecry_count`, "for each Battlecry" counting at the pick)
+    and for the Gold an Activate spent (`seat_gold_spent_at_pick`: it seats
+    `Player.pending_gold_spent` and the watchers' counts as the Activate found
+    them, since the state already holds the click's own count, log
+    `10_26_00_48_15-g3` turn 7 steps 29 and 30).
     A pick that is not the play's last word (a Discover a Battlecry opened and
     a target it asks for after it) is still one step here, so the rest of the
     play is behind the boundary.

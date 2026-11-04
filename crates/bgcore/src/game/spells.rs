@@ -295,27 +295,48 @@ impl Game {
     /// a Hot-Air Surveyor adds no cast and Surveyor Portrait's from-hand
     /// bonus does not reach it. `source` is the minion whose Activate cast
     /// it.
+    ///
+    /// It does target a friendly minion, so a Balinda Stonehearth casts it
+    /// twice (golden: three times). Every Geomant Activate in the logs with a
+    /// Balinda on the board has the leftover Gem land twice: the plain
+    /// Geomant of `Hearthstone_2026_11_03_15_22_36-g4` turn 12 step 8 puts
+    /// +2/+4 on a golden Bramble Tunneler with a Gem worth +1/+2, the
+    /// `Hearthstone_2026_10_28_22_11_50-g1` turn 12 step 22 golden Sanguine
+    /// Refiner takes +40/+72 with a Gem worth +20/+36, and the
+    /// `Hearthstone_2026_10_24_17_59_26-g1` turn 13 step 28 Gatekeeper
+    /// Amalgam takes +114/+186. Each is a cast of its own: the Felboar of the
+    /// `22_11_50-g1` step counts them apart, so each runs the whole cast, its
+    /// "after you cast a spell" triggers included.
     pub(super) fn cast_gem_on(&mut self, p: usize, target: usize, source: Option<u8>) {
         let Some(gem) = self.data.cards.blood_gem else { return };
         if target >= self.players[p].board.len() {
             return;
         }
         let Some(st) = self.data.cards.get(gem).spell_target else { return };
-        let pt = PendingTarget {
-            source,
-            kind: TargetKind::Spell(st),
-            runs: 1,
-            tavern: false,
-            gem: true,
-            by_minion: false,
-        };
-        // "Whenever you cast a spell" fire before the spell's own effect, and
-        // "after you cast a spell" once it has resolved.
-        self.fire_event(p, EventKind::AllSpellsCast, 1);
-        self.trinket_event(p, Event::SpellCast, Some(gem), 1);
-        self.apply_target(p, &pt, target);
-        self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
-        self.maybe_start_discover(p);
+        // Balinda alone: a Gem is no Tavern spell, so Replica Cathedral's
+        // first Tavern spell of the turn casts nothing extra on it
+        // (`balinda_mult` would add that).
+        let casts = self.times_count(p, |a| (a == Aura::Balinda).then_some(TimesRole::Setter));
+        for _ in 0..casts {
+            if target >= self.players[p].board.len() {
+                return;
+            }
+            let pt = PendingTarget {
+                source,
+                kind: TargetKind::Spell(st),
+                runs: 1,
+                tavern: false,
+                gem: true,
+                by_minion: false,
+            };
+            // "Whenever you cast a spell" fire before the spell's own effect,
+            // and "after you cast a spell" once it has resolved.
+            self.fire_event(p, EventKind::AllSpellsCast, 1);
+            self.trinket_event(p, Event::SpellCast, Some(gem), 1);
+            self.apply_target(p, &pt, target);
+            self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
+            self.maybe_start_discover(p);
+        }
     }
 
     /// Get `count` 1/1 Murloc tokens taught `spell` (Magicfin Sticker's

@@ -1271,3 +1271,35 @@ fn a_bounty_cast_twice_is_two_spells_for_every_counter_and_trigger() {
     cast(&mut g, "Wealthy Bounty");
     assert_eq!(g.players[0].board[0].improvements, 1);
 }
+
+/// The Gold an Activate pays is counted on the click, but the cards that watch
+/// Gold wait for the choice the Activate opened. The log's Sky Admiral Rogers
+/// counts its ninth Gold on the Activate and hands its Bounty over at the
+/// pick: its numbers go `[2, 0, 9, 0]` to `[9, 1, 9, 0]` on the Activate
+/// (`Hearthstone_2026_10_26_00_48_15-g3` turn 7 step 29) and back to
+/// `[9, 0, 9, 0]` with the Bounty in the hand at the pick (step 30).
+#[test]
+fn an_activates_gold_reaches_the_cards_that_watch_it_at_the_pick() {
+    let mut g = game(23);
+    put_on_board(&mut g, 0, "Sky Admiral Rogers", false);
+    put_on_board(&mut g, 0, "Clever Castaway", false);
+    g.players[0].gold = 10;
+    // Two Gold short of its ninth: this Activate is the one that pays out.
+    g.players[0].board[0].improvements = 7;
+    let hand = g.players[0].hand.len();
+    act(&mut g, 0, Action::Activate(1));
+    assert_eq!(g.players[0].hand.len(), hand, "the Bounty waits for the pick");
+    assert!(!g.players[0].discover.is_empty(), "the Activate opened a Discover");
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(
+        g.players[0].board[0].improvements,
+        0,
+        "the ninth Gold is counted once the Activate is done"
+    );
+    assert_eq!(
+        g.players[0].hand.len(),
+        hand + 2,
+        "the discovered spell and the Bounty it waited for"
+    );
+    g.check_invariants().unwrap();
+}

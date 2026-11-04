@@ -19,7 +19,7 @@ use std::sync::Arc;
 use arrayvec::ArrayVec;
 use serde::Deserialize;
 
-use crate::cards::{Effect, Tribe};
+use crate::cards::{Effect, EventKind, Tribe};
 use crate::fight_check::{
     SeatMode, seat_power as fight_seat_power, seat_secrets, seat_trinkets,
 };
@@ -2934,6 +2934,78 @@ fn owe_battlecry_count(data: &Data, ids: &CardIdMap, game: &mut Game, step: &Sho
     pl.pending_battlecries = pl.pending_battlecries.saturating_add(n);
 }
 
+/// What a pick step owes the "after you spend Gold" cards of the Activate it
+/// answers. The Gold leaves the purse on the click, but the cards that watch
+/// it wait for the choice the Activate opened (see `Action::Activate`), and
+/// the file logs the two as separate steps: the Activate step's hand is
+/// unchanged and the pick step carries the Bounty
+/// (`Hearthstone_2026_10_26_00_48_15-g3` turn 7 steps 29 and 30, Sky Admiral
+/// Rogers) or the Lockbox the Gold opened (`Hearthstone_2026_11_02_00_10_22-g5`
+/// turn 10 steps 78 to 80, an Enterprising Escapee). A golden Clever Castaway
+/// opens two Discovers as two pick steps and the Activate ends with the
+/// second, so only that one seats the Gold.
+fn seat_gold_spent_at_pick(data: &Data, ids: &CardIdMap, loaded: &mut LoadedShop, one: &OneStep) {
+    let OneStep { file, step, turn_index, index, .. } = *one;
+    if step.step != "discover" {
+        return;
+    }
+    let Some(source) = step.source.as_ref() else { return };
+    let Some(turn) = file.turns.get(turn_index) else { return };
+    let same_source = |s: &ShopStepSpec| {
+        s.step == "discover" && s.source.as_ref().is_some_and(|src| src.id == source.id)
+    };
+    // Another pick of the same Activate follows: that one ends it.
+    if turn.actions.get(index + 1).is_some_and(same_source) {
+        return;
+    }
+    // What comes before this pick is the Activate's own earlier picks, and
+    // before them the Activate.
+    let mut at = index;
+    while at > 0 && turn.actions.get(at - 1).is_some_and(same_source) {
+        at -= 1;
+    }
+    let from_activate = at > 0
+        && turn.actions.get(at - 1).is_some_and(|prev| {
+            prev.step == "activate" && prev.card.as_ref().is_some_and(|c| c.id == source.id)
+        });
+    if !from_activate {
+        return;
+    }
+    let Some(card) = resolve_card(data, ids, source) else { return };
+    let Some(act) = data.cards.get(card).activate else { return };
+    // The counts this state shows are already the click's: the log moves them
+    // when the Gold is spent and only the trigger's own card comes at the pick
+    // (Sky Admiral Rogers goes `[2, 0, 9, 0]` to `[9, 1, 9, 0]` at the
+    // Activate and its Bounty lands at the pick). Seat them as the Activate's
+    // own state had them, so the Gold counted now fires exactly the watchers
+    // the log fired.
+    let before = match at {
+        0 | 1 => Some(&turn.start),
+        _ => turn.actions.get(at - 2).and_then(|s| s.after.as_ref()),
+    };
+    if let Some(before) = before {
+        for (slot, &id) in loaded.board_ids.iter().enumerate() {
+            let Some(&m) = loaded.game.players[ME].board.get(slot) else { continue };
+            let Some(trigger) = data.cards.get(m.card).on_event else { continue };
+            if trigger.kind != EventKind::GoldSpent || trigger.every <= 1 {
+                continue;
+            }
+            let Some(left) = before
+                .board
+                .iter()
+                .find(|b| b.id == id)
+                .and_then(|b| b.numbers.first().copied())
+            else {
+                continue;
+            };
+            let done = (trigger.every as i32 - left).clamp(0, trigger.every as i32 - 1);
+            loaded.game.players[ME].board[slot].improvements = done as u16;
+        }
+    }
+    let pl = &mut loaded.game.players[ME];
+    pl.pending_gold_spent = pl.pending_gold_spent.saturating_add(act.cost as u32);
+}
+
 /// A pick that ends a *spell* the player cast (a Discover it opened, or the
 /// Choose One option it asked for) was logged as its own step, with the play in
 /// the step before, so the game's own action is split in two here: the pick
@@ -3698,6 +3770,9 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         loaded.game.players[ME].tp.choose_one_all = true;
     }
     seat_start_of_turn_gold(data, ids, &mut loaded.game.players[ME], step);
+    // The Gold the Activate before this pick spent, and what watches Gold
+    // spent: the game answers the choice first (`Action::Activate`).
+    seat_gold_spent_at_pick(data, ids, &mut loaded, one);
     // A Souvenir Stand the log turns into a copy of the Greater trinket in
     // this step rather than at its pick.
     if let Some(after) = step.after.as_ref() {
