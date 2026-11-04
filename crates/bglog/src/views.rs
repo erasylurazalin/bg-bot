@@ -275,14 +275,23 @@ fn gift_enchantment(card_id: &str) -> Option<&str> {
 ///
 /// One gift application can leave two carrier enchantments: Incubation puts
 /// both `...t4e` and `...t4e2` ("In 2 turns, double this minion's stats") on
-/// the minion. Carriers that share a `CREATOR` came from one gift card and are
-/// one copy; the copies made for a fight point at the same creator id as their
-/// original, so they group the same way. Checked on all 20 of Era's logs, this
+/// the minion. Carriers that share a `CREATOR` and were made fresh came from
+/// one gift card and are one copy. Checked on all 20 of Era's logs, this
 /// is the only rule tried that counts no buff, loses no carrier, and gives the
 /// golden Clever Castaway of `Hearthstone_2026_11_02_00_10_22` game 5 (entity
 /// 10380) its two Toughened Shields (carriers 10381 and 10384, created by the
 /// two gift cards 1114 and 1742) rather than the four enchantments attached to
 /// it.
+///
+/// A carrier the game **copied** is its own copy, even when the copy and its
+/// original name the same creator. A triple's golden takes its copies' carriers
+/// along: the golden Cadaver Caretaker of `Hearthstone_2026_10_26_00_48_15-g2`
+/// turn 7 carries two Replication carriers (4025 and 4026, both created by the
+/// gift card 1720, copied from 3770 and 3771), and counting creators alone made
+/// them one. So the copy is keyed by creator **and** `COPIED_FROM_ENTITY_ID`,
+/// which is 0 on a carrier the game made fresh (two carriers of one
+/// application share it and stay one copy) and the id of the carrier it came
+/// from on a copy.
 pub fn gifts_by_minion(g: &Game) -> HashMap<i32, Vec<String>> {
     // The gift families with a tagged enchantment in play: for those the tag
     // alone picks the carriers.
@@ -295,9 +304,9 @@ pub fn gifts_by_minion(g: &Game) -> HashMap<i32, Vec<String>> {
             tagged.insert(gift.to_string());
         }
     }
-    // (minion, gift) -> the creators seen, one per gift copy, in the order the
-    // first carrier of each came.
-    let mut creators: HashMap<(i32, String), HashSet<i32>> = HashMap::new();
+    // (minion, gift) -> where its carriers came from, one entry per gift copy,
+    // in the order the first carrier of each came.
+    let mut origins: HashMap<(i32, String), HashSet<(i32, i32)>> = HashMap::new();
     let mut order: Vec<(i32, String)> = Vec::new();
     for x in g.entities_in_order() {
         let Some(gift) = gift_enchantment(&x.card_id) else {
@@ -320,16 +329,17 @@ pub fn gifts_by_minion(g: &Game) -> HashMap<i32, Vec<String>> {
             0 => -x.id,
             creator => creator as i32,
         };
+        let copied_from = x.int("COPIED_FROM_ENTITY_ID") as i32;
         let key = (attached as i32, gift.to_string());
-        let seen = creators.entry(key.clone()).or_insert_with(|| {
+        let seen = origins.entry(key.clone()).or_insert_with(|| {
             order.push(key);
             HashSet::new()
         });
-        seen.insert(creator);
+        seen.insert((creator, copied_from));
     }
     let mut out: HashMap<i32, Vec<String>> = HashMap::new();
     for (minion, gift) in order {
-        let copies = creators[&(minion, gift.clone())].len();
+        let copies = origins[&(minion, gift.clone())].len();
         let gifts = out.entry(minion).or_default();
         for _ in 0..copies {
             gifts.push(gift.clone());

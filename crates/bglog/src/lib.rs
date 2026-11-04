@@ -64,9 +64,10 @@
 //! enchantments), [`hero_power`], [`trinkets`], [`rewards`], [`deity`],
 //! [`counts`], [`gem`], [`waiting`], [`hidden_in_hand`] and [`turn_of`].
 //! [`gifts_by_minion`] counts a Dark Gift once per copy: one entry per gift
-//! card that gave it (the carriers of one gift card are one copy), where the
-//! Python kept one per gift id. A minion that kept the same gift twice carries
-//! two. The buffs a gift leaves ("+0/+0." and the like) are not gifts.
+//! card that gave it (the carriers of one gift card are one copy, unless the
+//! game copied them onto a golden one by one), where the Python kept one per
+//! gift id. A minion that kept the same gift twice carries two. The buffs a
+//! gift leaves ("+0/+0." and the like) are not gifts.
 //!
 //! The options the client offered me, the ones I took, and the cards of a
 //! Discover or a Choose One are not in the power log: [`Options`] and

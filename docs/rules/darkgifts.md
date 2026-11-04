@@ -116,16 +116,24 @@ The pool the offers come from:
   Amalgamation) and gifts that set a state (Toreth's Blessing's three
   hits, Gilding) don't add up.
   Two more things show in the logs, and the engine follows them
-  (2026-11-04): a golden shows **no** keyword gift at all, not one copy of
-  it, with the keywords on it and its gift list empty
-  (`Hearthstone_2026_10_24_15_25_26-g4` turn 10: a golden Eredar Escapist
-  with Divine Shield and Windfury, from a Harpy's Talons copy, and no
-  gift); and of two **countdown** gifts the golden keeps one
-  (`Hearthstone_2026_10_26_00_48_15-g2` turn 6: two copies with
-  Replication, the golden with one). Across the 68 games, no golden carries
-  Harpy's Talons, Toxicity or Furtiveness, or two of Replication,
-  Incubation or Affinity, while two Toughened Shields and two Golemancy do
-  appear.
+  (2026-11-04): **countdown** gifts stack like the rest, and both counters
+  pay (`Hearthstone_2026_10_26_00_48_15-g2` turn 7: the golden Cadaver
+  Caretaker 4024 carries two Replication enchantments, 4025 and 4026, both
+  counting 2, and its end of turn hands over two plain Cadaver Caretakers,
+  5585 and 5587); and a keyword gift stays on a golden as its own
+  enchantment beside the keywords
+  (`Hearthstone_2026_10_24_15_25_26-g4` turn 10: the golden Eredar Escapist
+  12267 carries the Harpy's Talons enchantment 12269, `EDR_100t13e`, with
+  `IS_NIGHTMARE_BONUS` and Divine Shield and Windfury on it, the copy it
+  came from carrying 12266 the same way). The log keeps **two** of a
+  keyword gift on a golden as well (`Hearthstone_2026_10_28_02_28_32`: the
+  golden `BG34_140_G`, entity 11176, with two Harpy's Talons enchantments,
+  11177 and 11179, from two different gift cards); the engine keeps one,
+  since two Harpy's Talons do the same thing ("don't add up" above), and
+  that count is the one thing here Era has not called. Corrected from the
+  raw `Power.log` on 2026-11-04: this paragraph used to say that a golden
+  keeps one of two countdown gifts and no keyword gift at all, which was
+  what the collector wrote rather than what the log shows.
 - **Magnetic minions and gifts.** A Magnetic minion is never offered with a
   gift. The only way one gets a gift is Maldraxxus Dagger (a copy of a
   friendly minion). When a gifted Magnetic minion is Magnetized onto a

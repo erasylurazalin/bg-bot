@@ -597,11 +597,15 @@ fn a_triple_keeps_the_gifts_of_all_three_copies() {
         .expect("the triple is golden");
     let names = gift_names(&g, golden);
     // Gifts stack (docs/rules/darkgifts.md): Fortitude was on two copies, so the
-    // golden holds it twice. Harpy's Talons hands out only keywords, which stay
-    // on the golden without the gift: no golden in Era's logs carries one, and
-    // `Hearthstone_2026_10_24_15_25_26-g4` turn 10 has such a golden with
-    // Divine Shield and Windfury and an empty gift list.
-    assert_eq!(names, ["Gift: Fortitude", "Gift: Fortitude"], "{names:?}");
+    // golden holds it twice; Harpy's Talons sets a state, so once. The keyword
+    // gift stays on the golden like any other: `Hearthstone_2026_10_24_15_25_
+    // 26-g4` turn 10 has a golden Eredar Escapist carrying the Harpy's Talons
+    // enchantment (EDR_100t13e, entity 12269, tag IS_NIGHTMARE_BONUS).
+    assert_eq!(
+        names,
+        ["Gift: Fortitude", "Gift: Fortitude", "Gift: Harpy's Talons"],
+        "{names:?}"
+    );
     assert!(golden.keywords.has(Keywords::WINDFURY));
     g.check_invariants().unwrap();
 }
@@ -2228,48 +2232,13 @@ fn echoing_voice_answers_a_discover_battlecry_at_the_end_of_the_turn() {
     assert!(g.players[0].discover_queue.is_empty(), "nothing left waiting");
 }
 
-/// A gift that hands out only keywords stays on its minion as keywords, and a
-/// golden made from that copy keeps them without keeping the gift: no golden
-/// in Era's logs carries Harpy's Talons, Toxicity or Furtiveness, and
-/// `Hearthstone_2026_10_24_15_25_26-g4` turn 10 shows a golden Eredar Escapist
-/// with Divine Shield and Windfury and an empty gift list.
+/// Two Replication copies give the golden two gifts, and both pay: the golden
+/// Cadaver Caretaker of `Hearthstone_2026_10_26_00_48_15-g2` turn 7 carries two
+/// Replication enchantments (4025 and 4026) and ends its turn handing over two
+/// plain Cadaver Caretakers (5585 and 5587). A triple's golden keeps every
+/// copy's gifts, countdown ones included (docs/rules/darkgifts.md).
 #[test]
-fn a_triple_keeps_a_keyword_gifts_keywords_but_not_the_gift() {
-    let mut g = game(313);
-    let c = id(&g, "Cord Puller");
-    let n = pool_copies(&mut g, c);
-    let mut hand_copy = g.players[0].make_card(&g.data.cards, c, false, n);
-    bgcore::game::darkgifts::land_gift(
-        &g.data,
-        &g.players[0],
-        &mut hand_copy,
-        gift(&g, "Harpy's Talons"),
-        5,
-    );
-    assert!(hand_copy.keywords.has(Keywords::WINDFURY), "the copy has it");
-    g.players[0].hand.push(hand_copy);
-    put_on_board(&mut g, 0, "Cord Puller");
-    set_shop(&mut g, 0, &["Cord Puller"]);
-    g.players[0].gold = 10;
-    act(&mut g, 0, Action::Buy(0));
-    let golden = *g
-        .players[0]
-        .hand
-        .iter()
-        .find(|m| m.card == c && m.golden)
-        .expect("the triple is golden");
-    assert_eq!(gift_names(&g, &golden), Vec::<String>::new(), "no gift on the golden");
-    assert!(golden.keywords.has(Keywords::DIVINE_SHIELD), "its Divine Shield stays");
-    assert!(golden.keywords.has(Keywords::WINDFURY), "and its Windfury");
-    g.check_invariants().unwrap();
-}
-
-/// Two copies of the same countdown gift give the golden one counter, not two:
-/// `Hearthstone_2026_10_26_00_48_15-g2` turn 6 has a golden Cadaver Caretaker
-/// where two copies carried Replication and the golden shows it once. A gift
-/// that stacks (Toughened Shield) the game does keep twice; see the test above.
-#[test]
-fn a_triple_keeps_one_copy_of_a_countdown_gift() {
+fn a_triple_keeps_both_replication_gifts_and_pays_two_copies() {
     let mut g = game(314);
     let c = id(&g, "Cord Puller");
     for in_hand in [true, false] {
@@ -2285,12 +2254,27 @@ fn a_triple_keeps_one_copy_of_a_countdown_gift() {
     set_shop(&mut g, 0, &["Cord Puller"]);
     g.players[0].gold = 10;
     act(&mut g, 0, Action::Buy(0));
-    let golden = *g
-        .players[0]
+    let at = g.players[0]
         .hand
         .iter()
-        .find(|m| m.card == c && m.golden)
+        .position(|m| m.card == c && m.golden)
         .expect("the triple is golden");
-    assert_eq!(gift_names(&g, &golden), ["Gift: Replication"], "one counter");
+    let golden = g.players[0].hand[at];
+    assert_eq!(
+        gift_names(&g, &golden),
+        ["Gift: Replication", "Gift: Replication"],
+        "both counters stay"
+    );
+    // Onto the board, where the end of the turn runs: two ticks of two turns
+    // each, and each gift hands over a plain copy.
+    g.players[0].hand.remove(at);
+    g.players[0].board.push(golden);
+    let pos = g.players[0].board.len() - 1;
+    let copies = |g: &Game| g.players[0].hand.iter().filter(|m| m.card == c && !m.golden).count();
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(copies(&g), 0, "one turn to go on both");
+    assert_eq!(g.players[0].board[pos].n_gifts, 2, "both start their count again");
+    g.dark_gift_end_of_turn(0);
+    assert_eq!(copies(&g), 2, "one plain copy per gift");
     g.check_invariants().unwrap();
 }

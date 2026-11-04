@@ -8,6 +8,7 @@
 //! | `gifts.log` | `2026_10_24_00_56_06`: 2-3, 88858-88931: a minion, one Sharpened Sword carrier and the buff it left |
 //! | `gift_twice.log` | `2026_11_02_00_10_22` game 5: the golden Clever Castaway with two Toughened Shield carriers and their two buffs |
 //! | `gift_buffs.log` | `2026_11_02_00_10_22` game 1: an Incubation carrier with its two buffs |
+//! | `gift_copies.log` | `2026_10_26_00_48_15`: a golden Cadaver Caretaker and the two Replication carriers the game copied onto it for the triple |
 //! | `fight.log` | the same game, in pieces: the setup, one fight and its first attack (see the file's own lines) |
 //! | `views.log` | the same game: a leaderboard hero, a hero power, both trinket slots, a hand minion, the spell count |
 //! | `deity.log` | `2026_10_24_15_25_26`: the `BG_OldGod` entity |
@@ -70,6 +71,33 @@ fn a_gift_the_minion_carries_twice_counts_twice() {
         assert_eq!(buff.text("ZONE"), "PLAY");
         assert_eq!(buff.int("ATTACHED"), 10380);
         assert_eq!(buff.int("IS_NIGHTMARE_BONUS"), 0);
+    }
+}
+
+#[test]
+fn two_carriers_the_game_copied_from_different_gifts_count_twice() {
+    // Entity 4024, the golden Cadaver Caretaker of `2026_10_26_00_48_15`, as
+    // the triple is made (01:21:51): two Replication carriers (4025 and 4026),
+    // both naming the gift card 1720 as their CREATOR, copied from 3770 and
+    // 3771. Counting creators alone makes them one gift, which is what the
+    // collected state said; the golden carries two, and at the end of its turn
+    // it pays out two plain copies (entities 5585 and 5587, 01:23:57).
+    let log = read("gift_copies.log");
+    let game = log.game().unwrap();
+    assert_eq!(
+        gifts_by_minion(game).get(&4024),
+        Some(&vec![
+            "BG36_MidGameEffect_000t18".to_string(),
+            "BG36_MidGameEffect_000t18".to_string(),
+        ])
+    );
+    for (carrier, copied_from) in [(4025, 3770), (4026, 3771)] {
+        let x = &game.entities[&carrier];
+        assert_eq!(x.text("ZONE"), "PLAY");
+        assert_eq!(x.int("ATTACHED"), 4024);
+        assert_eq!(x.int("CREATOR"), 1720, "one gift card made both");
+        assert_eq!(x.int("COPIED_FROM_ENTITY_ID"), copied_from);
+        assert_eq!(x.int("IS_NIGHTMARE_BONUS"), 1);
     }
 }
 

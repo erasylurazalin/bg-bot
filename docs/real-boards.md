@@ -18,7 +18,14 @@ same gift from two copies carries it twice, and the "+0/+0" buff a gift leaves
 is not a gift (`gifts_by_minion` in `crates/bglog/src/views.rs`). The Python
 collector this replaced (until 2026-11-03) kept one id per gift; every file
 was rewritten with the Rust command that day (the old files are backed up
-outside the repo).
+outside the repo). A carrier the game **copied** counts as its own copy even
+when the copy names the same creator as its original: a triple's golden takes
+its copies' carriers along, and a copied carrier carries a
+`COPIED_FROM_ENTITY_ID` that its original has not
+(`Hearthstone_2026_10_26_00_48_15-g2`: the golden Cadaver Caretaker 4024 with
+two Replication carriers, 4025 and 4026, both created by the gift card 1720
+and copied from 3770 and 3771). Counting creators alone gave that golden one
+gift until 2026-11-04.
 
 A user timer runs it every 15 minutes, from a copy of the release binary
 outside `target/`, so a rebuild never breaks a run. After changing the
