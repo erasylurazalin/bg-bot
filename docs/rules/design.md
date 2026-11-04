@@ -818,6 +818,12 @@ or a Mukla Banana; Forsaken Weaver (Tier 6 Undead) doesn't. The engine
 already tells the two apart (built with Blood Gems); keep it that way for
 every new card and every new spell.
 
+**A Choose One minion's play is not a spell cast (logs, 2026-11-04).** No
+"whenever you cast a spell" card sees the option a Choose One minion picks
+(`Hearthstone_2026_11_03_00_29_06-g1` turn 8: Vicious Mindslasher counts
+three for a Veteran Brigand's three Blood Gem Barrages, not four). The
+Tavern spells its option casts are casts.
+
 **A spell a minion casts for you is not your cast (Era, 2026-11-02,
 2026-11-03).** When a minion's effect casts a spell (Gatekeeper Amalgam's
 Misplaced Tea Set, Air Revenant's Easterly Winds, a Magicfin token's taught
@@ -832,6 +838,16 @@ including Balinda's and Hot-Air Surveyor's extra casts. The evidence:
   spells the same turn.
 - Era knows for sure: a Magicfin token's spells don't count for Living
   Azerite or Forsaken Weaver.
+- No count of yours adds to a minion's cast either: Balinda doesn't cast it
+  twice (log `Hearthstone_2026_11_03_00_29_06-g1` turn 11 step 17, a
+  Magicfin Apprentice's Fortify gives +0/+3 with Balinda out; logs,
+  2026-11-04).
+- Victorious Geomant's leftover Gems are the exception the other way: they
+  are cast by you (the target's "whenever you cast a spell on this" fires,
+  the "after you cast" counters see them), but they are not played from
+  the hand (no Hot-Air Surveyor extra cast, no Surveyor Portrait bonus)
+  (logs `10_24_17_59_26-g1` turn 12 step 40, `10_28_22_11_50-g3` turn 10;
+  2026-11-04).
 
 The open part is a spell a minion casts **on** another minion and that
 minion's own "whenever you cast a spell on this" (Gatekeeper Amalgam,

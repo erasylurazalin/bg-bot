@@ -93,7 +93,11 @@ always afford one. A trinket with no cost in the game data is free.
 - **Lovely Locket:** after you cast a spell on a friendly minion, it casts
   the same spell on another friendly minion, picked at random. The copy is
   a real cast: it counts for cast triggers, and Hot Air Surveyor and
-  Balinda work with it. The random pick ignores the spell's own target
+  Balinda work with it. Corrected from logs (2026-11-04): the minion the
+  copy lands on does NOT fire its own "whenever you cast a spell on this /
+  on a Mech" (`Hearthstone_2026_11_02_00_10_22-g2` turn 12: Gem copies on a
+  Glambot give +1/+1 and no Satellite, its Magnetize count never moves).
+  The cast counters still see the copy. The random pick ignores the spell's own target
   rules, which makes it wild: Eyes of the Earth Mother cast on a Tier 4
   minion can land on a Tier 5 to 7 one and make it golden; Butchering or
   Channel the Devourer can eat your board; a spell that fills the Tavern
