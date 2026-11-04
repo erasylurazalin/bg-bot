@@ -364,6 +364,14 @@ as a Magnetization but doesn't buff it again (no 8/4). Spark Snapper only
 triggers on a Mech played from hand, never on a copy or a Satellite. A
 copied Volumizer counts as Magnetized for the first time (in
 docs/notes/UNSURE.md).
+Each Beatboxer copy of one step is minted afresh, so a copied Volumizer is
+bigger by every "your Volumizers have +A/+H" rise the copies before it in the
+same step paid (`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 20: two
+Beatboxers taking three copies each of one golden Green Volumizer end
++4140 and +4146, not three even +1374s). Drone Duplicator's own repeats are
+not fresh copies and merge the card as it attached. In the log each round's
+copies are minted before the host merge; the engine merges the host first,
+so it lands one rise per round short (UNSURE). (Logs, 2026-11-04.)
 
 **A Magnetic played from hand is a minion of its own until it merges.** The
 raw log's PLAY block puts it in play, runs the "whenever you play a Mech"
@@ -847,7 +855,9 @@ including Balinda's and Hot-Air Surveyor's extra casts. The evidence:
   the "after you cast" counters see them), but they are not played from
   the hand (no Hot-Air Surveyor extra cast, no Surveyor Portrait bonus)
   (logs `10_24_17_59_26-g1` turn 12 step 40, `10_28_22_11_50-g3` turn 10;
-  2026-11-04).
+  2026-11-04). Each leftover Gem is cast once, and Balinda casts it again
+  (it targets a friendly minion): `11_03_15_22_36-g4` turn 12 step 8, one
+  Gem entity cast twice on the left-most minion with Balinda out.
 
 The open part is a spell a minion casts **on** another minion and that
 minion's own "whenever you cast a spell on this" (Gatekeeper Amalgam,
