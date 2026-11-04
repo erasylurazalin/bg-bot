@@ -286,6 +286,10 @@ asking Era any rule question.
 - **Generated versus pool cards** ("Generated versus pool").
 - **Eating a minion with a spell:** its "whenever you play a card" gift
   procs first ("Eating a minion with a spell").
+- **The order inside one cast:** the target's "whenever you cast a spell on
+  this" fires before the spell's own effect; a Tavern buff the spell's own
+  effect gives lands after that cast's "after you cast" triggers ("The order
+  inside one cast", from logs).
 - **Butchering:** all Tavern spell power, Health included, "wherever they
   are" ("Butchering and spell power").
 - **Halves round up** ("Halves round up").
@@ -561,6 +565,22 @@ cast a spell on this" (Fleeing Fugitive; Gatekeeper Amalgam casts its Tea
 Set), and only then is the minion eaten or destroyed, so the eater gains the
 buffed stats. "After you cast a spell" triggers fire after the spell has
 resolved.
+
+**The order inside one cast (logs, 2026-11-04).** A spell cast on one of
+your minions runs the target's "whenever you cast a spell on this" triggers
+first and its own effect after them: Methodical Madness on a Devilish
+Distractor eats Tavern minions carrying the Distractor's fresh +1/+2
+(`Hearthstone_2026_10_24_15_25_26-g4` turn 11 step 23: the Distractor's
+TRIGGER block and its Tavern stat pushes come before the spell's POWER block,
+whose consumed stats include them). A Tavern buff that the spell's own effect
+gives ("give minions in the Tavern +2/+2 this game") reaches the Tavern's
+minions only after that cast's "after you cast" triggers have run: Staff of
+Enrichment's +2/+2 lands after the Felboar has eaten the Tichondrius at its
+pre-spell stats (`Hearthstone_2026_10_28_22_11_50-g4` turn 11 step 41). A stat
+buff a spell puts straight on a minion is not held back: a Blood Gem's stats
+reach the Felboar eating for the same cast (`2026_11_02_00_10_22-g4` turn 9
+step 39). Not Era's ruling; read from the raw logs (Era's RQ1 is half
+answered by them, see docs/notes/UNSURE.md).
 
 **Butchering and spell power (Era, 2026-11-02, 2026-11-03).** Butchering's
 "+8 Attack this game" is a Tavern spell number, so ALL Tavern spell power adds
