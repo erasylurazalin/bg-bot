@@ -205,6 +205,10 @@ board, except effects that say "permanently".
 - **Windfury:** attacks twice per turn. Mega-Windfury attacks four times.
 - **Venomous:** the next time it damages a minion, that minion dies. Then
   Venomous is gone. Checked. **Poisonous** is the same but permanent.
+  They are two separate keywords, and a minion can have both (Era,
+  2026-11-04; log `11_02_00_10_22-g7` turn 14: Tide Oracle Morgl, Poisonous
+  by its text, gains Venomous from Sewer Escapee). Venomous is a Bonus
+  Keyword and counts for Hackerfin; Poisonous is not a Bonus Keyword.
 - **Reborn:** when it dies, it comes back once with its printed Attack and 1
   Health, without Reborn. Checked.
 - **Cleave:** the attack also hits the target's neighbours, and they don't hit
