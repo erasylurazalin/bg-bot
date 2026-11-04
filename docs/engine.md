@@ -1038,10 +1038,21 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   trinket's cast, not the player's, so the minion it lands on answers with
   none of its own "whenever you cast a spell on this": while
   `tp.locket_copy` is set `apply_target` skips
-  `trigger_on_cast_spell_on_watchers` and `trigger_on_cast_spell_on_mech`
-  (the log's Glambot takes a Gem copy as +1/+1 and gets no Satellite,
-  `Hearthstone_2026_11_02_00_10_22-g2` turn 12 steps 24 to 31, where the
-  copies read +13/+13 before this).
+  `trigger_on_cast_spell_on_watchers` and `trigger_on_cast_spell_on_mech`.
+  It fires no "after you cast a spell" half either (`owe_after` is false
+  while `tp.locket_copy` is set), though a Tavern spell's copy still fires
+  the board's "whenever you cast a Tavern spell" cards. Read from the raw log
+  (`Hearthstone_2026_11_02_00_10_22-g2`, Power.log): turn 12 steps 24 to 31
+  has three Hot-Air Surveyors, so each Gem play is six casts (six POWER
+  blocks of the hand's Gem, 772266 onwards) and the Locket fires on every
+  one of them, six copies per play. Every real cast has its two Glambot
+  triggers before its own POWER block (772280 and 772634, then the cast at
+  772821); a copy has none: the two that land on the board's second Glambot
+  (772873, 773521) give it +1/+1 each and no Satellite, and the pair after
+  them (772939, 773293) belongs to the next cast. Not one of the game's 140
+  copies spawns a trigger block (no task list has a copy as its parent), and
+  turn 9 shows the "after" half too: Felboar fires 7 times for the turn's 7
+  real casts and none for its 6 copies.
 - **Spells versus Tavern spells (`cast_spell`, fixed 2026-10-31).** Two
   events, and every card or trinket that reacts to a cast is on the one its
   own words name (docs/rules/design.md "Read the card's exact words, every time"):
