@@ -490,7 +490,9 @@ build hero-less games so old tests pass unchanged, and
     type), `DeadWarband` (Kel'Thuzad's Kitty) and `DeadLastFight` (Reclaimed
     Souls, plain copies). The last two fill `Player.discover_minions`, the
     ready-made minions `resolve_choose` hands over (`discover_minions`, with
-    no pool copy moving; `abandon_discover` returns none). `Champion` deals
+    no pool copy moving; `abandon_discover` returns none). That path takes the
+    `discover_damage_from` damage too, so a Battlecry's Discover that lands as
+    a ready-made minion (a shop replay seats it so) still deals what it owes. `Champion` deals
     three Tier 7 minions and the pick lands in hand with
     `Minion.locked_gold` set (`discover_locked_gold`), the shared lock of
     docs/rules/design.md "Cards locked in hand". `MagneticMinion` is a plain draw with a

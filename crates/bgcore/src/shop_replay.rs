@@ -2934,6 +2934,160 @@ fn owe_battlecry_count(data: &Data, ids: &CardIdMap, game: &mut Game, step: &Sho
     pl.pending_battlecries = pl.pending_battlecries.saturating_add(n);
 }
 
+/// What a `discover` step still owes the Battlecry that opened it, beyond the
+/// count: Imposing Percussionist's "Discover a Demon. Deal damage to your hero
+/// equal to its Tier" deals that damage at the pick. The engine takes it from
+/// `discover_damage_from`, which its own Discover sets from the request
+/// (`game/discover.rs`), and the replay seats the offer instead, so the step
+/// names the Demon that dealt it: its `source`, found on the board. The board's
+/// "after your hero takes damage" cards (Ashen Corruptor, Devout Hellcaller)
+/// then react as the log's did (triage round 3's group A,
+/// `Hearthstone_2026_11_02_00_10_22-g5` turn 10 step 11: the Tavern gains
+/// +2/+2 from Ashen Corruptor on every Percussionist pick).
+fn owe_pick_damage(loaded: &mut LoadedShop, data: &Data, ids: &CardIdMap, step: &ShopStepSpec) {
+    if step.kind.as_deref() != Some("discover") {
+        return;
+    }
+    let Some(source) = step.source.as_ref() else { return };
+    let Some(card) = resolve_card(data, ids, source) else { return };
+    if !matches!(
+        data.cards.get(card).battlecry,
+        Some(crate::cards::Effect::DiscoverDemonTierDamage(_))
+    ) {
+        return;
+    }
+    // The step's own entity id is the card that dealt it. A source the state
+    // before does not hold by id falls back to the card of that name on the
+    // board.
+    let board = &loaded.game.players[ME].board;
+    let pos = (source.id != 0)
+        .then(|| loaded.board_ids.iter().position(|&id| id == source.id))
+        .flatten()
+        .or_else(|| board.iter().position(|m| m.card == card && m.golden == source.golden))
+        .or_else(|| board.iter().position(|m| m.card == card));
+    let Some(pos) = pos else {
+        loaded.missing.push("a pick's damage source is not on the board".to_string());
+        return;
+    };
+    loaded.game.players[ME].discover_damage_from = Some(pos as u8);
+}
+
+/// The card a pick step's play put in the log, when that card is also the
+/// step's own `source` and the step is the last pick the play opened.
+///
+/// A Discover a Battlecry opened and a Choose One's option both come as a pick
+/// step of their own right behind the play, and what that play still owed
+/// waits for the pick (`Player::pending_after_play`, `hogrider_pending`, the
+/// cast an `Action::Choose` ends). No logged state carries those flags, so the
+/// pick step has to seed them, and the file's own history says which pick is
+/// the one they land on. Two things rule a pick out:
+///
+/// - The card has to be one the player played from the hand. A Choose One card
+///   a Magicfin token casts opens the same pick and owes none of it
+///   (`Hearthstone_2026_10_26_00_48_15-g2` turn 8 step 33, where the log gives
+///   no Turbo Hogrider Gems), so the card the player played last before the
+///   pick has to be the card the pick names.
+/// - The step has to be that play's *last* pick. A Thorned Trailblazer's both
+///   options give two picks in a row and what the play owed lands at the
+///   second (`Hearthstone_2026_10_24_17_59_26-g1` turn 12 steps 10 and 11).
+fn pick_play_card(
+    data: &Data,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: usize,
+    index: usize,
+) -> Option<CardId> {
+    let turn_spec = file.turns.get(turn)?;
+    let step = turn_spec.actions.get(index)?;
+    if step.step != "discover" || !matches!(step.kind.as_deref(), Some("discover" | "choose_one")) {
+        return None;
+    }
+    let card = step.source.as_ref().and_then(|s| resolve_card(data, ids, s))?;
+    let played = turn_spec.actions[..index]
+        .iter()
+        .rev()
+        .find(|a| a.step == "play")
+        .and_then(|a| a.card.as_ref())
+        .and_then(|c| resolve_card(data, ids, c))?;
+    if played != card {
+        return None;
+    }
+    // Every pick the play opens runs before what it owed: a Brann Bronzebeard
+    // triples an Imposing Percussionist's Battlecry, and its three picks are
+    // three steps in a row (`Hearthstone_2026_11_01_17_59_13-g1` turn 10 steps
+    // 3 to 5: the Wrath Weavers gain at the third, not at the first).
+    let more = turn_spec.actions.get(index + 1).is_some_and(|next| {
+        next.kind == step.kind
+            && next.source.as_ref().and_then(|s| resolve_card(data, ids, s)) == Some(card)
+    });
+    if more {
+        return None;
+    }
+    Some(card)
+}
+
+/// What a minion's pick still owes the play that opened it: the "after you
+/// play an X" triggers, which wait for the Battlecry to resolve and for
+/// whatever it asks. The game keeps them in `pending_after_play` and fires
+/// them once nothing is open (`Game::resolve_after_play`), and the replay's
+/// play step still has the pick open, so the pick step carries them
+/// (triage round 3's group A: at an Imposing Percussionist's pick the hero
+/// damage comes first and then the Wrath Weavers' blocks,
+/// `Hearthstone_2026_10_24_15_25_26-g4` turn 6 step 8; `game/play.rs` says the
+/// same of the same game).
+fn owe_after_play(
+    data: &Data,
+    ids: &CardIdMap,
+    game: &mut Game,
+    file: &ShopFileSpec,
+    turn: usize,
+    index: usize,
+) {
+    let Some(card) = pick_play_card(data, ids, file, turn, index) else { return };
+    let c = data.cards.get(card);
+    if c.is_spell() {
+        // A spell's own aftermath is `seat_cast_after_pick`'s.
+        return;
+    }
+    let pl = &mut game.players[ME];
+    // The played minion never counts for its own trigger
+    // (`Minion::just_played`), and the state the pick starts from holds it on
+    // the board without that mark.
+    let tribes = match pl.board.iter().position(|m| m.card == card) {
+        Some(pos) => {
+            pl.board[pos].just_played = true;
+            data.cards.tribes_of(&pl.board[pos])
+        }
+        None => c.tribes,
+    };
+    pl.pending_after_play = Some(tribes);
+}
+
+/// What a Choose One play's pick still owes: Turbo Hogrider's "After you play a
+/// Choose One card, this plays 2 Blood Gems on all your Quilboar". The game
+/// sets `hogrider_pending` as the card is played from the hand and spends it
+/// once nothing that play opened is still waiting for a pick
+/// (`Game::resolve_hogrider`), so the play's last pick carries it (triage round
+/// 3's group C, `Hearthstone_2026_10_26_00_48_15-g2` turn 8: a Boundless
+/// Potential pick gives the only Quilboar on the board, the Hogrider itself,
+/// +4/+4; `pick_play_card` says which pick that is). The golden doubling is
+/// the Hogrider's own (`after_choose_one_played`), not the play's.
+fn owe_hogrider_gems(
+    data: &Data,
+    ids: &CardIdMap,
+    game: &mut Game,
+    file: &ShopFileSpec,
+    turn: usize,
+    index: usize,
+) {
+    let Some(card) = pick_play_card(data, ids, file, turn, index) else { return };
+    if data.cards.get(card).choose_one.is_none() {
+        return;
+    }
+    let pl = &mut game.players[ME];
+    pl.hogrider_pending = pl.hogrider_pending.saturating_add(1);
+}
+
 /// A pick that ends a *spell* the player cast (a Discover it opened, or the
 /// Choose One option it asked for) was logged as its own step, with the play in
 /// the step before, so the game's own action is split in two here: the pick
@@ -3518,6 +3672,7 @@ fn actions_for(
         "discover" | "trinket_pick" => {
             if step.step == "discover" {
                 owe_battlecry_count(data, ids, &mut loaded.game, step);
+                owe_pick_damage(loaded, data, ids, step);
             }
             seat_cast_after_pick(data, ids, &mut loaded.game, step);
             let at = force_offer(data, ids, &mut loaded.game, step, turn, landing, missing)?;
@@ -3687,6 +3842,12 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     // carries it, and the turn's own earlier steps do (Conflagration's
     // "improved by each Elemental you played this turn").
     seat_elementals_played_turn(data, ids, &mut loaded.game.players[ME], file, turn_index, index);
+    // What the play behind this pick still owed it, and no state carries: the
+    // played minion's "after you play an X" triggers (an Imposing
+    // Percussionist's Wrath Weavers) and a Turbo Hogrider's Gems for a Choose
+    // One card.
+    owe_after_play(data, ids, &mut loaded.game, file, turn_index, index);
+    owe_hogrider_gems(data, ids, &mut loaded.game, file, turn_index, index);
     let mut missing = std::mem::take(&mut loaded.missing);
     // The way the log answered a Choose One this step plays. A card that gives
     // both options (a Thorned Trailblazer, a Trailblazer Sticker) has to know

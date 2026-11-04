@@ -536,6 +536,15 @@ impl Game {
             let mut m = self.players[p].discover_minions[k];
             self.players[p].discover_minions.clear();
             self.players[p].discover.clear();
+            // Imposing Percussionist: the pick owes the hero damage equal to
+            // the Tier of the Demon chosen, and an offer of ready-made minions
+            // owes it too (a shop replay seats the offer this way, and a
+            // Battlecry's Discover landed through Kel'Thuzad's Kitty path is
+            // still that Battlecry's pick).
+            let damage = self.players[p]
+                .discover_damage_from
+                .take()
+                .map(|source| (source, self.data.cards.get(m.card).tier as i32));
             if !self.players[p].hand.is_full() {
                 m.pool_copies = 0;
                 m.no_reward = false;
@@ -544,6 +553,9 @@ impl Game {
                 // The check waits for the end of the action, as for any
                 // Discover pick.
                 self.check_triple_later(card);
+            }
+            if let Some((source, d)) = damage {
+                self.take_shop_damage(p, d, Some(source as usize));
             }
             self.fire_after_discover(p);
             self.maybe_start_discover(p);

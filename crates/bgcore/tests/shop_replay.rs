@@ -3481,3 +3481,246 @@ fn conflagration_counts_the_turns_earlier_elemental_plays() {
     );
     assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
 }
+
+/// The board, the hand and the Tavern of a two-step turn: a minion played from
+/// the hand and the pick its Battlecry opened, which is where the two steps of
+/// `pick_turn` differ.
+fn pick_state(board: &str, hand: &str, health: i32) -> String {
+    format!(
+        r#"{{"board": [{board}], "hand": [{hand}], "tavern": [
+          {{"id": 700, "slot": 1, "card_id": "BG20_101", "name": "Roadboar",
+            "attack": 2, "health": 4, "kind": "minion", "frozen": false}}],
+          "hand_hidden": 0, "gold": 12, "gold_max": 10, "tier": 4,
+          "upgrade_cost": 8, "health": {health}, "armor": 0, "free_refreshes": 0,
+          "frozen": false, "hero_powers": [], "trinkets": [],
+          "counters": {{"gem_attack": 2, "gem_health": 2}}, "secrets": []}}"#
+    )
+}
+
+/// Replay the pick step (the second) of a two-step turn: the play of the card
+/// that opened it, then the pick.
+fn replay_pick(text: &str) -> StepResult {
+    let files = parse_action_files(&[("pick.json".to_string(), text.to_string())])
+        .unwrap_or_else(|e| panic!("{e}\n{text}"));
+    let file = &files[0];
+    replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        1,
+        &ReplayOptions { seeds: 2, seed: 1 },
+    )
+}
+
+/// Imposing Percussionist: "Battlecry: Discover a Demon. Deal damage to your
+/// hero equal to its Tier". The engine takes that damage from
+/// `discover_damage_from`, which only a Discover it deals itself sets, so a
+/// replayed pick seat had none to deal (triage round 3's group A, twelve steps
+/// in four games).
+#[test]
+fn a_percussionists_pick_deals_the_picked_demons_tier_to_the_hero() {
+    let percussionist = r#"{"id": 511, "position": 1, "card_id": "BG26_525",
+        "name": "Imposing Percussionist", "attack": 4, "health": 4,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let in_hand = r#"{"id": 511, "index": 1, "card_id": "BG26_525",
+        "name": "Imposing Percussionist", "attack": 4, "health": 4,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let option = |id: u64, card: &str, name: &str, a: i32, h: i32| {
+        format!(
+            r#"{{"id": {id}, "card_id": "{card}", "name": "{name}", "attack": {a},
+                "health": {h}, "golden": false, "keywords": [], "kind": "minion"}}"#
+        )
+    };
+    let options = [
+        option(12001, "BGS_004", "Wrath Weaver", 1, 3),
+        option(12002, "BG26_174", "Soul Rewinder", 4, 2),
+        option(12003, "BG26_524", "Malchezaar, Prince of Dance", 4, 3),
+    ]
+    .join(",");
+    let picked = option(12002, "BG26_174", "Soul Rewinder", 4, 2);
+    let text = format!(
+        r#"{{"source": "percussionist", "game": 1, "turns": [
+        {{"turn": 8, "start": {},
+          "actions": [{{"step": "play", "index": 1, "card": {in_hand},
+            "moved": {{"id": 511, "from": {{"where": "hand", "index": 1}},
+                       "to": {{"where": "board", "position": 1}}}},
+            "after": {}}},
+           {{"step": "discover", "kind": "discover", "source": {percussionist},
+            "options": [{options}], "picked": {picked},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        pick_state("", in_hand, 30),
+        pick_state(percussionist, "", 30),
+        pick_state(percussionist, &picked, 28),
+    );
+    let r = replay_pick(&text);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    // 30 Health, the picked Demon's Tier 2 off it.
+    assert_eq!(r.ours.health, 28, "the pick deals the Demon's Tier to the hero");
+    let pick = r.ours.hand.iter().find(|m| m.name == "Soul Rewinder");
+    assert!(pick.is_some(), "the pick is in the hand: {:?}", r.ours.hand);
+}
+
+/// The "after you play a Demon" triggers wait for the Battlecry to resolve and
+/// for whatever it asks, and an Imposing Percussionist's Discover is one of
+/// them: at the pick step the hero damage comes first and then the Wrath
+/// Weavers' blocks (`game/play.rs` says so of
+/// `Hearthstone_2026_10_24_15_25_26`). The play is behind the pick in the file,
+/// so the pick step carries `pending_after_play` (triage round 3's group A: six
+/// of its twelve steps are a Wrath Weaver or a Soul Rewinder left still).
+#[test]
+fn the_after_you_play_a_demon_triggers_waiting_for_a_pick_fire_at_it() {
+    let demon = r#"{"id": 512, "position": 2, "card_id": "BG26_525",
+        "name": "Imposing Percussionist", "attack": 4, "health": 4,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let weaver = r#"{"id": 513, "position": 1, "card_id": "BGS_004",
+        "name": "Wrath Weaver", "attack": 1, "health": 3,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let weaver_after = r#"{"id": 513, "position": 1, "card_id": "BGS_004",
+        "name": "Wrath Weaver", "attack": 3, "health": 5,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let in_hand = r#"{"id": 512, "index": 1, "card_id": "BG26_525",
+        "name": "Imposing Percussionist", "attack": 4, "health": 4,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let option = |id: u64, card: &str, name: &str, a: i32, h: i32| {
+        format!(
+            r#"{{"id": {id}, "card_id": "{card}", "name": "{name}", "attack": {a},
+                "health": {h}, "golden": false, "keywords": [], "kind": "minion"}}"#
+        )
+    };
+    let options = [
+        option(12011, "BGS_004", "Wrath Weaver", 1, 3),
+        option(12012, "BG26_174", "Soul Rewinder", 4, 2),
+        option(12013, "BG26_524", "Malchezaar, Prince of Dance", 4, 3),
+    ]
+    .join(",");
+    let picked = option(12011, "BGS_004", "Wrath Weaver", 1, 3);
+    let text = format!(
+        r#"{{"source": "percussionist", "game": 1, "turns": [
+        {{"turn": 8, "start": {},
+          "actions": [{{"step": "play", "index": 1, "card": {in_hand},
+            "moved": {{"id": 512, "from": {{"where": "hand", "index": 1}},
+                       "to": {{"where": "board", "position": 2}}}},
+            "after": {}}},
+           {{"step": "discover", "kind": "discover", "source": {demon},
+            "options": [{options}], "picked": {picked},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        pick_state(weaver, in_hand, 30),
+        pick_state(&format!("{weaver}, {demon}"), "", 30),
+        pick_state(&format!("{weaver_after}, {demon}"), &picked, 28),
+    );
+    let r = replay_pick(&text);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    let board = &r.ours.board;
+    let gained = board
+        .iter()
+        .find(|m| m.name == "Wrath Weaver")
+        .expect("the Weaver is on the board");
+    assert_eq!((gained.attack, gained.health), (3, 5), "the Demon played is one Weaver trigger");
+    // 30 Health: the picked Demon's Tier 1, then the Weaver's own 1 damage.
+    assert_eq!(r.ours.health, 28);
+}
+
+/// Turbo Hogrider: "After you play a Choose One card, this plays 2 Blood Gems on
+/// all your Quilboar". The game sets `hogrider_pending` on the play and spends
+/// it once nothing the play opened is still waiting for a pick, and the replay's
+/// play step still has that pick open, so the Gems never fired at all (triage
+/// round 3's group C, eight steps in four games).
+#[test]
+fn a_choose_one_picks_step_pays_the_hogriders_gems() {
+    let hog = r#"{"id": 521, "position": 1, "card_id": "BG31_323",
+        "name": "Turbo Hogrider", "attack": 6, "health": 8,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let hog_fed = r#"{"id": 521, "position": 1, "card_id": "BG31_323",
+        "name": "Turbo Hogrider", "attack": 10, "health": 12,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let potential = r#"{"id": 522, "index": 1, "card_id": "BG31_890",
+        "name": "Boundless Potential", "attack": 0, "health": 0,
+        "golden": false, "keywords": [], "kind": "spell"}"#;
+    let option = |id: u64, card: &str, name: &str, a: i32, h: i32| {
+        format!(
+            r#"{{"id": {id}, "card_id": "{card}", "name": "{name}", "attack": {a},
+                "health": {h}, "golden": false, "keywords": [], "kind": "minion"}}"#
+        )
+    };
+    let options = [
+        option(12021, "BG31_148", "Hackerfin", 3, 2),
+        option(12022, "BG26_174", "Soul Rewinder", 4, 2),
+    ]
+    .join(",");
+    let picked = option(12021, "BG31_148", "Hackerfin", 3, 2);
+    let text = format!(
+        r#"{{"source": "boundless", "game": 1, "turns": [
+        {{"turn": 8, "start": {},
+          "actions": [{{"step": "play", "index": 1, "card": {potential},
+            "sub_option": 0,
+            "moved": {{"id": 522, "from": {{"where": "hand", "index": 1}},
+                       "to": {{"where": "off"}}}},
+            "after": {}}},
+           {{"step": "discover", "kind": "choose_one",
+            "source": {{"id": 522, "card_id": "BG31_890", "name": "Boundless Potential"}},
+            "options": [{options}], "picked": {picked},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        pick_state(hog, potential, 30),
+        pick_state(hog, "", 30),
+        pick_state(hog_fed, &picked, 30),
+    );
+    let r = replay_pick(&text);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    let board = &r.ours.board;
+    let fed = board.iter().find(|m| m.name == "Turbo Hogrider").expect("the Hogrider is there");
+    assert_eq!((fed.attack, fed.health), (10, 12), "2 Gems of +2/+2 on the Quilboar");
+}
+
+/// The other half of the same rule: what a Choose One card a *minion* cast
+/// opens is not the player playing it, so the Hogrider stays still
+/// (`Hearthstone_2026_10_26_00_48_15-g2` turn 8 step 33: a Magicfin token's
+/// Bindless Potential, whose pick the log pays no Gems at).
+#[test]
+fn a_choose_one_a_minion_cast_pays_no_hogriders_gems() {
+    let hog = r#"{"id": 531, "position": 1, "card_id": "BG31_323",
+        "name": "Turbo Hogrider", "attack": 6, "health": 8,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let token = r#"{"id": 532, "index": 1, "card_id": "BG33_890t",
+        "name": "Magicfin Apprentice", "attack": 1, "health": 2,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let token_board = r#"{"id": 532, "position": 2, "card_id": "BG33_890t",
+        "name": "Magicfin Apprentice", "attack": 1, "health": 2,
+        "golden": false, "keywords": [], "kind": "minion"}"#;
+    let option = |id: u64, card: &str, name: &str, a: i32, h: i32| {
+        format!(
+            r#"{{"id": {id}, "card_id": "{card}", "name": "{name}", "attack": {a},
+                "health": {h}, "golden": false, "keywords": [], "kind": "minion"}}"#
+        )
+    };
+    let options = [
+        option(12031, "BG31_148", "Hackerfin", 3, 2),
+        option(12032, "BG26_174", "Soul Rewinder", 4, 2),
+    ]
+    .join(",");
+    let picked = option(12031, "BG31_148", "Hackerfin", 3, 2);
+    let text = format!(
+        r#"{{"source": "token", "game": 1, "turns": [
+        {{"turn": 8, "start": {},
+          "actions": [{{"step": "play", "index": 1, "card": {token},
+            "moved": {{"id": 532, "from": {{"where": "hand", "index": 1}},
+                       "to": {{"where": "board", "position": 2}}}},
+            "after": {}}},
+           {{"step": "discover", "kind": "choose_one",
+            "source": {{"id": 533, "card_id": "BG31_890", "name": "Boundless Potential"}},
+            "options": [{options}], "picked": {picked},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        pick_state(hog, token, 30),
+        pick_state(&format!("{hog}, {token_board}"), "", 30),
+        pick_state(&format!("{hog}, {token_board}"), &picked, 30),
+    );
+    let r = replay_pick(&text);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    let board = &r.ours.board;
+    let fed = board.iter().find(|m| m.name == "Turbo Hogrider").expect("the Hogrider is there");
+    assert_eq!((fed.attack, fed.health), (6, 8), "no Gems for a card a minion cast");
+}

@@ -804,9 +804,24 @@ of a random step is run, since any of them may be the log's.
     spell" triggers and the Spell Siphon Dark Gift count, log
     `10_24_17_59_26-g1` turn 10 step 43 to 44) and for a Discover a Battlecry
     opened (`owe_battlecry_count`, "for each Battlecry" counting at the pick).
-    A pick that is not the play's last word (a Discover a Battlecry opened and
-    a target it asks for after it) is still one step here, so the rest of the
-    play is behind the boundary.
+    Three more of the game's own flags are seated the same way, at the pick
+    that pays them: `Player.pending_after_play` (`owe_after_play`: the played
+    minion's "after you play an X" triggers, which wait for its Battlecry and
+    for the pick, so an Imposing Percussionist's Wrath Weavers gain at the
+    Discover's pick and not at the play), `Player.hogrider_pending`
+    (`owe_hogrider_gems`: a Turbo Hogrider's Gems for a Choose One card) and
+    `Player.discover_damage_from` (`owe_pick_damage`: the Percussionist's
+    damage to the hero, which `resolve_choose` takes for an offer of
+    ready-made minions too). Those three land on the play's *last* pick and
+    only for a card the player played from the hand, which `pick_play_card`
+    reads off the turn's earlier steps: a Brann Bronzebeard triples a
+    Battlecry, so its three picks are three steps in a row and the triggers
+    fire at the third (`11_01_17_59_13-g1` turn 10 steps 3 to 5), and a
+    Choose One card a Magicfin token casts opens the same pick and owes none
+    of it (`10_26_00_48_15-g2` turn 8 step 33). A pick that is not the play's
+    last word (a Discover a Battlecry opened and a target it asks for after
+    it) is still one step here, so the rest of the play is behind the
+    boundary.
   - **A Magnetized minion's host** (`magnetize_host`) is the card the played
     minion's own stats went into: the step's `changed` list is in no order of
     its own, and a stat static the play set off comes before the host. It must
