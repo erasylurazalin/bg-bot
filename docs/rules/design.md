@@ -361,6 +361,23 @@ triggers on a Mech played from hand, never on a copy or a Satellite. A
 copied Volumizer counts as Magnetized for the first time (in
 docs/notes/UNSURE.md).
 
+**A Magnetic played from hand is a minion of its own until it merges.** The
+raw log's PLAY block puts it in play, runs the "whenever you play a Mech"
+triggers against it there and only then merges it into its host, so Spark
+Snapper's Satellite joins the played minion and every copy of that minion
+carries the Satellite. `Hearthstone_2026_10_29_22_20_04-g3` turn 13 step
+10: the 2/4 Annoy-o-Module takes the 84/126 Satellite, merges into a Red
+Volumizer (which gains +86/+130) and leaves a Polarizing Beatboxer
++170/+256, the Satellite and the module. The host takes one Magnetization,
+not two.
+
+**A Magnetization onto a Beatboxer sets no other Beatboxer off.** It is
+also what stops two Beatboxers from looping.
+`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 16: a Beatboxer played
+from hand takes Spark Snapper's Satellite (5/10 to 105/160) and the
+Beatboxer already on the board stays where it is. That is narrower than
+"it sees every Magnetization" above and comes from one log.
+
 **Volumizers inside a host (Era, 2026-11-03).** A Volumizer's "your
 Volumizers have +N/+M this game (wherever they are)" reaches the Volumizers
 in the Tavern, in your hand and on your board, but never the ones already

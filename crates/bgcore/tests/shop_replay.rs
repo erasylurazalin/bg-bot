@@ -1585,6 +1585,32 @@ fn a_magnetized_minion_merges_into_the_host_the_step_changed() {
     );
 }
 
+/// A Drone Duplicator's held extra Magnetization ("the next Magnetization to
+/// this minion this turn happens an extra time") comes from the file's
+/// `extra_magnetize` key, which the collector reads off the game's own held-
+/// extra tag (`docs/real-boards.md` "The action file"): a file that has it
+/// seats it, and one written before the key existed seats none, as the loader
+/// always did.
+#[test]
+fn a_held_extra_magnetization_is_seated_from_the_file() {
+    let held = seat(
+        r#"{"card_id": "BG36_506", "name": "Drone Duplicator", "attack": 5, "health": 2,
+            "position": 1, "extra_magnetize": 2}"#,
+        "",
+        "",
+        6,
+    );
+    assert_eq!(held.game.players[bgcore::shop_replay::ME].board[0].extra_magnetize, 2);
+    let none = seat(
+        r#"{"card_id": "BG36_506", "name": "Drone Duplicator", "attack": 5, "health": 2,
+            "position": 1}"#,
+        "",
+        "",
+        6,
+    );
+    assert_eq!(none.game.players[bgcore::shop_replay::ME].board[0].extra_magnetize, 0);
+}
+
 /// "Golden minions you played this game" (Hooktusk, Master Marauder) is not a
 /// number the log tags: a file the collector wrote carries it in the counters,
 /// and an older one still shows it on the card that improves with it (triage

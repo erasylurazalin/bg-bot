@@ -44,6 +44,15 @@ impl Game {
     /// when `m` was played from hand, and false when attached directly by an
     /// effect (Spark Snapper, Resourceful Robot, Auto Reveille, Glambot).
     pub(super) fn magnetize_to(&mut self, p: usize, pos: usize, m: Minion, from_play: bool) {
+        let mut m = m;
+        // A Magnetic played from hand is a minion of its own for the length of
+        // the play: the raw log's PLAY block puts it in play, runs the
+        // "whenever you play a Mech" triggers against it (a Spark Snapper's
+        // Satellite merges into it there) and only then merges it into the
+        // host (`Hearthstone_2026_10_29_22_20_04-g3` turn 13 step 10).
+        if from_play {
+            self.magnetize_onto_played_mech(p, &mut m);
+        }
         let volumizer = self.data.cards.get(m.card).volumizer_buff;
         if let Some((da, dh)) = volumizer {
             let mul = if m.golden { 2 } else { 1 };
@@ -54,14 +63,10 @@ impl Game {
             let slot = cards.get(m.card).pool_slot as usize;
             self.consumed[slot] += m.pool_copies as u32;
         }
-        // Drone Duplicator's extra Magnetization is left on the host for the
-        // triggers below: a Spark Snapper's Satellite Magnetizes onto the Mech
-        // that was just played before that Mech merges into the host, so it
-        // happens an extra time as well, and so does the played Magnetic
-        // itself. The log's own numbers: a Red Volumizer played from hand
-        // (24/20) with a 26/39 Satellite on it, into a Drone Duplicator at
-        // 15/17, gives the host 115/135, which is (24 + 26 + 15) and
-        // (20 + 39 + 17) twice over (`10_27_04_30_04-g2` turn 10 step 18).
+        // Drone Duplicator's extra Magnetization ("Activate (1): the next
+        // Magnetization to this minion this turn happens an extra time") is
+        // read here and spent below: the merge itself happens once now, and
+        // again `extra` times after the triggers.
         let extra = self.players[p].board[pos].extra_magnetize;
         self.players[p].board[pos].magnetize(cards, m);
         {
@@ -74,19 +79,32 @@ impl Game {
             self.trinket_event(p, crate::trinkets::Event::Magnetize, Some(m.card), 1);
         }
         // The copy a Beatboxer gets is the Magnetic as it attached, with the
-        // buff the host got from Mechgnome Interpreter and the like.
+        // Satellite that joined it before the merge and the buff the host got
+        // from Mechgnome Interpreter and the like.
         let m1 = self.with_magnetize_buffs(p, m);
-        self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
-        self.beatboxers_copy(p, Some(pos), m1);
+        // The played-Mech hooks ran against the played minion already
+        // (`magnetize_onto_played_mech`), so only the "whenever you play or
+        // Magnetize a Mech" buffs land on the host here.
+        self.trigger_mech_played_or_magnetized(p, pos, false, false);
         // A trigger's own attach (the Satellite) took the host's extra
         // Magnetizations and used them on itself; the flag is spent, and this
         // merge is due the same count.
         let _ = std::mem::take(&mut self.players[p].board[pos].extra_magnetize);
-        // Drone Duplicator: the same Magnetization happens again, without
-        // taking another copy from the pool.
+        // Drone Duplicator: the Magnetization to the host happens again, once
+        // per extra. The repeat is a Minion of its own (the log's copy is a
+        // fresh `BG34_170t3_G` carrying the merged minion's enchantments), so
+        // a Volumizer's "the first time this is played or Magnetized" fires
+        // again, and the Beatboxers copy it too. The log's own order: the
+        // repeats, each with their Beatboxer copies, and the first merge's
+        // Beatboxer copies last (`Hearthstone_2026_10_29_22_20_04-g3` turn 14
+        // step 20, a golden Drone Duplicator and two Beatboxers).
         for _ in 0..extra {
             if pos >= self.players[p].board.len() {
                 break;
+            }
+            if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
+                let mul = if m.golden { 2 } else { 1 };
+                self.add_volumizer_bonus(p, da * mul, dh * mul);
             }
             self.players[p].board[pos].magnetize(&self.data.cards, m);
             self.note_magnetized(p);
@@ -97,6 +115,68 @@ impl Game {
             self.trigger_mech_played_or_magnetized(p, pos, false, false);
             self.beatboxers_copy(p, Some(pos), m1);
         }
+        self.beatboxers_copy(p, Some(pos), m1);
+    }
+
+    /// The Magnetizations that happen to a Magnetic minion played from hand
+    /// before it merges into its host: the "whenever you play a Mech" hooks of
+    /// the board, which a Spark Snapper answers with a Satellite. The Satellite
+    /// joins the played minion and not the host, so the host takes one
+    /// Magnetization (the log's own count on it goes up by one) and every copy
+    /// of the played minion carries the Satellite's stats: the 2/4
+    /// Annoy-o-Module of `Hearthstone_2026_10_29_22_20_04-g3` turn 13 step 10
+    /// takes the 84/126 Satellite, merges into a Red Volumizer (which takes
+    /// +86/+130) and leaves a Polarizing Beatboxer +170/+256, the Satellite
+    /// and the module.
+    fn magnetize_onto_played_mech(&mut self, p: usize, m: &mut Minion) {
+        for sat in self.on_play_mech_satellites(p) {
+            // The Satellite is part of the played minion from here on, not a
+            // Magnetization of its own: the host it merges into takes one
+            // Magnetization, and the played minion's own count (a Magnetic
+            // carrying Magnetics) goes in unchanged.
+            let counted = sat.magnetizations.saturating_add(1);
+            m.magnetize(&self.data.cards, sat);
+            m.magnetizations = m.magnetizations.saturating_sub(counted);
+            self.note_magnetized(p);
+            // The Satellite Magnetized a Mech, so the board's "whenever you
+            // play or Magnetize a Mech" buffs land on the Mech it joined
+            // (Mechagnome Interpreter), which carries them into the host:
+            // `Hearthstone_2026_11_03_00_29_06-g4` turn 8 step 3, two
+            // Interpreters and a Red Volumizer played onto a Spark Snapper.
+            self.add_magnetize_buffs(p, m);
+            let copy = self.with_magnetize_buffs(p, sat);
+            // A Beatboxer played as the Magnetization copies nothing: a
+            // Magnetization onto a Beatboxer leaves the others alone
+            // (`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 16).
+            if !self.carries_beatboxer(m) {
+                self.beatboxers_copy(p, None, copy);
+            }
+        }
+    }
+
+    /// The Satellites the board's "whenever you play a Mech" cards Magnetize
+    /// onto the Mech that was just played, each card improving itself by one
+    /// for the next time (Spark Snapper).
+    fn on_play_mech_satellites(&mut self, p: usize) -> ArrayVec<Minion, 8> {
+        let mut sats = ArrayVec::new();
+        let len = self.players[p].board.len();
+        for i in 0..len {
+            let m = self.players[p].board[i];
+            for (card, golden) in m.parts() {
+                if let Some(OnPlayMech::MagnetizeSatellite { card: sat_id, attack, health }) =
+                    self.data.cards.get(card).on_play_mech
+                {
+                    let imp = self.players[p].board[i].improvements;
+                    self.players[p].board[i].improvements = imp.saturating_add(1);
+                    let stacks = (1 + imp as i32) * (if golden { 2 } else { 1 });
+                    let mut sat = self.data.cards.make(sat_id, false);
+                    sat.attack = attack * stacks;
+                    sat.health = health * stacks;
+                    let _ = sats.try_push(sat);
+                }
+            }
+        }
+        sats
     }
 
     /// Count one Magnetization for good: Dr. Boom's Monster's "for each time
@@ -109,6 +189,13 @@ impl Game {
     /// `m` plus what "whenever you play or Magnetize a Mech" cards on the
     /// board give a Mech it Magnetizes to.
     fn with_magnetize_buffs(&self, p: usize, mut m: Minion) -> Minion {
+        self.add_magnetize_buffs(p, &mut m);
+        m
+    }
+
+    /// What "whenever you play or Magnetize a Mech" cards on the board give the
+    /// Mech that was just played or Magnetized (Mechagnome Interpreter).
+    fn add_magnetize_buffs(&self, p: usize, m: &mut Minion) {
         for o in &self.players[p].board {
             for (card, golden) in o.parts() {
                 if let Some(OnPlayOrMagnetizeMech::Buff { attack, health }) =
@@ -120,18 +207,28 @@ impl Game {
                 }
             }
         }
-        m
     }
 
     /// Polarizing Beatboxer: `m` just Magnetized to the minion in board slot
-    /// `host` (None: a minion in the Tavern), so every board minion other than
-    /// the host with the Beatboxer's text gets a copy of the same Magnetic
-    /// (twice when golden). Each copy is a Magnetization of its own (Utility
-    /// Drone counts it; a Volumizer copy raises your Volumizers again) but not
-    /// a play, takes no pool copy, is not buffed again by Mechagnome
-    /// Interpreter, and sends nothing on: with two Beatboxers, A's copy to B
-    /// doesn't come back to A.
+    /// `host` (None: a minion not on the board, or a Tavern card), so every
+    /// board minion other than the host with the Beatboxer's text gets a copy
+    /// of the same Magnetic (twice when golden). Each copy is a Magnetization
+    /// of its own (Utility Drone counts it; a Volumizer copy raises your
+    /// Volumizers again) but not a play, takes no pool copy, is not buffed
+    /// again by Mechagnome Interpreter, and sends nothing on: with two
+    /// Beatboxers, A's copy to B doesn't come back to A.
+    ///
+    /// A Magnetization onto a Beatboxer sets nothing off, which is what keeps
+    /// that from looping: the log's Beatboxer played at
+    /// `Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 16 takes a Spark
+    /// Snapper's Satellite and no other Beatboxer copies it.
     fn beatboxers_copy(&mut self, p: usize, host: Option<usize>, m: Minion) {
+        let onto_beatboxer = host
+            .and_then(|h| self.players[p].board.get(h))
+            .is_some_and(|h| self.carries_beatboxer(h));
+        if onto_beatboxer {
+            return;
+        }
         let len = self.players[p].board.len();
         for j in 0..len {
             if Some(j) == host {
@@ -151,6 +248,13 @@ impl Game {
                 self.note_magnetized(p);
             }
         }
+    }
+
+    /// Whether this minion carries a Polarizing Beatboxer's text, its own or
+    /// one a Magnetic brought in.
+    fn carries_beatboxer(&self, m: &Minion) -> bool {
+        m.parts()
+            .any(|(card, _)| self.data.cards.get(card).aura == Some(Aura::PolarizingBeatboxer))
     }
 
     /// Glambot: a spell was cast on the Mech in Tavern slot `slot`, so a

@@ -280,14 +280,22 @@ rules behind each are in docs/rules/design.md Part 2.
 - **Magnetize hooks.** Every Magnetization goes through
   `Game::magnetize_to`, which also runs `beatboxers_copy` (Polarizing
   Beatboxer, `Aura::PolarizingBeatboxer`), so a new "whenever you Magnetize"
-  card hooks in there. Drone Duplicator's extra Magnetization
-  (`Minion.extra_magnetize`) stays on the host for the trigger that follows
-  the merge, because a Spark Snapper's Satellite Magnetizes onto the Mech
-  that was just played before that Mech merges in; the played Magnetic and
-  its Satellite then both happen again, and the extra loop re-runs the
-  "whenever you Magnetize a Mech" buffs without firing the played-Mech hooks
-  a second time (`10_27_04_30_04-g2` turn 10 step 18: a 24/20 Volumizer with
-  a 26/39 Satellite into a 15/17 host gives 115/135).
+  card hooks in there. A Magnetic played from hand goes through
+  `magnetize_onto_played_mech` first: the "whenever you play a Mech" hooks
+  (`on_play_mech`, Spark Snapper) run against the played minion while it is
+  a minion of its own, so its Satellite joins it before it merges into the
+  host, and every copy of it (Beatboxers) carries the Satellite
+  (`10_29_22_20_04-g3` turn 13 step 10). Drone Duplicator's extra
+  Magnetization (`Minion.extra_magnetize`, from `Effect::ExtraMagnetization`
+  and read by the collector off the game's own `4945` tag, see
+  `docs/real-boards.md` "The action file") then repeats the merge that many
+  times, each repeat counted as a fresh Volumizer (its own "the first time
+  this is played or Magnetized" fires again, so the Volumizer bonus grows)
+  and with its own `beatboxers_copy`; the first merge's Beatboxer copies
+  come last, as in the log (`10_29_22_20_04-g3` turn 14 step 20), and the
+  repeats re-run the "whenever you Magnetize a Mech" buffs without firing
+  the played-Mech hooks a second time (`10_27_04_30_04-g2` turn 10 step 18:
+  a 24/20 Volumizer with a Satellite into a Drone Duplicator happens twice).
 - **Pirates, Golden minions, gold spent, Lockbox, Bounties, Cleave:** see
   `docs/adding-cards.md` section 6.
 - **Undead** (the Undead bonus, Reborn in the shop, shop destroys, Knight

@@ -97,6 +97,13 @@ pub struct ShopMinionSpec {
     /// starts at 0, as it always did.
     #[serde(default)]
     pub magnetizations: u32,
+    /// The extra times the next Magnetization onto this minion happens
+    /// (`Minion.extra_magnetize`, a Drone Duplicator's Activate). The collector
+    /// reads the game's own held-extra tag (docs/real-boards.md "The action
+    /// file"). A file written before the key existed has it nowhere, and then
+    /// the minion holds none, as it always did.
+    #[serde(default)]
+    pub extra_magnetize: u8,
     /// A Golden minion that gives no Triple Reward when played, the file's
     /// mark: only the sources docs/rules/design.md names say so (Silent
     /// Deliverer's goldens, Sinister Invitation's, Gilding, Aureate Laureate).
@@ -1320,6 +1327,11 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
     // turn then gives it nothing. A file written before the key existed leaves
     // it 0, which is what the loader always seated.
     minion.magnetizations = m.magnetizations.min(u16::MAX as u32) as u16;
+    // A Drone Duplicator's held extra Magnetization ("the next Magnetization to
+    // this minion this turn happens an extra time"), which the step that
+    // Magnetizes onto it spends: the log keeps it in a bare tag the collector
+    // reads, and a fresh minion holds none.
+    minion.extra_magnetize = m.extra_magnetize;
     // Magnetic is a card property the board loader drops on purpose (a fight
     // never reads it), but a shop step does: it is what lets a minion be
     // Magnetized onto the board the game built it from.
