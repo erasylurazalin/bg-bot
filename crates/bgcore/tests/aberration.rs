@@ -553,6 +553,26 @@ fn sludge_corrosion_discarded_casts_twice_and_counts_twice() {
 }
 
 #[test]
+fn an_activates_improvement_is_in_place_for_the_card_it_discards() {
+    // N'raqi Frostcaller: "Discard a card for your Tavern spells to give an
+    // extra +1/+1 this game". The improvement lands before the discarded
+    // card's own casts, so a discarded Sludge Corrosion gives +2/+2 a cast and
+    // not +1/+1 (`Hearthstone_2026_10_28_22_11_50-g6` turn 9 step 35 and turn
+    // 12 step 7, each +2/+2 a minion short without this order).
+    let mut g = game(19);
+    put_on_board(&mut g, 0, "N'raqi Frostcaller", false);
+    g.give(0, "Sludge Corrosion").unwrap();
+    act(&mut g, 0, Action::Activate(0));
+    act(&mut g, 0, Action::Discard(0));
+    let pl = &g.players[0];
+    assert_eq!(pl.spell_bonus, (1, 1), "the Activate's own +1/+1");
+    // two casts, each +1/+1 plus the bonus it already reads
+    assert_eq!(stats(&pl.board[0]), (6 + 4, 3 + 4), "the Frostcaller's own +2/+2 a cast");
+    assert_eq!(pl.spells_cast, 2);
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn corrupted_coin_discarded_raises_maximum_gold_and_never_casts() {
     let mut g = game(6);
     put_on_board(&mut g, 0, "Mangled Bandit", false);
@@ -683,6 +703,29 @@ fn mysterious_kthir_discards_only_tavern_spells_and_grows_per_discard() {
     assert_eq!(pl.extra_max_gold, 2, "the Coin was a real discard too");
     assert_eq!(pl.spells_cast, 2);
     assert_eq!(pl.discarded, 2);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn mysterious_kthir_passes_over_a_lockbox() {
+    // A Lockbox is a spell in hand but not a Tavern spell, so K'Thir's "discard
+    // your 3 left-most Tavern spells" skips it and takes the Sludge Corrosion
+    // behind it (`Hearthstone_2026_10_28_22_11_50-g6` turn 8 step 41: the
+    // log's hand keeps the Lockbox and loses the Sludge Corrosions).
+    let mut g = game(20);
+    put_on_board(&mut g, 0, "Mysterious K'Thir", false);
+    g.players[0].board.push(wall(&g.data.cards));
+    g.give(0, "Lockbox").unwrap();
+    g.give(0, "Sludge Corrosion").unwrap();
+    turn_of(&mut g, 0);
+    g.step(Action::EndTurn).unwrap();
+    let pl = &g.players[0];
+    assert_eq!(pl.hand.len(), 1, "only the Sludge Corrosion went");
+    assert_eq!(name(&g, &pl.hand[0]), "Lockbox");
+    // one discard (+7/+7) and the two casts the discarded Sludge makes
+    assert_eq!(stats(&pl.board[0]), (7 + 7 + 2, 7 + 7 + 2), "K'Thir");
+    assert_eq!(pl.discarded, 1);
+    assert_eq!(pl.spells_cast, 2, "Sludge Corrosion casts twice");
     g.check_invariants().unwrap();
 }
 

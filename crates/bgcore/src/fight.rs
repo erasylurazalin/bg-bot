@@ -2801,7 +2801,7 @@ impl<'a> Side<'a> {
             Effect::GetRandomChooseOne(n) => {
                 for _ in 0..n as i32 * mul {
                     if let Some(c) =
-                        db.random_choose_one_minion(self.counters.tier, self.counters.lobby, rng)
+                        db.random_choose_one_card(self.counters.tier, self.counters.lobby, rng)
                     {
                         self.out.push_card(c);
                     }

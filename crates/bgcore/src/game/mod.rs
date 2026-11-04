@@ -2563,7 +2563,7 @@ impl Game {
                     pl.gold -= refresh_cost;
                     gold_spent = refresh_cost;
                 }
-                Self::refresh_shop(pl, pool, cards, rules, rng, *lobby, RefreshKind::Explicit);
+                let range = Self::refresh_shop(pl, pool, cards, rules, rng, *lobby, RefreshKind::Explicit);
                 // "After the Tavern is Refreshed": the trinket hook.
                 self.trinket_event(p, Event::Refresh, None, 1);
                 if health_paid > 0 {
@@ -2571,6 +2571,15 @@ impl Game {
                     self.take_hero_damage(p, health_paid, None);
                 }
                 self.fire_event(p, EventKind::GoldSpent, gold_spent as u32);
+                // The Fodders the Refresh dealt feed once it is over, so every
+                // "after the Tavern is Refreshed" effect has landed on them
+                // and the Demon they feed gets those stats too: the log's
+                // Fodder is a 2/2 plus the Barrage
+                // (`Hearthstone_2026_10_27_04_30_04-g3` turn 8 step 2) plus
+                // the Nomi Sticker's `on_refresh` +2/+2 this turn
+                // (`Hearthstone_2026_11_01_17_59_13-g1` turn 9 step 8).
+                let Game { data, rng, players, pool, lobby, .. } = self;
+                Self::feed_refresh_fodders(&mut players[p], pool, &data.cards, rng, *lobby, range);
             }
             Action::Freeze => self.players[p].frozen = !self.players[p].frozen,
             Action::Level => {

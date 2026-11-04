@@ -1036,7 +1036,7 @@ impl Game {
                 let tier = self.players[p].tier;
                 for _ in 0..total {
                     if let Some(c) =
-                        self.data.cards.random_choose_one_minion(tier, self.lobby, &mut self.rng)
+                        self.data.cards.random_choose_one_card(tier, self.lobby, &mut self.rng)
                     {
                         self.give_generated_tracking(p, c, pos);
                     }
@@ -1224,8 +1224,22 @@ impl Game {
                 ConsumePick::Random => self.rng.below(shop_len as u32) as usize,
                 ConsumePick::HighestHealth => {
                     let shop = &self.players[p].shop;
-                    // the first of equals, so the leftmost
-                    (0..shop_len).fold(0, |best, i| if shop[i].health > shop[best].health { i } else { best })
+                    let best = shop.iter().map(|m| m.health).max().unwrap_or(0);
+                    // A Health tie picks at random, like every other
+                    // highest-Health pick in the Tavern (docs/rules/design.md:
+                    // Arcane Absorption and De-volition-ist at random, Decoy
+                    // Conjurer for Attack). No random number without a tie.
+                    let mut tied: ArrayVec<usize, { crate::SHOP }> = ArrayVec::new();
+                    for (i, m) in shop.iter().enumerate() {
+                        if m.health == best {
+                            let _ = tied.try_push(i);
+                        }
+                    }
+                    if tied.len() > 1 {
+                        tied[self.rng.below(tied.len() as u32) as usize]
+                    } else {
+                        tied.first().copied().unwrap_or(0)
+                    }
                 }
                 ConsumePick::Chosen if shop_len == 1 => 0,
                 ConsumePick::Chosen => {

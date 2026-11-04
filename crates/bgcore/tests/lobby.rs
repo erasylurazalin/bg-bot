@@ -217,7 +217,7 @@ fn every_draw_respects_the_lobby() {
         Box::new(move |db: &CardDb, rng: &mut Rng| db.random_pool_minion(Tribe::Beast, 0, beast_lobby, rng)),
         Box::new(move |db: &CardDb, rng: &mut Rng| db.random_deathrattle_minion(0, beast_lobby, rng)),
         Box::new(move |db: &CardDb, rng: &mut Rng| db.random_tier_minion(2, beast_lobby, rng)),
-        Box::new(move |db: &CardDb, rng: &mut Rng| db.random_choose_one_minion(6, beast_lobby, rng)),
+        Box::new(move |db: &CardDb, rng: &mut Rng| db.random_choose_one_card(6, beast_lobby, rng)),
         Box::new(move |db: &CardDb, rng: &mut Rng| db.random_tier7_minion(beast_lobby, rng)),
         Box::new(move |db: &CardDb, rng: &mut Rng| db.random_spell(6, beast_lobby, rng)),
         Box::new(move |db: &CardDb, rng: &mut Rng| db.random_spell_up_to(6, &[], beast_lobby, rng)),
@@ -250,6 +250,31 @@ fn every_draw_respects_the_lobby() {
     let with_mechs = lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Demon]);
     assert!(d.cards.random_volumizer(no_mechs, &mut rng).is_none());
     assert!(d.cards.random_volumizer(with_mechs, &mut rng).is_some());
+}
+
+#[test]
+fn a_random_choose_one_card_can_be_a_spell() {
+    // "Get a random Choose One card" (Bramble Tunneler's Rally, the Glass of
+    // Perspective) takes minions and Tavern spells alike:
+    // `Hearthstone_2026_11_03_15_22_36-g3` turn 9 step 52 hands over Boundless
+    // Potential, a Choose One Tavern spell.
+    let d = data();
+    let any_lobby = lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Pirate]);
+    let mut rng = Rng::new(3);
+    let mut spells = 0;
+    let mut minions = 0;
+    for _ in 0..200 {
+        let c = d.cards.random_choose_one_card(6, any_lobby, &mut rng).unwrap();
+        let card = d.cards.get(c);
+        assert!(card.choose_one.is_some(), "{} is a Choose One card", card.name);
+        if card.is_spell() {
+            spells += 1;
+        } else {
+            minions += 1;
+        }
+    }
+    assert!(spells > 0, "a Tavern spell with a Choose One is in the pool");
+    assert!(minions > 0, "and so are the Choose One minions");
 }
 
 #[test]

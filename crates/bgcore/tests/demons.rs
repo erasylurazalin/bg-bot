@@ -225,6 +225,25 @@ fn a_fodder_feeds_a_demon_and_its_slot_is_refilled() {
 }
 
 #[test]
+fn the_refresh_buffs_reach_the_fodder_before_it_feeds() {
+    // A Fodder feeds once the Refresh is over, so it carries the "after the
+    // Tavern is Refreshed" buffs into the Demon it feeds:
+    // `Hearthstone_2026_10_27_04_30_04-g3` turn 8 step 2, where the log's
+    // Fodder feeds as 8/8, a 2/2 plus the Blood Gem Barrage's 6/6.
+    let mut g = game(1);
+    g.players[0].gold = 3;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.players[0].barrage = (2, 2);
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(1);
+    act(&mut g, 0, Action::Roll);
+    // the Fodder is 2/2 plus the Barrage's 2/2, so the Weaver gains +4/+4
+    assert_eq!(stats(&g.players[0].board[0]), (1 + 4, 3 + 4), "fed as 4/4");
+    assert_eq!(fodder_count(&g, 0), 0);
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_golden_wrath_weaver_damages_the_hero_twice() {
     // "deal 1 damage to your hero and gain +2/+2, twice" (the golden text):
     // two hits, so a Soul Rewinder takes +2 Health for each and a Devout
@@ -520,6 +539,31 @@ fn a_fodder_next_to_a_demon_feeds_before_the_enforcer_eats() {
     let (a, h) = stats(&g.players[0].board[0]);
     assert!(a >= 4 + 2 && h >= 5 + 2, "fed, then ate a Tavern minion: {a}/{h}");
     g.check_invariants().unwrap();
+}
+
+#[test]
+fn the_enforcer_eats_a_random_one_of_two_on_a_health_tie() {
+    // Flaming Enforcer's "consume the highest-Health Tavern minion": on a
+    // Health tie the pick is random, as every other highest-Health pick in the
+    // Tavern is (docs/rules/design.md: Arcane Absorption and De-volition-ist).
+    // `Hearthstone_2026_11_03_13_59_12-g2` turn 4 step 5 eats the second of
+    // two 3/4s; ours always ate the left-most one.
+    let mut seen = [false; 2];
+    for seed in 0..24 {
+        let mut g = game(seed);
+        put_on_board(&mut g, 0, "Flaming Enforcer");
+        set_shop(&mut g, 0, &["Snow Baller", "Intrepid Botanist"]);
+        assert_eq!(stats(&g.players[0].shop[0]), stats(&g.players[0].shop[1]), "a tie");
+        act(&mut g, 0, Action::EndTurn);
+        let left = g.players[0].shop.first().map(|m| g.data.cards.get(m.card).name.clone());
+        match left.as_deref() {
+            Some("Snow Baller") => seen[1] = true,     // the Botanist was eaten
+            Some("Intrepid Botanist") => seen[0] = true, // the Snow Baller was eaten
+            other => panic!("seed {seed}: the Tavern kept {other:?}"),
+        }
+        g.check_invariants().unwrap();
+    }
+    assert!(seen[0] && seen[1], "both of the tied minions get eaten over the seeds: {seen:?}");
 }
 
 // ---- Hero health ----

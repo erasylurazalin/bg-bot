@@ -314,7 +314,8 @@ spell tied through cards.toml `lobby = "<tribe>"`, the game data's
 `lobby_subsets`, is in only with that tribe; all-type minions are always in),
 `check_invariants` checks the rest stay at 0, and every card draw takes the
 lobby as its filter: the Tavern rolls, Discovers, "get a random X", random
-spells, random tier minions, random Choose One cards, Bounties, Chromadrakes,
+spells, random tier minions, random Choose One cards (minions and Tavern
+spells alike: `random_choose_one_card`), Bounties, Chromadrakes,
 Volumizers, Robust Evolution and the draws inside a fight (the lobby travels
 there in `Counters.lobby`; `Tribes::ALL` draws from everything, which is what a
 fight without a game behind it uses). Nothing outside the lobby can appear, and
@@ -863,7 +864,14 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   tier's slots grows the Tavern to hold them all (six Fodders at tier 4 put
   the spell seventh, seven take every card), and each Fodder's refilled slot
   draws inside the same tier range as the Refresh, Tier 6 alone during one of
-  Guiding Candle's (`feed_fodders`). The queue's own number for one Refresh
+  Guiding Candle's (`feed_fodders`, given the range `fill_shop` drew in).
+  A Fodder feeds once the Refresh is over, never inside its fill: the
+  caller (`Action::Roll`, or a hero power's own Refresh) runs
+  `feed_refresh_fodders` after the "after the Tavern is Refreshed" buffs, so
+  the Fodder carries Waveling's amount, the Blood Gem Barrage and a
+  trinket's `on_refresh` buff into the Demon it feeds
+  (log 2026_10_27_04_30_04-g3 turn 8 step 2: a 2/2 Fodder feeds as 8/8,
+  its own stats plus the Barrage's 6/6). The queue's own number for one Refresh
   stops at `SHOP`: six queued and three more show as 7, not 9
   (`add_fodder_to_refresh`, log 2026_11_01_17_59_13-g1 turn 9 step 16). The Warband Whistle and Bob's Burgles
   (`burgle_last_opponent`) hold one plain copy per warband minion the same

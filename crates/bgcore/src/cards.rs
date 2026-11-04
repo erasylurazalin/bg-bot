@@ -4748,19 +4748,33 @@ impl CardDb {
         self.pick_lobby(|c| self.cards[c].tier == tier, lobby, rng)
     }
 
-    /// A random pool minion with a Choose One, any tribe, of Tier `max_tier`
-    /// or lower, within the lobby (Bramble Tunneler, Fandral's Fortune).
-    pub fn random_choose_one_minion(
+    /// A random minion or Tavern spell with a Choose One, any tribe, of Tier
+    /// `max_tier` or lower, within the lobby: "get a random Choose One card"
+    /// (Bramble Tunneler, the Glass of Perspective) counts spells too, and
+    /// `Hearthstone_2026_11_03_15_22_36-g3` turn 9 step 52 hands over
+    /// Boundless Potential, a Choose One Tavern spell.
+    pub fn random_choose_one_card(
         &self,
         max_tier: u8,
         lobby: Tribes,
         rng: &mut Rng,
     ) -> Option<CardId> {
-        self.pick_lobby(
-            |c| self.cards[c].choose_one.is_some() && self.cards[c].tier <= max_tier,
-            lobby,
-            rng,
-        )
+        let minions = (0..self.pool_cards).filter(|&c| {
+            self.cards[c].choose_one.is_some()
+                && self.cards[c].tier <= max_tier
+                && self.cards[c].lobby_ok(lobby)
+        });
+        let spells = self.spells.iter().map(|&c| c as usize).filter(|&c| {
+            self.cards[c].choose_one.is_some()
+                && self.cards[c].tier <= max_tier
+                && self.cards[c].lobby_ok(lobby)
+        });
+        let count = minions.clone().count() + spells.clone().count();
+        if count == 0 {
+            return None;
+        }
+        let k = rng.below(count as u32) as usize;
+        minions.chain(spells).nth(k).map(|c| c as CardId)
     }
 
     /// A random pool minion of any tribe, of Tier `max_tier` or lower, within

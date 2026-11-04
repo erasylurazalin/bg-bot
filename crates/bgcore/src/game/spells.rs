@@ -1316,7 +1316,7 @@ impl Game {
     pub(super) fn refresh_tavern_now(&mut self, p: usize) {
         {
             let Game { data, rng, players, pool, lobby, .. } = self;
-            Self::refresh_shop(
+            let _ = Self::refresh_shop(
                 &mut players[p],
                 pool,
                 &data.cards,

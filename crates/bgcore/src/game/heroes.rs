@@ -959,7 +959,7 @@ impl Game {
                     }
                     pl.shop_spell = None;
                     let size = pl.shop_size(&data.rules);
-                    Self::fill_shop(
+                    let range = Self::fill_shop(
                         pl,
                         pool,
                         &data.cards,
@@ -972,6 +972,7 @@ impl Game {
                     Self::add_high_tier_slots(pl, pool, &data.cards, rng, *lobby, count);
                     Self::apply_refresh_buff(pl, &data.cards, rng);
                     Self::apply_barrage(pl, &data.cards, rng);
+                    Self::feed_refresh_fodders(pl, pool, &data.cards, rng, *lobby, range);
                     let bonus = data.rules.bonus_mask;
                     Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
                 }

@@ -58,16 +58,32 @@ impl Game {
         if !self.valid_discard(p, s) {
             return;
         }
-        self.discard_card(p, s);
+        let Some(m) = self.discard_card_quiet(p, s) else { return };
         // A hero power has no board slot: the reward runs with the board's
         // first slot as its `pos`, and only effects that do not read it are
         // ever given that way (Incubate).
         let mut pos = pd.source.unwrap_or(0) as usize;
         self.run_effect(p, &mut pos, pd.reward, pd.golden, pd.runs.max(1));
+        // The discarded card's own "if you discard this" reward comes last,
+        // so an Activate's improvement is already in place for it: the log's
+        // Sludge Corrosion, cast twice as N'raqi Frostcaller's Activate is
+        // paid, gives +2/+2 a cast with the +1/+1 the Activate just gave the
+        // player's Tavern spells (`Hearthstone_2026_10_28_22_11_50-g6` turn 9
+        // step 35 and turn 12 step 7, each +2/+2 a minion short without it).
+        self.discarded_card_reward(p, m);
         self.maybe_start_discover(p);
     }
 
     pub(super) fn discard_card(&mut self, p: usize, s: usize) -> Option<Minion> {
+        let m = self.discard_card_quiet(p, s)?;
+        self.discarded_card_reward(p, m);
+        Some(m)
+    }
+
+    /// A card leaves the hand: it is gone, a pool copy goes back to the pool,
+    /// and everything that watches a discard sees it. The card's own "if you
+    /// discard this" reward waits for `discarded_card_reward`.
+    fn discard_card_quiet(&mut self, p: usize, s: usize) -> Option<Minion> {
         if s >= self.players[p].hand.len() {
             return None;
         }
@@ -79,6 +95,12 @@ impl Game {
         self.dark_gift_count(p, 1, |c| c.buff_per_discard);
         self.fire_event(p, EventKind::Discarded, 1);
         self.trinket_event(p, crate::trinkets::Event::Discard, Some(m.card), 1);
+        Some(m)
+    }
+
+    /// What the discarded card itself does about it: Sludge Corrosion casts
+    /// itself twice, Corrupted Coin gives 2 more maximum Gold.
+    fn discarded_card_reward(&mut self, p: usize, m: Minion) {
         match self.data.cards.get(m.card).on_discard {
             Some(OnDiscard::CastSpell(times)) => {
                 for _ in 0..times {
@@ -90,7 +112,6 @@ impl Game {
             }
             None => {}
         }
-        Some(m)
     }
 
     /// Run one option of a Choose One (the shared body of `resolve_choose`

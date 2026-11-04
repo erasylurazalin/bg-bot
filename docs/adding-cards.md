@@ -103,7 +103,7 @@ legality in mod.rs.
 | Rally: summon a stat copy that attacks first | `rally = { summon_stat_copy = "Golem" }` | `attack_triggers` + `attack_swings_at` (fight); shop copy summons only | Jailbird Juggernaut |
 | Golden played from hand | `buff_per_golden_played`, `after_discover` scaling | `Action::Play` -> `add_golden_played`, `Player.golden_played` | Maritime Extortionist |
 | Tavern buff (this game / this turn) | `Effect::TavernBuff`, `tavern_buff` | `Player::add_tavern_buff`, `apply_tavern_buffs`, `end_turn_tavern_buffs` | Champion of Sargeras |
-| Consume Tavern minion | `consume = "random"` (the game picks), `"highest_health"`, `"chosen"` (the player picks: `PendingShopTarget`, unused by any card today) | `start_consume`, `consume`, `PendingShopTarget` | Mind Muck, Corrupted Cupcakes (random), Flaming Enforcer (highest health) |
+| Consume Tavern minion | `consume = "random"` (the game picks), `"highest_health"` (a Health tie picks at random, no random number without one), `"chosen"` (the player picks: `PendingShopTarget`, unused by any card today) | `start_consume`, `consume`, `PendingShopTarget` | Mind Muck, Corrupted Cupcakes (random), Flaming Enforcer (highest health) |
 | Aura (counts, not stats) | `aura = "brann"/"titus"/"drakkari"/"balinda"/"proud_privateer"/..` | `brann_mult`, `drakkari_mult`, `balinda_mult`, `bounty_mult`, `Side::deathrattle_fires` | Proud Privateer |
 | Per-game player counter | `buff_per_deathrattle`, `improve_counter`, `spell_bonus`, volumizer/beetle bonus | fields on `Player` (`counters()` hands them to fights) | Tasty Lobster |
 | Per-minion counter | `improvements` (u16) | tier of Patient Scout, event counts, damage milestones, Lockbox turns | Patient Scout |
@@ -861,7 +861,11 @@ Triple Reward spell.
   `OnDiscard::MaxGold(2)` only raises maximum Gold. Every discard goes
   through it: Activate rewards, linked cards, Mysterious K'Thir
   (`Effect::DiscardLeftmostSpells`, the N left-most Tavern spells only,
-  skipping Blood Gems and Triple Rewards).
+  skipping Blood Gems, Triple Rewards and a Lockbox). An Activate that
+  discards waits for the pick (`Game::resolve_discard`), and the reward runs
+  before the discarded card's own `on_discard`, so a discarded Sludge
+  Corrosion casts with the improvement the Activate just gave
+  (log 2026_10_28_22_11_50-g6 turn 9 step 35).
 - **Every-1 event triggers keep `improvements`.** `Game::fire_event` stores
   an event trigger's remainder in `Minion.improvements`; an every-1 trigger
   has none, so it leaves the field alone and an effect that improves itself

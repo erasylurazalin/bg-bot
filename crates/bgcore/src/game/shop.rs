@@ -237,17 +237,39 @@ impl Game {
         rng: &mut Rng,
         lobby: Tribes,
         kind: RefreshKind,
-    ) {
+    ) -> (u8, u8) {
         pl.frozen = false;
         for m in pl.shop.drain(..) {
             give_back(pool, cards, &m);
         }
         pl.shop_spell = None;
         let size = pl.shop_size(rules);
-        Self::fill_shop(pl, pool, cards, rules, size, rng, lobby, kind);
+        let range = Self::fill_shop(pl, pool, cards, rules, size, rng, lobby, kind);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards, rng);
         Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
+        range
+    }
+
+    /// The Fodders this Refresh dealt feed themselves once the Refresh is
+    /// done, so the "after the Tavern is Refreshed" buffs (Waveling, Blood Gem
+    /// Barrage) are already on them and the Demon they feed gets them too:
+    /// `Hearthstone_2026_10_27_04_30_04-g3` turn 8 step 2, where a 2/2 Fodder
+    /// feeds as 8/8, the 2/2 plus the Barrage's 6/6 that Refresh's Tavern
+    /// minions carry, and `Hearthstone_2026_11_01_17_59_13-g1` turn 9 step 8,
+    /// where ours fed one 2/2 short by the same pair.
+    pub(super) fn feed_refresh_fodders(
+        pl: &mut Player,
+        pool: &mut [u8],
+        cards: &CardDb,
+        rng: &mut Rng,
+        lobby: Tribes,
+        range: (u8, u8),
+    ) {
+        if pl.shop.iter().any(|m| cards.get(m.card).is_fodder) {
+            let (lo, hi) = range;
+            Self::feed_fodders(pl, pool, cards, rng, lobby, lo, hi);
+        }
     }
 
     /// The hero powers that watch the Tavern's shape (hero batch 2), run by
@@ -408,7 +430,7 @@ impl Game {
         rng: &mut Rng,
         lobby: Tribes,
         kind: RefreshKind,
-    ) {
+    ) -> (u8, u8) {
         let fodders = match kind {
             RefreshKind::Explicit => pl.take_fodder_for_refresh(),
             RefreshKind::TurnStart | RefreshKind::Effect => 0,
@@ -534,12 +556,13 @@ impl Game {
         } else {
             pl.shop_spell = None;
         }
-        // Only an explicit Refresh makes Fodders; they feed at once, and a
-        // refilled slot draws inside the same tier range as the Refresh
-        // (Tier 6 alone during one of Guiding Candle's).
-        if kind == RefreshKind::Explicit {
-            Self::feed_fodders(pl, pool, cards, rng, lobby, lo, hi);
-        }
+        // An explicit Refresh is the only one that makes Fodders (queued in
+        // `fodder_refreshes`), and they feed once the whole Refresh is done:
+        // the caller runs `feed_refresh_fodders` after the "after the Tavern
+        // is Refreshed" buffs, so a Fodder feeds the stats it was given. The
+        // range is the one this fill drew in, since a Guiding Candle Refresh
+        // has spent its own by the time the Fodder refills its slot.
+        (lo, hi)
     }
 
     /// The tier range the Tavern draws minions from right now: Bob-blehead's
@@ -1072,7 +1095,7 @@ impl Game {
     pub(super) fn refresh_with_fishbait(&mut self, p: usize, card: CardId, golden: bool) {
         {
             let Game { data, rng, players, pool, lobby, .. } = self;
-            Self::refresh_shop(
+            let _ = Self::refresh_shop(
                 &mut players[p],
                 pool,
                 &data.cards,

@@ -2811,11 +2811,16 @@ cost = 2
 effect = { target = "board", buff = [3, 2], golden_extra = true }
 
 # Generated only: an unplayable spell in hand that opens after 5 turns.
+# Not a Tavern spell: Mysterious K'Thir's "discard your 3 left-most Tavern
+# spells" passes over it and takes the Tavern spells behind it
+# (Hearthstone_2026_10_28_22_11_50-g6 turn 8 step 41, where the log's hand
+# keeps the Lockbox and loses the Sludge Corrosions).
 [[spell]]
 name = "Lockbox"
 tier = 0
 cost = 2
 token = true
+tavern_spell = false
 effect = { lockbox = 5 }
 
 # --- Spells: Elementals ---

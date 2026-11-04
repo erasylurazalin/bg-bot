@@ -652,7 +652,7 @@ impl Game {
             // explicit one.
             let refreshed =
                 !was_frozen || had_frozen || pl.shop.len() < size || pl.shop_spell.is_none();
-            Self::fill_shop(
+            let _ = Self::fill_shop(
                 pl, pool, &data.cards, &data.rules, size, rng, self.lobby, RefreshKind::TurnStart,
             );
             if refreshed {
