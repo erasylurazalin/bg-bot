@@ -89,6 +89,11 @@ fight phase.
   A triple is one action that takes all three copies, so a full hand still
   takes a board copy when the merge itself frees the slot the golden needs
   (log `10_24_04_08_00-g1` turn 10 step 25; 2026-11-04).
+  With a copy in hand the merge always frees the slot it needs, so a hand
+  is never too full for it. Three copies all on the board (a fight or a
+  summon can leave them there) need a free hand slot for the golden: with a
+  full hand they stay where they are and merge as soon as a hand slot opens
+  (Era, 2026-11-04). The same goes for a triple held from a fight.
 - The board order matters in the fight, and you can rearrange it freely
   during the shop phase.
 
