@@ -419,6 +419,11 @@ fn improvements(name: &str, golden: bool, numbers: &[i32]) -> u16 {
         // "Discover a Tier {0} minion. (Improves each turn!)": {0} is the
         // tier now, which is 1 + the count.
         "Patient Scout" => n(0) - 1,
+        // "Deathrattle: Give minions in the Tavern +2/+2 this game.
+        // Activate ({4}): Improve this.": {0} and {1} are the buff as it
+        // stands, {2} and {3} the part the Activates added (+2 a press,
+        // doubled golden), so {2} is the count.
+        "Sacrificial Wrathguard" => n(2) / (2 * mul),
         // "Unplayable. In {0} turns, break this open and get a random Golden
         // minion with a type!": {0} is the turns left, which the engine counts
         // down in `improvements` and opens at 0.

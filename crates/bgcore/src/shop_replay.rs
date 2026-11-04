@@ -1112,6 +1112,34 @@ pub fn load(
     LoadedShop { game, missing, tavern_ids, hand_ids, board_ids, spell_id }
 }
 
+/// Whether a step is the one the game's own triple check runs in: the state
+/// the step starts from holds three plain copies of a card on the board, and
+/// the state it leaves holds a Golden card of that name in the hand the first
+/// one did not. The check waits while a Discover is open, so the copies sit
+/// on the board for a step or two (log 2026_10_24_15_25_26-g6 turn 8 step 14
+/// leaves three Skeletons, and step 16, the second pick of the Maw Caster's
+/// Discover, is where the Golden one joins the hand).
+fn board_triple_due(before: &ShopStateSpec, after: &ShopStateSpec) -> bool {
+    // By name: a Golden card has a card_id of its own (`BG_ICC_026t_G`
+    // against `BG_ICC_026t`), and it is the same card to the game.
+    let plain_on_board = |s: &ShopStateSpec, name: &str| {
+        s.board
+            .iter()
+            .filter(|m| m.name.as_deref() == Some(name) && !m.golden)
+            .count()
+    };
+    let gold_in_hand = |s: &ShopStateSpec, name: &str| {
+        s.hand
+            .iter()
+            .filter(|m| m.name.as_deref() == Some(name) && m.golden)
+            .count()
+    };
+    before.board.iter().filter_map(|m| m.name.as_deref()).any(|name| {
+        plain_on_board(before, name) >= 3
+            && gold_in_hand(after, name) > gold_in_hand(before, name)
+    })
+}
+
 /// The Gold price the log shows on a Tavern spell, when it shows one that is
 /// not the card's printed cost: the card's own override (the whole new price)
 /// or what a reduction takes off the printed one.
@@ -2876,7 +2904,17 @@ fn play_slot(loaded: &LoadedShop, step: &ShopStepSpec) -> Option<u8> {
     }
     let mut board: Vec<&ShopMinionSpec> = after.board.iter().collect();
     board.sort_by_key(|m| (m.position.unwrap_or(0), m.id));
-    let at = board.iter().position(|m| m.id == played)?;
+    // The game can give the played minion a new entity id as it lands (Scarlet
+    // Skull: hand 18629, board 18667), so a card of the same name the state
+    // before held no copy of by id is the one that landed (log
+    // 2026_10_24_15_25_26-g6 turn 12 step 29).
+    let same_card = step.card.as_ref().and_then(|c| c.card_id.as_deref());
+    let at = board.iter().position(|m| m.id == played).or_else(|| {
+        let card_id = same_card?;
+        board
+            .iter()
+            .position(|m| m.card_id.as_deref() == Some(card_id) && !loaded.board_ids.contains(&m.id))
+    })?;
     // The slot a card stands in: its entity id in the board the play started
     // from, or, for a card the game destroyed and brought back to the slot it
     // stood in (a Reborn minion: Dead Bellringer's Reborn copy has a new
@@ -3135,6 +3173,14 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         .then(|| state_before_turn(file, turn_index))
         .flatten();
     let mut loaded = load(data, before, hero, file.lobby(), turn, seed, previous);
+    // The state may hold three copies a summon left on the board before the
+    // game's own triple check ran: the check runs as this step's action ends
+    // when the step's own states say it did (`board_triple_due`).
+    if let Some(after) = step.after.as_ref()
+        && board_triple_due(before, after)
+    {
+        loaded.game.note_triples_due();
+    }
     loaded.game.players[ME].tp.whistle = armed;
     loaded.game.players[ME].last_spell = last_spell;
     // A Gold-plated Compass's type is spent once the file has shown the Golden

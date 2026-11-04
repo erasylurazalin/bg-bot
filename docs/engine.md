@@ -137,9 +137,30 @@ rules behind each are in docs/rules/design.md Part 2.
 - **One count for Deathrattles.** `Side::deathrattle_fires` in fight.rs
   decides how many times a Deathrattle fires (Titus, golden Titus). Every
   path that fires one goes through it.
+- **The triple check runs as the action ends.** "Check Triples" is one hidden
+  step of the game, not part of the summon or the gain that made the third
+  copy, and it waits while a choice is open. `Game.board_triple_check` (a
+  summon may have left a third copy on the board) and
+  `Game.pending_triples` (cards gained whose own check waits: a Graverobber's
+  copy, a Discover's pick) are run by `Game::run_pending_triple_checks` at the
+  end of `Game::step`, only while no choice is open. The board's triples go
+  first, then the gained cards in the order they came, so a Battlecry's copy
+  keeps the lower hand slot and the Golden card its destroy leaves joins
+  after it (log 2026_10_30_19_45_15-g2 turn 5 step 4), and three Skeletons
+  stay on the board until the Discover that is still open is answered (log
+  2026_10_24_15_25_26-g6 turn 8 steps 14 to 16). A triple whose copies are all
+  in a full hand still merges, since those copies free their slots first, but
+  copies it would take off the board wait for a full hand to make room and for
+  a choice to close: a Choose One's minion may be one of them.
+- **A Health price comes before the card.** A Tavern spell bought for Health
+  pays before it joins the hand, so a card the damage triggers gains gets the
+  lower hand slot (Eredar Escapist's two Corrupted Cupcakes, log
+  2026_10_24_15_25_26-g4 turn 11 step 10). Gold, and the triggers that read
+  it, come after the spell is in hand (a Lockbox from a Gold-spent rule, log
+  2026_11_02_00_10_22-g5 turn 11 step 12).
 - **Counters.** Per minion: `improvements` (Leviathan, Hopebringer,
-  Patient Scout, the "N left" cards); a triple keeps the highest of the
-  three. Per player: `Player.improve` with `Counters.improve` inside a
+  Patient Scout, the "N left" cards, a Sacrificial Wrathguard's Activates);
+  a triple keeps the highest of the three. Per player: `Player.improve` with `Counters.improve` inside a
   fight (Tasty Lobster), the Tavern spell bonus, the Beast bonus from a
   shop Goldrinn, the Fodder queue. Gains made inside a fight come back
   through `SideOutcome`. The shop replay loads the per-minion "N left"
@@ -834,7 +855,9 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   tier's slots grows the Tavern to hold them all (six Fodders at tier 4 put
   the spell seventh, seven take every card), and each Fodder's refilled slot
   draws inside the same tier range as the Refresh, Tier 6 alone during one of
-  Guiding Candle's (`feed_fodders`). The Warband Whistle and Bob's Burgles
+  Guiding Candle's (`feed_fodders`). The queue's own number for one Refresh
+  stops at `SHOP`: six queued and three more show as 7, not 9
+  (`add_fodder_to_refresh`, log 2026_11_01_17_59_13-g1 turn 9 step 16). The Warband Whistle and Bob's Burgles
   (`burgle_last_opponent`) hold one plain copy per warband minion the same
   way (docs/rules/design.md "Demon Fodder", 2026_11_01_04_27_54-g2 turn 11,
   2026_11_02_00_10_22-g7 turn 8 step 40). `Game::refill_tavern` runs after

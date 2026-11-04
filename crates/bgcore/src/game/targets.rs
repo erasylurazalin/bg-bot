@@ -668,7 +668,7 @@ impl Game {
                 let card = self.players[p].board[s].card;
                 self.destroy_in_shop(p, &[s], None);
                 for _ in 0..copies {
-                    self.give_generated(p, card);
+                    self.give_generated_later(p, card);
                 }
             }
             TargetKind::RebornDestroy { attack, health, .. } => {

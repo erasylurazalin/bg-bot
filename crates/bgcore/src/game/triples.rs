@@ -192,8 +192,39 @@ impl Game {
         }
         let Some((x_card, x_count, wild)) = plan else { return };
         // The Golden minion goes to hand: with no room for it the copies stay
-        // where they are (a summon from a power can fill the hand first).
-        if self.players[p].hand.is_full() {
+        // where they are (a summon from a power can fill the hand first). A
+        // slot the copies give up first counts, so the three plain copies of a
+        // full hand still merge, losing three cards and taking one (log
+        // 2026_10_24_15_25_26-g6 turn 8 step 16: a Discovered Cadaver
+        // Caretaker into a hand of nine).
+        //
+        // The copies come out of the hand first (`take_from`) and the rest off
+        // the board. A copy off the board moves every minion behind it, which
+        // may be the slot a Choose One or a step's target still points at, so
+        // a full hand only takes the Golden card when the hand alone holds
+        // every copy, and a choice left open holds the board's copies where
+        // they stand: the game's own check runs as the action ends and the
+        // choice is answered first.
+        let (freed, from_board) = {
+            let pl = &self.players[p];
+            let in_hand = |id: CardId, n: usize, same: bool| {
+                pl.hand
+                    .iter()
+                    .filter(|m| m.card == id && (!m.golden || !same))
+                    .count()
+                    .min(n)
+            };
+            let x = in_hand(x_card, x_count, true);
+            let w = wild.map_or(0, |(card, n)| in_hand(card, n, false));
+            let need = x_count + wild.map_or(0, |(_, n)| n);
+            (x + w, need - x - w)
+        };
+        if from_board > 0
+            && (self.players[p].hand.is_full() || Self::other_choice_open(&self.players[p]))
+        {
+            return;
+        }
+        if self.players[p].hand.len() + 1 > crate::HAND + freed {
             return;
         }
         let pl = &mut self.players[p];
