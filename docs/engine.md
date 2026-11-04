@@ -806,10 +806,19 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `fill_shop` draws the extra slots and takes its tier bounds from
   `tavern_tiers` (Bob-blehead's `min_tier`, Guiding Candle's
   `tier6_refreshes`, which the turn-start roll counts down too when the
-  Tavern changed). `Game::refill_tavern` runs after every action and tops a
-  Gauntlet Tavern back up: a bought, consumed or stolen minion by a minion,
-  the spell by a spell. `minion_price` reads the set prices
-  (`magnetic_cost`, `tavern_price`).
+  Tavern changed). The spell slot is the Tavern's last card: `fill_shop`
+  deals it whenever fewer than `SHOP` cards are there, so a fill that takes
+  all seven leaves no spell. A Refresh with more Demon Fodders than the
+  tier's slots grows the Tavern to hold them all (six Fodders at tier 4 put
+  the spell seventh, seven take every card), and each Fodder's refilled slot
+  draws inside the same tier range as the Refresh, Tier 6 alone during one of
+  Guiding Candle's (`feed_fodders`). The Warband Whistle and Bob's Burgles
+  (`burgle_last_opponent`) hold one plain copy per warband minion the same
+  way (docs/rules/design.md "Demon Fodder", 2026_11_01_04_27_54-g2 turn 11,
+  2026_11_02_00_10_22-g7 turn 8 step 40). `Game::refill_tavern` runs after
+  every action and tops a Gauntlet Tavern back up: a bought, consumed or
+  stolen minion by a minion, the spell by a spell. `minion_price` reads the
+  set prices (`magnetic_cost`, `tavern_price`).
 - **The hero power (block 3).** `tp.power_triggers` runs a press's effect
   twice and a passive power's tick twice (one payment); `power_extra_uses`
   raises the per-turn uses (`power_start_of_turn` adds it to both held
