@@ -168,8 +168,18 @@ impl Game {
             }
             ChooseOption::SpellEffect(se) => {
                 // A spell a minion casts for the player is not the player's
-                // cast: no "whenever you cast a spell" card sees it.
-                if tavern && !by_minion {
+                // cast: no "whenever you cast a spell" card sees it. Neither
+                // is a minion's Choose One: its option is not a spell cast at
+                // all, so a Vicious Mindslasher or a Timecap'n Hooktail sees
+                // nothing (`source.is_some()` is a minion's Choose One). The
+                // log has it both ways: a Fearless Foodie's or a Snare
+                // Trapper's play gives the Mindslasher and the Hooktail
+                // nothing (`Hearthstone_2026_11_03_00_29_06-g1` turn 8,
+                // `Hearthstone_2026_10_30_19_45_15-g3` turn 7 step 9), while
+                // the Blood Gem Barrage a Veteran Brigand's own option casts
+                // still counts (`11_03_00_29_06-g1` turn 8 step 29: +3/+6,
+                // the Barrage's three casts and not a fourth).
+                if tavern && !by_minion && source.is_none() {
                     self.trigger_on_cast_spell(p, TriggerWhen::Now);
                 }
                 self.execute_spell_effect(p, se, tavern);

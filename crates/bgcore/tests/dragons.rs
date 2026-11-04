@@ -626,3 +626,37 @@ fn name(g: &Game, m: &Minion) -> String {
 fn stats(m: &Minion) -> (i32, i32) {
     (m.attack, m.health)
 }
+
+/// A Choose One minion's play is not a spell cast, so a Timecap'n Hooktail
+/// gives no Attack for it. The log has it both ways: no Hooktail, no +1/+0
+/// (`Hearthstone_2026_10_30_19_45_15-g3` turn 7 step 9 and
+/// `Hearthstone_2026_11_03_15_22_36-g3` turn 7 step 4, where ours gave every
+/// minion +1/+0 or +2/+0 for a Snare Trapper or a Sly Infiltrator; triage
+/// group E8).
+#[test]
+fn a_choose_one_play_gives_timecapn_hooktail_nothing() {
+    let mut g = Game::new_with_lobby(
+        Arc::new(Data::bundled()),
+        48,
+        lobby(&[Tribe::Dragon, Tribe::Quilboar, Tribe::Mech]),
+    );
+    put_on_board(&mut g, 0, "Timecap'n Hooktail");
+    put_on_board(&mut g, 0, "Cord Puller");
+    let c = g.data.cards.by_name("Snare Trapper").unwrap();
+    g.pool[g.data.cards.get(c).pool_slot as usize] -= 1;
+    let m = g.players[0].make_card(&g.data.cards, c, false, 1);
+    g.players[0].hand.push(m);
+    let before: Vec<(i32, i32)> =
+        g.players[0].board.iter().map(|m| (m.attack, m.health)).collect();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+    act(&mut g, 0, Action::Choose(1));
+    for (i, b) in before.iter().enumerate() {
+        assert_eq!(stats(&g.players[0].board[i]), *b, "minion {i} gains nothing");
+    }
+    assert_eq!(
+        stats(&g.players[0].board[2]),
+        (4, 4),
+        "the Snare Trapper, at its own stats"
+    );
+    g.check_invariants().unwrap();
+}

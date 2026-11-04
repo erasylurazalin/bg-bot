@@ -775,7 +775,12 @@ Triple Reward spell.
   plays several at once calls `Game::roogug_reacts` per Gem as each one
   lands (Gem Confiscation's three, before its steal: log
   `2026_10_28_02_28_32` line 1715147 onward), and the Tavern's own Gems go
-  through `Game::add_gem_stats_shop`. Roogug (`on_gem_played_on_self`)
+  through `Game::add_gem_stats_shop`. A Gem an Activate casts because the
+  hand had no room (Victorious Geomant) is a real cast on the left-most
+  minion through `Game::cast_gem_on`: the target's "whenever you cast a spell
+  on this" fires, and the "after you cast a spell" counters see it, but it is
+  not played from the hand, so no Hot-Air Surveyor's extra cast and no
+  Surveyor Portrait's bonus reach it. Roogug (`on_gem_played_on_self`)
   reacts to
   each one on the board, from the hand, from an extra cast, and from a
   minion's or a spell's effect. A Roogug in the Tavern doesn't react (open,

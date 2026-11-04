@@ -1010,7 +1010,14 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   Candle Set). The Lovely Locket hangs off `apply_target`'s spell arm: after a
   spell cast on a friendly minion, the same `PendingTarget` runs once on
   another friendly minion picked at random, ignoring the spell's own target
-  rules, guarded by `tp.locket_copy` so it never chains.
+  rules, guarded by `tp.locket_copy` so it never chains. The copy is the
+  trinket's cast, not the player's, so the minion it lands on answers with
+  none of its own "whenever you cast a spell on this": while
+  `tp.locket_copy` is set `apply_target` skips
+  `trigger_on_cast_spell_on_watchers` and `trigger_on_cast_spell_on_mech`
+  (the log's Glambot takes a Gem copy as +1/+1 and gets no Satellite,
+  `Hearthstone_2026_11_02_00_10_22-g2` turn 12 steps 24 to 31, where the
+  copies read +13/+13 before this).
 - **Spells versus Tavern spells (`cast_spell`, fixed 2026-10-31).** Two
   events, and every card or trinket that reacts to a cast is on the one its
   own words name (docs/rules/design.md "Read the card's exact words, every time"):
@@ -1124,11 +1131,37 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   prompt a taught spell can open (`PendingTarget.by_minion`,
   `QueuedOption`), so `apply_target` and `apply_choose_option` also skip the
   extra-cast counters and the "cast on a Tavern minion" trinket events for
-  it. Every extra cast the player's own cards add still counts (Balinda, a
-  Hot-Air Surveyor's Gem copy). A trinket's own `cast` act is the player's cast: `Act::Cast` calls
+  it. The player's own extra casts (Balinda, a Hot-Air Surveyor's extra Gem
+  cast) are the player's and do not reach a minion's cast either:
+  `cast_spell_inner` gives a `by_minion` cast one cast, whatever Balinda or a
+  Surveyor would add, and the log's Magicfin Apprentice casting Fortify with
+  Balinda on the board gives +3 Health and not +6
+  (`Hearthstone_2026_11_03_00_29_06-g1` turn 11 step 17). A trinket's own `cast` act is the player's cast: `Act::Cast` calls
   `cast_named_spell` with `by_minion` false, as does `cast_spell_on`; the
   Lovely Locket's copy inherits the flag of the cast it copies. In a fight the
   same `Effect::CastSpell` keeps its own `Side` counters.
+  **An Activate's leftover Gems are casts (`Game::cast_gem_on`).** Victorious
+  Geomant's "Get 6 Blood Gems. Cast any that don't fit on your left-most
+  minion" casts them: the player's own Activate pays for them, so
+  `Effect::GetGemsCastOverflow` goes through `cast_gem_on` for each one that
+  finds no hand slot, which fires the "whenever" and "after you cast a spell"
+  halves and the target's own "whenever you cast a spell on this" and
+  "on a Mech" watchers. The log's golden Geomant casts four on a Gatekeeper
+  Amalgam and the Amalgam's four Misplaced Tea Sets run, so it gains +76/+124
+  and not the Gems' +56/+104 (`Hearthstone_2026_10_24_17_59_26-g1` turn 12
+  step 40). They are not Gems played from the hand, so a Hot-Air Surveyor adds
+  no cast and no from-hand bonus reaches them: one cast each.
+  **A Choose One minion's play casts nothing.** The option a minion's Battlecry
+  picks is not a spell at all, so `apply_choose_option` fires
+  `trigger_on_cast_spell` only for a Choose One whose `source` is none (a
+  Choose One spell the player cast); the option's own numbers still get the
+  Tavern bonus. The log has it both ways: a Crater Miner's, a Fearless
+  Foodie's, a Sly Infiltrator's and a Snare Trapper's play give a Vicious
+  Mindslasher and a Timecap'n Hooktail nothing
+  (`Hearthstone_2026_11_03_00_29_06-g1` turn 8,
+  `Hearthstone_2026_10_30_19_45_15-g3` turn 7 step 9), while the Blood Gem
+  Barrages a Veteran Brigand's own option casts still count, three of them
+  (`11_03_00_29_06-g1` turn 8 step 29: +3/+6).
   **A spell a minion casts gets no Choose One choice (Era 2026-11-04).** The
   Choose One option of a taught spell is picked for the player at random
   (`cast_spell_inner`, which never opens a `PendingChooseOne` for a minion's

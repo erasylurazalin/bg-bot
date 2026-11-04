@@ -834,10 +834,22 @@ of a random step is run, since any of them may be the log's.
   the free Refreshes the step gained and the cards that arrived from this card
   each say which option ran, and both of them say the log combined the two,
   which is seated as the engine's own "both options" state (a Thorned
-  Trailblazer gives it the same way). That is a guess only when the options
-  change no number the file holds (maximum Gold), and then the step is left
-  unanswered. The `11_02_00_10_22-g4` turn 12 step 68 Snare Trapper and the
+  Trailblazer gives it the same way). When the options change no number the
+  file holds (maximum Gold, Intrepid Botanist's "+1 Attack or +1 Health to
+  your Tavern spells this game") the step is still answered, with the first
+  option: the game always resolved it, and what the play set off landed in the
+  same step (the Turbo Hogrider's Gems of `10_28_02_28_32-g4` turn 13 step
+  27), so leaving the choice open would lose the whole step. The
+  `11_02_00_10_22-g4` turn 12 step 68 Snare Trapper and the
   `10_30_19_45_15-g2` turn 12 step 3 Sly Infiltrator are the two shapes.
+- **How many Elementals the turn has played.** No state in the file carries
+  the count (Conflagration's "improved by each Elemental you played this
+  turn", and `cards::per_played_this_turn`), and the turn's own earlier steps
+  do: `shop_replay::seat_elementals_played_turn` counts the `play` steps of
+  minions of the tribe before the step being replayed
+  (`Hearthstone_2026_11_03_00_29_06-g3` turn 9 step 36). The game-wide count
+  (`Player.elementals_played`, for cards that say "this game") is still not
+  seated.
 - **Detective for Hire's two cards** are a guess at the opponent's warband,
   not a Discover: the pick joins nothing and a right guess hands a Tavern Coin
   over (`resolve_choose`), and the log's own step says whether the Coin came,

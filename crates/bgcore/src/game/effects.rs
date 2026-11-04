@@ -1002,8 +1002,14 @@ impl Game {
                 let Some(gem) = self.data.cards.blood_gem else { return };
                 for _ in 0..total {
                     if self.players[p].hand.is_full() {
-                        // Cast on the left-most friendly minion instead.
-                        self.play_gems_on_board(p, 0, 1);
+                        // Cast on the left-most friendly minion instead: a
+                        // real cast, so the minion's own "whenever you cast
+                        // a spell on this" fires and the "after you cast a
+                        // spell" counters see it
+                        // (`Hearthstone_2026_10_24_17_59_26-g1` turn 12
+                        // step 40, a golden Victorious Geomant).
+                        let source = Some(*pos as u8);
+                        self.cast_gem_on(p, 0, source);
                     } else {
                         let m = self.players[p].make_card(&self.data.cards, gem, false, 0);
                         self.add_to_hand(p, m);

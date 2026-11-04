@@ -808,19 +808,22 @@ fn conflagration_is_improved_by_each_elemental_played_this_turn() {
     // a minion on the board or in the Tavern: pick the Puller (slot 0)
     act(&mut g, 0, Action::Target(0));
     assert_eq!(stats(&g.players[0].board[0]), (1 + 4, 1 + 4));
-    // two Elementals played: +4/+4 plus 2 x +2/+2
+    // two Elementals played: +4/+4 plus 2 x +4/+4 (each Elemental improves it
+    // by its whole +4/+4: the log's `Hearthstone_2026_11_03_00_29_06-g3` turn
+    // 9 step 36, one Elemental played and a +0/+2 Tavern spell bonus, gives
+    // +8/+10 a cast)
     play_new(&mut g, "Crackling Cyclone");
     play_new(&mut g, "Crackling Cyclone");
     assert_eq!(g.players[0].elementals_played_turn, 2);
     cast(&mut g, "Conflagration");
     act(&mut g, 0, Action::Target(0));
-    assert_eq!(stats(&g.players[0].board[0]), (5 + 8, 5 + 8));
+    assert_eq!(stats(&g.players[0].board[0]), (5 + 12, 5 + 12));
     // a Tavern minion is a legal target too
     set_shop(&mut g, 0, &["Cord Puller"]);
     let before = stats(&g.players[0].shop[0]);
     cast(&mut g, "Conflagration");
     act(&mut g, 0, Action::TargetShop(0));
-    assert_eq!(stats(&g.players[0].shop[0]), (before.0 + 8, before.1 + 8));
+    assert_eq!(stats(&g.players[0].shop[0]), (before.0 + 12, before.1 + 12));
     // the count resets with the turn
     end_all_turns(&mut g);
     assert_eq!(g.players[0].elementals_played_turn, 0);

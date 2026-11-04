@@ -932,3 +932,38 @@ fn zoatroid_sells_for_a_tentacle() {
     assert!(g.data.cards.get(pl.hand[0].card).tribes.has(bgcore::cards::Tribe::Aberration));
     g.check_invariants().unwrap();
 }
+
+// ================= A Choose One is not a spell cast =================
+
+/// docs/rules/design.md "Read the card's exact words, every time": a Choose
+/// One minion's play is not a spell cast, so a Vicious Mindslasher gains
+/// nothing for it. The log (`Hearthstone_2026_11_03_00_29_06-g1` turn 8,
+/// steps 14 to 29) gives it nothing for a Crater Miner, a Fearless Foodie, a
+/// Sly Infiltrator and a Snare Trapper, and gives it +3/+6 for a Veteran
+/// Brigand: the three Blood Gem Barrages its own option casts are Tavern
+/// spells, the Brigand is not (triage groups E11 and E8).
+#[test]
+fn a_choose_one_play_is_not_a_spell_your_mindslasher_counts() {
+    let mut g = game(15);
+    put_on_board(&mut g, 0, "Vicious Mindslasher", false);
+    put_in_hand(&mut g, 0, "Snare Trapper", false);
+    play(&mut g, 0, 0, 1);
+    act(&mut g, 0, Action::Choose(1));
+    assert_eq!(
+        stats(&g.players[0].board[0]),
+        (1, 2),
+        "a Choose One minion's play casts nothing"
+    );
+    // The Blood Gem Barrage a Veteran Brigand's own option casts does count:
+    // three Tavern spells, so +3/+6.
+    put_in_hand(&mut g, 0, "Veteran Brigand", false);
+    let h = (g.players[0].hand.len() - 1) as u8;
+    play(&mut g, 0, h, 2);
+    act(&mut g, 0, Action::Choose(1));
+    assert_eq!(
+        stats(&g.players[0].board[0]),
+        (1 + 3, 2 + 6),
+        "the Brigand's three Barrages are the only spells cast"
+    );
+    g.check_invariants().unwrap();
+}
