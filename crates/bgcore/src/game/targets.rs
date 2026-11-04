@@ -420,9 +420,18 @@ impl Game {
                         }
                         SpellTarget::Confiscation { gems } => {
                             // 3 Gems on the Tavern minion, then its
-                            // neighbours' Blood Gem stats move onto it.
-                            self.add_gem_stats_shop(p, target, gems);
-                            gems_played = gems_played.saturating_add(gems);
+                            // neighbours' Blood Gem stats move onto it. The
+                            // Gems are played one at a time, each landing
+                            // before the next: whatever a Gem sets off
+                            // resolves before the steal. A Geomagus Roogug in
+                            // the Tavern's own reaction is not modelled
+                            // (docs/notes/UNSURE.md: the engine says a Tavern
+                            // Roogug does not react), so nothing runs between
+                            // them here.
+                            for _ in 0..gems {
+                                self.add_gem_stats_shop(p, target, 1);
+                                gems_played = gems_played.saturating_add(1);
+                            }
                             for n in [target.checked_sub(1), Some(target + 1)]
                                 .into_iter()
                                 .flatten()
@@ -1117,9 +1126,22 @@ impl Game {
                         SpellTarget::Confiscation { gems } => {
                             // 3 Gems on the target, then the neighbours'
                             // Blood Gem stats move onto it: they lose them,
-                            // it gains them.
-                            self.players[p].add_gem_stats(target_pos, gems, false);
-                            gems_played = gems_played.saturating_add(gems);
+                            // it gains them. Each Gem is a Gem played on the
+                            // target and resolves before the next one, so a
+                            // Geomagus Roogug there plays its Gems at once,
+                            // before the steal takes the neighbours' grown
+                            // stats (log Hearthstone_2026_10_28_02_28_32 line
+                            // 1715147 onward, game 4 turn 13: the golden
+                            // Roogug's Gems land on Amalgam, Bramble and the
+                            // Hogrider, and only then do Bramble and the
+                            // Hogrider lose their Gem stats to the Roogug).
+                            // So `gems_played` stays 0 here: each reaction is
+                            // already done, and the generic block below would
+                            // play them a second time.
+                            for _ in 0..gems {
+                                self.players[p].add_gem_stats(target_pos, 1, false);
+                                self.roogug_reacts(p, target_pos, 1);
+                            }
                             for n in [target_pos.checked_sub(1), Some(target_pos + 1)]
                                 .into_iter()
                                 .flatten()

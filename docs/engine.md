@@ -959,7 +959,11 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   casts (log `2026_11_02_00_10_22-g4` turn 9 step 39). Whatever a cast leaves
   owed (a Discover it opened, a choice, a target) is fired by
   `fire_cast_after_choice`, which `maybe_start_discover` calls once no prompt
-  is left, and so is a Choose One spell's whole "after" half: its option and
+  is left: a spell with no target whose own effect opens a Discover keeps its
+  "after" half until the card is picked too (Fandral's Fortune, Hired
+  Headhunter: log `2026_10_24_17_59_26` turn 10, the pick at line 252294 and
+  the Felboar's consume only at 252362). A Choose One spell's whole "after"
+  half waits the same way: its option and
   its target come first (docs/rules/design.md "Eating a minion with a
   spell"). In
   a fight, `Effect::CastSpell` fires the Tavern counter and the Tavern-only

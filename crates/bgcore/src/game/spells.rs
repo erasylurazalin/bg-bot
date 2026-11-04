@@ -561,14 +561,35 @@ impl Game {
                 // Gem or a Banana (docs/rules/design.md "Spells versus Tavern spells").
                 self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
             }
-            // A spell with nothing to wait for has landed: its "after you
-            // cast a spell" triggers fire now.
-            for _ in 0..all_casts {
-                self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
-            }
-            if tavern {
-                for _ in 0..casts {
-                    self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Resolved);
+            // A spell whose own effect opened a prompt (Fandral's Fortune's
+            // Discover, Hired Headhunter's, Unmasked Identity's hero power)
+            // has not resolved yet: like a target or a Choose One, it owes
+            // its "after you cast a spell" triggers to that pick (log
+            // Hearthstone_2026_10_24_17_59_26 turn 10: Fandral's Fortune's
+            // Discover is picked at line 252294, the Felboar only consumes at
+            // 252362; Hired Headhunter, 2026_10_24_15_25_26 line 827899).
+            // `maybe_start_discover` fires them once nothing is left to
+            // answer. An enclosing cast that already owes its own triggers
+            // keeps them: they fire now, as before.
+            if self.players[p].cast_after_choice.is_none()
+                && Game::other_choice_open(&self.players[p])
+            {
+                self.players[p].cast_after_choice = Some(CastAfterChoice {
+                    card: m.card,
+                    casts: all_casts,
+                    tavern,
+                    at_play: true,
+                });
+            } else {
+                // A spell with nothing to wait for has landed: its "after you
+                // cast a spell" triggers fire now.
+                for _ in 0..all_casts {
+                    self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
+                }
+                if tavern {
+                    for _ in 0..casts {
+                        self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Resolved);
+                    }
                 }
             }
         }
@@ -585,8 +606,9 @@ impl Game {
     /// Fire the triggers a Choose One or targeting spell's cast owed. A
     /// targeting spell fired its "whenever" triggers and trinket events at the
     /// play (`at_play`), so only its "after you cast a spell" triggers are
-    /// left; a Choose One spell owes those too. Called once the option and its
-    /// target are answered (`maybe_start_discover`).
+    /// left; a Choose One spell owes those too, and so does a plain spell
+    /// whose own effect opened a Discover. Called once the option, the target
+    /// and the Discover are answered (`maybe_start_discover`).
     pub(super) fn fire_cast_after_choice(&mut self, p: usize, what: CastAfterChoice) {
         if !what.at_play {
             for _ in 0..what.casts {

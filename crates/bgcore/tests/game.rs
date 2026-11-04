@@ -472,6 +472,32 @@ fn a_choose_one_spells_cast_triggers_wait_for_the_option_and_the_target() {
 }
 
 #[test]
+fn a_discover_spells_cast_triggers_wait_for_the_pick() {
+    // A spell whose own effect opens a Discover has not resolved until the
+    // card is picked, so its "after you cast a spell" triggers wait for that
+    // pick, like a target or a Choose One. Logs:
+    // Hearthstone_2026_10_24_17_59_26 turn 10 (Fandral's Fortune's Discover
+    // picked at line 252294, the Felboar's consume only at 252362) and
+    // Hearthstone_2026_10_24_15_25_26 (Hired Headhunter, play at 827899, the
+    // pick at 828273, the Felboar at 828321).
+    let mut g = game(145);
+    put_on_board(&mut g, 0, "Felboar");
+    set_shop(&mut g, 0, &["Wolf Pup", "Cord Puller"]);
+    // Two spells already counted: this cast is the third.
+    g.players[0].board[0].improvements = 2;
+    g.give(0, "A New Sprout").unwrap();
+    let hand = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
+    assert!(!g.players[0].discover.is_empty(), "the Discover is offered");
+    assert_eq!(g.players[0].board[0].improvements, 2, "the trigger waits for the pick");
+    assert_eq!(g.players[0].shop.len(), 2, "nothing eaten yet");
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].board[0].improvements, 0, "the third spell counted at the pick");
+    assert_eq!(g.players[0].shop.len(), 1, "and the Felboar eats once the cast has resolved");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn sprightly_scarab_choose_one_and_patient_scout_discover() {
     let mut g = game(107);
     put_on_board(&mut g, 0, "Buzzing Vermin"); // 1/1 at slot 0

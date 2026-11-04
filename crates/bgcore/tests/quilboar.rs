@@ -575,18 +575,31 @@ fn a_hogriders_gem_on_a_roogug_makes_it_play_its_own() {
 
 #[test]
 fn a_gem_confiscation_on_a_roogug_makes_it_play_a_gem_per_gem() {
-    // Three Gems go on the target, so a Roogug there plays three of its own.
+    // Three Gems go on the target, so a Roogug there plays three of its own,
+    // each as the Gem before it lands. The Power log
+    // Hearthstone_2026_10_28_02_28_32 (line 1715147 onward, game 4 turn 13)
+    // shows the Roogug's Gems on the neighbours before the steal: they lose
+    // the stats those Gems gave them to the Roogug. So the Roogug keeps its
+    // 3 Gems plus the 3 the neighbours lost, and the neighbours are back to
+    // where they started.
     let mut g = game(42);
     put_on_board(&mut g, 0, "Tusked Camper", false);
     put_on_board(&mut g, 0, "Geomagus Roogug", false);
     put_on_board(&mut g, 0, "Roadboar", false);
+    let camp = stats(&g.players[0].board[0]);
+    let boar = stats(&g.players[0].board[2]);
     g.give(0, "Gem Confiscation").unwrap();
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 0);
     act(&mut g, 0, Action::Target(1));
-    assert_eq!(g.players[0].board[1].gem_attack, 3, "the three Confiscation Gems");
+    assert_eq!(
+        g.players[0].board[1].gem_attack, 6,
+        "the three Confiscation Gems, then the three the Roogug's own Gems left on the neighbours"
+    );
     let others: i32 = [0, 2].into_iter().map(|i| g.players[0].board[i].gem_attack).sum();
-    assert_eq!(others, 3, "one Gem from the Roogug for each of them");
+    assert_eq!(others, 0, "the steal took the Gems the Roogug played on them");
+    assert_eq!(stats(&g.players[0].board[0]), camp, "a neighbour ends where it started");
+    assert_eq!(stats(&g.players[0].board[2]), boar);
     g.check_invariants().unwrap();
 }
 
