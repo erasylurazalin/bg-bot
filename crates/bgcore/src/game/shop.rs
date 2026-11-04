@@ -547,11 +547,18 @@ impl Game {
         // The spell slot is the Tavern's last card, so it appears whenever
         // fewer than seven cards are there and disappears when the minions
         // fill all seven (seven Fodders, seven copies from the Warband
-        // Whistle); a frozen Tavern keeps the spell it already had.
+        // Whistle); a frozen Tavern keeps the spell it already had. The spell
+        // follows the minions' tiers: a Guiding Candle Refresh deals a Tier 6
+        // Tavern spell (docs/rules/trinkets.md; the raw log's candle
+        // Refreshes create a Tier 6 spell next to five Tier 6 minions).
         let room = pl.shop.len() < crate::SHOP;
         if room {
             if pl.shop_spell.is_none() {
-                pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
+                pl.shop_spell = if pl.tp.refresh_tier6 > 0 {
+                    cards.random_tier_spell(crate::MAX_TIER, &[], lobby, rng)
+                } else {
+                    cards.random_spell(pl.tier, lobby, rng)
+                };
             }
         } else {
             pl.shop_spell = None;

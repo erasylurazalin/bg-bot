@@ -3080,7 +3080,40 @@ fn a_fodder_refilled_on_a_guiding_candle_refresh_draws_tier_six() {
         g.players[0].shop.iter().map(|m| g.data.cards.get(m.card).tier).collect();
     assert!(!tiers.is_empty(), "the Fodder slots refilled");
     assert!(tiers.iter().all(|&t| t == 6), "every refill is Tier 6: {tiers:?}");
-    assert!(g.players[0].shop_spell.is_some(), "and the spell slot is dealt as usual");
+    let spell = g.players[0].shop_spell.expect("the spell slot is dealt as usual");
+    assert_eq!(g.data.cards.get(spell).tier, 6, "and the spell is Tier 6 too");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_guiding_candle_refresh_deals_a_tier_six_tavern_spell() {
+    // "Your first two Refreshes each turn contain only Tier 6 cards": the
+    // Refresh keeps its Tavern spell, and the spell is Tier 6 as well
+    // (docs/rules/trinkets.md, Era 2026-11-04). The raw log's candle
+    // Refreshes create a Tier 6 Tavern spell next to their Tier 6 minions:
+    // 2026_11_01_04_27_54-g2, 05:15:01 creates Lost Staff of Hamuul
+    // (EBG_Spell_038, techLevel 6) at the Tavern's sixth slot with five Tier
+    // 6 minions; 05:15:25 creates Perfect Vision (BG28_838), 05:22:31 Azerite
+    // Empowerment (BG28_169), 05:31:33 Eyes of the Earth Mother
+    // (EBG_Spell_017), each of them with five Tier 6 minions.
+    let mut g = game(186);
+    g.players[0].tier = 4;
+    take(&mut g, 0, "Guiding Candle");
+    g.players[0].gold = 30;
+    g.players[0].free_rolls = 10;
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    let spell_tier = |g: &Game| g.players[0].shop_spell.map(|s| g.data.cards.get(s).tier);
+    // The roll at the start of the turn is the first of the two.
+    assert_eq!(spell_tier(&g), Some(6), "the turn-start roll's spell");
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(spell_tier(&g), Some(6), "the second Refresh's spell");
+    act(&mut g, 0, Action::Roll);
+    assert!(
+        spell_tier(&g).is_some_and(|t| t <= 4),
+        "the third Refresh's spell draws up to the player's tier again: {:?}",
+        spell_tier(&g)
+    );
     g.check_invariants().unwrap();
 }
 
