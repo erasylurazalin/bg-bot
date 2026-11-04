@@ -1709,7 +1709,7 @@ name = "Forsaken Weaver"
 tier = 6
 tribe = "undead"
 stats = [3, 8]
-on_cast_spell = { undead_bonus = [3, 0] }
+on_cast_spell = { after = true, undead_bonus = [3, 0] }
 
 [[minion]]
 name = "Snazzy Phantom"

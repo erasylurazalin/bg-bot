@@ -390,6 +390,40 @@ pub struct CastAfterChoice {
     /// already fired at the play, so only the "after you cast a spell" ones
     /// are owed (a targeting spell). A Choose One spell owes both.
     pub at_play: bool,
+    /// The Dark Gift count (`buff_per_tavern_spell`, Spell Siphon) is still
+    /// owed: the game grows those minions once the spell has resolved, after
+    /// the pick a Discover or a Choose One asked for (raw log
+    /// 2026_10_27_04_30_04 turn 7). False for a targeting spell, whose count
+    /// the play already takes.
+    pub count_owed: bool,
+    /// The board's "after you cast a Tavern spell" cards (`on_cast_spell_after`,
+    /// Forsaken Weaver) as they stood when the spell was cast, so one the
+    /// spell itself takes off the board still fires
+    /// (docs/notes/UNSURE.md, Butchering on a Forsaken Weaver).
+    pub after: AfterCastTriggers,
+}
+
+/// The board's "after you cast a Tavern spell" cards, gathered as the spell is
+/// cast: the board slot each sits in, its card, and whether it is golden. Four
+/// is all a board of seven can hold in a real game.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct AfterCastTriggers {
+    entries: [(u8, CardId, bool); 4],
+    len: u8,
+}
+
+impl AfterCastTriggers {
+    pub fn push(&mut self, host: u8, card: CardId, golden: bool) {
+        let i = self.len as usize;
+        if i < self.entries.len() {
+            self.entries[i] = (host, card, golden);
+            self.len += 1;
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (u8, CardId, bool)> + '_ {
+        self.entries[..self.len as usize].iter().copied()
+    }
 }
 
 /// "Discard a card" (Mangled Bandit's Activate) waiting for the player to

@@ -1025,7 +1025,19 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   the Felboar's consume only at 252362). A Choose One spell's whole "after"
   half waits the same way: its option and
   its target come first (docs/rules/design.md "Eating a minion with a
-  spell"). In
+  spell"). The Dark Gift count is on that half too (`CastAfterChoice::count_owed`,
+  the `buff_per_tavern_spell` gifts Spell Siphon): the game grows those
+  minions once the spell has resolved, so a Discover spell's pick comes first
+  (log `2026_10_27_04_30_04` turn 7: Planar Telescope cast at Power.log
+  68792, the Discover picked at 69231, the Spell Siphon tag at 69283). The
+  "whenever" half stays on the play in both cases. `Card.on_cast_spell_after`
+  is the same split for a minion's own "After you cast a Tavern spell"
+  (Forsaken Weaver): `trigger_on_cast_spell(p, TriggerWhen::Now)` fires the
+  `on_cast_spell` cards as the spell is cast, the `Resolved` call fires the
+  `on_cast_spell_after` ones with the rest of the "after" half. The shop
+  replay logs a pick as its own step, so the step that answers it loads a
+  state with nothing owed: `shop_replay::seat_cast_after_pick` seats the
+  cast's `CastAfterChoice` from the step's `source` spell again. In
   a fight, `Effect::CastSpell` fires the Tavern counter and the Tavern-only
   minion triggers only for a Tavern spell, and the trinket's `when = "cast"`
   hook for every spell. Replica Cathedral's "your first spell each turn casts

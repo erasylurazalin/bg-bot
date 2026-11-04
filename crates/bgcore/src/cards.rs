@@ -1502,7 +1502,13 @@ pub struct Card {
     pub on_play_mech: Option<OnPlayMech>,
     pub on_play_or_magnetize_mech: Option<OnPlayOrMagnetizeMech>,
     pub on_cast_spell_on_mech: Option<OnCastSpellOnMech>,
+    /// Whenever the owner casts a Tavern spell (Timecap'n Hooktail, Vicious
+    /// Mindslasher, Sha of Fear, Charging Czarina).
     pub on_cast_spell: Option<OnCastSpell>,
+    /// The same triggers, but "After you cast a Tavern spell": they fire once
+    /// the spell has resolved, so a pick it opened comes first (Forsaken
+    /// Weaver).
+    pub on_cast_spell_after: Option<OnCastSpell>,
     /// Whenever the owner casts a spell on this minion (Twilight Tidehunter).
     pub on_cast_spell_on_self: Option<Effect>,
     /// Whenever the owner casts a spell on a minion of `tribe` (Shamanic
@@ -1791,6 +1797,7 @@ impl Card {
             || self.on_play_or_magnetize_mech.is_some()
             || self.on_cast_spell_on_mech.is_some()
             || self.on_cast_spell.is_some()
+            || self.on_cast_spell_after.is_some()
             || self.on_cast_spell_on_self.is_some()
             || self.on_cast_spell_on_tribe.is_some()
             || self.when_damaged.is_some()
@@ -2783,6 +2790,9 @@ struct RawOnCastSpellOnMech {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawOnCastSpell {
+    /// "After you cast" rather than "whenever": it fires once the spell has
+    /// resolved, so a pick the spell opened comes first (Forsaken Weaver).
+    after: Option<bool>,
     buff_self_and_deity: Option<[i32; 2]>,
     buff_all_and_deity: Option<[i32; 2]>,
     buff_divine_shield: Option<[i32; 2]>,
@@ -4030,21 +4040,30 @@ impl CardDb {
                 }),
             };
 
-            let on_cast_spell = match &c.on_cast_spell {
-                None => None,
-                Some(cs) => Some(if let Some([attack, health]) = cs.buff_self_and_deity {
-                    OnCastSpell::BuffSelfAndDeity { attack, health }
-                } else if let Some([attack, health]) = cs.buff_all_and_deity {
-                    OnCastSpell::BuffAllAndDeity { attack, health }
-                } else if let Some([attack, health]) = cs.buff_divine_shield {
-                    OnCastSpell::BuffDivineShield { attack, health }
-                } else if let Some([attack, health]) = cs.buff_all {
-                    OnCastSpell::BuffAll { attack, health }
-                } else if let Some([attack, health]) = cs.undead_bonus {
-                    OnCastSpell::UndeadBonus { attack, health }
-                } else {
-                    return Err(err("invalid on_cast_spell".into()));
-                }),
+            let (on_cast_spell, on_cast_spell_after) = match &c.on_cast_spell {
+                None => (None, None),
+                Some(cs) => {
+                    let what = if let Some([attack, health]) = cs.buff_self_and_deity {
+                        OnCastSpell::BuffSelfAndDeity { attack, health }
+                    } else if let Some([attack, health]) = cs.buff_all_and_deity {
+                        OnCastSpell::BuffAllAndDeity { attack, health }
+                    } else if let Some([attack, health]) = cs.buff_divine_shield {
+                        OnCastSpell::BuffDivineShield { attack, health }
+                    } else if let Some([attack, health]) = cs.buff_all {
+                        OnCastSpell::BuffAll { attack, health }
+                    } else if let Some([attack, health]) = cs.undead_bonus {
+                        OnCastSpell::UndeadBonus { attack, health }
+                    } else {
+                        return Err(err("invalid on_cast_spell".into()));
+                    };
+                    // The card's own words: "After you cast" waits for the
+                    // spell to resolve ("whenever" fires as it is cast).
+                    if cs.after == Some(true) {
+                        (None, Some(what))
+                    } else {
+                        (Some(what), None)
+                    }
+                }
             };
 
             let on_sell = match &c.on_sell {
@@ -4154,6 +4173,7 @@ impl CardDb {
                 on_play_or_magnetize_mech,
                 on_cast_spell_on_mech,
                 on_cast_spell,
+                on_cast_spell_after,
                 on_cast_spell_on_self,
                 on_cast_spell_on_tribe,
                 when_damaged,
@@ -4363,6 +4383,7 @@ impl CardDb {
                 on_play_or_magnetize_mech: None,
                 on_cast_spell_on_mech: None,
                 on_cast_spell: None,
+                on_cast_spell_after: None,
                 on_cast_spell_on_self: None,
                 on_cast_spell_on_tribe: None,
                 when_damaged: None,

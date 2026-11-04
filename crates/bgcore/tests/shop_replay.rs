@@ -2500,3 +2500,43 @@ fn a_step_whose_states_show_the_triple_check_runs_it() {
     let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
     assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
 }
+
+/// A pick that ends a spell the player cast is logged as its own step, so the
+/// game's own action is split in two: the pick step loads a state where
+/// nothing of the cast is owed any more, and the loader seats it again. Its
+/// "after you cast a spell" triggers land at the pick, inside the cast (log
+/// 2026_10_24_17_59_26 turn 10 step 43 to 44: Fandral's Fortune's pick and
+/// the Felboar's consume, and 2026_10_27_04_30_04 turn 7 step 1 to 2).
+#[test]
+fn a_pick_that_ends_a_spell_carries_what_the_cast_still_owed() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 8,
+       "start": {"board": [
+          {"id": 1, "card_id": "BG34_692", "name": "Forsaken Weaver", "attack": 3, "health": 8, "position": 1},
+          {"id": 2, "card_id": "BG31_813", "name": "Cadaver Caretaker", "attack": 2, "health": 4, "position": 2}],
+        "hand": [], "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": [], "secrets": []},
+       "actions": [{"step": "discover", "kind": "discover",
+          "source": {"id": 9, "card_id": "BG33_101", "name": "A New Sprout"},
+          "options": [
+            {"id": 7, "card_id": "BG36_207", "name": "Wolf Pup", "attack": 1, "health": 1},
+            {"id": 8, "card_id": "BG_ICC_026t", "name": "Skeleton", "attack": 1, "health": 1}],
+          "picked": {"id": 7, "card_id": "BG36_207", "name": "Wolf Pup", "attack": 1, "health": 1},
+          "after": {"board": [
+              {"id": 1, "card_id": "BG34_692", "name": "Forsaken Weaver", "attack": 6, "health": 8, "position": 1},
+              {"id": 2, "card_id": "BG31_813", "name": "Cadaver Caretaker", "attack": 5, "health": 4, "position": 2}],
+            "hand": [
+              {"id": 7, "card_id": "BG36_207", "name": "Wolf Pup", "index": 1, "attack": 1, "health": 1}],
+            "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": [], "secrets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("pick-owed.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+}

@@ -1165,7 +1165,10 @@ impl<'a> Side<'a> {
                 continue;
             }
             for (card, golden) in f.m.parts() {
-                if let Some(trigger) = db.get(card).on_cast_spell {
+                let c = db.get(card);
+                // A fight cast has no pick to wait for, so the "whenever" and
+                // the "after" halves both fire here.
+                for trigger in [c.on_cast_spell, c.on_cast_spell_after].into_iter().flatten() {
                     let _ = triggers.try_push((f.uid, trigger, golden));
                 }
             }

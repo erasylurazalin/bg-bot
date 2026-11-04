@@ -26,6 +26,7 @@ use crate::{
     MAX_TIER,
 };
 use super::{
+    AfterCastTriggers,
     CastAfterChoice,
     DiscoverRequest,
     Game,
@@ -48,72 +49,116 @@ impl Game {
         self.players[p].total_spell_bonus(&self.data.cards)
     }
 
-    pub(super) fn trigger_on_cast_spell(&mut self, p: usize) {
-        let len = self.players[p].board.len();
-        for i in 0..len {
-            let m = self.players[p].board[i];
+    /// The board's "whenever you cast a Tavern spell" triggers, or with
+    /// `after` the "after you cast a Tavern spell" ones: the slot the card
+    /// sits in, the card and whether it is golden. The "after" ones are
+    /// gathered as the spell is cast and fired once it has resolved, so one
+    /// the spell itself takes off the board still fires (Butchering on a
+    /// Forsaken Weaver, docs/notes/UNSURE.md).
+    pub(crate) fn gather_on_cast_spell(&self, p: usize, after: bool) -> AfterCastTriggers {
+        let mut out = AfterCastTriggers::default();
+        for (i, m) in self.players[p].board.iter().enumerate() {
             for (card, golden) in m.parts() {
-                match self.data.cards.get(card).on_cast_spell {
-                    Some(OnCastSpell::BuffDivineShield { attack, health }) => {
-                        let mul = if golden { 2 } else { 1 };
-                        // Czarina Portrait: the Charging Czarinas also give
-                        // Health, as much as their Attack.
-                        let also_health = matches!(
-                            self.player_card_mod(p, card),
-                            Some(CardMod::AlsoHealth)
-                        );
-                        for o in &mut self.players[p].board {
-                            if o.keywords.has(Keywords::DIVINE_SHIELD) {
-                                buff(o, attack * mul, health * mul);
-                                if also_health {
-                                    buff(o, 0, attack * mul);
-                                }
-                            }
-                        }
-                    }
-                    Some(OnCastSpell::UndeadBonus { attack, health }) => {
-                        let mul = if golden { 2 } else { 1 };
-                        self.add_undead_bonus(p, attack * mul, health * mul, true);
-                    }
-                    Some(OnCastSpell::BuffSelfAndDeity { attack, health }) => {
-                        let mul = if golden { 2 } else { 1 };
-                        buff(&mut self.players[p].board[i], attack * mul, health * mul);
-                        // Mindslasher Portrait: the Vicious Mindslashers also
-                        // give their stats to the minions beside them.
-                        if matches!(self.player_card_mod(p, card), Some(CardMod::AlsoNeighbors)) {
-                            for j in [i.checked_sub(1), Some(i + 1)].into_iter().flatten() {
-                                if j < self.players[p].board.len() {
-                                    buff(&mut self.players[p].board[j], attack * mul, health * mul);
-                                }
-                            }
-                        }
-                        if let Some(deity) = &mut self.players[p].deity {
-                            deity.attack += attack * mul;
-                            deity.health += health * mul;
-                        }
-                    }
-                    Some(OnCastSpell::BuffAllAndDeity { attack, health }) => {
-                        let mul = if golden { 2 } else { 1 };
-                        for o in &mut self.players[p].board {
-                            buff(o, attack * mul, health * mul);
-                        }
-                        if let Some(deity) = &mut self.players[p].deity {
-                            deity.attack += attack * mul;
-                            deity.health += health * mul;
-                        }
-                    }
-                    Some(OnCastSpell::BuffAll { attack, health }) => {
-                        // A golden one gives the same buff twice.
-                        let times = if golden { 2 } else { 1 };
-                        for _ in 0..times {
-                            for o in &mut self.players[p].board {
-                                buff(o, attack, health);
-                            }
-                        }
-                    }
-                    None => {}
+                let c = self.data.cards.get(card);
+                let has = if after { c.on_cast_spell_after } else { c.on_cast_spell };
+                if has.is_some() {
+                    out.push(i as u8, card, golden);
                 }
             }
+        }
+        out
+    }
+
+    /// One of the triggers `gather_on_cast_spell` found.
+    fn apply_on_cast_spell(&mut self, p: usize, (host, card, golden): (u8, CardId, bool), after: bool) {
+        let i = host as usize;
+        let c = self.data.cards.get(card);
+        let trigger = if after { c.on_cast_spell_after } else { c.on_cast_spell };
+        match trigger {
+            Some(OnCastSpell::BuffDivineShield { attack, health }) => {
+                let mul = if golden { 2 } else { 1 };
+                // Czarina Portrait: the Charging Czarinas also give
+                // Health, as much as their Attack.
+                let also_health = matches!(
+                    self.player_card_mod(p, card),
+                    Some(CardMod::AlsoHealth)
+                );
+                for o in &mut self.players[p].board {
+                    if o.keywords.has(Keywords::DIVINE_SHIELD) {
+                        buff(o, attack * mul, health * mul);
+                        if also_health {
+                            buff(o, 0, attack * mul);
+                        }
+                    }
+                }
+            }
+            Some(OnCastSpell::UndeadBonus { attack, health }) => {
+                let mul = if golden { 2 } else { 1 };
+                self.add_undead_bonus(p, attack * mul, health * mul, true);
+            }
+            Some(OnCastSpell::BuffSelfAndDeity { attack, health }) => {
+                let mul = if golden { 2 } else { 1 };
+                // The minion may be gone by now (a spell that destroys its
+                // own caster's card): its own stats are lost with it, the
+                // Deity's are not.
+                let there = i < self.players[p].board.len()
+                    && self.players[p].board[i].parts().any(|(o, _)| o == card);
+                if there {
+                    buff(&mut self.players[p].board[i], attack * mul, health * mul);
+                    // Mindslasher Portrait: the Vicious Mindslashers also
+                    // give their stats to the minions beside them.
+                    if matches!(self.player_card_mod(p, card), Some(CardMod::AlsoNeighbors)) {
+                        for j in [i.checked_sub(1), Some(i + 1)].into_iter().flatten() {
+                            if j < self.players[p].board.len() {
+                                buff(&mut self.players[p].board[j], attack * mul, health * mul);
+                            }
+                        }
+                    }
+                }
+                if let Some(deity) = &mut self.players[p].deity {
+                    deity.attack += attack * mul;
+                    deity.health += health * mul;
+                }
+            }
+            Some(OnCastSpell::BuffAllAndDeity { attack, health }) => {
+                let mul = if golden { 2 } else { 1 };
+                for o in &mut self.players[p].board {
+                    buff(o, attack * mul, health * mul);
+                }
+                if let Some(deity) = &mut self.players[p].deity {
+                    deity.attack += attack * mul;
+                    deity.health += health * mul;
+                }
+            }
+            Some(OnCastSpell::BuffAll { attack, health }) => {
+                // A golden one gives the same buff twice.
+                let times = if golden { 2 } else { 1 };
+                for _ in 0..times {
+                    for o in &mut self.players[p].board {
+                        buff(o, attack, health);
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// The board's "whenever you cast a Tavern spell" cards fire as the spell
+    /// is cast; `TriggerWhen::Resolved` fires the "after you cast a Tavern
+    /// spell" cards of the board as it stands now.
+    pub(super) fn trigger_on_cast_spell(&mut self, p: usize, when: TriggerWhen) {
+        let after = when == TriggerWhen::Resolved;
+        let triggers = self.gather_on_cast_spell(p, after);
+        for entry in triggers.iter() {
+            self.apply_on_cast_spell(p, entry, after);
+        }
+    }
+
+    /// The "after you cast a Tavern spell" cards as they stood when the spell
+    /// was cast, fired once it has resolved.
+    fn fire_after_cast_spell(&mut self, p: usize, entries: &AfterCastTriggers) {
+        for entry in entries.iter() {
+            self.apply_on_cast_spell(p, entry, true);
         }
     }
 
@@ -541,6 +586,14 @@ impl Game {
             pl.spells_cast_turn = pl.spells_cast_turn.saturating_add(1);
         }
         let all_casts = if tavern { casts } else { 1 };
+        // The board's "after you cast a Tavern spell" cards as they stand now,
+        // so they fire once this cast has resolved even if it takes them off
+        // the board itself.
+        let after = if tavern {
+            self.gather_on_cast_spell(p, true)
+        } else {
+            AfterCastTriggers::default()
+        };
         if waits {
             // A Choose One spell owes every trigger to the choice.
             self.players[p].cast_after_choice = Some(CastAfterChoice {
@@ -548,6 +601,8 @@ impl Game {
                 casts,
                 tavern,
                 at_play: false,
+                count_owed: true,
+                after,
             });
         } else if targeting.is_some() {
             // A targeting spell fires its "whenever" triggers and its trinket
@@ -557,6 +612,8 @@ impl Game {
                 casts,
                 tavern,
                 at_play: true,
+                count_owed: false,
+                after,
             });
             // One cast's worth now; the loop in `apply_target` fires them
             // again before each extra cast (Balinda casts twice, so a
@@ -568,6 +625,46 @@ impl Game {
                 self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
                 self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
             }
+        } else if self.players[p].cast_after_choice.is_none()
+            && Game::other_choice_open(&self.players[p])
+        {
+            // A spell whose own effect opened a prompt (Fandral's Fortune's
+            // Discover, Hired Headhunter's, Unmasked Identity's hero power)
+            // has not resolved yet: the pick comes first, and what waits for
+            // the spell to resolve follows it inside the same action. Its
+            // "whenever you cast a spell" triggers and the counters of the
+            // cast are taken now, as the game takes them on the play, but the
+            // "after you cast a spell" triggers and the Dark Gift count wait.
+            // The raw log has both: the Spell Siphon gift ("has +2/+2 for each
+            // Tavern spell you've cast this game") only grows after the pick
+            // (Planar Telescope, 2026_10_27_04_30_04 turn 7: the play at
+            // Power.log 68792, the pick at 69231, the growth at 69283), and
+            // Fandral's Fortune's Felboar only consumes at its pick
+            // (2026_10_24_17_59_26 turn 10 step 43 to 44). A "whenever"
+            // trigger still fires on the play (Living Azerite, same spell as
+            // a Choose One, 2026_11_02_00_10_22-g8 turn 12 step 21).
+            // `maybe_start_discover` fires what is owed once nothing is left
+            // to answer. An enclosing cast that already owes its own triggers
+            // keeps them: they fire now, as before.
+            for _ in 0..all_casts {
+                self.fire_event(p, EventKind::AllSpellsCast, 1);
+            }
+            self.trinket_event(p, Event::SpellCast, Some(m.card), 1);
+            if tavern {
+                for _ in 0..casts {
+                    self.fire_event(p, EventKind::SpellsCast, 1);
+                }
+                self.players[p].spells_cast_turn = self.players[p].spells_cast_turn.saturating_add(1);
+                self.trinket_event(p, Event::CastSpell, Some(m.card), 1);
+            }
+            self.players[p].cast_after_choice = Some(CastAfterChoice {
+                card: m.card,
+                casts: all_casts,
+                tavern,
+                at_play: true,
+                count_owed: tavern,
+                after,
+            });
         } else {
             for _ in 0..all_casts {
                 self.fire_event(p, EventKind::AllSpellsCast, 1);
@@ -583,35 +680,15 @@ impl Game {
                 // Gem or a Banana (docs/rules/design.md "Spells versus Tavern spells").
                 self.dark_gift_count(p, casts as i32, |c| c.buff_per_tavern_spell);
             }
-            // A spell whose own effect opened a prompt (Fandral's Fortune's
-            // Discover, Hired Headhunter's, Unmasked Identity's hero power)
-            // has not resolved yet: like a target or a Choose One, it owes
-            // its "after you cast a spell" triggers to that pick (log
-            // Hearthstone_2026_10_24_17_59_26 turn 10: Fandral's Fortune's
-            // Discover is picked at line 252294, the Felboar only consumes at
-            // 252362; Hired Headhunter, 2026_10_24_15_25_26 line 827899).
-            // `maybe_start_discover` fires them once nothing is left to
-            // answer. An enclosing cast that already owes its own triggers
-            // keeps them: they fire now, as before.
-            if self.players[p].cast_after_choice.is_none()
-                && Game::other_choice_open(&self.players[p])
-            {
-                self.players[p].cast_after_choice = Some(CastAfterChoice {
-                    card: m.card,
-                    casts: all_casts,
-                    tavern,
-                    at_play: true,
-                });
-            } else {
-                // A spell with nothing to wait for has landed: its "after you
-                // cast a spell" triggers fire now.
-                for _ in 0..all_casts {
-                    self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
-                }
-                if tavern {
-                    for _ in 0..casts {
-                        self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Resolved);
-                    }
+            // A spell with nothing to wait for has landed: its "after you
+            // cast a spell" triggers fire now.
+            for _ in 0..all_casts {
+                self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
+            }
+            if tavern {
+                for _ in 0..casts {
+                    self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Resolved);
+                    self.fire_after_cast_spell(p, &after);
                 }
             }
         }
@@ -629,8 +706,10 @@ impl Game {
     /// targeting spell fired its "whenever" triggers and trinket events at the
     /// play (`at_play`), so only its "after you cast a spell" triggers are
     /// left; a Choose One spell owes those too, and so does a plain spell
-    /// whose own effect opened a Discover. Called once the option, the target
-    /// and the Discover are answered (`maybe_start_discover`).
+    /// whose own effect opened a Discover. The Dark Gift count waits the same
+    /// way when the play did not take it (`count_owed`, Spell Siphon). Called
+    /// once the option, the target and the Discover are answered
+    /// (`maybe_start_discover`).
     pub(super) fn fire_cast_after_choice(&mut self, p: usize, what: CastAfterChoice) {
         if !what.at_play {
             for _ in 0..what.casts {
@@ -642,8 +721,12 @@ impl Game {
                     self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Now);
                 }
                 self.trinket_event(p, Event::CastSpell, Some(what.card), 1);
-                self.dark_gift_count(p, what.casts as i32, |c| c.buff_per_tavern_spell);
             }
+        }
+        if what.count_owed && what.tavern {
+            // Dark Gifts Spell Siphon counts Tavern spells, never a Blood Gem
+            // or a Banana (docs/rules/design.md "Spells versus Tavern spells").
+            self.dark_gift_count(p, what.casts as i32, |c| c.buff_per_tavern_spell);
         }
         for _ in 0..what.casts {
             self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Resolved);
@@ -651,6 +734,9 @@ impl Game {
         if what.tavern {
             for _ in 0..what.casts {
                 self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Resolved);
+                // "After you cast a Tavern spell" cards (Forsaken Weaver) wait
+                // for the spell to resolve like every other "after" trigger.
+                self.fire_after_cast_spell(p, &what.after);
             }
         }
     }
@@ -839,7 +925,7 @@ impl Game {
                 // Power of the Storm for good on the main slot.
                 let excludes = self.data.heroes.hero_indices(&c.exclude_heroes);
                 if tavern && !by_minion {
-                    self.trigger_on_cast_spell(p);
+                    self.trigger_on_cast_spell(p, TriggerWhen::Now);
                 }
                 self.players[p].storm_power[0] = false;
                 self.discover_hero_power(p, &excludes, false, 1);
@@ -855,7 +941,7 @@ impl Game {
             }
             for _ in 0..casts {
                 if tavern && !by_minion {
-                    self.trigger_on_cast_spell(p);
+                    self.trigger_on_cast_spell(p, TriggerWhen::Now);
                 }
                 self.execute_spell_effect(p, se, tavern);
             }
