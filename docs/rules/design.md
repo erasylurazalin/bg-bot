@@ -290,7 +290,8 @@ asking Era any rule question.
   are" ("Butchering and spell power").
 - **Halves round up** ("Halves round up").
 - **Dark Gifts:** they stack (duplicates too), travel with the card, work the
-  same on a golden; countdowns fire at the end of your turn, Replication and
+  same on a golden; countdowns fire at the end of your turn (Incubation's
+  payout lands as the next turn starts, from the logs), Replication and
   Affinity restart, Incubation doesn't (docs/rules/darkgifts.md).
 - **Trinkets:** the Compass locks its type at the pick; Mystery Cube fires
   the old trinket's start of turn first, then switches; offers on turns 6
