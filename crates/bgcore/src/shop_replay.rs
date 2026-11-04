@@ -89,6 +89,14 @@ pub struct ShopMinionSpec {
     pub gem_attack: i32,
     #[serde(default)]
     pub gem_health: i32,
+    /// How many Magnetizations this minion carries (`Minion.magnetizations`,
+    /// which Utility Drone's "+4/+5 for each Magnetization they have" reads).
+    /// The collector counts the Magnetic enchantments the log leaves on the
+    /// host, one per merge (docs/real-boards.md "The action file"). A file
+    /// written before the key existed has it nowhere, and then the minion
+    /// starts at 0, as it always did.
+    #[serde(default)]
+    pub magnetizations: u32,
     /// A Golden minion that gives no Triple Reward when played, the file's
     /// mark: only the sources docs/rules/design.md names say so (Silent
     /// Deliverer's goldens, Sinister Invitation's, Gilding, Aureate Laureate).
@@ -1180,6 +1188,13 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
     // them 0, which is what the loader always seated.
     minion.gem_attack = m.gem_attack;
     minion.gem_health = m.gem_health;
+    // The Magnetizations inside it: the log leaves one enchantment per
+    // Magnetic that merged (`BG34_170te` for a Red Volumizer, `BG31_171te`
+    // for a Satellite, MAGNETIC 1, attached to the host), and the collector
+    // counts them. A fresh minion would start at 0, and Utility Drone's end of
+    // turn then gives it nothing. A file written before the key existed leaves
+    // it 0, which is what the loader always seated.
+    minion.magnetizations = m.magnetizations.min(u16::MAX as u32) as u16;
     // Magnetic is a card property the board loader drops on purpose (a fight
     // never reads it), but a shop step does: it is what lets a minion be
     // Magnetized onto the board the game built it from.

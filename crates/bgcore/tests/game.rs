@@ -186,6 +186,67 @@ fn magnetic_merge_into_full_board_and_normal_placement() {
 }
 
 #[test]
+fn drone_duplicator_doubles_the_played_magnetic_and_its_satellite() {
+    // `10_27_04_30_04-g2` turn 10: a Drone Duplicator at 15/17 Activated, then
+    // a Red Volumizer (24/20) played from hand with a 26/39 Satellite from
+    // Spark Snapper. The log's host ends at 115/135, which is 15/17 plus the
+    // whole package (24 + 26 = 50 Attack, 20 + 39 = 59 Health) twice. Here the
+    // board starts from the cards' own 5/2.
+    let mut g = game(105);
+    put_on_board(&mut g, 0, "Drone Duplicator");
+    put_on_board(&mut g, 0, "Spark Snapper");
+    // The Snapper's Satellite is its own size: 26/39 here.
+    g.players[0].board[1].improvements = 12; // 2/3, each step +2/+3
+    let mut red = take(&mut g, "Red Volumizer");
+    red.attack = 24;
+    red.health = 20;
+    g.players[0].hand.push(red);
+    act(&mut g, 0, Action::Activate(0));
+    assert_eq!(g.players[0].board[0].extra_magnetize, 1);
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    let host = g.players[0].board[0];
+    assert_eq!(
+        (host.attack, host.health),
+        (5 + 2 * (24 + 26), 2 + 2 * (20 + 39)),
+        "the played Volumizer and its Satellite both happen twice"
+    );
+    assert_eq!(g.players[0].board[0].extra_magnetize, 0, "the extra is spent");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_volumizers_triple_counts_the_aura_once_and_each_copys_own_buffs() {
+    // `10_29_22_20_04-g3` turn 11 (buying a third Blue Volumizer): the log's
+    // three copies stand at 69/108 and 71/111 with the +24/+39 "your
+    // Volumizers have" pair on them, and 25/42 on the one just bought, and the
+    // Golden Blue goes into the hand at 116/180. That is the printed 1/3
+    // doubled, plus the three copies' own bonuses (44/66, 46/69, 0/0), plus
+    // the pair once: the Golden is one Volumizer itself.
+    let mut g = game(106);
+    g.players[0].volumizer_bonus = (24, 39);
+    for (attack, health) in [(69, 108), (71, 111)] {
+        put_on_board(&mut g, 0, "Blue Volumizer");
+        let i = g.players[0].board.len() - 1;
+        g.players[0].board[i].attack = attack;
+        g.players[0].board[i].health = health;
+    }
+    set_shop(&mut g, 0, &["Blue Volumizer"]);
+    g.players[0].shop[0].attack = 25;
+    g.players[0].shop[0].health = 42;
+    act(&mut g, 0, Action::Buy(0));
+    let gold = g.players[0]
+        .hand
+        .iter()
+        .find(|m| g.data.cards.get(m.card).name == "Blue Volumizer")
+        .copied()
+        .expect("the triple's Golden Blue is in the hand");
+    assert!(gold.golden);
+    assert_eq!((gold.attack, gold.health), (116, 180));
+    assert!(g.players[0].board.is_empty(), "all three copies went in");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn volumizer_bonus_reaches_hand_and_shop_but_not_the_ones_inside_a_host() {
     let mut g = game(102);
     g.players[0].tier = 2;

@@ -706,6 +706,11 @@ impl Player {
         self.counts.gold_spent = c.gold_spent;
         self.refresh_buff = (c.refresh_attack, c.refresh_health);
         self.barrage = (c.barrage_attack, c.barrage_health);
+        // "Your Volumizers have +A/+H this game": the logged Volumizers
+        // already carry the pair in their stats, so it is seated without being
+        // put on them again, and the next Volumizer played adds to it and
+        // hands the increment to every Volumizer of mine.
+        self.volumizer_bonus = (c.volumizer_attack, c.volumizer_health);
         if c.tavern_attack != 0 || c.tavern_health != 0 {
             self.tavern_buffs.push(TavernBuff {
                 tribe: None,

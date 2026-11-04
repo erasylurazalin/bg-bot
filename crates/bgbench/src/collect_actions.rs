@@ -120,6 +120,12 @@ const SILENT_DELIVERER: &str = "BG36_343";
 /// Undead have +A/+H this game, wherever they are" (`undead_army_numbers`).
 const UNDEAD_ARMY: &str = "BG25_011e2";
 
+/// `Volumized`, the enchant every Volumizer of mine carries for "your
+/// Volumizers have +A/+H this game (wherever they are)"
+/// (`volumizer_bonus_numbers`): its first number is the Attack and its second
+/// the Health, and every Volumizer of mine holds the running pair.
+const VOLUMIZED: &str = "BG34_170e";
+
 /// Aureate Laureate: `always_golden`, so the game shows it Golden without three
 /// copies, and its text says it gives no Triple Reward. The golden card id is
 /// listed too, against a log that names that one.
@@ -670,6 +676,50 @@ fn undead_army_numbers(game: &Game) -> Option<[i64; 4]> {
                 x.int("TAG_SCRIPT_DATA_NUM_4"),
             ]
         })
+}
+
+/// "Your Volumizers have +A/+H this game (wherever they are)": the Attack and
+/// Health every Volumizer of mine carries as its `Volumized` enchantment
+/// (`BG34_170e`, numbers 1 and 2). The game keeps no pair on the player for it
+/// and the player enchantment (`BG34_170pe`) shows no numbers at all, so the
+/// minion's own enchantment is the only place the log has it. The pair runs on
+/// every Volumizer of mine, wherever it is, so the largest of them answers for
+/// all; a Volumizer Magnetized into a host stops getting it and keeps the last
+/// pair it had, which is why the largest and not the newest is taken. `None`
+/// when I never had a Volumizer.
+fn volumizer_bonus_numbers(game: &Game) -> Option<[i64; 2]> {
+    let me = me(game)? as i64;
+    game.entities_in_order()
+        .filter(|x| {
+            x.card_id == VOLUMIZED && x.text("ZONE") == "PLAY" && x.int("CONTROLLER") == me
+        })
+        .map(|x| {
+            [
+                x.int("TAG_SCRIPT_DATA_NUM_1"),
+                x.int("TAG_SCRIPT_DATA_NUM_2"),
+            ]
+        })
+        .max_by_key(|pair| pair[0] + pair[1])
+}
+
+/// How many Magnetizations a minion carries: the game attaches one enchantment
+/// per Magnetic that merged into it (`BG34_170te` for a Red Volumizer,
+/// `BG31_171te` for a Satellite), each with the `MAGNETIC` tag and the stats it
+/// brought, and that is the count Utility Drone's "+4/+5 for each Magnetization
+/// they have" reads. The minions a Magnetized minion brought inside it are not
+/// counted separately: their own enchantment hangs on the minion that merged,
+/// not on the host. A Magnetization that "happens an extra time" (Drone
+/// Duplicator) shows one enchantment, so the log undercounts that one; the
+/// replay re-applies the extra itself.
+fn magnetization_count(game: &Game, host: &Entity) -> i64 {
+    game.entities_in_order()
+        .filter(|x| {
+            x.text("CARDTYPE") == "ENCHANTMENT"
+                && x.text("ZONE") == "PLAY"
+                && x.int("MAGNETIC") != 0
+                && x.int("ATTACHED") == host.id as i64
+        })
+        .count() as i64
 }
 
 fn hero_entity(game: &Game) -> Option<&Entity> {
@@ -2578,6 +2628,13 @@ impl Collector {
             put(&mut d, "gem_attack", Json::Int(attack));
             put(&mut d, "gem_health", Json::Int(health));
         }
+        // The Magnetizations inside it, for Utility Drone's end of turn: each
+        // Magnetic that merged left its own enchantment on the host
+        // (`magnetization_count`).
+        let magnetizations = magnetization_count(game, e);
+        if magnetizations != 0 {
+            put(&mut d, "magnetizations", Json::Int(magnetizations));
+        }
         // A Golden minion gives a Triple Reward when it is played, unless its
         // own source says otherwise (`no_triple_reward`).
         if no_triple_reward(&m, creator.map(|c| c.card_id.as_str())) {
@@ -2770,6 +2827,15 @@ impl Collector {
             && sd[1] != 0
         {
             put(&mut out, "undead_health", Json::Int(sd[1]));
+        }
+        // "Your Volumizers have +A/+H this game (wherever they are)": every
+        // Volumizer of mine reads it, and playing another one raises it
+        // (`Player::volumizer_bonus`).
+        if let Some([attack, health]) = volumizer_bonus_numbers(game)
+            && (attack != 0 || health != 0)
+        {
+            put(&mut out, "volumizer_attack", Json::Int(attack));
+            put(&mut out, "volumizer_health", Json::Int(health));
         }
         if player.int("NUM_SPELLS_PLAYED_THIS_GAME") != 0 {
             put(
@@ -3075,6 +3141,109 @@ mod tests {
             ..Default::default()
         };
         assert!(!no_triple_reward(&normal, None));
+    }
+
+    /// "Your Volumizers have +A/+H this game (wherever they are)" is on every
+    /// Volumizer of mine as its `Volumized` enchantment, not on the player:
+    /// any one of them answers for the pair, an opponent's is never read, and
+    /// one that left play keeps its old pair without being current.
+    #[test]
+    fn the_volumized_enchant_carries_the_volumizer_bonus() {
+        fn tag(value: &str) -> TagValue {
+            TagValue::Text(value.to_string())
+        }
+        fn number(value: i64) -> TagValue {
+            TagValue::Int(value)
+        }
+        let volumized = |controller: i64, attack: i64, health: i64, zone: &str| {
+            vec![
+                ("ZONE", tag(zone)),
+                ("CONTROLLER", number(controller)),
+                ("TAG_SCRIPT_DATA_NUM_1", number(attack)),
+                ("TAG_SCRIPT_DATA_NUM_2", number(health)),
+            ]
+        };
+        let mut g = bglog::Game::new();
+        g.real_players = [1].into_iter().collect();
+        let mut add = |id: i32, card_id: &str, tags: Vec<(&str, TagValue)>| {
+            let e = g.entity(id);
+            e.card_id = card_id.to_string();
+            for (k, v) in tags {
+                e.set(k, v);
+            }
+        };
+        // Two of mine at the current pair, an old one of mine that left play
+        // with a bigger pair, and the opponent's.
+        add(300, VOLUMIZED, volumized(1, 24, 39, "PLAY"));
+        add(301, VOLUMIZED, volumized(1, 24, 39, "PLAY"));
+        add(302, VOLUMIZED, volumized(1, 90, 90, "REMOVEDFROMGAME"));
+        add(303, VOLUMIZED, volumized(2, 99, 99, "PLAY"));
+        assert_eq!(volumizer_bonus_numbers(&g), Some([24, 39]));
+        // No Volumizer of mine: the log shows no pair at all.
+        let mut g = bglog::Game::new();
+        g.real_players = [1].into_iter().collect();
+        let mut add = |id: i32, card_id: &str, tags: Vec<(&str, TagValue)>| {
+            let e = g.entity(id);
+            e.card_id = card_id.to_string();
+            for (k, v) in tags {
+                e.set(k, v);
+            }
+        };
+        add(303, VOLUMIZED, volumized(2, 99, 99, "PLAY"));
+        assert_eq!(volumizer_bonus_numbers(&g), None);
+    }
+
+    /// A minion's Magnetization count is the number of `Magnetic`
+    /// enchantments the game left on it, one per Magnetic that merged, and
+    /// another minion's are not counted.
+    #[test]
+    fn a_minions_magnetizations_are_the_magnetic_enchantments_on_it() {
+        fn tag(value: &str) -> TagValue {
+            TagValue::Text(value.to_string())
+        }
+        fn number(value: i64) -> TagValue {
+            TagValue::Int(value)
+        }
+        let host = |controller: i64| {
+            vec![
+                ("CARDTYPE", tag("MINION")),
+                ("ZONE", tag("PLAY")),
+                ("CONTROLLER", number(controller)),
+            ]
+        };
+        let attached = |to: i64, magnetic: i64| {
+            vec![
+                ("CARDTYPE", tag("ENCHANTMENT")),
+                ("ZONE", tag("PLAY")),
+                ("ATTACHED", number(to)),
+                ("MAGNETIC", number(magnetic)),
+            ]
+        };
+        let mut g = bglog::Game::new();
+        let mut add = |id: i32, card_id: &str, tags: Vec<(&str, TagValue)>| {
+            let e = g.entity(id);
+            e.card_id = card_id.to_string();
+            for (k, v) in tags {
+                e.set(k, v);
+            }
+        };
+        add(100, "BG36_506", host(1));
+        add(101, "BG36_506", host(1));
+        // Two Magnetizations on the first host (a Volumizer and a Satellite),
+        // the plain `Volumized` aura enchantment is not one, and one
+        // Magnetization on the second.
+        add(300, "BG34_170te", attached(100, 1));
+        add(301, "BG31_171te", attached(100, 1));
+        add(302, VOLUMIZED, attached(100, 0));
+        add(303, "BG34_170te", attached(101, 1));
+        let hosts: Vec<i32> = g.entities_in_order().map(|e| e.id).collect();
+        let count = |id: i32| {
+            let e = &g.entities[&id];
+            magnetization_count(&g, e)
+        };
+        assert!(hosts.contains(&100));
+        assert_eq!(count(100), 2);
+        assert_eq!(count(101), 1);
     }
 
     /// The Health half of "your Undead have +A/+H this game, wherever they

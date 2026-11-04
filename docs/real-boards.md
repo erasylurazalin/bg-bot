@@ -233,7 +233,14 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     `refresh_attack`/`refresh_health` (`BG34_854pe`, "after the Tavern is
     Refreshed this game": Waveling, En-Djinn Blazer, Easterly Winds);
     `barrage_attack`/`barrage_health` (`BG34_689e2`, Blood Gem Barrage casts);
-    and `golden_played`, the Golden minions I played from hand this game, which
+    `volumizer_attack`/`volumizer_health`, "your Volumizers have +A/+H this
+    game (wherever they are)", which the game keeps on each Volumizer of mine
+    as its own `Volumized` enchantment (`BG34_170e`, numbers 1 and 2) and not
+    on the player: every Volumizer of mine holds the same pair, so any one of
+    them answers for it, and one Magnetized into a host stops getting it and
+    keeps the pair it had, which is why the collector takes the largest pair
+    among the enchantments still in play; and
+    `golden_played`, the Golden minions I played from hand this game, which
     no tag holds: the collector counts my `play` steps whose card is Golden and
     still on my board after it (a Magnetic minion that merged into a host is a
     Magnetization, not a play). A key is written only when the game has a
@@ -255,6 +262,20 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     keys are written only when the minion has some, and a file written before
     they existed has them nowhere: the loader then seats 0, as it always did,
     and Gem Confiscation steals nothing.
+  - `magnetizations` on a minion: how many Magnetizations it carries, which
+    Utility Drone's "at the end of your turn, give your minions +4/+5 for each
+    Magnetization they have" reads. The game attaches one enchantment per
+    Magnetic that merged into the host (`BG34_170te` for a Red Volumizer,
+    `BG31_171te` for a Satellite: the Magnetic's own card id with a `te` on the
+    end, the `MAGNETIC` tag, the stats it brought), so the count is those
+    enchantments attached to the minion, and the minions a Magnetized minion
+    brought inside it hang on the minion that merged rather than on the host.
+    A Magnetization that happens "an extra time" (Drone Duplicator's Activate)
+    is one enchantment, so the log shows the count without that repeat; the
+    replay's own state has the repeat for the step that made it only. The key
+    is written only when the count is not 0, and a file written before it
+    existed has the count nowhere: the loader then seats 0, as it always did,
+    and Utility Drone gives nothing.
   - `secrets`, the Secret zone by card id in the order the Secrets were got, as
     the board files write it (always written, empty when there is nothing).
   - `waiting` on a hero power: the minion Lock and Load holds, as a board
