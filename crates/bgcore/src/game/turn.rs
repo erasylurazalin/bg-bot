@@ -974,13 +974,13 @@ impl Game {
                 continue;
             }
             // The hand only goes into the fight when something on the board
-            // or in it reads the hand, so most fights skip it entirely.
+            // or in it needs it, so most fights skip it entirely.
             let cards = &self.data.cards;
             let reads_board = |b: &[Minion]| {
-                b.iter().any(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()))
+                b.iter().any(|m| m.parts().any(|(c, _)| cards.get(c).needs_hand_in_fight()))
             };
             let reads_hand =
-                |h: &[Minion]| h.iter().any(|m| cards.get(m.card).reads_hand());
+                |h: &[Minion]| h.iter().any(|m| cards.get(m.card).needs_hand_in_fight());
             let (them, tier, their_counters, their_hand) = match self.players[p].opponent {
                 Some(Opponent::Player(q)) if p < q as usize => {
                     let q = &self.players[q as usize];
@@ -989,7 +989,7 @@ impl Game {
                         || q.trinket_reads_hand(&self.data)
                         || q.locked_and_loaded
                             .as_ref()
-                            .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()))
+                            .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).needs_hand_in_fight()))
                     {
                         &q.hand
                     } else {
@@ -1009,7 +1009,7 @@ impl Game {
                 || self.players[p]
                     .locked_and_loaded
                     .as_ref()
-                    .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()))
+                    .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).needs_hand_in_fight()))
             {
                 &self.players[p].hand
             } else {
@@ -1137,15 +1137,15 @@ impl Game {
         let cards = &self.data.cards;
         let pl = &self.players[0];
         let reads_board =
-            |b: &[Minion]| b.iter().any(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()));
-        let reads_hand = |h: &[Minion]| h.iter().any(|m| cards.get(m.card).reads_hand());
+            |b: &[Minion]| b.iter().any(|m| m.parts().any(|(c, _)| cards.get(c).needs_hand_in_fight()));
+        let reads_hand = |h: &[Minion]| h.iter().any(|m| cards.get(m.card).needs_hand_in_fight());
         let hand: &[Minion] = if reads_board(&pl.board)
             || reads_hand(&pl.hand)
             || pl.trinket_reads_hand(&self.data)
             || pl
                 .locked_and_loaded
                 .as_ref()
-                .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).reads_hand()))
+                .is_some_and(|m| m.parts().any(|(c, _)| cards.get(c).needs_hand_in_fight()))
         {
             &pl.hand
         } else {

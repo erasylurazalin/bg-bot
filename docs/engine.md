@@ -817,7 +817,9 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   counting in hand too, gets one of its trinkets; one qualifying tribe at
   random) and the weights of `rules.toml` for the other three, and writes each
   price: a tribe trinket whose tribe falls short costs `trinket_discount`
-  less. `pick_trinket` pays the price (Gold, so "Gold spent" counters see it),
+  less. A trinket marked `out_of_pool` (patch 37.0.2's removals) is never
+  offered, and one whose `banned_tribes` meets the lobby is left out
+  (`replace_trinket_at` applies both too). `pick_trinket` pays the price (Gold, so "Gold spent" counters see it),
   fills the slot, starts an "every N turns" counter at 1 and runs `on_pick`. A
   power's pick consumes the power (`power_usable` is false afterwards). The
   offer can't be declined: `is_legal` blocks the shopping actions while it is
@@ -1589,7 +1591,9 @@ through exactly that card's code. The engine never matches a gift by name:
   Spore).
 - **Who gets a gift.** `GiftDb::pick` chooses at random among the gifts whose
   window holds the turn and whose condition the host meets, never one already
-  on another offer of the press; the four weight-50 gifts count half. A Golden
+  on another offer of the press and never one whose darkgifts.toml `exclude`
+  list names the host (Furtiveness on Relentless Deflector, patch 37.0.2);
+  the three weight-50 gifts count half. A Golden
   offer (Sinister Invitation) also leaves out every gift that makes its host
   golden (`Gift.makes_golden`, from the effect card's own flag: Gilding): the
   minion is golden already (Era 2026-11-03,

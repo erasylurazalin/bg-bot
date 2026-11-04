@@ -94,10 +94,10 @@ The pool the offers come from:
   takes a pool copy, and the two not picked go back.
 - How a gift is picked for an offered minion: at random among the gifts
   whose turn window holds this turn and whose condition the minion meets,
-  never a gift already on another offer of the same press. The four gifts
+  never a gift already on another offer of the same press. The three gifts
   with weight 50 in the game data (Persisting Horror, Invulnerability,
-  Titanic Strength, Worship) are half as likely as the rest. The other
-  weights (200) are not used.
+  Titanic Strength; Worship lost its 50 in patch 37.0.2) are half as likely
+  as the rest. The other weights (200) are not used.
 - Conditions of the gifts that never showed up in Era's logs: Toxicity on
   Murlocs that aren't Venomous; Efficiency on Activate minions; Worship
   only when you have a Deity; Sunken Persistence on Spellcraft minions;

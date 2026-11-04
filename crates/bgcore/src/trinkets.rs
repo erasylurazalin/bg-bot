@@ -195,6 +195,10 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     RandomMinion { tribe: Tribe, count: u8 },
     /// Get this many random Tavern spells up to your tier (`random_spell`).
     RandomSpell(u8),
+    /// Get this many random Tavern spells of at least `cost` Gold, up to
+    /// your tier (`random_spell_at_least`: Secret Schematic's "one that costs
+    /// (2) or more").
+    RandomSpellAtLeast { cost: u8, count: u8 },
     /// Cast a named card (`cast`) this many times.
     Cast { card: CardId, times: u8 },
     /// Buff the Tavern (`tavern_buff`), now and, unless `this_turn`, for the
@@ -747,6 +751,12 @@ pub struct Trinket {
     pub slot: Slot,
     /// The lobby tribes it belongs to (`lobby_subsets`); empty is neutral.
     pub tribes: Tribes,
+    /// The lobby tribes it is banned in: never offered while one of them is
+    /// in the lobby (Wand of Divination in a Quilboar lobby).
+    pub banned: Tribes,
+    /// A trinket that has left the game (patch 37.0.2): its effects still
+    /// run for old logs and boards, but no offer may pick it again.
+    pub out_of_pool: bool,
     pub mechanic: Option<Mechanic>,
     /// Caps the hook lists per turn ("Twice per turn").
     pub uses_per_turn: Option<u8>,
@@ -1019,6 +1029,9 @@ struct RawAct {
     random_tier_minion: Option<u8>,
     random_minion: Option<String>,
     random_spell: Option<u8>,
+    /// Get random Tavern spells that cost at least this much (Secret
+    /// Schematic).
+    random_spell_at_least: Option<u8>,
     cast: Option<String>,
     times: Option<u8>,
     tavern_buff: Option<[i32; 2]>,
@@ -1210,6 +1223,15 @@ struct RawTrinket {
     cost: u8,
     #[serde(default)]
     tribes: Vec<String>,
+    /// Tribes whose lobby never gets this trinket offered (Wand of
+    /// Divination is banned in Quilboar lobbies, patch 37.0.2).
+    #[serde(default)]
+    banned_tribes: Vec<String>,
+    /// A trinket that has left the game (patch 37.0.2's Spell-powered
+    /// Wrench, Quilligraphy Set, Fridge Magnet, Writhing Tentacles): kept for
+    /// old logs and boards, never offered again.
+    #[serde(default)]
+    out_of_pool: bool,
     #[serde(default)]
     mechanic: Option<String>,
     #[serde(default)]
@@ -1459,6 +1481,8 @@ impl TrinketDb {
                     Act::RandomTierMinion { tier, count: a.count.unwrap_or(1) }
                 } else if let Some(t) = &a.random_minion {
                     Act::RandomMinion { tribe: tribe(t).map_err(err)?, count: a.count.unwrap_or(1) }
+                } else if let Some(cost) = a.random_spell_at_least {
+                    Act::RandomSpellAtLeast { cost, count: a.count.unwrap_or(1) }
                 } else if let Some(n) = a.random_spell {
                     Act::RandomSpell(n)
                 } else if let Some(n) = &a.cast {
@@ -1925,6 +1949,10 @@ impl TrinketDb {
                 }
                 tribes = tribes.with(tribe(n).map_err(err)?);
             }
+            let mut banned = Tribes::NONE;
+            for n in &t.banned_tribes {
+                banned = banned.with(tribe(n).map_err(err)?);
+            }
             let rule = match &t.rule {
                 None => None,
                 Some(r) => {
@@ -1982,6 +2010,8 @@ impl TrinketDb {
                 cost: t.cost,
                 slot,
                 tribes,
+                banned,
+                out_of_pool: t.out_of_pool,
                 mechanic,
                 uses_per_turn: t.uses_per_turn,
                 start_every: t.start_every,

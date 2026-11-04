@@ -189,14 +189,24 @@ fn the_gift_table_parses_with_the_forty_seven_gifts() {
 #[test]
 fn a_gift_is_only_offered_inside_its_window() {
     let g = game(1);
-    let host = g.data.cards.get(id(&g, "Cord Puller"));
+    let host_id = id(&g, "Cord Puller");
+    let host = g.data.cards.get(host_id);
     let horror = gift(&g, "Persisting Horror");
-    assert!(!g.data.gifts.eligible(horror, 9, host, host.tribes, false), "turn 9 is too early");
-    assert!(g.data.gifts.eligible(horror, 10, host, host.tribes, false));
-    assert!(g.data.gifts.eligible(horror, 15, host, host.tribes, false), "no last turn");
+    assert!(
+        !g.data.gifts.eligible(horror, 9, host, host_id, host.tribes, false),
+        "turn 9 is too early"
+    );
+    assert!(g.data.gifts.eligible(horror, 10, host, host_id, host.tribes, false));
+    assert!(
+        g.data.gifts.eligible(horror, 15, host, host_id, host.tribes, false),
+        "no last turn"
+    );
     let fortitude = gift(&g, "Fortitude");
-    assert!(g.data.gifts.eligible(fortitude, 3, host, host.tribes, false));
-    assert!(!g.data.gifts.eligible(fortitude, 4, host, host.tribes, false), "3 only");
+    assert!(g.data.gifts.eligible(fortitude, 3, host, host_id, host.tribes, false));
+    assert!(
+        !g.data.gifts.eligible(fortitude, 4, host, host_id, host.tribes, false),
+        "3 only"
+    );
 }
 
 #[test]
@@ -251,12 +261,13 @@ fn the_weight_fifty_gifts_are_half_as_likely() {
     let gifts = &g.data.gifts;
     // Titanic Strength (weight 50) against Fortitude (no weight), both on any
     // host of turn 11: count the picks.
-    let host = db.get(db.by_name("Cord Puller").unwrap());
+    let host_id = db.by_name("Cord Puller").unwrap();
+    let host = db.get(host_id);
     let titanic = gifts.gifts.iter().position(|x| x.name == "Titanic Strength").unwrap() as u8;
     let mut rng = Rng::new(11);
     let mut counts = [0u32; 2];
     for _ in 0..2000 {
-        let pick = gifts.pick(11, host, host.tribes, false, &[], false, &mut rng).unwrap();
+        let pick = gifts.pick(11, host, host_id, host.tribes, false, &[], false, &mut rng).unwrap();
         if pick as u8 == titanic {
             counts[0] += 1;
         } else {
@@ -344,9 +355,9 @@ fn the_offer_tiers_follow_the_table_by_turn() {
         (4, [[2]], [false, false, false]),
         (5, [[3]], [false, false, false]),
         (6, [[3]], [true, false, false]),
-        (7, [[4]], [true, false, false]),
-        (8, [[4]], [true, false, false]),
-        (9, [[4]], [true, false, false]),
+        (7, [[4]], [true, true, false]),
+        (8, [[4]], [true, true, false]),
+        (9, [[4]], [true, true, false]),
         (10, [[5]], [true, true, false]),
     ];
     for (turn, _, yours) in want {
@@ -654,7 +665,8 @@ fn incalculable_countdowns_tick_two_turns_at_the_end_of_the_turn() {
     let mut m = g.players[0].make_card(&g.data.cards, c, false, n);
     bgcore::game::darkgifts::land_gift(&g.data, &g.players[0], &mut m, incubation, 6);
     g.players[0].board.push(m);
-    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (5, 5));
+    // +6/+6 (patch 37.0.2) on the 1/1 host.
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (7, 7));
     g.players[0].board[0].attack = 10;
     g.players[0].board[0].health = 10;
     // First tick (the end of the turn): 1 turn left, nothing doubles.
@@ -1183,7 +1195,7 @@ fn the_shop_gifts_buff_on_a_card_played_and_on_events() {
     g.players[0].discarded = 1;
     let before = g.players[0].board[pos4].health;
     assert!(g.give_gift(0, pos4, "Desecration", 5));
-    assert_eq!(g.players[0].board[pos4].health, before + 3);
+    assert_eq!(g.players[0].board[pos4].health, before + 2, "+3/+2 for the one discard");
     // And they grow on the event.
     let before = g.players[0].board[pos4].attack;
     g.dark_gift_count(0, 1, |c| c.buff_per_discard);
@@ -1215,13 +1227,13 @@ fn channel_the_devourer_eats_the_health_toughened_shield_added() {
     let (ea, eh) = stats(&g, 0, food + 1);
     play_spell(&mut g, "Channel the Devourer");
     // The gift fired while the spell was played, before the minion is eaten.
-    assert_eq!(stats(&g, 0, food), (fa, fh + 3), "Toughened Shield +3 Health");
+    assert_eq!(stats(&g, 0, food), (fa, fh + 2), "Toughened Shield +2 Health");
     act(&mut g, 0, Action::Target(food as u8));
     assert_eq!(g.players[0].board.len(), 1);
     assert_eq!(
         stats(&g, 0, 0),
-        (ea + fa, eh + fh + 3),
-        "the eater gets the eaten minion's +3 Health"
+        (ea + fa, eh + fh + 2),
+        "the eater gets the eaten minion's +2 Health"
     );
     g.check_invariants().unwrap();
 }
@@ -1271,10 +1283,10 @@ fn channel_the_devourer_eats_the_stats_a_cast_a_spell_watcher_gained() {
 fn channel_the_devourer_eats_the_stats_a_cast_on_this_watcher_gained() {
     // "Whenever you cast a spell on this": Fleeing Fugitive (+1 Health) is
     // not in cards.toml, so Shamanic Tidecaller stands in, giving your
-    // Murlocs +3/+3 with its own Murloc self included. Gatekeeper Amalgam,
+    // Murlocs +3/+4 with its own Murloc self included. Gatekeeper Amalgam,
     // the rule's other example of the hook, has a test of its own below.
     let mut g = game(73);
-    let food = put_on_board(&mut g, 0, "Shamanic Tidecaller"); // 5/7, Murloc
+    let food = put_on_board(&mut g, 0, "Shamanic Tidecaller"); // 6/9, Murloc
     put_on_board(&mut g, 0, "Boom-in-a-Box"); // no Murloc, so it stays put
     let (fa, fh) = stats(&g, 0, food);
     let (ea, eh) = stats(&g, 0, food + 1);
@@ -1283,8 +1295,8 @@ fn channel_the_devourer_eats_the_stats_a_cast_on_this_watcher_gained() {
     assert_eq!(g.players[0].board.len(), 1);
     assert_eq!(
         stats(&g, 0, 0),
-        (ea + fa + 3, eh + fh + 3),
-        "the eater gets the +3/+3 the cast on it gave"
+        (ea + fa + 3, eh + fh + 4),
+        "the eater gets the +3/+4 the cast on it gave"
     );
     g.check_invariants().unwrap();
 }
@@ -1299,12 +1311,12 @@ fn channel_the_devourer_eats_what_the_gatekeepers_tea_set_gave_it() {
     play_spell(&mut g, "Channel the Devourer");
     act(&mut g, 0, Action::Target(food as u8));
     assert_eq!(g.players[0].board.len(), 1);
-    // The Tea Set fires on the cast, giving the Amalgam +4/+4, then the
+    // The Tea Set fires on the cast, giving the Amalgam +3/+3, then the
     // Amalgam is eaten: its own spell is not a spell you cast.
     assert_eq!(
         stats(&g, 0, 0),
-        (ea + fa + 4, eh + fh + 4),
-        "the eater gets the +4/+4 the Tea Set gave the Amalgam"
+        (ea + fa + 3, eh + fh + 3),
+        "the eater gets the +3/+3 the Tea Set gave the Amalgam"
     );
     g.check_invariants().unwrap();
 }
@@ -1472,7 +1484,7 @@ fn a_fight_tribe_buff_reaches_an_amalgamation() {
     let mut rng = Rng::new(11);
     fight_with(db, &board, &[wall], [Counters::default(); 2], 60, &mut rng, &mut seen);
     let mine = |name: &str| seen.stats_of(0, id(&g, name)).unwrap_or_else(|| panic!("{name} swung"));
-    assert_eq!(mine("Drakkari Enchanter"), (aa + 3, ah + 3), "every type is an Elemental");
+    assert_eq!(mine("Drakkari Enchanter"), (aa + 4, ah + 4), "every type is an Elemental");
     assert_eq!(mine("Sky Admiral Rogers"), (pa, ph), "a Pirate is no Elemental");
 }
 
@@ -1994,25 +2006,25 @@ fn the_tier_six_golden_grows_twice_as_fast_per_battlecry() {
     let printed = g.data.cards.get(version);
     assert_eq!(
         (plain.attack, plain.health),
-        (printed.attack + 6, printed.health + 6),
-        "+3/+3 for each of 2 Battlecries"
+        (printed.attack + 8, printed.health + 8),
+        "+4/+4 for each of 2 Battlecries"
     );
     assert_eq!(
         (golden.attack, golden.health),
-        (printed.attack * 2 + 12, printed.health * 2 + 12),
-        "a golden one doubles the printed stats and the +6/+6 per Battlecry"
+        (printed.attack * 2 + 16, printed.health * 2 + 16),
+        "a golden one doubles the printed stats and the +8/+8 per Battlecry"
     );
     // And it grows on the event, both of them.
     g.players[0].board.push(plain);
     g.players[0].board.push(golden);
     let before = (g.players[0].board[0].attack, g.players[0].board[1].attack);
     g.dark_gift_count(0, 1, |c| c.buff_per_battlecry);
-    assert_eq!(g.players[0].board[0].attack, before.0 + 3);
-    assert_eq!(g.players[0].board[1].attack, before.1 + 6);
+    assert_eq!(g.players[0].board[0].attack, before.0 + 4);
+    assert_eq!(g.players[0].board[1].attack, before.1 + 8);
 }
 
 #[test]
-fn the_tier_two_version_gains_attack_on_every_card_played() {
+fn the_tier_two_version_gains_health_on_every_card_played() {
     let mut g = game_with_paradox("Dark Paradox t3");
     let version = g.paradox.unwrap();
     let mut plain = g.players[0].make_card(&g.data.cards, version, false, 0);
@@ -2021,11 +2033,15 @@ fn the_tier_two_version_gains_attack_on_every_card_played() {
     golden.pool_copies = 0;
     g.players[0].board.push(plain);
     g.players[0].board.push(golden);
-    let before = (g.players[0].board[0].attack, g.players[0].board[1].attack);
-    assert_eq!(before.1 - before.0, 2, "the golden is twice the card");
+    assert_eq!(
+        g.players[0].board[1].health - g.players[0].board[0].health,
+        2,
+        "the golden is twice the card"
+    );
+    let before = (g.players[0].board[0].health, g.players[0].board[1].health);
     g.dark_gift_card_played(0);
-    assert_eq!(g.players[0].board[0].attack, before.0 + 3, "+3 Attack per card played");
-    assert_eq!(g.players[0].board[1].attack, before.1 + 6, "the golden gets +6");
+    assert_eq!(g.players[0].board[0].health, before.0 + 2, "+2 Health per card played");
+    assert_eq!(g.players[0].board[1].health, before.1 + 4, "the golden gets +4");
 }
 
 // ---- counting Battlecries (docs/rules/design.md "Counting Battlecries") ----
@@ -2096,8 +2112,8 @@ fn a_battlecry_counts_once_and_a_brann_double_counts_twice() {
     assert_eq!(g.players[0].tp.battlecries, 2, "Murky Sticker's count");
     assert_eq!(
         (g.players[0].hand[h].attack, g.players[0].hand[h].health),
-        (before.0 + 6, before.1 + 6),
-        "+3/+3 for each of the two triggers"
+        (before.0 + 8, before.1 + 8),
+        "+4/+4 for each of the two triggers"
     );
 }
 
@@ -2126,7 +2142,7 @@ fn a_tavern_dark_paradox_grows_on_a_battlecry() {
     play_from_hand(&mut g, 0, "Refreshing Anomaly");
     assert_eq!(
         (g.players[0].shop[at].attack, g.players[0].shop[at].health),
-        (before.0 + 3, before.1 + 3),
+        (before.0 + 4, before.1 + 4),
         "the Tavern copy grows by one Battlecry"
     );
     // Brann's double gives it two.
@@ -2134,7 +2150,7 @@ fn a_tavern_dark_paradox_grows_on_a_battlecry() {
     play_from_hand(&mut g, 0, "Refreshing Anomaly");
     assert_eq!(
         (g.players[0].shop[at].attack, g.players[0].shop[at].health),
-        (before.0 + 9, before.1 + 9),
+        (before.0 + 12, before.1 + 12),
         "two more triggers"
     );
 }
@@ -2181,7 +2197,7 @@ fn a_discover_battlecry_counts_at_the_pick_not_on_the_play() {
     assert_eq!(g.players[0].pending_battlecries, 0, "nothing left owed");
     assert_eq!(
         (g.players[0].shop[at].attack, g.players[0].shop[at].health),
-        (before.0 + 3, before.1 + 3),
+        (before.0 + 4, before.1 + 4),
         "the Tavern copy grows by the one trigger"
     );
 }
@@ -2209,8 +2225,8 @@ fn a_brann_doubled_discover_battlecry_counts_twice_at_the_picks() {
     assert_eq!(g.players[0].pending_battlecries, 0);
     assert_eq!(
         (g.players[0].shop[at].attack, g.players[0].shop[at].health),
-        (before.0 + 6, before.1 + 6),
-        "+3/+3 for each of the two triggers"
+        (before.0 + 8, before.1 + 8),
+        "+4/+4 for each of the two triggers"
     );
 }
 
@@ -2279,4 +2295,30 @@ fn a_triple_keeps_both_replication_gifts_and_pays_two_copies() {
     g.dark_gift_end_of_turn(0);
     assert_eq!(copies(&g), 2, "one plain copy per gift");
     g.check_invariants().unwrap();
+}
+
+/// Patch 37.0.2: Relentless Deflector can no longer be offered with
+/// Furtiveness. The exclusion is data (the gift's `exclude` list in
+/// darkgifts.toml), so the engine compares card ids, never names.
+#[test]
+fn furtiveness_never_lands_on_relentless_deflector() {
+    let g = game(1);
+    let gifts = &g.data.gifts;
+    let furt = gift(&g, "Furtiveness");
+    let deflector = id(&g, "Relentless Deflector");
+    let host = g.data.cards.get(deflector);
+    assert!(
+        !gifts.eligible(furt, 4, host, deflector, host.tribes, false),
+        "Furtiveness is never offered on the Deflector"
+    );
+    // Another minion on the same turn still gets it.
+    let other = id(&g, "Cord Puller");
+    let card = g.data.cards.get(other);
+    assert!(gifts.eligible(furt, 4, card, other, card.tribes, false));
+    // And no pick for the Deflector ever hands it out.
+    let mut rng = Rng::new(5);
+    for _ in 0..200 {
+        let pick = gifts.pick(4, host, deflector, host.tribes, false, &[], false, &mut rng);
+        assert_ne!(pick, Some(furt), "the Deflector was offered Furtiveness");
+    }
 }

@@ -315,7 +315,7 @@ fn blood_gems_are_plain_spells_no_counters_no_azerite_no_spell_power() {
     g.give(0, "Tavern Coin").unwrap();
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 0);
-    assert_eq!(stats(&g.players[0].shop[0]), (before.0 + 4, before.1 + 3), "a Tavern spell does");
+    assert_eq!(stats(&g.players[0].shop[0]), (before.0 + 3, before.1 + 3), "a Tavern spell does");
     g.check_invariants().unwrap();
 }
 
@@ -451,7 +451,7 @@ fn a_choose_one_spells_balinda_casts_feed_felboar_each_time() {
 #[test]
 fn a_whenever_tavern_spell_trigger_fires_before_the_spell_resolves() {
     // Living Azerite: "Whenever you cast a Tavern spell, give Elementals in
-    // the Tavern +4/+3". "Whenever" is on the cast, so a spell that reads the
+    // the Tavern +3/+3". "Whenever" is on the cast, so a spell that reads the
     // Tavern (Arcane Absorption) sees the buffed minion.
     let mut g = game(31);
     put_on_board(&mut g, 0, "Living Azerite", false);
@@ -463,10 +463,10 @@ fn a_whenever_tavern_spell_trigger_fires_before_the_spell_resolves() {
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 0);
     act(&mut g, 0, Action::Target(1));
-    // Dune Dweller 3/3 takes two +4/+3 (two Azerites): 11/9. Half of it,
-    // rounded up, is 6/5.
-    assert_eq!(stats(&g.players[0].shop[0]), (11, 9), "both Azerites buffed the Tavern");
-    assert_eq!(stats(&g.players[0].board[1]), (8 + 6, 6 + 5), "the spell read the buffed Tavern");
+    // Dune Dweller 3/3 takes two +3/+3 (two Azerites): 9/9. Half of it,
+    // rounded up, is 5/5.
+    assert_eq!(stats(&g.players[0].shop[0]), (9, 9), "both Azerites buffed the Tavern");
+    assert_eq!(stats(&g.players[0].board[1]), (6 + 5, 6 + 5), "the spell read the buffed Tavern");
     g.check_invariants().unwrap();
 }
 
@@ -688,8 +688,8 @@ fn every_extra_gem_cast_makes_the_gatekeeper_cast_its_tea_set_again() {
     // A gem that lands on a Gatekeeper Amalgam makes it cast its Misplaced Tea
     // Set, and one gem play with a golden Hot-Air Surveyor is three casts, so
     // three Tea Sets: the Gems give the Amalgam +1/+1 three times and its own
-    // Tea Sets +4/+4 three times, and the Tea Set's one-pick-per-type rule
-    // gives the three Quilboar hosts +4/+4 a cast between them.
+    // Tea Sets +3/+3 three times, and the Tea Set's one-pick-per-type rule
+    // gives the three Quilboar hosts +3/+3 a cast between them.
     let mut g = game(20);
     put_on_board(&mut g, 0, "Hot-Air Surveyor", true);
     put_on_board(&mut g, 0, "Gatekeeper Amalgam", false);
@@ -702,12 +702,12 @@ fn every_extra_gem_cast_makes_the_gatekeeper_cast_its_tea_set_again() {
         let now = stats(&g.players[0].board[i]);
         (now.0 - before[i].0, now.1 - before[i].1)
     };
-    assert_eq!(delta(1), (15, 15), "three Gems and three Tea Sets on the Amalgam");
+    assert_eq!(delta(1), (12, 12), "three Gems and three Tea Sets on the Amalgam");
     let quilboar: (i32, i32) = [0, 2, 3]
         .into_iter()
         .map(delta)
         .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
-    assert_eq!(quilboar, (12, 12), "three +4/+4 Tea Set picks over the Quilboars");
+    assert_eq!(quilboar, (9, 9), "three +3/+3 Tea Set picks over the Quilboars");
     g.check_invariants().unwrap();
 }
 
@@ -1304,7 +1304,7 @@ fn rally_gems_in_a_fight_use_the_gem_value_and_refiner_raises_it_for_good() {
         &mut Rng::new(4),
         &mut (),
     );
-    assert_eq!(out.sides[0].gem_gain, (1, 2), "one Rally");
+    assert_eq!(out.sides[0].gem_gain, (1, 1), "one Rally");
 }
 
 #[test]
@@ -1431,8 +1431,8 @@ fn the_golem_attacks_first_with_the_juggernauts_stats_and_stays() {
         &mut Rng::new(9),
         &mut w,
     );
-    // the Golem (6/15, the Juggernaut's stats) swung first
-    assert_eq!(w.0[0], ("Golem".to_string(), 6, 15));
+    // the Golem (13/17, the Juggernaut's stats) swung first
+    assert_eq!(w.0[0], ("Golem".to_string(), 13, 17));
     assert!(w.0.iter().any(|(n, _, _)| n == "Jailbird Juggernaut"));
     // both survive: the wall has 0 attack
     assert_eq!(out.sides[0].permanent_stats[0], (0, 0));
@@ -1484,7 +1484,7 @@ fn a_golden_juggernaut_makes_a_double_stat_golem_and_a_full_board_makes_none() {
         &mut Rng::new(11),
         &mut w,
     );
-    assert_eq!(w.0[0], ("Golem".to_string(), 24, 60), "double the golden stats");
+    assert_eq!(w.0[0], ("Golem".to_string(), 52, 68), "double the golden stats");
 
     // a full board: no Golem, the Juggernaut attacks normally
     let mut w = SawAttacks(Vec::new());
@@ -1554,16 +1554,16 @@ fn every_quilboar_card_is_in_the_data_with_its_real_numbers() {
         ("Bonker", 4, 2, 7),
         ("Bramble Tunneler", 4, 3, 6),
         ("Geomagus Roogug", 4, 4, 6),
-        ("Hot-Air Surveyor", 4, 3, 7),
+        ("Hot-Air Surveyor", 5, 3, 7),
         ("Razorfen Flapper", 4, 5, 3),
         ("Snare Trapper", 4, 4, 4),
         ("Razorfen Vineweaver", 5, 4, 4),
-        ("Sanguine Refiner", 5, 3, 8),
+        ("Sanguine Refiner", 5, 4, 9),
         ("Sanguine Champion", 6, 9, 4),
         ("Turbo Hogrider", 6, 6, 8),
         ("Veteran Brigand", 6, 8, 8),
         ("Victorious Geomant", 6, 10, 10),
-        ("Jailbird Juggernaut", 7, 6, 15),
+        ("Jailbird Juggernaut", 7, 13, 17),
     ];
     for &(n, tier, a, h) in expect {
         let c = dbc.get(id(&dbc, n));
@@ -1712,10 +1712,10 @@ fn a_geomants_leftover_gems_are_casts_the_target_sees() {
     act(&mut g, 0, Action::Activate(1));
     let now = stats(&g.players[0].board[0]);
     // Six Gems of +1/+1, and a Misplaced Tea Set for each of them: the Amalgam
-    // is every type and the only minion, so it takes one +4/+4 a cast.
+    // is every type and the only minion, so it takes one +3/+3 a cast.
     assert_eq!(
         (now.0 - before.0, now.1 - before.1),
-        (6 + 6 * 4, 6 + 6 * 4),
+        (6 + 6 * 3, 6 + 6 * 3),
         "six Gems and their six Tea Sets"
     );
     g.check_invariants().unwrap();
@@ -1740,7 +1740,7 @@ fn a_surveyor_adds_no_cast_to_a_geomants_leftover_gems() {
     // the hand and do not reach them).
     assert_eq!(
         (now.0 - before.0, now.1 - before.1),
-        (6 + 6 * 4, 6 + 6 * 4),
+        (6 + 6 * 3, 6 + 6 * 3),
         "the Surveyor's extra casts are for Gems played from the hand"
     );
     g.check_invariants().unwrap();

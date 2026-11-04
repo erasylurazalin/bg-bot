@@ -178,16 +178,16 @@ fn the_satellite_token_is_4_4_and_attachers_pass_their_own_stats() {
     let db = db();
     let sat = db.make(id(&db, "Satellite"), false);
     assert_eq!(stats(&sat), (4, 4));
-    // Spark Snapper attaches a 2/3 that grows with its improvements.
+    // Spark Snapper attaches a 2/2 that grows with its improvements.
     let mut g = game(2);
     put_on_board(&mut g, 0, "Spark Snapper", false);
     put_in_hand(&mut g, 0, "Cord Puller", false);
     play(&mut g, 0, 0, 1);
-    assert_eq!(stats(&g.players[0].board[1]), (1 + 2, 1 + 3));
+    assert_eq!(stats(&g.players[0].board[1]), (1 + 2, 1 + 2));
     put_in_hand(&mut g, 0, "Cord Puller", false);
     play(&mut g, 0, 0, 2);
-    // second play: Snapper improved once, so (1 + 1) stacks of 2/3
-    assert_eq!(stats(&g.players[0].board[2]), (1 + 4, 1 + 6));
+    // second play: Snapper improved once, so (1 + 1) stacks of 2/2
+    assert_eq!(stats(&g.players[0].board[2]), (1 + 4, 1 + 4));
     g.check_invariants().unwrap();
 }
 

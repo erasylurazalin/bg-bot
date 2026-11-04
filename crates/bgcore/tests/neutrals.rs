@@ -602,8 +602,8 @@ fn tea_set_buffs_a_dual_tribe_minion_once() {
     put_on_board(&mut g, 0, "Gearfin");
     g.give(0, "Misplaced Tea Set").unwrap();
     play_card(&mut g, 0, "Misplaced Tea Set");
-    // Gearfin is Mech and Murloc and is the only minion: one +4/+4.
-    assert_eq!(stats(&g.players[0].board[0]), (10, 9));
+    // Gearfin is Mech and Murloc and is the only minion: one +3/+3.
+    assert_eq!(stats(&g.players[0].board[0]), (9, 8));
     g.check_invariants().unwrap();
 }
 
@@ -614,7 +614,7 @@ fn balinda_does_not_double_tea_set() {
     put_on_board(&mut g, 0, "Balinda Stonehearth");
     g.give(0, "Misplaced Tea Set").unwrap();
     play_card(&mut g, 0, "Misplaced Tea Set");
-    assert_eq!(stats(&g.players[0].board[0]), (10, 9));
+    assert_eq!(stats(&g.players[0].board[0]), (9, 8));
     g.check_invariants().unwrap();
 }
 
@@ -1301,12 +1301,12 @@ fn natural_blessing_picks_one_type_of_a_dual_minion() {
     g.give(0, "Natural Blessing").unwrap();
     play_card(&mut g, 0, "Natural Blessing");
     act(&mut g, 0, Action::Target(gearfin as u8));
-    assert_eq!(stats(&g.players[0].board[0]), (8, 6)); // Gearfin +2/+1
+    assert_eq!(stats(&g.players[0].board[0]), (8, 7)); // Gearfin +2/+2
     let mech = stats(&g.players[0].board[1]);
     let murloc = stats(&g.players[0].board[2]);
     // Exactly one of the two single-type minions shares the picked type.
     assert!(
-        (mech == (4, 3) && murloc == (2, 2)) || (mech == (2, 2) && murloc == (4, 3)),
+        (mech == (4, 4) && murloc == (2, 2)) || (mech == (2, 2) && murloc == (4, 4)),
         "mech {mech:?}, murloc {murloc:?}"
     );
     g.check_invariants().unwrap();
@@ -1314,7 +1314,7 @@ fn natural_blessing_picks_one_type_of_a_dual_minion() {
 
 #[test]
 fn natural_blessing_reaches_the_taverns_minions_of_the_type() {
-    // "Give all minions that share a type with it +2/+1" is every such
+    // "Give all minions that share a type with it +2/+2" is every such
     // minion, the Tavern's included (Era, 2026-11-02; log 15_25_26-g2 turn 7
     // step 27, where a Tavern Abyssal Envoy gained it).
     let mut g = game(34);
@@ -1325,10 +1325,10 @@ fn natural_blessing_reaches_the_taverns_minions_of_the_type() {
     g.give(0, "Natural Blessing").unwrap();
     play_card(&mut g, 0, "Natural Blessing");
     act(&mut g, 0, Action::Target(0));
-    assert_eq!(stats(&g.players[0].board[0]), (4, 3), "the board's Mech: +2/+1");
+    assert_eq!(stats(&g.players[0].board[0]), (4, 4), "the board's Mech: +2/+2");
     assert_eq!(
         stats(&g.players[0].shop[0]),
-        (before_mech.0 + 2, before_mech.1 + 1),
+        (before_mech.0 + 2, before_mech.1 + 2),
         "the Tavern's Mech gains it too"
     );
     assert_eq!(stats(&g.players[0].shop[1]), before_murloc, "the Murloc does not");
@@ -1345,8 +1345,8 @@ fn a_same_tribe_buff_reaches_a_minion_through_either_of_its_tribes() {
     play_card(&mut g, 0, "Natural Blessing");
     act(&mut g, 0, Action::Target(1)); // the Lullabot is a Mech
     // the buff reaches Gearfin through its Mech tribe, never Tad
-    assert_eq!(stats(&g.players[0].board[0]), (6 + 2, 5 + 1));
-    assert_eq!(stats(&g.players[0].board[1]), (2 + 2, 2 + 1));
+    assert_eq!(stats(&g.players[0].board[0]), (6 + 2, 5 + 2));
+    assert_eq!(stats(&g.players[0].board[1]), (2 + 2, 2 + 2));
     assert_eq!(stats(&g.players[0].board[2]), (2, 2));
     g.check_invariants().unwrap();
 }

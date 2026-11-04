@@ -467,12 +467,12 @@ fn ravager_hits_the_target_before_the_attack_lands_so_it_takes_its_attack_twice(
         plain(wall(&db), 0, 100),
     ];
     let (_, log) = run(&db, &[rav], &enemies, 1, 3);
-    // The attack event comes after the Rally: the target is already at 14 - 7.
+    // The attack event comes after the Rally: the target is already at 14 - 11.
     assert_eq!(
         log.attacks()[0],
-        &Ev::Attack(0, "Obsidian Ravager".into(), 7, "Microbot".into(), 7)
+        &Ev::Attack(0, "Obsidian Ravager".into(), 11, "Microbot".into(), 3)
     );
-    // 7 from the Rally and 7 from the attack kill a 14 health target.
+    // 11 from the Rally and 11 from the attack kill a 14 health target.
     assert_eq!(log.deaths(1, "Microbot"), 1);
     // The attacker took the target's (zero) damage and lives.
     assert_eq!(log.deaths(0, "Obsidian Ravager"), 0);
@@ -493,7 +493,7 @@ fn ravager_hits_one_random_neighbour_and_golden_hits_both() {
     for seed in 0..30 {
         let (_, log) = run(&db, &[mk(&db, "Obsidian Ravager", false)], &enemies(), 1, seed);
         let dead = log.deaths(1, "Microbot");
-        assert_eq!(dead, 1, "exactly one neighbour takes the 7 (seed {seed})");
+        assert_eq!(dead, 1, "exactly one neighbour takes the 11 (seed {seed})");
         // which one: the survivor still stands, so check by the board order
         // through a second fight where the left one is stronger
         let mut left_tough = enemies();
@@ -508,12 +508,12 @@ fn ravager_hits_one_random_neighbour_and_golden_hits_both() {
     assert!(hit_left && hit_right, "the neighbour is picked at random");
     for seed in 0..5 {
         let (_, log) = run(&db, &[mk(&db, "Obsidian Ravager", true)], &enemies(), 1, seed);
-        // the golden Ravager has 14 Attack: the target takes 28 in all and
+        // the golden Ravager has 22 Attack: the target takes 44 in all and
         // both neighbours die
         assert_eq!(log.deaths(1, "Microbot"), 2, "both neighbours (seed {seed})");
         assert_eq!(
             log.attacks()[0],
-            &Ev::Attack(0, "Obsidian Ravager".into(), 14, "Microbot".into(), 100 - 14)
+            &Ev::Attack(0, "Obsidian Ravager".into(), 22, "Microbot".into(), 100 - 22)
         );
     }
 }
@@ -538,7 +538,7 @@ fn ravager_rally_pops_divine_shield_and_a_kill_makes_the_swing_fizzle() {
     assert_eq!(log.deaths(1, "Microbot"), 1, "the Rally pops the shield, the attack kills");
     assert_eq!(
         log.attacks()[0],
-        &Ev::Attack(0, "Obsidian Ravager".into(), 7, "Microbot".into(), 7)
+        &Ev::Attack(0, "Obsidian Ravager".into(), 11, "Microbot".into(), 7)
     );
 
     // A target the Rally kills never gets hit: no attack event, and it can't
@@ -673,26 +673,26 @@ fn champion_battlecry_buffs_the_tavern_this_game() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     let after: Vec<(i32, i32)> = g.players[0].shop.iter().map(stats).collect();
     for (b, a) in base.iter().zip(&after) {
-        assert_eq!(*a, (b.0 + 8, b.1 + 8));
+        assert_eq!(*a, (b.0 + 12, b.1 + 12));
     }
     // Minions that show up later have it too: it lasts the game.
     act(&mut g, 0, Action::Roll);
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
         if !c.is_spell() {
-            assert_eq!(stats(m), (c.attack + 8, c.health + 8), "{}", c.name);
+            assert_eq!(stats(m), (c.attack + 12, c.health + 12), "{}", c.name);
         }
     }
     g.check_invariants().unwrap();
 
-    // Golden: +16/+16.
+    // Golden: +24/+24.
     let mut g = game(42);
     put_in_hand(&mut g, 0, "Champion of Sargeras", true);
     set_shop(&mut g, 0, &["Wolf Pup", "Cord Puller", "Cord Puller"]);
     let base: Vec<(i32, i32)> = g.players[0].shop.iter().map(stats).collect();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     for (b, m) in base.iter().zip(&g.players[0].shop) {
-        assert_eq!(stats(m), (b.0 + 16, b.1 + 16));
+        assert_eq!(stats(m), (b.0 + 24, b.1 + 24));
     }
 }
 
@@ -714,9 +714,9 @@ fn champion_deathrattle_buffs_the_tavern_from_a_fight_golden_and_with_titus() {
             .sides[0]
             .tavern_buff_gain
     };
-    assert_eq!(gain(&[victim(false)]), (8, 8));
-    assert_eq!(gain(&[victim(true)]), (16, 16));
-    assert_eq!(gain(&[victim(false), mk(&db, "Titus Rivendare", false)]), (16, 16));
+    assert_eq!(gain(&[victim(false)]), (12, 12));
+    assert_eq!(gain(&[victim(true)]), (24, 24));
+    assert_eq!(gain(&[victim(false), mk(&db, "Titus Rivendare", false)]), (24, 24));
 
     // And it reaches the Tavern after a real fight.
     let mut g = game(43);
@@ -729,7 +729,7 @@ fn champion_deathrattle_buffs_the_tavern_from_a_fight_golden_and_with_titus() {
     while g.turn == 1 {
         g.step(Action::EndTurn).unwrap();
     }
-    assert!(g.players[0].tavern_buffs.iter().any(|b| (b.attack, b.health) == (8, 8) && !b.this_turn));
+    assert!(g.players[0].tavern_buffs.iter().any(|b| (b.attack, b.health) == (12, 12) && !b.this_turn));
 }
 
 // ================= Futurefin =================
@@ -750,20 +750,20 @@ fn futurefin_gives_its_stats_to_the_leftmost_minion_in_hand() {
     let bot = stats(&g.players[0].hand[2]);
     end_turn_of(&mut g, 0);
     let hand = &g.players[0].hand;
-    assert_eq!(stats(&hand[1]), (pup.0 + 7, pup.1 + 13));
+    assert_eq!(stats(&hand[1]), (pup.0 + 17, pup.1 + 23));
     assert_eq!(stats(&hand[2]), bot, "only the left-most one");
     // it's a copy: Futurefin keeps its stats
-    assert_eq!(stats(&g.players[0].board[0]), (7, 13));
+    assert_eq!(stats(&g.players[0].board[0]), (17, 23));
     g.check_invariants().unwrap();
 
-    // Golden Futurefin (14/26) gives double: 28/52.
+    // Golden Futurefin (34/46) gives double: 68/92.
     let mut g = game(52);
     put_on_board(&mut g, 0, "Futurefin", true);
     g.give(0, "Wolf Pup").unwrap();
     let pup = stats(&g.players[0].hand[0]);
     end_turn_of(&mut g, 0);
-    assert_eq!(stats(&g.players[0].hand[0]), (pup.0 + 28, pup.1 + 52));
-    assert_eq!(stats(&g.players[0].board[0]), (14, 26));
+    assert_eq!(stats(&g.players[0].hand[0]), (pup.0 + 68, pup.1 + 92));
+    assert_eq!(stats(&g.players[0].board[0]), (34, 46));
 
     // Drakkari Enchanter doubles the end of turn.
     let mut g = game(53);
@@ -772,7 +772,7 @@ fn futurefin_gives_its_stats_to_the_leftmost_minion_in_hand() {
     g.give(0, "Wolf Pup").unwrap();
     let pup = stats(&g.players[0].hand[0]);
     end_turn_of(&mut g, 0);
-    assert_eq!(stats(&g.players[0].hand[0]), (pup.0 + 14, pup.1 + 26));
+    assert_eq!(stats(&g.players[0].hand[0]), (pup.0 + 34, pup.1 + 46));
 
     // No minion in hand: nothing happens, spells are skipped.
     let mut g = game(54);
@@ -815,18 +815,20 @@ fn last_one_standing_buffs_one_minion_of_each_type_once_and_can_pick_itself() {
         let perm = &out.sides[0].permanent_stats;
         let buffed: Vec<usize> = (0..6).filter(|&i| perm[i] != (0, 0)).collect();
         assert_eq!(buffed.len(), 6, "seed {seed}: {perm:?}");
-        assert!(buffed.iter().all(|&i| perm[i] == (15, 15)), "seed {seed}: {perm:?}");
+        assert!(buffed.iter().all(|&i| perm[i] == (10, 10)), "seed {seed}: {perm:?}");
     }
 
     // Alone it is every type but one minion: one buff, not five.
     let (out, _) = run(&db, &[mk(&db, "The Last One Standing", false)], &[wall(&db)], 1, 1);
-    assert_eq!(out.sides[0].permanent_stats[0], (15, 15));
-    // Golden does the whole thing twice (with a fresh pick each time).
+    assert_eq!(out.sides[0].permanent_stats[0], (10, 10));
+    // Golden does the whole thing twice, each pass improving the next by the
+    // card's own +10/+10: on its own it takes +10/+10 and then +20/+20.
     let (out, _) = run(&db, &[mk(&db, "The Last One Standing", true)], &[wall(&db)], 1, 1);
     assert_eq!(out.sides[0].permanent_stats[0], (30, 30));
     let (out, _) = run(&db, &los_board_golden(&db), &[wall(&db)], 1, 2);
     let total: i32 = out.sides[0].permanent_stats.iter().map(|s| s.0).sum();
-    assert!((10 * 15..=12 * 15).contains(&total), "two passes of five or six buffs: {total}");
+    // five or six picks a pass: +10/+10 each, then +20/+20 each.
+    assert!((5 * 30..=6 * 30).contains(&total), "two passes of five or six buffs: {total}");
 }
 
 fn los_board_golden(db: &CardDb) -> Vec<Minion> {
@@ -842,7 +844,7 @@ fn last_one_standing_triggers_before_the_attack_and_the_gain_is_kept() {
     let (_, log) = run(&db, &[mk(&db, "The Last One Standing", false)], &[wall(&db)], 1, 1);
     assert_eq!(
         log.attacks()[0],
-        &Ev::Attack(0, "The Last One Standing".into(), 30, "Microbot".into(), 1000)
+        &Ev::Attack(0, "The Last One Standing".into(), 20, "Microbot".into(), 1000)
     );
 
     // After a real fight the stats are on the board.
@@ -856,7 +858,7 @@ fn last_one_standing_triggers_before_the_attack_and_the_gain_is_kept() {
         g.step(Action::EndTurn).unwrap();
     }
     let los = g.players[0].board[0];
-    assert!(los.attack >= 30 && los.health >= 30, "kept: {:?}", stats(&los));
+    assert!(los.attack >= 20 && los.health >= 20, "kept: {:?}", stats(&los));
     g.check_invariants().unwrap();
 }
 
@@ -871,10 +873,12 @@ fn last_one_standing_rally_works_in_the_shop_through_sky_hatch_runaway() {
     assert!(g.players[0].pending_target.is_none());
     let b = &g.players[0].board;
     // the Runaway is a Dragon: it can only be picked for that one type
-    let gained = (b[0].attack - 15) + (b[1].attack - 4);
-    assert!(gained >= 15 && (gained % 15 == 0), "buffed in 15s: {gained}");
-    assert!(b[0].attack - 15 <= 15, "no minion gets two buffs");
-    assert!(b[1].attack - 4 <= 15, "no minion gets two buffs");
+    // The Last One Standing is 10/10 and the Runaway 4/4: every pick is one
+    // +10/+10, and no minion takes two of them.
+    let gained = (b[0].attack - 10) + (b[1].attack - 4);
+    assert!(gained >= 10 && (gained % 10 == 0), "buffed in 10s: {gained}");
+    assert!(b[0].attack - 10 <= 10, "no minion gets two buffs");
+    assert!(b[1].attack - 4 <= 10, "no minion gets two buffs");
     g.check_invariants().unwrap();
 }
 
@@ -899,14 +903,14 @@ fn walls(db: &CardDb, n: usize) -> Vec<Minion> {
 #[test]
 fn kodo_gives_summons_its_attack_and_maximum_health() {
     let db = db();
-    // Kodo is hit for 3 by Boom, so its Health is 29 but its maximum stays 32.
+    // Kodo is hit for 3 by Boom, so its Health is 27 but its maximum stays 30.
     let (_, log) = run(&db, &kodo_board(&db, false, 1), &walls(&db, 4), 1, 1);
-    // Beetle is 2/2: +16 Attack, +32 maximum Health (not 29)
-    assert_eq!(log.summons(0, "Beetle"), vec![(2 + 16, 2 + 32)]);
+    // Beetle is 2/2: double the Kodo's 15 Attack and 30 maximum Health.
+    assert_eq!(log.summons(0, "Beetle"), vec![(2 + 30, 2 + 60)]);
 
-    // Golden Kodo (32/64) gives double: +64/+128.
+    // Golden Kodo (30/60) gives triple: +90/+180.
     let (_, log) = run(&db, &kodo_board(&db, true, 1), &walls(&db, 4), 1, 1);
-    assert_eq!(log.summons(0, "Beetle"), vec![(2 + 64, 2 + 128)]);
+    assert_eq!(log.summons(0, "Beetle"), vec![(2 + 90, 2 + 180)]);
 }
 
 #[test]
@@ -915,7 +919,7 @@ fn kodo_stops_after_three_summons_per_combat() {
     let (_, log) = run(&db, &kodo_board(&db, false, 5), &walls(&db, 8), 1, 1);
     let beetles = log.summons(0, "Beetle");
     assert_eq!(beetles.len(), 5);
-    assert_eq!(&beetles[..3], &[(18, 34); 3], "the first three get the gift");
+    assert_eq!(&beetles[..3], &[(32, 62); 3], "the first three get the gift");
     assert_eq!(&beetles[3..], &[(2, 2); 2], "then Kodo is done");
 
     // Two Kodos have three gifts each, and each one gives its own stats.
@@ -929,10 +933,10 @@ fn kodo_stops_after_three_summons_per_combat() {
     let (_, log) = run(&db, &board, &walls(&db, 9), 1, 1);
     let beetles = log.summons(0, "Beetle");
     assert_eq!(beetles.len(), 4);
-    // two Kodos each give +16/+32 to each of the first three summons
-    assert_eq!(beetles[0], (2 + 32, 2 + 64));
-    assert_eq!(beetles[1], (2 + 32, 2 + 64));
-    assert_eq!(beetles[2], (2 + 32, 2 + 64));
+    // two Kodos each give +30/+60 to each of the first three summons
+    assert_eq!(beetles[0], (2 + 60, 2 + 120));
+    assert_eq!(beetles[1], (2 + 60, 2 + 120));
+    assert_eq!(beetles[2], (2 + 60, 2 + 120));
     assert_eq!(beetles[3], (2, 2), "both Kodos have used their three");
 }
 
@@ -943,8 +947,8 @@ fn kodo_counts_a_reborn_summon_too() {
     board[2].keywords.set(Keywords::REBORN);
     let (_, log) = run(&db, &board, &walls(&db, 4), 1, 1);
     // the Deathrattle Beetle and the Reborn Vermin (1 Health) both get it
-    assert_eq!(log.summons(0, "Beetle"), vec![(18, 34)]);
-    assert_eq!(log.summons(0, "Buzzing Vermin"), vec![(1 + 16, 1 + 32)]);
+    assert_eq!(log.summons(0, "Beetle"), vec![(32, 62)]);
+    assert_eq!(log.summons(0, "Buzzing Vermin"), vec![(1 + 30, 1 + 60)]);
 }
 
 #[test]
@@ -952,7 +956,7 @@ fn kodo_does_not_buff_summons_on_the_other_side() {
     let db = db();
     let (_, log) = run(&db, &walls(&db, 1), &kodo_board(&db, false, 1), 1, 1);
     // side 1 has the Kodo, so its Beetle is the one that gets the gift
-    assert_eq!(log.summons(1, "Beetle"), vec![(18, 34)]);
+    assert_eq!(log.summons(1, "Beetle"), vec![(32, 62)]);
     assert!(log.summons(0, "Beetle").is_empty());
 }
 
@@ -1062,7 +1066,7 @@ fn a_beatboxer_played_takes_its_satellite_and_sets_none_off() {
     put_in_hand(&mut g, 0, "Polarizing Beatboxer", false);
     act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
     let b = &g.players[0].board;
-    assert_eq!(stats(&b[2]), (5 + 2, 10 + 3), "the Satellite joined it");
+    assert_eq!(stats(&b[2]), (5 + 2, 10 + 2), "the Satellite joined it");
     assert_eq!(stats(&b[1]), (5, 10), "the other Beatboxer got nothing");
     g.check_invariants().unwrap();
 }
@@ -1082,11 +1086,11 @@ fn a_satellite_joins_the_played_magnetic_before_it_merges() {
     g.give(0, "Annoy-o-Module").unwrap(); // 2/4 Magnetic
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
     let b = &g.players[0].board;
-    assert_eq!(stats(&b[1]), (1 + 4, 1 + 7), "the module and its 2/3 Satellite");
+    assert_eq!(stats(&b[1]), (1 + 4, 1 + 6), "the module and its 2/2 Satellite");
     assert_eq!(b[1].magnetizations, 1, "one Magnetization: the Satellite rode in");
-    assert_eq!(stats(&b[2]), (5 + 6, 10 + 10), "the Beatboxer gets both");
+    assert_eq!(stats(&b[2]), (5 + 6, 10 + 8), "the Beatboxer gets both");
     assert_eq!(b[2].magnetizations, 2);
-    assert_eq!(stats(&b[0]), (6, 8), "the Snapper only improves itself");
+    assert_eq!(stats(&b[0]), (8, 8), "the Snapper only improves itself");
     g.check_invariants().unwrap();
 }
 
@@ -1138,9 +1142,9 @@ fn beatboxer_with_glambot_satellites() {
         act(&mut g, 0, Action::Target(1));
         let n = if golden { 2 } else { 1 };
         let b = &g.players[0].board;
-        // Tavern Dish Banana +2/+2, then a 4/4 Satellite per Magnetization
-        assert_eq!(stats(&b[1]), (1 + 2 + 4 * n, 1 + 2 + 4 * n), "golden {golden}");
-        assert_eq!(stats(&b[0]), (5 + 4 * n, 10 + 4 * n), "golden {golden}");
+        // Tavern Dish Banana +2/+2, then a 5/5 Satellite per Magnetization
+        assert_eq!(stats(&b[1]), (1 + 2 + 5 * n, 1 + 2 + 5 * n), "golden {golden}");
+        assert_eq!(stats(&b[0]), (5 + 5 * n, 10 + 5 * n), "golden {golden}");
         assert_eq!(b[0].magnetizations, n as u16);
         g.check_invariants().unwrap();
     }
@@ -1193,7 +1197,7 @@ fn play_lullabot_on_hand0(g: &mut Game, pos: u8) {
 fn kodo_reborn_counts_as_damaged_not_as_max_one() {
     let db = db();
     // A Reborn Kodo with 1 Health dies to Boom and comes back with 1 Health
-    // but a maximum of 32: the Beetle a Vermin leaves gets the full 32.
+    // but a maximum of 30: the Beetle a Vermin leaves gets double that.
     let mut kodo = mk(&db, "Stalwart Kodo", false);
     kodo.health = 1;
     kodo.keywords.set(Keywords::REBORN);
@@ -1202,13 +1206,13 @@ fn kodo_reborn_counts_as_damaged_not_as_max_one() {
     let board = [kodo, mk(&db, "Boom-in-a-Box", false), vermin];
     let (_, log) = run(&db, &board, &walls(&db, 4), 1, 1);
     assert_eq!(log.deaths(0, "Stalwart Kodo"), 1);
-    assert_eq!(log.summons(0, "Beetle"), vec![(2 + 16, 2 + 32)]);
+    assert_eq!(log.summons(0, "Beetle"), vec![(2 + 30, 2 + 60)]);
 
     // A Reborn minion that Kodo gives stats to is a recipient like any other.
     let mut board = kodo_board(&db, false, 1);
     board[2].keywords.set(Keywords::REBORN);
     let (_, log) = run(&db, &board, &walls(&db, 4), 1, 1);
-    assert_eq!(log.summons(0, "Buzzing Vermin"), vec![(1 + 16, 1 + 32)]);
+    assert_eq!(log.summons(0, "Buzzing Vermin"), vec![(1 + 30, 1 + 60)]);
 }
 
 #[test]
@@ -1220,9 +1224,9 @@ fn beatboxer_sees_a_magnetization_to_a_minion_in_the_tavern() {
     g.give(0, "Tavern Dish Banana").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     act(&mut g, 0, Action::TargetShop(0));
-    assert_eq!(stats(&g.players[0].shop[0]), (1 + 2 + 4, 1 + 2 + 4));
+    assert_eq!(stats(&g.players[0].shop[0]), (1 + 2 + 5, 1 + 2 + 5));
     let b = &g.players[0].board[0];
-    assert_eq!(stats(b), (5 + 4, 10 + 4));
+    assert_eq!(stats(b), (5 + 5, 10 + 5));
     assert_eq!(b.magnetizations, 1);
     g.check_invariants().unwrap();
 }
@@ -1233,10 +1237,10 @@ fn beatboxer_copies_spark_snappers_satellite_but_nothing_triggers_from_a_copy() 
     put_on_board(&mut g, 0, "Polarizing Beatboxer", false);
     put_on_board(&mut g, 0, "Spark Snapper", false);
     put_in_hand(&mut g, 0, "Cord Puller", false);
-    // Spark Snapper attaches a 2/3 (the Satellite token itself is 4/4)
+    // Spark Snapper attaches a 2/2 (the Satellite token itself is 4/4)
     let sat = g.data.cards.make(id(&g.data.cards, "Satellite"), false);
     assert_eq!(stats(&sat), (4, 4));
-    let sat = Minion { attack: 2, health: 3, ..sat };
+    let sat = Minion { attack: 2, health: 2, ..sat };
     act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
     let b = &g.players[0].board;
     // the played Puller and the Beatboxer each got one Satellite
@@ -1262,4 +1266,78 @@ fn beatboxer_copy_of_a_volumizer_raises_your_volumizers_again() {
         assert_eq!(g.players[0].volumizer_bonus, (da * times, dh * times), "golden {golden}");
         g.check_invariants().unwrap();
     }
+}
+
+/// Patch 37.0.2: Stalwart Kodo's "a different minion" skips another copy of
+/// itself. A Kodo summoned in combat (the Doppelganger Dark Gift summons a
+/// copy of its host at Start of Combat) gets nothing, while a Beast that dies
+/// beside it still gets the gift.
+#[test]
+fn kodo_gives_nothing_to_another_kodo() {
+    let db = db();
+    let mut kodo = mk(&db, "Stalwart Kodo", false);
+    let doppel = db.by_name("Gift: Doppelganger").expect("the gift's effect card");
+    assert!(kodo.push_gift(bgcore::minion::GiftOn::new(doppel, 0)));
+    let board = kodo_board_with(&db, kodo);
+    let (_, log) = run(&db, &board, &walls(&db, 4), 1, 1);
+    // The copy is a Kodo: 15/30, no gift on it.
+    assert_eq!(log.summons(0, "Stalwart Kodo"), vec![(15, 30)]);
+    // The Vermin's Beetle is not a Kodo, so both Kodos still give it double
+    // their stats.
+    assert_eq!(log.summons(0, "Beetle"), vec![(2 + 60, 2 + 120)]);
+}
+
+/// The Kodo board with a ready-made Kodo in slot 0 (its gifts already on it).
+fn kodo_board_with(db: &CardDb, kodo: Minion) -> Vec<Minion> {
+    let mut b = vec![kodo];
+    b.push(mk(db, "Boom-in-a-Box", false));
+    let mut v = mk(db, "Buzzing Vermin", false);
+    v.keywords.clear(Keywords::TAUNT);
+    b.push(v);
+    b
+}
+
+/// Patch 37.0.2: The Last One Standing's Rally improves by its printed
+/// +10/+10 every time it runs, counted in the minion's `improvements`.
+#[test]
+fn last_one_standing_improves_on_every_rally() {
+    let db = db();
+    for (improvements, want) in [(0u16, (10, 10)), (1, (20, 20)), (2, (30, 30))] {
+        let mut board = los_board(&db);
+        board[0].improvements = improvements;
+        let (out, _) = run(&db, &board, &[wall(&db)], 1, 1);
+        let perm = &out.sides[0].permanent_stats;
+        assert!(
+            (0..6).all(|i| perm[i] == want),
+            "at {improvements} rallies the buff is {want:?}: {perm:?}"
+        );
+    }
+}
+
+/// The counter is the minion's and outlives the fight: after a combat with
+/// one Rally the card carries `improvements` 1, so its next Rally gives
+/// +20/+20 (docs/rules/design.md "The pool").
+#[test]
+fn last_one_standing_keeps_its_counter_after_a_fight() {
+    let mut g = game(62);
+    for p in 0..8 {
+        g.players[p].board.clear();
+    }
+    put_on_board(&mut g, 0, "The Last One Standing", false);
+    let q = match g.players[0].opponent {
+        Some(bgcore::Opponent::Player(q)) => q as usize,
+        other => panic!("paired with {other:?}"),
+    };
+    put_on_board(&mut g, q, "Cage Gnawer", false);
+    g.players[q].board[0].attack = 1;
+    g.players[q].board[0].health = 2000;
+    while g.turn == 1 {
+        g.step(Action::EndTurn).unwrap();
+    }
+    assert!(
+        g.players[0].board[0].improvements >= 1,
+        "a counter per Rally, kept on the card: {}",
+        g.players[0].board[0].improvements
+    );
+    g.check_invariants().unwrap();
 }

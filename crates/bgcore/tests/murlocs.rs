@@ -545,14 +545,14 @@ fn tad_shoalfin_gormling_and_the_rest() {
 
 #[test]
 fn twilight_shamanic_and_sewer_escapee_buff_the_hand_and_the_board() {
-    // Twilight Tidehunter: a spell on it gives the left-most hand minion +8/+8.
+    // Twilight Tidehunter: a spell on it gives the left-most hand minion +9/+9.
     let mut g = game(21);
     put_on_board(&mut g, 0, "Twilight Tidehunter");
     g.give(0, "Tad").unwrap();
     g.give(0, "Fortify").unwrap();
     act(&mut g, 0, Action::Play { hand: 1, pos: 0 });
     act(&mut g, 0, Action::Target(0));
-    assert_eq!(stats(&g.players[0].hand[0]), (10, 10));
+    assert_eq!(stats(&g.players[0].hand[0]), (11, 11));
 
     // Shamanic Tidecaller: a spell on a Murloc buffs the tribe on board and
     // in hand. Fortify's own +0/+3 lands on the target too.
@@ -563,9 +563,9 @@ fn twilight_shamanic_and_sewer_escapee_buff_the_hand_and_the_board() {
     g.give(0, "Fortify").unwrap();
     act(&mut g, 0, Action::Play { hand: 1, pos: 0 });
     act(&mut g, 0, Action::Target(1));
-    assert_eq!(stats(&g.players[0].board[0]), (8, 10));
-    assert_eq!(stats(&g.players[0].board[1]), (5, 8));
-    assert_eq!(stats(&g.players[0].hand[0]), (5, 6));
+    assert_eq!(stats(&g.players[0].board[0]), (9, 13));
+    assert_eq!(stats(&g.players[0].board[1]), (5, 9));
+    assert_eq!(stats(&g.players[0].hand[0]), (5, 7));
 
     // Sewer Escapee: Activate gives another Murloc +7/+7 and a keyword.
     let mut g = game(23);
@@ -702,4 +702,85 @@ fn name(g: &Game, m: &Minion) -> String {
 
 fn stats(m: &Minion) -> (i32, i32) {
     (m.attack, m.health)
+}
+
+// ---- Murcules (back in the pool with patch 37.0.2) ----
+
+#[test]
+fn murcules_is_a_tier_two_murloc_in_the_pool_with_plus_three() {
+    let db = db();
+    let c = id_of(&db, "Murcules");
+    let card = db.get(c);
+    assert!((c as usize) < db.pool_cards, "a pool minion, not a token");
+    assert_eq!(card.tier, 2);
+    assert!(card.tribes.has(Tribe::Murloc));
+    assert!(!card.out_of_pool);
+    assert!(card.lobby_ok(bgcore::Tribes::ALL));
+    assert_eq!((card.attack, card.health), (5, 3));
+    let golden = db.make(c, true);
+    assert_eq!((golden.attack, golden.health), (10, 6), "the golden doubles");
+    assert_eq!(
+        card.on_kill,
+        Some(bgcore::cards::KillReward::BuffHand { attack: 3, health: 3 })
+    );
+}
+
+fn id_of(db: &CardDb, name: &str) -> bgcore::CardId {
+    db.by_name(name).unwrap_or_else(|| panic!("no card {name}"))
+}
+
+#[test]
+fn murcules_gives_a_minion_in_hand_plus_three_after_a_kill() {
+    let db = db();
+    for golden in [false, true] {
+        // Hackerfin (5/3) in the hand; Murcules kills a 1/1 Sewer Rat.
+        let hand = [mk(&db, "Hackerfin", false)];
+        let murcules = mk(&db, "Murcules", golden);
+        let enemy = [mk(&db, "Sewer Rat", false)];
+        let (out, _) = run(&db, &[murcules], &enemy, [&hand, &[]], 3, 3);
+        let want = if golden { (6, 6) } else { (3, 3) };
+        assert_eq!(
+            out.sides[0].hand_stats[0], want,
+            "the hand card took the kill's +3/+3 (golden +6/+6): {golden}"
+        );
+    }
+    // No kill, no buff: a 0-Attack wall survives.
+    let hand = [mk(&db, "Hackerfin", false)];
+    let (out, _) = run(&db, &[mk(&db, "Murcules", false)], &[wall(&db)], [&hand, &[]], 3, 3);
+    assert_eq!(out.sides[0].hand_stats[0], (0, 0), "nothing died");
+}
+
+/// The hand only goes into a fight when a card on the board needs it
+/// (`Card::needs_hand_in_fight`): Murcules's reward is one of those cards, so
+/// a real combat pays the hand out. The same path serves Tide Oracle Morgl.
+#[test]
+fn murcules_reaches_the_hand_in_a_whole_game() {
+    let mut g = game(70);
+    for p in 0..8 {
+        g.players[p].board.clear();
+    }
+    put_on_board(&mut g, 0, "Murcules");
+    // A minion in hand to take the buff; its pool copy goes with it.
+    let hand_card = id_of(&g.data.cards, "Hackerfin");
+    let slot = g.data.cards.get(hand_card).pool_slot as usize;
+    g.pool[slot] -= 1;
+    let m = g.players[0].make_card(&g.data.cards, hand_card, false, 1);
+    g.players[0].hand.push(m);
+    let q = opponent(&g, 0);
+    // A 1/1 for Murcules to kill, and nothing else on the other side.
+    g.players[q].board.push(g.players[q].make_card(&g.data.cards, hand_card, false, 0));
+    g.players[q].board[0].attack = 0;
+    g.players[q].board[0].health = 1;
+    let t = g.turn;
+    while g.turn == t && !g.over {
+        g.step(Action::EndTurn).unwrap();
+    }
+    let base = g.data.cards.get(hand_card);
+    let got = stats(&g.players[0].hand[0]);
+    assert_eq!(
+        got,
+        (base.attack + 3, base.health + 3),
+        "the kill's +3/+3 reached the hand"
+    );
+    g.check_invariants().unwrap();
 }

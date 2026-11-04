@@ -964,7 +964,7 @@ fn a_seated_azerite_portrait_buffs_the_board_elementals() {
     let after = stats(g, 1);
     assert_eq!(
         (after.0 - before.0, after.1 - before.1),
-        (4, 3),
+        (3, 3),
         "the Living Azerite's Tavern buff reaches the board's Elemental too"
     );
     g.check_invariants().unwrap();
@@ -3277,7 +3277,8 @@ fn a_discover_pick_lands_with_the_stats_the_step_shows_on_it() {
           "end": null}}]}}"#,
         state(""),
         state(r#"{"id": 12090, "index": 1, "card_id": "BG36_241", "name": "Crimson Vindicator",
-                   "attack": 30, "health": 30, "golden": false, "keywords": ["DIVINE_SHIELD"],
+                   "attack": 30, "health": 30, "golden": false,
+                   "keywords": ["DIVINE_SHIELD", "WINDFURY"],
                    "kind": "minion"}"#),
     );
     let r = one_step(&text);
@@ -3510,8 +3511,12 @@ fn glaive_ricochet_copies_one_of_the_turns_three_buys() {
     // Which of the three the copy takes is the engine's own draw, so the
     // change's shape is what is compared; the hand still grows by one card.
     assert!(
-        matches!(third.verdict, Verdict::Ok | Verdict::OkShape),
-        "{:?} {:?}",
+        matches!(
+            third.verdict,
+            Verdict::Ok | Verdict::OkShape | Verdict::OkRandom
+        ),
+        "{:?} {:?} {:?}",
+        third.verdict,
         third.diffs,
         third.missing
     );

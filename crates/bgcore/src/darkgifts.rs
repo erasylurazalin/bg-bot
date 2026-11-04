@@ -101,12 +101,22 @@ pub struct Gift {
     /// these: the gift would have nothing to do (Era 2026-11-03,
     /// docs/rules/darkgifts.md "Sinister Invitation never offers Gilding").
     pub makes_golden: bool,
+    /// Hosts this gift is never offered on, by card (darkgifts.toml
+    /// `exclude`: Furtiveness never lands on Relentless Deflector, patch
+    /// 37.0.2). Read by `Gift::on_host`.
+    pub exclude: Vec<CardId>,
 }
 
 impl Gift {
     /// Whether this gift's window holds `turn`.
     pub fn in_window(&self, turn: u32) -> bool {
         turn >= self.first as u32 && (self.last == 0 || turn <= self.last as u32)
+    }
+
+    /// Whether this gift may land on this host card at all: the host is not
+    /// one the data leaves out.
+    pub fn on_host(&self, id: CardId) -> bool {
+        !self.exclude.contains(&id)
     }
 }
 
@@ -246,6 +256,9 @@ struct RawGift {
     condition: String,
     #[serde(default)]
     repeats: bool,
+    /// Host cards (cards.toml names) this gift is never offered on.
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 fn condition(name: &str, err: &impl Fn(String) -> String) -> Result<GiftCond, String> {
@@ -371,6 +384,15 @@ impl GiftDb {
                 cond: condition(&g.condition, &err)?,
                 repeats: g.repeats,
                 makes_golden: cards.get(card).makes_golden,
+                exclude: g
+                    .exclude
+                    .iter()
+                    .map(|n| {
+                        cards
+                            .by_name(n)
+                            .ok_or_else(|| err(format!("gift {}: unknown host {n:?}", g.name)))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
             });
         }
         db.by_card = vec![0; cards.cards.len()];
@@ -406,10 +428,21 @@ impl GiftDb {
         self.offers.iter().rev().find(|o| turn >= o.turn as u32)
     }
 
-    /// Whether gift `i` may be offered on this host this turn.
-    pub fn eligible(&self, i: usize, turn: u32, card: &Card, tribes: crate::cards::Tribes, deity: bool) -> bool {
+    /// Whether gift `i` may be offered on this host this turn: its window
+    /// holds, the host meets its condition, and the data does not leave this
+    /// host out of it (Furtiveness on Relentless Deflector).
+    #[allow(clippy::too_many_arguments)]
+    pub fn eligible(
+        &self,
+        i: usize,
+        turn: u32,
+        card: &Card,
+        id: CardId,
+        tribes: crate::cards::Tribes,
+        deity: bool,
+    ) -> bool {
         let g = &self.gifts[i];
-        g.in_window(turn) && g.cond.fits(card, tribes, deity)
+        g.in_window(turn) && g.on_host(id) && g.cond.fits(card, tribes, deity)
     }
 
     /// The gifts that fit this host this turn, in table order.
@@ -417,12 +450,13 @@ impl GiftDb {
         &self,
         turn: u32,
         card: &Card,
+        id: CardId,
         tribes: crate::cards::Tribes,
         deity: bool,
     ) -> arrayvec::ArrayVec<u8, 64> {
         let mut out = arrayvec::ArrayVec::new();
         for i in 0..self.gifts.len() {
-            if self.eligible(i, turn, card, tribes, deity) {
+            if self.eligible(i, turn, card, id, tribes, deity) {
                 let _ = out.try_push(i as u8);
             }
         }
@@ -441,13 +475,14 @@ impl GiftDb {
         &self,
         turn: u32,
         card: &Card,
+        id: CardId,
         tribes: crate::cards::Tribes,
         deity: bool,
         used: &[u8],
         golden: bool,
         rng: &mut Rng,
     ) -> Option<usize> {
-        let candidates = self.candidates(turn, card, tribes, deity);
+        let candidates = self.candidates(turn, card, id, tribes, deity);
         let skip = |i: u8| used.contains(&i) || (golden && self.gifts[i as usize].makes_golden);
         let mut total = 0u32;
         for &i in &candidates {

@@ -65,8 +65,8 @@ legality in mod.rs.
 | Damage dealt milestone | `damage_milestone = { total, effect }` | `Side::count_damage` | Treasure Parrot |
 | Takes damage | `when_damaged = {..}` | `Side::when_damaged` | Very Hungry Winterfinner |
 | Summon in combat | `Effect::Summon`, `Deathrattle::Summon` | `Side::summon` (7 limit, Watch hook, summon triggers) | Cord Puller |
-| After you summon (combat) | `after_summon_give_stats = { times }`, `on_summon_beast` | `Side::summon` | Stalwart Kodo |
-| Summon from hand | `summon_from_hand = "murloc"` | `Side::summon_from_hand`; fight needs the hand (`Card::reads_hand`) | Expert Aviator |
+| After you summon (combat) | `after_summon_give_stats = { times, multiply, golden_multiply, different }`, `on_summon_beast` | `Side::summon`. `multiply`/`golden_multiply` are the multipliers of the summoner's Attack and maximum Health (Stalwart Kodo 2, golden 3), and `different` skips a summoned copy of the same card ("a different minion") | Stalwart Kodo |
+| Summon from hand | `summon_from_hand = "murloc"` | `Side::summon_from_hand`; a fight needs the hand when a card says so (`Card::needs_hand_in_fight`) | Expert Aviator |
 | Magnetize / Mech played | `on_play_mech`, `on_play_or_magnetize_mech`, `on_cast_spell_on_mech`, `aura = polarizing_beatboxer` | `magnetize_to` (a Magnetic played from hand first runs the played-Mech hooks in `magnetize_onto_played_mech`, so its Satellite joins it before the merge), `trigger_mech_played_or_magnetized`, `beatboxers_copy`, `Minion::magnetize` | Spark Snapper |
 | Cast a Tavern spell (the exact words) | `on_cast_spell`, `on_cast_spell_on_self`, `on_cast_spell_on_tribe` | `trigger_on_cast_spell` (Tavern spells only), `trigger_on_cast_spell_on_watchers` (any spell, one per cast); one call per cast (a Bounty cast twice calls it twice). The minions' watchers run before the spell's own effect, so a Tavern buff the target's watcher gives is on the Tavern when the effect picks among it (log `Hearthstone_2026_10_24_15_25_26-g4` turn 11 step 23), and a spell that takes its target off the board runs them itself in `fire_cast_triggers_early` (the `Devourer` and `Butchering` arms, docs/rules/design.md "Eating a minion with a spell"). The trinkets for that cast (`Event::CastSpellOnMinion`, Honeycomb Ring) run after the effect: `trigger_trinket_on_cast_spell_on_minion`. A Tavern spell a minion casts for you off this cast is therefore sized without the +1/+1 this cast's improvement gives, and the play's next cast gets it (log `Hearthstone_2026_11_03_15_22_36-g4` turn 10 step 27: 12/13 then 13/14) | Timecap'n Hooktail |
 | Cast any spell, Tavern spell or not | `EventKind::AllSpellsCast` for a minion's `on_event` counter (Felboar), `Event::SpellCast` for a trinket (Bewitched Ribbon, Bloodbound Earrings) | `Game::cast_spell` / `cast_spell_on`, once per spell cast (a Blood Gem, Gem Day, a Banana, a Spellcraft spell, a Triple Reward, which is a plain spell and not a Tavern spell); the extra casts of one spell count too (`apply_target`). A spell a minion's effect casts for you (`cast` on a minion, `cast_taught`) is not your cast: `cast_named_spell` with `by_minion` runs it and nothing here sees it (Era 2026-11-02) | Felboar |
@@ -79,7 +79,7 @@ legality in mod.rs.
 | While in hand, after a tribe is played | `while_in_hand` | `trigger_in_hand_on_play` | Bream Counter |
 | After you trigger a Battlecry | `after_battlecry` | `fire_after_battlecry` | Kalecgos |
 | Discover (the effect) | `discover_spell`, `discover_tribe_if_another`, `Effect::Discover*`, spell `discover = ..` | `discover_queue` of `DiscoverRequest`, `maybe_start_discover`, `resolve_choose`. A Discover a Battlecry that was not played opens is the exception: an Activate's, a hero power's or an end-of-turn trigger's (Young Murk-Eye, Echoing Voice) gives a random card of its pool with no offer (`QueuedRepeat.random_discover`, `Game::run_battlecry_at`, `Player.repeat_discover`; docs/rules/design.md "Shop replay answers") | Rodeo Performer |
-| After you Discover | `after_discover = {..}` | `fire_after_discover` (end of `resolve_choose`), skipped for the random card such a trigger's Discover gives (`Player.discover_silent`, Era 2026-11-03/04) | Hooktusk |
+| After you Discover | `after_discover = {..}` | `fire_after_discover` (end of `resolve_choose`), skipped for the random card such a trigger's Discover gives (`Player.discover_silent`, Era 2026-11-03/04). A `buff` with `per_golden_played` and target `"all"` buffs the host too ("your Pirates"); target `"others"` leaves it out | Hooktusk |
 | Hero takes damage | `after_hero_damage = [..]`, `DamageHero` | `take_hero_damage`, `take_shop_damage` (can kill), `can_pay_health` | Wrath Weaver |
 | Refresh | `health_refreshes`, `RefreshKind` | `refresh_shop`, `fill_shop`, Roll in `apply` | Malchezaar |
 | After the Tavern is Refreshed | `refresh_buff = [a, h]` (effect and spell effect) | `Player.refresh_buff`, `apply_refresh_buff` (end of `refresh_shop`, `refresh_with_spells`, `refresh_with_tribe`, and in `start_turn` when the turn-start roll changed the Tavern); a fight adds through `SideOutcome::refresh_buff_gain` | Waveling |
@@ -116,7 +116,7 @@ legality in mod.rs.
 | A card is discarded, any source | `on_event = { event = "discarded" }`; on the discarded spell itself `on_discard = "cast_twice"` / `"max_gold_2"` | `Game::discard_card` (Activates, linked cards, Mysterious K'Thir): pool copy back, the `Discarded` event, then `OnDiscard` (two real Tavern spell casts, or maximum Gold) | Cutthroat K'Thir |
 | A card is added to your hand | `on_card_added = { buff }` | `Game::add_to_hand`, the one path into a hand (buys, Gems, Triple Rewards, Discover picks, generated, Lockbox, `Game::give`) | The Shadow of Doubt |
 | You get a card of a tribe | `on_event = { event = "got_pirate", every = 4, effect }` (the event is `got_<tribe>`); a trinket listens with `get_tribe` + `on_get` | `Game::add_to_hand` fires `EventKind::CardGot(tribe)` and `trinkets::Event::GetTribe(tribe)` for every tribe the added card has | Doubloon Grifter, Trusty Crowbar |
-| After this attacks and kills | `on_kill = "max_stats_to_hand"` (`KillReward`) | `attack_swings` in fight.rs, at the hit that takes the defender below 1 Health; "maximum stats" are its Attack and its Health before the hit plus what it had already taken, so a Venomous or Poisonous kill reads right | Tide Oracle Morgl |
+| After this attacks and kills | `on_kill = "max_stats_to_hand"`, or `on_kill = { buff_hand = [3, 3] }` (`KillReward`) | `attack_swings` in fight.rs, at the hit that takes the defender below 1 Health; "maximum stats" are its Attack and its Health before the hit plus what it had already taken, so a Venomous or Poisonous kill reads right. Either reward goes to a random minion in the owner's hand, doubled on a golden one, and neither works unless the hand is passed into the fight | Tide Oracle Morgl, Murcules |
 | Stats for every Elemental played / time Magnetized this game | `buff_per_elemental_played`, `buff_per_magnetize` (`[a, h]`, doubled when golden) | `Player::make_card` reads `Player.elementals_played` (the play path) and `Player.magnetizations` (`Game::note_magnetized`, every `Minion::magnetize` the shop does) | Flourishing Frostling, Dr. Boom's Monster |
 | Selling a minion of a tribe gives its stats to the ones that stay | `on_sell = { gain_sold_stats = "<tribe>" }` (empty string for any) | `Game::sell_minion` after the sell: the minion with the text is still on the board, so it is scanned there, not on the sold card | Arcane Behemoth |
 | Gain the Deathrattle of a friendly Deathrattle minion that dies | `gains_friendly_deathrattles = true` | `Side::gain_deathrattles` (from `Side::resolve`) fills `Side.gained_dr` by uid; `Side::fire_deathrattles` fires them with the minion's own, once each | Fish of N'Zoth |
@@ -205,7 +205,7 @@ exactly one legal target and drops the effect when there is none.
 |---|---|---|
 | Battlecry: buff one friendly minion (of a tribe) | Forest Rover / Tinkerer (`target = "chosen"`, `tribe`) | cannot pick itself |
 | Buff all / others / self / random | `target = "all"/"others"/"self"/"random"` | `fixed_stats` minions are skipped |
-| Buff one minion of each type (one buff per minion) | The Last One Standing (`buff_each_type`), Misplaced Tea Set | `cards::pick_one_per_type`; an all-type minion is a type of its own ("all") and takes that one pick, never another tribe's (`15_25_26-g1` turn 10 step 24, Era 2026-11-02) |
+| Buff one minion of each type (one buff per minion) | The Last One Standing (`buff_each_type`, with `improves_self = true`: the buff grows by its own printed numbers each time it runs, counted in the minion's `improvements`, and the count outlives the fight), Misplaced Tea Set | `cards::pick_one_per_type`; an all-type minion is a type of its own ("all") and takes that one pick, never another tribe's (`15_25_26-g1` turn 10 step 24, Era 2026-11-02) |
 | Buff scaled by a counter that improves | Tasty Lobster (`improve_counter`) | player counter `Counter`, kept through fights via `improve_gain` |
 | Per-minion "N left" counter | Gunpowder Courier (`on_event`), Treasure Parrot (`damage_milestone`) | triple keeps the highest count |
 | Stat per thing counted game-long | Falling Sky Golem (`buff_per_deathrattle`), Maritime Extortionist | wherever-it-is: update shop, hand, board (`add_golden_played`, `add_deathrattles_triggered`) |
@@ -226,7 +226,7 @@ exactly one legal target and drops the effect when there is none.
 | Make a minion golden on the board | Elite Navigator (`make_golden_max_tier`) | no reward, not counted as played; `golden_up` (the golden card's printed stats and its own "for each ... this game" counters doubled, its buffs kept) |
 | Golden played gives no reward | Aureate Laureate (`always_golden`, `no_triple`), `Minion.no_reward` | |
 | Summon in combat | Cord Puller / Den Mother style (`summon`) | `golden_doubles_count` for Beetle style |
-| Summon a copy / from hand | Flighty Scout, Expert Aviator | fights need the hand passed (`reads_hand`) |
+| Summon a copy / from hand | Flighty Scout, Expert Aviator | a fight needs the hand passed when a card says so (`Card::needs_hand_in_fight`: `reads_hand` plus the on-kill rewards that hand stats out, Tide Oracle Morgl and Murcules) |
 | Deal damage in combat | Obsidian Ravager (`damage_target_and_neighbor`), Blade Collector (cleave) | `rally_damage`, `hit`; Divine Shield, Venomous and Poisonous honoured |
 | Keep stats after the fight | Tarecgosa (`permanent_keep`), Eudora (`keep_golden`), Persistent Poet (adjacent), Timewarped Poet (all Dragons) | `SideOutcome.permanent_stats` by start slot |
 | Keep a counter after the fight | Lurking Leviathan, Treasure Parrot | `permanent_improvements` |
@@ -551,13 +551,27 @@ Triple Reward spell.
 
 ## 5. Gotchas
 
-- **Satellite.** The token is 4/4 (Glambot's); an attacher passes its own stats
-  (`stats = [..]` on `on_play_mech` and `on_cast_spell_on_mech`, Spark Snapper 2/3).
+- **Satellite.** The token is 4/4; an attacher passes its own stats
+  (`stats = [..]` on `on_play_mech` and `on_cast_spell_on_mech`: Spark Snapper
+  2/2, Glambot 5/5, both patch 37.0.2's numbers).
 - **Spell tiers.** A spell is tier 1 to 7, or 0 for a generated one (Lockbox). Tier 7
   spells are in the pool list but no draw reaches them (see the hook index).
 - **Fuzz never sees tier 7.** The Tavern stops at tier 6 (`MAX_TIER`), so tier 7 cards
   only appear through a card that names tier 7. The fuzzer reaches them only through
   such cards; test tier 7 paths directly.
+- **A card that leaves the game is marked out of the pool, never deleted**
+  (patch 37.0.2: `out_of_pool = true` on Expert Aviator and on the trinkets
+  Spell-powered Wrench, both Quilligraphy Sets, Fridge Magnet and Writhing
+  Tentacles). It keeps its id, its pool slot and every effect, because old
+  logs, `boards/real` and recorded games still hold it; `Card::lobby_ok`
+  returns false for it, and that is the filter every minion draw applies, so
+  the Tavern, Discovers, random generation and the Dark Gift pool never hand
+  it out. A trinket's `out_of_pool` is read by `deal_trinket_offer` and
+  `replace_trinket_at`, and `banned_tribes` (Wand of Divination in a Quilboar
+  lobby) keeps one out of the lobbies it is banned in. A Dark Gift's
+  `exclude` list in darkgifts.toml names host cards it never lands on
+  (Furtiveness and Relentless Deflector); the loader turns the names into
+  card ids.
 - **Pool accounting is exact and checked after every fuzz action.** Drawn cards carry
   `pool_copies` (1, or up to 3 for a Golden minion); generated cards and tokens have 0
   and never touch the pool. Selling returns `pool_copies` (`give_back`). A Golden

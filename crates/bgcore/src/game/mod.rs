@@ -38,8 +38,10 @@ use crate::rng::Rng;
 use crate::{BOARD, CHOICES, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
 
 /// Upper bound on pool minions, for the fixed-size copy count in
-/// `check_invariants`. The card parser refuses a card list past it.
-pub const MAX_POOL_CARDS: usize = 256;
+/// `check_invariants`. The card parser refuses a card list past it. 257 pool
+/// minions with patch 37.0.2's Murcules, so the bound has room for a few
+/// more runs.
+pub const MAX_POOL_CARDS: usize = 320;
 /// Card rewrites one player can hold at once: the six portraits and the
 /// Trailblazer Sticker fit with room to spare.
 pub const CARD_MODS: usize = 8;

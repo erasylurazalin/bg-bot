@@ -312,3 +312,37 @@ fn the_sandbox_plays_a_fixed_or_rolled_lobby() {
     let rolled = Game::new_sandbox(d.clone(), 3, None, 0);
     assert_eq!(rolled.lobby.len(), 5);
 }
+
+/// Patch 37.0.2: Expert Aviator left the pool. It keeps its id, its place in
+/// old logs and boards and its effect, but no draw may offer it again
+/// (docs/rules/design.md "The pool").
+#[test]
+fn a_card_that_left_the_pool_keeps_its_effect_and_is_never_drawn() {
+    let d = data();
+    let aviator = d.cards.by_name("Expert Aviator").unwrap();
+    let card = d.cards.get(aviator);
+    assert!(card.out_of_pool, "marked out of the pool, never deleted");
+    assert!(card.rally.is_some(), "its effect is still built for old logs");
+    assert!(!card.token, "it is not a token: its id and pool slot stay");
+    for lobby in [Tribes::ALL, lobby(&[Tribe::Murloc, Tribe::Beast])] {
+        assert!(!card.lobby_ok(lobby), "no draw may hand it out");
+    }
+    // A fresh game's pool has no copies of it, and the accounting agrees.
+    let g = game(1);
+    assert_eq!(g.pool[card.pool_slot as usize], 0, "no copies in the pool");
+    let mut rng = Rng::new(9);
+    for _ in 0..2000 {
+        let draws = [
+            d.cards.random_pool_minion(Tribe::Murloc, 2, Tribes::ALL, &mut rng),
+            d.cards.random_any_minion(bgcore::MAX_TIER, Tribes::ALL, &mut rng),
+            d.cards.random_tier_minion(2, Tribes::ALL, &mut rng),
+            d.cards.random_battlecry_minion(2, Tribes::ALL, &mut rng),
+            d.cards.random_deathrattle_minion(2, Tribes::ALL, &mut rng),
+            d.cards.random_magnetic_minion(2, Tribes::ALL, &mut rng),
+            d.cards.random_different_minion(Tribes::ALL, aviator, 2, Tribes::ALL, &mut rng),
+        ];
+        for draw in draws {
+            assert_ne!(draw, Some(aviator), "a random draw offered it");
+        }
+    }
+}

@@ -252,10 +252,15 @@ impl Game {
             Slot::Lesser => rules.trinket_lesser_need,
             Slot::Greater => rules.trinket_greater_need,
         } as u32;
-        // A trinket is offered only when one of its tribes is in the lobby.
+        // A trinket is offered only when one of its tribes is in the lobby,
+        // never one it is banned in (Wand of Divination in a Quilboar lobby),
+        // and never one that has left the game.
         let mut eligible: ArrayVec<u8, 256> = ArrayVec::new();
         for i in 0..data.trinkets.len() as u8 {
             let t = data.trinkets.get(i);
+            if t.out_of_pool || t.banned.overlaps(self.lobby) {
+                continue;
+            }
             if t.slot != kind || (!t.tribes.is_empty() && !t.tribes.overlaps(self.lobby)) {
                 continue;
             }
@@ -636,6 +641,7 @@ impl Game {
             | Act::RandomTierMinion { .. }
             | Act::RandomMinion { .. }
             | Act::RandomSpell(_)
+            | Act::RandomSpellAtLeast { .. }
             | Act::RandomChromadrake(_)
             | Act::RandomVolumizer(_)
             | Act::RandomChooseOne(_)
@@ -1096,6 +1102,18 @@ impl Game {
                 false,
                 1,
             ),
+            // Secret Schematic: "a random Tavern spell that costs (2) or
+            // more", up to the player's tier, the pool's own filter.
+            Act::RandomSpellAtLeast { cost, count } => {
+                let tier = self.players[p].tier;
+                for _ in 0..count {
+                    if let Some(card) =
+                        self.data.cards.random_spell_at_least(cost, tier, self.lobby, &mut self.rng)
+                    {
+                        self.give_generated_tracking(p, card, &mut pos);
+                    }
+                }
+            }
             // A trinket's own cast (Easterly Winds): the player's, unlike the
             // same `cast` key on a minion (`Effect::CastSpell`).
             Act::Cast { card, times } => {
@@ -2091,7 +2109,9 @@ impl Game {
         // slot swap, and a clone would bump the refcount of the table every
         // game shares.
         let fits = |t: &crate::trinkets::Trinket, lobby: Tribes| {
-            t.slot == kind
+            !t.out_of_pool
+                && !t.banned.overlaps(lobby)
+                && t.slot == kind
                 && (t.tribes.is_empty() || t.tribes.overlaps(lobby))
                 && tribe.is_none_or(|w| t.tribes.has(w))
         };

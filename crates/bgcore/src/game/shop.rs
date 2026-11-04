@@ -67,7 +67,7 @@ pub(super) fn draw_filtered(
             exclude.is_empty() || !exclude.contains(&(c as CardId))
         }
     };
-    let mut eligible: ArrayVec<(u8, u8), MAX_POOL_CARDS> = ArrayVec::new();
+    let mut eligible: ArrayVec<(CardId, u8), MAX_POOL_CARDS> = ArrayVec::new();
     let mut total = 0u32;
     // Ids in ascending order, so the walk below sees cards in the same order
     // as a scan of the whole pool; `ok` still checks everything.
@@ -75,7 +75,7 @@ pub(super) fn draw_filtered(
         let c = c as usize;
         if ok(c) {
             total += pool[c] as u32;
-            eligible.push((c as u8, pool[c]));
+            eligible.push((c as CardId, pool[c]));
         }
     }
     if total == 0 {

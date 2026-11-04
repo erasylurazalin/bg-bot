@@ -271,7 +271,7 @@ impl Game {
                 // 2026-11-03, docs/rules/darkgifts.md).
                 self.data
                     .gifts
-                    .pick(plan.gift_turn, c, c.tribes, deity, &used, plan.golden, &mut self.rng)
+                    .pick(plan.gift_turn, c, card, c.tribes, deity, &used, plan.golden, &mut self.rng)
             };
             let Some(gift) = gift else {
                 // Nothing fits it (a pool this thin): the copy goes back.
@@ -354,7 +354,7 @@ impl Game {
             let gift = self
                 .data
                 .gifts
-                .pick(turn, self.data.cards.get(card), tribes, deity, &used, false, &mut self.rng);
+                .pick(turn, self.data.cards.get(card), card, tribes, deity, &used, false, &mut self.rng);
             // No gift fits it (only on a turn with fewer than three gifts
             // open): the offer has fewer options.
             let Some(gift) = gift else { continue };

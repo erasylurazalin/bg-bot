@@ -256,24 +256,24 @@ fn relentless_deflector_taunts_while_it_has_divine_shield() {
 // ---- The Tavern: Fishbait, Activate, Magnetization ----
 
 #[test]
-fn spark_snapper_satellites_grow_by_2_3_per_mech_played() {
+fn spark_snapper_satellites_grow_by_2_2_per_mech_played() {
     let mut g = game(205);
     put_on_board(&mut g, 0, "Spark Snapper");
     g.give(0, "Cord Puller").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
-    // First Mech: a 2/3 Satellite, so the 1/1 host becomes 3/4.
-    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (3, 4));
+    // First Mech: a 2/2 Satellite (patch 37.0.2), so the 1/1 host is 3/3.
+    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (3, 3));
     assert_eq!(g.players[0].board[0].improvements, 1);
     g.give(0, "Cord Puller").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
-    // Second Mech: 4/6, so the 1/1 host becomes 5/7.
-    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (5, 7));
+    // Second Mech: two 2/2 Satellites, so the 1/1 host becomes 5/5.
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (5, 5));
     assert_eq!(g.players[0].board[0].improvements, 2);
     g.check_invariants().unwrap();
 }
 
 #[test]
-fn golden_spark_snapper_satellites_start_at_4_6_and_grow_by_4_6() {
+fn golden_spark_snapper_satellites_start_at_4_4_and_grow_by_4_4() {
     let mut g = game(206);
     let c = g.data.cards.by_name("Spark Snapper").unwrap();
     let slot = g.data.cards.get(c).pool_slot as usize;
@@ -282,10 +282,10 @@ fn golden_spark_snapper_satellites_start_at_4_6_and_grow_by_4_6() {
     g.players[0].board.push(m);
     g.give(0, "Cord Puller").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
-    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (5, 7));
+    assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (5, 5));
     g.give(0, "Cord Puller").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
-    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (9, 13));
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (9, 9));
     assert_eq!(g.players[0].board[0].improvements, 2);
     g.check_invariants().unwrap();
 }

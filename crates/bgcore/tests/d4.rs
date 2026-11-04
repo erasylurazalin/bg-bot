@@ -137,8 +137,8 @@ fn slots_show_tribes_keywords_and_counters() {
     put_on_board(&mut g, 0, "Deadly Spore"); // 3: Venomous, and Poisonous too
     g.players[0].board[3].keywords.set(bgcore::Keywords::POISONOUS);
     put_on_board(&mut g, 0, "Suspicious Prisonguard"); // 4: Activate (1)
-    put_on_board(&mut g, 0, "Eredar Escapist"); // 5: "after 4 damage (N left!)"
-    g.players[0].board[5].improvements = 3;
+    put_on_board(&mut g, 0, "Eredar Escapist"); // 5: "after 5 damage (N left!)"
+    g.players[0].board[5].improvements = 4;
     g.players[0].board[1].extra_magnetize = 2;
 
     let out = view(&g, 0);
@@ -164,7 +164,7 @@ fn slots_show_tribes_keywords_and_counters() {
     assert_eq!(board_slot(&out, 3)[SLOT_ACTIVATE_COST], 0.0);
     let escapist = board_slot(&out, 5);
     assert_eq!(escapist[SLOT_DEMON], 1.0);
-    assert_eq!(escapist[SLOT_IMPROVEMENTS], 3.0);
+    assert_eq!(escapist[SLOT_IMPROVEMENTS], 4.0);
     assert_eq!(escapist[SLOT_EVENTS_LEFT], 1.0);
     assert_eq!(board_slot(&out, 4)[SLOT_EVENTS_LEFT], 0.0);
     assert_eq!(escapist[SLOT_COST], g.data.rules.buy_cost as f32);

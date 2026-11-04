@@ -60,17 +60,17 @@ yours = [true, false, false]
 [[offer]]
 turn = 7
 tiers = ["4", "4", "4"]
-yours = [true, false, false]
+yours = [true, true, false]
 
 [[offer]]
 turn = 8
 tiers = ["4", "5", "5"]
-yours = [true, false, false]
+yours = [true, true, false]
 
 [[offer]]
 turn = 9
 tiers = ["4,5", "5", "6"]
-yours = [true, false, false]
+yours = [true, true, false]
 
 [[offer]]
 turn = 10
@@ -116,7 +116,7 @@ condition = "any"
 name = "Charisma"
 id = "BG36_MidGameEffect_000t3"
 card = "Gift: Charisma"
-window = [7, 11]
+window = [7, 10]
 condition = "any"
 
 [[gift]]
@@ -228,7 +228,7 @@ condition = "typeless"
 name = "Battle Scars"
 id = "BG36_MidGameEffect_000t28"
 card = "Gift: Battle Scars"
-window = [7, 10]
+window = [7, 9]
 condition = "any"
 
 [[gift]]
@@ -285,7 +285,7 @@ condition = "any"
 name = "Fresh Perspective"
 id = "BG36_MidGameEffect_000t52"
 card = "Gift: Fresh Perspective"
-window = [3, 5]
+window = [4, 5]
 condition = "any"
 
 [[gift]]
@@ -300,7 +300,7 @@ condition = "not_taunt_or_typeless"
 name = "Golemancy"
 id = "BG36_MidGameEffect_000t61"
 card = "Gift: Golemancy"
-window = [9, 11]
+window = [9, 12]
 condition = "any"
 
 [[gift]]
@@ -374,14 +374,14 @@ condition = "any"
 name = "Sharpened Sword"
 id = "BG36_MidGameEffect_000t74"
 card = "Gift: Sharpened Sword"
-window = [3, 6]
+window = [3, 5]
 condition = "any"
 
 [[gift]]
 name = "Toughened Shield"
 id = "BG36_MidGameEffect_000t75"
 card = "Gift: Toughened Shield"
-window = [3, 6]
+window = [3, 5]
 condition = "any"
 
 [[gift]]
@@ -398,6 +398,10 @@ id = "BG36_MidGameEffect_000t79"
 card = "Gift: Furtiveness"
 window = [4]
 condition = "any"
+# Patch 37.0.2: never offered on Relentless Deflector (Blizzard: "can no
+# longer be offered with Furtiveness"). By card name here, a card id in the
+# engine.
+exclude = ["Relentless Deflector"]
 
 [[gift]]
 name = "Consanguinity"
@@ -434,8 +438,7 @@ condition = "any"
 name = "Worship"
 id = "BG36_MidGameEffect_000t89"
 card = "Gift: Worship"
-window = [12]
-weight = 50
+window = [11]
 condition = "deity"
 
 [[gift]]

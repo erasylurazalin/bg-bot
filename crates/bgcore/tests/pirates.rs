@@ -346,7 +346,7 @@ fn captain_sanders_makes_a_minion_of_tier_6_or_below_golden() {
     play(&mut g, 0, 0, 2);
     act(&mut g, 0, Action::Target(1));
     assert!(g.players[0].board[1].golden);
-    assert_eq!(stats(&g.players[0].board[1]), (8, 8));
+    assert_eq!(stats(&g.players[0].board[1]), (10, 10));
     assert!(g.players[0].discover.is_empty());
     assert!(!g.players[0].board[2].golden);
     g.check_invariants().unwrap();
@@ -483,11 +483,11 @@ fn one_big_payment_fires_a_threshold_more_than_once() {
 }
 
 #[test]
-fn the_thresholds_are_five_gold_for_the_courier_six_for_the_escapee_nine_for_rogers() {
+fn the_thresholds_are_five_gold_for_the_courier_and_the_escapee_nine_for_rogers() {
     let db = db();
     let ev = |n: &str| db.get(id(&db, n)).on_event.unwrap().every;
     assert_eq!(ev("Gunpowder Courier"), 5);
-    assert_eq!(ev("Enterprising Escapee"), 6);
+    assert_eq!(ev("Enterprising Escapee"), 5);
     assert_eq!(ev("Sky Admiral Rogers"), 9);
 }
 
@@ -853,13 +853,13 @@ fn the_bounties_do_what_they_say() {
         cast(&mut g, n);
         assert!(g.players[0].board.iter().all(|m| stats(m) == (3 + d.0, 1 + d.1)));
     }
-    // Wave of Gold: +3/+2, Golden ones another +3/+2
+    // Wave of Gold: +3/+3, Golden ones another +3/+3
     let mut g = game(34);
     put_on_board(&mut g, 0, "Cord Puller", false);
     put_on_board(&mut g, 0, "Cord Puller", true);
     cast(&mut g, "Wave of Gold");
-    assert_eq!(stats(&g.players[0].board[0]), (4, 3));
-    assert_eq!(stats(&g.players[0].board[1]), (2 + 6, 2 + 4));
+    assert_eq!(stats(&g.players[0].board[0]), (4, 4));
+    assert_eq!(stats(&g.players[0].board[1]), (2 + 6, 2 + 6));
     // the Tavern spell bonus applies (Azsharan Cutlassier's battlecry)
     let mut g = game(35);
     put_on_board(&mut g, 0, "Azsharan Cutlassier", false);
@@ -922,7 +922,7 @@ fn proud_privateer_doubles_bounties_and_two_do_not_triple_them() {
     put_on_board(&mut g, 0, "Proud Privateer", false);
     put_on_board(&mut g, 0, "Cord Puller", false);
     cast(&mut g, "Wave of Gold");
-    assert_eq!(stats(&g.players[0].board[1]), (4, 3));
+    assert_eq!(stats(&g.players[0].board[1]), (4, 4));
 }
 
 // ================= fights =================
@@ -1029,7 +1029,7 @@ fn ship_master_eudora_buffs_all_for_the_fight_and_golden_minions_keep_it() {
     let (out, _) = fight_deaths(&db, &[eudora, plain, golden], &[killer], 1, 3);
     let perm = &out.sides[0].permanent_stats;
     assert_eq!(perm[1], (0, 0), "the plain minion keeps nothing");
-    assert_eq!(perm[2], (6, 6), "the Golden one keeps +6/+6");
+    assert_eq!(perm[2], (8, 8), "the Golden one keeps +8/+8");
     // a Golden Eudora does it twice
     let mut eudora = mk(&db, "Ship Master Eudora", true);
     eudora.attack = 1;
@@ -1037,7 +1037,7 @@ fn ship_master_eudora_buffs_all_for_the_fight_and_golden_minions_keep_it() {
     let (out, _) = fight_deaths(&db, &[eudora, plain, golden], &[killer], 1, 3);
     let perm = &out.sides[0].permanent_stats;
     assert_eq!(perm[1], (0, 0));
-    assert_eq!(perm[2], (12, 12));
+    assert_eq!(perm[2], (16, 16));
 
 }
 
@@ -1063,7 +1063,7 @@ fn eudoras_permanent_buff_reaches_the_real_board_after_the_fight() {
     end_all_turns(&mut g);
     let b = &g.players[0].board;
     assert_eq!(name(&g, &b[0]), "Ship Master Eudora");
-    assert_eq!(stats(&b[1]), (6 + 6, 2 + 6), "the Golden Busker keeps +6/+6");
+    assert_eq!(stats(&b[1]), (6 + 8, 2 + 8), "the Golden Busker keeps +8/+8");
     assert_eq!(stats(&b[2]), (3, 1), "the plain one keeps nothing");
     g.check_invariants().unwrap();
 }
@@ -1091,14 +1091,15 @@ fn greedy_conniver_sold_golden_discovers_a_tier_7_minion() {
 }
 
 #[test]
-fn hooktusk_buffs_other_pirates_after_a_discover_improved_by_golden_minions_played() {
+fn hooktusk_buffs_your_pirates_after_a_discover_improved_by_golden_minions_played() {
     let mut g = game(80);
     put_on_board(&mut g, 0, "Hooktusk, Master Marauder", false);
     put_on_board(&mut g, 0, "Southsea Busker", false);
     put_on_board(&mut g, 0, "Cord Puller", false);
     g.discover_tier7_minion(0);
     act(&mut g, 0, Action::Choose(0));
-    assert_eq!(stats(&g.players[0].board[0]), (4, 4), "not itself");
+    // "your Pirates" since 37.0.2, so the Hooktusk itself takes it too.
+    assert_eq!(stats(&g.players[0].board[0]), (5 + 1, 5 + 1), "itself too");
     assert_eq!(stats(&g.players[0].board[1]), (4, 2), "+1/+1");
     assert_eq!(stats(&g.players[0].board[2]), (1, 1), "not a Pirate");
     // two Golden minions played: +3/+3
@@ -1106,6 +1107,7 @@ fn hooktusk_buffs_other_pirates_after_a_discover_improved_by_golden_minions_play
     g.discover_tier7_minion(0);
     act(&mut g, 0, Action::Choose(0));
     assert_eq!(stats(&g.players[0].board[1]), (7, 5));
+    assert_eq!(stats(&g.players[0].board[0]), (5 + 1 + 3, 5 + 1 + 3), "the Hooktusk too");
     g.check_invariants().unwrap();
 }
 

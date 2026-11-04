@@ -74,7 +74,7 @@ on_refresh = [{ upgrade_discount = 1 }]
 name = "Bloodbound Earrings"
 card_id = "BG32_MagicItem_808"
 slot = "lesser"
-cost = 1
+cost = 2
 tribes = ["quilboar"]
 # "After you cast 4 spells": every spell, not only Tavern spells.
 rule = { event = "spell_cast", every = 4, acts = [{ gems_on_board = 1 }] }
@@ -92,7 +92,7 @@ start_of_turn = [{ discover_spell = 1 }]
 name = "Sellemental Portrait"
 card_id = "BG32_MagicItem_831"
 slot = "lesser"
-cost = 4
+cost = 3
 tribes = ["elemental"]
 on_pick = [{ get = "Sellemental" }]
 start_of_turn = [{ get = "Sellemental" }]
@@ -101,7 +101,7 @@ start_of_turn = [{ get = "Sellemental" }]
 name = "Chromatic Tear"
 card_id = "BG35_MagicItem_840"
 slot = "lesser"
-cost = 3
+cost = 2
 tribes = ["dragon"]
 on_pick = [{ random_chromadrake = 1 }]
 start_of_turn = [{ random_chromadrake = 1 }]
@@ -110,7 +110,7 @@ start_of_turn = [{ random_chromadrake = 1 }]
 name = "Sunken Anchor"
 card_id = "BG35_MagicItem_890"
 slot = "lesser"
-cost = 6
+cost = 5
 tribes = ["pirate"]
 on_pick = [{ random_bounty = 2 }]
 start_of_turn = [{ random_bounty = 2 }]
@@ -119,7 +119,7 @@ start_of_turn = [{ random_bounty = 2 }]
 name = "Glass of Perspective"
 card_id = "BG36_MagicItem_303"
 slot = "lesser"
-cost = 2
+cost = 3
 tribes = ["quilboar"]
 on_pick = [{ random_choose_one = 1 }]
 start_of_turn = [{ random_choose_one = 1 }]
@@ -128,7 +128,7 @@ start_of_turn = [{ random_choose_one = 1 }]
 name = "Volumizer Portrait"
 card_id = "BG36_MagicItem_423"
 slot = "lesser"
-cost = 3
+cost = 2
 tribes = ["mech"]
 on_pick = [{ random_volumizer = 1 }]
 start_of_turn = [{ random_volumizer = 1 }]
@@ -163,22 +163,22 @@ start_of_turn = [{ linked_spells = 2 }]
 name = "Nerglish Phrasebook"
 card_id = "BG30_MagicItem_914"
 slot = "lesser"
+cost = 1
 tribes = ["murloc"]
-on_play = [{ buff_leftmost_hand = [3, 3] }]
+on_play = [{ buff_leftmost_hand = [5, 5] }]
 
 [[trinket]]
 name = "Explorer's Binoculars"
 cube = false
 card_id = "BG32_MagicItem_858"
 slot = "lesser"
-cost = 1
 on_pick = [{ random_tier_minion = 4, count = 3 }]
 
 [[trinket]]
 name = "Magician's Top Hat"
 card_id = "BG35_MagicItem_815"
 slot = "lesser"
-cost = 2
+cost = 1
 on_pick = [
   { random_tier_minion = 1, count = 2 },
   { random_tier_minion = 2, count = 2 },
@@ -207,9 +207,9 @@ on_pick = [{ get = "Corrupted Coin", count = 2 }]
 name = "Cursed Crystal"
 card_id = "BG35_MagicItem_150"
 slot = "lesser"
-cost = 3
+cost = 2
 tribes = ["demon"]
-on_refresh = [{ buff_tavern_this_turn = [3, 3] }]
+on_refresh = [{ buff_tavern_this_turn = [2, 2] }]
 
 [[trinket]]
 name = "Nomi Sticker"
@@ -310,7 +310,7 @@ start_of_turn = [{ get = "Menagerie Tableware" }]
 name = "Glass of Perspective"
 card_id = "BG36_MagicItem_303t"
 slot = "greater"
-cost = 3
+cost = 4
 tribes = ["quilboar"]
 on_pick = [{ random_choose_one = 2 }]
 start_of_turn = [{ random_choose_one = 2 }]
@@ -319,7 +319,7 @@ start_of_turn = [{ random_choose_one = 2 }]
 name = "Volumizer Portrait"
 card_id = "BG36_MagicItem_423t"
 slot = "greater"
-cost = 3
+cost = 1
 tribes = ["mech"]
 on_pick = [{ random_volumizer = 2 }]
 start_of_turn = [{ random_volumizer = 2 }]
@@ -328,16 +328,16 @@ start_of_turn = [{ random_volumizer = 2 }]
 name = "Nerglish Phrasebook"
 card_id = "BG30_MagicItem_914t"
 slot = "greater"
-cost = 1
+cost = 2
 tribes = ["murloc"]
-on_play = [{ buff_leftmost_hand = [6, 6] }]
+on_play = [{ buff_leftmost_hand = [10, 10] }]
 
 [[trinket]]
 name = "Secret Schematic"
 card_id = "BG36_MagicItem_840"
 slot = "greater"
 tribes = ["mech"]
-on_buy = [{ random_spell = 1 }]
+on_buy = [{ random_spell_at_least = 2 }]
 buy_tribe = "mech"
 
 [[trinket]]
@@ -361,7 +361,7 @@ name = "Surprise Portrait"
 cube = false
 card_id = "BG30_MagicItem_555"
 slot = "greater"
-cost = 5
+cost = 6
 tribes = ["elemental"]
 # "More appear when you least expect them..." (docs/rules/trinkets.md, Era's
 # model): every buy, sell and Refresh has a 5% chance of a surprise, never
@@ -382,7 +382,7 @@ name = "Beatboxer Portrait"
 cube = false
 card_id = "BG35_MagicItem_741"
 slot = "greater"
-cost = 6
+cost = 7
 tribes = ["mech"]
 on_pick = [{ get = "Polarizing Beatboxer" }]
 
@@ -443,7 +443,7 @@ slot = "greater"
 cost = 3
 tribes = ["pirate"]
 on_pick = [{ spell_bonus = [1, 1] }]
-rule = { event = "cast_spell", every = 6, acts = [{ spell_bonus = [1, 1] }] }
+rule = { event = "cast_spell", every = 5, acts = [{ spell_bonus = [1, 1] }] }
 mechanic = "spells"
 
 [[trinket]]
@@ -452,7 +452,7 @@ card_id = "BG35_MagicItem_710"
 slot = "greater"
 cost = 1
 tribes = ["pirate"]
-on_cast_spell = [{ buff_all = [3, 3], tribe = "pirate" }]
+on_cast_spell = [{ buff_all = [4, 4], tribe = "pirate" }]
 mechanic = "spells"
 
 [[trinket]]
@@ -494,7 +494,7 @@ mechanic = "spells"
 name = "Sludge Portrait"
 card_id = "BG36_MagicItem_430"
 slot = "greater"
-cost = 5
+cost = 7
 tribes = ["aberration"]
 on_pick = [{ get = "Sludge Corrosion" }]
 on_discard = [{ get = "Sludge Corrosion" }]
@@ -540,7 +540,7 @@ start_of_turn = [{ health_price_minions = ["demon", "1"] }]
 name = "Bazaar Sticker"
 card_id = "BG32_MagicItem_822"
 slot = "lesser"
-cost = 1
+cost = 2
 tribes = ["demon"]
 start_of_turn = [{ health_price_spell = 1 }]
 
@@ -556,7 +556,7 @@ rule = { event = "refresh", every = 4, acts = [{ health_price_highest_tier = tru
 name = "The Eye of Sargeras"
 card_id = "BG30_MagicItem_701"
 slot = "greater"
-cost = 5
+cost = 6
 tribes = ["demon"]
 on_pick = [{ every_nth_buy_health = 4 }]
 
@@ -564,7 +564,7 @@ on_pick = [{ every_nth_buy_health = 4 }]
 name = "Warcry Totem"
 card_id = "BG36_MagicItem_202"
 slot = "lesser"
-cost = 4
+cost = 5
 tribes = ["dragon", "murloc"]
 start_of_turn = [{ free_buys = 2 }]
 
@@ -574,7 +574,7 @@ name = "Stuffed Coin Purse"
 cube = false
 card_id = "BG35_MagicItem_814"
 slot = "lesser"
-on_pick = [{ gold_on_tier6 = 12 }]
+on_pick = [{ gold_on_tier6 = 14 }]
 
 [[trinket]]
 name = "Glowing Crystal"
@@ -640,7 +640,7 @@ cube = false
 card_id = "BG36_MagicItem_408"
 slot = "lesser"
 tribes = ["pirate"]
-rule = { event = "gold_spent", every = 50, once = true, acts = [{ replace_with_random = ["greater", "pirate"] }] }
+rule = { event = "gold_spent", every = 40, once = true, acts = [{ replace_with_random = ["greater", "pirate"] }] }
 
 [[trinket]]
 name = "Mystery Cube"
@@ -656,7 +656,6 @@ on_pick = [{ offer_replace = 2 }]
 name = "Booty Bay Brew"
 card_id = "BG30_MagicItem_924"
 slot = "lesser"
-cost = 2
 tribes = ["pirate"]
 on_gold_spent = [{ buff_random_other = [3, 3], tribe = "pirate", count = 2 }]
 
@@ -666,7 +665,7 @@ card_id = "BG30_MagicItem_924t"
 slot = "greater"
 cost = 1
 tribes = ["pirate"]
-on_gold_spent = [{ buff_random_other = [6, 6], tribe = "pirate", count = 2 }]
+on_gold_spent = [{ buff_random_other = [8, 8], tribe = "pirate", count = 2 }]
 
 [[trinket]]
 name = "Shark Cannon"
@@ -676,11 +675,14 @@ tribes = ["pirate"]
 rule = { event = "gold_spent", every = 4, acts = [{ buff_all_growing = [1, 1], tribe = "pirate" }, { grow_value = 1 }] }
 
 [[trinket]]
+# Patch 37.0.2: no tribe tie any more, 2 spells on minions, and banned in
+# Quilboar lobbies (Blizzard: "Now banned in Quill lobbies").
 name = "Wand of Divination"
 card_id = "BG36_MagicItem_307"
 slot = "lesser"
-tribes = ["naga", "quilboar"]
-rule = { event = "cast_spell_on_minion", every = 3, acts = [{ gold = 1 }] }
+cost = 2
+banned_tribes = ["quilboar"]
+rule = { event = "cast_spell_on_minion", every = 2, acts = [{ gold = 1 }] }
 
 #
 # Fight-side trinkets (block 1). A trinket has no host minion, so these are
@@ -698,6 +700,7 @@ rule = { event = "cast_spell_on_minion", every = 3, acts = [{ gold = 1 }] }
 # ---- the frame's proof: one Avenge, one Start of Combat, one summon ----
 
 [[trinket]]
+out_of_pool = true
 name = "Quilligraphy Set"
 card_id = "BG30_MagicItem_410"
 slot = "lesser"
@@ -705,6 +708,7 @@ tribes = ["quilboar"]
 fight = [{ when = "avenge", every = 3, gem_bonus = [0, 1] }]
 
 [[trinket]]
+out_of_pool = true
 name = "Quilligraphy Set"
 card_id = "BG30_MagicItem_410t2"
 slot = "greater"
@@ -723,7 +727,7 @@ name = "Mama Bear Sticker"
 card_id = "BG35_MagicItem_871"
 slot = "lesser"
 tribes = ["beast"]
-fight = [{ when = "summon", tribe = "beast", buff = [6, 6] }]
+fight = [{ when = "summon", tribe = "beast", buff = [7, 7] }]
 
 # ---- the rest of the Avenge trinkets, and a death trigger ----
 
@@ -746,11 +750,12 @@ fight = [{ when = "avenge", every = 5, summon = "Beetle", count = 1, keywords = 
 name = "Beetle Band"
 card_id = "BG32_MagicItem_860t"
 slot = "greater"
-cost = 5
+cost = 4
 tribes = ["beast"]
-fight = [{ when = "avenge", every = 7, summon = "Beetle", count = 2, keywords = ["taunt"] }]
+fight = [{ when = "avenge", every = 8, summon = "Beetle", count = 2, keywords = ["taunt"] }]
 
 [[trinket]]
+out_of_pool = true
 name = "Fridge Magnet"
 card_id = "BG30_MagicItem_545"
 slot = "greater"
@@ -787,14 +792,14 @@ name = "Lucky Tabby"
 card_id = "BG30_MagicItem_931"
 slot = "lesser"
 tribes = ["beast"]
-rule = { event = "death", every = 7, acts = [{ random_minion = "beast" }] }
+rule = { event = "death", every = 6, acts = [{ random_minion = "beast" }] }
 
 [[trinket]]
 name = "Stormcoil Sticker"
 card_id = "BG35_MagicItem_302"
 slot = "lesser"
 tribes = ["mech"]
-rule = { event = "death", every = 6, acts = [{ random_minion = "mech" }] }
+rule = { event = "death", every = 5, acts = [{ random_minion = "mech" }] }
 
 [[trinket]]
 name = "Wildfeather Duster"
@@ -818,6 +823,7 @@ first_deathrattle = true
 name = "Hoggy Bank"
 card_id = "BG30_MagicItem_411"
 slot = "lesser"
+cost = 1
 tribes = ["quilboar"]
 fight = [{ when = "soc", tribe = "quilboar", dr = { gems = 2 } }]
 
@@ -842,7 +848,7 @@ fight = [{ when = "soc", pick = "ends", tribe = "undead", keywords = ["reborn"] 
 name = "Training Certificate"
 card_id = "BG30_MagicItem_962"
 slot = "lesser"
-cost = 3
+cost = 4
 tribes = ["dragon"]
 fight = [{ when = "soc", pick = "lowest_attack", count = 2, scale = "double" }]
 
@@ -904,7 +910,7 @@ slot = "greater"
 cost = 3
 tribes = ["mech"]
 on_pick = [{ get = "Falling Sky Golem" }]
-fight = [{ when = "soc", dr = { buff_all = [2, 2] } }]
+fight = [{ when = "soc", dr = { buff_all = [3, 3] } }]
 
 [[trinket]]
 name = "Dramaloc Sticker"
@@ -936,7 +942,7 @@ fight = [{ when = "soc", card = "Faceless Converter", keywords = ["reborn"] }]
 name = "Herding Horn"
 card_id = "BG36_MagicItem_200"
 slot = "lesser"
-cost = 3
+cost = 4
 tribes = ["beast"]
 fight = [{ when = "attack", rally = true, free_refreshes = 1 }]
 
@@ -953,10 +959,10 @@ fight = [{ when = "attack", tribe = "beast", buff = [4, 2] }]
 name = "All-Purpose Kibble"
 card_id = "BG32_MagicItem_200"
 slot = "greater"
-cost = 2
+cost = 4
 tribes = ["beast"]
 fight = [
-    { when = "attack", tribe = "beast", buff = [3, 0], grow = 1 },
+    { when = "attack", tribe = "beast", buff = [4, 0], grow = 1 },
     { when = "attack", tribe = "beast", improve = 1 },
 ]
 
@@ -996,8 +1002,9 @@ fight = [{ when = "reborn", copy = true, cap = 3 }]
 name = "Jar o' Gems"
 card_id = "BG30_MagicItem_546"
 slot = "greater"
+cost = 3
 tribes = ["quilboar"]
-fight = [{ when = "attack", every = 2, once = true, gems = { count = 1, tribe = "quilboar" } }]
+fight = [{ when = "attack", tribe = "quilboar", once = true, gems = { count = 1, tribe = "quilboar" } }]
 
 [[trinket]]
 name = "Evil Experiment"
@@ -1039,7 +1046,7 @@ on_pick = [{ get = "Arcane Behemoth" }]
 name = "Boom's Monster Portrait"
 card_id = "BG32_MagicItem_172"
 slot = "greater"
-cost = 6
+cost = 4
 tribes = ["mech"]
 on_pick = [{ get = "Dr. Boom's Monster" }]
 start_of_turn = [{ get = "Dr. Boom's Monster" }]
@@ -1093,7 +1100,6 @@ end_of_turn = [{ magnetize_ends = "Accord-o-Tron", tribe = "mech" }]
 name = "Jarred Frostling"
 card_id = "BG30_MagicItem_952"
 slot = "greater"
-cost = 2
 tribes = ["elemental"]
 fight = [{ when = "soc", tribe = "elemental", pick = "random", count = 3, dr = { summon = "Flourishing Frostling" } }]
 
@@ -1111,7 +1117,8 @@ start_of_turn = [{ get_remembered = 1 }]
 name = "Portable Factory"
 card_id = "BG32_MagicItem_361t"
 slot = "greater"
-on_pick = [{ discover_remember = 5, discover_remember_typed = true }]
+cost = 2
+on_pick = [{ discover_remember = 6, discover_remember_typed = true }]
 start_of_turn = [{ get_remembered = 1 }]
 
 [[trinket]]
@@ -1125,7 +1132,6 @@ start_of_turn = [{ gold = 2 }, { discover_tier = 6 }]
 name = "Rockin' Music Box"
 card_id = "BG30_MagicItem_430"
 slot = "lesser"
-cost = 1
 on_pick = [{ random_battlecry = 1 }]
 start_of_turn = [{ random_battlecry = 1 }]
 
@@ -1133,7 +1139,7 @@ start_of_turn = [{ random_battlecry = 1 }]
 name = "Reflective Pendant"
 card_id = "BG30_MagicItem_706"
 slot = "lesser"
-cost = 6
+cost = 5
 on_pick = [{ plain_copy_random_friendly = 1 }]
 start_of_turn = [{ plain_copy_random_friendly = 1 }]
 
@@ -1152,6 +1158,7 @@ cost = 4
 on_pick = [{ copy_buys = 4 }]
 
 [[trinket]]
+out_of_pool = true
 name = "Writhing Tentacles"
 card_id = "BG36_MagicItem_606"
 slot = "greater"
@@ -1181,7 +1188,7 @@ card_id = "BG35_MagicItem_713"
 slot = "greater"
 tribes = ["pirate"]
 get_tribe = "pirate"
-on_get = [{ buff_leftmost = [16, 16] }]
+on_get = [{ buff_leftmost = [20, 20] }]
 
 [[trinket]]
 name = "Warband Whistle"
@@ -1210,7 +1217,7 @@ rule = { event = "turns", every = 3, acts = [{ get = "The Goldenizer" }] }
 name = "Conch Portrait"
 card_id = "BG35_MagicItem_305"
 slot = "lesser"
-cost = 5
+cost = 4
 tribes = ["murloc"]
 start_every = 2
 on_pick = [{ get = "Cloning Conch" }]
@@ -1229,7 +1236,7 @@ start_of_turn = [{ get = "Duplicating Lens" }]
 name = "Baller Portrait"
 card_id = "BG36_MagicItem_390"
 slot = "lesser"
-cost = 2
+cost = 1
 tribes = ["elemental"]
 on_pick = [{ one_of = ["Fire Baller", "Snow Baller"] }]
 start_of_turn = [{ one_of = ["Fire Baller", "Snow Baller"] }]
@@ -1313,7 +1320,7 @@ on_pick = [{ tier6_refreshes = 2 }]
 name = "Bob-blehead"
 card_id = "BG30_MagicItem_998"
 slot = "lesser"
-on_pick = [{ gold = 2 }, { min_tier = 3 }]
+on_pick = [{ gold = 3 }, { min_tier = 3 }]
 
 #
 # Spellcraft (block 3). A Spellcraft trinket hands its spell out when it is
@@ -1362,7 +1369,7 @@ start_of_turn = [{ get = "Jailer Sticker (Greater)" }]
 name = "Token of the Old Gods"
 card_id = "BG30_MagicItem_416"
 slot = "lesser"
-cost = 2
+cost = 1
 on_pick = [{ get = "Token of the Old Gods" }]
 start_of_turn = [{ get = "Token of the Old Gods" }]
 
@@ -1449,7 +1456,7 @@ name = "Gold Mallet"
 card_id = "BG36_MagicItem_302t"
 slot = "greater"
 cost = 2
-end_of_turn = [{ buff_all_per_golden = [4, 2] }]
+end_of_turn = [{ buff_all_per_golden = [4, 4] }]
 
 [[trinket]]
 name = "Charming Panpipes"
@@ -1621,6 +1628,9 @@ tribes = ["mech"]
 end_of_turn = [{ cast_on_leftmost = true, card = "Repair Job", tribe = "mech" }]
 
 [[trinket]]
+# Out of the pool since patch 37.0.2: the effect still runs for old logs and
+# boards, no offer may hand it out again.
+out_of_pool = true
 name = "Spell-powered Wrench"
 card_id = "BG32_MagicItem_170"
 slot = "lesser"
@@ -1631,8 +1641,9 @@ on_magnetize = [{ cast_on_random = true, card = "Repair Job", tribe = "mech" }]
 name = "Reusable Batteries"
 card_id = "BG32_MagicItem_278"
 slot = "lesser"
+cost = 1
 tribes = ["mech"]
-uses_per_turn = 1
+uses_per_turn = 2
 on_buy = [{ satellite_of_bought = "Satellite" }]
 
 [[trinket]]
@@ -1640,14 +1651,15 @@ name = "Inductive Gyroblade"
 card_id = "BG36_MagicItem_810"
 slot = "lesser"
 tribes = ["mech"]
-end_of_turn = [{ get_with_stats = "Satellite", stats = [4, 4], per_spell = [4, 4] }]
+end_of_turn = [{ get_with_stats = "Satellite", stats = [6, 6], per_spell = [6, 6] }]
 
 [[trinket]]
 name = "Inductive Gyroblade"
 card_id = "BG36_MagicItem_810t"
 slot = "greater"
+cost = 2
 tribes = ["mech"]
-end_of_turn = [{ get_with_stats = "Satellite", stats = [12, 12], per_spell = [12, 12] }]
+end_of_turn = [{ get_with_stats = "Satellite", stats = [20, 20], per_spell = [20, 20] }]
 
 [[trinket]]
 name = "Magicfin Sticker"
@@ -1672,10 +1684,10 @@ on_destroy = [{ get = "Plaguerunner" }]
 name = "Maw Caster Portrait"
 card_id = "BG32_MagicItem_205"
 slot = "greater"
-cost = 5
+cost = 1
 tribes = ["undead"]
 on_pick = [{ get = "Maw Caster" }]
-on_destroy = [{ gold = 2 }]
+on_destroy = [{ gold = 1 }]
 
 [[trinket]]
 name = "Felsteel Cleaver"
@@ -1695,11 +1707,13 @@ on_pick = [{ consume_claw = [5, 5] }]
 # ---- B. counters and growing numbers ----
 
 [[trinket]]
+# Patch 37.0.2: a Greater trinket now, starting at +7/+7 (still doubles at
+# the start of each turn).
 name = "Weighted Gauntlet"
 card_id = "BG36_MagicItem_414"
-slot = "lesser"
+slot = "greater"
 cost = 3
-on_pick = [{ grow_value = 1 }]
+on_pick = [{ grow_value = 7 }]
 start_of_turn = [{ double_value = true }]
 end_of_turn = [{ buff_all_growing = [0, 0] }]
 
@@ -1819,7 +1833,6 @@ on_pick = [
 name = "Czarina Portrait"
 card_id = "BG32_MagicItem_283"
 slot = "greater"
-cost = 1
 tribes = ["mech"]
 on_pick = [
     { get = "Charging Czarina" },
@@ -1858,7 +1871,7 @@ on_pick = [{ souvenir = true }]
 name = "Trailblazer Sticker"
 card_id = "BG36_MagicItem_308"
 slot = "greater"
-cost = 4
+cost = 5
 tribes = ["quilboar"]
 on_pick = [{ choose_one_all = true }]
 
@@ -1868,6 +1881,7 @@ on_pick = [{ choose_one_all = true }]
 name = "Jewelry Box"
 card_id = "BG35_MagicItem_434"
 slot = "lesser"
+cost = 1
 tribes = ["quilboar"]
 on_pick = [{ one_of3 = ["Blood Gem (Taunt)", "Blood Gem (Divine Shield)", "Blood Gem (Reborn)"] }]
 start_of_turn = [{ one_of3 = ["Blood Gem (Taunt)", "Blood Gem (Divine Shield)", "Blood Gem (Reborn)"] }]
@@ -1877,7 +1891,7 @@ name = "Dragonhead Staff"
 card_id = "BG36_MagicItem_407"
 slot = "lesser"
 tribes = ["dragon"]
-rule = { event = "attack", every = 13, acts = [{ replace_with_random = ["greater", "dragon"] }] }
+rule = { event = "attack", every = 11, acts = [{ replace_with_random = ["greater", "dragon"] }] }
 
 [[trinket]]
 name = "Ruby Tusk"
@@ -1909,7 +1923,7 @@ fight = [{ when = "soc", fermenter = 3 }]
 name = "Snarky Portrait"
 card_id = "BG36_MagicItem_450"
 slot = "greater"
-cost = 2
+cost = 4
 tribes = ["beast"]
 death_card = "Fishbait"
 on_pick = [{ get = "Snarky Shark", count = 2 }, { grow_value = 4 }]
@@ -1923,7 +1937,7 @@ rule = {
 name = "Blood Golem Sticker"
 card_id = "BG30_MagicItem_442"
 slot = "greater"
-cost = 5
+cost = 6
 tribes = ["quilboar"]
 fight = [{ when = "death", tribe = "quilboar", gem_golem = "Blood Golem" }]
 
@@ -1983,7 +1997,7 @@ on_pick = [{ dark_gift = { yours = true, golden = true } }]
 name = "Maldraxxus Dagger"
 card_id = "BG36_MagicItem_370"
 slot = "greater"
-cost = 6
+cost = 7
 on_pick = [{ dark_gift_copies = true }]
 start_every = 2
 start_of_turn = [{ dark_gift_copies = true }]
@@ -2059,7 +2073,7 @@ rule = { event = "death_undead", every = 1, acts = [
 name = "Yogg-Tastic Pastry"
 card_id = "BG30_MagicItem_994"
 slot = "lesser"
-cost = 5
+cost = 3
 on_pick = [{ yogg_wheel = true }]
 start_of_turn = [{ yogg_wheel = true }]
 wheel = [

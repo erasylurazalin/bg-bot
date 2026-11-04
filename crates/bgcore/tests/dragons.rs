@@ -477,9 +477,12 @@ fn runic_arcanist_casts_shiny_ring_twice_in_combat() {
 #[test]
 fn crimson_vindicator_casts_mighty_dragonbreath_in_combat() {
     let db = db();
-    // It has Divine Shield, so its own Dragonbreath gives it +9/+6
+    // 9/7 with Divine Shield and Windfury since patch 37.0.2; its own
+    // Dragonbreath gives it +9/+6 (Divine Shield and Dragon).
+    let card = db.get(db.by_name("Crimson Vindicator").unwrap());
+    assert!(card.keywords.has(Keywords::WINDFURY));
     let (_, log) = run(&db, &[mk(&db, "Crimson Vindicator", false)], &[wall(&db)], 1, 1);
-    assert_eq!(log.attacks[0], ("Crimson Vindicator".to_string(), 8 + 9, 9 + 6));
+    assert_eq!(log.attacks[0], ("Crimson Vindicator".to_string(), 9 + 9, 7 + 6));
 }
 
 #[test]

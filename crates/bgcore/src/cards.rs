@@ -425,8 +425,11 @@ pub enum Effect {
     GetRandomTierMinion { tier: u8 },
     /// Give a friendly minion of each type the stats permanently, one random
     /// minion per type and at most one buff per minion (The Last One
-    /// Standing). A golden minion does the whole thing twice.
-    BuffEachType { attack: i32, health: i32 },
+    /// Standing). A golden minion does the whole thing twice. With
+    /// `improves_self` the buff grows by its own numbers every time it runs,
+    /// counted in the host's `improvements`, so the first run gives
+    /// +attack/+health, the second twice that, the third three times.
+    BuffEachType { attack: i32, health: i32, improves_self: bool },
     /// Rally: deal this minion's Attack to the minion it attacks and to one
     /// random minion next to it (both neighbours when golden). Obsidian
     /// Ravager.
@@ -474,9 +477,11 @@ pub enum Effect {
     /// Get a copy of the last card the player discarded, with double stats
     /// (Writhing Tentacles). Nothing when nothing was discarded.
     CopyLastDiscarded,
-    /// Give the other friendly minions of a tribe +attack/+health, times one
-    /// plus the Golden minions the player played this game (Hooktusk).
-    BuffOthersPerGolden { tribe: Option<Tribe>, attack: i32, health: i32 },
+    /// Give the friendly minions of a tribe (the host too when
+    /// `include_self`, which is "your Pirates" rather than "your other
+    /// Pirates") +attack/+health, times one plus the Golden minions the
+    /// player played this game (Hooktusk).
+    BuffOthersPerGolden { tribe: Option<Tribe>, attack: i32, health: i32, include_self: bool },
     /// Add to the player's "after the Tavern is Refreshed this game" amount
     /// (Waveling, En-Djinn Blazer, Easterly Winds). Every Refresh gives the
     /// whole amount to one random Tavern minion, the turn-start roll
@@ -1379,12 +1384,14 @@ pub enum Aura {
 }
 
 /// What a minion does after it attacks and kills a minion (Tide Oracle
-/// Morgl). A golden minion doubles the numbers the reward carries.
+/// Morgl, Murcules). A golden minion doubles the numbers the reward carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KillReward {
     /// Give the killed minion's Attack and maximum Health to a random card in
     /// the owner's hand.
     MaxStatsToHand,
+    /// Give a random minion in the owner's hand +attack/+health (Murcules).
+    BuffHand { attack: i32, health: i32 },
 }
 
 /// A card's role in a "how many times" count (docs/rules/design.md "Set versus add, as
@@ -1439,12 +1446,19 @@ pub struct AfterBuy {
     pub golden_multiply: i32,
 }
 
-/// "After you summon a minion in combat, give it this minion's current
-/// Attack and maximum Health, `times` times per combat" (Stalwart Kodo).
-/// A golden minion gives double.
+/// "After you summon a minion in combat, give it some multiple of this
+/// minion's current Attack and maximum Health, `times` times per combat"
+/// (Stalwart Kodo). `multiply` is the multiplier for the normal card and
+/// `golden_multiply` for the golden one (1 and 2 unless the data says
+/// otherwise: Stalwart Kodo doubles and triples). `different` skips the
+/// summon when the summoned minion is another copy of the same card (Kodo's
+/// "a different minion").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AfterSummonGiveStats {
     pub times: u8,
+    pub multiply: i32,
+    pub golden_multiply: i32,
+    pub different: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1487,6 +1501,10 @@ pub struct Card {
     pub cost: u8,
     pub is_beetle: bool,
     pub is_volumizer: bool,
+    /// A card that has left the game's pool (patch 37.0.2's Expert Aviator):
+    /// it keeps its id, its effects and its place in old boards and logs,
+    /// but no draw may offer it again. See `Card::lobby_ok`.
+    pub out_of_pool: bool,
     /// Index in `Game::pool` that holds copies of this card. Shared pool
     /// groups (such as the three Volumizers) all point to their first card's
     /// slot.
@@ -1718,13 +1736,18 @@ impl Card {
         self.spell
     }
 
-    /// Whether the card may exist in a lobby of these tribes, which is also
-    /// the filter every card draw applies: a minion with a lobby tribe, or a
+    /// Whether the card may be drawn in a lobby of these tribes, which is the
+    /// filter every card draw applies: a minion with a lobby tribe, or a
     /// neutral or spell not tied to a tribe outside it (`Card.lobby`, the
-    /// game data's `lobby_subsets`). An all-type minion is always in. A
-    /// wider mask widens the draw (a future trinket), `Tribes::ALL` is no
-    /// filter.
+    /// game data's `lobby_subsets`), and a card that has not left the pool
+    /// (`Card.out_of_pool`: no Tavern, Discover, random draw or trinket offer
+    /// may hand out an out-of-pool card again, though a board or log that
+    /// already holds one keeps it). An all-type minion is always in. A wider
+    /// mask widens the draw (a future trinket), `Tribes::ALL` is no filter.
     pub fn lobby_ok(&self, lobby: Tribes) -> bool {
+        if self.out_of_pool {
+            return false;
+        }
         match self.lobby {
             Some(t) => lobby.has(t),
             None => self.tribes.is_neutral() || self.tribes.overlaps(lobby),
@@ -1785,6 +1808,15 @@ impl Card {
             || matches!(self.rally, Some(Effect::SummonFromHand { .. }))
     }
 
+    /// Whether a fight needs its owner's hand because of this card: every
+    /// card `reads_hand` names, plus the on-kill rewards that hand stats out
+    /// (Tide Oracle Morgl, Murcules). The Dark Gift pool asks `reads_hand`
+    /// for "its effect works in hand", which is a different question, so the
+    /// two are kept apart.
+    pub fn needs_hand_in_fight(&self) -> bool {
+        self.reads_hand() || self.on_kill.is_some()
+    }
+
     /// Whether a host Mech needs to store this card in `Minion::attached`
     /// when Magnetized. Satellites and Volumizers have no persistent board
     /// triggers after being Magnetized, so they take no slot.
@@ -1838,7 +1870,7 @@ pub struct CardDb {
     /// Tier of every card by id, kept compact for the pool draws.
     pub tiers: Vec<u8>,
     /// Pool card ids (ascending) of tier at most the index, for the pool draws.
-    pub ids_up_to_tier: Vec<Vec<u8>>,
+    pub ids_up_to_tier: Vec<Vec<CardId>>,
     pub volumizers: Vec<CardId>,
     pub spells: Vec<CardId>,
     pub beetle_token: Option<CardId>,
@@ -1907,6 +1939,10 @@ struct RawCard {
     /// The token Venomstrike Trap summons (cards.toml `secret_cobra`).
     #[serde(default)]
     secret_cobra: bool,
+    /// A card that has left the pool (patch 37.0.2's Expert Aviator): kept
+    /// for old logs and boards, never drawn or offered again.
+    #[serde(default)]
+    out_of_pool: bool,
     volumizer_buff: Option<[i32; 2]>,
     spell_buff: Option<[i32; 2]>,
     battlecry: Option<RawEffect>,
@@ -1968,8 +2004,10 @@ struct RawCard {
     buff_per_golden_played: Option<[i32; 2]>,
     buff_per_elemental_played: Option<[i32; 2]>,
     buff_per_magnetize: Option<[i32; 2]>,
-    /// What this minion gets after it attacks and kills a minion.
-    on_kill: Option<String>,
+    /// What this minion does after it attacks and kills a minion: the name
+    /// of the reward (`"max_stats_to_hand"`, Tide Oracle Morgl) or a table
+    /// (`{ buff_hand = [3, 3] }`, Murcules).
+    on_kill: Option<RawOnKill>,
     /// Gains the Deathrattle of a friendly Deathrattle minion that dies in
     /// combat (Fish of N'Zoth).
     #[serde(default)]
@@ -2076,6 +2114,28 @@ struct RawAfterBuy {
 #[serde(deny_unknown_fields)]
 struct RawAfterSummonGiveStats {
     times: u8,
+    /// The multiplier for the normal card, 1 when left out.
+    #[serde(default = "one_i32")]
+    multiply: i32,
+    /// The multiplier for the golden card, 1 when left out.
+    #[serde(default = "one_i32")]
+    golden_multiply: i32,
+    /// Skip "another copy of the same card" (Stalwart Kodo's "a different
+    /// minion").
+    #[serde(default)]
+    different: bool,
+}
+
+fn one_i32() -> i32 {
+    1
+}
+
+/// `on_kill`: either the reward's name or a table with its numbers.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawOnKill {
+    Name(String),
+    Reward { buff_hand: [i32; 2] },
 }
 
 #[derive(Deserialize)]
@@ -2556,6 +2616,10 @@ struct RawEffect {
     /// Multiply a buff by one plus this minion's `improvements`.
     #[serde(default)]
     per_improvement: bool,
+    /// The buff grows by its own numbers each time it runs, raising this
+    /// minion's `improvements` (The Last One Standing's Rally).
+    #[serde(default)]
+    improves_self: bool,
     /// Your Undead have +buff this game (wherever they are).
     undead_bonus: Option<[i32; 2]>,
     /// The Attack `undead_bonus` gives when it runs outside combat.
@@ -3424,7 +3488,10 @@ impl CardDb {
                 }
             } else if b.per_golden_played {
                 let [attack, health] = b.buff.ok_or("per_golden_played needs buff")?;
-                Effect::BuffOthersPerGolden { tribe: t, attack, health }
+                // "Your Pirates" (target "all") includes the host; "your
+                // other Pirates" (target "others", the default) does not.
+                let include_self = b.target.as_deref() == Some("all");
+                Effect::BuffOthersPerGolden { tribe: t, attack, health, include_self }
             } else if let Some([attack, health]) = b.keep_golden {
                 Effect::BuffAllKeepGolden { attack, health }
             } else if let Some(attack) = b.adjacent_per_golden {
@@ -3600,7 +3667,7 @@ impl CardDb {
             } else if let Some(tier) = b.random_tier_minion {
                 Effect::GetRandomTierMinion { tier }
             } else if let Some([attack, health]) = b.buff_each_type {
-                Effect::BuffEachType { attack, health }
+                Effect::BuffEachType { attack, health, improves_self: b.improves_self }
             } else if b.damage_target_and_neighbor {
                 Effect::DamageTargetAndNeighbor
             } else if b.give_stats_leftmost_hand {
@@ -4160,6 +4227,7 @@ impl CardDb {
                 cost: 0,
                 is_beetle: c.beetle,
                 is_volumizer,
+                out_of_pool: c.out_of_pool,
                 pool_slot,
                 volumizer_buff,
                 spell_buff,
@@ -4201,10 +4269,14 @@ impl CardDb {
                 health_refreshes: c.health_refreshes.unwrap_or(0),
                 on_sell,
                 aura,
-                after_summon_give_stats: c
-                    .after_summon_give_stats
-                    .as_ref()
-                    .map(|a| AfterSummonGiveStats { times: a.times }),
+                after_summon_give_stats: c.after_summon_give_stats.as_ref().map(|a| {
+                    AfterSummonGiveStats {
+                        times: a.times,
+                        multiply: a.multiply,
+                        golden_multiply: a.golden_multiply,
+                        different: a.different,
+                    }
+                }),
                 spell_target: None,
                 spell_effect: None,
                 always_golden: c.always_golden,
@@ -4212,10 +4284,15 @@ impl CardDb {
                 buff_per_golden_played: c.buff_per_golden_played.map(|[a, h]| (a, h)),
                 buff_per_elemental_played: c.buff_per_elemental_played.map(|[a, h]| (a, h)),
                 buff_per_magnetize: c.buff_per_magnetize.map(|[a, h]| (a, h)),
-                on_kill: match c.on_kill.as_deref() {
+                on_kill: match &c.on_kill {
                     None => None,
-                    Some("max_stats_to_hand") => Some(KillReward::MaxStatsToHand),
-                    Some(other) => return Err(err(format!("unknown on_kill {other:?}"))),
+                    Some(RawOnKill::Name(n)) => match n.as_str() {
+                        "max_stats_to_hand" => Some(KillReward::MaxStatsToHand),
+                        other => return Err(err(format!("unknown on_kill {other:?}"))),
+                    },
+                    Some(RawOnKill::Reward { buff_hand: [attack, health] }) => {
+                        Some(KillReward::BuffHand { attack: *attack, health: *health })
+                    }
                 },
                 gains_friendly_deathrattles: c.gains_friendly_deathrattles,
                 after_discover,
@@ -4370,6 +4447,7 @@ impl CardDb {
                 cost: sp.cost,
                 is_beetle: false,
                 is_volumizer: false,
+                out_of_pool: false,
                 pool_slot: id,
                 volumizer_buff: None,
                 spell_buff: None,
@@ -4497,7 +4575,7 @@ impl CardDb {
             .map(|i| i as CardId);
         let tiers: Vec<u8> = cards.iter().map(|c| c.tier).collect();
         let ids_up_to_tier = (0..=crate::CARD_MAX_TIER)
-            .map(|hi| (0..pool_cards).filter(|&c| tiers[c] <= hi).map(|c| c as u8).collect())
+            .map(|hi| (0..pool_cards).filter(|&c| tiers[c] <= hi).map(|c| c as CardId).collect())
             .collect();
         Ok(CardDb {
             cards,

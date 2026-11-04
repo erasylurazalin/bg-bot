@@ -11,9 +11,9 @@
 use arrayvec::ArrayVec;
 
 use crate::cards::{
-    N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, DeityKind, Effect, OnSummonBeast,
-    PermanentKeep, OnCastSpell, OnReborn, SpellEffect, StartOfCombat, TimesRole, Tribe, Tribes, how_many_times,
-    pick_one_per_type,
+    N_COUNTERS, AttackFilter, Aura, CardDb, Deathrattle, DeityKind, Effect, KillReward,
+    OnSummonBeast, PermanentKeep, OnCastSpell, OnReborn, SpellEffect, StartOfCombat, TimesRole,
+    Tribe, Tribes, how_many_times, pick_one_per_type,
 };
 use crate::minion::{Attached, CardId, Keywords, Minion};
 use crate::trinkets::{FIGHT_ACTS, FightAct, FightEntry, GrantedDr, NO_CAP, Pick, Scale, Trigger, When};
@@ -1799,8 +1799,10 @@ impl<'a> Side<'a> {
                 }
             }
         }
-        // Stalwart Kodo: each one on the board gives the new minion its
-        // current Attack and maximum Health, a few times per fight.
+        // Stalwart Kodo: each one on the board gives the new minion a
+        // multiple of its current Attack and maximum Health (double, triple
+        // when golden), a few times per fight. Its "a different minion" skips
+        // another copy of itself: a summoned Kodo gets nothing from a Kodo.
         if self.gift_trigger {
             for j in 0..self.ms.len() {
                 if j == pos || self.ms[j].m.health <= 0 {
@@ -1812,8 +1814,11 @@ impl<'a> Side<'a> {
                     if self.ms[j].gifts >= g.times {
                         continue;
                     }
+                    if g.different && self.ms[pos].m.parts().any(|(c, _)| c == card) {
+                        continue;
+                    }
                     self.ms[j].gifts += 1;
-                    let mul = if golden { 2 } else { 1 };
+                    let mul = if golden { g.golden_multiply } else { g.multiply };
                     let max_health = mj.health + self.ms[j].taken;
                     self.gain_at(db, pos, mj.attack * mul, max_health * mul);
                 }
@@ -2600,17 +2605,34 @@ impl<'a> Side<'a> {
                     }
                 }
             }
-            Effect::BuffEachType { attack, health } => {
+            Effect::BuffEachType { attack, health, improves_self } => {
                 // A golden minion does the whole thing twice, with fresh
                 // picks, so one minion can get two buffs from it.
+                let host = if improves_self { self.index_of(fx.host) } else { None };
                 for _ in 0..mul {
+                    // "Improve this": the host's own counter grows the buff
+                    // by its printed numbers each time it runs (The Last One
+                    // Standing), and the count outlives the fight.
+                    let (da, dh) = match host {
+                        Some(hi) => {
+                            let n = self.ms[hi].m.improvements as i32;
+                            self.ms[hi].m.improvements = self.ms[hi].m.improvements.saturating_add(1);
+                            if let Some(slot) = self.ms[hi].start_slot {
+                                let s = slot as usize;
+                                self.out.permanent_improvements[s] =
+                                    self.out.permanent_improvements[s].saturating_add(1);
+                            }
+                            (attack * (1 + n), health * (1 + n))
+                        }
+                        None => (attack, health),
+                    };
                     let mut tribes: ArrayVec<Tribes, BOARD> = ArrayVec::new();
                     for f in &self.ms {
                         let t = if f.m.health > 0 { db.tribes_of(&f.m) } else { Tribes::NONE };
                         tribes.push(t);
                     }
                     for i in pick_one_per_type(&tribes, rng) {
-                        self.gain_permanent_at(db, i, attack, health);
+                        self.gain_permanent_at(db, i, da, dh);
                     }
                 }
             }
@@ -4403,29 +4425,34 @@ fn attack_swings_at(
         {
             att.gain_permanent_at(db, ai, kills * att.counters.glory_of_combat as i32, 0);
         }
-        // Tide Oracle Morgl: after it attacks and kills a minion, that
-        // minion's maximum stats (its Attack and its maximum Health) go to a
-        // random card in its owner's hand. A golden one gives double.
+        // An on-kill reward (Tide Oracle Morgl, Murcules): after it attacks
+        // and kills a minion, the reward pays out to a random card in its
+        // owner's hand. A golden one gives double.
         if dealt_x > 0
             && y_alive
             && let Some(di) = def.index_of(def_uid)
             && def.ms[di].m.health <= 0
         {
-            // Maximum Health: the Health it had before the hit plus the
-            // damage it had already taken. (Its `taken` after the hit counts
-            // only the damage dealt, so a Venomous kill, which does not need
-            // to deal its Health, would undercount.)
-            let killed = def.ms[di].m;
-            let taken_before = def.ms[di].taken - dealt_x;
-            let max_health = def_health_before + taken_before;
-            let mult = attacker
-                .parts()
-                .filter(|&(c, _)| db.get(c).on_kill.is_some())
-                .map(|(_, golden)| if golden { 2 } else { 1 })
-                .max()
-                .unwrap_or(0);
-            if mult > 0 {
-                att.buff_random_hand(db, killed.attack * mult, max_health * mult, rng);
+            let reward = attacker.parts().find_map(|(c, golden)| {
+                db.get(c).on_kill.map(|r| (r, if golden { 2 } else { 1 }))
+            });
+            if let Some((reward, mult)) = reward {
+                match reward {
+                    KillReward::MaxStatsToHand => {
+                        // Maximum Health: the Health it had before the hit
+                        // plus the damage it had already taken. (Its `taken`
+                        // after the hit counts only the damage dealt, so a
+                        // Venomous kill, which does not need to deal its
+                        // Health, would undercount.)
+                        let killed = def.ms[di].m;
+                        let taken_before = def.ms[di].taken - dealt_x;
+                        let max_health = def_health_before + taken_before;
+                        att.buff_random_hand(db, killed.attack * mult, max_health * mult, rng);
+                    }
+                    KillReward::BuffHand { attack, health } => {
+                        att.buff_random_hand(db, attack * mult, health * mult, rng);
+                    }
+                }
             }
         }
         let Some(di) = def.index_of(def_uid) else { continue };

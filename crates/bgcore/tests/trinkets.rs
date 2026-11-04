@@ -745,13 +745,13 @@ fn the_cast_triggers_feed_the_player_bonuses() {
     let deity = g.players[0].deity.expect("an Aberration lobby has a Deity");
     cast_tavern_spell(&mut g, 0);
     assert_eq!(g.players[0].deity.unwrap().attack, deity.attack + 4);
-    // Miniature Ship: give your Pirates +3/+3.
+    // Miniature Ship: give your Pirates +4/+4.
     let mut g = game(23);
     equip(&mut g, 0, 1, "Miniature Ship");
     put_on_board(&mut g, 0, "Southsea Busker");
     let before = g.players[0].board[0].attack;
     cast_tavern_spell(&mut g, 0);
-    assert_eq!(g.players[0].board[0].attack, before + 3);
+    assert_eq!(g.players[0].board[0].attack, before + 4);
     // Bloodfury Shield: add a Fodder to the next Refresh.
     let mut g = game(24);
     equip(&mut g, 0, 1, "Bloodfury Shield");
@@ -770,13 +770,13 @@ fn the_play_and_buy_triggers() {
     play_from_hand(&mut g, 0, "Sellemental");
     assert_eq!(g.players[0].shop[0].attack, before + 3, "the Tavern Elemental grew");
     // Nerglish Phrasebook: after you play a minion, the left-most card in
-    // hand gets +3/+3.
+    // hand gets +5/+5.
     let mut g = game(26);
     equip(&mut g, 0, 0, "Nerglish Phrasebook");
     put_in_hand(&mut g, 0, "Flittering Bat");
     let before = g.players[0].hand[0].attack;
     play_from_hand(&mut g, 0, "Southsea Busker");
-    assert_eq!(g.players[0].hand[0].attack, before + 3);
+    assert_eq!(g.players[0].hand[0].attack, before + 5);
     // Recycling Sticker: after you play an Elemental, a free Refresh.
     let mut g = game(27);
     equip(&mut g, 0, 1, "Recycling Sticker");
@@ -908,15 +908,15 @@ fn the_warband_whistle_deals_one_plain_copy_of_each_warband_minion() {
 
 #[test]
 fn the_wand_of_divination_counts_every_cast_on_a_minion() {
-    // "After you cast 3 spells on minions, gain 1 Gold": a Tavern minion is a
-    // minion (docs/rules/design.md "Targets in the shop"), and every cast of one spell
-    // counts (a Blood Gem Balinda casts three times).
+    // "After you cast 2 spells on minions, gain 1 Gold" (patch 37.0.2): a
+    // Tavern minion is a minion (docs/rules/design.md "Targets in the shop"),
+    // and every cast of one spell counts (a Blood Gem Balinda casts twice).
     let mut g = game(44);
     equip(&mut g, 0, 0, "Wand of Divination");
     set_shop(&mut g, 0, &["Cord Puller"]);
     g.players[0].gold = 10;
     let count = |g: &Game| g.players[0].trinkets[0].count;
-    for i in 1..=3u16 {
+    for i in 1..=2u16 {
         g.give(0, "Blood Gem").unwrap();
         let gem = g.players[0]
             .hand
@@ -926,12 +926,12 @@ fn the_wand_of_divination_counts_every_cast_on_a_minion() {
         let gold = g.players[0].gold;
         act(&mut g, 0, Action::Play { hand: gem as u8, pos: 0 });
         act(&mut g, 0, Action::TargetShop(0));
-        if i < 3 {
+        if i < 2 {
             assert_eq!(count(&g), i, "cast {i} on a Tavern minion counts");
-            assert_eq!(g.players[0].gold, gold, "no Gold before the third cast");
+            assert_eq!(g.players[0].gold, gold, "no Gold before the second cast");
         } else {
-            assert_eq!(count(&g), 0, "the third cast wraps the count");
-            assert_eq!(g.players[0].gold, gold + 1, "the third cast pays 1 Gold");
+            assert_eq!(count(&g), 0, "the second cast wraps the count");
+            assert_eq!(g.players[0].gold, gold + 1, "the second cast pays 1 Gold");
         }
     }
     // Balinda casts one Blood Gem twice (a golden one three times): every
@@ -950,9 +950,9 @@ fn the_wand_of_divination_counts_every_cast_on_a_minion() {
     let gold = g.players[0].gold;
     act(&mut g, 0, Action::Play { hand: gem as u8, pos: 0 });
     act(&mut g, 0, Action::Target(1));
-    assert_eq!(g.players[0].trinkets[0].count, 2, "two casts from one Gem");
-    assert_eq!(g.players[0].gold, gold, "two casts are not three");
-    // A golden Balinda casts three times, so the same Gem pays.
+    assert_eq!(g.players[0].trinkets[0].count, 0, "two casts wrap the count");
+    assert_eq!(g.players[0].gold, gold + 1, "and pay 1 Gold");
+    // A golden Balinda casts three times: one more after the wrap.
     let mut g = game(46);
     equip(&mut g, 0, 0, "Wand of Divination");
     let balinda = id(&g, "Balinda Stonehearth");
@@ -970,14 +970,14 @@ fn the_wand_of_divination_counts_every_cast_on_a_minion() {
     let gold = g.players[0].gold;
     act(&mut g, 0, Action::Play { hand: gem as u8, pos: 0 });
     act(&mut g, 0, Action::Target(1));
-    assert_eq!(g.players[0].trinkets[0].count, 0, "three casts wrap the count");
+    assert_eq!(g.players[0].trinkets[0].count, 1, "three casts: one after the wrap");
     assert_eq!(g.players[0].gold, gold + 1, "three casts of one Gem pay 1 Gold");
     g.check_invariants().unwrap();
 }
 
 #[test]
 fn the_tavern_shape_trinkets() {
-    // Cursed Crystal: +3/+3 to the Tavern this turn, and it must not stack
+    // Cursed Crystal: +2/+2 to the Tavern this turn, and it must not stack
     // when you Refresh again.
     let mut g = game(33);
     equip(&mut g, 0, 0, "Cursed Crystal");
@@ -991,9 +991,9 @@ fn the_tavern_shape_trinkets() {
     };
     act(&mut g, 0, Action::Roll);
     assert!(!g.players[0].shop.is_empty());
-    assert!(bonus(&g).iter().all(|&b| b == 3), "every Tavern minion got +3 Attack");
+    assert!(bonus(&g).iter().all(|&b| b == 2), "every Tavern minion got +2 Attack");
     act(&mut g, 0, Action::Roll);
-    assert!(bonus(&g).iter().all(|&b| b == 3), "a second Refresh must not double it");
+    assert!(bonus(&g).iter().all(|&b| b == 2), "a second Refresh must not double it");
     // It is this turn only.
     to_turn(&mut g, 2);
     turn_of(&mut g, 0);
@@ -1219,7 +1219,7 @@ fn the_discover_bounty_and_link_portraits() {
     for name in [
         "Bubble Gunner",
         "Flighty Scout",
-        "Expert Aviator",
+        "Murcules",
         "Tad",
         "Very Hungry Winterfinner",
     ] {
@@ -1234,13 +1234,13 @@ fn the_discover_bounty_and_link_portraits() {
 
 #[test]
 fn the_greater_forms_are_stronger() {
-    // Nerglish Phrasebook: +6/+6 instead of +3/+3.
+    // Nerglish Phrasebook: +10/+10 instead of +5/+5.
     let mut g = game(47);
     take_id(&mut g, 0, "BG30_MagicItem_914t");
     put_in_hand(&mut g, 0, "Flittering Bat");
     let before = g.players[0].hand[0].attack;
     play_from_hand(&mut g, 0, "Southsea Busker");
-    assert_eq!(g.players[0].hand[0].attack, before + 6);
+    assert_eq!(g.players[0].hand[0].attack, before + 10);
     // Comfy Coffin: +2 Attack instead of +1 per Tavern spell.
     let mut g = game(48);
     take_id(&mut g, 0, "BG30_MagicItem_547t");
@@ -1701,7 +1701,7 @@ fn a_start_of_combat_trinket_shields_the_two_ends() {
 
 #[test]
 fn summoning_a_beast_buffs_it() {
-    // Mama Bear Sticker: whenever you summon a Beast, give it +6/+6.
+    // Mama Bear Sticker: whenever you summon a Beast, give it +7/+7.
     let mut g = game(13);
     equip(&mut g, 0, 0, "Mama Bear Sticker");
     // Buzzing Vermin's Deathrattle summons a 2/2 Beetle, a Beast.
@@ -1709,7 +1709,7 @@ fn summoning_a_beast_buffs_it() {
     let mut seen = Seen::default();
     fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
     let beetle = seen.summoned(&g, "Beetle").expect("the Vermin's Beast was summoned");
-    assert_eq!((beetle.attack, beetle.health), (2 + 6, 2 + 6), "the sticker buffed it");
+    assert_eq!((beetle.attack, beetle.health), (2 + 7, 2 + 7), "the sticker buffed it");
     // The same fight with no trinket leaves the Beetle alone.
     g.players[0].board.clear();
     g.players[0].trinkets[0] = Default::default();
@@ -1750,10 +1750,15 @@ fn beetle_band_summons_taunt_beetles_at_the_right_end() {
     // its death shows the Taunt it was given.
     let dead = seen.dead(&g, "Beetle").expect("the Beetle fought and died");
     assert!(dead.keywords.has(bgcore::Keywords::TAUNT), "it has Taunt");
-    // The greater one is Avenge (7) and summons two.
+    // The greater one is Avenge (8) and summons two. Seven minions, one of
+    // them Reborn: it dies twice, which is the eighth death.
     let mut g = game(16);
     equip_id(&mut g, 0, 1, "BG32_MagicItem_860t");
-    weak_board(&mut g, 0, "Southsea Busker", 7);
+    weak_board(&mut g, 0, "Southsea Busker", 6);
+    put_on_board(&mut g, 0, "Southsea Busker");
+    let last = g.players[0].board.len() - 1;
+    g.players[0].board[last].health = 1;
+    g.players[0].board[last].keywords.set(bgcore::Keywords::REBORN);
     let mut seen = Seen::default();
     fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
     let summoned: Vec<Minion> = seen.summoned_all(&g, "Beetle");
@@ -1909,8 +1914,8 @@ fn the_death_counters_name_their_tribe() {
     let g = game(33);
     for (name, tribe, every) in [
         ("Bleeding Heart", Tribe::Undead, 8),
-        ("Lucky Tabby", Tribe::Beast, 7),
-        ("Stormcoil Sticker", Tribe::Mech, 6),
+        ("Lucky Tabby", Tribe::Beast, 6),
+        ("Stormcoil Sticker", Tribe::Mech, 5),
     ] {
         let t = g.data.trinkets.get(trinket(&g, name));
         let rule = t.rule.as_ref().unwrap_or_else(|| panic!("{name}: no rule"));
@@ -2124,9 +2129,9 @@ fn sky_golem_portrait_grants_a_deathrattle_that_buffs_the_rest_for_good() {
     g.players[0].board.last_mut().unwrap().health = 100;
     // Five swings: one death, and the Knight is still there at the end.
     let out = fight_wall(&g, 1, 3, 500, 5);
-    // Every minion got "Deathrattle: give your minions +2/+2 permanently",
+    // Every minion got "Deathrattle: give your minions +3/+3 permanently",
     // so the Knight's stats are kept through the outcome.
-    assert_eq!(out.sides[0].permanent_stats[1], (2, 2), "the survivor keeps +2/+2");
+    assert_eq!(out.sides[0].permanent_stats[1], (3, 3), "the survivor keeps +3/+3");
     assert_eq!(out.sides[0].deathrattles_triggered, 1, "the dead one's Deathrattle fired");
 }
 
@@ -2234,8 +2239,8 @@ fn all_purpose_kibble_grows_with_every_beast_attack() {
     let out = fight_wall_watched(&g, 1, 0, 500, 2, &mut seen);
     assert_eq!(
         swings(&seen, &g, "Flittering Bat"),
-        [(1 + 3, 4), (1 + 3 + 4, 4)],
-        "+3, then +4: it improved"
+        [(1 + 4, 4), (1 + 4 + 5, 4)],
+        "+4, then +5: it improved"
     );
     assert_eq!(out.sides[0].trinket_improve[1], 2, "two attacks improved it twice");
 }
@@ -2301,19 +2306,19 @@ fn funeral_wreath_gives_a_plain_copy_of_a_reborn_minion() {
 }
 
 #[test]
-fn jar_o_gems_plays_a_blood_gem_on_your_quilboar_after_two_attacks() {
+fn jar_o_gems_plays_a_blood_gem_on_your_quilboar_after_its_first_attack() {
     let mut g = game(69);
     equip_id(&mut g, 0, 1, "BG30_MagicItem_546");
     put_on_board(&mut g, 0, "Crater Miner"); // Quilboar 2/2
     put_on_board(&mut g, 0, "Southsea Busker"); // Pirate
     let mut seen = Seen::default();
     fight_wall_watched(&g, 1, 0, 500, 4, &mut seen);
-    // The Gem lands after the second friendly attack: from then on the
-    // Quilboar swings at +1/+1.
+    // The Gem lands as the Quilboar attacks (the trinket's Attack hook runs
+    // before the hit), once a combat: from then on it swings at +1/+1.
     assert_eq!(
         swings(&seen, &g, "Crater Miner"),
-        [(2, 2), (3, 3)],
-        "a Gem after the second attack, once"
+        [(3, 3), (3, 3)],
+        "a Gem after the Quilboar's first attack, once"
     );
     assert_eq!(swings(&seen, &g, "Southsea Busker"), [(3, 1), (3, 1)], "Pirates get nothing");
 }
@@ -2692,8 +2697,8 @@ fn trusty_crowbar_buffs_the_left_most_on_every_pirate() {
     let now = g.players[0].board[0];
     assert_eq!(
         (now.attack, now.health),
-        (first.attack + 16, first.health + 16),
-        "the left-most minion got +16/+16"
+        (first.attack + 20, first.health + 20),
+        "the left-most minion got +20/+20"
     );
     assert_eq!(g.players[0].board[1].attack, second.attack, "nobody else did");
     // A non-Pirate does nothing.
@@ -2891,7 +2896,7 @@ fn escapee_portrait_gives_a_golden_escapee_and_earlier_lockboxes() {
     let escapee = id(&g, "Enterprising Escapee");
     let m = *g.players[0].hand.iter().find(|m| m.card == escapee).expect("the Escapee");
     assert!(m.golden, "Golden");
-    assert_eq!((m.attack, m.health), (12, 12), "the golden stats");
+    assert_eq!((m.attack, m.health), (14, 10), "the golden stats");
     assert_eq!(g.players[0].tp.lockbox_sooner, 1);
     // A Lockbox this player gets opens one turn sooner: Lockbox Portrait
     // hands one out at the start of the turn.
@@ -3136,7 +3141,7 @@ fn bob_blehead_takes_tier_one_and_two_out_of_the_tavern() {
     g.players[0].tier = 4;
     let gold = g.players[0].gold;
     take(&mut g, 0, "Bob-blehead");
-    assert_eq!(g.players[0].gold, gold.saturating_add(2), "2 Gold");
+    assert_eq!(g.players[0].gold, gold.saturating_add(3), "3 Gold");
     g.players[0].free_rolls = 10;
     act(&mut g, 0, Action::Roll);
     assert!(
@@ -4043,19 +4048,22 @@ fn reusable_batteries_hands_out_a_satellite_with_the_bought_stats() {
         .expect("a Satellite");
     let lulla = g.players[0].hand.iter().find(|m| m.card == id(&g, "Lullabot")).copied().unwrap();
     assert_eq!((sat.attack, sat.health), (lulla.attack, lulla.health), "its stats");
-    // Only the first buy of the turn.
-    set_shop(&mut g, 0, &["Lullabot"]);
-    act(&mut g, 0, Action::Buy(0));
-    assert_eq!(
-        g.players[0].hand.iter().filter(|m| m.card == id(&g, "Satellite")).count(),
-        1
-    );
+    // Twice per turn (patch 37.0.2), and no third time.
+    for want in [2, 2] {
+        set_shop(&mut g, 0, &["Lullabot"]);
+        act(&mut g, 0, Action::Buy(0));
+        assert_eq!(
+            g.players[0].hand.iter().filter(|m| m.card == id(&g, "Satellite")).count(),
+            want,
+            "a Satellite for each of the two buys"
+        );
+    }
     g.check_invariants().unwrap();
 }
 
 #[test]
 fn inductive_gyroblade_grows_with_the_turns_tavern_spells() {
-    for (card, base) in [("BG36_MagicItem_810", 4), ("BG36_MagicItem_810t", 12)] {
+    for (card, base) in [("BG36_MagicItem_810", 6), ("BG36_MagicItem_810t", 20)] {
         let mut g = game(317);
         equip_id(&mut g, 0, 0, card);
         cast_coin(&mut g, 0);
@@ -4108,7 +4116,7 @@ fn the_two_destroy_portraits() {
     turn_of(&mut g, 0);
     act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
     act(&mut g, 0, Action::Target(0));
-    assert_eq!(g.players[0].gold, gold + 2, "2 Gold for the destroy");
+    assert_eq!(g.players[0].gold, gold + 1, "1 Gold for the destroy");
     // Plaguerunner Portrait: a plain copy of the Plaguerunner it destroyed.
     let mut g = game(320);
     take(&mut g, 0, "Plaguerunner Portrait");
@@ -4183,17 +4191,17 @@ fn consuming_claw_adds_keywords_and_stats_to_a_demon_consume() {
 
 #[test]
 fn the_growing_numbers() {
-    // Weighted Gauntlet: +1/+1 at the end of the turn, doubling each start.
+    // Weighted Gauntlet: +7/+7 at the end of the turn, doubling each start.
     let mut g = game(323);
     take(&mut g, 0, "Weighted Gauntlet");
     put_on_board(&mut g, 0, "Lullabot");
     let start = g.players[0].board[0].attack;
     next_turn(&mut g);
-    assert_eq!(g.players[0].board[0].attack, start + 1, "the pick turn gives +1");
+    assert_eq!(g.players[0].board[0].attack, start + 7, "the pick turn gives +7");
     next_turn(&mut g);
-    assert_eq!(g.players[0].board[0].attack, start + 1 + 2, "then +2");
+    assert_eq!(g.players[0].board[0].attack, start + 7 + 14, "then +14");
     next_turn(&mut g);
-    assert_eq!(g.players[0].board[0].attack, start + 1 + 2 + 4, "then +4");
+    assert_eq!(g.players[0].board[0].attack, start + 7 + 14 + 28, "then +28");
     // Hammer of Twilight: the base, one more step per card discarded.
     for (card, base) in [("BG36_MagicItem_403", (1, 0)), ("BG36_MagicItem_403t", (2, 1))] {
         let mut g = game(324);
@@ -4338,8 +4346,8 @@ fn the_rings_improvement_lands_after_the_casts_own_tea_set() {
     act(&mut g, 0, Action::Target(0));
     assert_eq!(
         stats(&g, "Tusked Camper"),
-        (camper.0 + 5, camper.1 + 5),
-        "one Tea Set: +4/+4 and the bonus as the cast began (+1/+1)"
+        (camper.0 + 4, camper.1 + 4),
+        "one Tea Set: +3/+3 and the bonus as the cast began (+1/+1)"
     );
     assert_eq!(
         g.total_spell_bonus(0),
@@ -4353,7 +4361,7 @@ fn the_rings_improvement_lands_after_the_casts_own_tea_set() {
 fn every_extra_cast_improves_the_ring_after_its_own_tea_set() {
     // Balinda's extra cast is another spell cast on a minion, so it improves
     // the Ring again, and each cast's Tea Set reads the bonus that cast began
-    // with: +5/+5 then +6/+6 on the Camper.
+    // with: +4/+4 then +5/+5 on the Camper.
     let mut g = game(332);
     take(&mut g, 0, "Honeycomb Ring");
     put_on_board(&mut g, 0, "Gatekeeper Amalgam");
@@ -4366,8 +4374,8 @@ fn every_extra_cast_improves_the_ring_after_its_own_tea_set() {
     act(&mut g, 0, Action::Target(0));
     assert_eq!(
         stats(&g, "Tusked Camper"),
-        (camper.0 + 11, camper.1 + 11),
-        "two Tea Sets, +5/+5 then +6/+6"
+        (camper.0 + 9, camper.1 + 9),
+        "two Tea Sets, +4/+4 then +5/+5"
     );
     assert_eq!(
         g.total_spell_bonus(0),
@@ -4487,7 +4495,7 @@ fn the_azerite_and_flaming_portraits_reach_the_board() {
     cast_coin(&mut g, 0);
     assert_eq!(
         g.players[0].board[at].attack,
-        before + 4,
+        before + 3,
         "the Elemental took the Tavern buff too"
     );
     // Flaming Portrait: the Flaming Enforcers' consume also gives the stats
@@ -5835,4 +5843,128 @@ fn balinda_does_not_double_a_spell_a_minion_casts() {
         "Fortify's +3 Health, cast once"
     );
     g.check_invariants().unwrap();
+}
+
+// ---- Patch 37.0.2: cards out of the pool, the Wand's lobby ban ----
+
+/// Every trinket offer every player sees on turns 6 and 9 for a few seeds.
+/// Each player's turn is read as it comes and then ended, which answers an
+/// offer still open (the engine buys its cheapest option; a player who
+/// cannot pay keeps it open, which is why the offer is read first).
+fn offers_over_seeds(tribes: &[Tribe], seeds: u64) -> Vec<(u32, u8)> {
+    let mut seen = Vec::new();
+    for seed in 0..seeds {
+        let mut g = game_lobby(seed, tribes);
+        for turn in [6u32, 9] {
+            to_turn(&mut g, turn);
+            for p in 0..8 {
+                if g.over {
+                    break;
+                }
+                turn_of(&mut g, p);
+                // Clear whatever the turn opened that is not the offer (a
+                // Hero Power Discover, a pending target), so the offer can be
+                // read and then answered.
+                while !g.over {
+                    let pl = &g.players[p];
+                    let open = !pl.power_offer.is_empty()
+                        || !pl.discover.is_empty()
+                        || pl.pending_target.is_some()
+                        || pl.pending_shop_target.is_some()
+                        || pl.pending_choose_one.is_some()
+                        || pl.pending_discard.is_some();
+                    if !open || !answer(&mut g) {
+                        break;
+                    }
+                }
+                for &(of, _) in &g.players[p].trinket_offer {
+                    seen.push((turn, of));
+                }
+                g.step(Action::EndTurn).unwrap();
+            }
+        }
+    }
+    seen
+}
+
+#[test]
+fn the_trinkets_that_left_the_pool_are_never_offered() {
+    let g = game(1);
+    let gone = [
+        "BG32_MagicItem_170", // Spell-powered Wrench
+        "BG30_MagicItem_410", // Quilligraphy Set, Lesser
+        "BG30_MagicItem_410t2", // Quilligraphy Set, Greater
+        "BG30_MagicItem_545", // Fridge Magnet
+        "BG36_MagicItem_606", // Writhing Tentacles
+    ];
+    let mut gone_ids = Vec::new();
+    for card_id in gone {
+        let i = g
+            .data
+            .trinkets
+            .by_card_id(card_id)
+            .unwrap_or_else(|| panic!("{card_id} is not built"));
+        assert!(g.data.trinkets.get(i).out_of_pool, "{card_id} is out of the pool");
+        gone_ids.push(i);
+    }
+    // Their effects still run: their own tests equip them (Spell-powered
+    // Wrench, Writhing Tentacles, the Quilligraphy Set).
+    let seen = offers_over_seeds(&Tribe::EVERY, 6);
+    assert!(!seen.is_empty(), "some offers were dealt");
+    for (_, of) in seen {
+        assert!(!gone_ids.contains(&of), "an out-of-pool trinket was offered");
+    }
+}
+
+#[test]
+fn the_wand_of_divination_is_banned_in_a_quillboar_lobby() {
+    let g = game(1);
+    let wand = trinket(&g, "Wand of Divination");
+    let t = g.data.trinkets.get(wand);
+    assert!(t.banned.has(Tribe::Quilboar), "banned there (patch 37.0.2)");
+    assert!(t.tribes.is_neutral(), "and no longer tied to Naga or Quilboar");
+    // Never offered while Quilboar is in the lobby.
+    let with_quill = offers_over_seeds(
+        &[Tribe::Quilboar, Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc],
+        8,
+    );
+    assert!(!with_quill.is_empty(), "some offers were dealt");
+    assert!(
+        !with_quill.iter().any(|&(_, of)| of == wand),
+        "offered in a Quilboar lobby"
+    );
+    // It can still be offered without Quilboar there.
+    let without = offers_over_seeds(
+        &[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Pirate],
+        40,
+    );
+    assert!(
+        without.iter().any(|&(_, of)| of == wand),
+        "never offered in a lobby it is allowed in"
+    );
+}
+
+#[test]
+fn weighted_gauntlet_is_a_greater_trinket_that_starts_at_plus_seven() {
+    let g = game(1);
+    let i = trinket(&g, "Weighted Gauntlet");
+    let t = g.data.trinkets.get(i);
+    assert_eq!(t.slot, bgcore::trinkets::Slot::Greater, "patch 37.0.2");
+    assert_eq!(t.cost, 3);
+    assert_eq!(
+        t.on_pick,
+        vec![bgcore::trinkets::Act::GrowValue(7)],
+        "it starts at +7/+7 and doubles each turn"
+    );
+    // The turn 6 offers are the Lesser ones and never hold it; the turn 9
+    // offers are Greater and can.
+    let seen = offers_over_seeds(&Tribe::EVERY, 30);
+    assert!(
+        !seen.iter().any(|&(turn, of)| turn == 6 && of == i),
+        "the Gauntlet was offered with the Lesser trinkets"
+    );
+    assert!(
+        seen.iter().any(|&(turn, of)| turn == 9 && of == i),
+        "the Gauntlet is offered in the Greater slot"
+    );
 }

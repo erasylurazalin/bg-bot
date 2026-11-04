@@ -932,7 +932,7 @@ fn dark_paradox_is_matched_by_its_card_id() {
     // The Tier 1 placeholder is no game's card and stays unnamed by version.
     assert_eq!(ids.get("BG36_360"), Some(("Dark Paradox", false)));
     // Every version cards.toml builds is a card the engine knows, and the
-    // stats are the version's own (t3 is the Tier 2, 2/6 one).
+    // stats are the version's own (t3 is the Tier 2, 6/2 one).
     let d = data();
     for t in ["t3", "t4", "t5", "t6", "t9"] {
         let name = format!("Dark Paradox {t}");
@@ -942,7 +942,7 @@ fn dark_paradox_is_matched_by_its_card_id() {
         assert!(golden.attack == 2 * m.attack, "{name}'s golden doubles its attack");
     }
     let t3 = d.cards.make(d.cards.by_name("Dark Paradox t3").unwrap(), false);
-    assert_eq!((t3.attack, t3.health), (2, 6));
+    assert_eq!((t3.attack, t3.health), (6, 2));
     assert_eq!(d.cards.get(d.cards.by_name("Dark Paradox t3").unwrap()).tier, 2);
 }
 

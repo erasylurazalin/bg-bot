@@ -761,15 +761,25 @@ impl Game {
             }
             // A Rally triggered in the shop (Sky-hatch Runaway): the buffs
             // are permanent in the shop anyway.
-            Effect::BuffEachType { attack, health } => {
+            Effect::BuffEachType { attack, health, improves_self } => {
                 for _ in 0..mul * runs as i32 {
                     let cards = &self.data.cards;
                     let board = &mut self.players[p].board;
+                    // "Improve this": the host's counter grows the buff by
+                    // its printed numbers each run (The Last One Standing).
+                    let (da, dh) = match board.get_mut(*pos) {
+                        Some(m) if improves_self => {
+                            let n = m.improvements as i32;
+                            m.improvements = m.improvements.saturating_add(1);
+                            (attack * (1 + n), health * (1 + n))
+                        }
+                        _ => (attack, health),
+                    };
                     let tribes: ArrayVec<Tribes, BOARD> =
                         board.iter().map(|m| cards.tribes_of(m)).collect();
                     for i in pick_one_per_type(&tribes, &mut self.rng) {
                         if !cards.get(board[i].card).fixed_stats {
-                            buff(&mut board[i], attack, health);
+                            buff(&mut board[i], da, dh);
                         }
                     }
                 }
@@ -898,13 +908,13 @@ impl Game {
                     self.add_to_hand(p, c);
                 }
             }
-            Effect::BuffOthersPerGolden { tribe, attack, health } => {
+            Effect::BuffOthersPerGolden { tribe, attack, health, include_self } => {
                 let k = 1 + self.players[p].golden_played as i32;
                 let cards = &self.data.cards;
                 let pl = &mut self.players[p];
                 for _ in 0..runs {
                     for (i, o) in pl.board.iter_mut().enumerate() {
-                        if i != *pos && cards.tribes_of(o).is(tribe) {
+                        if (include_self || i != *pos) && cards.tribes_of(o).is(tribe) {
                             buff(o, attack * mul * k, health * mul * k);
                         }
                     }

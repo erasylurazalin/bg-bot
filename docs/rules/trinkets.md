@@ -118,13 +118,14 @@ always afford one. A trinket with no cost in the game data is free.
   adds a trigger.
 - **Trickster's Sleeve:** keeps alternating for the rest of the game: after
   a minion buy, then after a Tavern spell buy, then a minion again.
-- **Inductive Gyroblade:** the Satellite grows +4/+4 per Tavern spell cast
-  this turn (Greater: +12/+12).
+- **Inductive Gyroblade:** the Satellite grows +6/+6 per Tavern spell cast
+  this turn (Greater: +20/+20; both are patch 37.0.2's numbers).
 - **Dalaran Cheese Wheel, Nether Pendant:** each improvement adds +1/+1
   (Greater: +2/+2).
 - **Hammer of Twilight:** +1 Attack per card discarded (Greater: +2/+1),
   counting discards from before you got it.
-- **Weighted Gauntlet:** doubles with no cap (+1, +2, +4...).
+- **Weighted Gauntlet:** starts at +7/+7 (patch 37.0.2 moved it to the
+  Greater slot) and doubles with no cap (+7, +14, +28...).
 - **Honeycomb Ring:** +1/+1 more this turn per spell cast on a minion.
   **Multilayered Shield:** +1/+2 per different minion type on your board.
 - **Chillmere Mosaic (Era, 2026-11-03):** its Spellcraft Refresh deals

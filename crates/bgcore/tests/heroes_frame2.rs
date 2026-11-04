@@ -52,30 +52,38 @@ fn make_power(g: &Game, of: u8) -> PowerState {
 fn answer(g: &mut Game) -> bool {
     let Some(p) = g.current_player() else { return false };
     let pl = &g.players[p];
-    let mut cands = [Action::EndTurn; 4];
-    let n = if !pl.discover.is_empty()
+    let open = pl.hero_offer.iter().any(|&h| h != u8::MAX)
+        || !pl.discover.is_empty()
         || !pl.power_offer.is_empty()
+        || !pl.secret_offer.is_empty()
+        || pl.wager_offer.is_some()
+        || pl.holmes_offer.is_some()
         || pl.pending_choose_one.is_some()
-    {
-        cands[0] = Action::Choose(0);
-        1
-    } else if pl.pending_discard.is_some() {
-        cands[0] = Action::Discard(0);
-        1
-    } else if pl.pending_shop_target.is_some() {
-        cands[0] = Action::TargetShop(0);
-        1
-    } else if pl.pending_target.is_some() {
-        cands[0] = Action::Target(0);
-        cands[1] = Action::TargetShop(0);
-        2
-    } else if !pl.trinket_offer.is_empty() {
-        cands[0] = Action::ChooseTrinket(0);
-        1
-    } else {
+        || pl.pending_discard.is_some()
+        || pl.pending_shop_target.is_some()
+        || pl.pending_target.is_some()
+        || !pl.trinket_offer.is_empty();
+    if !open {
         return false;
-    };
-    for &a in &cands[..n] {
+    }
+    // Every answer to every prompt is tried, in an order that lets a target
+    // be picked before a Discover that is queued behind it (the engine only
+    // allows the target while one is open) and lets a Tavern minion in any
+    // slot be the target (Alliance Flag on the Tavern), which the old
+    // fixed list of two actions could not.
+    let mut cands: Vec<Action> = Vec::new();
+    for s in 0..bgcore::BOARD as u8 {
+        cands.push(Action::Target(s));
+    }
+    // One past the cards: a card steal or a power may take the spell slot.
+    for s in 0..=bgcore::SHOP as u8 {
+        cands.push(Action::TargetShop(s));
+    }
+    cands.push(Action::Discard(0));
+    cands.push(Action::Choose(0));
+    cands.push(Action::Choose(1));
+    cands.push(Action::ChooseTrinket(0));
+    for a in cands {
         if g.is_legal(a) {
             g.step(a).ok();
             return true;
@@ -750,7 +758,7 @@ fn faelin_skips_turn_one_and_his_tier_minions_wait_for_their_tier() {
     assert_eq!(after.card, before.card);
     assert_eq!(
         (after.attack - before.attack, after.health - before.health),
-        (8, 8),
+        (9, 9),
         "the locked minion is buffed in hand"
     );
     assert!(after.locked_tier > 0, "and stays locked");

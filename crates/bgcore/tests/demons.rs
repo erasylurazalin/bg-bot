@@ -605,12 +605,12 @@ fn a_later_rewind_gives_nothing_back_but_still_buffs_the_tavern() {
     let soul = g.players[0].board[1].health;
     act(&mut g, 0, Action::Roll);
     // Soul Rewinder (left) gives the Health back; Ashen Corruptor has nothing
-    // left to rewind but still gives the Tavern +2/+2 this turn
+    // left to rewind but still gives the Tavern +1/+2 this turn
     assert_eq!(g.players[0].health, 1);
     assert_eq!(g.players[0].board[1].health, soul + 2);
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
-        assert_eq!((m.attack, m.health), (c.attack + 2, c.health + 2), "{}", c.name);
+        assert_eq!((m.attack, m.health), (c.attack + 1, c.health + 2), "{}", c.name);
     }
     g.check_invariants().unwrap();
 }
@@ -688,18 +688,18 @@ fn tichondrius_and_eredar_react_to_health_paid_for_a_refresh() {
     put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
     put_on_board(&mut g, 0, "Tichondrius");
     put_on_board(&mut g, 0, "Eredar Escapist");
-    // one damage short of the Corrupted Cupcakes
-    g.players[0].board[2].improvements = 3;
+    // one damage short of the Corrupted Cupcakes (5 damage since 37.0.2)
+    g.players[0].board[2].improvements = 4;
     let before = stats(&g.players[0].board[1]);
     act(&mut g, 0, Action::Roll);
     assert_eq!(g.players[0].health, 29);
     // Tichondrius gives every Demon +4/+4, the Escapist included
     assert_eq!(stats(&g.players[0].board[1]), (before.0 + 4, before.1 + 4));
-    assert_eq!(stats(&g.players[0].board[2]), (6 + 4, 8 + 4));
+    assert_eq!(stats(&g.players[0].board[2]), (5 + 4, 10 + 4));
     assert!(hand_has(&g, "Corrupted Cupcakes"));
     assert_eq!(
         g.players[0].board[2].events_left(&g.data.cards),
-        Some(4),
+        Some(5),
         "the counter starts over"
     );
     g.check_invariants().unwrap();
@@ -710,7 +710,7 @@ fn tichondrius_and_eredar_react_to_health_paid_for_a_refresh() {
 #[test]
 fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
     let db = db();
-    // two Activates: the Deathrattle gives 2/2 + 2 * 2/2
+    // two Activates: the Deathrattle gives 2/1 + 2 * 2/1
     let mut w = mk(&db, "Sacrificial Wrathguard", false);
     w.improvements = 2;
     let wall = fighter(&db, 50);
@@ -723,10 +723,10 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
         &mut Rng::new(1),
         &mut (),
     );
-    assert_eq!(out.sides[0].tavern_buff_gain, (6, 6));
+    assert_eq!(out.sides[0].tavern_buff_gain, (6, 3));
 
     // a golden one doubles the whole Deathrattle, so each Activate adds
-    // +4/+4 on top of the golden base +4/+4
+    // +4/+2 on top of the golden base +4/+2
     let mut w = mk(&db, "Sacrificial Wrathguard", true);
     w.improvements = 2;
     let out = fight_with(
@@ -738,7 +738,7 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
         &mut Rng::new(1),
         &mut (),
     );
-    assert_eq!(out.sides[0].tavern_buff_gain, (12, 12));
+    assert_eq!(out.sides[0].tavern_buff_gain, (12, 6));
 
     // in a whole game the Activate raises the number and the fight applies
     // the Tavern buff to the next Refresh
@@ -758,10 +758,10 @@ fn sacrificial_wrathguard_buffs_the_tavern_for_the_game() {
         .find(|b| !b.this_turn && b.tribe.is_none())
         .copied()
         .expect("the Deathrattle's Tavern buff is kept");
-    assert_eq!((buff.attack, buff.health), (6, 6));
+    assert_eq!((buff.attack, buff.health), (6, 3));
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
-        assert_eq!((m.attack, m.health), (c.attack + 6, c.health + 6));
+        assert_eq!((m.attack, m.health), (c.attack + 6, c.health + 3));
     }
     g.check_invariants().unwrap();
 
@@ -801,7 +801,7 @@ fn deathstrider_triggers_the_wrathguard_in_the_shop_through_a_fishbait_attack() 
         .find(|b| b.tribe.is_none() && !b.this_turn)
         .copied()
         .expect("the Deathrattle's Tavern buff was applied");
-    assert_eq!((buff.attack, buff.health), (6, 6));
+    assert_eq!((buff.attack, buff.health), (6, 3));
     g.check_invariants().unwrap();
 }
 
@@ -901,18 +901,18 @@ fn after_you_play_a_demon_waits_for_the_battlecry_to_consume() {
     assert_eq!(stats(&g.players[0].board[2]), (9, 9));
     assert_eq!(stats(&g.players[0].board[0]), (3, 5), "and then the Weaver's hit");
     // Ashen Corruptor rewinds that damage and gives the Tavern's survivor
-    // the +2/+2 once
+    // the +1/+2 once
     assert_eq!(g.players[0].health, 30);
     assert_eq!(g.players[0].shop.len(), 1);
-    assert_eq!(stats(&g.players[0].shop[0]), (3, 3), "the survivor takes the buff");
+    assert_eq!(stats(&g.players[0].shop[0]), (2, 3), "the survivor takes the buff");
     g.check_invariants().unwrap();
 }
 
 #[test]
 fn a_golden_wrath_weaver_buffs_the_tavern_only_after_the_consume() {
     // The same play with the golden Weaver: two hits, so the survivor takes
-    // +2/+2 twice (+4/+4, the log's survivors) while the eaten minion still
-    // carries none of it.
+    // +1/+2 twice (the log's survivors) while the eaten minion still carries
+    // none of it.
     let mut g = game(47);
     let weaver = id(&g, "Wrath Weaver");
     let slot = g.data.cards.get(weaver).pool_slot as usize;
@@ -928,7 +928,7 @@ fn a_golden_wrath_weaver_buffs_the_tavern_only_after_the_consume() {
     act(&mut g, 0, Action::Target(2));
     assert_eq!(stats(&g.players[0].board[2]), (9, 9), "the eaten 1/1 came unbuffed");
     assert_eq!(g.players[0].shop.len(), 1);
-    assert_eq!(stats(&g.players[0].shop[0]), (5, 5), "two hits, +2/+2 each");
+    assert_eq!(stats(&g.players[0].shop[0]), (3, 5), "two hits, +1/+2 each");
     assert_eq!(stats(&g.players[0].board[0]), (2 + 4, 6 + 4));
     assert_eq!(g.players[0].health, 30, "both hits are rewound");
     g.check_invariants().unwrap();
@@ -1202,14 +1202,14 @@ fn imposing_percussionist_damages_the_hero_for_the_demons_tier() {
 fn eredar_escapist_is_damage_counted_and_carries_over() {
     let mut g = game(25);
     put_on_board(&mut g, 0, "Eredar Escapist");
-    g.players[0].board[0].improvements = 3;
+    g.players[0].board[0].improvements = 4;
     put_on_board(&mut g, 0, "Wrath Weaver");
     g.give(0, "Flaming Enforcer").unwrap();
     g.players[0].health = 30;
     act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
-    // the demon play is 1 damage: 3 + 1 = 4, so the Cupcakes arrive
+    // the demon play is 1 damage: 4 + 1 = 5, so the Cupcakes arrive
     assert!(hand_has(&g, "Corrupted Cupcakes"));
-    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(4));
+    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(5));
     g.players[0].board[0].improvements = 2;
     // the counter lives on the minion, so the end of the turn leaves it be
     act(&mut g, 0, Action::EndTurn);
@@ -1600,12 +1600,12 @@ fn a_bought_minion_keeps_a_this_turn_tavern_buff_which_the_tavern_loses() {
     let (ba, bh) = (base.attack, base.health);
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
-        assert_eq!((m.attack, m.health), (c.attack + 2, c.health + 2), "{}", c.name);
+        assert_eq!((m.attack, m.health), (c.attack + 1, c.health + 2), "{}", c.name);
     }
     // the bought minion keeps the buff
     g.players[0].gold = 3;
     act(&mut g, 0, Action::Buy(0));
-    assert_eq!(stats(&g.players[0].hand[0]), (ba + 2, bh + 2));
+    assert_eq!(stats(&g.players[0].hand[0]), (ba + 1, bh + 2));
     act(&mut g, 0, Action::EndTurn);
     // the Tavern is plain again, the bought minion is not
     turn_of(&mut g, 0);
@@ -1613,7 +1613,7 @@ fn a_bought_minion_keeps_a_this_turn_tavern_buff_which_the_tavern_loses() {
         let c = g.data.cards.get(m.card);
         assert_eq!((m.attack, m.health), (c.attack, c.health), "{}", c.name);
     }
-    assert_eq!(stats(&g.players[0].hand[0]), (ba + 2, bh + 2));
+    assert_eq!(stats(&g.players[0].hand[0]), (ba + 1, bh + 2));
     g.check_invariants().unwrap();
 }
 
@@ -1626,10 +1626,10 @@ fn this_turn_and_this_game_tavern_buffs_stack_and_only_the_turn_one_ends() {
     put_on_board(&mut g, 0, "Ashen Corruptor");
     put_on_board(&mut g, 0, "Devilish Distractor");
     act(&mut g, 0, Action::Roll);
-    // the Corruptor's +2/+2 this turn
+    // the Corruptor's +1/+2 this turn
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
-        assert_eq!((m.attack, m.health), (c.attack + 2, c.health + 2), "{}", c.name);
+        assert_eq!((m.attack, m.health), (c.attack + 1, c.health + 2), "{}", c.name);
     }
     // and the Distractor's +1/+2 this game (Fortify cast on the Demon)
     g.players[0].gold = 9;
@@ -1638,7 +1638,7 @@ fn this_turn_and_this_game_tavern_buffs_stack_and_only_the_turn_one_ends() {
     act(&mut g, 0, Action::Target(2));
     for m in &g.players[0].shop {
         let c = g.data.cards.get(m.card);
-        assert_eq!((m.attack, m.health), (c.attack + 3, c.health + 4), "{}", c.name);
+        assert_eq!((m.attack, m.health), (c.attack + 2, c.health + 4), "{}", c.name);
     }
     act(&mut g, 0, Action::EndTurn);
     turn_of(&mut g, 0);
@@ -1701,17 +1701,18 @@ fn a_doubled_fodder_battlecry_adds_two_to_each_refresh() {
 #[test]
 fn an_escapist_counts_the_overshoot_of_a_damage_batch() {
     // The game's countdown after a fire is the overshoot, not what the count
-    // had left: the log shows an Eredar Escapist on "(4 left!)" take the 5
+    // had left: the log shows an Eredar Escapist one damage short take the
     // damage of one Imposing Percussionist pick, print "(1 left!)", and then
     // fire AGAIN on the 1 damage of the Wrath Weaver that follows, so the one
     // step gets two Corrupted Cupcakes (`Hearthstone_2026_10_27_04_30_04`
-    // turn 10 step 25). Here the counter is 3 of 4 and the pick's Demon is
-    // Tier 2: 3 + 2 fires once and counts the 1 over as "(1 left!)".
+    // turn 10 step 25). Here the counter is 4 of 5 (the Escapist's every is 5
+    // since 37.0.2) and the pick's Demon is Tier 2: 4 + 2 fires once and
+    // counts the 1 over as "(1 left!)".
     let mut g = game(48);
     g.players[0].tier = 2;
     g.players[0].health = 30;
     put_on_board(&mut g, 0, "Eredar Escapist");
-    g.players[0].board[0].improvements = 3;
+    g.players[0].board[0].improvements = 4;
     g.give(0, "Imposing Percussionist").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
     let at = (0..g.players[0].discover.len())

@@ -219,10 +219,10 @@ fn all_the_elementals_are_in_the_pool_with_their_stats_and_tribes() {
         ("Tavern Tempest", 4, (2, 2)),
         ("Air Revenant", 5, (3, 6)),
         ("Firelands Fugitive", 5, (5, 7)),
-        ("Living Azerite", 5, (8, 6)),
+        ("Living Azerite", 5, (6, 6)),
         ("Elemental of Surprise", 6, (8, 8)),
-        ("Ultraviolet Ascendant", 6, (6, 6)),
-        ("Unbound Tempest", 6, (3, 12)),
+        ("Ultraviolet Ascendant", 6, (8, 8)),
+        ("Unbound Tempest", 6, (3, 9)),
         ("Stone Age Slab", 7, (10, 10)),
     ];
     for (n, tier, st) in cards {
@@ -763,7 +763,7 @@ fn arcane_absorption_counts_for_living_azerite_even_with_an_empty_tavern() {
     cast(&mut g, "Arcane Absorption");
     act(&mut g, 0, Action::Target(0));
     // the Tavern is not empty here: the Azerite buffed its Elementals
-    assert_eq!(stats(&g.players[0].shop[0]), (dd.0 + 4, dd.1 + 3));
+    assert_eq!(stats(&g.players[0].shop[0]), (dd.0 + 3, dd.1 + 3));
     assert_eq!(stats(&g.players[0].shop[1]), cp);
     // now with an empty Tavern: still a cast, nothing to buff, no crash
     set_shop(&mut g, 0, &[]);
@@ -878,7 +878,7 @@ fn living_azerite_gives_elementals_in_the_tavern_a_buff_for_every_spell() {
     set_shop(&mut g, 0, &["Dune Dweller", "Cord Puller"]);
     let dd = stats(&g.players[0].shop[0]);
     cast(&mut g, "Wealthy Bounty");
-    assert_eq!(stats(&g.players[0].shop[0]), (dd.0 + 4, dd.1 + 3));
+    assert_eq!(stats(&g.players[0].shop[0]), (dd.0 + 3, dd.1 + 3));
     // for the game: a later Refresh shows buffed Elementals
     g.players[0].gold = 10;
     for _ in 0..3 {
@@ -886,7 +886,7 @@ fn living_azerite_gives_elementals_in_the_tavern_a_buff_for_every_spell() {
         for m in &g.players[0].shop {
             let c = g.data.cards.get(m.card);
             if !c.is_spell() && c.tribes.has(Tribe::Elemental) {
-                assert_eq!((m.attack - c.attack, m.health - c.health), (4, 3), "{}", c.name);
+                assert_eq!((m.attack - c.attack, m.health - c.health), (3, 3), "{}", c.name);
             }
         }
     }
@@ -896,7 +896,7 @@ fn living_azerite_gives_elementals_in_the_tavern_a_buff_for_every_spell() {
     set_shop(&mut g, 0, &["Dune Dweller"]);
     let dd = stats(&g.players[0].shop[0]);
     cast(&mut g, "Wealthy Bounty");
-    assert_eq!(stats(&g.players[0].shop[0]), (dd.0 + 8, dd.1 + 6));
+    assert_eq!(stats(&g.players[0].shop[0]), (dd.0 + 6, dd.1 + 6));
 }
 
 #[test]
@@ -918,7 +918,7 @@ fn a_spell_cast_twice_counts_twice_for_the_azerite_and_balinda_casts_count() {
     set_shop(&mut g, 0, &["Dune Dweller"]);
     let dd = stats(&g.players[0].shop[0]);
     cast(&mut g, "Wealthy Bounty");
-    assert_eq!(stats(&g.players[0].shop[0]), (dd.0 + 8, dd.1 + 6), "two casts, two buffs");
+    assert_eq!(stats(&g.players[0].shop[0]), (dd.0 + 6, dd.1 + 6), "two casts, two buffs");
     g.check_invariants().unwrap();
 }
 
@@ -1199,21 +1199,21 @@ fn a_plain_typeless_minion_never_triples_with_surprises() {
 // ================= Ultraviolet Ascendant, Unbound Tempest =================
 
 #[test]
-fn ultraviolet_ascendant_gives_other_elementals_plus_3_plus_3_and_improves() {
+fn ultraviolet_ascendant_gives_other_elementals_plus_4_plus_4_and_improves() {
     let db = db();
     let wall = wall(&db);
     let dd = mk(&db, "Dune Dweller", false); // 3/3
     let mut asc = mk(&db, "Ultraviolet Ascendant", false);
-    // no improvement: +3/+3
-    assert_eq!(first_attacker(&db, &[dd, asc, wall, wall], &[wall]), (6, 6));
-    // two Elementals played: +9/+9
+    // no improvement: +4/+4
+    assert_eq!(first_attacker(&db, &[dd, asc, wall, wall], &[wall]), (7, 7));
+    // two Elementals played: +12/+12
     asc.improvements = 2;
-    assert_eq!(first_attacker(&db, &[dd, asc, wall, wall], &[wall]), (12, 12));
+    assert_eq!(first_attacker(&db, &[dd, asc, wall, wall], &[wall]), (15, 15));
     // golden: twice as much
     let mut gasc = mk(&db, "Ultraviolet Ascendant", true);
-    assert_eq!(first_attacker(&db, &[dd, gasc, wall, wall], &[wall]), (3 + 6, 3 + 6));
+    assert_eq!(first_attacker(&db, &[dd, gasc, wall, wall], &[wall]), (3 + 8, 3 + 8));
     gasc.improvements = 1;
-    assert_eq!(first_attacker(&db, &[dd, gasc, wall, wall], &[wall]), (3 + 12, 3 + 12));
+    assert_eq!(first_attacker(&db, &[dd, gasc, wall, wall], &[wall]), (3 + 16, 3 + 16));
     // other Elementals only, not itself and not other tribes
     let cp = mk(&db, "Cord Puller", false); // 1/1 Mech
     assert_eq!(first_attacker(&db, &[cp, asc, wall, wall], &[wall]), (1, 1));
@@ -1243,7 +1243,7 @@ fn the_ascendant_improves_after_each_elemental_played_while_it_is_on_the_board()
 }
 
 #[test]
-fn unbound_tempest_gains_the_highest_health_tavern_stats_every_4_elementals() {
+fn unbound_tempest_gains_the_highest_health_tavern_stats_every_3_elementals() {
     let mut g = game(45);
     put_on_board(&mut g, 0, "Unbound Tempest", false);
     set_shop(&mut g, 0, &["Cord Puller", "Tasty Lobster", "Cord Puller"]);
@@ -1252,18 +1252,18 @@ fn unbound_tempest_gains_the_highest_health_tavern_stats_every_4_elementals() {
         g.players[0].shop[i].health = h;
     }
     let base = stats(&g.players[0].board[0]);
-    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(4));
-    for k in 1..=3 {
+    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(3));
+    for k in 1..=2 {
         play_new(&mut g, "Crackling Cyclone");
-        assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(4 - k));
+        assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(3 - k));
     }
     // a spell is not an Elemental
     cast(&mut g, "Wealthy Bounty");
     assert_eq!(stats(&g.players[0].board[0]), base);
     play_new(&mut g, "Crackling Cyclone");
-    // the 4th: gains 1/8, the highest-Health minion
+    // the 3rd: gains 1/8, the highest-Health minion
     assert_eq!(stats(&g.players[0].board[0]), (base.0 + 1, base.1 + 8));
-    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(4), "repeating");
+    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(3), "repeating");
     g.check_invariants().unwrap();
 }
 
@@ -1280,14 +1280,13 @@ fn unbound_tempest_carries_its_count_over_turns_and_an_empty_tavern_still_resets
     play_new(&mut s, "Crackling Cyclone");
     play_new(&mut s, "Crackling Cyclone");
     s.step(Action::EndTurn).unwrap();
-    assert_eq!(s.players[0].board[0].events_left(&s.data.cards), Some(2), "carried over");
-    // the Tavern is empty: the 4th does nothing but the count resets
+    assert_eq!(s.players[0].board[0].events_left(&s.data.cards), Some(1), "carried over");
+    // the Tavern is empty: the 3rd does nothing but the count resets
     set_shop(&mut s, 0, &[]);
     let base = stats(&s.players[0].board[0]);
     play_new(&mut s, "Crackling Cyclone");
-    play_new(&mut s, "Crackling Cyclone");
     assert_eq!(stats(&s.players[0].board[0]), base);
-    assert_eq!(s.players[0].board[0].events_left(&s.data.cards), Some(4));
+    assert_eq!(s.players[0].board[0].events_left(&s.data.cards), Some(3));
     s.check_invariants().unwrap();
     let _ = g;
 }
@@ -1678,9 +1677,9 @@ fn the_ascendant_and_the_tempest_do_not_count_their_own_play() {
     assert_eq!(g.players[0].board[0].improvements, 1);
     let mut g = game(61);
     play_new(&mut g, "Unbound Tempest");
-    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(4));
-    play_new(&mut g, "Crackling Cyclone");
     assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(3));
+    play_new(&mut g, "Crackling Cyclone");
+    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(2));
 }
 
 #[test]

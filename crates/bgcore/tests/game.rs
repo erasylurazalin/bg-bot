@@ -195,8 +195,9 @@ fn drone_duplicator_doubles_the_played_magnetic_and_its_satellite() {
     let mut g = game(105);
     put_on_board(&mut g, 0, "Drone Duplicator");
     put_on_board(&mut g, 0, "Spark Snapper");
-    // The Snapper's Satellite is its own size: 26/39 here.
-    g.players[0].board[1].improvements = 12; // 2/3, each step +2/+3
+    // The Snapper's Satellite is its own size: 26/26 here (2/2 a step since
+    // patch 37.0.2).
+    g.players[0].board[1].improvements = 12; // 2/2, each step +2/+2
     let mut red = take(&mut g, "Red Volumizer");
     red.attack = 24;
     red.health = 20;
@@ -207,7 +208,7 @@ fn drone_duplicator_doubles_the_played_magnetic_and_its_satellite() {
     let host = g.players[0].board[0];
     assert_eq!(
         (host.attack, host.health),
-        (5 + 2 * (24 + 26), 2 + 2 * (20 + 39)),
+        (5 + 2 * (24 + 26), 2 + 2 * (20 + 26)),
         "the played Volumizer and its Satellite both happen twice"
     );
     assert_eq!(g.players[0].board[0].extra_magnetize, 0, "the extra is spent");
@@ -341,8 +342,8 @@ fn spark_snapper_and_mechagnome_interpreter_distinguish_play_from_direct_attach(
 
     // Play Lullabot (2/2, Magnetic) onto Cord Puller at slot 0:
     // - Spark Snapper sees the played Mech while it is a minion of its own,
-    //   attaches a 2/3 Satellite to it (+2/+3) and improves itself (1).
-    // - Lullabot and its Satellite then merge into the host together (+4/+5),
+    //   attaches a 2/2 Satellite to it (+2/+2) and improves itself (1).
+    // - Lullabot and its Satellite then merge into the host together (+4/+4),
     //   one Magnetization: the Satellite measured too, so the host's own count
     //   goes up by one and not two (`10_29_22_20_04-g3` turn 13 step 10).
     // - Interpreter sees the played Magnetic and the Satellite (+3/+1 each).
@@ -350,7 +351,7 @@ fn spark_snapper_and_mechagnome_interpreter_distinguish_play_from_direct_attach(
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     let host = g.players[0].board[0];
     assert_eq!(host.magnetizations, 1);
-    assert_eq!((host.attack, host.health), (1 + 2 + 3 + 2 + 3, 1 + 2 + 1 + 3 + 1));
+    assert_eq!((host.attack, host.health), (1 + 2 + 3 + 2 + 3, 1 + 2 + 1 + 2 + 1));
     assert_eq!(g.players[0].board[1].improvements, 1);
 
     // Put Resourceful Robot on board at slot 3 and end turn:
@@ -548,7 +549,7 @@ fn a_choose_one_spells_cast_triggers_wait_for_the_option_and_the_target() {
     // docs/rules/design.md "Targets in the shop" (Era, 2026-11-02): a Choose One spell is
     // cast, then its option is picked, then its target, and only then do the
     // "after you cast a spell" triggers fire. Living Azerite is one: it gives
-    // Elemental Tavern minions +4/+3 after every Tavern spell.
+    // Elemental Tavern minions +3/+3 after every Tavern spell.
     let mut g = Game::new_with_lobby(
         Arc::new(Data::bundled()),
         143,
@@ -568,7 +569,7 @@ fn a_choose_one_spells_cast_triggers_wait_for_the_option_and_the_target() {
     act(&mut g, 0, Action::Target(0));
     assert_eq!(
         g.players[0].shop[0].attack,
-        before + 4,
+        before + 3,
         "the Tavern spell's own trigger lands after the target"
     );
     assert_eq!(g.players[0].board[0].attack, on_board + 3, "Alliance Flag's own +3 Attack");
@@ -937,13 +938,13 @@ fn stat_spells_choose_one_and_discover_get_spells() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     assert_eq!((g.players[0].shop[0].attack, g.players[0].shop[0].health), (2, 3));
 
-    // Natural Blessing buffs all minions on board that share a tribe with the target (+2/+1).
+    // Natural Blessing buffs all minions on board that share a tribe with the target (+2/+2).
     put_on_board(&mut g, 0, "Flittering Bat"); // Beast 1/4 at slot 2
     g.give(0, "Natural Blessing").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     act(&mut g, 0, Action::Target(0)); // target Beast at slot 0
-    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (3, 2));
-    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (3, 5));
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (3, 3));
+    assert_eq!((g.players[0].board[2].attack, g.players[0].board[2].health), (3, 6));
     assert_eq!((g.players[0].board[1].attack, g.players[0].board[1].health), (12, 19)); // Mech unchanged
 
     // Eyes of the Earth Mother makes a Tier <= 4 minion Golden;
@@ -952,7 +953,7 @@ fn stat_spells_choose_one_and_discover_get_spells() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     act(&mut g, 0, Action::Target(0));
     assert!(g.players[0].board[0].golden);
-    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (4, 3));
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (4, 4));
 
     g.give(0, "Perfect Vision").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
@@ -1045,13 +1046,13 @@ fn making_a_minion_golden_doubles_its_own_counters_and_keeps_its_buffs() {
     // A seed whose game holds the tier 6 Dark Paradox version: it is the only
     // minion that scales with Battlecries.
     let mut g = game(1);
-    // Five Battlecries behind it: 3/3 plus +15/+15.
+    // Five Battlecries behind it: 4/4 plus +20/+20.
     g.players[0].battlecries_triggered = 5;
     put_on_board(&mut g, 0, "Dark Paradox t6");
     assert_eq!(
         (g.players[0].board[0].attack, g.players[0].board[0].health),
-        (18, 18),
-        "its own +3/+3 for each Battlecry"
+        (24, 24),
+        "its own +4/+4 for each Battlecry"
     );
     // A +4/+4 buff on top of that, which is a buff and stays as it is.
     g.players[0].board[0].attack += 4;
@@ -1060,12 +1061,12 @@ fn making_a_minion_golden_doubles_its_own_counters_and_keeps_its_buffs() {
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     act(&mut g, 0, Action::Target(0));
     assert!(g.players[0].board[0].golden, "made Golden");
-    // The golden card's 6/6, the Battlecries' +15/+15 a second time, and the
+    // The golden card's 8/8, the Battlecries' +20/+20 a second time, and the
     // +4/+4 the minion carried.
     assert_eq!(
         (g.players[0].board[0].attack, g.players[0].board[0].health),
-        (40, 40),
-        "6/6 printed, twice the Battlecry stats, the buff kept once"
+        (52, 52),
+        "8/8 printed, twice the Battlecry stats, the buff kept once"
     );
 
     // A card with nothing of its own to scale: only its printed stats change,
@@ -1121,7 +1122,7 @@ fn boon_of_beetles_keeps_unused_charges_across_combats() {
 fn glambot_balinda_banana_interpreter_snapper_and_utility_drone() {
     let mut g = game(204);
     put_on_board(&mut g, 0, "Cord Puller"); // slot 0: 1/1 Mech (target)
-    put_on_board(&mut g, 0, "Glambot"); // slot 1: 4/4 Mech
+    put_on_board(&mut g, 0, "Glambot"); // slot 1: 5/5 Mech
     put_on_board(&mut g, 0, "Balinda Stonehearth"); // slot 2: 6/6 Neutral
     put_on_board(&mut g, 0, "Mechagnome Interpreter"); // slot 3: 3/1 Mech (+3/+1 per Magnetization)
     put_on_board(&mut g, 0, "Spark Snapper"); // slot 4: 6/8 Mech (only triggers on played Mechs)
@@ -1129,7 +1130,7 @@ fn glambot_balinda_banana_interpreter_snapper_and_utility_drone() {
 
     // Cast Tavern Dish Banana (+2/+2) on Cord Puller at slot 0:
     // - Balinda makes it cast twice.
-    // - Each cast gives +2/+2 from Banana, attaches a 4/4 Satellite from Glambot (+4/+4, +1 mag),
+    // - Each cast gives +2/+2 from Banana, attaches a 5/5 Satellite from Glambot (+5/+5, +1 mag),
     //   and triggers Mechagnome Interpreter (+3/+1).
     // - Spark Snapper does NOT trigger on Glambot's Satellites (improvements stays 0, mag is 2 not 4).
     g.give(0, "Tavern Dish Banana").unwrap();
@@ -1139,13 +1140,13 @@ fn glambot_balinda_banana_interpreter_snapper_and_utility_drone() {
     let host = g.players[0].board[0];
     assert_eq!(host.magnetizations, 2);
     assert_eq!(g.players[0].board[4].improvements, 0);
-    // Cord Puller: 1/1 + 2 * (2/2 Banana + 4/4 Satellite + 3/1 Interpreter) = 19/15.
-    assert_eq!((host.attack, host.health), (1 + 2 * (2 + 4 + 3), 1 + 2 * (2 + 4 + 1)));
+    // Cord Puller: 1/1 + 2 * (2/2 Banana + 5/5 Satellite + 3/1 Interpreter) = 21/17.
+    assert_eq!((host.attack, host.health), (1 + 2 * (2 + 5 + 3), 1 + 2 * (2 + 5 + 1)));
 
     // End player 0's turn: Utility Drone gives +4/+5 for each of the 2 Magnetizations (+8/+10).
     act(&mut g, 0, Action::EndTurn);
     let host = g.players[0].board[0];
-    assert_eq!((host.attack, host.health), (19 + 8, 15 + 10));
+    assert_eq!((host.attack, host.health), (21 + 8, 17 + 10));
     g.check_invariants().unwrap();
 }
 
@@ -1504,7 +1505,7 @@ fn a_beast_a_fight_grants_triples_at_the_start_of_the_next_turn() {
 }
 
 /// The other way a fight fills the hand: a trinket whose counter the fight
-/// feeds (Stormcoil Sticker, after six friendly Mech deaths) gets a Mech. It
+/// feeds (Stormcoil Sticker, after five friendly Mech deaths) gets a Mech. It
 /// waits to triple like the Rally's Beast does.
 #[test]
 fn a_mech_a_trinket_gets_after_a_fight_triples_at_the_start_of_the_next_turn() {
@@ -1539,7 +1540,7 @@ fn a_mech_a_trinket_gets_after_a_fight_triples_at_the_start_of_the_next_turn() {
     let out = fight_wall(&g, 1, 100, 500);
     assert_eq!(out.sides[0].friendly_deaths, 6, "all six died");
     g.apply_side_outcome(0, &out.sides[0], true);
-    assert_eq!(g.players[0].trinkets[0].count, 0, "the counter fired at six");
+    assert_eq!(g.players[0].trinkets[0].count, 1, "the counter fired at five, one left");
     assert_eq!(g.players[0].hand.len(), 5, "the Mech the trinket gave");
     assert!(g.players[0].hand.iter().all(|m| !m.golden), "no golden during the fight");
     let gained = g.players[0].hand[4].card;
