@@ -1675,3 +1675,44 @@ fn a_doubled_fodder_battlecry_adds_two_to_each_refresh() {
     );
     g.check_invariants().unwrap();
 }
+
+#[test]
+fn an_escapist_counts_the_overshoot_of_a_damage_batch() {
+    // The game's countdown after a fire is the overshoot, not what the count
+    // had left: the log shows an Eredar Escapist on "(4 left!)" take the 5
+    // damage of one Imposing Percussionist pick, print "(1 left!)", and then
+    // fire AGAIN on the 1 damage of the Wrath Weaver that follows, so the one
+    // step gets two Corrupted Cupcakes (`Hearthstone_2026_10_27_04_30_04`
+    // turn 10 step 25). Here the counter is 3 of 4 and the pick's Demon is
+    // Tier 2: 3 + 2 fires once and counts the 1 over as "(1 left!)".
+    let mut g = game(48);
+    g.players[0].tier = 2;
+    g.players[0].health = 30;
+    put_on_board(&mut g, 0, "Eredar Escapist");
+    g.players[0].board[0].improvements = 3;
+    g.give(0, "Imposing Percussionist").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    let at = (0..g.players[0].discover.len())
+        .find(|&i| g.data.cards.get(g.players[0].discover[i]).tier == 2)
+        .expect("a Tier 2 Demon is offered");
+    act(&mut g, 0, Action::Choose(at as u8));
+    assert_eq!(g.players[0].health, 28, "the pick's own 2 damage");
+    assert!(hand_has(&g, "Corrupted Cupcakes"));
+    assert_eq!(
+        g.players[0].board[0].events_left(&g.data.cards),
+        Some(1),
+        "one fire and 1 damage counted again: the log's \"(1 left!)\""
+    );
+    // one more point of damage fires it again, as the log's did
+    put_on_board(&mut g, 0, "Malchezaar, Prince of Dance");
+    g.players[0].gold = 0;
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].health, 27, "Malchezaar pays the Refresh in Health");
+    let cupcakes = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).name == "Corrupted Cupcakes")
+        .count();
+    assert_eq!(cupcakes, 2, "the log's two Cupcakes");
+    g.check_invariants().unwrap();
+}
