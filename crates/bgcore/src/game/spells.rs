@@ -142,13 +142,21 @@ impl Game {
 
     /// A spell was cast on the board minion in `target_pos`: run the
     /// "whenever you cast a spell on a Murloc" watchers (Shamanic
-    /// Tidecaller), then the target's own watcher (Twilight Tidehunter).
+    /// Tidecaller), then the target's own watcher (Twilight Tidehunter), and
+    /// last the trinkets that watch a spell cast on a friendly minion
+    /// (Honeycomb Ring).
+    ///
+    /// The minions' own watchers go first, so a Tavern spell they cast for
+    /// you (the Gatekeeper Amalgam's Misplaced Tea Set) is cast before this
+    /// cast's "improve for this turn" lands: the log sizes the Tea Set with
+    /// the bonus as it stood when the cast began, and only the play's next
+    /// cast gets the +1/+1. `Hearthstone_2026_11_03_15_22_36-g4` turn 10
+    /// step 27 (two Gem casts from Balinda): the total is 8/9 at the play,
+    /// the first Tea Set is 12/13 (4 + 8/9), the second 13/14 (4 + 9/10).
     pub(super) fn trigger_on_cast_spell_on_target(&mut self, p: usize, target_pos: usize) {
         if target_pos >= self.players[p].board.len() {
             return;
         }
-        // A trinket that watches spells cast on a friendly minion.
-        self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
         let target_tribes = self.data.cards.tribes_of(&self.players[p].board[target_pos]);
         let len = self.players[p].board.len();
         for i in 0..len {
@@ -175,6 +183,9 @@ impl Game {
                 }
             }
         }
+        // A trinket that watches spells cast on a friendly minion, after the
+        // minions' own reactions to the cast.
+        self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
     }
 
     /// Cast a named spell on the friendly minion in board slot `target`,

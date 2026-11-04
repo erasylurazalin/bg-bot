@@ -752,7 +752,9 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   "after the Tavern is Refreshed this game" fires), `cast_spell` and
   `cast_spell_on` (SpellCast for every spell, CastSpell for a Tavern spell
   only: see "Spells versus Tavern spells" below), `trigger_on_cast_spell_on_target`
-  (CastSpellOnMinion), `discard_card` (Discard) and `fire_event(GoldSpent)`.
+  (CastSpellOnMinion, after the minions' own watchers for that cast: a
+  Honeycomb Ring's this-turn +1/+1 lands after the Misplaced Tea Set the cast
+  made the Amalgam cast), `discard_card` (Discard) and `fire_event(GoldSpent)`.
   The turn flow calls `trinket_start_of_turn` (offers, uses back, the Turns
   counter, the start-of-turn effects) and `trinket_end_of_turn` (the
   end-of-turn effects, then an "every N turns" rule that reached N). A hook

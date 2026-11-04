@@ -4210,6 +4210,65 @@ fn honeycomb_ring_and_multilayered_shield_raise_the_spell_bonus() {
 }
 
 #[test]
+fn the_rings_improvement_lands_after_the_casts_own_tea_set() {
+    // Honeycomb Ring's "+1/+1 more this turn" comes after the target's own
+    // "whenever you cast a spell on this", so the Misplaced Tea Set of the
+    // cast that improves it is sized without that +1/+1, and the next cast of
+    // the same play gets it. Log `Hearthstone_2026_11_03_15_22_36-g4` turn 10
+    // step 27: the total is 8/9 when the play begins, and its two Gem casts
+    // give Tea Sets of 12/13 (4 + 8/9) and 13/14 (4 + 9/10).
+    let mut g = game(331);
+    take(&mut g, 0, "Honeycomb Ring");
+    assert_eq!(g.total_spell_bonus(0), (1, 1), "the pick's own +1/+1");
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam");
+    put_on_board(&mut g, 0, "Tusked Camper");
+    let camper = stats(&g, "Tusked Camper");
+    g.give(0, "Blood Gem").unwrap();
+    let h = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(
+        stats(&g, "Tusked Camper"),
+        (camper.0 + 5, camper.1 + 5),
+        "one Tea Set: +4/+4 and the bonus as the cast began (+1/+1)"
+    );
+    assert_eq!(
+        g.total_spell_bonus(0),
+        (2, 2),
+        "the Ring improves once, after the Tea Set"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn every_extra_cast_improves_the_ring_after_its_own_tea_set() {
+    // Balinda's extra cast is another spell cast on a minion, so it improves
+    // the Ring again, and each cast's Tea Set reads the bonus that cast began
+    // with: +5/+5 then +6/+6 on the Camper.
+    let mut g = game(332);
+    take(&mut g, 0, "Honeycomb Ring");
+    put_on_board(&mut g, 0, "Gatekeeper Amalgam");
+    put_on_board(&mut g, 0, "Balinda Stonehearth");
+    put_on_board(&mut g, 0, "Tusked Camper");
+    let camper = stats(&g, "Tusked Camper");
+    g.give(0, "Blood Gem").unwrap();
+    let h = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: h as u8, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert_eq!(
+        stats(&g, "Tusked Camper"),
+        (camper.0 + 11, camper.1 + 11),
+        "two Tea Sets, +5/+5 then +6/+6"
+    );
+    assert_eq!(
+        g.total_spell_bonus(0),
+        (3, 3),
+        "one improvement per cast, and the Tea Set counts for none"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn the_chromatic_tear_greater_pays_per_seventh_battlecry() {
     let mut g = game(330);
     take_id(&mut g, 0, "BG35_MagicItem_840t");
