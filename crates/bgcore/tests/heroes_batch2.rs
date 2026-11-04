@@ -674,31 +674,40 @@ fn i_spy_discovers_a_plain_copy_from_the_next_opponents_warband() {
 }
 
 #[test]
-fn twice_as_nice_copies_the_highest_tier_minion_and_freezes_both() {
+fn twice_as_nice_copies_the_highest_tier_minion_into_a_tavern_slot() {
     let mut g = hero_game(17, "Varden Dawngrasp");
     assert!(power(&g, 0).passive);
     duel(&mut g);
     g.players[0].tier = 2;
     set_shop(&mut g, 0, &["Buzzing Vermin", "Southsea Busker", "Sellemental"]);
-    g.players[0].gold = 5;
-    act(&mut g, 0, Action::Roll);
-    let shop = &g.players[0].shop;
     let base = g.data.rules.shop_size(2);
-    assert_eq!(shop.len(), base + 1, "one card outside the normal slots");
-    let copy = *shop.last().unwrap();
-    let same: Vec<usize> = shop
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| m.card == copy.card)
-        .map(|(i, _)| i)
-        .collect();
-    assert_eq!(same.len(), 2, "the highest-Tier minion, and its copy");
-    assert!(shop[same[0]].frozen && copy.frozen, "both frozen");
-    let top = g.data.cards.get(copy.card).tier;
-    for m in shop.iter() {
-        assert!(g.data.cards.get(m.card).tier <= top, "it is the highest Tier one");
+    // Every Refresh copies the Tavern's highest-Tier minion, and the copy
+    // takes one of the Tavern's normal slots: the Tavern keeps its size
+    // (docs/rules/heroes.md, from `Hearthstone_2026_10_24_17_59_26-g1` turn
+    // 15, where a Tier 6 Refresh holds five fresh minions and the copy where
+    // one without the power holds six).
+    for _ in 0..3 {
+        g.players[0].gold = 5;
+        act(&mut g, 0, Action::Roll);
+        let shop = &g.players[0].shop;
+        assert_eq!(shop.len(), base, "the copy takes one of the normal slots");
+        let frozen: Vec<usize> = shop
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.frozen)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(frozen.len(), 2, "the highest-Tier minion, and its copy, frozen");
+        let copy = *shop.last().unwrap();
+        assert_eq!(shop[frozen[1]], copy, "the copy is the card the Refresh added");
+        assert_eq!(shop[frozen[0]].card, copy.card, "an exact copy of it");
+        assert_eq!(copy.pool_copies, 0, "made fresh, no pool copy");
+        let top = g.data.cards.get(copy.card).tier;
+        for m in shop.iter() {
+            assert!(g.data.cards.get(m.card).tier <= top, "it is the highest Tier one");
+        }
+        g.check_invariants().unwrap();
     }
-    g.check_invariants().unwrap();
 }
 
 #[test]

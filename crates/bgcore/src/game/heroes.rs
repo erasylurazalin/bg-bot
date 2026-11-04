@@ -389,7 +389,6 @@ impl Game {
             super::shop::give_back(pool, &data.cards, &m);
         }
         pl.shop_spell = None;
-        let size = pl.shop_size(&data.rules);
         for card in board {
             if pl.shop.len() >= crate::SHOP {
                 break;
@@ -406,7 +405,7 @@ impl Game {
         Self::apply_refresh_buff(pl, &data.cards, rng);
         Self::apply_barrage(pl, &data.cards, rng);
         let bonus = data.rules.bonus_mask;
-        Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
+        Self::after_refresh_powers(pl, &data.cards, rng, bonus);
     }
 
     /// Take one Darkmoon Ticket from a Tavern card that carries one. At the
@@ -974,7 +973,7 @@ impl Game {
                     Self::apply_barrage(pl, &data.cards, rng);
                     Self::feed_refresh_fodders(pl, pool, &data.cards, rng, *lobby, range);
                     let bonus = data.rules.bonus_mask;
-                    Self::after_refresh_powers(pl, &data.cards, rng, bonus, size);
+                    Self::after_refresh_powers(pl, &data.cards, rng, bonus);
                 }
             }
             // Saturday C'Thuns!: pay, and the end of the turn gives the buff,
