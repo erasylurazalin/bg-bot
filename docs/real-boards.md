@@ -783,6 +783,18 @@ of a random step is run, since any of them may be the log's.
     one the game rebuilt under a new id as it landed (Scarlet Skull in
     `10_24_15_25_26-g6` turn 12 step 29: the same card id, an id the state
     before did not hold).
+  - **A hand card a Tomb Turning picked this turn** (`seat_tomb_turning_pick`)
+    is played with the game's "dies if you play it this turn" on it, the
+    engine's `Minion.doomed`, which `Game::resolve_doomed` takes off the board
+    right after the play. The game writes the mark as an `IMMOLATING` tag on
+    the picked card (raw log `Hearthstone_2026_10_27_04_30_04`, the tag at line
+    152848 and cleared as the card reaches the graveyard at 04:47:20), and no
+    logged state carries a tag, so the turn's own pick says it: a `discover`
+    step whose `source` is the Tomb Turning cast (or a Magicfin token that cast
+    it) and whose `picked` is the card the play step names
+    (`10_24_15_25_26-g6` turn 12 steps 29 and 33, `10_27_04_30_04-g1` turn 10
+    step 21). A card picked in an earlier turn was a normal minion by then,
+    `finish_shop` having cleared the mark in hand.
   - **The game's own triple check** ("Check Triples") runs as an action ends,
     not at the summon or the gain that made the third copy, so a logged state
     can hold three plain copies a summon left on the board: the Maw Caster's

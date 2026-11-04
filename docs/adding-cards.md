@@ -727,7 +727,10 @@ Triple Reward spell.
 - **Tomb Turning.** The Discovered minion has `Minion.doomed`
   (`DiscoverRequest::DoomedTribeMinion`, `Player.discover_doomed`). Played, the flag
   stays on the board minion until `Game::resolve_doomed` finds no pending choice or
-  Discover left, then destroys it. `finish_shop` clears the flag in hand.
+  Discover left, then destroys it. `finish_shop` clears the flag in hand. No logged
+  state carries the flag (the game's own mark is an `IMMOLATING` tag), so the shop
+  replay seats it from the turn's own pick (`shop_replay::seat_tomb_turning_pick`,
+  docs/real-boards.md "The shop replay").
 - **Fight-only Effects.** `GiveRebornRandom` (Mummifier; `Side.dr_card` is the dying
   card, so "different" excludes copies), `SummonAttacker` plus `Side.immediate` and
   `run_immediate` (Eternal Tycoon's Knight swings after the attack that killed),
