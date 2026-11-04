@@ -113,9 +113,11 @@ fight phase.
   golden gets its own once, at its doubled +60/+60 (log `10_28_22_11_50-g5`
   turn 10: golden Holy Vanguard 208/116, not 238/146; 2026-11-04). Holy Vanguard's
   +30/+30 is part of its stats wherever it is (board, hand, Tavern) while
-  you have 15 or less Health, and leaves when you go above: a Demon that
-  eats a Tavern Holy Vanguard gains the +30/+30 too (Era, 2026-11-04; the
-  logs show it in the card's stats in all three places). Its effect is doubled (twice the numbers, or the
+  you have 15 or less Health: a Demon that eats a Tavern Holy Vanguard gains
+  the +30/+30 too (Era, 2026-11-04; the logs show it in the card's stats in
+  all three places). Armor doesn't count, only Health, and Health never
+  comes back in Battlegrounds, so once you are at 15 or less it stays on
+  (Era, 2026-11-04). Its effect is doubled (twice the numbers, or the
   effect triggers twice).
 - Playing a golden minion gives a Triple Reward: a 0-cost plain spell (not
   a Tavern spell) that goes to your hand. Casting it is casting a spell:
