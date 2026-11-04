@@ -97,7 +97,12 @@ always afford one. A trinket with no cost in the game data is free.
   copy lands on does NOT fire its own "whenever you cast a spell on this /
   on a Mech" (`Hearthstone_2026_11_02_00_10_22-g2` turn 12: Gem copies on a
   Glambot give +1/+1 and no Satellite, its Magnetize count never moves).
-  The cast counters still see the copy. The random pick ignores the spell's own target
+  Checked in the raw log the same day: nothing answers the copy at all. No
+  trigger block of any kind follows any of the game's 140 copies (no
+  Glambot, no Felboar "after you cast 3 spells": 7 Felboar triggers for the
+  turn's 7 real casts, none for its 6 copies), and no cast counter moves.
+  The Locket itself fires once per cast, so each extra cast a Hot-Air
+  Surveyor or Balinda adds brings its own copy. The random pick ignores the spell's own target
   rules, which makes it wild: Eyes of the Earth Mother cast on a Tier 4
   minion can land on a Tier 5 to 7 one and make it golden; Butchering or
   Channel the Devourer can eat your board; a spell that fills the Tavern
