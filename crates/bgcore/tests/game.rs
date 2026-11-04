@@ -837,6 +837,63 @@ fn stat_spells_choose_one_and_discover_get_spells() {
     g.check_invariants().unwrap();
 }
 
+/// Making a minion Golden where it stands doubles the stats the card itself
+/// scales with ("+3/+3 for each Battlecry you've triggered this game, wherever
+/// this is") and keeps every buff, which does not double
+/// (`game::shop::golden_up`; the log's own numbers:
+/// `Hearthstone_2026_10_24_17_59_26-g1` turn 8 step 21 has a Tavern Dark
+/// Paradox go 18/18 to 36/36, and `Hearthstone_2026_11_03_00_29_06-g5` turn 9
+/// a Tavern Banana Slamma at 51/51 to 54/57).
+#[test]
+fn making_a_minion_golden_doubles_its_own_counters_and_keeps_its_buffs() {
+    // A seed whose game holds the tier 6 Dark Paradox version: it is the only
+    // minion that scales with Battlecries.
+    let mut g = game(1);
+    // Five Battlecries behind it: 3/3 plus +15/+15.
+    g.players[0].battlecries_triggered = 5;
+    put_on_board(&mut g, 0, "Dark Paradox t6");
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (18, 18),
+        "its own +3/+3 for each Battlecry"
+    );
+    // A +4/+4 buff on top of that, which is a buff and stays as it is.
+    g.players[0].board[0].attack += 4;
+    g.players[0].board[0].health += 4;
+    g.give(0, "Eyes of the Earth Mother").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    assert!(g.players[0].board[0].golden, "made Golden");
+    // The golden card's 6/6, the Battlecries' +15/+15 a second time, and the
+    // +4/+4 the minion carried.
+    assert_eq!(
+        (g.players[0].board[0].attack, g.players[0].board[0].health),
+        (40, 40),
+        "6/6 printed, twice the Battlecry stats, the buff kept once"
+    );
+
+    // A card with nothing of its own to scale: only its printed stats change,
+    // the +48/+45 of buffs stay (the Banana Slamma in the log).
+    put_on_board(&mut g, 0, "Banana Slamma");
+    assert_eq!(
+        (g.players[0].board[1].attack, g.players[0].board[1].health),
+        (3, 6),
+        "3/6 printed"
+    );
+    g.players[0].board[1].attack += 48;
+    g.players[0].board[1].health += 45;
+    g.give(0, "Eyes of the Earth Mother").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(1));
+    assert!(g.players[0].board[1].golden, "made Golden");
+    assert_eq!(
+        (g.players[0].board[1].attack, g.players[0].board[1].health),
+        (54, 57),
+        "6/12 printed plus the buffs, which do not double"
+    );
+    g.check_invariants().unwrap();
+}
+
 #[test]
 fn boon_of_beetles_keeps_unused_charges_across_combats() {
     let mut g = game(203);
@@ -1182,3 +1239,5 @@ fn legal_mask_matches_is_legal_everywhere() {
         }
     }
 }
+
+

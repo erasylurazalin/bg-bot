@@ -5397,18 +5397,24 @@ fn the_gold_plated_compass_makes_the_next_minion_of_its_type_golden() {
     let golden = base.golden_stats.unwrap_or((base.attack * 2, base.health * 2));
     assert!(mech.golden, "Golden");
     assert_eq!((mech.attack, mech.health), golden, "the golden card's stats");
-    assert!(mech.no_reward, "not a triple: no Triple Reward for it");
+    // A Golden minion bought and played from the hand gives its Triple Reward:
+    // "Make the next {type} you buy Golden" says nothing against one (THE
+    // GOLDEN RULE, docs/rules/design.md "Triples"), and the log shows one (a
+    // Golden Sanguine Refiner's play creates its Triple Reward in
+    // `Hearthstone_2026_10_28_22_11_50-g1` turn 9).
+    assert!(!mech.no_reward, "a Golden minion played gives its reward");
     assert_eq!(g.players[0].trinkets[1].tribe, None, "the type is spent");
-    // Playing it puts no Triple Reward in hand, and it is not a Golden played.
+    // Playing it puts the Triple Reward in hand, and it counts as a Golden
+    // minion played.
     let at = g.players[0].hand.iter().position(|m| m.card == id(&g, "Lullabot")).unwrap();
     act(&mut g, 0, Action::Play { hand: at as u8, pos: 0 });
     let reward = g.data.cards.triple_reward.expect("a Triple Reward spell");
     assert!(
-        g.players[0].hand.iter().all(|m| m.card != reward),
-        "no Triple Reward"
+        g.players[0].hand.iter().any(|m| m.card == reward),
+        "the Triple Reward it is owed"
     );
     // A Golden minion played it is, so the "Golden minions played" counters
-    // (Gold Mallet) still see it; only the Triple Reward is gone.
+    // (Gold Mallet) see it.
     assert_eq!(g.players[0].golden_played, 1, "a Golden minion was played");
     g.check_invariants().unwrap();
 }

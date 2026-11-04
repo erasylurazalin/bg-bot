@@ -643,7 +643,9 @@ impl Game {
                 // count (a golden Elite Navigator picks two Pirates): the
                 // golden itself happens once (docs/rules/design.md "Set versus
                 // add").
-                golden_up(&self.data.cards, &mut self.players[p].board[s]);
+                let mut m = self.players[p].board[s];
+                golden_up(&self.players[p], &self.data.cards, &mut m);
+                self.players[p].board[s] = m;
                 if pt.runs > 1 {
                     let again = PendingTarget { runs: pt.runs - 1, ..*pt };
                     self.offer_target(p, again);
@@ -982,15 +984,10 @@ impl Game {
                             self.start_consume(p, target_pos, pick, keywords, count, 1);
                         }
                         SpellTarget::MakeGolden { .. } => {
-                            let m = &mut self.players[p].board[target_pos];
-                            if !m.golden {
-                                let base = self.data.cards.get(m.card);
-                                let (ga, gh) = base
-                                    .golden_stats
-                                    .unwrap_or((base.attack * 2, base.health * 2));
-                                m.golden = true;
-                                m.attack += ga - base.attack;
-                                m.health += gh - base.health;
+                            if !self.players[p].board[target_pos].golden {
+                                let mut m = self.players[p].board[target_pos];
+                                golden_up(&self.players[p], &self.data.cards, &mut m);
+                                self.players[p].board[target_pos] = m;
                             }
                         }
                         SpellTarget::TrickyTrousers { attack, health } => {
@@ -1223,7 +1220,7 @@ impl Game {
                             // back to hand.
                             let mut m = self.players[p].board.remove(target_pos);
                             if !m.golden {
-                                super::shop::golden_up(&self.data.cards, &mut m);
+                                super::shop::golden_up(&self.players[p], &self.data.cards, &mut m);
                             }
                             self.add_to_hand(p, m);
                             stop_after = true;

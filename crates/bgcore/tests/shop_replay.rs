@@ -2087,3 +2087,89 @@ fn the_logged_tavern_spell_bonus_this_turn_is_seated_as_this_turns() {
         "the total is still the log's number"
     );
 }
+
+/// The Gold-plated Compass in a loaded state. Its pick never ran, but the game
+/// writes the type it locked into the trinket's own first number as its race
+/// code (43 is a Quilboar, 20 a Beast: `tools/export_cards.py` names the
+/// codes), so the next minion of that type the player buys comes to the hand
+/// Golden where it stands in the Tavern. It does that once: no logged state
+/// says whether it has, so the steps before the one being replayed do. A
+/// second turn's buy of the same type stays plain.
+#[test]
+fn a_loaded_compass_makes_the_next_buy_of_its_type_golden_once() {
+    let compass = r#"{"card_id": "BG32_MagicItem_901", "name": "Gold-plated Compass",
+                      "greater": true, "numbers": [43, 0, 0, 43]}"#;
+    let text = format!(
+        r#"{{"source": "compass", "game": 1, "turns": [
+        {{"turn": 9,
+          "start": {{"board": [], "hand": [],
+            "tavern": [
+              {{"id": 700, "slot": 1, "card_id": "BG20_101", "name": "Roadboar", "attack": 2, "health": 4, "kind": "minion", "frozen": false}},
+              {{"id": 702, "slot": 2, "card_id": "BG31_816", "name": "Fire Baller", "attack": 4, "health": 3, "kind": "minion", "frozen": false}}],
+            "hand_hidden": 0, "gold": 10, "gold_max": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": [{compass}], "counters": {{}},
+            "secrets": [], "won_last_combat": null}},
+          "actions": [
+            {{"step": "buy", "slot": 1,
+              "target": {{"id": 700, "card_id": "BG20_101", "name": "Roadboar", "kind": "slot", "slot": 1}},
+              "card": {{"id": 700, "card_id": "BG20_101", "name": "Roadboar"}},
+              "paid": {{"gold": 3, "health": 0}},
+              "after": {{"board": [],
+                "hand": [{{"id": 700, "index": 1, "card_id": "BG20_101_G", "name": "Roadboar",
+                           "attack": 4, "health": 8, "golden": true, "kind": "minion"}}],
+                "tavern": [{{"id": 702, "slot": 1, "card_id": "BG31_816", "name": "Fire Baller", "attack": 4, "health": 3, "kind": "minion", "frozen": false}}],
+                "hand_hidden": 0, "gold": 7, "gold_max": 10, "tier": 6, "upgrade_cost": null,
+                "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                "hero_powers": [], "trinkets": [{compass}], "counters": {{}},
+                "secrets": [], "won_last_combat": null}}}}]}},
+        {{"turn": 10,
+          "start": {{"board": [],
+            "hand": [{{"id": 700, "index": 1, "card_id": "BG20_101_G", "name": "Roadboar",
+                       "attack": 4, "health": 8, "golden": true, "kind": "minion"}}],
+            "tavern": [
+              {{"id": 800, "slot": 1, "card_id": "BG20_101", "name": "Roadboar", "attack": 2, "health": 4, "kind": "minion", "frozen": false}},
+              {{"id": 802, "slot": 2, "card_id": "BG31_816", "name": "Fire Baller", "attack": 4, "health": 3, "kind": "minion", "frozen": false}}],
+            "hand_hidden": 0, "gold": 10, "gold_max": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": [{compass}], "counters": {{}},
+            "secrets": [], "won_last_combat": null}},
+          "actions": [
+            {{"step": "buy", "slot": 1,
+              "target": {{"id": 800, "card_id": "BG20_101", "name": "Roadboar", "kind": "slot", "slot": 1}},
+              "card": {{"id": 800, "card_id": "BG20_101", "name": "Roadboar"}},
+              "paid": {{"gold": 3, "health": 0}},
+              "after": {{"board": [],
+                "hand": [
+                  {{"id": 700, "index": 1, "card_id": "BG20_101_G", "name": "Roadboar",
+                    "attack": 4, "health": 8, "golden": true, "kind": "minion"}},
+                  {{"id": 800, "index": 2, "card_id": "BG20_101", "name": "Roadboar",
+                    "attack": 2, "health": 4, "golden": false, "kind": "minion"}}],
+                "tavern": [{{"id": 802, "slot": 1, "card_id": "BG31_816", "name": "Fire Baller", "attack": 4, "health": 3, "kind": "minion", "frozen": false}}],
+                "hand_hidden": 0, "gold": 7, "gold_max": 10, "tier": 6, "upgrade_cost": null,
+                "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                "hero_powers": [], "trinkets": [{compass}], "counters": {{}},
+                "secrets": [], "won_last_combat": null}}}}]}}]}}"#
+    );
+    let files = parse_action_files(&[("compass.json".to_string(), text)]).unwrap();
+    let file = &files[0];
+    let opts = ReplayOptions { seeds: 1, seed: 1 };
+    // The first buy: the type the Compass locked in the log (a Quilboar) is
+    // still armed, so the bought Roadboar is Golden.
+    let first = replay_step(&data(), &ids(), file, &file.turns[0], 0, &opts);
+    assert_eq!(first.verdict, Verdict::Ok, "{:?} {:?}", first.diffs, first.missing);
+    assert!(
+        first.ours.hand.iter().any(|m| m.name == "Roadboar" && m.golden),
+        "the bought Roadboar is Golden: {:?}",
+        first.ours.hand
+    );
+    // The second turn: the file shows the payout behind it, so the trinket's
+    // type is spent and the next Roadboar stays plain.
+    let second = replay_step(&data(), &ids(), file, &file.turns[1], 0, &opts);
+    assert_eq!(second.verdict, Verdict::Ok, "{:?} {:?}", second.diffs, second.missing);
+    assert!(
+        second.ours.hand.iter().any(|m| m.name == "Roadboar" && !m.golden),
+        "the type is spent, so the Roadboar stays plain: {:?}",
+        second.ours.hand
+    );
+}

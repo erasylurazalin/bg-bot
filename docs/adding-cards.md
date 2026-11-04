@@ -222,7 +222,7 @@ exactly one legal target and drops the effect when there is none.
 | A guess with two answers | Lord Barov (Friendly Wager), Murloc Holmes (Detective for Hire) | `Player.wager_offer`/`holmes_offer`, `is_legal` + `resolve_choose`, the observation, `answer_pending` in bots.rs |
 | Golden: doubles numbers | any card, `mul` in `run_effect` | "twice" (fixed count, max over copies): Brann/Balinda/Proud Privateer. "An extra time" (stacks): Titus |
 | Golden count differs from x2 | golden text says "twice" vs doubled stats | read the golden card; `golden_doubles_count` for summons, `golden_stats` for stats |
-| Make a minion golden on the board | Elite Navigator (`make_golden_max_tier`) | no reward, not counted as played; `golden_up` |
+| Make a minion golden on the board | Elite Navigator (`make_golden_max_tier`) | no reward, not counted as played; `golden_up` (the golden card's printed stats and its own "for each ... this game" counters doubled, its buffs kept) |
 | Golden played gives no reward | Aureate Laureate (`always_golden`, `no_triple`), `Minion.no_reward` | |
 | Summon in combat | Cord Puller / Den Mother style (`summon`) | `golden_doubles_count` for Beetle style |
 | Summon a copy / from hand | Flighty Scout, Expert Aviator | fights need the hand passed (`reads_hand`) |
@@ -1131,13 +1131,23 @@ Triple Reward spell.
   `SCALAR_TRINKET_TRIBE`.
 - **A trinket that makes a bought minion Golden.** `golden_bought` on `on_buy`
   (`Act::GoldenBoughtType`) makes the minion just bought Golden when its
-  tribes include the slot's stored type: `golden_up` for the stats, and
-  `Minion.no_reward` so playing it gives no Triple Reward (docs/rules/design.md: it is
-  not a triple), then the type is cleared. The act finds the minion through
+  tribes include the slot's stored type: `golden_up` for the stats, then the
+  type is cleared. It is not a triple, but it was bought and played from the
+  hand, so it gives its Triple Reward like any other Golden bought
+  (docs/rules/design.md "Triple rewards", and the log: a Golden Sanguine
+  Refiner's play creates its Triple Reward in
+  `Hearthstone_2026_10_28_22_11_50-g1` turn 9), so nothing sets
+  `Minion.no_reward`. The act finds the minion through
   `TrinketPowers.bought_card`, which `Action::Buy` writes beside
   `bought_stats` just before the Buy event; the buy's own `check_triple` has
   already run by then, so a buy that made a triple keeps its Triple Reward and
   the trinket stays armed.
+  A loaded state's pick never ran, so the type comes from the game's own
+  trace of it: `seat_trinkets` reads the race code the game writes in the
+  trinket's first number (43 a Quilboar, 20 a Beast: `race_code_tribe`,
+  `tools/export_cards.py`'s `RACES`), and `shop_replay::compass_spent` empties
+  it for a step the file shows the payout behind (a plain Tavern card bought
+  Golden into the hand with no copies behind it for a triple).
 - **The keep for every Dragon.** `permanent_keep = "all_dragons"`
   (`PermanentKeep::AllDragons`) is Persistent Poet's `adjacent_dragons` for
   every living friendly Dragon instead of the two neighbours, the keeper's own

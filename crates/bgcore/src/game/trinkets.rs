@@ -1175,7 +1175,7 @@ impl Game {
                 let k = self.rng.below(ok.len() as u32) as usize;
                 let at = ok[k];
                 let mut m = self.players[p].board[at];
-                super::shop::golden_up(&self.data.cards, &mut m);
+                super::shop::golden_up(&self.players[p], &self.data.cards, &mut m);
                 self.players[p].board[at] = m;
             }
             Act::LastSpellCopies(n) => {
@@ -1896,10 +1896,14 @@ impl Game {
                     return;
                 };
                 let mut m = self.players[p].hand[at];
-                super::shop::golden_up(cards, &mut m);
-                // "A minion made golden this way is not a triple and gives no
-                // Triple Reward" (docs/rules/design.md): playing it gives none.
-                m.no_reward = true;
+                super::shop::golden_up(&self.players[p], cards, &mut m);
+                // A minion made Golden this way is not a triple, but it is
+                // played from hand, so it gives a Triple Reward like any other
+                // Golden (THE GOLDEN RULE, docs/rules/design.md "Triples"):
+                // "Make the next {type} you buy Golden" says nothing about a
+                // reward, and the log shows one (a Golden Sanguine Refiner
+                // buys its Triple Reward in `Hearthstone_2026_10_28_22_11_50-g1`
+                // turn 9).
                 self.players[p].hand[at] = m;
                 self.players[p].trinkets[slot].tribe = None;
             }

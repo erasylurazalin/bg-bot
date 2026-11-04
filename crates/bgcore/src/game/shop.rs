@@ -153,17 +153,34 @@ pub(super) fn draw_golden(
     None
 }
 
-/// Make a minion Golden where it stands: its stats go to the golden card's
-/// (double the printed ones), keeping every buff.
-pub(super) fn golden_up(cards: &CardDb, m: &mut Minion) {
+/// Make a minion Golden where it stands: its printed stats go to the golden
+/// card's (double the printed ones), the counters it scales with "wherever it
+/// is" (Battlecries, Tavern spells and the rest of `Player::wherever_stats`)
+/// gain the second share a golden card gets, and every buff stays as it is.
+///
+/// The logs say both halves. A Tavern Dark Paradox t6 ("+3/+3 for each
+/// Battlecry you've triggered this game") with five Battlecries behind it goes
+/// 18/18 to 36/36 when Golden Touch makes it Golden
+/// (`Hearthstone_2026_10_24_17_59_26-g1` turn 8 step 21), which is 6/6 plus
+/// twice the 15/15, not the 21/21 a plain card's counters would give. A Tavern
+/// Banana Slamma at 51/51, its own 3/6 plus +48/+45 of buffs, goes to 54/57
+/// (`Hearthstone_2026_11_03_00_29_06-g5` turn 9): the buffs do not double.
+/// Eyes of the Earth Mother, Captain Sanders, Elite Navigator and Gilding all
+/// add the same way (a 330/296 Brann made Golden by Captain Sanders goes to
+/// 332/300, `Hearthstone_2026_10_28_02_28_32-g1` turn 11).
+pub(super) fn golden_up(pl: &Player, cards: &CardDb, m: &mut Minion) {
     if m.golden {
         return;
     }
     let base = cards.get(m.card);
+    let plain = pl.wherever_stats(cards, m);
+    let mut up = *m;
+    up.golden = true;
+    let gold = pl.wherever_stats(cards, &up);
     let (ga, gh) = base.golden_stats.unwrap_or((base.attack * 2, base.health * 2));
+    m.attack += (ga - base.attack) + (gold.0 - plain.0);
+    m.health += (gh - base.health) + (gold.1 - plain.1);
     m.golden = true;
-    m.attack += ga - base.attack;
-    m.health += gh - base.health;
 }
 
 pub(crate) fn give_back(pool: &mut [u8], cards: &CardDb, m: &Minion) {

@@ -67,12 +67,12 @@ pub fn land_gift(data: &crate::Data, pl: &Player, m: &mut Minion, gift: usize, t
         if !pushed {
             // No room for one more gift: the stats still came.
             if makes_golden {
-                golden_up(&data.cards, m);
+                golden_up(pl, &data.cards, m);
             }
             return;
         }
         if makes_golden {
-            golden_up(&data.cards, m);
+            golden_up(pl, &data.cards, m);
         }
         let counts = [
             pl.battlecries_triggered as i32,

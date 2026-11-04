@@ -1083,6 +1083,18 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   offers one pick whatever made it trigger twice. A
   `SpellTarget::MakeGolden` cast twice (Eyes of the Earth Mother with
   Balinda) is guarded by `!m.golden`, and the second cast still counts.
+  `golden_up` (game/shop.rs) is the one way a minion turns Golden where it
+  stands, and every maker calls it: Golden Touch, Eyes of the Earth Mother,
+  Captain Sanders, Elite Navigator, Gilding, the trinkets and Raise the Stakes.
+  It adds the golden card's printed stats and the second share of the counters
+  the card scales with "wherever it is" (the same `Player::wherever_stats`
+  `Player::make_card` applies, read with `mul` 2), and keeps the minion's
+  buffs, which do not double. The logs say both halves: a Tavern Dark Paradox
+  t6 with five Battlecries behind it goes 18/18 to 36/36
+  (`Hearthstone_2026_10_24_17_59_26-g1` turn 8), a Tavern Banana Slamma at
+  51/51 (its own 3/6 plus +48/+45 of buffs) goes 54/57
+  (`Hearthstone_2026_11_03_00_29_06-g5` turn 9), and a 330/296 Brann goes
+  332/300 under Captain Sanders (`Hearthstone_2026_10_28_02_28_32-g1` turn 11).
 - **The numbers that grow (block 4).** `tp.spell_bonus_per_type`
   (Multilayered Shield: the bonus per different friendly minion type) and
   `tp.spell_bonus_turn` (Honeycomb Ring: this turn only, cleared in
@@ -1218,8 +1230,15 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   Compass's `golden_bought` is an `on_buy` act (`Act::GoldenBoughtType`): the
   minion just bought is `TrinketPowers.bought_card`, written beside
   `bought_stats` just before the Buy event, so the act makes that hand minion
-  Golden with `golden_up`, sets `Minion.no_reward` (playing it gives no Triple
-  Reward, docs/rules/design.md) and spends the slot's type. The Poet Portrait's token,
+  Golden with `golden_up` and spends the slot's type. It is a Golden bought and
+  played from the hand, so it gives its Triple Reward like any other
+  (docs/rules/design.md "Triple rewards"): nothing sets `Minion.no_reward`. A
+  loaded state's pick never ran, so the shop replay reads the type the game
+  writes into the trinket's first number (the race code `race_code_tribe`
+  names) in `seat_trinkets`, and `shop_replay::compass_spent` empties the slot
+  for a step whose file shows the Golden minion it named already bought (a
+  plain Tavern card Golden in the hand, with no copies behind it for a triple).
+  The Poet Portrait's token,
   Timewarped Poet, is Persistent Poet's keep for every friendly Dragon:
   `permanent_keep = "all_dragons"` is `PermanentKeep::AllDragons`, which
   `Side::keep_mul` reads on every living minion of the side, the keeper's own
