@@ -410,6 +410,42 @@ fn bobs_burgles_refreshes_with_plain_copies_of_the_last_warband() {
 }
 
 #[test]
+fn bobs_burgles_holds_the_whole_warband_and_no_spell_slot_when_it_is_seven() {
+    // Seven copies fill the Tavern's seven cards, so the spell slot has no
+    // room (2026_11_02_00_10_22-g7 turn 8 step 40 and turn 12 step 4: a
+    // warband of seven, seven Tavern minions and no spell, at Tier 4 and at
+    // Tier 5). A smaller warband sits next to the spell.
+    let mut g = hero_game(11, "Tess Greymane");
+    let c = id(&g, "Buzzing Vermin");
+    g.players[0].seen[1].board.clear();
+    for _ in 0..bgcore::BOARD {
+        g.players[0].seen[1].board.push(g.players[0].make_card(&g.data.cards, c, false, 0));
+    }
+    g.players[0].last_opponent = Some(Opponent::Player(1));
+    g.players[0].tier = 4;
+    g.players[0].gold = 5;
+    press(&mut g, 0);
+    assert_eq!(g.players[0].shop.len(), 7, "one copy per warband minion");
+    assert!(g.players[0].shop.iter().all(|m| m.card == c));
+    assert!(g.players[0].shop_spell.is_none(), "no room left for the spell");
+    g.check_invariants().unwrap();
+
+    // Three copies at Tier 4: three cards and the spell slot.
+    let mut g = hero_game(12, "Tess Greymane");
+    g.players[0].seen[1].board.clear();
+    for _ in 0..3 {
+        g.players[0].seen[1].board.push(g.players[0].make_card(&g.data.cards, c, false, 0));
+    }
+    g.players[0].last_opponent = Some(Opponent::Player(1));
+    g.players[0].tier = 4;
+    g.players[0].gold = 5;
+    press(&mut g, 0);
+    assert_eq!(g.players[0].shop.len(), 3, "one copy each, no padding");
+    assert!(g.players[0].shop_spell.is_some(), "the spell slot is dealt as usual");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn dream_portal_offers_one_more_minion_and_it_is_a_dragon() {
     let mut g = hero_game(8, "Ysera");
     assert!(power(&g, 0).passive);

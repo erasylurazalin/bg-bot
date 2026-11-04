@@ -460,6 +460,36 @@ fn queued_fodders_can_fill_the_spell_slot() {
 }
 
 #[test]
+fn more_fodders_than_slots_widen_the_tavern() {
+    // Tier 4 deals five minions and a spell. Six Fodders take the first six
+    // slots and the spell keeps the seventh; seven Fodders fill the Tavern
+    // and there is no room for the spell (2026_11_01_04_27_54-g2 turn 11
+    // step 26 and step 7, 2026_11_01_17_59_13-g1 turn 10 step 21).
+    let mut g = game(36);
+    g.players[0].tier = 4;
+    g.players[0].gold = 3;
+    put_on_board(&mut g, 0, "Ominous Seer");
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(6);
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(fodder_count(&g, 0), 0, "they all fed the Demon");
+    assert_eq!(g.players[0].shop.len(), 6, "the Tavern grew to hold them all");
+    assert!(g.players[0].shop_spell.is_some(), "the spell slot is still there");
+    g.check_invariants().unwrap();
+
+    let mut g = game(37);
+    g.players[0].tier = 4;
+    g.players[0].gold = 3;
+    put_on_board(&mut g, 0, "Ominous Seer");
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(7);
+    act(&mut g, 0, Action::Roll);
+    assert_eq!(g.players[0].shop.len(), 7, "seven cards is all there is room for");
+    assert!(g.players[0].shop_spell.is_none(), "the spell slot was taken");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn urzul_can_consume_a_waiting_fodder() {
     let mut g = game(35);
     clear_shop(&mut g, 0);

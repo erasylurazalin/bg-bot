@@ -492,11 +492,14 @@ impl Player {
     }
 
     /// The minion slots this player's Tavern has right now. `SHOP` holds the
-    /// spell slot too, so a Tavern never offers more than `SHOP - 1` minions
-    /// at once (docs/rules/design.md: never more than 7 slots, one almost always the
-    /// spell). Glowing Gauntlet fixes it at six (six plus the spell is the
-    /// seven it promises); Innkeeper's Stein and Electrode Attractor add one
-    /// each, and Stein's needs a tier above yours to draw from.
+    /// spell slot too, so this size never passes `SHOP - 1` minions
+    /// (docs/rules/design.md: never more than 7 slots, one almost always the
+    /// spell; a fill that takes all seven of them, seven Fodders or a
+    /// seven-minion warband for Bob's Burgles, leaves no spell and does not
+    /// come from this size). Glowing Gauntlet fixes it at six (six plus the
+    /// spell is the seven it promises); Innkeeper's Stein and Electrode
+    /// Attractor add one each, and Stein's needs a tier above yours to draw
+    /// from.
     pub fn shop_size(&self, rules: &Rules) -> usize {
         let base = if self.tp.gauntlet { 6 } else { rules.shop_size(self.tier) };
         // New Recruit: the Tavern offers one more minion this game.

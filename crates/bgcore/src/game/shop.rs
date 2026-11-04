@@ -376,9 +376,11 @@ impl Game {
     /// player's own Refresh takes Fodders queued for upcoming Refreshes; the
     /// automatic roll at the start of a turn and an effect that refreshes
     /// the Tavern leave the queue alone. The first `fodders` slots hold
-    /// Demon Fodders (they are not extra slots). A Fodder can also take the
-    /// spell slot, which then has no spell this Refresh; Fodders beyond all
-    /// slots are lost.
+    /// Demon Fodders (they are not extra slots), and a Refresh with more
+    /// Fodders than the tier's slots grows the Tavern to hold them, up to
+    /// seven cards; seven Fodders leave no room for the spell
+    /// (2026_11_01_04_27_54-g2 turn 11 step 7, 2026_11_01_17_59_13-g1 turn
+    /// 10 step 17).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn fill_shop(
         pl: &mut Player,
@@ -397,15 +399,19 @@ impl Game {
         // A price a Refresh gave the Tavern lasts only as long as those
         // cards do (Chillmere Mosaic).
         pl.tp.tavern_price = 0;
-        let slots = size + 1;
-        let fodders = (fodders as usize).min(slots);
         // The tier's own size: the extra slots below fill whatever the
         // player's shape adds on top of it.
         let base = if pl.tp.gauntlet { 6 } else { rules.shop_size(pl.tier) };
         let base = base.saturating_sub(pl.shop_fewer as usize);
         // New Recruit: the extra slot is drawn with the rest of them.
         let base = base + u8::from(pl.prize.extra_shop) as usize;
-        let normal = base.saturating_sub(fodders);
+        // Fodders take the first slots, and more of them than the tier has
+        // slots widen the Tavern to hold them all: the Tavern holds at most
+        // seven cards, so seven Fodders leave no spell slot
+        // (docs/rules/design.md "Demon Fodder").
+        let fodders = (fodders as usize).min(crate::SHOP);
+        let minions = base.max(fodders);
+        let normal = minions.saturating_sub(fodders);
         // The tier bounds this Refresh draws in: Bob-blehead's floor, and
         // Guiding Candle's first Refreshes of a turn, which hold Tier 6 cards
         // only (free access to the tier, as the card says).
@@ -488,7 +494,7 @@ impl Game {
         {
             let mut made: ArrayVec<Minion, SHOP> = ArrayVec::new();
             for _ in 0..fodders {
-                if pl.shop.len() + made.len() >= slots {
+                if pl.shop.len() + made.len() >= minions {
                     break;
                 }
                 let mut m = pl.make_card(cards, tok, false, 0);
@@ -499,11 +505,11 @@ impl Game {
                 pl.shop.insert(k, m);
             }
         }
-        // The spell slot is free unless Fodders took it too; a frozen Tavern
-        // keeps the spell it already had. The Warband Whistle's Tavern holds a
-        // copy per warband minion, so with six copies the spell takes the
-        // seventh slot and with seven there is no spell.
-        let room = if whistle { pl.shop.len() < crate::SHOP } else { pl.shop.len() <= size };
+        // The spell slot is the Tavern's last card, so it appears whenever
+        // fewer than seven cards are there and disappears when the minions
+        // fill all seven (seven Fodders, seven copies from the Warband
+        // Whistle); a frozen Tavern keeps the spell it already had.
+        let room = pl.shop.len() < crate::SHOP;
         if room {
             if pl.shop_spell.is_none() {
                 pl.shop_spell = cards.random_spell(pl.tier, lobby, rng);
@@ -511,9 +517,11 @@ impl Game {
         } else {
             pl.shop_spell = None;
         }
-        // Only an explicit Refresh makes Fodders; they feed at once.
+        // Only an explicit Refresh makes Fodders; they feed at once, and a
+        // refilled slot draws inside the same tier range as the Refresh
+        // (Tier 6 alone during one of Guiding Candle's).
         if kind == RefreshKind::Explicit {
-            Self::feed_fodders(pl, pool, cards, rng, lobby);
+            Self::feed_fodders(pl, pool, cards, rng, lobby, lo, hi);
         }
     }
 
@@ -677,15 +685,27 @@ impl Game {
         let Game { data, rng, players, pool, lobby, .. } = self;
         let cards = &data.cards;
         if players[p].shop.iter().any(|m| cards.get(m.card).is_fodder) {
-            Self::feed_fodders(&mut players[p], pool, cards, rng, *lobby);
+            let (lo, hi) = Self::tavern_tiers(&players[p]);
+            Self::feed_fodders(&mut players[p], pool, cards, rng, *lobby, lo, hi);
         }
     }
 
     /// The Fodders in the Tavern feed themselves if the player has a Demon:
     /// each goes to a random friendly Demon, which gains its current stats,
-    /// and its slot gets a new card from the pool. With no Demon they wait as
-    /// plain 2/2 Demons, and feed once a Demon lands (feed_waiting_fodders).
-    fn feed_fodders(pl: &mut Player, pool: &mut [u8], cards: &CardDb, rng: &mut Rng, lobby: Tribes) {
+    /// and its slot gets a new card from the pool, drawn in the tier range
+    /// `lo..=hi` the Tavern was dealt in (Tier 6 alone during one of Guiding
+    /// Candle's Refreshes: 2026_11_01_04_27_54-g2 turn 11 step 7). With no
+    /// Demon they wait as plain 2/2 Demons, and feed once a Demon lands
+    /// (feed_waiting_fodders).
+    fn feed_fodders(
+        pl: &mut Player,
+        pool: &mut [u8],
+        cards: &CardDb,
+        rng: &mut Rng,
+        lobby: Tribes,
+        lo: u8,
+        hi: u8,
+    ) {
         let is_demon = |m: &Minion| cards.tribes_of(m).has(Tribe::Demon);
         if !pl.board.iter().any(is_demon) {
             return;
@@ -708,7 +728,7 @@ impl Game {
                 .map(|(j, _)| j)
                 .unwrap();
             buff(&mut pl.board[di], fodder.attack, fodder.health);
-            if let Some(c) = draw_filtered(pool, cards, rng, 1, pl.tier, &[], lobby, |_| true) {
+            if let Some(c) = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |_| true) {
                 let mut m = pl.make_card(cards, c, false, 1);
                 pl.apply_tavern_buffs(cards, &mut m);
                 pl.shop.insert(i, m);

@@ -3029,6 +3029,33 @@ fn the_guiding_candle_draws_tier_six_for_two_refreshes() {
 }
 
 #[test]
+fn a_fodder_refilled_on_a_guiding_candle_refresh_draws_tier_six() {
+    // "Your first two Refreshes each turn contain only Tier 6 cards": the
+    // slot a Fodder refills is new Tavern stock, so it draws inside the same
+    // range (2026_11_01_04_27_54-g2 turn 11 step 7: seven Fodders, and the
+    // seven minions refilled into their slots are all Tier 6).
+    let mut g = game(185);
+    g.players[0].tier = 4;
+    take(&mut g, 0, "Guiding Candle");
+    g.players[0].gold = 30;
+    g.players[0].free_rolls = 10;
+    next_turn(&mut g);
+    turn_of(&mut g, 0);
+    // The roll at the start of the turn was the first of the two, so this
+    // explicit one is the second.
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    g.players[0].fodder_refreshes.clear();
+    g.players[0].fodder_refreshes.push(6);
+    act(&mut g, 0, Action::Roll);
+    let tiers: Vec<u8> =
+        g.players[0].shop.iter().map(|m| g.data.cards.get(m.card).tier).collect();
+    assert!(!tiers.is_empty(), "the Fodder slots refilled");
+    assert!(tiers.iter().all(|&t| t == 6), "every refill is Tier 6: {tiers:?}");
+    assert!(g.players[0].shop_spell.is_some(), "and the spell slot is dealt as usual");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn bob_blehead_takes_tier_one_and_two_out_of_the_tavern() {
     let mut g = game(184);
     g.players[0].tier = 4;

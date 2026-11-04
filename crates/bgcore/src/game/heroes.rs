@@ -366,7 +366,11 @@ impl Game {
 
     /// Bob's Burgles: Refresh the Tavern with plain copies of the warband
     /// this player last fought, made fresh (no pool copy, printed stats).
-    /// The Tavern's spell slot rolls as usual.
+    /// One copy per warband minion and nothing else random, like the Warband
+    /// Whistle: a warband of seven fills the Tavern and leaves no spell slot,
+    /// a smaller one sits next to the spell
+    /// (2026_11_02_00_10_22-g7 turn 8 step 40 and turn 12 step 4: seven
+    /// copies and no spell).
     fn burgle_last_opponent(&mut self, p: usize) {
         let Some(opp) = self.players[p].last_opponent else { return };
         let q = match opp {
@@ -386,19 +390,19 @@ impl Game {
         }
         pl.shop_spell = None;
         let size = pl.shop_size(&data.rules);
-        let mut next = 0;
-        while pl.shop.len() < size {
-            let card = if next < board.len() {
-                next += 1;
-                board[next - 1]
-            } else {
-                board[rng.below(board.len() as u32) as usize]
-            };
+        for card in board {
+            if pl.shop.len() >= crate::SHOP {
+                break;
+            }
             let mut m = pl.make_card(&data.cards, card, false, 0);
             pl.apply_tavern_buffs(&data.cards, &mut m);
             pl.shop.push(m);
         }
-        pl.shop_spell = data.cards.random_spell(pl.tier, *lobby, rng);
+        // The spell slot is the Tavern's last card, so it is dealt unless the
+        // copies fill all seven.
+        if pl.shop.len() < crate::SHOP {
+            pl.shop_spell = data.cards.random_spell(pl.tier, *lobby, rng);
+        }
         Self::apply_refresh_buff(pl, &data.cards, rng);
         Self::apply_barrage(pl, &data.cards, rng);
         let bonus = data.rules.bonus_mask;
