@@ -297,16 +297,16 @@ fn spark_snapper_and_mechagnome_interpreter_distinguish_play_from_direct_attach(
     put_on_board(&mut g, 0, "Mechagnome Interpreter"); // 3/1 at slot 2
 
     // Play Lullabot (2/2, Magnetic) onto Cord Puller at slot 0:
-    // - Lullabot merges (+2/+2, mag = 1).
-    // - Interpreter sees the played Magnetic (+3/+1).
-    // - Spark Snapper sees the played Magnetic, attaches a 2/3 Satellite (+2/+3, mag = 2),
-    //   and improves itself (improvements = 1).
-    // - Interpreter ALSO sees the directly attached Satellite (+3/+1), while Spark Snapper
-    //   does NOT trigger again on the Satellite.
+    // - Spark Snapper sees the played Mech while it is a minion of its own,
+    //   attaches a 2/3 Satellite to it (+2/+3) and improves itself (1).
+    // - Lullabot and its Satellite then merge into the host together (+4/+5),
+    //   one Magnetization: the Satellite measured too, so the host's own count
+    //   goes up by one and not two (`10_29_22_20_04-g3` turn 13 step 10).
+    // - Interpreter sees the played Magnetic and the Satellite (+3/+1 each).
     g.give(0, "Lullabot").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     let host = g.players[0].board[0];
-    assert_eq!(host.magnetizations, 2);
+    assert_eq!(host.magnetizations, 1);
     assert_eq!((host.attack, host.health), (1 + 2 + 3 + 2 + 3, 1 + 2 + 1 + 3 + 1));
     assert_eq!(g.players[0].board[1].improvements, 1);
 
@@ -1161,7 +1161,9 @@ fn stage2_observation_spells_magnetizations_and_scalars() {
     put_on_board(&mut g, 0, "Patient Scout");
 
     // Magnetize a Red Volumizer onto Cord Puller at slot 0:
-    // - Cord Puller gets +3/+1 and 1 Volumizer inside, plus a 2/3 Satellite from Spark Snapper (2 Magnetizations total).
+    // - Cord Puller gets +3/+1 and 1 Volumizer inside, plus a 2/3 Satellite
+    //   from Spark Snapper that joined the Volumizer before it merged: one
+    //   Magnetization (`10_29_22_20_04-g3` turn 13 step 10).
     // - Spark Snapper gets improvements = 1.
     // - Player 0 gets volumizer_bonus = (3, 0).
     g.give(0, "Red Volumizer").unwrap();
@@ -1261,7 +1263,7 @@ fn stage2_observation_spells_magnetizations_and_scalars() {
     assert_eq!(b0[SLOT_MECH], 1.0);
     assert_eq!(b0[SLOT_KEYWORDS + 1], 1.0); // divine_shield
     assert_eq!(b0[SLOT_KEYWORDS + 5], 1.0); // magnetic inherited from Red Volumizer
-    assert_eq!(b0[SLOT_MAGNETIZATIONS], 2.0);
+    assert_eq!(b0[SLOT_MAGNETIZATIONS], 1.0);
     // A Volumizer inside a host no longer counts as one (Era, 2026-11-03).
     assert_eq!(b0[SLOT_VOLUMIZERS], 0.0);
     assert_eq!(b0[SLOT_FROM_POOL], 1.0);

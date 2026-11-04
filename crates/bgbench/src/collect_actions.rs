@@ -710,6 +710,25 @@ fn volumizer_bonus_numbers(game: &Game) -> Option<[i64; 2]> {
 /// two other minions the Drone hits take their own counts, 6 and 12.
 const MAGNETIZED_TAG: &str = "3670";
 
+/// The tag a Drone Duplicator's held "the next Magnetization to this minion
+/// this turn happens an extra time" sits in (its Activate (1)). It has no name
+/// in the log, and the client shows nothing for it: the Activate sets it to 1
+/// and the Magnetization it was waiting for clears it again
+/// (`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 19 sets it on the
+/// Duplicator, step 20's Magnetization spends it). A Golden one sets the same 1
+/// and applies it twice, so what this file writes is the number of extra times:
+/// the tag, times two for a Golden card.
+const EXTRA_MAGNETIZATION_TAG: &str = "4945";
+
+/// The extra times the next Magnetization onto this minion happens, as the
+/// engine's `Minion.extra_magnetize` holds it: the game's held-extra tag
+/// (`EXTRA_MAGNETIZATION_TAG`), and a Golden Drone Duplicator applies its 1
+/// twice (`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 20, a golden one
+/// and three merges where the tag says 1).
+fn extra_magnetizations(e: &Entity, golden: bool) -> i64 {
+    e.int(EXTRA_MAGNETIZATION_TAG) * if golden { 2 } else { 1 }
+}
+
 /// How many Magnetizations a minion carries, which is what the game's own
 /// Utility Drone reads: the minion's `3670` tag, one for every Magnetic that
 /// merged into it and one for the minion itself when the minion is Magnetic
@@ -2658,6 +2677,16 @@ impl Collector {
         if magnetizations != 0 {
             put(&mut d, "magnetizations", Json::Int(magnetizations));
         }
+        // A held Drone Duplicator Magnetization, for the play that spends it:
+        // the replay seats it as `Minion::extra_magnetize`, the number of extra
+        // times the next Magnetization to this minion happens
+        // (`EXTRA_MAGNETIZATION_TAG`). Written only when one is held, so a file
+        // from before the key existed reads as none held, which is what the
+        // loader always seated.
+        let extra = extra_magnetizations(e, m.golden);
+        if extra != 0 {
+            put(&mut d, "extra_magnetize", Json::Int(extra));
+        }
         // A Golden minion gives a Triple Reward when it is played, unless its
         // own source says otherwise (`no_triple_reward`).
         if no_triple_reward(&m, creator.map(|c| c.card_id.as_str())) {
@@ -3288,6 +3317,33 @@ mod tests {
         assert_eq!(count(101), 1, "no tag: the enchantments");
         assert_eq!(count(102), 94, "the game's own count, not its one enchantment");
         assert_eq!(count(103), 2, "a Magnetic minion's own one is not a merge");
+    }
+
+    /// A Drone Duplicator's held extra Magnetization is the game's own tag
+    /// (`4945`), and a Golden one applies its 1 twice: the file writes the
+    /// number of extra times the replay's `Minion.extra_magnetize` holds.
+    #[test]
+    fn a_held_extra_magnetization_is_the_games_own_tag() {
+        fn number(value: i64) -> TagValue {
+            TagValue::Int(value)
+        }
+        let mut g = bglog::Game::new();
+        let mut add = |id: i32, tags: Vec<(&str, TagValue)>| {
+            let e = g.entity(id);
+            e.card_id = "BG36_506".to_string();
+            for (k, v) in tags {
+                e.set(k, v);
+            }
+        };
+        add(100, vec![(EXTRA_MAGNETIZATION_TAG, number(1))]);
+        add(101, vec![]);
+        let extra = |g: &bglog::Game, id: i32, golden: bool| {
+            extra_magnetizations(&g.entities[&id], golden)
+        };
+        assert_eq!(extra(&g, 100, false), 1, "the plain card's one extra time");
+        assert_eq!(extra(&g, 100, true), 2, "a golden one applies its 1 twice");
+        assert_eq!(extra(&g, 101, false), 0, "a Duplicator with nothing held");
+        assert_eq!(extra(&g, 101, true), 0);
     }
 
     /// The Health half of "your Undead have +A/+H this game, wherever they

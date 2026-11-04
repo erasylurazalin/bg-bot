@@ -293,6 +293,19 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     existed has the count nowhere: the loader then seats 0, as it always did,
     and Utility Drone gives nothing. A log with no `3670` tag at all falls
     back to counting the enchantments, one per merge.
+  - `extra_magnetize` on a minion: the extra times the next Magnetization
+    onto it happens, which is a Drone Duplicator's "Activate (1): the next
+    Magnetization to this minion this turn happens an extra time"
+    (`Minion.extra_magnetize`). The game keeps the held one in a tag with no
+    name in the log (`4945`), 1 for both the plain and the golden card, and
+    the golden one applies it twice, so the file carries the number of extra
+    times: the tag, times two for a golden. The Activate sets it and the
+    Magnetization it waits for clears it again
+    (`Hearthstone_2026_10_29_22_20_04-g3` turn 14: step 19 sets it on the
+    golden Drone Duplicator, step 20's Magnetization spends it and the merge
+    happens three times, +4128/+5793 on a host at 74/100). The key is written
+    only while one is held, and a file written before it existed holds none:
+    the loader then seats 0, as it always did.
   - `secrets`, the Secret zone by card id in the order the Secrets were got, as
     the board files write it (always written, empty when there is nothing).
   - `waiting` on a hero power: the minion Lock and Load holds, as a board

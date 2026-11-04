@@ -1033,17 +1033,60 @@ fn two_beatboxers_do_not_loop() {
     }
     g.check_invariants().unwrap();
 
-    // Magnetizing straight to the first Beatboxer: the second gets one copy
-    // and the copy doesn't go back.
+    // Magnetizing straight to the first Beatboxer: the second copies
+    // nothing. A Magnetization onto a Beatboxer leaves the others alone,
+    // which is also what stops two Beatboxers looping: the log's Beatboxer
+    // played at `Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 16 takes
+    // the Spark Snapper's Satellite (5/10 to 105/160) and the Beatboxer
+    // already on the board stays where it is.
     let mut g = game(75);
     put_on_board(&mut g, 0, "Polarizing Beatboxer", false);
     put_on_board(&mut g, 0, "Polarizing Beatboxer", false);
     play_lullabot_on(&mut g, 0);
     let b = &g.players[0].board;
     assert_eq!(stats(&b[0]), (7, 12));
-    assert_eq!(stats(&b[1]), (7, 12));
+    assert_eq!(stats(&b[1]), (5, 10), "a Magnetization onto a Beatboxer sets none off");
     assert_eq!(b[0].magnetizations, 1);
-    assert_eq!(b[1].magnetizations, 1);
+    assert_eq!(b[1].magnetizations, 0);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_beatboxer_played_takes_its_satellite_and_sets_none_off() {
+    // Hearthstone_2026_10_29_22_20_04-g3 turn 14 step 16: a Beatboxer played
+    // from hand takes Spark Snapper's 100/150 Satellite (5/10 to 105/160) and
+    // the Beatboxer already on the board gets nothing.
+    let mut g = game(77);
+    put_on_board(&mut g, 0, "Spark Snapper", false);
+    put_on_board(&mut g, 0, "Polarizing Beatboxer", false);
+    put_in_hand(&mut g, 0, "Polarizing Beatboxer", false);
+    act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+    let b = &g.players[0].board;
+    assert_eq!(stats(&b[2]), (5 + 2, 10 + 3), "the Satellite joined it");
+    assert_eq!(stats(&b[1]), (5, 10), "the other Beatboxer got nothing");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_satellite_joins_the_played_magnetic_before_it_merges() {
+    // The raw log's PLAY block of a Magnetic played from hand runs the
+    // "whenever you play a Mech" triggers against it while it is a minion of
+    // its own, so Spark Snapper's Satellite joins it there and every copy of
+    // it carries the Satellite: `Hearthstone_2026_10_29_22_20_04-g3` turn 13
+    // step 10, a 2/4 Annoy-o-Module with an 84/126 Satellite on it into a Red
+    // Volumizer, the host +86/+130 and the Beatboxer +170/+256.
+    let mut g = game(78);
+    put_on_board(&mut g, 0, "Spark Snapper", false);
+    put_on_board(&mut g, 0, "Cord Puller", false);
+    put_on_board(&mut g, 0, "Polarizing Beatboxer", false);
+    g.give(0, "Annoy-o-Module").unwrap(); // 2/4 Magnetic
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    let b = &g.players[0].board;
+    assert_eq!(stats(&b[1]), (1 + 4, 1 + 7), "the module and its 2/3 Satellite");
+    assert_eq!(b[1].magnetizations, 1, "one Magnetization: the Satellite rode in");
+    assert_eq!(stats(&b[2]), (5 + 6, 10 + 10), "the Beatboxer gets both");
+    assert_eq!(b[2].magnetizations, 2);
+    assert_eq!(stats(&b[0]), (6, 8), "the Snapper only improves itself");
     g.check_invariants().unwrap();
 }
 
