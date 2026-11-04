@@ -56,16 +56,18 @@ impl Game {
 
     /// Set a Tavern minion's stats to `attack`/`health`, keeping the bonuses
     /// that apply wherever the card is (the Undead bonus, an Eternal Knight's
-    /// deaths): the rule Pack Tactics' 3/3 copy follows (docs/rules/design.md "Exact
-    /// copies").
+    /// deaths, its own Holy Vanguard aura): the rule Pack Tactics' 3/3 copy
+    /// follows (docs/rules/design.md "Exact copies").
     pub(super) fn set_shop_stats(&mut self, p: usize, slot: usize, attack: i32, health: i32) {
         if slot >= self.players[p].shop.len() {
             return;
         }
         let (a, h) = self.players[p].wherever_stats(&self.data.cards, &self.players[p].shop[slot]);
+        let on = self.players[p].vanguard_health_on();
         let m = &mut self.players[p].shop[slot];
         m.attack = attack + a;
         m.health = health + h;
+        m.vanguard_aura = m.vanguard_pair(&self.data.cards, on);
     }
 
     /// `set_shop_stats` on a board minion.
@@ -74,9 +76,11 @@ impl Game {
             return;
         }
         let (a, h) = self.players[p].wherever_stats(&self.data.cards, &self.players[p].board[pos]);
+        let on = self.players[p].vanguard_health_on();
         let m = &mut self.players[p].board[pos];
         m.attack = attack + a;
         m.health = health + h;
+        m.vanguard_aura = m.vanguard_pair(&self.data.cards, on);
     }
 
     pub(super) fn resolve_shop_target(&mut self, p: usize, slot: usize) {

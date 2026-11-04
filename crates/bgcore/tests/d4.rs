@@ -169,15 +169,18 @@ fn slots_show_tribes_keywords_and_counters() {
     assert_eq!(board_slot(&out, 4)[SLOT_EVENTS_LEFT], 0.0);
     assert_eq!(escapist[SLOT_COST], g.data.rules.buy_cost as f32);
 
-    // at 15 Health the +30/+30 it gets at fight start shows in the fight stats
+    // at 15 Health the +30/+30 is in its stats, so the fight stats show it too
+    // (nothing adds it a second time)
     g.players[0].health = 15;
+    g.seat_vanguard(0);
     let out = view(&g, 0);
     let vanguard = board_slot(&out, 0);
-    assert_eq!((vanguard[SLOT_ATTACK], vanguard[SLOT_FIGHT_ATTACK]), (10.0, 40.0));
-    assert_eq!(vanguard[SLOT_FIGHT_HEALTH], 40.0);
+    assert_eq!((vanguard[SLOT_ATTACK], vanguard[SLOT_FIGHT_ATTACK]), (40.0, 40.0));
+    assert_eq!((vanguard[SLOT_HEALTH], vanguard[SLOT_FIGHT_HEALTH]), (40.0, 40.0));
     assert_eq!(board_slot(&out, 1)[SLOT_FIGHT_ATTACK], 6.0, "only the Vanguard gets it");
     // golden doubles it
     g.players[0].board[0].golden = true;
+    g.seat_vanguard(0);
     let out = view(&g, 0);
     assert_eq!(board_slot(&out, 0)[SLOT_FIGHT_ATTACK], 70.0);
 }
@@ -369,6 +372,9 @@ fn opponents_show_last_opponent_tribes_and_placement() {
     let mut g = game(6);
     let Some(Opponent::Player(q)) = g.players[0].opponent else { panic!() };
     let q = q as usize;
+    // Their hero is already at 10 when the fight is staged, so the pair is in
+    // their Holy Vanguard's stats and the seen board keeps it.
+    g.players[q].health = 10;
     put_on_board(&mut g, q, "Gatekeeper Amalgam");
     put_on_board(&mut g, q, "Eredar Escapist");
     put_on_board(&mut g, q, "Holy Vanguard");
@@ -389,13 +395,11 @@ fn opponents_show_last_opponent_tribes_and_placement() {
             assert_eq!(block(r)[OPP_LAST], 0.0);
         }
     }
-    // their Holy Vanguard shows the bonus once their hero is low
+    // Their Holy Vanguard's +30/+30 is in its stats, and the fight stats add
+    // nothing on top of it.
     let vanguard = OPP_SCALARS + 2 * SLOT_FEATURES;
-    assert_eq!(o[vanguard + SLOT_FIGHT_ATTACK], o[vanguard + SLOT_ATTACK]);
-    g.players[q].health = 10;
-    let out2 = view(&g, 0);
-    let start = OWN_END + (q - 1) * OPP_BLOCK;
-    assert_eq!(out2[start + vanguard + SLOT_FIGHT_ATTACK], o[vanguard + SLOT_ATTACK] + 30.0);
+    assert_eq!(o[vanguard + SLOT_ATTACK], 40.0);
+    assert_eq!(o[vanguard + SLOT_FIGHT_ATTACK], 40.0);
 }
 
 #[test]

@@ -407,25 +407,108 @@ fn sindorei_removes_reborn_and_taunt_before_the_hit() {
 
 // ---- Holy Vanguard ----
 
+/// A minion as the shop seats it at this Health: Holy Vanguard's own aura
+/// ("Has +30/+30 if you have 15 or less Health") is in the card's stats while
+/// the owner has 15 or less (docs/rules/design.md "Triples").
+fn seated(db: &CardDb, mut m: Minion, health: Option<i32>) -> Minion {
+    m.sync_vanguard_aura(db, health.is_some_and(|h| h <= 15));
+    m
+}
+
 #[test]
-fn holy_vanguard_gains_at_15_health() {
+fn holy_vanguards_aura_is_in_its_stats_at_15_health() {
     let d = db();
-    let a = vec![mk(&d, "Holy Vanguard", false), mk(&d, "Microbot", false)];
     let b = vec![mk(&d, "Microbot", false)];
     let vanguard = d.by_name("Holy Vanguard").unwrap();
     for (health, expected) in [(Some(15), 40), (Some(16), 10), (None, 10)] {
+        let a = vec![seated(&d, mk(&d, "Holy Vanguard", false), health), mk(&d, "Microbot", false)];
         let counters = [Counters { health, ..Counters::default() }, Counters::default()];
         let mut w = Rec::default();
         fight_with(&d, &a, &b, counters, 1, &mut Rng::new(13), &mut w);
         let attack = w.attacks.iter().find(|(c, _)| *c == vanguard).unwrap().1;
         assert_eq!(attack, expected, "health {health:?}");
     }
-    // Golden: 20/20 plus +60/+60.
-    let a = vec![mk(&d, "Holy Vanguard", true), mk(&d, "Microbot", false)];
+    // Golden: its own 20/20 plus the Golden card's +60/+60.
+    let a = vec![seated(&d, mk(&d, "Holy Vanguard", true), Some(15)), mk(&d, "Microbot", false)];
     let counters = [Counters { health: Some(15), ..Counters::default() }, Counters::default()];
     let mut w = Rec::default();
     fight_with(&d, &a, &b, counters, 1, &mut Rng::new(13), &mut w);
     assert_eq!(w.attacks.iter().find(|(c, _)| *c == vanguard).unwrap().1, 80);
+}
+
+#[test]
+fn a_fight_does_not_add_the_vanguards_aura_a_second_time() {
+    let d = db();
+    let vanguard = d.by_name("Holy Vanguard").unwrap();
+    // The stats already carry the pair, as the shop leaves them at 15 Health:
+    // the fight reads 40, not the 70 an aura added again would give.
+    let a = vec![seated(&d, mk(&d, "Holy Vanguard", false), Some(15))];
+    let b = vec![mk(&d, "Microbot", false)];
+    let counters = [Counters { health: Some(15), ..Counters::default() }, Counters::default()];
+    let mut w = Rec::default();
+    fight_with(&d, &a, &b, counters, 1, &mut Rng::new(13), &mut w);
+    assert_eq!(w.attacks.iter().find(|(c, _)| *c == vanguard).unwrap().1, 40);
+}
+
+#[test]
+fn the_vanguard_aura_comes_and_goes_with_the_health_in_every_zone() {
+    let mut g = game(21);
+    put_on_board(&mut g, 0, "Holy Vanguard");
+    g.give(0, "Holy Vanguard").unwrap();
+    set_shop(&mut g, 0, &["Holy Vanguard"]);
+    let zones = |g: &Game| -> Vec<(i32, i32, [u8; 2])> {
+        g.players[0]
+            .board
+            .iter()
+            .chain(g.players[0].hand.iter())
+            .chain(g.players[0].shop.iter())
+            .map(|m| (m.attack, m.health, m.vanguard_aura))
+            .collect()
+    };
+    assert_eq!(
+        zones(&g),
+        vec![(10, 10, [0, 0]); 3],
+        "above 15 Health each copy is its printed 10/10, board, hand and Tavern"
+    );
+    // At 15 every Vanguard carries the pair, wherever it is.
+    g.players[0].health = 15;
+    g.seat_vanguard(0);
+    assert_eq!(zones(&g), vec![(40, 40, [30, 30]); 3]);
+    // Back above 15 it comes off exactly once, not twice.
+    g.players[0].health = 16;
+    g.seat_vanguard(0);
+    assert_eq!(zones(&g), vec![(10, 10, [0, 0]); 3]);
+}
+
+#[test]
+fn a_golden_vanguards_own_aura_is_60() {
+    let mut g = game(23);
+    g.players[0].health = 12;
+    let vanguard = id(&g, "Holy Vanguard");
+    let m = g.players[0].make_card(&g.data.cards, vanguard, true, 0);
+    assert_eq!((m.attack, m.health, m.vanguard_aura), (80, 80, [60, 60]));
+    g.players[0].health = 16;
+    let m = g.players[0].make_card(&g.data.cards, vanguard, true, 0);
+    assert_eq!((m.attack, m.health, m.vanguard_aura), (20, 20, [0, 0]));
+}
+
+#[test]
+fn a_hero_hit_that_drops_the_health_to_15_puts_the_pair_in_the_vanguard() {
+    let mut g = game(22);
+    g.players[0].health = 16;
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    // The Vanguard waits in the hand, which the aura covers too and which a
+    // fight leaves alone.
+    g.give(0, "Holy Vanguard").unwrap();
+    g.give(0, "Demon Fodder").unwrap();
+    play_card(&mut g, 0, "Demon Fodder");
+    assert_eq!(g.players[0].health, 15, "Wrath Weaver's 1 damage");
+    let vanguard = id(&g, "Holy Vanguard");
+    let in_hand = g.players[0].hand.iter().find(|m| m.card == vanguard).copied().unwrap();
+    assert_eq!(
+        (in_hand.attack, in_hand.health, in_hand.vanguard_aura),
+        (40, 40, [30, 30])
+    );
 }
 
 #[test]
@@ -434,17 +517,24 @@ fn holy_vanguard_does_not_show_a_rewound_hit() {
     g.players[0].health = 16;
     put_on_board(&mut g, 0, "Wrath Weaver");
     put_on_board(&mut g, 0, "Soul Rewinder");
-    put_on_board(&mut g, 0, "Holy Vanguard");
+    // The Vanguard waits in the hand, which the aura covers too and which a
+    // fight leaves alone, so the pair can be read back after the play.
+    g.give(0, "Holy Vanguard").unwrap();
     g.give(0, "Demon Fodder").unwrap();
     play_card(&mut g, 0, "Demon Fodder");
     // Wrath Weaver dealt 1 and Soul Rewinder gave it back: the hero is at
-    // 16, so Holy Vanguard has no bonus.
+    // 16, so the Vanguard's stats carry no aura and a fight adds none.
     assert_eq!(g.players[0].health, 16);
     let counters = [g.players[0].counters(&g.data, g.lobby), Counters::default()];
     let d = db();
+    let vanguard = d.by_name("Holy Vanguard").unwrap();
+    let in_hand = g.players[0].hand.iter().find(|m| m.card == vanguard).copied().unwrap();
+    assert_eq!(
+        (in_hand.attack, in_hand.health, in_hand.vanguard_aura),
+        (10, 10, [0, 0])
+    );
     let a = vec![mk(&d, "Holy Vanguard", false), mk(&d, "Microbot", false)];
     let b = vec![mk(&d, "Microbot", false)];
-    let vanguard = d.by_name("Holy Vanguard").unwrap();
     let mut w = Rec::default();
     fight_with(&d, &a, &b, counters, 1, &mut Rng::new(15), &mut w);
     assert_eq!(w.attacks.iter().find(|(c, _)| *c == vanguard).unwrap().1, 10);

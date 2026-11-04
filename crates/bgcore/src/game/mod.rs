@@ -814,6 +814,13 @@ pub struct HeroCounts {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Player {
     pub health: i32,
+    /// Whether this player's Health was 15 or less when Holy Vanguard's own
+    /// aura was last put into their minions' stats. It turns on the aura in
+    /// the board, the hand and the Tavern (and takes it off), and it is the
+    /// state those zones are in, not a rule of its own:
+    /// `Game::sync_vanguard` compares it with the Health and walks the zones
+    /// only when it differs.
+    pub vanguard_on: bool,
     pub alive: bool,
     /// The hero this player picked (index into `HeroDb`), None in a game
     /// without heroes.
@@ -1312,6 +1319,7 @@ impl Game {
             let pl = &mut g.players[p];
             pl.real = true;
             pl.health = 30;
+            pl.vanguard_on = pl.vanguard_health_on();
             pl.armor = 10;
         }
         g.real_boards = Some(boards);
@@ -2186,6 +2194,10 @@ impl Game {
         }
         let p = self.current_player().unwrap();
         self.apply(p, a);
+        // A Health price, damage or a heal this action dealt crosses Holy
+        // Vanguard's 15: the aura goes into (or comes off) every Vanguard the
+        // actor has before anything below reads their stats.
+        self.sync_vanguard(p);
         self.resolve_doomed(p);
         self.resolve_hogrider(p);
         // A play whose Battlecry asked for an answer fires its "after you
@@ -2254,6 +2266,12 @@ impl Game {
         for q in 0..PLAYERS {
             self.players[q].flush_tavern_buffs(&self.data.cards);
         }
+        // A Health change in another player's zones, or in a hook `advance`
+        // ran (a fight's damage, a turn starting), leaves Holy Vanguard's aura
+        // wherever the new Health says; the check is one comparison a player.
+        for q in 0..PLAYERS {
+            self.sync_vanguard(q);
+        }
         #[cfg(debug_assertions)]
         self.check_invariants().unwrap();
         Ok(())
@@ -2264,6 +2282,32 @@ impl Game {
     /// trinkets on a player it built itself (`crate::shop_replay`).
     pub fn sync_seat_rules(&mut self, p: usize) {
         self.sync_power_flags(p);
+    }
+
+    /// Put a Holy Vanguard's own aura into its owner's minions' stats, or take
+    /// it back out, when the Health crossed 15 (docs/rules/design.md
+    /// "Triples"): the board, the hand and the Tavern, whose minions read the
+    /// player who owns it. The check is one comparison: `Player::vanguard_on`
+    /// is the state the zones are in, and they are walked only when the
+    /// Health's side differs. A Vanguard that enters a zone while the aura
+    /// holds gets it from `Player::make_card` (a bought, Discovered, dealt or
+    /// summoned card), and a triple gives the Golden one its own
+    /// (`game/triples.rs`).
+    pub fn sync_vanguard(&mut self, p: usize) {
+        if self.players[p].vanguard_health_on() == self.players[p].vanguard_on {
+            return;
+        }
+        self.seat_vanguard(p);
+    }
+
+    /// Walk the zones now, whether or not `vanguard_on` says they already
+    /// agree with the Health: for a state edited by hand, which sets a Health
+    /// or makes a minion Golden without a shop action to notice (tests, the
+    /// sandbox). `sync_vanguard` is the cheap one the game itself uses.
+    pub fn seat_vanguard(&mut self, p: usize) {
+        let on = self.players[p].vanguard_health_on();
+        self.players[p].vanguard_on = on;
+        self.players[p].sync_vanguard_zones(&self.data.cards, on);
     }
 
     /// A state a game hands over (`crate::shop_replay`) can hold the copies a

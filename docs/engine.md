@@ -185,12 +185,18 @@ rules behind each are in docs/rules/design.md Part 2.
   `2026_10_24_00_56_06-g1` turn 8 step 21: the merged Plaguerunner takes ATK 25
   and DAMAGE 1, then DAMAGE 0). `Minion` keeps no damage, so a copy's Health
   below its card's printed stats reads as no buff. A copy's own Holy Vanguard
-  aura is no buff either: the engine applies that aura where it is read, at a
-  fight's start, so a card seated from a log carries the pair the log counted
-  in its stats (`Minion::vanguard_aura`) and the merge leaves it out, giving
-  the Golden one its own once at its doubled +60/+60 (log
-  `Hearthstone_2026_10_28_22_11_50` game 5 turn 10 step 12: the Golden Holy
-  Vanguard is 208/116, where counting the three copies' auras said 238/146).
+  aura is no buff either, and it is in the copies' stats like any other stat
+  (`Player::make_card` puts it on the card's own +30/+30, +60/+60 for a
+  Golden one, while the Health is 15 or less), so the merge's difference
+  against the card's base leaves it out and the Golden card, made at the same
+  Health, has its own once (log `Hearthstone_2026_10_28_22_11_50` game 5 turn
+  10 step 12: the Golden Holy Vanguard is 208/116, where counting the three
+  copies' auras said 238/146). `Minion::vanguard_aura` is what that pair is
+  worth to the card, so `Game::sync_vanguard` can take it off exactly once
+  when the Health goes back above 15: it is called from every Health change
+  (damage, a Health price, a rewind, a fight's damage) and at a turn's start,
+  and it walks the board, the hand and the Tavern only when the Health's side
+  of 15 changed (`Player::vanguard_on` holds the state the zones are in).
 - **A Health price comes before the card.** A Tavern spell bought for Health
   pays before it joins the hand, so a card the damage triggers gains gets the
   lower hand slot (Eredar Escapist's two Corrupted Cupcakes, log
@@ -1988,7 +1994,8 @@ mlp stays the default until a head-to-head says otherwise.
   Ichoron's one-turn shield, doomed picks), player counters (gem value,
   Undead bonus, Knight deaths, discards, spells cast, ...), own and
   as-last-seen opponent Deities, and opponents' gem value and spell power
-  from the last fight with them, plus "fight stats" (Holy Vanguard's +30/+30
-  at 15 Health or less, the shop Goldrinn bonus a Beast in hand gets when
-  played). Relentless Deflector's Taunt while shielded isn't a feature; the
+  from the last fight with them, plus "fight stats" (the shop Goldrinn bonus
+  a Beast in hand gets when played; Holy Vanguard's +30/+30 is not one, it is
+  in the slot's own Attack and Health while the Health is 15 or less).
+  Relentless Deflector's Taunt while shielded isn't a feature; the
   card embedding has to learn it.

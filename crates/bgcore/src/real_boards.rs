@@ -58,13 +58,16 @@ pub struct RealMinionSpec {
     /// The +A/+H a Holy Vanguard's own aura ("Has +30/+30 if you have 15 or
     /// less Health") has put into `attack` and `health`: the pair on the
     /// `Vanguard's Valor` enchantment the log shows on the minion, which the
-    /// action files write as `vanguard_aura`. The engine applies that aura
-    /// where it is read (at the start of a fight, `crate::obs::vanguard_bonus`)
-    /// rather than keeping it in a minion's stats, so a loader records the pair
-    /// on `Minion::vanguard_aura` and a triple leaves it out of its sum: with
-    /// the Golden one's own aura counted on top, the log's Golden Holy Vanguard
-    /// is 208/116 where counting every copy's aura made our 238/146. Zero for
-    /// every other card, and for a file written before the key existed.
+    /// files write as `vanguard_aura`. The aura is part of the card's stats
+    /// wherever the log shows it, so a loader records the pair on
+    /// `Minion::vanguard_aura`, which can take it off again exactly once (a
+    /// later Health crossing), and a triple leaves it out of the sum: with the
+    /// Golden one's own aura counted on top, the log's Golden Holy Vanguard is
+    /// 208/116 where counting every copy's aura made our 238/146. The pair is
+    /// what the stats hold only while the Health is 15 or less: above that the
+    /// game can keep the enchantment on a card without it in the stats, and
+    /// `RealBoard::build_one` then records no pair. Zero for every other card,
+    /// and for a file written before the key existed.
     pub vanguard_aura: [i32; 2],
 }
 
@@ -483,9 +486,9 @@ fn make_real_minion(
     let mut minion = db.make(id, m.golden);
     minion.attack = m.attack;
     minion.health = m.health;
-    // How much of those stats is Holy Vanguard's own aura, which the engine's
-    // own minions never carry (they apply it where it is read, at the start of
-    // a fight) and the log's do: a triple leaves the pair out of its sum
+    // How much of those stats is Holy Vanguard's own aura, which the log counts
+    // in ATK and HEALTH and the file records beside them: a later Health
+    // crossing takes the pair off again, and a triple leaves it out of its sum
     // (`Minion::vanguard_aura`).
     minion.vanguard_aura = [
         m.vanguard_aura[0].clamp(0, u8::MAX as i32) as u8,
@@ -592,6 +595,17 @@ impl RealBoard {
                 lobster = lobster.max(lobster_count(&m.numbers, m.golden));
             }
             hand.push(make(m, spec.turn, &mut unmatched));
+        }
+        // Above 15 Health a Holy Vanguard's pair is not in its stats: the log
+        // can show a `Vanguard's Valor` enchantment on a card (copied with its
+        // enchantments from a player whose Health was low, log
+        // 2026_11_04_15_53_32 game 2: an opponent at 17 Health, a 13/13
+        // Vanguard wearing a 30/30 one) while the card's stats leave it out,
+        // so only a low Health makes the file's pair what the stats hold.
+        if spec.health > 15 {
+            for m in minions.iter_mut().chain(hand.iter_mut()) {
+                m.vanguard_aura = [0, 0];
+            }
         }
         let mut counters = spec.counters;
         // Every Lobster shares one count: the log's numbers on any of them,
@@ -837,6 +851,12 @@ struct RawMinion {
     /// them, or nothing when the card has none.
     #[serde(default)]
     numbers: Vec<i32>,
+    /// The +A/+H of Holy Vanguard's own aura ("Has +30/+30 if you have 15 or
+    /// less Health") that `attack` and `health` already hold, the pair the
+    /// log's `Vanguard's Valor` enchantment shows on the minion. A file
+    /// written before the key existed has none.
+    #[serde(default)]
+    vanguard_aura: [i32; 2],
     /// Marked by Rapid Reanimation: the minion the power destroys at Start of
     /// Combat and brings back as an exact copy.
     #[serde(default)]
@@ -1094,9 +1114,12 @@ fn real_minion(m: RawMinion, ids: &CardIdMap, unknown: &mut Vec<String>) -> Real
         reanimate: m.reanimate,
         no_reward: m.no_reward,
         dark_gift_states: Vec::new(),
-        // The board files carry no `vanguard_aura` key: only the shop actions
-        // collector writes it, so a real board reads as no aura, as before.
-        vanguard_aura: [0, 0],
+        // How much of those logged stats is Holy Vanguard's own aura, the pair
+        // on the `Vanguard's Valor` enchantment: the log counts it in ATK and
+        // HEALTH, and the loader records it so a later Health crossing takes
+        // it off exactly once. A file written before the key existed reads as
+        // no aura, and its stats keep whatever the log counted in them.
+        vanguard_aura: m.vanguard_aura,
     }
 }
 

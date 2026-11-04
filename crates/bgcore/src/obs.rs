@@ -223,7 +223,7 @@
 //!   90 reanimate (1 when marked by Rapid Reanimation for Start of Combat)
 //! An empty slot is all zeros.
 
-use crate::cards::{Aura, CardDb, ChooseOption, Counter, DeityKind, SpellEffect, SpellTarget, Tribe};
+use crate::cards::{CardDb, ChooseOption, Counter, DeityKind, SpellEffect, SpellTarget, Tribe};
 use crate::fight::Deity;
 use crate::game::{Game, Opponent, Player, PowerState, ShopTargetKind, TargetKind};
 use crate::heroes::PowerEffect;
@@ -607,25 +607,10 @@ const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_HERO);
 const _: () = assert!(OPP_HERO + 2 == OPP_TRINKET);
 const _: () = assert!(OPP_TRINKET + crate::TRINKET_SLOTS == OPP_SCALARS);
 
-/// Holy Vanguard's bonus on this minion if its hero is at `health`: +30/+30
-/// (+60 golden) at 15 Health or less, added at the start of a fight.
-pub fn vanguard_bonus(db: &CardDb, m: &Minion, health: i32) -> i32 {
-    if health > 15 {
-        return 0;
-    }
-    m.parts()
-        .filter(|&(c, _)| db.get(c).aura == Some(Aura::HolyVanguard))
-        .map(|(_, golden)| if golden { 60 } else { 30 })
-        .max()
-        .unwrap_or(0)
-}
-
 /// How a slot's minion relates to the player whose view this is, for its
 /// fight stats.
 #[derive(Clone, Copy)]
 struct Owner {
-    /// Health of the hero whose board it is (or would be on).
-    health: i32,
     /// Bonus a Beast gets when played (0 for a minion already on a board).
     beast_bonus: (i32, i32),
     /// The owner's Tavern tier and the Gold it has spent this game, which a
@@ -669,11 +654,13 @@ fn write_slot(game: &Game, o: &mut [f32], m: &Minion, owner: Owner) {
     o[SLOT_COST] = game.data.rules.buy_cost as f32;
     o[SLOT_ATTACK] = m.attack as f32;
     o[SLOT_HEALTH] = m.health as f32;
-    let v = vanguard_bonus(db, m, owner.health);
+    // Holy Vanguard's +30/+30 is in the stats themselves while the Health
+    // holds (docs/rules/design.md "Triples"), so the fight stats add only what
+    // a fight itself adds: the shop Goldrinn bonus for a Beast in hand.
     let tribes = db.tribes_of(m);
     let (ba, bh) = if tribes.has(Tribe::Beast) { owner.beast_bonus } else { (0, 0) };
-    o[SLOT_FIGHT_ATTACK] = (m.attack + v + ba) as f32;
-    o[SLOT_FIGHT_HEALTH] = (m.health + v + bh) as f32;
+    o[SLOT_FIGHT_ATTACK] = (m.attack + ba) as f32;
+    o[SLOT_FIGHT_HEALTH] = (m.health + bh) as f32;
     o[SLOT_GOLDEN] = m.golden as u8 as f32;
     for (j, t) in Tribe::EVERY.into_iter().enumerate() {
         o[SLOT_TRIBES + j] = tribes.has(t) as u8 as f32;
@@ -1188,13 +1175,11 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
     let db = &game.data.cards;
     write_scalars(game, p, &mut out[..SCALARS]);
     let on_board = Owner {
-        health: pl.health,
         beast_bonus: (0, 0),
         tier: pl.tier,
         gold_spent: pl.counts.gold_spent,
     };
     let off_board = Owner {
-        health: pl.health,
         beast_bonus: pl.beast_bonus,
         tier: pl.tier,
         gold_spent: pl.counts.gold_spent,
@@ -1260,7 +1245,7 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
         i += OPP_SCALARS;
         // A locked card stays in its owner's hand, so their board slots are
         // never locked; their tier is the one we last saw.
-        let owner = Owner { health: them.health, beast_bonus: (0, 0), tier: seen.tier, gold_spent: 0 };
+        let owner = Owner { beast_bonus: (0, 0), tier: seen.tier, gold_spent: 0 };
         i += write_slots(game, &mut out[i..], BOARD, seen.board.iter(), owner);
     }
     debug_assert_eq!(i, OBS_SIZE);

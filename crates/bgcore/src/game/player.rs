@@ -54,6 +54,7 @@ impl Player {
     pub(super) fn new(data: &Data) -> Player {
         Player {
             health: data.rules.starting_health,
+            vanguard_on: data.rules.starting_health <= 15,
             alive: true,
             hero: None,
             armor: 0,
@@ -456,13 +457,17 @@ impl Player {
     }
 
     /// Create a copy of `id` with this player's current Volumizer and Beetle
-    /// bonuses applied.
+    /// bonuses applied, and its own Holy Vanguard aura if this player has 15
+    /// or less Health (the aura is part of the card's stats wherever it is).
     pub fn make_card(&self, cards: &CardDb, id: CardId, golden: bool, pool_copies: u8) -> Minion {
         let mut m = cards.make(id, golden);
         m.pool_copies = pool_copies;
         let (a, h) = self.wherever_stats(cards, &m);
         m.attack += a;
         m.health += h;
+        // What of those stats is Holy Vanguard's own aura, so it can be taken
+        // off again exactly once (`Minion::sync_vanguard_aura`).
+        m.vanguard_aura = m.vanguard_pair(cards, self.vanguard_health_on());
         // A card made now has its limited uses now, wherever it lands: a
         // Malchezaar summoned by a Tavern spell keeps its Health Refreshes
         // (docs/notes/KNOWN-GAPS.md, the first row).
@@ -481,6 +486,7 @@ impl Player {
 
     /// The stats a card gets "wherever it is", on top of its base: the Undead
     /// bonus, Goldrinn's Beasts, the Beetle bonus, the Volumizers inside it,
+    /// its own Holy Vanguard aura while this player has 15 or less Health,
     /// and every counter a card scales with (Eternal Knight deaths, this
     /// game's Deathrattles, Battlecries, Tavern spells, discards, Golden
     /// minions played, Elementals played, Magnetizations). `make_card` adds
@@ -490,6 +496,9 @@ impl Player {
     pub fn wherever_stats(&self, cards: &CardDb, m: &Minion) -> (i32, i32) {
         let mut a = 0;
         let mut h = 0;
+        let aura = m.vanguard_pair(cards, self.vanguard_health_on());
+        a += aura[0] as i32;
+        h += aura[1] as i32;
         if m.volumizers > 0 {
             a += self.volumizer_bonus.0 * m.volumizers as i32;
             h += self.volumizer_bonus.1 * m.volumizers as i32;
@@ -526,6 +535,30 @@ impl Player {
             h += ph * n;
         }
         (a, h)
+    }
+
+    /// Whether this player's Health turns a Holy Vanguard's aura on: 15 or
+    /// less (docs/rules/design.md "Triples").
+    pub fn vanguard_health_on(&self) -> bool {
+        self.health <= 15
+    }
+
+    /// Put Holy Vanguard's own aura into the stats of every copy this player
+    /// has, or take it back out, after the Health crossed 15: the board, the
+    /// hand (and the cards a full hand queued for it), and the Tavern, whose
+    /// minions read the player who owns it. Every other minion is left alone:
+    /// `Minion::sync_vanguard_aura` does nothing without the card's aura.
+    /// `vanguard_on` is the state the zones are left in.
+    pub fn sync_vanguard_zones(&mut self, db: &CardDb, on: bool) {
+        for m in self
+            .board
+            .iter_mut()
+            .chain(self.hand.iter_mut())
+            .chain(self.hand_queue.iter_mut())
+            .chain(self.shop.iter_mut())
+        {
+            m.sync_vanguard_aura(db, on);
+        }
     }
 
     /// The minion slots this player's Tavern has right now. `SHOP` holds the
@@ -623,6 +656,10 @@ impl Player {
     pub fn from_real_board(data: &Data, board: &crate::real_boards::RealBoard) -> Player {
         let mut pl = Player::new(data);
         pl.health = if board.health > 0 { board.health } else { data.rules.starting_health };
+        // The logged stats already carry a Holy Vanguard's own aura, and the
+        // loader records the pair beside them (the file's `vanguard_aura`), so
+        // the zones start as the Health they were logged at left them.
+        pl.vanguard_on = pl.vanguard_health_on();
         pl.armor = board.armor;
         pl.tier = board.tier;
         for m in &board.minions {

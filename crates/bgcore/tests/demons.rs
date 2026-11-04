@@ -808,6 +808,28 @@ fn deathstrider_triggers_the_wrathguard_in_the_shop_through_a_fishbait_attack() 
 // ---- Demons consuming ----
 
 #[test]
+fn a_demon_that_eats_a_tavern_vanguard_gains_its_aura_too() {
+    // Holy Vanguard's "Has +30/+30 if you have 15 or less Health" is part of
+    // the card's stats wherever it is, the Tavern included, so a Demon that
+    // consumes a Tavern copy at 12 Health gains 40/40 (docs/rules/design.md
+    // "Triples", Era 2026-11-04).
+    let mut g = game(31);
+    g.players[0].health = 12;
+    put_on_board(&mut g, 0, "Devout Hellcaller");
+    set_shop(&mut g, 0, &["Holy Vanguard"]);
+    assert_eq!(stats(&g.players[0].shop[0]), (40, 40), "the Tavern copy carries the pair");
+    g.give(0, "Mind Muck").unwrap();
+    let before = stats(&g.players[0].board[0]);
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(
+        stats(&g.players[0].board[0]),
+        (before.0 + 40, before.1 + 40),
+        "the aura was eaten with the stats"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn mind_muck_has_a_demon_consume_a_random_tavern_minion() {
     // "Choose a friendly Demon. It consumes a minion in the Tavern to gain
     // its stats." The Demon is the only pick: the game takes the Tavern

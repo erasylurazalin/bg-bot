@@ -456,6 +456,9 @@ impl Game {
                 pl.armor += pl.last_damage_armor;
                 pl.last_damage = 0;
                 pl.last_damage_armor = 0;
+                // A rewind can put the Health back above 15: the aura comes
+                // off again before anything after this reads the stats.
+                self.sync_vanguard(p);
             }
             Effect::MagnetizeVolumizerAndCopy => {
                 for _ in 0..runs {
@@ -886,6 +889,12 @@ impl Game {
                     let mut c = self.players[p].make_card(&self.data.cards, m.card, m.golden, 0);
                     c.attack = m.attack.saturating_mul(2 * mul);
                     c.health = m.health.saturating_mul(2 * mul);
+                    // The stats are given outright, so what of Holy Vanguard's
+                    // own aura they hold is what the source's stats held: the
+                    // copy records none there and gets its own on top while the
+                    // Health is low, as a fight gives any Vanguard.
+                    c.vanguard_aura = [0, 0];
+                    c.sync_vanguard_aura(&self.data.cards, self.players[p].vanguard_health_on());
                     self.add_to_hand(p, c);
                 }
             }
@@ -1323,6 +1332,7 @@ impl Game {
         m.pool_copies = 1;
         m.attack = old.attack;
         m.health = old.health;
+        self.seat_evolved_vanguard(p, &mut m);
         self.players[p].board[slot] = m;
     }
 
@@ -1333,7 +1343,17 @@ impl Game {
         m.pool_copies = 1;
         m.attack = old.attack;
         m.health = old.health;
+        self.seat_evolved_vanguard(p, &mut m);
         self.players[p].shop[slot] = m;
+    }
+
+    /// The stats a Robust Evolution keeps are the old card's plain numbers: a
+    /// Holy Vanguard the transform lands on has no pair of its own in them, so
+    /// it gets its own on top while its owner's Health is low, and records it
+    /// (`Minion::vanguard_aura`).
+    fn seat_evolved_vanguard(&self, p: usize, m: &mut Minion) {
+        m.vanguard_aura = [0, 0];
+        m.sync_vanguard_aura(&self.data.cards, self.players[p].vanguard_health_on());
     }
 
     /// Return the old copies to the pool and draw the new one. The result is

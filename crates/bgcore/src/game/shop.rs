@@ -181,6 +181,10 @@ pub(super) fn golden_up(pl: &Player, cards: &CardDb, m: &mut Minion) {
     m.attack += (ga - base.attack) + (gold.0 - plain.0);
     m.health += (gh - base.health) + (gold.1 - plain.1);
     m.golden = true;
+    // A Holy Vanguard made Golden here gets the Golden card's own aura (+60
+    // rather than +30) through `wherever_stats` above, so what it carries in
+    // its stats is the Golden pair from now on.
+    m.vanguard_aura = m.vanguard_pair(cards, pl.vanguard_health_on());
 }
 
 pub(crate) fn give_back(pool: &mut [u8], cards: &CardDb, m: &Minion) {
