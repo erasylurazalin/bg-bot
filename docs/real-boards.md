@@ -637,6 +637,13 @@ of a random step is run, since any of them may be the log's.
       Auto Reveille, Unbound Tempest). A card whose first number is something
       else (Living Azerite's buff pair), whose trigger is every 1, or whose
       count the log never fills (Doubloon Grifter's "@ left!") keeps 0;
+    - a once-a-turn use the card itself carries: a Thorned Trailblazer's "(@
+      left!)" is its first number, and the log shows no number at all once the
+      cover is spent (`uses_left`, `11_03_15_22_36-g4` turn 8 step 30 has
+      `[1, 0, 0, 0]` and step 31 has none), and a Stone Age Slab's
+      after-you-buy use is its third number (`[20, 20, 1, 0]` while it is
+      there and `[20, 20, 0, 0]` after the buy that spent it,
+      `11_02_00_10_22-g8` turn 11 step 5 to 9, which is `Minion.activated`);
     - a trinket's "left this turn" or "every N" count: Warcry Totem's free
       Battlecry minions (`tp.free_buys`, its `{0}`), Transcribing Typewriter's
       copies (`tp.copy_buys`), Magicfin Sticker's uses (`uses_left`), Guiding
@@ -676,15 +683,17 @@ of a random step is run, since any of them may be the log's.
     Lockbox) waits for room and joins at the first step that frees a slot
     (docs/rules/design.md "A full hand"), and no state can show a card that is
     not in the hand yet: `shop_replay::seat_queued_start_of_turn` queues it
-    again from the trinket the state does show, unless the hand holds it or
-    the turn already shows it arriving or being played
-    (`Hearthstone_2026_10_28_22_11_50-g6` turn 8's Lockbox). The same log
-    shows the gap this cannot close: a trinket's start-of-turn trigger the
-    game resolves after a trinket pick or a pending Discover fires at
-    `MAIN_START`, behind the logged step boundary
-    (`Hearthstone_2026_10_26_00_48_15-g2` turn 9's Floating Candle,
-    `Hearthstone_2026_10_30_19_45_15-g2` turn 9's Token of the Old Gods), and
-    that one is the collector's boundary to move.
+    again from the trinket the turn's own start state shows (a trinket the
+    player picked this turn has had its start of turn already), unless the
+    hand holds it or the turn already shows it arriving or being played
+    (`Hearthstone_2026_10_28_22_11_50-g6` turn 8's Lockbox). The turn's start
+    state does not always hold it either: the client hands it out with the
+    turn's first board update, so the first step of the turn already shows it
+    in the hand beside its own pick (`Hearthstone_2026_10_26_00_48_15-g2` turn
+    9's Floating Candle, `Hearthstone_2026_10_30_19_45_15-g2` turn 9's Token of
+    the Old Gods), and that step's own `entered` list is what says the handout
+    is this step's. The card joins at the end of the step's action, which is
+    where the log puts it.
 
       as how many more spells it takes; Buried Treasure's number is the digs
       left ("(1 left!)" is the fourth dig) and the engine counts the digs done
@@ -696,6 +705,13 @@ of a random step is run, since any of them may be the log's.
     the log's press only shows the copy it gave: `replay_step` reads it off the
     steps before the press, the last `play` of a Tavern spell in the game,
     earlier turns included (docs/rules/heroes.md, Era 2026-11-03).
+  - **Gold a card's own start of turn gives** (Accord-o-Tron's "At the start
+    of your turn, gain 1 Gold") lands on the step after the turn start, because
+    the client's tag moves with the turn's first board update:
+    `shop_replay::seat_start_of_turn_gold` pays the step's own `gold_gain` when
+    the card it names is one of those in play, since the replay never runs a
+    start of turn (`10_27_04_30_04-g2` turn 6 step 1). A played Tavern spell's
+    Gold is the step's own effect and the engine gives it itself.
   - **A chosen power that completes at the start of a turn** (Galewing's
     flightpaths) is the one turn-start trigger the counters cannot carry: the
     log's turn-start state is taken before the countdown. A state whose chosen
@@ -709,6 +725,14 @@ of a random step is run, since any of them may be the log's.
     a minion a new entity id every turn, so the ids cannot follow it). The
     growth then comes from darkgifts.toml's table for that turn, and the
     doubling for Drakkari the engine already does.
+  - **A Souvenir Stand** ("When you buy a Greater Trinket, this transforms
+    into a copy of it") is transformed where the log shows it, which is a step
+    or two after the greater trinket's pick: the state the step starts from
+    still names the Stand in the lesser slot and the state it leaves names the
+    copy (`11_03_00_29_06-g4` turn 9 step 1, whose greater Maldraxxus Dagger
+    was picked at turn 6). `shop_replay::seat_souvenir_copy` does what
+    `Game::pick_trinket` does at a pick, and seats the copy's own numbers from
+    that state.
   - **A Discover that takes a slot** is seated from the pick's `moved.to` when
     the file writes one, and otherwise from the state it left (a pick that
     turns a minion into itself adds no copy to the hand, and the state shows
@@ -763,8 +787,26 @@ of a random step is run, since any of them may be the log's.
   whichever of a press's clicks it chooses, and not at all for a chooser), the
   MAGNETIC keyword (a card property), which card of a zone a random change
   landed on (a random step's shape is the set of changes, not the cards they
-  fell on), and the client's freeze button (the per-card flags say the same
-  thing).
+  fell on), and the per-card frozen flag. The engine keeps one freeze on the
+  player and the game one on each card, and the log's cards are not a state
+  to judge: they read unfrozen after a board move (design.md settles that the
+  Tavern stays frozen, Era 2026-11-04: `Hearthstone_2026_10_24_17_59_26-g1`
+  turn 15), after a Freeze press the log's own state does not show
+  (`..._10_28_02_28_32-g4` turn 8 step 27 is a press whose before and after
+  states are both unfrozen) and on the Tavern's spell slot, which the game
+  never marks (`..._10_30_19_45_15-g2` turn 3 step 6; 17 steps of triage round
+  2's group Q1). No freeze is compared at all, the whole-Tavern flag included:
+  nothing else in a step reads it, since every step loads its own state, so a
+  freeze the step should not have made is left unseen.
+  The **order** of the Tavern and of the hand is not compared either: a
+  Tavern card's slot is the game's display order, and the file's before state
+  does not always agree with it (the turn-start state can show one order and
+  the step's own Tavern another: `10_28_19_47_59-g1` turn 1's buy names the
+  card at slot 2 while the turn's start state shows it first), and a Refresh
+  deals in the engine's order. The hand's index is the player's own
+  arrangement. Both zones are compared as a multiset of cards, by name so a
+  buff still pairs with a copy of its own name; the board keeps its order,
+  because a position is where a minion stands.
 - **A minion's target is a place on the board before it lands.** A Battlecry
   or Choose One picks its target before the played minion is in its slot, so
   the log's board place for the target is the board as it stood; the engine has
@@ -785,6 +827,23 @@ of a random step is run, since any of them may be the log's.
   once, so the file shows a power the engine does not build. The Warband Whistle's one-shot "your next Refresh holds copies of
   your warband" is armed from the steps before it (the pick armed it, the first
   Refresh after that spent it), since no state says so.
+- **A Choose One the file does not mark.** The game writes the client's own
+  `sub_option` only when the player picked the way; when it picks the way
+  itself (a 0 Gold buy, a power's own pick) the step has none, and the loader
+  reads the way off the log's step instead (`shop_replay::logged_choose_one`):
+  the free Refreshes the step gained and the cards that arrived from this card
+  each say which option ran, and both of them say the log combined the two,
+  which is seated as the engine's own "both options" state (a Thorned
+  Trailblazer gives it the same way). That is a guess only when the options
+  change no number the file holds (maximum Gold), and then the step is left
+  unanswered. The `11_02_00_10_22-g4` turn 12 step 68 Snare Trapper and the
+  `10_30_19_45_15-g2` turn 12 step 3 Sly Infiltrator are the two shapes.
+- **Detective for Hire's two cards** are a guess at the opponent's warband,
+  not a Discover: the pick joins nothing and a right guess hands a Tavern Coin
+  over (`resolve_choose`), and the log's own step says whether the Coin came,
+  so it says which index the game counted right
+  (`shop_replay::holmes_offer_answer`: `11_02_00_10_22-g6` turn 7 step 2 has
+  the Coin in the hand and the picked card nowhere).
 - **The step to the engine's action:** `buy` slot, `sell` position, `play`
   index with its target (and a Choose One's `sub_option`), `activate`, `move`,
   `roll`, `freeze`, `level`, `hero_power` (main or second) with its target,
@@ -831,7 +890,11 @@ What the replay cannot see, and so cannot blame on the engine: the lobby's real
 tribes (the file's `tribes` are the ones the log showed), the client's own
 prices where a discount is invisible (a Tavern spell is priced from the card's
 own marks or, failing those, from what its buy step paid, so a discount the
-log applied is the log's number; a minion's price comes from the engine's own
+log applied is the log's number: the spell slot's own price goes in as the
+player's next-spell discount, and one the game dealt into a minion slot's as
+this turn's "Tavern spells cost less", which is the state the engine prices
+that card from. A Tavern Coin bought at 0 Gold, `11_02_00_10_22-g6` turn 1
+step 4, is the step that used to be refused; a minion's price comes from the engine's own
 rule, and so does a standing "minions cost (1)" from a played Friends and
 Family Discount or the Chillmere Mosaic spell, because a logged Tavern minion
 carries no price unless the game wrote one on it), a

@@ -304,6 +304,11 @@ pub struct ShopPlace {
     /// The Dark Gifts the card carries (a Dark Discovery's offers).
     #[serde(default)]
     pub dark_gifts: Vec<ShopGiftSpec>,
+    /// The card an `entered` entry came from, as the collector writes it (the
+    /// card that handed it out): which option's cards arrived is what
+    /// `logged_choose_one` reads.
+    #[serde(default)]
+    pub from: Option<Box<ShopPlace>>,
     /// The keywords and numbers of an offer's card, as it stood: a Discover's
     /// pick lands with them, not with the card's printed ones. None in a file
     /// written before they were collected, and then the card's own stand.
@@ -339,6 +344,16 @@ pub struct ShopStats {
     pub attack: i32,
     #[serde(default)]
     pub health: i32,
+}
+
+/// The Gold a step gained from a card's own trigger, as the collector writes
+/// it: how much, and which card gave it.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ShopGoldGain {
+    #[serde(default)]
+    pub gold: i32,
+    #[serde(default)]
+    pub by: Option<ShopPlace>,
 }
 
 impl ShopPlace {
@@ -394,6 +409,10 @@ pub struct ShopStepSpec {
     /// Free Refreshes left when the Refresh button showed a price.
     #[serde(default)]
     pub free: Option<u8>,
+    /// The Gold a card's own trigger gave this step, by the card that gave it
+    /// (`gold_gain` in the file).
+    #[serde(default)]
+    pub gold_gain: Option<ShopGoldGain>,
     /// What a `discover` offered: `discover`, `choose_one`, `dark_gift` or
     /// `triple_reward`. A `trinket_pick` has none.
     #[serde(default)]
@@ -1161,6 +1180,31 @@ fn logged_spell_price(data: &Data, spec: &ShopMinionSpec, card: CardId) -> Optio
     }
 }
 
+/// A Tavern spell the step bought from a minion slot for less than the engine's
+/// price: the same shortfall as `seat_spell_paid`, seated as the turn's
+/// "Tavern spells cost less" (`PrizePowers::spell_discount_turn`), which is the
+/// state the engine prices such a card from. Nothing is seated for a spell
+/// paid in Health, or one the engine already prices at or under what the log
+/// took.
+fn seat_shop_spell_paid(game: &mut Game, data: &Data, card: CardId, step: &ShopStepSpec) {
+    let Some(paid) = step.paid.filter(|p| p.health <= 0 && p.gold >= 0) else {
+        return;
+    };
+    let c = data.cards.get(card);
+    if c.pay_health {
+        return;
+    }
+    let pl = &mut game.players[ME];
+    if pl.tp.spell_health_left > 0 {
+        return;
+    }
+    let engine = c.cost.saturating_sub(pl.prize.spell_discount_turn);
+    let paid = paid.gold.clamp(0, u8::MAX as i32) as u8;
+    if paid < engine {
+        pl.prize.spell_discount_turn = pl.prize.spell_discount_turn.saturating_add(engine - paid);
+    }
+}
+
 /// The log's Tavern spell bonus is the whole bonus the next spell gets, and
 /// the game keeps what this turn's spells on a minion improved inside it
 /// (Honeycomb Ring's "+1/+1 more this turn": `Hearthstone_2026_11_03_15_22_36-g4`
@@ -1183,15 +1227,82 @@ pub fn seat_spell_bonus_turn(pl: &mut Player, state: &ShopStateSpec, turn_start:
     pl.tp.spell_bonus_turn.1 += health;
 }
 
+/// Gold a card's own trigger gives at the start of the turn lands on the step
+/// after it, because the client's tag moves with the turn's first board update
+/// and the logged turn-start state is taken before that (Accord-o-Tron's "At
+/// the start of your turn, gain 1 Gold": `10_27_04_30_04-g2` turn 6 step 1
+/// gains its Gold there, and the file's `gold_gain` names the card). The replay
+/// never runs a start of turn, so the step's own `gold_gain` pays it, and only
+/// for a card in play whose start of turn is Gold: a played Tavern spell's Gold
+/// is the step's own effect, which the engine gives itself.
+fn seat_start_of_turn_gold(data: &Data, ids: &CardIdMap, pl: &mut Player, step: &ShopStepSpec) {
+    let Some(gain) = step.gold_gain.as_ref().filter(|g| g.gold > 0) else {
+        return;
+    };
+    let Some(card) = gain.by.as_ref().and_then(|b| resolve_card(data, ids, b)) else {
+        return;
+    };
+    let Some(crate::cards::StartOfTurn::GainGold(n)) = data.cards.get(card).start_of_turn else {
+        return;
+    };
+    if !pl.board.iter().any(|m| m.parts().any(|(c, _)| c == card)) {
+        return;
+    }
+    pl.gold = pl
+        .gold
+        .saturating_add(gain.gold.min(n as i32).max(0) as u8);
+}
+
+/// Souvenir Stand becomes a copy of the Greater trinket the player picked. The
+/// game writes that a step or two after the pick, not at it: the state the step
+/// starts from still names the Stand in the lesser slot and the state it leaves
+/// names the copy (`Hearthstone_2026_11_03_00_29_06-g4` turn 9 step 1, whose
+/// greater Maldraxxus Dagger was picked at turn 6). The loader does the
+/// transformation where the log shows it, which is what `Game::pick_trinket`
+/// does at a pick, and seats the copy's own numbers from that state.
+fn seat_souvenir_copy(data: &Data, game: &mut Game, before: &ShopStateSpec, after: &ShopStateSpec) {
+    let souvenir = |card_id: Option<&str>| {
+        card_id
+            .and_then(|id| data.trinkets.by_card_id(id))
+            .is_some_and(|i| {
+                data.trinkets
+                    .get(i)
+                    .on_pick
+                    .iter()
+                    .any(|a| matches!(a, crate::trinkets::Act::Souvenir))
+            })
+    };
+    for (slot, (was, now)) in before.trinkets.iter().zip(&after.trinkets).enumerate() {
+        if !souvenir(was.card_id.as_deref()) || was.card_id == now.card_id {
+            continue;
+        }
+        let Some(i) = now.card_id.as_deref().and_then(|id| data.trinkets.by_card_id(id)) else {
+            continue;
+        };
+        game.set_trinket(ME, slot, Some(i));
+        seat_trinket_counters(data, &mut game.players[ME], &after.trinkets);
+    }
+}
+
 /// The cards the state's trinkets hand out at the start of the turn: a
-/// Spellcraft spell, or a Lockbox.
-fn start_of_turn_cards(data: &Data, pl: &Player) -> Vec<CardId> {
+/// Spellcraft spell, or a Lockbox. Only a trinket the turn's own start state
+/// holds is due: one the player picked this turn has had its start of turn
+/// already, and its card comes at the next one.
+fn start_of_turn_cards(data: &Data, pl: &Player, start: &ShopStateSpec) -> Vec<CardId> {
     let mut out: Vec<CardId> = Vec::new();
     for st in pl.trinkets.iter() {
         if st.of == 0 {
             continue;
         }
-        for act in data.trinkets.get(st.of - 1).start_of_turn.iter() {
+        let trinket = data.trinkets.get(st.of - 1);
+        if !start
+            .trinkets
+            .iter()
+            .any(|t| t.card_id.as_deref() == Some(trinket.card_id.as_str()))
+        {
+            continue;
+        }
+        for act in trinket.start_of_turn.iter() {
             match *act {
                 crate::trinkets::Act::Get { card, .. } => out.push(card),
                 crate::trinkets::Act::GetLockbox(_) => out.extend(data.cards.lockbox),
@@ -1212,6 +1323,14 @@ fn start_of_turn_cards(data: &Data, pl: &Player) -> Vec<CardId> {
 /// Nothing is queued for a card the hand still holds, or one this turn already
 /// shows arriving or being played: that is how a state behind an early cast
 /// says the handout was delivered.
+///
+/// The turn's start state does not always hold the card either: the client
+/// hands it out with the turn's first board update, so the logged start state
+/// is taken before it and the turn's first step already shows it arriving
+/// (`Hearthstone_2026_10_26_00_48_15-g2` turn 9 and
+/// `Hearthstone_2026_10_30_19_45_15-g2` turn 9 hand a Floating Candle and a
+/// Token of the Old Gods over beside the step's own pick). A queued card joins
+/// at the end of the step's action, which is where the log shows it.
 fn seat_queued_start_of_turn(
     data: &Data,
     pl: &mut Player,
@@ -1219,11 +1338,8 @@ fn seat_queued_start_of_turn(
     turn: usize,
     index: usize,
 ) {
-    if !pl.hand.is_full() {
-        return;
-    }
-    let due = start_of_turn_cards(data, pl);
     let Some(turn_spec) = file.turns.get(turn) else { return };
+    let due = start_of_turn_cards(data, pl, &turn_spec.start);
     // Whether a card of the state's is the one the trinket hands out, by the
     // name the loader builds it under (the log writes Floating Candle Set's
     // spell with the trinket's name, and the greater Jailer Sticker's with the
@@ -1234,6 +1350,16 @@ fn seat_queued_start_of_turn(
             Some(id) => crate::real_boards::resolved_name(id, place_name.unwrap_or_default()) == name,
             None => place_name == Some(name),
         }
+    };
+    // The step this one replays, which says itself when the card arrives: the
+    // collector writes every card that entered the hand and the card it came
+    // from, so a start-of-turn card in `entered` is the handout this step.
+    let arriving = |card: CardId| {
+        turn_spec.actions.get(index).is_some_and(|a| {
+            a.entered.iter().any(|e| {
+                e.zone() == Some("hand") && named(e.card_id.as_deref(), e.name.as_deref(), card)
+            })
+        })
     };
     let due: Vec<CardId> = due
         .into_iter()
@@ -1251,13 +1377,16 @@ fn seat_queued_start_of_turn(
             if held(&turn_spec.start) {
                 return false;
             }
-            !turn_spec.actions[..index.min(turn_spec.actions.len())].iter().any(|a| {
-                let played = a
-                    .card
-                    .as_ref()
-                    .is_some_and(|c| named(c.card_id.as_deref(), c.name.as_deref(), card));
-                played || a.after.as_ref().is_some_and(held)
-            })
+            let earlier = turn_spec.actions[..index.min(turn_spec.actions.len())]
+                .iter()
+                .any(|a| {
+                    let played = a
+                        .card
+                        .as_ref()
+                        .is_some_and(|c| named(c.card_id.as_deref(), c.name.as_deref(), card));
+                    played || a.after.as_ref().is_some_and(held)
+                });
+            !earlier && (pl.hand.is_full() || arriving(card))
         })
         .collect();
     for card in due {
@@ -1364,6 +1493,25 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
     if card.health_refreshes > 0 {
         let left = m.numbers.first().copied().unwrap_or(0).clamp(0, u8::MAX as i32);
         minion.uses_left = left as u8;
+    }
+    // A Thorned Trailblazer's "One Choose One card each turn has both effects
+    // combined. (@ left!)" and a Trailblazer Sticker's: the log keeps the uses
+    // left in the first number, and shows no number at all once they are spent
+    // (`Hearthstone_2026_11_03_15_22_36-g4` turn 8 step 30 has `[1, 0, 0, 0]`
+    // and step 31 has none). The board loader reads a missing number as the
+    // card's full uses, which gives a spent cover back and lets the replay
+    // combine two options the log combined one of (`..._g4` turn 10 step 14).
+    if card.choose_one_cover > 0 {
+        let left = m.numbers.first().copied().unwrap_or(0).clamp(0, u8::MAX as i32);
+        minion.uses_left = left as u8;
+    }
+    // A Stone Age Slab's "after you buy a minion" effect is once a turn too,
+    // and the log keeps the use in the third number (`[20, 20, 1, 0]` while it
+    // is there and `[20, 20, 0, 0]` after the buy that spent it,
+    // `Hearthstone_2026_11_02_00_10_22-g8` turn 11 step 5 to 9). A card the
+    // engine seats as spent would double the next bought minion's stats.
+    if card.after_buy.is_some() {
+        minion.activated = m.numbers.get(2).copied().unwrap_or(1) <= 0;
     }
     // A card whose trigger counts its events ("After you spend 9 Gold, get a
     // random Bounty. (6 Gold left!)"): the engine keeps how far the count has
@@ -2136,28 +2284,36 @@ pub fn compare_pressed(
         ));
     }
     for (zi, (zone, _)) in ZONES.iter().enumerate() {
-        let (a, b) = (zone_of(ours, zi), zone_of(log, zi));
+        let a = zone_of(ours, zi);
+        let b = zone_of(log, zi);
+        // The Tavern and the hand are compared without their order. A Tavern
+        // card's slot is the game's own display order, which the file's before
+        // state does not always agree with: the turn-start state can hold one
+        // order and the step's own Tavern another (a buy at
+        // `Hearthstone_2026_10_28_19_47_59-g1` turn 1 puts the card the step
+        // names at slot 2 while the turn's start state shows it at slot 1),
+        // and the engine deals a Refresh in its own order. The hand's index is
+        // the player's own arrangement. The board keeps its order: a position
+        // is where a minion stands, and a summon that lands in the wrong place
+        // is a difference.
+        let (a, b) = if *zone == "board" {
+            (a.iter().collect::<Vec<_>>(), b.iter().collect::<Vec<_>>())
+        } else {
+            fn by_name(z: &[SnapMinion]) -> Vec<&SnapMinion> {
+                let mut v: Vec<&SnapMinion> = z.iter().collect();
+                v.sort_by(|x, y| x.name.cmp(&y.name));
+                v
+            }
+            (by_name(a), by_name(b))
+        };
         // A card that is not there on one side and is on the other, or a card
-        // whose stats, keywords, gifts or golden flag differ, or a card in the
-        // wrong place.
+        // whose stats, keywords, gifts or golden flag differ (the per-card
+        // frozen flag is not compared: see `card_diff`).
         let n = a.len().max(b.len());
         for i in 0..n {
             match (a.get(i), b.get(i)) {
-                (Some(x), Some(y)) if x == y => {}
                 (Some(x), Some(y)) => {
-                    let what = if x.name != y.name {
-                        "a card in the wrong place"
-                    } else if x.golden != y.golden {
-                        "golden"
-                    } else if (x.attack, x.health) != (y.attack, y.health) {
-                        "stats"
-                    } else if x.keywords != y.keywords {
-                        "keywords"
-                    } else if x.gifts != y.gifts {
-                        "gifts"
-                    } else {
-                        "frozen"
-                    };
+                    let Some(what) = card_diff(x, y) else { continue };
                     out.push(format!(
                         "{zone} {what} {}: {} vs {}",
                         i + 1,
@@ -2223,6 +2379,37 @@ pub fn compare_pressed(
     out
 }
 
+/// What differs between the two cards of one place, or `None` when they are the
+/// same card. The per-card frozen flag is not compared, in either direction,
+/// because the game's own flag is the log quirk design.md settles ("Moving a
+/// minion on your board doesn't touch the freeze: the Tavern stays frozen",
+/// Era 2026-11-04): the engine keeps one flag on the player and the game keeps
+/// one on each card, and the log's cards read unfrozen after a move (triage
+/// round 2's group Q1, `Hearthstone_2026_10_24_17_59_26-g1` turn 15 step 36 to
+/// 41 and `Hearthstone_2026_11_02_00_10_22-g8` turn 15), after a Freeze press
+/// the log's own state does not show (`..._10_28_02_28_32-g4` turn 8 step 27),
+/// and on the Tavern's spell slot, which the game never marks (`..._10_30_19_45_15-g2`
+/// turn 3 step 6). Nothing else in a step depends on the flag: every step loads
+/// its own state, and a random step's shape does not hold the flag either, so a
+/// freeze the step should not have made is not caught by the comparison.
+fn card_diff(x: &SnapMinion, y: &SnapMinion) -> Option<&'static str> {
+    if x.name != y.name {
+        Some("a card in the wrong place")
+    } else if x.golden != y.golden {
+        Some("golden")
+    } else if (x.attack, x.health) != (y.attack, y.health) {
+        Some("stats")
+    } else if x.keywords != y.keywords {
+        Some("keywords")
+    } else if x.gifts != y.gifts {
+        Some("gifts")
+    } else if x.spell != y.spell {
+        Some("a spell")
+    } else {
+        None
+    }
+}
+
 fn opt_text(v: Option<u8>) -> String {
     v.map_or_else(|| "none".to_string(), |v| v.to_string())
 }
@@ -2255,7 +2442,6 @@ pub struct ShopShape {
     /// them takes the first number, so the queue's own shape says whether the
     /// Fodders reached the Tavern. None when the file does not carry it.
     pub fodder_refreshes: Option<Vec<u8>>,
-    pub frozen: bool,
     /// How many cards each zone holds, and how many of them are spells (the
     /// kind of a card a random step brings in is part of its shape).
     pub board: (usize, usize),
@@ -2281,7 +2467,6 @@ impl ShopShape {
             upgrade_cost: after.upgrade_cost,
             free_refreshes: after.free_refreshes,
             fodder_refreshes: after.fodder_refreshes.clone(),
-            frozen: after.frozen,
             board: (after.board.len(), spells(&after.board)),
             hand: (after.hand.len(), spells(&after.hand)),
             tavern: (after.tavern.len(), spells(&after.tavern)),
@@ -2773,6 +2958,41 @@ fn pick_landing<'a>(
     None
 }
 
+/// The Detective for Hire offer a step answers: its two cards and which of them
+/// counted as the right guess. The pick itself joins nothing: a right guess
+/// hands a Tavern Coin over (docs/rules/heroes.md, `resolve_choose`'s own
+/// path), which is why the log's hand holds the Coin and not the card it
+/// picked (`Hearthstone_2026_11_02_00_10_22-g6` turn 7 step 2). The log's step
+/// says whether the Coin came (`entered`), so it says which index the game
+/// counted right.
+fn holmes_offer_answer(
+    data: &Data,
+    ids: &CardIdMap,
+    step: &ShopStepSpec,
+) -> Option<([CardId; 2], u8)> {
+    let source = step.source.as_ref()?.card_id.as_deref()?;
+    let i = data.heroes.power_by_card_id(source)?;
+    let coin = match data.heroes.power(i).effect {
+        crate::heroes::PowerEffect::DetectiveForHire { coin } => coin,
+        _ => return None,
+    };
+    if step.options.len() != 2 || step.kind.as_deref() != Some("discover") {
+        return None;
+    }
+    let picked = step.picked.as_ref()?.id;
+    let at = step.options.iter().position(|o| o.id == picked)?;
+    let cards = [
+        resolve_card(data, ids, &step.options[0])?,
+        resolve_card(data, ids, &step.options[1])?,
+    ];
+    let got = step
+        .entered
+        .iter()
+        .any(|e| resolve_card(data, ids, e) == Some(coin));
+    let correct = if got { at } else { 1 - at } as u8;
+    Some((cards, correct))
+}
+
 /// Put the log's offer on the player before answering it: a Discover's
 /// options, a Dark Discovery's offers with their gifts, or a trinket offer.
 /// Returns the index of the option the log picked.
@@ -2842,6 +3062,12 @@ fn force_offer(
                 1
             }
         };
+        return Ok(at);
+    }
+    // Detective for Hire's two cards are a guess, not a Discover: the engine
+    // keeps them in its own offer and the pick lands nothing but the Coin.
+    if let Some((cards, correct)) = holmes_offer_answer(data, ids, step) {
+        pl.holmes_offer = Some((cards, correct));
         return Ok(at);
     }
     let dark = step.kind.as_deref() == Some("dark_gift");
@@ -3060,6 +3286,16 @@ fn actions_for(
                 if at as usize >= loaded.game.players[ME].shop.len() {
                     return Err("the Tavern slot the step bought is not in the Tavern".to_string());
                 }
+                // A Tavern spell in a minion slot (a spell the game dealt
+                // there, a Saloon's Finest slot) is priced by the game the
+                // same way as the spell slot's, and the file's own price is
+                // what it took: a Tavern Coin bought at 0 Gold is legal in the
+                // log (`Hearthstone_2026_11_02_00_10_22-g6` turn 1 step 4)
+                // and the engine would refuse it (`seat_shop_spell_paid`).
+                let bought = loaded.game.players[ME].shop[at as usize].card;
+                if data.cards.get(bought).is_spell() {
+                    seat_shop_spell_paid(&mut loaded.game, data, bought, step);
+                }
                 out.push(Action::Buy(at));
             }
         }
@@ -3218,6 +3454,94 @@ struct OneStep<'a> {
     last_spell: Option<CardId>,
 }
 
+/// A Choose One's answer: which option the log took, and whether it gave both.
+#[derive(Clone, Copy, Debug)]
+struct ChooseAnswer {
+    option: u8,
+    both: bool,
+}
+
+/// Whether a Choose One option's own outcome shows in the step: the free
+/// Refreshes the option gives (`free_refreshes` before and after), or the cards
+/// it puts in the hand, each of them from the card that played (`entered`).
+/// `false` for an option whose outcome no state carries (maximum Gold, a Blood
+/// Gem's bonus "this game", a target), which says nothing either way.
+fn choose_option_shows(
+    data: &Data,
+    ids: &CardIdMap,
+    opt: crate::cards::ChooseOption,
+    step: &ShopStepSpec,
+    before: &ShopStateSpec,
+    after: &ShopStateSpec,
+) -> bool {
+    use crate::cards::{ChooseOption as Opt, SpellEffect};
+    let source = step.card.as_ref().and_then(|c| c.card_id.as_deref());
+    let entered: Vec<&ShopPlace> = step
+        .entered
+        .iter()
+        .filter(|e| e.from.as_ref().and_then(|f| f.card_id.as_deref()) == source)
+        .collect();
+    let is = |e: &ShopPlace, card: CardId| resolve_card(data, ids, e) == Some(card);
+    let of_tribe = |e: &ShopPlace, tribe: Tribe| {
+        resolve_card(data, ids, e).is_some_and(|c| data.cards.get(c).tribes.has(tribe))
+    };
+    match opt {
+        Opt::SpellEffect(SpellEffect::FreeRolls(n)) => {
+            after.free_refreshes.saturating_sub(before.free_refreshes) >= n
+        }
+        Opt::SpellEffect(SpellEffect::GetGems(n)) => {
+            n > 0
+                && data.cards.blood_gem.is_some_and(|gem| {
+                    entered.iter().any(|e| is(e, gem))
+                })
+        }
+        Opt::SpellEffect(SpellEffect::GetCard { card, .. }) => {
+            entered.iter().any(|e| is(e, card))
+        }
+        Opt::SpellEffect(SpellEffect::RandomTribeMinion { tribe, .. }) => {
+            entered.iter().any(|e| of_tribe(e, tribe))
+        }
+        _ => false,
+    }
+}
+
+/// How a Choose One the file does not mark was answered. The game writes the
+/// client's own `sub_option` when the player picks a way, and nothing when it
+/// picks the way itself (an auto-pick, triage round 2's group L2); the log's
+/// own step still shows what ran (the free Refreshes, the cards that arrived),
+/// which is what this reads. Both options show when a Thorned Trailblazer or a
+/// Trailblazer Sticker combined them, and the step then says so in the same
+/// two ways. `None` when the file marks no option and the log's outcome cannot
+/// say which one ran (an option that changes no number the file holds).
+fn logged_choose_one(
+    data: &Data,
+    ids: &CardIdMap,
+    step: &ShopStepSpec,
+    before: &ShopStateSpec,
+    after: &ShopStateSpec,
+) -> Option<ChooseAnswer> {
+    if let Some(k) = step.sub_option
+        && (0..2).contains(&k)
+    {
+        return Some(ChooseAnswer { option: k as u8, both: false });
+    }
+    if step.step != "play" {
+        return None;
+    }
+    let card = resolve_card(data, ids, step.card.as_ref()?)?;
+    let [a, b] = data.cards.get(card).choose_one?;
+    let (a, b) = (
+        choose_option_shows(data, ids, a, step, before, after),
+        choose_option_shows(data, ids, b, step, before, after),
+    );
+    match (a, b) {
+        (true, true) => Some(ChooseAnswer { option: 0, both: true }),
+        (false, true) => Some(ChooseAnswer { option: 1, both: false }),
+        (true, false) => Some(ChooseAnswer { option: 0, both: false }),
+        (false, false) => None,
+    }
+}
+
 fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<StepRun, StepError> {
     let OneStep { file, before, step, turn, turn_index, index, armed, last_spell } = *one;
     let hero = file.hero(data, before);
@@ -3252,6 +3576,21 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     // step can hand it over when it frees a slot.
     seat_queued_start_of_turn(data, &mut loaded.game.players[ME], file, turn_index, index);
     let mut missing = std::mem::take(&mut loaded.missing);
+    // The way the log answered a Choose One this step plays. A card that gives
+    // both options (a Thorned Trailblazer, a Trailblazer Sticker) has to know
+    // it before the play, because that is the play's own path.
+    let answer = step.after.as_ref().and_then(|after| {
+        logged_choose_one(data, ids, step, before, after)
+    });
+    if answer.is_some_and(|a| a.both) {
+        loaded.game.players[ME].tp.choose_one_all = true;
+    }
+    seat_start_of_turn_gold(data, ids, &mut loaded.game.players[ME], step);
+    // A Souvenir Stand the log turns into a copy of the Greater trinket in
+    // this step rather than at its pick.
+    if let Some(after) = step.after.as_ref() {
+        seat_souvenir_copy(data, &mut loaded.game, before, after);
+    }
     if step.step == "end_turn" {
         // The end of turn effects, without the fight that follows them: the
         // logged turn ends before the fight.
@@ -3314,7 +3653,7 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     // (docs/rules/design.md "Targets in the shop"): the play's own sub-option is answered
     // before the step's target, not after it.
     let choose_first = step.step == "play"
-        && step.sub_option.is_some_and(|k| (0..2).contains(&k))
+        && answer.is_some_and(|a| !a.both)
         && actions.len() > 1;
     let mut chosen = false;
     for a in &actions {
@@ -3323,7 +3662,7 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
             && matches!(a, Action::Target(_) | Action::TargetShop(_))
             && loaded.game.players[ME].pending_choose_one.is_some()
         {
-            let k = step.sub_option.unwrap_or(0) as u8;
+            let k = answer.map_or(0, |a| a.option);
             if loaded.game.step(Action::Choose(k)).is_err() {
                 return Err((format!("the engine does not allow {k:?} of the Choose One"), missing));
             }
@@ -3381,21 +3720,25 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         text.push(format!("{a:?}"));
     }
     // A Choose One card played from the hand asks which way in the same click
-    // in the game, and the client's own sub-option says which one it was: the
-    // engine opens the two options after the play.
+    // in the game, and the client's own sub-option says which one it was (or,
+    // when the game picked the way itself, the log's own step does: see
+    // `logged_choose_one`): the engine opens the two options after the play.
     if step.step == "play"
         && !chosen
-        && let Some(k) = step.sub_option
-        && (0..2).contains(&k)
+        && let Some(a) = answer
+        && !a.both
         && loaded.game.players[ME].pending_choose_one.is_some()
     {
-        if loaded.game.step(Action::Choose(k as u8)).is_err() {
+        if loaded.game.step(Action::Choose(a.option)).is_err() {
             return Err((
-                format!("the engine does not allow {k:?} of the Choose One"),
+                format!(
+                    "the engine does not allow {:?} of the Choose One",
+                    a.option
+                ),
                 missing,
             ));
         }
-        text.push(format!("Choose({k})"));
+        text.push(format!("Choose({})", a.option));
     }
     let snap = ShopSnapshot::of_game(data, &loaded.game, ME);
     Ok((snap, missing, text.join(", ")))

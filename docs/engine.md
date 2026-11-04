@@ -175,7 +175,10 @@ rules behind each are in docs/rules/design.md Part 2.
   first number, and a Magicfin Mycologist's teachings left (no number means
   none, and a fresh card would otherwise teach once more than the log did).
   A Malchezaar's Health Refreshes left are the same kind of number (its
-  first, no number at all when both are spent), and so is the Demon Fodder
+  first, no number at all when both are spent), and so are a Thorned
+  Trailblazer's combine left this turn (its first, none when spent) and a
+  Stone Age Slab's after-you-buy use (its third, `Minion.activated`), and so
+  is the Demon Fodder
   queue, which the game keeps on its own player enchant (`fodder_refreshes`,
   one number per coming Refresh). The card itself also carries the Attack and
   Health its Blood Gems gave it (`gem_attack`/`gem_health`, the log's
