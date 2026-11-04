@@ -702,24 +702,47 @@ fn volumizer_bonus_numbers(game: &Game) -> Option<[i64; 2]> {
         .max_by_key(|pair| pair[0] + pair[1])
 }
 
-/// How many Magnetizations a minion carries: the game attaches one enchantment
-/// per Magnetic that merged into it (`BG34_170te` for a Red Volumizer,
-/// `BG31_171te` for a Satellite), each with the `MAGNETIC` tag and the stats it
-/// brought, and that is the count Utility Drone's "+4/+5 for each Magnetization
-/// they have" reads. The minions a Magnetized minion brought inside it are not
-/// counted separately: their own enchantment hangs on the minion that merged,
-/// not on the host. A Magnetization that "happens an extra time" (Drone
-/// Duplicator) shows one enchantment, so the log undercounts that one; the
-/// replay re-applies the extra itself.
+/// The tag the game keeps a minion's own Magnetization count in. It has no
+/// name in the log (the client shows it as the bare number), and it is the
+/// count Utility Drone's "+4/+5 for each Magnetization they have" reads.
+/// `Hearthstone_2026_11_02_00_10_22-g2` turn 10, the end of the turn: the
+/// Glambot at `3670` 94 takes +376/+470 from the Drone (94 x +4/+5) while the
+/// two other minions the Drone hits take their own counts, 6 and 12.
+const MAGNETIZED_TAG: &str = "3670";
+
+/// How many Magnetizations a minion carries, which is what the game's own
+/// Utility Drone reads: the minion's `3670` tag, one for every Magnetic that
+/// merged into it and one for the minion itself when the minion is Magnetic
+/// (a Blue Volumizer on its own in hand shows 1, one with a Satellite merged
+/// into it 2). The engine's `Minion::magnetizations` counts what merged into
+/// the minion and not the minion itself, so a Magnetic minion's own one comes
+/// off the tag.
+///
+/// The count is *not* the number of `Magnetic` enchantments attached to the
+/// host: the game accumulates a Satellite's stats into a single `BG31_171te`
+/// enchantment, so a Glambot with 94 Magnetizations shows one enchantment.
+/// That is the count this used to read, and it gave the Drone nothing
+/// (`Hearthstone_2026_11_02_00_10_22-g2` turn 10 step 31: Glambot 581/626
+/// replayed against the log's 953/1091).
+///
+/// A log with no `3670` tag at all (every log of Era's has it) falls back to
+/// counting the enchantments, one per merge, as the collector always did.
 fn magnetization_count(game: &Game, host: &Entity) -> i64 {
-    game.entities_in_order()
-        .filter(|x| {
-            x.text("CARDTYPE") == "ENCHANTMENT"
-                && x.text("ZONE") == "PLAY"
-                && x.int("MAGNETIC") != 0
-                && x.int("ATTACHED") == host.id as i64
-        })
-        .count() as i64
+    let merged = || {
+        game.entities_in_order()
+            .filter(|x| {
+                x.text("CARDTYPE") == "ENCHANTMENT"
+                    && x.text("ZONE") == "PLAY"
+                    && x.int("MAGNETIC") != 0
+                    && x.int("ATTACHED") == host.id as i64
+            })
+            .count() as i64
+    };
+    let Some(count) = host.get(MAGNETIZED_TAG) else {
+        return merged();
+    };
+    let own = i64::from(host.int("MAGNETIC") != 0);
+    (count.as_int() - own).max(0)
 }
 
 fn hero_entity(game: &Game) -> Option<&Entity> {
@@ -3193,11 +3216,13 @@ mod tests {
         assert_eq!(volumizer_bonus_numbers(&g), None);
     }
 
-    /// A minion's Magnetization count is the number of `Magnetic`
-    /// enchantments the game left on it, one per Magnetic that merged, and
-    /// another minion's are not counted.
+    /// A minion's Magnetization count is the game's own (`3670`), not the
+    /// `Magnetic` enchantments the game left on it: a Satellite's stats pile
+    /// into one enchantment however many of them merged. A Magnetic minion's
+    /// own one is not a merge. With no such tag in the log, the enchants are
+    /// the count, as they always were.
     #[test]
-    fn a_minions_magnetizations_are_the_magnetic_enchantments_on_it() {
+    fn a_minions_magnetizations_are_the_games_own_count() {
         fn tag(value: &str) -> TagValue {
             TagValue::Text(value.to_string())
         }
@@ -3229,6 +3254,20 @@ mod tests {
         };
         add(100, "BG36_506", host(1));
         add(101, "BG36_506", host(1));
+        // The game's own count, and an enchantment the game kept for a
+        // Magnetization that merged: the count is what the Drone reads, so it
+        // wins over the enchantments (`2026_11_02_00_10_22-g2` turn 10: 94
+        // Magnetizations under one `BG31_171te`).
+        let mut counted = host(1);
+        counted.push((MAGNETIZED_TAG, number(94)));
+        add(102, "BG36_506", counted);
+        // A Magnetic minion's own count includes itself; what merged into it
+        // is what the engine seats.
+        let mut magnetic = host(1);
+        magnetic.push(("MAGNETIC", number(1)));
+        magnetic.push((MAGNETIZED_TAG, number(3)));
+        add(103, "BG31_171t", magnetic);
+        // A log with no such tag at all: the enchantments, one per merge.
         // Two Magnetizations on the first host (a Volumizer and a Satellite),
         // the plain `Volumized` aura enchantment is not one, and one
         // Magnetization on the second.
@@ -3236,14 +3275,19 @@ mod tests {
         add(301, "BG31_171te", attached(100, 1));
         add(302, VOLUMIZED, attached(100, 0));
         add(303, "BG34_170te", attached(101, 1));
+        // The Satellite enchantment the game accumulated: one enchantment
+        // only, for however many Magnetizations.
+        add(304, "BG31_171te", attached(102, 1));
         let hosts: Vec<i32> = g.entities_in_order().map(|e| e.id).collect();
         let count = |id: i32| {
             let e = &g.entities[&id];
             magnetization_count(&g, e)
         };
         assert!(hosts.contains(&100));
-        assert_eq!(count(100), 2);
-        assert_eq!(count(101), 1);
+        assert_eq!(count(100), 2, "no tag: the enchantments");
+        assert_eq!(count(101), 1, "no tag: the enchantments");
+        assert_eq!(count(102), 94, "the game's own count, not its one enchantment");
+        assert_eq!(count(103), 2, "a Magnetic minion's own one is not a merge");
     }
 
     /// The Health half of "your Undead have +A/+H this game, wherever they

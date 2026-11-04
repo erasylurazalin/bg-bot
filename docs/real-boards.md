@@ -268,18 +268,24 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     and Gem Confiscation steals nothing.
   - `magnetizations` on a minion: how many Magnetizations it carries, which
     Utility Drone's "at the end of your turn, give your minions +4/+5 for each
-    Magnetization they have" reads. The game attaches one enchantment per
-    Magnetic that merged into the host (`BG34_170te` for a Red Volumizer,
-    `BG31_171te` for a Satellite: the Magnetic's own card id with a `te` on the
-    end, the `MAGNETIC` tag, the stats it brought), so the count is those
-    enchantments attached to the minion, and the minions a Magnetized minion
-    brought inside it hang on the minion that merged rather than on the host.
-    A Magnetization that happens "an extra time" (Drone Duplicator's Activate)
-    is one enchantment, so the log shows the count without that repeat; the
-    replay's own state has the repeat for the step that made it only. The key
-    is written only when the count is not 0, and a file written before it
+    Magnetization they have" reads. The game keeps that count on the minion
+    itself, in a tag with no name in the log (`3670`): one per Magnetic that
+    merged into it, and one for the minion itself when the minion is Magnetic
+    (a Blue Volumizer alone in hand shows 1, one with a Satellite merged into
+    it 2). `Minion.magnetizations` counts only what merged in, so the
+    collector takes a Magnetic minion's own one off. It is *not* the number of
+    `Magnetic` enchantments attached (`BG34_170te` for a Red Volumizer,
+    `BG31_171te` for a Satellite): the game piles a Satellite's stats into one
+    such enchantment, so a Glambot with 94 Magnetizations shows a single one,
+    and that count gave Utility Drone nothing (`Hearthstone_2026_11_02_00_10
+    _22-g2` turn 10: the Drone's +376/+470 on the Glambot against the replay's
+    +4/+5). A Magnetization that happens "an extra time" (Drone Duplicator's
+    Activate) is one tag step, so the log shows the count without that repeat;
+    the replay's own state has the repeat for the step that made it only. The
+    key is written only when the count is not 0, and a file written before it
     existed has the count nowhere: the loader then seats 0, as it always did,
-    and Utility Drone gives nothing.
+    and Utility Drone gives nothing. A log with no `3670` tag at all falls
+    back to counting the enchantments, one per merge.
   - `secrets`, the Secret zone by card id in the order the Secrets were got, as
     the board files write it (always written, empty when there is nothing).
   - `waiting` on a hero power: the minion Lock and Load holds, as a board

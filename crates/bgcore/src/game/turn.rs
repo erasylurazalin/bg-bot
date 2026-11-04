@@ -148,7 +148,9 @@ impl Game {
         // The Dark Gift countdowns (Incubation, Replication, Affinity) tick
         // and fire after the board's own effects (Hearthstone_2026_10_26
         // _00_48_15-g2 turn 5: Trench Fighter's Gem Confiscation lands before
-        // the Replication gift's copy).
+        // the Replication gift's copy). Incubation only ticks here: its
+        // doubling lands with the start of the next turn
+        // (`dark_gift_start_of_turn`, log `10_28_19_47_59-g1` turn 7).
         self.dark_gift_end_of_turn(p);
         // The powers' own end-of-turn effects (Sulfuras gives your ends
         // +8/+8).

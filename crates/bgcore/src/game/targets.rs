@@ -264,6 +264,13 @@ impl Game {
             }
             TargetKind::Spell(st) => {
                 let target = slot;
+                // How many times the spell was cast on the Tavern minion:
+                // one, unless a Hot-Air Surveyor's "Blood Gems played from
+                // your hand cast an extra time" adds casts (a Tavern minion
+                // is not a friendly minion, so Balinda's double cast never
+                // reaches one). The trinkets that watch a spell cast on a
+                // minion see each cast, as they do on the board.
+                let mut casts: u8 = 1;
                 // A Tavern minion is not a friendly minion, so Balinda's
                 // double cast does not apply to it.
                 for _ in 0..1 {
@@ -300,10 +307,11 @@ impl Game {
                                 // a Gem on Relentless Deflector with a
                                 // Surveyor up: +2/+2). A Roogug there reacts
                                 // below, once per cast.
-                                let casts = self.times_count(p, |a| {
+                                let gem_casts = self.times_count(p, |a| {
                                     (a == Aura::HotAirSurveyor).then_some(TimesRole::Adder)
                                 });
-                                for _ in 0..casts {
+                                casts = gem_casts;
+                                for _ in 0..gem_casts {
                                     let (ga, gh) =
                                         (self.players[p].gem_attack, self.players[p].gem_health);
                                     let m = &mut self.players[p].shop[target];
@@ -547,8 +555,13 @@ impl Game {
                     self.trinket_event(p, Event::CastSpellOnShop, None, 1);
                     // A Tavern minion is a minion (docs/rules/design.md "Targets in the
                     // shop"), so the spell was cast on one: "after you cast 3
-                    // spells on minions" (Wand of Divination) counts it.
-                    self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
+                    // spells on minions" (Wand of Divination) counts it, and
+                    // counts each cast (a Hot-Air Surveyor's extra Gem cast is
+                    // a second cast on the minion, as on the board; Honeycomb
+                    // Ring's +1/+1 is per cast too).
+                    for _ in 0..casts {
+                        self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
+                    }
                 }
             }
             _ => {}
