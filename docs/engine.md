@@ -1040,8 +1040,15 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   Gem Day, a Banana, a Spellcraft spell), `Event::CastSpell` for a
   `tavern_spell = true` card only. The trinket lists are `on_any_spell` and
   `on_cast_spell`; the rule events are `spell_cast` and `cast_spell`. A
-  Triple Reward is not cast at all (it is a reward you open) and is skipped in
-  `cast_spell`. The minion side: `Card.on_cast_spell` stays Tavern-only (every
+  Triple Reward is "a 0-cost plain spell (not a Tavern spell)"
+  (docs/rules/design.md "Triples"), so its cast is a spell cast and not a
+  Tavern spell (fixed 2026-11-04): it fires `EventKind::AllSpellsCast` (the
+  Felboar's counter and its consume) and `Event::SpellCast`, and never
+  `EventKind::SpellsCast`, `Event::CastSpell` or `Card.on_cast_spell`. The
+  raw log has it twice: `Hearthstone_2026_11_02_00_10_22-g4` turn 8, the
+  reward played at Power.log 1128876 with the Felboar's TRIGGER at 1129386,
+  and `Hearthstone_2026_11_03_15_22_36-g3` turn 8, where a Timecap'n Hooktail
+  on the board (Tavern spells only) never fires. The minion side: `Card.on_cast_spell` stays Tavern-only (every
   card that has it says "Tavern spell"); `EventKind::SpellsCast` and
   `Player.spells_cast` (the observation's "Tavern spells cast this game", and
   Faceless Converter's per-Tavern-spell improvement) stay Tavern-only, and
@@ -1072,14 +1079,20 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   minions once the spell has resolved, so a Discover spell's pick comes first
   (log `2026_10_27_04_30_04` turn 7: Planar Telescope cast at Power.log
   68792, the Discover picked at 69231, the Spell Siphon tag at 69283). The
-  "whenever" half stays on the play in both cases. `Card.on_cast_spell_after`
+  "whenever" half stays on the play in both cases, and for a Triple Reward it
+  does not: the game takes that whole cast at the pick, so its
+  `CastAfterChoice` is seated with `at_play: false`
+  (`Hearthstone_2026_11_02_00_10_22-g4` turn 8: the reward played at 1128876
+  moves no counter, and the pick at 1129386 carries the Felboar's own and its
+  consume together). `Card.on_cast_spell_after`
   is the same split for a minion's own "After you cast a Tavern spell"
   (Forsaken Weaver): `trigger_on_cast_spell(p, TriggerWhen::Now)` fires the
   `on_cast_spell` cards as the spell is cast, the `Resolved` call fires the
   `on_cast_spell_after` ones with the rest of the "after" half. The shop
   replay logs a pick as its own step, so the step that answers it loads a
   state with nothing owed: `shop_replay::seat_cast_after_pick` seats the
-  cast's `CastAfterChoice` from the step's `source` spell again. In
+  cast's `CastAfterChoice` from the step's `source` spell again (for a Triple
+  Reward's pick, `step.kind = "triple_reward"`, both halves). In
   a fight, `Effect::CastSpell` fires the Tavern counter and the Tavern-only
   minion triggers only for a Tavern spell, and the trinket's `when = "cast"`
   hook for every spell. Replica Cathedral's "your first spell each turn casts

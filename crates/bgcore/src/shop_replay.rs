@@ -3170,24 +3170,37 @@ fn seat_gold_spent_at_pick(data: &Data, ids: &CardIdMap, loaded: &mut LoadedShop
 /// Hearthstone_2026_10_27_04_30_04 turn 7: Planar Telescope is cast at
 /// Power.log 68792, its Discover is picked at 69231 and the Spell Siphon Dark
 /// Gift's count only grows at 69283, and 2026_10_24_17_59_26 turn 10 step 43
-/// to 44, Fandral's Fortune's pick and its Felboar's consume). The "whenever"
-/// half and the counters were taken on the play, which is why this seats
-/// `at_play: true` and no counter of its own.
+/// to 44, Fandral's Fortune's pick and its Felboar's consume). For every spell
+/// but a Triple Reward the "whenever" half and the counters were taken on the
+/// play, which is why this seats `at_play: true` and no counter of its own.
+///
+/// A Triple Reward is a plain spell (not a Tavern spell) and *is* a spell the
+/// player cast: the play step shows no counter moving and the pick step shows
+/// the Felboar's counter and its consume together
+/// (`Hearthstone_2026_11_02_00_10_22-g4` turn 8, and
+/// `Hearthstone_2026_11_03_15_22_36-g3` turn 8 where a Timecap'n Hooktail's
+/// Tavern-spell trigger never fires at all). Its whole cast is therefore owed
+/// to the pick, `at_play: false`, where every other spell fired the
+/// "whenever" half on the play.
 ///
 /// The number of casts is one: a spell the player doubled with Balinda is not
 /// in a file this reads (`cast_spell_as` folds the extra casts into the play).
 pub fn seat_cast_after_pick(data: &Data, ids: &CardIdMap, game: &mut Game, step: &ShopStepSpec) {
-    if !matches!(step.kind.as_deref(), Some("discover" | "choose_one")) {
-        // A Triple Reward or a Dark Gift offer.
+    if !matches!(
+        step.kind.as_deref(),
+        Some("discover" | "choose_one" | "triple_reward")
+    ) {
+        // A Dark Gift offer.
         return;
     }
     let Some(card) = step.source.as_ref().and_then(|s| resolve_card(data, ids, s)) else {
         return;
     };
     let c = data.cards.get(card);
-    if !c.is_spell() || matches!(c.spell_effect, Some(crate::cards::SpellEffect::TripleReward)) {
+    if !c.is_spell() {
         return;
     }
+    let reward = matches!(c.spell_effect, Some(crate::cards::SpellEffect::TripleReward));
     // The board's "after you cast a Tavern spell" cards as this step shows
     // them: the play that owed them is behind us in the file.
     let after = game.gather_on_cast_spell(ME, true);
@@ -3195,7 +3208,7 @@ pub fn seat_cast_after_pick(data: &Data, ids: &CardIdMap, game: &mut Game, step:
         card,
         casts: 1,
         tavern: c.tavern_spell,
-        at_play: true,
+        at_play: !reward,
         count_owed: c.tavern_spell,
         after,
     });

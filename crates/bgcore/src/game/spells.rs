@@ -590,11 +590,34 @@ impl Game {
         let c = self.data.cards.get(m.card);
         let casts = if c.is_bounty && c.spell_effect.is_some() { self.bounty_mult(p) } else { 1 };
         let tavern = c.tavern_spell;
-        // A Triple Reward is a reward you open, not a spell you cast
-        // (docs/rules/design.md "Read the card's exact words, every time").
+        // A Triple Reward is "a 0-cost plain spell (not a Tavern spell)"
+        // (docs/rules/design.md "Triples"), and its cast counts as a spell
+        // cast for every "after you cast a spell" counter and trigger, though
+        // not for the Tavern-spell ones ("cast a spell" counts every spell).
+        // The game takes that cast only once the reward's Discover is
+        // answered: the play shows no counter moving and the pick shows the
+        // Felboar's counter and its consume both (`Hearthstone_2026_11_02_00_10_22`
+        // turn 8, Felboar [1, 3, 0, 0] at the play and [3, 3, 0, 0] with a
+        // Hired Mount eaten at the pick, and a Timecap'n Hooktail's
+        // Tavern-spell trigger never firing; same shape in
+        // `Hearthstone_2026_11_03_15_22_36-g3` turn 8, Hooktail on the board
+        // again). So both halves of the cast are owed to the pick. Whether
+        // Replica Cathedral's "first spell each turn" double covers a Triple
+        // Reward is not settled and no log shows it, so this cast leaves it
+        // unspent, as before.
         let reward = matches!(c.spell_effect, Some(SpellEffect::TripleReward));
         let took_all = self.cast_spell_inner(p, m, by_minion, repeats);
         if reward {
+            if !by_minion {
+                self.players[p].cast_after_choice = Some(CastAfterChoice {
+                    card: m.card,
+                    casts: 1,
+                    tavern: false,
+                    at_play: false,
+                    count_owed: false,
+                    after: AfterCastTriggers::default(),
+                });
+            }
             return took_all;
         }
         if by_minion {

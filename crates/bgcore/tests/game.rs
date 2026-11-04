@@ -602,6 +602,35 @@ fn a_discover_spells_cast_triggers_wait_for_the_pick() {
 }
 
 #[test]
+fn a_triple_rewards_cast_is_a_spell_cast_at_its_pick() {
+    // A Triple Reward is "a 0-cost plain spell (not a Tavern spell)"
+    // (docs/rules/design.md "Triples"), so its cast counts for "after you cast
+    // a spell" (Felboar) and not for the Tavern-spell cards, and the game
+    // takes it only once the reward's Discover is answered. Raw log
+    // Hearthstone_2026_11_02_00_10_22 turn 8: the reward is played with the
+    // Felboar's first number (what is left of "After you cast 3 spells") still
+    // at 1, and the pick moves it (0 then 3, a consume) and eats the Hired
+    // Mount 3/5 in the same block, the Felboar going 15/22 to 18/27.
+    // Hearthstone_2026_11_03_15_22_36 turn 8 is the same pick with a
+    // Timecap'n Hooktail on the board, whose Tavern-spell trigger never fires.
+    let mut g = game(146);
+    put_on_board(&mut g, 0, "Felboar");
+    set_shop(&mut g, 0, &["Hired Mount"]);
+    // Two spells already counted: the reward's cast is the third.
+    g.players[0].board[0].improvements = 2;
+    g.give(0, "Triple Reward").unwrap();
+    let hand = g.players[0].hand.len() - 1;
+    act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
+    assert!(!g.players[0].discover.is_empty(), "the reward's Discover is offered");
+    assert_eq!(g.players[0].board[0].improvements, 2, "the cast waits for the pick");
+    assert_eq!(g.players[0].shop.len(), 1, "nothing eaten yet");
+    act(&mut g, 0, Action::Choose(0));
+    assert_eq!(g.players[0].board[0].improvements, 0, "the reward's cast counted at the pick");
+    assert_eq!(g.players[0].shop.len(), 0, "and the Felboar eats once the cast has resolved");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_spell_siphon_gift_grows_after_the_pick_not_on_the_play() {
     // The Dark Gift Spell Siphon is "has +2/+2 for each Tavern spell you've
     // cast this game", and the game grows the minion once the spell has

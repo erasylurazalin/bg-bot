@@ -2567,6 +2567,51 @@ fn a_pick_that_ends_a_spell_carries_what_the_cast_still_owed() {
     assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
 }
 
+/// A Triple Reward's pick owes its whole cast: the reward's cast is a spell
+/// cast (docs/rules/design.md "Triples": a 0-cost plain spell, not a Tavern
+/// spell) and the game takes it once the Discover is answered, so the play
+/// step shows no counter moving and the pick step shows the Felboar's counter
+/// and its consume together (log `Hearthstone_2026_11_02_00_10_22-g4` turn 8:
+/// the reward played at Power.log 1128876, the Felboar's TRIGGER at 1129386 in
+/// the pick's own block, eating the Hired Mount 3/5 and going 15/22 to 18/27).
+#[test]
+fn a_triple_rewards_pick_carries_its_cast() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 8,
+       "start": {"board": [
+          {"id": 1, "card_id": "BG28_633", "name": "Felboar", "attack": 15, "health": 22,
+           "position": 1, "numbers": [1, 3, 0, 0]}],
+        "hand": [],
+        "tavern": [
+          {"id": 5, "card_id": "BG36_240", "name": "Hired Mount", "attack": 3, "health": 5,
+           "slot": 1}],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": [], "secrets": []},
+       "actions": [{"step": "discover", "kind": "triple_reward",
+          "source": {"id": 9, "card_id": "TB_BaconShop_Triples_01", "name": "Triple Reward",
+                     "numbers": [6, 0, 0, 0]},
+          "options": [
+            {"id": 7, "card_id": "BG36_207", "name": "Wolf Pup", "attack": 1, "health": 1},
+            {"id": 8, "card_id": "BG_ICC_026t", "name": "Skeleton", "attack": 1, "health": 1}],
+          "picked": {"id": 7, "card_id": "BG36_207", "name": "Wolf Pup", "attack": 1, "health": 1},
+          "after": {"board": [
+              {"id": 1, "card_id": "BG28_633", "name": "Felboar", "attack": 18, "health": 27,
+               "position": 1, "numbers": [3, 3, 0, 0]}],
+            "hand": [
+              {"id": 7, "card_id": "BG36_207", "name": "Wolf Pup", "index": 1, "attack": 1, "health": 1}],
+            "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": [], "secrets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("reward-cast.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+}
+
 /// Two states the comparison sees: a Tavern whose cards stand in another order,
 /// one card frozen on one side only, and the same card in the wrong hand place.
 fn tavern_snap(cards: &[(&str, i32, i32, bool, bool)]) -> ShopSnapshot {

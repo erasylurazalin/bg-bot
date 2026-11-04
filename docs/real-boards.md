@@ -802,7 +802,10 @@ of a random step is run, since any of them may be the log's.
     seats it back from the step's `source` card, for a pick that ends a spell
     the player cast (`shop_replay::seat_cast_after_pick`: the "after you cast a
     spell" triggers and the Spell Siphon Dark Gift count, log
-    `10_24_17_59_26-g1` turn 10 step 43 to 44) and for a Discover a Battlecry
+    `10_24_17_59_26-g1` turn 10 step 43 to 44; a Triple Reward's pick, whose
+    `step.kind` is `triple_reward`, carries its whole cast, the "whenever"
+    half too, because the game takes a reward's cast only at the pick, log
+    `11_02_00_10_22-g4` turn 8 step 3 to 4) and for a Discover a Battlecry
     opened (`owe_battlecry_count`, "for each Battlecry" counting at the pick)
     and for the Gold an Activate spent (`seat_gold_spent_at_pick`: it seats
     `Player.pending_gold_spent` and the watchers' counts as the Activate found
