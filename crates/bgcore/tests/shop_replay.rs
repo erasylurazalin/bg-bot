@@ -3853,3 +3853,84 @@ fn a_pick_that_ends_an_activate_carries_the_gold_it_spent() {
     );
     assert_eq!(r.ours.hand.len(), 2, "the spell and the Bounty");
 }
+
+/// Tomb Turning's pick dies the moment it is played in the turn it was picked
+/// (docs/rules/design.md "Tomb Turning"). The game marks the picked card with an
+/// `IMMOLATING` tag while it sits in the hand (raw log
+/// `Hearthstone_2026_10_27_04_30_04` line 152848, cleared as it reaches the
+/// graveyard at 04:47:20), and no logged state carries that tag: the loader read
+/// the card as a normal minion and kept it on the board
+/// (`10_24_15_25_26-g6` turn 12 steps 29 and 33, `10_27_04_30_04-g1` turn 10
+/// step 21). The turn's own pick is what says it: a `discover` step whose
+/// `source` is the Tomb Turning cast and whose `picked` is this card.
+#[test]
+fn a_tomb_turning_pick_dies_as_it_is_played() {
+    let option = |id: u64, card: &str, name: &str, a: i32, h: i32| {
+        format!(
+            r#"{{"id": {id}, "card_id": "{card}", "name": "{name}", "attack": {a},
+                "health": {h}, "golden": false, "keywords": [], "kind": "minion"}}"#
+        )
+    };
+    let options = [
+        option(71, "XRR", "Risen Rider", 2, 1),
+        option(72, "XSS", "Scarlet Skull", 2, 1),
+        option(73, "XCC", "Cadaver Caretaker", 2, 4),
+    ]
+    .join(",");
+    let picked = option(71, "XRR", "Risen Rider", 2, 1);
+    let state = |hand: &str| {
+        format!(
+            r#"{{"board": [], "hand": [{hand}], "tavern": [
+              {{"id": 700, "slot": 1, "card_id": "BG20_101", "name": "Roadboar",
+                "attack": 2, "health": 4, "kind": "minion", "frozen": false}}],
+              "hand_hidden": 0, "gold": 10, "tier": 4, "upgrade_cost": 8,
+              "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+              "hero_powers": [], "trinkets": [], "secrets": []}}"#
+        )
+    };
+    let spell = r#"{"id": 70, "index": 1, "card_id": "XTT", "name": "Tomb Turning",
+                   "attack": 0, "health": 0, "golden": false, "keywords": [],
+                   "kind": "spell"}"#;
+    let rider = r#"{"id": 71, "index": 1, "card_id": "XRR", "name": "Risen Rider",
+                   "attack": 2, "health": 1, "golden": false, "keywords": [],
+                   "kind": "minion"}"#;
+    let text = format!(
+        r#"{{"source": "tomb", "game": 1, "turns": [
+        {{"turn": 10, "start": {},
+          "actions": [
+            {{"step": "play", "paid": {{"gold": 0, "health": 0}},
+              "card": {{"id": 70, "card_id": "XTT", "name": "Tomb Turning"}},
+              "moved": {{"id": 70, "from": {{"where": "hand", "index": 1}}, "to": null}},
+              "after": {}}},
+            {{"step": "discover", "kind": "discover",
+              "source": {{"id": 70, "card_id": "XTT", "name": "Tomb Turning"}},
+              "options": [{options}], "picked": {picked},
+              "moved": {{"id": 71, "from": {{"where": "offer"}},
+                        "to": {{"where": "hand", "index": 1}}}},
+              "after": {}}},
+            {{"step": "play", "paid": {{"gold": 0, "health": 0}},
+              "index": 1,
+              "card": {{"id": 71, "card_id": "XRR", "name": "Risen Rider", "attack": 2,
+                        "health": 1, "golden": false}},
+              "moved": {{"id": 71, "from": {{"where": "hand", "index": 1}}, "to": null}},
+              "after": {}}}],
+          "end": null}}]}}"#,
+        state(spell),
+        state(""),
+        state(rider),
+        state(""),
+    );
+    let files = parse_action_files(&[("tomb.json".to_string(), text.clone())])
+        .unwrap_or_else(|e| panic!("{e}\n{text}"));
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        2,
+        &ReplayOptions { seeds: 4, seed: 1 },
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    assert!(r.ours.board.is_empty(), "the pick dies as it is played: {:?}", r.ours.board);
+}

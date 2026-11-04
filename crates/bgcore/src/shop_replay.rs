@@ -1374,6 +1374,79 @@ fn seat_elementals_played_turn(
     pl.elementals_played_turn = played;
 }
 
+/// Whether a place names the same card as another: by the game's entity id when
+/// the file writes one for both (it keeps one for the whole turn), otherwise by
+/// the card id or the name.
+fn same_card(a: &ShopPlace, b: &ShopPlace) -> bool {
+    if a.id != 0 && b.id != 0 {
+        return a.id == b.id;
+    }
+    if let (Some(x), Some(y)) = (a.card_id.as_deref(), b.card_id.as_deref()) {
+        return x == y;
+    }
+    a.name.is_some() && a.name == b.name
+}
+
+/// Whether a place is a Tomb Turning card: the Tavern spell "Discover an Undead.
+/// It dies if you play it this turn".
+fn is_tomb_turning(data: &Data, ids: &CardIdMap, place: &ShopPlace) -> bool {
+    resolve_card(data, ids, place).is_some_and(|c| {
+        matches!(data.cards.get(c).spell_effect, Some(crate::cards::SpellEffect::TombTurning))
+    })
+}
+
+/// The hand card this step plays was picked from a Tomb Turning cast earlier in
+/// the same turn, so it carries the game's "dies if you play it this turn": the
+/// engine's `Minion.doomed`, which `Game::resolve_doomed` takes off the board
+/// right after the play (docs/rules/design.md "Tomb Turning").
+///
+/// No logged state carries the mark: the game writes it as the `IMMOLATING` tag
+/// on the picked card, and the loader does not read the game's tags. The file's
+/// own history says it, though: the pick comes as a `discover` step whose
+/// `source` is the Tomb Turning cast (or a Magicfin token that cast it) and
+/// whose `picked` is this card (the play is the step right behind it:
+/// `10_24_15_25_26-g6` turn 12 steps 29 and 33, `10_27_04_30_04-g1` turn 10 step
+/// 21), or, for a collector that writes the pick as a card that entered, an
+/// `entered` entry `from` the Tomb Turning card itself. A card picked in an
+/// earlier turn was a normal minion by then, `finish_shop` having cleared the
+/// mark in hand at the end of its own turn.
+fn seat_tomb_turning_pick(
+    data: &Data,
+    ids: &CardIdMap,
+    loaded: &mut LoadedShop,
+    file: &ShopFileSpec,
+    turn: usize,
+    index: usize,
+) {
+    let Some(turn_spec) = file.turns.get(turn) else { return };
+    let Some(step) = turn_spec.actions.get(index) else { return };
+    if step.step != "play" {
+        return;
+    }
+    let Some(card) = step.card.as_ref() else { return };
+    let mut doomed = false;
+    for a in turn_spec.actions.iter().take(index) {
+        if a.step == "discover"
+            && a.source.as_ref().is_some_and(|s| is_tomb_turning(data, ids, s))
+            && a.picked.as_ref().is_some_and(|p| same_card(p, card))
+        {
+            doomed = true;
+        }
+        if a.entered.iter().any(|e| {
+            e.from.as_ref().is_some_and(|f| is_tomb_turning(data, ids, f)) && same_card(e, card)
+        }) {
+            doomed = true;
+        }
+    }
+    if !doomed {
+        return;
+    }
+    let Some(at) = zone_index(&loaded.hand_ids, card.id, step.index) else { return };
+    if let Some(m) = loaded.game.players[ME].hand.get_mut(at as usize) {
+        m.doomed = true;
+    }
+}
+
 fn seat_queued_start_of_turn(
     data: &Data,
     pl: &mut Player,
@@ -3927,6 +4000,10 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     // carries it, and the turn's own earlier steps do (Conflagration's
     // "improved by each Elemental you played this turn").
     seat_elementals_played_turn(data, ids, &mut loaded.game.players[ME], file, turn_index, index);
+    // A hand card the turn picked from a Tomb Turning dies as it is played
+    // (`Minion.doomed`): no state carries the mark, and the turn's own pick
+    // says which card has it.
+    seat_tomb_turning_pick(data, ids, &mut loaded, file, turn_index, index);
     // What the play behind this pick still owed it, and no state carries: the
     // played minion's "after you play an X" triggers (an Imposing
     // Percussionist's Wrath Weavers) and a Turbo Hogrider's Gems for a Choose
