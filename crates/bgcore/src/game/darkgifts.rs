@@ -566,12 +566,8 @@ impl Game {
                 let copy = self.players[p].make_card(&self.data.cards, m.card, false, 0);
                 let card = copy.card;
                 let joined = self.add_to_hand(p, copy);
-                let cards = &self.data.cards;
-                if joined && !cards.get(card).is_spell() && !cards.get(card).no_triple {
-                    let wait = &mut self.players[p].triples_next_turn;
-                    if !wait.contains(&card) {
-                        let _ = wait.try_push(card);
-                    }
+                if joined {
+                    self.defer_triple(p, card);
                 }
             }
             CountdownEffect::RandomMinionOfType => {

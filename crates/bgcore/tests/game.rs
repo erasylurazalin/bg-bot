@@ -1182,3 +1182,114 @@ fn legal_mask_matches_is_legal_everywhere() {
         }
     }
 }
+
+/// Fight player 0's board against one wall, with the player's own counters, so
+/// a fight's grants and what it carries home are the ones a real combat makes.
+fn fight_wall(g: &Game, seed: u64, attack: i32, health: i32) -> bgcore::fight::Outcome {
+    let board = g.players[0].board.clone();
+    let db = &g.data.cards;
+    let mut wall = db.make(db.by_name("Lullabot").unwrap(), false);
+    wall.attack = attack;
+    wall.health = health;
+    bgcore::fight_with(
+        db,
+        &board,
+        &[wall],
+        [g.players[0].counters(&g.data, g.lobby), Default::default()],
+        500,
+        &mut Rng::new(seed),
+        &mut (),
+    )
+}
+
+/// Headhunter Gryphon's Rally gets a Buzzing Vermin in a fight while two
+/// plain copies stand on the board: nothing triples during a fight, so the
+/// three merge at the start of the next turn and the golden lands in the hand
+/// then, with the copies' stats (docs/rules/design.md "Nothing triples during
+/// combat", THE GOLDEN RULE).
+#[test]
+fn a_beast_a_fight_grants_triples_at_the_start_of_the_next_turn() {
+    let mut g = game(109);
+    // One plain copy in hand, two on the board, each buffed so the golden
+    // shows which copies went into it.
+    let held = take(&mut g, "Buzzing Vermin");
+    g.players[0].hand.push(held);
+    put_on_board(&mut g, 0, "Headhunter Gryphon");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    g.players[0].board[1].attack = 2;
+    g.players[0].board[1].health = 3;
+    g.players[0].board[2].attack = 2;
+    g.players[0].board[2].health = 3;
+    let out = fight_wall(&g, 7, 3, 4);
+    let vermin = g.data.cards.by_name("Buzzing Vermin").unwrap();
+    assert_eq!(out.sides[0].cards_gained(), &[vermin], "the Rally got one Beast");
+    g.apply_side_outcome(0, &out.sides[0], true);
+    // The fight is over and the fourth copy waits: no golden yet.
+    assert_eq!(g.players[0].hand.len(), 2, "the one in hand and the one the Rally gave");
+    assert!(g.players[0].hand.iter().all(|m| m.card == vermin && !m.golden), "nothing triples in combat");
+    assert_eq!(g.players[0].board.len(), 3, "both copies still on the board");
+    g.check_invariants().unwrap();
+    // The next turn's start runs the check the fight could not: three copies
+    // merge into a golden in hand and one plain Vermin is left on the board.
+    g.dark_gift_start_of_turn(0);
+    assert_eq!(g.players[0].hand.len(), 1);
+    let gold = g.players[0].hand[0];
+    assert_eq!(gold.card, vermin);
+    assert!(gold.golden, "the golden Vermin is in the hand");
+    assert_eq!((gold.attack, gold.health), (3, 4), "double 1/1 plus the board copy's +1/+2");
+    let plain: Vec<(i32, i32)> = g.players[0]
+        .board
+        .iter()
+        .filter(|m| m.card == vermin)
+        .map(|m| (m.attack, m.health))
+        .collect();
+    assert_eq!(plain, vec![(2, 3)], "one plain copy left, and it keeps its buffs");
+    g.check_invariants().unwrap();
+}
+
+/// The other way a fight fills the hand: a trinket whose counter the fight
+/// feeds (Stormcoil Sticker, after six friendly Mech deaths) gets a Mech. It
+/// waits to triple like the Rally's Beast does.
+#[test]
+fn a_mech_a_trinket_gets_after_a_fight_triples_at_the_start_of_the_next_turn() {
+    let mut g = game(110);
+    let sticker = g.data.trinkets.by_name("Stormcoil Sticker").unwrap();
+    g.set_trinket(0, 0, Some(sticker));
+    // Six Mechs of a card the counter cannot give (tier 2), at 1 Health.
+    for _ in 0..6 {
+        put_on_board(&mut g, 0, "Mechagnome Interpreter");
+        let last = g.players[0].board.len() - 1;
+        g.players[0].board[last].attack = 0;
+        g.players[0].board[last].health = 1;
+    }
+    // Two plain copies of each Tier 1 Mech the trinket can give: whichever one
+    // arrives, its third copy is what waits.
+    for name in ["Cord Puller", "Lullabot"] {
+        for _ in 0..2 {
+            let m = take(&mut g, name);
+            g.players[0].hand.push(m);
+        }
+    }
+    let out = fight_wall(&g, 1, 100, 500);
+    assert_eq!(out.sides[0].friendly_deaths, 6, "all six died");
+    g.apply_side_outcome(0, &out.sides[0], true);
+    assert_eq!(g.players[0].trinkets[0].count, 0, "the counter fired at six");
+    assert_eq!(g.players[0].hand.len(), 5, "the Mech the trinket gave");
+    assert!(g.players[0].hand.iter().all(|m| !m.golden), "no golden during the fight");
+    let gained = g.players[0].hand[4].card;
+    assert!(g.data.cards.get(gained).tribes.has(Tribe::Mech), "a Mech");
+    g.check_invariants().unwrap();
+    // The next turn's start merges the three copies of the Mech that arrived.
+    g.dark_gift_start_of_turn(0);
+    let golden: Vec<Minion> = g.players[0].hand.iter().copied().filter(|m| m.golden).collect();
+    assert_eq!(golden.len(), 1, "one golden, in the hand");
+    assert_eq!(golden[0].card, gained);
+    let base = g.data.cards.make(gained, false);
+    assert_eq!(
+        (golden[0].attack, golden[0].health),
+        (2 * base.attack, 2 * base.health),
+        "double the printed stats, no buffs on any copy"
+    );
+    g.check_invariants().unwrap();
+}

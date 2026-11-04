@@ -668,6 +668,15 @@ Triple Reward spell.
 - **Spells counted twice.** `apply_target` fires one extra `SpellsCast` event for
   every extra Balinda cast on a friendly minion (Proud Privateer's extra Bounty
   casts were already counted in `cast_spell`).
+- **Triples wait for the shop phase.** Nothing triples during a fight
+  (docs/rules/design.md "Nothing triples during combat"). `Game.defer_triples`
+  is set while `apply_side_outcome` applies a fight's carry-over, so a
+  minion card a fight gives the hand then (a Rally's Beast, a Deathrattle's
+  card, a trinket's "after N deaths / summons" counter, MechGyver) is
+  recorded on `Player.triples_next_turn` (`defer_triple`, from `add_to_hand`)
+  instead of running `check_triple`; `dark_gift_start_of_turn` runs those
+  checks as the next turn starts. A new fight-side source of cards gets this
+  for free as long as it hands the card over through `add_to_hand`.
 - **Fights.** Wildfire's splash is in `attack_swings` (`Card.overkill`);
   `Effect::BuffOthersPerImprovement` reads the host's `improvements`
   (Ultraviolet Ascendant).

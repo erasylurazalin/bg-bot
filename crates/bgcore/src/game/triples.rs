@@ -64,9 +64,33 @@ impl Game {
         self.check_triple_tracking(p, card, &mut dummy);
     }
 
+    /// Nothing triples during the fights (`docs/rules/design.md` "Nothing
+    /// triples during combat"): a minion card that arrives in the hand then
+    /// (a Rally's Beast, a Deathrattle's card, a trinket's or a hero power's,
+    /// Replication's copy at the end of the turn) is recorded here, and
+    /// `dark_gift_start_of_turn` runs its triple check as the next turn
+    /// starts, so the merge waits for the shop phase.
+    pub(super) fn defer_triple(&mut self, p: usize, card: CardId) {
+        let cards = &self.data.cards;
+        if cards.get(card).is_spell() || cards.get(card).no_triple {
+            return;
+        }
+        let wait = &mut self.players[p].triples_next_turn;
+        if !wait.contains(&card) {
+            let _ = wait.try_push(card);
+        }
+    }
+
     pub(super) fn check_triple_tracking(&mut self, p: usize, card: CardId, tracked_pos: &mut usize) {
         let cards = &self.data.cards;
         if cards.get(card).is_spell() || cards.get(card).no_triple {
+            return;
+        }
+        // A third copy can only merge in the shop phase: a check asked for
+        // while a fight's carry-over is applied waits for the start of the
+        // next turn instead.
+        if self.defer_triples {
+            self.defer_triple(p, card);
             return;
         }
         let pl = &self.players[p];
