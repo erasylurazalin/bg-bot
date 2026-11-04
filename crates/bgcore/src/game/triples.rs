@@ -199,12 +199,17 @@ impl Game {
         // Caretaker into a hand of nine).
         //
         // The copies come out of the hand first (`take_from`) and the rest off
-        // the board. A copy off the board moves every minion behind it, which
-        // may be the slot a Choose One or a step's target still points at, so
-        // a full hand only takes the Golden card when the hand alone holds
-        // every copy, and a choice left open holds the board's copies where
-        // they stand: the game's own check runs as the action ends and the
-        // choice is answered first.
+        // the board. A full hand still takes a board copy: the merge is one
+        // action that takes all three copies and puts the Golden one in the
+        // hand, so the slots it frees are free before the Golden card needs
+        // one (log 2026_10_24_04_08_00-g1 turn 10 step 25: nine cards in hand,
+        // one copy in hand, one on the board, and the bought third one makes
+        // the hand ten; the log's Golden The Shadow of Doubt 21/169 is in the
+        // hand and the board copy is gone). A copy off the board moves every
+        // minion behind it, which may be the slot a Choose One or a step's
+        // target still points at, so a choice left open holds the board's
+        // copies where they stand: the game's own check runs as the action
+        // ends and the choice is answered first.
         let (freed, from_board) = {
             let pl = &self.players[p];
             let in_hand = |id: CardId, n: usize, same: bool| {
@@ -219,9 +224,7 @@ impl Game {
             let need = x_count + wild.map_or(0, |(_, n)| n);
             (x + w, need - x - w)
         };
-        if from_board > 0
-            && (self.players[p].hand.is_full() || Self::other_choice_open(&self.players[p]))
-        {
+        if from_board > 0 && Self::other_choice_open(&self.players[p]) {
             return;
         }
         if self.players[p].hand.len() + 1 > crate::HAND + freed {
@@ -256,7 +259,15 @@ impl Game {
                     (0, 0)
                 };
                 gold.attack += m.attack - bonus.0 - base.attack;
-                gold.health += m.health - bonus.1 - base.health;
+                // A copy's damage never comes off the Golden one: the game
+                // sums the copies into the Golden card and heals it, so what a
+                // copy has left of its Health below the card's own is damage,
+                // not a buff (log 2026_10_24_00_56_06-g1 turn 8 step 21: the
+                // merged Plaguerunner 7051 takes ATK 25 and DAMAGE 1, then
+                // DAMAGE 0, so a board copy at 21/1 gives a 25/4 Golden one,
+                // not 25/3). The engine keeps no damage, so a buffed copy that
+                // was also damaged loses the damage's worth of its buff.
+                gold.health += (m.health - bonus.1 - base.health).max(0);
                 gold.hats = gold.hats.saturating_add(m.hats);
                 gold.winners_bread = gold.winners_bread.saturating_add(m.winners_bread);
                 // A "gain +X/+X at the end of your turn" a Prize gave the

@@ -135,6 +135,65 @@ fn a_triple_forms_in_a_full_hand() {
     assert_eq!(g.players[0].hand.len(), 8);
 }
 
+/// A full hand still takes the third copy off the board: the merge is one
+/// action that takes all three copies and puts the Golden one in the hand, so
+/// the slots it frees are free before the Golden card needs one (log
+/// 2026_10_24_04_08_00-g1 turn 10 step 25: nine cards in hand, one copy in
+/// hand and one on the board, the bought third one makes the hand ten, and
+/// the log ends with the Golden The Shadow of Doubt 21/169 in the hand and
+/// the board copy gone).
+#[test]
+fn a_full_hand_takes_the_board_copy_the_merge_makes_room_for() {
+    let mut g = sandbox(7);
+    in_hand(&mut g, "Mummifier");
+    for _ in 0..8 {
+        in_hand(&mut g, "Butchering");
+    }
+    on_board(&mut g, "Mummifier");
+    assert_eq!(g.players[0].hand.len(), 9);
+    let bought = card(&mut g, "Mummifier");
+    let slot = g.players[0].shop.len() as u8;
+    g.players[0].shop.push(bought);
+    g.step(Action::Buy(slot)).unwrap();
+    while answer(&mut g) {}
+    assert_eq!(board_names(&g), Vec::<String>::new(), "the board copy went into the Golden one");
+    assert!(
+        g.players[0].hand.iter().filter(|m| m.golden).count() == 1,
+        "the three Mummifiers made one Golden one in the hand: {:?}",
+        hand_names(&g)
+    );
+    assert_eq!(g.players[0].hand.len(), 9, "ten cards, two copies in, one Golden out");
+}
+
+/// A copy's damage never comes off the Golden card's Health: the game sums the
+/// copies and then heals the Golden one, so what a copy has left below its
+/// card's own Health is damage, not a buff (log 2026_10_24_00_56_06-g1 turn 8
+/// step 21: the merged Plaguerunner 7051 takes ATK 25 and DAMAGE 1, then
+/// DAMAGE 0, so a board copy at 21/1 gives a 25/4 Golden one and not a 25/3).
+#[test]
+fn a_damaged_copy_keeps_its_damage_off_the_golden_card() {
+    let mut g = sandbox(8);
+    in_hand(&mut g, "Suspicious Prisonguard");
+    on_board(&mut g, "Suspicious Prisonguard");
+    // 3/3 with two damage, as a board copy can carry it.
+    g.players[0].board[0].health = 1;
+    let bought = card(&mut g, "Suspicious Prisonguard");
+    let slot = g.players[0].shop.len() as u8;
+    g.players[0].shop.push(bought);
+    g.step(Action::Buy(slot)).unwrap();
+    while answer(&mut g) {}
+    let gold = g.players[0]
+        .hand
+        .iter()
+        .find(|m| m.golden)
+        .expect("the three Prisonguards make a Golden one");
+    assert_eq!(
+        (gold.attack, gold.health),
+        (6, 6),
+        "a Prisonguard is 3/3, double that is 6/6, and the damage is gone"
+    );
+}
+
 /// A Tavern spell paid in Health lands after the card its damage gives:
 /// Eredar Escapist's two Corrupted Cupcakes take the lower hand slot (log
 /// 2026_10_24_15_25_26-g4 turn 11 step 10).

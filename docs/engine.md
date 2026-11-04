@@ -156,9 +156,18 @@ rules behind each are in docs/rules/design.md Part 2.
   after it (log 2026_10_30_19_45_15-g2 turn 5 step 4), and three Skeletons
   stay on the board until the Discover that is still open is answered (log
   2026_10_24_15_25_26-g6 turn 8 steps 14 to 16). A triple whose copies are all
-  in a full hand still merges, since those copies free their slots first, but
-  copies it would take off the board wait for a full hand to make room and for
-  a choice to close: a Choose One's minion may be one of them.
+  in a full hand still merges, since those copies free their slots first, and
+  so does one that has to take a copy off the board with ten cards in hand:
+  the merge is one action that takes all three copies and puts the Golden one
+  in the hand, so the slots it frees are free before the Golden card needs one
+  (log 2026_10_24_04_08_00-g1 turn 10 step 25). A copy an open choice still
+  points at holds its place: a Choose One left open keeps the board's copies
+  where they stand. The Golden card's stats are its golden card's printed ones
+  plus each copy's buffs; a copy's damage is not one of them, since the game
+  sums the copies and then heals the Golden one (log
+  `2026_10_24_00_56_06-g1` turn 8 step 21: the merged Plaguerunner takes ATK 25
+  and DAMAGE 1, then DAMAGE 0). `Minion` keeps no damage, so a copy's Health
+  below its card's printed stats reads as no buff.
 - **A Health price comes before the card.** A Tavern spell bought for Health
   pays before it joins the hand, so a card the damage triggers gains gets the
   lower hand slot (Eredar Escapist's two Corrupted Cupcakes, log
