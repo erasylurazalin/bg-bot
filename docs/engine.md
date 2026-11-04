@@ -160,11 +160,28 @@ rules behind each are in docs/rules/design.md Part 2.
   so does one that has to take a copy off the board with ten cards in hand:
   the merge is one action that takes all three copies and puts the Golden one
   in the hand, so the slots it frees are free before the Golden card needs one
-  (log 2026_10_24_04_08_00-g1 turn 10 step 25). A copy an open choice still
-  points at holds its place: a Choose One left open keeps the board's copies
-  where they stand. The Golden card's stats are its golden card's printed ones
-  plus each copy's buffs; a copy's damage is not one of them, since the game
-  sums the copies and then heals the Golden one (log
+  (log 2026_10_24_04_08_00-g1 turn 10 step 25). Three copies all on the board
+  are the exception: they need a slot for the Golden card that they do not
+  free themselves, so with ten cards in hand the check puts the card on
+  `Player.triples_waiting` and `Game::retry_waiting_triples` (the last thing
+  `run_pending_triple_checks` does, so a card an action gained keeps its hand
+  slot first) asks again as every later action ends: the merge happens as soon
+  as an action takes a card out of the hand (`docs/rules/design.md` "A full
+  hand"; Era, 2026-11-04). Only a refused card is asked again, never the whole
+  hand and board: the game's own check is queued by what happens, and a state
+  that holds three copies the game has not merged yet stays that way until the
+  next step that asks (log 2026_10_24_15_25_26-g6 turn 8 step 15, the Discover
+  answered, leaves the Skeletons where they are; step 16 merges them). The one
+  place that sweeps is the start of a turn: a fight leaves its survivors
+  without any check of their own, so `Game::check_triples_at_turn_start` (from
+  `dark_gift_start_of_turn`, after the cards a fight handed over got their
+  check) asks once about every card in the hand and on the board that has its
+  copies, merging them if the hand has room and putting them on
+  `Player.triples_waiting` if it does not. A copy an open choice still points
+  at holds its place: a Choose One left open keeps the board's copies where
+  they stand. The Golden card's stats are its
+  golden card's printed ones plus each copy's buffs; a copy's damage is not
+  one of them, since the game sums the copies and then heals the Golden one (log
   `2026_10_24_00_56_06-g1` turn 8 step 21: the merged Plaguerunner takes ATK 25
   and DAMAGE 1, then DAMAGE 0). `Minion` keeps no damage, so a copy's Health
   below its card's printed stats reads as no buff.

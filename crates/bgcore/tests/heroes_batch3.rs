@@ -592,8 +592,10 @@ fn embrace_your_rage_summons_a_minion_of_your_tier_and_adds_it_to_hand() {
 
     // A full board still gets the card and summons nothing new.
     clear_board(&mut g, 0);
-    set_board(&mut g, 0, &["Microbot", "Microbot", "Microbot", "Microbot", "Microbot",
-                            "Microbot", "Microbot"]);
+    // Seven different minions: three plain copies of one card merge at the
+    // turn's start, which would empty the full board this checks.
+    set_board(&mut g, 0, &["Buzzing Vermin", "Flittering Bat", "Forest Rover", "Humming Bird",
+                            "Lullabot", "Mechagnome Interpreter", "Glambot"]);
     for m in &mut g.players[0].board {
         m.attack = 0;
         m.health = 400;

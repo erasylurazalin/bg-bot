@@ -742,6 +742,10 @@ impl Game {
         {
             self.check_triple(p, card);
         }
+        // A triple one of the checks above refused for want of a hand slot
+        // (three copies all on the board with a full hand) waits for one to
+        // open, and this is the check that takes it (Era, 2026-11-04).
+        self.retry_waiting_triples(p);
     }
 
     /// After an action: Fodders that waited in the Tavern because there was

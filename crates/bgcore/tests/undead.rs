@@ -1051,8 +1051,9 @@ fn lichling_hoarder_gets_a_plain_copy_of_a_minion_that_started_on_the_board() {
     }
     // The hand is full: it is lost.
     let mut g = game(210);
+    // Spells: ten copies of one minion merge at a turn's start.
     for _ in 0..10 {
-        g.give(0, "Skeleton").unwrap();
+        g.give(0, "Butchering").unwrap();
     }
     let mut hoarder = mk(&db, "Lichling Hoarder", false);
     hoarder.attack = 0;
@@ -1083,9 +1084,11 @@ fn drustfallen_butcher_gets_a_butchering_after_the_fight() {
     let mut butcher = mk(&db, "Drustfallen Butcher", false);
     butcher.attack = 0;
     butcher.health = 2000;
+    // Four different fodders: three plain copies of one card merge at the
+    // turn's start, before the fight that needs the four deaths.
     let mut board = vec![butcher];
-    for _ in 0..4 {
-        board.push(fodder(&db));
+    for i in 0..4 {
+        board.push(fodder_n(&db, i));
     }
     fight_with_boards(&mut g, board);
     assert_eq!(g.players[0].hand.len(), 1);
@@ -1107,14 +1110,14 @@ fn drustfallen_butcher_gets_a_butchering_after_the_fight() {
     // a full hand loses it
     let mut g = game(221);
     for _ in 0..10 {
-        g.give(0, "Skeleton").unwrap();
+        g.give(0, "Butchering").unwrap();
     }
     let mut butcher = mk(&db, "Drustfallen Butcher", false);
     butcher.attack = 0;
     butcher.health = 2000;
     let mut board = vec![butcher];
-    for _ in 0..4 {
-        board.push(fodder(&db));
+    for i in 0..4 {
+        board.push(fodder_n(&db, i));
     }
     fight_with_boards(&mut g, board);
     assert_eq!(g.players[0].hand.len(), 10);
@@ -1135,14 +1138,12 @@ fn eternal_knights_count_every_death_wherever_they_are() {
     assert_eq!(out.sides[0].knight_deaths, 1);
 
     // In the game: the count goes up after a fight (a death in the fight),
-    // and a Knight on the board, in the hand and in the Tavern grows; the
-    // golden one grows by +8/+4.
+    // and a Knight in the hand grows; the golden one grows by +8/+4. One plain
+    // Knight on the board (it dies in the fight) and one in the hand: a third
+    // plain copy would merge at the turn's start.
     let mut g = game(230);
     put_on_board(&mut g, 0, "Eternal Knight", false);
     g.players[0].board[0].health = 1;
-    put_on_board(&mut g, 0, "Eternal Knight", false);
-    g.players[0].board[1].keywords.set(Keywords::TAUNT);
-    g.players[0].board[1].health = 5000;
     put_in_hand(&mut g, 0, "Eternal Knight", false);
     put_in_hand(&mut g, 0, "Eternal Knight", true);
     let Some(bgcore::Opponent::Player(q)) = g.players[0].opponent else { panic!() };

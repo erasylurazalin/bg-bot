@@ -64,6 +64,97 @@ impl Game {
         self.check_triple_tracking(p, card, &mut dummy);
     }
 
+    /// A triple refused for want of a hand slot waits here instead of being
+    /// lost, and the next action's own check merges it as soon as an action
+    /// opens a slot (Era, 2026-11-04; `docs/rules/design.md` "A full hand").
+    /// Only a card refused this way is remembered: the game's checks are
+    /// queued by what happens (a summon, a gain), not run over the whole hand
+    /// and board at every action, so re-arming one here would merge cards the
+    /// game leaves alone (log 2026_10_24_15_25_26-g6 turn 8 step 15: three
+    /// Skeletons stay on the board after the Discover is answered, and step
+    /// 16, the second pick, is where the Golden one joins the hand).
+    fn wait_for_room(&mut self, p: usize, card: CardId) {
+        let wait = &mut self.players[p].triples_waiting;
+        if !wait.contains(&card) {
+            let _ = wait.try_push(card);
+        }
+    }
+
+    /// The triples a full hand refused, asked again: a play, a spell cast,
+    /// anything that takes a card out of the hand leaves the slot the Golden
+    /// card needs, and this is the check that fills it. Cheap: only the cards
+    /// that asked, each one through the ordinary check (`check_board_triples`
+    /// and the cards an action gained run first, as they always did). A card
+    /// that still has no room, or has lost a copy since, stays out: nothing
+    /// re-adds it.
+    pub(super) fn retry_waiting_triples(&mut self, p: usize) {
+        if self.players[p].triples_waiting.is_empty() {
+            return;
+        }
+        // The list comes off the player first: a card that still has no room
+        // is put back by the check itself, and a list read in place would
+        // hand it out again for ever. An `ArrayVec` on the stack, no heap.
+        let mut waiting = std::mem::take(&mut self.players[p].triples_waiting);
+        while let Some(card) = (!waiting.is_empty()).then(|| waiting.remove(0)) {
+            self.check_triple(p, card);
+        }
+    }
+
+    /// The triples a turn's start owes: a fight can leave three plain copies
+    /// on the board, since nothing triples during the fights, and nothing asks
+    /// for their check afterwards, so the game's own check at the turn's start
+    /// is where they merge. With a full hand they wait for a slot instead
+    /// (`triples_waiting`; Era 2026-11-04: "the same goes for a triple held
+    /// from a fight", `docs/rules/design.md` "A full hand", night-note
+    /// question 19). One pass over the hand and the board, no allocation, and
+    /// it repeats while a merge still frees enough copies for a second one
+    /// (`check_board_triples` loops the same way). A state a log holds mid-turn
+    /// with three unmerged copies is not touched: this runs at the turn's
+    /// start, not at every action (log 2026_10_24_15_25_26-g6 turn 8 step 15
+    /// keeps its three Skeletons).
+    pub(super) fn check_triples_at_turn_start(&mut self, p: usize) {
+        loop {
+            let before = self.players[p].hand.len() + self.players[p].board.len();
+            // The copies a card needs: three, or two for Double Time and
+            // Designer Eyepatch (`check_triple_tracking` works it out again
+            // for the card it is given; this is only the loop's own filter).
+            let need =
+                if self.players[p].double_time.is_some() || self.players[p].tp.pirate_triple {
+                    2
+                } else {
+                    3
+                };
+            let mut cards: ArrayVec<CardId, { crate::HAND + crate::BOARD }> = ArrayVec::new();
+            // A stand-in (Elemental of Surprise) completes a card that is one
+            // or two copies short, so the number around lowers the bar for
+            // every other card.
+            let mut stand_ins = 0usize;
+            for m in self.players[p].hand.iter().chain(&self.players[p].board) {
+                if self.data.cards.get(m.card).triple_wildcard.is_some() {
+                    stand_ins = (stand_ins + 1).min(need);
+                }
+                if !cards.contains(&m.card) {
+                    let _ = cards.try_push(m.card);
+                }
+            }
+            let short = need.saturating_sub(stand_ins);
+            for card in cards {
+                let copies = self.players[p]
+                    .hand
+                    .iter()
+                    .chain(&self.players[p].board)
+                    .filter(|m| m.card == card && !m.golden)
+                    .count();
+                if copies >= short {
+                    self.check_triple(p, card);
+                }
+            }
+            if self.players[p].hand.len() + self.players[p].board.len() == before {
+                break;
+            }
+        }
+    }
+
     /// Nothing triples during the fights (`docs/rules/design.md` "Nothing
     /// triples during combat"): a minion card that arrives in the hand then
     /// (a Rally's Beast, a Deathrattle's card, a trinket's or a hero power's,
@@ -228,6 +319,9 @@ impl Game {
             return;
         }
         if self.players[p].hand.len() + 1 > crate::HAND + freed {
+            // The Golden card has no slot: the copies stay where they are and
+            // the merge waits for one to open (`retry_waiting_triples`).
+            self.wait_for_room(p, x_card);
             return;
         }
         let pl = &mut self.players[p];

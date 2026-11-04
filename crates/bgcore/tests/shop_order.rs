@@ -165,6 +165,80 @@ fn a_full_hand_takes_the_board_copy_the_merge_makes_room_for() {
     assert_eq!(g.players[0].hand.len(), 9, "ten cards, two copies in, one Golden out");
 }
 
+/// Three copies all on the board need a free hand slot for the Golden card:
+/// with a full hand they stay where they are, and the check as an action ends
+/// merges them once an action takes a card out of the hand (Era, 2026-11-04,
+/// docs/rules/design.md "A full hand"). A copy in hand would free the slot
+/// itself; a board copy does not.
+#[test]
+fn three_board_copies_wait_for_a_hand_slot() {
+    let mut g = sandbox(9);
+    for _ in 0..3 {
+        on_board(&mut g, "Mummifier");
+    }
+    for _ in 0..9 {
+        in_hand(&mut g, "Butchering");
+    }
+    in_hand(&mut g, "Deadly Spore");
+    g.players[0].gold = 10;
+    assert_eq!(g.players[0].hand.len(), 10);
+    // The summon that left the three copies asks for the check, and the full
+    // hand refuses it: the copies wait.
+    g.note_triples_due();
+    g.step(Action::Freeze).unwrap();
+    assert_eq!(
+        board_names(&g),
+        ["Mummifier", "Mummifier", "Mummifier"],
+        "the full hand holds the merge back"
+    );
+    assert!(g.players[0].hand.iter().all(|m| !m.golden));
+    // Playing the Spore frees the hand slot the Golden card needs, and the
+    // game's own check at the end of the action takes the three board copies.
+    g.step(Action::Play { hand: 9, pos: 3 }).unwrap();
+    assert_eq!(board_names(&g), ["Deadly Spore"], "the three board copies went into the merge");
+    assert_eq!(
+        g.players[0].hand.iter().filter(|m| m.golden).count(),
+        1,
+        "one Golden Mummifier in the hand: {:?}",
+        hand_names(&g)
+    );
+    assert_eq!(g.players[0].hand.len(), 10, "nine spells, the Golden one, the Spore is on the board");
+}
+
+/// The same for a triple a fight left on the board: nothing asked for its
+/// check during the fight, and the turn's start cannot merge it for want of a
+/// hand slot, so the copies must wait rather than stay apart for good
+/// (night-note question 19, Era 2026-11-04). A check refused at the start of
+/// the turn is asked again as each action ends.
+#[test]
+fn a_triple_held_from_a_fight_waits_for_a_hand_slot() {
+    let mut g = sandbox(10);
+    for _ in 0..3 {
+        on_board(&mut g, "Mummifier");
+    }
+    for _ in 0..9 {
+        in_hand(&mut g, "Butchering");
+    }
+    in_hand(&mut g, "Deadly Spore");
+    g.players[0].gold = 10;
+    g.dark_gift_start_of_turn(0);
+    assert_eq!(
+        board_names(&g),
+        ["Mummifier", "Mummifier", "Mummifier"],
+        "a full hand holds the merge back"
+    );
+    assert!(g.players[0].hand.iter().all(|m| !m.golden), "no Golden card has a slot yet");
+    // A hand slot opens, and the wait is over.
+    g.step(Action::Play { hand: 9, pos: 3 }).unwrap();
+    assert_eq!(board_names(&g), ["Deadly Spore"], "the three board copies went into the merge");
+    assert_eq!(
+        g.players[0].hand.iter().filter(|m| m.golden).count(),
+        1,
+        "one Golden Mummifier in the hand: {:?}",
+        hand_names(&g)
+    );
+}
+
 /// A copy's damage never comes off the Golden card's Health: the game sums the
 /// copies and then heals the Golden one, so what a copy has left below its
 /// card's own Health is damage, not a buff (log 2026_10_24_00_56_06-g1 turn 8

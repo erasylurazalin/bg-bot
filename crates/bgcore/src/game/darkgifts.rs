@@ -506,6 +506,11 @@ impl Game {
         while let Some(card) = self.players[p].triples_next_turn.pop() {
             self.check_triple(p, card);
         }
+        // A fight can leave three copies on the board with nothing to ask for
+        // their check: the turn's start asks, and a full hand makes them wait
+        // for a slot instead of leaving them apart for good (Era 2026-11-04,
+        // docs/rules/design.md "A full hand").
+        self.check_triples_at_turn_start(p);
         if self.data.gifts.is_empty() {
             return;
         }

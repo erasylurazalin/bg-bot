@@ -1822,11 +1822,12 @@ fn sandbox(seed: u64, lobby: &[Tribe]) -> Game {
     Game::new_sandbox(data(), seed, Some(tribes), 0)
 }
 
-/// Put `count` copies of a minion on player 0's board without pool copies
-/// (a sandbox fixture, cleared at the end of every turn), at 1 Health.
-fn fixture(g: &mut Game, p: usize, name: &str, count: usize) {
-    let c = id(g, name);
-    for _ in 0..count {
+/// Put these minions on player 0's board without pool copies (a sandbox
+/// fixture, cleared at the end of every turn), at 1 Health. Different cards:
+/// three plain copies of one card merge at a turn's start.
+fn fixture(g: &mut Game, p: usize, names: &[&str]) {
+    for &name in names {
+        let c = id(g, name);
         let mut m = g.data.cards.make(c, false);
         m.health = 1;
         g.players[p].board.push(m);
@@ -1851,16 +1852,17 @@ fn a_death_counter_takes_shop_and_fight_deaths_and_carries_across_fights() {
     // Bleeding Heart: after 8 friendly minions die, get a random Undead.
     let mut g = sandbox(31, &[Tribe::Undead, Tribe::Beast]);
     equip(&mut g, 0, 0, "Bleeding Heart");
-    // Three 1/1s on both sides: every fight kills all three of ours.
+    // Three 1-Health minions on both sides: every fight kills all three of
+    // ours (different cards, which the turn's start never merges).
     for _ in 0..2 {
         g.players[0].board.clear();
-        fixture(&mut g, 0, "Patient Scout", 3);
+        fixture(&mut g, 0, &["Patient Scout", "Ominous Seer", "Wrath Weaver"]);
         sandbox_turn(&mut g);
     }
     assert_eq!(g.players[0].trinkets[0].count, 6, "two fights of three deaths");
     assert_eq!(count_in_hand(&g, 0, Tribe::Undead), 0, "not eight yet");
     g.players[0].board.clear();
-    fixture(&mut g, 0, "Patient Scout", 3);
+    fixture(&mut g, 0, &["Patient Scout", "Ominous Seer", "Wrath Weaver"]);
     sandbox_turn(&mut g);
     assert_eq!(g.players[0].trinkets[0].count, 1, "nine deaths: fired at eight, one over");
     assert_eq!(count_in_hand(&g, 0, Tribe::Undead), 1, "a random Undead");
@@ -1882,10 +1884,21 @@ fn a_summon_counter_counts_the_beasts_a_fight_summons() {
     // Wildfeather Duster: after 6 Beasts are summoned, get a random Beast.
     let mut g = sandbox(32, &[Tribe::Beast, Tribe::Undead]);
     equip_id(&mut g, 0, 1, "BG35_MagicItem_700");
-    // Six 1/1 Beasts whose Deathrattles each summon a Beetle: six summons.
-    for _ in 0..6 {
-        put_on_board(&mut g, 0, "Buzzing Vermin");
-    }
+    // Six Beasts whose Deathrattles each summon a Beetle: six summons. Two
+    // copies of each of three cards, since three plain copies of one card
+    // merge at a turn's start.
+    fixture(
+        &mut g,
+        0,
+        &[
+            "Buzzing Vermin",
+            "Buzzing Vermin",
+            "Forest Rover",
+            "Forest Rover",
+            "Turquoise Skitterer",
+            "Turquoise Skitterer",
+        ],
+    );
     sandbox_turn(&mut g);
     assert_eq!(count_in_hand(&g, 0, Tribe::Beast), 1, "a random Beast after six summons");
 }
@@ -5440,9 +5453,10 @@ fn the_colorful_compass_keeps_the_type_it_read_at_the_pick() {
     let mut out = vec![0f32; bgcore::obs::OBS_SIZE];
     bgcore::obs::write(&g, 0, &mut out);
     assert_eq!(out[bgcore::obs::SCALAR_TRINKET_TRIBE], Tribe::Mech as usize as f32 + 1.0);
-    // Rebuilt into Demons, the compass still hands out Mechs.
-    for _ in 0..4 {
-        put_on_board(&mut g, 0, "Wrath Weaver");
+    // Rebuilt into Demons, the compass still hands out Mechs. Four different
+    // ones: three plain copies of one card merge at a turn's start.
+    for name in ["Wrath Weaver", "Ominous Seer", "Laboratory Assistant", "Mind Muck"] {
+        put_on_board(&mut g, 0, name);
     }
     next_turn(&mut g);
     assert_eq!(hand_tribe(&g, 0, Tribe::Mech), 2, "another Mech at the start of the turn");
@@ -5545,8 +5559,11 @@ fn a_full_hand_queues_the_start_of_turns_card_and_loses_the_rest() {
     // every turn, and with ten cards in hand it waits.
     let mut g = game(61);
     g.set_trinket(0, 0, Some(trinket(&g, "Sellemental Portrait")));
+    // One Skeleton to play, then spells: ten copies of one minion merge at a
+    // turn's start and the hand would no longer be full.
+    assert!(g.give(0, "Skeleton").is_some());
     while !g.players[0].hand.is_full() {
-        assert!(g.give(0, "Skeleton").is_some());
+        assert!(g.give(0, "Butchering").is_some());
     }
     to_turn(&mut g, 2);
     let queued: Vec<String> = g.players[0]
@@ -5571,7 +5588,7 @@ fn a_full_hand_queues_the_start_of_turns_card_and_loses_the_rest() {
     put_on_board(&mut g, 0, "Sky Admiral Rogers");
     g.players[0].board[0].improvements = 8;
     while !g.players[0].hand.is_full() {
-        assert!(g.give(0, "Skeleton").is_some());
+        assert!(g.give(0, "Butchering").is_some());
     }
     g.players[0].gold = 10;
     act(&mut g, 0, Action::Roll);
@@ -5586,7 +5603,7 @@ fn a_full_hand_queues_the_start_of_turns_card_and_loses_the_rest() {
     put_on_board(&mut g, 0, "Sky Admiral Rogers");
     g.players[0].board[0].improvements = 8;
     while g.players[0].hand.len() < 9 {
-        assert!(g.give(0, "Skeleton").is_some());
+        assert!(g.give(0, "Butchering").is_some());
     }
     g.players[0].gold = 10;
     act(&mut g, 0, Action::Roll);
@@ -5608,7 +5625,7 @@ fn a_full_hand_queues_the_start_of_turns_card_and_loses_the_rest() {
     assert!(!gained.is_empty(), "the fight's Blood Gems reach the hand");
     let mut full = one_roadboar();
     while !full.players[0].hand.is_full() {
-        assert!(full.give(0, "Skeleton").is_some());
+        assert!(full.give(0, "Butchering").is_some());
     }
     full.step(Action::EndTurn).unwrap();
     assert_eq!(full.players[0].hand.len(), 10, "a full hand loses the fight's cards");

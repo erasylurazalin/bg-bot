@@ -140,6 +140,7 @@ impl Player {
             hand_queue: ArrayVec::new(),
             hand_queue_on: false,
             triples_next_turn: ArrayVec::new(),
+            triples_waiting: ArrayVec::new(),
             board: ArrayVec::new(),
             pending_choose_one: None,
             cast_after_choice: None,
