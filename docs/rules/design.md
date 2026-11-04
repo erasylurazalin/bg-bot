@@ -648,6 +648,11 @@ summoned later). A 1/1 Skeleton with Reborn then comes back as a 12/4.
 - Lurking Lionfish: "choose a card in the Tavern" may pick a Tavern spell too.
 - Kelp Keeper: its Activate on a minion whose Battlecry Discovers gives a
   random card from that Discover's pool instead of opening the Discover.
+- **Read from the logs, Era agreed (2026-11-04).**
+  - A Refresh's Fodder queue puts at most seven Fodders into one Refresh.
+  - A Health price is paid before the bought spell joins the hand; a Gold
+    price after it (so a card the damage triggers comes first, and a
+    Gold-spent card comes after).
 - **Shop replay answers (Era, 2026-11-04).**
   - A Battlecry triggered at the end of the turn (Young Murk-Eye, Drakkari)
     on a Discover Battlecry gives a random card, the same as Kelp Keeper:
@@ -808,7 +813,10 @@ counter.
   always gets Divine Shield (Era, 2026-11-03).
 - **"After you play an X"** never counts the card being played, for every
   card (Ultraviolet Ascendant, Unbound Tempest, Wrath Weaver, Insatiable
-  Ur'zul, the Pirate and Demon cards).
+  Ur'zul, the Pirate and Demon cards). It fires once the played minion's
+  Battlecry, and whatever it asks (a Choose One, a target, a Discover), has
+  resolved; a Brann repeat resolves all its runs first (logs, 2026-11-04:
+  Wrath Weavers gain at an Imposing Percussionist's pick, not at the play).
 - **Stone Age Slab before Living Prison:** on the same buy, Slabs buff the
   minion first, then an armed Prison gains its stats (buffs included).
 - **Arcane Absorption** takes a random minion on a Health tie. Spell power
