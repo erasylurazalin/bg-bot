@@ -2555,6 +2555,35 @@ fn transcribing_typewriter_copies_the_next_two_minions_bought() {
 }
 
 #[test]
+fn transcribing_typewriters_copy_joins_after_the_buys_triple() {
+    // Log `Hearthstone_2026_10_26_00_48_15-g1`: two Bronze Wardens on the
+    // board, a third bought with the Typewriter. The game merges the bought
+    // one with the two board copies first and hands over a plain copy after.
+    let mut g = game(91);
+    take(&mut g, 0, "Transcribing Typewriter");
+    let a = put_on_board(&mut g, 0, "Bronze Warden");
+    let b = put_on_board(&mut g, 0, "Bronze Warden");
+    g.players[0].board[a].health += 3;
+    g.players[0].board[b].health += 3;
+    set_shop(&mut g, 0, &["Bronze Warden"]);
+    g.players[0].gold = 10;
+    act(&mut g, 0, Action::Buy(0));
+    let wardens: Vec<_> = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| g.data.cards.get(m.card).name.contains("Bronze Warden"))
+        .copied()
+        .collect();
+    assert_eq!(wardens.len(), 2, "the golden and the plain copy: {wardens:?}");
+    assert!(g.players[0].board.is_empty(), "both board copies went into the golden");
+    let gold = wardens.iter().find(|m| m.golden).expect("a golden");
+    let plain = wardens.iter().find(|m| !m.golden).expect("a plain copy");
+    let base = g.data.cards.get(plain.card);
+    assert!(gold.health >= 6, "the golden keeps both board copies' +3 Health: {gold:?}");
+    assert_eq!(plain.health, base.health, "the copy is of the bought, unbuffed card");
+}
+
+#[test]
 fn writhing_tentacles_copies_the_first_discarded_minion_doubled() {
     let mut g = game(90);
     equip(&mut g, 0, 1, "Writhing Tentacles");

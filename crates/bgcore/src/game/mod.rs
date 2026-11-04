@@ -2338,18 +2338,32 @@ impl Game {
                     // Transcribing Typewriter: an exact copy of the minion
                     // bought (buffs included), so the bought one keeps the
                     // buffs it was bought with and gains any "after you buy"
-                    // ones before the copy is taken.
+                    // ones before the copy is taken. The copy joins the hand
+                    // only after the buy's own triple check: the raw log
+                    // merges the bought card with two board copies first and
+                    // hands over the plain copy after it
+                    // (`Hearthstone_2026_10_26_00_48_15-g1`, Bronze Warden,
+                    // golden 3630 at 00:57:12.998, copy 3639 at 00:57:13.665).
+                    let mut typed = None;
                     if self.players[p].tp.copy_buys > 0
                         && let Some(&bought) = self.players[p].hand.last()
                         && bought.card == m.card
-                        && !self.players[p].hand.is_full()
                     {
                         self.players[p].tp.copy_buys -= 1;
                         let mut copy = bought;
                         copy.pool_copies = 0;
-                        self.add_to_hand(p, copy);
+                        typed = Some(copy);
                     }
                     self.check_triple(p, m.card);
+                    // The copy is checked again: when the buy alone was one
+                    // short, the copy completes the triple (same log, turn 6
+                    // step 11: board copy, bought one and the copy).
+                    if let Some(copy) = typed
+                        && !self.players[p].hand.is_full()
+                    {
+                        self.add_to_hand(p, copy);
+                        self.check_triple(p, m.card);
+                    }
                     self.fire_event(p, EventKind::GoldSpent, buy_cost as u32);
                     self.fire_event(p, EventKind::CardsBought, 1);
                     self.power_bought_card(p, &m);
