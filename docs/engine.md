@@ -161,7 +161,15 @@ rules behind each are in docs/rules/design.md Part 2.
   `4270`/`4271` pair on the minion): the loader seats them as
   `Minion.gem_attack`/`gem_health` in the board, the hand and the Tavern, so
   a replayed Gem Confiscation takes the neighbours' pair onto its target as
-  the log does. The price the game charges for a Tavern
+  the log does. A minion's own Magnetization count is on the card too
+  (`magnetizations`, one `Magnetic` enchantment per merge), seated as
+  `Minion.magnetizations` so Utility Drone's end of turn has a count to
+  read. The player's "your Volumizers have +A/+H this game (wherever they
+  are)" is on no player entity in the log, only on each Volumizer's own
+  `Volumized` enchantment: the loader seats the pair the collector reads
+  there as `Player.volumizer_bonus`, and the next Volumizer played adds to
+  it and hands the increment to every Volumizer in the shop, the hand and
+  the board. The price the game charges for a Tavern
   card when it is not the rule's is on the card too (`cost_override` for
   Chillmere Mosaic's (1), `cost_reduce` for a free buy), and the loader turns
   a Tavern that all costs the same into the engine's own state: the shop's
@@ -245,7 +253,14 @@ rules behind each are in docs/rules/design.md Part 2.
 - **Magnetize hooks.** Every Magnetization goes through
   `Game::magnetize_to`, which also runs `beatboxers_copy` (Polarizing
   Beatboxer, `Aura::PolarizingBeatboxer`), so a new "whenever you Magnetize"
-  card hooks in there.
+  card hooks in there. Drone Duplicator's extra Magnetization
+  (`Minion.extra_magnetize`) stays on the host for the trigger that follows
+  the merge, because a Spark Snapper's Satellite Magnetizes onto the Mech
+  that was just played before that Mech merges in; the played Magnetic and
+  its Satellite then both happen again, and the extra loop re-runs the
+  "whenever you Magnetize a Mech" buffs without firing the played-Mech hooks
+  a second time (`10_27_04_30_04-g2` turn 10 step 18: a 24/20 Volumizer with
+  a 26/39 Satellite into a 15/17 host gives 115/135).
 - **Pirates, Golden minions, gold spent, Lockbox, Bounties, Cleave:** see
   `docs/adding-cards.md` section 6.
 - **Undead** (the Undead bonus, Reborn in the shop, shop destroys, Knight

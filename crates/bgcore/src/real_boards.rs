@@ -179,6 +179,15 @@ pub struct RealCounters {
     /// Blood Gems, to every minion in the Tavern. Only a shop step reads it.
     pub barrage_attack: i32,
     pub barrage_health: i32,
+    /// "Your Volumizers have +A/+H this game (wherever they are)": the pair
+    /// every Volumizer played has added up so far (`Player::volumizer_bonus`).
+    /// The log keeps it on each Volumizer's own `Volumized` enchantment
+    /// (`BG34_170e`, its first two numbers), not on the player, so the
+    /// collector reads it off any Volumizer of mine and the shop replay seats
+    /// it. A board file carries it nowhere, and a fight reads none of it: a
+    /// board's minions already have the pair in their stats.
+    pub volumizer_attack: i32,
+    pub volumizer_health: i32,
 }
 
 impl Default for RealCounters {
@@ -208,6 +217,8 @@ impl Default for RealCounters {
             refresh_health: 0,
             barrage_attack: 0,
             barrage_health: 0,
+            volumizer_attack: 0,
+            volumizer_health: 0,
         }
     }
 }
@@ -219,7 +230,8 @@ impl RealCounters {
     /// `knight_deaths`, `tasty_lobster`, `baller`, and the numbers only a shop
     /// step reads: `golden_played`, `gold_spent`, `tavern_attack`, `tavern_health`,
     /// `tavern_elemental_attack`, `tavern_elemental_health`, `refresh_attack`,
-    /// `refresh_health`, `barrage_attack`, `barrage_health`. A key that is not
+    /// `refresh_health`, `barrage_attack`, `barrage_health`,
+    /// `volumizer_attack`, `volumizer_health`. A key that is not
     /// in the file leaves its field at the base value; a key no engine number
     /// uses is ignored.
     pub fn set(&mut self, key: &str, value: i32) {
@@ -251,6 +263,8 @@ impl RealCounters {
             "refresh_health" => self.refresh_health = value,
             "barrage_attack" => self.barrage_attack = value,
             "barrage_health" => self.barrage_health = value,
+            "volumizer_attack" => self.volumizer_attack = value,
+            "volumizer_health" => self.volumizer_health = value,
             _ => {}
         }
     }

@@ -740,6 +740,44 @@ fn stats(g: &Game, at: usize) -> (i32, i32) {
     (m.attack, m.health)
 }
 
+/// The two numbers the log keeps per Volumizer and per host, and neither on
+/// the player: "your Volumizers have +A/+H this game (wherever they are)" (the
+/// `Volumized` enchantment, `BG34_170e`) and how many Magnetizations a minion
+/// carries (one `Magnetic` enchantment per merge). The collector writes them
+/// as `counters.volumizer_attack`/`volumizer_health` and as a minion's
+/// `magnetizations`, and the replay seats them; a file written before the keys
+/// existed carries neither and the replay starts them at 0, as it always did.
+#[test]
+fn the_volumizer_bonus_and_the_magnetization_count_load_into_the_player() {
+    let holster = r#"{"name": "Drone Duplicator", "attack": 15, "health": 17,
+                      "magnetizations": 4}"#;
+    let text = format!(
+        r#"{{"source": "volumizer", "game": 1, "turns": [
+        {{"turn": 8,
+          "start": {{"board": [{holster}], "hand": [], "tavern": [],
+                     "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": 5,
+                     "health": 30, "armor": 0, "free_refreshes": 0,
+                     "frozen": false, "hero_powers": [], "trinkets": [],
+                     "counters": {{"volumizer_attack": 24, "volumizer_health": 39}}}},
+          "actions": [], "end": null}}]}}"#
+    );
+    let files = parse_action_files(&[("volumizer.json".to_string(), text)]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let data = data();
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 7, None);
+    let me = bgcore::shop_replay::ME;
+    assert_eq!(loaded.game.players[me].volumizer_bonus, (24, 39));
+    assert_eq!(loaded.game.players[me].board[0].magnetizations, 4);
+    // A file from before the collector read them says nothing about either.
+    let mut bare = turn.start.clone();
+    bare.counters.clear();
+    bare.board[0].magnetizations = u32::default();
+    let loaded = load(&data, &bare, None, None, turn.turn, 7, None);
+    assert_eq!(loaded.game.players[me].volumizer_bonus, (0, 0));
+    assert_eq!(loaded.game.players[me].board[0].magnetizations, 0);
+}
+
 /// The Blood Gem stats a logged card carries (`gem_attack`/`gem_health`, the
 /// log's `4270`/`4271` pair) are the engine's `Minion::gem_attack`/
 /// `gem_health`, and Gem Confiscation takes exactly that pair from the

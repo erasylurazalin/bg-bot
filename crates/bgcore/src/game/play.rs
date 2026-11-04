@@ -54,7 +54,15 @@ impl Game {
             let slot = cards.get(m.card).pool_slot as usize;
             self.consumed[slot] += m.pool_copies as u32;
         }
-        let extra = std::mem::take(&mut self.players[p].board[pos].extra_magnetize);
+        // Drone Duplicator's extra Magnetization is left on the host for the
+        // triggers below: a Spark Snapper's Satellite Magnetizes onto the Mech
+        // that was just played before that Mech merges into the host, so it
+        // happens an extra time as well, and so does the played Magnetic
+        // itself. The log's own numbers: a Red Volumizer played from hand
+        // (24/20) with a 26/39 Satellite on it, into a Drone Duplicator at
+        // 15/17, gives the host 115/135, which is (24 + 26 + 15) and
+        // (20 + 39 + 17) twice over (`10_27_04_30_04-g2` turn 10 step 18).
+        let extra = self.players[p].board[pos].extra_magnetize;
         self.players[p].board[pos].magnetize(cards, m);
         {
             let pl = &mut self.players[p];
@@ -70,6 +78,10 @@ impl Game {
         let m1 = self.with_magnetize_buffs(p, m);
         self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
         self.beatboxers_copy(p, Some(pos), m1);
+        // A trigger's own attach (the Satellite) took the host's extra
+        // Magnetizations and used them on itself; the flag is spent, and this
+        // merge is due the same count.
+        let _ = std::mem::take(&mut self.players[p].board[pos].extra_magnetize);
         // Drone Duplicator: the same Magnetization happens again, without
         // taking another copy from the pool.
         for _ in 0..extra {
@@ -78,7 +90,11 @@ impl Game {
             }
             self.players[p].board[pos].magnetize(&self.data.cards, m);
             self.note_magnetized(p);
-            self.trigger_mech_played_or_magnetized(p, pos, from_play, false);
+            // The same Magnetization again, so "whenever you play or
+            // Magnetize a Mech" buffs land again, but the played-Mech hooks
+            // (Spark Snapper's Satellite, which the first Magnetization
+            // already brought along) do not fire a second time.
+            self.trigger_mech_played_or_magnetized(p, pos, false, false);
             self.beatboxers_copy(p, Some(pos), m1);
         }
     }
