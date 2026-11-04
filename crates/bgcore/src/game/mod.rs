@@ -1024,6 +1024,13 @@ pub struct Player {
     /// (`dark_gift_start_of_turn` runs it; Era 2026-11-03). One entry per
     /// card, so it can hold a full hand's worth of them.
     pub triples_next_turn: ArrayVec<CardId, HAND>,
+    /// Cards whose triple the hand had no slot for (three plain copies all on
+    /// the board: a copy in hand frees the slot the Golden card needs, a board
+    /// copy does not). They merge once an action opens a slot
+    /// (`retry_waiting_triples`; Era 2026-11-04, `docs/rules/design.md`
+    /// "A full hand"). One entry per card, and the hand and the board hold at
+    /// most `HAND + BOARD` different ones.
+    pub triples_waiting: ArrayVec<CardId, { HAND + BOARD }>,
     pub board: ArrayVec<Minion, BOARD>,
     pub pending_choose_one: Option<PendingChooseOne>,
     pub pending_target: Option<PendingTarget>,

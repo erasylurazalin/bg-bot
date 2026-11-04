@@ -1511,9 +1511,19 @@ fn a_mech_a_trinket_gets_after_a_fight_triples_at_the_start_of_the_next_turn() {
     let mut g = game(110);
     let sticker = g.data.trinkets.by_name("Stormcoil Sticker").unwrap();
     g.set_trinket(0, 0, Some(sticker));
-    // Six Mechs of a card the counter cannot give (tier 2), at 1 Health.
-    for _ in 0..6 {
-        put_on_board(&mut g, 0, "Mechagnome Interpreter");
+    // Six different Mechs of cards the counter cannot give (tier 2 or more),
+    // at 1 Health. Different ones, since three plain copies of a card merge at
+    // the turn's start, and this fixture leaves the dead on the board (the
+    // fight's own result is applied by the caller in a real turn).
+    for name in [
+        "Mechagnome Interpreter",
+        "Annoy-o-Module",
+        "Glambot",
+        "Drone Duplicator",
+        "Spark Snapper",
+        "Utility Drone",
+    ] {
+        put_on_board(&mut g, 0, name);
         let last = g.players[0].board.len() - 1;
         g.players[0].board[last].attack = 0;
         g.players[0].board[last].health = 1;
