@@ -299,6 +299,12 @@ rules behind each are in docs/rules/design.md Part 2.
   repeats re-run the "whenever you Magnetize a Mech" buffs without firing
   the played-Mech hooks a second time (`10_27_04_30_04-g2` turn 10 step 18:
   a 24/20 Volumizer with a Satellite into a Drone Duplicator happens twice).
+  Every copy the Beatboxers take is minted afresh, so a Volumizer's copy is
+  as much bigger as the copies before it in the same step raised "your
+  Volumizers have +A/+H" (`10_29_22_20_04-g3` turn 14 step 20: two
+  Beatboxers take three copies each of one golden Green Volumizer and the
+  log's two come out +4140 and +4146 bigger, three even copies +4122); the
+  pair a step's copies paid is handed on to the next `beatboxers_copy` call.
 - **Pirates, Golden minions, gold spent, Lockbox, Bounties, Cleave:** see
   `docs/adding-cards.md` section 6.
 - **Undead** (the Undead bonus, Reborn in the shop, shop destroys, Knight

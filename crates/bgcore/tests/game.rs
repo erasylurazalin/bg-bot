@@ -215,6 +215,49 @@ fn drone_duplicator_doubles_the_played_magnetic_and_its_satellite() {
 }
 
 #[test]
+fn every_fresh_volumizer_copy_a_beatboxer_takes_is_bigger_than_the_one_before() {
+    // `10_29_22_20_04-g3` turn 14 step 20: a golden Green Volumizer is played
+    // onto a golden Drone Duplicator with two Polarizing Beatboxers on the
+    // board. Each Beatboxer takes three copies of it and the log's two come
+    // out +4140 and +4146 Attack, where three copies of the card as it was
+    // played (1374) would be +4122: the copy the second one gets is minted
+    // after the first raised "your Volumizers have +A/+H", so it is a Green
+    // Volumizer's +1/+1 (+2/+2 when golden) bigger. Here the cards' own
+    // numbers.
+    let mut g = game(107);
+    g.players[0].tier = 2;
+    put_on_board(&mut g, 0, "Cord Puller"); // 1/1 Mech, the host
+    put_on_board(&mut g, 0, "Polarizing Beatboxer"); // 5/10
+    put_on_board(&mut g, 0, "Polarizing Beatboxer"); // 5/10
+    g.give(0, "Green Volumizer").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    let host = g.players[0].board[0];
+    assert_eq!(
+        (host.attack, host.health),
+        (1 + 3, 1 + 3),
+        "the host takes the played Volumizer's own stats"
+    );
+    let first = g.players[0].board[1];
+    let second = g.players[0].board[2];
+    assert_eq!(
+        (first.attack, first.health),
+        (5 + 3, 10 + 3),
+        "the first Beatboxer's copy is the card as it was played"
+    );
+    assert_eq!(
+        (second.attack, second.health),
+        (5 + 4, 10 + 4),
+        "the second Beatboxer's copy carries the +1/+1 the first one paid"
+    );
+    assert_eq!(
+        g.players[0].volumizer_bonus,
+        (3, 3),
+        "the play and both copies count as Magnetized for the first time"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_volumizers_triple_counts_the_aura_once_and_each_copys_own_buffs() {
     // `10_29_22_20_04-g3` turn 11 (buying a third Blue Volumizer): the log's
     // three copies stand at 69/108 and 71/111 with the +24/+39 "your

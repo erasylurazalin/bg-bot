@@ -22,6 +22,20 @@ use super::{
 };
 use super::effects::buff;
 
+/// `m` as a copy minted after `growth` of "your Volumizers have +A/+H this
+/// game" was raised: a Volumizer carries that pair in its own stats, so the
+/// copy is that much bigger.
+fn grown(m: Minion, growth: (i32, i32)) -> Minion {
+    let mut m = m;
+    m.attack = m.attack.saturating_add(growth.0);
+    m.health = m.health.saturating_add(growth.1);
+    m
+}
+
+fn add_growth(a: (i32, i32), b: (i32, i32)) -> (i32, i32) {
+    (a.0.saturating_add(b.0), a.1.saturating_add(b.1))
+}
+
 impl Game {
     /// The player played `n` more Golden minions from hand: Maritime
     /// Extortionist grows wherever it is (Tavern, hand or board).
@@ -98,6 +112,12 @@ impl Game {
         // repeats, each with their Beatboxer copies, and the first merge's
         // Beatboxer copies last (`Hearthstone_2026_10_29_22_20_04-g3` turn 14
         // step 20, a golden Drone Duplicator and two Beatboxers).
+        // Each copy the Beatboxers take is minted after the copies before it
+        // raised "your Volumizers have +A/+H this game", so it is that much
+        // bigger: the copies of one step grow
+        // (`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 20, a golden
+        // Green Volumizer with two Beatboxers: its +2/+2 each time).
+        let mut growth = (0, 0);
         for _ in 0..extra {
             if pos >= self.players[p].board.len() {
                 break;
@@ -113,9 +133,9 @@ impl Game {
             // (Spark Snapper's Satellite, which the first Magnetization
             // already brought along) do not fire a second time.
             self.trigger_mech_played_or_magnetized(p, pos, false, false);
-            self.beatboxers_copy(p, Some(pos), m1);
+            growth = add_growth(growth, self.beatboxers_copy(p, Some(pos), grown(m1, growth)));
         }
-        self.beatboxers_copy(p, Some(pos), m1);
+        let _ = self.beatboxers_copy(p, Some(pos), grown(m1, growth));
     }
 
     /// The Magnetizations that happen to a Magnetic minion played from hand
@@ -149,7 +169,7 @@ impl Game {
             // Magnetization onto a Beatboxer leaves the others alone
             // (`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 16).
             if !self.carries_beatboxer(m) {
-                self.beatboxers_copy(p, None, copy);
+                let _ = self.beatboxers_copy(p, None, copy);
             }
         }
     }
@@ -222,13 +242,22 @@ impl Game {
     /// that from looping: the log's Beatboxer played at
     /// `Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 16 takes a Spark
     /// Snapper's Satellite and no other Beatboxer copies it.
-    fn beatboxers_copy(&mut self, p: usize, host: Option<usize>, m: Minion) {
+    ///
+    /// Every copy is minted afresh, so a Volumizer's copy is as much bigger as
+    /// the copies before it raised the "your Volumizers have +A/+H" pair; the
+    /// pair this call paid comes back so the next call of the same step starts
+    /// from it (`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 20, two
+    /// Beatboxers taking three copies each of a golden Green Volumizer: the
+    /// log's two end +4140 and +4146 bigger, three even copies +4122).
+    fn beatboxers_copy(&mut self, p: usize, host: Option<usize>, m: Minion) -> (i32, i32) {
         let onto_beatboxer = host
             .and_then(|h| self.players[p].board.get(h))
             .is_some_and(|h| self.carries_beatboxer(h));
         if onto_beatboxer {
-            return;
+            return (0, 0);
         }
+        let mut m = m;
+        let mut growth = (0, 0);
         let len = self.players[p].board.len();
         for j in 0..len {
             if Some(j) == host {
@@ -240,14 +269,24 @@ impl Game {
                 .map(|(_, golden)| if golden { 2 } else { 1 })
                 .sum();
             for _ in 0..copies {
-                if let Some((da, dh)) = self.data.cards.get(m.card).volumizer_buff {
-                    let mul = if m.golden { 2 } else { 1 };
-                    self.add_volumizer_bonus(p, da * mul, dh * mul);
-                }
+                let rise = match self.data.cards.get(m.card).volumizer_buff {
+                    Some((da, dh)) => {
+                        let mul = if m.golden { 2 } else { 1 };
+                        let rise = (da * mul, dh * mul);
+                        self.add_volumizer_bonus(p, rise.0, rise.1);
+                        rise
+                    }
+                    None => (0, 0),
+                };
                 self.players[p].board[j].magnetize(&self.data.cards, m);
                 self.note_magnetized(p);
+                // The improvement is for the copies after this one.
+                m.attack += rise.0;
+                m.health += rise.1;
+                growth = add_growth(growth, rise);
             }
         }
+        growth
     }
 
     /// Whether this minion carries a Polarizing Beatboxer's text, its own or
@@ -280,7 +319,7 @@ impl Game {
             sat.health = health;
             self.players[p].shop[slot].magnetize(&self.data.cards, sat);
             self.note_magnetized(p);
-            self.beatboxers_copy(p, None, sat);
+            let _ = self.beatboxers_copy(p, None, sat);
         }
     }
 
