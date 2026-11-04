@@ -647,6 +647,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SLOT_ABERRATION", obs::SLOT_ABERRATION)?;
     m.add("SLOT_KEYWORDS", obs::SLOT_KEYWORDS)?;
     m.add("SLOT_STEALTH", obs::SLOT_STEALTH)?;
+    m.add("SLOT_POISONOUS", obs::SLOT_POISONOUS)?;
     m.add("SLOT_MAGNETIZATIONS", obs::SLOT_MAGNETIZATIONS)?;
     m.add("SLOT_VOLUMIZERS", obs::SLOT_VOLUMIZERS)?;
     m.add("SLOT_IMPROVEMENTS", obs::SLOT_IMPROVEMENTS)?;

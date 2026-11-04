@@ -1612,7 +1612,11 @@ through exactly that card's code. The engine never matches a gift by name:
   (hats, ticket, frozen after the gift slots; OBS_SIZE 7145 to 7292). Hero
   batch 3 took the scalars from 208 to 224 and the card slot from 89 to 90
   (the reanimate mark; OBS_SIZE 7292 to 7385): free minion buys, Conviction,
-  Lock and Load's stored minion, the two guesses and the "empty" flags.
+  Lock and Load's stored minion, the two guesses and the "empty" flags. The
+  scalars have grown since, so OBS_SIZE read 7400 before Poisonous.
+  Poisonous (2026-11-04) added the card slot's eighth keyword, after stealth
+  (`SLOT_FEATURES` 90 to 91, OBS_SIZE 7400 to 7477): a checkpoint from
+  before it breaks too.
 - **Real-board seats** carry the `dark_gifts` the files record: the loader
   attaches them (their stats are already in the file's attack and health),
   with the counter set as if the gift had landed on that board's turn.
@@ -1859,7 +1863,9 @@ Deleting `.venv` undoes it.
   frozen card to the card slot (SLOT_FEATURES 86 to 89, OBS_SIZE 7145 to
   7292), and hero batch 3 the reanimate mark and sixteen scalars
   (SLOT_FEATURES 89 to 90, OBS_SIZE 7292 to 7385), so every checkpoint before
-  it breaks too. A hero id and a power id share the model's one id embedding, so its
+  it breaks too. Poisonous (2026-11-04) added the eighth keyword slot to the
+  card slot (SLOT_FEATURES 90 to 91, OBS_SIZE 7400 to 7477), which breaks them
+  all again. A hero id and a power id share the model's one id embedding, so its
   table is `max(N_HEROES, N_POWERS)` wide and the offer slots are embedded
   from it too (`HERO_IDS` in train/model.py), not scaled as numbers.
 - Games from `bgpy` play with heroes (`Game::new_random_heroes`, no pick),

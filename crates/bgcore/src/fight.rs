@@ -3329,8 +3329,13 @@ fn deal_damage(target: &mut Minion, dmg: i32) -> i32 {
 }
 
 /// `source` deals `dmg` to `target`. Divine Shield takes any hit and keeps
-/// Venomous unused; 0 damage does nothing at all. Returns the damage dealt,
-/// 0 when the shield took it.
+/// Venomous and Poisonous unused; 0 damage does nothing at all. Returns the
+/// damage dealt, 0 when the shield took it.
+///
+/// Poisonous kills what it damages and is never used up; Venomous kills and is
+/// then gone (docs/rules/design.md "Keywords"). A minion with both kills with
+/// its Poisonous, so the Venomous is not needed and stays: nothing settles
+/// which of the two would be spent (Era asked for this reading, 2026-11-04).
 fn hit(target: &mut Minion, dmg: i32, source: &mut Minion) -> i32 {
     if dmg <= 0 {
         return 0;
@@ -3345,7 +3350,9 @@ fn hit(target: &mut Minion, dmg: i32, source: &mut Minion) -> i32 {
         return 0;
     }
     target.health -= dmg;
-    if source.keywords.has(Keywords::VENOMOUS) {
+    if source.keywords.has(Keywords::POISONOUS) {
+        target.health = target.health.min(0);
+    } else if source.keywords.has(Keywords::VENOMOUS) {
         target.health = target.health.min(0);
         source.keywords.clear(Keywords::VENOMOUS);
     }
@@ -4327,7 +4334,12 @@ fn attack_swings_at(
                     def.note_shield_lost(db);
                 }
             }
-            if killed && src.keywords.has(Keywords::VENOMOUS) {
+            // Poisonous did the killing, so a Venomous alongside it is not
+            // spent (see `hit`).
+            if killed
+                && src.keywords.has(Keywords::VENOMOUS)
+                && !src.keywords.has(Keywords::POISONOUS)
+            {
                 src.keywords.clear(Keywords::VENOMOUS);
                 if let Some(ai) = att.index_of(me) {
                     att.ms[ai].m.keywords.clear(Keywords::VENOMOUS);

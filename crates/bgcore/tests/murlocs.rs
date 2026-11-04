@@ -463,6 +463,36 @@ fn hackerfin_and_seafood_stew_count_different_bonus_keywords() {
 }
 
 #[test]
+fn hackerfin_counts_venomous_but_not_poisonous() {
+    // Venomous is a Bonus Keyword and Poisonous is not (docs/rules/design.md
+    // "Keywords"), so only the Venomous one pays Hackerfin's "+3/+2 for each
+    // different Bonus Keyword in your warband" (plus its own +3/+2).
+    let mut g = game(15);
+    put_on_board(&mut g, 0, "Deadly Spore"); // a 1/1 Venomous
+    g.give(0, "Hackerfin").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(stats(&g.players[0].board[0]), (1 + 3 + 3, 1 + 2 + 2));
+
+    // The same 1/1 with Poisonous instead: no Bonus Keyword.
+    let mut g = game(15);
+    put_on_board(&mut g, 0, "Deadly Spore");
+    let m = &mut g.players[0].board[0];
+    m.keywords.clear(Keywords::VENOMOUS);
+    m.keywords.set(Keywords::POISONOUS);
+    g.give(0, "Hackerfin").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(stats(&g.players[0].board[0]), (1 + 3, 1 + 2));
+
+    // Wearing both still counts once, for the Venomous.
+    let mut g = game(15);
+    put_on_board(&mut g, 0, "Deadly Spore");
+    g.players[0].board[0].keywords.set(Keywords::POISONOUS);
+    g.give(0, "Hackerfin").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(stats(&g.players[0].board[0]), (1 + 3 + 3, 1 + 2 + 2));
+}
+
+#[test]
 fn tad_shoalfin_gormling_and_the_rest() {
     // Tad: a random Murloc on sell, never above the owner's tier.
     let mut g = game(17);

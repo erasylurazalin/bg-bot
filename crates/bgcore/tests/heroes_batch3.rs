@@ -1313,7 +1313,7 @@ fn an_exact_copys_maximum_health_is_the_originals() {
     let mut morgl = db.make(db.by_name("Tide Oracle Morgl").unwrap(), false);
     morgl.attack = 20;
     morgl.health = 100;
-    morgl.keywords.0 = 0; // no Venomous: the damage itself should be the kill
+    morgl.keywords.0 = 0; // no Poisonous: the damage itself should be the kill
     // A 0-Attack Taunt takes the enemy's swings, so the copy survives to be
     // killed by Morgl rather than dying to his counter-attack.
     let mut wall = db.make(db.by_name("Microbot").unwrap(), false);

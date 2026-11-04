@@ -114,14 +114,40 @@ fn build_resolves_minions_and_stands_in_for_the_unknown() {
     assert_eq!(m.pool_copies, 0, "a real minion holds no pool copies");
     assert!(t3[1].minions[0].keywords.has(Keywords::TAUNT));
     // The file's stats stand, golden or not (9/10, not the card's golden 8/8),
-    // POISONOUS becomes Venomous, unknown keywords are dropped.
+    // POISONOUS stays Poisonous, unknown keywords are dropped.
     let g = &boards.boards_at(14)[0].minions[0];
     assert_eq!((g.attack, g.health), (9, 10));
     assert!(g.golden);
-    assert!(g.keywords.has(Keywords::VENOMOUS));
+    assert!(g.keywords.has(Keywords::POISONOUS));
+    assert!(!g.keywords.has(Keywords::VENOMOUS), "Poisonous is not Venomous");
     assert!(g.keywords.has(Keywords::STEALTH));
     assert!(!g.keywords.has(Keywords::TAUNT));
     assert_eq!(g.keywords.0 & Keywords::MAGNETIC, 0);
+}
+
+#[test]
+fn the_loader_keeps_venomous_and_poisonous_apart() {
+    // Poisonous and Venomous are two keywords, and a minion can wear both
+    // (docs/rules/design.md "Keywords"; log 11_02_00_10_22-g7 turn 14, where
+    // Tide Oracle Morgl gets Venomous on top of its printed Poisonous).
+    let d = data();
+    let specs = [
+        spec(14, 3, &[
+            ("Tide Oracle Morgl", 141, 109, false, &["POISONOUS"]),
+            ("Tide Oracle Morgl", 141, 109, false, &["POISONOUS", "VENOMOUS"]),
+            ("Tide Oracle Morgl", 141, 109, false, &["VENOMOUS"]),
+        ]),
+    ];
+    let (boards, unmatched) = RealBoards::build(&specs, &d.cards, &d.gifts);
+    assert!(unmatched.is_empty(), "unexpected unmatched: {unmatched:?}");
+    let board = &boards.boards_at(14)[0];
+    let (poisonous, both, venomous) = (&board.minions[0], &board.minions[1], &board.minions[2]);
+    assert!(poisonous.keywords.has(Keywords::POISONOUS));
+    assert!(!poisonous.keywords.has(Keywords::VENOMOUS));
+    assert!(both.keywords.has(Keywords::POISONOUS), "both, still Poisonous");
+    assert!(both.keywords.has(Keywords::VENOMOUS), "both, still Venomous");
+    assert!(!venomous.keywords.has(Keywords::POISONOUS));
+    assert!(venomous.keywords.has(Keywords::VENOMOUS));
 }
 
 #[test]

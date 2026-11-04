@@ -29,11 +29,16 @@ impl Keywords {
     pub const REBORN: u8 = 16;
     pub const MAGNETIC: u8 = 32;
     pub const STEALTH: u8 = 64;
+    /// Poisonous kills what it damages and is never used up (docs/rules/design.md
+    /// "Keywords"). A separate keyword from Venomous, and not a Bonus Keyword:
+    /// rules.toml's `bonus_keywords` leaves it out, so no random keyword and
+    /// no "different Bonus Keywords" count ever reads it.
+    pub const POISONOUS: u8 = 128;
 
     /// Every keyword a minion can carry, by its name in the data files.
     /// Which of these are Bonus Keywords is a rule (`bonus_keywords` in
     /// rules.toml), not a property of this list.
-    pub const ALL: [(u8, &'static str); 7] = [
+    pub const ALL: [(u8, &'static str); 8] = [
         (Self::TAUNT, "taunt"),
         (Self::DIVINE_SHIELD, "divine_shield"),
         (Self::WINDFURY, "windfury"),
@@ -41,6 +46,7 @@ impl Keywords {
         (Self::REBORN, "reborn"),
         (Self::MAGNETIC, "magnetic"),
         (Self::STEALTH, "stealth"),
+        (Self::POISONOUS, "poisonous"),
     ];
 
     pub fn has(self, k: u8) -> bool {
