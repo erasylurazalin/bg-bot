@@ -688,10 +688,12 @@ impl Game {
             if let Some((a, h)) = set_stats {
                 // A set of the pick's stats keeps the bonuses that apply
                 // wherever the card is (the Undead bonus, an Eternal Knight's
-                // deaths), as every other stat set does.
+                // deaths, its own Holy Vanguard aura), as every other stat set
+                // does.
                 let (wa, wh) = pl.wherever_stats(&data.cards, &m);
                 m.attack = a + wa;
                 m.health = h + wh;
+                m.vanguard_aura = m.vanguard_pair(&data.cards, pl.vanguard_health_on());
             }
             if locked && !is_spell {
                 m.locked_turns = 1;

@@ -360,6 +360,50 @@ fn the_fixture_folder_loads_through_the_shared_parser() {
 }
 
 #[test]
+fn the_loader_records_the_vanguard_aura_beside_the_logged_stats() {
+    // The logged ATK and HEALTH carry Holy Vanguard's own +30/+30 while its
+    // owner has 15 or less Health, in every zone: the file writes the pair on
+    // the `Vanguard's Valor` enchantment beside them and the loader records it
+    // on `Minion::vanguard_aura`, so a later Health crossing can take it off
+    // exactly once (docs/rules/design.md "Triples").
+    let text = r#"{"source": "vanguard", "game": 1, "boards": [
+        {"who": "me", "turn": 8, "result": "win", "tier": 4, "health": 12, "armor": 0,
+         "minions": [{"card_id": "BG36_372", "name": "Holy Vanguard", "attack": 40,
+                      "health": 40, "golden": false, "keywords": ["DIVINE_SHIELD"],
+                      "vanguard_aura": [30, 30]}],
+         "hand": [], "counters": {}}]}"#;
+    let ids = CardIdMap::parse(
+        &std::fs::read_to_string("../../ref/bg-cards.json").unwrap(),
+    )
+    .unwrap();
+    let (specs, unknown) =
+        parse_board_files(&[("vanguard.json".to_string(), text.to_string())], &ids).unwrap();
+    assert!(unknown.is_empty(), "{unknown:?}");
+    assert_eq!(specs[0].health, 12);
+    assert_eq!(specs[0].minions[0].vanguard_aura, [30, 30]);
+    let boards = build(&specs);
+    let m = &boards.boards_at(8)[0].minions[0];
+    assert_eq!((m.attack, m.health, m.vanguard_aura), (40, 40, [30, 30]));
+    // Above 15 Health the pair is not in the stats, even when the log shows a
+    // `Vanguard's Valor` enchantment on the card: a copy can carry one from a
+    // player whose Health was low (log 2026_11_04_15_53_32 game 2, an opponent
+    // at 17 with a 13/13 Vanguard wearing a 30/30 one). The loader then
+    // records no pair, since the stats hold none.
+    let high = text.replace(r#""health": 12"#, r#""health": 17"#).replace(
+        r#""attack": 40,
+                      "health": 40"#,
+        r#""attack": 13,
+                      "health": 13"#,
+    );
+    let (specs, _) =
+        parse_board_files(&[("vanguard.json".to_string(), high)], &ids).unwrap();
+    assert_eq!(specs[0].minions[0].vanguard_aura, [30, 30], "the file still says so");
+    let boards = build(&specs);
+    let m = &boards.boards_at(8)[0].minions[0];
+    assert_eq!((m.attack, m.health, m.vanguard_aura), (13, 13, [0, 0]));
+}
+
+#[test]
 fn real_seats_take_no_hero_from_the_deck() {
     // Two heroes, two hero seats, six real seats: both heroes reach the hero
     // seats only because the real seats are dealt none.

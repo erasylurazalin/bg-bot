@@ -108,12 +108,17 @@ pub struct ShopMinionSpec {
     /// less Health") has put into this card's attack and health, the file's
     /// `vanguard_aura`: the pair the log keeps on the minion's `Vanguard's
     /// Valor` enchantment, 30/30 on a plain one and 60/60 on a Golden one. The
-    /// engine applies the aura where it is read, at the start of a fight, and
-    /// keeps it out of a minion's own stats, so the loader records the pair on
-    /// `Minion::vanguard_aura` (`RealMinionSpec::vanguard_aura`) and a triple
-    /// leaves it out of its sum: kept, it counted once per copy (log
-    /// `Hearthstone_2026_10_28_22_11_50` game 5 turn 10 step 12). Empty or
-    /// zero in a file written before the key existed, and on every other card.
+    /// stats the file logs already include it, so the loader records the pair
+    /// on `Minion::vanguard_aura` (`RealMinionSpec::vanguard_aura`), which
+    /// takes it off exactly once when the Health goes back above 15 and which
+    /// a triple leaves out of its sum (kept, it counted once per copy; log
+    /// `Hearthstone_2026_10_28_22_11_50` game 5 turn 10 step 12). It counts
+    /// only at 15 or less Health: above that the game can keep the enchantment
+    /// on a card without the pair in its stats (a card copied with its
+    /// enchantments from a player at low Health, log
+    /// `2026_11_04_15_53_32` game 2), and the loader records no pair then.
+    /// Empty or zero in a file written before the key existed, and on every
+    /// other card.
     #[serde(default)]
     pub vanguard_aura: Vec<i32>,
     /// A Golden minion that gives no Triple Reward when played, the file's
@@ -848,6 +853,22 @@ pub fn load(
         } else {
             data.rules.starting_health
         };
+        // The logged stats already carry a Holy Vanguard's own aura, and the
+        // loader records the pair the log's enchantment shows beside them, so
+        // the zones are seated at the Health the file logged: no walk, and a
+        // crossing later in the turn moves it (`Game::sync_vanguard`).
+        pl.vanguard_on = pl.vanguard_health_on();
+        // Above 15 Health the pair is not in the stats: the game can keep a
+        // `Vanguard's Valor` enchantment on a card with its 30/30 while the
+        // card's stats leave it out (a card copied with its enchantments:
+        // log 2026_11_04_15_53_32 game 2, an opponent at 17 Health with a
+        // 13/13 Holy Vanguard wearing one copied from a player at 9). The
+        // file's pair therefore counts only where the Health lets it apply.
+        if pl.health > 15 {
+            for m in board.iter_mut().chain(hand.iter_mut()).chain(tavern.iter_mut()) {
+                m.vanguard_aura = [0, 0];
+            }
+        }
         pl.armor = spec.armor;
         pl.free_rolls = spec.free_refreshes;
         // The Fodders queued for the coming Refreshes. The engine keeps the
@@ -3526,6 +3547,7 @@ fn force_offer(
         let (wa, wh) = pl.wherever_stats(&data.cards, m);
         m.attack = a + wa;
         m.health = h + wh;
+        m.vanguard_aura = m.vanguard_pair(&data.cards, pl.vanguard_health_on());
     }
     // A pick that lands on the board or in a Tavern slot (a transform, or
     // Galakrond's Greed taking the slot) goes through the engine's transform

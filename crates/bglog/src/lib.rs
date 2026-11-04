@@ -96,7 +96,8 @@ pub use tracker::{Snapshot, Tracker};
 pub use views::{
     Board, DEITY_MINIONS, Deity, Fight, GIFT_TAG, HERO_ENCHANTMENTS, HeroPower, KEYWORDS,
     LOCK_AND_LOAD, Minion, OWES_A_SUMMON, PLAYER_COUNTS, PLAYER_ENCHANTS, REANIMATE_MARK, Reward,
-    SECRET_CARDS, Seat, Trinket, UPPER_HAND, WINGMEN, board, counts, deity, enchant_numbers, gem,
-    gifts_by_minion, hand, held_entity, hero_enchants_by_minion, hero_power, hidden_in_hand, minion,
-    one_minion, reanimates, rewards, secrets, side_numbers, trinkets, turn_of, waiting,
+    SECRET_CARDS, Seat, Trinket, UPPER_HAND, VANGUARD_AURA, WINGMEN, board, counts, deity,
+    enchant_numbers, gem, gifts_by_minion, hand, held_entity, hero_enchants_by_minion, hero_power,
+    hidden_in_hand, minion, one_minion, reanimates, rewards, secrets, side_numbers, trinkets,
+    turn_of, vanguard_aura, waiting,
 };

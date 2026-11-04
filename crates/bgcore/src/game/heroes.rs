@@ -115,6 +115,7 @@ impl Game {
             (h.extra_health, h.armor, h.power, h.power_excludes.clone());
         let effect = self.data.heroes.power(starting).effect;
         self.players[p].health += extra_health;
+        self.sync_vanguard(p);
         self.players[p].armor = armor as i32;
         self.players[p].hero = Some(hero);
         self.players[p].power2 = None;
@@ -2241,6 +2242,7 @@ impl Game {
         // finding All Patched Up) still does its part: the extra Health.
         if self.turn == 0 {
             self.players[p].health += self.power_extra_health(of);
+            self.sync_vanguard(p);
         } else if self.players[p].storm_power[second as usize] {
             let extra = self.players[p].tp.power_extra_uses;
             if let Some(sl) = self.players[p].power_at_mut(second) {
@@ -2312,6 +2314,9 @@ impl Game {
         pl.health -= amount - to_armor;
         pl.last_damage = amount;
         pl.last_damage_armor = to_armor;
+        // The Health may have crossed 15: Holy Vanguard's aura follows it
+        // before the damage reactions below read any minion's stats.
+        self.sync_vanguard(p);
         self.note_shop_demon_damage(p, source);
         let mut pos = 0;
         while pos < self.players[p].board.len() {

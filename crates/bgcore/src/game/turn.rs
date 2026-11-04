@@ -711,6 +711,13 @@ impl Game {
                 self.drain_hand_queue(p);
             }
         }
+        // The fight's damage and the start of the turn's own heals have left
+        // every player at their new Health: Holy Vanguard's aura follows it
+        // before anything reads the stats this turn (`sync_vanguard` is one
+        // comparison a player when nothing crossed 15).
+        for p in 0..PLAYERS {
+            self.sync_vanguard(p);
+        }
         self.pair();
         self.order = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
         self.rng.shuffle(&mut self.order);
@@ -1114,6 +1121,9 @@ impl Game {
             pl.armor -= to_armor;
             pl.health -= d - to_armor;
             pl.last_opponent = pl.opponent.take();
+            // A fight's damage can take the hero across 15: Holy Vanguard's
+            // aura follows before the turn starts and anything reads stats.
+            self.sync_vanguard(p);
         }
         self.knockouts(alive);
         self.settle_wagers();

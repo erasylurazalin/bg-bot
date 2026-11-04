@@ -105,6 +105,22 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
 - `numbers` on a minion are its current `TAG_SCRIPT_DATA_NUM_1..4`, the
   {0} {1} {2} {3} of its text (Lurking Leviathan's growth, Spark Snapper's
   Satellite, a Tasty Lobster's buff). Written only for cards that have any.
+- `vanguard_aura` on a minion is the +A/+H Holy Vanguard's own aura ("Has
+  +30/+30 if you have 15 or less Health") has put into its `attack` and
+  `health`: the pair on the `Vanguard's Valor` enchantment (`BG36_372e`) the
+  log shows on it, 30/30 on a plain copy and 60/60 on a Golden one (a Golden
+  carries three such enchantments and the collector takes the largest). The
+  loaded minion's stats already include it and `Minion::vanguard_aura` records
+  it, so a later Health crossing takes it off exactly once and a triple leaves
+  it out of its sum (docs/rules/design.md "Triples"). The pair is what the
+  stats hold only at 15 or less Health: above that the game can keep a
+  `Vanguard's Valor` with its numbers on a card whose stats leave it out (a
+  card copied with its enchantments from a player whose Health was low: log
+  `2026_11_04_15_53_32` game 2, an opponent at 17 Health with a 13/13 Holy
+  Vanguard wearing a 30/30 one), so a board whose `health` is above 15 records
+  no pair. The key is written only when the minion has one; a file from before
+  it existed has the pair nowhere and its logged stats keep whatever the log
+  counted in them.
 - `secrets` is the side's Secret zone at the first attack: the card ids of the
   Secrets in it, in the order they were got, which is the order they fire in.
   The five are `TB_Bacon_Secrets_01` (Venomstrike Trap), `_07` (Autodefense
@@ -309,18 +325,24 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   - `vanguard_aura` on a minion: the +A/+H Holy Vanguard's own aura ("Has
     +30/+30 if you have 15 or less Health", +60/+60 on the Golden one) has put
     into the card's `attack` and `health`, the pair on the `Vanguard's Valor`
-    enchantment (`BG36_372e`) the log shows on it. The engine applies that aura
-    where it is read, at the start of a fight (`Counters.health`,
-    `obs::vanguard_bonus`), and never keeps it in a minion's stats, so the
-    loader records the pair on `Minion::vanguard_aura` and a triple leaves it
-    out of its sum: the Golden one gets its own once, at its doubled +60/+60
-    (log `2026_10_28_22_11_50` game 5 turn 10 step 12, where counting the three
+    enchantment (`BG36_372e`) the log shows on it. The aura is part of the
+    card's stats wherever it is (board, hand and Tavern alike), so the loader
+    records the pair on `Minion::vanguard_aura`, which takes it off exactly
+    once when the Health goes back above 15, and a triple leaves it out of its
+    sum: the Golden one gets its own once, at its doubled +60/+60 (log
+    `2026_10_28_22_11_50` game 5 turn 10 step 12, where counting the three
     copies' auras gave our Golden Holy Vanguard 238/146 against the log's
-    208/116). The game puts the aura on the card wherever it is (board, hand
-    and Tavern alike), and a Golden one can carry three such enchantments (two
-    30/30 copies' and its own 60/60), so the collector takes the largest pair.
-    The key is written only when the minion has one, and a file written before
-    it existed has it nowhere: the loader then records 0, as it always seated.
+    208/116). A Golden one can carry three such enchantments (two 30/30
+    copies' and its own 60/60), so the collector takes the largest pair. The
+    pair is what the stats hold only at 15 or less Health: above that the game
+    can keep a `Vanguard's Valor` with its numbers on a card whose stats leave
+    it out (a card copied with its enchantments from a player whose Health was
+    low: log `2026_11_04_15_53_32` game 2, an opponent at 17 Health with a
+    13/13 Holy Vanguard wearing a 30/30 one), so the loader records no pair
+    when the state's Health is above 15. The key is written only when the
+    minion has one, and a file written before it existed has it nowhere: the
+    loader then records 0 and the logged stats keep whatever the log counted
+    in them.
   - `secrets`, the Secret zone by card id in the order the Secrets were got, as
     the board files write it (always written, empty when there is nothing).
   - `waiting` on a hero power: the minion Lock and Load holds, as a board

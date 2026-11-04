@@ -44,6 +44,11 @@ pub struct Minion {
     pub dark_gifts: Vec<String>,
     /// Hero power enchantments on it (see [`hero_enchants_by_minion`]).
     pub hp_enchants: Vec<String>,
+    /// The +A/+H Holy Vanguard's own aura ("Has +30/+30 if you have 15 or
+    /// less Health") has put into `attack` and `health`, read off the
+    /// `Vanguard's Valor` enchantment the log shows on it (see
+    /// [`vanguard_aura`]). `None` for every other card.
+    pub vanguard_aura: Option<(i64, i64)>,
     /// Every tag of the entity, as it stood.
     pub tags: HashMap<String, TagValue>,
 }
@@ -390,6 +395,36 @@ pub fn hero_enchants_by_minion(g: &Game) -> HashMap<i32, Vec<String>> {
     out
 }
 
+/// The enchantment Holy Vanguard's own aura leaves on its card ("Has +30/+30
+/// if you have 15 or less Health"): `Vanguard's Valor`, 30/30 on a plain copy
+/// and 60/60 on a Golden one.
+pub const VANGUARD_AURA: &str = "BG36_372e";
+
+/// The +A/+H Holy Vanguard's own aura has put into a minion's logged `ATK` and
+/// `HEALTH`, or `None` when it has none: the pair on the `Vanguard's Valor`
+/// enchantment the log shows attached to it. A triple carries one such
+/// enchantment per copy over onto the Golden one (a Golden Holy Vanguard ends
+/// up with three, two of 30/30 and its own 60/60), and the game never adds the
+/// copies' pairs up, so the largest pair is the one its own card adds. The
+/// stats the log shows already include it (docs/rules/design.md "Triples").
+pub fn vanguard_aura(g: &Game, host: i32) -> Option<(i64, i64)> {
+    let mut best: Option<(i64, i64)> = None;
+    for x in g.entities_in_order() {
+        if x.card_id != VANGUARD_AURA || x.text("ZONE") != "PLAY" || x.int("ATTACHED") != host as i64
+        {
+            continue;
+        }
+        let pair = (x.int("TAG_SCRIPT_DATA_NUM_1"), x.int("TAG_SCRIPT_DATA_NUM_2"));
+        if pair == (0, 0) {
+            continue;
+        }
+        if best.is_none_or(|b| pair.0 > b.0 || pair.1 > b.1) {
+            best = Some(pair);
+        }
+    }
+    best
+}
+
 /// One minion, with the Dark Gifts and hero power enchantments the log attached
 /// to it. The two maps save recomputing them for every minion of a board.
 pub fn minion(
@@ -418,6 +453,7 @@ pub fn minion(
         keywords: KEYWORDS.iter().copied().filter(|k| e.int(k) != 0).collect(),
         dark_gifts: own,
         hp_enchants: enchants.get(&e.id).cloned().unwrap_or_default(),
+        vanguard_aura: vanguard_aura(g, e.id),
         tags: e.tags.clone(),
     }
 }

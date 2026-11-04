@@ -38,7 +38,9 @@ pub struct Deity {
 /// Per-player counters passed into a fight.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Counters {
-    /// The owner's hero Health, for Holy Vanguard; None when unknown.
+    /// The owner's hero Health; None when unknown. A fight reads nothing off
+    /// it (Holy Vanguard's +30/+30 is in the board's own stats, the shop keeps
+    /// it there), but a seat and the observations do.
     pub health: Option<i32>,
     pub beetle_attack: i32,
     pub beetle_health: i32,
@@ -711,21 +713,10 @@ impl<'a> Side<'a> {
         let gift_trigger = ms
             .iter()
             .any(|f| f.m.parts().any(|(c, _)| db.get(c).after_summon_give_stats.is_some()));
-        // Holy Vanguard: +30/+30 while the hero has 15 or less Health. The
-        // Health already includes every damage reaction (a rewound hit has
-        // given its Health back).
-        if counters.health.is_some_and(|h| h <= 15) {
-            for f in &mut ms {
-                let mut bonus = 0;
-                for (card, golden) in f.m.parts() {
-                    if db.get(card).aura == Some(Aura::HolyVanguard) {
-                        bonus = bonus.max(30 * if golden { 2 } else { 1 });
-                    }
-                }
-                f.m.attack += bonus;
-                f.m.health += bonus;
-            }
-        }
+        // Holy Vanguard's +30/+30 (at 15 Health or less) is in the card's own
+        // stats already: the shop puts it there and takes it off when the
+        // Health crosses 15 (`Game::sync_vanguard`, docs/rules/design.md
+        // "Triples"), so a fight adds nothing on top.
         Side {
             ms,
             hand: &hand[..hand.len().min(HAND)],

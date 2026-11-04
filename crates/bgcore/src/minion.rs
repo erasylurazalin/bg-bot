@@ -253,13 +253,16 @@ pub struct Minion {
     pub extra_tribes: crate::cards::Tribes,
     /// The +A/+H of its own Holy Vanguard aura ("Has +30/+30 if you have 15 or
     /// less Health", +60/+60 on the Golden one) that `attack` and `health`
-    /// already hold, 0/0 for a minion without one. The engine's own minions
-    /// keep 0: the aura is applied where it is read, at the start of a fight
-    /// (`crate::obs::vanguard_bonus`). A minion seated from a log carries the
-    /// pair the log's `Vanguard's Valor` enchantment shows it wearing, so a
-    /// triple can leave it out of the sum and give the Golden one its own
-    /// instead (`game/triples.rs`; log `Hearthstone_2026_10_28_22_11_50`
-    /// game 5 turn 10 step 12).
+    /// already hold, 0/0 for a minion without one. The aura is part of the
+    /// card's stats wherever it is (board, hand, Tavern) while its owner has
+    /// 15 or less Health (docs/rules/design.md "Triples"), so this pair is
+    /// what `sync_vanguard_aura` added and can take off again exactly once:
+    /// when the Health goes back above 15, and in a triple, where the copies
+    /// leave it out of the sum and the Golden one gets its own
+    /// (`game/triples.rs`; log `Hearthstone_2026_10_28_22_11_50` game 5 turn
+    /// 10 step 12). A card seated from a log carries the pair the log's
+    /// `Vanguard's Valor` enchantment shows it wearing, which its logged stats
+    /// already include.
     pub vanguard_aura: [u8; 2],
 }
 
@@ -278,6 +281,38 @@ impl Minion {
 
     pub fn mul(&self) -> i32 {
         if self.golden { 2 } else { 1 }
+    }
+
+    /// The +A/+H this card's own Holy Vanguard aura is worth to it: +30/+30
+    /// while its owner has 15 or less Health (`on`), +60/+60 for the Golden
+    /// card, 0/0 when the condition does not hold or the card has no such
+    /// aura. The pair is part of the card's stats, so this is what
+    /// `sync_vanguard_aura` adds and takes off.
+    pub fn vanguard_pair(&self, db: &CardDb, on: bool) -> [u8; 2] {
+        if !on {
+            return [0, 0];
+        }
+        let mut pair = 0;
+        for (card, golden) in self.parts() {
+            if db.get(card).aura == Some(crate::cards::Aura::HolyVanguard) {
+                pair = pair.max(if golden { 60 } else { 30 });
+            }
+        }
+        [pair; 2]
+    }
+
+    /// Put the card's own Holy Vanguard aura into its stats, or take it back
+    /// out, exactly once: what `vanguard_aura` records is what it added. `on`
+    /// is whether its owner has 15 or less Health.
+    pub fn sync_vanguard_aura(&mut self, db: &CardDb, on: bool) {
+        let pair = self.vanguard_pair(db, on);
+        let had = self.vanguard_aura;
+        if pair == had {
+            return;
+        }
+        self.attack += pair[0] as i32 - had[0] as i32;
+        self.health += pair[1] as i32 - had[1] as i32;
+        self.vanguard_aura = pair;
     }
 
     /// The limited uses a fresh copy of this minion has each turn: a Thorned

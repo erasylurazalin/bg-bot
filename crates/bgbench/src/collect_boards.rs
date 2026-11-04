@@ -661,6 +661,19 @@ fn minion_json(m: &Minion, reanimate: bool) -> Json {
     if let Some(sd) = minion_numbers(&m.tags) {
         fields.push(("numbers".to_string(), numbers_json(&sd)));
     }
+    // Holy Vanguard's "+30/+30 if you have 15 or less Health" is in the card's
+    // logged ATK/HEALTH wherever it is, and the log keeps it on the minion's
+    // `Vanguard's Valor` enchantment: the file writes the pair beside the
+    // stats, and the loader records it on `Minion::vanguard_aura` so a later
+    // Health crossing can take it off exactly once. Written only when the
+    // minion has one; a file from before the key existed reads as no aura,
+    // and its stats keep what the log counted in them.
+    if let Some((attack, health)) = m.vanguard_aura {
+        fields.push((
+            "vanguard_aura".to_string(),
+            Json::Arr(vec![Json::Int(attack), Json::Int(health)]),
+        ));
+    }
     if reanimate {
         fields.push(("reanimate".to_string(), Json::Bool(true)));
     }
