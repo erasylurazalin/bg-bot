@@ -108,7 +108,10 @@ fight phase.
   before a card the buy hands over (Transcribing Typewriter's copy joins
   after, and is checked again; log `10_26_00_48_15-g1` turn 6). Volumizers
   of different colours don't triple together (log `10_29_22_20_04-g3` turn
-  10). Its effect is doubled (twice the numbers, or the
+  10). A copy's own aura isn't one of its bonus stats: Holy Vanguard's
+  "+30/+30 if you have 15 or less Health" stays out of the sum, and the
+  golden gets its own once, at its doubled +60/+60 (log `10_28_22_11_50-g5`
+  turn 10: golden Holy Vanguard 208/116, not 238/146; 2026-11-04). Its effect is doubled (twice the numbers, or the
   effect triggers twice).
 - Playing a golden minion gives a Triple Reward: a 0-cost plain spell (not
   a Tavern spell) that goes to your hand. Casting it is casting a spell:
@@ -849,6 +852,12 @@ the JSON flags it.
 - **Mummifier:** a random Undead without Reborn; none left, wasted.
 - **Maw Caster, Butchering:** you choose the Undead to destroy; with none,
   nothing happens (Butchering can't be cast).
+- **Eredar Escapist's countdown keeps the overshoot** (logs, 2026-11-04): it
+  counts one per point of hero damage and fires at 0; after a batch past the
+  countdown it shows the overshoot, not what was left. On "(4 left!)", 5
+  damage fires it once and leaves "(1 left!)", so the next point fires it
+  again (`10_27_04_30_04-g3` turn 10 step 25: two Cupcakes, from a 5 and a
+  1). Whether every "after N" counter works this way is open (UNSURE).
 - **Tomb Turning:** the Discovered Undead dies right after it's played
   that turn, after its Battlecry (in docs/notes/UNSURE.md). Kept in hand to a
   later turn, it's a normal minion.
