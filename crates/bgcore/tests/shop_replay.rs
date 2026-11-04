@@ -2211,3 +2211,185 @@ fn a_loaded_compass_makes_the_next_buy_of_its_type_golden_once() {
         second.ours.hand
     );
 }
+
+/// Gone Fishing's button counts the sells left ("5" is none since the last
+/// Murloc, then 4, 3, 2, 1 and a Murloc at 0), and the engine counts the sells
+/// done: the loader turns one into the other. Without it every step would
+/// start the count at 0 again and the power could never fire inside a step,
+/// which is what `Hearthstone_2026_10_28_22_11_50-g4` turn 12 shows (four
+/// Murlocs the log got and the engine did not).
+#[test]
+fn gone_fishing_counts_the_sells_that_are_left_as_sells_done() {
+    let file_of = |numbers: &str| {
+        let text = format!(
+            r#"{{"source": "flurgl", "game": 1,
+            "hero": {{"card_id": "TB_BaconShop_HERO_55", "name": "Fungalmancer Flurgl"}},
+            "turns": [
+            {{"turn": 8,
+              "start": {{"board": [
+                 {{"id": 11, "position": 1, "card_id": "BGS_004", "name": "Wrath Weaver",
+                   "attack": 2, "health": 3, "golden": false, "keywords": []}}],
+               "hand": [], "tavern": [], "hand_hidden": 0, "gold": 10, "tier": 3,
+               "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+               "frozen": false,
+               "hero_powers": [{{"card_id": "TB_BaconShop_HP_056", "name": "Gone Fishing",
+                                 "cost": 0, "numbers": {numbers}}}],
+               "trinkets": []}},
+             "actions": [], "end": null}}]}}"#
+        );
+        parse_action_files(&[("flurgl.json".to_string(), text)]).unwrap().remove(0)
+    };
+    let data = data();
+    let me = bgcore::shop_replay::ME;
+    let load_of = |file: &ShopFileSpec| {
+        let turn = &file.turns[0];
+        load(&data, &turn.start, file.hero(&data, &turn.start), file.lobby(), turn.turn, 1, None)
+    };
+    // Three of five sells left is two done.
+    let loaded = load_of(&file_of("[3, 5, 0, 0]"));
+    let pl = &loaded.game.players[me];
+    assert_eq!(pl.power.map(|p| p.progress), Some(2), "two of the five sells are done");
+    // One left: this sell is the fifth, and the Murloc comes.
+    let file = file_of("[1, 5, 0, 0]");
+    let loaded = load_of(&file);
+    let mut game = loaded.game.clone();
+    let before = game.players[me].hand.len();
+    game.step(Action::Sell(0)).expect("the sell is legal");
+    let pl = &game.players[me];
+    assert_eq!(pl.board.len(), 0, "the minion is sold");
+    assert_eq!(pl.hand.len(), before + 1, "the fifth sell gets a random Murloc");
+    assert!(data.cards.get(pl.hand[before].card).tribes.has(Tribe::Murloc), "a Murloc");
+    assert_eq!(game.check_invariants(), Ok(()));
+    // Five left (a fresh count) is a sell with no Murloc.
+    let file = file_of("[5, 5, 0, 0]");
+    let loaded = load_of(&file);
+    let mut game = loaded.game.clone();
+    let before = game.players[me].hand.len();
+    game.step(Action::Sell(0)).expect("the sell is legal");
+    assert_eq!(game.players[me].hand.len(), before, "the first sell of five gets nothing");
+}
+
+/// The pair a source hands out is a linked pair: playing one discards the
+/// other (docs/rules/design.md "Linked cards"). A sold Faceless Operative gives
+/// two random Aberrations, and the state says only which card each came from,
+/// so the loader links two hand cards with one `from`
+/// (`Hearthstone_2026_10_24_15_25_26-g2` turn 9: the Abyssal Envoy played and
+/// the Unwilling Slacker discarded with it, which the log shows and the replay
+/// did not).
+#[test]
+fn the_two_cards_one_source_hands_out_are_linked() {
+    let text = |hand: &str| {
+        format!(
+            r#"{{"source": "linked", "game": 1, "turns": [
+            {{"turn": 5,
+              "start": {{"board": [], "hand": [{hand}], "tavern": [],
+                "hand_hidden": 0, "gold": 10, "tier": 4, "upgrade_cost": 5,
+                "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+                "hero_powers": [], "trinkets": []}},
+              "actions": [], "end": null}}]}}"#
+        )
+    };
+    let pair = r#"
+        {"id": 11, "index": 1, "card_id": "BG36_311", "name": "Abyssal Envoy",
+         "attack": 2, "health": 2, "golden": false, "keywords": [], "kind": "minion",
+         "from": {"card_id": "BG36_308", "name": "Faceless Operative"}},
+        {"id": 12, "index": 2, "card_id": "BG36_101", "name": "Unwilling Slacker",
+         "attack": 3, "health": 2, "golden": false, "keywords": [], "kind": "minion",
+         "from": {"card_id": "BG36_308", "name": "Faceless Operative"}}"#;
+    let files = parse_action_files(&[("linked.json".to_string(), text(pair))]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let data = data();
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 1, None);
+    let me = bgcore::shop_replay::ME;
+    let mut game = loaded.game.clone();
+    assert_eq!(game.players[me].hand.len(), 2);
+    game.step(Action::Play { hand: 0, pos: 0 }).expect("the Envoy is played");
+    assert_eq!(game.players[me].board.len(), 1, "the Envoy is on the board");
+    assert!(game.players[me].hand.is_empty(), "playing one discards the other");
+
+    // One card from that source on its own is no pair, and playing it leaves
+    // the rest of the hand alone.
+    let lone = r#"
+        {"id": 11, "index": 1, "card_id": "BG36_311", "name": "Abyssal Envoy",
+         "attack": 2, "health": 2, "golden": false, "keywords": [], "kind": "minion",
+         "from": {"card_id": "BG36_308", "name": "Faceless Operative"}},
+        {"id": 12, "index": 2, "card_id": "BG36_101", "name": "Unwilling Slacker",
+         "attack": 3, "health": 2, "golden": false, "keywords": [], "kind": "minion"}"#;
+    let files = parse_action_files(&[("linked.json".to_string(), text(lone))]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let loaded = load(&data, &turn.start, None, None, turn.turn, 1, None);
+    let mut game = loaded.game.clone();
+    game.step(Action::Play { hand: 0, pos: 0 }).expect("the Envoy is played");
+    assert_eq!(game.players[me].hand.len(), 1, "an unlinked card stays");
+}
+
+/// A card a trinket hands out at the start of the turn that a full hand
+/// refused waits for room and joins at the first step that frees a slot
+/// (docs/rules/design.md "A full hand"). The state cannot show a waiting card,
+/// so the step that frees the slot would never see it: the loader queues it
+/// again from the trinket the state does show. The Lockbox Portrait's Lockbox
+/// in `Hearthstone_2026_10_28_22_11_50-g6` turn 8 and the Token of the Old
+/// Gods in `Hearthstone_2026_10_29_22_20_04-g3` turns 10 and 11 arrived like
+/// that.
+#[test]
+fn a_start_of_turn_card_a_full_hand_refused_joins_when_a_slot_frees() {
+    let gem = |i: usize| {
+        format!(
+            r#"{{"id": {i}, "index": {i}, "card_id": "BG20_GEM", "name": "Blood Gem",
+             "attack": 0, "health": 0, "golden": false, "keywords": [],
+             "numbers": [1, 1, 0, 0], "kind": "spell"}}"#
+        )
+    };
+    let gems: Vec<String> = (1..=9).map(gem).collect();
+    let hand = gems.join(",");
+    let lockbox = r#"{"id": 100, "index": 10, "card_id": "BG36_520t", "name": "Lockbox",
+                      "attack": 0, "health": 0, "golden": false, "keywords": [], "kind": "spell"}"#;
+    let module = r#"{"id": 10, "index": 10, "card_id": "BG_BOT_911",
+                     "name": "Annoy-o-Module", "attack": 2, "health": 4,
+                     "golden": false, "keywords": ["TAUNT", "DIVINE_SHIELD"],
+                     "kind": "minion"}"#;
+    let on_board = r#"{"id": 10, "position": 1, "card_id": "BG_BOT_911",
+                       "name": "Annoy-o-Module", "attack": 2, "health": 4,
+                       "golden": false, "keywords": ["TAUNT", "DIVINE_SHIELD"],
+                       "kind": "minion"}"#;
+    let trinket = r#"{"card_id": "BG36_MagicItem_301", "name": "Lockbox Portrait",
+                      "greater": false, "numbers": [2, 0, 0, 126]}"#;
+    let state = |hand: &str, board: &str| {
+        format!(
+            r#"{{"board": [{board}], "hand": [{hand}], "tavern": [],
+             "hand_hidden": 0, "gold": 10, "tier": 4, "upgrade_cost": 5,
+             "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+             "hero_powers": [], "trinkets": [{trinket}], "secrets": []}}"#
+        )
+    };
+    let text = format!(
+        r#"{{"source": "lockbox", "game": 1, "turns": [
+        {{"turn": 8,
+          "start": {},
+          "actions": [{{"step": "play", "paid": {{"gold": 0, "health": 0}},
+            "index": 10,
+            "card": {{"id": 10, "index": 10, "card_id": "BG_BOT_911", "name": "Annoy-o-Module"}},
+            "moved": {{"id": 10, "from": {{"where": "hand", "index": 10}},
+                      "to": {{"where": "board", "position": 1}}}},
+            "after": {}}}],
+          "end": null}}]}}"#,
+        state(&format!("{hand},{module}"), ""),
+        state(&format!("{hand},{lockbox}"), on_board),
+    );
+    let files = parse_action_files(&[("lockbox.json".to_string(), text.clone())])
+        .unwrap_or_else(|e| panic!("{e}\n{text}"));
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    let names: Vec<&str> = r.ours.hand.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"Lockbox"), "the queued Lockbox joins: {names:?}");
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+}

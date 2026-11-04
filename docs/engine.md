@@ -1300,7 +1300,13 @@ through exactly that card's code. The engine never matches a gift by name:
   the keyword gifts, Amalgamation, Toreth's Blessing's hits and Gilding),
   which `push_gift_unique` drops. Past `MAX_GIFTS` a new gift is not attached.
   A triple takes the gifts of all three copies, a Magnetized Mech keeps its
-  own (the magnetic minion's are lost) and a sold minion's go with it.
+  own (the magnetic minion's are lost) and a sold minion's go with it. Two
+  kinds of gift a golden does not take from its copies, which is how Era's
+  logs show them: a gift that hands out only keywords (`keyword_gift` in
+  `game/triples.rs`: Harpy's Talons, Toxicity, Furtiveness) leaves its
+  keywords on the golden through the copies and no gift behind, and of two
+  countdown gifts the golden keeps one (`Hearthstone_2026_10_26_00_48_15-g2`
+  turn 6, a golden Cadaver Caretaker with one Replication from two copies).
   `CardDb::tribes_of(&Minion)` is the one tribe read that knows about
   Amalgamation ("has all minion types"). Every tribe check on a minion goes
   through it (board, hand, the Tavern, a fight, an observation, a bot's

@@ -897,3 +897,33 @@ fn floating_candle_sets_spell_is_matched_by_its_card_id() {
     assert!(unknown.is_empty(), "nothing is unmatched: {unknown:?}");
     assert_eq!(specs[0].hand[0].name, "Floating Candle");
 }
+
+/// Both Jailer Sticker spells print the same name in the log ("Jailer
+/// Sticker"), and the lesser (one random Undead) and the greater trinket's
+/// (two) are different cards.toml tokens. Only the card id tells them apart:
+/// the greater's `BG35_MagicItem_733t` maps to the "(Greater)" token, and the
+/// lesser's `BG35_MagicItem_306t` keeps the plain name
+/// (`Hearthstone_2026_11_03_15_22_36-g2`, the five Jailer Sticker plays).
+#[test]
+fn the_two_jailer_sticker_spells_are_matched_by_their_card_ids() {
+    let ids = CardIdMap::parse(
+        r#"{"cards": [
+            {"card_id": "BG35_MagicItem_306t", "name": "Jailer Sticker"},
+            {"card_id": "BG35_MagicItem_733t", "name": "Jailer Sticker"}
+        ]}"#,
+    )
+    .unwrap();
+    assert_eq!(ids.get("BG35_MagicItem_306t"), Some(("Jailer Sticker", false)));
+    assert_eq!(ids.get("BG35_MagicItem_733t"), Some(("Jailer Sticker (Greater)", false)));
+    // Both are built, and the greater one is the one that gets two Undead.
+    let d = data();
+    for (name, count) in [("Jailer Sticker", 1), ("Jailer Sticker (Greater)", 2)] {
+        let card = d.cards.by_name(name).unwrap_or_else(|| panic!("{name}"));
+        match d.cards.get(card).spell_target {
+            Some(bgcore::cards::SpellTarget::DestroyGetRandom { count: n, .. }) => {
+                assert_eq!(n, count, "{name}")
+            }
+            other => panic!("{name} is not a destroy-and-get: {other:?}"),
+        }
+    }
+}
