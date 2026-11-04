@@ -86,6 +86,9 @@ fight phase.
   Blood Gems from a Roadboar that attacks 15 times). A card that arrives at
   the start of your turn (a compass trinket's tribe card and the like) is
   queued instead and joins your hand as soon as there is space.
+  A triple is one action that takes all three copies, so a full hand still
+  takes a board copy when the merge itself frees the slot the golden needs
+  (log `10_24_04_08_00-g1` turn 10 step 25; 2026-11-04).
 - The board order matters in the fight, and you can rearrange it freely
   during the shop phase.
 
@@ -94,10 +97,21 @@ fight phase.
 - Getting a third copy of the same minion (in hand or on board) merges the
   three into a golden version in your hand.
 - A golden minion has double the printed stats plus the bonus stats of all
-  three copies that made it. Its effect is doubled (twice the numbers, or the
+  three copies that made it. A damaged copy's damage doesn't carry: the game sums
+  the copies and heals the golden (log `10_24_00_56_06-g1`, golden
+  Plaguerunner 25/4 from a damaged copy; 2026-11-04). The triple check runs
+  before a card the buy hands over (Transcribing Typewriter's copy joins
+  after, and is checked again; log `10_26_00_48_15-g1` turn 6). Volumizers
+  of different colours don't triple together (log `10_29_22_20_04-g3` turn
+  10). Its effect is doubled (twice the numbers, or the
   effect triggers twice).
 - Playing a golden minion gives a Triple Reward: a 0-cost plain spell (not
-  a Tavern spell) that goes to your hand. Its tier is fixed when you get
+  a Tavern spell) that goes to your hand. Casting it is casting a spell:
+  every "cast a spell" counter and trigger sees it (a Felboar counts it), a
+  "Tavern spell" one doesn't (a Timecap'n Hooktail stays silent), and the
+  whole cast waits for the Discover it opens, so those effects land at the
+  pick (logs `Hearthstone_2026_11_02_00_10_22` game 4 turn 8,
+  `11_03_15_22_36` game 3 turn 8; 2026-11-04). Its tier is fixed when you get
   it: one above your tier then (tier 6 at most). Played on tier 4, it
   Discovers tier 5 even if you level before casting it. You can also keep
   it and never cast it. It comes before anything the golden minion's
@@ -248,7 +262,8 @@ asking Era any rule question.
 - **Spell versus Tavern spell:** "cast a spell" counts every spell (Blood
   Gems, Bananas, Gem Day, Spellcraft); "cast a Tavern spell" only
   BATTLEGROUND_SPELL ("Tavern spells versus other spells", "Read the card's
-  exact words").
+  exact words") A Triple Reward is a plain spell: it
+  counts for "cast a spell", never for "Tavern spell" (logs, 2026-11-04).
 - **Targets:** a spell, Battlecry or Activate may pick your board AND the
   Tavern unless the text limits it ("Targets in the shop", "Who a card can
   reach").
