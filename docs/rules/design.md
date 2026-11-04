@@ -522,7 +522,14 @@ its Triple Reward as usual (THE GOLDEN RULE).
 with no target, nor spells cast on a Tavern minion), including
 Robust Evolution (the second cast evolves the result again) and Lost
 Staff of Hamuul ("cast on this" triggers fire twice). Channel the
-Devourer's second cast does nothing: the minion is already sold.
+Devourer's second cast does nothing: the minion is already sold. Each of
+Balinda's casts is a cast of its own, a Choose One spell's targeted option
+too: "after you cast a spell" counters see each, and a Felboar eats between
+them (log `Hearthstone_2026_11_02_00_10_22-g4` turn 14 step 24, Alliance
+Flag with a golden Balinda: three casts, both Felboars counting one per
+cast; 2026-11-04). Hot-Air Surveyor adds no cast to a Gem a minion plays
+(Turbo Hogrider, Roogug): only Gems played from your hand (log
+`10_28_02_28_32-g4` turn 13 step 27; 2026-11-04).
 
 **Two kinds of Refresh.** An explicit Refresh is the button (paid with
 Gold, Health or free) or an effect that says "Refresh" (Snarky Shark).
