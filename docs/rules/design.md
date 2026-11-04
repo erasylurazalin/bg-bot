@@ -208,7 +208,11 @@ board, except effects that say "permanently".
   They are two separate keywords, and a minion can have both (Era,
   2026-11-04; log `11_02_00_10_22-g7` turn 14: Tide Oracle Morgl, Poisonous
   by its text, gains Venomous from Sewer Escapee). Venomous is a Bonus
-  Keyword and counts for Hackerfin; Poisonous is not a Bonus Keyword.
+  Keyword and counts for Hackerfin; Poisonous is not a Bonus Keyword and
+  doesn't count (logs, 2026-11-04: `11_02_00_10_22-g7` turn 9 step 31 and
+  turn 10 step 17, Hackerfin's own number is +6/+4 and +9/+6 with Morgl's
+  Poisonous on the board, which counts only Venomous, then Venomous and
+  Taunt; Era thought Poisonous counted).
 - **Reborn:** when it dies, it comes back once with its printed Attack and 1
   Health, without Reborn. Checked.
 - **Cleave:** the attack also hits the target's neighbours, and they don't hit
@@ -277,10 +281,14 @@ asking Era any rule question.
 - **Battlecries:** Brann counts twice; a Choose One is not a Battlecry
   ("Counting Battlecries").
 - **A minion's cast isn't yours** ("A spell a minion casts for you").
-- **Start versus end of turn:** an effect happens at the start of the turn
-  unless its text says "end of turn" (counters, discounts, countdowns).
-  Drakkari Enchanter repeats every end-of-turn effect and never a
-  start-of-turn one (Era, 2026-11-03).
+- **Start versus end of turn:** read the card's text. If it says "at the end
+  of" (your turn, every 2 turns), it is an end-of-turn effect and Drakkari
+  Enchanter repeats it. Anything else ("next turn", "in 2 turns", "each
+  turn", "at the start of") happens at the start of the turn and Drakkari
+  doesn't repeat it. This covers every card, not only Dark Gifts: counters,
+  discounts, countdowns (Era, 2026-11-03 and 2026-11-04; Incubation's "in 2
+  turns" pays at the start of the turn and doubles once, Replication's "at
+  the end of every 2 turns" pays at the end and Drakkari repeats it).
 - **"A minion of each type" (Tea Set):** each minion gets at most one buff,
   and as many minions as possible get one; random only between equal choices
   like two Demons ("Types").
