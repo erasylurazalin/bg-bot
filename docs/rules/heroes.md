@@ -96,8 +96,12 @@ two turns in a row.
 ## The Tavern's shape
 
 **Ysera (Dream Portal):** the extra Dragon at each Refresh takes a minion
-slot. The spell slot is always there. The only exceptions known are the
-Whistle Band trinket and a Tavern full of 7 Fodders.
+slot. The spell slot is there unless the Tavern's minions reach seven
+cards, whoever filled them: Whistle Band, a Refresh with seven Fodders, or
+Bob's Burgles copying a seven-minion warband (log
+`Hearthstone_2026_11_02_00_10_22-g7` turn 8 and 12: seven copies, no
+spell). Corrected from the logs on 2026-11-04; the old text named only
+Whistle Band and seven Fodders.
 
 **Stay Frosty** is still in the game.
 
