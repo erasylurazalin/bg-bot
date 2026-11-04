@@ -59,6 +59,12 @@ Incubation, Replication and Affinity count down 2 turns. They are end of
 turn effects (Era, 2026-11-02; the card text says "At the end of every 2
 turns", and Era's log has Replication's copy in hand at the end of the
 turn): the count goes down and the gift fires at the end of your turn.
+Incubation is the exception in the logs (corrected 2026-11-04): its count
+reaches 0 at the end of your turn, but the doubling lands as your next
+turn starts, after the fight (`Hearthstone_2026_10_28_19_47_59-g1` end of
+turn 7: Incubation's counter goes to 0 at 19:59:50 and the Hot-Air Surveyor
+stays 12/16 through the fight, then doubles to 24/32 at 19:59:53 on the next
+turn). Replication and Affinity pay at the end of the turn as written.
 On the turn it fires, the payout runs as many times as the player's end of
 turn effects do: Drakkari Enchanter sets that to 2 (3 golden; two Drakkari
 still make 2), and Ghastly Sticker adds one on top (Drakkari plus Sticker:
