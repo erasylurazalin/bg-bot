@@ -3904,6 +3904,40 @@ fn the_end_of_turn_battlecries_trigger() {
 }
 
 #[test]
+fn a_sticker_triggered_battlecrys_discover_is_a_random_card() {
+    // A Battlecry the Young Murk-Eye Sticker triggers at the end of the turn
+    // is not a Battlecry you played: a Discover it opens gives a random card
+    // of its pool with no Discover offered and is not a Discover for "after
+    // you Discover" cards (Hooktusk, which sits between the two ends here),
+    // the same as a Kelp Keeper's Activate (docs/rules/design.md "Shop replay
+    // answers", Era 2026-11-04). Rodeo Performer Discovers a Tavern spell.
+    let mut g = game(312);
+    equip(&mut g, 0, 1, "Young Murk-Eye Sticker");
+    put_on_board(&mut g, 0, "Rodeo Performer");
+    put_on_board(&mut g, 0, "Hooktusk, Master Marauder");
+    put_on_board(&mut g, 0, "Southsea Busker");
+    g.players[0].golden_played = 1;
+    let busker = (g.players[0].board[2].attack, g.players[0].board[2].health);
+    let hand = g.players[0].hand.len();
+    act(&mut g, 0, Action::EndTurn);
+    assert!(g.players[0].discover.is_empty(), "no Discover is offered");
+    assert!(g.players[0].discover_queue.is_empty(), "and none is left waiting");
+    assert_eq!(g.players[0].repeat_discover, 0, "the trigger's Discover is spent");
+    assert_eq!(g.players[0].hand.len(), hand + 1, "the Discover gave its random card");
+    assert!(
+        g.data.cards.get(g.players[0].hand[hand].card).is_spell(),
+        "a Tavern spell: {:?}",
+        g.players[0].hand[hand].card
+    );
+    assert_eq!(
+        (g.players[0].board[2].attack, g.players[0].board[2].health),
+        busker,
+        "Hooktusk did not fire"
+    );
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn insurrectionists_blade_triggers_every_rally() {
     let mut g = game(311);
     equip(&mut g, 0, 1, "Insurrectionist's Blade");

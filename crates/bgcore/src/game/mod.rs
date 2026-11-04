@@ -330,7 +330,9 @@ pub struct QueuedRepeat {
     /// pool instead of being offered, and does not count as a Discover for
     /// "after you Discover" cards: a Battlecry an Activate triggers does that
     /// (Kelp Keeper; docs/rules/design.md "Shop replay answers", Era
-    /// 2026-11-03).
+    /// 2026-11-03), and so does one an end-of-turn trigger runs (Young
+    /// Murk-Eye and its Sticker, Hackerfin Portrait, Echoing Voice; Era
+    /// 2026-11-04).
     pub random_discover: bool,
 }
 
@@ -1057,17 +1059,20 @@ pub struct Player {
     /// Repeats a Battlecry trigger or a spell cast still owes after the first
     /// run asked for a target or a Choose One option (see `QueuedRepeat`).
     pub repeats: ArrayVec<QueuedRepeat, 8>,
-    /// Whether `run_queued_repeats` is on the stack: a prompt it answers must
-    /// not re-enter it.
+    /// Whether a Battlecry trigger driver is on the stack, `run_queued_repeats`
+    /// or `run_battlecry_at` counting the Discovers its run opens: a prompt it
+    /// answers must not start the Discover driver itself.
     pub repeating: bool,
     /// Discover options waiting for a choice. Minion cards here are out of the pool.
     pub discover: ArrayVec<CardId, DISCOVER>,
     /// Queued Discover requests to offer once pending choices finish.
     pub discover_queue: ArrayVec<DiscoverRequest, 8>,
-    /// How many of the queued Discover requests a Battlecry an Activate (or a
-    /// hero power) triggered opened. Those are answered with a random card of
-    /// the Discover's pool instead of being offered (docs/rules/design.md
-    /// "Shop replay answers": a Kelp Keeper's Activate).
+    /// How many of the queued Discover requests a Battlecry that was not
+    /// played (an Activate, a hero power, an end-of-turn trigger) opened.
+    /// Those are answered with a random card of the Discover's pool instead
+    /// of being offered (docs/rules/design.md "Shop replay answers": a Kelp
+    /// Keeper's Activate and an end-of-turn trigger, Era 2026-11-03 and
+    /// 2026-11-04).
     pub repeat_discover: u8,
     /// Whether the Discover offer now being answered is one of those: its
     /// pick is not a Discover for `after_discover` cards (Hooktusk; Era

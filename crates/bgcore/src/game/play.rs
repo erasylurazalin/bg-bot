@@ -677,19 +677,33 @@ impl Game {
     }
 
     /// Run the Battlecry of the minion in board slot `pos`, for a trigger
-    /// that is not a play (Young Murk-Eye Sticker, Hackerfin Portrait, the
-    /// Snicker-snack power). With `random`, a target the Battlecry asks for
-    /// is answered at random, out of the board and the Tavern
-    /// (docs/rules/trinkets.md: "a Battlecry that needs a target picks one at
-    /// random, and that can be a Tavern minion").
+    /// that is not a play (Young Murk-Eye Sticker, Hackerfin Portrait, a Dark
+    /// Gift's Echoing Voice). With `random`, a
+    /// target the Battlecry asks for is answered at random, out of the board
+    /// and the Tavern (docs/rules/trinkets.md: "a Battlecry that needs a
+    /// target picks one at random, and that can be a Tavern minion"). A
+    /// Discover the Battlecry opens gives a random card of its pool with no
+    /// Discover offered, and is not a Discover for `after_discover` cards,
+    /// the same as a Kelp Keeper's Activate (docs/rules/design.md "Shop
+    /// replay answers", Era 2026-11-04: an end-of-turn trigger too).
     pub(super) fn run_battlecry_at(&mut self, p: usize, pos: usize, random: bool) {
         if pos >= self.players[p].board.len() {
             return;
         }
+        let discovers_before = self.players[p].discover_queue.len();
+        // The Discover driver waits for the whole trigger, as it does for a
+        // queued repeat, so the requests this run makes can be counted before
+        // any of them is offered: answering the target can open one itself
+        // (a Maw Caster's Discover comes after its pick).
+        let repeating = std::mem::replace(&mut self.players[p].repeating, true);
         self.battlecry_or_choose_one(p, pos);
         if random {
             self.answer_target_at_random(p);
         }
+        self.players[p].repeating = repeating;
+        let opened = self.players[p].discover_queue.len().saturating_sub(discovers_before);
+        self.players[p].repeat_discover =
+            self.players[p].repeat_discover.saturating_add(opened as u8);
     }
 
     /// Answer the target a Battlecry left open with a random legal minion,
