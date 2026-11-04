@@ -634,6 +634,21 @@ summoned later). A 1/1 Skeleton with Reborn then comes back as a 12/4.
 - Lurking Lionfish: "choose a card in the Tavern" may pick a Tavern spell too.
 - Kelp Keeper: its Activate on a minion whose Battlecry Discovers gives a
   random card from that Discover's pool instead of opening the Discover.
+- **Shop replay answers (Era, 2026-11-04).**
+  - A Battlecry triggered at the end of the turn (Young Murk-Eye, Drakkari)
+    on a Discover Battlecry gives a random card, the same as Kelp Keeper:
+    no Discover opens.
+  - Mind Muck: you choose the Demon; the Tavern minion it eats is random.
+  - A minion's own Choose One or Battlecry can't target the minion itself
+    (Sprightly Scarab played as your only Beast buffs nothing; log
+    `10_28_02_28_32-g4` turn 10).
+  - Ominous Seer (Tier 1 Demon and Naga, "the next Tavern spell you buy
+    costs (1) less") is what makes Tavern spells cost 0 or 1 in the logs.
+  - Victorious Geomant's Activate costs 2; the one log step that showed 1
+    was a misread step, not a discount.
+  - Two casts on one minion versus one each on two (Misplaced Tea Set) are
+    both fine random outcomes; only the replay's comparison tells them
+    apart.
 - Decoy Conjurer: when several Tavern minions tie for the highest Attack, the
   stolen one is random among them.
 - Fishbait: the minion that kills it (your left-most Beast, which attacks it)

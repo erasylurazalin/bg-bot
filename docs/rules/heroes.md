@@ -243,10 +243,16 @@ so)
   most Tier 6.
 - Twice as Nice: after a Refresh (the start-of-turn roll included), it
   freezes the Tavern's highest-tier minion and adds an exact copy of it to
-  the Tavern, frozen too, outside the normal slots (5 minions and a spell
-  become 6 and a spell). Works with Golden Touch: gild the top minion,
+  the Tavern, frozen too. Corrected from the logs (Era agreed, 2026-11-04):
+  the copy takes one of the Tavern's normal slots, so the Tavern keeps its
+  size (the old text said it sat outside them, 5 minions and a spell
+  becoming 6 and a spell). Works with Golden Touch: gild the top minion,
   freeze it, and next turn the copy is golden too.
-- Bob's Burgles: plain copies of the opponent you last fought, made fresh.
+- Bob's Burgles: plain copies of the opponent you last fought, made fresh. With
+  six or fewer minions in that warband, the Tavern still has its spell
+  (Era, 2026-11-04).
+- Reno Jackson's power with Ancient Wishbone (the power triggers twice):
+  one minion made golden, by the golden-making-once rule (Era, 2026-11-04).
 - Enhancification: a random minion each time (both can land on the same
   one); skips a minion with every keyword.
 - Imprison: the card goes to your hand without a buy, locked 2 turns, and

@@ -234,6 +234,8 @@ See `docs/rules/darkgifts.md`.
 - **Colorful Compass:** the Lesser one gives 1 random minion of its type on pick and at the start of each turn, and the Greater one gives 2.
 - **The type is fixed at the pick.** It's your most common minion type at the moment you pick the trinket, and it never changes after. Take the compass on a board of Mechs, rebuild into Demons, and you still get Mechs. Gold-plated Compass works the same way.
 - **Gold-plated Compass:** the type in "the next {type} you buy" is your most common minion type.
+- **Guiding Candle** ("your first two Refreshes each turn contain only Tier 6 cards"): the Refresh still has its Tavern spell, and the spell is Tier 6 too. A Fodder that feeds later in the turn refills with Tier 6 while the candle has Refreshes left (Era, 2026-11-04).
+- **Gold-plated Compass** gives a Triple Reward when its golden is played (THE GOLDEN RULE; Era confirmed 2026-11-04).
 - **Minion Bait:** the {type} would be your most common type too, but the trinket never appears in Era's 47 logged games, so it's left out.
 - **Poet Portrait:** gives a Timewarped Poet, a trinket-only token. It works like Persistent Poet, but for all your Dragons.
 - **Wisdomball Supply and Putricide Sticker:** out for now.
