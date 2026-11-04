@@ -279,7 +279,7 @@ fn a_pick_that_takes_a_tavern_slot_lands_there() {
     assert_eq!(to.zone(), Some("tavern"), "the file says the Tavern slot it took");
     let picked = step.picked.as_ref().and_then(|p| p.name.clone()).unwrap_or_default();
     let r = replay(&file, "discover");
-    assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.diffs);
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
     assert!(
         r.ours.tavern.iter().any(|m| m.name == picked),
         "{picked} is in the Tavern the engine left"
@@ -2124,4 +2124,112 @@ fn the_logged_tavern_spell_bonus_this_turn_is_seated_as_this_turns() {
         (8, 9),
         "the total is still the log's number"
     );
+}
+
+/// "Sacrificial Wrathguard: Deathrattle: Give minions in the Tavern +2/+2 this
+/// game. Activate ({4}): Improve this." The log's numbers are the buff as it
+/// stands and the part the Activates added, so the second pair is the count
+/// the Deathrattle scales with (log 2026_11_01_04_27_54-g2 turn 11 step 21:
+/// +72/+72, where ours used to give +8/+8).
+#[test]
+fn a_wrathguards_activate_count_is_seated() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 11,
+       "start": {"board": [
+          {"id": 1, "card_id": "BG36_362", "name": "Sacrificial Wrathguard",
+           "attack": 5, "health": 3, "position": 1, "numbers": [4, 4, 2, 2]}],
+        "hand": [], "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": []},
+       "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("wrathguard.json".to_string(), text.to_string())]).unwrap();
+    let turn = &files[0].turns[0];
+    let loaded = load(&data(), &turn.start, None, None, turn.turn, 1, None);
+    let m = loaded.game.players[bgcore::shop_replay::ME].board[0];
+    assert_eq!(m.improvements, 1, "one Activate behind a +4/+4 Tavern buff");
+}
+
+/// A play whose minion the game rebuilds under a new entity id still lands in
+/// its slot: the file's hand id and its board id differ (log
+/// 2026_10_24_15_25_26-g6 turn 12 step 29, Scarlet Skull: 18629 in hand,
+/// 18667 on the board).
+#[test]
+fn a_played_card_the_game_rebuilds_keeps_its_slot() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 12,
+       "start": {"board": [
+          {"id": 1, "card_id": "BG25_010", "name": "Handless Forsaken", "attack": 2, "health": 1, "position": 1},
+          {"id": 2, "card_id": "BG25_001", "name": "Risen Rider", "attack": 2, "health": 1, "position": 2}],
+        "hand": [{"id": 3, "card_id": "BG25_001", "name": "Risen Rider", "index": 1,
+                  "kind": "minion", "attack": 2, "health": 1, "keywords": ["REBORN"]}],
+        "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": [], "secrets": []},
+       "actions": [{"step": "play", "index": 1,
+          "card": {"id": 3, "card_id": "BG25_001", "name": "Risen Rider", "attack": 2, "health": 1},
+          "moved": {"id": 3, "from": {"where": "hand", "index": 1}, "to": null},
+          "after": {"board": [
+              {"id": 1, "card_id": "BG25_010", "name": "Handless Forsaken", "attack": 2, "health": 1, "position": 1},
+              {"id": 4, "card_id": "BG25_001", "name": "Risen Rider", "attack": 2, "health": 1,
+               "keywords": ["REBORN"], "position": 2},
+              {"id": 2, "card_id": "BG25_001", "name": "Risen Rider", "attack": 2, "health": 1, "position": 3}],
+            "hand": [], "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": [], "secrets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("rebuilt.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert!(
+        r.action.contains("Play { hand: 0, pos: 1 }"),
+        "the new entity id still names the played card: {:?} (verdict {:?}, {:?})",
+        r.action,
+        r.verdict,
+        r.diffs
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+}
+
+/// A state can hold three plain copies a summon left on the board while the
+/// game's own triple check waits for a Discover to be answered: the step that
+/// answers it is where the Golden card joins the hand (log
+/// 2026_10_24_15_25_26-g6 turn 8 steps 14 and 16).
+#[test]
+fn a_step_whose_states_show_the_triple_check_runs_it() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 8,
+       "start": {"board": [
+          {"id": 2, "card_id": "BG_ICC_026t", "name": "Skeleton", "attack": 1, "health": 1, "position": 1},
+          {"id": 3, "card_id": "BG_ICC_026t", "name": "Skeleton", "attack": 1, "health": 1, "position": 2},
+          {"id": 4, "card_id": "BG_ICC_026t", "name": "Skeleton", "attack": 1, "health": 1, "position": 3}],
+        "hand": [], "tavern": [],
+        "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+        "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+        "hero_powers": [], "trinkets": [], "secrets": []},
+       "actions": [{"step": "discover",
+          "options": [
+            {"id": 7, "card_id": "BG25_001", "name": "Risen Rider", "attack": 2, "health": 1},
+            {"id": 8, "card_id": "BG25_010", "name": "Handless Forsaken", "attack": 2, "health": 1}],
+          "picked": {"id": 7, "card_id": "BG25_001", "name": "Risen Rider", "attack": 2, "health": 1,
+                     "keywords": ["REBORN", "TAUNT"]},
+          "after": {"board": [],
+            "hand": [
+              {"id": 7, "card_id": "BG25_001", "name": "Risen Rider", "index": 1, "attack": 2,
+               "health": 1, "keywords": ["REBORN", "TAUNT"]},
+              {"id": 9, "card_id": "BG_ICC_026t_G", "name": "Skeleton", "index": 2, "golden": true,
+               "attack": 2, "health": 2}],
+            "tavern": [],
+            "hand_hidden": 0, "gold": 10, "tier": 6, "upgrade_cost": null,
+            "health": 30, "armor": 0, "free_refreshes": 0, "frozen": false,
+            "hero_powers": [], "trinkets": [], "secrets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("triple-due.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let r = replay_step(&data(), &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
 }

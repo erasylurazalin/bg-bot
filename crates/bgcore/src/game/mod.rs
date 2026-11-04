@@ -1175,6 +1175,13 @@ pub struct Game {
     /// start of the next turn (docs/rules/design.md "Nothing triples during
     /// combat").
     defer_triples: bool,
+    /// A summon in the shop may have made a third copy on the board: the
+    /// game's own triple check ("Check Triples") runs as the action ends
+    /// (`Game::step`), not at the summon (`Game::check_board_triples`).
+    board_triple_check: bool,
+    /// Cards this action gained whose own triple check also waits for the end
+    /// of the action (`Game::give_generated_later`), in the order they came.
+    pending_triples: ArrayVec<CardId, 4>,
 }
 
 /// Settings and results of a sandbox game (see `Game::new_sandbox`).
@@ -1393,6 +1400,8 @@ impl Game {
             order: ArrayVec::new(),
             cursor: 0,
             defer_triples: false,
+            board_triple_check: false,
+            pending_triples: ArrayVec::new(),
         }
     }
 
@@ -2135,6 +2144,7 @@ impl Game {
         }
         // A hero knocked out by its own effect damage takes no more actions.
         if self.players[p].alive {
+            self.run_pending_triple_checks(p);
             // A card the start of the turn queued with a full hand joins as
             // soon as this action freed a slot (docs/rules/design.md "A full hand").
             self.drain_hand_queue(p);
@@ -2185,6 +2195,15 @@ impl Game {
         self.sync_power_flags(p);
     }
 
+    /// A state a game hands over (`crate::shop_replay`) can hold the copies a
+    /// summon left on the board before the game's own triple check ran, which
+    /// it holds back while a Discover is open (log
+    /// 2026_10_24_15_25_26-g6 turn 8 step 14 leaves three Skeletons). The
+    /// check runs as the next action ends, where the game runs it.
+    pub fn note_triples_due(&mut self) {
+        self.board_triple_check = true;
+    }
+
     /// Run one player's end of turn effects without the fight that follows
     /// them, which is the state a logged turn ends in: the shop replay
     /// (`bgbench shopreplay`) compares them. `Action::EndTurn` reaches the
@@ -2210,11 +2229,23 @@ impl Game {
                         self.players[p].tp.spell_health_left -= 1;
                     }
                     let m = self.players[p].shop.remove(slot);
+                    // A Health price is self damage, and a card the damage
+                    // triggers joins the hand ahead of the spell: paid before
+                    // the spell lands (Eredar Escapist's two Corrupted
+                    // Cupcakes, log 2026_10_24_15_25_26-g4 turn 11 step 10).
+                    // Gold, and the triggers that read it, come after the
+                    // spell is in hand (a Lockbox from a Gold-spent rule,
+                    // log 2026_11_02_00_10_22-g5 turn 11 step 12).
+                    if pay_health {
+                        self.pay_for_spell(p, true, cost);
+                    }
                     self.add_to_hand(p, m);
                     if m.tickets == 1 {
                         self.take_ticket(p);
                     }
-                    self.pay_for_spell(p, pay_health, cost);
+                    if !pay_health {
+                        self.pay_for_spell(p, false, cost);
+                    }
                     self.magicfin_teach(p, id);
                     self.fire_event(p, EventKind::CardsBought, 1);
                     // A bought card counts towards BUY, INSECT!, the Tavern
@@ -2290,15 +2321,21 @@ impl Game {
                 if trinket_health {
                     self.players[p].tp.spell_health_left -= 1;
                 }
-                let pl = &mut self.players[p];
-                let m = pl.make_card(&self.data.cards, id, false, 0);
+                let m = self.players[p].make_card(&self.data.cards, id, false, 0);
+                // A Health price before the spell lands, Gold after: the same
+                // order as a spell bought from a minion slot.
+                if pay_health {
+                    self.pay_for_spell(p, true, cost);
+                }
                 self.add_to_hand(p, m);
                 // Come One, Come All!: the spell slot's Ticket, taken with the
                 // spell.
                 if ticket {
                     self.take_ticket(p);
                 }
-                self.pay_for_spell(p, pay_health, cost);
+                if !pay_health {
+                    self.pay_for_spell(p, false, cost);
+                }
                 self.magicfin_teach(p, id);
                 self.fire_event(p, EventKind::CardsBought, 1);
                 // A bought card counts towards BUY, INSECT!, the Tavern
@@ -2578,6 +2615,29 @@ impl Game {
     fn give_generated(&mut self, p: usize, card: CardId) {
         let mut dummy = 0;
         self.give_generated_tracking(p, card, &mut dummy);
+    }
+
+    /// Ask for a card's triple check at the end of the action instead of now
+    /// (`Game::pending_triples`): a Discover's pick joins the hand first and
+    /// the game's own check runs once the action has resolved, after the
+    /// copies a summon left on the board.
+    fn check_triple_later(&mut self, card: CardId) {
+        if self.data.cards.get(card).is_spell() {
+            return;
+        }
+        let _ = self.pending_triples.try_push(card);
+    }
+
+    /// A card gained whose own triple check waits for the end of the action,
+    /// the way the game's "Check Triples" does: the copy a Disguised
+    /// Graverobber takes of the minion it destroyed waits with the Skeletons
+    /// that destroy leaves on the board, and the Golden cards join the hand in
+    /// the game's own order (log 2026_11_01_04_27_54-g3 turn 7 step 4).
+    fn give_generated_later(&mut self, p: usize, card: CardId) {
+        let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+        if self.add_to_hand(p, m) && !self.data.cards.get(card).is_spell() {
+            let _ = self.pending_triples.try_push(card);
+        }
     }
 
     fn add_to_hand(&mut self, p: usize, mut m: Minion) -> bool {

@@ -274,9 +274,13 @@ impl Player {
                 return false;
             }
         }
+        // A Refresh deals at most a full Tavern's worth of cards, so the
+        // Fodders queued for it stop there: six queued and three more show as
+        // 7, not 9 (log 2026_11_01_17_59_13-g1 turn 9 step 16).
+        let per = per.min(crate::SHOP as u8);
         match self.fodder_refreshes.get_mut(index) {
             Some(n) => {
-                *n = n.saturating_add(per);
+                *n = n.saturating_add(per).min(crate::SHOP as u8);
                 true
             }
             None => self.fodder_refreshes.try_push(per).is_ok(),

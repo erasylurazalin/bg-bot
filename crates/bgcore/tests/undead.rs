@@ -1413,9 +1413,10 @@ fn a_second_empty_cast_is_not_a_spell_cast() {
 fn three_skeletons_a_shop_destroy_summons_triple_into_the_hand() {
     // docs/rules/design.md "Triples": three Skeletons a Cadaver Caretaker
     // leaves make a Golden Skeleton in the hand, and the shop phase does it at
-    // once (log 2026_10_30_19_45_15-g2 turn 5, Disguised Graverobber on a
-    // Cadaver Caretaker). The Graverobber's copy of the Caretaker is a plain
-    // card, and the Golden comes with it.
+    // the end of the action (log 2026_10_30_19_45_15-g2 turn 5, Disguised
+    // Graverobber on a Cadaver Caretaker). The Graverobber's copy of the
+    // Caretaker is a plain card and joins the hand first, and the Golden comes
+    // after it.
     let mut g = game(272);
     put_on_board(&mut g, 0, "Cadaver Caretaker", false);
     put_in_hand(&mut g, 0, "Disguised Graverobber", false);
@@ -1432,8 +1433,8 @@ fn three_skeletons_a_shop_destroy_summons_triple_into_the_hand() {
     assert_eq!(
         hand,
         [
-            ("Skeleton".to_string(), true, (2, 2)),
             ("Cadaver Caretaker".to_string(), false, (3, 3)),
+            ("Skeleton".to_string(), true, (2, 2)),
         ]
     );
     g.check_invariants().unwrap();

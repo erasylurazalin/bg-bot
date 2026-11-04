@@ -679,6 +679,31 @@ impl Game {
         Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask, size);
     }
 
+    /// The game's own triple check, as the action ends: three copies a summon
+    /// in it left on the board make a Golden card in the hand now, and not at
+    /// the summon itself, so a card the same action gained keeps the lower
+    /// hand slot (log 2026_10_30_19_45_15-g2 turn 5 step 4). A choice the
+    /// action opened (a Discover, a target) holds the check back until it is
+    /// answered: the three Skeletons a Maw Caster's destroy summoned stay on
+    /// the board while its Discover is open (log 2026_10_24_15_25_26-g6 turn
+    /// 8 step 14). The board's own triples go first, then the cards the action
+    /// gained and left for the end of it, in the order they came (log
+    /// 2026_11_01_04_27_54-g3 turn 7 step 4).
+    pub(super) fn run_pending_triple_checks(&mut self, p: usize) {
+        if Self::choice_open(&self.players[p]) {
+            return;
+        }
+        if self.board_triple_check {
+            self.board_triple_check = false;
+            self.check_board_triples(p);
+        }
+        while let Some(card) = (!self.pending_triples.is_empty())
+            .then(|| self.pending_triples.remove(0))
+        {
+            self.check_triple(p, card);
+        }
+    }
+
     /// After an action: Fodders that waited in the Tavern because there was
     /// no Demon feed themselves as soon as one is on the board.
     pub(super) fn feed_waiting_fodders(&mut self, p: usize) {
@@ -767,7 +792,11 @@ impl Game {
         // A Deathrattle can summon the third copy of a card: Cadaver
         // Caretaker's three Skeletons make a Golden Skeleton in the hand
         // (docs/rules/design.md "Triples", log 2026_10_30_19_45_15-g2 turn 5).
-        self.check_board_triples(p);
+        // The game's own check runs as the action ends, not here
+        // (`Game::step`), so a Battlecry that gains a card first gives it the
+        // lower hand slot, and a Discover the same action opened holds the
+        // check back.
+        self.board_triple_check = true;
         out.tracked
     }
 
@@ -824,8 +853,8 @@ impl Game {
         pl.board.extend(out.board);
         self.apply_side_outcome(p, &out.side, false);
         // A summon the Deathrattles made can be the third copy (see
-        // `destroy_in_shop`).
-        self.check_board_triples(p);
+        // `destroy_in_shop`): the check waits for the end of the action.
+        self.board_triple_check = true;
     }
 
     /// A minion was just bought into the last hand slot (before it can
@@ -1082,8 +1111,8 @@ impl Game {
         self.apply_side_outcome(p, &out.side, false);
         // A Rally can summon the third copy of a card (Flittering Bat's 1/1
         // Beast next to two of them), and in the shop phase that triples at
-        // once.
-        self.check_board_triples(p);
+        // once: the check runs as the action ends (`Game::step`).
+        self.board_triple_check = true;
     }
 
     /// Steal the `n` highest-Attack Tavern minions into hand (Decoy
@@ -1247,6 +1276,12 @@ mod tests {
         }
         g.players[0].shop.push(g.data.cards.make(fish, false));
         g.tavern_attack(0, 0);
+        assert!(
+            !g.players[0].hand.iter().any(|m| m.card == bats && m.golden),
+            "the check waits for the end of the action"
+        );
+        // What the end of the action does (`Game::step`).
+        g.run_pending_triple_checks(0);
         assert!(
             g.players[0].hand.iter().any(|m| m.card == bats && m.golden),
             "the third copy tripled into a golden one in hand"

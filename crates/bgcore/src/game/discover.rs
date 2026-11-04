@@ -509,7 +509,9 @@ impl Game {
                 m.no_reward = false;
                 let card = m.card;
                 self.add_to_hand(p, m);
-                self.check_triple(p, card);
+                // The check waits for the end of the action, as for any
+                // Discover pick.
+                self.check_triple_later(card);
             }
             self.fire_after_discover(p);
             self.maybe_start_discover(p);
@@ -656,7 +658,12 @@ impl Game {
             }
             self.add_to_hand(p, m);
             if !is_spell {
-                self.check_triple(p, c);
+                // The game's own triple check runs as the action ends, after
+                // the copies a summon in the same action left on the board
+                // (log 2026_10_24_15_25_26-g6 turn 8 step 16: the Skeletons
+                // become a Golden card before the Discovered Cadaver Caretaker
+                // makes one).
+                self.check_triple_later(c);
             }
         } else if !is_spell && copies[k] > 0 {
             let slot = self.data.cards.get(c).pool_slot as usize;

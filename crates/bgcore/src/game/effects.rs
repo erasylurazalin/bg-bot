@@ -364,9 +364,11 @@ impl Game {
             Effect::AddFodderToNextRefresh(n) => {
                 let add = n.saturating_mul(mul as u8).saturating_mul(runs);
                 if let Some(first) = self.players[p].fodder_refreshes.first_mut() {
-                    *first = first.saturating_add(add);
+                    // A Refresh deals at most a full Tavern: the queue stops
+                    // at seven (`Player::add_fodder_to_refresh`).
+                    *first = first.saturating_add(add).min(crate::SHOP as u8);
                 } else {
-                    let _ = self.players[p].fodder_refreshes.try_push(add);
+                    let _ = self.players[p].fodder_refreshes.try_push(add.min(crate::SHOP as u8));
                 }
             }
             Effect::DemonsConsume { count } => {
@@ -616,9 +618,10 @@ impl Game {
                     self.players[p].board.insert(at, m);
                     at += 1;
                 }
-                // Three summoned copies of one card are a triple too.
+                // Three summoned copies of one card are a triple too, and
+                // the check runs as the action ends (`Game::step`).
                 if n > 1 {
-                    self.check_board_triples(p);
+                    self.board_triple_check = true;
                 }
             }
             Effect::SpellBonus { attack, health } => {

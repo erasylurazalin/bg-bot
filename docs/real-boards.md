@@ -216,8 +216,10 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   A Trapped Clapper's Deathrattle gives one to each of the next three Refreshes
   (`[1, 1, 1]`), the Refresh that follows takes the first number and leaves the
   rest, and a Laboratory Assistant run twice by Brann gives two to each of the
-  same three (`[2, 2, 2]`). A writer that does not read the enchant leaves the
-  key out, and then the replay's step is judged without the queue.
+  same three (`[2, 2, 2]`). One number never passes seven: a Refresh deals a
+  full Tavern at most, so six queued and three more read as 7, not 9
+  (`11_01_17_59_13-g1` turn 9 step 16). A writer that does not read the enchant
+  leaves the key out, and then the replay's step is judged without the queue.
 - `start`, the `after` of every step and `end` hold the same things, so the
   replay (below) loads any of them the same way. Beyond the cards and the
   numbers above they carry the marks and the player-level numbers a step reads:
@@ -423,8 +425,10 @@ in the folder when a run starts is what it loads; new games add boards every
 A minion's `numbers` become the engine state they stand for, for the cards
 whose scaling it models as `Minion.improvements` (`real_boards.rs`): Lurking
 Leviathan (growth / 3, / 6 golden), Spark Snapper (Satellite growth / 2, / 4
-golden), Ultraviolet Ascendant (the third number is its count) and Patient
-Scout (its tier, minus 1). A Tasty Lobster's numbers are the player's
+golden), Ultraviolet Ascendant (the third number is its count), Patient
+Scout (its tier, minus 1) and Sacrificial Wrathguard (the third number, the
+part of its Tavern buff the Activates added, / 2, / 4 golden). A Tasty
+Lobster's numbers are the player's
 `tasty_lobster` count instead (`attack / 2 - 1`, `/ 4 - 1` golden): every
 Lobster shares one, and the board keeps the best of its board and hand. Other
 cards keep 0 whatever numbers they carry, since their numbers are something
@@ -666,7 +670,18 @@ of a random step is run, since any of them may be the log's.
     a Battlecry's summons push it and before the minions it killed leave, so
     with a full board it is even past the board. A card the step destroyed and
     brought back to the slot it stood in (a Reborn minion, whose new entity id
-    the step's `left` and `entered` say) still holds that slot.
+    the step's `left` and `entered` say) still holds that slot, and so does
+    one the game rebuilt under a new id as it landed (Scarlet Skull in
+    `10_24_15_25_26-g6` turn 12 step 29: the same card id, an id the state
+    before did not hold).
+  - **The game's own triple check** ("Check Triples") runs as an action ends,
+    not at the summon or the gain that made the third copy, so a logged state
+    can hold three plain copies a summon left on the board: the Maw Caster's
+    Skeletons of `10_24_15_25_26-g6` turn 8 sit there for two steps while its
+    Discover is answered. `load` asks for the check on the step's own action
+    (`Game::note_triples_due`) when `board_triple_due` reads it in the two
+    states: three plain copies of one name on the board before, and a Golden
+    card of that name in the hand after that the state before did not hold.
   - **A Magnetized minion's host** (`magnetize_host`) is the card the played
     minion's own stats went into: the step's `changed` list is in no order of
     its own, and a stat static the play set off comes before the host. It must
