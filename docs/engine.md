@@ -790,11 +790,12 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   filter), `sell_minion` (Sell), the Refresh sites (Refresh, the same places
   "after the Tavern is Refreshed this game" fires), `cast_spell` and
   `cast_spell_on` (SpellCast for every spell, CastSpell for a Tavern spell
-  only: see "Spells versus Tavern spells" below), `trigger_on_cast_spell_on_target`
-  and the Tavern arm of `apply_target_shop` (CastSpellOnMinion, after the
-  minions' own watchers for that cast: a Honeycomb Ring's this-turn +1/+1
-  lands after the Misplaced Tea Set the cast made the Amalgam cast; one event
-  per cast on either path, so a Hot-Air Surveyor's extra Gem cast counts
+  only: see "Spells versus Tavern spells" below),
+  `trigger_trinket_on_cast_spell_on_minion` and the Tavern arm of
+  `apply_target_shop` (CastSpellOnMinion, after the minions' own watchers for
+  that cast and after the spell's own effect: a Honeycomb Ring's this-turn
+  +1/+1 lands after the Misplaced Tea Set the cast made the Amalgam cast; one
+  event per cast on either path, so a Hot-Air Surveyor's extra Gem cast counts
   twice), `discard_card` (Discard) and `fire_event(GoldSpent)`.
   The turn flow calls `trinket_start_of_turn` (offers, uses back, the Turns
   counter, the start-of-turn effects) and `trinket_end_of_turn` (the
@@ -1024,7 +1025,7 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   Faceless Converter's per-Tavern-spell improvement) stay Tavern-only, and
   `EventKind::AllSpellsCast` is the "after you cast N spells" counter (Felboar)
   with no player scalar. `on_cast_spell_on_self` and `on_cast_spell_on_tribe`
-  were always any-spell (they fire from `trigger_on_cast_spell_on_target`).
+  were always any-spell (they fire from `trigger_on_cast_spell_on_watchers`).
 - **The two halves of a spell-event trigger.** A card's `on_event` for a
   spell event fires either as the spell is cast ("whenever", `TriggerWhen::Now`)
   or once it has resolved (`after = true` in cards.toml,
@@ -1061,6 +1062,52 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   minion triggers only for a Tavern spell, and the trinket's `when = "cast"`
   hook for every spell. Replica Cathedral's "your first spell each turn casts
   an extra time" covers any spell, a Blood Gem included (`gem_casts`).
+- **The order inside one cast (2026-11-04).** Two things the logs pin down:
+  the target's "whenever you cast a spell on this" watchers run before the
+  spell's own effect, and a Tavern buff that effect gives lands after the
+  cast's "after you cast" triggers. Everything else stays where it was, the
+  "after" half included: it still fires once the cast has resolved, and still
+  waits for a pick the cast opened.
+  - **The target's watchers come first.** `apply_target`'s cast loop calls
+    `trigger_on_cast_spell_on_watchers` (the `on_cast_spell_on_tribe` watchers
+    and the target's own `on_cast_spell_on_self`) before the spell's own
+    effect, so a Tavern buff the target's watcher gives is on the Tavern's
+    minions when the effect picks among them:
+    `Hearthstone_2026_10_24_15_25_26-g4` turn 11 step 23, a
+    Methodical Madness on a Devilish Distractor (Power.log 1220476), where the
+    Distractor's TRIGGER block and the Tavern's +1/+2 stat pushes come first,
+    the spell's POWER block then consumes at those buffed 77/80, and the log's
+    Distractor gains +117/+121 rather than the +77/+79 of the pair's pre-spell
+    stats. The two spells that eat or destroy their own target (Channel the
+    Devourer, Butchering) run it themselves in `fire_cast_triggers_early`, with
+    the board's "whenever you cast a spell" cards, before they eat
+    (docs/rules/design.md "Eating a minion with a spell"). A spell that moves
+    its target off the board (Repeat Customer, Raise the Stakes) fires the
+    watchers too, now that they come before the effect. After the effect
+    `trigger_trinket_on_cast_spell_on_minion` fires the Honeycomb Ring class
+    of trinket, as `Hearthstone_2026_11_03_15_22_36-g4` turn 10 step 27 shows
+    (the Gem's stats on the target, then the trinket).
+  - **The spell's own Tavern buff comes last.** A Tavern buff the spell's own
+    effect prints ("give minions in the Tavern +2/+2 this game",
+    `SpellEffect::BuffTavernPermanent`, and Eonar's Favor's
+    `SpellTarget::TavernBuffType`) goes through
+    `Player::add_tavern_buff_late`: the buff is held in `Player.late_tavern`
+    and `Player::flush_tavern_buffs` puts its stats on the Tavern's minions
+    once the cast's "after you cast" triggers have run (end of `cast_spell_as`,
+    end of `fire_cast_after_choice`, and once per action in `step`). So a
+    Felboar eating for the same cast takes its minion at its pre-spell stats:
+    `Hearthstone_2026_10_28_22_11_50-g4` turn 11 step 41 (Power.log 1946359),
+    where Staff of Enrichment's POWER block sets the Shop Buff to 22/22 for six
+    Tavern minions, the Felboar's TRIGGER block then consumes the Tichondrius
+    at 52/46 with no buff on it, and only then do the other Tavern minions get
+    the +22. A Tavern buff a trigger of the same cast gives (the Distractor's
+    "whenever you cast a spell on this", `Effect::TavernBuff`) is not late: it
+    lands at once, which is what the target's watcher above reads. An "after
+    you cast" trigger cannot simply be moved before the effect instead: a
+    Blood Gem's own stats on a Tavern minion do reach a Felboar eating for the
+    same cast (`felboar_eats_the_tavern_minion_the_same_gem_buffed` in
+    tests/quilboar.rs, log `2026_11_02_00_10_22-g4` turn 9 step 39), so only
+    the Tavern buff waits.
 - **A spell a minion casts for you is not your cast (Era 2026-11-02).**
   `Effect::CastSpell` (Gatekeeper Amalgam's Misplaced Tea Set, an Air
   Revenant's Easterly Winds, a Crimson Vindicator's Rally spell) and
@@ -1071,7 +1118,7 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   the "spells you cast" bookkeeping is its: no `EventKind::AllSpellsCast` or
   `EventKind::SpellsCast` (so no Felboar count, no `spells_cast`), no
   `spells_cast_turn`, no trinket `spell_cast` or `cast_spell` event, no
-  `trigger_on_cast_spell`, `trigger_on_cast_spell_on_target` or
+  `trigger_on_cast_spell`, `trigger_on_cast_spell_on_watchers` or
   `trigger_on_cast_spell_on_mech`, so neither Timecap'n Hooktail nor the
   Amalgam's own "on this" fires for the Tea Set. The flag travels with the
   prompt a taught spell can open (`PendingTarget.by_minion`,

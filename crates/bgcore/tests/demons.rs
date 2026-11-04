@@ -1275,6 +1275,51 @@ fn corrupted_cupcakes_consumes_three_for_stats_only() {
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn a_spells_consume_sees_the_targets_on_cast_tavern_buff() {
+    // Hearthstone_2026_10_24_15_25_26-g4 turn 11 step 23: Methodical Madness
+    // on a Devilish Distractor with two Tavern minions. The log's Distractor
+    // gains +117/+121, which is the eaten pair plus one +1/+2 per eaten
+    // minion: "whenever you cast a spell on this, give minions in the Tavern
+    // +1/+2 this game" lands before the spell's own effect picks and eats
+    // them. Before, we ate the pair at their unbuffed 1/1 and gained +2/+2.
+    let mut g = game(29);
+    put_on_board(&mut g, 0, "Devilish Distractor");
+    set_shop(&mut g, 0, &["Buzzing Vermin", "Cord Puller"]);
+    g.give(0, "Methodical Madness").unwrap();
+    let hand = (g.players[0].hand.len() - 1) as u8;
+    act(&mut g, 0, Action::Play { hand, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    // 4/7 plus the pair, each a 1/1 with the Distractor's +1/+2 on it.
+    assert_eq!(stats(&g.players[0].board[0]), (4 + 2 + 2, 7 + 3 + 3));
+    assert!(g.players[0].shop.is_empty());
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn staff_of_enrichments_own_buff_lands_after_the_casts_after_triggers() {
+    // Hearthstone_2026_10_28_22_11_50-g4 turn 11 step 41: a Felboar's "after
+    // you cast 3 spells" eats the Tichondrius at its pre-spell 52/46, not at
+    // the +2/+2 Staff of Enrichment gave the Tavern in the same cast. So a
+    // Tavern buff the spell's own effect gives lands after that cast's "after
+    // you cast" triggers.
+    let mut g = game(30);
+    put_on_board(&mut g, 0, "Felboar");
+    set_shop(&mut g, 0, &["Buzzing Vermin"]);
+    // Two spells already counted: this cast is the third.
+    g.players[0].board[0].improvements = 2;
+    g.give(0, "Staff of Enrichment").unwrap();
+    let hand = (g.players[0].hand.len() - 1) as u8;
+    act(&mut g, 0, Action::Play { hand, pos: 0 });
+    // 2/6 and the eaten 1/1, not the 3/3 the +2/+2 would have made it.
+    assert_eq!(stats(&g.players[0].board[0]), (2 + 1, 6 + 1));
+    assert!(g.players[0].shop.is_empty());
+    // The buff itself still landed, for the Refreshes to come.
+    assert_eq!(g.players[0].tavern_buffs.len(), 1);
+    assert_eq!(g.players[0].tavern_buffs[0].attack, 2);
+    g.check_invariants().unwrap();
+}
+
 // ---- Devout Hellcaller in the shop ----
 
 #[test]

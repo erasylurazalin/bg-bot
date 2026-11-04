@@ -185,31 +185,27 @@ impl Game {
         }
     }
 
-    /// A spell was cast on the board minion in `target_pos`: run the
-    /// "whenever you cast a spell on a Murloc" watchers (Shamanic
-    /// Tidecaller), then the target's own watcher (Twilight Tidehunter), and
-    /// last the trinkets that watch a spell cast on a friendly minion
-    /// (Honeycomb Ring).
+    /// The minions' own reaction to a spell cast on the board minion in
+    /// `target_pos`: the "whenever you cast a spell on a Murloc" watchers
+    /// (Shamanic Tidecaller), then the target's own watcher (Twilight
+    /// Tidehunter, and the Devilish Distractor's Tavern buff).
     ///
-    /// The minions' own watchers go first, so a Tavern spell they cast for
-    /// you (the Gatekeeper Amalgam's Misplaced Tea Set) is cast before this
-    /// cast's "improve for this turn" lands: the log sizes the Tea Set with
-    /// the bonus as it stood when the cast began, and only the play's next
-    /// cast gets the +1/+1. `Hearthstone_2026_11_03_15_22_36-g4` turn 10
-    /// step 27 (two Gem casts from Balinda): the total is 8/9 at the play,
-    /// the first Tea Set is 12/13 (4 + 8/9), the second 13/14 (4 + 9/10).
-    ///
-    /// The game puts these watchers a step earlier still, before the spell's
-    /// own effect lands: the same log's block runs PLAY Blood Gem -> the
-    /// Amalgam's watcher -> POWER Misplaced Tea Set -> POWER Blood Gem (the
-    /// Gem's stats on the target) -> TRIGGER Honeycomb Ring. This call is
-    /// made after the effect instead, and that changes nothing: every
-    /// "whenever you cast a spell on this" and "on a <tribe>" effect reads
-    /// nothing from the target (`cards.toml`: the Tea Set's own fixed stats
-    /// plus the player's spell bonus, a hand minion's +8/+8, the Tavern's
-    /// +1/+2, the Tidecaller's own +3/+3), so no spell and no watcher can
-    /// tell the two orders apart.
-    pub(super) fn trigger_on_cast_spell_on_target(&mut self, p: usize, target_pos: usize) {
+    /// It runs before the spell's own effect, which is the game's order: a
+    /// Tavern buff the target's watcher gives is on the Tavern's minions when
+    /// the effect picks among them (`Hearthstone_2026_10_24_15_25_26-g4`
+    /// turn 11 step 23: the Distractor's +1/+2 lands before the Methodical
+    /// Madness it took eats, so the log's Distractor gains +117/+121, the
+    /// eaten minions at their buffed stats). The watchers also go first so a
+    /// Tavern spell they cast for you (the Gatekeeper Amalgam's Misplaced Tea
+    /// Set) is cast before this cast's "improve for this turn" lands: the log
+    /// sizes the Tea Set with the bonus as it stood when the cast began, and
+    /// only the play's next cast gets the +1/+1.
+    /// `Hearthstone_2026_11_03_15_22_36-g4` turn 10 step 27 (two Gem casts
+    /// from Balinda): the total is 8/9 at the play, the first Tea Set is
+    /// 12/13 (4 + 8/9), the second 13/14 (4 + 9/10). The trinkets that watch
+    /// a spell cast on a friendly minion (Honeycomb Ring) come after the
+    /// effect instead: `trigger_trinket_on_cast_spell_on_minion`.
+    pub(super) fn trigger_on_cast_spell_on_watchers(&mut self, p: usize, target_pos: usize) {
         if target_pos >= self.players[p].board.len() {
             return;
         }
@@ -239,8 +235,11 @@ impl Game {
                 }
             }
         }
-        // A trinket that watches spells cast on a friendly minion, after the
-        // minions' own reactions to the cast.
+    }
+
+    /// A trinket that watches spells cast on a friendly minion (Honeycomb
+    /// Ring), after the spell's own effect.
+    pub(super) fn trigger_trinket_on_cast_spell_on_minion(&mut self, p: usize) {
         self.trinket_event(p, Event::CastSpellOnMinion, None, 1);
     }
 
@@ -691,6 +690,10 @@ impl Game {
                     self.fire_after_cast_spell(p, &after);
                 }
             }
+            // The cast's "after you cast" triggers have run: a Tavern buff
+            // the spell's own effect gave (Staff of Enrichment) lands now,
+            // never before them (`Player::add_tavern_buff_late`).
+            self.players[p].flush_tavern_buffs(&self.data.cards);
         }
         // A cast never leaves a prompt nothing can answer: the spell's own
         // "after you cast" triggers can take away its last target (the only
@@ -739,6 +742,9 @@ impl Game {
                 self.fire_after_cast_spell(p, &what.after);
             }
         }
+        // The cast's "after you cast" triggers have run: a Tavern buff the
+        // spell's own effect gave lands now, not before them.
+        self.players[p].flush_tavern_buffs(&self.data.cards);
     }
 
     /// Whether a spell has anything to land on right now. A spell cast
@@ -1191,6 +1197,9 @@ impl Game {
                 self.players[p].upper_hand = self.players[p].upper_hand.saturating_add(1);
             }
             SpellEffect::BuffTavernPermanent { attack, health } => {
+                // The Tavern's stats wait for the end of the cast: a Felboar
+                // eating for this same cast takes its minion at its pre-spell
+                // stats (`Player::add_tavern_buff_late`).
                 let b = TavernBuff {
                     tribe: None,
                     attack: attack + da,
@@ -1198,7 +1207,7 @@ impl Game {
                     this_turn: false,
                     typed_only: false,
                 };
-                self.players[p].add_tavern_buff(&self.data.cards, b);
+                self.players[p].add_tavern_buff_late(&self.data.cards, b);
             }
             SpellEffect::MisplacedTeaSet { attack, health } => {
                 // One random unbuffed minion of each type on the board; a

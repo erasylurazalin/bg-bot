@@ -396,7 +396,10 @@ impl Game {
                             let target_card = self.players[p].shop[target];
                             let b = self.tavern_buff_type(&target_card, attack + da, health + dh);
                             if let Some(b) = b {
-                                self.players[p].add_tavern_buff(&self.data.cards, b);
+                                // The spell's own Tavern buff lands after its
+                                // "after you cast" triggers
+                                // (`Player::add_tavern_buff_late`).
+                                self.players[p].add_tavern_buff_late(&self.data.cards, b);
                             }
                         }
                         SpellTarget::RefreshWithType => {
@@ -623,7 +626,8 @@ impl Game {
             self.trigger_on_cast_spell(p, TriggerWhen::Now);
         }
         if !by_minion {
-            self.trigger_on_cast_spell_on_target(p, target_pos);
+            self.trigger_on_cast_spell_on_watchers(p, target_pos);
+            self.trigger_trinket_on_cast_spell_on_minion(p);
         }
     }
 
@@ -906,6 +910,23 @@ impl Game {
                     // How many Blood Gems this cast played on the target: a
                     // Roogug there reacts once for each of them.
                     let mut gems_played: u8 = 0;
+                    // The target's "whenever you cast a spell on this"
+                    // watchers (the Devilish Distractor's Tavern buff, the
+                    // Twilight Tidehunter's hand buff) fire before the spell's
+                    // own effect, so the effect already sees what they gave
+                    // (`trigger_on_cast_spell_on_watchers`). The two spells
+                    // that eat or destroy their own target run them further
+                    // down with the rest of the cast's triggers.
+                    let eats_target = matches!(
+                        st,
+                        SpellTarget::Devourer | SpellTarget::Butchering { .. }
+                    );
+                    if !pt.by_minion && !eats_target {
+                        self.trigger_on_cast_spell_on_watchers(p, target_pos);
+                        if target_pos >= self.players[p].board.len() {
+                            break;
+                        }
+                    }
                     match st {
                         SpellTarget::Buff {
                             attack,
@@ -1021,7 +1042,10 @@ impl Game {
                             let target_card = self.players[p].board[target_pos];
                             let b = self.tavern_buff_type(&target_card, attack + da, health + dh);
                             if let Some(b) = b {
-                                self.players[p].add_tavern_buff(&self.data.cards, b);
+                                // The spell's own Tavern buff lands after its
+                                // "after you cast" triggers
+                                // (`Player::add_tavern_buff_late`).
+                                self.players[p].add_tavern_buff_late(&self.data.cards, b);
                             }
                         }
                         SpellTarget::RefreshWithType => {
@@ -1251,12 +1275,14 @@ impl Game {
                         self.trigger_on_cast_spell(p, TriggerWhen::Now);
                     }
                     if !target_removed && target_pos < self.players[p].board.len() {
-                        // "Whenever you cast a spell on" cards and the
-                        // target's own watcher are reactions to a spell the
-                        // player cast: a minion's cast for the player fires
-                        // none of them.
+                        // A trinket that watches a spell cast on a friendly
+                        // minion (Honeycomb Ring) fires once the spell's own
+                        // effect has landed; the minions' own watchers to the
+                        // cast already ran before it
+                        // (`trigger_on_cast_spell_on_watchers`). A minion's
+                        // cast for the player fires neither.
                         if !pt.by_minion {
-                            self.trigger_on_cast_spell_on_target(p, target_pos);
+                            self.trigger_trinket_on_cast_spell_on_minion(p);
                         }
                         if gems_played > 0 {
                             // Every Gem played on the target, from however

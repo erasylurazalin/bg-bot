@@ -53,6 +53,11 @@ impl Game {
             {
                 return Err(format!("player {i}: shop_spell invalid"));
             }
+            // A spell's own Tavern buff waits for the end of its cast, and
+            // every action flushes it: one still held means a cast leaked it.
+            if !pl.late_tavern.is_empty() {
+                return Err(format!("player {i}: a Tavern buff still held back"));
+            }
             // The minion slots plus the spell slot, which a Fodder can take
             // (and fill with a minion once it feeds).
             // The Tavern holds its minion slots plus the spell slot, which a
