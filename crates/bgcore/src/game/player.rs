@@ -77,6 +77,7 @@ impl Player {
             tier_turns: [1, 0, 0, 0, 0, 0],
             final_tribes: [0; TRIBES],
             tavern_buffs: ArrayVec::new(),
+            late_tavern: ArrayVec::new(),
             last_damage: 0,
             last_damage_armor: 0,
             gold: 0,
@@ -355,6 +356,36 @@ impl Player {
                 buff(m, b.attack, b.health);
             }
         }
+    }
+
+    /// A Tavern buff a spell's own effect printed ("give minions in the
+    /// Tavern +2/+2 this game"): it is remembered for the Refreshes to come,
+    /// but its stats reach the Tavern's minions only once the cast is over,
+    /// at `flush_tavern_buffs`. The log puts those stats after that cast's
+    /// "after you cast" triggers: `Hearthstone_2026_10_28_22_11_50-g4` turn
+    /// 11 step 41, where Staff of Enrichment's +2/+2 lands after the Felboar
+    /// has eaten the Tichondrius at its pre-spell 52/46. A buff a trigger of
+    /// the same cast gives (the Devilish Distractor's "whenever you cast a
+    /// spell on this", an on-cast watcher) is not one of these: it lands at
+    /// once, so the spell's own effect that follows sees it
+    /// (`Hearthstone_2026_10_24_15_25_26-g4` turn 11 step 23).
+    pub fn add_tavern_buff_late(&mut self, cards: &CardDb, b: TavernBuff) {
+        // A cast gives the Tavern a couple of buffs at most; one more than
+        // that lands at once rather than being lost.
+        if self.late_tavern.try_push(b).is_err() {
+            self.add_tavern_buff(cards, b);
+        }
+    }
+
+    /// The cast is over: the Tavern buffs its own effect gave land now.
+    pub fn flush_tavern_buffs(&mut self, cards: &CardDb) {
+        let mut k = 0;
+        while k < self.late_tavern.len() {
+            let b = self.late_tavern[k];
+            self.add_tavern_buff(cards, b);
+            k += 1;
+        }
+        self.late_tavern.clear();
     }
 
     /// Put every Tavern buff that applies on a minion that just showed up in

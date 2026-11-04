@@ -282,6 +282,10 @@ pub struct TavernBuff {
 /// One buff per (tribe filter, duration): 10 tribes and no filter, times 2.
 pub const MAX_TAVERN_BUFFS: usize = 22;
 
+/// Tavern buffs one cast's own effect can give and still hold back: Staff of
+/// Enrichment's and Eonar's Favor's, plus room to spare.
+pub const LATE_TAVERN_BUFFS: usize = 4;
+
 /// A Choose One minion or spell waiting for the player to pick one of its
 /// two options.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -875,6 +879,9 @@ pub struct Player {
     /// Counts of (Beast, Mech, neutral) minions on the player's final board.
     pub final_tribes: [u8; TRIBES],
     pub tavern_buffs: ArrayVec<TavernBuff, MAX_TAVERN_BUFFS>,
+    /// Tavern buffs a spell's own effect gave this cast, whose stats land
+    /// once the cast is over (`Player::add_tavern_buff_late`).
+    pub late_tavern: ArrayVec<TavernBuff, LATE_TAVERN_BUFFS>,
     /// Damage the hero took last, what "rewind it" gives back.
     pub last_damage: i32,
     /// How much of `last_damage` armor took: a rewind gives that much back as
@@ -2171,6 +2178,12 @@ impl Game {
         for q in 0..PLAYERS {
             self.settle_dead(q);
         }
+        // A Tavern buff a spell's own effect gave always lands by the end of
+        // the action, even if the cast that gave it was dropped or its caster
+        // knocked out (`Player::add_tavern_buff_late`).
+        for q in 0..PLAYERS {
+            self.players[q].flush_tavern_buffs(&self.data.cards);
+        }
         if self.over {
             #[cfg(debug_assertions)]
             self.check_invariants().unwrap();
@@ -2216,6 +2229,12 @@ impl Game {
         // something: one more sweep, so a dead hero never holds cards.
         for q in 0..PLAYERS {
             self.settle_dead(q);
+        }
+        // A start-of-turn effect that casts a spell can hold a Tavern buff
+        // back too (`Player::add_tavern_buff_late`); nothing may leave the
+        // action with one still held.
+        for q in 0..PLAYERS {
+            self.players[q].flush_tavern_buffs(&self.data.cards);
         }
         #[cfg(debug_assertions)]
         self.check_invariants().unwrap();
