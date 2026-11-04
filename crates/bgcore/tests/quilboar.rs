@@ -411,6 +411,44 @@ fn a_three_cast_gem_feeds_felboar_between_its_casts() {
 }
 
 #[test]
+fn a_choose_one_spells_balinda_casts_feed_felboar_each_time() {
+    // Hearthstone_2026_11_02_00_10_22-g4 turn 14 step 24: Alliance Flag, a
+    // Choose One Tavern spell whose option targets a minion, on a board with
+    // a golden Balinda. The log shows three POWER blocks and both Felboars'
+    // "After you cast 3 spells" counters dropping once per block (`[1, 3]`
+    // and `[2, 3]` before, the first eating at the first cast and the second
+    // at the second, each on a Tavern minion only that cast's Devilish
+    // Distractor buff has reached). Ours fired the "whenever you cast a
+    // Tavern spell" half three times but took the play as one cast for the
+    // "after you cast a spell" half, so only one Felboar ate, and it ate
+    // after all three Tavern buffs.
+    let mut g = game(44);
+    put_on_board(&mut g, 0, "Felboar", false);
+    put_on_board(&mut g, 0, "Devilish Distractor", false);
+    put_on_board(&mut g, 0, "Balinda Stonehearth", true);
+    put_on_board(&mut g, 0, "Bramble Tunneler", false);
+    set_shop(&mut g, 0, &["Wolf Pup"]);
+    // One spell already counted: this play's second cast is the third.
+    g.players[0].board[0].improvements = 1;
+    g.players[0].gold = 10;
+    g.give(0, "Alliance Flag").unwrap();
+    let before = stats(&g.players[0].board[0]);
+    let pup = stats(&g.players[0].shop[0]);
+    let hand = (g.players[0].hand.len() - 1) as u8;
+    play(&mut g, 0, hand, 0);
+    act(&mut g, 0, Action::Choose(0));
+    act(&mut g, 0, Action::Target(1)); // the Distractor, so its Tavern buff fires
+    let now = stats(&g.players[0].board[0]);
+    assert_eq!(
+        (now.0 - before.0, now.1 - before.1),
+        (pup.0 + 2, pup.1 + 4),
+        "Balinda's second cast makes the Felboar eat, and the Wolf Pup carries that cast's Tavern buffs only"
+    );
+    assert!(g.players[0].shop.is_empty(), "the Wolf Pup was the one eaten");
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn a_whenever_tavern_spell_trigger_fires_before_the_spell_resolves() {
     // Living Azerite: "Whenever you cast a Tavern spell, give Elementals in
     // the Tavern +4/+3". "Whenever" is on the cast, so a spell that reads the

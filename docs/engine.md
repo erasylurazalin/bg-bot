@@ -1080,10 +1080,19 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   is left: a spell with no target whose own effect opens a Discover keeps its
   "after" half until the card is picked too (Fandral's Fortune, Hired
   Headhunter: log `2026_10_24_17_59_26` turn 10, the pick at line 252294 and
-  the Felboar's consume only at 252362). A Choose One spell's whole "after"
+  the Felboar's consume only at 252362). A Choose One spell's "after"
   half waits the same way: its option and
   its target come first (docs/rules/design.md "Eating a minion with a
-  spell"). The Dark Gift count is on that half too (`CastAfterChoice::count_owed`,
+  spell"). Once that target is picked, the casts of the option are the
+  play's casts: the "whenever" half of the first one fires then (it was
+  owed to the choice, `apply_target` fires it before the first run) and
+  every cast's "after" half follows its own run in the loop, so a golden
+  Balinda's three casts of Alliance Flag give a Felboar three counts and
+  let it eat the Tavern minion with only the first cast's Tavern buff on it
+  (log `Hearthstone_2026_11_02_00_10_22-g4` turn 14 step 24: three POWER
+  blocks, both Felboars' "After you cast 3 spells" counters one per block).
+  `CastAfterChoice::casts` is that many, not the one cast the play counted.
+  The Dark Gift count is on that half too (`CastAfterChoice::count_owed`,
   the `buff_per_tavern_spell` gifts Spell Siphon): the game grows those
   minions once the spell has resolved, so a Discover spell's pick comes first
   (log `2026_10_27_04_30_04` turn 7: Planar Telescope cast at Power.log

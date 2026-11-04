@@ -873,7 +873,31 @@ impl Game {
                 // This cast's "whenever" half already fired at the play, so
                 // each of the play's casts is owed one (`cast_after_choice`,
                 // at_play). A Locket's copy is inside its own cast and fires
-                // none.
+                // none. A Choose One spell's option that targets a minion has
+                // just answered the choice the cast waited on, so its halves
+                // are settled here first, and then it is owed per cast like a
+                // targeting spell's.
+                if !pt.by_minion
+                    && self.players[p].cast_after_choice.is_some_and(|w| !w.at_play)
+                    && let Some(mut w) = self.players[p].cast_after_choice.take()
+                {
+                    self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Now);
+                    self.trinket_event(p, Event::SpellCast, Some(w.card), 1);
+                    if w.tavern {
+                        self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Now);
+                        self.trinket_event(p, Event::CastSpell, Some(w.card), 1);
+                        if w.count_owed {
+                            // Dark Gifts Spell Siphon counts every cast.
+                            self.dark_gift_count(p, pt.runs.max(1) as i32, |c| {
+                                c.buff_per_tavern_spell
+                            });
+                        }
+                    }
+                    w.casts = pt.runs.max(1);
+                    w.at_play = true;
+                    w.count_owed = false;
+                    self.players[p].cast_after_choice = Some(w);
+                }
                 let owe_after = !pt.by_minion
                     && !self.players[p].tp.locket_copy
                     && self.players[p].cast_after_choice.is_some_and(|w| w.at_play);
