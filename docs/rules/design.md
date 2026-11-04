@@ -363,6 +363,13 @@ asking Era any rule question.
   the pool: Chromadrakes, Demon Fodder, Fishbait, Satellites, Beetles and
   so on.
 - Spells have no limited pool. (Assumption; I haven't checked it.)
+- **Patch 37.0.2 (2026-11-03), Era 2026-11-04:** cards that leave the game
+  (Expert Aviator; trinkets Spell-powered Wrench, Quilligraphy Set, Fridge
+  Magnet, Writhing Tentacles) are marked out of the pool, never deleted:
+  old logs and real boards still hold them. Stalwart Kodo's "a different
+  minion" means not another Stalwart Kodo. Last One Standing's "improve
+  this" adds +10/+10 each Rally (+10/+10, then +20/+20, +30/+30, ...).
+  The full change list is `docs/notes/patch-37.0.2.md`.
 - Some groups share one pool slot: the three Volumizers are one slot and a
   drawn one gets a random color. The five Bounty spells are one slot the
   same way, and a drawn Bounty is a random one of the five.
