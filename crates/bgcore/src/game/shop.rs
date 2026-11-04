@@ -846,14 +846,25 @@ impl Game {
     /// (docs/rules/design.md "Triples"). `check_triple` does nothing below
     /// three copies.
     pub(super) fn check_board_triples(&mut self, p: usize) {
-        let mut held: ArrayVec<CardId, { crate::BOARD }> = ArrayVec::new();
-        for m in &self.players[p].board {
-            if !m.golden && !held.contains(&m.card) {
-                let _ = held.try_push(m.card);
+        // One pass merges one triple per card, and a summon can bring enough
+        // copies for two: a Golden Cadaver Caretaker's six Skeletons triple
+        // twice and both Golden Skeletons join the hand
+        // (`Hearthstone_2026_10_26_00_48_15-g2` turn 7 step 6). So the pass
+        // repeats while a merge still happens.
+        loop {
+            let before = self.players[p].board.len() + self.players[p].hand.len();
+            let mut held: ArrayVec<CardId, { crate::BOARD }> = ArrayVec::new();
+            for m in &self.players[p].board {
+                if !m.golden && !held.contains(&m.card) {
+                    let _ = held.try_push(m.card);
+                }
             }
-        }
-        for card in held {
-            self.check_triple(p, card);
+            for card in held {
+                self.check_triple(p, card);
+            }
+            if self.players[p].board.len() + self.players[p].hand.len() == before {
+                break;
+            }
         }
     }
 

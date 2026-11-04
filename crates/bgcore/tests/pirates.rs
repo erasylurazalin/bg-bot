@@ -513,14 +513,16 @@ fn lovesick_balladist_reads_the_gold_spent_this_turn() {
     act(&mut g, 0, Action::Roll);
     assert_eq!(g.players[0].gold_spent_turn, 2);
     play(&mut g, 0, 0, 1);
-    // +2 Health plus 1 for each Gold spent
-    assert_eq!(stats(&g.players[0].board[0]), (3, 1 + 2 + 2));
+    // +2 Health plus 2 for each Gold spent, which is the log's own number:
+    // 19 Gold behind a +0/+40 buff and 18 behind a golden +0/+76 (see the
+    // card's note in cards.toml)
+    assert_eq!(stats(&g.players[0].board[0]), (3, 1 + 2 + 2 * 2));
     // the next turn it starts again from nothing
     end_all_turns(&mut g);
     put_in_hand(&mut g, 0, "Lovesick Balladist", false);
     play(&mut g, 0, 0, 2);
     act(&mut g, 0, Action::Target(0));
-    assert_eq!(stats(&g.players[0].board[0]), (3, 5 + 2));
+    assert_eq!(stats(&g.players[0].board[0]), (3, 7 + 2));
 }
 
 #[test]

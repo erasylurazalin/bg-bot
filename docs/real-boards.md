@@ -677,8 +677,14 @@ of a random step is run, since any of them may be the log's.
     each came from: `shop_replay::seat_links` links two hand cards with one
     `from` that came from a source handing out a pair, so playing one
     discards the other (`Minion.linked`, docs/rules/design.md "Linked
-    cards"). Four cards from one source (two presses, a golden source sold
-    twice) do not say who goes with whom and stay unlinked.
+    cards"). Four cards from a hero power are two pairs in position order,
+    because a press hands its two out together and the hand keeps them side
+    by side (`11_03_13_59_12-g2` turn 12: Brann Bronzebeard next to Runic
+    Arcanist and Hoarding Hyena next to Sin'dorei Straight Shot, and the log
+    loses a card of its own pair each time). Four cards from a sold minion do
+    not say who goes with whom (two Faceless Operative sales,
+    `11_03_00_29_06-g5` turn 11 step 18 plays one with no discard) and stay
+    unlinked, and so does an odd one out.
   - **A start-of-turn card a full hand refused** (a Spellcraft spell, a
     Lockbox) waits for room and joins at the first step that frees a slot
     (docs/rules/design.md "A full hand"), and no state can show a card that is
@@ -705,6 +711,29 @@ of a random step is run, since any of them may be the log's.
     the log's press only shows the copy it gave: `replay_step` reads it off the
     steps before the press, the last `play` of a Tavern spell in the game,
     earlier turns included (docs/rules/heroes.md, Era 2026-11-03).
+  - **Gold spent this turn** ("Improved by each Gold you spent this turn!",
+    Lovesick Balladist) is the log's `gold_spent` counter against the one the
+    turn started with: `shop_replay::seat_spell_bonus_turn` seats the
+    difference as `Player.gold_spent_turn`, as it does for the Tavern spell
+    bonus. The counter is the game's total, 19 and 18 more than the turn's
+    start by the two Balladist plays in `10_28_02_28_32-g4` turn 11 and
+    `11_03_00_29_06-g4` turn 11.
+  - **The minions bought this turn** (Glaive Ricochet's "after you buy 3
+    minions, a plain copy of one of them") are in no state, and every step
+    loads a fresh one: `replay_step` reads them off the turn's own earlier
+    `buy` steps (`recent_buys_of_turn`), and the power's count off its own
+    number, which counts the minions still to buy ("(1 left!)" is two bought)
+    and shows three left again with this turn's use spent once the copy has
+    fired (`seat_power_counters`, `10_27_04_30_04-g3` turn 10).
+  - **A Discover's pick is the card as the effect that made it left it**, not
+    as the offer shows it: Innkeeper's Hearth's "Set their stats to 30/30"
+    leaves the offer at its printed 8/9 and writes 30/30 on the pick
+    (`10_28_22_11_50-g5` turn 9 steps 2 and 3). The engine's own set
+    (`Player.tp.discover_stats`) only runs on a Discover it deals itself, and
+    a state loaded mid-turn has lost it, so the loader sets the pick from the
+    trinket the step names. A pick whose stats changed for another reason (an
+    Undead's standing Attack arriving with it) is not that and is left to the
+    engine.
   - **Gold a card's own start of turn gives** (Accord-o-Tron's "At the start
     of your turn, gain 1 Gold") lands on the step after the turn start, because
     the client's tag moves with the turn's first board update:
@@ -762,6 +791,10 @@ of a random step is run, since any of them may be the log's.
     (`Game::note_triples_due`) when `board_triple_due` reads it in the two
     states: three plain copies of one name on the board before, and a Golden
     card of that name in the hand after that the state before did not hold.
+    One check merges one triple per name, and a summon can bring six copies,
+    so the engine repeats the pass while a merge still happens: a Golden
+    Cadaver Caretaker's six Skeletons triple twice and both Golden Skeletons
+    join the hand (`10_26_00_48_15-g2` turn 7 step 6).
   - **What a pick still owes the action that opened it.** The game resolves a
     Discover or a Choose One inside the play that asked for it, but the log
     makes the pick a step of its own, and `replay_step` replays the pick alone

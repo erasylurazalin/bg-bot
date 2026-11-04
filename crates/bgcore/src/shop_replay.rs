@@ -1214,6 +1214,13 @@ fn seat_shop_spell_paid(game: &mut Game, data: &Data, card: CardId, step: &ShopS
 /// is only this turn's, which is what the engine's own improve-for-this-turn
 /// writes and what the end of the turn drops. It needs the turn's start state
 /// (the counter there is the standing part), which `load` does not take.
+///
+/// The same difference gives the Gold the turn has spent so far, which
+/// "improved by each Gold you spent this turn" reads (Lovesick Balladist): the
+/// log's `gold_spent` counter is the game's total, 19 and 18 more than the
+/// turn's start by the two plays in `Hearthstone_2026_10_28_02_28_32-g4` turn
+/// 11 and `Hearthstone_2026_11_03_00_29_06-g4` turn 11. Every step loads a
+/// fresh state, so without it the count is nothing at every step.
 pub fn seat_spell_bonus_turn(pl: &mut Player, state: &ShopStateSpec, turn_start: &ShopStateSpec) {
     let added = |key: &str| {
         let now = state.counters.get(key).copied().unwrap_or(0);
@@ -1225,6 +1232,7 @@ pub fn seat_spell_bonus_turn(pl: &mut Player, state: &ShopStateSpec, turn_start:
     pl.spell_bonus.1 -= health;
     pl.tp.spell_bonus_turn.0 += attack;
     pl.tp.spell_bonus_turn.1 += health;
+    pl.gold_spent_turn = added("gold_spent").min(u16::MAX as i32) as u16;
 }
 
 /// Gold a card's own trigger gives at the start of the turn lands on the step
@@ -1650,6 +1658,18 @@ fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPowerSpec]) {
             let left = left.clamp(1, every as i32) as u32;
             st.progress = every as u32 - left;
         }
+        if let crate::heroes::PowerEffect::CopyBuyAfterMinions { every } = effect {
+            // Glaive Ricochet counts the minions still to buy ("(3 left!)" is
+            // none bought yet, "(1 left!)" two), the engine the minions bought
+            // this turn, so again the two turn around. Once the copy has fired
+            // the log shows three left again with this turn's use spent
+            // (`numbers[1]` 0, `Hearthstone_2026_10_27_04_30_04-g3` turn 10
+            // step 15), and the engine's count stops at `every` so that the
+            // power cannot fire twice in one turn.
+            let left = power.numbers.first().copied().unwrap_or(0).clamp(0, every as i32) as u32;
+            let spent = power.numbers.get(1).is_some_and(|n| *n == 0);
+            st.progress = if spent { every as u32 } else { every as u32 - left };
+        }
         if let Some(cost) = power.cost {
             let base = data.heroes.power(i).cost as i32;
             st.cost_delta = (cost - base).clamp(i8::MIN as i32, i8::MAX as i32) as i8;
@@ -1743,39 +1763,56 @@ fn golden_played_shown(
 /// group number on the cards (`Minion::linked`), and the one thing a logged
 /// state still says about it is the card each came from (`from`), so the loader
 /// links the hand again: exactly two hand cards from a source that hands out a
-/// pair are that pair. Four (two presses, or a golden source sold twice) do not
-/// say who goes with whom, and are left unlinked.
+/// pair are that pair.
+///
+/// A hero power hands its pairs out together and the hand keeps them side by
+/// side, so four cards from it are two pairs in position order: Kith'ix's Dark
+/// Ritual pressed twice leaves Brann Bronzebeard next to Runic Arcanist and
+/// Hoarding Hyena next to Sin'dorei Straight Shot, and the log loses a card of
+/// its own pair each time (`Hearthstone_2026_11_03_13_59_12-g2` turn 12). A
+/// sold minion's four do not: two Faceless Operative sales gave four
+/// Aberrations that the log plays without a discard
+/// (`Hearthstone_2026_11_03_00_29_06-g5` turn 11 step 18, the Mindbending
+/// Recruiter played and no other card lost), so they are left unlinked. An odd
+/// one out (three from a source) is left unlinked too.
 fn seat_links(data: &Data, hand: &mut [Minion], specs: &[ShopMinionSpec]) {
     let mut sorted: Vec<&ShopMinionSpec> = specs.iter().collect();
     sorted.sort_by_key(|m| (m.position.or(m.index).unwrap_or(0), m.id));
-    let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
+    // The source's key and whether its pairs come out side by side.
+    let mut groups: Vec<(&str, bool, Vec<usize>)> = Vec::new();
     for (slot, spec) in sorted.iter().take(hand.len()).enumerate() {
         let Some(from) = spec.from.as_ref() else { continue };
-        if !hands_out_a_pair(data, from) {
-            continue;
-        }
+        let Some(side_by_side) = hands_out_a_pair(data, from) else { continue };
         let key = from.card_id.as_deref().or(from.name.as_deref()).unwrap_or_default();
-        match groups.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, slots)) => slots.push(slot),
-            None => groups.push((key, vec![slot])),
+        match groups.iter_mut().find(|(k, _, _)| *k == key) {
+            Some((_, _, slots)) => slots.push(slot),
+            None => groups.push((key, side_by_side, vec![slot])),
         }
     }
     let mut next = 1u16;
-    for (_, slots) in groups {
-        if slots.len() != 2 {
+    for (_, side_by_side, slots) in groups {
+        if !side_by_side && slots.len() != 2 {
             continue;
         }
-        for slot in slots {
-            hand[slot].linked = next;
+        for pair in slots.chunks(2) {
+            if pair.len() != 2 {
+                continue;
+            }
+            for &slot in pair {
+                hand[slot].linked = next;
+            }
+            next += 1;
         }
-        next += 1;
     }
 }
 
-/// Whether a card hands out its cards as a linked pair: a minion whose sale is
-/// `linked_minions` or `linked_spells`, or the hero power `GetLinkedMinions`.
-fn hands_out_a_pair(data: &Data, from: &ShopPlace) -> bool {
-    let Some(name) = from.name.as_deref() else { return false };
+/// Whether a card hands out its cards as a linked pair, and whether two of its
+/// pairs come out side by side: a minion whose sale is `linked_minions` or
+/// `linked_spells` hands out one pair per sale and says nothing about two
+/// sales, while the hero power `GetLinkedMinions` hands each pair out together
+/// (`seat_links`).
+fn hands_out_a_pair(data: &Data, from: &ShopPlace) -> Option<bool> {
+    let name = from.name.as_deref()?;
     let linked_sale = data.cards.by_name(name).is_some_and(|c| {
         matches!(
             data.cards.get(c).on_sell,
@@ -1785,10 +1822,14 @@ fn hands_out_a_pair(data: &Data, from: &ShopPlace) -> bool {
             ))
         )
     });
-    linked_sale
-        || data.heroes.powers.iter().any(|p| {
-            p.name == name && matches!(p.effect, crate::heroes::PowerEffect::GetLinkedMinions(_))
-        })
+    if linked_sale {
+        return Some(false);
+    }
+    data.heroes
+        .powers
+        .iter()
+        .any(|p| p.name == name && matches!(p.effect, crate::heroes::PowerEffect::GetLinkedMinions(_)))
+        .then_some(true)
 }
 
 /// One zone (the board or the hand) of a logged state, in position order.
@@ -3075,7 +3116,7 @@ fn force_offer(
     // stats, golden flag, keywords and numbers), which the engine lands as it
     // is (`discover_minions`), so a stat-set offer or a Golden one comes out
     // right and no pool copy moves.
-    let ready: Vec<Minion> = step
+    let mut ready: Vec<Minion> = step
         .options
         .iter()
         .map(|o| {
@@ -3097,6 +3138,33 @@ fn force_offer(
             m
         })
         .collect();
+    // Innkeeper's Hearth: "Discover two Tier 6 minions. Set their stats to
+    // 30/30". The engine's own set (`Player::tp.discover_stats`) runs only on
+    // a Discover it deals itself, and a state loaded mid-turn has lost it, so
+    // the loader sets the pick from the trinket the step names
+    // (`Hearthstone_2026_10_28_22_11_50-g5` turn 9 steps 2 and 3, both
+    // 30/30). It adds the bonuses that apply wherever the card is, as the
+    // engine's own set does.
+    let set_stats = step
+        .source
+        .as_ref()
+        .and_then(|s| s.card_id.as_deref())
+        .and_then(|id| data.trinkets.by_card_id(id))
+        .and_then(|i| {
+            data.trinkets.get(i).on_pick.iter().find_map(|a| match a {
+                crate::trinkets::Act::DiscoverTierStats { attack, health, .. } => {
+                    Some((*attack, *health))
+                }
+                _ => None,
+            })
+        });
+    if step.step == "discover"
+        && let (Some((a, h)), Some(m)) = (set_stats, ready.get_mut(at))
+    {
+        let (wa, wh) = pl.wherever_stats(&data.cards, m);
+        m.attack = a + wa;
+        m.health = h + wh;
+    }
     // A pick that lands on the board or in a Tavern slot (a transform, or
     // Galakrond's Greed taking the slot) goes through the engine's transform
     // paths, which need the offer's card ids, not ready-made minions. The step
@@ -3561,6 +3629,12 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     }
     loaded.game.players[ME].tp.whistle = armed;
     loaded.game.players[ME].last_spell = last_spell;
+    // The minions this turn has already bought, for Glaive Ricochet's plain
+    // copy of one of them.
+    loaded.game.players[ME].recent_buys.clear();
+    for card in recent_buys_of_turn(data, ids, file, turn_index, index) {
+        let _ = loaded.game.players[ME].recent_buys.try_push(card);
+    }
     // A Gold-plated Compass's type is spent once the file has shown the Golden
     // minion it named; the state the loader seats says nothing about it
     // (`compass_spent`).
@@ -3867,6 +3941,42 @@ fn last_tavern_spell(
         }
     }
     None
+}
+
+/// The minions bought earlier in the turn step `step` of turn `turn` began,
+/// for Glaive Ricochet's "get a plain copy of one of them": the engine keeps
+/// them (`Player::recent_buys`) and the turn's own steps are the only place
+/// they show, since every step loads a fresh state
+/// (`Hearthstone_2026_10_27_04_30_04-g3` turn 10 buys an Imposing
+/// Percussionist, a Planar Telescope and a Wrath Weaver, and the third gives
+/// the copy). A Tavern spell is not a minion and never counts; the list holds
+/// the last three.
+fn recent_buys_of_turn(
+    data: &Data,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: usize,
+    step: usize,
+) -> Vec<CardId> {
+    let Some(turn_spec) = file.turns.get(turn) else { return Vec::new() };
+    let mut out: Vec<CardId> = Vec::new();
+    for a in turn_spec.actions[..step.min(turn_spec.actions.len())].iter() {
+        if a.step != "buy" {
+            continue;
+        }
+        let Some(card) = a.card.as_ref().and_then(|c| resolve_card(data, ids, c)) else {
+            continue;
+        };
+        let c = data.cards.get(card);
+        if c.is_spell() || c.token {
+            continue;
+        }
+        if out.len() == 3 {
+            out.remove(0);
+        }
+        out.push(card);
+    }
+    out
 }
 
 /// Replay one step of one logged turn and judge it.

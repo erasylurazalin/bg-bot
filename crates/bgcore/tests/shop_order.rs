@@ -182,3 +182,29 @@ fn fodders_queued_for_a_refresh_stop_at_seven() {
     let queued: Vec<u8> = g.players[0].fodder_refreshes.iter().copied().collect();
     assert_eq!(queued, vec![7]);
 }
+
+/// A Golden Cadaver Caretaker's Deathrattle, triggered in the Tavern, brings
+/// six 1/1 Skeletons: they triple twice in the one action, and both Golden
+/// Skeletons join the hand, leaving the board empty of them (log
+/// `Hearthstone_2026_10_26_00_48_15-g2` turn 7 step 6, the Floating Candle
+/// Set the trinket hands out).
+#[test]
+fn a_golden_cadaver_caretakers_six_skeletons_triple_twice() {
+    let mut g = sandbox(7);
+    let c = g.data.cards.by_name("Cadaver Caretaker").unwrap();
+    let slot = g.data.cards.get(c).pool_slot as usize;
+    g.pool[slot] -= 1;
+    let caretaker = g.players[0].make_card(&g.data.cards, c, true, 1);
+    g.players[0].board.push(caretaker);
+    in_hand(&mut g, "Floating Candle");
+    g.players[0].gold = 10;
+    g.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+    while answer(&mut g) {}
+    assert_eq!(board_names(&g), ["Cadaver Caretaker"], "no Skeleton stays on the board");
+    assert_eq!(hand_names(&g), ["Skeleton", "Skeleton"], "two Golden Skeletons in the hand");
+    for m in &g.players[0].hand {
+        assert!(m.golden);
+        assert_eq!((m.attack, m.health), (2, 2));
+    }
+    g.check_invariants().unwrap();
+}

@@ -208,7 +208,7 @@ exactly one legal target and drops the effect when there is none.
 | Buff scaled by a counter that improves | Tasty Lobster (`improve_counter`) | player counter `Counter`, kept through fights via `improve_gain` |
 | Per-minion "N left" counter | Gunpowder Courier (`on_event`), Treasure Parrot (`damage_milestone`) | triple keeps the highest count |
 | Stat per thing counted game-long | Falling Sky Golem (`buff_per_deathrattle`), Maritime Extortionist | wherever-it-is: update shop, hand, board (`add_golden_played`, `add_deathrattles_triggered`) |
-| Scale by gold spent this turn | Lovesick Balladist (`per_gold_spent`) | `Player.gold_spent_turn` |
+| Scale by gold spent this turn | Lovesick Balladist (`per_gold_spent`, +2 per Gold: the log's own numbers, `10_28_02_28_32-g4` turn 11 step 19) | `Player.gold_spent_turn`, which the shop replay seats from the log's `gold_spent` counter (`seat_spell_bonus_turn`) |
 | Get a generated card | Weapons Forge (`get`), Chromadrake effects | no pool copy, hand slot needed, `give_generated` |
 | Get a random pool minion (generated) | `random_minion`, Highkeeper Ra (`random_tier_minion`) | `CardDb::random_pool_minion`, `random_tier_minion` |
 | Get a pool minion that takes a copy | Discover (`DiscoverRequest`), Silent Deliverer (`draw_golden`) | pool copies come out of `Game.pool`, go back on sell |
@@ -616,7 +616,9 @@ Triple Reward spell.
   one Golden minion (Lockbox, Silent Deliverer).
 - **Gold spent.** Every payment goes through `fire_event(GoldSpent, n)`, which also
   adds to `Player.gold_spent_turn` (Lovesick Balladist). Health payments and free
-  Refreshes never count.
+  Refreshes never count. The shop replay seats the turn's own part of it from the
+  log's `gold_spent` counter, the difference against the turn's start state
+  (`shop_replay::seat_spell_bonus_turn`); the counter itself is the game's total.
 - **Lockbox.** A generated spell in hand whose `improvements` is the turns left.
   `give_lockbox(p, sooner)` gets one or shortens the held one, `tick_lockboxes` runs
   at the end of the turn, before that turn's fight (Drakkari doubles it). A
