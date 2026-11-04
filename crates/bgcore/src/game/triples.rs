@@ -240,6 +240,9 @@ impl Game {
         // golden one in hand gets it when it is played, not twice
         let beast_bonus = pl.beast_bonus;
         let mut returned: ArrayVec<Minion, 2> = ArrayVec::new();
+        // The Holy Vanguard aura the copies' logged stats carry, if any did
+        // (`Minion::vanguard_aura`): the Golden one gets its own instead.
+        let mut carried = [0u8; 2];
         let mut take_from = |pl: &mut Player, id: CardId, n: usize, same: bool, gold: &mut Minion| {
             for _ in 0..n {
                 let is_copy = |m: &Minion| m.card == id && (!m.golden || !same);
@@ -258,7 +261,16 @@ impl Game {
                 } else {
                     (0, 0)
                 };
-                gold.attack += m.attack - bonus.0 - base.attack;
+                // Holy Vanguard's "Has +30/+30 if you have 15 or less Health"
+                // is the card's own aura and not a buff of the copy: the
+                // log's stats count it and the Golden one is given it once, at
+                // its own doubled value, below (log
+                // `Hearthstone_2026_10_28_22_11_50` game 5 turn 10 step 12:
+                // 208/116, where counting the aura of all three copies gave
+                // our 238/146).
+                let aura = m.vanguard_aura;
+                carried = [carried[0].max(aura[0]), carried[1].max(aura[1])];
+                gold.attack += m.attack - bonus.0 - base.attack - aura[0] as i32;
                 // A copy's damage never comes off the Golden one: the game
                 // sums the copies into the Golden card and heals it, so what a
                 // copy has left of its Health below the card's own is damage,
@@ -267,7 +279,7 @@ impl Game {
                 // DAMAGE 0, so a board copy at 21/1 gives a 25/4 Golden one,
                 // not 25/3). The engine keeps no damage, so a buffed copy that
                 // was also damaged loses the damage's worth of its buff.
-                gold.health += (m.health - bonus.1 - base.health).max(0);
+                gold.health += (m.health - bonus.1 - base.health - aura[1] as i32).max(0);
                 gold.hats = gold.hats.saturating_add(m.hats);
                 gold.winners_bread = gold.winners_bread.saturating_add(m.winners_bread);
                 // A "gain +X/+X at the end of your turn" a Prize gave the
@@ -334,6 +346,16 @@ impl Game {
         take_from(pl, x_card, x_count, true, &mut gold);
         if let Some((w, n)) = wild {
             take_from(pl, w, n, false, &mut gold);
+        }
+        // The Golden one's own aura, once, at the value its own doubled card
+        // text gives it (+60/+60), and only where the copies' stats came with
+        // one: the engine's own minions keep it out of their stats and apply
+        // it at the start of a fight (`obs::vanguard_bonus`).
+        if carried != [0, 0] {
+            let own = crate::obs::vanguard_bonus(cards, &gold, pl.health);
+            gold.attack += own;
+            gold.health += own;
+            gold.vanguard_aura = [own.clamp(0, u8::MAX as i32) as u8; 2];
         }
         self.add_to_hand(p, gold);
         for m in returned {

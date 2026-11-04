@@ -5030,6 +5030,9 @@ impl CardDb {
             reanimate: false,
             end_turn_gain: (0, 0),
             extra_tribes: crate::cards::Tribes::NONE,
+            // Only a minion seated from a log carries one (Holy Vanguard's
+            // aura, `Minion::vanguard_aura`).
+            vanguard_aura: [0, 0],
         }
     }
 }

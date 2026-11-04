@@ -167,7 +167,13 @@ rules behind each are in docs/rules/design.md Part 2.
   sums the copies and then heals the Golden one (log
   `2026_10_24_00_56_06-g1` turn 8 step 21: the merged Plaguerunner takes ATK 25
   and DAMAGE 1, then DAMAGE 0). `Minion` keeps no damage, so a copy's Health
-  below its card's printed stats reads as no buff.
+  below its card's printed stats reads as no buff. A copy's own Holy Vanguard
+  aura is no buff either: the engine applies that aura where it is read, at a
+  fight's start, so a card seated from a log carries the pair the log counted
+  in its stats (`Minion::vanguard_aura`) and the merge leaves it out, giving
+  the Golden one its own once at its doubled +60/+60 (log
+  `Hearthstone_2026_10_28_22_11_50` game 5 turn 10 step 12: the Golden Holy
+  Vanguard is 208/116, where counting the three copies' auras said 238/146).
 - **A Health price comes before the card.** A Tavern spell bought for Health
   pays before it joins the hand, so a card the damage triggers gains gets the
   lower hand slot (Eredar Escapist's two Corrupted Cupcakes, log

@@ -597,6 +597,102 @@ fn a_logged_aureate_laureate_gives_no_triple_reward_whatever_the_file_says() {
     );
 }
 
+/// Holy Vanguard's "+30/+30 if you have 15 or less Health" is the card's own
+/// aura, not a buff a copy carries into a triple: the log keeps it on the
+/// minion's `Vanguard's Valor` enchantment (30/30, 60/60 on the Golden one)
+/// and the game gives the Golden card its own once, at the Golden card's own
+/// value, never one per copy. The file writes that pair as `vanguard_aura`
+/// and the loader records it on `Minion::vanguard_aura`, so the triple can
+/// leave it out of the sum.
+///
+/// Two copies on the board and the third in the Tavern, with +0/+0, +30/+15
+/// and +0/+0 of real buffs behind the aura: the Golden is double the printed
+/// 10/10 plus those, 50/35, and the log shows its own +60/+60 on top, 110/95
+/// (`Hearthstone_2026_10_28_22_11_50` game 5 turn 10 step 12: ours 238/146
+/// against the log's 208/116, exactly one copy's +30/+30 too much). With the
+/// hero above 15 Health the same numbers are real buffs, the file holds no
+/// pair, and the Golden is 140/125.
+#[test]
+fn a_holy_vanguards_aura_is_not_a_buff_of_a_copy_in_a_triple() {
+    for (health, aura, golden) in [
+        // At 11 Health the aura is on: 40/40, 70/55 and 40/40 are the log's
+        // stats and 30/30 of each is the aura, so the Golden the log shows is
+        // 50/35 with its own +60/+60 on top, 110/95.
+        (11, Some(30), (110, 95)),
+        // Above 15 the aura is off and the same stats are buffs: no pair to
+        // leave out, and the Golden is 140/125.
+        (16, None, (140, 125)),
+    ] {
+        let text = vanguard_triple_file(health, aura, golden);
+        let files = parse_action_files(&[("vanguard.json".to_string(), text)]).unwrap();
+        let file = &files[0];
+        let turn = &file.turns[0];
+        // The copies stay the log's stats, with the aura pair the file names
+        // recorded beside them.
+        let data = data();
+        let loaded = load(&data, &turn.start, None, None, turn.turn, 1, None);
+        let board: Vec<(i32, i32, [u8; 2])> = loaded
+            .game
+            .players[0]
+            .board
+            .iter()
+            .map(|m| (m.attack, m.health, m.vanguard_aura))
+            .collect();
+        let pair = if aura.is_some() { [30, 30] } else { [0, 0] };
+        assert_eq!(
+            board,
+            vec![(40, 40, pair), (70, 55, pair)],
+            "health {health}: the log's stats, and the aura pair beside them"
+        );
+        let r = replay_step(&data, &ids(), file, turn, 0, &ReplayOptions { seeds: 1, seed: 1 });
+        assert_eq!(r.verdict, Verdict::Ok, "health {health}: {:?} {:?}", r.diffs, r.missing);
+    }
+}
+
+/// One turn of shopping whose only step buys the third Holy Vanguard, against
+/// the two copies on the board: `aura` is the pair the log's `Vanguard's
+/// Valor` enchantment holds on each of the three (the file's `vanguard_aura`),
+/// and `golden` the attack and health the log shows on the Golden one, aura
+/// included.
+fn vanguard_triple_file(health: i32, aura: Option<i32>, golden: (i32, i32)) -> String {
+    // The pair, as the file writes it, or nothing at all when the aura is off.
+    let pair = aura.map(|a| format!(r#""vanguard_aura": [{a}, {a}], "#)).unwrap_or_default();
+    // The Golden one carries its own, doubled: 60/60 when the aura is on.
+    let gold_pair = aura
+        .map(|a| format!(r#", "vanguard_aura": [{}, {}]"#, a * 2, a * 2))
+        .unwrap_or_default();
+    let (golden_attack, golden_health) = golden;
+    format!(
+        r#"{{"source": "vanguard", "game": 1, "turns": [
+          {{"turn": 6,
+            "start": {{"board": [
+               {{"id": 1, "card_id": "BG36_372", "name": "Holy Vanguard", {pair}"attack": 40,
+                 "health": 40, "keywords": ["DIVINE_SHIELD"], "position": 1}},
+               {{"id": 2, "card_id": "BG36_372", "name": "Holy Vanguard", {pair}"attack": 70,
+                 "health": 55, "keywords": ["DIVINE_SHIELD"], "position": 2}}],
+             "hand": [],
+             "tavern": [{{"id": 3, "card_id": "BG36_372", "name": "Holy Vanguard", {pair}"attack": 40,
+                         "health": 40, "keywords": ["DIVINE_SHIELD"], "kind": "minion", "slot": 1}}],
+             "hand_hidden": 0, "gold": 3, "tier": 4, "upgrade_cost": 11,
+             "health": {health}, "armor": 0, "free_refreshes": 0, "frozen": false,
+             "hero_powers": [], "trinkets": [], "secrets": []}},
+            "actions": [{{"step": "buy", "slot": 1, "paid": {{"gold": 3, "health": 0}},
+               "card": {{"id": 3, "card_id": "BG36_372", "name": "Holy Vanguard", {pair}"attack": 40,
+                         "health": 40, "keywords": ["DIVINE_SHIELD"]}},
+               "entered": [{{"id": 4, "where": "hand", "card_id": "BG36_372_G",
+                             "name": "Holy Vanguard", "index": 1}}],
+               "after": {{"board": [],
+                 "hand": [{{"id": 4, "card_id": "BG36_372_G", "name": "Holy Vanguard",
+                            "attack": {golden_attack}, "health": {golden_health}, "golden": true,
+                            "keywords": ["DIVINE_SHIELD"], "index": 1{gold_pair}}}],
+                 "tavern": [],
+                 "hand_hidden": 0, "gold": 0, "tier": 4, "upgrade_cost": 11,
+                 "health": {health}, "armor": 0, "free_refreshes": 0, "frozen": false,
+                 "hero_powers": [], "trinkets": []}}}}],
+            "end": null}}]}}"#
+    )
+}
+
 /// Steady Growth: "At the end of your turn, gain +X/+Y", where the pair is
 /// fixed by the turn the gift landed (darkgifts.toml's table). The loader
 /// used to seat the gift at the board's own turn, so every turn the replay
