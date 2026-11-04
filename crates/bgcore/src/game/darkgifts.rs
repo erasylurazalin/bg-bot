@@ -465,10 +465,11 @@ impl Game {
         // The payouts a gift's count ran out on at the end of the last turn,
         // before anything can move the minions they sit on: Incubation's
         // doubling, which the game lands on the next turn's board (see
-        // `dark_gift_end_of_turn`). Same multiplier as an end-of-turn payout
-        // (docs/notes/UNSURE.md "Incubation with Drakkari Enchanter").
+        // `dark_gift_end_of_turn`). It runs once: Incubation's text says "in 2
+        // turns", not "at the end of", so it is a start-of-turn effect and
+        // Drakkari Enchanter doesn't repeat it (Era, 2026-11-04).
         if !self.data.gifts.is_empty() {
-            let runs = self.drakkari_mult(p);
+            let runs = 1;
             let mut pos = 0;
             while pos < self.players[p].board.len() {
                 let m = self.players[p].board[pos];

@@ -849,7 +849,9 @@ fn drakkari_doubles_the_payout_not_the_count() {
     g.dark_gift_end_of_turn(0);
     assert_eq!(g.players[0].hand.len(), 4, "two more plain copies");
 
-    // Incubation doubles the minion's stats twice with a Drakkari.
+    // Incubation doubles the minion's stats once, even with a Drakkari: its
+    // text says "in 2 turns", so it is a start-of-turn effect and Drakkari
+    // only repeats end of turn ones (Era, 2026-11-04).
     let mut g = game(19);
     let incubation = gift(&g, "Incubation");
     let c = id(&g, "Cord Puller");
@@ -864,10 +866,10 @@ fn drakkari_doubles_the_payout_not_the_count() {
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 10));
     g.dark_gift_end_of_turn(0);
     // The count runs out at the end of the turn; the doubling lands as the
-    // next turn starts, and the Drakkari doubles it there too.
+    // next turn starts, once.
     assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (10, 10));
     g.dark_gift_start_of_turn(0);
-    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (40, 40));
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), (20, 20));
 }
 
 // ---- gift effects, one test per mechanism ----

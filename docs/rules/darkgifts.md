@@ -65,6 +65,11 @@ turn starts, after the fight (`Hearthstone_2026_10_28_19_47_59-g1` end of
 turn 7: Incubation's counter goes to 0 at 19:59:50 and the Hot-Air Surveyor
 stays 12/16 through the fight, then doubles to 24/32 at 19:59:53 on the next
 turn). Replication and Affinity pay at the end of the turn as written.
+Because Incubation pays at the start of the turn, Drakkari Enchanter and
+Ghastly Sticker don't repeat it: it doubles once (Era, 2026-11-04: an effect
+whose text says "at the end of" is end of turn and Drakkari repeats it;
+"in 2 turns", "next turn", "each turn" or anything else is start of turn,
+and Drakkari doesn't). The multiplier below is for Replication and Affinity.
 On the turn it fires, the payout runs as many times as the player's end of
 turn effects do: Drakkari Enchanter sets that to 2 (3 golden; two Drakkari
 still make 2), and Ghastly Sticker adds one on top (Drakkari plus Sticker:
