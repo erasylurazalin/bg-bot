@@ -51,7 +51,7 @@ PRIMER = LLM_DIR / "rules_primer.md"
 LINEUP = [1, 0, 0, 0, 0, 7]  # one learner seat, seven real boards
 API_URL = "https://api.river.ai/v1/chat/completions"
 MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
-MAX_TOKENS = 8000
+MAX_TOKENS = 16000  # 8000 cut off 3 of 62 answers mid-thought in the first game
 TIMEOUT = 300
 RETRY_WAITS = (10, 30, 60, 120)
 KEY_VAR = "RIVER_API_KEY"
@@ -323,8 +323,10 @@ def append_lessons(name, game, place, text):
     return lines
 
 
-def system_message(primer, lessons):
+def system_message(primer, lessons, book=""):
     parts = [primer.strip()]
+    if book:
+        parts.append(book)
     if lessons:
         parts.append(
             "## Lessons from your earlier games\n\n"
@@ -369,9 +371,19 @@ def last_fight_line(desc, obs, prev_vitals):
     return line + "."
 
 
-def user_message(state, plan, turn_actions, fight_line, actions):
+def user_message(state, plan, turn_actions, fight_line, actions, plan_turn=None,
+                 named=None):
     parts = ["## Current state\n", state, ""]
-    parts.append("## Your plan so far\n")
+    if named:
+        parts.append("## Cards named above that are not in the card book\n")
+        for n, text in named.items():
+            parts.append(f"- {n}: {text}")
+        parts.append("")
+    if plan.strip() and plan_turn is not None:
+        parts.append(f"## Your plan, written at your last decision (turn {plan_turn}; "
+                     "Gold and cards may have changed since: trust the state above)\n")
+    else:
+        parts.append("## Your plan so far\n")
     parts.append(plan.strip() if plan.strip() else "(you have not written a plan yet)")
     parts.append("")
     if fight_line:
@@ -414,7 +426,8 @@ def play_game(game, args, boards, primer, lessons, player_factory):
     args.out.mkdir(parents=True, exist_ok=True)
     log = GameLog(args.out, game)
     player = player_factory(log)
-    system = system_message(primer, lessons)
+    system = None  # built at the first decision, when the lobby's card book is known
+    plan_turn = None
 
     started = time.time()
     tokens = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -475,10 +488,16 @@ def play_game(game, args, boards, primer, lessons, player_factory):
                 log.note(reason)
                 break
 
+            if system is None:
+                system = system_message(primer, lessons, desc.card_book(o))
+            # card names inside the state's card texts (not the action list, whose
+            # plain words like "Refresh the Tavern" happen to be card names too)
+            named = desc.named_cards(state)
             messages = [
                 {"role": "system", "content": system},
                 {"role": "user",
-                 "content": user_message(state, plan, turn_actions, fight_line, actions)},
+                 "content": user_message(state, plan, turn_actions, fight_line, actions,
+                                         plan_turn, named)},
             ]
             # The state is in the md in full at the start of a turn and while a
             # choice is open; otherwise only what changed (the jsonl always has
@@ -531,7 +550,8 @@ def play_game(game, args, boards, primer, lessons, player_factory):
                 log.note(reason)
                 break
 
-            plan = answer_plan or plan
+            if answer_plan:
+                plan, plan_turn = answer_plan, this_turn
             words = dict(actions).get(action, desc.action_words(o, action))
             turn_actions.append((action, words))
             history.append({"turn": this_turn, "action": action, "words": words,

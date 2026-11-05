@@ -407,6 +407,81 @@ class Descriptor:
                 out.append({"name": name.group(1), "card_id": card.group(1)})
         return out
 
+    # -- the card book ------------------------------------------------------
+
+    _REF_TRIBE = {"BEAST": "Beast", "MECHANICAL": "Mech", "DRAGON": "Dragon",
+                  "MURLOC": "Murloc", "DEMON": "Demon", "PIRATE": "Pirate",
+                  "ELEMENTAL": "Elemental", "UNDEAD": "Undead",
+                  "QUILBOAR": "Quilboar", "ABERRATION": "Aberration"}
+
+    def lobby_tribes(self, obs):
+        return [TRIBES[j] for j in range(LOBBY_TRIBES) if _b(obs, SCALAR_LOBBY + j)]
+
+    def card_book(self, obs, ref_cards=REF_CARDS):
+        """Every minion and Tavern spell this lobby's pool holds, by tier, with
+        its stats, types and text: the in-game card book (bottom right of the
+        real client). Only cards the engine has built."""
+        lobby = set(self.lobby_tribes(obs))
+        built = set(self.card_names)
+        minions, spells = {}, {}
+        self._book_names = set()
+        for c in json.loads(Path(ref_cards).read_text())["cards"]:
+            if c.get("is_golden") or not c.get("in_solo_pool") or c["name"] not in built:
+                continue
+            subsets = {self._REF_TRIBE.get(t, t) for t in c.get("lobby_subsets") or []}
+            if subsets and not subsets & lobby:
+                continue
+            tribes = [self._REF_TRIBE[t] for t in c.get("tribes", []) if t in self._REF_TRIBE]
+            is_all = "ALL" in c.get("tribes", [])
+            text = strip_counter((c.get("text_plain") or "").strip())
+            tier = c.get("tier") or 0
+            if c["type"] == "MINION":
+                if tribes and not is_all and not set(tribes) & lobby:
+                    continue
+                kind = "all types" if is_all else ("/".join(tribes) if tribes else "no type")
+                line = f"- {c['name']} ({c['attack']}/{c['health']}, {kind})" + (f": {text}" if text else "")
+                minions.setdefault(tier, []).append(line)
+            else:
+                line = f"- {c['name']} ({c.get('cost', 0)} Gold)" + (f": {text}" if text else "")
+                spells.setdefault(tier, []).append(line)
+            self._book_names.add(c["name"])
+        out = ["## The card book",
+               "Every minion and Tavern spell in this game's pool (lobby types: "
+               + ", ".join(sorted(lobby)) + "), like the card book in the real game. "
+               "Generated cards (tokens, Blood Gems, rewards) are not in it; when a text "
+               "you are shown names one, its text is given with the state."]
+        for t in sorted(minions):
+            out.append(f"### Tier {t} minions")
+            out.extend(sorted(minions[t]))
+        for t in sorted(spells):
+            out.append(f"### Tier {t} Tavern spells")
+            out.extend(sorted(spells[t]))
+        return "\n".join(out)
+
+    # card names that are also everyday words of the state text or the rules
+    _UI_PHRASES = {"Refresh the Tavern", "Refresh", "Freeze", "Level Up", "Gold",
+                   "Avenge", "Rally", "Battlecry", "Deathrattle", "Discover", "Magnetic",
+                   "Magnetize", "Taunt", "Reborn", "Windfury", "Stealth", "Venomous",
+                   "Poisonous", "Divine Shield", "Start of Combat", "Spellcraft",
+                   "Choose One", "Immune", "Deity", "Upbeat", "Colossal"}
+
+    def named_cards(self, text):
+        """Texts of cards that `text` names but that are not in the card book
+        (tokens, generated cards, cards a trinket gives): name -> text."""
+        book = getattr(self, "_book_names", set())
+        if not hasattr(self, "_name_re"):
+            names = sorted((n for n in self._card_texts if len(n) >= 4), key=len, reverse=True)
+            self._name_re = re.compile(r"\b(" + "|".join(re.escape(n) for n in names) + r")\b")
+        found = {}
+        for m in self._name_re.finditer(text):
+            n = m.group(1)
+            if n in book or n in found or n in self._UI_PHRASES:
+                continue
+            body = self.card_text(n)
+            if body:
+                found[n] = strip_counter(body)
+        return found
+
     # -- lookups ----------------------------------------------------------
 
     def card_name(self, card_id_plus_one):
