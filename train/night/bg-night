@@ -1,0 +1,542 @@
+#!/bin/bash
+# bg-night HOURS [RUN] [--dry-run]
+# bg-night --no-train [--dry-run]   desktop off and the tmux session only (for agent work on an idle PC)
+#
+# Turn the desktop off, keep training on at night strength, and leave a tmux
+# session to watch it from another machine.
+#
+#   train/night/bg-night 8          train 8 more hours, then close the desktop
+#   train/night/bg-night 8 r1105    the same, for run r1105
+#   train/night/bg-night --dry-run 8
+#
+# HOURS is how long to train when nothing is running yet. When a run is
+# already going it is switched to night strength and keeps the time it has
+# left, so HOURS is ignored then. RUN defaults to the last run, as bgt does.
+#
+# Order of work:
+#   1. refuses unless this is a terminal inside Hyprland, HOURS is a positive
+#      number, and the tools it needs (systemd-run, tmux, jq, hyprctl) are
+#      there
+#   2. moves this script into a systemd scope of its own: step 6 closes every
+#      window, this script's terminal included, and the scope keeps the hangup
+#      from stopping it halfway
+#   3. training. A run that is going is restarted at night strength with the
+#      time it has left (bgt night on). With nothing running, bgt night on RUN
+#      sets the strength and bgt go HOURS RUN starts it. Both run in a
+#      transient systemd user service that stays active after the command
+#      returns, so go.sh's detached loop is not killed with it and the loop
+#      lives outside the desktop session
+#   4. tmux session bg, started the same way: window "bgt" runs bgt menu,
+#      window "shell" is a shell in the repo
+#   5. writes $XDG_RUNTIME_DIR/bg-night, which ~/.bash_profile checks: while
+#      that file exists the console gets the tmux session instead of a new
+#      desktop
+#   6. closes every Hyprland window gracefully (the close-window dispatcher,
+#      one client at a time), waits up to 20 s, prints whatever is still open,
+#      stops the user services that use the GPU (llama, Sunshine) if they were
+#      active, then asks Hyprland to exit
+#   7. prints what it did, and logs it to train/runs/night.log
+#
+# bg-boards.timer and bg-twitch.service are left alone: they collect logs.
+#
+# --dry-run does every check and prints every command, and starts nothing,
+# closes nothing, stops nothing and exits nothing.
+#
+# train/night/bg-day undoes all of this. README.md in this directory has the
+# short version for a terminal.
+set -u
+
+self=$(readlink -f "$0")
+here=$(dirname "$self")
+repo=$(cd "$here/../.." && pwd)
+train=$repo/train
+nightlog=$train/runs/night.log
+runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+flag=$runtime/bg-night
+bgt=$(command -v bgt || echo "$train/bgt.py")
+bgt_py=$(readlink -f "$bgt" 2>/dev/null || echo "$bgt")
+gpu_services=(llama.service app-dev.lizardbyte.app.Sunshine.service)
+close_wait=20
+start_wait=60
+stamp=${BG_NIGHT_STAMP:-$(date '+%Y%m%d-%H%M%S')}
+
+usage() {
+    cat <<'EOF'
+usage: bg-night HOURS [RUN] [--dry-run]
+       bg-night --no-train [--dry-run]
+
+Turn the desktop off and train for HOURS (or keep the running run going at
+full strength), with a tmux session to watch it over ssh. See
+train/night/README.md. End night mode with train/night/bg-day.
+
+--no-train: the same desktop-off and tmux steps, but no training is started
+(for running an agent on a fully idle PC from the tmux session). It refuses
+if a run is already going, since closing the desktop would kill it.
+EOF
+}
+
+dry=0
+notrain=0
+hours=
+run=
+for arg in "$@"; do
+    case $arg in
+        --dry-run|-n) dry=1 ;;
+        --no-train) notrain=1 ;;
+        -h|--help) usage; exit 0 ;;
+        -*) usage >&2; exit 2 ;;
+        *)
+            if [ -z "$hours" ]; then
+                hours=$arg
+            elif [ -z "$run" ]; then
+                run=$arg
+            else
+                usage >&2
+                exit 2
+            fi
+            ;;
+    esac
+done
+
+# log_line: one line in train/runs/night.log with a timestamp in front. If
+# the log cannot be written it says so once and keeps going; the terminal still
+# shows everything.
+nolog=0
+log_line() {
+    [ "$nolog" = 1 ] && return 0
+    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$nightlog" || {
+        nolog=1
+        printf 'bg-night: cannot write %s, logging to the terminal only\n' "$nightlog" >&2
+    }
+}
+
+# say: print, and (unless this is a dry run) append the same line to the log.
+# Nothing is logged before the script has moved into its own scope: the scope
+# re-runs this script, and it would write the same lines again.
+logged=0
+say() {
+    if [ "$dry" = 1 ]; then
+        printf '%s\n' "$*"
+        return
+    fi
+    [ "$logged" = 1 ] && log_line "$*"
+    printf '%s\n' "$*"
+}
+
+die() {
+    say "bg-night: $*"
+    [ "$dry" = 0 ] && [ "$logged" = 0 ] && log_line "bg-night: $*"
+    exit 1
+}
+
+# transient UNIT COMMAND...: run COMMAND in a transient systemd user service
+# and leave the unit active after COMMAND exits (--remain-after-exit).
+#
+# That last flag is the point. bgt go and bgt night on both hand their work to
+# a detached go.sh loop and exit at once, so a unit that stopped with its main
+# process would kill that loop (KillMode=control-group). Staying active keeps
+# the cgroup alive, and the loop stays in it. The unit is a service in
+# user@1000.service/app.slice, not in the desktop's session scope, so
+# Hyprland exiting cannot take it down. Stop the unit to stop what it holds.
+transient() {
+    local unit=$1
+    shift
+    if [ "$dry" = 1 ]; then
+        say "would: systemd-run --user --collect --quiet --unit $unit --remain-after-exit -- $*"
+        return 0
+    fi
+    say "+ systemd-run --user --collect --quiet --unit $unit --remain-after-exit -- $*"
+    systemd-run --user --collect --quiet --unit "$unit" --remain-after-exit -- "$@"
+}
+
+# run COMMAND...: a plain command, printed as it runs (or only printed in a
+# dry run).
+run() {
+    if [ "$dry" = 1 ]; then
+        say "would: $*"
+        return 0
+    fi
+    say "+ $*"
+    "$@"
+}
+
+# in_scope UNIT RUN: is the go.sh loop or ppo.py of RUN living in a cgroup
+# inside UNIT? This is how the script knows training really moved out of the
+# desktop session before it closes anything.
+in_scope() {
+    local unit=$1 name=$2 p
+    for p in $(pgrep -f "go[.]sh [0-9.]+ $name" 2>/dev/null) \
+             $(pgrep -f "ppo[.]py --name $name" 2>/dev/null); do
+        grep -q -- "$unit" "/proc/$p/cgroup" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+# wait_loop UNIT RUN [SECONDS]: wait until RUN's loop shows up inside UNIT.
+# Prints a line every 10 s so a slow start does not look like a hang.
+wait_loop() {
+    local unit=$1 name=$2
+    local limit=${3:-$start_wait} i
+    if [ "$dry" = 1 ]; then
+        say "would: wait up to $limit s for $name to run inside $unit,"
+        say "      and stop here without closing the desktop if it did not (training would die with it)"
+        return 0
+    fi
+    say "waiting up to $limit s for $name to run inside $unit"
+    i=0
+    while [ "$i" -lt "$limit" ]; do
+        in_scope "$unit" "$name" && return 0
+        sleep 1
+        i=$((i + 1))
+        [ $((i % 10)) -eq 0 ] && say "  ${i} s, still waiting (tail $train/runs/go.log for what go.sh is doing)"
+    done
+    return 1
+}
+
+# have_night: does bgt know the night command yet? The sibling change adds
+# "bgt night on|off"; read the source rather than calling it, so the check
+# cannot start or restart anything.
+have_night() {
+    grep -qE 'def night\(|"night"' "$bgt_py" 2>/dev/null
+}
+
+# ---- checks -------------------------------------------------------------
+
+if [ "$notrain" = 1 ]; then
+    [ -z "$hours" ] || die "--no-train takes no HOURS or RUN"
+    hours=0
+elif [ -z "$hours" ]; then
+    usage >&2
+    exit 2
+fi
+if [ "$notrain" = 0 ] && { ! [[ $hours =~ ^[0-9]*\.?[0-9]+$ ]] || ! awk -v h="$hours" 'BEGIN { exit !(h > 0) }'; }; then
+    die "HOURS must be a positive number of hours, e.g. bg-night 8"
+fi
+if [ -n "$run" ] && ! [[ $run =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    die "bad run name: $run"
+fi
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE-}" ]; then
+    die "not inside Hyprland (HYPRLAND_INSTANCE_SIGNATURE is not set); run this from a terminal on the desktop"
+fi
+if ! hyprctl version >/dev/null 2>&1; then
+    die "hyprctl cannot reach the compositor; is Hyprland running?"
+fi
+for tool in systemd-run jq tmux pgrep; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool is not on PATH"
+done
+[ -x "$bgt" ] || die "no bgt at $bgt"
+
+# the second pass (inside the scope) is the one that writes the log
+if [ "${BG_NIGHT_IN_SCOPE-}" = 1 ]; then
+    logged=1
+fi
+
+if [ "$dry" = 1 ]; then
+    say "bg-night: DRY RUN, $([ "$notrain" = 1 ] && echo "no training" || echo "HOURS $hours${run:+, RUN $run}"). Nothing is started, closed, stopped or exited."
+else
+    say "bg-night: $([ "$notrain" = 1 ] && echo "no training" || echo "HOURS $hours${run:+, RUN $run}")"
+fi
+say "the compositor answers (Hyprland instance ${HYPRLAND_INSTANCE_SIGNATURE})."
+
+if [ -e "$flag" ]; then
+    say "note: $flag already exists, so night mode looks on already:"
+    while IFS= read -r line; do
+        say "    $line"
+    done < "$flag"
+    say "This run redoes the steps below; nothing breaks if they were done already."
+fi
+
+# ---- move this script out of the session --------------------------------
+
+# Step 6 closes every window, including the terminal this script runs in, and
+# a pty hangup sends SIGHUP. In a scope of its own, with SIGHUP ignored, the
+# closing desktop cannot stop this script halfway. The units started below are
+# separate units of the user manager, not children of this scope, so they are
+# not affected when this scope ends.
+trap '' HUP
+if [ "$dry" = 0 ] && [ "${BG_NIGHT_IN_SCOPE-}" != 1 ]; then
+    unit=bg-night-$stamp
+    say "+ systemd-run --user --scope --quiet --unit $unit --setenv BG_NIGHT_IN_SCOPE=1 --setenv BG_NIGHT_STAMP=$stamp -- $self $*"
+    exec systemd-run --user --scope --quiet --unit "$unit" \
+        --setenv BG_NIGHT_IN_SCOPE=1 --setenv "BG_NIGHT_STAMP=$stamp" -- "$self" "$@"
+fi
+
+# ---- training -----------------------------------------------------------
+
+say ""
+say "== training"
+
+head1=$("$bgt" check 2>/dev/null | head -1)
+live=
+last=
+if [[ $head1 =~ ^([A-Za-z0-9_.-]+):\ RUNNING ]]; then
+    live=${BASH_REMATCH[1]}
+fi
+if [[ $head1 =~ ^([A-Za-z0-9_.-]+):\ (RUNNING|stopped) ]]; then
+    last=${BASH_REMATCH[1]}
+fi
+
+if [ "$notrain" = 1 ]; then
+    if [ -n "$live" ]; then
+        die "--no-train, but $live is training inside this session: closing the desktop would kill it. bgt stop first, or use bg-night HOURS"
+    fi
+    run=none
+    say "--no-train: nothing is running and nothing is started."
+else
+# A dry run prints the bgt night commands even before the sibling change lands,
+# so they can be checked here; a real run only uses them once bgt has them.
+night=
+if have_night || [ "$dry" = 1 ]; then
+    night=1
+fi
+
+start_new=1
+new_run=0
+if [ -n "$live" ]; then
+    start_new=0
+    run=$live
+    if [ -z "$night" ]; then
+        die "training $live is going inside this session, and $bgt_py has no 'night' command to restart it outside it. Closing the desktop would kill it. Either add bgt night, or: bgt stop, then bg-night $hours"
+    fi
+    train_unit=bg-strength-$stamp
+    say "$run is running: bgt night on restarts it at night strength with the time it has left,"
+    say "so the $hours h you gave is ignored."
+    if ! transient "$train_unit" "$bgt" night on; then
+        die "bgt night on failed, nothing closed"
+    fi
+    if wait_loop "$train_unit" "$run" 20; then
+        if [ "$dry" = 1 ]; then
+            say "would then check that $run runs inside $train_unit before closing anything"
+        else
+            say "$run is inside $train_unit, which outlives the desktop session"
+        fi
+    elif "$bgt" check 2>/dev/null | head -1 | grep -q 'RUNNING'; then
+        # something is training, but not where it should be: the desktop would
+        # take it down with it
+        say "training is still not inside $train_unit 20 s after the restart: NOT closing the desktop."
+        say "It would be killed when Hyprland exits. What to look at: tail $train/runs/go.log"
+        say "Training is left running. Fix that, then run bg-night again."
+        exit 2
+    else
+        say "$run had no time left, so bgt night on stopped it without restarting:"
+        say "starting $run for $hours h instead."
+        start_new=1
+    fi
+fi
+
+if [ "$start_new" = 1 ]; then
+    [ -n "$run" ] || run=$last
+    if [ -z "$run" ]; then
+        die "no runs in $train/runs yet: start one first (bgt go 1 rNNNN), then run bg-night again"
+    fi
+    say "nothing is running: starting $run for $hours h at night strength."
+    if [ -n "$night" ]; then
+        if [ -f "$train/runs/$run-args.txt" ]; then
+            # nothing is running, so this only rewrites the run's flags: no
+            # --micro-batch and --vram-gb, which is what full strength means
+            if ! transient "bg-strength-$stamp" "$bgt" night on "$run"; then
+                say "warning: bgt night on $run failed; $run starts with the flags its args file holds"
+            fi
+        else
+            new_run=1
+            say "note: $run has no args file yet, so bgt go copies one from the newest run;"
+            say "      its strength is checked and corrected just below."
+        fi
+    else
+        say "warning: $bgt_py has no 'night' command yet, so $run starts at whatever strength its args file says"
+    fi
+    train_unit=bg-train-$stamp
+    if ! transient "$train_unit" "$bgt" go "$hours" "$run"; then
+        die "could not start training in $train_unit, nothing closed"
+    fi
+    if ! wait_loop "$train_unit" "$run"; then
+        say "training is still not inside $train_unit $start_wait s after starting: NOT closing the desktop."
+        say "It would be killed when Hyprland exits. What to look at: tail $train/runs/go.log"
+        say "Training is left running. Fix that, then run bg-night again."
+        exit 2
+    fi
+    if [ "$dry" = 1 ]; then
+        say "would then check that $run runs inside $train_unit before closing anything"
+    else
+        say "$run is inside $train_unit, which outlives the desktop session"
+    fi
+    # a brand new run copies the flags of the newest run, which may be at half
+    # strength. Correct that now that the args file exists (this restarts the
+    # run once, with the time it has left).
+    if [ "$new_run" = 1 ] && [ -n "$night" ] && "$bgt" check "$run" 2>/dev/null | head -1 | grep -q 'half strength'; then
+        say "$run has half-strength flags (inherited from the run it copied them from); switching to full"
+        train_unit=bg-strength-$stamp
+        if transient "$train_unit" "$bgt" night on "$run" && wait_loop "$train_unit" "$run"; then
+            if [ "$dry" = 1 ]; then
+                say "would then check that $run is training at full strength inside $train_unit"
+            else
+                say "$run is at full strength, inside $train_unit"
+            fi
+        else
+            say "warning: could not switch $run to full strength; it keeps the strength it has,"
+            say "         and it still runs outside the desktop session"
+        fi
+    fi
+fi
+fi
+
+# ---- tmux ---------------------------------------------------------------
+
+say ""
+say "== tmux"
+
+if tmux has-session -t bg 2>/dev/null; then
+    say "tmux session bg already exists, leaving it alone (tmux attach -t bg)"
+    server=$(tmux display-message -p -t bg '#{pid}' 2>/dev/null)
+    if [ -n "$server" ] && grep -q 'session-' "/proc/$server/cgroup" 2>/dev/null; then
+        say "warning: that session is inside the desktop's session scope, so it may not survive Hyprland exiting."
+        say "         Nothing is killed here. tmux kill-server first if you want it to be sure to outlive the desktop."
+    else
+        say "the tmux server (pid ${server:-unknown}) is not in a session scope, so it outlives the desktop"
+    fi
+else
+    tmux_unit=bg-tmux-$stamp
+    if ! transient "$tmux_unit" tmux new-session -d -s bg -n bgt -c "$repo" "$bgt" menu; then
+        say "warning: could not create the tmux session in $tmux_unit; night mode goes on,"
+        say "         but there is no session to attach to over ssh (tmux new -s bg by hand)"
+    else
+        run tmux new-window -t bg: -n shell -c "$repo"
+        server=$(tmux display-message -p -t bg '#{pid}' 2>/dev/null)
+        if [ -n "$server" ] && grep -q "$tmux_unit" "/proc/$server/cgroup" 2>/dev/null; then
+            say "the tmux server (pid $server) is inside $tmux_unit, which outlives the desktop session"
+        elif [ "$dry" = 1 ]; then
+            say "would then check that the tmux server is inside $tmux_unit"
+        else
+            say "warning: could not confirm the tmux server left the session (pid ${server:-unknown})."
+            say "         It may die with Hyprland; night mode goes on anyway, and you can"
+            say "         start another session over ssh with: tmux new -s bg"
+        fi
+    fi
+fi
+say "watch it from another machine: ssh era-arch, then tmux attach -t bg"
+
+# ---- the night flag -----------------------------------------------------
+
+say ""
+say "== night flag"
+
+if [ "$dry" = 1 ]; then
+    say "would write $flag (atomically, via $flag.tmp):"
+    say "    started $(date '+%F %T')"
+    say "    run $run"
+    say "    hours $hours"
+    say "    training unit ${train_unit:-none}"
+    say "    tmux unit ${tmux_unit:-none (session already existed)}"
+    say "    services stopped: (filled in after the services step)"
+else
+    if { printf 'started %s\n' "$(date '+%F %T')"
+         printf 'run %s\n' "$run"
+         printf 'hours %s\n' "$hours"
+         printf 'training unit %s\n' "${train_unit:-none}"
+         printf 'tmux unit %s\n' "${tmux_unit:-none}"
+         printf 'services stopped:\n'
+       } > "$flag.tmp" 2>/dev/null && mv -f "$flag.tmp" "$flag" 2>/dev/null; then
+        say "wrote $flag. While it exists, ~/.bash_profile gives the console a shell in tmux instead of a new desktop."
+        say "A reboot clears /run/user and brings the normal desktop back."
+    else
+        say "warning: could not write $flag, so the console will start Hyprland again after"
+        say "         it exits. Training and the tmux session keep running; only the console"
+        say "         needs that file. Check that $runtime is writable."
+    fi
+fi
+
+# ---- close the windows --------------------------------------------------
+
+say ""
+say "== windows"
+
+clients=$(hyprctl -j clients 2>/dev/null | jq -r '.[] | "\(.address)\t\(.class)"')
+if [ -z "$clients" ]; then
+    say "no windows to close"
+else
+    while IFS=$'\t' read -r addr class; do
+        [ -n "$addr" ] || continue
+        if [ "$dry" = 1 ]; then
+            say "would: hyprctl dispatch 'hl.dsp.window.close({ window = \"address:$addr\" })'   ($class)"
+        else
+            say "close-window $addr ($class)"
+            hyprctl dispatch "hl.dsp.window.close({ window = \"address:$addr\" })" >/dev/null 2>&1
+        fi
+    done <<< "$clients"
+fi
+
+if [ "$dry" = 1 ]; then
+    say "would: wait up to $close_wait s for the windows to go, then print whatever is still open"
+else
+    left=$close_wait
+    while [ "$left" -gt 0 ]; do
+        [ "$(hyprctl -j clients 2>/dev/null | jq 'length' 2>/dev/null || echo 0)" = 0 ] && break
+        sleep 1
+        left=$((left - 1))
+    done
+    open_windows=$(hyprctl -j clients 2>/dev/null | jq -r '.[] | "\(.class): \(.title)"')
+    if [ -z "$open_windows" ]; then
+        say "all windows are gone"
+    else
+        say "still open after $close_wait s (they go when Hyprland exits):"
+        while IFS= read -r line; do
+            [ -n "$line" ] && say "    $line"
+        done <<< "$open_windows"
+    fi
+fi
+
+# ---- GPU user services --------------------------------------------------
+
+say ""
+say "== GPU services"
+say "leaving bg-boards.timer and bg-twitch.service alone (they collect logs)"
+
+stopped=()
+for svc in "${gpu_services[@]}"; do
+    if [ "$dry" = 1 ]; then
+        say "would: systemctl --user stop $svc  (only if it is active; bg-day starts it again)"
+        continue
+    fi
+    state=$(systemctl --user is-active "$svc" 2>/dev/null || true)
+    case $state in
+        active|activating|reloading)
+            say "+ systemctl --user stop $svc"
+            if systemctl --user stop "$svc"; then
+                stopped+=("$svc")
+            else
+                say "warning: could not stop $svc"
+            fi
+            ;;
+        *)
+            say "$svc is ${state:-unknown (no user bus)}: leaving it alone"
+            ;;
+    esac
+done
+
+if [ "$dry" = 0 ]; then
+    sed -i "s/^services stopped:.*/services stopped: ${stopped[*]-}/" "$flag" 2>/dev/null || true
+fi
+
+# ---- done ---------------------------------------------------------------
+
+say ""
+say "== done"
+if [ "$notrain" = 1 ]; then
+    say "no training running (--no-train): start an agent or a run from the tmux shell"
+elif [ "$dry" = 1 ]; then
+    say "would then leave training $run running in ${train_unit:-the night unit}, outside the desktop session"
+else
+    say "training $run is running in ${train_unit:-the night unit}, outside the desktop session"
+fi
+say "tmux session bg: window bgt is bgt menu, window shell is $repo"
+say "from another machine: ssh era-arch, then tmux attach -t bg"
+say "end night mode with bg-day on the PC, or over ssh and then log in on the PC"
+say "log: $nightlog"
+
+if [ "$dry" = 1 ]; then
+    say "would: hyprctl dispatch 'hl.dsp.exit()'   (the desktop goes away at this point)"
+else
+    say "+ hyprctl dispatch 'hl.dsp.exit()'"
+    hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1 || say "warning: the exit dispatcher did not answer"
+    say "asked Hyprland to exit. The console gets the tmux session, not a new desktop, while the flag is there."
+fi

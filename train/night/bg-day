@@ -1,0 +1,225 @@
+#!/bin/bash
+# bg-day [--dry-run]
+#
+# End night mode (train/night/bg-night) and give the desktop back.
+#
+#   train/night/bg-day                on the PC, from the console
+#   train/night/bg-day                over ssh: everything but the desktop
+#   train/night/bg-day --dry-run
+#
+# What it does, in order:
+#   1. reads $XDG_RUNTIME_DIR/bg-night: which run, which units and which
+#      services night mode recorded
+#   2. switches a running run back to half strength (bgt half on, which
+#      restarts it with the time it has left), in a transient systemd user
+#      service that stays active after the command returns, so the restarted
+#      loop does not belong to the shell bg-day runs in
+#   3. starts the services bg-night stopped, if they are not already up
+#   4. removes the flag, so the console starts the desktop again
+#   5. starts the desktop: from the console on tty1 it execs start-hyprland
+#      with HYPR_LOGIN_LOCK=1 (hyprlock is the password prompt), as
+#      ~/.bash_profile does; over ssh it only says to log in on the PC
+#
+# Inside the tmux session on tty1, detaching (Ctrl-b d) is enough: that login
+# shell exec'd "tmux attach", so it ends with the client, getty starts a new
+# session, and with the flag gone ~/.bash_profile starts Hyprland.
+#
+# --dry-run does every check and prints every command, and changes nothing.
+set -u
+
+self=$(readlink -f "$0")
+here=$(dirname "$self")
+repo=$(cd "$here/../.." && pwd)
+train=$repo/train
+nightlog=$train/runs/night.log
+runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+flag=$runtime/bg-night
+bgt=$(command -v bgt || echo "$train/bgt.py")
+stamp=$(date '+%Y%m%d-%H%M%S')
+
+usage() {
+    cat <<'EOF'
+usage: bg-day [--dry-run]
+
+End night mode: half strength for a running run, the services bg-night
+stopped started again, the night flag removed, and on the console tty1 the
+desktop restarted with hyprlock as the login prompt. See train/night/README.md.
+EOF
+}
+
+dry=0
+for arg in "$@"; do
+    case $arg in
+        --dry-run|-n) dry=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+
+# log_line: one line in train/runs/night.log with a timestamp in front. If
+# the log cannot be written it says so once and keeps going; the terminal still
+# shows everything.
+nolog=0
+log_line() {
+    [ "$nolog" = 1 ] && return 0
+    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$nightlog" || {
+        nolog=1
+        printf 'bg-day: cannot write %s, logging to the terminal only\n' "$nightlog" >&2
+    }
+}
+
+say() {
+    if [ "$dry" = 1 ]; then
+        printf '%s\n' "$*"
+        return
+    fi
+    log_line "$*"
+    printf '%s\n' "$*"
+}
+
+die() {
+    say "bg-day: $*"
+    exit 1
+}
+
+# transient UNIT COMMAND...: the same as in bg-night. bgt half on restarts the
+# run by handing it to a detached go.sh loop and exiting, so the unit has to
+# stay active after the command returns, or the restart is killed with it.
+transient() {
+    local unit=$1
+    shift
+    if [ "$dry" = 1 ]; then
+        say "would: systemd-run --user --collect --quiet --unit $unit --remain-after-exit -- $*"
+        return 0
+    fi
+    say "+ systemd-run --user --collect --quiet --unit $unit --remain-after-exit -- $*"
+    systemd-run --user --collect --quiet --unit "$unit" --remain-after-exit -- "$@"
+}
+
+run() {
+    if [ "$dry" = 1 ]; then
+        say "would: $*"
+        return 0
+    fi
+    say "+ $*"
+    "$@"
+}
+
+[ -x "$bgt" ] || die "no bgt at $bgt"
+
+if [ "$dry" = 1 ]; then
+    say "bg-day: DRY RUN. Nothing is started, stopped or removed."
+else
+    say "bg-day"
+fi
+
+# ---- what night mode recorded -------------------------------------------
+
+say ""
+say "== night flag"
+
+services=()
+run_name=
+if [ -f "$flag" ]; then
+    while IFS= read -r line; do
+        case $line in
+            "started "*) say "night mode was on since ${line#started }" ;;
+            "run "*) run_name=${line#run }; say "night mode was training $run_name" ;;
+            "training unit "*) say "night mode started training in ${line#training unit }" ;;
+            "tmux unit "*) say "night mode started tmux in ${line#tmux unit }" ;;
+            "services stopped:"*)
+                for svc in ${line#services stopped:}; do
+                    services+=("$svc")
+                done
+                ;;
+        esac
+    done < "$flag"
+    if [ ${#services[@]} -gt 0 ]; then
+        say "night mode stopped: ${services[*]}"
+    else
+        say "night mode stopped no services"
+    fi
+else
+    say "night mode is not on (no $flag), so there is nothing recorded to undo"
+fi
+
+# ---- back to half strength ----------------------------------------------
+
+say ""
+say "== training"
+
+head1=$("$bgt" check 2>/dev/null | head -1)
+live=
+if [[ $head1 =~ ^([A-Za-z0-9_.-]+):\ RUNNING ]]; then
+    live=${BASH_REMATCH[1]}
+fi
+
+if [ -n "$live" ]; then
+    say "$live is running: bgt half on restarts it at half strength with the time it has left."
+    if ! transient "bg-half-$stamp" "$bgt" half on; then
+        say "warning: bgt half on failed; training is left as it is (it keeps running)"
+    fi
+else
+    say "nothing is running, so there is no strength to change"
+fi
+
+# ---- services back ------------------------------------------------------
+
+say ""
+say "== services"
+
+if [ ${#services[@]} -eq 0 ]; then
+    say "no service to start again"
+fi
+for svc in ${services[*]-}; do
+    state=$(systemctl --user is-active "$svc" 2>/dev/null || true)
+    case $state in
+        active|activating|reloading)
+            say "$svc is already $state, leaving it alone"
+            ;;
+        *)
+            if [ "$dry" = 1 ]; then
+                say "would: systemctl --user start $svc  (only if it is not already active)"
+            else
+                say "+ systemctl --user start $svc"
+                systemctl --user start "$svc" || say "warning: could not start $svc"
+            fi
+            ;;
+    esac
+done
+
+# ---- the flag goes ------------------------------------------------------
+
+say ""
+say "== night flag off"
+
+if [ -f "$flag" ]; then
+    run rm -f "$flag"
+    [ "$dry" = 1 ] || say "removed $flag: the console starts the desktop again"
+else
+    say "there was no $flag to remove"
+fi
+
+# ---- the desktop --------------------------------------------------------
+
+say ""
+say "== desktop"
+
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE-}" ] && hyprctl version >/dev/null 2>&1; then
+    say "the desktop is already running, nothing to start"
+elif [ -n "${TMUX-}" ]; then
+    say "you are inside tmux and Hyprland needs the console itself: detach with Ctrl-b d."
+    say "On the console that ends the login shell which attached, getty starts a new"
+    say "session, and with the flag gone the desktop comes back. Over ssh: detach there"
+    say "too, or detach on the PC (any key in the tmux window works on the PC console)."
+elif [ "${XDG_VTNR-}" = 1 ]; then
+    if [ "$dry" = 1 ]; then
+        say "would: export HYPR_LOGIN_LOCK=1; exec start-hyprland"
+    else
+        say "+ HYPR_LOGIN_LOCK=1 start-hyprland (hyprlock asks for the password)"
+        export HYPR_LOGIN_LOCK=1
+        exec start-hyprland
+    fi
+else
+    say "log in on the PC to get the desktop back (tty1 starts Hyprland again now that the flag is gone)"
+fi
