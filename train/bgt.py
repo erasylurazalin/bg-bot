@@ -109,6 +109,28 @@ def last_update(run):
     return ups[-1] if ups else None
 
 
+def current_minute(run):
+    """The run's training minute: the newest update line over all its logs (a
+    fresh log has none yet), else go.log's last "start at N min"."""
+    best = None
+    for out in RUNS.glob(f"{run}-2*.out"):
+        for l in out.read_text(errors="replace").splitlines():
+            if l.startswith("update"):
+                m = re.search(r"([\d.]+) min", l)
+                if m and (best is None or float(m.group(1)) > best):
+                    best = float(m.group(1))
+    if GOLOG.exists():
+        lines = GOLOG.read_text().splitlines()
+        for i in range(len(lines) - 1, -1, -1):
+            if re.search(rf" go [\d.]+ h: {re.escape(run)} ", lines[i]):
+                for l in lines[i:]:
+                    m = re.search(r"start at (\d+) min", l)
+                    if m and (best is None or int(m.group(1)) > best):
+                        best = float(m.group(1))
+                break
+    return best
+
+
 def g(pat, s, default="?"):
     m = re.search(pat, s)
     return m.group(1) if m else default
@@ -160,7 +182,7 @@ def check(run=None):
             print(f"  best vs 7 real so far: {b[0]:.2f} (minute {float(b[1]):.0f})")
         u = until_of(run)
         if live == run and u:
-            left = max(0, u - minute)
+            left = max(0, u - (current_minute(run) or minute))
             eta = datetime.datetime.now() + datetime.timedelta(minutes=left)
             print(f"  stops at minute {u}: about {left / 60:.1f} h left, around {eta:%a %H:%M}")
     else:
@@ -184,7 +206,9 @@ def check(run=None):
 
 def start(run, hours):
     cmd = (HALF_PREFIX if is_half(run) else []) + ["./go.sh", str(hours), run]
-    r = subprocess.run(cmd, cwd=TRAIN, capture_output=True, text=True)
+    # a new session, so closing the terminal (or the menu's window) doesn't hang up on it
+    r = subprocess.run(cmd, cwd=TRAIN, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, start_new_session=True)
     if r.returncode != 0 or r.stdout.strip():
         print((r.stdout + r.stderr).strip())
     if r.returncode == 0:
@@ -229,7 +253,14 @@ def stop():
     if not running():
         print("no training running")
         return
-    subprocess.run(["./stop.sh"], cwd=TRAIN)
+    stop_quiet()
+
+
+def stop_quiet():
+    r = subprocess.run(["./stop.sh"], cwd=TRAIN, capture_output=True, text=True)
+    out = (r.stdout + r.stderr).strip()
+    if out:
+        print(out)
 
 
 def half(onoff, run=None):
@@ -246,11 +277,10 @@ def half(onoff, run=None):
     set_half(run, on)
     print(f"{run} set to {'half' if on else 'full'} strength")
     if live == run:
-        up = last_update(run)
         u = until_of(run)
-        minute = float(g(r"([\d.]+) min", up or "", "0"))
-        left = (u - minute) / 60 if u else None
-        subprocess.run(["./stop.sh"], cwd=TRAIN)
+        minute = current_minute(run)
+        left = (u - minute) / 60 if u and minute is not None else None
+        stop_quiet()
         if left and left > 0.05:
             print(f"restarting with the {left:.1f} h it had left")
             start(run, round(left, 2))
@@ -334,7 +364,22 @@ def menu():
                     return ["cancelled"]
             return captured(go, hours, run)
 
+        def busy(text):
+            h, w = scr.getmaxyx()
+            scr.move(h - 2, 0)
+            scr.clrtoeol()
+            scr.addstr(h - 2, 1, text[:w - 2], curses.color_pair(2) | curses.A_BOLD)
+            scr.refresh()
+
         def act(i):
+            try:
+                return act_(i)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                return [f"error: {type(e).__name__}: {e}"]
+
+        def act_(i):
             name = items()[i][0]
             if name == "Go":
                 return do_go()
@@ -342,9 +387,14 @@ def menu():
                 if not running():
                     return ["nothing is running"]
                 a = ask(f"Stop {running()}? (y/n)", "n")
-                return captured(stop) if a and a.lower().startswith("y") else ["not stopped"]
+                if not (a and a.lower().startswith("y")):
+                    return ["not stopped"]
+                busy("stopping... (can take up to 30 s)")
+                return captured(stop)
             if name.startswith("Half"):
                 run = running() or last_run()
+                if running():
+                    busy("restarting the run at the new strength... (up to 30 s)")
                 return captured(half, "off" if is_half(run) else "on", run)
             if name == "Refresh":
                 return []
