@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=bgt
+Comment=Start, stop and watch bg-bot training
+Exec=kitty --class bgt --title bgt -e /home/era/projects/bg-bot/train/bgt.py menu
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;
+Keywords=training;bg;bot;gpu;

@@ -8,6 +8,8 @@
     bgt half on|off [RUN]   cap training at about half the PC (GPU memory 8 GB,
                             8 CPU threads left free, lowest priority); restarts
                             a running run so it applies now
+    bgt menu                a full-screen menu that refreshes itself (what the
+                            app launcher entry, train/bgt.desktop, opens)
 
 A new run copies its lineup and flags from the last run and is named rDDMM
 by default (today's date, with a letter added if that name is taken). Runs
@@ -256,6 +258,160 @@ def half(onoff, run=None):
             print("it was about to stop anyway; not restarted")
 
 
+def captured(fn, *a):
+    """Run fn and return what it printed (and its exit message) as lines."""
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        try:
+            fn(*a)
+        except SystemExit as e:
+            if e.code not in (None, 0):
+                print(e.code)
+    return buf.getvalue().rstrip("\n").splitlines()
+
+
+def menu():
+    import curses
+
+    def ui(scr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        for i, c in enumerate((curses.COLOR_GREEN, curses.COLOR_YELLOW, curses.COLOR_CYAN), 1):
+            curses.init_pair(i, c, -1)
+        curses.mousemask(curses.ALL_MOUSE_EVENTS)
+        scr.timeout(5000)
+        sel, msg = 0, []
+        status = captured(check)
+
+        def items():
+            live = running()
+            run = live or last_run()
+            h = is_half(run) if run else False
+            return [("Go", "start or continue a run"),
+                    ("Stop", "stop the running run" if live else "nothing is running"),
+                    (f"Half strength: {'ON' if h else 'off'}",
+                     "toggle; a running run restarts with its time left"),
+                    ("Refresh", "the status refreshes itself every 5 s"),
+                    ("Quit", "training keeps going after this window closes")]
+
+        def ask(prompt, default=""):
+            h, _ = scr.getmaxyx()
+            curses.curs_set(1)
+            curses.echo()
+            scr.timeout(-1)
+            scr.move(h - 2, 0)
+            scr.clrtoeol()
+            scr.addstr(h - 2, 1, prompt + (f" [{default}]" if default else "") + ": ",
+                       curses.color_pair(3) | curses.A_BOLD)
+            try:
+                ans = scr.getstr().decode().strip()
+            except KeyboardInterrupt:
+                ans = None
+            curses.noecho()
+            curses.curs_set(0)
+            scr.timeout(5000)
+            return default if ans == "" else ans
+
+        def do_go():
+            live = running()
+            if live:
+                return [f"{live} is already running. Stop it first."]
+            hours = ask("Hours to train (Enter on empty cancels)")
+            if not hours:
+                return ["cancelled"]
+            last = last_run()
+            run = None
+            if last:
+                a = ask(f"Continue {last}? (y/n)", "y")
+                if a is None:
+                    return ["cancelled"]
+                if a.lower().startswith("y"):
+                    run = last
+            if not run:
+                run = ask("New run name", suggest_name())
+                if not run:
+                    return ["cancelled"]
+            return captured(go, hours, run)
+
+        def act(i):
+            name = items()[i][0]
+            if name == "Go":
+                return do_go()
+            if name == "Stop":
+                if not running():
+                    return ["nothing is running"]
+                a = ask(f"Stop {running()}? (y/n)", "n")
+                return captured(stop) if a and a.lower().startswith("y") else ["not stopped"]
+            if name.startswith("Half"):
+                run = running() or last_run()
+                return captured(half, "off" if is_half(run) else "on", run)
+            if name == "Refresh":
+                return []
+            raise KeyboardInterrupt
+
+        while True:
+            its = items()
+            scr.erase()
+            h, w = scr.getmaxyx()
+            y = 0
+            scr.addstr(y, 1, "bg-bot training", curses.A_BOLD)
+            scr.addstr(y, 18, datetime.datetime.now().strftime("%H:%M:%S"), curses.A_DIM)
+            y += 2
+            for l in status:
+                if y >= h - 9:
+                    break
+                attr = curses.color_pair(1) | curses.A_BOLD if "RUNNING" in l else 0
+                if "crash" in l and "0 crash" not in l:
+                    attr = curses.color_pair(2) | curses.A_BOLD
+                scr.addstr(y, 1, l[:w - 2], attr)
+                y += 1
+            y += 1
+            menu_top = y
+            for i, (name, hint) in enumerate(its):
+                line = f" {i + 1}  {name:<24}"
+                scr.addstr(y, 1, line[:w - 2], curses.A_REVERSE if i == sel else 0)
+                if len(line) + 3 < w:
+                    scr.addstr(y, len(line) + 3, hint[:w - len(line) - 4], curses.A_DIM)
+                y += 1
+            y += 1
+            for l in msg[-max(1, h - y - 2):]:
+                if y >= h - 2:
+                    break
+                scr.addstr(y, 1, l[:w - 2], curses.color_pair(3))
+                y += 1
+            scr.addstr(h - 1, 1, "arrows/numbers/mouse pick, Enter runs, q quits"[:w - 2], curses.A_DIM)
+            scr.refresh()
+            try:
+                k = scr.getch()
+                if k == -1:
+                    status = captured(check)
+                    continue
+                if k in (ord("q"), 27):
+                    break
+                if k in (curses.KEY_UP, ord("k")):
+                    sel = (sel - 1) % len(its)
+                elif k in (curses.KEY_DOWN, ord("j"), 9):
+                    sel = (sel + 1) % len(its)
+                elif ord("1") <= k < ord("1") + len(its):
+                    sel = k - ord("1")
+                    msg = act(sel)
+                elif k in (10, 13, curses.KEY_ENTER):
+                    msg = act(sel)
+                elif k == curses.KEY_MOUSE:
+                    _, _, my, _, bstate = curses.getmouse()
+                    if menu_top <= my < menu_top + len(its) and bstate & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED):
+                        sel = my - menu_top
+                        msg = act(sel)
+                status = captured(check)
+            except KeyboardInterrupt:
+                break
+            except curses.error:
+                pass
+
+    curses.wrapper(ui)
+
+
 def main(argv):
     if not argv or argv[0] in ("check", "status"):
         return check(argv[1] if len(argv) > 1 else None)
@@ -266,6 +422,8 @@ def main(argv):
         return stop()
     if cmd == "half" and rest:
         return half(*rest[:2])
+    if cmd in ("menu", "--menu"):
+        return menu()
     print(__doc__.strip())
 
 

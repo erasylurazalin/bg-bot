@@ -1887,6 +1887,8 @@ Deleting `.venv` undoes it.
   named rDDMM by default), `bgt stop`, and `bgt half on|off` caps the run
   at 8 GB of GPU memory, 24 CPU threads and the lowest priority so the PC
   stays usable (`--vram-gb`, `--micro-batch`: the same updates in pieces).
+  `bgt menu` is a full-screen menu that refreshes itself; `train/bgt.desktop`
+  (linked into `~/.local/share/applications`) opens it in kitty.
 - Day to day, `./train/go.sh HOURS` continues the current run
   (`r1025-attn`) for that many hours and stops, detached, resuming from
   the last checkpoint after a crash; `./train/stop.sh` stops it, and
