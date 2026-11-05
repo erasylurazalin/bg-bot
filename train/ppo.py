@@ -108,6 +108,13 @@ def args():
     a.add_argument("--lr", type=float, default=2.5e-4)
     a.add_argument("--epochs", type=int, default=3)
     a.add_argument("--minibatch", type=int, default=8192)
+    a.add_argument("--micro-batch", type=int,
+                   help="run each minibatch through the network in pieces of this size and add "
+                        "up the gradients: the same update, less GPU memory")
+    a.add_argument("--vram-gb", type=float,
+                   help="cap this process's GPU memory (GB) so the desktop keeps the rest; "
+                        "pair with a smaller --minibatch (4096 halves the training peak at the "
+                        "same samples/s; --micro-batch keeps the update the same)")
     a.add_argument("--clip", type=float, default=0.2)
     a.add_argument("--ent", type=float, default=0.01)
     a.add_argument("--vf", type=float, default=0.5)
@@ -373,6 +380,9 @@ def main():
     torch.manual_seed(cfg.seed)
     random.seed(cfg.seed)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if cfg.vram_gb and dev.type == "cuda":
+        total = torch.cuda.get_device_properties(0).total_memory / 2**30
+        torch.cuda.set_per_process_memory_fraction(min(1.0, cfg.vram_gb / total), 0)
     ck = torch.load(cfg.resume, map_location=dev) if cfg.resume else None
     if ck is not None:
         if cfg.init_from:
@@ -582,7 +592,9 @@ def main():
             all_obs = np.zeros((N, P, bgpy.OBS_SIZE), np.float32)
             live = np.zeros((N, P), bool)
             env.observe_all(all_obs, live)
-            _, boot = net(torch.from_numpy(all_obs).to(dev).reshape(N * P, -1))
+            # in chunks: one pass over all N * P seats is the run's biggest activation peak
+            flat = torch.from_numpy(all_obs.reshape(N * P, -1))
+            boot = torch.cat([net(flat[i:i + 1024].to(dev))[1] for i in range(0, N * P, 1024)])
             next_v = (boot.reshape(N, P) * torch.from_numpy(live).to(dev)).clone()
             next_a = torch.zeros((N, P), device=dev)
             adv = torch.zeros((T, N), device=dev)
@@ -627,25 +639,38 @@ def main():
                 # its advantage std is noise, or NaN for one sample (which poisoned a run)
                 if idx.numel() < 256:
                     continue
-                logits, v = net(f_obs[idx])
-                dist = torch.distributions.Categorical(logits=masked(logits, f_mask[idx]))
-                lp = dist.log_prob(f_act[idx])
-                ratio = (lp - f_logp[idx]).exp()
-                ad = f_adv[idx]
-                ad = (ad - ad.mean()) / (ad.std() + 1e-8)
-                pg = torch.max(-ad * ratio, -ad * ratio.clamp(1 - cfg.clip, 1 + cfg.clip)).mean()
-                vl = 0.5 * ((v - f_ret[idx]) ** 2).mean()
-                ent = dist.entropy().mean()
-                loss = pg + cfg.vf * vl - cfg.ent * ent
+                # --micro-batch: the same minibatch in pieces with the gradients added
+                # up, so the update is identical and the activation peak smaller
+                ad_all = f_adv[idx]
+                ad_mean, ad_std = ad_all.mean(), ad_all.std() + 1e-8
+                m = idx.numel()
+                step = cfg.micro_batch or m
                 opt.zero_grad()
-                loss.backward()
+                kl_s = clip_s = ent_s = vl_s = 0.0
+                for j in range(0, m, step):
+                    sub = idx[j:j + step]
+                    w = sub.numel() / m
+                    logits, v = net(f_obs[sub])
+                    dist = torch.distributions.Categorical(logits=masked(logits, f_mask[sub]))
+                    lp = dist.log_prob(f_act[sub])
+                    ratio = (lp - f_logp[sub]).exp()
+                    ad = (f_adv[sub] - ad_mean) / ad_std
+                    pg = torch.max(-ad * ratio, -ad * ratio.clamp(1 - cfg.clip, 1 + cfg.clip)).mean()
+                    vl = 0.5 * ((v - f_ret[sub]) ** 2).mean()
+                    ent = dist.entropy().mean()
+                    loss = pg + cfg.vf * vl - cfg.ent * ent
+                    (loss * w).backward()
+                    with torch.no_grad():
+                        kl_s += w * ((ratio - 1) - (lp - f_logp[sub])).mean().item()
+                        clip_s += w * ((ratio - 1).abs() > cfg.clip).float().mean().item()
+                        ent_s += w * ent.item()
+                        vl_s += w * vl.item()
                 torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
                 opt.step()
-                with torch.no_grad():
-                    kls.append(((ratio - 1) - (lp - f_logp[idx])).mean().item())
-                    clips.append(((ratio - 1).abs() > cfg.clip).float().mean().item())
-                    ents.append(ent.item())
-                    vls.append(vl.item())
+                kls.append(kl_s)
+                clips.append(clip_s)
+                ents.append(ent_s)
+                vls.append(vl_s)
         update += 1
 
         # behaviour, from this rollout's learner samples
