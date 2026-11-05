@@ -85,6 +85,10 @@ def args():
     a.add_argument("--opp-boards", choices=OPP_BOARDS,
                    help="attn: opponent minions as tokens (full), pooled into each opponent's "
                         "token (pooled), or pooled plus the next opponent's in full (next, the default)")
+    a.add_argument("--attn-d", dest="d", type=int, help="attn: token width (default 128)")
+    a.add_argument("--attn-layers", dest="layers", type=int, help="attn: transformer layers (default 3)")
+    a.add_argument("--attn-heads", dest="heads", type=int, help="attn: attention heads (default 4)")
+    a.add_argument("--attn-ff", dest="ff", type=int, help="attn: feed-forward width (default 256)")
     a.add_argument("--compile", action=argparse.BooleanOptionalAction,
                    help="torch.compile the attention layers (default: on for attn)")
     a.add_argument("--init-from", help="checkpoint to take matching weights from, for a new run")
@@ -384,7 +388,8 @@ def main():
         if cfg.init_from and not cfg.model:
             cfg.model = ck_model(torch.load(cfg.init_from, map_location="cpu"))[0]
         cfg.model = cfg.model or "mlp"
-        opts = model_opts(cfg.model, opp_boards=cfg.opp_boards)
+        opts = model_opts(cfg.model, opp_boards=cfg.opp_boards, d=cfg.d, layers=cfg.layers,
+                          heads=cfg.heads, ff=cfg.ff)
     for k, v in opts.items():
         setattr(cfg, k, v)
     if cfg.init_from:

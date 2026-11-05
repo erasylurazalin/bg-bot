@@ -545,7 +545,7 @@ class PoolNet(nn.Module):
 MODELS = {"mlp": Net, "attn": AttnNet, "pool": PoolNet}
 # Settings that change a model's shape, with their defaults; other models
 # ignore them.
-MODEL_OPTS = {"attn": {"opp_boards": "next"}}
+MODEL_OPTS = {"attn": {"opp_boards": "next", "d": 128, "layers": 3, "heads": 4, "ff": 256}}
 
 
 def model_opts(kind, **given):
