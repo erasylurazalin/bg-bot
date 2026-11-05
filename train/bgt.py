@@ -102,11 +102,14 @@ def latest_out(run):
 
 
 def last_update(run):
-    out = latest_out(run)
-    if not out:
-        return None
-    ups = [l for l in out.read_text(errors="replace").splitlines() if l.startswith("update")]
-    return ups[-1] if ups else None
+    """The newest update line of RUN and when it was written: the newest log
+    that has one (right after a start the new log is still empty)."""
+    outs = sorted(RUNS.glob(f"{run}-2*.out"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for out in outs:
+        ups = [l for l in out.read_text(errors="replace").splitlines() if l.startswith("update")]
+        if ups:
+            return ups[-1], datetime.datetime.fromtimestamp(out.stat().st_mtime), out
+    return None
 
 
 def current_minute(run):
@@ -170,10 +173,13 @@ def check(run=None):
         return
     state = "RUNNING" if live == run else ("stopped" + (f" (running now: {live})" if live else ""))
     print(f"{run}: {state}, {'half strength' if is_half(run) else 'full strength'}")
-    up = last_update(run)
+    lu = last_update(run)
+    up = lu[0] if lu else None
     if up:
         minute = float(g(r"([\d.]+) min", up, "0"))
-        print(f"  update {g(r'update\s+(\d+)', up)}, minute {minute:.0f}, {g(r'(\d+) games', up)} games")
+        fresh = latest_out(run) != lu[2]
+        print(f"  update {g(r'update\s+(\d+)', up)}, minute {minute:.0f}, {g(r'(\d+) games', up)} games"
+              f"   (written {lu[1]:%H:%M}{', before the last restart; the first new line comes in a few minutes' if fresh else ''})")
         print(f"  vs 7 real {g(r'real ([\d.]+)', up)}   vs 7 standard {g(r'std ([\d.]+)', up)}   "
               f"tier 3/4/5 on turns {g(r't3/4/5 (\S+)', up)}   entropy {g(r'ent ([\d.]+)', up)}   "
               f"{g(r'(\d+) steps/s', up)} steps/s")
@@ -202,6 +208,11 @@ def check(run=None):
                   + (f", last: {crashes[-1].strip()}" if crashes else "")
                   + (", gave up after 5 tries" if len(crashes) >= 5 else ""))
     print(f"  {gpu()}")
+    if GOLOG.exists():
+        print("  go.log:")
+        for l in GOLOG.read_text().splitlines()[-3:]:
+            l = re.sub(r", lineup .*", "", l)  # the flags are long; bgt shows them elsewhere
+            print("    " + l.strip())
 
 
 def start(run, hours):
