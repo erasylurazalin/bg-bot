@@ -1881,6 +1881,12 @@ Deleting `.venv` undoes it.
 
 ## Training notes
 
+- `train/bgt.py` (I link it as `bgt`) wraps these: `bgt` shows the run and
+  its latest numbers, `bgt go HOURS [RUN]` starts or continues a run (it
+  refuses while one is going; a new run copies the last run's flags and is
+  named rDDMM by default), `bgt stop`, and `bgt half on|off` caps the run
+  at 8 GB of GPU memory, 24 CPU threads and the lowest priority so the PC
+  stays usable (`--vram-gb`, `--micro-batch`: the same updates in pieces).
 - Day to day, `./train/go.sh HOURS` continues the current run
   (`r1025-attn`) for that many hours and stops, detached, resuming from
   the last checkpoint after a crash; `./train/stop.sh` stops it, and

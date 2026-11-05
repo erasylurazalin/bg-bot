@@ -22,17 +22,19 @@ cd "$(dirname "$0")"
 log=runs/go.log
 ck=runs/$run/ckpt.pt
 py=../.venv/bin/python
-[ -f "$ck" ] || { echo "no checkpoint $ck"; exit 1; }
+# no checkpoint yet: a fresh run, which needs its lineup and args files
+[ -f "$ck" ] || [ -f "runs/$run-args.txt" ] || { echo "no checkpoint $ck and no runs/$run-args.txt"; exit 1; }
 if pgrep -f "^$py ppo.py" >/dev/null || pgrep -f "^\.\./\.venv/bin/python ppo.py" >/dev/null; then
   echo "a training run is already going; ./train/stop.sh first"; exit 1
 fi
 
 t_total() {
+  [ -f "$ck" ] || { echo 0; return; }
   $py -c "import torch;print(int(torch.load('$ck',map_location='cpu',weights_only=False)['t_total']))"
 }
 
 start=$(t_total)
-until=$(( start + hours * 60 ))
+until=$(awk "BEGIN{print int($start + $hours * 60)}")   # HOURS may be fractional
 lineup=3,1,1,1,0,2
 [ -f "runs/$run-lineup.txt" ] && lineup=$(cat "runs/$run-lineup.txt")
 # extra ppo.py flags for this run, one line (a resume takes them from the
@@ -49,7 +51,7 @@ extra=""
     out=runs/$run-$(date +%Y%m%d-%H%M).out
     echo "$(date '+%F %T')   start at $t min, log $out" >> $log
     $py ppo.py --name $run --minutes $until --compile --snapshot-every 50 \
-      --lineup $lineup $extra --resume $ck > $out 2>&1
+      --lineup $lineup $extra $([ -f "$ck" ] && echo --resume $ck) > $out 2>&1
     rc=$?
     echo "$(date '+%F %T')   exit $rc" >> $log
     grep -q 'no legal action' $out && echo "$(date '+%F %T')   NOTE: 'no legal action' state dump in $out" >> $log
