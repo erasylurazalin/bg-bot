@@ -1188,7 +1188,7 @@ Buy a minion or the spell, sell, play (minion to a position, or cast a
 spell), pick a target on the board, pick a Tavern minion, choose an option
 (Discover, Choose One), move, Activate, roll, freeze, level, end turn. One
 flat list with a legality mask from the engine; `crates/bgcore/src/action.rs`
-has the layout. A turn is capped at 60 actions.
+has the layout. A turn is capped at 200 actions (Era, 2026-11-07: was 60, but scaling comps loop far longer; Era's 1st-place Pirates turn was 104 steps; the real game only has the turn timer).
 
 ## Not in this game yet
 

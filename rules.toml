@@ -27,7 +27,7 @@ late_damage_cap = 15
 uncapped_at_players = 4
 
 max_turns = 40
-max_actions_per_turn = 60
+max_actions_per_turn = 200
 max_attacks = 500
 
 # Heroes each player is offered before turn 1 (a free account; the Battle

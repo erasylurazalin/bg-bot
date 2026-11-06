@@ -1933,9 +1933,11 @@ Deleting `.venv` undoes it.
   real seats play boards from `--real-boards`, default `boards/real` when
   the lineup has any).
 - Reward is placement only (+1 for 1st to -1 for 8th), minus 0.002 per
-  action so it doesn't shuffle its board for free. Discounting is per
-  turn, not per action; with per-action discounting nothing learned,
-  because a turn can be 60 actions.
+  Move action (`--action-cost`, `--cost-kinds move`) so it doesn't shuffle
+  its board for free; buys, sells, plays and refreshes cost nothing extra,
+  since gold already limits them and long gold-neutral loops are good play.
+  Discounting is per turn, not per action; with per-action discounting
+  nothing learned, because a turn can be up to 200 actions.
 - The starting policy is uniform over action kinds, not over all actions,
   or it almost never ends a turn.
 - Snapshots of itself are taken every 250 updates (at about 95 updates a
