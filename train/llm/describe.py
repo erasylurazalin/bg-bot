@@ -475,6 +475,14 @@ class Descriptor:
                    "Poisonous", "Divine Shield", "Start of Combat", "Spellcraft",
                    "Choose One", "Immune", "Deity", "Upbeat", "Colossal"}
 
+    def is_pool_card(self, name):
+        """Whether the game data has this card in the solo pool (any lobby)."""
+        if not hasattr(self, "_pool_names"):
+            self._pool_names = {c["name"] for c in self._by_id.values()
+                                if c.get("in_solo_pool") and not c.get("is_golden")}
+        base = name[:-len(" golden")] if name.endswith(" golden") else name
+        return base in self._pool_names or base.startswith("Dark Paradox t")
+
     def named_cards(self, text):
         """Texts of cards that `text` names but that are not in the card book
         (tokens, generated cards, cards a trinket gives): name -> text."""
@@ -647,8 +655,12 @@ class Descriptor:
             notes.append("frozen on its own")
         if _n(f, SLOT_LINKED):
             notes.append("linked: playing one discards its partners")
-        if from_pool_note and not _n(f, SLOT_FROM_POOL) and float(f[SLOT_IS_SPELL]) == 0.0:
-            notes.append("a token, not in the pool")
+        # SLOT_FROM_POOL only says whether this copy holds one of the pool's
+        # copies (a Discovered or generated copy of a real card holds none). Only
+        # a card that is no pool card at all is a token.
+        if (from_pool_note and not _n(f, SLOT_FROM_POOL) and float(f[SLOT_IS_SPELL]) == 0.0
+                and not self.is_pool_card(name)):
+            notes.append("a token, not a pool card")
         events = _n(f, SLOT_EVENTS_LEFT)
         if not notes:
             return head + self._text_suffix(name, golden, text, events)
