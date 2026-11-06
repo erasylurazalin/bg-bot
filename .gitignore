@@ -8,3 +8,4 @@ __pycache__/
 boards/
 /docs/briefs/
 /docs/notes/
+train/llm/digests/
