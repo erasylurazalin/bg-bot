@@ -23,7 +23,7 @@ log=runs/go.log
 ck=runs/$run/ckpt.pt
 py=../.venv/bin/python
 # no checkpoint yet: a fresh run, which needs its lineup and args files
-[ -f "$ck" ] || [ -f "runs/$run-args.txt" ] || { echo "no checkpoint $ck and no runs/$run-args.txt"; exit 1; }
+[ -f "$ck" ] || [ -f "runs/$run-args.txt" ] || [ -f "runs/$run-init.txt" ] || { echo "no checkpoint $ck and no runs/$run-args.txt"; exit 1; }
 if pgrep -f "^$py ppo.py" >/dev/null || pgrep -f "^\.\./\.venv/bin/python ppo.py" >/dev/null; then
   echo "a training run is already going; ./train/stop.sh first"; exit 1
 fi
@@ -41,6 +41,10 @@ lineup=3,1,1,1,0,2
 # command line, not the checkpoint), e.g. "--low-penalty 0.02"
 extra=""
 [ -f "runs/$run-args.txt" ] && extra=$(cat "runs/$run-args.txt")
+# flags for the first start only (no checkpoint yet), e.g. "--init-from ..."
+# (ppo.py refuses --init-from together with --resume)
+first=""
+[ -f "runs/$run-init.txt" ] && first=$(cat "runs/$run-init.txt")
 
 (
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -51,7 +55,7 @@ extra=""
     out=runs/$run-$(date +%Y%m%d-%H%M).out
     echo "$(date '+%F %T')   start at $t min, log $out" >> $log
     $py ppo.py --name $run --minutes $until --compile --snapshot-every 50 \
-      --lineup $lineup $extra $([ -f "$ck" ] && echo --resume $ck) > $out 2>&1
+      --lineup $lineup $extra $([ -f "$ck" ] && echo --resume $ck || echo $first) > $out 2>&1
     rc=$?
     echo "$(date '+%F %T')   exit $rc" >> $log
     grep -q 'no legal action' $out && echo "$(date '+%F %T')   NOTE: 'no legal action' state dump in $out" >> $log

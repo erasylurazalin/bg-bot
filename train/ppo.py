@@ -88,6 +88,10 @@ def args():
                    help="git revision whose cards.toml and heroes.toml an --init-from checkpoint "
                         "was trained on, for checkpoints saved before they stored card names")
     a.add_argument("--warmup", type=int, default=0, help="updates of linear lr warmup")
+    a.add_argument("--value-warmup", type=int, default=0,
+                   help="first updates that train only the value loss (no policy or entropy "
+                        "loss): for an --init-from network whose value head never learned, "
+                        "such as imitate.py's, so its first advantages aren't noise")
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--envs", type=int, default=1024)
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
@@ -650,7 +654,10 @@ def main():
                     pg = torch.max(-ad * ratio, -ad * ratio.clamp(1 - cfg.clip, 1 + cfg.clip)).mean()
                     vl = 0.5 * ((v - f_ret[sub]) ** 2).mean()
                     ent = dist.entropy().mean()
-                    loss = pg + cfg.vf * vl - cfg.ent * ent
+                    if update < cfg.value_warmup:
+                        loss = cfg.vf * vl
+                    else:
+                        loss = pg + cfg.vf * vl - cfg.ent * ent
                     (loss * w).backward()
                     with torch.no_grad():
                         kl_s += w * ((ratio - 1) - (lp - f_logp[sub])).mean().item()
