@@ -15,7 +15,7 @@ use bgcore::shop_replay::{
 };
 use bgcore::real_boards::CardIdMap;
 use bgcore::trinkets::CardMod;
-use bgcore::{Action, CardId, Data, Game, Tribe};
+use bgcore::{Action, CardId, Data, Game, Tribe, Tribes};
 
 fn data() -> Arc<Data> {
     Arc::new(Data::bundled())
@@ -4034,4 +4034,31 @@ fn a_tomb_turning_pick_dies_as_it_is_played() {
     );
     assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
     assert!(r.ours.board.is_empty(), "the pick dies as it is played: {:?}", r.ours.board);
+}
+
+/// The pool the replay draws from: the file's own `lobby` (the single-type
+/// Tavern rule, docs/rules/design.md "The lobby") when it has one, and the
+/// tribes the log showed when it does not, which is every file written before
+/// the key existed.
+#[test]
+fn the_lobby_key_wins_over_the_tribes() {
+    let file = |keys: &str| {
+        let text = format!(r#"{{"source": "lobby", "game": 1, "turns": [], {keys}}}"#);
+        parse_action_files(&[("lobby.json".to_string(), text)]).unwrap().remove(0)
+    };
+    let both = file(
+        r#""tribes": ["beast", "demon", "dragon", "mech", "murloc", "pirate"],
+           "lobby": ["beast", "dragon", "murloc", "pirate", "quilboar"]"#,
+    );
+    let lobby = both.lobby().expect("a file with the lobby key");
+    assert!(lobby.has(Tribe::Quilboar), "a type only the lobby key has");
+    assert!(!lobby.has(Tribe::Demon) && !lobby.has(Tribe::Mech), "not the log's wider set");
+    // No key: the tribes, as the replay drew before the key existed.
+    let old = file(r#""tribes": ["beast", "dragon", "undead"]"#);
+    let fallback = old.lobby().expect("the log's own tribes");
+    let want = Tribes::of(Tribe::Beast).with(Tribe::Dragon).with(Tribe::Undead);
+    assert_eq!(fallback, want);
+    // Nothing the engine has a tribe for: the engine rolls its own five.
+    assert_eq!(file(r#""tribes": []"#).lobby(), None, "no tribes at all");
+    assert_eq!(file(r#""tribes": ["naga"]"#).lobby(), None, "a type the engine has not");
 }

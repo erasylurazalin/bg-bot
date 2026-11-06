@@ -8,7 +8,8 @@
 //!
 //!   boards/actions/<log folder>-g<N>.json
 //!
-//! One file per game, `{"source", "game", "turns", "hero", "unread", "tribes"}`;
+//! One file per game,
+//! `{"source", "game", "turns", "hero", "unread", "tribes", "lobby"}`;
 //! the step kinds and every key of a step are `docs/real-boards.md` "The action
 //! file".
 //!
@@ -62,6 +63,22 @@ const KEYS: [&str; 6] = [
 
 /// What the stand-in player's Tavern holds.
 const SHOP_TYPES: [&str; 2] = ["MINION", "BATTLEGROUND_SPELL"];
+
+/// The minion types a lobby can be made of, in the engine's spelling: the ten
+/// names `bglog` reads a card's races as. The game's eleventh, Naga, is not one
+/// of them (the engine has no Naga yet), so a Naga-only minion adds no type.
+const LOBBY_TRIBES: [&str; 10] = [
+    "beast",
+    "demon",
+    "dragon",
+    "elemental",
+    "mech",
+    "murloc",
+    "pirate",
+    "quilboar",
+    "undead",
+    "aberration",
+];
 
 /// The buttons and cards a step is named after.
 const DRAG_BUY: [&str; 2] = ["TB_BaconShop_DragBuy", "TB_BaconShop_DragBuy_Spell"];
@@ -226,7 +243,7 @@ fn collect(
         let mut steps = Tally::new();
         let mut unread = Tally::new();
         let mut games = 0;
-        for (index, record) in read_log(&path, &cards)?.into_iter().enumerate() {
+        for (index, record) in read_log(&path, &cards, &name)?.into_iter().enumerate() {
             let Some(record) = record else {
                 continue;
             };
@@ -487,10 +504,17 @@ struct Collector {
     gold_live: Option<i64>,
     waited: BTreeMap<i64, Json>,
     tribes: BTreeSet<String>,
+    /// The lobby's types by Era's rule (docs/rules/design.md "The lobby"): for
+    /// every type a minion of only that type showed in the Tavern, the ids of
+    /// the Tavern minions that showed it. The ids are for the warning a game
+    /// with more than five types prints.
+    lobby: BTreeMap<String, BTreeSet<String>>,
+    /// The log folder this run's files are named after, for that warning.
+    label: String,
 }
 
 impl Collector {
-    fn new(cards: Cards) -> Collector {
+    fn new(cards: Cards, label: &str) -> Collector {
         let mut collector = Collector {
             log: PowerLog::new(),
             tracker: Tracker::new(cards.clone()),
@@ -516,6 +540,8 @@ impl Collector {
             gold_live: None,
             waited: BTreeMap::new(),
             tribes: BTreeSet::new(),
+            lobby: BTreeMap::new(),
+            label: label.to_string(),
         };
         collector.reset();
         collector
@@ -572,6 +598,7 @@ impl Collector {
         self.gold_live = None;
         self.waited.clear();
         self.tribes.clear();
+        self.lobby.clear();
     }
 
     /// File the game just read, under the number `collect-boards` gives it: one
@@ -596,10 +623,29 @@ impl Collector {
         let unread = self.unread.to_json();
         let hero = self.my_hero(game);
         let tribes = Json::Arr(self.tribes.iter().map(|t| str_(t)).collect());
+        let lobby = Json::Arr(self.lobby.keys().map(|t| str_(t)).collect());
+        // A lobby has five types (docs/rules/design.md "The lobby"): more than
+        // five of them seen alone in the Tavern is the collector's bug, not the
+        // game's, so it says which game and which cards showed them.
+        if self.lobby.len() > 5 {
+            let mut cards: Vec<String> = Vec::new();
+            for (tribe, ids) in &self.lobby {
+                let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+                cards.push(format!("{tribe}: {}", ids.join(" ")));
+            }
+            eprintln!(
+                "{}-g{}: {} lobby types, more than the five a lobby has: {}",
+                self.label,
+                self.games.len() + 1,
+                self.lobby.len(),
+                cards.join(", ")
+            );
+        }
         if let Some(object) = record.as_obj_mut() {
             set(object, "hero", hero);
             put(object, "unread", unread);
             put(object, "tribes", tribes);
+            put(object, "lobby", lobby);
         }
         self.games.push(Some(record));
         self.reset();
@@ -2553,7 +2599,18 @@ impl Collector {
                 if e.int("BACON_REDUCE_BUY_COST") != 0 {
                     put(&mut d, "cost_reduce", Json::Int(e.int("BACON_REDUCE_BUY_COST")));
                 }
-                tribes.extend(card_tribes(&self.cards, &e.card_id));
+                let shown = card_tribes(&self.cards, &e.card_id);
+                // Era's lobby rule (docs/rules/design.md "The lobby"): a type is
+                // in the lobby when a minion of only that type shows in the
+                // Tavern. Two-tribe minions, "all types" minions (no tribe the
+                // engine names) and everything outside the Tavern say nothing.
+                if ct == "MINION"
+                    && shown.len() == 1
+                    && LOBBY_TRIBES.contains(&shown[0].as_str())
+                {
+                    self.lobby.entry(shown[0].clone()).or_default().insert(e.card_id.clone());
+                }
+                tribes.extend(shown);
                 tavern.push(Json::Obj(d));
             } else if Some(controller) == mine
                 && zone == "HAND"
@@ -3070,11 +3127,12 @@ fn card_tribes(cards: &Cards, card_id: &str) -> Vec<String> {
 }
 
 /// Every Battlegrounds game of a log, in order, with `None` for a game that has
-/// no shop turn: the Python's `read_log`.
-fn read_log(path: &Path, cards: &Cards) -> Result<Vec<Option<Json>>, String> {
+/// no shop turn: the Python's `read_log`. `label` is the log folder's name, for
+/// the warning a game with more than five lobby types prints.
+fn read_log(path: &Path, cards: &Cards, label: &str) -> Result<Vec<Option<Json>>, String> {
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = BufReader::with_capacity(1 << 20, file);
-    let mut collector = Collector::new(cards.clone());
+    let mut collector = Collector::new(cards.clone(), label);
     let mut bytes: Vec<u8> = Vec::new();
     loop {
         bytes.clear();
@@ -3500,7 +3558,7 @@ mod tests {
         none.push((GEM_TAGS[1], number(0)));
         add(101, none);
 
-        let mut collector = Collector::new(cards);
+        let mut collector = Collector::new(cards, "test");
         let state = collector.state(&g);
         let got: serde_json::Value = serde_json::from_str(&render(&Json::Obj(state))).unwrap();
         let board = got["board"].as_array().unwrap();

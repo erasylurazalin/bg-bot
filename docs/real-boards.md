@@ -373,6 +373,14 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   minion that sat in my Tavern, my hand or my board. The lobby itself is not in
   the log, so this is a lower bound on it (a game often has a tribe the Tavern
   never offered), which a replayed pool can only draw fewer cards from.
+- The game's `lobby` is the lobby's types by Era's rule
+  (docs/rules/design.md "The lobby"): a type is in when a minion of only that
+  type shows in the Tavern, so the types of a two-tribe minion, of an "all
+  types" minion and of cards outside the Tavern say nothing. It is sorted and
+  usually holds five types; a game where the rule finds fewer writes what it
+  found (the short log fragment). The shop replay draws its pool from this key
+  when it is there and from `tribes` when it is not (a file written before the
+  key existed).
 
 Every step says what it was and, where there is one, on which card or slot:
 
@@ -1004,7 +1012,9 @@ of a random step is run, since any of them may be the log's.
   card id), so a later build run can check the cards it touched.
 
 What the replay cannot see, and so cannot blame on the engine: the lobby's real
-tribes (the file's `tribes` are the ones the log showed), the client's own
+tribes beyond the file's own guess (its `lobby` key is the types a single-type
+Tavern minion showed, which a lobby whose offers never showed one type alone
+would fall short of), the client's own
 prices where a discount is invisible (a Tavern spell is priced from the card's
 own marks or, failing those, from what its buy step paid, so a discount the
 log applied is the log's number: the spell slot's own price goes in as the

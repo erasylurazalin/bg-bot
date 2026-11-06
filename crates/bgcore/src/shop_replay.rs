@@ -513,6 +513,12 @@ pub struct ShopFileSpec {
     /// on the lobby's: the lobby itself is not in the log).
     #[serde(default)]
     pub tribes: Vec<String>,
+    /// The lobby's types by Era's rule (docs/rules/design.md "The lobby"): a
+    /// type is in when a minion of only that type showed in the Tavern. A file
+    /// written before the key existed has it nowhere, and then the replay falls
+    /// back to `tribes`.
+    #[serde(default)]
+    pub lobby: Vec<String>,
     #[serde(default)]
     pub turns: Vec<ShopTurnSpec>,
 }
@@ -534,17 +540,24 @@ impl ShopFileSpec {
         format!("{}-g{}", self.source, self.game)
     }
 
-    /// The lobby tribes the file lists, as the engine's bit set. A file that
-    /// lists none (one written before the key existed) leaves the pool to the
-    /// engine's roll of five.
+    /// The lobby tribes the file lists, as the engine's bit set: its own
+    /// `lobby` (the single-type Tavern rule) when it has one, and the tribes
+    /// the log showed when it does not, which is every file written before the
+    /// key existed. A file that lists none leaves the pool to the engine's roll
+    /// of five.
     pub fn lobby(&self) -> Option<crate::cards::Tribes> {
-        let mut lobby = crate::cards::Tribes::NONE;
-        for name in &self.tribes {
-            if let Some(t) = tribe_by_name(name) {
-                lobby = lobby.with(t);
+        for names in [&self.lobby, &self.tribes] {
+            let mut lobby = crate::cards::Tribes::NONE;
+            for name in names {
+                if let Some(t) = tribe_by_name(name) {
+                    lobby = lobby.with(t);
+                }
+            }
+            if !lobby.is_neutral() {
+                return Some(lobby);
             }
         }
-        (!lobby.is_neutral()).then_some(lobby)
+        None
     }
 
     /// The hero Era played, as a hero index, if the card set builds it.
