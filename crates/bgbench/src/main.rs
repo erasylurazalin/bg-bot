@@ -11,6 +11,8 @@
 //!                           [--out FILE] [--time]
 //!   bgbench tracker FILE    the Battlegrounds seats and fights of a Power.log
 //!                           [--out FILE] [--cards FILE] [--time]
+//!   bgbench record          my logged shop decisions as training examples
+//!                           [--actions DIR] [--out DIR] [--seeds N]
 //!
 //! `fuzz` and `games` also take --real-boards DIR [--real-seats N] to seat
 //! real-board seats playing the boards of DIR (docs/real-boards.md), the
@@ -34,6 +36,7 @@ mod check_actions;
 mod collect_actions;
 mod collect_boards;
 mod powerlog;
+mod record_examples;
 mod tracker;
 
 /// The boards real seats play, and how many seats of a game are real.
@@ -730,6 +733,7 @@ fn main() {
                 .cloned();
             shop_replay(&actions, seeds, &out, card.as_deref());
         }
+        Some("record") => record_examples::run(&args),
         Some("powerlog") => powerlog::run(&args),
         Some("tracker") => tracker::run(&args),
         Some("check-actions") => check_actions::run(&args),
@@ -749,6 +753,7 @@ fn main() {
                  \x20      bgbench collect-boards [--out DIR] [--cards FILE] [--no-archive]\n\
                  \x20      bgbench collect-actions [--out DIR] [--cards FILE] [--rewrite]\n\
                  \x20      bgbench check-actions [--verbose] [PATTERN] [--actions DIR]\n\
+                 \x20      bgbench record [--actions DIR] [--out DIR] [--seeds N]\n\
                  \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N]"
             );
             std::process::exit(2);

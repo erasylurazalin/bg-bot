@@ -4008,7 +4008,25 @@ fn logged_choose_one(
     }
 }
 
-fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<StepRun, StepError> {
+/// What one step's state holds once it is seated, and the engine's actions for
+/// the step, before any of them is played.
+struct Seated {
+    game: Game,
+    /// The engine's actions for the step, in order: the step's own decision
+    /// first, then the answers it asks for (a target, a discard, a Choose One
+    /// option, a Discover's pick). Empty for `end_turn`, whose effects are no
+    /// action of the player's.
+    actions: Vec<Action>,
+    /// What the loader could not use.
+    missing: Vec<String>,
+    /// The way the log answered a Choose One the step plays.
+    answer: Option<ChooseAnswer>,
+}
+
+/// Seat one logged step: everything `run_once` does before it plays the step's
+/// actions. The error is what made the step impossible, with what the loader
+/// could not use.
+fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<Seated, StepError> {
     let OneStep { file, before, step, turn, turn_index, index, armed, last_spell } = *one;
     let hero = file.hero(data, before);
     // The start of a turn follows the turn before's last state, which one
@@ -4081,15 +4099,9 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         seat_souvenir_copy(data, &mut loaded.game, before, after);
     }
     if step.step == "end_turn" {
-        // The end of turn effects, without the fight that follows them: the
-        // logged turn ends before the fight.
-        loaded.game.shop_end_of_turn(ME);
-        // And the picks those effects opened are in the same logged step (the
-        // file folds them in), so a Battlecry they triggered has resolved and
-        // owes its count here.
-        loaded.game.pay_pending_battlecries(ME);
-        let snap = ShopSnapshot::of_game(data, &loaded.game, ME);
-        return Ok((snap, missing, "end of turn effects".to_string()));
+        // The end of turn effects are no action of the player's: the click that
+        // ends the turn has none here, and `run_once` plays the effects alone.
+        return Ok(Seated { game: loaded.game, actions: Vec::new(), missing, answer });
     }
     // Where a Discover's pick lands, when it is not the hand: the engine only
     // does that from a state the press left (Galakrond's Greed's Tavern slot, a
@@ -4124,6 +4136,30 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         Ok(a) => a,
         Err(e) => return Err((e, missing)),
     };
+    Ok(Seated { game: loaded.game, actions, missing, answer })
+}
+
+/// Apply one step to a seated state and snapshot the result. The error is what
+/// made the step impossible, which makes it incomplete or illegal.
+fn run_once(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    one: &OneStep,
+    seed: u64,
+) -> Result<StepRun, StepError> {
+    let OneStep { before, step, .. } = *one;
+    let Seated { mut game, actions, missing, answer } = seat(data, ids, one, seed)?;
+    if step.step == "end_turn" {
+        // The end of turn effects, without the fight that follows them: the
+        // logged turn ends before the fight.
+        game.shop_end_of_turn(ME);
+        // And the picks those effects opened are in the same logged step (the
+        // file folds them in), so a Battlecry they triggered has resolved and
+        // owes its count here.
+        game.pay_pending_battlecries(ME);
+        let snap = ShopSnapshot::of_game(data, &game, ME);
+        return Ok((snap, missing, "end of turn effects".to_string()));
+    }
     // The game's power button for a press is one the engine does not build:
     // the log then shows a press the engine has no state for. Spirit Swap's
     // second click is one (the game counts each click of a two-click power as
@@ -4158,10 +4194,10 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         if choose_first
             && !chosen
             && matches!(a, Action::Target(_) | Action::TargetShop(_))
-            && loaded.game.players[ME].pending_choose_one.is_some()
+            && game.players[ME].pending_choose_one.is_some()
         {
             let k = answer.map_or(0, |a| a.option);
-            if loaded.game.step(Action::Choose(k)).is_err() {
+            if game.step(Action::Choose(k)).is_err() {
                 return Err((format!("the engine does not allow {k:?} of the Choose One"), missing));
             }
             text.push(format!("Choose({k})"));
@@ -4176,7 +4212,7 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         // target and open a Discover from it in the same click (Kelp Keeper's
         // trigger of a Battlecry that Discovers, Trash for Treasure), and the
         // step's target click is still one the engine has already answered.
-        let pl = &loaded.game.players[ME];
+        let pl = &game.players[ME];
         let nothing_open = pl.pending_target.is_none()
             && pl.pending_shop_target.is_none()
             && pl.pending_choose_one.is_none();
@@ -4184,11 +4220,11 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
             text.push(format!("{a:?} (one answer, so the engine took it)"));
             continue;
         }
-        if loaded.game.step(*a).is_err() {
+        if game.step(*a).is_err() {
             // A pick of a two-step effect answers the prompt the *game* opened
             // in the step before, which one state cannot carry: the replay can
             // answer only one of the two picks.
-            let pl = &loaded.game.players[ME];
+            let pl = &game.players[ME];
             if matches!(a, Action::Target(_)) && pl.pending_shop_target.is_some() {
                 return Err((
                     "a board pick where the engine is still on the Tavern pick of a \
@@ -4231,10 +4267,10 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
     if plays_choose_one
         && !chosen
         && !answer.is_some_and(|a| a.both)
-        && loaded.game.players[ME].pending_choose_one.is_some()
+        && game.players[ME].pending_choose_one.is_some()
     {
         let option = answer.map_or(0, |a| a.option);
-        if loaded.game.step(Action::Choose(option)).is_err() {
+        if game.step(Action::Choose(option)).is_err() {
             return Err((
                 format!("the engine does not allow {option:?} of the Choose One"),
                 missing,
@@ -4242,8 +4278,75 @@ fn run_once(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Resu
         }
         text.push(format!("Choose({option})"));
     }
-    let snap = ShopSnapshot::of_game(data, &loaded.game, ME);
+    let snap = ShopSnapshot::of_game(data, &game, ME);
     Ok((snap, missing, text.join(", ")))
+}
+
+/// The state one logged step starts from, seated the way the replay seats it
+/// (`seat`), and the engine's own actions for the step. `bgbench record` reads
+/// Era's observation, the legal moves and the index of the step's decision off
+/// it; the replay plays the actions on the same state (`run_once`).
+pub struct SeatedStep {
+    pub game: Game,
+    /// The engine's actions for the step, in order: the step's own decision
+    /// first, then the answers it asks for (a target, a discard, a Choose One
+    /// option, a Discover's pick). Empty for `end_turn`, whose effects are no
+    /// action of the player's.
+    pub actions: Vec<Action>,
+    /// What the loader could not use, in the report's own words: a step with any
+    /// of them is incomplete, whoever plays it next.
+    pub missing: Vec<String>,
+}
+
+impl SeatedStep {
+    /// The step's own decision: the first action the engine plays for it, which
+    /// is the one the recording writes as Era's. `None` for a step with no
+    /// action of its own (`end_turn`).
+    pub fn decision(&self) -> Option<Action> {
+        self.actions.first().copied()
+    }
+}
+
+/// Seat one logged step without playing it: everything `replay_step` does
+/// before it runs the step's own actions. `seed` is the seed `replay_step` runs
+/// first (the replay's own `ReplayOptions::seed`). The error is what made the
+/// step impossible, with what the loader could not use.
+pub fn seat_step(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    i: usize,
+    seed: u64,
+) -> Result<SeatedStep, StepError> {
+    let Some(before) = state_before(turn, i) else {
+        return Err((
+            "no state before the step (the file has no step before it to load)".to_string(),
+            Vec::new(),
+        ));
+    };
+    let Some(step) = turn.actions.get(i) else {
+        return Err(("the step is not in the turn".to_string(), Vec::new()));
+    };
+    let turn_index = file.turns.iter().position(|t| t.turn == turn.turn).unwrap_or(0);
+    let armed = whistle_armed(file, turn_index, i);
+    let last_spell = last_tavern_spell(data, ids, file, turn_index, i);
+    let one = OneStep {
+        file,
+        before,
+        step,
+        turn: turn.turn,
+        turn_index,
+        index: i,
+        armed,
+        last_spell,
+    };
+    let seated = seat(data, ids, &one, seed)?;
+    Ok(SeatedStep {
+        game: seated.game,
+        actions: seated.actions,
+        missing: seated.missing,
+    })
 }
 
 /// The Warband Whistle: its pick makes the next Refresh deal plain copies of

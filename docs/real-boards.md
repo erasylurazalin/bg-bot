@@ -1034,3 +1034,68 @@ before).
 
 Measures for the two checks on one machine are comparable: `fightcheck` reads
 a fight, `shopreplay` a step.
+
+## Recording
+
+`bgbench record` turns the same steps into training data: my own decisions, in
+the state the bot would have seen them in. It is not a check and it fixes
+nothing; it takes the verdicts the shop replay already gives and keeps the steps
+it can vouch for.
+
+```
+./target/release/bgbench record [--actions DIR] [--places DIR] [--out DIR] [--seeds N]
+```
+
+Defaults: `boards/actions`, `boards/real`, `train/runs/clone-data` (git-ignored)
+and 64 seeds, the seeds the replay judges a step with. The command is
+`crates/bgbench/src/record_examples.rs`: it lives in bgbench and not in bgcore
+because it reads folders and writes files, and because bgcore's own `record`
+module is about sandbox game files.
+
+- A game is recorded when its `boards/real/` file says a place other than 0 (a
+  game still going has none) and its log has a `Power.log` build to name its
+  patch.
+- The step is seated by the replay's own loader with seed 1
+  (`shop_replay::seat_step`, the work `replay_step` does before it plays the
+  step) and kept when the replay's verdict is ok, ok-random or ok-shape and my
+  action is legal in the state's legal-move mask. The others are counted by
+  reason: `flagged`, `illegal`, `incomplete` (something the engine or the log
+  does not build) and `unmapped` (a step kind the engine has no action for).
+- The `end_turn` step is no decision: it carries the end of turn effects, which
+  are the game's. The turn instead gives one `EndTurn` example from the state
+  before it, which is the state I pressed the button in, and only when the
+  turn's last decision replayed ok.
+- **The opponents are the engine's stand-ins.** A replay is a sandbox game: my
+  seat is real and the seven others are dead players the engine made up (a
+  Health, a tier, a placement and no hero). Everything the observation takes
+  from them is blanked, so an example never teaches the bot about a board that
+  never existed: for each of the seven opponent blocks the 33 `OPP_SCALARS`
+  values (alive, health, armor, tier, hero, seen, turns since, next, last,
+  placement, the last board's tribes, Deity, Blood Gem and Tavern spell bonus,
+  trinkets) are 0, and so are all seven of its board slots, but the first
+  block's. That one keeps the warband the log really has,
+  `last_opponent_board` (the opponent I last fought), which is the board the
+  replay seats for the powers that copy one; which of the seven seats it sits in
+  is a guess, since the log says nothing about seat order. `SCALAR_ALIVE` (the
+  living players) is blanked for the same reason. Every other number is the
+  logged state's own, `won_last_combat` included, and `SCALAR_GHOST` stays 0,
+  which is what a game with no pairing writes.
+- `meta.tsv`'s `patch` is the game's own `Power.log` build number (254477 is
+  37.0, 255790 is 37.0.2) and `unknown` where no log is left.
+
+The files in `--out`:
+
+| file | what |
+|---|---|
+| `obs.f32` | N x OBS_SIZE little-endian float32, row major: the observation of my seat, the numbers `bgpy` hands the training |
+| `mask.u8` | N x N_ACTIONS bytes, 1 = legal |
+| `meta.tsv` | a header line, then one line per example: `i action game turn step kind place patch` (`game` is `<source>-g<n>`, `step` the step's index in its turn and -1 for the added End Turn one, `kind` the log step's kind or `end`) |
+| `header.json` | `obs_size`, `n_actions`, `count`, `games`, `git` (the `HEAD` commit) and `skipped`: how many steps or games gave no example, and why |
+
+On 2026-11-06 it wrote 15,718 examples from 74 of the 78 games of
+`boards/actions` (4.5% of them End Turn; 13,457 from patch 37.0, 2,261 from
+37.0.2), leaving out 1,251 flagged steps, 2,583 incomplete, 18 the engine does
+not allow and one game still going. A run takes about 5 seconds on 32 cores.
+`train/runs/check_clone_data.py` reads a folder back: the three files agree with
+`header.json`, every row's action is legal in its own mask, and the opponent
+blocks hold nothing but the one real warband.
