@@ -560,6 +560,24 @@ def build(kind, n_cards=bgpy.N_CARDS, compile=False, **opts):
     return net
 
 
+def model_args(a, default="mlp"):
+    """The flags that pick the network and its shape. The sizes carry no
+    default: MODEL_OPTS holds those, through model_opts. Shared by ppo.py and
+    imitate.py, so both build the same network and a checkpoint's model_opts
+    means the same thing to both. `default` is what --model falls back to
+    when the caller reads it (the flag itself is None)."""
+    a.add_argument("--model", choices=list(MODELS),
+                   help=f"network (default {default}, or --init-from's); "
+                        "on --resume the checkpoint's")
+    a.add_argument("--opp-boards", choices=OPP_BOARDS,
+                   help="attn: opponent minions as tokens (full), pooled into each opponent's "
+                        "token (pooled), or pooled plus the next opponent's in full (next, the default)")
+    a.add_argument("--attn-d", dest="d", type=int, help="attn: token width (default 128)")
+    a.add_argument("--attn-layers", dest="layers", type=int, help="attn: transformer layers (default 3)")
+    a.add_argument("--attn-heads", dest="heads", type=int, help="attn: attention heads (default 4)")
+    a.add_argument("--attn-ff", dest="ff", type=int, help="attn: feed-forward width (default 256)")
+
+
 def ck_model(ck):
     """(kind, shape settings) of a ppo.py checkpoint or keep/ copy. Older
     ones have no model (mlp) or no opp_boards (attn was full then)."""

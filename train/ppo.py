@@ -39,7 +39,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
 import real_boards
-from model import MODELS, OPP_BOARDS, build, ck_model, masked, model_opts, table_names, warm_start
+from model import (build, ck_model, masked, model_args, model_opts, table_names, warm_start)
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
@@ -80,15 +80,7 @@ def args():
     a.add_argument("--name", required=True)
     a.add_argument("--minutes", type=float, default=10)
     a.add_argument("--resume")
-    a.add_argument("--model", choices=list(MODELS),
-                   help="network (default mlp, or --init-from's); on --resume the checkpoint's")
-    a.add_argument("--opp-boards", choices=OPP_BOARDS,
-                   help="attn: opponent minions as tokens (full), pooled into each opponent's "
-                        "token (pooled), or pooled plus the next opponent's in full (next, the default)")
-    a.add_argument("--attn-d", dest="d", type=int, help="attn: token width (default 128)")
-    a.add_argument("--attn-layers", dest="layers", type=int, help="attn: transformer layers (default 3)")
-    a.add_argument("--attn-heads", dest="heads", type=int, help="attn: attention heads (default 4)")
-    a.add_argument("--attn-ff", dest="ff", type=int, help="attn: feed-forward width (default 256)")
+    model_args(a)
     a.add_argument("--compile", action=argparse.BooleanOptionalAction,
                    help="torch.compile the attention layers (default: on for attn)")
     a.add_argument("--init-from", help="checkpoint to take matching weights from, for a new run")
