@@ -39,7 +39,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
 import real_boards
-from model import (build, ck_model, masked, model_args, model_opts, table_names, warm_start)
+from model import (build, ck_model, masked, model_args, model_opts, set_recompute,
+                   table_names, warm_start)
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
@@ -111,6 +112,15 @@ def args():
                    help="cap this process's GPU memory (GB) so the desktop keeps the rest; "
                         "pair with a smaller --minibatch (4096 halves the training peak at the "
                         "same samples/s; --micro-batch keeps the update the same)")
+    a.add_argument("--no-recompute", action="store_true",
+                   help="attn: keep each layer's activations instead of recomputing them in the "
+                        "backward pass: the same update, about a third less learning time, more "
+                        "GPU memory (bgt's night strength)")
+    a.add_argument("--obs-fp16", action="store_true",
+                   help="store the rollout's observations in float16 (half the buffer) and widen "
+                        "them to float32 just before the network sees them; exact, because every "
+                        "observation is a whole number below 2048 (checked on 32,768 real ones "
+                        "2026-11-06: largest 472, none changed)")
     a.add_argument("--clip", type=float, default=0.2)
     a.add_argument("--ent", type=float, default=0.01)
     a.add_argument("--vf", type=float, default=0.5)
@@ -373,6 +383,9 @@ def main():
     cfg = args()
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
+    # a training setting, not a model one: the checkpoint and its weights are
+    # the same with the blocks recomputed or kept
+    set_recompute(not cfg.no_recompute)
     torch.manual_seed(cfg.seed)
     random.seed(cfg.seed)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -502,7 +515,11 @@ def main():
                     curve[e, crng.choice(seats, min(k, len(seats)), replace=False)] = True
 
     pick_curve(range(N))
-    obs = torch.zeros((T, N, bgpy.OBS_SIZE), device=dev)
+    # --obs-fp16: the rollout's observations in float16 (rounded once, when
+    # they are stored) and widened again just before the network, which wants
+    # float32; halves the buffer, which is the run's largest permanent tensor
+    obs_dtype = torch.float16 if cfg.obs_fp16 else torch.float32
+    obs = torch.zeros((T, N, bgpy.OBS_SIZE), device=dev, dtype=obs_dtype)
     masks = torch.zeros((T, N, bgpy.N_ACTIONS), dtype=torch.bool, device=dev)
     acts = torch.zeros((T, N), dtype=torch.long, device=dev)
     logps = torch.zeros((T, N), device=dev)
@@ -590,7 +607,10 @@ def main():
             env.observe_all(all_obs, live)
             # in chunks: one pass over all N * P seats is the run's biggest activation peak
             flat = torch.from_numpy(all_obs.reshape(N * P, -1))
-            boot = torch.cat([net(flat[i:i + 1024].to(dev))[1] for i in range(0, N * P, 1024)])
+            if cfg.obs_fp16:
+                flat = flat.half()  # the same rounding the rollout buffer gets
+            boot = torch.cat([net(flat[i:i + 1024].to(dev).float())[1]
+                              for i in range(0, N * P, 1024)])
             next_v = (boot.reshape(N, P) * torch.from_numpy(live).to(dev)).clone()
             next_a = torch.zeros((N, P), device=dev)
             adv = torch.zeros((T, N), device=dev)
@@ -646,7 +666,7 @@ def main():
                 for j in range(0, m, step):
                     sub = idx[j:j + step]
                     w = sub.numel() / m
-                    logits, v = net(f_obs[sub])
+                    logits, v = net(f_obs[sub].float())
                     dist = torch.distributions.Categorical(logits=masked(logits, f_mask[sub]))
                     lp = dist.log_prob(f_act[sub])
                     ratio = (lp - f_logp[sub]).exp()

@@ -8,8 +8,16 @@
     bgt half on|off [RUN]   cap training at about half the PC (GPU memory 8 GB,
                             8 CPU threads left free, lowest priority); restarts
                             a running run so it applies now
+    bgt night on|off [RUN]  the whole GPU for training while the desktop is off
+                            (train/night/bg-night): no recompute, fp16
+                            observations, GPU memory 15 GB, and the largest
+                            micro-batch the run's model fits under that; restarts
+                            a running run so it applies now
     bgt menu                a full-screen menu that refreshes itself (what the
                             app launcher entry, train/bgt.desktop, opens)
+
+The three strengths, full, half and night, are exclusive: turning one on
+drops the other two's flags from the run's args file.
 
 A new run copies its lineup and flags from the last run and is named rDDMM
 by default (today's date, with a letter added if that name is taken). Runs
@@ -24,6 +32,45 @@ RUNS = TRAIN / "runs"
 GOLOG = RUNS / "go.log"
 HALF = ["--micro-batch", "2048", "--vram-gb", "8"]
 HALF_PREFIX = ["nice", "-n", "19", "taskset", "-c", "0-23"]
+# Night: the whole GPU for training while the desktop is off. The attn blocks
+# keep their activations (--no-recompute) and the rollout's observations are
+# float16, which is exact: every observation is a whole number and the largest
+# one in 32,768 real observations was 472, far below the 2048 float16 holds
+# exactly. 15 GB of the card's 16.3 leaves about a gigabyte for the driver.
+# Night does not keep room for Hyprland because bg-day puts a running run back
+# to half strength before the desktop comes back.
+NIGHT = ["--no-recompute", "--obs-fp16", "--vram-gb", "15"]
+# Night's micro-batch, from the model shape in the run's args file. No GPU was
+# reachable to measure (see docs/engine.md), so these are the largest sizes
+# whose peak stays about a gigabyte under the 15 GB cap, from counting the
+# activations autograd keeps for the backward pass: the big run (r1105-big, 4
+# layers of d256 with ff512) 13.3 GB at 8192 and 7.8 GB at 4096, so 4096; the
+# attn default (3 layers of d128 with ff256) 7.4 GB at 8192, so 8192. Any
+# other shape gets 2048, half's size. The size hardly touches speed: r1105-big
+# did 9.90 s per update at 2048 and 9.60 s at 8192.
+NIGHT_MICRO_BATCH = {(128, 3, 4, 256): "8192", (256, 4, 8, 512): "4096"}
+NIGHT_MICRO_BATCH_OTHER = "2048"
+STRENGTHS = ("full", "half", "night")
+# The flags a strength owns: turning one on drops all of them first.
+STRENGTH_FLAGS = ("--micro-batch", "--vram-gb", "--no-recompute", "--obs-fp16")
+FLAGS_WITH_VALUE = ("--micro-batch", "--vram-gb")
+
+
+def model_shape(a):
+    """(d, layers, heads, ff) of the attn model in args list A, with model.py's
+    defaults where a flag is missing."""
+    def num(flag, default):
+        return int(a[a.index(flag) + 1]) if flag in a else default
+    return (num("--attn-d", 128), num("--attn-layers", 3),
+            num("--attn-heads", 4), num("--attn-ff", 256))
+
+
+def strength_args(name, a):
+    """The flags strength NAME puts in args list A: night's micro-batch follows
+    the model A describes."""
+    if name == "night":
+        return NIGHT + ["--micro-batch", NIGHT_MICRO_BATCH.get(model_shape(a), NIGHT_MICRO_BATCH_OTHER)]
+    return HALF if name == "half" else []
 
 
 def pgrep(pattern):
@@ -70,18 +117,22 @@ def args_of(run):
     return p.read_text().split() if p.exists() else []
 
 
-def is_half(run):
-    return "--vram-gb" in args_of(run)
-
-
-def set_half(run, on):
+def strength(run):
+    """The strength RUN's args file holds. Night is half's flags plus flags of
+    its own, so it is tested first."""
     a = args_of(run)
-    for flag in ("--micro-batch", "--vram-gb"):
+    if "--no-recompute" in a or "--obs-fp16" in a:
+        return "night"
+    return "half" if "--vram-gb" in a else "full"
+
+
+def set_strength(run, name):
+    a = args_of(run)
+    for flag in STRENGTH_FLAGS:
         while flag in a:
             i = a.index(flag)
-            del a[i:i + 2]
-    if on:
-        a += HALF
+            del a[i:i + (2 if flag in FLAGS_WITH_VALUE else 1)]
+    a += strength_args(name, a)
     (RUNS / f"{run}-args.txt").write_text(" ".join(a) + "\n")
 
 
@@ -172,7 +223,7 @@ def check(run=None):
         print("no runs yet")
         return
     state = "RUNNING" if live == run else ("stopped" + (f" (running now: {live})" if live else ""))
-    print(f"{run}: {state}, {'half strength' if is_half(run) else 'full strength'}")
+    print(f"{run}: {state}, {strength(run)} strength")
     lu = last_update(run)
     up = lu[0] if lu else None
     if up:
@@ -216,15 +267,16 @@ def check(run=None):
 
 
 def start(run, hours):
-    cmd = (HALF_PREFIX if is_half(run) else []) + ["./go.sh", str(hours), run]
+    s = strength(run)
+    # night is the whole PC, so only half gets the nice/taskset prefix
+    cmd = (HALF_PREFIX if s == "half" else []) + ["./go.sh", str(hours), run]
     # a new session, so closing the terminal (or the menu's window) doesn't hang up on it
     r = subprocess.run(cmd, cwd=TRAIN, capture_output=True, text=True,
                        stdin=subprocess.DEVNULL, start_new_session=True)
     if r.returncode != 0 or r.stdout.strip():
         print((r.stdout + r.stderr).strip())
     if r.returncode == 0:
-        print(f"started {run} for {hours} h ({'half' if is_half(run) else 'full'} strength). "
-              f"Check with: bgt check")
+        print(f"started {run} for {hours} h ({s} strength). Check with: bgt check")
 
 
 def go(hours, run=None):
@@ -274,19 +326,22 @@ def stop_quiet():
         print(out)
 
 
-def half(onoff, run=None):
+def set_run_strength(name, onoff, run=None):
+    """bgt half|night on|off [RUN]: turn one strength on (and the others off),
+    or off (back to full), restarting a running run with the time it had left."""
     if onoff not in ("on", "off"):
-        sys.exit("usage: bgt half on|off [RUN]")
+        sys.exit(f"usage: bgt {name} on|off [RUN]")
     live = running()
     run = run or live or last_run()
     if not run or not (RUNS / f"{run}-args.txt").exists():
         sys.exit(f"no args file for {run}")
-    on = onoff == "on"
-    if is_half(run) == on:
-        print(f"{run} is already at {'half' if on else 'full'} strength")
+    now = strength(run)
+    want = name if onoff == "on" else "full"
+    if now == want:
+        print(f"{run} is already at {want} strength")
         return
-    set_half(run, on)
-    print(f"{run} set to {'half' if on else 'full'} strength")
+    set_strength(run, want)
+    print(f"{run} set to {want} strength")
     if live == run:
         u = until_of(run)
         minute = current_minute(run)
@@ -328,11 +383,12 @@ def menu():
         def items():
             live = running()
             run = live or last_run()
-            h = is_half(run) if run else False
+            s = strength(run) if run else "full"
             return [("Go", "start or continue a run"),
                     ("Stop", "stop the running run" if live else "nothing is running"),
-                    (f"Half strength: {'ON' if h else 'off'}",
-                     "toggle; a running run restarts with its time left"),
+                    (f"Strength: {s}",
+                     "full, half (half the PC) or night (all of it); a running run "
+                     "restarts with its time left"),
                     ("Refresh", "the status refreshes itself every 5 s"),
                     ("Quit", "training keeps going after this window closes")]
 
@@ -402,11 +458,13 @@ def menu():
                     return ["not stopped"]
                 busy("stopping... (can take up to 30 s)")
                 return captured(stop)
-            if name.startswith("Half"):
+            if name.startswith("Strength"):
                 run = running() or last_run()
+                s = strength(run) if run else "full"
+                nxt = STRENGTHS[(STRENGTHS.index(s) + 1) % len(STRENGTHS)]
                 if running():
-                    busy("restarting the run at the new strength... (up to 30 s)")
-                return captured(half, "off" if is_half(run) else "on", run)
+                    busy(f"restarting the run at {nxt} strength... (up to 30 s)")
+                return captured(set_run_strength, nxt, "on", run)
             if name == "Refresh":
                 return []
             raise KeyboardInterrupt
@@ -481,8 +539,8 @@ def main(argv):
         return go(*rest[:2])
     if cmd == "stop":
         return stop()
-    if cmd == "half" and rest:
-        return half(*rest[:2])
+    if cmd in ("half", "night") and rest:
+        return set_run_strength(cmd, *rest[:2])
     if cmd in ("menu", "--menu"):
         return menu()
     print(__doc__.strip())

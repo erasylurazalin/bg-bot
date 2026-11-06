@@ -431,6 +431,19 @@ class Block(nn.Module):
 
 OPP_BOARDS = ("full", "pooled", "next")
 
+# Whether AttnNet's blocks are recomputed in the backward pass (checkpoint)
+# to save memory, as they are by default. `set_recompute(False)` keeps the
+# activations instead: a third less learning time, more GPU memory, the same
+# loss and gradients. Not a shape setting: weights and checkpoints are the
+# same either way, which is why it is a module flag and not an argument.
+RECOMPUTE = True
+
+
+def set_recompute(on):
+    """Recompute the attn blocks in the backward pass (default) or not."""
+    global RECOMPUTE
+    RECOMPUTE = bool(on)
+
 
 def _pool(t, m):
     """Mean and max of tokens t (..., n, d) over the present ones m (..., n),
@@ -460,7 +473,9 @@ class AttnNet(nn.Module):
     keeps about 4 GB of activations for the backward pass in fp32, so the
     layers run in bf16 and, when gradients are on, are recomputed in the
     backward pass instead (about a third more compute, a fraction of the
-    memory)."""
+    memory). `set_recompute(False)` keeps the activations: the same math, no
+    recompute, more memory (ppo.py's --no-recompute, bgt's night strength).
+    It is not a shape setting and never goes into a checkpoint."""
 
     def __init__(self, n_cards=bgpy.N_CARDS, d=128, layers=3, heads=4, ff=256, emb=32, bf16=True,
                  opp_boards="next"):
@@ -504,7 +519,7 @@ class AttnNet(nn.Module):
         keep = torch.cat([keep.new_ones(b, 1 + OPP), keep], 1)[:, None, None]
         with torch.autocast("cuda", torch.bfloat16, enabled=self.bf16 and x.is_cuda):
             for blk in self.blocks:
-                if torch.is_grad_enabled():
+                if torch.is_grad_enabled() and RECOMPUTE:
                     x = checkpoint(blk, x, keep, use_reentrant=False)
                 else:
                     x = blk(x, keep)

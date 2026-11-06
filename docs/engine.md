@@ -1884,11 +1884,36 @@ Deleting `.venv` undoes it.
 - `train/bgt.py` (I link it as `bgt`) wraps these: `bgt` shows the run and
   its latest numbers, `bgt go HOURS [RUN]` starts or continues a run (it
   refuses while one is going; a new run copies the last run's flags and is
-  named rDDMM by default), `bgt stop`, and `bgt half on|off` caps the run
-  at 8 GB of GPU memory, 24 CPU threads and the lowest priority so the PC
-  stays usable (`--vram-gb`, `--micro-batch`: the same updates in pieces).
-  `bgt menu` is a full-screen menu that refreshes itself; `train/bgt.desktop`
+  named rDDMM by default), `bgt stop`, and two strengths beside full:
+  `bgt half on|off` caps the run at 8 GB of GPU memory, 24 CPU threads and
+  the lowest priority so the PC stays usable, and `bgt night on|off` gives
+  it the whole GPU while the desktop is off (`train/night/bg-night`). The
+  three strengths are exclusive: turning one on drops the others' flags from
+  `runs/NAME-args.txt`, and a running run restarts with the time it has left.
+  Both use `--vram-gb` and `--micro-batch` (the same update, run through the
+  network in pieces); night also sets `--no-recompute` and `--obs-fp16`, and
+  picks its micro-batch from the model shape in the run's args file. `bgt
+  menu` is a full-screen menu that refreshes itself; `train/bgt.desktop`
   (linked into `~/.local/share/applications`) opens it in kitty.
+- Night strength, for overnight runs with the desktop off, keeps what the
+  recompute pass would throw away: `--no-recompute` calls the attn blocks
+  directly instead of again in the backward pass (the same loss and
+  gradients, bit for bit on CPU, and about a fifth off an update if the
+  plan's estimate holds), and `--obs-fp16` stores the rollout's observations
+  in float16, widened again just before the network. Float16 rounds nothing
+  there: every observation is a whole number and the largest in 32,768 real
+  observations was 472, below the 2048 float16 holds exactly. `--vram-gb 15`
+  of the card's 16.3 leaves about a gigabyte for the driver, and night needs
+  no room for Hyprland because `bg-day` puts a running run back to half
+  strength before the desktop comes back. The micro-batch is 8192 for the
+  attn default and 4096 for r1105-big's 4 layers of d256 (2048 for any other
+  shape). Those peaks are estimates from counting the activations autograd
+  keeps, because no GPU was reachable when this was written: big 4096 about
+  7.8 GB and big 8192 about 13.3 GB, small 8192 about 7.4 GB, so the first
+  night run should read `torch.cuda.max_memory_allocated` before raising the
+  big one. Size hardly shows in speed: the runs' own metrics give r1105-big
+  9.60 s per update at full strength and 9.90 s at half (micro-batch 2048),
+  r1105-p37 6.90 s.
 - Day to day, `./train/go.sh HOURS` continues the current run
   (`r1025-attn`) for that many hours and stops, detached, resuming from
   the last checkpoint after a crash; `./train/stop.sh` stops it, and
@@ -1949,8 +1974,10 @@ Deleting `.venv` undoes it.
   its opponent's token, 36) or `next` (pooled, plus the next opponent's
   board in full, 43; the default). Both are saved in the checkpoint and
   `--resume` builds what the checkpoint holds. `attn` runs its layers in
-  bf16, recomputes them in the backward pass to fit a minibatch of 8192,
-  and is compiled with torch.compile unless `--no-compile`. It does about
+  bf16, recomputes them in the backward pass to fit a minibatch of 8192
+  (`--no-recompute` keeps the activations instead: the same math, more GPU
+  memory, night strength's trade), and is compiled with torch.compile unless
+  `--no-compile`. It does about
   20 updates a minute with `next` (10 with `full`) against `mlp`'s 70,
   `pool` about 35. `python model.py` checks that the per-slot logits
   follow their slots.
