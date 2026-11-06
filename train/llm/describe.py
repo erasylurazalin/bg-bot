@@ -212,6 +212,7 @@ TRINKET_OPTION_FEATURES = bgpy.TRINKET_OPTION_FEATURES
 SCALAR_DARK_GIFT_USES = bgpy.SCALAR_DARK_GIFT_USES
 SCALAR_DARK_GIFT_PRESSED = bgpy.SCALAR_DARK_GIFT_PRESSED
 SCALAR_DARK_GIFT_READY = bgpy.SCALAR_DARK_GIFT_READY
+SCALAR_PARADOX = bgpy.SCALAR_PARADOX
 SCALAR_DARK_OFFER = bgpy.SCALAR_DARK_OFFER
 SCALAR_FREE_MINION_LEFT = bgpy.SCALAR_FREE_MINION_LEFT
 SCALAR_PENDING_WAGER = bgpy.SCALAR_PENDING_WAGER
@@ -376,7 +377,9 @@ class Descriptor:
         (Blood Gem and its keyword variants), so the second map keeps them."""
         out = {}
         every = {}
+        Descriptor._by_id = {}
         for c in json.loads(path.read_text())["cards"]:
+            Descriptor._by_id[c["card_id"]] = c
             text = (c.get("text_plain") or "").strip()
             if not text:
                 continue
@@ -445,6 +448,13 @@ class Descriptor:
                 line = f"- {c['name']} ({c.get('cost', 0)} Gold)" + (f": {text}" if text else "")
                 spells.setdefault(tier, []).append(line)
             self._book_names.add(c["name"])
+        par = self.card_name(_n(obs, SCALAR_PARADOX))
+        if par.startswith("Dark Paradox t"):
+            c = self._by_id.get("BG36_360t" + par[len("Dark Paradox t"):])
+            if c:
+                minions.setdefault(c.get("tier") or 0, []).append(
+                    f"- {par} ({c['attack']}/{c['health']}, all types): {self.card_text(par)}")
+                self._book_names.add(par)
         out = ["## The card book",
                "Every minion and Tavern spell in this game's pool (lobby types: "
                + ", ".join(sorted(lobby)) + "), like the card book in the real game. "
@@ -503,6 +513,14 @@ class Descriptor:
         if name.startswith("Gift: "):
             return self.gift_text(name)
         if name.startswith("Dark Paradox t"):
+            # the engine's "Dark Paradox tN" is the game data's BG36_360tN (golden
+            # BG36_360_GtN): its own built-in gift, not the generic card text
+            n = name[len("Dark Paradox t"):]
+            c = self._by_id.get(f"BG36_360_Gt{n}" if golden else f"BG36_360t{n}")
+            if c and (c.get("text_plain") or "").strip():
+                return ("This game's Dark Paradox (it has a different Dark Gift, stats and "
+                        "Tier each game; this one is the same for every player all game): "
+                        + c["text_plain"].strip())
             return self.card_text("Dark Paradox", golden)
         # "Blood Gem (Taunt)" and the like: the base card whose text names it.
         m = re.match(r"^(.*) \(([^)]+)\)$", name)
