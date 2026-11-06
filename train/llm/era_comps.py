@@ -61,6 +61,20 @@ import digest  # noqa: E402  (same folder)
 
 RUNS = ROOT / "train" / "runs"
 PRIMER = HERE / "rules_primer.md"
+# Era's own strategy notes (scam and the like), private, in docs/notes/
+STRATEGY = HERE.parent.parent / "docs" / "notes" / "era-strategy.md"
+
+
+def strategy_text() -> str:
+    if not STRATEGY.exists():
+        return ""
+    return ("## How Era plays (Era's own notes)\n\n" + STRATEGY.read_text().strip() +
+            "\n\nA game can end in a scam instead of a comp: when the final board is "
+            "built from scam pieces (Venomous, Poisonous, Heroic Underdog, Leeroy) "
+            "rather than a scaling engine, name the comp \"Scam\" (\"Scam (after a "
+            "failed X)\" if Era first tried X), and say from which turn Era switched "
+            "to scamming. You don't see the opponents' boards: judge the scam by "
+            "what Era bought and kept, not by the fights.")
 COMPS_TOML = ROOT / "comps.toml"
 
 API_URL = "https://api.river.ai/v1/chat/completions"
@@ -621,7 +635,7 @@ def ask(player, log: RunLog, messages, kind: str, game=None, context=None,
 
 def pass1_messages(primer: str, digest_text: str) -> list[dict]:
     return [
-        {"role": "system", "content": primer.strip() + "\n\n" + PASS1_INSTRUCTIONS},
+        {"role": "system", "content": primer.strip() + "\n\n" + strategy_text() + "\n\n" + PASS1_INSTRUCTIONS},
         {"role": "user", "content": (
             "The digest of the game follows.\n\n" + digest_text
         )},
@@ -816,7 +830,7 @@ def level_and_refresh(results: list[dict]) -> tuple[str, str]:
 
 def pass2_messages(primer: str, facts: str, summaries: list[str],
                    merge: bool = False, partials: list[dict] | None = None):
-    system = primer.strip() + "\n\n## comps.toml's header\n\n" + comps_header() + \
+    system = primer.strip() + "\n\n" + strategy_text() + "\n\n## comps.toml's header\n\n" + comps_header() + \
              "\n\n" + PASS2_INSTRUCTIONS
     if merge:
         body = [
