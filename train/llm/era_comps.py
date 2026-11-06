@@ -66,7 +66,10 @@ COMPS_TOML = ROOT / "comps.toml"
 API_URL = "https://api.river.ai/v1/chat/completions"
 MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
 MAX_TOKENS = 16000  # as in train/llm_play.py
-TIMEOUT = 300
+# pass 2 writes the whole comp list, habits and lessons in one answer: 16000
+# cut the first real run off mid-JSON (2026-11-06)
+PASS2_MAX_TOKENS = 64000
+TIMEOUT = 900  # pass 2 answers run long
 RETRY_WAITS = (10, 30, 60, 120)
 KEY_VAR = "RIVER_API_KEY"
 
@@ -316,7 +319,7 @@ class DeepSeekPlayer:
             "model": MODEL,
             "messages": messages,
             "reasoning_effort": "high",
-            "max_tokens": MAX_TOKENS,
+            "max_tokens": PASS2_MAX_TOKENS if kind.startswith("pass2") else MAX_TOKENS,
         }
         for attempt, wait in enumerate((0,) + RETRY_WAITS):
             if wait:
