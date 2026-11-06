@@ -94,10 +94,10 @@ Look at the actions Era took, and describe the game:
 - Note the patch: a game played before patch 37.0.2 says so at the top and
   lists the numbers that patch changed. That does not make the game wrong; it
   only means some numbers (stats, prices) differ from today's.
-- The digest's "Tribes seen in this game" line is not the lobby: a lobby has
-  five tribes, and that line lists every tribe that turned up in Era's Tavern,
-  hand or board, which is more than five. Do not treat a tribe on that line as
-  one the lobby had, and do not put the line's whole list in "tribes".
+- The digest's "Lobby tribes" line is the lobby's five types. The "tribes"
+  field of your answer is NOT the lobby: it is the comp's own types, the types
+  of the minions the comp is built around (usually one or two; [] for a comp of
+  minions with no type).
 - Do not judge the player harshly: say what Era did and what it looks like it
   was for. Era is a strong player and these are their real games.
 
@@ -397,7 +397,7 @@ class FakePlayer:
 
     @staticmethod
     def _tribes(text: str) -> list[str]:
-        found = re.search(r"Tribes seen in this game[^:]*: ([a-z, ]+)", text)
+        found = re.search(r"Lobby tribes[^:]*: ([a-z, ]+)", text)
         if not found:
             return []
         return [t.strip() for t in found.group(1).split(",") if t.strip()]
@@ -682,6 +682,7 @@ def pass1_game(info: dict, player, log: RunLog, folder: Path) -> dict:
         "patch": info["patch"],
         "build": info["build"],
         "build_from": "power log" if info["from_log"] else "date guess",
+        "lobby": info.get("lobby") or [],
         "date": info["date"],
         "turns": info["turns"],
         "steps": info["steps"],

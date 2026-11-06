@@ -829,6 +829,34 @@ def cards_section(seen_cards: set[str], info: dict) -> list[str]:
     return lines
 
 
+_LOBBY_TRIBES = {"BEAST": "beast", "MECHANICAL": "mech", "DRAGON": "dragon",
+                 "MURLOC": "murloc", "DEMON": "demon", "PIRATE": "pirate",
+                 "ELEMENTAL": "elemental", "UNDEAD": "undead", "QUILBOAR": "quilboar",
+                 "ABERRATION": "aberration", "NAGA": "naga"}
+
+
+def lobby_tribes(game: dict) -> list[str]:
+    """The lobby's types, by Era's rule (docs/rules/design.md "The lobby"): a
+    type is in when a minion of only that type shows up in the Tavern. The log
+    never names the lobby; minions with two types, "all types" minions and
+    cards outside the Tavern don't count."""
+    cards, _ = export(NEW_BUILD)
+    old_cards, _ = export(OLD_BUILD)
+    found = set()
+    for turn in game.get("turns") or []:
+        states = [turn.get("start") or {}] + [a.get("after") or {} for a in turn.get("actions") or []]
+        for state in states:
+            for m in state.get("tavern") or []:
+                cid = plain_card_id(m.get("card_id") or "")
+                c = cards.get(cid) or old_cards.get(cid)
+                if not c or c.get("type") != "MINION":
+                    continue
+                tribes = c.get("tribes") or []
+                if len(tribes) == 1 and tribes[0] in _LOBBY_TRIBES:
+                    found.add(_LOBBY_TRIBES[tribes[0]])
+    return sorted(found)
+
+
 def game_info(path: Path) -> dict:
     """Everything the digest and the analysis need to know about one game."""
     game = load_json(path)
@@ -867,6 +895,7 @@ def game_info(path: Path) -> dict:
         "hero_powers": [p.get("name") or p.get("card_id") for p in powers],
         "hero_power_ids": [p.get("card_id") for p in powers if p.get("card_id")],
         "tribes": list(game.get("tribes") or []),
+        "lobby": lobby_tribes(game),
         "place": where,
         "unfinished": where in (None, 0),
         "turns": len(game.get("turns") or []),
@@ -892,11 +921,13 @@ def digest(path: Path, info: dict | None = None) -> str:
     lines.append(f"Hero: {info['hero']} ({info['hero_id']})")
     lines.append(f"{label}: " + (", ".join(hero_powers) or "none seen"))
     lines.append(patch_line(info, seen))
-    tribes = ", ".join(info["tribes"]) or "none seen"
-    lines.append(
-        "Tribes seen in this game (Era's Tavern, offers and cards; the lobby "
-        "is 5 of these): " + tribes
-    )
+    lobby = info.get("lobby") or []
+    if len(lobby) == 5:
+        lines.append("Lobby tribes: " + ", ".join(lobby) + " (found from the minions of only "
+                     "one type that showed up in Era's Tavern)")
+    else:
+        lines.append(f"Lobby tribes: only {len(lobby)} of the 5 could be found (" +
+                     (", ".join(lobby) or "none") + "); the log is too short to see them all")
     if info["unfinished"]:
         lines.append("Final place: unknown (the log ends before the game did)")
     else:
