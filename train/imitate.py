@@ -43,7 +43,7 @@ import numpy as np
 import torch
 
 import bgpy
-from model import build, masked, model_args, model_opts
+from model import build, ck_model, masked, model_args, model_opts, warm_start
 
 KINDS = [name for name, _ in bgpy.ACTION_KINDS]
 KIND_OF = np.repeat(np.arange(len(KINDS)), [count for _, count in bgpy.ACTION_KINDS])
@@ -74,6 +74,9 @@ def args():
     a.add_argument("--max-epochs", type=int, default=50)
     a.add_argument("--patience", type=int, default=3,
                    help="stop after this many epochs without a better held-out top-1")
+    a.add_argument("--init-from", metavar="CKPT",
+                   help="start from a ppo.py checkpoint's network (its model and shape) instead "
+                        "of a fresh one: copying on top of a trained bot")
     a.add_argument("--device", help="torch device (default: cuda when there is one)")
     return a.parse_args()
 
@@ -280,6 +283,9 @@ def main():
     if cfg.make_fake:
         make_fake(cfg.make_fake, cfg.fake_games, cfg.fake_per_game)
         return
+    init_ck = torch.load(cfg.init_from, map_location="cpu") if cfg.init_from else None
+    if init_ck is not None:
+        cfg.model = ck_model(init_ck)[0]
     cfg.model = cfg.model or "attn"
     torch.manual_seed(cfg.seed)
     dev = torch.device(cfg.device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -314,7 +320,17 @@ def main():
     card_names, hero_names = env.card_names(), env.hero_names()
     opts = model_opts(cfg.model, opp_boards=cfg.opp_boards, d=cfg.d, layers=cfg.layers,
                       heads=cfg.heads, ff=cfg.ff)
-    net = build(cfg.model, len(card_names), **opts).to(dev)
+    if init_ck is not None:
+        opts = ck_model(init_ck)[1]
+    net = build(cfg.model, len(card_names), **opts)
+    if init_ck is not None:
+        loaded, fresh, skipped, _, remapped = warm_start(
+            net, cfg.model, cfg.init_from, cards=card_names, heroes=hero_names)
+        print(f"init from {cfg.init_from}: {len(loaded)} tensors loaded, fresh "
+              f"{', '.join(fresh) or 'none'}, not used {', '.join(skipped) or 'none'}", flush=True)
+        for r in remapped:
+            print(f"  by name: {r}", flush=True)
+    net = net.to(dev)
     print(f"network: {cfg.model} {opts}, {sum(p.numel() for p in net.parameters())} parameters "
           f"on {dev}", flush=True)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr)
