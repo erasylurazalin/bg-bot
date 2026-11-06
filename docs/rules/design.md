@@ -24,6 +24,13 @@ where they were compared against real logs.
 - Each lobby uses 5 of the 10 minion types: Beast, Demon, Dragon, Elemental,
   Mech, Murloc, Naga, Pirate, Quilboar, Undead. Neutral minions are always
   in. A minion with two types is in if either type is.
+- **How to tell the lobby's 5 types from a log (Era, 2026-11-06):** the log
+  never names them. A type is in the lobby when a minion of only that type
+  shows up in the Tavern (a Demon-only minion in the shop means Demons are
+  in). Minions with two types, "all types" minions and cards from outside
+  the Tavern (Discovers, hero powers, generated cards) don't count. Checked
+  on 2026-11-06 over boards/actions: exactly 5 types in 77 of 78 games; the
+  78th is a 2-turn log fragment.
 - Players are knocked out when their health reaches 0. Placement is the
   order of knockouts: the last player standing is 1st. Rating (MMR) goes up
   for good placements and down for bad ones, top 4 roughly counts as a win.
