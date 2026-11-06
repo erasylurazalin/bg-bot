@@ -17,7 +17,9 @@ Both score per-slot actions from the token of the slot they act on
 (`ActionHead`) and global actions from the summary.
 """
 
+import contextlib
 import math
+import sys
 
 import torch
 import torch.nn.functional as F
@@ -131,6 +133,11 @@ OPP_SCALE = _scales(bgpy.OPP_SCALARS, "OPP_", {
     "HEALTH": 30, "TIER": 6, "TURNS_SINCE": 10, "PLACEMENT": 8, (bgpy.OPP_TRIBES, 10): 7,
     "DEITY_ATTACK": 50, "DEITY_HEALTH": 50, "GEM_ATTACK": 10, "GEM_HEALTH": 10,
     "SPELL_ATTACK": 10, "SPELL_HEALTH": 10, "ARMOR": 25,
+    # The leaderboard's tribe line (a one-hot, a flag and a count of at most
+    # seven) and the last three fights' damage, at the "last damage" scale.
+    "TRIBE_COUNT": 7,
+    **{(bgpy.OPP_FIGHTS + f * bgpy.FIGHT_FEATURES + 2, 1): 15
+       for f in range(bgpy.FIGHTS_SHOWN)},
 })
 OPP_LOG = [bgpy.OPP_DEITY_ATTACK, bgpy.OPP_DEITY_HEALTH]
 SLOT_SCALE = _scales(SF, "SLOT_", {
@@ -570,6 +577,7 @@ def model_opts(kind, **given):
 
 def build(kind, n_cards=bgpy.N_CARDS, compile=False, **opts):
     net = MODELS[kind](n_cards, **model_opts(kind, **opts))
+    check_input_cols(kind, net)
     if compile and hasattr(net, "compile_layers"):
         net.compile_layers()
     return net
@@ -639,6 +647,68 @@ def _remap(src_w, own_w, old_names, new_names):
     return w, kept, len(new_names) - kept, dropped
 
 
+def _input_cols(kind, net, opp_scalars):
+    """The columns of each input layer whose width the observation's layout
+    sets: what each column holds, as a key, and how many opponent blocks the
+    keys cover. `opp_scalars` is the opponent scalar count the layer was built
+    for, which is what `warm_start` needs to line up a checkpoint from before
+    the leaderboard and fight fields made the block longer."""
+    emb = (net.card if kind == "mlp" else net.inp.card).embedding_dim
+    own_ids = ([("s_card", j, k) for j in range(len(SCALAR_IDS)) for k in range(emb)]
+               + [("s_hero", j, k) for j in range(len(HERO_IDS)) for k in range(emb)]
+               + [("s_trinket", j, k) for j in range(len(TRINKET_IDS)) for k in range(emb)])
+    if kind == "mlp":
+        slot = net.slot[0].out_features
+        cols = [("slot", s, k) for s in range(bgpy.TOTAL_SLOTS) for k in range(slot)]
+        cols += [("scalar", i) for i in range(bgpy.SCALARS)] + own_ids
+        cols += [("opp_raw", o, i) for o in range(OPP) for i in range(opp_scalars)]
+        cols += [("opp_hero", o, j, k)
+                 for o in range(OPP) for j in range(len(OPP_IDS)) for k in range(emb)]
+        cols += [("opp_trinket", o, j, k)
+                 for o in range(OPP) for j in range(len(OPP_TRINKET_IDS)) for k in range(emb)]
+        return {"trunk.0.weight": (cols, OPP)}
+    # attn and pool: one opponent's scalars at a time, without the columns the
+    # hero and trinket embeddings replace.
+    cols = [("opp_s", i) for i in range(opp_scalars)
+            if i not in OPP_IDS and i not in OPP_TRINKET_IDS]
+    cols += [("opp_hero", 0, j, k) for j in range(len(OPP_IDS)) for k in range(emb)]
+    cols += [("opp_trinket", 0, j, k) for j in range(len(OPP_TRINKET_IDS)) for k in range(emb)]
+    return {"inp.opp.weight": (cols, 1)}
+
+
+def check_input_cols(kind, net):
+    """Refuse a network whose widening input layers the column map does not
+    describe: a change there has to be mirrored in `_input_cols`, or a warm
+    start would copy weights into the wrong places."""
+    state = net.state_dict()
+    for name, (cols, _) in _input_cols(kind, net, bgpy.OPP_SCALARS).items():
+        if name not in state:
+            raise SystemExit(f"model.py: {name} is not in a {kind} network")
+        if state[name].shape[1] != len(cols):
+            raise SystemExit(f"model.py: {name} takes {state[name].shape[1]} input columns, "
+                             f"the column map names {len(cols)}")
+
+
+def _grown_opp_scalars(kind, net, src):
+    """The opponent scalar count a checkpoint's wider input layers were built
+    for, or None when they are something else than this layout with a shorter
+    opponent block (another observation change: a new run, not a warm start)."""
+    own = net.state_dict()
+    old = None
+    for name, (_, blocks) in _input_cols(kind, net, bgpy.OPP_SCALARS).items():
+        w, v = own.get(name), src.get(name)
+        if w is None or v is None or w.shape[0] != v.shape[0]:
+            continue
+        grew = w.shape[1] - v.shape[1]
+        if grew <= 0 or grew % blocks:
+            continue
+        cand = bgpy.OPP_SCALARS - grew // blocks
+        if cand < 0 or (old is not None and cand != old):
+            return None
+        old = cand
+    return old
+
+
 def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_heroes=None):
     """Load every entry of the checkpoint at `path` whose name and shape match
     `net` (a `kind` model). The card and hero embeddings are matched by name
@@ -646,8 +716,14 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     keeps what the model knew about every other card: `cards` / `heroes` are
     this run's names by id, the checkpoint's own come from the checkpoint
     (`card_names`, `hero_names`) or `old_cards` / `old_heroes` for one saved
-    before it stored them. Returns (loaded, fresh, skipped, src_opts,
-    remapped) where remapped describes each table matched by name."""
+    before it stored them.
+
+    An input layer that only grew (the 2026-11-06 opponent view widened the
+    opponent block) keeps every old column where the column map puts it and
+    starts the new ones at zero, so the loaded network answers exactly as it
+    did until it learns to use the new inputs. Returns (loaded, fresh,
+    skipped, src_opts, remapped) where remapped describes each table matched
+    by name and each input layer carried over column by column."""
     ck = torch.load(path, map_location="cpu")
     src_kind, src_opts = ck_model(ck)
     if src_kind != kind:
@@ -667,6 +743,26 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
                 w, kept, new, dropped = _remap(src[k], own[k], old_names, new_names)
                 take[k] = w
                 remapped.append(f"{k}: {kept} kept, {new} new, {dropped} dropped")
+    old_opp = _grown_opp_scalars(kind, net, src)
+    if old_opp is not None:
+        for name, (cols, _) in _input_cols(kind, net, bgpy.OPP_SCALARS).items():
+            w, v = own.get(name), src.get(name)
+            if w is None or v is None or w.shape[0] != v.shape[0] or w.shape[1] == v.shape[1]:
+                continue
+            old_cols = _input_cols(kind, net, old_opp)[name][0]
+            if len(old_cols) != v.shape[1]:
+                continue
+            at = {k: i for i, k in enumerate(cols)}
+            carried = torch.zeros_like(w)
+            kept = 0
+            for j, key in enumerate(old_cols):
+                i = at.get(key)
+                if i is not None:
+                    carried[:, i] = v[:, j]
+                    kept += 1
+            take[name] = carried
+            remapped.append(f"input layout: {name}: {kept} columns carried from the "
+                            f"{old_opp}-column opponent block, {w.shape[1] - kept} new at zero")
     net.load_state_dict(take, strict=False)
     params = [k for k, _ in net.named_parameters()]
     loaded = [k for k in params if k in take]
@@ -703,6 +799,105 @@ def _sample_obs(n=512, steps=300, seed=3):
         w[:, SELL_A] *= 0.05
         env.step(w.argmax(1), places, tiers, tribes, reset)
     return torch.from_numpy(np.concatenate(out))
+
+
+@contextlib.contextmanager
+def _old_layout(opp_scalars):
+    """The observation as a checkpoint from before the opponent block grew
+    saw it: the block constants in `bgpy` and this module's copies of them,
+    put back when the block ends. For building and running a checkpoint's own
+    network in `check_warm_start` only."""
+    global OPP_SCALE, OPP_BLOCK, OWN_END
+    saved = (OPP_SCALE, OPP_BLOCK, OWN_END)
+    block = opp_scalars + bgpy.BOARD * SF
+    own_end = bgpy.SCALARS + bgpy.OWN_SLOTS * SF
+    sizes = {"OPP_SCALARS": opp_scalars, "OPP_BLOCK": block, "OWN_END": own_end,
+             "OBS_SIZE": own_end + OPP * block}
+    was = {name: getattr(bgpy, name) for name in sizes}
+    for name, value in sizes.items():
+        setattr(bgpy, name, value)
+    OPP_SCALE = OPP_SCALE[:opp_scalars]
+    OPP_BLOCK = block
+    OWN_END = own_end
+    try:
+        yield
+    finally:
+        OPP_SCALE, OPP_BLOCK, OWN_END = saved
+        for name, value in was.items():
+            setattr(bgpy, name, value)
+
+
+def _to_old_obs(obs, opp_scalars):
+    """The same positions in the observation a checkpoint from before the
+    opponent block grew was trained on: each block without the scalars the
+    leaderboard and fight lines added."""
+    own = obs[:, :OWN_END]
+    opp = obs[:, OWN_END:].reshape(len(obs), OPP, OPP_BLOCK)
+    kept = torch.cat([opp[:, :, :opp_scalars], opp[:, :, bgpy.OPP_SCALARS:]], 2)
+    return torch.cat([own, kept.reshape(len(obs), -1)], 1)
+
+
+def check_warm_start(path, n=256):
+    """A checkpoint from before the opponent block grew, loaded into this
+    build's network: the same action probabilities on the same game
+    positions, with the new inputs (the leaderboard and fight scalars) at any
+    values at all, because their weights start at zero.
+
+    The old network is this one built for the old block (see `_old_layout`),
+    loaded as it was saved; the new one is `warm_start` on the same file. Both
+    see the same positions: the same own slots, own scalars and opponent
+    block, the only difference being the new scalars, which the old network
+    does not have at all."""
+    ck = torch.load(path, map_location="cpu")
+    kind, opts = ck_model(ck)
+    obs = _sample_obs(n=n, steps=250)
+    obs = obs[-2 * n:]
+    net = build(kind, **opts).eval()
+    old_opp = _grown_opp_scalars(kind, net, ck["net"])
+    if old_opp is None:
+        raise SystemExit(f"{path}: its input layers are not this build's with a shorter "
+                         "opponent block")
+    old_rows = _to_old_obs(obs, old_opp)
+    with _old_layout(old_opp):
+        old_net = build(kind, **opts).eval()
+        old_net.load_state_dict(ck["net"])
+        with torch.no_grad():
+            want_logits, want_value = old_net(old_rows)
+    loaded, fresh, _, _, carried = warm_start(net, kind, path)
+    carried = [c for c in carried if c.startswith("input layout:")]
+    # Exactly one layer may be fresh: the grown input layer. Anything else
+    # would mean the two networks are not the same network, and the
+    # comparison would say nothing.
+    if fresh != [name for name in ("inp.opp.weight", "trunk.0.weight") if name in fresh] or not carried:
+        raise SystemExit(f"{path}: expected the input layer to grow, got fresh {fresh}")
+    with torch.no_grad():
+        logits, value = net(obs)
+        # The new inputs at other values: doubled, and zeroed.
+        moved = obs.clone()
+        for o in range(OPP):
+            at = OWN_END + o * OPP_BLOCK
+            moved[:, at + bgpy.OPP_TOP_TRIBE:at + bgpy.OPP_SCALARS] *= 2.0
+        moved_logits, moved_value = net(moved)
+        flat = obs.clone()
+        for o in range(OPP):
+            at = OWN_END + o * OPP_BLOCK
+            flat[:, at + bgpy.OPP_TOP_TRIBE:at + bgpy.OPP_SCALARS] = 0.0
+        flat_logits, flat_value = net(flat)
+    d_logits = (logits - want_logits).abs().max().item()
+    d_value = (value - want_value).abs().max().item()
+    d_moved = (moved_logits - want_logits).abs().max().item()
+    d_flat = (flat_logits - want_logits).abs().max().item()
+    for name, d in (("logits", d_logits), ("value", d_value), ("doubled", d_moved),
+                    ("zeroed", d_flat)):
+        assert d < 1e-5, f"{name}: {d} from the old checkpoint's own answers"
+    assert (moved_value - want_value).abs().max().item() < 1e-5
+    assert (flat_value - want_value).abs().max().item() < 1e-5
+    print(f"warm start from {path} ({kind} {opts}, {old_opp} opponent scalars then): "
+          f"logits within {max(d_logits, d_moved, d_flat):.2e}, value within "
+          f"{max(d_value, (moved_value - want_value).abs().max().item()):.2e}, "
+          f"on {len(obs)} positions")
+    for c in carried:
+        print(f"  {c}")
 
 
 def _swap(obs, zone_start, i, j):
@@ -767,3 +962,7 @@ def check_pointers():
 
 if __name__ == "__main__":
     check_pointers()
+    # With a checkpoint: the warm-start equality check (the old network and
+    # this one, on the same positions).
+    for path in sys.argv[1:]:
+        check_warm_start(path)

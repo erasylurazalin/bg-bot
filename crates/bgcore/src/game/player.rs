@@ -200,6 +200,8 @@ impl Player {
             opponent: None,
             last_opponent: None,
             seen: Default::default(),
+            leaderboard: Default::default(),
+            fights: Default::default(),
         }
     }
 

@@ -27,7 +27,10 @@ pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 pub use cards::{Card, CardDb, Effect, Tribe, Tribes};
 pub use darkgifts::{Gift, GiftCond, GiftDb};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
-pub use game::{Game, IllegalAction, Opponent, Player, PowerState, Sandbox, SandboxFight};
+pub use game::{
+    FightResult, Game, IllegalAction, Leaderboard, Opponent, Player, PowerState, Sandbox,
+    SandboxFight,
+};
 pub use heroes::{Hero, HeroDb, HeroPower, PowerEffect};
 pub use minion::{Attached, CardId, GiftOn, Keywords, MAX_ATTACHED, MAX_GIFTS, Minion};
 pub use real_boards::{
@@ -60,6 +63,9 @@ pub const CARD_MAX_TIER: u8 = 7;
 /// Slots in `Player::final_tribes`: the ten tribes in `Tribe::EVERY` order,
 /// then neutral. A multi-tribe minion counts in each of its tribes' slots.
 pub const TRIBES: usize = 11;
+/// Fights the leaderboard shows for a player: the last three, most recent
+/// first (`Player::fights`).
+pub const FIGHTS_SHOWN: usize = 3;
 
 /// Cards and rules together, shared by every game.
 #[derive(Debug, Clone)]

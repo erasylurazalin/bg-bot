@@ -26,10 +26,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use bgcore::obs::{self, OBS_SIZE, OPP_BLOCK, OPP_SCALARS, OWN_END, SCALAR_ALIVE};
+use bgcore::obs::{
+    self, OBS_SIZE, OPP_BLOCK, OPP_SCALARS, OPP_TRIBE_COUNT, OPP_TRIBE_MIXED, OPP_TOP_TRIBE, OWN_END,
+    SCALAR_ALIVE,
+};
 use bgcore::real_boards::CardIdMap;
 use bgcore::shop_replay::{self, ReplayOptions, ShopFileSpec, ShopTurnSpec, StepResult, Verdict};
-use bgcore::{Action, Data, N_ACTIONS, Opponent, PLAYERS};
+use bgcore::{Action, Data, Leaderboard, N_ACTIONS, Opponent, PLAYERS, Tribe};
 use rayon::prelude::*;
 use serde::Deserialize;
 
@@ -172,16 +175,29 @@ fn state_row(game: &bgcore::Game) -> (Vec<f32>, [bool; N_ACTIONS]) {
 /// bot about opponents that never existed: seven dead players and one player
 /// alive, every time. So:
 /// - `SCALAR_ALIVE` (own scalar 7, the living players) is set to 0, unknown.
-/// - Every opponent block's `OPP_SCALARS` values, 33 of them (alive, health,
+/// - Every opponent block's `OPP_SCALARS` values, 54 of them (alive, health,
 ///   armor, tier, hero, seen, turns since, next, last, placement, the last
-///   board's tribes, Deity, Blood Gem and Tavern spell bonus, trinkets), are set
-///   to 0.
+///   board's tribes, Deity, Blood Gem and Tavern spell bonus, trinkets, the
+///   leaderboard's tribe line and the last three fights), are set to 0, but
+///   the leaderboard tribe line of the one seat whose board is kept (below),
+///   which the log's board says: Power.log carries no leaderboard tribe tag
+///   (`bgbench powerlog` dumps every tag; there is none), and the tribe the
+///   client shows is that of the board the player fought with, which the log
+///   has for the opponent Era fought and for no other seat.
 /// - Every opponent's board slots are set to 0, except the first opponent
 ///   block, the seat `load` gives the warband the log really has
 ///   (`last_opponent_board`, the opponent Era last fought, as that seat's seen
 ///   board): those slots keep the real cards, their stats and their keywords.
 ///   Which of the seven seats that is comes from the log saying nothing about
 ///   seat order, so the first block is as good as any.
+///
+/// Every opponent's last three fights stay 0. Power.log carries
+/// `BACON_WON_LAST_COMBAT` on my own hero and on the hero of the one
+/// opponent I fought (that is all of it: a dump of a real log has no other
+/// entity with the tag, and there is no loss, tie or damage tag at all), so
+/// for the other six seats there is no result at all, and for the seventh a
+/// won flag that cannot tell a loss from a tie and no damage: not a fight
+/// result.
 ///
 /// `SCALAR_WON_LAST_COMBAT` and `SCALAR_LOST_LAST_COMBAT` are left alone: the
 /// log has them (`won_last_combat`), so they are Era's own state, not an
@@ -200,6 +216,18 @@ fn blank_invented(out: &mut [f32], game: &bgcore::Game) {
         let at = OWN_END + k * OPP_BLOCK;
         let end = if real == Some(q) { at + OPP_SCALARS } else { at + OPP_BLOCK };
         out[at..end].fill(0.0);
+        if real == Some(q) {
+            // The one board the log carries is the board that fight went in
+            // with, which is where the leaderboard's snapshot is taken.
+            let seen = &game.players[shop_replay::ME].seen[q];
+            let line = Leaderboard::of(&game.data.cards, &seen.board);
+            if let Some(t) = line.top {
+                let j = Tribe::EVERY.iter().position(|&x| x == t).unwrap_or(0);
+                out[at + OPP_TOP_TRIBE + j] = 1.0;
+            }
+            out[at + OPP_TRIBE_MIXED] = line.mixed as u8 as f32;
+            out[at + OPP_TRIBE_COUNT] = line.count as f32;
+        }
     }
 }
 
@@ -663,6 +691,23 @@ mod tests {
         let mut obs = vec![0.0f32; OBS_SIZE];
         obs::write(&seated.game, shop_replay::ME, &mut obs);
         blank_invented(&mut obs, &seated.game);
+        // The block whose board the log carries keeps the leaderboard's tribe
+        // line, taken from that board: blank_invented zeroes the rest of the
+        // block's scalars and must not zero this one with them.
+        let real = match seated.game.players[shop_replay::ME].last_opponent {
+            Some(bgcore::Opponent::Player(q)) | Some(bgcore::Opponent::Ghost(q)) => Some(q as usize),
+            None => None,
+        };
+        if let Some(q) = real {
+            let seen = &seated.game.players[shop_replay::ME].seen[q];
+            let line = bgcore::Leaderboard::of(&seated.game.data.cards, &seen.board);
+            let at = OWN_END;
+            assert_eq!(obs[at + obs::OPP_TRIBE_COUNT], line.count as f32);
+            assert_eq!(obs[at + obs::OPP_TRIBE_MIXED], line.mixed as u8 as f32);
+            for (j, t) in bgcore::Tribe::EVERY.into_iter().enumerate() {
+                assert_eq!(obs[at + obs::OPP_TOP_TRIBE + j], (line.top == Some(t)) as u8 as f32);
+            }
+        }
         let mut mask = [false; N_ACTIONS];
         seated.game.legal_mask(&mut mask);
         assert!(mask[action]);

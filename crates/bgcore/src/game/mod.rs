@@ -24,7 +24,7 @@ use arrayvec::ArrayVec;
 
 use crate::action::{Action, N_ACTIONS};
 use crate::cards::{
-    N_COUNTERS, ChooseOption, ConsumePick, Effect, EventKind, SpellEffect, SpellTarget,
+    CardDb, N_COUNTERS, ChooseOption, ConsumePick, Effect, EventKind, SpellEffect, SpellTarget,
     Tribe, Tribes,
 };
 use crate::fight::{Counters, Deity, SeenCounters, SideOutcome};
@@ -35,7 +35,9 @@ use crate::real_boards::RealBoards;
 use crate::trinkets::{CardMod, Event};
 use self::trinkets::MinionPrice;
 use crate::rng::Rng;
-use crate::{BOARD, CHOICES, DISCOVER, Data, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES};
+use crate::{
+    BOARD, CHOICES, DISCOVER, Data, FIGHTS_SHOWN, HAND, MAX_TIER, PLAYERS, SHOP, TRIBES,
+};
 
 /// Upper bound on pool minions, for the fixed-size copy count in
 /// `check_invariants`. The card parser refuses a card list past it. 257 pool
@@ -50,6 +52,68 @@ pub enum Opponent {
     Player(u8),
     /// The ghost of a knocked-out player.
     Ghost(u8),
+}
+
+/// The leaderboard's tribe line for one player: the top tribe on their board
+/// and its count, as of the start of their last fight
+/// (docs/rules/design.md "The leaderboard").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Leaderboard {
+    /// The top tribe, None when two or more tribes tie for the top count (the
+    /// leaderboard shows "mixed minions") and when the board shows nothing.
+    pub top: Option<Tribe>,
+    /// Two or more tribes with the same top count.
+    pub mixed: bool,
+    /// The top count, 0 for an empty or neutral board.
+    pub count: u8,
+}
+
+impl Leaderboard {
+    /// The leaderboard line of a board. A minion counts once in each of its
+    /// tribes, so an all-types minion (Amalgam) counts for every tribe and a
+    /// two-tribe one for both; a neutral minion counts for none
+    /// (Era, docs/rules/design.md "The leaderboard").
+    pub fn of(cards: &CardDb, board: &[Minion]) -> Leaderboard {
+        let mut counts = [0u8; Tribe::EVERY.len()];
+        for m in board {
+            let tribes = cards.tribes_of(m);
+            for (j, t) in Tribe::EVERY.into_iter().enumerate() {
+                if tribes.has(t) {
+                    counts[j] += 1;
+                }
+            }
+        }
+        let mut top: Option<Tribe> = None;
+        let mut mixed = false;
+        for (j, t) in Tribe::EVERY.into_iter().enumerate() {
+            if counts[j] == 0 {
+                continue;
+            }
+            match top {
+                Some(best) if counts[j] > counts[best as usize] => {
+                    top = Some(t);
+                    mixed = false;
+                }
+                Some(best) if counts[j] == counts[best as usize] => mixed = true,
+                Some(_) => {}
+                None => top = Some(t),
+            }
+        }
+        let count = top.map_or(0, |t| counts[t as usize]);
+        Leaderboard { top: if mixed { None } else { top }, mixed, count }
+    }
+}
+
+/// One fight as the leaderboard shows it, for one of its two players.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct FightResult {
+    /// Whether a fight happened at all: a tie has no outcome, so the flag is
+    /// what tells it from an empty slot.
+    pub happened: bool,
+    /// +1 won, -1 lost, 0 tied.
+    pub outcome: i8,
+    /// Damage this player's hero dealt to the other (negative when taken).
+    pub damage: i32,
 }
 
 /// What a player last saw of an opponent's board, in their last fight.
@@ -1192,6 +1256,22 @@ pub struct Player {
     pub opponent: Option<Opponent>,
     pub last_opponent: Option<Opponent>,
     pub seen: [Seen; PLAYERS],
+    /// The leaderboard's tribe line, taken for every living player at the
+    /// start of each combat and held until the next one
+    /// (docs/rules/design.md "The leaderboard").
+    pub leaderboard: Leaderboard,
+    /// The last `FIGHTS_SHOWN` fights, most recent first. A player who has not
+    /// fought that often has empty slots after the fights it has had.
+    pub fights: [FightResult; FIGHTS_SHOWN],
+}
+
+impl Player {
+    /// The fight just fought: the new result goes first and the rest shift
+    /// down, so the leaderboard's three lines are the last three fights.
+    pub(super) fn note_fight(&mut self, r: FightResult) {
+        self.fights.rotate_right(1);
+        self.fights[0] = r;
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

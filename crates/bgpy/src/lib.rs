@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
-use bgcore::obs::{self, OBS_SIZE};
+use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec};
 use bgcore::{ACTION_KINDS, Action, Data, Game, Keywords, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES};
 use numpy::{PyReadonlyArray1, PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3};
@@ -183,6 +183,8 @@ struct VecEnv {
     lineup: [u8; SEAT_KINDS],
     boards: Option<Arc<RealBoards>>,
     next_seed: u64,
+    /// Whether opponents' last-seen boards are written (see `obs::OldBoards`).
+    old_boards: OldBoards,
 }
 
 fn check_lineup(lineup: [u8; SEAT_KINDS], boards: bool) -> PyResult<[u8; SEAT_KINDS]> {
@@ -207,8 +209,13 @@ impl VecEnv {
     /// loads them ((turn, tier, minions, hand, counters, deity) with
     /// (name, attack, health, golden, keywords, numbers) each); required
     /// when the lineup has real seats.
+    /// `old_boards`: "keep" (the default) writes every opponent's last-seen
+    /// board in the observation, however old; "drop" writes it only for the
+    /// opponent fought last turn and for the one fought this turn when the
+    /// board is at most `OLD_BOARD_AGE` turns old, zeros for the rest. The
+    /// observation keeps its size either way (see `bgcore::obs::OldBoards`).
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -218,6 +225,7 @@ impl VecEnv {
         rules_toml: Option<&str>,
         heroes_toml: Option<&str>,
         real_boards: Option<PyBoards>,
+        old_boards: Option<&str>,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -259,11 +267,20 @@ impl VecEnv {
             Arc::new(boards)
         });
         let lineup = check_lineup(lineup, boards.is_some())?;
+        let old_boards = match old_boards {
+            None | Some("keep") => OldBoards::Keep,
+            Some("drop") => OldBoards::Drop,
+            Some(other) => {
+                return Err(PyValueError::new_err(format!(
+                    "old_boards is keep or drop, not {other}"
+                )));
+            }
+        };
         let seed = seed.wrapping_mul(1 << 32);
         let mut envs: Vec<Env> =
             (0..n as u64).map(|i| Env::new(&data, seed + i, &lineup, boards.as_ref())).collect();
         envs.par_iter_mut().for_each(Env::advance);
-        Ok(VecEnv { data, envs, lineup, boards, next_seed: seed + n as u64 })
+        Ok(VecEnv { data, envs, lineup, boards, next_seed: seed + n as u64, old_boards })
     }
 
     /// The lineup for games that start from now on.
@@ -372,6 +389,7 @@ impl VecEnv {
         {
             return Err(PyValueError::new_err("array sizes don't match"));
         }
+        let old_boards = self.old_boards;
         py.detach(|| {
             self.envs
                 .par_iter()
@@ -382,7 +400,7 @@ impl VecEnv {
                 .for_each(|((((env, o), m), s), k)| {
                     let p = env.game.current_player().expect("a waiting game is never over");
                     debug_assert!(env.is_python(p));
-                    obs::write(&env.game, p, o);
+                    obs::write_with(&env.game, p, o, old_boards);
                     let m: &mut [bool; N_ACTIONS] = m.try_into().unwrap();
                     env.game.legal_mask(m);
                     *s = p as i64;
@@ -407,6 +425,7 @@ impl VecEnv {
         if obs.len() != n * PLAYERS * OBS_SIZE || live.len() != n * PLAYERS {
             return Err(PyValueError::new_err("array sizes don't match"));
         }
+        let old_boards = self.old_boards;
         py.detach(|| {
             self.envs
                 .par_iter()
@@ -414,7 +433,12 @@ impl VecEnv {
                 .zip(live.par_chunks_mut(PLAYERS))
                 .for_each(|((env, o), l)| {
                     for p in 0..PLAYERS {
-                        obs::write(&env.game, p, &mut o[p * OBS_SIZE..(p + 1) * OBS_SIZE]);
+                        obs::write_with(
+                            &env.game,
+                            p,
+                            &mut o[p * OBS_SIZE..(p + 1) * OBS_SIZE],
+                            old_boards,
+                        );
                         l[p] = env.kinds[p] == LEARNER && env.game.players[p].alive;
                     }
                 });
@@ -754,6 +778,16 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("OPP_HERO", obs::OPP_HERO)?;
     m.add("OPP_ARMOR", obs::OPP_ARMOR)?;
     m.add("OPP_TRINKET", obs::OPP_TRINKET)?;
+    m.add("OPP_TOP_TRIBE", obs::OPP_TOP_TRIBE)?;
+    m.add("OPP_TRIBE_MIXED", obs::OPP_TRIBE_MIXED)?;
+    m.add("OPP_TRIBE_COUNT", obs::OPP_TRIBE_COUNT)?;
+    m.add("OPP_FIGHTS", obs::OPP_FIGHTS)?;
+    m.add("FIGHT_FEATURES", obs::FIGHT_FEATURES)?;
+    m.add("FIGHTS_SHOWN", bgcore::FIGHTS_SHOWN)?;
+    m.add("OPP_FIGHT_HAPPENED", obs::OPP_FIGHT_HAPPENED)?;
+    m.add("OPP_FIGHT_OUTCOME", obs::OPP_FIGHT_OUTCOME)?;
+    m.add("OPP_FIGHT_DAMAGE", obs::OPP_FIGHT_DAMAGE)?;
+    m.add("OLD_BOARD_AGE", obs::OLD_BOARD_AGE)?;
     m.add("LEARNER", LEARNER)?;
     m.add("SNAPSHOT", SNAPSHOT)?;
     m.add("STANDARD", STANDARD)?;

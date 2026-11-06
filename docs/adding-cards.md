@@ -478,7 +478,9 @@ passes the slot through.
    `final_tribes` and `board_tribes`, the ten tribes then neutral). Still do
    not add features in a tribe run: the layout changes only in an observation
    run, and `N_CARDS` in bgpy is `cards.len()` and grows with every card.
-   Either way old checkpoints stop loading, expected.
+   Either way old checkpoints stop loading, expected (a longer opponent
+   block is the exception: `warm_start` carries its old columns over and
+   starts the new ones at zero, docs/engine.md; `N_CARDS` moving is not).
    New `TargetKind` variants need an arm in `obs::target_kind` (share a slot).
    New `Effect`/`SpellEffect` variants do not need obs changes unless a match is exhaustive.
 6. `cards.toml`: pool minions go in the `[[minion]]` section (before tokens; ids

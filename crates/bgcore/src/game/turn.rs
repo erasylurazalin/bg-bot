@@ -22,8 +22,10 @@ use crate::{
     PLAYERS,
 };
 use super::{
+    FightResult,
     Game,
     Ghost,
+    Leaderboard,
     Opponent,
     Player,
     RefreshKind,
@@ -964,6 +966,16 @@ impl Game {
             self.sandbox_combat();
             return;
         }
+        // The leaderboard's tribe line for every living player, taken here:
+        // after the shop, before any combat, whatever pairings this round
+        // makes, and held until the next round's snapshot
+        // (docs/rules/design.md "The leaderboard").
+        for p in 0..PLAYERS {
+            if self.players[p].alive {
+                let line = Leaderboard::of(&self.data.cards, &self.players[p].board);
+                self.players[p].leaderboard = line;
+            }
+        }
         let alive = self.alive();
         let max_attacks = self.data.rules.max_attacks;
         let cap = self.data.rules.damage_cap(self.turn, alive);
@@ -1047,26 +1059,52 @@ impl Game {
                     let q = q as usize;
                     self.players[p].seen[q] = their_seen;
                     self.players[q].seen[p] = my_seen;
+                    // The leaderboard's three lines each carry both sides of
+                    // the fight: the loser takes what the winner deals.
                     match out.winner {
                         Some(0) => {
-                            damage[q] += capped(my_tier as i32 + out.survivor_tiers);
+                            let dealt = capped(my_tier as i32 + out.survivor_tiers);
+                            damage[q] += dealt;
                             self.players[p].lost_last_combat = false;
                             self.players[p].won_last_combat = true;
                             self.players[q].lost_last_combat = true;
                             self.players[q].won_last_combat = false;
+                            self.players[p].note_fight(FightResult {
+                                happened: true,
+                                outcome: 1,
+                                damage: dealt,
+                            });
+                            self.players[q].note_fight(FightResult {
+                                happened: true,
+                                outcome: -1,
+                                damage: -dealt,
+                            });
                         }
                         Some(_) => {
-                            damage[p] += capped(tier as i32 + out.survivor_tiers);
+                            let taken = capped(tier as i32 + out.survivor_tiers);
+                            damage[p] += taken;
                             self.players[p].lost_last_combat = true;
                             self.players[p].won_last_combat = false;
                             self.players[q].lost_last_combat = false;
                             self.players[q].won_last_combat = true;
+                            self.players[p].note_fight(FightResult {
+                                happened: true,
+                                outcome: -1,
+                                damage: -taken,
+                            });
+                            self.players[q].note_fight(FightResult {
+                                happened: true,
+                                outcome: 1,
+                                damage: taken,
+                            });
                         }
                         None => {
                             self.players[p].lost_last_combat = false;
                             self.players[p].won_last_combat = false;
                             self.players[q].lost_last_combat = false;
                             self.players[q].won_last_combat = false;
+                            self.players[p].note_fight(FightResult { happened: true, ..Default::default() });
+                            self.players[q].note_fight(FightResult { happened: true, ..Default::default() });
                         }
                     }
                     self.apply_side_outcome(p, &out.sides[0], true);
@@ -1076,19 +1114,33 @@ impl Game {
                 }
                 Opponent::Ghost(g) => {
                     self.players[p].seen[g as usize] = their_seen;
+                    // A ghost has no hero, so a win against one deals no
+                    // damage; only the living side's line changes.
                     match out.winner {
                         Some(0) => {
                             self.players[p].lost_last_combat = false;
                             self.players[p].won_last_combat = true;
+                            self.players[p].note_fight(FightResult {
+                                happened: true,
+                                outcome: 1,
+                                damage: 0,
+                            });
                         }
                         Some(_) => {
-                            damage[p] += capped(tier as i32 + out.survivor_tiers);
+                            let taken = capped(tier as i32 + out.survivor_tiers);
+                            damage[p] += taken;
                             self.players[p].lost_last_combat = true;
                             self.players[p].won_last_combat = false;
+                            self.players[p].note_fight(FightResult {
+                                happened: true,
+                                outcome: -1,
+                                damage: -taken,
+                            });
                         }
                         None => {
                             self.players[p].lost_last_combat = false;
                             self.players[p].won_last_combat = false;
+                            self.players[p].note_fight(FightResult { happened: true, ..Default::default() });
                         }
                     }
                     self.apply_side_outcome(p, &out.sides[0], true);

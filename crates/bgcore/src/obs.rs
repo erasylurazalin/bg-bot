@@ -155,15 +155,22 @@
 //!   board (BOARD = 7), Discover options (DISCOVER = 3). A Tavern spell that
 //!   sits in a minion slot (Saloon's Finest) is written there as a spell.
 //! - 7 opponents, in seat order starting after me (each OPP_BLOCK values):
-//!   OPP_SCALARS (30): alive, health, armor, tier, hero (index + 1, 0 with
+//!   OPP_SCALARS (54): alive, health, armor, tier, hero (index + 1, 0 with
 //!   none), seen (1 if I ever fought them),
 //!   turns_since (since that fight), next (my opponent this turn, or the ghost
 //!   of this player), last (my opponent last turn), placement (0 while
 //!   alive), the tribe counts of their last seen board (ten values,
 //!   `Tribe::EVERY` order), their Deity at the first attack of that fight,
-//!   after Start of Combat (DEITY_FEATURES values, laid out like mine), and
-//!   their Blood Gem value and Tavern spell bonus at that moment (attack,
-//!   health each); then that board (BOARD = 7 card slots).
+//!   after Start of Combat (DEITY_FEATURES values, laid out like mine), their
+//!   Blood Gem value and Tavern spell bonus at that moment (attack, health
+//!   each), then the leaderboard's tribe line, taken at the start of their
+//!   last fight for every living player whether I fought them or not: ten
+//!   values, `Tribe::EVERY` order, the one-hot of the top tribe, a mixed flag
+//!   (two or more tribes tied for the top count) and the top count, all zero
+//!   for an empty or neutral board; then their last three fights, most recent
+//!   first, 3 x 3 values (happened, outcome +1 win / -1 loss / 0 tie, damage
+//!   dealt positive and taken negative); then that board (BOARD = 7 card
+//!   slots, written only where `OldBoards` allows).
 //!
 //! A card slot is SLOT_FEATURES (91) values:
 //!   0  present (1 if occupied)
@@ -233,7 +240,7 @@ use crate::{BOARD, DISCOVER, HAND, PLAYERS, SHOP};
 pub const SHOP_SPELL: usize = 1;
 pub const SLOT_FEATURES: usize = 91;
 pub const MINION_FEATURES: usize = SLOT_FEATURES;
-pub const OPP_SCALARS: usize = 33;
+pub const OPP_SCALARS: usize = 54;
 
 pub const OWN_SLOTS: usize = SHOP + SHOP_SPELL + HAND + BOARD + DISCOVER;
 pub const OPP_SLOTS: usize = (PLAYERS - 1) * BOARD;
@@ -585,6 +592,24 @@ pub const OPP_HERO: usize = 28;
 pub const OPP_ARMOR: usize = 29;
 /// Their trinkets (lesser, greater, the hero power's), trinket index + 1.
 pub const OPP_TRINKET: usize = 30;
+/// Their leaderboard tribe line: ten values, `Tribe::EVERY` order, the one-hot
+/// of the top tribe (all zero when mixed or nothing), then the mixed flag and
+/// the top count. Taken for every living player at the start of each combat
+/// (docs/rules/design.md "The leaderboard").
+pub const OPP_TOP_TRIBE: usize = 33;
+pub const OPP_TRIBE_MIXED: usize = OPP_TOP_TRIBE + Tribe::EVERY.len();
+pub const OPP_TRIBE_COUNT: usize = OPP_TRIBE_MIXED + 1;
+/// Their last three fights, most recent first (FIGHTS_SHOWN of them), each
+/// FIGHT_FEATURES values: happened, outcome (+1 win, -1 loss, 0 tie) and the
+/// damage (dealt positive, taken negative).
+pub const OPP_FIGHTS: usize = OPP_TRIBE_COUNT + 1;
+pub const FIGHT_FEATURES: usize = 3;
+pub const OPP_FIGHT_HAPPENED: usize = OPP_FIGHTS;
+pub const OPP_FIGHT_OUTCOME: usize = OPP_FIGHTS + 1;
+pub const OPP_FIGHT_DAMAGE: usize = OPP_FIGHTS + 2;
+/// Turns after their last fight in which the board of the opponent fought this
+/// turn is still written when `OldBoards::Drop` is on.
+pub const OLD_BOARD_AGE: u32 = 2;
 
 const _: () = assert!(SCALAR_TAVERN_BUFFS + TAVERN_BUFF_FILTERS * 4 == SCALAR_LAST_SPELL);
 const _: () = assert!(SCALAR_LOBBY + LOBBY_TRIBES == SCALAR_GEM_ATTACK);
@@ -605,7 +630,11 @@ const _: () = assert!(OPP_TRIBES + Tribe::EVERY.len() == OPP_DEITY);
 const _: () = assert!(OPP_DEITY + DEITY_FEATURES == OPP_GEM_ATTACK);
 const _: () = assert!(OPP_GEM_ATTACK + 4 == OPP_HERO);
 const _: () = assert!(OPP_HERO + 2 == OPP_TRINKET);
-const _: () = assert!(OPP_TRINKET + crate::TRINKET_SLOTS == OPP_SCALARS);
+const _: () = assert!(OPP_TRINKET + crate::TRINKET_SLOTS == OPP_TOP_TRIBE);
+const _: () = assert!(OPP_FIGHT_HAPPENED == OPP_FIGHTS);
+const _: () = assert!(OPP_FIGHT_OUTCOME == OPP_FIGHT_HAPPENED + 1);
+const _: () = assert!(OPP_FIGHT_DAMAGE == OPP_FIGHT_OUTCOME + 1);
+const _: () = assert!(OPP_FIGHTS + crate::FIGHTS_SHOWN * FIGHT_FEATURES == OPP_SCALARS);
 
 /// How a slot's minion relates to the player whose view this is, for its
 /// fight stats.
@@ -1168,8 +1197,33 @@ fn write_scalars(game: &Game, p: usize, s: &mut [f32]) {
     s[SCALAR_TRIPLE_PRIZE] = pl.tp.triple_prize.map_or(0.0, |_| 1.0);
 }
 
-/// Write player `p`'s view into `out`, which must hold OBS_SIZE values.
+/// Whether an opponent's last-seen board goes into the observation. The
+/// leaderboard and the last three fights are what Era judges an opponent from,
+/// not boards seen turns ago (docs/notes/era-strategy.md "Guessing
+/// opponents, and the turn-2 level").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum OldBoards {
+    /// Every opponent's last-seen board, however old: the observation as it
+    /// stood before the 2026-11-06 opponent view.
+    #[default]
+    Keep,
+    /// Only the opponent fought last turn keeps its board slots, and the one
+    /// fought this turn when that board was seen within `OLD_BOARD_AGE` turns.
+    /// Every other opponent's board slots are zeros; their scalars stay.
+    Drop,
+}
+
+/// Write player `p`'s view into `out`, which must hold OBS_SIZE values, with
+/// every opponent's last-seen board in it.
+///
+/// This is `write_with(.., OldBoards::Keep)`; the size is the same either
+/// way, so a network trained on one reads the other.
 pub fn write(game: &Game, p: usize, out: &mut [f32]) {
+    write_with(game, p, out, OldBoards::Keep);
+}
+
+/// Write player `p`'s view into `out`, which must hold OBS_SIZE values.
+pub fn write_with(game: &Game, p: usize, out: &mut [f32], old_boards: OldBoards) {
     assert_eq!(out.len(), OBS_SIZE);
     let pl = &game.players[p];
     let db = &game.data.cards;
@@ -1222,9 +1276,27 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
         o[OPP_TIER] = them.tier as f32;
         o[OPP_SEEN] = (seen.turn > 0) as u8 as f32;
         o[OPP_TURNS_SINCE] = if seen.turn > 0 { (game.turn - seen.turn) as f32 } else { 0.0 };
-        o[OPP_NEXT] = is(pl.opponent) as u8 as f32;
-        o[OPP_LAST] = is(pl.last_opponent) as u8 as f32;
+        let next = is(pl.opponent);
+        let last = is(pl.last_opponent);
+        o[OPP_NEXT] = next as u8 as f32;
+        o[OPP_LAST] = last as u8 as f32;
         o[OPP_PLACEMENT] = them.placement as f32;
+        // Their leaderboard tribe line and last three fights
+        // (docs/rules/design.md "The leaderboard").
+        if let Some(t) = them.leaderboard.top {
+            let j = Tribe::EVERY.iter().position(|&x| x == t).unwrap_or(0);
+            o[OPP_TOP_TRIBE + j] = 1.0;
+        }
+        o[OPP_TRIBE_MIXED] = them.leaderboard.mixed as u8 as f32;
+        o[OPP_TRIBE_COUNT] = them.leaderboard.count as f32;
+        // Their last three fights, most recent first: happened, outcome,
+        // damage (the order the three OPP_FIGHT_ constants name).
+        for (f, r) in them.fights.iter().enumerate() {
+            let at = OPP_FIGHTS + f * FIGHT_FEATURES;
+            o[at] = r.happened as u8 as f32;
+            o[at + 1] = r.outcome as f32;
+            o[at + 2] = r.damage as f32;
+        }
         for m in &seen.board {
             let tribes = db.tribes_of(m);
             for (j, t) in Tribe::EVERY.into_iter().enumerate() {
@@ -1243,10 +1315,20 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
             o[OPP_TRINKET + slot] = them.trinkets[slot].of as f32;
         }
         i += OPP_SCALARS;
-        // A locked card stays in its owner's hand, so their board slots are
-        // never locked; their tier is the one we last saw.
-        let owner = Owner { beast_bonus: (0, 0), tier: seen.tier, gold_spent: 0 };
-        i += write_slots(game, &mut out[i..], BOARD, seen.board.iter(), owner);
+        // Their board slots: the last board we saw of theirs, kept for the
+        // opponent just fought and (within OLD_BOARD_AGE turns) the one we
+        // face now when OldBoards::Drop is on, zeros for everyone else.
+        let fresh = seen.turn > 0 && game.turn.saturating_sub(seen.turn) <= OLD_BOARD_AGE;
+        if old_boards == OldBoards::Keep || last || (next && fresh) {
+            // A locked card stays in its owner's hand, so their board slots
+            // are never locked; their tier is the one we last saw.
+            let owner = Owner { beast_bonus: (0, 0), tier: seen.tier, gold_spent: 0 };
+            i += write_slots(game, &mut out[i..], BOARD, seen.board.iter(), owner);
+        } else {
+            let n = BOARD * SLOT_FEATURES;
+            out[i..i + n].fill(0.0);
+            i += n;
+        }
     }
     debug_assert_eq!(i, OBS_SIZE);
 }

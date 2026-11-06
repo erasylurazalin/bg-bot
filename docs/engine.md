@@ -558,6 +558,13 @@ build hero-less games so old tests pass unchanged, and
     queues one `DeadWarband(i)` per warband, back to back (heroes die at the
     end of a fight, so several can die at once). The warbands are dropped once
     that round has started for everyone.
+  - **What the leaderboard shows** is taken in `combat` before any fight:
+    `Leaderboard::of` over each living player's board fills
+    `Player.leaderboard` (the top tribe and its count, nothing for a neutral
+    or empty board, "mixed" when two tribes tie for the count), and it holds
+    until the next combat. Each fight then shifts one `FightResult` (the
+    outcome and the damage dealt or taken) into the front of `Player.fights`,
+    the three the observation carries (docs/rules/design.md "The leaderboard").
   - **A random Tavern spell** (Puzzle Box): `Game::cast_random_spell` draws
     with `CardDb::random_castable_spell` (never a destructive one), skips a
     spell with nothing to land on (`Game::spell_castable`, which
@@ -1961,7 +1968,14 @@ Deleting `.venv` undoes it.
   (SLOT_FEATURES 89 to 90, OBS_SIZE 7292 to 7385), so every checkpoint before
   it breaks too. Poisonous (2026-11-04) added the eighth keyword slot to the
   card slot (SLOT_FEATURES 90 to 91, OBS_SIZE 7400 to 7477), which breaks them
-  all again. A hero id and a power id share the model's one id embedding, so its
+  all again. The opponent view (2026-11-06) gave every opponent block the
+  leaderboard's tribe line and their last three fights (OPP_SCALARS 33 to 54,
+  OBS_SIZE 7477 to 7624). That one does not break them: `warm_start` copies
+  the old columns of an input layer that only grew into their places and
+  starts the new ones at zero, so an old checkpoint answers exactly as it did
+  until it learns to use them, and `--resume` does the same (with a fresh
+  Adam, whose state has the old shapes). A hero id and a power id share the
+  model's one id embedding, so its
   table is `max(N_HEROES, N_POWERS)` wide and the offer slots are embedded
   from it too (`HERO_IDS` in train/model.py), not scaled as numbers.
 - Games from `bgpy` play with heroes (`Game::new_random_heroes`, no pick),
@@ -1982,7 +1996,10 @@ Deleting `.venv` undoes it.
   `--no-compile`. It does about
   20 updates a minute with `next` (10 with `full`) against `mlp`'s 70,
   `pool` about 35. `python model.py` checks that the per-slot logits
-  follow their slots.
+  follow their slots; `python model.py PATH` also loads that checkpoint with
+  `warm_start` into this build and checks that it answers exactly as its own
+  network did on the same positions, the grew-in columns at zero (how an old
+  run crosses an observation that only grew).
 - `--init-from PATH` starts a new run (fresh optimizer) from every
   parameter of another checkpoint of the same model whose name and shape
   match, for example `attn` with `full` into `next`; it prints what was
@@ -2034,9 +2051,24 @@ mlp stays the default until a head-to-head says otherwise.
   keyword, per-minion counters (Blood Gem stats, attachments, links,
   Ichoron's one-turn shield, doomed picks), player counters (gem value,
   Undead bonus, Knight deaths, discards, spells cast, ...), own and
-  as-last-seen opponent Deities, and opponents' gem value and spell power
-  from the last fight with them, plus "fight stats" (the shop Goldrinn bonus
-  a Beast in hand gets when played; Holy Vanguard's +30/+30 is not one, it is
-  in the slot's own Attack and Health while the Health is 15 or less).
+  as-last-seen opponent Deities, opponents' gem value and spell power from
+  the last fight with them, their leaderboard line (the top tribe and its
+  count, or "mixed", taken for every living player at the start of each
+  combat, so it changes once a round and not with the live board) and their
+  last three fight results with the damage dealt or taken, plus "fight
+  stats" (the shop Goldrinn bonus a Beast in hand gets when played; Holy
+  Vanguard's +30/+30 is not one, it is in the slot's own Attack and Health
+  while the Health is 15 or less).
   Relentless Deflector's Taunt while shielded isn't a feature; the
   card embedding has to learn it.
+- An opponent's last-seen board is what the bot used to read an opponent
+  from, and Era does not remember boards (docs/notes/era-strategy.md
+  "Guessing opponents, and the turn-2 level"). `obs::OldBoards` decides how
+  much of it goes in: `keep` writes every opponent's board however old (the
+  observation before 2026-11-06), `drop` writes only the opponent fought
+  last turn and the one fought this turn when that board is at most
+  `OLD_BOARD_AGE` (2) turns old, zeros for the rest, their scalars and the
+  new lines untouched. The size is the same either way, so the two can be
+  compared on one network: `bgpy.VecEnv(.., old_boards="keep"|"drop")` and
+  `--old-boards` in train/ppo.py (default `keep`, and the checkpoint's own
+  on `--resume`).

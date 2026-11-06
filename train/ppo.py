@@ -94,6 +94,14 @@ def args():
                         "loss): for an --init-from network whose value head never learned, "
                         "such as imitate.py's, so its first advantages aren't noise")
     a.add_argument("--seed", type=int, default=0)
+    a.add_argument("--old-boards", choices=["keep", "drop"], default=None,
+                   help="what an opponent's last-seen board is worth in the observation: keep "
+                        "writes it however old it is (the observation before 2026-11-06), drop "
+                        "writes it only for the opponent fought last turn and for the one faced "
+                        "now when their board is at most 2 turns old (docs/notes/era-strategy.md: "
+                        "Era judges a foe from the leaderboard, not old boards). Same observation "
+                        "size either way, so a run can switch mid-way (default keep, or the "
+                        "checkpoint's own on --resume)")
     a.add_argument("--envs", type=int, default=1024)
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
     a.add_argument("--lineup", default="4,2,1,1,0,0",
@@ -192,6 +200,10 @@ class Bufs:
 # --force-turn2-level: on turn 2 a tier 1 seat that can level must level
 # (the curve every beginner is taught). Set from the flag in main().
 FORCE_TURN2 = False
+# --old-boards: "keep" or "drop", what an opponent's last-seen board is worth
+# in the observation (bgpy's old_boards). Set from the flag in main(), so the
+# eval games see what the training games see.
+OLD_BOARDS = "keep"
 LEVEL = int(np.nonzero(KIND_OF.numpy() == KINDS.index("level"))[0][0])
 DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
 # --force-dark-gift: on turns 3, 4 and 5 every Python seat presses Dark
@@ -286,7 +298,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, curve=False):
     """Play n_games with `lineup` and return (avg_place, learner_records).
     With curve, the learner seats are curve seats (levels forced)."""
     n = min(n_games, 1024)
-    env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards)
+    env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS)
     b = Bufs(n)
     env.kinds(b.kinds)
     records, done = [], 0
@@ -315,7 +327,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, curve=False):
 def evaluate_vs(net, other, n_games, dev, seed):
     """4 learner seats against 4 seats of `other`. Learners' average place."""
     n = min(n_games, 1024)
-    env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0, 0])
+    env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0, 0], old_boards=OLD_BOARDS)
     b = Bufs(n)
     env.kinds(b.kinds)
     places, done = [], 0
@@ -436,8 +448,15 @@ def main():
         if not real:
             raise SystemExit(f"no real boards in {folder}")
 
+    global OLD_BOARDS
+    saved_boards = (ck.get("cfg") or {}).get("old_boards") if ck is not None else None
+    OLD_BOARDS = cfg.old_boards or saved_boards or "keep"
+    if saved_boards and cfg.old_boards and cfg.old_boards != saved_boards:
+        print(f"--old-boards {cfg.old_boards}: the run was training with {saved_boards}")
+    cfg.old_boards = OLD_BOARDS
+    print(f"opponents' old boards: {OLD_BOARDS}")
     N, T = cfg.envs, cfg.steps
-    env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real)
+    env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS)
     names = env.card_names()
     hero_names = env.hero_names()
     if cfg.compile is None:
@@ -454,18 +473,35 @@ def main():
               f"tensors loaded, {len(fresh)} fresh: {', '.join(fresh) or 'none'}; "
               f"not used: {', '.join(skipped) or 'none'}")
         for r in remapped:
-            print(f"  by name: {r}")
+            print(f"  carried: {r}")
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     pool = []  # snapshot state dicts, on the CPU
     update, best, t_total = 0, 9.0, 0.0
     # best.pt and --stop-flat follow vs7 real when there are real boards
     best_by = "real" if real is not None else "std+rush"
     if ck is not None:
-        net.load_state_dict(ck["net"])
-        opt.load_state_dict(ck["opt"])
-        for g in opt.param_groups:
-            g["lr"] = cfg.lr
-        pool, update, best, t_total = ck["pool"], ck["update"], ck["best"], ck.get("t_total", 0.0)
+        try:
+            net.load_state_dict(ck["net"])
+        except RuntimeError:
+            # A checkpoint from before the 2026-11-06 opponent view: its
+            # input layers are narrower. Carry their old columns over (the
+            # network answers as it did until the new columns learn), and
+            # start Adam and the snapshot pool fresh, since their tensors and
+            # the pool's state dicts have the old shapes.
+            loaded, fresh, _, _, carried = warm_start(
+                net, cfg.model, cfg.resume, cards=names, heroes=hero_names)
+            print(f"resumed {cfg.resume}: its observation is narrower than this build's, so "
+                  f"{len(loaded)} tensors loaded, {len(fresh)} fresh: "
+                  f"{', '.join(fresh) or 'none'}")
+            for r in carried:
+                print(f"  {r}")
+            opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
+            pool, update, best, t_total = [], ck["update"], ck["best"], ck.get("t_total", 0.0)
+        else:
+            opt.load_state_dict(ck["opt"])
+            for g in opt.param_groups:
+                g["lr"] = cfg.lr
+            pool, update, best, t_total = ck["pool"], ck["update"], ck["best"], ck.get("t_total", 0.0)
         if ck.get("best_by", "std+rush") != best_by:
             best = 9.0  # best.pt was chosen by another eval: start over
         print(f"resumed {cfg.resume} at update {update}")
