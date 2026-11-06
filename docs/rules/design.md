@@ -184,6 +184,21 @@ that act in a fight.
 - Anomalies (one game-wide rule change per lobby) are not in the game right
   now. Buddies and Duos are out of scope.
 
+## The leaderboard (Era, 2026-11-06)
+
+- Every player sees, for each player on the leaderboard:
+  - **Tribe:** the top tribe and its count, e.g. "Aberrations 5", from that
+    player's board at the start of the last fight (after their shop turn,
+    before combat), so it changes once per round, not with the live board.
+    A neutral or empty board shows nothing. Two or more tribes with the same
+    top count show as mixed minions. An all-types minion (Amalgam) counts
+    for every tribe: 3 Beasts and 2 Amalgams show "Beasts 5" (Era). A
+    two-type minion counts for both its types (inferred from that, not
+    confirmed).
+  - **Last three fights:** the outcome of each and the damage dealt or taken.
+- Era judges opponents from this, the turn, their tier and their trinkets,
+  not from remembering old boards (docs/notes/era-strategy.md).
+
 ## The fight
 
 Each player is paired with another. With an odd number alive, one player
