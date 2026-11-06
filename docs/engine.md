@@ -1898,8 +1898,7 @@ Deleting `.venv` undoes it.
 - Night strength, for overnight runs with the desktop off, keeps what the
   recompute pass would throw away: `--no-recompute` calls the attn blocks
   directly instead of again in the backward pass (the same loss and
-  gradients, bit for bit on CPU, and about a fifth off an update if the
-  plan's estimate holds), and `--obs-fp16` stores the rollout's observations
+  gradients, bit for bit on CPU), and `--obs-fp16` stores the rollout's observations
   in float16, widened again just before the network. Float16 rounds nothing
   there: every observation is a whole number and the largest in 32,768 real
   observations was 472, below the 2048 float16 holds exactly. `--vram-gb 15`
@@ -1907,13 +1906,16 @@ Deleting `.venv` undoes it.
   no room for Hyprland because `bg-day` puts a running run back to half
   strength before the desktop comes back. The micro-batch is 8192 for the
   attn default and 4096 for r1105-big's 4 layers of d256 (2048 for any other
-  shape). Those peaks are estimates from counting the activations autograd
-  keeps, because no GPU was reachable when this was written: big 4096 about
-  7.8 GB and big 8192 about 13.3 GB, small 8192 about 7.4 GB, so the first
-  night run should read `torch.cuda.max_memory_allocated` before raising the
-  big one. Size hardly shows in speed: the runs' own metrics give r1105-big
-  9.60 s per update at full strength and 9.90 s at half (micro-batch 2048),
-  r1105-p37 6.90 s.
+  shape). Measured 2026-11-06 with the desktop off (nvidia-smi peak,
+  seconds per update between updates 20 and 40): big full 15.2 GB 11.1 s,
+  big night 4096 10.9 GB 10.5 s, big night 8192 out of memory at the 15 GB
+  cap; small full 14.2 GB about 6.5 s, small night 8192 12.3 GB about the
+  same. So night saves memory but hardly time (about 5% on the big model,
+  not the fifth the plan guessed): the update is not limited by the
+  recompute. Full's high peak is the caching allocator taking what is free.
+  One small night test died in its first 20 updates on NaN action
+  probabilities and its repeat ran clean; cause unknown, and go.sh would
+  restart such a crash from the last checkpoint.
 - Day to day, `./train/go.sh HOURS` continues the current run
   (`r1025-attn`) for that many hours and stops, detached, resuming from
   the last checkpoint after a crash; `./train/stop.sh` stops it, and
