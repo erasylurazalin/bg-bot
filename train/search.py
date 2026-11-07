@@ -255,6 +255,9 @@ class Searcher:
         self.seconds = 0.0
         # The turn each game's last real-trade judge ran in.
         self._judged: dict[tuple, int] = {}
+        # Whether the action this decision returns is part of a dominating
+        # cycle (search_games.py records it for the training weight).
+        self.last_dominating = False
 
     # -- the network -------------------------------------------------------
 
@@ -323,16 +326,21 @@ class Searcher:
         # the line was judged on, and the line's next action may no longer
         # exist. Dropping it and judging the real position afresh is the only
         # safe thing; on one searching seat the check always passes.
+        self.last_dominating = False
         plan = self.plans.get(key)
         if plan is not None:
-            turn, actions = plan
+            turn, actions = plan[0], plan[1]
+            flags = plan[2] if len(plan) > 2 else [False] * len(actions)
             if turn == b.turn and actions:
                 S.observe()
                 a = actions[0]
                 if 0 <= a < bgpy.N_ACTIONS and S.mask[0, a]:
                     actions.pop(0)
+                    self.last_dominating = bool(flags.pop(0))
                     if not actions:
                         del self.plans[key]
+                    else:
+                        self.plans[key] = (turn, actions, flags)
                     return a
                 self.plans_abandoned += 1
             del self.plans[key]
@@ -343,6 +351,7 @@ class Searcher:
             # The same boards and seeds for every candidate of this decision.
             b.set_fights(self.fights, self.fight_seed)
         pending: list[int] = []
+        pending_dom: list[bool] = []
         cycles: list[Candidate] = []
         base = 0
         while True:
@@ -370,21 +379,25 @@ class Searcher:
             self.cycles_played += 1
             self.log(f"dominance: {best.label} {best.variant} cost {best.cost}")
             pending.extend(best.actions)
+            pending_dom.extend([True] * len(best.actions))
             base = best.slot
-        def play(actions) -> int:
+        def play(actions, dominating: bool = False) -> int:
             """Hand the line back: its first action now, the rest as a plan."""
             pending.extend(actions)
-            self.plans[key] = (b.turn, pending[1:])
+            pending_dom.extend([dominating] * len(actions))
+            self.last_dominating = bool(pending_dom[0]) if pending else False
+            self.plans[key] = (b.turn, pending[1:], pending_dom[1:])
             return pending[0]
 
         if S.state[base] != 0:
             # The dominance cycles ended the turn (or the game).
             if not pending:
+                self.last_dominating = False
                 return int(self._masked_action(S, [base])[0])
             return play([])
         if not self.want_item3(key, b.turn):
             # The network's action comes after the cycles already played.
-            return play([int(self._masked_action(S, [base])[0])])
+            return play([int(self._masked_action(S, [base])[0])], False)
         # The plain player's forced mask applies to the search's own choice
         # too: on the forced turns the search may only take the forced press
         # (it has no cycles then). Elsewhere the mask is the legal mask.
@@ -394,7 +407,7 @@ class Searcher:
         if not restricted:
             cands += cycles
         if not cands:
-            return play([int(self._masked_action(S, [base])[0])])
+            return play([int(self._masked_action(S, [base])[0])], False)
         # The network's own choice (greedy, the prior), at the forced mask. A
         # candidate must beat it by `margin` to override it.
         prior = int(self._masked_action(S, [base], sample=False)[0])

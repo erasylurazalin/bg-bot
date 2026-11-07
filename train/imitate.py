@@ -98,6 +98,9 @@ def args():
     a.add_argument("--anchor-kl", type=float, default=0.0, metavar="W",
                    help="add W x KL(start network's policy || current policy) on the same "
                         "legal mask, to stay near --init-from; 0 (the default) is off")
+    a.add_argument("--dom-weight", type=float, default=1.0,
+                   help="weight for examples a dominating cycle played (dom.u8 in the "
+                        "recording, search_games.py); 1 (the default) is off")
     a.add_argument("--device", help="torch device (default: cuda when there is one)")
     return a.parse_args()
 
@@ -190,6 +193,12 @@ def load(folder):
     obs = obs.reshape(count, bgpy.OBS_SIZE)
     mask = mask.reshape(count, bgpy.N_ACTIONS) != 0
     meta = read_meta(folder / "meta.tsv", count)
+    dom_path = folder / "dom.u8"
+    if dom_path.exists():
+        dom = np.fromfile(dom_path, np.uint8)
+        if dom.size != count:
+            raise SystemExit(f"{dom_path} is {dom.size} bytes, expected {count}")
+        meta["dom"] = dom != 0
     legal = mask[np.arange(count), meta["action"]]
     if not legal.all():
         bad = int((~legal).sum())
@@ -200,6 +209,8 @@ def load(folder):
             meta[k] = meta[k][keep]
         for k in ("game", "kind", "patch"):
             meta[k] = [v for v, ok in zip(meta[k], keep) if ok]
+        if "dom" in meta:
+            meta["dom"] = meta["dom"][keep]
     return header, obs, mask, meta
 
 
@@ -230,6 +241,8 @@ def load_many(folders):
         for j, p in enumerate(parts):
             vals.extend(f"{j}:{v}" for v in p[3][key])
         meta[key] = vals
+    meta["dom"] = np.concatenate([
+        p[3].get("dom", np.zeros(len(p[3]["action"]), bool)) for p in parts])
     return header, obs, mask, meta
 
 
@@ -377,6 +390,9 @@ def main():
         w_all = weights(meta["place"]).astype(np.float32)
     else:
         w_all = np.ones(len(obs), np.float32)
+    dom = meta.get("dom", np.zeros(len(obs), bool))
+    if cfg.dom_weight != 1.0:
+        w_all = w_all * np.where(dom, cfg.dom_weight, 1.0).astype(np.float32)
     targets = ((4.5 - np.clip(meta["place"], 1, 8)) / 3.5).astype(np.float32) \
         if cfg.value else None
     train_idx, val_idx, held = split_games(meta["game"], cfg.holdout, cfg.seed)
@@ -390,7 +406,8 @@ def main():
     patches = {p: meta["patch"].count(p) for p in sorted(set(meta["patch"]))}
     data_label = ", ".join(str(d) for d in data)
     print(f"{data_label}: {len(obs)} examples from {len(set(meta['game']))} games "
-          f"(git {header.get('git')}), patches {patches}, skipped {header.get('skipped')}")
+          f"(git {header.get('git')}), patches {patches}, skipped {header.get('skipped')}, "
+          f"dominating {int(dom.sum())} (weight {cfg.dom_weight:g})")
     print(f"split by game with seed {cfg.seed}: {len(train_idx)} training and {len(val_idx)} "
           f"held-out examples ({len(set(meta['game'])) - len(held)} and {len(held)} games)",
           flush=True)
@@ -484,7 +501,8 @@ def main():
                                     "batch": cfg.batch, "seed": cfg.seed,
                                     "weight": cfg.weight, "value": cfg.value,
                                     "value_weight": cfg.value_weight,
-                                    "anchor_kl": cfg.anchor_kl}},
+                                    "anchor_kl": cfg.anchor_kl,
+                                    "dom_weight": cfg.dom_weight}},
                        out / "best.pt")
         elif epoch - best_epoch >= cfg.patience:
             print(f"stopping: held-out top-1 has not improved for {epoch - best_epoch} epochs",
@@ -536,7 +554,9 @@ def main():
          f"- training: Adam lr {cfg.lr}, batch {cfg.batch}, "
          f"weight {'(9 - place) / 8' if cfg.weight == 'place' else '1 for every example'}, "
          f"cross-entropy over the legal actions plus {cfg.value_weight:g} x value loss "
-         f"(0.5 x MSE to (4.5 - place) / 3.5)"),
+         f"(0.5 x MSE to (4.5 - place) / 3.5)"
+         + (f", dominating-cycle examples weighted {cfg.dom_weight:g}"
+            if cfg.dom_weight != 1.0 else "")),
         f"- device: {dev}",
         *([f"- anchor: {cfg.anchor_kl:g} x KL to `{cfg.init_from}`"] if anchor is not None else []),
         "",

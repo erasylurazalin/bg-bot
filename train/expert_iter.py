@@ -174,7 +174,7 @@ def measure_plain(net, dev, boards, cfg, folder: Path, tests: dict, net_sha: str
         cmd = [PYTHON, str(ROOT / "train" / "era_turns.py"),
                "--ckpt", str(folder / "ckpt.pt"), "--name", folder.name,
                "--sample", str(cfg.era_sample), "--repeats", str(cfg.era_repeats),
-               "--players", "plain,search", "--seed", str(cfg.seed),
+               "--players", cfg.era_players, "--seed", str(cfg.seed),
                "--out", str(out)]
         def run_era():
             run(cmd, folder / "era_turns.log")
@@ -313,6 +313,18 @@ def args():
     a.add_argument("--era-repeats", type=int, default=3)
     a.add_argument("--search-games", type=int, default=40,
                    help="games of the with-search placement test")
+    a.add_argument("--with-search", action=argparse.BooleanOptionalAction, default=True,
+                   help="run the with-search placement test")
+    a.add_argument("--era-players", default="plain,search",
+                   help="players for the Era-turn benchmark")
+    a.add_argument("--imitate-lr", type=float, default=0.0,
+                   help="imitate.py --lr (0: its default)")
+    a.add_argument("--anchor-kl", type=float, default=0.0,
+                   help="imitate.py --anchor-kl (0: off)")
+    a.add_argument("--dom-weight", type=float, default=1.0,
+                   help="imitate.py --dom-weight (1: off)")
+    a.add_argument("--imitate-epochs", type=int, default=0,
+                   help="imitate.py --max-epochs (0: its default)")
     a.add_argument("--playouts", type=int, default=1)
     a.add_argument("--fights", type=int, default=20)
     a.add_argument("--fight-weight", type=float, default=1.0)
@@ -418,14 +430,23 @@ def main() -> None:
             d = runs / f"xit-{n - k}" / "search"
             if (d / "header.json").exists():
                 train_data.append(str(d))
+        plain_data = folder / "plain"
+        if (plain_data / "header.json").exists():
+            train_data.append(str(plain_data))
         best = folder / "imitate" / "best.pt"
         if not (cfg.resume and best.exists()):
             cmd = [PYTHON, str(ROOT / "train" / "imitate.py"),
                    "--data", *train_data, "--out", str(folder / "imitate"),
                    "--init-from", str(ck), "--weight", "none", "--value",
                    "--value-weight", "0.5", "--seed", str(cfg.seed)]
-            if cfg.vram_gb > 0:
-                cmd += []  # imitate has no memory cap flag; the GPU is off then
+            if cfg.imitate_lr > 0:
+                cmd += ["--lr", str(cfg.imitate_lr)]
+            if cfg.anchor_kl > 0:
+                cmd += ["--anchor-kl", str(cfg.anchor_kl)]
+            if cfg.dom_weight != 1.0:
+                cmd += ["--dom-weight", str(cfg.dom_weight)]
+            if cfg.imitate_epochs > 0:
+                cmd += ["--max-epochs", str(cfg.imitate_epochs)]
             run(cmd, folder / "imitate.log")
         if not best.exists():
             raise SystemExit(f"imitate wrote no {best}")
@@ -450,7 +471,7 @@ def main() -> None:
         net = load(str(ck), dev)
         net.eval()
         measure_plain(net, dev, boards, cfg, folder, tests, net_sha,
-                      force=cfg.force_measure, search40=True, era=True)
+                      force=cfg.force_measure, search40=cfg.with_search, era=True)
         write_report(folder, tests, baseline, cfg)
         del net
 
