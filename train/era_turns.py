@@ -239,12 +239,21 @@ def run(net, dev, args, replays, bad, fights, out: Path) -> tuple[list[dict], li
                 replay.path(turn, args.seed, True)
             except ValueError as e:
                 skipped.append({"file": replay.file, "turn": turn, "why": str(e)})
-    if args.turns:
-        seatable = []
+    seatable = []
+    if args.turns or args.sample:
         for replay in replays:
             for turn in replay.turns(args.from_turn):
                 if not any(s["file"] == replay.file and s["turn"] == turn for s in skipped):
                     seatable.append((replay, turn))
+    if args.sample:
+        # N turns spread evenly over the seatable turns, every k-th, so the
+        # sample covers all games and comps instead of the first N files.
+        n = min(args.sample, len(seatable))
+        chosen = [seatable[int((i + 0.5) * len(seatable) / n)] for i in range(n)] if n else []
+        wanted = {(r.file, t) for r, t in chosen}
+        print(f"sample: {len(wanted)} of {len(seatable)} seatable turns, evenly spread",
+              flush=True)
+    elif args.turns:
         wanted = {(r.file, t) for r, t in seatable[: args.turns]}
     else:
         wanted = None
@@ -347,6 +356,9 @@ def run(net, dev, args, replays, bad, fights, out: Path) -> tuple[list[dict], li
                                     playouts=args.playouts, fights=args.search_fights,
                                     fight_weight=args.fight_weight,
                                     seed=args.seed * 31 + repeat, replan=args.replan,
+                                    playout_temperature=args.playout_temperature,
+                                    playout_actions=args.playout_actions,
+                                    margin=args.margin,
                                 )
                                 searcher.names = names
                                 searcher.force = eval_search.forced
@@ -758,8 +770,12 @@ def write_report(records, skipped, bad, args, out: Path, run_seconds: float) -> 
         + ", ".join(f"{v} {k}" for k, v in skip_kinds(skipped).most_common()) + ")",
         f"- Players: {', '.join(players)}; repeats: {args.repeats}; "
         f"fights per opponent: {args.fights}; typical boards: {args.typical}",
+        (f"- Sample: {args.sample} turns spread evenly over the seatable turns"
+         if args.sample else "- Sample: all seatable turns"),
         f"- Search: fight weight {args.fight_weight:g}, {args.playouts} playouts, "
-        f"{args.search_fights} fights, replan {args.replan}",
+        f"playout temperature {args.playout_temperature:g}, at most {args.playout_actions} "
+        f"playout actions, margin {args.margin:g}, {args.search_fights} fights, "
+        f"replan {args.replan}",
         f"- Run time: {run_seconds / 60:.1f} min of {args.dev}",
         f"- Action files that do not load: {len(bad)}"
         + ("" if not bad else " (" + "; ".join(bad) + ")"),
@@ -979,8 +995,17 @@ def main() -> None:
     ap.add_argument("--max-actions", type=int, default=200,
                     help="the most actions one turn may take")
     ap.add_argument("--turns", type=int, default=0, help="play only the first N turns")
+    ap.add_argument("--sample", type=int, default=0,
+                    help="play N turns spread evenly over the seatable turns (0: all)")
     ap.add_argument("--seed", type=int, default=11)
-    ap.add_argument("--playouts", type=int, default=2, help="the search's playouts")
+    ap.add_argument("--playouts", type=int, default=1,
+                    help="the search's playouts (greedy playouts are deterministic, 1 is enough)")
+    ap.add_argument("--playout-temperature", type=float, default=0.0,
+                    help="the network's temperature after a candidate's first move (0 = greedy)")
+    ap.add_argument("--playout-actions", type=int, default=60,
+                    help="the most shop actions one playout takes")
+    ap.add_argument("--margin", type=float, default=0.0,
+                    help="a candidate must beat the network's own choice by this value margin")
     ap.add_argument("--search-fights", type=int, default=20,
                     help="real boards per search playout")
     ap.add_argument("--fight-weight", type=float, default=1.0,
@@ -1004,6 +1029,8 @@ def main() -> None:
                     help="the run time to report (0: measure this process); a rerun "
                          "that only rewrites the report keeps the first run's")
     args = ap.parse_args()
+    if args.turns and args.sample:
+        raise SystemExit("--turns and --sample are exclusive: --sample spreads N, --turns takes the first N")
 
     args.players = [p.strip() for p in args.players.split(",") if p.strip()]
     for player in args.players:

@@ -1849,14 +1849,26 @@ free, the Dragons buffed).
   as it was; the Tavern's contents, the freeze, `recent_buys` and the action
   count are ignored. The doc comment on `Position` lists every field.
 - **Judge 2, real trades** (`Searcher.score`): a move or a cycle that costs
-  Gold is played out to the end of the turn, `--playouts` times, with the
-  network sampling its moves. Each finished turn is scored as the network's
-  value of the position plus `--fight-weight` times the Health the coming fight
-  is expected to cost against `--fights` boards of Era's real games for the
-  turn (preferring the next opponent's tier and leaderboard tribe, the whole
-  bucket when fewer than 5 match), fought with `fight_with_hands` exactly as
-  `Game::combat` fights a real seat. The same boards and the same seeds for
-  every candidate of one decision.
+  Gold is played out to the end of the turn, `--playouts` times. After the
+  candidate's own first move the network plays at `--playout-temperature`
+  (default 0, greedy: sampled playouts were the passivity bug, 2026-11-07),
+  for at most `--playout-actions` shop actions (default 60). Move, Freeze and
+  End Turn are not played in a playout: a greedy network loops on board moves,
+  and ending the turn there would run the coming fight and start the next
+  turn. The playout stops if its turn changes. End Turn itself is exact: the
+  copy's shop turn is ended with `end_shop_turn` (no fight) and scored as it
+  stands, while the other playouts finish. Each finished turn is scored as the
+  network's value of the position plus `--fight-weight` times the Health the
+  coming fight is expected to cost against `--fights` boards of Era's real
+  games for the turn (preferring the next opponent's tier and leaderboard
+  tribe, the whole bucket when fewer than 5 match), fought with
+  `fight_with_hands` exactly as `Game::combat` fights a real seat. The same
+  boards and the same seeds for every candidate of one decision.
+- **The network's prior** is the greedy action at the forced mask. A candidate
+  must beat its score by `--margin` (default 0, which still breaks ties toward
+  the network) or the search takes the prior. The forced mask (`ppo.force_mask`)
+  also restricts the candidates, so the search cannot skip a forced Dark
+  Discovery or level that the plain player must press.
 - **`--replan`** says when judge 2 runs: `every` (the default) at every shop
   decision, `turn` once per turn (about ten times cheaper, the rest of the
   turn is the network with the dominance cycles), or `cycle` never
@@ -1864,7 +1876,9 @@ free, the Dragons buffed).
 - **`train/eval_search.py`** is the measurement: one learner against seven
   real-board seats, plain network and search over the same seeds, plus the Blue
   Shell test, the Warden test and the cycle rate over Era's logged turns
-  (`bgpy.shop_replay_turns`, `bgpy.sandbox_position`).
+  (`bgpy.shop_replay_turns`, `bgpy.sandbox_position`). `train/era_turns.py
+  --sample N` plays N turns spread evenly over the seatable turns (every
+  k-th, all comps), not the first N in file order; 0 plays all.
 
 ## Era's turns, with Era's luck
 

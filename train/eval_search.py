@@ -282,7 +282,9 @@ def shell_test(net, args, dev, boards) -> None:
         for batch in found:
             copy = batch.copy()
             s = Searcher(net, dev=dev, mode=mode, playouts=args.playouts, fights=args.fights,
-                         fight_weight=args.fight_weight, seed=args.seed, replan=args.replan)
+                         fight_weight=args.fight_weight, seed=args.seed, replan=args.replan,
+                         playout_temperature=args.playout_temperature,
+                         playout_actions=args.playout_actions, margin=args.margin)
             s.names = names
             s.force = forced
             s.fights = 0 if not batch.n_fights else s.fights
@@ -311,7 +313,9 @@ def detail(net, args, dev, batch, names, shell) -> None:
     """One Blue Shell position in full: the candidates that involve the Shell,
     their cost and the dominance verdict with what blocked it."""
     s = Searcher(net, dev=dev, mode="search", playouts=args.playouts, fights=args.fights,
-                 fight_weight=args.fight_weight, seed=args.seed, replan="every")
+                 fight_weight=args.fight_weight, seed=args.seed, replan="every",
+                 playout_temperature=args.playout_temperature,
+                 playout_actions=args.playout_actions, margin=args.margin)
     s.names = names
     s.force = forced
     copy = batch.copy()
@@ -349,7 +353,9 @@ def warden_test(net, args, dev) -> None:
     batch = bgpy.sandbox_position(args.seed, board, ["Draconic Warden"], [], 10, 5)
     names = batch.card_names()
     s = Searcher(net, dev=dev, mode="search", playouts=args.playouts, fights=0,
-                 seed=args.seed, replan="every", log=print)
+                 seed=args.seed, replan="every", log=print,
+                 playout_temperature=args.playout_temperature,
+                 playout_actions=args.playout_actions, margin=args.margin)
     s.names = names
     S = Slots(batch)
     S.observe()
@@ -397,7 +403,9 @@ def cycle_rate(net, args, dev) -> None:
         total_cycles = 0
         for batch in batches[: args.turns]:
             s = Searcher(net, dev=dev, mode=mode, playouts=args.playouts, fights=0,
-                         fight_weight=0.0, seed=args.seed, replan=args.replan)
+                         fight_weight=0.0, seed=args.seed, replan=args.replan,
+                         playout_temperature=args.playout_temperature,
+                         playout_actions=args.playout_actions, margin=args.margin)
             turn = batch.copy()
             s.names = turn.card_names()
             tp = TurnPlay(turn, s, s.names).run()
@@ -466,7 +474,8 @@ def placement(net, args, dev, boards) -> None:
         t = time.time()
         searcher = Searcher(net, dev=dev, mode="search", playouts=args.playouts,
                             fights=args.fights, fight_weight=weight, seed=args.seed,
-                            replan=args.replan)
+                            replan=args.replan, playout_temperature=args.playout_temperature,
+                            playout_actions=args.playout_actions, margin=args.margin)
         rec, buys = play(net, args.games, args.seed, dev, boards=boards,
                          searcher=searcher, gen_seed=args.seed, track=True)
         s = summarize(rec, buys, searcher)
@@ -486,7 +495,14 @@ def main() -> None:
     ap.add_argument("--ckpt", default=str(DEFAULT_CKPT), help="the network")
     ap.add_argument("--games", type=int, default=200, help="games per run")
     ap.add_argument("--seed", type=int, default=11)
-    ap.add_argument("--playouts", type=int, default=4, help="playouts per candidate")
+    ap.add_argument("--playouts", type=int, default=1,
+                    help="playouts per candidate (greedy playouts are deterministic, 1 is enough)")
+    ap.add_argument("--playout-temperature", type=float, default=0.0,
+                    help="the network's temperature after a candidate's first move (0 = greedy)")
+    ap.add_argument("--playout-actions", type=int, default=60,
+                    help="the most shop actions one playout takes")
+    ap.add_argument("--margin", type=float, default=0.0,
+                    help="a candidate must beat the network's own choice by this value margin")
     ap.add_argument("--fights", type=int, default=20, help="real boards per playout")
     ap.add_argument("--fight-weight", type=float, default=1.0,
                     help="weight of the expected Health change against the value "

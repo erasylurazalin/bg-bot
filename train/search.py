@@ -57,6 +57,14 @@ KIND_OF = np.array(
     [k for k, (_, n) in enumerate(bgpy.ACTION_KINDS) for _ in range(n)], np.int32
 )
 FIRST = {name: int(np.nonzero(KIND_OF == k)[0][0]) for k, name in enumerate(KINDS)}
+SPAN = {name: n for name, n in bgpy.ACTION_KINDS}
+# Moves and Freeze are legal almost always (Move even with no Gold), so a
+# greedy playout loops on them to the action cap. The playout spends: it buys,
+# plays, sells, rolls, levels and presses the hero power, then ends the turn.
+PLAYOUT_SKIP = np.array(
+    list(range(FIRST["move"], FIRST["move"] + SPAN["move"]))
+    + list(range(FIRST["freeze"], FIRST["freeze"] + SPAN["freeze"])), np.int64
+)
 K_BUY = KINDS.index("buy")
 K_SELL = KINDS.index("sell")
 K_PLAY = KINDS.index("play")
@@ -195,6 +203,9 @@ class Searcher:
         replan="every",
         max_actions=200,
         temperature=1.0,
+        playout_temperature=0.0,
+        playout_actions=60,
+        margin=0.0,
         cycle_variants="all",
         log=None,
     ):
@@ -206,9 +217,23 @@ class Searcher:
         self.fight_weight = float(fight_weight)
         self.replan = replan
         self.max_actions = int(max_actions)
+        # The network's own action (plain, and a line's answers) samples at
+        # `temperature`; the moves that finish a candidate's turn sample at
+        # `playout_temperature` (0 = greedy, the fix for noisy playouts).
         self.temperature = float(temperature)
+        self.playout_temperature = float(playout_temperature)
+        # The most shop actions one playout takes. A greedy network can cycle
+        # buy/sell/roll forever; 60 is a whole long turn and bounds the cost.
+        self.playout_actions = max(1, int(playout_actions))
+        # A candidate must beat the network's own choice by this much (value
+        # units) to override it. 0 still breaks ties toward the network.
+        self.margin = float(margin)
         self.cycle_variants = cycle_variants
         self.log = log or (lambda *a, **k: None)
+        # An optional diagnostic hook: called with each decision's candidate
+        # scores after `score` (a list of dicts, see `score`). None is off.
+        self.trace = None
+        self.trace_tag = None
         # A forced mask (ppo.force_mask), or None: the network's choices in a
         # search and the plain baseline must be forced the same way.
         self.force = None
@@ -230,7 +255,18 @@ class Searcher:
 
     # -- the network -------------------------------------------------------
 
-    def _masked_action(self, S: Slots, rows, sample=True) -> np.ndarray:
+    def _mask_for(self, S: Slots, rows) -> np.ndarray:
+        """The legal mask with ppo.force_mask applied, as the plain player
+        sees it. The search's own candidates use this too: it must not skip a
+        forced Dark Discovery or level."""
+        mask = S.mask[rows].copy()
+        if self.force is None:
+            return mask
+        o = torch.from_numpy(np.ascontiguousarray(S.obs[rows])).to(self.dev)
+        return self.force(o, torch.from_numpy(mask).to(self.dev)).cpu().numpy()
+
+    def _masked_action(self, S: Slots, rows, sample=True, temperature=None,
+                       allow_end=True, skip=()) -> np.ndarray:
         mask = torch.from_numpy(np.ascontiguousarray(S.mask[rows]))
         o = torch.from_numpy(np.ascontiguousarray(S.obs[rows])).to(self.dev)
         with torch.no_grad():
@@ -241,9 +277,19 @@ class Searcher:
             # ones ppo.py's own evaluation forces: the searcher's network
             # decisions and the plain baseline must be the same player.
             m = self.force(o, mask.to(self.dev)).cpu()
+        temp = self.temperature if temperature is None else float(temperature)
+        if not allow_end or skip:
+            m = m.clone()
+            if not allow_end:
+                # A playout never ends the turn early: the final position is
+                # made by `end_all`, so ending here would fight the coming
+                # fight, start the next turn and score a different decision.
+                m[:, FIRST["end"]] = False
+            for a in skip:
+                m[:, a] = False
         logits = masked(logits.float().cpu(), m)
-        if sample and self.temperature > 0:
-            probs = torch.softmax(logits / self.temperature, -1)
+        if sample and temp > 0:
+            probs = torch.softmax(logits / temp, -1)
             a = torch.multinomial(probs, 1, generator=self.gen).squeeze(1)
         else:
             a = logits.argmax(1)
@@ -290,13 +336,20 @@ class Searcher:
             S.observe()
             if S.state[base] != 0:
                 break
+            # A forced press (a Dark Discovery on turns 3 to 5) comes before
+            # any cycle: the plain player must press it, so the search does
+            # too, and no dominance cycle may skip it.
+            forced = self._mask_for(S, [base])[0]
+            if not np.array_equal(forced, S.mask[base]):
+                cycles = []
+                break
             cycles = self.cycles(S, base)
             dominating = [c for c in cycles if c.dominates]
             if not dominating:
                 break
             # Several dominating cycles: the one item 3 scores best.
             if len(dominating) > 1:
-                scores = self.score(S, dominating)
+                scores = self.score(S, dominating, base)
                 best = dominating[int(np.argmax(scores))]
             else:
                 best = dominating[0]
@@ -319,12 +372,28 @@ class Searcher:
         if not self.want_item3(key, b.turn):
             # The network's action comes after the cycles already played.
             return play([int(self._masked_action(S, [base])[0])])
-        cands = self.moves(S, base) + cycles
+        # The plain player's forced mask applies to the search's own choice
+        # too: on the forced turns the search may only take the forced press
+        # (it has no cycles then). Elsewhere the mask is the legal mask.
+        forced = self._mask_for(S, [base])[0]
+        restricted = not np.array_equal(forced, S.mask[base])
+        cands = self.moves(S, base, forced if restricted else None)
+        if not restricted:
+            cands += cycles
         if not cands:
             return play([int(self._masked_action(S, [base])[0])])
-        scores = self.score(S, cands)
-        best = cands[int(np.argmax(scores))]
-        self.log(f"item 3: {best.label} {best.variant} cost {best.cost} score {max(scores):.3f}")
+        # The network's own choice (greedy, the prior), at the forced mask. A
+        # candidate must beat it by `margin` to override it.
+        prior = int(self._masked_action(S, [base], sample=False)[0])
+        prior_i = next((k for k, c in enumerate(cands)
+                        if c.kind == "move" and c.actions == [prior]), None)
+        scores = self.score(S, cands, base)
+        best_i = int(np.argmax(scores))
+        if prior_i is not None and best_i != prior_i and \
+                scores[best_i] <= scores[prior_i] + self.margin:
+            best_i = prior_i
+        best = cands[best_i]
+        self.log(f"item 3: {best.label} {best.variant} cost {best.cost} score {scores[best_i]:.3f}")
         if best.kind == "cycle":
             self.cycles_played += 1
         return play(best.actions)
@@ -342,14 +411,21 @@ class Searcher:
 
     # -- the candidates ----------------------------------------------------
 
-    def moves(self, S: Slots, base: int = 0) -> list[Candidate]:
+    def moves(self, S: Slots, base: int = 0, mask=None) -> list[Candidate]:
         """Every legal action: the brief's first half of the candidates."""
         out = []
         desc = S.describe(base)
-        for a in np.nonzero(S.mask[base])[0]:
+        legal = S.mask[base] if mask is None else mask
+        for a in np.nonzero(legal)[0]:
             a = int(a)
             label = self.action_label(desc, a)
             slot = S.push(base)
+            if a == FIRST["end"]:
+                # End Turn is applied by `end_all` after the playouts, not by
+                # `step`: stepping it runs the coming fight and starts the next
+                # turn, which is not the position this decision judges.
+                out.append(Candidate([a], slot, label, "end"))
+                continue
             S.act(slot, [a])
             out.append(Candidate([a], slot, label, "move"))
         return out
@@ -585,31 +661,56 @@ class Searcher:
 
     # -- the second judge: playouts, fights and the value ------------------
 
-    def score(self, S: Slots, cands: list[Candidate]) -> np.ndarray:
+    def score(self, S: Slots, cands: list[Candidate], base: int = 0) -> np.ndarray:
         """The average score of every candidate: the network's value of the
         end of the turn plus the fight weight times the expected Health the
         coming fight costs."""
         P = self.playouts
         rows: list[int] = []
+        end_slots: list[int] = []
         for c in cands:
             for _ in range(P):
                 slot = S.push(c.slot)
-                S.b.mark(slot)
                 rows.append(slot)
-        # The rest of the turn, step by step, for every playout at once.
-        for _ in range(self.max_actions):
+                if c.kind == "end":
+                    end_slots.append(slot)
+        if end_slots:
+            # End Turn is exact: end the shop turn now, before the fight. The
+            # row then waits at state 2 while the other playouts finish.
+            flags = np.zeros(len(S.lines), bool)
+            flags[end_slots] = True
+            S.b.end_all(flags)
+        turn = S.b.slot_turn(rows[0]) if rows else 0
+        # The rest of the turn, step by step, for every playout at once. A
+        # playout never leaves the decision's turn: End Turn is masked and a
+        # turn change stops the row, so the value is of this end of turn.
+        for _ in range(self.playout_actions):
             S.observe()
-            active = [s for s in rows if S.state[s] == 0]
+            active = []
+            for s in rows:
+                if S.state[s] not in (0, 1) or S.b.slot_turn(s) != turn:
+                    continue
+                legal = S.mask[s].copy()
+                legal[PLAYOUT_SKIP] = False
+                legal[FIRST["end"]] = False
+                # A shop position with nothing but End Turn, Move or Freeze
+                # left is done: the playout spends, it does not shuffle the
+                # board or freeze the shop, and those are where a greedy
+                # network would otherwise loop to the 200-action cap.
+                if S.state[s] == 0 and not legal.any():
+                    continue
+                active.append(s)
             if not active:
                 break
-            a = self._masked_action(S, active, sample=True)
+            a = self._masked_action(S, active, sample=True,
+                                    temperature=self.playout_temperature,
+                                    allow_end=False,
+                                    skip=PLAYOUT_SKIP)
             actions = np.full(len(S.lines), -1, np.int64)
             for s, x in zip(active, a):
                 actions[s] = int(x)
             S.b.step_all(actions)
             self.playout_steps += 1
-            # An improving step along the way is taken: the mark moves with it.
-            S.b.dominating(S.dom[: len(S.lines)], S.better[: len(S.lines)])
         end = np.zeros(len(S.lines), bool)
         end[rows] = True
         S.b.end_all(end)
@@ -626,6 +727,15 @@ class Searcher:
         health = health[rows].astype(np.float64)
         boards = max(1, S.b.n_fights)
         score = value + self.fight_weight * health / (HEALTH_SCALE * boards)
+        if self.trace is not None:
+            self.trace({
+                "tag": self.trace_tag,
+                "base": base,
+                "cands": cands,
+                "scores": score.reshape(len(cands), P).copy(),
+                "values": value.reshape(len(cands), P).copy(),
+                "health": health.reshape(len(cands), P).copy(),
+            })
         return score.reshape(len(cands), P).mean(1)
 
     # -- counters ----------------------------------------------------------
