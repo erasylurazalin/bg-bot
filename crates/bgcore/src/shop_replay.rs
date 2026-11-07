@@ -4139,6 +4139,36 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
     Ok(Seated { game: loaded.game, actions, missing, answer })
 }
 
+/// The game a logged turn starts from, seated exactly as the shop replay
+/// seats the turn's first step (`train/eval_search.py`, the search brief's
+/// cycle-rate test): the state the log shows before that step, with what the
+/// turn had already done to the player's numbers. None when the file has no
+/// step to seat. Answers to a choice the turn's own play opens are the
+/// player's, as in the replay.
+pub fn turn_start_game(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    seed: u64,
+) -> Option<(Game, Vec<String>)> {
+    let step = turn.actions.first()?;
+    let before = state_before(turn, 0)?;
+    let turn_index = file.turns.iter().position(|t| t.turn == turn.turn).unwrap_or(0);
+    let one = OneStep {
+        file,
+        before,
+        step,
+        turn: turn.turn,
+        turn_index,
+        index: 0,
+        armed: whistle_armed(file, turn_index, 0),
+        last_spell: last_tavern_spell(data, ids, file, turn_index, 0),
+    };
+    let seated = seat(data, ids, &one, seed).ok()?;
+    Some((seated.game, seated.missing))
+}
+
 /// Apply one step to a seated state and snapshot the result. The error is what
 /// made the step impossible, which makes it incomplete or illegal.
 fn run_once(

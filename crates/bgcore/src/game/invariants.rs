@@ -16,6 +16,11 @@ impl Game {
     /// Checked after every step in debug builds; the fuzzer calls it in
     /// release too.
     pub fn check_invariants(&self) -> Result<(), String> {
+        if self.pool_untracked {
+            // A search copy puts every pool copy back before each Refresh it
+            // plays (crate::search): its pool is not the game's accounting.
+            return Ok(());
+        }
         let cards = &self.data.cards;
         let mut held = [0u32; MAX_POOL_CARDS];
         for (i, pl) in self.players.iter().enumerate() {

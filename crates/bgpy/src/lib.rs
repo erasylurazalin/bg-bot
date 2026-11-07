@@ -17,6 +17,7 @@ use std::sync::Arc;
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec};
+use bgcore::search::Position;
 use bgcore::{ACTION_KINDS, Action, Data, Game, Keywords, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES};
 use numpy::{PyReadonlyArray1, PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3};
 use pyo3::exceptions::PyValueError;
@@ -510,6 +511,614 @@ impl VecEnv {
     fn hero_names(&self) -> Vec<String> {
         self.data.heroes.heroes.iter().map(|h| h.name.clone()).collect()
     }
+
+    /// A search batch holding a copy of game `i` at its waiting seat
+    /// (train/search.py). The copy has its own game, RNG and pool: nothing the
+    /// search does to it touches the game here, which is stepped with the
+    /// action the search picks, exactly as without the search.
+    fn search_copy(&self, i: usize) -> PyResult<SearchBatch> {
+        let env = self.envs.get(i).ok_or_else(|| PyValueError::new_err("no such game"))?;
+        let p = env.game.current_player().ok_or_else(|| PyValueError::new_err("game over"))?;
+        Ok(SearchBatch::new(env.game.clone(), p, self.data.clone(), self.boards.clone()))
+    }
+}
+
+// ---- the search (train/search.py) ----
+
+/// One slot of a `SearchBatch`: a game to try one candidate on, and the
+/// position its line is compared against (`SearchBatch::mark_all`).
+struct SearchSlot {
+    game: Game,
+    mark: Option<Position>,
+}
+
+/// The search's copies of one game's shop decision: every candidate gets a
+/// slot, and the slots are stepped together so the network sees one big
+/// batch. `docs/briefs/` "Search v1", `crates/bgcore/src/search.rs`.
+#[pyclass]
+struct SearchBatch {
+    data: Arc<Data>,
+    /// The seat the search plays, the same in every slot.
+    p: usize,
+    /// The turn the decision belongs to: every fight of a candidate is one of
+    /// this turn's real boards.
+    turn: u32,
+    /// Every pool card at its full copies: a playout's Refresh puts them back
+    /// (`bgcore::search::full_pool`).
+    full_pool: Vec<u8>,
+    /// The real games' boards every candidate of this decision fights, by
+    /// index into `boards_at(turn)`. Empty without real boards.
+    boards: Option<Arc<RealBoards>>,
+    fight_boards: Vec<usize>,
+    /// The seed the fights start from: the same boards and seeds for every
+    /// candidate of one decision.
+    seed: u64,
+    slots: Vec<Option<SearchSlot>>,
+}
+
+impl SearchBatch {
+    fn new(game: Game, p: usize, data: Arc<Data>, boards: Option<Arc<RealBoards>>) -> SearchBatch {
+        let turn = game.turn;
+        let full_pool = bgcore::search::full_pool(&game);
+        // The opponent this player is paired against, for the boards to
+        // fight: its tier and the tribe its leaderboard line shows.
+        let (opp_tier, opp_tribe) = match game.players[p].opponent {
+            Some(bgcore::Opponent::Player(q)) => {
+                let line = game.players[q as usize].leaderboard;
+                (Some(game.players[q as usize].tier), if line.mixed { None } else { line.top })
+            }
+            Some(bgcore::Opponent::Ghost(_)) => (game.ghost.as_ref().map(|g| g.tier), None),
+            None => (None, None),
+        };
+        let fight_boards = boards.as_ref().map_or_else(Vec::new, |b| {
+            bgcore::search::fight_boards(&data, b, turn, opp_tier, opp_tribe, FIGHT_BOARDS)
+        });
+        SearchBatch {
+            data,
+            p,
+            turn,
+            full_pool,
+            boards,
+            fight_boards,
+            seed: 0,
+            // Slot 0 is the position every candidate starts from.
+            slots: vec![Some(SearchSlot { game, mark: None })],
+        }
+    }
+
+    fn slot(&self, i: usize) -> PyResult<&SearchSlot> {
+        self.slots
+            .get(i)
+            .and_then(|s| s.as_ref())
+            .ok_or_else(|| PyValueError::new_err(format!("slot {i} is empty")))
+    }
+
+    fn slot_mut(&mut self, i: usize) -> PyResult<&mut SearchSlot> {
+        self.slots
+            .get_mut(i)
+            .and_then(|s| s.as_mut())
+            .ok_or_else(|| PyValueError::new_err(format!("slot {i} is empty")))
+    }
+}
+
+/// Boards per decision the search fights, when Python has not set
+/// `SearchBatch.fights` (the brief's default).
+const FIGHT_BOARDS: usize = 20;
+
+#[pymethods]
+impl SearchBatch {
+    /// The seat the search plays.
+    #[getter]
+    fn p(&self) -> usize {
+        self.p
+    }
+
+    #[getter]
+    fn turn(&self) -> u32 {
+        self.turn
+    }
+
+    /// How many real boards each candidate fights (0 without real boards).
+    #[getter]
+    fn n_fights(&self) -> usize {
+        self.fight_boards.len()
+    }
+
+    /// How many boards of this turn's bucket the fight draws from.
+    #[getter]
+    fn bucket(&self) -> usize {
+        self.boards.as_ref().map_or(0, |b| b.boards_at(self.turn).len())
+    }
+
+    /// Take `n` boards per candidate, evenly spread, and a seed for the
+    /// fights. Every candidate of this batch fights the same boards with the
+    /// same seeds.
+    fn set_fights(&mut self, n: usize, seed: u64) {
+        self.seed = seed;
+        let Some(boards) = self.boards.as_ref() else {
+            self.fight_boards = Vec::new();
+            return;
+        };
+        let turn = self.turn;
+        let (tier, tribe) = self.opponent_hint();
+        self.fight_boards = bgcore::search::fight_boards(&self.data, boards, turn, tier, tribe, n);
+    }
+
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// A fresh batch with a copy of slot 0: the position again, with none of
+    /// the scratch slots (a turn to play from it, in train/eval_search.py).
+    fn copy(&self) -> PyResult<SearchBatch> {
+        let game = self.slot(0)?.game.clone();
+        Ok(SearchBatch::new(game, self.p, self.data.clone(), self.boards.clone()))
+    }
+
+    /// Add `n` empty slots.
+    fn grow(&mut self, n: usize) {
+        for _ in 0..n {
+            self.slots.push(None);
+        }
+    }
+
+    /// Drop every slot from `n` on.
+    fn truncate(&mut self, n: usize) {
+        self.slots.truncate(n);
+    }
+
+    /// Slot `dst` becomes a copy of slot `src` (a new game copy: from here on
+    /// the two step apart).
+    fn set(&mut self, dst: usize, src: usize) -> PyResult<()> {
+        let game = self.slot(src)?.game.clone();
+        let mark = None;
+        let slot = self
+            .slots
+            .get_mut(dst)
+            .ok_or_else(|| PyValueError::new_err("no such slot"))?;
+        *slot = Some(SearchSlot { game, mark });
+        Ok(())
+    }
+
+    /// Append a copy of slot `src` and return its index.
+    fn push_copy(&mut self, src: usize) -> PyResult<usize> {
+        let game = self.slot(src)?.game.clone();
+        self.slots.push(Some(SearchSlot { game, mark: None }));
+        Ok(self.slots.len() - 1)
+    }
+
+    /// Take one action index on one slot. Raises when the action is not
+    /// legal: the caller built a line the engine refuses.
+    fn act(&mut self, slot: usize, actions: Vec<i64>) -> PyResult<()> {
+        let s = self.slot_mut(slot)?;
+        for a in actions {
+            let action = usize::try_from(a).ok().and_then(Action::from_index);
+            let Some(action) = action else {
+                return Err(PyValueError::new_err(format!("no action {a}")));
+            };
+            s.game
+                .step(action)
+                .map_err(|_| PyValueError::new_err(format!("illegal action {a} in slot {slot}")))?;
+        }
+        Ok(())
+    }
+
+    /// Take one action index per slot, -1 to leave a slot alone. A Refresh
+    /// draws from the full pool (a real player only roughly knows which
+    /// copies are gone); a slot whose shop turn has ended is left alone.
+    fn step_all(&mut self, py: Python<'_>, actions: PyReadonlyArray1<i64>) -> PyResult<()> {
+        let actions = actions.as_slice()?;
+        if actions.len() != self.slots.len() {
+            return Err(PyValueError::new_err("one action per slot"));
+        }
+        let p = self.p;
+        let pool = &self.full_pool;
+        let bad = py.detach(|| {
+            self.slots
+                .par_iter_mut()
+                .zip(actions.par_iter())
+                .enumerate()
+                .filter_map(|(i, (slot, &a))| {
+                    let slot = slot.as_mut()?;
+                    if a < 0 || !slot.game.shopping(p) {
+                        return None;
+                    }
+                    let Some(action) = usize::try_from(a).ok().and_then(Action::from_index) else {
+                        return Some(i);
+                    };
+                    if matches!(action, Action::Roll) {
+                        slot.game.pool.copy_from_slice(pool);
+                        slot.game.pool_untracked = true;
+                    }
+                    if slot.game.step(action).is_err() {
+                        return Some(i);
+                    }
+                    None
+                })
+                .min()
+        });
+        match bad {
+            Some(i) => Err(PyValueError::new_err(format!("illegal search action in slot {i}"))),
+            None => Ok(()),
+        }
+    }
+
+    /// End the shop turn of the slots `which` marks (every slot when the
+    /// array is empty), so a finished line sits at the position the coming
+    /// fight is played from.
+    fn end_all(&mut self, which: PyReadonlyArray1<bool>) -> PyResult<()> {
+        let p = self.p;
+        let which = which.as_slice()?;
+        if !which.is_empty() && which.len() != self.slots.len() {
+            return Err(PyValueError::new_err("one flag per slot"));
+        }
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            let Some(slot) = slot else { continue };
+            if !which.is_empty() && !which[i] {
+                continue;
+            }
+            slot.game.end_shop_turn(p);
+        }
+        Ok(())
+    }
+
+    /// The observation, legal mask and state of every slot:
+    /// `state` is 0 for a shop decision, 1 for an answer the network takes
+    /// (a Discover, a target, a trinket or hero pick) and 2 for a finished
+    /// turn or a game that is over.
+    fn observe_all(
+        &self,
+        py: Python<'_>,
+        mut obs: PyReadwriteArray2<f32>,
+        mut mask: PyReadwriteArray2<bool>,
+        mut state: PyReadwriteArray1<i8>,
+    ) -> PyResult<()> {
+        let n = self.slots.len();
+        let obs = obs.as_slice_mut()?;
+        let mask = mask.as_slice_mut()?;
+        let state = state.as_slice_mut()?;
+        if obs.len() != n * OBS_SIZE || mask.len() != n * N_ACTIONS || state.len() != n {
+            return Err(PyValueError::new_err("array sizes don't match the number of slots"));
+        }
+        let p = self.p;
+        py.detach(|| {
+            self.slots
+                .par_iter()
+                .zip(obs.par_chunks_mut(OBS_SIZE))
+                .zip(mask.par_chunks_mut(N_ACTIONS))
+                .zip(state.par_iter_mut())
+                .for_each(|(((slot, o), m), s)| {
+                    let Some(slot) = slot else {
+                        o.fill(0.0);
+                        m.fill(false);
+                        *s = 2;
+                        return;
+                    };
+                    let g = &slot.game;
+                    obs::write(g, p, o);
+                    let m: &mut [bool; N_ACTIONS] = m.try_into().unwrap();
+                    g.legal_mask(m);
+                    *s = if g.shopping(p) {
+                        0
+                    } else if g.players[p].alive && !g.over && !g.players[p].done {
+                        1
+                    } else {
+                        2
+                    };
+                });
+        });
+        Ok(())
+    }
+
+    /// What a slot's position holds, as the search reads it: Gold, Tavern
+    /// tier, Health, armor, the upgrade price, free Refreshes, the freeze, and
+    /// the hand, shop and board as `(card id, Attack, Health)` (the hand and
+    /// board with golden). Read only.
+    #[allow(clippy::type_complexity)]
+    fn describe(
+        &self,
+        slot: usize,
+    ) -> PyResult<(u8, u8, i32, i32, u8, u8, bool, Vec<(u16, i32, i32, bool)>, Vec<(u16, i32, i32)>, Vec<(u16, i32, i32, bool)>)> {
+        let g = &self.slot(slot)?.game;
+        let pl = &g.players[self.p];
+        Ok((
+            pl.gold,
+            pl.tier,
+            pl.health,
+            pl.armor,
+            pl.upgrade_cost,
+            pl.free_rolls,
+            pl.frozen,
+            pl.hand.iter().map(|m| (m.card, m.attack, m.health, m.golden)).collect(),
+            pl.shop.iter().map(|m| (m.card, m.attack, m.health)).collect(),
+            pl.board.iter().map(|m| (m.card, m.attack, m.health, m.golden)).collect(),
+        ))
+    }
+
+    /// The turn a slot's game is on.
+    fn slot_turn(&self, slot: usize) -> PyResult<u32> {
+        Ok(self.slot(slot)?.game.turn)
+    }
+
+    /// The card names of the game's card set, by id.
+    fn card_names(&self) -> Vec<String> {
+        self.data.cards.cards.iter().map(|c| c.name.clone()).collect()
+    }
+
+    /// Remember every slot's position, so `dominating` says which slots have
+    /// got at least as good since.
+    fn mark_all(&mut self) {
+        let p = self.p;
+        for slot in self.slots.iter_mut().flatten() {
+            slot.mark = Some(Position::of(&slot.game, p));
+        }
+    }
+
+    /// For every slot: does its position dominate the one it was marked at?
+    /// A dominating slot is re-marked at its new position, so the next call
+    /// judges from there. `blocked` (when asked for) says why not.
+    fn dominating(
+        &mut self,
+        mut out: PyReadwriteArray1<bool>,
+        mut better: PyReadwriteArray1<bool>,
+    ) -> PyResult<()> {
+        let n = self.slots.len();
+        let out = out.as_slice_mut()?;
+        let better = better.as_slice_mut()?;
+        if out.len() != n || better.len() != n {
+            return Err(PyValueError::new_err("array sizes don't match the number of slots"));
+        }
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            let Some(slot) = slot.as_mut() else {
+                out[i] = false;
+                better[i] = false;
+                continue;
+            };
+            let Some(mark) = slot.mark.as_ref() else {
+                out[i] = false;
+                better[i] = false;
+                continue;
+            };
+            let d = mark.judge(&slot.game);
+            out[i] = d.dominates;
+            better[i] = d.better;
+            if d.dominates {
+                slot.mark = Some(Position::of(&slot.game, self.p));
+            }
+        }
+        Ok(())
+    }
+
+    /// Judge slot `after` against slot `base`: does it dominate, is anything
+    /// better, and what blocked it. The base is read fresh, so a caller that
+    /// judged once and then changed the base gets what it asks for.
+    fn dominance(&self, base: usize, after: usize) -> PyResult<(bool, bool, Vec<String>)> {
+        let b = self.slot(base)?;
+        let a = self.slot(after)?;
+        let pos = Position::of(&b.game, self.p);
+        let d = pos.judge(&a.game);
+        Ok((d.dominates, d.better, d.blocked))
+    }
+
+    /// Mark one slot, for a line that starts from a position other than the
+    /// batch's own.
+    fn mark(&mut self, slot: usize) -> PyResult<()> {
+        let p = self.p;
+        let s = self.slot_mut(slot)?;
+        s.mark = Some(Position::of(&s.game, p));
+        Ok(())
+    }
+
+    /// The Health changes of the coming fight for every slot: the sum over
+    /// the boards, 0 when the player wins or ties one. The same boards and
+    /// the same seeds for every slot, so two candidates are compared on the
+    /// same fights.
+    fn fights(&self, py: Python<'_>, mut out: PyReadwriteArray1<i32>) -> PyResult<()> {
+        let out = out.as_slice_mut()?;
+        if out.len() != self.slots.len() {
+            return Err(PyValueError::new_err("one number per slot"));
+        }
+        let Some(boards) = self.boards.as_ref() else {
+            out.fill(0);
+            return Ok(());
+        };
+        let all = boards.boards_at(self.turn);
+        let picks = &self.fight_boards;
+        if picks.is_empty() {
+            out.fill(0);
+            return Ok(());
+        }
+        let (data, p, seed) = (&self.data, self.p, self.seed);
+        py.detach(|| {
+            self.slots
+                .par_iter()
+                .zip(out.par_iter_mut())
+                .for_each(|(slot, total)| {
+                    let Some(slot) = slot else {
+                        *total = 0;
+                        return;
+                    };
+                    let g = &slot.game;
+                    let mut sum = 0;
+                    for (k, &i) in picks.iter().enumerate() {
+                        let mut rng = Rng::new(seed ^ (k as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+                        sum += bgcore::search::fight_health_change(data, g, p, &all[i], &mut rng);
+                    }
+                    *total = sum;
+                });
+        });
+        Ok(())
+    }
+}
+
+impl SearchBatch {
+    /// The next opponent's tier and top tribe, for the boards to fight: from
+    /// slot 0, the decision's own position.
+    fn opponent_hint(&self) -> (Option<u8>, Option<bgcore::Tribe>) {
+        let Some(slot) = self.slots.first().and_then(|s| s.as_ref()) else {
+            return (None, None);
+        };
+        let g = &slot.game;
+        match g.players[self.p].opponent {
+            Some(bgcore::Opponent::Player(q)) => {
+                let line = g.players[q as usize].leaderboard;
+                (Some(g.players[q as usize].tier), if line.mixed { None } else { line.top })
+            }
+            Some(bgcore::Opponent::Ghost(_)) => (g.ghost.as_ref().map(|q| q.tier), None),
+            None => (None, None),
+        }
+    }
+}
+
+// ---- positions a test asks for (train/eval_search.py) ----
+
+/// Hand a zone back to the pool, so a hand-built position keeps the
+/// accounting exact.
+fn give_back_all(pool: &mut [u8], cards: &bgcore::CardDb, held: Vec<bgcore::Minion>) {
+    for m in held {
+        let card = cards.get(m.card);
+        if m.pool_copies > 0 && !card.token && !card.is_spell() {
+            pool[card.pool_slot as usize] += m.pool_copies;
+        }
+    }
+}
+
+fn take_card(g: &mut Game, name: &str) -> PyResult<bgcore::Minion> {
+    let c = g
+        .data
+        .cards
+        .by_name(name)
+        .ok_or_else(|| PyValueError::new_err(format!("no card {name}")))?;
+    let card = g.data.cards.get(c);
+    let (slot, copies) = (card.pool_slot as usize, !card.token && !card.is_spell());
+    let copies = if copies && slot < g.pool.len() {
+        g.pool[slot] -= 1;
+        1
+    } else {
+        0
+    };
+    let cards = &g.data.cards;
+    Ok(g.players[0].make_card(cards, c, false, copies))
+}
+
+/// A one-player sandbox position with the board, hand and Tavern a test
+/// names, for the search's built positions (`--warden-test`): every card at
+/// its own stats, `gold` in hand, the Tavern at `tier`. The sandbox fights a
+/// copy of the player's own board and nothing else, which is why it is the
+/// right place for a judged line: no opponent and no turn needs to pass.
+#[pyfunction]
+#[pyo3(signature = (seed, board, shop, hand=Vec::new(), gold=10, tier=5, lost_last_combat=false))]
+fn sandbox_position(
+    seed: u64,
+    board: Vec<String>,
+    shop: Vec<String>,
+    hand: Vec<String>,
+    gold: u8,
+    tier: u8,
+    lost_last_combat: bool,
+) -> PyResult<SearchBatch> {
+    let data = Arc::new(Data::bundled());
+    let mut g = Game::new_sandbox(data.clone(), seed, Some(bgcore::Tribes::ALL), 0);
+    if g.current_player() != Some(0) {
+        return Err(PyValueError::new_err("the sandbox position is not player 0's turn"));
+    }
+    {
+        let cards = &g.data.cards;
+        let mut pool = std::mem::take(&mut g.pool);
+        let shop: Vec<bgcore::Minion> = g.players[0].shop.drain(..).collect();
+        let board: Vec<bgcore::Minion> = g.players[0].board.drain(..).collect();
+        let hand: Vec<bgcore::Minion> = g.players[0].hand.drain(..).collect();
+        give_back_all(&mut pool, cards, shop);
+        give_back_all(&mut pool, cards, board);
+        give_back_all(&mut pool, cards, hand);
+        g.pool = pool;
+    }
+    for name in &board {
+        let m = take_card(&mut g, name)?;
+        let _ = g.players[0].board.try_push(m);
+    }
+    for name in &hand {
+        let m = take_card(&mut g, name)?;
+        let _ = g.players[0].hand.try_push(m);
+    }
+    for name in &shop {
+        let m = take_card(&mut g, name)?;
+        let _ = g.players[0].shop.try_push(m);
+    }
+    let pl = &mut g.players[0];
+    pl.gold = gold;
+    pl.tier = tier;
+    pl.upgrade_cost = 0;
+    pl.lost_last_combat = lost_last_combat;
+    Ok(SearchBatch::new(g, 0, data, None))
+}
+
+/// The positions Era's logged shop turns start from, one batch each: every
+/// turn from `from_turn` on in the action files of `dir`, seated exactly as
+/// the shop replay seats the turn's first step (the search brief's cycle-rate
+/// test). `labels` says which file and turn each batch is.
+/// A logged turn as a batch, and its label: the file, the turn, and what the
+/// loader could not build.
+type ReplayTurn = (Vec<SearchBatch>, Vec<(String, u32, Vec<String>)>);
+
+#[pyfunction]
+#[pyo3(signature = (dir, from_turn=6, seed=1, ref_cards="ref/bg-cards.json"))]
+#[allow(clippy::type_complexity)]
+fn shop_replay_turns(
+    dir: &str,
+    from_turn: u32,
+    seed: u64,
+    ref_cards: &str,
+) -> PyResult<ReplayTurn> {
+    let data = Arc::new(Data::bundled());
+    let ids = bgcore::CardIdMap::parse(
+        &std::fs::read_to_string(ref_cards)
+            .map_err(|e| PyValueError::new_err(format!("{ref_cards}: {e}")))?,
+    )
+    .map_err(PyValueError::new_err)?;
+    let mut files: Vec<(String, String)> = std::fs::read_dir(dir)
+        .map_err(|e| PyValueError::new_err(format!("{dir}: {e}")))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_str().is_some_and(|n| n.ends_with(".json")))
+        .map(|e| {
+            let name = e.file_name().to_str().unwrap_or_default().to_string();
+            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+            (name, text)
+        })
+        .collect();
+    files.sort();
+    // One file at a time, so a file the loader cannot build (a logged value
+    // past what its field holds) is skipped and named rather than stopping
+    // the whole test.
+    let mut specs = Vec::new();
+    let mut bad: Vec<String> = Vec::new();
+    for file in &files {
+        match bgcore::shop_replay::parse_action_files(std::slice::from_ref(file)) {
+            Ok(mut one) => specs.append(&mut one),
+            Err(e) => bad.push(format!("{}: {e}", file.0)),
+        }
+    }
+    bgcore::shop_replay::seat_taught_spells(&mut specs, &ids);
+    let mut batches = Vec::new();
+    let mut labels = Vec::new();
+    for file in &specs {
+        for turn in &file.turns {
+            if turn.turn < from_turn || turn.actions.is_empty() {
+                continue;
+            }
+            let Some((game, missing)) =
+                bgcore::shop_replay::turn_start_game(&data, &ids, file, turn, seed)
+            else {
+                continue;
+            };
+            batches.push(SearchBatch::new(game, bgcore::shop_replay::ME, data.clone(), None));
+            labels.push((file.file(), turn.turn, missing));
+        }
+    }
+    for line in &bad {
+        labels.push((line.clone(), 0, vec!["the file does not load".to_string()]));
+    }
+    Ok((batches, labels))
 }
 
 #[pymodule]
@@ -524,6 +1133,9 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let n_powers = Data::bundled().heroes.powers.len();
     let n_trinkets = Data::bundled().trinkets.len();
     m.add_class::<VecEnv>()?;
+    m.add_class::<SearchBatch>()?;
+    m.add_function(wrap_pyfunction!(sandbox_position, m)?)?;
+    m.add_function(wrap_pyfunction!(shop_replay_turns, m)?)?;
     m.add("N_HEROES", n_heroes)?;
     m.add("N_POWERS", n_powers)?;
     m.add("N_TRINKETS", n_trinkets)?;

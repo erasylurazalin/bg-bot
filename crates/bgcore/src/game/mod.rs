@@ -1304,6 +1304,11 @@ pub struct Game {
     pub consumed: Vec<u32>,
     pub ghost: Option<Ghost>,
     pub over: bool,
+    /// Set only on a search copy (`crate::search`, train/search.py): the copy
+    /// puts every pool copy back before each Refresh it plays, because a
+    /// playout models what a real player knows rather than the exact pool, so
+    /// `check_invariants` does not hold for it. Never set on a real game.
+    pub pool_untracked: bool,
     /// Set only by `Game::new_sandbox`: one player, a rigged Tavern and a
     /// fight against a copy of the player's own board. None in a normal game.
     pub sandbox: Option<Sandbox>,
@@ -1543,6 +1548,7 @@ impl Game {
             paradox,
             ghost: None,
             over: false,
+            pool_untracked: false,
             sandbox: None,
             real_boards: None,
             kitty_warbands: ArrayVec::new(),
@@ -1577,6 +1583,36 @@ impl Game {
 
     pub fn placements(&self) -> [u8; PLAYERS] {
         std::array::from_fn(|i| self.players[i].placement)
+    }
+
+    /// Whether player `p` is waiting on an answer (a Discover, a target, a
+    /// Choose One, a discard, a hero pick, a power offer, a trinket offer, a
+    /// Secret pick). The search (`crate::search`, train/search.py) leaves
+    /// those with the network: it only searches the shopping actions.
+    pub fn choice_waiting(&self, p: usize) -> bool {
+        let pl = &self.players[p];
+        Self::choice_open(pl)
+            || pl.hero_offer.iter().any(|&h| h != u8::MAX)
+            || !pl.power_offer.is_empty()
+            || !pl.secret_offer.is_empty()
+            || pl.trinket_offer_slot != 0
+    }
+
+    /// Whether player `p`'s shop turn is still going, with no choice waiting:
+    /// the positions the search raises candidates in.
+    pub fn shopping(&self, p: usize) -> bool {
+        !self.over && self.players[p].alive && !self.players[p].done && !self.choice_waiting(p)
+    }
+
+    /// End player `p`'s shop turn on this game without playing the rest of
+    /// the round: what an end of turn does for one player (the end-of-turn
+    /// effects, the Spellcraft cards leaving, the "this turn" marks coming
+    /// off), for a search copy whose turn the network finished
+    /// (`train/search.py`).
+    pub fn end_shop_turn(&mut self, p: usize) {
+        if !self.players[p].done {
+            self.finish_shop(p);
+        }
     }
 
     /// Whether the current player may take `a`.

@@ -44,6 +44,10 @@ crates/
     src/shop_replay.rs the shop replay: one logged shop state loaded into a
                       game, one step played in it, and the three files it
                       writes (docs/real-boards.md "The shop replay")
+    src/search.rs     what the shop-turn search needs: the dominance
+                      comparison of two positions, the full pool a playout's
+                      Refresh draws from, and the coming fight against the
+                      boards of Era's real games (see "The shop-turn search")
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
                       heroes.rs (the hero frame: pick, armor, the 22 powers, the two spells),
                       trinkets.rs (the trinket frame: the two offers, the guarantee and the
@@ -87,12 +91,17 @@ crates/
                       tribes from ref/hsjson-cards.json (src/cards.rs).
                       `bgbench powerlog` and `bgbench tracker` dump a log, to diff
                       against the older Python tracker
-  bgpy/               PyO3 bindings: a batch of games stepped together
+  bgpy/               PyO3 bindings: a batch of games stepped together, and the
+                      search's copies (SearchBatch, see "The shop-turn search")
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
   model.py            policy and value network
   ppo.py              PPO self-play, evals, checkpoints
   real_boards.py      loads boards/real for training (card id to name, summary)
+  search.py           the shop-turn search: candidates, cycles, the two
+                      judges, playouts (see "The shop-turn search")
+  eval_search.py      the search's evaluation: N games plain against the
+                      search, and the Blue Shell, Warden and cycle-rate tests
   status.py           prints a run's metrics.csv as a table
 ref/                  (git-ignored) Blizzard card data snapshots, see below
 docs/                 concept, pool analysis, mechanics inventory (a snapshot from before
@@ -1807,6 +1816,52 @@ minions in the hand.
   takes the loaded specs, and real seats are played in Rust like the bot
   seats. `ppo.py` adds a `vs7 real` eval (one learner against 7 real seats,
   `place_vs_real`) whenever real boards are loaded.
+
+## The shop-turn search
+
+`train/search.py` plays shop turns with a search instead of the network's single
+move: at each shop decision it tries every legal move and every short cycle on
+copies of the game, judges them, and plays the best. Play time only; nothing in
+training changes. The idea is Era's (`docs/notes/era-strategy.md`, "Gold-neutral
+loops"): buying and selling a card for value, the Tortollan Blue Shell after a
+loss (+2 Gold), Brann with Kalecgos and a Draconic Warden (two Chromadrakes for
+free, the Dragons buffed).
+
+- **The copies** are `bgpy.SearchBatch` slots: `Game` clones with their own RNG
+  and pool, stepped by the actions a candidate tries. The real game is stepped
+  only with the action the search picks, and the rest of the picked line
+  follows as a plan (`Searcher.plans`), so the copy's work never touches the
+  game or its accounting. A copy may put every pool copy back before a Refresh
+  (`crate::search::refresh_from_full_pool`), because a playout models what a
+  real player knows rather than the exact pool; that is the one state where
+  `check_invariants` does not hold, and `Game::pool_untracked` marks it.
+- **Judge 1, dominance** (`crate::search::Position`): a cycle *dominates* when
+  nothing about the position got worse and something got better. It compares
+  the player's own fields one by one, Gold and the counters as "at least as
+  much", the Tavern upgrade cost as "no higher", the board minion by minion
+  (same card, same order, Attack, Health, keywords and `improvements` at least
+  as good, not Golden turned plain), the hand as "every card still there with
+  stats at least as good, a card gained is a gain" (the engine's Blue
+  Chromadrake gives Tavern spells to hand), and everything not listed exactly
+  as it was; the Tavern's contents, the freeze, `recent_buys` and the action
+  count are ignored. The doc comment on `Position` lists every field.
+- **Judge 2, real trades** (`Searcher.score`): a move or a cycle that costs
+  Gold is played out to the end of the turn, `--playouts` times, with the
+  network sampling its moves. Each finished turn is scored as the network's
+  value of the position plus `--fight-weight` times the Health the coming fight
+  is expected to cost against `--fights` boards of Era's real games for the
+  turn (preferring the next opponent's tier and leaderboard tribe, the whole
+  bucket when fewer than 5 match), fought with `fight_with_hands` exactly as
+  `Game::combat` fights a real seat. The same boards and the same seeds for
+  every candidate of one decision.
+- **`--replan`** says when judge 2 runs: `every` (the default) at every shop
+  decision, `turn` once per turn (about ten times cheaper, the rest of the
+  turn is the network with the dominance cycles), or `cycle` never
+  (dominance only).
+- **`train/eval_search.py`** is the measurement: one learner against seven
+  real-board seats, plain network and search over the same seeds, plus the Blue
+  Shell test, the Warden test and the cycle rate over Era's logged turns
+  (`bgpy.shop_replay_turns`, `bgpy.sandbox_position`).
 
 ## Adding a card
 

@@ -19,6 +19,7 @@ pub mod real_boards;
 pub mod record;
 pub mod rng;
 pub mod rules;
+pub mod search;
 pub mod secrets;
 pub mod shop_replay;
 pub mod trinkets;
