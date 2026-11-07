@@ -20,6 +20,8 @@ same thing in both. By default only the policy head is trained; the value
 head is left as built (random), for PPO to learn from there. --value trains
 it on the seat's final placement, on ppo.py's return scale, and --weight none
 gives every example weight 1 (the search's choices are all good choices).
+--anchor-kl W adds W x KL(start || current) to stay near the --init-from
+network while copying a small teacher.
 
 Several --data folders are concatenated, which is how train/expert_iter.py
 mixes this iteration's search games with the previous iteration's.
@@ -39,6 +41,7 @@ legal action kind) are printed and written to report.md.
 """
 
 import argparse
+import copy
 import csv
 import json
 import time
@@ -92,6 +95,9 @@ def args():
                         "return scale ((4.5 - place) / 3.5)")
     a.add_argument("--value-weight", type=float, default=0.5,
                    help="the value loss's weight in the total loss (default 0.5)")
+    a.add_argument("--anchor-kl", type=float, default=0.0, metavar="W",
+                   help="add W x KL(start network's policy || current policy) on the same "
+                        "legal mask, to stay near --init-from; 0 (the default) is off")
     a.add_argument("--device", help="torch device (default: cuda when there is one)")
     return a.parse_args()
 
@@ -296,6 +302,14 @@ def value_loss(values, target):
     return 0.5 * ((values - target) ** 2).mean()
 
 
+def policy_kl(start_logits, logits, mask):
+    """KL(the start network's policy || the current policy) on each row's
+    legal actions, averaged over the rows."""
+    start = torch.log_softmax(masked(start_logits, mask), 1)
+    now = torch.log_softmax(masked(logits, mask), 1)
+    return (start.exp() * (start - now)).sum(1).mean()
+
+
 def first_legal(mask, cand):
     """Each row's first legal action of the kinds `cand` marks (falling back
     to its first legal action when it has none of them)."""
@@ -400,6 +414,15 @@ def main():
     net = net.to(dev)
     print(f"network: {cfg.model} {opts}, {sum(p.numel() for p in net.parameters())} parameters "
           f"on {dev}", flush=True)
+    anchor = None
+    if cfg.anchor_kl > 0:
+        if init_ck is None:
+            raise SystemExit("--anchor-kl needs --init-from: the start network it anchors to")
+        anchor = copy.deepcopy(net)
+        anchor.eval()
+        for p in anchor.parameters():
+            p.requires_grad_(False)
+        print(f"anchor: KL to {cfg.init_from} with weight {cfg.anchor_kl:g}", flush=True)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr)
     rng = np.random.default_rng(cfg.seed)
 
@@ -407,7 +430,7 @@ def main():
     for epoch in range(1, cfg.max_epochs + 1):
         net.train()
         order = train_idx[rng.permutation(len(train_idx))]
-        tot_loss, tot_w, tot_v, tot_n = 0.0, 0.0, 0.0, 0
+        tot_loss, tot_w, tot_v, tot_n, tot_kl = 0.0, 0.0, 0.0, 0, 0.0
         for s in range(0, len(order), cfg.batch):
             idx = order[s:s + cfg.batch]
             x = torch.from_numpy(obs[idx]).to(dev)
@@ -423,6 +446,12 @@ def main():
                 loss = pol + cfg.value_weight * vl
                 tot_v += float(vl.detach()) * len(idx)
                 tot_n += len(idx)
+            if anchor is not None:
+                with torch.no_grad():
+                    anchor_logits, _ = anchor(x)
+                kl = policy_kl(anchor_logits, logits, m)
+                loss = loss + cfg.anchor_kl * kl
+                tot_kl += float(kl.detach()) * len(idx)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
@@ -431,8 +460,11 @@ def main():
         ev = evaluate(net, obs_va, mask_va, act_va, w_va, dev, targets=tgt_va)
         minutes = (time.time() - t0) / 60
         rows.append((epoch, tot_loss / max(tot_w, 1e-9), ev["loss"], ev["top1"], ev["top3"],
-                     minutes, tot_v / max(tot_n, 1), ev.get("value_loss", float("nan"))))
+                     minutes, tot_v / max(tot_n, 1), ev.get("value_loss", float("nan")),
+                     tot_kl / max(len(train_idx), 1)))
         extra = (f"  value {rows[-1][6]:.4f}" if cfg.value else "")
+        if anchor is not None:
+            extra += f"  KL {rows[-1][8]:.4f}"
         print(f"epoch {epoch:3d}  train {rows[-1][1]:.4f}  held-out {ev['loss']:.4f}  "
               f"top-1 {ev['top1']:.1%}  top-3 {ev['top3']:.1%}{extra}  {minutes:5.1f} min",
               flush=True)
@@ -451,7 +483,8 @@ def main():
                                     "games_held_out": len(held), "lr": cfg.lr,
                                     "batch": cfg.batch, "seed": cfg.seed,
                                     "weight": cfg.weight, "value": cfg.value,
-                                    "value_weight": cfg.value_weight}},
+                                    "value_weight": cfg.value_weight,
+                                    "anchor_kl": cfg.anchor_kl}},
                        out / "best.pt")
         elif epoch - best_epoch >= cfg.patience:
             print(f"stopping: held-out top-1 has not improved for {epoch - best_epoch} epochs",
@@ -465,12 +498,16 @@ def main():
         cols = ["epoch", "train_loss", "val_loss", "val_top1", "val_top3", "minutes"]
         if cfg.value:
             cols += ["train_value_loss", "val_value_loss"]
+        if anchor is not None:
+            cols += ["train_kl"]
         log.writerow(cols)
         for r in rows:
             row = [r[0], f"{r[1]:.6f}", f"{r[2]:.6f}", f"{r[3]:.6f}", f"{r[4]:.6f}",
                    f"{r[5]:.2f}"]
             if cfg.value:
                 row += [f"{r[6]:.6f}", f"{r[7]:.6f}"]
+            if anchor is not None:
+                row += [f"{r[8]:.6f}"]
             log.writerow(row)
 
     # The report is measured with what best.pt holds, read back from the file
@@ -501,14 +538,18 @@ def main():
          f"cross-entropy over the legal actions plus {cfg.value_weight:g} x value loss "
          f"(0.5 x MSE to (4.5 - place) / 3.5)"),
         f"- device: {dev}",
+        *([f"- anchor: {cfg.anchor_kl:g} x KL to `{cfg.init_from}`"] if anchor is not None else []),
         "",
         "## Epochs (log.tsv)",
         "",
         ("| epoch | train loss | held-out loss | top-1 | top-3 | minutes |"
-         + (" value train | value held-out |" if cfg.value else "")),
-        ("|---|---|---|---|---|---|" + ("---|---|" if cfg.value else "")),
+         + (" value train | value held-out |" if cfg.value else "")
+         + (" train KL |" if anchor is not None else "")),
+        ("|---|---|---|---|---|---|" + ("---|---|" if cfg.value else "")
+         + ("---|" if anchor is not None else "")),
         *([f"| {r[0]} | {r[1]:.4f} | {r[2]:.4f} | {r[3]:.1%} | {r[4]:.1%} | {r[5]:.1f} |"
-           + (f" {r[6]:.4f} | {r[7]:.4f} |" if cfg.value else "") for r in rows]),
+           + (f" {r[6]:.4f} | {r[7]:.4f} |" if cfg.value else "")
+           + (f" {r[8]:.4f} |" if anchor is not None else "") for r in rows]),
         "",
         "## Best epoch",
         "",
