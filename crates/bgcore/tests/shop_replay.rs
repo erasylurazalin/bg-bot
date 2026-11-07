@@ -84,6 +84,18 @@ fn replay(file: &ShopFileSpec, kind: &str) -> StepResult {
     replay_step(&data(), &ids(), file, turn, i, &ReplayOptions { seeds: 4, seed: 1 })
 }
 
+#[test]
+fn the_action_loader_reads_free_refreshes_over_255() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 8,
+       "start": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+        "gold": 10, "tier": 5, "upgrade_cost": 8, "health": 30, "armor": 0,
+        "free_refreshes": 282, "frozen": false, "hero_powers": [], "trinkets": []},
+       "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("282.json".to_string(), text.to_string())]).unwrap();
+    assert_eq!(files[0].turns[0].start.free_refreshes, 282);
+}
+
 /// A play that lands a minion in front of its own target shifts the target:
 /// the file's board position is the board before the play, and the engine
 /// asks after the minion has landed (log 2026_10_30_19_45_15-g2 turn 6 step

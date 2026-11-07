@@ -268,7 +268,7 @@ pub struct ShopStateSpec {
     #[serde(default)]
     pub armor: i32,
     #[serde(default)]
-    pub free_refreshes: u8,
+    pub free_refreshes: u16,
     /// The Demon Fodders queued for the coming Refreshes, one number per
     /// Refresh (`Player.fodder_refreshes`): the log's "Fodder Player Enchant"
     /// numbers. None in a file written before the collector read them, and
@@ -429,7 +429,7 @@ pub struct ShopStepSpec {
     pub spell: bool,
     /// Free Refreshes left when the Refresh button showed a price.
     #[serde(default)]
-    pub free: Option<u8>,
+    pub free: Option<u16>,
     /// The Gold a card's own trigger gave this step, by the card that gave it
     /// (`gold_gain` in the file).
     #[serde(default)]
@@ -2200,7 +2200,7 @@ pub struct ShopSnapshot {
     pub upgrade_cost: Option<u8>,
     pub health: i32,
     pub armor: i32,
-    pub free_refreshes: u8,
+    pub free_refreshes: u16,
     /// The Fodders queued for the coming Refreshes (`fodder_queue`), when
     /// the file carries the queue at all.
     pub fodder_refreshes: Option<Vec<u8>>,
@@ -2635,7 +2635,7 @@ pub struct ShopShape {
     pub armor: i32,
     pub tier: u8,
     pub upgrade_cost: Option<u8>,
-    pub free_refreshes: u8,
+    pub free_refreshes: u16,
     /// The Fodders queued for the coming Refreshes: a Refresh that was given
     /// them takes the first number, so the queue's own shape says whether the
     /// Fodders reached the Tavern. None when the file does not carry it.

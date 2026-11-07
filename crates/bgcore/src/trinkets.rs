@@ -216,7 +216,7 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     UndeadBonus { attack: i32, health: i32 },
     /// Give your Deity stats (`buff_deity`).
     BuffDeity { attack: i32, health: i32 },
-    FreeRefreshes(u8),
+    FreeRefreshes(u16),
     /// Every friendly Demon consumes this many Tavern minions (`demons_consume`).
     DemonsConsume(u8),
     /// Add Fodders to the next Refresh (`add_fodder_refreshes`).
@@ -699,7 +699,7 @@ pub enum FightAct {
     /// Get `n` random Magnetic minions.
     RandomMagnetic(u8),
     /// Gain `n` free Refreshes.
-    FreeRefreshes(u8),
+    FreeRefreshes(u16),
     /// Raise the trinket's own "improve this" number for good.
     Improve(u8),
     /// Get a plain copy (base stats) of the picked minions into hand.
@@ -1042,7 +1042,7 @@ struct RawAct {
     buff_all: Option<[i32; 2]>,
     undead_bonus: Option<[i32; 2]>,
     buff_deity: Option<[i32; 2]>,
-    free_refreshes: Option<u8>,
+    free_refreshes: Option<u16>,
     demons_consume: Option<u8>,
     add_fodder_refreshes: Option<u8>,
     get_lockbox: Option<u8>,
@@ -1383,7 +1383,7 @@ struct RawFightAct {
     #[serde(default)]
     random_magnetic: Option<u8>,
     #[serde(default)]
-    free_refreshes: Option<u8>,
+    free_refreshes: Option<u16>,
     #[serde(default)]
     improve: Option<u8>,
     #[serde(default)]

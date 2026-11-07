@@ -489,7 +489,7 @@ pub enum Effect {
     RefreshBuff { attack: i32, health: i32 },
     /// Gain free Refreshes, which are used before Gold and carry over turns
     /// (Refreshing Anomaly). Golden doubles it.
-    FreeRefreshes(u8),
+    FreeRefreshes(u16),
     /// Give friendly minions stats multiplied by one plus the player's count
     /// of `counter`, then raise the count (the Ballers: "Improve your future
     /// Ballers"). Golden doubles the stats, not the count.
@@ -951,7 +951,7 @@ pub enum SpellEffect {
     GainGold(u8),
     GoldNextTurn(u8),
     MaxGold(u8),
-    FreeRolls(u8),
+    FreeRolls(u16),
     Overconfidence { win: u8, tie: u8 },
     BuffShop { attack: i32, health: i32 },
     BuffBoard { attack: i32, health: i32, times: u8, golden_extra: bool },
@@ -1068,7 +1068,7 @@ pub enum SpellEffect {
     /// Gain this many free Refreshes now and this many at the start of every
     /// turn for the rest of the game (Rocking and Rolling: `[0, 1]`, Open
     /// Bar: `[5, 5]`).
-    FreeRollsPerTurn { now: u8, per_turn: u8 },
+    FreeRollsPerTurn { now: u16, per_turn: u16 },
     /// Get a random Tavern spell costing at least this much (Unfurled
     /// Codex).
     RandomSpellAtLeast(u8),
@@ -2243,7 +2243,7 @@ struct RawSpellEffect {
     gold_next_turn: Option<u8>,
     max_gold: Option<u8>,
     buff_deity: Option<[i32; 2]>,
-    free_rolls: Option<u8>,
+    free_rolls: Option<u16>,
     overconfidence: Option<[u8; 2]>,
     random_tier_minion: Option<u8>,
     discover: Option<String>,
@@ -2390,7 +2390,7 @@ struct RawSpellEffect {
     extra_shop_minion: Option<[i32; 2]>,
     /// Free Refreshes now and at the start of every turn for the rest of the
     /// game, `[now, per_turn]` (Rocking and Rolling, Open Bar).
-    free_rolls_per_turn: Option<[u8; 2]>,
+    free_rolls_per_turn: Option<[u16; 2]>,
     /// A random Tavern spell costing at least this much (Unfurled Codex).
     random_spell_at_least: Option<u8>,
     /// Tavern spells cost this much less this turn (Reserve Prices).
@@ -2598,7 +2598,7 @@ struct RawEffect {
     per_golden_played: bool,
     /// Add to the "after the Tavern is Refreshed this game" amount.
     refresh_buff: Option<[i32; 2]>,
-    free_refreshes: Option<u8>,
+    free_refreshes: Option<u16>,
     /// Dark Gifts: one random Tavern spell of any cost.
     #[serde(default)]
     get_any_tavern_spell: bool,

@@ -27,7 +27,7 @@ pub enum PowerEffect {
     None,
     /// At the start of each of your turns, gain this many free Refreshes
     /// (Clairvoyance).
-    FreeRefreshPerTurn(u8),
+    FreeRefreshPerTurn(u16),
     /// After you upgrade the Tavern, gain this much Gold (Everbloom).
     GoldAfterUpgrade(u8),
     /// After you buy a minion of `tribe`, gain this much Gold (I'm the Cap'n
@@ -664,7 +664,7 @@ struct RawHits {
 #[derive(Deserialize, Default)]
 struct RawPowerEffect {
     #[serde(default)]
-    free_refresh_per_turn: Option<u8>,
+    free_refresh_per_turn: Option<u16>,
     #[serde(default)]
     gold_after_upgrade: Option<u8>,
     #[serde(default)]

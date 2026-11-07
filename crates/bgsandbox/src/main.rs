@@ -46,7 +46,7 @@ fn main() -> ExitCode {
     let mut hero = None;
     let mut label = None;
     let mut seed = None;
-    let mut free_rolls = 0u8;
+    let mut free_rolls = 0u16;
     let mut boards = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../boards"));
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {

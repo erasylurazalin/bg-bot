@@ -1263,7 +1263,7 @@ impl Game {
         let effect = self.data.heroes.power(st.of).effect;
         match effect {
             PowerEffect::FreeRefreshPerTurn(n) => {
-                let n = n.saturating_mul(runs);
+                let n = n.saturating_mul(runs as u16);
                 let pl = &mut self.players[p];
                 pl.free_rolls = pl.free_rolls.saturating_add(n);
             }

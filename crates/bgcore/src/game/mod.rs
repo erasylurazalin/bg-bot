@@ -806,7 +806,7 @@ pub struct PrizePowers {
     pub extra_shop: bool,
     /// Free Refreshes gained at the start of every turn (Rocking and
     /// Rolling, Open Bar).
-    pub free_rolls_per_turn: u8,
+    pub free_rolls_per_turn: u16,
     /// Tavern spells cost this much less this turn (Reserve Prices).
     pub spell_discount_turn: u8,
     /// Minions in the Tavern cost this much for the rest of the game
@@ -965,7 +965,7 @@ pub struct Player {
     pub gold: u8,
     pub gold_next_turn: u8,
     pub extra_max_gold: u8,
-    pub free_rolls: u8,
+    pub free_rolls: u16,
     pub tier: u8,
     pub upgrade_cost: u8,
     pub frozen: bool,
@@ -1341,7 +1341,7 @@ pub struct Game {
 #[derive(Clone, Debug)]
 pub struct Sandbox {
     /// Free Refreshes the player has at the start of every turn.
-    pub free_rolls: u8,
+    pub free_rolls: u16,
     /// The latest mirror fight, for whoever records the game.
     pub last_fight: Option<SandboxFight>,
 }
@@ -1437,7 +1437,7 @@ impl Game {
     /// fight against a copy of the player's own board that never damages the
     /// hero. Shop-phase damage still counts and ends the game at 0 Health.
     /// Normal games never set any of this.
-    pub fn new_sandbox(data: Arc<Data>, seed: u64, lobby: Option<Tribes>, free_rolls: u8) -> Game {
+    pub fn new_sandbox(data: Arc<Data>, seed: u64, lobby: Option<Tribes>, free_rolls: u16) -> Game {
         let mut g = Game::unstarted(data, seed, lobby);
         for p in 1..PLAYERS {
             g.players[p].alive = false;
@@ -1454,7 +1454,7 @@ impl Game {
         data: Arc<Data>,
         seed: u64,
         lobby: Option<Tribes>,
-        free_rolls: u8,
+        free_rolls: u16,
     ) -> Game {
         let mut g = Game::unstarted(data, seed, lobby);
         for p in 1..PLAYERS {
@@ -1473,7 +1473,7 @@ impl Game {
         data: Arc<Data>,
         seed: u64,
         lobby: Option<Tribes>,
-        free_rolls: u8,
+        free_rolls: u16,
         hero: u8,
     ) -> Game {
         let mut g = Game::unstarted(data, seed, lobby);

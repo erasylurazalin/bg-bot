@@ -927,7 +927,7 @@ impl Game {
                 pl.refresh_buff.1 += health * n;
             }
             Effect::FreeRefreshes(n) => {
-                let gain = n.saturating_mul(mul as u8).saturating_mul(runs);
+                let gain = n.saturating_mul(mul as u16).saturating_mul(runs as u16);
                 self.players[p].free_rolls = self.players[p].free_rolls.saturating_add(gain);
             }
             Effect::BuffAllImproving { attack, health, counter } => {

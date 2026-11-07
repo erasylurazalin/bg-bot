@@ -410,7 +410,7 @@ pub struct SideOutcome {
     /// stats and Blood Gem stats after the fight.
     pub permanent_gems: [(i32, i32); BOARD],
     /// Free Refreshes a trinket gave in this fight (Herding Horn).
-    pub free_refresh_gain: u8,
+    pub free_refresh_gain: u16,
     /// Increase to each trinket slot's own "improve this" number, by slot
     /// (All-Purpose Kibble, Fang Anklet).
     pub trinket_improve: [u8; crate::TRINKET_SLOTS],
@@ -2423,7 +2423,7 @@ impl<'a> Side<'a> {
                 self.out.free_refresh_gain = self
                     .out
                     .free_refresh_gain
-                    .saturating_add(n.saturating_mul(mul as u8));
+                    .saturating_add(n.saturating_mul(mul as u16));
             }
             Effect::GetAnyTavernSpell => {
                 // Dark Gifts Mystic Essence: any Tavern spell, cost and all.

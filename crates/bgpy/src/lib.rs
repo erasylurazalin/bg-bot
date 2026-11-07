@@ -976,7 +976,7 @@ type Describe = (
     i32,
     i32,
     u8,
-    u8,
+    u16,
     bool,
     Vec<(u16, i32, i32, bool)>,
     Vec<(u16, i32, i32)>,

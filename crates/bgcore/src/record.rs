@@ -77,7 +77,7 @@ pub struct GameRecord {
     pub tribe: Option<String>,
     pub label: String,
     pub seed: u64,
-    pub free_rolls: u8,
+    pub free_rolls: u16,
     /// The day the game was played, as `YYYY-MM-DD`.
     pub date: String,
     pub turns: Vec<TurnRecord>,
@@ -92,7 +92,7 @@ struct FileGame {
     tribe: Option<String>,
     label: String,
     seed: i64,
-    free_rolls: u8,
+    free_rolls: u16,
     date: String,
     #[serde(default)]
     turn: Vec<FileTurn>,

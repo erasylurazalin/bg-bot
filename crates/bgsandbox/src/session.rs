@@ -22,7 +22,7 @@ pub struct Config {
     /// with the label command), recorded as "unlabeled" meanwhile.
     pub label: Option<String>,
     pub seed: u64,
-    pub free_rolls: u8,
+    pub free_rolls: u16,
     pub boards_dir: PathBuf,
 }
 

@@ -11,7 +11,7 @@ fn data() -> Arc<Data> {
     Arc::new(Data::bundled())
 }
 
-fn sandbox(seed: u64, lobby: Tribes, free: u8) -> Game {
+fn sandbox(seed: u64, lobby: Tribes, free: u16) -> Game {
     Game::new_sandbox(data(), seed, Some(lobby), free)
 }
 
@@ -120,6 +120,42 @@ fn normal_games_roll_a_five_tribe_lobby() {
         seen.iter().all(|&s| s),
         "30 seeds should roll every tribe into some lobby: {seen:?}"
     );
+}
+
+#[test]
+fn free_refreshes_over_255_are_kept_used_once_and_loaded() {
+    let mut g = sandbox(11, one(Tribe::Beast), 282);
+    assert_eq!(g.players[0].free_rolls, 282);
+    g.step(Action::Roll).unwrap();
+    assert_eq!(g.players[0].free_rolls, 281, "a Refresh uses one of 282");
+    assert_eq!(g.players[0].gold, 3, "the free Refresh costs no Gold");
+
+    let rec = GameRecord {
+        tribe: Some("Beast".into()),
+        label: "282 free refreshes".into(),
+        seed: 11,
+        free_rolls: 282,
+        date: record::today(),
+        turns: Vec::new(),
+    };
+    let text = record::to_toml(&g.data.cards, &rec).unwrap();
+    let back = record::load_str(&g.data.cards, &text).unwrap();
+    assert_eq!(back.free_rolls, 282, "the loader reads 282 back");
+}
+
+#[test]
+fn the_free_refresh_observation_keeps_the_same_value_to_255() {
+    let mut g = sandbox(11, one(Tribe::Beast), 0);
+    let mut out = vec![0f32; bgcore::obs::OBS_SIZE];
+    for n in 0..=255u16 {
+        g.players[0].free_rolls = n;
+        bgcore::obs::write(&g, 0, &mut out);
+        assert_eq!(out[bgcore::obs::SCALAR_FREE_ROLLS], n as f32);
+    }
+    g.players[0].free_rolls = 282;
+    bgcore::obs::write(&g, 0, &mut out);
+    assert_eq!(out[bgcore::obs::SCALAR_FREE_ROLLS], 282.0);
+    assert!(out[bgcore::obs::SCALAR_FREE_ROLLS].is_finite());
 }
 
 #[test]

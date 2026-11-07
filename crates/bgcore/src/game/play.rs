@@ -544,7 +544,7 @@ impl Game {
                     SpellEffect::GemBonus { attack, health } => {
                         SpellEffect::GemBonus { attack: attack * mul, health: health * mul }
                     }
-                    SpellEffect::FreeRolls(n) => SpellEffect::FreeRolls(n * mul as u8),
+                    SpellEffect::FreeRolls(n) => SpellEffect::FreeRolls(n * mul as u16),
                     SpellEffect::MaxGold(n) => SpellEffect::MaxGold(n * mul as u8),
                     SpellEffect::CastSpell { card, times } => {
                         SpellEffect::CastSpell { card, times: times * mul as u8 }
