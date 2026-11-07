@@ -271,8 +271,9 @@ def shell_test(net, args, dev, boards) -> None:
     print(f"collected {len(found)} Blue Shell positions with room to play it, and "
           f"{full_board} where the brief's conditions held but the board was full "
           f"(a cycle cannot be played there at all)")
+    result = {"positions": len(found), "full_board": full_board}
     if not found:
-        return
+        return result
     shell = names.index(SHELL)
     if args.verbose:
         detail(net, args, dev, found[0], names, shell)
@@ -302,11 +303,15 @@ def shell_test(net, args, dev, boards) -> None:
             "top4": round(100.0 * sold / n, 1),
             "first": round(100.0 * dom / n, 1),
         }))
+        result[f"{label}_buy"] = bought / n
+        result[f"{label}_sell"] = sold / n
+        result[f"{label}_dominance"] = dom / n
     print(f"over every one of the {n + full_board} positions the brief names, the "
           f"search's buy-and-sell rate is still counted on the {n} it can play")
     print("columns: place = bought the Shell %, top4 = bought and sold it %, "
           "first = a dominance cycle fired %")
     print(table(rows))
+    return result
 
 
 def detail(net, args, dev, batch, names, shell) -> None:
@@ -424,6 +429,13 @@ def cycle_rate(net, args, dev) -> None:
     print(table(rows))
     print(f"Era: {era[0]} of {era[1]} turns with at least one cycle "
           f"({100.0 * era[0] / max(1, era[1]):.1f}%), {era[2] / max(1, era[1]):.2f} cycles a turn")
+    n = len(batches[: args.turns])
+    result = {"turns": n, "era_with": era[0], "era_turns": era[1],
+              "era_cycles": era[2]}
+    for label, row in rows:
+        result[f"{label}_with"] = row["place"] / 100.0
+        result[f"{label}_cycles"] = row["top4"]
+    return result
 
 
 def era_cycles(dir_: Path, from_turn: int = 6):

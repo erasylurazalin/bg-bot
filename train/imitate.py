@@ -16,8 +16,13 @@ saves a checkpoint ppo.py can start a normal run from:
 
 The network is built exactly as ppo.py builds it (model.py: model_args,
 model_opts, build), so --model, --opp-boards and the --attn-* sizes mean the
-same thing in both. Only the policy head is trained; the value head is left
-as built (random), for PPO to learn from there.
+same thing in both. By default only the policy head is trained; the value
+head is left as built (random), for PPO to learn from there. --value trains
+it on the seat's final placement, on ppo.py's return scale, and --weight none
+gives every example weight 1 (the search's choices are all good choices).
+
+Several --data folders are concatenated, which is how train/expert_iter.py
+mixes this iteration's search games with the previous iteration's.
 
 Games, not examples, are split: about --holdout of them are held out with
 --seed, so held-out accuracy measures play on games the network never saw.
@@ -57,8 +62,10 @@ FAKE_PATCHES = ["37.0", "37.0.2", "unknown"]
 
 def args():
     a = argparse.ArgumentParser()
-    a.add_argument("--data", default="train/runs/clone-data",
-                   help="the folder bgbench record wrote: obs.f32, mask.u8, meta.tsv, header.json")
+    a.add_argument("--data", nargs="+", default=["train/runs/clone-data"],
+                   help="the folder(s) bgbench record or search_games wrote: obs.f32, "
+                        "mask.u8, meta.tsv, header.json. Several folders are concatenated "
+                        "(expert iteration trains on this iteration's games and the last one's)")
     a.add_argument("--out", default="train/runs/clone-1",
                    help="where best.pt, log.tsv and report.md go")
     a.add_argument("--make-fake", metavar="DIR",
@@ -77,6 +84,14 @@ def args():
     a.add_argument("--init-from", metavar="CKPT",
                    help="start from a ppo.py checkpoint's network (its model and shape) instead "
                         "of a fresh one: copying on top of a trained bot")
+    a.add_argument("--weight", choices=["place", "none"], default="place",
+                   help="example weight: place (Era's games, a 1st counts fully) or none "
+                        "(every example 1, the search's choices are all good choices)")
+    a.add_argument("--value", action="store_true",
+                   help="also train the value head on the seat's final placement, on ppo.py's "
+                        "return scale ((4.5 - place) / 3.5)")
+    a.add_argument("--value-weight", type=float, default=0.5,
+                   help="the value loss's weight in the total loss (default 0.5)")
     a.add_argument("--device", help="torch device (default: cuda when there is one)")
     return a.parse_args()
 
@@ -182,6 +197,36 @@ def load(folder):
     return header, obs, mask, meta
 
 
+def load_many(folders):
+    """obs, mask and meta of several recordings, concatenated in order. The
+    games of each later folder get a folder prefix, so a game held out is a
+    game of one of them even when two runs picked the same names."""
+    folders = [Path(f) for f in folders]
+    if len(folders) == 1:
+        return load(folders[0])
+    parts = [load(f) for f in folders]
+    header = dict(parts[0][0])
+    header["count"] = sum(int(p[0]["count"]) for p in parts)
+    header["games"] = sum(int(p[0].get("games", 0)) for p in parts)
+    skipped = {}
+    for p in parts:
+        for k, v in (p[0].get("skipped") or {}).items():
+            skipped[k] = skipped.get(k, 0) + int(v)
+    header["skipped"] = skipped
+    header["folders"] = [str(f) for f in folders]
+    obs = np.concatenate([p[1] for p in parts])
+    mask = np.concatenate([p[2] for p in parts])
+    meta = {}
+    for key in ("action", "turn", "place"):
+        meta[key] = np.concatenate([p[3][key] for p in parts])
+    for key in ("game", "kind", "patch"):
+        vals = []
+        for j, p in enumerate(parts):
+            vals.extend(f"{j}:{v}" for v in p[3][key])
+        meta[key] = vals
+    return header, obs, mask, meta
+
+
 def weights(place):
     """Era's decision: a 1st place counts 1.0, an 8th (9 - 8) / 8."""
     return (9.0 - np.clip(place, 1, 8)) / 8.0
@@ -209,20 +254,26 @@ def policy_loss(logits, mask, action, w):
 
 
 @torch.no_grad()
-def evaluate(net, obs, mask, action, w, dev, batch=512):
+def evaluate(net, obs, mask, action, w, dev, batch=512, targets=None):
     """Held-out loss (weighted like training), top-1 and top-3 accuracy (plain
-    counts) and the predicted action of every example."""
+    counts) and the predicted action of every example. With `targets`, also
+    the value loss on them (0.5 x MSE, the same scale ppo.py trains)."""
     net.eval()
     pred = np.empty(len(action), np.int64)
     tot_loss, tot_w, top1, top3 = 0.0, 0.0, 0, 0
+    tot_vl = 0.0
     for s in range(0, len(action), batch):
         sl = slice(s, s + batch)
         x = torch.from_numpy(obs[sl]).to(dev)
         m = torch.from_numpy(mask[sl]).to(dev)
         a = torch.from_numpy(action[sl]).to(dev)
         wt = torch.from_numpy(w[sl]).to(dev)
-        logits = masked(net(x)[0], m)
+        logits, value = net(x)
+        logits = masked(logits, m)
         logp = torch.log_softmax(logits, 1)
+        if targets is not None:
+            vt = torch.from_numpy(targets[sl]).to(dev)
+            tot_vl += float(0.5 * ((value - vt) ** 2).sum())
         tot_loss += float(-(wt * logp.gather(1, a[:, None]).squeeze(1)).sum())
         tot_w += float(wt.sum())
         # how many logits beat Era's; illegal ones sit at -1e9, so a state with
@@ -233,7 +284,16 @@ def evaluate(net, obs, mask, action, w, dev, batch=512):
         pred[sl] = logits.argmax(1).cpu().numpy()
     net.train()
     n = len(action)
-    return {"loss": tot_loss / max(tot_w, 1e-9), "top1": top1 / n, "top3": top3 / n, "pred": pred}
+    out = {"loss": tot_loss / max(tot_w, 1e-9), "top1": top1 / n, "top3": top3 / n,
+           "pred": pred}
+    if targets is not None:
+        out["value_loss"] = tot_vl / n
+    return out
+
+
+def value_loss(values, target):
+    """ppo.py's value loss: 0.5 x mean squared error to the return."""
+    return 0.5 * ((values - target) ** 2).mean()
 
 
 def first_legal(mask, cand):
@@ -289,17 +349,22 @@ def main():
     cfg.model = cfg.model or "attn"
     torch.manual_seed(cfg.seed)
     dev = torch.device(cfg.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    data = Path(cfg.data)
+    data = [Path(d) for d in cfg.data]
     out = Path(cfg.out)
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
-    header, obs, mask, meta = load(data)
+    header, obs, mask, meta = load_many(data)
     bad_place = int(((meta["place"] < 1) | (meta["place"] > 8)).sum())
     if bad_place:
         print(f"warning: {bad_place} examples have a place outside 1 to 8, "
               f"their weight is clamped to that range", flush=True)
-    w_all = weights(meta["place"]).astype(np.float32)
+    if cfg.weight == "place":
+        w_all = weights(meta["place"]).astype(np.float32)
+    else:
+        w_all = np.ones(len(obs), np.float32)
+    targets = ((4.5 - np.clip(meta["place"], 1, 8)) / 3.5).astype(np.float32) \
+        if cfg.value else None
     train_idx, val_idx, held = split_games(meta["game"], cfg.holdout, cfg.seed)
     if len(val_idx) == 0:
         raise SystemExit(f"no held-out examples: {len(set(meta['game']))} games and "
@@ -307,8 +372,10 @@ def main():
     act_tr = meta["action"][train_idx]
     obs_va, mask_va = obs[val_idx], mask[val_idx]
     act_va, w_va = meta["action"][val_idx], w_all[val_idx]
+    tgt_va = targets[val_idx] if targets is not None else None
     patches = {p: meta["patch"].count(p) for p in sorted(set(meta["patch"]))}
-    print(f"{data}: {len(obs)} examples from {len(set(meta['game']))} games "
+    data_label = ", ".join(str(d) for d in data)
+    print(f"{data_label}: {len(obs)} examples from {len(set(meta['game']))} games "
           f"(git {header.get('git')}), patches {patches}, skipped {header.get('skipped')}")
     print(f"split by game with seed {cfg.seed}: {len(train_idx)} training and {len(val_idx)} "
           f"held-out examples ({len(set(meta['game'])) - len(held)} and {len(held)} games)",
@@ -340,25 +407,35 @@ def main():
     for epoch in range(1, cfg.max_epochs + 1):
         net.train()
         order = train_idx[rng.permutation(len(train_idx))]
-        tot_loss, tot_w = 0.0, 0.0
+        tot_loss, tot_w, tot_v, tot_n = 0.0, 0.0, 0.0, 0
         for s in range(0, len(order), cfg.batch):
             idx = order[s:s + cfg.batch]
             x = torch.from_numpy(obs[idx]).to(dev)
             m = torch.from_numpy(mask[idx]).to(dev)
             a = torch.from_numpy(meta["action"][idx]).to(dev)
             wt = torch.from_numpy(w_all[idx]).to(dev)
-            loss = policy_loss(net(x)[0], m, a, wt)
+            logits, value = net(x)
+            pol = policy_loss(logits, m, a, wt)
+            loss = pol
+            if cfg.value:
+                vt = torch.from_numpy(targets[idx]).to(dev)
+                vl = value_loss(value, vt)
+                loss = pol + cfg.value_weight * vl
+                tot_v += float(vl.detach()) * len(idx)
+                tot_n += len(idx)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
-            tot_loss += float(loss.detach()) * float(wt.sum())
+            tot_loss += float(pol.detach()) * float(wt.sum())
             tot_w += float(wt.sum())
-        ev = evaluate(net, obs_va, mask_va, act_va, w_va, dev)
+        ev = evaluate(net, obs_va, mask_va, act_va, w_va, dev, targets=tgt_va)
         minutes = (time.time() - t0) / 60
         rows.append((epoch, tot_loss / max(tot_w, 1e-9), ev["loss"], ev["top1"], ev["top3"],
-                     minutes))
+                     minutes, tot_v / max(tot_n, 1), ev.get("value_loss", float("nan"))))
+        extra = (f"  value {rows[-1][6]:.4f}" if cfg.value else "")
         print(f"epoch {epoch:3d}  train {rows[-1][1]:.4f}  held-out {ev['loss']:.4f}  "
-              f"top-1 {ev['top1']:.1%}  top-3 {ev['top3']:.1%}  {minutes:5.1f} min", flush=True)
+              f"top-1 {ev['top1']:.1%}  top-3 {ev['top3']:.1%}{extra}  {minutes:5.1f} min",
+              flush=True)
         score = (ev["top1"], -ev["loss"])
         if best_score is None or score > best_score:
             best_score, best_epoch = score, epoch
@@ -367,10 +444,14 @@ def main():
                         "card_names": card_names, "hero_names": hero_names,
                         "epoch": epoch, "val_top1": ev["top1"], "val_top3": ev["top3"],
                         "val_loss": ev["loss"],
-                        "imitate": {"data": str(data), "examples": len(obs),
+                        "val_value_loss": ev.get("value_loss", float("nan")),
+                        "imitate": {"data": str(data[0]) if len(data) == 1 else [str(d) for d in data],
+                                    "examples": len(obs),
                                     "train": len(train_idx), "holdout": len(val_idx),
                                     "games_held_out": len(held), "lr": cfg.lr,
-                                    "batch": cfg.batch, "seed": cfg.seed}},
+                                    "batch": cfg.batch, "seed": cfg.seed,
+                                    "weight": cfg.weight, "value": cfg.value,
+                                    "value_weight": cfg.value_weight}},
                        out / "best.pt")
         elif epoch - best_epoch >= cfg.patience:
             print(f"stopping: held-out top-1 has not improved for {epoch - best_epoch} epochs",
@@ -381,15 +462,21 @@ def main():
         raise SystemExit("no epoch ran: --max-epochs must be at least 1")
     with open(out / "log.tsv", "w", newline="") as f:
         log = csv.writer(f, delimiter="\t")
-        log.writerow(["epoch", "train_loss", "val_loss", "val_top1", "val_top3", "minutes"])
+        cols = ["epoch", "train_loss", "val_loss", "val_top1", "val_top3", "minutes"]
+        if cfg.value:
+            cols += ["train_value_loss", "val_value_loss"]
+        log.writerow(cols)
         for r in rows:
-            log.writerow([r[0], f"{r[1]:.6f}", f"{r[2]:.6f}", f"{r[3]:.6f}", f"{r[4]:.6f}",
-                          f"{r[5]:.2f}"])
+            row = [r[0], f"{r[1]:.6f}", f"{r[2]:.6f}", f"{r[3]:.6f}", f"{r[4]:.6f}",
+                   f"{r[5]:.2f}"]
+            if cfg.value:
+                row += [f"{r[6]:.6f}", f"{r[7]:.6f}"]
+            log.writerow(row)
 
     # The report is measured with what best.pt holds, read back from the file
     # so the checkpoint itself is checked on the way.
     net.load_state_dict(torch.load(out / "best.pt", map_location=dev)["net"])
-    ev = evaluate(net, obs_va, mask_va, act_va, w_va, dev)
+    ev = evaluate(net, obs_va, mask_va, act_va, w_va, dev, targets=tgt_va)
     hit1 = ev["pred"] == act_va
     kind_va = [meta["kind"][i] for i in val_idx]
     patch_va = [meta["patch"][i] for i in val_idx]
@@ -399,28 +486,36 @@ def main():
     by_patch = by_group(patch_va, hit1)
 
     lines = [
-        f"# Imitation run: {data} -> {out}",
+        f"# Imitation run: {data_label} -> {out}",
         "",
         f"- examples: {len(obs)} ({len(train_idx)} training, {len(val_idx)} held out)",
         f"- games: {len(set(meta['game']))}, {len(held)} held out (seed {cfg.seed}, "
         f"--holdout {cfg.holdout})",
         f"- patches: " + ", ".join(f"{p} {n}" for p, n in patches.items()),
         f"- network: {cfg.model} {opts}, {sum(p.numel() for p in net.parameters())} parameters",
-        f"- training: Adam lr {cfg.lr}, batch {cfg.batch}, weight (9 - place) / 8, "
-        f"cross-entropy over the legal actions, policy head only",
+        (f"- training: Adam lr {cfg.lr}, batch {cfg.batch}, weight (9 - place) / 8, "
+         f"cross-entropy over the legal actions, policy head only"
+         if not cfg.value else
+         f"- training: Adam lr {cfg.lr}, batch {cfg.batch}, "
+         f"weight {'(9 - place) / 8' if cfg.weight == 'place' else '1 for every example'}, "
+         f"cross-entropy over the legal actions plus {cfg.value_weight:g} x value loss "
+         f"(0.5 x MSE to (4.5 - place) / 3.5)"),
         f"- device: {dev}",
         "",
         "## Epochs (log.tsv)",
         "",
-        "| epoch | train loss | held-out loss | top-1 | top-3 | minutes |",
-        "|---|---|---|---|---|---|",
-        *[f"| {r[0]} | {r[1]:.4f} | {r[2]:.4f} | {r[3]:.1%} | {r[4]:.1%} | {r[5]:.1f} |"
-          for r in rows],
+        ("| epoch | train loss | held-out loss | top-1 | top-3 | minutes |"
+         + (" value train | value held-out |" if cfg.value else "")),
+        ("|---|---|---|---|---|---|" + ("---|---|" if cfg.value else "")),
+        *([f"| {r[0]} | {r[1]:.4f} | {r[2]:.4f} | {r[3]:.1%} | {r[4]:.1%} | {r[5]:.1f} |"
+           + (f" {r[6]:.4f} | {r[7]:.4f} |" if cfg.value else "") for r in rows]),
         "",
         "## Best epoch",
         "",
         f"- epoch {best_epoch}: held-out top-1 {ev['top1']:.1%}, top-3 {ev['top3']:.1%}, "
-        f"loss {ev['loss']:.4f} ({len(val_idx)} examples on games it never saw)",
+        f"loss {ev['loss']:.4f}"
+        + (f", value loss {ev['value_loss']:.4f}" if cfg.value else "")
+        + f" ({len(val_idx)} examples on games it never saw)",
         "",
         "## Baseline",
         "",

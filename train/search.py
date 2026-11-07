@@ -247,6 +247,9 @@ class Searcher:
         self.decisions = 0
         self.dominance_fired = 0
         self.cycles_played = 0
+        # Plans dropped because the position changed under them (another
+        # learner seat acted between two actions of the line).
+        self.plans_abandoned = 0
         self.moves_scored = 0
         self.playout_steps = 0
         self.seconds = 0.0
@@ -313,15 +316,25 @@ class Searcher:
 
     def _decide(self, b: bgpy.SearchBatch, key) -> int:
         S = Slots(b)
-        # A line already judged plays out its remaining actions.
+        # A line already judged plays out its remaining actions, but only
+        # while its next action is legal in the real position. Another seat
+        # can act between two actions of a line (search_games has two learner
+        # seats in one game): the shared pool can then differ from the copy
+        # the line was judged on, and the line's next action may no longer
+        # exist. Dropping it and judging the real position afresh is the only
+        # safe thing; on one searching seat the check always passes.
         plan = self.plans.get(key)
         if plan is not None:
             turn, actions = plan
             if turn == b.turn and actions:
-                a = actions.pop(0)
-                if not actions:
-                    del self.plans[key]
-                return a
+                S.observe()
+                a = actions[0]
+                if 0 <= a < bgpy.N_ACTIONS and S.mask[0, a]:
+                    actions.pop(0)
+                    if not actions:
+                        del self.plans[key]
+                    return a
+                self.plans_abandoned += 1
             del self.plans[key]
         if self.mode == "plain":
             S.observe()
@@ -747,6 +760,7 @@ class Searcher:
             "cycles_played": self.cycles_played,
             "candidates_scored": self.moves_scored,
             "playout_steps": self.playout_steps,
+            "plans_abandoned": self.plans_abandoned,
             "seconds": self.seconds,
             "seconds_per_decision": self.seconds / max(1, self.decisions),
         }
