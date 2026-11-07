@@ -3922,9 +3922,11 @@ struct OneStep<'a> {
 
 /// A Choose One's answer: which option the log took, and whether it gave both.
 #[derive(Clone, Copy, Debug)]
-struct ChooseAnswer {
-    option: u8,
-    both: bool,
+pub struct ChooseAnswer {
+    /// The option's place in the engine's list (0 or 1).
+    pub option: u8,
+    /// Whether the card gave both options rather than one.
+    pub both: bool,
 }
 
 /// Whether a Choose One option's own outcome shows in the step: the free
@@ -4008,25 +4010,10 @@ fn logged_choose_one(
     }
 }
 
-/// What one step's state holds once it is seated, and the engine's actions for
-/// the step, before any of them is played.
-struct Seated {
-    game: Game,
-    /// The engine's actions for the step, in order: the step's own decision
-    /// first, then the answers it asks for (a target, a discard, a Choose One
-    /// option, a Discover's pick). Empty for `end_turn`, whose effects are no
-    /// action of the player's.
-    actions: Vec<Action>,
-    /// What the loader could not use.
-    missing: Vec<String>,
-    /// The way the log answered a Choose One the step plays.
-    answer: Option<ChooseAnswer>,
-}
-
 /// Seat one logged step: everything `run_once` does before it plays the step's
 /// actions. The error is what made the step impossible, with what the loader
 /// could not use.
-fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<Seated, StepError> {
+fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<SeatedStep, StepError> {
     let OneStep { file, before, step, turn, turn_index, index, armed, last_spell } = *one;
     let hero = file.hero(data, before);
     // The start of a turn follows the turn before's last state, which one
@@ -4098,10 +4085,24 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
     if let Some(after) = step.after.as_ref() {
         seat_souvenir_copy(data, &mut loaded.game, before, after);
     }
+    let press_not_built = step.step == "hero_power"
+        && before
+            .hero_powers
+            .iter()
+            .find(|p| p.second == (step.which.as_deref() == Some("second")))
+            .and_then(|p| p.card_id.as_deref())
+            .is_some_and(|id| data.heroes.power_by_card_id(id).is_none());
     if step.step == "end_turn" {
         // The end of turn effects are no action of the player's: the click that
         // ends the turn has none here, and `run_once` plays the effects alone.
-        return Ok(Seated { game: loaded.game, actions: Vec::new(), missing, answer });
+        return Ok(SeatedStep {
+            game: loaded.game,
+            actions: Vec::new(),
+            missing,
+            step: step.clone(),
+            answer,
+            press_not_built,
+        });
     }
     // Where a Discover's pick lands, when it is not the hand: the engine only
     // does that from a state the press left (Galakrond's Greed's Tavern slot, a
@@ -4136,7 +4137,14 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
         Ok(a) => a,
         Err(e) => return Err((e, missing)),
     };
-    Ok(Seated { game: loaded.game, actions, missing, answer })
+    Ok(SeatedStep {
+        game: loaded.game,
+        actions,
+        missing,
+        step: step.clone(),
+        answer,
+        press_not_built,
+    })
 }
 
 /// The game a logged turn starts from, seated exactly as the shop replay
@@ -4177,146 +4185,18 @@ fn run_once(
     one: &OneStep,
     seed: u64,
 ) -> Result<StepRun, StepError> {
-    let OneStep { before, step, .. } = *one;
-    let Seated { mut game, actions, missing, answer } = seat(data, ids, one, seed)?;
-    if step.step == "end_turn" {
-        // The end of turn effects, without the fight that follows them: the
-        // logged turn ends before the fight.
-        game.shop_end_of_turn(ME);
-        // And the picks those effects opened are in the same logged step (the
-        // file folds them in), so a Battlecry they triggered has resolved and
-        // owes its count here.
-        game.pay_pending_battlecries(ME);
-        let snap = ShopSnapshot::of_game(data, &game, ME);
-        return Ok((snap, missing, "end of turn effects".to_string()));
-    }
-    // The game's power button for a press is one the engine does not build:
-    // the log then shows a press the engine has no state for. Spirit Swap's
-    // second click is one (the game counts each click of a two-click power as
-    // a use and swaps the button to the power's second half, while the engine
-    // presses once and remembers the first pick itself), and so is a power no
-    // card set has. Such a step is not a finding: the state cannot carry it.
-    let press_not_built = step.step == "hero_power"
-        && before
-            .hero_powers
-            .iter()
-            .find(|p| p.second == (step.which.as_deref() == Some("second")))
-            .and_then(|p| p.card_id.as_deref())
-            .is_some_and(|id| data.heroes.power_by_card_id(id).is_none());
-    let mut text = Vec::new();
-    // The card this step plays is a Choose One card, so the step answers its
-    // choice whether or not the file says which option ran (`logged_choose_one`
-    // reads that when it can).
-    let plays_choose_one = step.step == "play"
-        && step
-            .card
-            .as_ref()
-            .and_then(|c| resolve_card(data, ids, c))
-            .is_some_and(|c| data.cards.get(c).choose_one.is_some());
-    // A Choose One with a target asks the option first, then the target
-    // (docs/rules/design.md "Targets in the shop"): the play's own sub-option is answered
-    // before the step's target, not after it.
-    let choose_first = plays_choose_one
-        && !answer.is_some_and(|a| a.both)
-        && actions.len() > 1;
-    let mut chosen = false;
-    for a in &actions {
-        if choose_first
-            && !chosen
-            && matches!(a, Action::Target(_) | Action::TargetShop(_))
-            && game.players[ME].pending_choose_one.is_some()
-        {
-            let k = answer.map_or(0, |a| a.option);
-            if game.step(Action::Choose(k)).is_err() {
-                return Err((format!("the engine does not allow {k:?} of the Choose One"), missing));
-            }
-            text.push(format!("Choose({k})"));
-            chosen = true;
-        }
-        // A prompt with one answer is no prompt: the engine applies the only
-        // target itself (`offer_target`), so the step's own target click has
-        // nothing left to answer in the replay. The state the game left still
-        // says whether the engine picked the same target.
-        //
-        // A Discover is not a target prompt: an effect can apply its one
-        // target and open a Discover from it in the same click (Kelp Keeper's
-        // trigger of a Battlecry that Discovers, Trash for Treasure), and the
-        // step's target click is still one the engine has already answered.
-        let pl = &game.players[ME];
-        let nothing_open = pl.pending_target.is_none()
-            && pl.pending_shop_target.is_none()
-            && pl.pending_choose_one.is_none();
-        if matches!(a, Action::Target(_) | Action::TargetShop(_)) && nothing_open {
-            text.push(format!("{a:?} (one answer, so the engine took it)"));
-            continue;
-        }
-        if game.step(*a).is_err() {
-            // A pick of a two-step effect answers the prompt the *game* opened
-            // in the step before, which one state cannot carry: the replay can
-            // answer only one of the two picks.
-            let pl = &game.players[ME];
-            if matches!(a, Action::Target(_)) && pl.pending_shop_target.is_some() {
-                return Err((
-                    "a board pick where the engine is still on the Tavern pick of a \
-                     two-step effect, whose first pick the file does not carry"
-                        .to_string(),
-                    missing,
-                ));
-            }
-            if matches!(a, Action::TargetShop(_)) && pl.pending_target.is_some() {
-                return Err((
-                    "a Tavern pick where the engine is still on the board pick of a \
-                     two-step effect, whose first pick the file does not carry"
-                        .to_string(),
-                    missing,
-                ));
-            }
-            if press_not_built && matches!(a, Action::HeroPower | Action::HeroPower2) {
-                return Err((
-                    "the power the game shows is one the engine does not build: its \
-                     second click of a two-click power, or a power no card set has"
-                        .to_string(),
-                    missing,
-                ));
-            }
-            return Err((format!("the engine does not allow {a:?}"), missing));
-        }
-        text.push(format!("{a:?}"));
-    }
-    // A Choose One card played from the hand asks which way in the same click
-    // in the game, and the client's own sub-option says which one it was (or,
-    // when the game picked the way itself, the log's own step does: see
-    // `logged_choose_one`): the engine opens the two options after the play.
-    //
-    // The game always answers it, so the replay does too: a Choose One whose
-    // options change nothing the file carries (Intrepid Botanist's "+1 Attack
-    // or +1 Health to your Tavern spells this game") still resolved, and what
-    // it set off landed in the same step (a Turbo Hogrider's Gems on every
-    // Quilboar, `Hearthstone_2026_10_28_02_28_32-g4` turn 13 step 27). Its
-    // first option answers it, since the file gives neither one's outcome.
-    if plays_choose_one
-        && !chosen
-        && !answer.is_some_and(|a| a.both)
-        && game.players[ME].pending_choose_one.is_some()
-    {
-        let option = answer.map_or(0, |a| a.option);
-        if game.step(Action::Choose(option)).is_err() {
-            return Err((
-                format!("the engine does not allow {option:?} of the Choose One"),
-                missing,
-            ));
-        }
-        text.push(format!("Choose({option})"));
-    }
-    let snap = ShopSnapshot::of_game(data, &game, ME);
-    Ok((snap, missing, text.join(", ")))
+    let (game, missing, text) = seat(data, ids, one, seed)?.play(data, ids)?;
+    Ok((ShopSnapshot::of_game(data, &game, ME), missing, text))
 }
 
 /// The state one logged step starts from, seated the way the replay seats it
 /// (`seat`), and the engine's own actions for the step. `bgbench record` reads
 /// Era's observation, the legal moves and the index of the step's decision off
-/// it; the replay plays the actions on the same state (`run_once`).
+/// it; the replay plays the actions on the same state (`play`, in `run_once`).
+/// `train/era_turns.py` plays one logged step with it too, which is how a bot
+/// on Era's path gets the log's own outcomes.
 pub struct SeatedStep {
+    /// The state the step starts from, seated from the log.
     pub game: Game,
     /// The engine's actions for the step, in order: the step's own decision
     /// first, then the answers it asks for (a target, a discard, a Choose One
@@ -4326,6 +4206,13 @@ pub struct SeatedStep {
     /// What the loader could not use, in the report's own words: a step with any
     /// of them is incomplete, whoever plays it next.
     pub missing: Vec<String>,
+    /// The step itself, as the file writes it.
+    pub step: ShopStepSpec,
+    /// The way the log answered a Choose One the step plays.
+    pub answer: Option<ChooseAnswer>,
+    /// A press whose power the engine does not build: the log then shows a
+    /// press the engine has no state for (see `play`).
+    pub press_not_built: bool,
 }
 
 impl SeatedStep {
@@ -4335,8 +4222,158 @@ impl SeatedStep {
     pub fn decision(&self) -> Option<Action> {
         self.actions.first().copied()
     }
-}
 
+    /// The step's own decision as an action index: what a player that picks
+    /// from the engine's action list matches against.
+    pub fn decision_index(&self) -> Option<usize> {
+        self.decision().map(Action::index)
+    }
+
+    /// Play the step on the state it was seated from, exactly as the replay
+    /// plays it (`run_once`): the step's own actions in order, with the answers
+    /// the log gave its choices, or the end of turn effects for an `end_turn`
+    /// step. The error is what made the step impossible, with what the loader
+    /// could not use. Returns the state the step left, the loader's misses, and
+    /// the step's action text.
+    pub fn play(
+        self,
+        data: &Data,
+        ids: &CardIdMap,
+    ) -> Result<(Game, Vec<String>, String), StepError> {
+        let game = self.game.clone();
+        self.play_on(data, ids, game)
+    }
+
+    /// The same, on a state the caller has carried forward instead of the
+    /// step's own seating: `train/era_turns.py`'s fidelity pass, which plays
+    /// Era's steps one after the other from the turn's start and compares what
+    /// the engine ends with to the log (`replay_step` seats every step alone,
+    /// so this is the one place a whole turn is played forward).
+    pub fn play_on(
+        self,
+        data: &Data,
+        ids: &CardIdMap,
+        mut game: Game,
+    ) -> Result<(Game, Vec<String>, String), StepError> {
+        let SeatedStep { game: _, actions, missing, step, answer, press_not_built } = self;
+        if step.step == "end_turn" {
+            // The end of turn effects, without the fight that follows them: the
+            // logged turn ends before the fight.
+            game.shop_end_of_turn(ME);
+            // And the picks those effects opened are in the same logged step (the
+            // file folds them in), so a Battlecry they triggered has resolved and
+            // owes its count here.
+            game.pay_pending_battlecries(ME);
+            return Ok((game, missing, "end of turn effects".to_string()));
+        }
+        let mut text = Vec::new();
+        // The card this step plays is a Choose One card, so the step answers its
+        // choice whether or not the file says which option ran (`logged_choose_one`
+        // reads that when it can).
+        let plays_choose_one = step.step == "play"
+            && step
+                .card
+                .as_ref()
+                .and_then(|c| resolve_card(data, ids, c))
+                .is_some_and(|c| data.cards.get(c).choose_one.is_some());
+        // A Choose One with a target asks the option first, then the target
+        // (docs/rules/design.md "Targets in the shop"): the play's own sub-option is answered
+        // before the step's target, not after it.
+        let choose_first = plays_choose_one
+            && !answer.is_some_and(|a| a.both)
+            && actions.len() > 1;
+        let mut chosen = false;
+        for a in &actions {
+            if choose_first
+                && !chosen
+                && matches!(a, Action::Target(_) | Action::TargetShop(_))
+                && game.players[ME].pending_choose_one.is_some()
+            {
+                let k = answer.map_or(0, |a| a.option);
+                if game.step(Action::Choose(k)).is_err() {
+                    return Err((format!("the engine does not allow {k:?} of the Choose One"), missing));
+                }
+                text.push(format!("Choose({k})"));
+                chosen = true;
+            }
+            // A prompt with one answer is no prompt: the engine applies the only
+            // target itself (`offer_target`), so the step's own target click has
+            // nothing left to answer in the replay. The state the game left still
+            // says whether the engine picked the same target.
+            //
+            // A Discover is not a target prompt: an effect can apply its one
+            // target and open a Discover from it in the same click (Kelp Keeper's
+            // trigger of a Battlecry that Discovers, Trash for Treasure), and the
+            // step's target click is still one the engine has already answered.
+            let pl = &game.players[ME];
+            let nothing_open = pl.pending_target.is_none()
+                && pl.pending_shop_target.is_none()
+                && pl.pending_choose_one.is_none();
+            if matches!(a, Action::Target(_) | Action::TargetShop(_)) && nothing_open {
+                text.push(format!("{a:?} (one answer, so the engine took it)"));
+                continue;
+            }
+            if game.step(*a).is_err() {
+                // A pick of a two-step effect answers the prompt the *game* opened
+                // in the step before, which one state cannot carry: the replay can
+                // answer only one of the two picks.
+                let pl = &game.players[ME];
+                if matches!(a, Action::Target(_)) && pl.pending_shop_target.is_some() {
+                    return Err((
+                        "a board pick where the engine is still on the Tavern pick of a \
+                         two-step effect, whose first pick the file does not carry"
+                            .to_string(),
+                        missing,
+                    ));
+                }
+                if matches!(a, Action::TargetShop(_)) && pl.pending_target.is_some() {
+                    return Err((
+                        "a Tavern pick where the engine is still on the board pick of a \
+                         two-step effect, whose first pick the file does not carry"
+                            .to_string(),
+                        missing,
+                    ));
+                }
+                if press_not_built && matches!(a, Action::HeroPower | Action::HeroPower2) {
+                    return Err((
+                        "the power the game shows is one the engine does not build: its \
+                         second click of a two-click power, or a power no card set has"
+                            .to_string(),
+                        missing,
+                    ));
+                }
+                return Err((format!("the engine does not allow {a:?}"), missing));
+            }
+            text.push(format!("{a:?}"));
+        }
+        // A Choose One card played from the hand asks which way in the same click
+        // in the game, and the client's own sub-option says which one it was (or,
+        // when the game picked the way itself, the log's own step does: see
+        // `logged_choose_one`): the engine opens the two options after the play.
+        //
+        // The game always answers it, so the replay does too: a Choose One whose
+        // options change nothing the file carries (Intrepid Botanist's "+1 Attack
+        // or +1 Health to your Tavern spells this game") still resolved, and what
+        // it set off landed in the same step (a Turbo Hogrider's Gems on every
+        // Quilboar, `Hearthstone_2026_10_28_02_28_32-g4` turn 13 step 27). Its
+        // first option answers it, since the file gives neither one's outcome.
+        if plays_choose_one
+            && !chosen
+            && !answer.is_some_and(|a| a.both)
+            && game.players[ME].pending_choose_one.is_some()
+        {
+            let option = answer.map_or(0, |a| a.option);
+            if game.step(Action::Choose(option)).is_err() {
+                return Err((
+                    format!("the engine does not allow {option:?} of the Choose One"),
+                    missing,
+                ));
+            }
+            text.push(format!("Choose({option})"));
+        }
+        Ok((game, missing, text.join(", ")))
+    }
+}
 /// Seat one logged step without playing it: everything `replay_step` does
 /// before it runs the step's own actions. `seed` is the seed `replay_step` runs
 /// first (the replay's own `ReplayOptions::seed`). The error is what made the
@@ -4372,11 +4409,7 @@ pub fn seat_step(
         last_spell,
     };
     let seated = seat(data, ids, &one, seed)?;
-    Ok(SeatedStep {
-        game: seated.game,
-        actions: seated.actions,
-        missing: seated.missing,
-    })
+    Ok(seated)
 }
 
 /// The Warband Whistle: its pick makes the next Refresh deal plain copies of

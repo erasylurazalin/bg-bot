@@ -405,6 +405,10 @@ pub struct RealBoards {
     /// Buckets for turns 1..=LATE_TURN, index 0 being turn 1. The last bucket
     /// holds every board of `LATE_TURN` or later.
     by_turn: Vec<Vec<RealBoard>>,
+    /// The spec's own place in the list `build` was given, for every board of
+    /// every bucket: a caller that keeps its own parallel array (the game each
+    /// board came from) finds a bucket's boards through it.
+    place: Vec<Vec<usize>>,
 }
 
 /// The token a real board's unknown minion becomes.
@@ -650,18 +654,22 @@ impl RealBoards {
         gifts: &crate::darkgifts::GiftDb,
     ) -> (RealBoards, Vec<String>) {
         let mut by_turn = vec![Vec::new(); LATE_TURN as usize];
+        let mut place = vec![Vec::new(); LATE_TURN as usize];
         let mut unmatched = Vec::new();
-        for spec in specs {
+        for (i, spec) in specs.iter().enumerate() {
             let (board, missing) = RealBoard::build_one(spec, db, gifts);
             unmatched.extend(missing);
             // Turn 13 and later all draw from one bucket.
             let t = spec.turn.clamp(1, LATE_TURN) as usize;
             by_turn[t - 1].push(board);
+            place[t - 1].push(i);
         }
-        (RealBoards { by_turn }, unmatched)
+        (RealBoards { by_turn, place }, unmatched)
     }
 
-    fn bucket(&self, turn: u32) -> &[RealBoard] {
+    /// The bucket index `bucket` reads from, after the late-turn and
+    /// fallback rules: 1-based.
+    fn bucket_index(&self, turn: u32) -> usize {
         let n = self.by_turn.len();
         // Start at this turn's bucket (the shared late one from LATE_TURN on)
         // and fall back to the nearest earlier turn that has boards; a turn
@@ -673,7 +681,11 @@ impl RealBoards {
         if t == 0 {
             t = 1 + self.by_turn.iter().position(|b| !b.is_empty()).unwrap_or(0);
         }
-        &self.by_turn[t - 1]
+        t
+    }
+
+    fn bucket(&self, turn: u32) -> &[RealBoard] {
+        &self.by_turn[self.bucket_index(turn) - 1]
     }
 
     /// A fresh random board for a real seat on `turn`, from every board of
@@ -687,6 +699,22 @@ impl RealBoards {
     /// fallback rules); empty only for an empty set.
     pub fn boards_at(&self, turn: u32) -> &[RealBoard] {
         self.bucket(turn)
+    }
+
+    /// The same boards as `boards_at`, as places in the spec list `build` was
+    /// given, in the same order: a caller with its own array beside the specs
+    /// (which game each board came from) reads it through this.
+    pub fn places_at(&self, turn: u32) -> &[usize] {
+        &self.place[self.bucket_index(turn) - 1]
+    }
+
+    /// Every board with its place in the spec list `build` was given, in
+    /// bucket order.
+    pub fn indexed(&self) -> impl Iterator<Item = (usize, &RealBoard)> {
+        self.by_turn
+            .iter()
+            .zip(&self.place)
+            .flat_map(|(boards, places)| places.iter().copied().zip(boards.iter()))
     }
 
     /// How many boards each turn bucket 1..=LATE_TURN holds as itself (so

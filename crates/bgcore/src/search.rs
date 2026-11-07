@@ -586,6 +586,17 @@ pub fn fight_boards(
     (0..n).map(|k| pool[k * pool.len() / n.max(1)]).collect()
 }
 
+/// How one fight against a real board went, from player `p`'s side: the
+/// engine's own fight, with the same counters, hands and rules as
+/// `fight_health_change`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FightOutcome {
+    /// 1 when player `p`'s hero won, 0 for a tie, -1 when the real board won.
+    pub outcome: i8,
+    /// The Health player `p`'s hero loses: 0 when the player wins or ties.
+    pub health_change: i32,
+}
+
 /// The Health player `p`'s hero loses in the coming fight against one real
 /// board: 0 when the player wins or ties, else minus the damage the winner
 /// deals, capped by the rules of the turn, exactly as `Game::combat` counts
@@ -599,6 +610,19 @@ pub fn fight_health_change(
     board: &RealBoard,
     rng: &mut Rng,
 ) -> i32 {
+    fight_outcome(data, game, p, board, rng).health_change
+}
+
+/// One fight against a real board, with both numbers the judging of an
+/// end-of-turn position reads: who won, and what the player's Health paid
+/// (`fight_health_change`). A tie is a loss of 0.
+pub fn fight_outcome(
+    data: &Data,
+    game: &Game,
+    p: usize,
+    board: &RealBoard,
+    rng: &mut Rng,
+) -> FightOutcome {
     let pl = &game.players[p];
     let them = Player::from_real_board(data, board);
     let counters = [pl.counters(data, game.lobby), them.counters(data, game.lobby)];
@@ -614,11 +638,18 @@ pub fn fight_health_change(
         &mut (),
     );
     match out.winner {
-        Some(1) => {
+        Some(0) => FightOutcome { outcome: 1, health_change: 0 },
+        None => FightOutcome { outcome: 0, health_change: 0 },
+        Some(_) => {
             let raw = board.tier as i32 + out.survivor_tiers;
-            -data.rules.damage_cap(game.turn, game.alive()).map_or(raw, |c| raw.min(c))
+            FightOutcome {
+                outcome: -1,
+                health_change: -data
+                    .rules
+                    .damage_cap(game.turn, game.alive())
+                    .map_or(raw, |c| raw.min(c)),
+            }
         }
-        _ => 0,
     }
 }
 

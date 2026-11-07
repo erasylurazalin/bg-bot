@@ -91,8 +91,11 @@ crates/
                       tribes from ref/hsjson-cards.json (src/cards.rs).
                       `bgbench powerlog` and `bgbench tracker` dump a log, to diff
                       against the older Python tracker
-  bgpy/               PyO3 bindings: a batch of games stepped together, and the
-                      search's copies (SearchBatch, see "The shop-turn search")
+  bgpy/               PyO3 bindings: a batch of games stepped together, the
+                      search's copies (SearchBatch, see "The shop-turn search"),
+                      and Era's turns seated step by step (EraReplay,
+                      EraTurnPath, RealFights, see "Era's turns, with Era's
+                      luck")
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
   model.py            policy and value network
@@ -1862,6 +1865,54 @@ free, the Dragons buffed).
   real-board seats, plain network and search over the same seeds, plus the Blue
   Shell test, the Warden test and the cycle rate over Era's logged turns
   (`bgpy.shop_replay_turns`, `bgpy.sandbox_position`).
+
+## Era's turns, with Era's luck
+
+`train/era_turns.py` measures the bot on Era's own turns (the compiled plan's
+main stick, `docs/notes/training-plans.md`): for every logged shop turn from
+turn 3 on it puts the bot in Era's position at the start of the turn and lets
+it play, then fights the end-of-turn board against the board Era really fought
+next. While the bot takes Era's steps, every random outcome is the log's: the
+state before each decision is seated from the log (`shop_replay::seat_step`),
+so a Refresh shows Era's Tavern and a Discover offers Era's cards. The first
+action that is not Era's ends that, and from then on the engine draws, its rng
+seeded from the turn's seed (a repeat's).
+
+- **The player is `bgpy.EraTurnPath`** (`crates/bgpy/src/lib.rs`, built from a
+  `bgpy.EraReplay`, one action file): `observe`/`describe`/`state` read the
+  current position, `era_action` is Era's next logged decision as an action
+  index, `act` plays one action and returns whether the turn is still on her
+  path, `left_at`/`left_why` say where it left, `finish` ends the shop turn
+  without the fight, and `batch` gives a `SearchBatch` at the position for the
+  search. `bought`/`played`/`sold` count the turn's cycles and `levelled` the
+  tier button.
+- **Seating every step alone** means a step whose actions the engine refuses
+  ends the turn's path where it happens: `missing` carries the replay's own
+  words for it. `reset` keeps the log's state before every decision; the
+  fidelity pass (`play_era`) turns it off and plays Era's steps forward from
+  the turn's start instead, which is what `diffs` compares against the log's
+  end state (`shop_replay::compare`).
+- **`shop_replay::SeatedStep::play`/`play_on`** is the replay's own step
+  runner, split out of `run_once` so a caller can play one logged step (or
+  carry a turn forward): the replay's report is byte for byte what it was.
+  `bgbench shopreplay` and the search still use `replay_step`, which seats and
+  plays one step without help.
+- **`bgpy.RealFights`** loads `boards/real` through
+  `real_boards::parse_board_files`, so every board keeps the file and game it
+  came from: `opponent(file, game, turn)` is the board Era really fought after
+  that turn, `typical(turn, n)` the same evenly spread draw the search fights
+  (`search::fight_boards` with no opponent hint), and `fight(batch, slot,
+  which, seed)` plays the batch's board against those boards with one seed per
+  fight, returning wins, ties, losses and the Health change
+  (`search::fight_outcome`, the three-way result `fight_health_change` only
+  had as a number). `final_tribe` is the leaderboard's top tribe of Era's last
+  board, the comp label for a game the comps run has no name for.
+  `RealBoards::places_at`/`indexed` keep a bucket's boards tied to their place
+  in the spec list.
+- **Not measurable:** a turn whose first step is a trinket pick whose offer
+  holds a trinket the trinket table does not build cannot be seated (turns 6
+  and 9 are mostly lost that way), and a step the loader cannot seat ends the
+  path mid-turn; the report counts both.
 
 ## Adding a card
 

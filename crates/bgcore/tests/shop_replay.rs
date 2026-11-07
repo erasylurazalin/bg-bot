@@ -9,9 +9,9 @@
 use std::sync::Arc;
 
 use bgcore::shop_replay::{
-    LoadedShop, ReplayOptions, ShopFileSpec, ShopShape, ShopSnapshot, ShopStepSpec, SnapMinion,
-    StepResult, Verdict, load, parse_action_files, replay_step, replay_turn,
-    seat_spell_bonus_turn, seat_taught_spells,
+    LoadedShop, ME, ReplayOptions, ShopFileSpec, ShopShape, ShopSnapshot, ShopStepSpec, SnapMinion,
+    StepResult, Verdict, load, parse_action_files, replay_step, replay_turn, seat_spell_bonus_turn,
+    seat_step, seat_taught_spells,
 };
 use bgcore::real_boards::CardIdMap;
 use bgcore::trinkets::CardMod;
@@ -4061,4 +4061,43 @@ fn the_lobby_key_wins_over_the_tribes() {
     // Nothing the engine has a tribe for: the engine rolls its own five.
     assert_eq!(file(r#""tribes": []"#).lobby(), None, "no tribes at all");
     assert_eq!(file(r#""tribes": ["naga"]"#).lobby(), None, "a type the engine has not");
+}
+
+/// A seated step played on its own (`SeatedStep::play`, which
+/// `train/era_turns.py` plays Era's steps with) is exactly the replay's own run
+/// of that step: same state, and a step the replay refuses has no play either.
+#[test]
+fn a_seated_step_played_alone_is_the_replay_step() {
+    let data = data();
+    let ids = ids();
+    let opts = ReplayOptions { seeds: 1, seed: 7 };
+    for file in fixtures() {
+        for turn in &file.turns {
+            for i in 0..turn.actions.len() {
+                let result = replay_step(&data, &ids, &file, turn, i, &opts);
+                match seat_step(&data, &ids, &file, turn, i, opts.seed) {
+                    Ok(seated) => match seated.play(&data, &ids) {
+                        Ok((game, _, _)) => {
+                            let ours = ShopSnapshot::of_game(&data, &game, ME);
+                            assert_eq!(
+                                ours, result.ours,
+                                "{} turn {} step {} ({})",
+                                file.file(), turn.turn, i, result.kind
+                            );
+                        }
+                        Err((why, _)) => assert!(
+                            !result.diffs.is_empty(),
+                            "{} turn {} step {}: the replay passed it but its play failed: {why}",
+                            file.file(), turn.turn, i
+                        ),
+                    },
+                    Err(_) => assert!(
+                        !result.diffs.is_empty(),
+                        "{} turn {} step {}: the replay passed a step that cannot be seated",
+                        file.file(), turn.turn, i
+                    ),
+                }
+            }
+        }
+    }
 }

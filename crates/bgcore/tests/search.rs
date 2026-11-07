@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use bgcore::cards::Tribes;
 use bgcore::real_boards::{CardIdMap, RealBoards, parse_board_files};
-use bgcore::search::{Position, fight_boards, fight_health_change, full_pool, refresh_from_full_pool};
+use bgcore::search::{
+    Position, fight_boards, fight_health_change, fight_outcome, full_pool, refresh_from_full_pool,
+};
 use bgcore::{Action, CardDb, Data, Game, Minion, Tribe, PLAYERS, Rng};
 
 fn data() -> Arc<Data> {
@@ -346,6 +348,17 @@ fn the_fights_use_real_boards_only() {
         changes.push(h);
     }
     assert!(changes.iter().any(|&h| h < 0), "a 1/1 Microbot loses to a turn 6 board: {changes:?}");
+    // The same fight gives the judge's own three-way outcome and the Health
+    // change the search uses (train/era_turns.py reads both from one fight).
+    for (k, &i) in picked.iter().enumerate() {
+        let b = &boards.boards_at(6)[i];
+        let mut rng = Rng::new(0x5eed + k as u64);
+        let out = fight_outcome(&data, &g, 0, b, &mut rng);
+        assert!(matches!(out.outcome, -1..=1));
+        let mut rng = Rng::new(0x5eed + k as u64);
+        assert_eq!(out.health_change, fight_health_change(&data, &g, 0, b, &mut rng));
+        assert_eq!(out.outcome == -1, out.health_change < 0);
+    }
     // The same board and seed give the same result for every candidate.
     let b = &boards.boards_at(6)[picked[0]];
     let one = fight_health_change(&data, &g, 0, b, &mut Rng::new(99));

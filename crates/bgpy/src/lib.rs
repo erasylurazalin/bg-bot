@@ -16,7 +16,10 @@ use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::obs::{self, OBS_SIZE, OldBoards};
-use bgcore::real_boards::{RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec};
+use bgcore::real_boards::{
+    RealBoard, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
+};
+use bgcore::shop_replay::{SeatedStep, ShopSnapshot};
 use bgcore::search::Position;
 use bgcore::{ACTION_KINDS, Action, Data, Game, Keywords, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES};
 use numpy::{PyReadonlyArray1, PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3};
@@ -69,6 +72,31 @@ fn minion_specs(list: Vec<PyMinion>) -> Vec<RealMinionSpec> {
             no_reward: false,
             dark_gift_states: Vec::new(),
             vanguard_aura: [0, 0],
+        })
+        .collect()
+}
+
+/// The specs `VecEnv(real_boards=..)` and the era-turn runs read: one board
+/// per (turn, tier, minions, hand, counters, deity) tuple from
+/// train/real_boards.py.
+fn real_board_specs(raw: PyBoards) -> Vec<RealBoardSpec> {
+    raw.into_iter()
+        .map(|(turn, tier, minions, hand, counters, deity)| RealBoardSpec {
+            turn,
+            tier,
+            minions: minion_specs(minions),
+            hand: minion_specs(hand),
+            counters: real_counters(counters),
+            deity: deity.map(|(name, attack, health, golden)| RealDeitySpec {
+                name,
+                attack,
+                health,
+                golden,
+            }),
+            // The rest of the file's board (the game it came from, its side
+            // and result, Health, armor, power, trinkets, quest rewards) is for
+            // the fight check, not for a seat.
+            ..RealBoardSpec::default()
         })
         .collect()
 }
@@ -241,26 +269,7 @@ impl VecEnv {
         };
         let data = Arc::new(data);
         let boards = real_boards.map(|raw| {
-            let specs: Vec<RealBoardSpec> = raw
-                .into_iter()
-                .map(|(turn, tier, minions, hand, counters, deity)| RealBoardSpec {
-                    turn,
-                    tier,
-                    minions: minion_specs(minions),
-                    hand: minion_specs(hand),
-                    counters: real_counters(counters),
-                    deity: deity.map(|(name, attack, health, golden)| RealDeitySpec {
-                        name,
-                        attack,
-                        health,
-                        golden,
-                    }),
-                    // The rest of the file's board (the game it came from, its
-                    // side and result, Health, armor, power, trinkets, quest
-                    // rewards) is for the fight check, not for a seat.
-                    ..RealBoardSpec::default()
-                })
-                .collect();
+            let specs = real_board_specs(raw);
             // Names that match no card are dropped here; train/real_boards.py
             // reports them (it knows both stages of the mapping), so this
             // stays quiet: every eval VecEnv would repeat the line.
@@ -814,25 +823,11 @@ impl SearchBatch {
     /// tier, Health, armor, the upgrade price, free Refreshes, the freeze, and
     /// the hand, shop and board as `(card id, Attack, Health)` (the hand and
     /// board with golden). Read only.
-    #[allow(clippy::type_complexity)]
     fn describe(
         &self,
         slot: usize,
-    ) -> PyResult<(u8, u8, i32, i32, u8, u8, bool, Vec<(u16, i32, i32, bool)>, Vec<(u16, i32, i32)>, Vec<(u16, i32, i32, bool)>)> {
-        let g = &self.slot(slot)?.game;
-        let pl = &g.players[self.p];
-        Ok((
-            pl.gold,
-            pl.tier,
-            pl.health,
-            pl.armor,
-            pl.upgrade_cost,
-            pl.free_rolls,
-            pl.frozen,
-            pl.hand.iter().map(|m| (m.card, m.attack, m.health, m.golden)).collect(),
-            pl.shop.iter().map(|m| (m.card, m.attack, m.health)).collect(),
-            pl.board.iter().map(|m| (m.card, m.attack, m.health, m.golden)).collect(),
-        ))
+    ) -> PyResult<Describe> {
+        Ok(describe_player(&self.slot(slot)?.game, self.p))
     }
 
     /// The turn a slot's game is on.
@@ -970,6 +965,41 @@ impl SearchBatch {
     }
 }
 
+/// What one player's position holds, as the search and the judges read it
+/// (`SearchBatch.describe`, `EraTurnPath.describe`): Gold, Tavern tier,
+/// Health, armor, the upgrade price, free Refreshes, the freeze, and the hand,
+/// shop and board as `(card id, Attack, Health)` (the hand and board with
+/// golden).
+type Describe = (
+    u8,
+    u8,
+    i32,
+    i32,
+    u8,
+    u8,
+    bool,
+    Vec<(u16, i32, i32, bool)>,
+    Vec<(u16, i32, i32)>,
+    Vec<(u16, i32, i32, bool)>,
+);
+
+#[allow(clippy::type_complexity)]
+fn describe_player(g: &Game, p: usize) -> Describe {
+    let pl = &g.players[p];
+    (
+        pl.gold,
+        pl.tier,
+        pl.health,
+        pl.armor,
+        pl.upgrade_cost,
+        pl.free_rolls,
+        pl.frozen,
+        pl.hand.iter().map(|m| (m.card, m.attack, m.health, m.golden)).collect(),
+        pl.shop.iter().map(|m| (m.card, m.attack, m.health)).collect(),
+        pl.board.iter().map(|m| (m.card, m.attack, m.health, m.golden)).collect(),
+    )
+}
+
 // ---- positions a test asks for (train/eval_search.py) ----
 
 /// Hand a zone back to the pool, so a hand-built position keeps the
@@ -1071,34 +1101,7 @@ fn shop_replay_turns(
     ref_cards: &str,
 ) -> PyResult<ReplayTurn> {
     let data = Arc::new(Data::bundled());
-    let ids = bgcore::CardIdMap::parse(
-        &std::fs::read_to_string(ref_cards)
-            .map_err(|e| PyValueError::new_err(format!("{ref_cards}: {e}")))?,
-    )
-    .map_err(PyValueError::new_err)?;
-    let mut files: Vec<(String, String)> = std::fs::read_dir(dir)
-        .map_err(|e| PyValueError::new_err(format!("{dir}: {e}")))?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_str().is_some_and(|n| n.ends_with(".json")))
-        .map(|e| {
-            let name = e.file_name().to_str().unwrap_or_default().to_string();
-            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
-            (name, text)
-        })
-        .collect();
-    files.sort();
-    // One file at a time, so a file the loader cannot build (a logged value
-    // past what its field holds) is skipped and named rather than stopping
-    // the whole test.
-    let mut specs = Vec::new();
-    let mut bad: Vec<String> = Vec::new();
-    for file in &files {
-        match bgcore::shop_replay::parse_action_files(std::slice::from_ref(file)) {
-            Ok(mut one) => specs.append(&mut one),
-            Err(e) => bad.push(format!("{}: {e}", file.0)),
-        }
-    }
-    bgcore::shop_replay::seat_taught_spells(&mut specs, &ids);
+    let (specs, ids, bad) = replay_specs(dir, ref_cards)?;
     let mut batches = Vec::new();
     let mut labels = Vec::new();
     for file in &specs {
@@ -1121,6 +1124,796 @@ fn shop_replay_turns(
     Ok((batches, labels))
 }
 
+/// The `*.json` files of a folder, with their text: the collector's hidden
+/// state file (`.state.json`) is not one of them.
+fn action_files(dir: &str) -> PyResult<Vec<(String, String)>> {
+    Ok(std::fs::read_dir(dir)
+        .map_err(|e| PyValueError::new_err(format!("{dir}: {e}")))?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.ends_with(".json") && !n.starts_with('.'))
+        })
+        .map(|e| {
+            let name = e.file_name().to_str().unwrap_or_default().to_string();
+            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+            (name, text)
+        })
+        .collect())
+}
+
+/// Every action file of `dir`, parsed and seated as `shop_replay_turns` seats
+/// it: the loader's card id map, and the files it cannot build (a logged value
+/// past what its field holds) as `file: why` lines, left out rather than
+/// stopping the whole run. Both `shop_replay_turns` and `era_replays` read
+/// their turns through this.
+fn replay_specs(
+    dir: &str,
+    ref_cards: &str,
+) -> PyResult<(Vec<bgcore::shop_replay::ShopFileSpec>, bgcore::CardIdMap, Vec<String>)> {
+    let ids = bgcore::CardIdMap::parse(
+        &std::fs::read_to_string(ref_cards)
+            .map_err(|e| PyValueError::new_err(format!("{ref_cards}: {e}")))?,
+    )
+    .map_err(PyValueError::new_err)?;
+    let mut files = action_files(dir)?;
+    files.sort();
+    // One file at a time, so a file the loader cannot build (a logged value
+    // past what its field holds) is skipped and named rather than stopping
+    // the whole test.
+    let mut specs = Vec::new();
+    let mut bad: Vec<String> = Vec::new();
+    for file in &files {
+        match bgcore::shop_replay::parse_action_files(std::slice::from_ref(file)) {
+            Ok(mut one) => specs.append(&mut one),
+            Err(e) => bad.push(format!("{}: {e}", file.0)),
+        }
+    }
+    bgcore::shop_replay::seat_taught_spells(&mut specs, &ids);
+    Ok((specs, ids, bad))
+}
+
+
+// ---- Era's own turns, seated step by step (train/era_turns.py) ----
+
+/// Era's own seat in a replayed game, the seat the shop replay plays.
+const ME: usize = bgcore::shop_replay::ME;
+
+/// One of Era's logged turns, played from her own start. The state is seated
+/// from the log before every decision, so while the bot takes Era's steps the
+/// shop it sees, the Tavern a Refresh deals it and the offers a Discover shows
+/// are the log's own, never the engine's draw. The first action that is not
+/// Era's leaves her path, and from then on the engine draws: its rng comes from
+/// the turn's seed, which is a repeat's seed.
+#[pyclass]
+struct EraTurnPath {
+    data: Arc<Data>,
+    ids: Arc<bgcore::CardIdMap>,
+    file: Arc<bgcore::shop_replay::ShopFileSpec>,
+    turn_index: usize,
+    turn: u32,
+    seed: u64,
+    /// The real boards the search's own judging fights use, if any.
+    boards: Option<Arc<RealBoards>>,
+    /// The state the bot decides from.
+    game: Game,
+    /// The next logged step to play.
+    step: usize,
+    /// The seated state at the start of step `step`, while it is known.
+    seated: Option<SeatedStep>,
+    /// Whether a matched step is followed by the next step's own seating (the
+    /// bot's path, the log's outcomes) or by what the engine played from it
+    /// (the fidelity check, Era's steps replayed without help).
+    reseat: bool,
+    /// The step of the turn the bot first did something else, -1 while it has
+    /// not left Era's path.
+    left_at: i64,
+    left_why: String,
+    /// Whether the turn is over.
+    done: bool,
+    /// How many of Era's steps the bot has played.
+    steps_on_path: usize,
+    /// What the turn has bought, played and sold, by card.
+    bought: Vec<u16>,
+    played: Vec<u16>,
+    sold: Vec<u16>,
+    levelled: bool,
+    /// What the loader could not use, or could not seat.
+    missing: Vec<String>,
+}
+
+impl EraTurnPath {
+    /// Seat logged step `i` as the state the bot decides from, keeping the
+    /// seated step to play it if the bot takes it.
+    fn seat_index(&mut self, i: usize) -> Result<(), (String, Vec<String>)> {
+        let seated = bgcore::shop_replay::seat_step(
+            &self.data,
+            &self.ids,
+            &self.file,
+            &self.file.turns[self.turn_index],
+            i,
+            self.seed,
+        )?;
+        if self.reseat {
+            // The bot decides from the log's own before-state. The fidelity
+            // pass keeps the state it has carried forward instead.
+            self.game = seated.game.clone();
+        }
+        self.seated = Some(seated);
+        Ok(())
+    }
+
+    /// Note that the turn left Era's path at the next logged step.
+    fn leave(&mut self, why: String) {
+        if self.left_at < 0 {
+            self.left_at = self.step as i64;
+            self.left_why = why;
+        }
+    }
+
+    /// Era's next decision, as the action index she picked. Steps the engine
+    /// asks nothing about (a step with no action of its own, or one whose
+    /// click the engine takes itself) are played as the log has them, since
+    /// the bot cannot make that decision. None when Era's logged steps are
+    /// over, or the next one cannot be seated.
+    fn era_decision(&mut self) -> PyResult<Option<usize>> {
+        while !self.done && self.left_at < 0 {
+            let n = self.file.turns[self.turn_index].actions.len();
+            if self.step >= n {
+                return Ok(None);
+            }
+            if self.seated.is_none()
+                && let Err((why, miss)) = self.seat_index(self.step)
+            {
+                self.missing.extend(miss);
+                self.missing
+                    .push(format!("step {} cannot be seated: {why}", self.step));
+                self.leave("the logged step cannot be seated".to_string());
+                return Ok(None);
+            }
+            let seated = self.seated.as_ref().expect("seated just above");
+            if seated.step.step == "end_turn" {
+                return Ok(Some(Action::EndTurn.index()));
+            }
+            let mut mask = [false; N_ACTIONS];
+            self.game.legal_mask(&mut mask);
+            match seated.decision_index() {
+                Some(d) if mask[d] => return Ok(Some(d)),
+                _ => {
+                    // Nothing to ask here: play the log's own step.
+                    self.advance()?;
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Play Era's next logged step, then put the state at the next step's own
+    /// seating while that is what keeps the log's outcomes (the bot's path).
+    fn advance(&mut self) -> PyResult<()> {
+        let seated = self
+            .seated
+            .take()
+            .ok_or_else(|| PyValueError::new_err("no logged step is seated"))?;
+        let index = self.step;
+        let n = self.file.turns[self.turn_index].actions.len();
+        self.step += 1;
+        self.steps_on_path += 1;
+        for a in &seated.actions {
+            self.track_action(&seated.game, *a);
+        }
+        let is_end = seated.step.step == "end_turn";
+        let carried = self.game.clone();
+        let (game, missing, _text) = seated
+            .play_on(&self.data, &self.ids, carried)
+            .map_err(|(why, miss)| {
+                PyValueError::new_err(format!(
+                    "step {index} cannot be played: {why}{}",
+                    if miss.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", miss.join("; "))
+                    }
+                ))
+            })?;
+        self.missing.extend(missing);
+        self.game = game;
+        if is_end || self.game.players[ME].done || self.game.turn != self.turn || self.game.over {
+            self.done = true;
+            return Ok(());
+        }
+        if self.step >= n {
+            // The log's turn ends here (an end_turn step almost always closes
+            // it, and its own effects have run above).
+            self.done = true;
+            return Ok(());
+        }
+        if self.reseat && let Err((why, miss)) = self.seat_index(self.step) {
+            self.missing.extend(miss);
+            self.missing
+                .push(format!("step {} cannot be seated: {why}", self.step));
+            self.leave("the next logged step cannot be seated".to_string());
+        }
+        Ok(())
+    }
+
+    /// Remember what one action bought, played or sold, so the turn's cycles
+    /// (a card bought or played and sold in the same turn) can be counted. The
+    /// state is the one the action was taken from.
+    fn track_action(&mut self, g: &Game, action: Action) {
+        let pl = &g.players[ME];
+        match action {
+            Action::Buy(slot) => {
+                if let Some(m) = pl.shop.get(slot as usize) {
+                    self.bought.push(m.card);
+                }
+            }
+            Action::BuySpell => {
+                if let Some(card) = pl.shop_spell {
+                    self.bought.push(card);
+                }
+            }
+            Action::Sell(slot) => {
+                if let Some(m) = pl.board.get(slot as usize) {
+                    self.sold.push(m.card);
+                }
+            }
+            Action::Play { hand, .. } => {
+                if let Some(m) = pl.hand.get(hand as usize) {
+                    self.played.push(m.card);
+                }
+            }
+            Action::Level => self.levelled = true,
+            _ => {}
+        }
+    }
+
+    /// Play one action of the bot's. While it is Era's own next decision the
+    /// logged step is played instead, with the log's outcomes; anything else
+    /// leaves her path. Returns whether the turn is still on it.
+    fn take_action(&mut self, a: i64) -> PyResult<bool> {
+        if self.done {
+            return Err(PyValueError::new_err("the turn is over"));
+        }
+        let Some(action) = usize::try_from(a).ok().and_then(Action::from_index) else {
+            return Err(PyValueError::new_err(format!("no action {a}")));
+        };
+        match self.era_decision()? {
+            Some(era) if era == action.index() => {
+                self.advance()?;
+                return Ok(self.left_at < 0);
+            }
+            Some(era) => {
+                let era = Action::from_index(era).map_or("?".to_string(), |a| format!("{a:?}"));
+                self.leave(format!(
+                    "at step {} the bot played {action:?}, Era played {era}",
+                    self.step
+                ));
+            }
+            None => {
+                if matches!(action, Action::EndTurn) {
+                    // Era's logged steps are over and her turn is ending: the
+                    // bot ends its own too, still on her path.
+                    self.done = true;
+                    self.game.end_shop_turn(ME);
+                    return Ok(self.left_at < 0);
+                }
+                self.leave(format!(
+                    "Era's logged steps were over and the bot played {action:?}"
+                ));
+            }
+        }
+        self.play_free(action)?;
+        Ok(false)
+    }
+
+    /// Play one action the engine draws for: the turn is off Era's path.
+    fn play_free(&mut self, action: Action) -> PyResult<()> {
+        let game = self.game.clone();
+        self.track_action(&game, action);
+        if matches!(action, Action::EndTurn) {
+            // The engine's End Turn fights; the judged position is the board
+            // that goes into the fight, so only the shop turn ends here.
+            self.done = true;
+            self.game.end_shop_turn(ME);
+            return Ok(());
+        }
+        self.game
+            .step(action)
+            .map_err(|_| PyValueError::new_err(format!("illegal action {action:?}")))?;
+        if self.game.players[ME].done || self.game.turn != self.turn || self.game.over {
+            self.done = true;
+        }
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl EraTurnPath {
+    #[getter]
+    fn turn(&self) -> u32 {
+        self.turn
+    }
+
+    /// The action file's name, as `boards/real` names the same game.
+    #[getter]
+    fn file(&self) -> String {
+        self.file.file()
+    }
+
+    #[getter]
+    fn source(&self) -> String {
+        self.file.source.clone()
+    }
+
+    #[getter]
+    fn game(&self) -> u32 {
+        self.file.game
+    }
+
+    /// How many steps the log has for the turn.
+    #[getter]
+    fn logged_steps(&self) -> usize {
+        self.file.turns[self.turn_index].actions.len()
+    }
+
+    /// How many of Era's steps the bot played (the ones it took).
+    #[getter]
+    fn steps_on_path(&self) -> usize {
+        self.steps_on_path
+    }
+
+    /// The step the turn left Era's path at, -1 while it has not.
+    #[getter]
+    fn left_at(&self) -> i64 {
+        self.left_at
+    }
+
+    /// What the bot did differently, in words.
+    #[getter]
+    fn left_why(&self) -> String {
+        self.left_why.clone()
+    }
+
+    #[getter]
+    fn on_path(&self) -> bool {
+        self.left_at < 0
+    }
+
+    #[getter]
+    fn done(&self) -> bool {
+        self.done
+    }
+
+    /// What the loader could not use, or could not seat, in the replay's words.
+    #[getter]
+    fn missing(&self) -> Vec<String> {
+        self.missing.clone()
+    }
+
+    /// The cards the turn has bought, played and sold, by card id: a cycle is
+    /// a card in `bought` or `played` and in `sold`.
+    #[getter]
+    fn bought(&self) -> Vec<u16> {
+        self.bought.clone()
+    }
+
+    #[getter]
+    fn played(&self) -> Vec<u16> {
+        self.played.clone()
+    }
+
+    #[getter]
+    fn sold(&self) -> Vec<u16> {
+        self.sold.clone()
+    }
+
+    /// Whether the bot pressed the tier up button this turn.
+    #[getter]
+    fn levelled(&self) -> bool {
+        self.levelled
+    }
+
+    /// 0 for a shop decision, 1 for an answer the network takes (a Discover, a
+    /// target, a trinket or hero pick) and 2 for a finished turn.
+    #[getter]
+    fn state(&self) -> i8 {
+        if self.done || !self.game.players[ME].alive || self.game.over {
+            2
+        } else if self.game.shopping(ME) {
+            0
+        } else {
+            1
+        }
+    }
+
+    /// The actions the engine's own cap still allows this turn.
+    #[getter]
+    fn actions_left(&self) -> usize {
+        (self.data.rules.max_actions_per_turn as usize)
+            .saturating_sub(self.game.players[ME].actions as usize)
+    }
+
+    fn card_names(&self) -> Vec<String> {
+        self.data.cards.cards.iter().map(|c| c.name.clone()).collect()
+    }
+
+    /// Era's next logged decision as an action index, -1 when the turn has no
+    /// logged step left (or it cannot be seated).
+    fn era_action(&mut self) -> PyResult<i64> {
+        Ok(self.era_decision()?.map_or(-1, |d| d as i64))
+    }
+
+    /// The observation and legal mask of the state the bot decides from.
+    fn observe(
+        &self,
+        mut obs: PyReadwriteArray1<f32>,
+        mut mask: PyReadwriteArray1<bool>,
+    ) -> PyResult<()> {
+        let o = obs.as_slice_mut()?;
+        if o.len() != OBS_SIZE {
+            return Err(PyValueError::new_err("one observation"));
+        }
+        obs::write(&self.game, ME, o);
+        let m: &mut [bool; N_ACTIONS] = mask
+            .as_slice_mut()?
+            .try_into()
+            .map_err(|_| PyValueError::new_err("one legal mask"))?;
+        self.game.legal_mask(m);
+        Ok(())
+    }
+
+    fn describe(&self) -> Describe {
+        describe_player(&self.game, ME)
+    }
+
+    /// Play one action. Returns false once the turn has left Era's path (and
+    /// stays false), true while the bot is still on it.
+    fn act(&mut self, a: i64) -> PyResult<bool> {
+        self.take_action(a)
+    }
+
+    /// End the shop turn without a fight, so the position is the one the fight
+    /// after it is fought from (the bot's own end of turn).
+    fn finish(&mut self) {
+        if self.done {
+            return;
+        }
+        self.game.end_shop_turn(ME);
+        self.done = true;
+    }
+
+    /// Play every remaining logged step as Era played it: the fidelity check
+    /// (a player that always plays Era's next step), and Era's own end-of-turn
+    /// position.
+    fn play_era(&mut self) -> PyResult<()> {
+        loop {
+            if self.done {
+                break;
+            }
+            match self.era_decision()? {
+                Some(d) => {
+                    self.take_action(d as i64)?;
+                }
+                None => {
+                    self.finish();
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// What the engine's own state shows differently from the log's end-of-turn
+    /// state, in the replay's words: empty when the turn is reproduced exactly.
+    fn diffs(&self) -> Vec<String> {
+        let turn = &self.file.turns[self.turn_index];
+        let Some(end) = turn.end.as_ref() else {
+            return vec!["the log has no end state for the turn".to_string()];
+        };
+        let mut missing = Vec::new();
+        let log = ShopSnapshot::of_state(&self.data, end, turn.turn, &mut missing);
+        let ours = ShopSnapshot::of_game(&self.data, &self.game, ME);
+        let mut diffs = bgcore::shop_replay::compare(&ours, &log);
+        diffs.extend(missing);
+        diffs
+    }
+
+    /// A `SearchBatch` at the position the bot decides from: the search's own
+    /// entry point, with the same real boards its fights use.
+    fn batch(&self) -> PyResult<SearchBatch> {
+        Ok(SearchBatch::new(self.game.clone(), ME, self.data.clone(), self.boards.clone()))
+    }
+}
+
+/// One action file of Era's games, ready to seat any of its turns
+/// (`train/era_turns.py`).
+#[pyclass]
+struct EraReplay {
+    data: Arc<Data>,
+    ids: Arc<bgcore::CardIdMap>,
+    spec: Arc<bgcore::shop_replay::ShopFileSpec>,
+    name: String,
+    boards: Option<Arc<RealBoards>>,
+}
+
+#[pymethods]
+impl EraReplay {
+    /// The file's name, as `boards/real` names the same game.
+    #[getter]
+    fn file(&self) -> String {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn source(&self) -> String {
+        self.spec.source.clone()
+    }
+
+    #[getter]
+    fn game(&self) -> u32 {
+        self.spec.game
+    }
+
+    /// The logged turns from `from_turn` on that have steps to seat, in the
+    /// file's order.
+    fn turns(&self, from_turn: u32) -> Vec<u32> {
+        self.spec
+            .turns
+            .iter()
+            .filter(|t| t.turn >= from_turn && !t.actions.is_empty())
+            .map(|t| t.turn)
+            .collect()
+    }
+
+    /// The turn seated as a path: the position at its first step, and the
+    /// machinery to play it with the log's own outcomes. `seed` is the turn's
+    /// own (a repeat's seed), and seeds the engine's draws once the path is
+    /// left.
+    #[pyo3(signature = (turn, seed, reseat=true))]
+    fn path(&self, turn: u32, seed: u64, reseat: bool) -> PyResult<EraTurnPath> {
+        let turn_index = self
+            .spec
+            .turns
+            .iter()
+            .position(|t| t.turn == turn)
+            .ok_or_else(|| PyValueError::new_err(format!("{} has no turn {turn}", self.name)))?;
+        let seated = bgcore::shop_replay::seat_step(
+            &self.data,
+            &self.ids,
+            &self.spec,
+            &self.spec.turns[turn_index],
+            0,
+            seed,
+        )
+        .map_err(|(why, miss)| {
+            PyValueError::new_err(format!(
+                "turn {turn} cannot be seated: {why}{}",
+                if miss.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", miss.join("; "))
+                }
+            ))
+        })?;
+        let missing = seated.missing.clone();
+        let game = seated.game.clone();
+        Ok(EraTurnPath {
+            data: self.data.clone(),
+            ids: self.ids.clone(),
+            file: self.spec.clone(),
+            turn_index,
+            turn,
+            seed,
+            boards: self.boards.clone(),
+            game,
+            step: 0,
+            seated: Some(seated),
+            reseat,
+            left_at: -1,
+            left_why: String::new(),
+            done: false,
+            steps_on_path: 0,
+            bought: Vec::new(),
+            played: Vec::new(),
+            sold: Vec::new(),
+            levelled: false,
+            missing,
+        })
+    }
+}
+
+/// Every action file of `dir` as a replay to seat turns from, with the files
+/// the loader cannot build as `file: why` lines. `real_boards` is
+/// train/real_boards.py's spec list, the boards the search's own judging
+/// fights; without it the search plays blind, as it does for a cycle-rate run.
+#[pyfunction]
+#[pyo3(signature = (dir, ref_cards, real_boards=None))]
+fn era_replays(
+    dir: &str,
+    ref_cards: &str,
+    real_boards: Option<PyBoards>,
+) -> PyResult<(Vec<EraReplay>, Vec<String>)> {
+    let data = Arc::new(Data::bundled());
+    let (specs, ids, bad) = replay_specs(dir, ref_cards)?;
+    let ids = Arc::new(ids);
+    let boards = real_boards.map(|raw| {
+        let specs = real_board_specs(raw);
+        let (boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
+        Arc::new(boards)
+    });
+    let replays = specs
+        .into_iter()
+        .map(|spec| {
+            let name = spec.file();
+            EraReplay {
+                data: data.clone(),
+                ids: ids.clone(),
+                spec: Arc::new(spec),
+                name,
+                boards: boards.clone(),
+            }
+        })
+        .collect();
+    Ok((replays, bad))
+}
+
+/// The boards of Era's real games, for judging an end-of-turn position: every
+/// board of `boards/real`, with the file and game it came from, so the board
+/// Era really fought next can be found by (file, turn) and a turn's typical
+/// boards drawn the way `RealBoards` draws them.
+#[pyclass]
+struct RealFights {
+    data: Arc<Data>,
+    boards: RealBoards,
+    /// Every spec's board, in the files' order, so a place found by key and a
+    /// place found by `places_at` are the same board.
+    flat: Vec<RealBoard>,
+    /// The file, game, turn and side of every flat board, in the same order.
+    keys: Vec<(String, u32, u32, bool)>,
+}
+
+impl RealFights {
+    fn index_of(&self, source: &str, game: u32, turn: u32, opponent: bool) -> Option<usize> {
+        self.keys
+            .iter()
+            .position(|(s, g, t, o)| s == source && *g == game && *t == turn && *o == opponent)
+    }
+}
+
+#[pymethods]
+impl RealFights {
+    /// Read every board file of `dir`: the game each board came from and its
+    /// side survive (the files' own keys), and the minions no card matches come
+    /// back by name.
+    #[staticmethod]
+    fn load(dir: &str, ref_cards: &str) -> PyResult<(RealFights, Vec<String>)> {
+        let data = Arc::new(Data::bundled());
+        let ids = bgcore::CardIdMap::parse(
+            &std::fs::read_to_string(ref_cards)
+                .map_err(|e| PyValueError::new_err(format!("{ref_cards}: {e}")))?,
+        )
+        .map_err(PyValueError::new_err)?;
+        let mut files = action_files(dir)?;
+        files.sort();
+        let (specs, unknown) =
+            bgcore::real_boards::parse_board_files(&files, &ids).map_err(PyValueError::new_err)?;
+        let keys = specs
+            .iter()
+            .map(|s| {
+                (
+                    s.source.clone(),
+                    s.game,
+                    s.turn,
+                    matches!(s.side, bgcore::real_boards::RealSide::Opp),
+                )
+            })
+            .collect();
+        let (boards, unbuilt) = RealBoards::build(&specs, &data.cards, &data.gifts);
+        // The flat list in the files' order: `places_at` names the places of a
+        // turn's bucket, so the same board is reachable both ways.
+        let mut flat: Vec<Option<RealBoard>> = vec![None; specs.len()];
+        for (place, board) in boards.indexed() {
+            flat[place] = Some(board.clone());
+        }
+        let mut out = Vec::with_capacity(specs.len());
+        for (i, board) in flat.into_iter().enumerate() {
+            let Some(board) = board else {
+                return Err(PyValueError::new_err(format!("board {i} was not built")));
+            };
+            out.push(board);
+        }
+        let mut unknown = unknown;
+        unknown.extend(unbuilt);
+        Ok((
+            RealFights { data, boards, flat: out, keys },
+            unknown,
+        ))
+    }
+
+    fn len(&self) -> usize {
+        self.flat.len()
+    }
+
+    /// The boards of `turn` a typical draw fights, as flat indices: the same
+    /// evenly spread list for every position judged on that turn (the rule the
+    /// search's own judging uses, `bgcore::search::fight_boards`).
+    fn typical(&self, turn: u32, n: usize) -> Vec<usize> {
+        let places = self.boards.places_at(turn);
+        bgcore::search::fight_boards(&self.data, &self.boards, turn, None, None, n)
+            .into_iter()
+            .filter_map(|i| places.get(i).copied())
+            .collect()
+    }
+
+    /// The board Era fought after `turn` of the game `source`+`game`, as a flat
+    /// index, or -1 when the folder holds none (the fight was a ghost, or the
+    /// log has no opponent board for it).
+    fn opponent(&self, source: &str, game: u32, turn: u32) -> i64 {
+        self.index_of(source, game, turn, true)
+            .map_or(-1, |i| i as i64)
+    }
+
+    /// Fight the batch's slot board against the boards `which` names, one
+    /// fight each, with the seeds `seed` gives: the same boards and seeds for
+    /// every position judged, so a stronger board simply wins more. Returns
+    /// (wins, ties, losses, total Health change).
+    fn fight(
+        &self,
+        batch: &SearchBatch,
+        slot: usize,
+        which: Vec<usize>,
+        seed: u64,
+    ) -> PyResult<(i64, i64, i64, i64)> {
+        let game = &batch.slot(slot)?.game;
+        let p = batch.p;
+        let mut wins = 0;
+        let mut ties = 0;
+        let mut losses = 0;
+        let mut health = 0;
+        for (k, &i) in which.iter().enumerate() {
+            let board = self
+                .flat
+                .get(i)
+                .ok_or_else(|| PyValueError::new_err(format!("no real board {i}")))?;
+            let mut rng = Rng::new(seed ^ (k as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+            let out = bgcore::search::fight_outcome(&self.data, game, p, board, &mut rng);
+            match out.outcome {
+                1 => wins += 1,
+                0 => ties += 1,
+                _ => losses += 1,
+            }
+            health += out.health_change;
+        }
+        Ok((wins, ties, losses, health as i64))
+    }
+
+    /// The top tribe of Era's last board of the game, by the leaderboard's rule
+    /// (a shared top is "mixed", an empty board "none"). The comp label of a
+    /// game the comps run has no name for.
+    fn final_tribe(&self, source: &str, game: u32) -> String {
+        let mut best: Option<(u32, usize)> = None;
+        for (i, (s, g, t, opp)) in self.keys.iter().enumerate() {
+            if s != source || *g != game || *opp {
+                continue;
+            }
+            if best.is_none_or(|(bt, _)| *t > bt) {
+                best = Some((*t, i));
+            }
+        }
+        let Some((_, i)) = best else {
+            return "none".to_string();
+        };
+        let line = bgcore::game::Leaderboard::of(&self.data.cards, &self.flat[i].minions);
+        match (line.top, line.mixed) {
+            (Some(t), false) => bgcore::shop_replay::tribe_name(t).to_string(),
+            _ if line.mixed => "mixed".to_string(),
+            _ => "none".to_string(),
+        }
+    }
+}
+
 #[pymodule]
 fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // A game step inlines into rayon's splitting helper with a 64 KB frame,
@@ -1134,8 +1927,12 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let n_trinkets = Data::bundled().trinkets.len();
     m.add_class::<VecEnv>()?;
     m.add_class::<SearchBatch>()?;
+    m.add_class::<EraTurnPath>()?;
+    m.add_class::<EraReplay>()?;
+    m.add_class::<RealFights>()?;
     m.add_function(wrap_pyfunction!(sandbox_position, m)?)?;
     m.add_function(wrap_pyfunction!(shop_replay_turns, m)?)?;
+    m.add_function(wrap_pyfunction!(era_replays, m)?)?;
     m.add("N_HEROES", n_heroes)?;
     m.add("N_POWERS", n_powers)?;
     m.add("N_TRINKETS", n_trinkets)?;
