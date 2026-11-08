@@ -290,11 +290,11 @@ commit_turn = [2, 6]
 abort = { min_tier = 3 }
 scales = "none"
 # Era: Soul Rewinder (the turns 3 to 5 enabler) and Ashen Corruptor both
-# count. The guide's common-enabler line is Wrath Weaver + Soul Rewinder, but
-# the brief says both rewind cards count, so each is an entry of its own.
+# count, each needing a self-damage card with it: a Soul Rewinder alone is just
+# a tier 2 Demon, and activating on it alone ran the comp in a quarter of all games.
 enabler = [
-  { all = [["Soul Rewinder"]] },
-  { all = [["Ashen Corruptor"]] },
+  { all = [["Soul Rewinder"], ["Wrath Weaver"]] },
+  { all = [["Ashen Corruptor"], ["Wrath Weaver", "Malchezaar, Prince of Dance"]] },
 ]
 payoff = ["Ashen Corruptor", "Balinda Stonehearth", "Eredar Escapist", "Devilish Distractor", "Brann Bronzebeard"]
 filler = ["Tichondrius", "Malchezaar, Prince of Dance", "Wrath Weaver"]
