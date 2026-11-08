@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
+use bgcore::comps::Comps;
 use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{
     RealBoard, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
@@ -1759,6 +1760,90 @@ fn era_replays(
     Ok((replays, bad))
 }
 
+
+/// The comp planner as a player for Era's turns (`train/era_turns.py
+/// --planner`). One planner per seat or per repeat; `reset` starts a turn or a
+/// game with a fresh state.
+#[pyclass]
+struct Planner {
+    inner: bgcore::planner::Planner,
+    data: Arc<Data>,
+}
+
+#[pymethods]
+impl Planner {
+    /// `comps`: the comp library TOML (data/comps/comps.toml). `real_boards`:
+    /// the same specs a VecEnv gets, so the planner fights the same boards.
+    #[new]
+    #[pyo3(signature = (comps, seed=0, real_boards=None))]
+    fn new(comps: &str, seed: u64, real_boards: Option<PyBoards>) -> PyResult<Planner> {
+        let data = Arc::new(Data::bundled());
+        let text = std::fs::read_to_string(comps)
+            .map_err(|e| PyValueError::new_err(format!("{comps}: {e}")))?;
+        let comps = Comps::from_toml(&text, &data).map_err(PyValueError::new_err)?;
+        let mut inner = bgcore::planner::Planner::new(comps, seed, &data);
+        if let Some(raw) = real_boards {
+            let specs = real_board_specs(raw);
+            let (boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
+            inner.set_boards(Some(Arc::new(boards)));
+        }
+        Ok(Planner { inner, data })
+    }
+
+    fn reset(&mut self, seed: u64) {
+        self.inner.reset(seed);
+    }
+
+    /// The next action for the path's current position.
+    fn action(&mut self, path: &EraTurnPath) -> PyResult<i64> {
+        if path.data.cards.cards.len() != self.data.cards.cards.len() {
+            return Err(PyValueError::new_err(
+                "the planner was built from a different card set than the path",
+            ));
+        }
+        if path.boards.is_some() {
+            self.inner.set_boards(path.boards.clone());
+        }
+        Ok(self.inner.action(&path.game, ME).index() as i64)
+    }
+
+    /// The comp committed to, if any.
+    #[getter]
+    fn comp(&self) -> Option<String> {
+        self.inner.comp_name().map(str::to_string)
+    }
+
+    /// The comp the planner is leaning to before committing.
+    #[getter]
+    fn lean(&self) -> Option<String> {
+        self.inner.lean_name().map(str::to_string)
+    }
+
+    #[getter]
+    fn committed_turn(&self) -> Option<u32> {
+        self.inner.state.committed_turn
+    }
+
+    #[getter]
+    fn switched_turn(&self) -> Option<u32> {
+        self.inner.state.switched_turn
+    }
+
+    #[getter]
+    fn shell_cycles(&self) -> usize {
+        self.inner.state.shell_cycle_turns.len()
+    }
+
+    #[getter]
+    fn shell_chances(&self) -> usize {
+        self.inner.state.shell_chance_turns.len()
+    }
+
+    fn level_turns(&self) -> Vec<(u32, u8)> {
+        self.inner.state.level_turns.clone()
+    }
+}
+
 /// The boards of Era's real games, for judging an end-of-turn position: every
 /// board of `boards/real`, with the file and game it came from, so the board
 /// Era really fought next can be found by (file, turn) and a turn's typical
@@ -1929,6 +2014,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SearchBatch>()?;
     m.add_class::<EraTurnPath>()?;
     m.add_class::<EraReplay>()?;
+    m.add_class::<Planner>()?;
     m.add_class::<RealFights>()?;
     m.add_function(wrap_pyfunction!(sandbox_position, m)?)?;
     m.add_function(wrap_pyfunction!(shop_replay_turns, m)?)?;

@@ -104,7 +104,7 @@ def plain_action(net, path, gen, dev, obs, mask) -> int:
     return int(eval_search.sample(net, obs[None], mask[None], gen, dev)[0])
 
 
-def play_bot(net, path, player, searcher, gen, dev, args) -> dict:
+def play_bot(net, path, player, searcher, gen, dev, args, planner=None) -> dict:
     """Play one turn of one repeat and say how it went: the actions, the card
     events and where the turn left Era's path."""
     obs = np.zeros(bgpy.OBS_SIZE, np.float32)
@@ -115,6 +115,8 @@ def play_bot(net, path, player, searcher, gen, dev, args) -> dict:
         while path.state != 2 and path.actions_left > 1 and actions < args.max_actions:
             if player == "plain":
                 a = plain_action(net, path, gen, dev, obs, mask)
+            elif player == "planner":
+                a = planner.action(path)
             else:
                 a = searcher.decide_batch(path.batch(), key=("era", path.file, path.turn))
             path.act(a)
@@ -221,7 +223,7 @@ def unloaded_turns(bad: list[str], actions: Path, from_turn: int) -> list[dict]:
     return out
 
 
-def run(net, dev, args, replays, bad, fights, out: Path) -> tuple[list[dict], list[dict]]:
+def run(net, dev, args, replays, bad, fights, out: Path, boards=None) -> tuple[list[dict], list[dict]]:
     names = None
     for replay in replays:
         turns = replay.turns(args.from_turn)
@@ -231,6 +233,7 @@ def run(net, dev, args, replays, bad, fights, out: Path) -> tuple[list[dict], li
     if names is None:
         raise SystemExit("no seatable turn to play")
 
+    planners = {}
     skipped = unloaded_turns(bad, Path(args.actions), args.from_turn)
     # The turns that cannot be seated at all: the path's own seating says why.
     for replay in replays:
@@ -367,8 +370,23 @@ def run(net, dev, args, replays, bad, fights, out: Path) -> tuple[list[dict], li
                         else:
                             searcher = None
                             gen.manual_seed((args.seed * 7919 + repeat * 104729 + turn) & 0xFFFF_FFFF)
+                        planner = None
+                        if player == "planner":
+                            planner = planners.get(repeat)
+                            if planner is None:
+                                planner = bgpy.Planner(
+                                    args.planner, args.seed * 31 + repeat, boards
+                                )
+                                planners[repeat] = planner
+                            planner.reset(
+                                (args.seed * 7919 + repeat * 104729 + turn) & 0xFFFF_FFFF
+                            )
                         path = replay.path(turn, args.seed + repeat * 101 + 1, True)
-                        summary = play_bot(net, path, player, searcher, gen, dev, args)
+                        summary = play_bot(net, path, player, searcher, gen, dev, args, planner)
+                        if planner is not None:
+                            summary["comp"] = planner.comp
+                            summary["committed_turn"] = planner.committed_turn
+                            summary["shell_cycles"] = planner.shell_cycles
                         batch = path.batch()
                         judged = judge(fights, batch, names, net, dev, turn,
                                        opponent, typical, seed, args)
@@ -983,7 +1001,9 @@ def main() -> None:
     ap.add_argument("--name", default="plain-search", help="the run's name (the output folder)")
     ap.add_argument("--ckpt", default=str(DEFAULT_CKPT), help="the network")
     ap.add_argument("--players", default="plain,search",
-                    help="comma list of plain and search")
+                    help="comma list of plain, search and planner")
+    ap.add_argument("--planner", default="",
+                    help="the comp library TOML; adds the planner player")
     ap.add_argument("--from-turn", type=int, default=3, help="the first logged turn to play")
     ap.add_argument("--repeats", type=int, default=3, help="repeats per turn and player")
     ap.add_argument("--fights", type=int, default=100,
@@ -1033,9 +1053,13 @@ def main() -> None:
         raise SystemExit("--turns and --sample are exclusive: --sample spreads N, --turns takes the first N")
 
     args.players = [p.strip() for p in args.players.split(",") if p.strip()]
+    if args.planner and "planner" not in args.players:
+        args.players.append("planner")
     for player in args.players:
-        if player not in ("plain", "search"):
-            raise SystemExit(f"no player {player}: plain or search")
+        if player not in ("plain", "search", "planner"):
+            raise SystemExit(f"no player {player}: plain, search or planner")
+        if player == "planner" and not args.planner:
+            raise SystemExit("--players planner needs --planner PATH")
     args.dev = "cuda" if torch.cuda.is_available() else "cpu"
     if args.dev == "cuda" and args.vram_gb > 0:
         torch.cuda.set_per_process_memory_fraction(args.vram_gb / 16.3)
@@ -1057,7 +1081,7 @@ def main() -> None:
     print(f"real fight boards: {fights.len()} ({len(unknown_fights)} unknown minions)", flush=True)
 
     t_start = time.time()
-    records, skipped = run(net, args.dev, args, replays, bad, fights, out)
+    records, skipped = run(net, args.dev, args, replays, bad, fights, out, specs)
     run_seconds = args.run_seconds if args.run_seconds > 0 else time.time() - t_start
     lines = ["file\tturn\twhy"]
     lines += [f"{s['file']}\t{s['turn']}\t{s['why']}" for s in skipped]

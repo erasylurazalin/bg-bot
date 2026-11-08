@@ -267,15 +267,6 @@ pub fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Acti
         let k = pl.hero_offer.iter().position(|&h| h != u8::MAX).unwrap();
         return Some(Action::Choose(k as u8));
     }
-    // A Hero Power Discover: take the first offered power.
-    if !pl.power_offer.is_empty() {
-        return Some(Action::Choose(0));
-    }
-    // Prestidigitation: the first offered Secret (all four are worth having,
-    // and the zone stops it from offering one that is already held).
-    if !pl.secret_offer.is_empty() {
-        return Some(Action::Choose(0));
-    }
     if let Some(pt) = pl.pending_target {
         let board = (0..pl.board.len() as u8)
             .map(Action::Target)
@@ -349,6 +340,15 @@ pub fn answer_pending(game: &Game, p: usize, pref: Option<Tribe>) -> Option<Acti
             (a, score)
         });
         return Some(best_of(scored).unwrap_or_else(|| first_legal(game)));
+    }
+    // A Hero Power Discover: take the first offered power.
+    if !pl.power_offer.is_empty() {
+        return Some(Action::Choose(0));
+    }
+    // Prestidigitation: the first offered Secret (all four are worth having,
+    // and the zone stops it from offering one that is already held).
+    if !pl.secret_offer.is_empty() {
+        return Some(Action::Choose(0));
     }
     // Friendly Wager and Detective for Hire: a guess, with nothing to go on
     // here (the offered seats and minion ids are in the observation), so the

@@ -18,16 +18,19 @@
 //! real-board seats playing the boards of DIR (docs/real-boards.md), the
 //! small fixture crate bgcore/tests/data/real-boards included.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bgcore::bots::{random_action, rush_action, standard_action};
+use bgcore::comps::Comps;
+use bgcore::planner::Planner;
 use bgcore::fight_check::{CheckOptions, CheckReport, check_fight};
 use bgcore::real_boards::{CardIdMap, RealBoards, pair_fights, parse_board_files};
 use bgcore::{
-    Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, RealBoardSpec, Rng, fight,
-    fight_with,
+    Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, PLAYERS, RealBoardSpec, Rng,
+    fight, fight_with,
 };
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -149,42 +152,83 @@ fn bench_fights(n: usize) {
 }
 
 /// Plays one game with random actions. Returns (steps, turns). With `real`,
-/// that many seats (players 0..) are real-board seats instead.
-fn play(data: &Arc<Data>, seed: u64, check: bool, real: Real) -> Result<(u64, u32), String> {
+/// that many seats are real-board seats instead (players 0.., or 1.. when a
+/// planner seat is present). With `planner`, player 0 plays the comp planner.
+fn play(
+    data: &Arc<Data>,
+    seed: u64,
+    check: bool,
+    real: Real,
+    planner: Option<Arc<Comps>>,
+) -> Result<(u64, u32), String> {
     let mut g = match &real {
         Some((boards, n)) => {
-            let seats: Vec<usize> = (0..*n).collect();
+            // The planner always takes seat 0; real seats start at 1.
+            let first = if planner.is_some() { 1 } else { 0 };
+            assert!(*n + first <= bgcore::PLAYERS, "a planner seat leaves at most 7 real seats");
+            let seats: Vec<usize> = (first..first + *n).collect();
             Game::new_random_heroes_real(data.clone(), seed, &seats, boards.clone())
         }
         None => Game::new_random_heroes(data.clone(), seed),
     };
     let mut rng = Rng::new(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    let mut bot = planner.map(|c| Planner::new((*c).clone(), seed ^ 0x51ed_2a17, data));
     let mut steps = 0;
-    while !g.over {
-        let a = random_action(&g, &mut rng);
-        g.step(a).map_err(|_| format!("seed {seed}: random_action picked illegal {a:?}"))?;
-        steps += 1;
-        for (p, pl) in g.players.iter().enumerate() {
-            if pl.pending_cycle.is_some() && !g.choice_waiting(p) {
-                return Err(format!(
-                    "seed {seed}, step {steps}, turn {}: player {p} has a paused cycle with no choice open: {:?}, gold {}, board {:?}, hand {:?}",
-                    g.turn,
-                    pl.pending_cycle,
-                    pl.gold,
-                    pl.board.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
-                    pl.hand.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
-                ));
+    if let Some(bot) = bot.as_mut() {
+        while !g.over {
+            let a = if g.current_player() == Some(0) {
+                bot.action(&g, 0)
+            } else {
+                random_action(&g, &mut rng)
+            };
+            g.step(a).map_err(|_| format!("seed {seed}: picked illegal {a:?}"))?;
+            steps += 1;
+            for (p, pl) in g.players.iter().enumerate() {
+                if pl.pending_cycle.is_some() && !g.choice_waiting(p) {
+                    return Err(format!(
+                        "seed {seed}, step {steps}, turn {}: player {p} has a paused cycle with no choice open: {:?}, gold {}, board {:?}, hand {:?}",
+                        g.turn,
+                        pl.pending_cycle,
+                        pl.gold,
+                        pl.board.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
+                        pl.hand.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
+                    ));
+                }
+            }
+            if check {
+                g.check_invariants()
+                    .map_err(|e| format!("seed {seed}, step {steps}, turn {}: {e}", g.turn))?;
             }
         }
-        if check {
-            g.check_invariants()
-                .map_err(|e| format!("seed {seed}, step {steps}, turn {}: {e}", g.turn))?;
+    } else {
+        // The default path is the original loop, inlined here: `games` and
+        // `fuzz` keep the speed they had before the planner seat existed.
+        while !g.over {
+            let a = random_action(&g, &mut rng);
+            g.step(a).map_err(|_| format!("seed {seed}: picked illegal {a:?}"))?;
+            steps += 1;
+            for (p, pl) in g.players.iter().enumerate() {
+                if pl.pending_cycle.is_some() && !g.choice_waiting(p) {
+                    return Err(format!(
+                        "seed {seed}, step {steps}, turn {}: player {p} has a paused cycle with no choice open: {:?}, gold {}, board {:?}, hand {:?}",
+                        g.turn,
+                        pl.pending_cycle,
+                        pl.gold,
+                        pl.board.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
+                        pl.hand.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
+                    ));
+                }
+            }
+            if check {
+                g.check_invariants()
+                    .map_err(|e| format!("seed {seed}, step {steps}, turn {}: {e}", g.turn))?;
+            }
         }
     }
     Ok((steps, g.turn))
 }
 
-fn bench_games(secs: u64, real: Real) {
+fn bench_games(secs: u64, real: Real, planner: Option<Arc<Comps>>) {
     let data = Arc::new(Data::bundled());
     // one core first, for the per-game time
     let t = Instant::now();
@@ -192,7 +236,7 @@ fn bench_games(secs: u64, real: Real) {
     let mut turns = 0;
     let n = 2000;
     for seed in 0..n {
-        let (s, tu) = play(&data, seed, false, real.clone()).unwrap();
+        let (s, tu) = play(&data, seed, false, real.clone(), planner.clone()).unwrap();
         steps += s;
         turns += tu as u64;
     }
@@ -213,7 +257,7 @@ fn bench_games(secs: u64, real: Real) {
     (0..threads as u64).into_par_iter().for_each(|th| {
         let mut seed = th << 40;
         while !stop.load(Ordering::Relaxed) {
-            play(&data, seed, false, real.clone()).unwrap();
+            play(&data, seed, false, real.clone(), planner.clone()).unwrap();
             seed += 1;
             games.fetch_add(1, Ordering::Relaxed);
             if t.elapsed() >= deadline {
@@ -226,11 +270,11 @@ fn bench_games(secs: u64, real: Real) {
     println!("{threads} threads: {g} games in {el:.1} s, {:.0} games per second", g as f64 / el);
 }
 
-fn fuzz(n: u64, real: Real) {
+fn fuzz(n: u64, real: Real, planner: Option<Arc<Comps>>) {
     let data = Arc::new(Data::bundled());
     let t = Instant::now();
     let results: Vec<Result<(u64, u32), String>> =
-        (0..n).into_par_iter().map(|seed| play(&data, seed, true, real.clone())).collect();
+        (0..n).into_par_iter().map(|seed| play(&data, seed, true, real.clone(), planner.clone())).collect();
     let steps: u64 = results.iter().filter_map(|r| r.as_ref().ok()).map(|r| r.0).sum();
     let errors: Vec<&String> = results.iter().filter_map(|r| r.as_ref().err()).collect();
     println!("{n} games, {steps} actions, invariants checked after each, in {:.1?}", t.elapsed());
@@ -281,6 +325,274 @@ fn bot_match(n: u64) {
                 rule_sum / (k * rule as f64),
                 rand_sum / (k * (bgcore::PLAYERS - rule) as f64),
             );
+        }
+    }
+}
+
+/// Which player the `planner` command puts in seat 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Seat {
+    Planner,
+    Standard,
+    Rush,
+}
+
+impl Seat {
+    fn name(self) -> &'static str {
+        match self {
+            Seat::Planner => "planner",
+            Seat::Standard => "standard",
+            Seat::Rush => "rush",
+        }
+    }
+}
+
+/// One game of the `planner` command: the seat 0 result and, for the planner,
+/// what it committed to and did.
+struct GameRec {
+    seed: u64,
+    place: u8,
+    tier: u8,
+    health: i32,
+    comp: Option<String>,
+    commit_turn: Option<u32>,
+    switched_turn: Option<u32>,
+    core_share: f32,
+    core_cards: usize,
+    shell_chances: usize,
+    shell_cycles: usize,
+    level_turns: Vec<(u32, u8)>,
+    tier_turns: [u8; 6],
+    board: Vec<String>,
+    hand: Vec<String>,
+    decisions: u64,
+    nanos: u128,
+}
+
+fn minion_text(game: &Game, m: &Minion) -> String {
+    let c = game.data.cards.get(m.card);
+    let mut s = format!("{} {}/{}", c.name, m.attack, m.health);
+    if m.golden {
+        s.push_str(" golden");
+    }
+    let kw = bgcore::search::keyword_names(m);
+    if !kw.is_empty() {
+        s.push_str(&format!(" [{}]", kw.join(",")));
+    }
+    if m.improvements != 0 || m.magnetizations != 0 {
+        s.push_str(&format!(" (improvements {}, magnetizations {})", m.improvements, m.magnetizations));
+    }
+    s
+}
+
+fn load_comps(path: &str, data: &Data) -> Result<Arc<Comps>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    Ok(Arc::new(Comps::from_toml(&text, data)?))
+}
+
+/// `--planner PATH` on `fuzz` and `games`: the comp library for the seat 0
+/// planner, None when the run is all random play.
+fn load_planner_arg(args: &[String]) -> Option<Arc<Comps>> {
+    let k = args.iter().position(|a| a == "--planner")?;
+    let Some(path) = args.get(k + 1) else {
+        eprintln!("--planner needs a comp library path");
+        std::process::exit(2);
+    };
+    let data = Data::bundled();
+    Some(load_comps(path, &data).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    }))
+}
+
+fn play_one(
+    seed: u64,
+    data: Arc<Data>,
+    boards: Arc<RealBoards>,
+    comps: Option<Arc<Comps>>,
+    seat: Seat,
+) -> GameRec {
+    // Seat 0 is the bot; seats 1..7 play real boards.
+    let real: Vec<usize> = (1..PLAYERS).collect();
+    let mut g = Game::new_random_heroes_real(data.clone(), seed, &real, boards);
+    let mut planner = comps.as_ref().map(|c| Planner::new((**c).clone(), seed ^ 0x51ed_2a17, &data));
+    let mut nanos = 0u128;
+    let mut decisions = 0u64;
+    let mut last_board: Vec<Minion> = Vec::new();
+    let mut last_hand: Vec<Minion> = Vec::new();
+    while let Some(p) = g.current_player() {
+        assert_eq!(p, 0, "seed {seed}: a real-board seat is the current player");
+        if !g.players[0].board.is_empty() {
+            last_board = g.players[0].board.to_vec();
+            last_hand = g.players[0].hand.to_vec();
+        }
+        let a = match seat {
+            Seat::Planner => {
+                let t = Instant::now();
+                let a = planner.as_mut().expect("the planner seat").action(&g, 0);
+                nanos += t.elapsed().as_nanos();
+                decisions += 1;
+                a
+            }
+            Seat::Standard => standard_action(&g),
+            Seat::Rush => rush_action(&g),
+        };
+        g.step(a).unwrap_or_else(|_| panic!("seed {seed}: {} picked illegal {a:?}", seat.name()));
+    }
+    let pl = &g.players[0];
+    if last_board.is_empty() {
+        last_board = pl.board.to_vec();
+        last_hand = pl.hand.to_vec();
+    }
+    let comp_index = planner.as_ref().and_then(|p| p.state.comp);
+    let (core_share, core_cards) = match (comps.as_ref(), comp_index) {
+        (Some(c), Some(ci)) => {
+            let comp = &c.comps[ci];
+            let total: f32 = comp.core.iter().map(|c| c.weight).sum();
+            let mut on = 0.0;
+            let mut n = 0;
+            for core in &comp.core {
+                if last_board.iter().any(|m| m.card == core.id) {
+                    on += core.weight;
+                    n += 1;
+                }
+            }
+            (if total > 0.0 { on / total } else { 0.0 }, n)
+        }
+        _ => (0.0, 0),
+    };
+    GameRec {
+        seed,
+        place: pl.placement,
+        tier: pl.tier,
+        health: pl.health,
+        comp: planner.as_ref().and_then(|p| p.comp_name().map(str::to_string)),
+        commit_turn: planner.as_ref().and_then(|p| p.state.committed_turn),
+        switched_turn: planner.as_ref().and_then(|p| p.state.switched_turn),
+        core_share,
+        core_cards,
+        shell_chances: planner.as_ref().map_or(0, |p| p.state.shell_chance_turns.len()),
+        shell_cycles: planner.as_ref().map_or(0, |p| p.state.shell_cycle_turns.len()),
+        level_turns: planner.as_ref().map_or_else(Vec::new, |p| p.state.level_turns.clone()),
+        tier_turns: pl.tier_turns,
+        board: last_board.iter().map(|m| minion_text(&g, m)).collect(),
+        hand: last_hand.iter().map(|m| minion_text(&g, m)).collect(),
+        decisions,
+        nanos,
+    }
+}
+
+fn bench_planner(comps_path: &str, games: usize, seat: Seat, boards_dir: &str) {
+    let games = games.max(1);
+    let data = Arc::new(Data::bundled());
+    let boards = load_real_boards(boards_dir).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    let comps = if seat == Seat::Planner {
+        Some(load_comps(comps_path, &data).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }))
+    } else {
+        None
+    };
+    // The candidate copies and the fight sim are large; this command's own
+    // pool gets a bigger stack so a 512-game run does not overflow. The other
+    // commands keep rayon's default stack, and their speed is unchanged.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .stack_size(8 * 1024 * 1024)
+        .build()
+        .expect("the planner's thread pool");
+    let t = Instant::now();
+    let recs: Vec<GameRec> = pool.install(|| {
+        (0..games as u64)
+            .into_par_iter()
+            .map(|seed| play_one(seed, data.clone(), boards.clone(), comps.clone(), seat))
+            .collect()
+    });
+    let secs = t.elapsed().as_secs_f64();
+    let n = recs.len() as f64;
+    let avg = recs.iter().map(|r| r.place as f64).sum::<f64>() / n;
+    let top4 = recs.iter().filter(|r| r.place <= 4).count() as f64 / n;
+    let first = recs.iter().filter(|r| r.place == 1).count() as f64 / n;
+    println!("{} games, one {} seat against 7 real boards of {boards_dir}", games, seat.name());
+    println!("average place {avg:.2}, top-4 {:.1}%, first {:.1}%", top4 * 100.0, first * 100.0);
+
+    if seat == Seat::Planner {
+        let mut commits: BTreeMap<String, (usize, u64)> = BTreeMap::new();
+        for r in &recs {
+            if let (Some(c), Some(t)) = (&r.comp, r.commit_turn) {
+                let e = commits.entry(c.clone()).or_insert((0, 0));
+                e.0 += 1;
+                e.1 += t as u64;
+            }
+        }
+        let never = recs.iter().filter(|r| r.comp.is_none()).count();
+        println!("comp committed to (games, average commit turn):");
+        for (c, (k, sum)) in &commits {
+            println!("  {c}: {k} games, average turn {:.2}", *sum as f64 / *k as f64);
+        }
+        if never > 0 {
+            println!("  none: {never} games");
+        }
+        let switched = recs.iter().filter(|r| r.switched_turn.is_some()).count();
+        println!("give-up switches: {switched} games");
+        let comp_boards = recs
+            .iter()
+            .filter(|r| r.core_share >= 0.5 && r.core_cards >= 2)
+            .count();
+        println!(
+            "final boards that are the committed comp (core share >= 0.5 and at least 2 core cards): {} of {} ({:.1}%)",
+            comp_boards,
+            recs.len(),
+            comp_boards as f64 / n * 100.0
+        );
+        let chances: usize = recs.iter().map(|r| r.shell_chances).sum();
+        let cycles: usize = recs.iter().map(|r| r.shell_cycles).sum();
+        println!(
+            "Shell cycles: {cycles} on {chances} turns where the rule applied ({:.1}%)",
+            if chances == 0 { 0.0 } else { cycles as f64 / chances as f64 * 100.0 }
+        );
+        for tier in 3..=6 {
+            let mut turns: Vec<u32> = recs
+                .iter()
+                .map(|r| r.tier_turns[tier - 1] as u32)
+                .filter(|&t| t > 0)
+                .collect();
+            turns.sort_unstable();
+            if !turns.is_empty() {
+                println!(
+                    "tier {tier}: median turn {} ({} games reached it)",
+                    turns[turns.len() / 2],
+                    turns.len()
+                );
+            }
+        }
+        let decisions: u64 = recs.iter().map(|r| r.decisions).sum();
+        let nanos: u128 = recs.iter().map(|r| r.nanos).sum();
+        if decisions > 0 {
+            println!(
+                "decision time: {:.3} ms average over {decisions} decisions",
+                nanos as f64 / decisions as f64 / 1e6
+            );
+        }
+    }
+    println!("{games} games in {secs:.1} s");
+    println!("\n10 final boards:");
+    for r in recs.iter().take(10) {
+        println!(
+            "\nseed {}: place {}, tier {}, health {}, comp {:?} (commit {:?}, switch {:?}), core share {:.2} ({} cards)",
+            r.seed, r.place, r.tier, r.health, r.comp, r.commit_turn, r.switched_turn, r.core_share, r.core_cards
+        );
+        for (i, line) in r.board.iter().enumerate() {
+            println!("  {}. {line}", i + 1);
+        }
+        if !r.hand.is_empty() {
+            println!("  hand: {}", r.hand.join(", "));
+        }
+        if !r.level_turns.is_empty() {
+            println!("  level presses: {:?}", r.level_turns);
         }
     }
 }
@@ -751,8 +1063,38 @@ fn main() {
         Some("check-actions") => check_actions::run(&args),
         Some("collect-actions") => collect_actions::run(&args),
         Some("collect-boards") => collect_boards::run(&args),
-        Some("games") => bench_games(num(10), real),
-        Some("fuzz") => fuzz(num(10_000), real),
+        Some("games") => bench_games(num(10), real, load_planner_arg(&args)),
+        Some("fuzz") => fuzz(num(10_000), real, load_planner_arg(&args)),
+        Some("planner") => {
+            let opt = |name: &str, default: &str| {
+                args.iter()
+                    .position(|a| a == name)
+                    .and_then(|k| args.get(k + 1))
+                    .cloned()
+                    .unwrap_or_else(|| default.to_string())
+            };
+            let comps = opt("--comps", "data/comps/comps.toml");
+            let boards = opt("--real-boards", "boards/real");
+            let games: usize = opt("--games", "512").parse().unwrap_or_else(|_| {
+                eprintln!("--games needs a number");
+                std::process::exit(2);
+            });
+            let vs = opt("--vs", "real");
+            if vs != "real" {
+                eprintln!("--vs only takes real (7 real-board seats)");
+                std::process::exit(2);
+            }
+            let seat = match opt("--seat", "planner").as_str() {
+                "planner" => Seat::Planner,
+                "standard" => Seat::Standard,
+                "rush" => Seat::Rush,
+                other => {
+                    eprintln!("no seat {other}: planner, standard or rush");
+                    std::process::exit(2);
+                }
+            };
+            bench_planner(&comps, games, seat, &boards);
+        }
         Some("match") => bot_match(num(10_000)),
         Some("peak") => bench_peak(num(10_000) as usize),
         _ => {

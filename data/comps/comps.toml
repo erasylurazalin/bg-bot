@@ -1,0 +1,168 @@
+# The comp library the planner bot plays (docs/briefs/comp-planner-1.md).
+#
+# Every card is named as cards.toml names it. The loader rejects a name that
+# cards.toml does not hold, and a hero or trinket that heroes.toml or
+# trinkets.toml does not hold. Change the file and rerun: no rebuild needed.
+#
+# Format, one [[comp]] per comp:
+#   name         the comp's name, unique, the target of a give_up
+#   tribes       the card tribes the comp plays (for target and Discover
+#                preference); empty for a comp with no tribe
+#   draft        true while Era has not corrected the entry
+#   fallback     true when the planner may pick it late with no other comp
+#   commit_turn  [first, last] turn the planner may commit on a signal
+#   level        the tier target for turn 1, 2, ...; absent means no curve
+#   scales       "none", "beetles" or "stats": the player-wide counter that
+#                makes the comp grow (beetles reads Player.beetle_bonus)
+#
+# [[comp.core]] name, weight, scale. The weight is what the card is worth on
+# the final board; scale = true means the card's own growth (improvements,
+# Magnetizations, Golden) is worth extra progress.
+#
+# [comp.early] cards and strong_stats: what keeps the comp alive before it
+# comes together.
+#
+# [[comp.signals]] weight, plus one of: cards (a list, one point per distinct
+# card seen on the board, in hand or in the Tavern), tribe + min_count, hero,
+# trinket, keyword.
+#
+# [comp.give_up] after_turn, progress_below, to: the comp is dropped after
+# that turn when its progress is below that number.
+#
+# not_in_comp: cards that look good but are sold first (the Balinda rule).
+
+[[comp]]
+name = "beetles"
+tribes = ["beast"]
+draft = true
+fallback = false
+commit_turn = [4, 9]
+level = [1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6]
+scales = "beetles"
+not_in_comp = ["Humming Bird", "Cage Gnawer", "Sewer Lord", "Hoarding Hyena"]
+
+# A short core on purpose: the beetle scaling, the summon bodies and the
+# Attack doubler. The draft leaves out every other Beast.
+[[comp.core]]
+name = "Ravaging Scorpid"
+weight = 6.0
+scale = true
+
+[[comp.core]]
+name = "Turquoise Skitterer"
+weight = 6.0
+scale = true
+
+[[comp.core]]
+name = "Banana Slamma"
+weight = 7.0
+scale = true
+
+[[comp.core]]
+name = "Headhunter Gryphon"
+weight = 4.0
+scale = false
+
+[[comp.core]]
+name = "Forest Rover"
+weight = 3.0
+scale = true
+
+[[comp.core]]
+name = "Buzzing Vermin"
+weight = 2.0
+scale = false
+
+[comp.early]
+cards = ["Buzzing Vermin", "Forest Rover"]
+strong_stats = true
+
+[[comp.signals]]
+cards = ["Ravaging Scorpid", "Turquoise Skitterer", "Banana Slamma"]
+weight = 4.0
+
+[[comp.signals]]
+cards = ["Headhunter Gryphon"]
+weight = 2.0
+
+[[comp.signals]]
+tribe = "beast"
+min_count = 1
+weight = 0.5
+
+[[comp.signals]]
+tribe = "beast"
+min_count = 2
+weight = 1.5
+
+[[comp.signals]]
+trinket = "Beetle Band"
+weight = 5.0
+
+[comp.give_up]
+after_turn = 11
+progress_below = 8.0
+to = "scam"
+
+[[comp]]
+name = "scam"
+tribes = []
+draft = true
+fallback = true
+scales = "none"
+
+# Scam has no level curve of its own: it is what the planner switches to when
+# another comp's give_up fires, or picks late when nothing else is there.
+[[comp.core]]
+name = "Heroic Underdog"
+weight = 5.0
+scale = false
+
+[[comp.core]]
+name = "Leeroy the Reckless"
+weight = 5.0
+scale = false
+
+[[comp.core]]
+name = "Sneed's New Shredder"
+weight = 5.0
+scale = false
+
+[[comp.core]]
+name = "Titus Rivendare"
+weight = 4.0
+scale = false
+
+[[comp.core]]
+name = "Deadly Spore"
+weight = 2.0
+scale = false
+
+[[comp.core]]
+name = "Bile Spitter"
+weight = 2.0
+scale = false
+
+[comp.early]
+cards = []
+strong_stats = false
+
+[[comp.signals]]
+cards = ["Deadly Spore", "Bile Spitter", "Heroic Underdog", "Leeroy the Reckless"]
+weight = 2.0
+
+[[comp.signals]]
+cards = ["Titus Rivendare", "Sneed's New Shredder"]
+weight = 1.5
+
+[[comp.signals]]
+keyword = "venomous"
+weight = 1.0
+
+[[comp.signals]]
+keyword = "poisonous"
+weight = 1.0
+
+[[comp.signals]]
+hero = "Sneed"
+weight = 4.0

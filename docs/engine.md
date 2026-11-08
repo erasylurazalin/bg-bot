@@ -13,6 +13,7 @@ trinkets.toml         the built trinkets, lesser and greater (see "Trinkets")
 darkgifts.toml        the 47 Dark Gifts: windows, weights, host conditions, the
                       offer tiers by turn (see "Dark Gifts")
 peak_boards.toml      hand-made peak boards for `bgbench peak` (guesses, see below)
+data/comps/comps.toml the comp library the planner bot plays (see "The comp planner")
 crates/
   bgcore/             the rules: no I/O, no Python
     src/cards.rs      card data: TOML parsing into Card, Effect, triggers
@@ -31,6 +32,8 @@ crates/
     src/action.rs     the flat action space and its index mapping
     src/obs.rs        the observation a player sees, as fixed-size f32
     src/bots.rs       random, standard-curve and rush-curve bots
+    src/comps.rs      the comp library: cards by name, weights, signals, give-up, level
+    src/planner.rs    the comp planner bot (see "The comp planner")
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
@@ -1908,6 +1911,62 @@ free, the Dragons buffed).
   --sample N` plays N turns spread evenly over the seatable turns (every
   k-th, all comps), not the first N in file order; 0 plays all.
 
+## The comp planner
+
+`crates/bgcore/src/planner.rs` is a bot that plays a comp written as data
+(`data/comps/comps.toml`, loaded by `crates/bgcore/src/comps.rs`). The plan is
+`docs/notes/comp-planner.md`; the first build is
+`docs/briefs/comp-planner-1.md`. The effects still live in `cards.toml`: the
+planner may name cards, as the scripted bots do, but no rule matches a name.
+
+- **The file:** one `[[comp]]` per comp. `name`, `tribes`, `draft`, `fallback`,
+  `commit_turn` (first and last turn it may commit), `level` (the tier target
+  for turn 1, 2, ...), `scales` (`none`, `beetles` or `stats`), `core` cards
+  with a weight and a `scale` flag, `early` (cards and `strong_stats`),
+  `signals` (cards, a tribe with a minimum count, a hero, a trinket, or a
+  keyword, each with a weight), `give_up` (`after_turn`, `progress_below`,
+  `to`) and `not_in_comp`. Every card, hero and trinket is checked against the
+  loaded data; an unknown name fails the load with the comp and the name.
+  `data/comps/comps.toml` holds two `draft = true` entries: `beetles` (the
+  first comp) and `scam` (its fallback, also the late fallback when nothing
+  else was found). Scam has no level curve of its own.
+- **One decision:** answer an open choice (a comp card first), apply the
+  standing rules, level when the comp's curve or the default curve says so
+  (unless Health is at or below 10), make room on a full board (the lowest
+  comp weight card goes, never a core card), take a dominating cycle
+  (`search::Position`), then score the legal moves.
+- **The score:** `strong + w(turn) * comp progress`. `strong` is the average of
+  `FIGHTS` (16) `search::fight_outcome` fights against the real boards of the
+  turn, preferring the next opponent's tier and leaderboard tribe through
+  `search::fight_boards`; without real boards it is a stat reading.
+  `comp progress` is the core weights on the board (full weight) and in hand
+  (half), triples of core cards, the early cards, a comp-tribe body, keyword
+  and signal cards, the player-wide beetle or improvement scaling, less
+  `not_in_comp` cards. `w(turn)` is 0.10 on turns 0 to 3, 0.25 on 4 to 6,
+  0.50 on 7 to 9, 1.00 on 10 to 12 and 2.00 after. The weight is 10 points per
+  progress point. A full board refuses a non-core buy unless it can replace a
+  weaker card; a core card in hand or in the Tavern always gets a slot.
+  `bgbench planner` prints the measured decision time.
+- **Standing rules:** after a lost fight, a Tortollan Blue Shell in the Tavern,
+  affordable and with room, is a `CycleShop` (buy, play, sell, +2 Gold); on a
+  full board the lowest comp weight card is sold first, and the cycle is
+  skipped when every card on the board is core. The same rule makes room for a
+  core card. Trinket, hero and Discover offers prefer the comp's signals. The
+  constants are in `planner.rs` (`FIGHTS`, `CANDIDATES`, `COMMIT_MIN`,
+  `REPLACE_MARGIN`, `TRIBE_PROGRESS`, `DYING_HEALTH`, `DEFAULT_CURVE`).
+- **`bgbench planner --comps PATH --games N --vs real [--seat planner|standard|rush]`:**
+  one seat 0 bot against seven real-board seats. It prints average place,
+  top-4 and first rates, the comps committed to and their average commit turn,
+  the share of final boards with at least half the comp's core weight and at
+  least two core cards, Shell cycles on the turns the rule applied, the median
+  tier turns, the decision time and ten final boards in full.
+- **Python:** `bgpy.Planner(comps, seed, real_boards)` has `action(path)` for
+  `EraTurnPath`, `reset(seed)`, `comp`, `committed_turn`, `shell_cycles`,
+  `shell_chances` and `level_turns`. `train/era_turns.py --planner PATH` adds
+  the `planner` player, with `--players plain,planner` to measure it beside
+  plain. `bgbench fuzz ... --planner PATH` lets seat 0 play the planner while
+  the fuzzer checks the invariants after every action.
+
 ## Era's turns, with Era's luck
 
 `train/era_turns.py` measures the bot on Era's own turns (the compiled plan's
@@ -1990,13 +2049,19 @@ cargo build --release -p bgbench
 ./target/release/bgbench collect-boards  # write Era's board files, boards/real/
 ./target/release/bgbench collect-actions # write Era's action files, boards/actions/
 ./target/release/bgbench check-actions   # add up the turns of boards/actions/
+./target/release/bgbench planner         # the comp planner against real boards
 cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 ```
 
 `fuzz` and `games` also take `--real-boards DIR [--real-seats N]` (default 2)
 to seat real-board seats playing DIR's boards (docs/real-boards.md); without
 a real boards/ folder, `crates/bgcore/tests/data/real-boards/` is a small
-stand-in. Needs `ref/bg-cards.json` for the card id mapping.
+stand-in. Needs `ref/bg-cards.json` for the card id mapping. `--planner PATH`
+on either gives seat 0 the comp planner.
+
+`planner [--comps PATH] [--games N] [--vs real] [--seat planner|standard|rush]`
+(see "The comp planner") plays one seat against seven real-board seats and
+prints the placement and comp numbers, then ten final boards.
 
 `fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]` plays every
 paired fight of DIR `--runs` times on every core and writes `fights.tsv`,
