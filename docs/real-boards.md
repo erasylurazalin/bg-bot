@@ -485,6 +485,28 @@ that turn, mine and opponents' alike, equally likely; turn 13 and later draw
 from every board of turn 13 or later; a turn before 13 with no boards of its
 own uses the nearest earlier turn that has some.
 
+**The Era seat.** One real seat can play Era's own boards of one finished
+game instead of a random board (`Game::new_random_heroes_era`, `bgbench
+eraseat`, `bgpy.VecEnv(era_game=("source", game))`). Its board at turn t is
+that game's `who: me` board of turn t, the nearest earlier one when a turn is
+missing, and the last board again past the last turn Era really played. The
+other real seats draw from the whole pool with that game left out. The seat
+keeps the flat 30 Health and 10 armor of every real seat and takes no hero
+power, trinket, quest reward or Secret into the fight; the game reports the
+turns it played past Era's last real turn and whether it outlived that game.
+
+**The lobby filter.** `--real-lobby-filter` on `bgbench`, `ppo.py`,
+`eval_search.py` and `eval_overlay.py`, or `real_lobby_filter=True` on
+`bgpy.VecEnv`, keeps only boards whose minions can appear in this game's
+lobby: a neutral minion always passes, and a typed one passes when any of its
+types is in the lobby (so a dual-type minion needs one of its two). Only the
+board's minions are filtered; its hand and numbers stay as logged. A turn
+with fewer than 8 eligible boards widens to the nearest earlier turn with at
+least 8, then the nearest later one, then the fullest bucket; a draw with no
+eligible board anywhere falls back to the old unfiltered draw. The counts
+(draws, own turn, widened, unfiltered) are in `RealBoards::filter_stats`.
+With the flag off the draw is exactly the old one.
+
 Loading (train/real_boards.py, also `bgbench --real-boards DIR`): every
 minion's card id is mapped to a card name through `ref/bg-cards.json` (a
 golden id, the game's `_G` and `TB_BaconUps_*` forms, maps to the base card

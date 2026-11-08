@@ -1315,6 +1315,17 @@ pub struct Game {
     /// The boards real seats (`Player.real`) draw from, set with them by
     /// `Game::new_random_heroes_real`. None in a game without real seats.
     pub real_boards: Option<Arc<RealBoards>>,
+    /// The one seat that plays Era's own boards of one game instead of a
+    /// random real board (`Game::new_random_heroes_era`). No seat is the Era
+    /// seat in an ordinary game.
+    pub era_seat: Option<usize>,
+    /// The game whose boards the Era seat plays (the file's `source` and
+    /// `game`); every other real seat's pool leaves that game out.
+    pub era_game: Option<(String, u32)>,
+    /// Turns the Era seat has played past the last turn Era really played.
+    pub era_turns_added: u32,
+    /// The Era seat started a turn past the last turn Era really played.
+    pub era_outlived: bool,
     /// The warband of every hero that died in a round, as it stood at its last
     /// moment, with the round it died in: Kel'Thuzad's Kitty offers one
     /// Discover per warband, back to back, at the start of the holder's next
@@ -1401,14 +1412,45 @@ impl Game {
         boards: Arc<RealBoards>,
     ) -> Game {
         let mut g = Game::unstarted(data, seed, None);
+        g.seat_real(real);
+        g.real_boards = Some(boards);
+        g.deal_random_heroes();
+        g
+    }
+
+    /// The real seats' own setup, before the heroes are dealt: no hero, flat
+    /// 30 Health and 10 armor.
+    fn seat_real(&mut self, real: &[usize]) {
         for &p in real {
             assert!(p < PLAYERS, "real seat {p} is not a player");
-            let pl = &mut g.players[p];
+            let pl = &mut self.players[p];
             pl.real = true;
             pl.health = 30;
             pl.vanguard_on = pl.vanguard_health_on();
             pl.armor = 10;
         }
+    }
+
+    /// The hero game with one Era seat: `era_seat` plays Era's own boards of
+    /// `source`/`game`, and the other real seats draw from the pool without
+    /// that game. The Era seat is one of `real`. The marks are set before the
+    /// heroes are dealt, because an all-real game starts turn 1 inside that
+    /// call.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_random_heroes_era(
+        data: Arc<Data>,
+        seed: u64,
+        real: &[usize],
+        boards: Arc<RealBoards>,
+        era_seat: usize,
+        source: String,
+        game: u32,
+    ) -> Game {
+        assert!(real.contains(&era_seat), "the Era seat must be a real seat");
+        let mut g = Game::unstarted(data, seed, None);
+        g.seat_real(real);
+        g.era_seat = Some(era_seat);
+        g.era_game = Some((source, game));
         g.real_boards = Some(boards);
         g.deal_random_heroes();
         g
@@ -1551,6 +1593,10 @@ impl Game {
             pool_untracked: false,
             sandbox: None,
             real_boards: None,
+            era_seat: None,
+            era_game: None,
+            era_turns_added: 0,
+            era_outlived: false,
             kitty_warbands: ArrayVec::new(),
             order: ArrayVec::new(),
             cursor: 0,

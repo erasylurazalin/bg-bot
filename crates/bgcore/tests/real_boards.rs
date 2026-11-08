@@ -9,10 +9,10 @@ use bgcore::bots::random_action;
 use bgcore::cards::Counter;
 use bgcore::fight::{Counters, Watch, fight_with_hands};
 use bgcore::real_boards::{
-    CardIdMap, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
-    parse_board_files, LATE_TURN,
+    CardIdMap, MIN_FILTERED_BOARDS, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec,
+    RealMinionSpec, parse_board_files, LATE_TURN,
 };
-use bgcore::{Data, Game, Keywords, Minion, PLAYERS, Rng, Tribes};
+use bgcore::{Data, Game, Keywords, Minion, PLAYERS, Rng, Tribe, Tribes};
 
 fn data() -> Arc<Data> {
     Arc::new(Data::bundled())
@@ -999,4 +999,200 @@ fn the_two_jailer_sticker_spells_are_matched_by_their_card_ids() {
             other => panic!("{name} is not a destroy-and-get: {other:?}"),
         }
     }
+}
+
+// ---- the lobby filter and the Era seat (2026-11-09) ----
+
+fn game_spec(
+    turn: u32,
+    source: &str,
+    game: u32,
+    side: bgcore::RealSide,
+    minions: &[(&str, i32, i32, bool, &[&str])],
+) -> RealBoardSpec {
+    RealBoardSpec {
+        source: source.to_string(),
+        game,
+        side,
+        ..spec(turn, 1, minions)
+    }
+}
+
+fn board_name(d: &Data, b: &bgcore::RealBoard) -> String {
+    d.cards.get(b.minions[0].card).name.clone()
+}
+
+#[test]
+fn lobby_filter_never_draws_an_off_lobby_board() {
+    let d = data();
+    let mut specs = vec![
+        // A Mech board: off the lobby below.
+        game_spec(3, "g", 1, bgcore::RealSide::Me, &[("Cord Puller", 1, 1, false, &[])]),
+        // A neutral board: always passes.
+        game_spec(3, "g", 1, bgcore::RealSide::Me, &[("Sewer Rat", 3, 2, false, &[])]),
+        // A Demon/Quilboar board: passes only with either type in the lobby.
+        game_spec(3, "g", 1, bgcore::RealSide::Me, &[("Felboar", 4, 4, false, &[])]),
+    ];
+    for _ in 0..8 {
+        specs.push(game_spec(
+            3,
+            "g",
+            1,
+            bgcore::RealSide::Me,
+            &[("Flittering Bat", 1, 4, false, &[])],
+        ));
+    }
+    let (mut boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
+    boards.set_lobby_filter(true);
+    let beasts = Tribes::NONE.with(Tribe::Beast);
+    let mut rng = Rng::new(7);
+    let mut saw_neutral = false;
+    for _ in 0..500 {
+        let b = boards.draw_filtered(3, beasts, None, &mut rng);
+        let name = board_name(&d, b);
+        assert_ne!(name, "Cord Puller", "an off-lobby Mech board was drawn");
+        assert_ne!(name, "Felboar", "a Demon/Quilboar board was drawn in a Beast lobby");
+        saw_neutral |= name == "Sewer Rat";
+    }
+    assert!(saw_neutral, "the neutral board never passed");
+    let stats = boards.filter_stats();
+    assert_eq!(stats.widened, 0, "the turn's own pool was large enough");
+    assert_eq!(stats.unfiltered, 0);
+}
+
+#[test]
+fn lobby_filter_passes_a_dual_type_minion_on_either_type() {
+    let d = data();
+    let specs: Vec<RealBoardSpec> = (0..8)
+        .map(|_| {
+            game_spec(2, "g", 1, bgcore::RealSide::Me, &[("Felboar", 5, 5, false, &[])])
+        })
+        .collect();
+    let (mut boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
+    boards.set_lobby_filter(true);
+    let mut rng = Rng::new(3);
+    // Quilboar is one of Felboar's types.
+    for _ in 0..50 {
+        assert_eq!(board_name(&d, boards.draw_filtered(2, Tribes::NONE.with(Tribe::Quilboar), None, &mut rng)), "Felboar");
+    }
+    // Demon is its other type.
+    for _ in 0..50 {
+        assert_eq!(board_name(&d, boards.draw_filtered(2, Tribes::NONE.with(Tribe::Demon), None, &mut rng)), "Felboar");
+    }
+}
+
+#[test]
+fn a_thin_filtered_pool_widens_to_the_nearest_earlier_turn() {
+    let d = data();
+    let mut specs = Vec::new();
+    for _ in 0..MIN_FILTERED_BOARDS {
+        specs.push(game_spec(3, "g", 1, bgcore::RealSide::Me, &[("Flittering Bat", 1, 4, false, &[])]));
+    }
+    // Turn 4 has only two Beast boards: below the threshold.
+    for _ in 0..2 {
+        specs.push(game_spec(4, "g", 1, bgcore::RealSide::Me, &[("Humming Bird", 1, 2, false, &[])]));
+    }
+    let (mut boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
+    boards.set_lobby_filter(true);
+    boards.reset_filter_stats();
+    let mut rng = Rng::new(11);
+    for _ in 0..20 {
+        let b = boards.draw_filtered(4, Tribes::NONE.with(Tribe::Beast), None, &mut rng);
+        assert_eq!(board_name(&d, b), "Flittering Bat", "turn 4 should widen to turn 3");
+    }
+    let stats = boards.filter_stats();
+    assert_eq!(stats.draws, 20);
+    assert_eq!(stats.widened, 20);
+    assert_eq!(stats.current, 0);
+    assert_eq!(stats.unfiltered, 0);
+}
+
+#[test]
+fn the_era_seat_repeats_its_last_board_and_cannot_draw_its_own_game() {
+    let d = data();
+    let specs = vec![
+        game_spec(1, "era", 1, bgcore::RealSide::Me, &[("Razorfen Geomancer", 2, 1, false, &[])]),
+        game_spec(3, "era", 1, bgcore::RealSide::Me, &[("Roadboar", 2, 4, false, &[])]),
+        game_spec(5, "era", 1, bgcore::RealSide::Me, &[("Bonker", 9, 9, false, &[])]),
+        game_spec(1, "other", 2, bgcore::RealSide::Me, &[("Sewer Rat", 3, 2, false, &[])]),
+        game_spec(3, "other", 2, bgcore::RealSide::Me, &[("Cord Puller", 1, 1, false, &[])]),
+        game_spec(5, "other", 2, bgcore::RealSide::Me, &[("Amber Guardian", 3, 2, false, &[])]),
+    ];
+    let (mut boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
+    assert_eq!(boards.era_last_turn("era", 1), Some(5));
+    let mut rng = Rng::new(5);
+    // Turn 2 has no board of its own: the nearest earlier one.
+    assert_eq!(board_name(&d, boards.draw_era("era", 1, 2, &mut rng).unwrap()), "Razorfen Geomancer");
+    // Past the last turn Era really played: the last board again.
+    for turn in [6, 9, 20] {
+        assert_eq!(board_name(&d, boards.draw_era("era", 1, turn, &mut rng).unwrap()), "Bonker");
+    }
+    // The opponents' pool leaves the Era game out, filter on or off.
+    for _ in 0..200 {
+        let b = boards.draw_filtered(1, Tribes::NONE.with(Tribe::Beast), Some(("era", 1)), &mut rng);
+        assert_eq!(board_name(&d, b), "Sewer Rat");
+    }
+    boards.set_lobby_filter(true);
+    // With every board of the era game excluded, one of the other game's
+    // boards still comes up (the filter passes a neutral one).
+    for _ in 0..100 {
+        let b = boards.draw_filtered(1, Tribes::NONE.with(Tribe::Beast), Some(("era", 1)), &mut rng);
+        assert_eq!(board_name(&d, b), "Sewer Rat");
+    }
+}
+
+#[test]
+fn the_era_seat_plays_its_own_game_and_outlives_it() {
+    let d = data();
+    let mut specs = Vec::new();
+    for turn in 1..=3 {
+        specs.push(game_spec(turn, "era", 1, bgcore::RealSide::Me, &[("Flittering Bat", 400, 400, false, &[]) ]));
+    }
+    // Seven real opponents with tiny boards, so the Era seat survives.
+    for _ in 0..7 {
+        for turn in 1..=6 {
+            specs.push(game_spec(turn, "other", 2, bgcore::RealSide::Me, &[("Sewer Rat", 1, 1, false, &[])]));
+        }
+    }
+    let (boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
+    let boards = Arc::new(boards);
+    let real: Vec<usize> = (0..PLAYERS).collect();
+    let g = Game::new_random_heroes_era(
+        d.clone(),
+        9,
+        &real,
+        boards,
+        0,
+        "era".to_string(),
+        1,
+    );
+    // An all-real game plays itself as the turns start: there is no shopper
+    // to step, and the game is over when the constructor returns.
+    assert!(g.over, "an all-real game should have finished");
+    assert!(g.turn > 3, "the era seat died too early to test the repeat");
+    assert!(g.era_outlived, "the era seat did not outlive its three-turn game");
+    assert_eq!(g.era_turns_added, g.turn.saturating_sub(3));
+    // Its own board is the one it repeated, not a random opponent's.
+    let repeated = g
+        .players
+        .iter()
+        .flat_map(|p| p.board.iter())
+        .filter(|m| d.cards.get(m.card).name == "Flittering Bat")
+        .count();
+    assert!(repeated >= 1, "the Era seat lost its repeated board");
+}
+
+#[test]
+fn the_flag_off_draw_is_exactly_the_old_draw() {
+    let d = data();
+    let (boards, _) = RealBoards::build(&folder_like(), &d.cards, &d.gifts);
+    let beasts = Tribes::NONE.with(Tribe::Beast);
+    let mut old = Rng::new(17);
+    let mut new = Rng::new(17);
+    for turn in 1..=20 {
+        let a = boards.draw(turn, &mut old);
+        let b = boards.draw_filtered(turn, beasts, None, &mut new);
+        assert_eq!(a, b, "turn {turn}");
+    }
+    assert_eq!(boards.filter_stats(), Default::default(), "the filter never ran");
 }

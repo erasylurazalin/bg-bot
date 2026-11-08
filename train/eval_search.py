@@ -86,7 +86,8 @@ def play(net, n_games, seed, dev, lineup=(1, 0, 0, 0, 0, 7), boards=None,
     learner seats, else the plain network). Returns the learner records."""
     n = min(n_games, max_rows)
     env = bgpy.VecEnv(n, seed, list(lineup), real_boards=boards,
-                      old_boards=ppo.OLD_BOARDS)
+                      old_boards=ppo.OLD_BOARDS,
+                      real_lobby_filter=ppo.REAL_LOBBY_FILTER)
     b = Bufs(n)
     env.kinds(b.kinds)
     gen = torch.Generator(device="cpu")
@@ -234,7 +235,8 @@ def shell_positions(net, n_games, seed, dev, boards, limit=40, max_rows=256):
     reported, because a bot that keeps seven minions can never cycle at all
     while Era keeps a slot for it."""
     env = bgpy.VecEnv(min(n_games, max_rows), seed, [1, 0, 0, 0, 0, 7], real_boards=boards,
-                      old_boards=ppo.OLD_BOARDS)
+                      old_boards=ppo.OLD_BOARDS,
+                      real_lobby_filter=ppo.REAL_LOBBY_FILTER)
     b = Bufs(env.n)
     gen = torch.Generator(device="cpu")
     gen.manual_seed(int(seed) & 0xFFFF_FFFF)
@@ -538,6 +540,8 @@ def main() -> None:
                          "with it, and its evals force it: ppo.force_mask)")
     ap.add_argument("--force-turn2-level", action="store_true",
                     help="ppo.py's --force-turn2-level, for a run trained with it")
+    ap.add_argument("--real-lobby-filter", action="store_true",
+                    help="a real seat draws only boards whose minions fit this game's lobby")
     ap.add_argument("--shell-test", action="store_true")
     ap.add_argument("--warden-test", action="store_true")
     ap.add_argument("--cycle-rate", action="store_true")
@@ -551,6 +555,7 @@ def main() -> None:
     ppo.FORCE_DARK = args.force_dark_gift
     ppo.FORCE_TURN2 = args.force_turn2_level
     ppo.OLD_BOARDS = args.old_boards
+    ppo.REAL_LOBBY_FILTER = args.real_lobby_filter
     net = load(args.ckpt, dev)
     net.eval()
     print(f"{args.ckpt}: {dev}")

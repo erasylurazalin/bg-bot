@@ -13,6 +13,9 @@
 //!                           [--out FILE] [--cards FILE] [--time]
 //!   bgbench record          my logged shop decisions as training examples
 //!                           [--actions DIR] [--out DIR] [--seeds N]
+//!   bgbench eraseat         one seat plays Era's own boards of a game
+//!                           [--boards DIR] [--runs N | --games N] [--seed N]
+//!                           [--real-lobby-filter] [--out FILE]
 //!
 //! `fuzz` and `games` also take --real-boards DIR [--real-seats N] to seat
 //! real-board seats playing the boards of DIR (docs/real-boards.md), the
@@ -38,6 +41,7 @@ use serde::Deserialize;
 mod check_actions;
 mod collect_actions;
 mod collect_boards;
+mod era_seat;
 mod powerlog;
 mod record_examples;
 mod tracker;
@@ -74,14 +78,15 @@ fn read_board_files(dir: &str) -> Result<Vec<(String, String)>, String> {
 /// Read the board files in `dir` (docs/real-boards.md) and resolve them
 /// against the card set, mapping card ids through ref/bg-cards.json. Prints
 /// what was loaded: boards per turn and the unmatched minions by name.
-fn load_real_boards(dir: &str) -> Result<Arc<RealBoards>, String> {
+fn load_real_boards(dir: &str, lobby_filter: bool) -> Result<Arc<RealBoards>, String> {
     let files = read_board_files(dir)?;
     let ref_json = std::fs::read_to_string("ref/bg-cards.json")
         .map_err(|e| format!("ref/bg-cards.json (the card id mapping): {e}"))?;
     let ids = CardIdMap::parse(&ref_json)?;
     let (specs, unknown): (Vec<RealBoardSpec>, Vec<String>) = parse_board_files(&files, &ids)?;
     let data = Data::bundled();
-    let (boards, unmatched) = RealBoards::build(&specs, &data.cards, &data.gifts);
+    let (mut boards, unmatched) = RealBoards::build(&specs, &data.cards, &data.gifts);
+    boards.set_lobby_filter(lobby_filter);
     let mut by_name = unknown;
     by_name.extend(unmatched);
     println!(
@@ -563,10 +568,16 @@ fn print_turn_stats(recs: &[GameRec]) {
     println!("  most held minions (turn cards): {}", top(&by_minion));
 }
 
-fn bench_planner(comps_path: &str, games: usize, seat: Seat, boards_dir: &str) {
+fn bench_planner(
+    comps_path: &str,
+    games: usize,
+    seat: Seat,
+    boards_dir: &str,
+    lobby_filter: bool,
+) {
     let games = games.max(1);
     let data = Arc::new(Data::bundled());
-    let boards = load_real_boards(boards_dir).unwrap_or_else(|e| {
+    let boards = load_real_boards(boards_dir, lobby_filter).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
     });
@@ -1070,6 +1081,7 @@ fn shop_replay(dir: &str, seeds: u32, out: &str, card: Option<&str>) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let num = |default: u64| args.get(2).and_then(|s| s.parse().ok()).unwrap_or(default);
+    let lobby_filter = args.iter().any(|a| a == "--real-lobby-filter");
     // --real-boards DIR [--real-seats N] on fuzz and games: seats that play
     // boards from DIR instead of shopping.
     let real: Real = if let Some(k) = args.iter().position(|a| a == "--real-boards") {
@@ -1084,7 +1096,7 @@ fn main() {
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(2);
         assert!((1..=bgcore::PLAYERS).contains(&seats), "real seats must be 1 to 8");
-        let boards = load_real_boards(dir).unwrap_or_else(|e| {
+        let boards = load_real_boards(dir, lobby_filter).unwrap_or_else(|e| {
             eprintln!("{e}");
             std::process::exit(2);
         });
@@ -1139,6 +1151,7 @@ fn main() {
                 .cloned();
             shop_replay(&actions, seeds, &out, card.as_deref());
         }
+        Some("eraseat") => era_seat::run(&args),
         Some("record") => record_examples::run(&args),
         Some("powerlog") => powerlog::run(&args),
         Some("tracker") => tracker::run(&args),
@@ -1175,7 +1188,7 @@ fn main() {
                     std::process::exit(2);
                 }
             };
-            bench_planner(&comps, games, seat, &boards);
+            bench_planner(&comps, games, seat, &boards, lobby_filter);
         }
         Some("match") => bot_match(num(10_000)),
         Some("peak") => bench_peak(num(10_000) as usize),
@@ -1190,7 +1203,9 @@ fn main() {
                  \x20      bgbench collect-actions [--out DIR] [--cards FILE] [--rewrite]\n\
                  \x20      bgbench check-actions [--verbose] [PATTERN] [--actions DIR]\n\
                  \x20      bgbench record [--actions DIR] [--out DIR] [--seeds N]\n\
-                 \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N]"
+                 \x20      bgbench eraseat [--boards DIR] [--runs N | --games N] [--seed N]\n\
+                 \x20                      [--real-lobby-filter] [--out FILE]\n\
+                 \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N] [--real-lobby-filter]"
             );
             std::process::exit(2);
         }

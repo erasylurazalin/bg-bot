@@ -466,7 +466,20 @@ impl Game {
                 continue;
             }
             let (da, dh) = self.total_spell_bonus(p);
-            let Game { data, rng, players, pool, sandbox, real_boards, .. } = self;
+            if self.era_seat == Some(p)
+                && let Some((source, game)) = &self.era_game
+                && let Some(last) = self
+                    .real_boards
+                    .as_ref()
+                    .and_then(|b| b.era_last_turn(source, *game))
+                && turn > last
+            {
+                self.era_turns_added += 1;
+                self.era_outlived = true;
+            }
+            let Game {
+                data, rng, players, pool, sandbox, real_boards, lobby, era_seat, era_game, ..
+            } = self;
             let pl = &mut players[p];
             if pl.real {
                 // A real seat doesn't shop: it takes a fresh random board of
@@ -485,10 +498,20 @@ impl Game {
                         give_back(pool, &data.cards, m);
                     }
                 }
-                let board = real_boards
+                let boards = real_boards
                     .as_ref()
-                    .expect("a real seat needs real boards")
-                    .draw(turn, rng);
+                    .expect("a real seat needs real boards");
+                let board = if *era_seat == Some(p) {
+                    let (source, game) = era_game.as_ref().expect("the Era seat needs its game");
+                    boards
+                        .draw_era(source, *game, turn, rng)
+                        .expect("the Era game has no boards")
+                } else {
+                    let exclude = era_game
+                        .as_ref()
+                        .map(|(source, game)| (source.as_str(), *game));
+                    boards.draw_filtered(turn, *lobby, exclude, rng)
+                };
                 pl.tier = board.tier;
                 pl.board.clear();
                 for m in &board.minions {

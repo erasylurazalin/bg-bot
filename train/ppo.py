@@ -151,6 +151,8 @@ def args():
     a.add_argument("--force-dark-gift", action="store_true",
                    help="on turns 3, 4 and 5 every learner and snapshot seat presses Dark "
                         "Discovery first thing when it can, in training and test games")
+    a.add_argument("--real-lobby-filter", action="store_true",
+                   help="a real seat draws only boards whose minions fit this game's lobby")
     a.add_argument("--low-penalty", type=float, default=0.0,
                    help="reward taken off at each turn end per tier below the standard curve")
     a.add_argument("--low-penalty-fade", type=float, default=240,
@@ -213,6 +215,10 @@ FORCE_TURN2 = False
 # in the observation (bgpy's old_boards). Set from the flag in main(), so the
 # eval games see what the training games see.
 OLD_BOARDS = "keep"
+# --real-lobby-filter: a real seat draws only boards whose minions fit this
+# game's lobby (bgpy's real_lobby_filter). Set from the flag in main(), so
+# every eval game sees what the training games see.
+REAL_LOBBY_FILTER = False
 LEVEL = int(np.nonzero(KIND_OF.numpy() == KINDS.index("level"))[0][0])
 DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
 # --force-dark-gift: on turns 3, 4 and 5 every Python seat presses Dark
@@ -311,7 +317,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, curve=False):
     """Play n_games with `lineup` and return (avg_place, learner_records).
     With curve, the learner seats are curve seats (levels forced)."""
     n = min(n_games, 1024)
-    env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS)
+    env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
+                      real_lobby_filter=REAL_LOBBY_FILTER)
     b = Bufs(n)
     env.kinds(b.kinds)
     records, done = [], 0
@@ -404,10 +411,11 @@ def summarize_records(records):
 
 
 def main():
-    global FORCE_TURN2, FORCE_DARK
+    global FORCE_TURN2, FORCE_DARK, REAL_LOBBY_FILTER
     cfg = args()
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
+    REAL_LOBBY_FILTER = cfg.real_lobby_filter
     # a training setting, not a model one: the checkpoint and its weights are
     # the same with the blocks recomputed or kept
     set_recompute(not cfg.no_recompute)
@@ -469,7 +477,8 @@ def main():
     cfg.old_boards = OLD_BOARDS
     print(f"opponents' old boards: {OLD_BOARDS}")
     N, T = cfg.envs, cfg.steps
-    env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS)
+    env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS,
+                      real_lobby_filter=REAL_LOBBY_FILTER)
     if cfg.overlay_comps:
         env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus, not cfg.no_dominance)
         print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}, dominance "

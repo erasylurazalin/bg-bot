@@ -188,7 +188,8 @@ def play(net, n_games, seed, dev, boards, comps_path=None, bonus=0.0,
 
     n = min(n_games, 512)
     env = bgpy.VecEnv(n, seed, [1, 0, 0, 0, 0, 7], real_boards=boards,
-                      old_boards=ppo.OLD_BOARDS)
+                      old_boards=ppo.OLD_BOARDS,
+                      real_lobby_filter=ppo.REAL_LOBBY_FILTER)
     env.set_overlay(str(comps_path), float(bonus), dominance)
     b = Bufs(n)
     env.kinds(b.kinds)
@@ -432,6 +433,8 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--vram-gb", type=float, default=4.0,
                     help="cap this process's GPU memory (4 while the PPO run trains)")
+    ap.add_argument("--real-lobby-filter", action="store_true",
+                    help="a real seat draws only boards whose minions fit this game's lobby")
     ap.add_argument("--no-dominance", action="store_true",
                     help="keep the comp bonuses but turn the dominance layer off")
     ap.add_argument("--lines", action="store_true",
@@ -445,6 +448,7 @@ def main():
     ppo.FORCE_DARK = True
     ppo.FORCE_TURN2 = False
     ppo.OLD_BOARDS = "keep"
+    ppo.REAL_LOBBY_FILTER = args.real_lobby_filter
     net = load(args.ckpt, dev)
     net.eval()
     specs, unknown = real_boards.load(Path(args.real_boards))

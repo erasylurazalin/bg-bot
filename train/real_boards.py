@@ -85,11 +85,13 @@ def load(directory=DEFAULT_DIR, ref: Path = REF_CARDS, cards_toml: Path = CARDS_
     """Read every board file in `directory` (dot files like .state.json skip).
 
     Returns (specs, unknown): specs is the list for bgpy.VecEnv(real_boards=..),
-    one (turn, tier, minions, hand, counters, deity) per board; a minion is
-    (name, attack, health, golden, keywords, numbers, dark_gifts), counters is the side's
-    player-level numbers by their file keys (a number the log did not show is
-    left out, and the engine uses the base value), and deity is
-    (name, attack, health, golden) or None. unknown lists every minion that
+    one (turn, tier, minions, hand, counters, deity, source, game) per board;
+    a minion is (name, attack, health, golden, keywords, numbers, dark_gifts),
+    counters is the side's player-level numbers by their file keys (a number
+    the log did not show is left out, and the engine uses the base value),
+    deity is (name, attack, health, golden) or None, and source/game name the
+    file the board came from (the Era seat and its exclusion). unknown lists
+    every minion that
     matched no card we have, by name: card ids the ref data doesn't know
     (buddies, timewarped minions) and cards the engine hasn't built (Dark
     Paradox). Those minions are dropped; the boards around them stay.
@@ -137,10 +139,12 @@ def load(directory=DEFAULT_DIR, ref: Path = REF_CARDS, cards_toml: Path = CARDS_
     for f in sorted(Path(directory).glob("*.json")):
         if f.name.startswith("."):
             continue
-        for b in json.loads(f.read_text())["boards"]:
+        raw = json.loads(f.read_text())
+        source, game = raw["source"], raw["game"]
+        for b in raw["boards"]:
             specs.append((b["turn"], b["tier"], minions(b["minions"]),
                           minions(b.get("hand") or ()), dict(b.get("counters") or {}),
-                          deity(b.get("deity"))))
+                          deity(b.get("deity")), source, game))
     return specs, unknown
 
 

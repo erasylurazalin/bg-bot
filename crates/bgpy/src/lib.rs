@@ -63,9 +63,11 @@ fn overlay_pool() -> &'static rayon::ThreadPool {
 type PyMinion = (String, i32, i32, bool, Vec<String>, Vec<i32>, Vec<String>);
 
 /// One board for `VecEnv(real_boards=..)`:
-/// (turn, tier, minions, hand, counters, deity). `counters` holds the
-/// side-wide numbers the log showed, by the board file's keys (a missing one
-/// is the base value); `deity` is (name, attack, health, golden) or None.
+/// (turn, tier, minions, hand, counters, deity, source, game). `counters`
+/// holds the side-wide numbers the log showed, by the board file's keys (a
+/// missing one is the base value); `deity` is (name, attack, health, golden)
+/// or None; `source` and `game` name the file it came from, which the Era
+/// seat and its opponents' exclusion read.
 type PyBoard = (
     u32,
     u8,
@@ -73,6 +75,8 @@ type PyBoard = (
     Vec<PyMinion>,
     HashMap<String, i32>,
     Option<(String, i32, i32, bool)>,
+    String,
+    u32,
 );
 
 type PyBoards = Vec<PyBoard>;
@@ -100,11 +104,11 @@ fn minion_specs(list: Vec<PyMinion>) -> Vec<RealMinionSpec> {
 }
 
 /// The specs `VecEnv(real_boards=..)` and the era-turn runs read: one board
-/// per (turn, tier, minions, hand, counters, deity) tuple from
+/// per (turn, tier, minions, hand, counters, deity, source, game) tuple from
 /// train/real_boards.py.
 fn real_board_specs(raw: PyBoards) -> Vec<RealBoardSpec> {
     raw.into_iter()
-        .map(|(turn, tier, minions, hand, counters, deity)| RealBoardSpec {
+        .map(|(turn, tier, minions, hand, counters, deity, source, game)| RealBoardSpec {
             turn,
             tier,
             minions: minion_specs(minions),
@@ -116,9 +120,11 @@ fn real_board_specs(raw: PyBoards) -> Vec<RealBoardSpec> {
                 health,
                 golden,
             }),
-            // The rest of the file's board (the game it came from, its side
-            // and result, Health, armor, power, trinkets, quest rewards) is for
-            // the fight check, not for a seat.
+            source,
+            game,
+            // The rest of the file's board (its side and result, Health,
+            // armor, power, trinkets, quest rewards) is for the fight check,
+            // not for a seat.
             ..RealBoardSpec::default()
         })
         .collect()
@@ -153,6 +159,7 @@ impl Env {
         seed: u64,
         lineup: &[u8; SEAT_KINDS],
         boards: Option<&Arc<RealBoards>>,
+        era_game: Option<&(String, u32)>,
     ) -> Env {
         let mut rng = Rng::new(seed ^ 0x6a09_e667_f3bc_c908);
         let mut kinds = [LEARNER; PLAYERS];
@@ -165,15 +172,23 @@ impl Env {
         }
         rng.shuffle(&mut kinds);
         let real: Vec<usize> = (0..PLAYERS).filter(|&p| kinds[p] == REAL).collect();
-        let game = if real.is_empty() {
-            Game::new_random_heroes(data.clone(), seed)
-        } else {
-            Game::new_random_heroes_real(
+        let game = match era_game {
+            Some((source, game)) => Game::new_random_heroes_era(
                 data.clone(),
                 seed,
                 &real,
                 boards.expect("real seats need real boards").clone(),
-            )
+                real[0],
+                source.clone(),
+                *game,
+            ),
+            None if real.is_empty() => Game::new_random_heroes(data.clone(), seed),
+            None => Game::new_random_heroes_real(
+                data.clone(),
+                seed,
+                &real,
+                boards.expect("real seats need real boards").clone(),
+            ),
         };
         Env {
             game,
@@ -248,6 +263,8 @@ struct VecEnv {
     envs: Vec<Env>,
     lineup: [u8; SEAT_KINDS],
     boards: Option<Arc<RealBoards>>,
+    /// The game whose boards the Era seat plays, when there is one.
+    era_game: Option<(String, u32)>,
     next_seed: u64,
     /// Whether opponents' last-seen boards are written (see `obs::OldBoards`).
     old_boards: OldBoards,
@@ -276,16 +293,20 @@ impl VecEnv {
     /// `lineup`: how many seats of each kind (learner, snapshot, standard,
     /// rush, random, real) a new game gets, shuffled into random seats.
     /// `real_boards`: the boards real seats play, as train/real_boards.py
-    /// loads them ((turn, tier, minions, hand, counters, deity) with
-    /// (name, attack, health, golden, keywords, numbers) each); required
+    /// loads them ((turn, tier, minions, hand, counters, deity, source, game)
+    /// with (name, attack, health, golden, keywords, numbers) each); required
     /// when the lineup has real seats.
     /// `old_boards`: "keep" (the default) writes every opponent's last-seen
     /// board in the observation, however old; "drop" writes it only for the
     /// opponent fought last turn and for the one fought this turn when the
     /// board is at most `OLD_BOARD_AGE` turns old, zeros for the rest. The
     /// observation keeps its size either way (see `bgcore::obs::OldBoards`).
+    /// `real_lobby_filter`: a real seat draws only boards whose minions fit
+    /// this game's lobby (docs/real-boards.md "The lobby filter").
+    /// `era_game`: (source, game) whose own boards the first real seat plays,
+    /// with the other real seats' pool leaving that game out.
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -296,6 +317,8 @@ impl VecEnv {
         heroes_toml: Option<&str>,
         real_boards: Option<PyBoards>,
         old_boards: Option<&str>,
+        real_lobby_filter: bool,
+        era_game: Option<(String, u32)>,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -314,10 +337,21 @@ impl VecEnv {
             // Names that match no card are dropped here; train/real_boards.py
             // reports them (it knows both stages of the mapping), so this
             // stays quiet: every eval VecEnv would repeat the line.
-            let (boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
+            let (mut boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
+            boards.set_lobby_filter(real_lobby_filter);
             Arc::new(boards)
         });
         let lineup = check_lineup(lineup, boards.is_some())?;
+        if let Some((source, game)) = &era_game {
+            if lineup[REAL as usize] == 0 {
+                return Err(PyValueError::new_err("era_game needs a real seat"));
+            }
+            if !boards.as_ref().is_some_and(|b| b.has_era_game(source, *game)) {
+                return Err(PyValueError::new_err(format!(
+                    "era_game {source}-g{game}: the game has no Era boards"
+                )));
+            }
+        }
         let old_boards = match old_boards {
             None | Some("keep") => OldBoards::Keep,
             Some("drop") => OldBoards::Drop,
@@ -328,14 +362,16 @@ impl VecEnv {
             }
         };
         let seed = seed.wrapping_mul(1 << 32);
-        let mut envs: Vec<Env> =
-            (0..n as u64).map(|i| Env::new(&data, seed + i, &lineup, boards.as_ref())).collect();
+        let mut envs: Vec<Env> = (0..n as u64)
+            .map(|i| Env::new(&data, seed + i, &lineup, boards.as_ref(), era_game.as_ref()))
+            .collect();
         envs.par_iter_mut().for_each(Env::advance);
         Ok(VecEnv {
             data,
             envs,
             lineup,
             boards,
+            era_game,
             next_seed: seed + n as u64,
             old_boards,
             overlay_rules: None,
@@ -480,7 +516,8 @@ impl VecEnv {
         {
             return Err(PyValueError::new_err("array sizes don't match the number of games"));
         }
-        let (data, lineup, boards, base) = (&self.data, self.lineup, &self.boards, self.next_seed);
+        let (data, lineup, boards, era_game, base) =
+            (&self.data, self.lineup, &self.boards, &self.era_game, self.next_seed);
         let envs = &mut self.envs;
         let finals = &mut self.finals;
         let bad = py.detach(|| {
@@ -507,7 +544,13 @@ impl VecEnv {
                     env.report(places, tier_turns, tribes);
                     if env.game.over {
                         *finals = env.last_board;
-                        *env = Env::new(data, base + i as u64, &lineup, boards.as_ref());
+                        *env = Env::new(
+                            data,
+                            base + i as u64,
+                            &lineup,
+                            boards.as_ref(),
+                            era_game.as_ref(),
+                        );
                         env.advance();
                         *reset = true;
                     }
@@ -613,6 +656,25 @@ impl VecEnv {
             }
         }
         Ok(())
+    }
+
+    /// The lobby filter's counts across the games played so far:
+    /// (draws, draws from the turn's own pool, widened draws, unfiltered
+    /// fallbacks).
+    fn real_filter_stats(&self) -> (u64, u64, u64, u64) {
+        self.boards.as_ref().map_or((0, 0, 0, 0), |b| {
+            let s = b.filter_stats();
+            (s.draws, s.current, s.widened, s.unfiltered)
+        })
+    }
+
+    /// Turns the Era seats have played past their real game, and how many
+    /// games one of them outlived its real game.
+    fn era_stats(&self) -> (u64, u64) {
+        (
+            self.envs.iter().map(|e| e.game.era_turns_added as u64).sum(),
+            self.envs.iter().filter(|e| e.game.era_outlived).count() as u64,
+        )
     }
 
     /// Every seat of game `i` as it stands now, for looking at what bots

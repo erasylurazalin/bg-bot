@@ -1824,6 +1824,22 @@ minions in the hand.
   takes the loaded specs, and real seats are played in Rust like the bot
   seats. `ppo.py` adds a `vs7 real` eval (one learner against 7 real seats,
   `place_vs_real`) whenever real boards are loaded.
+- **The Era seat:** `Game::new_random_heroes_era` marks one real seat to play
+  Era's own boards of one finished game (`who: me`, nearest earlier turn, the
+  last board again past the game's end) and leaves that game out of every
+  other real seat's pool. `bgbench eraseat` runs it (`--runs N` per finished
+  game or `--games N` with a random era game each time) and
+  `bgpy.VecEnv(era_game=(source, game))` exposes the same seat to Python.
+- **The lobby filter:** `RealBoards::set_lobby_filter(true)` keeps only
+  boards whose minions fit the game's lobby (neutral always, a typed minion
+  when any type is in). A turn with fewer than `MIN_FILTERED_BOARDS` (8)
+  eligible boards widens to the nearest earlier turn with 8, then the nearest
+  later one, then the fullest bucket; no eligible board anywhere falls back
+  to the old draw. `draw_filtered` is the seat's draw and `filter_stats`
+  counts own-turn, widened and fallback draws. On `bgbench`, `ppo.py`,
+  `eval_search.py` and `eval_overlay.py` the flag is `--real-lobby-filter`;
+  on `bgpy.VecEnv` it is `real_lobby_filter=True`. Off is the old draw
+  exactly.
 
 ## The shop-turn search
 

@@ -6,11 +6,13 @@
 //! fuzzer and the benchmarks.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use arrayvec::ArrayVec;
 use serde::Deserialize;
 
-use crate::cards::{CardDb, Counter, N_COUNTERS};
+use crate::cards::{CardDb, Counter, N_COUNTERS, Tribes};
 use crate::fight::Deity;
 use crate::minion::{Keywords, Minion};
 use crate::rng::Rng;
@@ -308,6 +310,8 @@ pub struct RealBoardSpec {
     /// is compared with the next turn's Health.
     pub source: String,
     pub game: u32,
+    /// Era's final place in the game (0 while it is still going).
+    pub place: u8,
     pub side: RealSide,
     pub result: RealResult,
     /// The player's Health and armor at the first attack.
@@ -380,6 +384,9 @@ impl RealFightSpec {
 pub struct RealBoard {
     pub tier: u8,
     pub minions: ArrayVec<Minion, BOARD>,
+    /// The types of every board minion, in the same order, for the lobby
+    /// filter. `Tribes::NONE` is a neutral minion, which always passes.
+    pub minion_tribes: ArrayVec<Tribes, BOARD>,
     pub hand: ArrayVec<Minion, HAND>,
     pub counters: RealCounters,
     pub deity: Option<Deity>,
@@ -397,6 +404,53 @@ pub struct RealBoard {
     pub secrets: Option<Vec<String>>,
 }
 
+/// One built board's file identity, beside its bucket.
+#[derive(Clone, Debug)]
+struct BoardMeta {
+    source: String,
+    game: u32,
+}
+
+/// How many boards a filtered turn must hold before it is drawn from. A
+/// thinner pool widens to the nearest turn with at least this many.
+pub const MIN_FILTERED_BOARDS: usize = 8;
+
+/// What the lobby filter did, for a report: draws, draws that used the turn's
+/// own pool, draws widened to another turn, and draws with no eligible board
+/// at all (which fall back to the old unfiltered draw).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FilterStats {
+    pub draws: u64,
+    pub current: u64,
+    pub widened: u64,
+    pub unfiltered: u64,
+}
+
+#[derive(Debug, Default)]
+struct FilterCounters {
+    draws: AtomicU64,
+    current: AtomicU64,
+    widened: AtomicU64,
+    unfiltered: AtomicU64,
+}
+
+impl FilterCounters {
+    fn stats(&self) -> FilterStats {
+        FilterStats {
+            draws: self.draws.load(Ordering::Relaxed),
+            current: self.current.load(Ordering::Relaxed),
+            widened: self.widened.load(Ordering::Relaxed),
+            unfiltered: self.unfiltered.load(Ordering::Relaxed),
+        }
+    }
+
+    fn reset(&self) {
+        for c in [&self.draws, &self.current, &self.widened, &self.unfiltered] {
+            c.store(0, Ordering::Relaxed);
+        }
+    }
+}
+
 /// Real boards grouped by turn for the seat draws. Turn `LATE_TURN` and every
 /// later turn share one bucket; a turn whose bucket is empty draws from the
 /// nearest earlier turn that has boards (Era's rules).
@@ -409,6 +463,17 @@ pub struct RealBoards {
     /// every bucket: a caller that keeps its own parallel array (the game each
     /// board came from) finds a bucket's boards through it.
     place: Vec<Vec<usize>>,
+    /// The file identity of every board, in the same bucket order.
+    meta: Vec<Vec<BoardMeta>>,
+    /// Era's own boards (`who: me`) by game, each game's turns sorted. The Era
+    /// seat reads a game's board for its turn, repeats the last one past the
+    /// game's end, and every other real seat draws from the pool without it.
+    era: BTreeMap<(String, u32), Vec<(u32, RealBoard)>>,
+    /// Whether a real seat's random draw keeps only boards whose minions fit
+    /// the game's lobby (`draw_filtered`). Off by default: the old draw is
+    /// then byte for byte the same.
+    lobby_filter: bool,
+    filter: Arc<FilterCounters>,
 }
 
 /// The token a real board's unknown minion becomes.
@@ -628,9 +693,11 @@ impl RealBoard {
         } else {
             minions.iter().map(|m| db.get(m.card).tier).max().unwrap_or(1).clamp(1, crate::MAX_TIER)
         };
+        let minion_tribes = minions.iter().map(|m| db.tribes_of(m)).collect();
         (RealBoard {
             tier,
             minions,
+            minion_tribes,
             hand,
             counters,
             deity,
@@ -655,16 +722,125 @@ impl RealBoards {
     ) -> (RealBoards, Vec<String>) {
         let mut by_turn = vec![Vec::new(); LATE_TURN as usize];
         let mut place = vec![Vec::new(); LATE_TURN as usize];
+        let mut meta = vec![Vec::new(); LATE_TURN as usize];
+        let mut era: BTreeMap<(String, u32), Vec<(u32, RealBoard)>> = BTreeMap::new();
         let mut unmatched = Vec::new();
         for (i, spec) in specs.iter().enumerate() {
             let (board, missing) = RealBoard::build_one(spec, db, gifts);
             unmatched.extend(missing);
+            if spec.side == RealSide::Me {
+                era.entry((spec.source.clone(), spec.game))
+                    .or_default()
+                    .push((spec.turn, board.clone()));
+            }
             // Turn 13 and later all draw from one bucket.
             let t = spec.turn.clamp(1, LATE_TURN) as usize;
             by_turn[t - 1].push(board);
             place[t - 1].push(i);
+            meta[t - 1].push(BoardMeta { source: spec.source.clone(), game: spec.game });
         }
-        (RealBoards { by_turn, place }, unmatched)
+        for boards in era.values_mut() {
+            boards.sort_by_key(|(turn, _)| *turn);
+        }
+        (
+            RealBoards {
+                by_turn,
+                place,
+                meta,
+                era,
+                lobby_filter: false,
+                filter: Arc::new(FilterCounters::default()),
+            },
+            unmatched,
+        )
+    }
+
+    /// Turn the lobby filter on or off. Off is the default, and then every
+    /// draw is exactly the old one.
+    pub fn set_lobby_filter(&mut self, on: bool) {
+        self.lobby_filter = on;
+    }
+
+    pub fn lobby_filter(&self) -> bool {
+        self.lobby_filter
+    }
+
+    pub fn filter_stats(&self) -> FilterStats {
+        self.filter.stats()
+    }
+
+    pub fn reset_filter_stats(&self) {
+        self.filter.reset();
+    }
+
+    /// Whether one board's minions can all appear in `lobby`: a neutral
+    /// minion always passes, and a typed one passes when any of its types is
+    /// in the lobby (docs/rules/design.md "The lobby's tribes").
+    fn board_fits(board: &RealBoard, lobby: Tribes) -> bool {
+        board
+            .minion_tribes
+            .iter()
+            .all(|&t| t.is_neutral() || t.overlaps(lobby))
+    }
+
+    /// The games with Era's own boards, by source and game number.
+    pub fn era_games(&self) -> impl Iterator<Item = (&str, u32)> {
+        self.era.iter().map(|((source, game), _)| (source.as_str(), *game))
+    }
+
+    fn era_boards(&self, source: &str, game: u32) -> Option<&Vec<(u32, RealBoard)>> {
+        self.era.iter().find(|((s, g), _)| s == source && *g == game).map(|(_, b)| b)
+    }
+
+    pub fn has_era_game(&self, source: &str, game: u32) -> bool {
+        self.era_boards(source, game).is_some()
+    }
+
+    /// The last turn Era really played in a game, if the game's own boards
+    /// are in the set.
+    pub fn era_last_turn(&self, source: &str, game: u32) -> Option<u32> {
+        self.era_boards(source, game)
+            .and_then(|boards| boards.last().map(|(turn, _)| *turn))
+    }
+
+    /// Era's board for `turn` in one game: the board of that turn, the nearest
+    /// earlier one when it is missing, and the last board again past the last
+    /// turn Era really played.
+    pub fn draw_era(&self, source: &str, game: u32, turn: u32, rng: &mut Rng) -> Option<&RealBoard> {
+        let boards = self.era_boards(source, game)?;
+        if boards.is_empty() {
+            return None;
+        }
+        let pick = boards.partition_point(|(t, _)| *t <= turn);
+        let at = if pick == 0 { 0 } else { pick - 1 };
+        let chosen_turn = boards[at].0;
+        let n = boards.iter().filter(|(t, _)| *t == chosen_turn).count();
+        let mut take = rng.below(n as u32) as usize;
+        for (t, board) in boards {
+            if *t != chosen_turn {
+                continue;
+            }
+            if take == 0 {
+                return Some(board);
+            }
+            take -= 1;
+        }
+        None
+    }
+
+    /// The number of boards of each bucket that fit `lobby` and are not from
+    /// `exclude`. Index 0 is turn 1, the last is turn `LATE_TURN` and later.
+    pub fn pool_sizes(&self, lobby: Tribes, exclude: Option<(&str, u32)>) -> Vec<usize> {
+        (0..self.by_turn.len())
+            .map(|i| {
+                (0..self.by_turn[i].len())
+                    .filter(|&k| {
+                        let m = &self.meta[i][k];
+                        !Self::excluded(m, exclude) && Self::board_fits(&self.by_turn[i][k], lobby)
+                    })
+                    .count()
+            })
+            .collect()
     }
 
     /// The bucket index `bucket` reads from, after the late-turn and
@@ -693,6 +869,156 @@ impl RealBoards {
     pub fn draw(&self, turn: u32, rng: &mut Rng) -> &RealBoard {
         let b = self.bucket(turn);
         &b[rng.below(b.len() as u32) as usize]
+    }
+
+    fn excluded(meta: &BoardMeta, exclude: Option<(&str, u32)>) -> bool {
+        matches!(exclude, Some((source, game))
+            if meta.source == source && meta.game == game)
+    }
+
+    /// Draw from one bucket, keeping only the boards that pass the filter and
+    /// are not from `exclude`. None when the bucket holds none.
+    fn pick(
+        &self,
+        bucket: usize,
+        lobby: Tribes,
+        exclude: Option<(&str, u32)>,
+        rng: &mut Rng,
+    ) -> Option<usize> {
+        let n = (0..self.by_turn[bucket].len())
+            .filter(|&k| {
+                !Self::excluded(&self.meta[bucket][k], exclude)
+                    && Self::board_fits(&self.by_turn[bucket][k], lobby)
+            })
+            .count();
+        if n == 0 {
+            return None;
+        }
+        let mut take = rng.below(n as u32) as usize;
+        for k in 0..self.by_turn[bucket].len() {
+            if Self::excluded(&self.meta[bucket][k], exclude)
+                || !Self::board_fits(&self.by_turn[bucket][k], lobby)
+            {
+                continue;
+            }
+            if take == 0 {
+                return Some(k);
+            }
+            take -= 1;
+        }
+        None
+    }
+
+    /// The bucket a filtered draw reads, with the widening rule: this turn's
+    /// bucket when it holds at least `MIN_FILTERED_BOARDS` eligible boards,
+    /// else the nearest earlier one that does, else the nearest later one,
+    /// else the fullest bucket there is. Returns the bucket and whether it is
+    /// not the turn's own.
+    fn widened_bucket(&self, turn: u32, lobby: Tribes, exclude: Option<(&str, u32)>) -> (usize, bool) {
+        let own = self.bucket_index(turn) - 1;
+        let count = |i: usize| {
+            (0..self.by_turn[i].len())
+                .filter(|&k| {
+                    !Self::excluded(&self.meta[i][k], exclude)
+                        && Self::board_fits(&self.by_turn[i][k], lobby)
+                })
+                .count()
+        };
+        if count(own) >= MIN_FILTERED_BOARDS {
+            return (own, false);
+        }
+        for i in (0..own).rev() {
+            if count(i) >= MIN_FILTERED_BOARDS {
+                return (i, true);
+            }
+        }
+        for i in own + 1..self.by_turn.len() {
+            if count(i) >= MIN_FILTERED_BOARDS {
+                return (i, true);
+            }
+        }
+        let mut best = (own, count(own));
+        for i in 0..self.by_turn.len() {
+            let n = count(i);
+            if n > best.1 {
+                best = (i, n);
+            }
+        }
+        (best.0, true)
+    }
+
+    /// A real seat's draw with the lobby filter and, when given, one game
+    /// excluded (the Era seat's own game). With the filter off and no
+    /// exclusion this is exactly `draw`.
+    pub fn draw_filtered(
+        &self,
+        turn: u32,
+        lobby: Tribes,
+        exclude: Option<(&str, u32)>,
+        rng: &mut Rng,
+    ) -> &RealBoard {
+        if !self.lobby_filter && exclude.is_none() {
+            return self.draw(turn, rng);
+        }
+        if !self.lobby_filter && exclude.is_some() {
+            // The Era seat's opponents never draw its own game, even with
+            // the lobby filter off.
+            let own = self.bucket_index(turn) - 1;
+            let mut best = (own, 0);
+            for i in 0..self.by_turn.len() {
+                let n = (0..self.by_turn[i].len())
+                    .filter(|&k| !Self::excluded(&self.meta[i][k], exclude))
+                    .count();
+                if n > best.1 {
+                    best = (i, n);
+                }
+            }
+            let own = self.bucket_index(turn) - 1;
+            let bucket = if (0..self.by_turn[own].len())
+                .any(|k| !Self::excluded(&self.meta[own][k], exclude))
+            {
+                own
+            } else {
+                best.0
+            };
+            let n = (0..self.by_turn[bucket].len())
+                .filter(|&k| !Self::excluded(&self.meta[bucket][k], exclude))
+                .count();
+            if n == 0 {
+                // Every board in the set is the excluded game: there is no
+                // pool left to draw from, and the old draw is better than
+                // failing.
+                return self.draw(turn, rng);
+            }
+            let mut take = rng.below(n as u32) as usize;
+            for k in 0..self.by_turn[bucket].len() {
+                if Self::excluded(&self.meta[bucket][k], exclude) {
+                    continue;
+                }
+                if take == 0 {
+                    return &self.by_turn[bucket][k];
+                }
+                take -= 1;
+            }
+            return &self.by_turn[bucket][0];
+        }
+        self.filter.draws.fetch_add(1, Ordering::Relaxed);
+        let (bucket, widened) = self.widened_bucket(turn, lobby, exclude);
+        if widened {
+            self.filter.widened.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.filter.current.fetch_add(1, Ordering::Relaxed);
+        }
+        match self.pick(bucket, lobby, exclude, rng) {
+            Some(k) => &self.by_turn[bucket][k],
+            None => {
+                // Nothing in the whole set fits this lobby (which a board
+                // set made of one typed game can meet): the old unfiltered
+                // draw is better than failing.
+                self.filter.unfiltered.fetch_add(1, Ordering::Relaxed);
+                self.draw(turn, rng)
+            }
+        }
     }
 
     /// The boards a real seat draws from on `turn` (after the late-turn and
@@ -754,6 +1080,9 @@ struct RawFile {
     source: String,
     #[serde(default)]
     game: u32,
+    /// Era's final place, 0 while the game is still going.
+    #[serde(default)]
+    place: u8,
     boards: Vec<RawBoard>,
 }
 
@@ -1086,6 +1415,7 @@ pub fn parse_board_files(
                 deity,
                 source: raw.source.clone(),
                 game: raw.game,
+                place: raw.place,
                 side: if b.who.eq_ignore_ascii_case("opp") { RealSide::Opp } else { RealSide::Me },
                 result: parse_result(&b.result),
                 health: b.health.unwrap_or(0),
