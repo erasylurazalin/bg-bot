@@ -12,7 +12,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::comps::Comps;
@@ -38,6 +38,25 @@ const RUSH: u8 = 3;
 const RANDOM: u8 = 4;
 const REAL: u8 = 5;
 const SEAT_KINDS: usize = 6;
+
+/// How many threads the overlay's line search gets. The game steps and
+/// observation use the global pool (one thread per core); the line search on
+/// the same pool wakes every worker, and the spinning workers then delay the
+/// network forward that follows. A small dedicated pool keeps that work off
+/// the global pool and leaves the forward pass alone.
+const OVERLAY_THREADS: usize = 4;
+
+static OVERLAY_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+
+fn overlay_pool() -> &'static rayon::ThreadPool {
+    OVERLAY_POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(OVERLAY_THREADS)
+            .stack_size(64 << 20)
+            .build()
+            .expect("the overlay thread pool")
+    })
+}
 
 /// One minion for `VecEnv(real_boards=..)`, as train/real_boards.py loads
 /// it: (name, attack, health, golden, keywords, numbers).
@@ -380,25 +399,27 @@ impl VecEnv {
         let rules = self.overlay_rules.clone();
         let envs = &mut self.envs;
         py.detach(|| {
-            envs
-                .par_iter_mut()
-                .zip(forced.par_chunks_mut(PLAYERS))
-                .zip(bonus.par_chunks_mut(PLAYERS * N_ACTIONS))
-                .zip(flags.par_chunks_mut(PLAYERS * OVERLAY_FLAGS))
-                .for_each(|(((env, forced), bonus), flags)| {
-                    forced.fill(-1);
-                    bonus.fill(0.0);
-                    flags.fill(0);
-                    let Some(rules) = &rules else { return };
-                    let Some(p) = env.game.current_player() else { return };
-                    let mut row = [0.0f32; N_ACTIONS];
-                    let mut f = [0i32; OVERLAY_FLAGS];
-                    if let Some(a) = rules.decide(&env.game, p, &mut env.shell_lines[p], &mut row, &mut f) {
-                        forced[p] = a.index() as i64;
-                    }
-                    bonus[p * N_ACTIONS..(p + 1) * N_ACTIONS].copy_from_slice(&row);
-                    flags[p * OVERLAY_FLAGS..(p + 1) * OVERLAY_FLAGS].copy_from_slice(&f);
-                });
+            overlay_pool().install(|| {
+                envs
+                    .par_iter_mut()
+                    .zip(forced.par_chunks_mut(PLAYERS))
+                    .zip(bonus.par_chunks_mut(PLAYERS * N_ACTIONS))
+                    .zip(flags.par_chunks_mut(PLAYERS * OVERLAY_FLAGS))
+                    .for_each(|(((env, forced), bonus), flags)| {
+                        forced.fill(-1);
+                        bonus.fill(0.0);
+                        flags.fill(0);
+                        let Some(rules) = &rules else { return };
+                        let Some(p) = env.game.current_player() else { return };
+                        let mut row = [0.0f32; N_ACTIONS];
+                        let mut f = [0i32; OVERLAY_FLAGS];
+                        if let Some(a) = rules.decide(&env.game, p, &mut env.shell_lines[p], &mut row, &mut f) {
+                            forced[p] = a.index() as i64;
+                        }
+                        bonus[p * N_ACTIONS..(p + 1) * N_ACTIONS].copy_from_slice(&row);
+                        flags[p * OVERLAY_FLAGS..(p + 1) * OVERLAY_FLAGS].copy_from_slice(&f);
+                    });
+            });
         });
         Ok(())
     }

@@ -103,6 +103,12 @@ def args():
                         "size either way, so a run can switch mid-way (default keep, or the "
                         "checkpoint's own on --resume)")
     a.add_argument("--envs", type=int, default=1024)
+    a.add_argument("--overlay-comps", default=None,
+                   help="comp file for the overlay during training; absent means no overlay")
+    a.add_argument("--overlay-bonus", type=float, default=8.0,
+                   help="B, the comp payoff bonus (the dominance layer runs at any B)")
+    a.add_argument("--no-dominance", action="store_true",
+                   help="keep the comp overlay but turn the dominance line search off")
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
     a.add_argument("--lineup", default="4,2,1,1,0,0",
                    help="learner,snapshot,standard,rush,random,real seats")
@@ -195,6 +201,9 @@ class Bufs:
         self.tribes = np.zeros((n, P, bgpy.TRIBES), np.int8)
         self.reset = np.zeros(n, bool)
         self.kinds = np.zeros((n, P), np.int64)
+        self.forced = np.full((n, P), -1, np.int64)
+        self.bonus = np.zeros((n, P, bgpy.N_ACTIONS), np.float32)
+        self.flags = np.zeros((n, P, bgpy.OVERLAY_FLAGS), np.int32)
 
 
 # --force-turn2-level: on turn 2 a tier 1 seat that can level must level
@@ -253,10 +262,14 @@ def force_mask(obs, mask, curve_rows=None):
     return mask
 
 
-def act(net, obs, mask, greedy=False):
+def act(net, obs, mask, greedy=False, bonus=None, forced=None):
     logits, value = net(obs)
+    if bonus is not None:
+        logits = logits + bonus
     dist = torch.distributions.Categorical(logits=masked(logits, mask))
     a = logits.argmax(1) if greedy else dist.sample()
+    if forced is not None:
+        a = torch.where(forced >= 0, forced, a)
     return a, dist.log_prob(a), value, dist.entropy()
 
 
@@ -457,6 +470,10 @@ def main():
     print(f"opponents' old boards: {OLD_BOARDS}")
     N, T = cfg.envs, cfg.steps
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS)
+    if cfg.overlay_comps:
+        env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus, not cfg.no_dominance)
+        print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}, dominance "
+              f"{'off' if cfg.no_dominance else 'on'}")
     names = env.card_names()
     hero_names = env.hero_names()
     if cfg.compile is None:
@@ -596,10 +613,24 @@ def main():
                 is_learner = torch.from_numpy(b.kind == LEARNER).to(dev)
                 cr = torch.from_numpy(curve[np.arange(N), b.seat]).to(dev)
                 m = force_mask(o, m, cr)
-                a, lp, v, _ = act(net, o, m)
+                bonus = forced = None
+                if cfg.overlay_comps:
+                    env.overlay(b.forced, b.bonus, b.flags)
+                    bonus = torch.from_numpy(b.bonus[np.arange(N), b.seat]).to(dev)
+                    forced = torch.from_numpy(b.forced[np.arange(N), b.seat]).to(dev)
+                    # A PPO forced press (Dark Gift, level) wins over the
+                    # overlay for that row.
+                    blocked = (m != torch.from_numpy(b.mask).to(dev)).any(1)
+                    forced[blocked] = -1
+                    bonus[blocked] = 0.0
+                a, lp, v, _ = act(net, o, m, bonus=bonus, forced=forced)
                 sn = ~is_learner
                 if sn.any():
-                    sa, _, _, _ = act(snap, o[sn], m[sn])
+                    sa, _, _, _ = act(
+                        snap, o[sn], m[sn],
+                        bonus=bonus[sn] if bonus is not None else None,
+                        forced=forced[sn] if forced is not None else None,
+                    )
                     a[sn] = sa
                 obs[t], masks[t], acts[t], logps[t], vals[t] = o, m, a, lp, v
                 rews[t] = -cost_of[kind_of[a]]

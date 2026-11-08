@@ -1,16 +1,17 @@
 """The comp overlay against seven real boards (docs/briefs/comp-overlay-1.md).
 
 One learner seat plays r1106-keep against seven real-board seats. With the
-overlay on, the Rust rules force the Shell and enabler/payoff choices and add
-the logit bonus `B` for buying or playing a payoff (`B/2` for a filler). With
-`B = 0` the same loop is the plain network, and a separate 512-game check
-reproduces the 5.867 baseline exactly.
+overlay on, the Rust rules force any short line that dominates the position
+and take offered enablers/payoffs, and add the logit bonus `B` for buying or
+playing a payoff (`B/2` for a filler). With `B = 0` the same loop is the
+plain network, and a separate 512-game check reproduces the baseline exactly.
 
     .venv/bin/python train/eval_overlay.py --games 2048 --bonus 0 2 4 8
 
-Output: one table per B, with the Shell and enabler counts, the active games'
-comp share and place, and the overlay call's relative cost. `--out DIR` writes
-`report.md` and `results.json`.
+Output: one table per B, with the Shell and enabler counts, lines forced, the
+active games' comp share and place, and steps per second. `--no-dominance`
+runs the same seeds without the line search; `--lines` records the line cards
+and 10 examples. `--out DIR` writes `report.md` and `results.json`.
 """
 
 from __future__ import annotations

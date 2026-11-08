@@ -146,7 +146,7 @@ fn a_card_that_sells_for_less_is_not_forced() {
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(line, ShellLine::default());
+    assert_eq!(line.turn, 0);
     assert_eq!(f[F_LINE_FOUND], 0);
 }
 
@@ -158,7 +158,8 @@ fn a_full_board_has_no_dominating_line() {
     ready(&mut g);
     g.players[0].lost_last_combat = true;
     for _ in 0..7 {
-        place(&mut g, 0, 0, "Microbot", false);
+        g.players[0].lost_last_combat = true;
+    place(&mut g, 0, 0, "Microbot", false);
     }
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
@@ -168,8 +169,118 @@ fn a_full_board_has_no_dominating_line() {
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(line, ShellLine::default());
+    assert_eq!(line.turn, 0);
     assert_eq!(f[F_LINE_FOUND], 0);
+}
+
+#[test]
+fn a_comp_card_is_not_consumed_by_a_line() {
+    let d = data();
+    // The real library protects the Beetle cards. Here the same Shell line
+    // that dominates in the test above is listed as a comp enabler, so only
+    // the comp guard can stop it. The comp file is the whole source of the
+    // protection.
+    let custom = Comps::from_toml(
+        r#"
+[defaults]
+level = [1]
+dying_health = 10
+
+[[comp]]
+name = "test"
+tribes = []
+enabler = ["Tortollan Blue Shell"]
+payoff = []
+filler = []
+
+[[comp.core]]
+name = "Tortollan Blue Shell"
+weight = 1.0
+scale = false
+"#,
+        &d,
+    )
+    .expect("the test comp library");
+    let mut g = sandbox(23);
+    ready(&mut g);
+    g.players[0].lost_last_combat = true;
+    place(&mut g, 0, 0, "Microbot", false);
+    place(&mut g, 0, 2, "Tortollan Blue Shell", false);
+    mine(&mut g);
+    let mut bonus = [0.0f32; N_ACTIONS];
+
+    let protected = Overlay::new(custom, 2.0, &d);
+    let mut line = ShellLine::default();
+    let mut f = flags();
+    assert_eq!(protected.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
+
+    // The same position without the comp entry does force the line, so the
+    // guard, not the card filter, is what changed the answer.
+    let control = Overlay::new(comps(&d), 2.0, &d);
+    let mut line = ShellLine::default();
+    let mut f = flags();
+    assert!(
+        control.decide(&g, 0, &mut line, &mut bonus, &mut f).is_some(),
+        "the Shell line dominates when it is not a comp card"
+    );
+}
+
+#[test]
+fn comp_card_protection_needs_the_comp_tribe_in_the_lobby() {
+    let d = data();
+    let custom = Comps::from_toml(
+        r#"
+[defaults]
+level = [1]
+dying_health = 10
+
+[[comp]]
+name = "test"
+tribes = ["beast"]
+enabler = ["Tortollan Blue Shell"]
+payoff = []
+filler = []
+
+[[comp.core]]
+name = "Tortollan Blue Shell"
+weight = 1.0
+scale = false
+"#,
+        &d,
+    )
+    .expect("the test comp library");
+    let mut g = Game::new_sandbox(data(), 29, Some(Tribes::of(bgcore::Tribe::Mech)), 0);
+    ready(&mut g);
+    g.players[0].lost_last_combat = true;
+    place(&mut g, 0, 0, "Microbot", false);
+    place(&mut g, 0, 2, "Tortollan Blue Shell", false);
+    mine(&mut g);
+    let o = Overlay::new(custom, 2.0, &d);
+    let mut line = ShellLine::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    assert!(
+        o.decide(&g, 0, &mut line, &mut bonus, &mut f).is_some(),
+        "the beast comp is not in a mech lobby, so the Shell is not protected"
+    );
+}
+
+#[test]
+fn a_card_without_a_play_or_sell_effect_is_not_tried() {
+    let d = data();
+    let o = Overlay::new(comps(&d), 2.0, &d);
+    let mut g = sandbox(31);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Microbot", false);
+    // A plain 1/1 bought, played and sold keeps Gold and the board as they
+    // were; only the action counters would move, so Era's rule says no copy.
+    place(&mut g, 0, 2, "Microbot", false);
+    mine(&mut g);
+    let mut line = ShellLine::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
+    assert_eq!(line.turn, 0);
 }
 
 #[test]
@@ -187,7 +298,7 @@ fn no_gold_means_no_line() {
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(line, ShellLine::default());
+    assert_eq!(line.turn, 0);
 }
 
 /// Era's free Dragon cycle: Brann, Kalecgos and four Dragons on the board,
@@ -334,7 +445,8 @@ fn a_full_board_gets_a_bonus_for_selling_a_non_comp_card() {
     ready(&mut g);
     place(&mut g, 0, 0, "Ravaging Scorpid", false);
     for _ in 0..6 {
-        place(&mut g, 0, 0, "Microbot", false);
+        g.players[0].lost_last_combat = true;
+    place(&mut g, 0, 0, "Microbot", false);
     }
     place(&mut g, 0, 1, "Turquoise Skitterer", false);
     mine(&mut g);
@@ -352,6 +464,7 @@ fn no_active_comp_changes_nothing() {
     let o = Overlay::new(comps(&d), 8.0, &d);
     let mut g = sandbox(41);
     ready(&mut g);
+    g.players[0].lost_last_combat = true;
     place(&mut g, 0, 0, "Microbot", false);
     place(&mut g, 0, 2, "Banana Slamma", false);
     place(&mut g, 0, 2, "Turquoise Skitterer", false);

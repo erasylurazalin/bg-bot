@@ -16,6 +16,9 @@
 //! filler `B/2`, and on a full board selling a card that is not in the comp
 //! is worth `B` when a comp card is waiting in the hand or Tavern.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use crate::cards::{ChooseOption, SpellEffect};
 use crate::comps::{Comp, Comps};
 use crate::game::Game;
@@ -50,17 +53,36 @@ pub struct ShellLine {
     plan: [u8; LINE_MAX],
     len: u8,
     next: u8,
+    /// The position at which this seat last found no line: the same gold,
+    /// board, hand and Tavern means there is no reason to search it again.
+    last_none: Option<u64>,
 }
 
 impl Default for ShellLine {
     fn default() -> ShellLine {
-        ShellLine { turn: 0, slot: None, plan: [0; LINE_MAX], len: 0, next: 0 }
+        ShellLine {
+            turn: 0,
+            slot: None,
+            plan: [0; LINE_MAX],
+            len: 0,
+            next: 0,
+            last_none: None,
+        }
     }
 }
 
 impl ShellLine {
     fn clear(&mut self) {
         *self = ShellLine::default();
+    }
+
+    /// Drop the plan but keep the "no line here" marker: a new turn with the
+    /// same visible state may skip the search too.
+    fn reset_plan(&mut self) {
+        self.turn = 0;
+        self.slot = None;
+        self.len = 0;
+        self.next = 0;
     }
 
     fn start(&mut self, turn: u32, plan: &Plan) {
@@ -160,7 +182,7 @@ impl Overlay {
         }
         // A line already judged plays its next action, one per decision.
         if line.turn != 0 && line.turn != game.turn {
-            line.clear();
+            line.reset_plan();
         }
         if line.turn == game.turn {
             if let Some(a) = line.next_action() {
@@ -171,7 +193,8 @@ impl Overlay {
                     }
                     return Some(a);
                 }
-                line.clear();
+                line.last_none = None;
+                line.reset_plan();
             } else {
                 line.clear();
             }
@@ -179,17 +202,23 @@ impl Overlay {
         if let Some(a) = self.choice(game, p, active, flags) {
             return Some(a);
         }
-        if self.dominance
-            && let Some(plan) = self.dominating_line(game, p)
-        {
-            line.start(game.turn, &plan);
-            let a = line.next_action()?;
-            flags[F_LINE_FOUND] = 1;
-            flags[F_LINE_FORCED] = 1;
-            if line.next >= line.len {
-                line.clear();
+        if self.dominance {
+            let key = line_key(game, p);
+            if line.last_none == Some(key) {
+                // Nothing the line search reads has changed since the last
+                // "no line" here: skip every copy.
+            } else if let Some(plan) = self.dominating_line(game, p) {
+                line.start(game.turn, &plan);
+                let a = line.next_action()?;
+                flags[F_LINE_FOUND] = 1;
+                flags[F_LINE_FORCED] = 1;
+                if line.next >= line.len {
+                    line.clear();
+                }
+                return Some(a);
+            } else {
+                line.last_none = Some(key);
             }
-            return Some(a);
         }
         if let Some(ci) = active {
             self.bonuses(game, p, ci, bonus);
@@ -217,6 +246,17 @@ impl Overlay {
         }
         let pos = pl.board.len() as u8;
         for s in 0..pl.shop.len() {
+            let card = pl.shop[s].card;
+            // Era's rule: only a Battlecry or a "when you sell" effect can
+            // make a bought card worth cycling, so nothing else gets a copy.
+            if !self.line_card(game, card) {
+                continue;
+            }
+            // A comp card is not ours to consume: buying and selling it would
+            // take it out of the Tavern for everyone.
+            if self.protected_card(game, card) {
+                continue;
+            }
             let a = Action::Buy(s as u8);
             if game.is_legal(a)
                 && let Some(plan) = self.line_from(game, p, a)
@@ -225,6 +265,10 @@ impl Overlay {
             }
         }
         for h in 0..pl.hand.len() {
+            let card = pl.hand[h].card;
+            if !self.line_card(game, card) || self.protected_card(game, card) {
+                continue;
+            }
             let a = Action::Play { hand: h as u8, pos };
             if game.is_legal(a)
                 && let Some(plan) = self.line_from(game, p, a)
@@ -233,6 +277,23 @@ impl Overlay {
             }
         }
         None
+    }
+
+    /// Whether a card can make a free line worth trying: one of its own
+    /// effects must fire on the play or the sell. A plain stat minion can
+    /// only lose Gold or leave the position as it was.
+    fn line_card(&self, game: &Game, card: CardId) -> bool {
+        let c = game.data.cards.get(card);
+        c.battlecry.is_some() || c.on_sell.is_some()
+    }
+
+    /// Whether any comp whose tribes are in this lobby lists `card` as an
+    /// enabler or a payoff. The comp file is the only source; no name is
+    /// written here.
+    fn protected_card(&self, game: &Game, card: CardId) -> bool {
+        self.comps.comps.iter().any(|c| {
+            self.comp_in_lobby(game, c) && (c.is_enabler(card) || c.is_payoff(card))
+        })
     }
 
     /// Try one line: buy (for a Tavern card) and play the source card, sell
@@ -300,6 +361,13 @@ impl Overlay {
             sim.step(sell).ok()?;
         }
         for &card in &generated[..n_generated] {
+            // A comp card the play generated stays in the hand: the line must
+            // not sell it either. A spell stays too: the judge counts the
+            // extra hand card as a gain, and playing it would only open its
+            // target or effect on the copy.
+            if self.protected_card(game, card) || game.data.cards.get(card).is_spell() {
+                continue;
+            }
             let Some(hand) = sim.players[p].hand.iter().position(|m| m.card == card) else {
                 continue;
             };
@@ -488,6 +556,20 @@ impl Overlay {
             }
         }
     }
+}
+
+/// The position the no-line marker is keyed on: gold, the lost-fight flag,
+/// the board, the hand and the Tavern. `Minion` hashes every field, so a
+/// buff, a keyword, a pending counter or a swap all break the cache.
+fn line_key(game: &Game, p: usize) -> u64 {
+    let pl = &game.players[p];
+    let mut h = DefaultHasher::new();
+    pl.gold.hash(&mut h);
+    pl.lost_last_combat.hash(&mut h);
+    pl.board.hash(&mut h);
+    pl.hand.hash(&mut h);
+    pl.shop.hash(&mut h);
+    h.finish()
 }
 
 /// The card a Choose One option directly gives, if it names one.

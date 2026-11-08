@@ -1985,16 +1985,23 @@ their hand.
   it, sells it, then plays and sells whatever the play put in the hand. The
   end is judged with `crate::search::Position`; the first line that dominates
   is forced, one ordinary action per decision, and the rest of its actions
-  wait in the seat's `ShellLine` plan. A line that opens a Discover, a Choose
-  One, a target or a discard is dropped rather than answered on the copy: the
-  short lines this layer judges do not make choices. A generated card that
-  cannot be played stays in the hand, which dominance counts as a gain.
-  Nothing matches a card name; the Blue Shell is a test, not a rule. A full
-  board has no line, because making a slot means selling a minion and that
-  sale on its own is a loss. A Discover or Choose One that offers an enabler
-  takes it when the comp's tribe is in the lobby; an active comp takes a
-  payoff, then a filler. The line and enabler flags are in the overlay stats
-  array.
+  wait in the seat's `ShellLine` plan. Before any copy is made, a source card
+  is tried only when its own data has a Battlecry or an `on_sell` effect
+  (Era's rule: nothing else can make a bought card worth cycling), and it is
+  skipped when any comp whose tribes are in the lobby lists it as an enabler
+  or a payoff (`protected_card`; the comp file is the only source of that
+  list). A seat that found no line at a position skips the search until its
+  gold, lost-fight flag, board, hand or Tavern changes (`line_key`). A line
+  that opens a Discover, a Choose One, a target or a discard is dropped
+  rather than answered on the copy: the short lines this layer judges do not
+  make choices. A generated card that cannot be played, a generated spell,
+  and a generated comp card stay in the hand, which dominance counts as a
+  gain. Nothing matches a card name; the Blue Shell is a test, not a rule. A
+  full board has no line, because making a slot means selling a minion and
+  that sale on its own is a loss. A Discover or Choose One that offers an
+  enabler takes it when the comp's tribe is in the lobby; an active comp
+  takes a payoff, then a filler. The line and enabler flags are in the
+  overlay stats array.
 - **Bonuses:** while a comp is active, buying or playing a payoff is worth
   `B`, a filler `B/2`, and a full board sells a non-comp card for `B` when a
   comp card waits in the hand or Tavern. Selling an enabler or a payoff is
@@ -2008,7 +2015,11 @@ their hand.
   `final_boards()` is needed. `final_boards()` returns the last completed
   game's board card ids per seat. Only the current player's row is computed,
   because `Game::is_legal` is current-player only; the other seats are
-  neutral.
+  neutral. The overlay's parallel loop runs on its own 4-thread Rayon pool
+  (`OVERLAY_THREADS`), not the global one: the search on the global pool woke
+  all 32 workers, and their spinning delayed the network forward that follows
+  (the eval loop's forward went from about 10 ms to 25 ms a step; on the small
+  pool it is back to about 11 ms).
 - **`train/eval_overlay.py --games 2048 --bonus 0 2 4 8`** runs the network
   seat against seven real boards. It prints the place with a 95% interval,
   Shell bought/taken against Tavern turns with a free slot (the old named rule
@@ -2201,6 +2212,10 @@ Deleting `.venv` undoes it.
   `--lineup` (learner, snapshot, standard bot, rush bot, random, real; the
   real seats play boards from `--real-boards`, default `boards/real` when
   the lineup has any).
+- The comp overlay is off in training unless `--overlay-comps FILE` is given
+  (`--overlay-bonus B`, default 8; `--no-dominance` keeps the comp bonuses
+  and turns the line search off). A PPO forced press (Dark Gift, level) wins
+  over the overlay on that row.
 - Reward is placement only (+1 for 1st to -1 for 8th), minus 0.002 per
   Move action (`--action-cost`, `--cost-kinds move`) so it doesn't shuffle
   its board for free; buys, sells, plays and refreshes cost nothing extra,
