@@ -70,20 +70,36 @@ fn name(g: &Game, m: &Minion) -> String {
 }
 
 #[test]
-fn the_comp_file_loads_the_ten_drafts() {
+fn the_comp_file_loads_the_26_drafts() {
     let d = data();
     let c = comps(&d);
-    assert_eq!(c.comps.len(), 10);
+    assert_eq!(c.comps.len(), 26);
     for name in [
+        "Murlocs - Keyword",
         "Beasts - Tasty Lobstah",
+        "Undead - Attack Scaling",
         "Beasts - Leviathan",
+        "Menagerie",
+        "Demons - Self Damage",
+        "Demons - Shop Buff",
+        "Elementals - Unbound Tempest",
         "Beasts - Beetles",
         "Demons - Deathrattle/Shop Buff",
+        "Aberrations - Deathrattle/Spells",
+        "Murlocs - Magicfin",
         "Mechs - Magnetics/Spells",
+        "Elementals - Ultraviolet",
         "Quilboar - Choose One",
-        "Murlocs - Keyword",
-        "Demons - Self Damage",
-        "Menagerie",
+        "Quilboar - Gem Barrage",
+        "Dragons - Copebringer",
+        "Undead - Eternal Knight",
+        "Quilboar - Gems from Hand",
+        "Aberrations - Sludge",
+        "Dragons - Spell Power",
+        "Mechs - Volumizer",
+        "Dragons - Battlecries",
+        "Beasts - Summons",
+        "Mechs - Divine Shield",
         "Murlocs - Venom Scam",
     ] {
         assert!(c.index_of(name).is_some(), "{name} is in the file");

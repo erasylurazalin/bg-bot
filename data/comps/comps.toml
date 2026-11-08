@@ -1,9 +1,12 @@
 # The comp library the planner bot plays (docs/briefs/comp-planner-1.md).
 #
-# The ten comps are JeefHS's current-patch HSReplay guides
+# The 26 comps are JeefHS's current-patch HSReplay guides
 # (docs/notes/comps/hsreplay-2026-11-09.json), chosen by Era on 2026-11-09:
-# the easy or S-tier comps whose commit is a card, plus Murlocs - Venom Scam
-# as the fallback. The APM and infinite-gold comps wait.
+# every comp with a card-based commit, except the seven APM or economy comps
+# (Quilboar - APM Shop Buff, Undead - APM Undead, Mechs - APM Magnetic,
+# Aberrations - APM Deity, Pirates - APM Golden, Elementals - Living Azerite,
+# Murlocs - Tidecaller), plus Murlocs - Venom Scam as the fallback. File order
+# is S tier, then Tier 2 and Tier 3, with the fallback last.
 #
 # Every card is named as cards.toml names it. The loader rejects a name that
 # cards.toml does not hold, and a hero or trinket that heroes.toml or
@@ -32,11 +35,11 @@
 #
 # enabler: a list of alternatives. Each one is `all = [[...], [...]]`: every
 # group must have one of its cards on the board or in the hand, and a group
-# with several names is an either/or. One entry has to be complete for the
-# comp to be ACTIVE. Several entries are the guide's several commit
-# alternatives. The guide's when-to-commit text is the enabler; the common
-# enabler line is used only when it adds something the commit text does not
-# say (noted per comp).
+# with several names is an either/or. `copies = N` (default 1) asks for N
+# distinct cards of every group; Mechs - Divine Shield uses `copies = 2` for
+# "2x Charging Czarina". One entry has to be complete for the comp to be
+# ACTIVE. Several entries are the guide's commit and common-enabler
+# alternatives; a Discover pick is forced only when it completes one of them.
 #
 # payoff, filler: the overlay's cards. A payoff is worth a purchase/play bonus
 # B, a filler B/2. The overlay masks selling an enabler or a payoff.
@@ -51,8 +54,9 @@
 # abort: the comp's enabler no longer activates it once the threshold turn has
 # passed (`after_turn`, checked as turn > after_turn) or the player has reached
 # `min_tier`, with no enabler held. Both are one-way. Only where the guide
-# says a latest turn (Demons - Deathrattle/Shop Buff, turn 6) and Era's Self
-# Damage rule (Tier 3 without an enabler).
+# says a latest turn (Demons - Deathrattle/Shop Buff turn 6, Dragons -
+# Copebringer turn 8, Undead - Eternal Knight turn 4) and Era's Self Damage
+# rule (Tier 3 without an enabler).
 #
 # [comp.give_up] after_turn, progress_below, to: the comp is dropped after
 # that turn when its progress is below that number.
@@ -73,182 +77,6 @@ dying_health = 10
 # Health on the player's own turn while no Soul Rewinder or Ashen Corruptor
 # is on the board. Applies to every comp and card.
 health_loss_penalty = -10.0
-
-[[comp]]
-name = "Beasts - Tasty Lobstah"
-tribes = ["beast"]
-lobby = ["beast"]
-draft = true
-fallback = false
-commit_turn = [4, 12]
-scales = "none"
-enabler = [
-  { all = [["Headhunter Gryphon"], ["Deathstrider"]] },
-]
-payoff = ["Titus Rivendare", "Tasty Lobster", "Headhunter Gryphon", "Deathstrider"]
-filler = ["Sin'dorei Straight Shot", "Lurking Lionfish", "Hoarding Hyena"]
-core = [
-  { name = "Titus Rivendare", weight = 6.0, scale = false },
-  { name = "Tasty Lobster", weight = 10.0, scale = true },
-  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
-  { name = "Deathstrider", weight = 8.0, scale = false },
-]
-early = { cards = ["Lurking Lionfish", "Hoarding Hyena"], strong_stats = true }
-signals = [
-  { cards = ["Tasty Lobster"], weight = 6.0 },
-  { cards = ["Headhunter Gryphon", "Deathstrider"], weight = 4.0 },
-  { cards = ["Titus Rivendare"], weight = 3.0 },
-]
-not_in_comp = []
-
-[[comp]]
-name = "Beasts - Leviathan"
-tribes = ["beast"]
-lobby = ["beast"]
-draft = true
-fallback = false
-commit_turn = [4, 12]
-scales = "stats"
-enabler = [
-  { all = [["Lurking Leviathan"], ["Sewer Lord", "Hoarding Hyena", "Buzzing Vermin", "Forest Rover", "Turquoise Skitterer", "Ravaging Scorpid"]] },
-]
-payoff = ["Banana Slamma", "Lurking Leviathan", "Sewer Lord", "Headhunter Gryphon"]
-filler = ["Ravaging Scorpid"]
-core = [
-  { name = "Banana Slamma", weight = 8.0, scale = false },
-  { name = "Lurking Leviathan", weight = 10.0, scale = true },
-  { name = "Sewer Lord", weight = 6.0, scale = false },
-  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
-]
-early = { cards = ["Hoarding Hyena", "Buzzing Vermin", "Forest Rover", "Turquoise Skitterer", "Ravaging Scorpid"], strong_stats = true }
-signals = [
-  { cards = ["Lurking Leviathan"], weight = 8.0 },
-  { cards = ["Sewer Lord"], weight = 4.0 },
-  { cards = ["Banana Slamma"], weight = 4.0 },
-  { cards = ["Headhunter Gryphon"], weight = 2.0 },
-]
-not_in_comp = []
-
-[[comp]]
-name = "Beasts - Beetles"
-tribes = ["beast"]
-lobby = ["beast"]
-draft = true
-fallback = false
-commit_turn = [4, 12]
-scales = "beetles"
-enabler = [
-  { all = [["Ravaging Scorpid"]] },
-  { all = [["Turquoise Skitterer"]] },
-]
-payoff = ["Banana Slamma", "Turquoise Skitterer", "Headhunter Gryphon", "Ravaging Scorpid"]
-filler = ["Forest Rover", "Buzzing Vermin", "Lurking Leviathan", "Sewer Lord"]
-core = [
-  { name = "Banana Slamma", weight = 7.0, scale = false },
-  { name = "Turquoise Skitterer", weight = 6.0, scale = false },
-  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
-  { name = "Ravaging Scorpid", weight = 10.0, scale = true },
-]
-early = { cards = ["Buzzing Vermin", "Forest Rover"], strong_stats = true }
-signals = [
-  { cards = ["Ravaging Scorpid"], weight = 6.0 },
-  { cards = ["Turquoise Skitterer"], weight = 4.0 },
-  { cards = ["Banana Slamma"], weight = 3.0 },
-  { cards = ["Headhunter Gryphon"], weight = 2.0 },
-]
-not_in_comp = []
-
-[[comp]]
-name = "Demons - Deathrattle/Shop Buff"
-tribes = ["demon"]
-lobby = ["demon"]
-draft = true
-fallback = false
-# The guide: "early Sacrificial Wrathguard (turn 6 latest)".
-commit_turn = [2, 6]
-abort = { after_turn = 6 }
-scales = "stats"
-enabler = [
-  { all = [["Sacrificial Wrathguard"]] },
-]
-payoff = ["Titus Rivendare", "Sacrificial Wrathguard", "Imp-lusionist"]
-filler = ["Twisted Wrathguard", "Balinda Stonehearth", "Soulkeeping Jailer"]
-core = [
-  { name = "Titus Rivendare", weight = 8.0, scale = false },
-  { name = "Sacrificial Wrathguard", weight = 10.0, scale = true },
-  { name = "Imp-lusionist", weight = 6.0, scale = false },
-]
-early = { cards = ["Twisted Wrathguard", "Soulkeeping Jailer"], strong_stats = true }
-signals = [
-  { cards = ["Sacrificial Wrathguard"], weight = 8.0 },
-  { cards = ["Titus Rivendare"], weight = 4.0 },
-  { cards = ["Imp-lusionist"], weight = 3.0 },
-]
-not_in_comp = []
-
-[[comp]]
-name = "Mechs - Magnetics/Spells"
-tribes = ["mech"]
-# The guide cycles Fearless Foodie's Blood Gems to feed Glambot; Era's note
-# says Glambot Mechs needs Quilboar in the lobby for that reason.
-lobby = ["mech", "quilboar"]
-draft = true
-fallback = false
-commit_turn = [4, 12]
-scales = "stats"
-enabler = [
-  { all = [["Glambot"], ["Balinda Stonehearth"]] },
-]
-payoff = ["Utility Drone", "Hot-Air Surveyor", "Balinda Stonehearth", "Glambot"]
-filler = ["Drakkari Enchanter", "Victorious Geomant", "Rescue Bot"]
-core = [
-  { name = "Utility Drone", weight = 8.0, scale = false },
-  { name = "Hot-Air Surveyor", weight = 6.0, scale = false },
-  { name = "Balinda Stonehearth", weight = 7.0, scale = false },
-  { name = "Glambot", weight = 10.0, scale = false },
-]
-early = { cards = ["Victorious Geomant", "Rescue Bot"], strong_stats = true }
-signals = [
-  { cards = ["Glambot"], weight = 8.0 },
-  { cards = ["Balinda Stonehearth"], weight = 5.0 },
-  { cards = ["Utility Drone"], weight = 3.0 },
-  { cards = ["Hot-Air Surveyor"], weight = 2.0 },
-]
-not_in_comp = []
-
-[[comp]]
-name = "Quilboar - Choose One"
-tribes = ["quilboar"]
-lobby = ["quilboar"]
-draft = true
-fallback = false
-commit_turn = [4, 12]
-scales = "none"
-# Gem Rat or Bramble Tunneler with Turbo Hogrider (the guide's commit), plus
-# Sanguine Refiner, which the how-to-play says "could be" the gem scaling.
-enabler = [
-  { all = [["Gem Rat"], ["Turbo Hogrider"]] },
-  { all = [["Bramble Tunneler"], ["Turbo Hogrider"]] },
-  { all = [["Sanguine Refiner"], ["Turbo Hogrider"]] },
-]
-payoff = ["Turbo Hogrider", "Gem Rat", "Sanguine Refiner", "Trench Fighter", "Bramble Tunneler"]
-filler = ["Sanguine Champion", "Thorned Trailblazer", "Sky-hatch Runaway"]
-core = [
-  { name = "Turbo Hogrider", weight = 10.0, scale = false },
-  { name = "Gem Rat", weight = 7.0, scale = false },
-  { name = "Sanguine Refiner", weight = 5.0, scale = false },
-  { name = "Trench Fighter", weight = 3.0, scale = false },
-  { name = "Bramble Tunneler", weight = 6.0, scale = false },
-]
-early = { cards = ["Trench Fighter", "Thorned Trailblazer"], strong_stats = true }
-signals = [
-  { cards = ["Turbo Hogrider"], weight = 8.0 },
-  { cards = ["Gem Rat"], weight = 5.0 },
-  { cards = ["Bramble Tunneler"], weight = 4.0 },
-  { cards = ["Sanguine Refiner"], weight = 3.0 },
-  { cards = ["Trench Fighter"], weight = 2.0 },
-]
-not_in_comp = []
 
 [[comp]]
 name = "Murlocs - Keyword"
@@ -278,6 +106,132 @@ signals = [
   { cards = ["Kelp Keeper"], weight = 2.0 },
 ]
 not_in_comp = []
+
+
+[[comp]]
+name = "Beasts - Tasty Lobstah"
+tribes = ["beast"]
+lobby = ["beast"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "none"
+enabler = [
+  { all = [["Headhunter Gryphon"], ["Deathstrider"]] },
+]
+payoff = ["Titus Rivendare", "Tasty Lobster", "Headhunter Gryphon", "Deathstrider"]
+filler = ["Sin'dorei Straight Shot", "Lurking Lionfish", "Hoarding Hyena"]
+core = [
+  { name = "Titus Rivendare", weight = 6.0, scale = false },
+  { name = "Tasty Lobster", weight = 10.0, scale = true },
+  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
+  { name = "Deathstrider", weight = 8.0, scale = false },
+]
+early = { cards = ["Lurking Lionfish", "Hoarding Hyena"], strong_stats = true }
+signals = [
+  { cards = ["Tasty Lobster"], weight = 6.0 },
+  { cards = ["Headhunter Gryphon", "Deathstrider"], weight = 4.0 },
+  { cards = ["Titus Rivendare"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Undead - Attack Scaling"
+tribes = ["undead"]
+lobby = ["undead"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "none"
+enabler = [
+  { all = [["Drustfallen Butcher"], ["Handless Forsaken"]] },
+  { all = [["Deathly Striker"]] },
+  { all = [["Plaguerunner"]] },
+]
+payoff = ["Handless Forsaken", "Mummifier", "Drustfallen Butcher", "Dead Bellringer", "Snazzy Phantom"]
+filler = ["Eternal Summoner", "Titus Rivendare", "Deathly Striker", "Friendly Geist", "Barrier Banshee"]
+core = [
+  { name = "Handless Forsaken", weight = 9.0, scale = false },
+  { name = "Mummifier", weight = 5.0, scale = false },
+  { name = "Drustfallen Butcher", weight = 10.0, scale = false },
+  { name = "Dead Bellringer", weight = 6.0, scale = false },
+  { name = "Snazzy Phantom", weight = 8.0, scale = false },
+]
+early = { cards = ["Handless Forsaken", "Mummifier", "Friendly Geist", "Plaguerunner"], strong_stats = true }
+signals = [
+  { cards = ["Drustfallen Butcher"], weight = 8.0 },
+  { cards = ["Handless Forsaken"], weight = 5.0 },
+  { cards = ["Snazzy Phantom"], weight = 4.0 },
+  { cards = ["Mummifier"], weight = 3.0 },
+  { cards = ["Deathly Striker"], weight = 3.0 },
+  { cards = ["Plaguerunner"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Beasts - Leviathan"
+tribes = ["beast"]
+lobby = ["beast"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "stats"
+enabler = [
+  { all = [["Lurking Leviathan"], ["Sewer Lord", "Hoarding Hyena", "Buzzing Vermin", "Forest Rover", "Turquoise Skitterer", "Ravaging Scorpid"]] },
+]
+payoff = ["Banana Slamma", "Lurking Leviathan", "Sewer Lord", "Headhunter Gryphon"]
+filler = ["Ravaging Scorpid"]
+core = [
+  { name = "Banana Slamma", weight = 8.0, scale = false },
+  { name = "Lurking Leviathan", weight = 10.0, scale = true },
+  { name = "Sewer Lord", weight = 6.0, scale = false },
+  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
+]
+early = { cards = ["Hoarding Hyena", "Buzzing Vermin", "Forest Rover", "Turquoise Skitterer", "Ravaging Scorpid"], strong_stats = true }
+signals = [
+  { cards = ["Lurking Leviathan"], weight = 8.0 },
+  { cards = ["Sewer Lord"], weight = 4.0 },
+  { cards = ["Banana Slamma"], weight = 4.0 },
+  { cards = ["Headhunter Gryphon"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Menagerie"
+tribes = []
+# Menagerie works in every lobby.
+lobby = []
+draft = true
+fallback = false
+commit_turn = [5, 14]
+scales = "none"
+# Gatekeeper Amalgam + Balinda, or spell power (the guide's named Dark
+# Puppeteer).
+enabler = [
+  { all = [["Gatekeeper Amalgam"], ["Balinda Stonehearth"]] },
+  { all = [["Dark Puppeteer"]] },
+]
+payoff = ["Hot-Air Surveyor", "Balinda Stonehearth", "Gatekeeper Amalgam", "Brann Bronzebeard"]
+filler = ["Felboar", "Felfire Conjurer", "Magicfin Mycologist", "Dark Puppeteer", "Victorious Geomant", "Enterprising Escapee"]
+core = [
+  { name = "Hot-Air Surveyor", weight = 7.0, scale = false },
+  { name = "Balinda Stonehearth", weight = 8.0, scale = false },
+  { name = "Gatekeeper Amalgam", weight = 10.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 6.0, scale = false },
+]
+early = { cards = ["Felfire Conjurer", "Magicfin Mycologist", "Enterprising Escapee"], strong_stats = true }
+signals = [
+  { cards = ["Gatekeeper Amalgam"], weight = 8.0 },
+  { cards = ["Balinda Stonehearth"], weight = 5.0 },
+  { cards = ["Dark Puppeteer"], weight = 4.0 },
+  { cards = ["Brann Bronzebeard"], weight = 4.0 },
+  { cards = ["Hot-Air Surveyor"], weight = 3.0 },
+]
+not_in_comp = []
+
 
 [[comp]]
 name = "Demons - Self Damage"
@@ -315,38 +269,603 @@ signals = [
 ]
 not_in_comp = []
 
+
 [[comp]]
-name = "Menagerie"
-tribes = []
-# Menagerie works in every lobby.
-lobby = []
+name = "Demons - Shop Buff"
+tribes = ["demon"]
+lobby = ["demon"]
 draft = true
 fallback = false
-commit_turn = [5, 14]
+commit_turn = [4, 12]
 scales = "none"
-# Gatekeeper Amalgam + Balinda, or spell power (the guide's named Dark
-# Puppeteer).
 enabler = [
-  { all = [["Gatekeeper Amalgam"], ["Balinda Stonehearth"]] },
-  { all = [["Dark Puppeteer"]] },
+  { all = [["Devilish Distractor"], ["Twisted Wrathguard"]] },
+  { all = [["Brann Bronzebeard"]] },
 ]
-payoff = ["Hot-Air Surveyor", "Balinda Stonehearth", "Gatekeeper Amalgam", "Brann Bronzebeard"]
-filler = ["Felboar", "Felfire Conjurer", "Magicfin Mycologist", "Dark Puppeteer", "Victorious Geomant", "Enterprising Escapee"]
+payoff = ["Felboar", "Balinda Stonehearth", "Imp-lusionist", "Devilish Distractor"]
+filler = ["Insatiable Ur'zul", "Soul Rewinder", "Hot-Air Surveyor", "Ashen Corruptor", "Twisted Wrathguard", "Brann Bronzebeard"]
 core = [
-  { name = "Hot-Air Surveyor", weight = 7.0, scale = false },
+  { name = "Felboar", weight = 10.0, scale = false },
   { name = "Balinda Stonehearth", weight = 8.0, scale = false },
-  { name = "Gatekeeper Amalgam", weight = 10.0, scale = false },
-  { name = "Brann Bronzebeard", weight = 6.0, scale = false },
+  { name = "Imp-lusionist", weight = 7.0, scale = false },
+  { name = "Devilish Distractor", weight = 9.0, scale = false },
 ]
-early = { cards = ["Felfire Conjurer", "Magicfin Mycologist", "Enterprising Escapee"], strong_stats = true }
+early = { cards = ["Twisted Wrathguard", "Soul Rewinder", "Imp-lusionist"], strong_stats = true }
 signals = [
-  { cards = ["Gatekeeper Amalgam"], weight = 8.0 },
-  { cards = ["Balinda Stonehearth"], weight = 5.0 },
-  { cards = ["Dark Puppeteer"], weight = 4.0 },
-  { cards = ["Brann Bronzebeard"], weight = 4.0 },
-  { cards = ["Hot-Air Surveyor"], weight = 3.0 },
+  { cards = ["Devilish Distractor"], weight = 7.0 },
+  { cards = ["Twisted Wrathguard"], weight = 5.0 },
+  { cards = ["Felboar"], weight = 4.0 },
+  { cards = ["Balinda Stonehearth"], weight = 3.0 },
+  { cards = ["Brann Bronzebeard"], weight = 2.0 },
 ]
 not_in_comp = []
+
+
+[[comp]]
+name = "Elementals - Unbound Tempest"
+tribes = ["elemental"]
+lobby = ["elemental"]
+draft = true
+fallback = false
+commit_turn = [5, 13]
+scales = "none"
+enabler = [
+  { all = [["Brann Bronzebeard"], ["Air Revenant"], ["Unbound Tempest"]] },
+  { all = [["Brann Bronzebeard"]] },
+  { all = [["Tavern Tempest"], ["Kelp Keeper"]] },
+]
+payoff = ["Air Revenant", "Unbound Tempest", "Kelp Keeper", "Brann Bronzebeard", "Tavern Tempest"]
+filler = ["Living Azerite", "Flaming Enforcer"]
+core = [
+  { name = "Air Revenant", weight = 8.0, scale = false },
+  { name = "Unbound Tempest", weight = 10.0, scale = false },
+  { name = "Kelp Keeper", weight = 7.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 8.0, scale = false },
+  { name = "Tavern Tempest", weight = 6.0, scale = false },
+]
+early = { cards = ["Flaming Enforcer", "Living Azerite", "Air Revenant"], strong_stats = true }
+signals = [
+  { cards = ["Brann Bronzebeard"], weight = 6.0 },
+  { cards = ["Air Revenant"], weight = 5.0 },
+  { cards = ["Unbound Tempest"], weight = 5.0 },
+  { cards = ["Tavern Tempest"], weight = 3.0 },
+  { cards = ["Kelp Keeper"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Beasts - Beetles"
+tribes = ["beast"]
+lobby = ["beast"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "beetles"
+enabler = [
+  { all = [["Ravaging Scorpid"]] },
+  { all = [["Turquoise Skitterer"]] },
+]
+payoff = ["Banana Slamma", "Turquoise Skitterer", "Headhunter Gryphon", "Ravaging Scorpid"]
+filler = ["Forest Rover", "Buzzing Vermin", "Lurking Leviathan", "Sewer Lord"]
+core = [
+  { name = "Banana Slamma", weight = 7.0, scale = false },
+  { name = "Turquoise Skitterer", weight = 6.0, scale = false },
+  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
+  { name = "Ravaging Scorpid", weight = 10.0, scale = true },
+]
+early = { cards = ["Buzzing Vermin", "Forest Rover"], strong_stats = true }
+signals = [
+  { cards = ["Ravaging Scorpid"], weight = 6.0 },
+  { cards = ["Turquoise Skitterer"], weight = 4.0 },
+  { cards = ["Banana Slamma"], weight = 3.0 },
+  { cards = ["Headhunter Gryphon"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Demons - Deathrattle/Shop Buff"
+tribes = ["demon"]
+lobby = ["demon"]
+draft = true
+fallback = false
+# The guide: "early Sacrificial Wrathguard (turn 6 latest)".
+commit_turn = [2, 6]
+abort = { after_turn = 6 }
+scales = "stats"
+enabler = [
+  { all = [["Sacrificial Wrathguard"]] },
+]
+payoff = ["Titus Rivendare", "Sacrificial Wrathguard", "Imp-lusionist"]
+filler = ["Twisted Wrathguard", "Balinda Stonehearth", "Soulkeeping Jailer"]
+core = [
+  { name = "Titus Rivendare", weight = 8.0, scale = false },
+  { name = "Sacrificial Wrathguard", weight = 10.0, scale = true },
+  { name = "Imp-lusionist", weight = 6.0, scale = false },
+]
+early = { cards = ["Twisted Wrathguard", "Soulkeeping Jailer"], strong_stats = true }
+signals = [
+  { cards = ["Sacrificial Wrathguard"], weight = 8.0 },
+  { cards = ["Titus Rivendare"], weight = 4.0 },
+  { cards = ["Imp-lusionist"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Aberrations - Deathrattle/Spells"
+tribes = ["aberration", "beast"]
+lobby = ["aberration", "beast"]
+draft = true
+fallback = false
+commit_turn = [4, 13]
+scales = "none"
+enabler = [
+  { all = [["Faceless Converter"], ["Titus Rivendare"]] },
+  { all = [["Sky Admiral Rogers"], ["Proud Privateer"]] },
+  { all = [["Unwilling Slacker"]] },
+]
+payoff = ["Titus Rivendare", "Headhunter Gryphon", "Deathstrider", "Faceless Converter"]
+filler = ["Sin'dorei Straight Shot", "Sky Admiral Rogers", "Proud Privateer", "Unwilling Slacker", "N'raqi Sapper", "The Shadow of Doubt", "Nightmare Corroder"]
+core = [
+  { name = "Titus Rivendare", weight = 8.0, scale = false },
+  { name = "Headhunter Gryphon", weight = 6.0, scale = false },
+  { name = "Deathstrider", weight = 9.0, scale = false },
+  { name = "Faceless Converter", weight = 10.0, scale = false },
+]
+early = { cards = ["Unwilling Slacker", "N'raqi Sapper", "Nightmare Corroder"], strong_stats = true }
+signals = [
+  { cards = ["Faceless Converter"], weight = 7.0 },
+  { cards = ["Titus Rivendare"], weight = 5.0 },
+  { cards = ["Deathstrider"], weight = 4.0 },
+  { cards = ["Headhunter Gryphon"], weight = 4.0 },
+  { cards = ["Unwilling Slacker"], weight = 3.0 },
+  { cards = ["Sky Admiral Rogers"], weight = 3.0 },
+  { cards = ["Proud Privateer"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Murlocs - Magicfin"
+tribes = ["murloc"]
+lobby = ["murloc"]
+draft = true
+fallback = false
+commit_turn = [6, 14]
+scales = "none"
+enabler = [
+  { all = [["Brann Bronzebeard"], ["Magicfin Mycologist"], ["Young Murk-Eye"]] },
+  { all = [["Magicfin Mycologist"]] },
+  { all = [["Brann Bronzebeard"]] },
+]
+payoff = ["Young Murk-Eye", "Drakkari Enchanter", "Felfire Conjurer", "Magicfin Apprentice", "Magicfin Mycologist", "Brann Bronzebeard"]
+filler = ["Azsharan Cutlassier", "Draconic Warden"]
+core = [
+  { name = "Young Murk-Eye", weight = 10.0, scale = false },
+  { name = "Drakkari Enchanter", weight = 8.0, scale = false },
+  { name = "Felfire Conjurer", weight = 6.0, scale = false },
+  { name = "Magicfin Apprentice", weight = 9.0, scale = false },
+  { name = "Magicfin Mycologist", weight = 9.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 7.0, scale = false },
+]
+early = { cards = ["Magicfin Mycologist", "Felfire Conjurer", "Draconic Warden"], strong_stats = true }
+signals = [
+  { cards = ["Magicfin Mycologist"], weight = 7.0 },
+  { cards = ["Young Murk-Eye"], weight = 6.0 },
+  { cards = ["Brann Bronzebeard"], weight = 5.0 },
+  { cards = ["Felfire Conjurer"], weight = 3.0 },
+  { cards = ["Drakkari Enchanter"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Mechs - Magnetics/Spells"
+tribes = ["mech"]
+# The guide cycles Fearless Foodie's Blood Gems to feed Glambot; Era's note
+# says Glambot Mechs needs Quilboar in the lobby for that reason.
+lobby = ["mech", "quilboar"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "stats"
+enabler = [
+  { all = [["Glambot"], ["Balinda Stonehearth"]] },
+]
+payoff = ["Utility Drone", "Hot-Air Surveyor", "Balinda Stonehearth", "Glambot"]
+filler = ["Drakkari Enchanter", "Victorious Geomant", "Rescue Bot"]
+core = [
+  { name = "Utility Drone", weight = 8.0, scale = false },
+  { name = "Hot-Air Surveyor", weight = 6.0, scale = false },
+  { name = "Balinda Stonehearth", weight = 7.0, scale = false },
+  { name = "Glambot", weight = 10.0, scale = false },
+]
+early = { cards = ["Victorious Geomant", "Rescue Bot"], strong_stats = true }
+signals = [
+  { cards = ["Glambot"], weight = 8.0 },
+  { cards = ["Balinda Stonehearth"], weight = 5.0 },
+  { cards = ["Utility Drone"], weight = 3.0 },
+  { cards = ["Hot-Air Surveyor"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Elementals - Ultraviolet"
+tribes = ["elemental"]
+lobby = ["elemental"]
+draft = true
+fallback = false
+commit_turn = [5, 13]
+scales = "stats"
+enabler = [
+  { all = [["Brann Bronzebeard"], ["Ultraviolet Ascendant"]] },
+  { all = [["Brann Bronzebeard"]] },
+]
+payoff = ["Ultraviolet Ascendant", "Kelp Keeper", "Brann Bronzebeard", "Tavern Tempest"]
+filler = ["Air Revenant", "Unbound Tempest", "Wildfire Elemental"]
+core = [
+  { name = "Ultraviolet Ascendant", weight = 10.0, scale = true },
+  { name = "Kelp Keeper", weight = 7.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 8.0, scale = false },
+  { name = "Tavern Tempest", weight = 6.0, scale = false },
+]
+early = { cards = ["Tavern Tempest", "Kelp Keeper", "Wildfire Elemental"], strong_stats = true }
+signals = [
+  { cards = ["Brann Bronzebeard"], weight = 6.0 },
+  { cards = ["Ultraviolet Ascendant"], weight = 6.0 },
+  { cards = ["Kelp Keeper"], weight = 3.0 },
+  { cards = ["Tavern Tempest"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Quilboar - Choose One"
+tribes = ["quilboar"]
+lobby = ["quilboar"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "none"
+# Gem Rat or Bramble Tunneler with Turbo Hogrider (the guide's commit), plus
+# Sanguine Refiner, which the how-to-play says "could be" the gem scaling.
+enabler = [
+  { all = [["Gem Rat"], ["Turbo Hogrider"]] },
+  { all = [["Bramble Tunneler"], ["Turbo Hogrider"]] },
+  { all = [["Sanguine Refiner"], ["Turbo Hogrider"]] },
+]
+payoff = ["Turbo Hogrider", "Gem Rat", "Sanguine Refiner", "Trench Fighter", "Bramble Tunneler"]
+filler = ["Sanguine Champion", "Thorned Trailblazer", "Sky-hatch Runaway"]
+core = [
+  { name = "Turbo Hogrider", weight = 10.0, scale = false },
+  { name = "Gem Rat", weight = 7.0, scale = false },
+  { name = "Sanguine Refiner", weight = 5.0, scale = false },
+  { name = "Trench Fighter", weight = 3.0, scale = false },
+  { name = "Bramble Tunneler", weight = 6.0, scale = false },
+]
+early = { cards = ["Trench Fighter", "Thorned Trailblazer"], strong_stats = true }
+signals = [
+  { cards = ["Turbo Hogrider"], weight = 8.0 },
+  { cards = ["Gem Rat"], weight = 5.0 },
+  { cards = ["Bramble Tunneler"], weight = 4.0 },
+  { cards = ["Sanguine Refiner"], weight = 3.0 },
+  { cards = ["Trench Fighter"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Quilboar - Gem Barrage"
+tribes = ["quilboar"]
+lobby = ["quilboar"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "none"
+enabler = [
+  { all = [["Razorfen Flapper"], ["Trench Fighter", "Felboar"]] },
+  { all = [["Razorfen Flapper"]] },
+]
+payoff = ["Razorfen Flapper", "Trench Fighter"]
+filler = ["Titus Rivendare", "Drakkari Enchanter", "Felboar"]
+core = [
+  { name = "Razorfen Flapper", weight = 10.0, scale = false },
+  { name = "Trench Fighter", weight = 9.0, scale = false },
+]
+early = { cards = ["Trench Fighter", "Razorfen Flapper", "Felboar"], strong_stats = true }
+signals = [
+  { cards = ["Razorfen Flapper"], weight = 7.0 },
+  { cards = ["Trench Fighter"], weight = 5.0 },
+  { cards = ["Felboar"], weight = 4.0 },
+  { cards = ["Drakkari Enchanter"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Dragons - Copebringer"
+tribes = ["dragon"]
+lobby = ["dragon"]
+draft = true
+fallback = false
+commit_turn = [3, 8]
+abort = { after_turn = 8 }
+scales = "none"
+enabler = [
+  { all = [["Hopebringer"], ["Bronze Warden"]] },
+]
+payoff = ["Persistent Poet", "Hopebringer", "Heroic Broodmother", "Nadina the Red"]
+filler = ["Crimson Vindicator", "Bronze Warden"]
+core = [
+  { name = "Persistent Poet", weight = 8.0, scale = false },
+  { name = "Hopebringer", weight = 10.0, scale = false },
+  { name = "Heroic Broodmother", weight = 9.0, scale = false },
+  { name = "Nadina the Red", weight = 7.0, scale = false },
+]
+early = { cards = ["Bronze Warden", "Crimson Vindicator", "Persistent Poet"], strong_stats = true }
+signals = [
+  { cards = ["Hopebringer"], weight = 8.0 },
+  { cards = ["Heroic Broodmother"], weight = 5.0 },
+  { cards = ["Persistent Poet"], weight = 4.0 },
+  { cards = ["Nadina the Red"], weight = 3.0 },
+  { cards = ["Bronze Warden"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Undead - Eternal Knight"
+tribes = ["undead"]
+lobby = ["undead"]
+draft = true
+fallback = false
+commit_turn = [2, 4]
+abort = { after_turn = 4 }
+scales = "none"
+enabler = [
+  { all = [["Eternal Knight"], ["Eternal Summoner"]] },
+  { all = [["Eternal Knight"]] },
+]
+payoff = ["Eternal Knight", "Eternal Summoner", "Eternal Tycoon"]
+filler = ["Mummifier", "Dead Bellringer", "Snazzy Phantom"]
+core = [
+  { name = "Eternal Knight", weight = 10.0, scale = false },
+  { name = "Eternal Summoner", weight = 8.0, scale = false },
+  { name = "Eternal Tycoon", weight = 7.0, scale = false },
+]
+early = { cards = ["Eternal Knight", "Mummifier", "Dead Bellringer"], strong_stats = true }
+signals = [
+  { cards = ["Eternal Knight"], weight = 8.0 },
+  { cards = ["Eternal Summoner"], weight = 5.0 },
+  { cards = ["Eternal Tycoon"], weight = 4.0 },
+  { cards = ["Snazzy Phantom"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Quilboar - Gems from Hand"
+tribes = ["quilboar"]
+lobby = ["quilboar"]
+draft = true
+fallback = false
+commit_turn = [4, 13]
+scales = "none"
+enabler = [
+  { all = [["Sanguine Refiner"], ["Hot-Air Surveyor"]] },
+  { all = [["Sanguine Refiner"]] },
+]
+payoff = ["Geomagus Roogug", "Hot-Air Surveyor", "Sanguine Refiner", "Victorious Geomant"]
+filler = ["Sanguine Champion", "Blade Collector", "Mangled Bandit", "Balinda Stonehearth"]
+core = [
+  { name = "Geomagus Roogug", weight = 7.0, scale = false },
+  { name = "Hot-Air Surveyor", weight = 9.0, scale = false },
+  { name = "Sanguine Refiner", weight = 8.0, scale = false },
+  { name = "Victorious Geomant", weight = 8.0, scale = false },
+]
+early = { cards = ["Sanguine Refiner", "Mangled Bandit", "Blade Collector"], strong_stats = true }
+signals = [
+  { cards = ["Sanguine Refiner"], weight = 6.0 },
+  { cards = ["Hot-Air Surveyor"], weight = 6.0 },
+  { cards = ["Victorious Geomant"], weight = 4.0 },
+  { cards = ["Geomagus Roogug"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Aberrations - Sludge"
+tribes = ["aberration"]
+lobby = ["aberration"]
+draft = true
+fallback = false
+commit_turn = [4, 13]
+scales = "none"
+enabler = [
+  { all = [["Nightmare Corroder"], ["N'raqi Frostcaller"]] },
+  { all = [["Nightmare Corroder"], ["Mysterious K'Thir"]] },
+]
+payoff = ["Drakkari Enchanter", "Felfire Conjurer", "Dark Puppeteer", "Nightmare Corroder", "Mysterious K'Thir"]
+filler = ["N'raqi Sapper", "N'raqi Frostcaller", "Mindbending Recruiter"]
+core = [
+  { name = "Drakkari Enchanter", weight = 8.0, scale = false },
+  { name = "Felfire Conjurer", weight = 6.0, scale = false },
+  { name = "Dark Puppeteer", weight = 7.0, scale = false },
+  { name = "Nightmare Corroder", weight = 10.0, scale = false },
+  { name = "Mysterious K'Thir", weight = 7.0, scale = false },
+]
+early = { cards = ["Nightmare Corroder", "Mindbending Recruiter", "Felfire Conjurer"], strong_stats = true }
+signals = [
+  { cards = ["Nightmare Corroder"], weight = 7.0 },
+  { cards = ["N'raqi Frostcaller"], weight = 5.0 },
+  { cards = ["Dark Puppeteer"], weight = 4.0 },
+  { cards = ["Felfire Conjurer"], weight = 3.0 },
+  { cards = ["Mysterious K'Thir"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Dragons - Spell Power"
+tribes = ["dragon"]
+lobby = ["dragon"]
+draft = true
+fallback = false
+commit_turn = [4, 13]
+scales = "none"
+enabler = [
+  { all = [["Bronze Timewalker"], ["Crimson Vindicator"]] },
+  { all = [["Bronze Timewalker"]] },
+]
+payoff = ["Persistent Poet", "Crimson Vindicator", "Bronze Timewalker", "Sky-hatch Runaway", "Runic Arcanist", "Brann Bronzebeard"]
+filler = ["Felfire Conjurer", "Hired Mount", "Heroic Broodmother"]
+core = [
+  { name = "Persistent Poet", weight = 8.0, scale = false },
+  { name = "Crimson Vindicator", weight = 10.0, scale = false },
+  { name = "Bronze Timewalker", weight = 8.0, scale = false },
+  { name = "Sky-hatch Runaway", weight = 6.0, scale = false },
+  { name = "Runic Arcanist", weight = 6.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 7.0, scale = false },
+]
+early = { cards = ["Bronze Timewalker", "Runic Arcanist", "Crimson Vindicator"], strong_stats = true }
+signals = [
+  { cards = ["Bronze Timewalker"], weight = 7.0 },
+  { cards = ["Crimson Vindicator"], weight = 6.0 },
+  { cards = ["Sky-hatch Runaway"], weight = 3.0 },
+  { cards = ["Runic Arcanist"], weight = 3.0 },
+  { cards = ["Brann Bronzebeard"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Mechs - Volumizer"
+tribes = ["mech"]
+lobby = ["mech"]
+draft = true
+fallback = false
+commit_turn = [4, 13]
+scales = "stats"
+enabler = [
+  { all = [["Conveyor Construct"], ["Utility Drone"]] },
+  { all = [["Conveyor Construct"]] },
+]
+payoff = ["Utility Drone", "Drakkari Enchanter", "Conveyor Construct", "Resourceful Robot"]
+filler = ["Auto Accelerator", "Auto Reveille", "Kelp Keeper", "Spark Snapper", "Brann Bronzebeard"]
+core = [
+  { name = "Utility Drone", weight = 10.0, scale = false },
+  { name = "Drakkari Enchanter", weight = 8.0, scale = false },
+  { name = "Conveyor Construct", weight = 8.0, scale = false },
+  { name = "Resourceful Robot", weight = 7.0, scale = false },
+]
+early = { cards = ["Conveyor Construct", "Resourceful Robot", "Spark Snapper"], strong_stats = true }
+signals = [
+  { cards = ["Conveyor Construct"], weight = 7.0 },
+  { cards = ["Utility Drone"], weight = 6.0 },
+  { cards = ["Resourceful Robot"], weight = 4.0 },
+  { cards = ["Drakkari Enchanter"], weight = 3.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Dragons - Battlecries"
+tribes = ["dragon"]
+lobby = ["dragon"]
+draft = true
+fallback = false
+commit_turn = [4, 13]
+scales = "none"
+enabler = [
+  { all = [["Kalecgos, Arcane Aspect"], ["Brann Bronzebeard"]] },
+  { all = [["Brann Bronzebeard"]] },
+  { all = [["Bronze Timewalker"]] },
+]
+payoff = ["Persistent Poet", "Draconic Warden", "Kelp Keeper", "Heroic Broodmother", "Brann Bronzebeard", "Kalecgos, Arcane Aspect"]
+filler = ["Bronze Timewalker", "Nadina the Red"]
+core = [
+  { name = "Persistent Poet", weight = 7.0, scale = false },
+  { name = "Draconic Warden", weight = 9.0, scale = false },
+  { name = "Kelp Keeper", weight = 8.0, scale = false },
+  { name = "Heroic Broodmother", weight = 9.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 8.0, scale = false },
+  { name = "Kalecgos, Arcane Aspect", weight = 10.0, scale = false },
+]
+early = { cards = ["Draconic Warden", "Bronze Timewalker", "Kelp Keeper"], strong_stats = true }
+signals = [
+  { cards = ["Kalecgos, Arcane Aspect"], weight = 7.0 },
+  { cards = ["Brann Bronzebeard"], weight = 5.0 },
+  { cards = ["Draconic Warden"], weight = 4.0 },
+  { cards = ["Kelp Keeper"], weight = 3.0 },
+  { cards = ["Heroic Broodmother"], weight = 3.0 },
+  { cards = ["Bronze Timewalker"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Beasts - Summons"
+tribes = ["beast"]
+lobby = ["beast"]
+draft = true
+fallback = false
+commit_turn = [4, 13]
+scales = "none"
+enabler = [
+  { all = [["Headhunter Gryphon"], ["Deathstrider"], ["Goldrinn, the Great Wolf"]] },
+  { all = [["Headhunter Gryphon"]] },
+]
+payoff = ["Titus Rivendare", "Banana Slamma", "Sewer Lord", "Headhunter Gryphon", "Deathstrider", "Goldrinn, the Great Wolf"]
+filler = ["Lurking Lionfish"]
+core = [
+  { name = "Titus Rivendare", weight = 8.0, scale = false },
+  { name = "Banana Slamma", weight = 9.0, scale = false },
+  { name = "Sewer Lord", weight = 8.0, scale = false },
+  { name = "Headhunter Gryphon", weight = 7.0, scale = false },
+  { name = "Deathstrider", weight = 9.0, scale = false },
+  { name = "Goldrinn, the Great Wolf", weight = 10.0, scale = false },
+]
+early = { cards = ["Headhunter Gryphon", "Lurking Lionfish", "Sewer Lord"], strong_stats = true }
+signals = [
+  { cards = ["Headhunter Gryphon"], weight = 7.0 },
+  { cards = ["Deathstrider"], weight = 5.0 },
+  { cards = ["Goldrinn, the Great Wolf"], weight = 5.0 },
+  { cards = ["Banana Slamma"], weight = 3.0 },
+  { cards = ["Titus Rivendare"], weight = 3.0 },
+  { cards = ["Sewer Lord"], weight = 2.0 },
+]
+not_in_comp = []
+
+
+[[comp]]
+name = "Mechs - Divine Shield"
+tribes = ["mech"]
+lobby = ["mech"]
+draft = true
+fallback = false
+commit_turn = [4, 13]
+scales = "none"
+enabler = [
+  { all = [["Charging Czarina"]], copies = 2 },
+]
+payoff = ["Charging Czarina"]
+filler = ["Falling Sky Golem", "Hopebringer", "Gearfin"]
+core = [
+  { name = "Charging Czarina", weight = 10.0, scale = false },
+]
+early = { cards = ["Charging Czarina", "Falling Sky Golem", "Gearfin"], strong_stats = true }
+signals = [
+  { cards = ["Charging Czarina"], weight = 8.0 },
+  { cards = ["Falling Sky Golem"], weight = 3.0 },
+  { cards = ["Hopebringer"], weight = 2.0 },
+  { cards = ["Gearfin"], weight = 2.0 },
+  { keyword = "divine_shield", weight = 1.0 },
+]
+not_in_comp = []
+
 
 [[comp]]
 name = "Murlocs - Venom Scam"

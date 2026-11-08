@@ -87,21 +87,21 @@ fn the_beetle_comp_has_its_overlay_cards() {
 #[test]
 fn a_two_card_enabler_needs_both_cards() {
     let d = data();
-    let o = Overlay::new(comps(&d), 2.0, &d);
+    let lib = comps(&d);
+    let lobster = lib.comps.iter().find(|c| c.name == "Beasts - Tasty Lobstah").unwrap();
     let mut g = sandbox(43);
     ready(&mut g);
     place(&mut g, 0, 0, "Headhunter Gryphon", false);
-    mine(&mut g);
-    let mut line = OverlayState::default();
-    let mut bonus = [0.0f32; N_ACTIONS];
-    let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(f[F_ACTIVE], 0, "Gryphon without Deathstrider");
+    assert!(
+        !lobster.enabler_held(&g.players[0].board, &g.players[0].hand),
+        "Gryphon without Deathstrider"
+    );
 
     place(&mut g, 0, 1, "Deathstrider", false);
-    let mut f = flags();
-    let _ = o.decide(&g, 0, &mut line, &mut bonus, &mut f);
-    assert_eq!(f[F_ACTIVE], 1, "Gryphon + Deathstrider");
+    assert!(
+        lobster.enabler_held(&g.players[0].board, &g.players[0].hand),
+        "Gryphon + Deathstrider"
+    );
 }
 
 #[test]
@@ -456,4 +456,21 @@ fn only_a_card_that_completes_an_enabler_counts() {
     let beetles = lib.comps.iter().find(|c| c.name == "Beasts - Beetles").unwrap();
     let scorpid = d.cards.by_name("Ravaging Scorpid").unwrap();
     assert!(beetles.completes_enabler(scorpid, &[], &[]), "a one-card enabler always counts");
+}
+
+#[test]
+fn a_two_copy_enabler_needs_two_copies() {
+    let d = data();
+    let lib = comps(&d);
+    let czarina = lib.comps.iter().find(|c| c.name == "Mechs - Divine Shield").unwrap();
+    let id = d.cards.by_name("Charging Czarina").unwrap();
+    let mut g = sandbox(50);
+    ready(&mut g);
+    assert!(!czarina.enabler_held(&g.players[0].board, &g.players[0].hand));
+    assert!(!czarina.completes_enabler(id, &g.players[0].board, &g.players[0].hand));
+    place(&mut g, 0, 0, "Charging Czarina", false);
+    assert!(!czarina.enabler_held(&g.players[0].board, &g.players[0].hand), "one copy is half");
+    assert!(czarina.completes_enabler(id, &g.players[0].board, &g.players[0].hand));
+    place(&mut g, 0, 1, "Charging Czarina", false);
+    assert!(czarina.enabler_held(&g.players[0].board, &g.players[0].hand));
 }

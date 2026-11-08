@@ -48,11 +48,19 @@ pub struct Early {
 }
 
 /// One way to make a comp ACTIVE. Every group is needed (one card from each
-/// group); a group with several cards is an either/or. A comp with several
-/// `Enabler` entries needs any one of them.
-#[derive(Clone, Debug, Default)]
+/// group); a group with several cards is an either/or. `copies` is how many
+/// distinct cards of each group are needed (2 for "2x Charging Czarina"). A
+/// comp with several `Enabler` entries needs any one of them.
+#[derive(Clone, Debug)]
 pub struct Enabler {
     pub all: Vec<Vec<CardId>>,
+    pub copies: u8,
+}
+
+impl Default for Enabler {
+    fn default() -> Enabler {
+        Enabler { all: Vec::new(), copies: 1 }
+    }
 }
 
 /// When a comp's enabler no longer activates it. The thresholds are one-way:
@@ -154,24 +162,30 @@ impl Comp {
     }
 
     /// Whether any one of the comp's enabler entries is complete: every group
-    /// has one of its cards on the board or in the hand.
+    /// has enough of its cards (`copies`, default 1) on the board or in the
+    /// hand.
     pub fn enabler_held(&self, board: &[Minion], hand: &[Minion]) -> bool {
-        let held = |id: &CardId| {
-            board.iter().chain(hand).any(|m| m.card == *id)
+        let count = |group: &[CardId]| {
+            board.iter().chain(hand).filter(|m| group.contains(&m.card)).count()
         };
         self.enabler.iter().any(|e| {
-            !e.all.is_empty() && e.all.iter().all(|g| g.iter().any(held))
+            !e.all.is_empty()
+                && e.all.iter().all(|g| count(g) >= e.copies as usize)
         })
     }
 
     /// Whether taking `id` would complete one of the comp's enabler entries:
-    /// `id` fills a group and every other group already has a card held. A
-    /// single-card entry always counts; one half of a two-card entry doesn't.
+    /// `id` fills a group and every other group already has enough cards held.
+    /// A single-card entry always counts; one half of a two-card entry doesn't.
     pub fn completes_enabler(&self, id: CardId, board: &[Minion], hand: &[Minion]) -> bool {
-        let held = |c: &CardId| board.iter().chain(hand).any(|m| m.card == *c);
+        let count = |group: &[CardId]| {
+            board.iter().chain(hand).filter(|m| group.contains(&m.card)).count()
+        };
         self.enabler.iter().any(|e| {
             e.all.iter().any(|g| g.contains(&id))
-                && e.all.iter().all(|g| g.contains(&id) || g.iter().any(held))
+                && e.all.iter().all(|g| {
+                    count(g) + usize::from(g.contains(&id)) >= e.copies as usize
+                })
         })
     }
 
@@ -437,12 +451,17 @@ fn card_list(cards: &CardDb, names: &[String]) -> Result<Vec<CardId>, String> {
 }
 
 /// Resolve every enabler entry's groups. An entry with no group, or a group
-/// with no card, would be held by everyone, so both fail the load.
+/// with no card, would be held by everyone, so both fail the load; `copies`
+/// is 1 when the entry does not say.
 fn enabler_list(cards: &CardDb, raw: Vec<RawEnabler>) -> Result<Vec<Enabler>, String> {
     let mut out = Vec::with_capacity(raw.len());
     for e in raw {
         if e.all.is_empty() {
             return Err("an enabler entry needs at least one group".to_string());
+        }
+        let copies = e.copies.unwrap_or(1);
+        if copies == 0 {
+            return Err("an enabler entry needs copies >= 1".to_string());
         }
         let mut all = Vec::with_capacity(e.all.len());
         for group in e.all {
@@ -455,7 +474,7 @@ fn enabler_list(cards: &CardDb, raw: Vec<RawEnabler>) -> Result<Vec<Enabler>, St
             }
             all.push(ids);
         }
-        out.push(Enabler { all });
+        out.push(Enabler { all, copies });
     }
     Ok(out)
 }
@@ -564,6 +583,8 @@ struct RawComp {
 #[serde(deny_unknown_fields)]
 struct RawEnabler {
     all: Vec<Vec<String>>,
+    #[serde(default)]
+    copies: Option<u8>,
 }
 
 #[derive(Deserialize, Default)]

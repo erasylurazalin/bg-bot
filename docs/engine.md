@@ -1818,8 +1818,7 @@ minions in the hand.
   DIR [--real-seats N]` for fuzz and games, and the tests use the small
   fixture folder `crates/bgcore/tests/data/real-boards/`.
 - **In training:** the lineup grows a sixth number,
-  `learner,snapshot,standard,rush,random,real` (default `4,2,1,1,0,0`, so
-  old commands keep working); `bgpy.VecEnv(n, seed, lineup, real_boards=..)`
+  `learner,snapshot,standard,rush,random,real` (default `2,2,0,0,0,4`); `bgpy.VecEnv(n, seed, lineup, real_boards=..)`
   takes the loaded specs, and real seats are played in Rust like the bot
   seats. `ppo.py` adds a `vs7 real` eval (one learner against 7 real seats,
   `place_vs_real`) whenever real boards are loaded.
@@ -1921,16 +1920,22 @@ name.
   and a `scale` flag, `early` (cards and `strong_stats`), `signals` (cards, a
   tribe with a minimum count, a hero, a trinket, or a keyword, each with a
   weight), `enabler` (entries of `all` groups: every group needs one of its
-  cards held; a comp has any one entry), `abort` (`after_turn` or `min_tier`,
-  with no enabler held; one-way), `give_up` (`after_turn`,
-  `progress_below`, `to`) and `not_in_comp`. Every card, hero and trinket is
-  checked against the loaded data; an unknown name fails the load with the
-  comp and the name. `data/comps/comps.toml` holds ten `draft = true`
-  entries from JeefHS's current guides, chosen by Era on 2026-11-09: Beasts -
-  Tasty Lobstah, Beasts - Leviathan, Beasts - Beetles, Demons -
-  Deathrattle/Shop Buff, Mechs - Magnetics/Spells, Quilboar - Choose One,
-  Murlocs - Keyword, Demons - Self Damage, Menagerie and Murlocs - Venom Scam
-  (the fallback, `level = []`). The shipped default is the
+  cards held, and `copies = N` asks for N distinct cards of every group; a
+  comp has any one entry), `abort` (`after_turn` or `min_tier`, with no
+  enabler held; one-way), `give_up` (`after_turn`, `progress_below`, `to`)
+  and `not_in_comp`. Every card, hero and trinket is checked against the
+  loaded data; an unknown name fails the load with the comp and the name.
+  `data/comps/comps.toml` holds 26 `draft = true` entries from JeefHS's
+  current guides, chosen by Era on 2026-11-09: every comp with a card-based
+  commit except the seven APM or economy comps (Quilboar - APM Shop Buff,
+  Undead - APM Undead, Mechs - APM Magnetic, Aberrations - APM Deity,
+  Pirates - APM Golden, Elementals - Living Azerite, Murlocs - Tidecaller).
+  Murlocs - Venom Scam is the fallback, `level = []`, and is listed last.
+  File order is tier: the two S-tier comps first, then Tier 2 and Tier 3, so
+  the overlay's first-active tiebreak prefers the stronger comp. Abort is
+  used only where the guide gives a latest turn (Demons - Deathrattle/Shop
+  Buff turn 6, Dragons - Copebringer turn 8, Undead - Eternal Knight turn 4)
+  and for Era's Self Damage rule. The shipped default is the
   standard curve: Era's own timing (tier 4 on turn 6, tier 5 on turn 8) was
   measured at 7.27 against 7.02 for this one, so it is left in
   `docs/notes/mining/sure-plays.md` for a comp to override.
@@ -1995,7 +2000,7 @@ name.
 (`docs/briefs/comp-overlay-1.md`): a forced action or nothing, plus a logit
 bonus per action. It is not a bot. The network plays by default; a comp
 becomes ACTIVE when one of its enabler entries is complete (every group has
-one of its cards on the board or in the hand), all its `lobby` tribes are in
+its `copies` cards on the board or in the hand), all its `lobby` tribes are in
 the lobby, and its `abort` rule has not fired. Several active comps are
 resolved by file order: the first one wins. `OverlayState` keeps the Shell
 line and one abort bit per comp per seat and game, so an aborted comp is never
@@ -2019,9 +2024,10 @@ turned back on.
   seat records the turn and the board slot the line put it in, so a Shell
   that was already on the board is not sold. On a full board an active comp
   sells a card that is not in the comp first; with no active comp the sale is
-  skipped. A Discover or Choose One that offers an enabler takes it when the
-  comp's lobby tribes are all in the lobby; an active comp takes a payoff,
-  then a filler. The enabler/offered flags are in the overlay stats array.
+  skipped. A Discover or Choose One is forced only for a card that
+  `completes_enabler` a comp whose lobby tribes are all present; half of a
+  two-card entry is left to the network. An active comp takes a payoff, then
+  a filler. The enabler/offered flags are in the overlay stats array.
 - **Bonuses:** while a comp is active, buying or playing a payoff is worth
   `B`, a filler `B/2`, and a full board sells a non-comp card for `B` when a
   comp card waits in the hand or Tavern. Selling an enabler or a payoff is
