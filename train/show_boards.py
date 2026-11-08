@@ -1,7 +1,7 @@
 """Play test games with a checkpoint and show the boards the learner ends on.
 
     .venv/bin/python train/show_boards.py runs/r1102-deadline/best.pt
-    .venv/bin/python train/show_boards.py CKPT --vs std --games 64 --curve
+    .venv/bin/python train/show_boards.py CKPT --vs std --games 64
 
 One learner seat against 7 real boards (default) or 7 standard or rush bots.
 For each game it prints the learner's last board (taken after its last
@@ -47,7 +47,6 @@ def main():
     a.add_argument("ckpt")
     a.add_argument("--vs", choices=LINEUPS, default="real")
     a.add_argument("--games", type=int, default=48)
-    a.add_argument("--curve", action="store_true", help="force the learner to level on curve")
     a.add_argument("--seed", type=int, default=777)
     a.add_argument("--force-dark-gift", action="store_true",
                    help="press Dark Discovery on turns 3 to 5 (on by default when the run trained with it)")
@@ -71,8 +70,7 @@ def main():
         env.observe(b.obs, b.mask, b.seat, b.kind)
         turns = b.obs[:, bgpy.SCALAR_TURN].astype(int)
         o = torch.from_numpy(b.obs).to(dev)
-        cr = torch.from_numpy(b.kind == LEARNER).to(dev) if cfg.curve else None
-        acts, _, _, _ = act(net, o, force_mask(o, torch.from_numpy(b.mask).to(dev), cr))
+        acts, _, _, _ = act(net, o, force_mask(o, torch.from_numpy(b.mask).to(dev)))
         kinds = b.kinds.copy()
         env.step(acts.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
         for e, s in zip(*np.nonzero(b.places)):
@@ -97,7 +95,7 @@ def main():
         out.append("    " + (", ".join(fmt_minion(m) for m in r["board"]) or "(empty board)"))
     out.append("")
     places = [r["place"] for r in results]
-    out.append(f"{len(results)} games vs 7 {cfg.vs}{' (curve forced)' if cfg.curve else ''}: "
+    out.append(f"{len(results)} games vs 7 {cfg.vs}: "
                f"avg place {np.mean(places):.2f}, top 4 {np.mean([p <= 4 for p in places]):.0%}, "
                f"first {np.mean([p == 1 for p in places]):.0%}")
     out.append("knocked out on turn: " + ", ".join(
@@ -113,7 +111,7 @@ def main():
             f"{name} {c}" for name, c in cnt.most_common(15)))
     text = "\n".join(out)
     print(text)
-    name = Path(cfg.ckpt).parent.name + f"-{cfg.vs}" + ("-curve" if cfg.curve else "")
+    name = Path(cfg.ckpt).parent.name + f"-{cfg.vs}"
     path = Path(__file__).parent / "runs" / f"boards-{name}.txt"
     path.write_text(text + "\n")
     print(f"\nwritten to {path}")

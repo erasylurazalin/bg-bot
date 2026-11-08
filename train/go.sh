@@ -13,7 +13,7 @@
 #   tail train/runs/go.log   what it did
 #
 # The lineup is read from runs/<RUN>-lineup.txt if it exists, otherwise
-# 3,1,1,1,0,2 (3 learner, 1 snapshot, 1 standard, 1 rush, 0 random, 2 real).
+# 2,2,0,0,0,4 (2 learner, 2 snapshot, 0 standard, 0 rush, 0 random, 4 real).
 # Extra ppo.py flags come from runs/<RUN>-args.txt if it exists.
 set -u
 hours=${1:?usage: go.sh HOURS [RUN]}
@@ -35,7 +35,7 @@ t_total() {
 
 start=$(t_total)
 until=$(awk "BEGIN{print int($start + $hours * 60)}")   # HOURS may be fractional
-lineup=3,1,1,1,0,2
+lineup=2,2,0,0,0,4
 [ -f "runs/$run-lineup.txt" ] && lineup=$(cat "runs/$run-lineup.txt")
 # extra ppo.py flags for this run, one line (a resume takes them from the
 # command line, not the checkpoint), e.g. "--low-penalty 0.02"

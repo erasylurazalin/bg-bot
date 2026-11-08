@@ -63,9 +63,6 @@ EVAL_KEYS = [
     # last, so rows appended to a metrics.csv from before real seats stay
     # aligned with its header (the extra value just trails the old columns)
     "place_vs_real",
-    # one curve learner (levels forced to the standard curve) against 7 real
-    # seats, next to the free learner's place_vs_real
-    "place_vs_real_curve",
 ]
 # Columns of bgpy's tribe counts: the ten tribes in bgcore's `Tribe::EVERY`
 # order, then neutral.
@@ -108,7 +105,7 @@ def args():
     a.add_argument("--overlay-bonus", type=float, default=8.0,
                    help="B, the comp payoff bonus")
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
-    a.add_argument("--lineup", default="4,2,1,1,0,0",
+    a.add_argument("--lineup", default="2,2,0,0,0,4",
                    help="learner,snapshot,standard,rush,random,real seats")
     a.add_argument("--real-boards", default=None,
                    help="folder of real boards for real seats (docs/real-boards.md); "
@@ -140,10 +137,6 @@ def args():
     a.add_argument("--lam", type=float, default=0.95, help="per turn, like --gamma")
     a.add_argument("--action-cost", type=float, default=0.002,
                    help="reward taken off each action of --cost-kinds, so it doesn't dither")
-    a.add_argument("--curve-learners", type=int, default=0,
-                   help="learner seats per game whose levels are forced to the standard curve")
-    a.add_argument("--curve-snapshots", type=int, default=0,
-                   help="snapshot seats per game whose levels are forced to the standard curve")
     a.add_argument("--force-turn2-level", action="store_true",
                    help="a tier 1 seat that can level on turn 2 must level (learner and snapshots)")
     a.add_argument("--force-dark-gift", action="store_true",
@@ -226,25 +219,14 @@ FORCE_DARK = False
 DARK_TURNS = (3, 4, 5)
 
 
-# The standard curve bots.rs levels on: the tier wanted by turn 1..12+.
-CURVE = torch.tensor([1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6], dtype=torch.float32)
-
-
-def force_mask(obs, mask, curve_rows=None):
-    """The legal-action mask with forced levels. A curve seat (curve_rows, a
-    bool per row) below the standard curve that can level must level; with
-    --force-turn2-level, a free seat on turn 2 at tier 1 must too. The forced
-    mask is the one stored for the update, so a forced action has
-    log-probability 0 and no gradient."""
+def force_mask(obs, mask):
+    """The legal-action mask with forced moves: with --force-turn2-level, a
+    seat on turn 2 at tier 1 must level; with --force-dark-gift, the Dark
+    Gift press. The forced mask is the one stored for the update, so a forced
+    action has log-probability 0 and no gradient."""
     rows = torch.zeros(obs.shape[0], dtype=torch.bool, device=obs.device)
     if FORCE_TURN2:
         rows |= (obs[:, bgpy.SCALAR_TURN] == 2) & (obs[:, bgpy.SCALAR_TIER] == 1)
-        if curve_rows is not None:
-            rows &= ~curve_rows
-    if curve_rows is not None and curve_rows.any():
-        turn = obs[:, bgpy.SCALAR_TURN].long().clamp(1, len(CURVE)) - 1
-        behind = obs[:, bgpy.SCALAR_TIER] < CURVE.to(obs.device)[turn]
-        rows |= curve_rows & behind
     rows &= mask[:, LEVEL]
     dark = torch.zeros_like(rows)
     if FORCE_DARK:
@@ -298,22 +280,21 @@ def names_at_rev(rev):
     return table_names(cards), hero_list
 
 
-def evaluate(net, n_games, lineup, dev, seed, real_boards=None, curve=False):
+def evaluate(net, n_games, lineup, dev, seed, real_boards=None):
     """_evaluate, retried on a new seed when a scripted bot hits the engine's
     illegal-action panic (a known engine bug, 2026-11-02), so one bad test
     game doesn't kill the training run."""
     for attempt in range(4):
         try:
-            return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards, curve)
+            return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards)
         except BaseException as e:  # pyo3 PanicException is a BaseException
             if type(e).__name__ != "PanicException" or attempt == 3:
                 raise
             print(f"eval panic ({e}); retrying with a new seed", flush=True)
 
 
-def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, curve=False):
-    """Play n_games with `lineup` and return (avg_place, learner_records).
-    With curve, the learner seats are curve seats (levels forced)."""
+def _evaluate(net, n_games, lineup, dev, seed, real_boards=None):
+    """Play n_games with `lineup` and return (avg_place, learner_records)."""
     n = min(n_games, 1024)
     env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
                       real_lobby_filter=REAL_LOBBY_FILTER)
@@ -323,8 +304,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, curve=False):
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
         o = torch.from_numpy(b.obs).to(dev)
-        cr = torch.from_numpy(b.kind == LEARNER).to(dev) if curve else None
-        a, _, _, _ = act(net, o, force_mask(o, torch.from_numpy(b.mask).to(dev), cr))
+        a, _, _, _ = act(net, o, force_mask(o, torch.from_numpy(b.mask).to(dev)))
         kinds = b.kinds.copy()
         env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
         for e, s in zip(*np.nonzero(b.places)):
@@ -453,9 +433,6 @@ def main():
     if len(lineup) != bgpy.SEAT_KINDS:
         raise SystemExit(f"--lineup needs {bgpy.SEAT_KINDS} numbers "
                          f"(learner,snapshot,standard,rush,random,real), got {cfg.lineup}")
-    if cfg.curve_learners >= lineup[bgpy.LEARNER] or cfg.curve_snapshots > lineup[bgpy.SNAPSHOT]:
-        raise SystemExit("--curve-learners must leave at least one free learner, and "
-                         "--curve-snapshots can't exceed the snapshot seats")
     # Real seats need the boards; --real-boards alone still adds the vs7 real
     # eval, so a run can watch that number without training against them.
     real = None
@@ -561,19 +538,6 @@ def main():
 
     b = Bufs(N)
     env.kinds(b.kinds)
-    # which seats of each game are curve seats, drawn again for every game
-    curve = np.zeros((N, P), bool)
-    crng = np.random.default_rng(cfg.seed)
-
-    def pick_curve(rows):
-        for e in rows:
-            curve[e] = False
-            for kind, k in ((LEARNER, cfg.curve_learners), (SNAPSHOT, cfg.curve_snapshots)):
-                seats = np.nonzero(b.kinds[e] == kind)[0]
-                if k > 0 and len(seats):
-                    curve[e, crng.choice(seats, min(k, len(seats)), replace=False)] = True
-
-    pick_curve(range(N))
     # --obs-fp16: the rollout's observations in float16 (rounded once, when
     # they are stored) and widened again just before the network, which wants
     # float32; halves the buffer, which is the run's largest permanent tensor
@@ -617,8 +581,7 @@ def main():
                 o = torch.from_numpy(b.obs).to(dev, non_blocking=True)
                 m = torch.from_numpy(b.mask).to(dev, non_blocking=True)
                 is_learner = torch.from_numpy(b.kind == LEARNER).to(dev)
-                cr = torch.from_numpy(curve[np.arange(N), b.seat]).to(dev)
-                m = force_mask(o, m, cr)
+                m = force_mask(o, m)
                 bonus = forced = None
                 if cfg.overlay_comps:
                     env.overlay(b.forced, b.bonus, b.flags)
@@ -646,8 +609,6 @@ def main():
                     behind = (curve[turn_i] - o[:, bgpy.SCALAR_TIER]).clamp(min=0)
                     rews[t] -= low_pen * behind * ends_turn
                 if cfg.deadline_penalty:
-                    # curve seats are forced past every deadline, so only free
-                    # seats can ever pay this
                     ends_turn = (a == END_TURN) | (o[:, ACTIONS_LEFT] <= 1)
                     turn = o[:, bgpy.SCALAR_TURN]
                     tier = o[:, bgpy.SCALAR_TIER]
@@ -672,7 +633,6 @@ def main():
                     last[r] = -1
                     games += len(r)
                     env.kinds(b.kinds)
-                    pick_curve(r)
 
             # bootstrap from every live learner seat's current view
             all_obs = np.zeros((N, P, bgpy.OBS_SIZE), np.float32)
@@ -814,11 +774,9 @@ def main():
             snap.load_state_dict(pool[0])  # the oldest snapshot kept
             vs_snap = evaluate_vs(net, snap, cfg.eval_games // 2, dev, seed + 5)
             # One learner against 7 real seats: does it beat real boards?
-            vs_real = vs_real_curve = float("nan")
+            vs_real = float("nan")
             if real is not None:
                 vs_real, _ = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev, seed + 6, real)
-                vs_real_curve, _ = evaluate(net, cfg.eval_games // 2, [1, 0, 0, 0, 0, 7], dev,
-                                            seed + 7, real, curve=True)
             net.train()
 
             rep = summarize_records(rec_std + rec_rush + rec_4s + rec_4r + rec_4m)
@@ -830,7 +788,6 @@ def main():
                 "place_4v4_mix": v4_mix,
                 "place_vs_snapshot": vs_snap,
                 "place_vs_real": vs_real,
-                "place_vs_real_curve": vs_real_curve,
                 **rep,
             }
             for key, val in eval_vals.items():
@@ -873,7 +830,7 @@ def main():
                 done = True
             print(
                 f"update {update:5d}  {minutes:5.1f} min  {games:7d} games  "
-                f"vs7(std {vs_std:.2f} rush {vs_rush:.2f} real {vs_real:.2f} real-curve {vs_real_curve:.2f})  "
+                f"vs7(std {vs_std:.2f} rush {vs_rush:.2f} real {vs_real:.2f})  "
                 f"4v4(std {v4_std:.2f} rush {v4_rush:.2f} mix {v4_mix:.2f} snap {vs_snap:.2f})  "
                 f"t3/4/5 {rep['turn_t3']:.1f}/{rep['turn_t4']:.1f}/{rep['turn_t5']:.1f}  "
                 f"crv(std {rep['curve_standard']:.0%} rush {rep['curve_rush']:.0%} "
