@@ -286,7 +286,7 @@ impl Overlay {
                 items[n] = (k as u8, pl.discover[k]);
                 n += 1;
             }
-            if let Some((action, pick)) = self.pick(game, active, &items[..n], flags) {
+            if let Some((action, pick)) = self.pick(game, p, active, &items[..n], flags) {
                 let a = Action::Choose(action);
                 if game.is_legal(a) {
                     flags[F_ENABLER_TAKEN] = (pick == Pick::Enabler) as i32;
@@ -303,7 +303,7 @@ impl Overlay {
                     n += 1;
                 }
             }
-            if let Some((action, pick)) = self.pick(game, active, &items[..n], flags) {
+            if let Some((action, pick)) = self.pick(game, p, active, &items[..n], flags) {
                 let a = Action::Choose(action);
                 if game.is_legal(a) {
                     flags[F_ENABLER_TAKEN] = (pick == Pick::Enabler) as i32;
@@ -315,11 +315,12 @@ impl Overlay {
     }
 
     /// Pick an offered card: the active comp's payoff, then filler, then its
-    /// enabler; with no active comp, an enabler of a comp whose tribe is in
-    /// the lobby.
+    /// enabler; with no active comp, a card that completes an enabler of a
+    /// comp whose tribe is in the lobby. Half of a two-card enabler is not forced.
     fn pick(
         &self,
         game: &Game,
+        p: usize,
         active: Option<usize>,
         items: &[(u8, CardId)],
         flags: &mut [i32; OVERLAY_FLAGS],
@@ -352,9 +353,12 @@ impl Overlay {
                 }
             }
         } else {
+            let pl = &game.players[p];
             for &(action, id) in items {
                 let found = self.comps.comps.iter().any(|c| {
-                    c.has_enabler() && c.is_enabler(id) && self.comp_in_lobby(game, c)
+                    c.has_enabler()
+                        && c.completes_enabler(id, &pl.board, &pl.hand)
+                        && self.comp_in_lobby(game, c)
                 });
                 if found {
                     return Some((action, Pick::Enabler));

@@ -164,6 +164,17 @@ impl Comp {
         })
     }
 
+    /// Whether taking `id` would complete one of the comp's enabler entries:
+    /// `id` fills a group and every other group already has a card held. A
+    /// single-card entry always counts; one half of a two-card entry doesn't.
+    pub fn completes_enabler(&self, id: CardId, board: &[Minion], hand: &[Minion]) -> bool {
+        let held = |c: &CardId| board.iter().chain(hand).any(|m| m.card == *c);
+        self.enabler.iter().any(|e| {
+            e.all.iter().any(|g| g.contains(&id))
+                && e.all.iter().all(|g| g.contains(&id) || g.iter().any(held))
+        })
+    }
+
     /// Whether the comp's abort condition holds now: a threshold turn or Tier
     /// is here and no enabler is held. One-way state is kept by the caller
     /// (`OverlayState` and `PlannerState`), because the threshold passing

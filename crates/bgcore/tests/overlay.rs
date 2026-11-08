@@ -129,6 +129,7 @@ fn an_aborted_comp_does_not_activate_later() {
     let mut g = sandbox(47);
     ready(&mut g);
     place(&mut g, 0, 0, "Soul Rewinder", false);
+    place(&mut g, 0, 0, "Wrath Weaver", false);
     g.players[0].tier = 2;
     mine(&mut g);
     let mut line = OverlayState::default();
@@ -437,4 +438,22 @@ fn no_active_comp_changes_nothing() {
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
     assert!(bonus.iter().all(|&b| b == 0.0));
     assert!(f.iter().all(|&v| v == 0));
+}
+
+#[test]
+fn only_a_card_that_completes_an_enabler_counts() {
+    let d = data();
+    let lib = comps(&d);
+    let lobster = lib.comps.iter().find(|c| c.name == "Beasts - Tasty Lobstah").unwrap();
+    let gryphon = d.cards.by_name("Headhunter Gryphon").unwrap();
+    let strider = d.cards.by_name("Deathstrider").unwrap();
+    let mut g = sandbox(48);
+    ready(&mut g);
+    assert!(!lobster.completes_enabler(gryphon, &g.players[0].board, &g.players[0].hand));
+    place(&mut g, 0, 0, "Deathstrider", false);
+    assert!(lobster.completes_enabler(gryphon, &g.players[0].board, &g.players[0].hand));
+    assert!(!lobster.completes_enabler(strider, &[], &[]));
+    let beetles = lib.comps.iter().find(|c| c.name == "Beasts - Beetles").unwrap();
+    let scorpid = d.cards.by_name("Ravaging Scorpid").unwrap();
+    assert!(beetles.completes_enabler(scorpid, &[], &[]), "a one-card enabler always counts");
 }
