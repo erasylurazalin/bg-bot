@@ -1596,8 +1596,7 @@ through exactly that card's code. The engine never matches a gift by name:
   counts taken now, and the counter. Everything else the gift does is read
   later from its card by the existing paths; `Minion::has_gift` is the one
   flag test a fight pays for a gift with no trigger.
-- **The button.** `Action::DarkGift` (the last global action, right before
-  the cycle kind; `N_ACTIONS` grew by one); `dark_gift_usable` is the rule (rules.toml's `dark_gift_cost`,
+- **The button.** `Action::DarkGift` (the last global action); `dark_gift_usable` is the rule (rules.toml's `dark_gift_cost`,
   `_uses` and `_turn`, once a turn, 3 uses a game, locked until turn 3).
   A press pays, opens `DiscoverRequest::DarkGift(DarkGiftPlan)`, and
   `deal_dark_gift_offer` draws the three offers. The plan is the source's:
@@ -1825,34 +1824,6 @@ minions in the hand.
   seats. `ppo.py` adds a `vs7 real` eval (one learner against 7 real seats,
   `place_vs_real`) whenever real boards are loaded.
 
-## The cycle action
-
-`Action::CycleShop(i)` (buy Tavern slot i, play it at the end of the board,
-sell it) and `Action::CycleHand(j)` (play hand slot j, sell it) are one
-action that runs the whole line through the ordinary `step`, one ordinary
-action at a time; each substep counts towards the 200-action turn cap. After
-the played card is sold, every minion the line generated is played and sold
-in hand order (a generated spell stays in hand, except the Triple Reward,
-whose Discover is part of the line). A play or a sell that
-opens a choice pauses the line: `Player.pending_cycle` holds the phase (play
-the bought card, sell the played card, or sell the generated cards), the
-played card's slot and id, the hand before the line, the hand when the pause
-began, and the choice's payoff cards. The normal choice actions answer it;
-once nothing is left to answer, that same answering `step` finishes the line
-from the marker. The payoff cards (the Discovered card, the Choose One card,
-a triple reward) stay in hand; the line's other generated minions are sold.
-The marker is `Copy`, fixed-size card-id arrays, no heap. A choice that
-loses every answer fizzles and drops the marker, and a line whose hero dies
-or whose game ends drops it too. A triple mid-line adds the Triple Reward
-spell to hand; the line plays that spell, so its Discover pauses like the
-card's own choice, and the Discovered card stays. `Faceless Manipulator` is the
-one excluded minion: its play replaces it with the copied card, so there is
-no played card left to sell (`CardDb::cycle_play_unsafe`). The action is
-legal only for a minion, with a free board slot, no open choice, and, for
-`CycleShop`, the Gold for the buy and room in the hand.
-The new kind is last in `ACTION_KINDS` (17 actions, `N_ACTIONS` 200), so an
-old recording's action indices still mean the same actions.
-
 ## The shop-turn search
 
 `train/search.py` plays shop turns with a search instead of the network's single
@@ -1964,11 +1935,13 @@ name.
   Power is worth 2.0, so a free or useful power is pressed before that
   Refresh. `bgbench planner` prints the measured decision time and the
   end-of-turn hand and Gold.
-- **Standing rules:** after a lost fight, a Tortollan Blue Shell in the Tavern,
-  affordable and with room, is a `CycleShop` (buy, play, sell, +2 Gold); on a
-  full board the lowest comp weight card is sold first, and the cycle is
-  skipped when every card on the board is core. The same rule makes room for a
-  core card. Leaf Through the Pages, Wealthy Bounty and Fandral's Fortune are
+- **Standing rules:** after a lost fight, a Tortollan Blue Shell in the Tavern
+  is forced as its three ordinary actions, buy, then play, then sell (+2
+  Gold); the planner keeps a small line marker so a Shell that was already on
+  the board is not sold. On a full board the lowest comp weight card is sold
+  first, and the line is skipped when every card on the board is core. The
+  same rule makes room for a core card. Leaf Through the Pages, Wealthy Bounty
+  and Fandral's Fortune are
   bought whenever offered and affordable. A hand spell is cast at once unless
   it is one Era holds (`HOLD_SPELLS`: Them Apples, Sludge Corrosion,
   Methodical Madness, Hasty Excavation, Corrupted Coin) or a stat buff with
@@ -2005,13 +1978,14 @@ their hand.
   planner fields stay. Beetles: enabler Ravaging Scorpid; payoffs Banana Slamma
   and Ravaging Scorpid; filler Turquoise Skitterer, Forest Rover, Buzzing
   Vermin and Headhunter Gryphon. Scam has no enabler in this round.
-- **Forced:** the Tortollan Blue Shell after a lost fight, when it is in the
-  Tavern, affordable and there is a free board slot, is the `CycleShop` action.
-  On a full board an active comp sells a card that is not in the comp first;
-  with no active comp the sale is skipped. A Discover or Choose One that offers
-  an enabler takes it when the comp's tribe is in the lobby; an active comp
-  takes a payoff, then a filler. The enabler/offered flags are in the overlay
-  stats array.
+- **Forced:** the Tortollan Blue Shell after a lost fight is three ordinary
+  forced actions, buy, then play, then sell. A small `ShellLine` marker per
+  seat records the turn and the board slot the line put it in, so a Shell
+  that was already on the board is not sold. On a full board an active comp
+  sells a card that is not in the comp first; with no active comp the sale is
+  skipped. A Discover or Choose One that offers an enabler takes it when the
+  comp's tribe is in the lobby; an active comp takes a payoff, then a filler.
+  The enabler/offered flags are in the overlay stats array.
 - **Bonuses:** while a comp is active, buying or playing a payoff is worth
   `B`, a filler `B/2`, and a full board sells a non-comp card for `B` when a
   comp card waits in the hand or Tavern. Selling an enabler or a payoff is
@@ -2219,13 +2193,7 @@ Deleting `.venv` undoes it.
   Discounting is per turn, not per action; with per-action discounting
   nothing learned, because a turn can be up to 200 actions.
 - The starting policy is uniform over action kinds, not over all actions,
-  or it almost never ends a turn. The cycle kind starts lower: its logits
-  share the buy and play slot columns and get a -9 bias, so an older
-  checkpoint's old actions keep their probabilities until PPO explores the
-  cycles. (-3 put 6 to 7% of a loaded checkpoint's actions on cycles and
-  cost it 1.7 places against real boards; -9 starts under 1% and keeps the
-  old 5.8.) `ppo.py --cycle-bias B` overrides that start for an
-  `--init-from` checkpoint saved before the cycle kind. `ppo.py` logs `cycle_move` and `top_cycles` beside `buys`.
+  or it almost never ends a turn.
 - Snapshots of itself are taken every 250 updates (at about 95 updates a
   minute, 10 was only 2 minutes of history).
 - Every eval writes a row to `runs/NAME/metrics.csv`: placement against
@@ -2238,11 +2206,12 @@ Deleting `.venv` undoes it.
   it also no longer beats its oldest snapshot.
 - Any change to the action space or observation breaks old checkpoints;
   start a new run, except where the change only appends actions or input
-  columns. The cycle kind (2026-11-08) is appended after `dark_gift`, so
-  `model.load` and `warm_start` copy an old checkpoint's action rows exactly
-  and start the 17 new rows at -9 (`N_ACTIONS` 183 to 200); an old recording's
-  action indices still mean the same actions, and `imitate.py` pads its mask
-  with the new actions illegal. The 2026-10-25 observation rewrite (all ten tribes, the
+  columns. The cycle action (2026-11-08) is removed, so `N_ACTIONS` is 183
+  again and every old index means what it meant before the cycle kind. A
+  checkpoint or recording from the cycle build has 200 actions: `imitate.py`
+  keeps the first 183 and drops examples whose action was a cycle, and a
+  cycle-era checkpoint's action rows no longer match, so start a new run from
+  one of those. The 2026-10-25 observation rewrite (all ten tribes, the
   lobby, the Deity, Blood Gems, attachments, and opponents' Deity, gem value
   and spell power as last seen; OBS_SIZE 2658 to 6362) broke every earlier
   checkpoint, expected. The heroes run the same day added own and opponents'

@@ -178,7 +178,7 @@ def load(folder):
     if missing:
         raise SystemExit(f"{folder}/header.json has no {', '.join(sorted(missing))}")
     old_actions = int(header.get("n_actions", 0))
-    if header.get("obs_size") != bgpy.OBS_SIZE or not 0 < old_actions <= bgpy.N_ACTIONS:
+    if header.get("obs_size") != bgpy.OBS_SIZE or old_actions <= 0:
         raise SystemExit(f"{folder}/header.json holds {header.get('obs_size')} observations and "
                          f"{header.get('n_actions')} actions, but this bgpy holds "
                          f"{bgpy.OBS_SIZE} and {bgpy.N_ACTIONS}: the data is from another build")
@@ -204,6 +204,22 @@ def load(folder):
         if dom.size != count:
             raise SystemExit(f"{dom_path} is {dom.size} bytes, expected {count}")
         meta["dom"] = dom != 0
+    if old_actions > bgpy.N_ACTIONS:
+        # A recording from the cycle-action build has the extra actions at the
+        # end. The old indices still mean what they meant; examples whose
+        # action was a cycle are dropped.
+        mask = mask[:, :bgpy.N_ACTIONS]
+        keep = meta["action"] < bgpy.N_ACTIONS
+        if not keep.all():
+            print(f"skipping {int((~keep).sum())} examples of removed cycle actions", flush=True)
+            obs, mask = obs[keep], mask[keep]
+            for k in ("action", "turn", "place"):
+                meta[k] = meta[k][keep]
+            for k in ("game", "kind", "patch"):
+                meta[k] = [v for v, ok in zip(meta[k], keep) if ok]
+            if "dom" in meta:
+                meta["dom"] = meta["dom"][keep]
+            count = int(keep.sum())
     legal = mask[np.arange(count), meta["action"]]
     if not legal.all():
         bad = int((~legal).sum())

@@ -98,7 +98,7 @@ core = [{ name = "No Such Card", weight = 1.0 }]
 }
 
 #[test]
-fn the_blue_shell_cycle_fires_after_a_loss() {
+fn the_blue_shell_line_is_buy_then_play_then_sell() {
     let d = data();
     let c = comps(&d);
     let mut g = sandbox(7);
@@ -110,9 +110,34 @@ fn the_blue_shell_cycle_fires_after_a_loss() {
     mine(&mut g);
     let mut p = Planner::new(c, 11, &d);
     let a = p.action(&g, 0);
-    assert_eq!(a, Action::CycleShop(0), "the Shell is bought, played and sold");
+    assert!(matches!(a, Action::Buy(_)), "the buy is first: {a:?}");
+    g.step(a).unwrap();
+    let a = p.action(&g, 0);
+    assert_eq!(a, Action::Play { hand: 0, pos: 1 });
+    g.step(a).unwrap();
+    let a = p.action(&g, 0);
+    assert_eq!(a, Action::Sell(1));
+    g.step(a).unwrap();
+    assert_eq!(g.players[0].gold, 12, "the Shell is bought, played and sold for +2");
+    assert_eq!(g.players[0].board.len(), 1);
+    assert!(g.players[0].hand.is_empty());
     assert_eq!(p.state.shell_cycle_turns, vec![1]);
     assert_eq!(p.state.shell_chance_turns, vec![1]);
+}
+
+#[test]
+fn a_shell_already_on_the_board_is_not_sold_by_the_planner() {
+    let d = data();
+    let c = comps(&d);
+    let mut g = sandbox(9);
+    ready(&mut g);
+    g.players[0].lost_last_combat = true;
+    place(&mut g, 0, 0, "Tortollan Blue Shell", false);
+    mine(&mut g);
+    let mut p = Planner::new(c, 9, &d);
+    let a = p.action(&g, 0);
+    assert!(!matches!(a, Action::Sell(_)), "the board Shell is not the line: {a:?}");
+    assert!(p.state.shell_cycle_turns.is_empty());
 }
 
 #[test]
@@ -125,8 +150,7 @@ fn the_blue_shell_cycle_does_not_fire_without_the_loss() {
     place(&mut g, 0, 0, "Forest Rover", false);
     mine(&mut g);
     let mut p = Planner::new(c, 11, &d);
-    let a = p.action(&g, 0);
-    assert!(!matches!(a, Action::CycleShop(_)), "{a:?}");
+    let _ = p.action(&g, 0);
     assert!(p.state.shell_cycle_turns.is_empty());
     assert!(p.state.shell_chance_turns.is_empty());
 }

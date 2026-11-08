@@ -32,12 +32,6 @@ pub enum Action {
     ChooseTrinket(u8),
     /// Press the Dark Discovery button (every player has it).
     DarkGift,
-    /// Buy the Tavern minion in this slot, play it at the end of the board,
-    /// sell it, then play and sell what the line put in the hand.
-    CycleShop(u8),
-    /// Play the hand minion in this slot at the end of the board, sell it,
-    /// then play and sell what the line put in the hand.
-    CycleHand(u8),
 }
 
 const BUY: usize = 0;
@@ -58,11 +52,9 @@ const HERO_POWER: usize = END_TURN + 1;
 const HERO_POWER2: usize = HERO_POWER + 1;
 const CHOOSE_TRINKET: usize = HERO_POWER2 + 1;
 const DARK_GIFT: usize = CHOOSE_TRINKET + TRINKET_CHOICES;
-const CYCLE_SHOP: usize = DARK_GIFT + 1;
-const CYCLE_HAND: usize = CYCLE_SHOP + SHOP;
 
-pub const N_ACTIONS: usize = CYCLE_HAND + HAND;
-pub const N_KINDS: usize = 19;
+pub const N_ACTIONS: usize = DARK_GIFT + 1;
+pub const N_KINDS: usize = 18;
 pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("buy", SHOP),
     ("buy_spell", 1),
@@ -82,7 +74,6 @@ pub const ACTION_KINDS: [(&str, usize); N_KINDS] = [
     ("hero_power2", 1),
     ("choose_trinket", TRINKET_CHOICES),
     ("dark_gift", 1),
-    ("cycle", SHOP + HAND),
 ];
 
 impl Action {
@@ -109,8 +100,6 @@ impl Action {
             Action::HeroPower2 => HERO_POWER2,
             Action::ChooseTrinket(k) => CHOOSE_TRINKET + k as usize,
             Action::DarkGift => DARK_GIFT,
-            Action::CycleShop(s) => CYCLE_SHOP + s as usize,
-            Action::CycleHand(h) => CYCLE_HAND + h as usize,
         }
     }
 
@@ -143,13 +132,11 @@ impl Action {
             HERO_POWER2 => Action::HeroPower2,
             _ if i < DARK_GIFT => Action::ChooseTrinket((i - CHOOSE_TRINKET) as u8),
             DARK_GIFT => Action::DarkGift,
-            _ if i < CYCLE_HAND => Action::CycleShop((i - CYCLE_SHOP) as u8),
-            _ if i < N_ACTIONS => Action::CycleHand((i - CYCLE_HAND) as u8),
             _ => return None,
         })
     }
 
-    /// Which of the 19 kinds of action this is, in declaration order.
+    /// Which of the 18 kinds of action this is, in declaration order.
     pub fn kind(self) -> usize {
         match self {
             Action::Buy(_) => 0,
@@ -170,7 +157,6 @@ impl Action {
             Action::HeroPower2 => 15,
             Action::ChooseTrinket(_) => 16,
             Action::DarkGift => 17,
-            Action::CycleShop(_) | Action::CycleHand(_) => 18,
         }
     }
 }

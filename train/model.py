@@ -219,16 +219,8 @@ class Net(nn.Module):
 
 
 KIND_SIZES = [n for _, n in bgpy.ACTION_KINDS]
-# The new cycle kind starts low, so an older checkpoint's policy barely
-# changes: the cycle actions get this bias, while every old action keeps the
-# bias it was trained with (the kind prior is per kind, not renormalised).
-# -3 still put 6 to 7% of a loaded checkpoint's actions on shop cycles and
-# cost it 1.7 places against 7 real boards (7.59 vs 5.84); -9 keeps that
-# starting rate under 1% and leaves the old policy at 5.81.
-CYCLE_BIAS = -9.0
 # The global actions after the trinket offer's options, which come from `s`
-# alone: the Dark Discovery button. The cycle actions are last and come from
-# the card slots, so this is the dark_gift span, not the last kind's.
+# alone: the Dark Discovery button.
 GLOBALS_AFTER = dict(bgpy.ACTION_KINDS)["dark_gift"]
 assert sum(KIND_SIZES) == bgpy.N_ACTIONS
 
@@ -236,13 +228,10 @@ assert sum(KIND_SIZES) == bgpy.N_ACTIONS
 def kind_prior():
     """Starting logits that make every kind of action about equally likely,
     whatever its number of arguments. Uniform over all actions would almost
-    never end a turn, since 42 of them are moves and 80 are plays. The cycle
-    kind starts at `CYCLE_BIAS` instead, so an old checkpoint's old actions
-    keep their probabilities until PPO explores the cycles."""
+    never end a turn, since 42 of them are moves and 80 are plays."""
     out = []
-    for name, n in bgpy.ACTION_KINDS:
-        at = CYCLE_BIAS if name == "cycle" else -float(torch.tensor(n).log())
-        out.append(torch.full((n,), at))
+    for _, n in bgpy.ACTION_KINDS:
+        out.append(torch.full((n,), -float(torch.tensor(n).log())))
     return torch.cat(out)
 
 
@@ -357,8 +346,6 @@ class ActionHead(nn.Module):
       of j's query with t's key
     - roll, freeze, level, end turn, the two hero power buttons: from s
     - choose_trinket k: from s (the offer's options live in the scalars)
-    - cycle_shop i: from Tavern slot i's z; cycle_hand k: from hand slot k's
-      z, the same columns buy and play use, with their own low bias
     Plus a per-action bias that starts at the kind prior, with the scoring
     weights small, so the starting policy is about Net's."""
 
@@ -427,10 +414,6 @@ class ActionHead(nn.Module):
             g[:, 6 + bgpy.CHOICES:6 + bgpy.CHOICES + bgpy.TRINKET_CHOICES],
             # the Dark Discovery button
             g[:, 6 + bgpy.CHOICES + bgpy.TRINKET_CHOICES:],
-            # the two cycle groups: Tavern and hand, from the same slot
-            # columns buy and play score from
-            p[:, SHOP_R, 0],
-            p[:, HAND_R, 7],
         ], 1)
         return logits + self.bias
 
@@ -632,37 +615,13 @@ def ck_model(ck):
     return kind, model_opts(kind, **saved)
 
 
-def _grow_action_outputs(src, own, cycle_bias=None):
-    """Carry a checkpoint's action outputs over when this build has more
-    actions at the end (the cycle kind). The old rows are copied exactly and
-    the new rows keep `own`'s fresh start (`kind_prior`, so `CYCLE_BIAS`), so
-    every old action's logit is unchanged on a position where no cycle is
-    legal. `cycle_bias` overrides that start for the new bias rows only.
-    Handles the mlp's policy layer and the slot models' head bias."""
-    grown = {}
-    for name in ("head.bias", "policy.weight", "policy.bias"):
-        w, v = own.get(name), src.get(name)
-        if w is None or v is None or w.shape == v.shape or w.shape[0] < v.shape[0]:
-            continue
-        table = w.clone()
-        table[:v.shape[0]] = v
-        if cycle_bias is not None and name.endswith("bias"):
-            table[v.shape[0]:] = cycle_bias
-        grown[name] = table
-    return grown
-
-
-def load(path, dev="cpu", compile=False, cycle_bias=None):
+def load(path, dev="cpu", compile=False):
     """The network saved in a ppo.py checkpoint, built as the model it was
-    trained with. An older checkpoint with fewer actions (before the cycle
-    kind) loads with its old rows copied and its new cycle rows at
-    `CYCLE_BIAS`, or at `cycle_bias` when given."""
+    trained with."""
     ck = torch.load(path, map_location=dev)
     kind, opts = ck_model(ck)
     net = build(kind, compile=compile, **opts).to(dev)
-    state = dict(ck["net"])
-    state.update(_grow_action_outputs(state, net.state_dict(), cycle_bias))
-    net.load_state_dict(state)
+    net.load_state_dict(dict(ck["net"]))
     return net
 
 
@@ -753,8 +712,7 @@ def _grown_opp_scalars(kind, net, src):
     return old
 
 
-def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_heroes=None,
-               cycle_bias=None):
+def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_heroes=None):
     """Load every entry of the checkpoint at `path` whose name and shape match
     `net` (a `kind` model). The card and hero embeddings are matched by name
     instead, row by row, so a card added, removed or moved in cards.toml
@@ -766,11 +724,9 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     An input layer that only grew (the 2026-11-06 opponent view widened the
     opponent block) keeps every old column where the column map puts it and
     starts the new ones at zero, so the loaded network answers exactly as it
-    did until it learns to use the new inputs. A checkpoint from before the
-    cycle kind starts its new bias rows at `cycle_bias` when given (otherwise
-    `CYCLE_BIAS`). Returns (loaded, fresh, skipped, src_opts, remapped) where
-    remapped describes each table matched by name and each input layer
-    carried over column by column."""
+    did until it learns to use the new inputs. Returns (loaded, fresh,
+    skipped, src_opts, remapped) where remapped describes each table matched
+    by name and each input layer carried over column by column."""
     ck = torch.load(path, map_location="cpu")
     src_kind, src_opts = ck_model(ck)
     if src_kind != kind:
@@ -779,10 +735,6 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     src = ck["net"]
     own = net.state_dict()
     take = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
-    # An older checkpoint has fewer actions: its action outputs grow with the
-    # cycle kind at the end, the old rows copied exactly and the new ones at
-    # the fresh start (`CYCLE_BIAS`).
-    take.update(_grow_action_outputs(src, own, cycle_bias))
     remapped = []
     tables = (("card.weight", cards, ck.get("card_names") or old_cards),
               ("hero.weight", heroes, ck.get("hero_names") or old_heroes))
@@ -975,7 +927,7 @@ def check_pointers():
         i += n
     present = obs[:, bgpy.SCALARS:OWN_END].reshape(len(obs), OWN_SLOTS, SF)[:, :, bgpy.SLOT_PRESENT] > 0
     cards = obs[:, bgpy.SCALARS:OWN_END].reshape(len(obs), OWN_SLOTS, SF)[:, :, bgpy.SLOT_CARD_ID]
-    glob = list(range(off["roll"].start, off["cycle"].start))
+    glob = list(range(off["roll"].start, off["dark_gift"].stop))
     for kind, opts in (("attn", {"opp_boards": "full"}), ("attn", {"opp_boards": "pooled"}),
                        ("attn", {"opp_boards": "next"}), ("pool", {})):
         net = build(kind, **opts).eval()
@@ -997,21 +949,6 @@ def check_pointers():
                     perm = [1, 0] + list(range(2, a.shape[1]))
                     assert torch.allclose(a[:, perm], b, atol=1e-4), (kind, k)
                     assert (a[:, 0] - a[:, 1]).abs().max() > 1e-4, (kind, k, "vacuous")
-                # The cycle kind is two groups: the Tavern part follows the
-                # Tavern slots, the hand part the hand slots.
-                cyc0, cyc1 = l0[:, off["cycle"]], l1[:, off["cycle"]]
-                if label == "tavern":
-                    a, b = cyc0[:, :bgpy.SHOP], cyc1[:, :bgpy.SHOP]
-                    perm = [1, 0] + list(range(2, bgpy.SHOP))
-                    assert torch.allclose(a[:, perm], b, atol=1e-4), (kind, "cycle shop")
-                    assert torch.allclose(cyc0[:, bgpy.SHOP:], cyc1[:, bgpy.SHOP:], atol=1e-4), \
-                        (kind, "cycle hand under a Tavern swap")
-                elif label == "hand":
-                    a, b = cyc0[:, bgpy.SHOP:], cyc1[:, bgpy.SHOP:]
-                    perm = [1, 0] + list(range(2, bgpy.HAND))
-                    assert torch.allclose(a[:, perm], b, atol=1e-4), (kind, "cycle hand")
-                    assert torch.allclose(cyc0[:, :bgpy.SHOP], cyc1[:, :bgpy.SHOP], atol=1e-4), \
-                        (kind, "cycle shop under a hand swap")
                 if label == "board":
                     grid0 = torch.full((len(x), bgpy.BOARD, bgpy.BOARD), float("nan"))
                     grid1 = grid0.clone()

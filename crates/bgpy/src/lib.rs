@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::comps::Comps;
-use bgcore::overlay::{Overlay, OVERLAY_FLAGS};
+use bgcore::overlay::{Overlay, OVERLAY_FLAGS, ShellLine};
 use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{
     RealBoard, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
@@ -124,6 +124,8 @@ struct Env {
     /// `remember_boards` updates this; `final_boards` returns it after a
     /// game ends.
     last_board: [[i16; BOARD]; PLAYERS],
+    /// The Shell line in progress, per seat.
+    shell_lines: [ShellLine; PLAYERS],
 }
 
 impl Env {
@@ -154,7 +156,14 @@ impl Env {
                 boards.expect("real seats need real boards").clone(),
             )
         };
-        Env { game, kinds, rng, reported: [false; PLAYERS], last_board: [[-1; BOARD]; PLAYERS] }
+        Env {
+            game,
+            kinds,
+            rng,
+            reported: [false; PLAYERS],
+            last_board: [[-1; BOARD]; PLAYERS],
+            shell_lines: [ShellLine::default(); PLAYERS],
+        }
     }
 
     fn is_python(&self, p: usize) -> bool {
@@ -348,7 +357,7 @@ impl VecEnv {
     /// is current-player only; the other seats are -1 and zero.
     #[pyo3(signature = (forced, bonus, flags))]
     fn overlay(
-        &self,
+        &mut self,
         py: Python<'_>,
         mut forced: PyReadwriteArray2<i64>,
         mut bonus: PyReadwriteArray3<f32>,
@@ -365,9 +374,10 @@ impl VecEnv {
             return Err(PyValueError::new_err("overlay array sizes don't match"));
         }
         let rules = self.overlay_rules.clone();
+        let envs = &mut self.envs;
         py.detach(|| {
-            self.envs
-                .par_iter()
+            envs
+                .par_iter_mut()
                 .zip(forced.par_chunks_mut(PLAYERS))
                 .zip(bonus.par_chunks_mut(PLAYERS * N_ACTIONS))
                 .zip(flags.par_chunks_mut(PLAYERS * OVERLAY_FLAGS))
@@ -379,7 +389,7 @@ impl VecEnv {
                     let Some(p) = env.game.current_player() else { return };
                     let mut row = [0.0f32; N_ACTIONS];
                     let mut f = [0i32; OVERLAY_FLAGS];
-                    if let Some(a) = rules.decide(&env.game, p, &mut row, &mut f) {
+                    if let Some(a) = rules.decide(&env.game, p, &mut env.shell_lines[p], &mut row, &mut f) {
                         forced[p] = a.index() as i64;
                     }
                     bonus[p * N_ACTIONS..(p + 1) * N_ACTIONS].copy_from_slice(&row);

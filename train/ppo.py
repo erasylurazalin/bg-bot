@@ -48,10 +48,6 @@ KINDS = [name for name, _ in bgpy.ACTION_KINDS]
 KIND_OF = torch.tensor([k for k, (_, n) in enumerate(bgpy.ACTION_KINDS) for _ in range(n)])
 END_TURN = bgpy.END_TURN
 SHOP_START = bgpy.SHOP_START
-HAND_START = bgpy.HAND_START
-CYCLE_KIND = KINDS.index("cycle")
-CYCLE_SHOP_START = sum(n for _, n in bgpy.ACTION_KINDS[:CYCLE_KIND])
-CYCLE_HAND_START = CYCLE_SHOP_START + bgpy.SHOP
 ACTIONS_LEFT = bgpy.SCALAR_ACTIONS_LEFT
 
 TRIBE_NAMES = ("beast", "mech", "dragon", "murloc", "demon", "pirate",
@@ -76,7 +72,7 @@ EVAL_KEYS = [
 TRIBE_COLS = {t: k for k, t in enumerate(TRIBE_NAMES)}
 TRAIN_KEYS = [
     "entropy", "approx_kl", "clipfrac", "value_loss", "explained_var", "steps_per_s",
-    "actions_per_turn", "tier_t6", "tier_t10", "health_end", "cycle_move",
+    "actions_per_turn", "tier_t6", "tier_t10", "health_end",
 ]
 
 
@@ -89,12 +85,6 @@ def args():
     a.add_argument("--compile", action=argparse.BooleanOptionalAction,
                    help="torch.compile the attention layers (default: on for attn)")
     a.add_argument("--init-from", help="checkpoint to take matching weights from, for a new run")
-    a.add_argument("--cycle-bias", type=float,
-                   help="the starting bias of the 17 cycle actions, for a fresh network or an "
-                        "--init-from from before the cycle kind (default model.CYCLE_BIAS, -9; "
-                        "-2.83 is neutral, what kind_prior gives any other kind of 17)")
-    a.add_argument("--no-cycles", action="store_true",
-                   help="never offer the cycle actions: a control run for the cycle kind")
     a.add_argument("--init-cards-rev",
                    help="git revision whose cards.toml and heroes.toml an --init-from checkpoint "
                         "was trained on, for checkpoints saved before they stored card names")
@@ -220,7 +210,6 @@ DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
 # Discovery first thing when it can (once per turn, the tutorial line). Set
 # from the flag in main().
 FORCE_DARK = False
-NO_CYCLES = False
 DARK_TURNS = (3, 4, 5)
 
 
@@ -234,9 +223,6 @@ def force_mask(obs, mask, curve_rows=None):
     --force-turn2-level, a free seat on turn 2 at tier 1 must too. The forced
     mask is the one stored for the update, so a forced action has
     log-probability 0 and no gradient."""
-    if NO_CYCLES:
-        mask = mask.clone()
-        mask[:, CYCLE_SHOP_START:] = False
     rows = torch.zeros(obs.shape[0], dtype=torch.bool, device=obs.device)
     if FORCE_TURN2:
         rows |= (obs[:, bgpy.SCALAR_TURN] == 2) & (obs[:, bgpy.SCALAR_TIER] == 1)
@@ -405,11 +391,10 @@ def summarize_records(records):
 
 
 def main():
-    global FORCE_TURN2, FORCE_DARK, NO_CYCLES
+    global FORCE_TURN2, FORCE_DARK
     cfg = args()
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
-    NO_CYCLES = cfg.no_cycles
     # a training setting, not a model one: the checkpoint and its weights are
     # the same with the blocks recomputed or kept
     set_recompute(not cfg.no_recompute)
@@ -477,19 +462,13 @@ def main():
     if cfg.compile is None:
         cfg.compile = cfg.model == "attn"
     net = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
-    if cfg.cycle_bias is not None and not cfg.init_from and not cfg.resume:
-        with torch.no_grad():
-            bias = dict(net.named_parameters())
-            bias = bias.get("head.bias", bias.get("policy.bias"))
-            bias[CYCLE_SHOP_START:] = cfg.cycle_bias
-        print(f"fresh network: cycle actions start at bias {cfg.cycle_bias}")
     if cfg.init_from:
         old_cards = old_heroes = None
         if cfg.init_cards_rev:
             old_cards, old_heroes = names_at_rev(cfg.init_cards_rev)
         loaded, fresh, skipped, src_opts, remapped = warm_start(
             net, cfg.model, cfg.init_from, cards=names, heroes=hero_names,
-            old_cards=old_cards, old_heroes=old_heroes, cycle_bias=cfg.cycle_bias)
+            old_cards=old_cards, old_heroes=old_heroes)
         print(f"init from {cfg.init_from} ({cfg.model} {src_opts}): {len(loaded)} parameter "
               f"tensors loaded, {len(fresh)} fresh: {', '.join(fresh) or 'none'}; "
               f"not used: {', '.join(skipped) or 'none'}")
@@ -510,8 +489,7 @@ def main():
             # start Adam and the snapshot pool fresh, since their tensors and
             # the pool's state dicts have the old shapes.
             loaded, fresh, _, _, carried = warm_start(
-                net, cfg.model, cfg.resume, cards=names, heroes=hero_names,
-                cycle_bias=cfg.cycle_bias)
+                net, cfg.model, cfg.resume, cards=names, heroes=hero_names)
             print(f"resumed {cfg.resume}: its observation is narrower than this build's, so "
                   f"{len(loaded)} tensors loaded, {len(fresh)} fresh: "
                   f"{', '.join(fresh) or 'none'}")
@@ -555,7 +533,7 @@ def main():
             *EVAL_KEYS,
             *TRAIN_KEYS,
             *[f"act_{k}" for k in KINDS],
-            "top_buys", "top_cycles",
+            "top_buys",
         ])
 
     b = Bufs(N)
@@ -766,19 +744,6 @@ def main():
             ev = 1 - (f_ret - f_val).var() / (f_ret.var() + 1e-8)
             n_ends = ends.reshape(-1)[sel].sum().item()
             term = dones.reshape(-1)[sel] > 0
-            is_cycle = k == CYCLE_KIND
-            shop_cycle = is_cycle & (f_act >= CYCLE_SHOP_START) & (f_act < CYCLE_HAND_START)
-            hand_cycle = is_cycle & (f_act >= CYCLE_HAND_START)
-            cycle_ids = torch.cat([
-                f_obs[shop_cycle,
-                      SHOP_START + (f_act[shop_cycle] - CYCLE_SHOP_START) * bgpy.SLOT_FEATURES
-                      + bgpy.SLOT_CARD_ID],
-                f_obs[hand_cycle,
-                      HAND_START + (f_act[hand_cycle] - CYCLE_HAND_START) * bgpy.SLOT_FEATURES
-                      + bgpy.SLOT_CARD_ID],
-            ]).long() - 1
-            cycle_ids = cycle_ids[cycle_ids >= 0]
-            cycle_counts = torch.bincount(cycle_ids, minlength=len(names))
             stats = {
                 "entropy": np.mean(ents), "approx_kl": np.mean(kls), "clipfrac": np.mean(clips),
                 "value_loss": np.mean(vls), "explained_var": ev.item(),
@@ -787,19 +752,11 @@ def main():
                 "tier_t6": t6.mean().item() if len(t6) else float("nan"),
                 "tier_t10": t10.mean().item() if len(t10) else float("nan"),
                 "health_end": health[term].mean().item() if term.any() else float("nan"),
-                "cycle_move": (counts[CYCLE_KIND] / counts.sum()).item(),
                 **{f"act_{KINDS[i]}": (counts[i] / counts.sum()).item() for i in range(len(KINDS))},
             }
             top = buy_counts.argsort(descending=True)[:5]
             total = max(buy_counts.sum().item(), 1)
             top_buys = " ".join(f"{names[i]}:{buy_counts[i].item() / total:.0%}" for i in top.tolist())
-            if cycle_counts.sum().item() > 0:
-                top = cycle_counts.argsort(descending=True)[:5]
-                total = cycle_counts.sum().item()
-                top_cycles = " ".join(f"{names[i]}:{cycle_counts[i].item() / total:.0%}"
-                                      for i in top.tolist())
-            else:
-                top_cycles = "-"
         for key, val in stats.items():
             tb.add_scalar(f"train/{key}", val, update)
 
@@ -847,7 +804,7 @@ def main():
                 *[f"{eval_vals[k]:.3f}" for k in EVAL_KEYS],
                 *[f"{stats[k]:.4g}" for k in TRAIN_KEYS],
                 *[f"{stats[f'act_{k}']:.3f}" for k in KINDS],
-                top_buys, top_cycles,
+                top_buys,
             ])
             csv_file.flush()
             score = vs_real if best_by == "real" else 0.5 * (vs_std + vs_rush)
@@ -887,8 +844,7 @@ def main():
                 "trb(" + " ".join(
                     f"{t[:2]} {rep[f'tribe_{t}']:.0%}@{rep[f'place_{t}']:.2f}"
                     for t in REPORT_GROUPS) + ")  "
-                f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}  "
-                f"cycles {stats['cycle_move']:.2%} {top_cycles}",
+                f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}",
                 flush=True,
             )
         if done:

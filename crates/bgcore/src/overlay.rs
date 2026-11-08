@@ -26,6 +26,16 @@ pub const F_ENABLER_TAKEN: usize = 3;
 pub const F_ACTIVE: usize = 4;
 pub const F_FORCED_SELL: usize = 5;
 
+/// The Tortollan Blue Shell line for one seat: buy, play, sell as three
+/// ordinary actions. `turn` is 0 when no line is running; `slot` is the board
+/// slot the line put the Shell in, so a Shell that was already on the board
+/// for another reason is not sold.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShellLine {
+    pub turn: u32,
+    pub slot: Option<u8>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pick {
     Enabler,
@@ -63,6 +73,7 @@ impl Overlay {
         &self,
         game: &Game,
         p: usize,
+        line: &mut ShellLine,
         bonus: &mut [f32; N_ACTIONS],
         flags: &mut [i32; OVERLAY_FLAGS],
     ) -> Option<Action> {
@@ -72,7 +83,7 @@ impl Overlay {
         if active.is_some() {
             flags[F_ACTIVE] = 1;
         }
-        if let Some(a) = self.shell(game, p, active, flags) {
+        if let Some(a) = self.shell(game, p, line, active, flags) {
             return Some(a);
         }
         if let Some(a) = self.choice(game, p, active, flags) {
@@ -92,43 +103,117 @@ impl Overlay {
         &self,
         game: &Game,
         p: usize,
+        line: &mut ShellLine,
         active: Option<usize>,
         flags: &mut [i32; OVERLAY_FLAGS],
     ) -> Option<Action> {
         let shell = self.shell?;
         let pl = &game.players[p];
+        if line.turn != 0 && line.turn != game.turn {
+            *line = ShellLine::default();
+        }
         if !pl.lost_last_combat {
+            *line = ShellLine::default();
             return None;
         }
-        let slot = pl.shop.iter().position(|m| m.card == shell)?;
-        if pl.gold < game.data.cards.get(shell).cost {
-            return None;
-        }
-        if game.is_legal(Action::CycleShop(slot as u8)) {
-            flags[F_SHELL_LEGAL] = 1;
-            flags[F_SHELL_TAKEN] = 1;
-            return Some(Action::CycleShop(slot as u8));
-        }
-        // A full board needs a slot. Only an active comp says which card is
-        // not part of it; with no comp the rule skips the sale.
-        if pl.board.is_full()
-            && let Some(ci) = active
-        {
-            let comp = &self.comps.comps[ci];
-            let sell = (0..pl.board.len())
-                .filter(|&s| !comp.in_comp(pl.board[s].card))
-                .min_by_key(|&s| {
-                    let m = &pl.board[s];
-                    m.attack + m.health
-                });
-            if let Some(slot) = sell {
-                let a = Action::Sell(slot as u8);
+        // A line already started: play the Shell in hand, then sell the one
+        // this line played. The stored slot tells it from a Shell that was
+        // already on the board for another reason.
+        if line.turn == game.turn {
+            if let Some(h) = pl.hand.iter().position(|m| m.card == shell) {
+                let pos = pl.board.len() as u8;
+                let a = Action::Play { hand: h as u8, pos };
                 if game.is_legal(a) {
                     flags[F_SHELL_LEGAL] = 1;
-                    flags[F_FORCED_SELL] = 1;
+                    flags[F_SHELL_TAKEN] = 1;
+                    line.slot = Some(pos);
+                    return Some(a);
+                }
+                return self.make_room(game, p, active, flags);
+            }
+            if let Some(slot) = line
+                .slot
+                .filter(|&slot| {
+                    (slot as usize) < pl.board.len() && pl.board[slot as usize].card == shell
+                })
+                .or_else(|| pl.board.iter().position(|m| m.card == shell).map(|s| s as u8))
+            {
+                let a = Action::Sell(slot);
+                if game.is_legal(a) {
+                    flags[F_SHELL_LEGAL] = 1;
+                    flags[F_SHELL_TAKEN] = 1;
+                    *line = ShellLine::default();
                     return Some(a);
                 }
             }
+            *line = ShellLine::default();
+            return None;
+        }
+        // Start a line: a Shell in the Tavern is bought first, a Shell in
+        // hand is played first. A Shell already on the board is not sold
+        // unless this line put it there.
+        let shop = pl.shop.iter().position(|m| m.card == shell);
+        let hand = pl.hand.iter().position(|m| m.card == shell);
+        let shop_ok = shop.is_some_and(|_| {
+            pl.gold >= game.data.cards.get(shell).cost && !pl.hand.is_full()
+        });
+        if shop_ok && !pl.board.is_full() {
+            let a = Action::Buy(shop.unwrap() as u8);
+            if game.is_legal(a) {
+                flags[F_SHELL_LEGAL] = 1;
+                flags[F_SHELL_TAKEN] = 1;
+                line.turn = game.turn;
+                line.slot = None;
+                return Some(a);
+            }
+        }
+        if pl.board.is_full() {
+            // Only sell for a Shell the line can actually use.
+            if !shop_ok && hand.is_none() {
+                return None;
+            }
+            return self.make_room(game, p, active, flags);
+        }
+        if let Some(h) = hand {
+            let pos = pl.board.len() as u8;
+            let a = Action::Play { hand: h as u8, pos };
+            if game.is_legal(a) {
+                flags[F_SHELL_LEGAL] = 1;
+                flags[F_SHELL_TAKEN] = 1;
+                line.turn = game.turn;
+                line.slot = Some(pos);
+                return Some(a);
+            }
+        }
+        None
+    }
+
+    /// On a full board, sell the weakest card that is not in the active comp.
+    /// With no active comp the rule does not know what to sell, so it skips.
+    fn make_room(
+        &self,
+        game: &Game,
+        p: usize,
+        active: Option<usize>,
+        flags: &mut [i32; OVERLAY_FLAGS],
+    ) -> Option<Action> {
+        let pl = &game.players[p];
+        if !pl.board.is_full() {
+            return None;
+        }
+        let ci = active?;
+        let comp = &self.comps.comps[ci];
+        let sell = (0..pl.board.len())
+            .filter(|&s| !comp.in_comp(pl.board[s].card))
+            .min_by_key(|&s| {
+                let m = &pl.board[s];
+                m.attack + m.health
+            })?;
+        let a = Action::Sell(sell as u8);
+        if game.is_legal(a) {
+            flags[F_SHELL_LEGAL] = 1;
+            flags[F_FORCED_SELL] = 1;
+            return Some(a);
         }
         None
     }
@@ -254,9 +339,6 @@ impl Overlay {
                     bonus[a.index()] = b;
                 }
             }
-            if comp.is_enabler_or_payoff(id) {
-                bonus[Action::CycleShop(s as u8).index()] = f32::NEG_INFINITY;
-            }
         }
         for h in 0..pl.hand.len() {
             let id = pl.hand[h].card;
@@ -268,9 +350,6 @@ impl Overlay {
                         bonus[a.index()] = b;
                     }
                 }
-            }
-            if comp.is_enabler_or_payoff(id) {
-                bonus[Action::CycleHand(h as u8).index()] = f32::NEG_INFINITY;
             }
         }
         for s in 0..pl.board.len() {

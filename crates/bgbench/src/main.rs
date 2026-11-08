@@ -183,18 +183,6 @@ fn play(
             };
             g.step(a).map_err(|_| format!("seed {seed}: picked illegal {a:?}"))?;
             steps += 1;
-            for (p, pl) in g.players.iter().enumerate() {
-                if pl.pending_cycle.is_some() && !g.choice_waiting(p) {
-                    return Err(format!(
-                        "seed {seed}, step {steps}, turn {}: player {p} has a paused cycle with no choice open: {:?}, gold {}, board {:?}, hand {:?}",
-                        g.turn,
-                        pl.pending_cycle,
-                        pl.gold,
-                        pl.board.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
-                        pl.hand.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
-                    ));
-                }
-            }
             if check {
                 g.check_invariants()
                     .map_err(|e| format!("seed {seed}, step {steps}, turn {}: {e}", g.turn))?;
@@ -207,18 +195,6 @@ fn play(
             let a = random_action(&g, &mut rng);
             g.step(a).map_err(|_| format!("seed {seed}: picked illegal {a:?}"))?;
             steps += 1;
-            for (p, pl) in g.players.iter().enumerate() {
-                if pl.pending_cycle.is_some() && !g.choice_waiting(p) {
-                    return Err(format!(
-                        "seed {seed}, step {steps}, turn {}: player {p} has a paused cycle with no choice open: {:?}, gold {}, board {:?}, hand {:?}",
-                        g.turn,
-                        pl.pending_cycle,
-                        pl.gold,
-                        pl.board.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
-                        pl.hand.iter().map(|m| g.data.cards.get(m.card).name.clone()).collect::<Vec<_>>(),
-                    ));
-                }
-            }
             if check {
                 g.check_invariants()
                     .map_err(|e| format!("seed {seed}, step {steps}, turn {}: {e}", g.turn))?;

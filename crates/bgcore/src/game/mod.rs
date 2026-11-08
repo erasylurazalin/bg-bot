@@ -513,42 +513,6 @@ pub struct PendingDiscard {
     pub runs: u8,
 }
 
-/// A cycle line paused on a choice its played card opened. The answer
-/// actions run as usual; once nothing is left to answer, `step` finishes the
-/// line from this marker. The hand snapshots are card ids only, so the marker
-/// is small and `Copy` and a shop action never allocates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum CyclePhase {
-    /// The bought minion is in hand, waiting to be played.
-    PlayBought,
-    /// The played minion is on the board, waiting to be sold.
-    SellPlayed,
-    /// The played card is sold; play and sell what the line generated.
-    SellGenerated,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PendingCycle {
-    /// Turn the line started in.
-    pub turn: u32,
-    /// What the line does next once the choice is answered.
-    pub phase: CyclePhase,
-    /// Board slot and card of the played minion to sell in `SellPlayed`.
-    pub played_pos: u8,
-    pub played_card: CardId,
-    /// The hand before the line started.
-    pub original: [CardId; HAND],
-    pub original_len: u8,
-    /// Cards the choice itself put in the hand (the Discovered card, the
-    /// Choose One card, a triple's reward): these stay.
-    pub protected: [CardId; HAND],
-    pub protected_len: u8,
-    /// The hand when the pause began, to tell later additions from the
-    /// choice's own payoff.
-    pub paused: [CardId; HAND],
-    pub paused_len: u8,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DiscoverRequest {
     MinionTier(u8),
@@ -1146,9 +1110,6 @@ pub struct Player {
     pub pending_shop_target: Option<PendingShopTarget>,
     /// "Discard a card" waiting for the player's pick.
     pub pending_discard: Option<PendingDiscard>,
-    /// A cycle line paused on a choice; `step` finishes it once the last
-    /// answer is in.
-    pub pending_cycle: Option<PendingCycle>,
     /// A Choose One spell cast whose "after you cast a spell" triggers wait
     /// for the option and its target (see `CastAfterChoice`).
     pub cast_after_choice: Option<CastAfterChoice>,
@@ -1832,35 +1793,6 @@ impl Game {
             Action::HeroPower => self.power_usable(p),
             Action::HeroPower2 => self.power_usable2(p),
             Action::DarkGift => self.dark_gift_usable(p),
-            Action::CycleShop(s) => {
-                let s = s as usize;
-                if s >= pl.shop.len() || pl.hand.is_full() || pl.board.is_full() {
-                    return false;
-                }
-                let card_id = pl.shop[s].card;
-                if self.data.cards.get(card_id).is_spell()
-                    || self.data.cards.cycle_play_unsafe(card_id)
-                {
-                    return false;
-                }
-                match self.minion_price(p, s) {
-                    MinionPrice::Gold(g) => pl.gold >= g,
-                    MinionPrice::Health(h) => {
-                        pl.can_pay_health(h as i32, &self.data.cards)
-                    }
-                }
-            }
-            Action::CycleHand(h) => {
-                let h = h as usize;
-                if h >= pl.hand.len() || pl.board.is_full() {
-                    return false;
-                }
-                let m = pl.hand[h];
-                let card = self.data.cards.get(m.card);
-                !card.is_spell()
-                    && !m.locked_in_hand(pl.tier, pl.counts.gold_spent)
-                    && !self.data.cards.cycle_play_unsafe(m.card)
-            }
         }
     }
 
@@ -1916,9 +1848,6 @@ impl Game {
         pl.pending_shop_target = None;
         pl.pending_discard = None;
         pl.pending_choose_one = None;
-        // A cycle paused on this choice cannot finish it: drop the line where
-        // it stands rather than leave a marker with nothing to answer.
-        pl.pending_cycle = None;
         // The repeats a fizzled choice owed have no target left to land on.
         pl.repeats.clear();
         // A Choose One spell whose choice files away has no "after" left to
@@ -1937,7 +1866,7 @@ impl Game {
         mask.fill(false);
         let Some(p) = self.current_player() else { return };
         let pl = &self.players[p];
-        // A macro, not a closure: the cycle loops read `mask` between asks.
+        // A macro, not a closure, so the loops can read `mask` between asks.
         macro_rules! ask { ($a:expr) => { mask[$a.index()] = self.is_legal($a); } }
         // A choice that nothing can answer is fizzled by `step`, so the
         // normal actions are the legal ones then, as in `is_legal`.
@@ -2029,23 +1958,6 @@ impl Game {
             ask!(Action::HeroPower);
             ask!(Action::HeroPower2);
             ask!(Action::DarkGift);
-            // A cycle needs a free board slot, and its first action (Buy or
-            // Play at the end) is already legal from the loops above: ask
-            // only those slots, so an older position without a cycle pays
-            // nothing for the new kind.
-            if !pl.board.is_full() {
-                for s in 0..pl.shop.len() as u8 {
-                    if mask[Action::Buy(s).index()] {
-                        ask!(Action::CycleShop(s));
-                    }
-                }
-                let pos = pl.board.len() as u8;
-                for h in 0..pl.hand.len() as u8 {
-                    if mask[Action::Play { hand: h, pos }.index()] {
-                        ask!(Action::CycleHand(h));
-                    }
-                }
-            }
             ask!(Action::EndTurn);
         }
         // A skipped turn can freeze or end whatever else is open (the End
@@ -2389,19 +2301,6 @@ impl Game {
 
     /// Take an action for the current player.
     pub fn step(&mut self, a: Action) -> Result<(), IllegalAction> {
-        self.step_with(a, true)
-    }
-
-    /// `allow_resume` is false for the ordinary actions `resume_cycle` runs
-    /// itself: those must not recurse back into the resume.
-    fn step_with(&mut self, a: Action, allow_resume: bool) -> Result<(), IllegalAction> {
-        // A cycle is one action that runs its line through this same `step`,
-        // one ordinary action at a time (so every trigger, pool count and
-        // counter is exactly what separate actions give), and each of them
-        // counts towards the turn's action cap.
-        if matches!(a, Action::CycleShop(_) | Action::CycleHand(_)) {
-            return self.step_cycle(a);
-        }
         // A choice nothing can answer fizzles here, before it is answered:
         // `is_legal` already let the normal actions through on that basis.
         if let Some(p) = self.current_player()
@@ -2413,13 +2312,6 @@ impl Game {
             return Err(IllegalAction);
         }
         let p = self.current_player().unwrap();
-        #[cfg(debug_assertions)]
-        if allow_resume && self.players[p].pending_cycle.is_some() {
-            debug_assert!(
-                self.choice_waiting(p),
-                "a cycle is paused but the player has no choice open"
-            );
-        }
         self.apply(p, a);
         // A Health price, damage or a heal this action dealt crosses Holy
         // Vanguard's 15: the aura goes into (or comes off) every Vanguard the
@@ -2440,11 +2332,6 @@ impl Game {
         // knocked out (`Player::add_tavern_buff_late`).
         for q in 0..PLAYERS {
             self.players[q].flush_tavern_buffs(&self.data.cards);
-        }
-        if self.over || !self.players[p].alive {
-            // A choice's own effect can end the game or the hero; the line
-            // has nowhere left to go.
-            self.players[p].pending_cycle = None;
         }
         if self.over {
             #[cfg(debug_assertions)]
@@ -2486,18 +2373,6 @@ impl Game {
                 }
             }
         }
-        // The last answer to a paused cycle finishes the line here, inside
-        // this same step. Its continuation actions each count and advance
-        // themselves, so this step must not advance again.
-        if allow_resume
-            && self.players[p].alive
-            && !self.players[p].done
-            && self.players[p].pending_cycle.is_some()
-            && !self.choice_waiting(p)
-            && self.resume_cycle(p)
-        {
-            return Ok(());
-        }
         self.advance();
         // A fight or a hook in `advance` can still hand a knocked-out player
         // something: one more sweep, so a dead hero never holds cards.
@@ -2519,482 +2394,6 @@ impl Game {
         #[cfg(debug_assertions)]
         self.check_invariants().unwrap();
         Ok(())
-    }
-
-    /// Run a cycle action as the ordinary actions it stands for. Each one
-    /// goes through `step`, so it increments the action count and can end the
-    /// turn exactly where the separate actions would; the line stops when the
-    /// turn it started in is no longer shopping (a choice opened, the cap was
-    /// reached, or the game moved on).
-    fn step_cycle(&mut self, a: Action) -> Result<(), IllegalAction> {
-        if !self.is_legal(a) {
-            return Err(IllegalAction);
-        }
-        let p = self.current_player().unwrap();
-        let turn = self.turn;
-        let (original, original_len) = Self::cycle_hand_cards(&self.players[p].hand);
-        let original = &original[..original_len as usize];
-        match a {
-            Action::CycleShop(s) => {
-                let card = self.players[p].shop[s as usize].card;
-                let hand_before = self.players[p].hand.len();
-                self.step(Action::Buy(s))?;
-                if self.cycle_can_pause(p, turn) {
-                    self.pause_cycle(
-                        p, CyclePhase::PlayBought, original, BOARD as u8, card, &[],
-                    );
-                    return Ok(());
-                }
-                if !self.cycle_more(p, turn) {
-                    return Ok(());
-                }
-                let Some(hand) = self.cycle_bought_hand(p, hand_before, card) else {
-                    return Ok(());
-                };
-                let pos = self.players[p].board.len() as u8;
-                let play = Action::Play { hand, pos };
-                if !self.is_legal(play) {
-                    return Ok(());
-                }
-                self.step(play)?;
-                if self.cycle_can_pause(p, turn) {
-                    self.pause_cycle(
-                        p, CyclePhase::SellPlayed, original, pos, card, &[],
-                    );
-                    return Ok(());
-                }
-                if !self.cycle_more(p, turn) {
-                    return Ok(());
-                }
-                self.cycle_sell_played(p, pos, card);
-                if self.cycle_can_pause(p, turn) {
-                    self.pause_cycle(
-                        p, CyclePhase::SellGenerated, original, pos, card, &[],
-                    );
-                    return Ok(());
-                }
-                if !self.cycle_more(p, turn) {
-                    return Ok(());
-                }
-            }
-            Action::CycleHand(hand) => {
-                let card = self.players[p].hand[hand as usize].card;
-                let pos = self.players[p].board.len() as u8;
-                self.step(Action::Play { hand, pos })?;
-                if self.cycle_can_pause(p, turn) {
-                    self.pause_cycle(
-                        p, CyclePhase::SellPlayed, original, pos, card, &[],
-                    );
-                    return Ok(());
-                }
-                if !self.cycle_more(p, turn) {
-                    return Ok(());
-                }
-                self.cycle_sell_played(p, pos, card);
-                if self.cycle_can_pause(p, turn) {
-                    self.pause_cycle(
-                        p, CyclePhase::SellGenerated, original, pos, card, &[],
-                    );
-                    return Ok(());
-                }
-                if !self.cycle_more(p, turn) {
-                    return Ok(());
-                }
-            }
-            _ => unreachable!("step_cycle only takes a cycle action"),
-        }
-        self.cycle_sell_generated(p, turn, original, &[]);
-        Ok(())
-    }
-
-    /// A cycle line may pause only while the same turn's player waits on a
-    /// real answer. A turn that ended or a game that moved on clears it.
-    fn cycle_can_pause(&self, p: usize, turn: u32) -> bool {
-        self.turn == turn
-            && self.current_player() == Some(p)
-            && self.players[p].alive
-            && !self.players[p].done
-            && self.choice_waiting(p)
-    }
-
-    /// Whether a cycle line may take its next ordinary action: the same turn,
-    /// still the same player, and still a plain shop decision (no choice
-    /// opened, the action cap not reached).
-    fn cycle_more(&self, p: usize, turn: u32) -> bool {
-        self.turn == turn && self.current_player() == Some(p) && self.shopping(p)
-    }
-
-    /// The card ids in a hand, for the cycle's fixed-size snapshots.
-    fn cycle_hand_cards(hand: &[Minion]) -> ([CardId; HAND], u8) {
-        let mut cards = [0; HAND];
-        for (i, m) in hand.iter().enumerate() {
-            cards[i] = m.card;
-        }
-        (cards, hand.len() as u8)
-    }
-
-    /// Remember a paused cycle: what it does next, the played card, the hand
-    /// before the line, the cards the line may not sell (the choice's payoff),
-    /// and the hand at this pause.
-    fn pause_cycle(
-        &mut self,
-        p: usize,
-        phase: CyclePhase,
-        original: &[CardId],
-        played_pos: u8,
-        played_card: CardId,
-        protected: &[CardId],
-    ) {
-        let (paused, paused_len) = Self::cycle_hand_cards(&self.players[p].hand);
-        let mut c = PendingCycle {
-            turn: self.turn,
-            phase,
-            played_pos,
-            played_card,
-            original: [0; HAND],
-            original_len: original.len() as u8,
-            protected: [0; HAND],
-            protected_len: protected.len() as u8,
-            paused,
-            paused_len,
-        };
-        c.original[..original.len()].copy_from_slice(original);
-        c.protected[..protected.len()].copy_from_slice(protected);
-        self.players[p].pending_cycle = Some(c);
-        debug_assert!(self.choice_waiting(p), "a cycle pauses only on a choice");
-    }
-
-    /// Re-take the pause hand without protecting the cards just added: used
-    /// after a sell, whose own generated cards are line output, not a choice
-    /// payoff.
-    fn cycle_pause_existing(&mut self, p: usize) {
-        let (paused, paused_len) = Self::cycle_hand_cards(&self.players[p].hand);
-        if let Some(mut c) = self.players[p].pending_cycle {
-            c.paused = paused;
-            c.paused_len = paused_len;
-            self.players[p].pending_cycle = Some(c);
-        }
-    }
-
-    /// Add what the answered choice put in the hand since the pause to
-    /// `protected`, so the continuation sells the line's other generated
-    /// cards only. Then take the hand as the new pause point.
-    fn cycle_protect_new(&mut self, p: usize) {
-        let Some(mut c) = self.players[p].pending_cycle else { return };
-        let mut used = [false; HAND];
-        let mut added = [0; HAND];
-        let mut n = 0;
-        for m in &self.players[p].hand {
-            let mut was_there = false;
-            for j in 0..c.paused_len as usize {
-                if !used[j] && c.paused[j] == m.card {
-                    used[j] = true;
-                    was_there = true;
-                    break;
-                }
-            }
-            if !was_there && n < HAND {
-                added[n] = m.card;
-                n += 1;
-            }
-        }
-        for &card in &added[..n] {
-            if (c.protected_len as usize) < HAND {
-                c.protected[c.protected_len as usize] = card;
-                c.protected_len += 1;
-            }
-        }
-        let (paused, paused_len) = Self::cycle_hand_cards(&self.players[p].hand);
-        c.paused = paused;
-        c.paused_len = paused_len;
-        self.players[p].pending_cycle = Some(c);
-    }
-
-    /// Finish a paused cycle once the last answer is in. Returns whether it
-    /// ran an ordinary action (those advance the game themselves, so the
-    /// calling `step` must not advance again).
-    fn resume_cycle(&mut self, p: usize) -> bool {
-        let mut acted = false;
-        loop {
-            let Some(c) = self.players[p].pending_cycle else {
-                return acted;
-            };
-            let turn = c.turn;
-            if self.turn != turn
-                || self.current_player() != Some(p)
-                || !self.players[p].alive
-                || self.players[p].done
-            {
-                self.players[p].pending_cycle = None;
-                return acted;
-            }
-            if self.choice_waiting(p) {
-                return acted;
-            }
-            match c.phase {
-                CyclePhase::PlayBought => {
-                    self.cycle_protect_new(p);
-                    let c = self.players[p].pending_cycle.unwrap();
-                    let original = c.original;
-                    let protected = c.protected;
-                    let Some(hand) = self.cycle_generated_hand(
-                        p,
-                        &original[..c.original_len as usize],
-                        &protected[..c.protected_len as usize],
-                        c.played_card,
-                    ) else {
-                        self.players[p].pending_cycle = None;
-                        return acted;
-                    };
-                    let pos = self.players[p].board.len() as u8;
-                    let play = Action::Play { hand, pos };
-                    if !self.is_legal(play) {
-                        self.players[p].pending_cycle = None;
-                        return acted;
-                    }
-                    let mut next = c;
-                    next.phase = CyclePhase::SellPlayed;
-                    next.played_pos = pos;
-                    next.played_card = c.played_card;
-                    self.players[p].pending_cycle = Some(next);
-                    let _ = self.step_with(play, false);
-                    acted = true;
-                    if self.cycle_can_pause(p, turn) {
-                        self.cycle_pause_existing(p);
-                        return acted;
-                    }
-                    if !self.cycle_more(p, turn) || self.players[p].pending_cycle.is_none() {
-                        return acted;
-                    }
-                }
-                CyclePhase::SellPlayed => {
-                    self.cycle_protect_new(p);
-                    let c = self.players[p].pending_cycle.unwrap();
-                    let mut next = c;
-                    next.phase = CyclePhase::SellGenerated;
-                    self.players[p].pending_cycle = Some(next);
-                    if let Some(slot) = self.cycle_played_pos(p, c.played_pos, c.played_card)
-                        && self.is_legal(Action::Sell(slot))
-                    {
-                        let _ = self.step_with(Action::Sell(slot), false);
-                        acted = true;
-                    }
-                    if self.cycle_can_pause(p, turn) {
-                        self.cycle_pause_existing(p);
-                        return acted;
-                    }
-                    if !self.cycle_more(p, turn) || self.players[p].pending_cycle.is_none() {
-                        return acted;
-                    }
-                    // The sell's own generated cards are not choice payoff.
-                    self.cycle_pause_existing(p);
-                }
-                CyclePhase::SellGenerated => {
-                    self.cycle_protect_new(p);
-                    let c = self.players[p].pending_cycle.unwrap();
-                    let original = c.original;
-                    let protected = c.protected;
-                    self.players[p].pending_cycle = None;
-                    let did = self.cycle_sell_generated(
-                        p,
-                        turn,
-                        &original[..c.original_len as usize],
-                        &protected[..c.protected_len as usize],
-                    );
-                    return acted || did;
-                }
-            }
-        }
-    }
-
-    /// The hand slot the bought minion is in. It is pushed at the end of the
-    /// hand (`hand_before`), but a triple can replace it with its Golden copy
-    /// later in the hand, which is the card the player would play.
-    fn cycle_bought_hand(&self, p: usize, hand_before: usize, card: CardId) -> Option<u8> {
-        let hand = &self.players[p].hand;
-        if hand.get(hand_before).is_some_and(|m| m.card == card) {
-            return Some(hand_before as u8);
-        }
-        (hand_before..hand.len())
-            .rev()
-            .find(|&i| hand[i].card == card)
-            .or_else(|| {
-                // A triple merged the hand down past `hand_before`; its
-                // Golden card is the one to play.
-                (0..hand.len()).rev().find(|&i| hand[i].card == card)
-            })
-            .map(|i| i as u8)
-    }
-
-    /// The board slot the played card landed in: the end it was played at,
-    /// unless a Battlecry moved the board and the card with it.
-    fn cycle_played_pos(&self, p: usize, pos: u8, card: CardId) -> Option<u8> {
-        let board = &self.players[p].board;
-        if board.get(pos as usize).is_some_and(|m| m.card == card) {
-            return Some(pos);
-        }
-        (0..board.len())
-            .rev()
-            .find(|&i| board[i].card == card)
-            .map(|i| i as u8)
-    }
-
-    /// The cards the line put in the hand that were not there before it and
-    /// are not the answered choice's payoff, in hand order (a multiset
-    /// difference by card, like the search's cycle).
-    fn cycle_generated(
-        &self,
-        p: usize,
-        original: &[CardId],
-        protected: &[CardId],
-    ) -> ArrayVec<CardId, HAND> {
-        let mut used = [false; HAND];
-        let mut kept = [false; HAND];
-        let mut out = ArrayVec::new();
-        for m in &self.players[p].hand {
-            let mut was_there = false;
-            for (j, &x) in original.iter().enumerate() {
-                if !used[j] && x == m.card {
-                    used[j] = true;
-                    was_there = true;
-                    break;
-                }
-            }
-            if was_there {
-                continue;
-            }
-            let mut keep = false;
-            for (j, &x) in protected.iter().enumerate() {
-                if !kept[j] && x == m.card {
-                    kept[j] = true;
-                    keep = true;
-                    break;
-                }
-            }
-            if !keep {
-                let _ = out.try_push(m.card);
-            }
-        }
-        out
-    }
-
-    /// The first hand slot holding a generated `card` (not one of the cards
-    /// the line started with and not a choice payoff), in hand order.
-    fn cycle_generated_hand(
-        &self,
-        p: usize,
-        original: &[CardId],
-        protected: &[CardId],
-        card: CardId,
-    ) -> Option<u8> {
-        let mut used = [false; HAND];
-        let mut kept = [false; HAND];
-        for (i, m) in self.players[p].hand.iter().enumerate() {
-            let mut was_there = false;
-            for (j, &x) in original.iter().enumerate() {
-                if !used[j] && x == m.card {
-                    used[j] = true;
-                    was_there = true;
-                    break;
-                }
-            }
-            if was_there {
-                continue;
-            }
-            let mut keep = false;
-            for (j, &x) in protected.iter().enumerate() {
-                if !kept[j] && x == m.card {
-                    kept[j] = true;
-                    keep = true;
-                    break;
-                }
-            }
-            if !keep && m.card == card {
-                return Some(i as u8);
-            }
-        }
-        None
-    }
-
-    /// Play and sell each minion the line generated, in hand order. A spell
-    /// cannot be sold, so it stays. A play or a sell that opens a choice
-    /// pauses the line; `resume_cycle` carries on from the marker.
-    fn cycle_sell_generated(
-        &mut self,
-        p: usize,
-        turn: u32,
-        original: &[CardId],
-        protected: &[CardId],
-    ) -> bool {
-        let generated = self.cycle_generated(p, original, protected);
-        let mut acted = false;
-        for card in generated {
-            if !self.cycle_more(p, turn) {
-                return acted;
-            }
-            let spell = self.data.cards.get(card).is_spell();
-            // A generated spell stays in hand, except the Triple Reward: the
-            // triple's Discover is part of the line, like the card's own
-            // choice.
-            if spell && self.data.cards.triple_reward != Some(card) {
-                continue;
-            }
-            let Some(hand) = self.cycle_generated_hand(p, original, protected, card) else {
-                continue;
-            };
-            let pos = if spell { 0 } else { self.players[p].board.len() as u8 };
-            let play = Action::Play { hand, pos };
-            if !self.is_legal(play) {
-                continue;
-            }
-            if self.step(play).is_err() {
-                return acted;
-            }
-            acted = true;
-            if self.cycle_can_pause(p, turn) {
-                self.pause_cycle(
-                    p,
-                    CyclePhase::SellPlayed,
-                    original,
-                    if spell { BOARD as u8 } else { pos },
-                    card,
-                    protected,
-                );
-                return acted;
-            }
-            if !self.cycle_more(p, turn) {
-                return acted;
-            }
-            if spell {
-                // The reward spell is cast and gone; its Discovered card, if
-                // any, is the payoff already in hand.
-                continue;
-            }
-            let Some(slot) = self.cycle_played_pos(p, pos, card) else {
-                continue;
-            };
-            if self.is_legal(Action::Sell(slot)) {
-                let _ = self.step(Action::Sell(slot));
-                acted = true;
-            }
-            if self.cycle_can_pause(p, turn) {
-                self.pause_cycle(
-                    p, CyclePhase::SellGenerated, original, pos, card, protected,
-                );
-                return acted;
-            }
-        }
-        acted
-    }
-
-    /// Sell the card the line played, if it is still on the board.
-    fn cycle_sell_played(&mut self, p: usize, pos: u8, card: CardId) {
-        let Some(slot) = self.cycle_played_pos(p, pos, card) else {
-            return;
-        };
-        if self.is_legal(Action::Sell(slot)) {
-            let _ = self.step(Action::Sell(slot));
-        }
     }
 
     /// Recompute the standing rules a hero power or a trinket sets, the way a
@@ -3481,11 +2880,6 @@ impl Game {
             Action::ChooseTrinket(k) => self.pick_trinket(p, k as usize),
             Action::DarkGift => self.press_dark_gift(p),
             Action::EndTurn => {}
-            // A cycle runs its line in `step_cycle`, one ordinary action at
-            // a time; `apply` never sees the cycle itself.
-            Action::CycleShop(_) | Action::CycleHand(_) => {
-                unreachable!("a cycle action is expanded by step_cycle")
-            }
         }
     }
 

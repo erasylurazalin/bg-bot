@@ -8,7 +8,6 @@
 //! 1. Answer an open choice, preferring a comp card.
 //! 2. Apply the standing rules (the Tortollan Blue Shell after a loss).
 //! 3. Level when the comp's curve or the default curve says so, unless dying.
-//! 4. Take a cycle that dominates, if there is one.
 //! 5. Score legal moves by their fights against real boards of the turn plus
 //!    `w(turn) * comp progress`, and play the best.
 //!
@@ -18,11 +17,12 @@
 use std::sync::Arc;
 
 use crate::comps::{Comp, Comps, Scales, SignalKind};
+use crate::overlay::ShellLine;
 use crate::game::{Game, Opponent};
 use crate::minion::{CardId, Keywords, Minion};
 use crate::real_boards::RealBoards;
 use crate::rng::Rng;
-use crate::search::{Position, fight_boards, fight_outcome};
+use crate::search::{fight_boards, fight_outcome};
 use crate::{Action, HAND, N_ACTIONS};
 
 /// Fights per shop decision: the same 16 (or fewer, when a turn has fewer
@@ -94,6 +94,8 @@ pub struct Planner {
     boards: Option<Arc<RealBoards>>,
     fights: usize,
     shell: Option<CardId>,
+    /// The buy-play-sell Shell line in progress.
+    shell_line: ShellLine,
     sure_buys: Vec<CardId>,
 }
 
@@ -106,6 +108,7 @@ impl Planner {
             boards: None,
             fights: FIGHTS,
             shell: data.cards.by_name("Tortollan Blue Shell"),
+            shell_line: ShellLine::default(),
             sure_buys: ["Leaf Through the Pages", "Wealthy Bounty", "Fandral's Fortune"]
                 .iter()
                 .filter_map(|n| data.cards.by_name(n))
@@ -126,6 +129,7 @@ impl Planner {
     pub fn reset(&mut self, seed: u64) {
         self.state = PlannerState::default();
         self.rng = Rng::new(seed);
+        self.shell_line = ShellLine::default();
     }
 
     pub fn comp_name(&self) -> Option<&str> {
@@ -218,9 +222,6 @@ impl Planner {
             return a;
         }
         if let Some(a) = self.make_room_action(game, p) {
-            return a;
-        }
-        if let Some(a) = self.dominating_cycle(game, p) {
             return a;
         }
         self.score_action(game, p)
@@ -400,29 +401,93 @@ impl Planner {
     fn shell_action(&mut self, game: &Game, p: usize) -> Option<Action> {
         let shell = self.shell?;
         let pl = &game.players[p];
+        if self.shell_line.turn != 0 && self.shell_line.turn != game.turn {
+            self.shell_line = ShellLine::default();
+        }
         if !pl.lost_last_combat {
+            self.shell_line = ShellLine::default();
             return None;
         }
-        let slot = pl.shop.iter().position(|m| m.card == shell)?;
-        let cost = game.data.cards.get(shell).cost;
-        if pl.gold < cost || pl.hand.is_full() {
+        let comp = self.state.comp.or(self.state.lean);
+        if self.shell_line.turn == game.turn {
+            if let Some(h) = pl.hand.iter().position(|m| m.card == shell) {
+                let pos = pl.board.len() as u8;
+                let a = Action::Play { hand: h as u8, pos };
+                if game.is_legal(a) {
+                    self.note_shell_chance(game.turn);
+                    self.shell_line.slot = Some(pos);
+                    return Some(a);
+                }
+                return self.shell_room(game, p, comp);
+            }
+            let slot = self
+                .shell_line
+                .slot
+                .filter(|&slot| {
+                    (slot as usize) < pl.board.len() && pl.board[slot as usize].card == shell
+                })
+                .or_else(|| pl.board.iter().position(|m| m.card == shell).map(|s| s as u8));
+            if let Some(slot) = slot {
+                let a = Action::Sell(slot);
+                if game.is_legal(a) {
+                    self.note_shell_chance(game.turn);
+                    self.note_shell_cycle(game.turn);
+                    self.shell_line = ShellLine::default();
+                    return Some(a);
+                }
+            }
+            self.shell_line = ShellLine::default();
             return None;
         }
-        if game.is_legal(Action::CycleShop(slot as u8)) {
-            self.note_shell_chance(game.turn);
-            self.note_shell_cycle(game.turn);
-            return Some(Action::CycleShop(slot as u8));
-        }
-        // A full board needs a slot first. Sell the card with the lowest comp
-        // weight (not the weakest), and only if it is not part of the comp.
-        if pl.board.is_full() {
-            let slot = self.sell_for_room(game, p)?;
-            if game.is_legal(Action::Sell(slot as u8)) {
+        // Start a line: buy first, then a hand Shell. A Shell already on the
+        // board is not sold unless this line put it there.
+        let shop = pl.shop.iter().position(|m| m.card == shell);
+        let hand = pl.hand.iter().position(|m| m.card == shell);
+        let shop_ok = shop.is_some_and(|_| {
+            pl.gold >= game.data.cards.get(shell).cost && !pl.hand.is_full()
+        });
+        if shop_ok && !pl.board.is_full() {
+            let a = Action::Buy(shop.unwrap() as u8);
+            if game.is_legal(a) {
                 self.note_shell_chance(game.turn);
-                return Some(Action::Sell(slot as u8));
+                self.note_shell_cycle(game.turn);
+                self.shell_line.turn = game.turn;
+                self.shell_line.slot = None;
+                return Some(a);
+            }
+        }
+        if pl.board.is_full() {
+            if !shop_ok && hand.is_none() {
+                return None;
+            }
+            return self.shell_room(game, p, comp);
+        }
+        if let Some(h) = hand {
+            let pos = pl.board.len() as u8;
+            let a = Action::Play { hand: h as u8, pos };
+            if game.is_legal(a) {
+                self.note_shell_chance(game.turn);
+                self.note_shell_cycle(game.turn);
+                self.shell_line.turn = game.turn;
+                self.shell_line.slot = Some(pos);
+                return Some(a);
             }
         }
         None
+    }
+
+    /// Full-board room for the Shell line: sell the lowest comp weight card,
+    /// and only when a comp is known.
+    fn shell_room(&mut self, game: &Game, p: usize, comp: Option<usize>) -> Option<Action> {
+        comp?;
+        let slot = self.sell_for_room(game, p)?;
+        let a = Action::Sell(slot as u8);
+        if game.is_legal(a) {
+            self.note_shell_chance(game.turn);
+            Some(a)
+        } else {
+            None
+        }
     }
 
     /// The board slot with the lowest comp weight, when that weight is not
@@ -534,7 +599,7 @@ impl Planner {
 
     /// With a full board, sell a card that is not in the comp to make room for
     /// a core card in hand or in the Tavern. This is the same Balinda rule as
-    /// the Shell cycle: the card not in the comp goes, never a core one.
+    /// the Shell line: the card not in the comp goes, never a core one.
     fn make_room_action(&self, game: &Game, p: usize) -> Option<Action> {
         let pl = &game.players[p];
         if !pl.board.is_full() {
@@ -615,31 +680,6 @@ impl Planner {
             }
         }
         v
-    }
-
-    /// A cycle that leaves the position no worse and something better (the
-    /// search's dominance judge). The Shell rule already caught its own.
-    fn dominating_cycle(&self, game: &Game, p: usize) -> Option<Action> {
-        let before = Box::new(Position::of(game, p));
-        let mut mask = [false; N_ACTIONS];
-        game.legal_mask(&mut mask);
-        for i in 0..N_ACTIONS {
-            if !mask[i] {
-                continue;
-            }
-            let Some(a) = Action::from_index(i) else { continue };
-            if !matches!(a, Action::CycleShop(_) | Action::CycleHand(_)) {
-                continue;
-            }
-            let mut copy = Box::new(game.clone());
-            if copy.step(a).is_err() {
-                continue;
-            }
-            if before.judge(&copy).dominates {
-                return Some(a);
-            }
-        }
-        None
     }
 
     // ---- scoring --------------------------------------------------------

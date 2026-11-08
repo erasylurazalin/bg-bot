@@ -8,7 +8,7 @@ use bgcore::comps::Comps;
 use bgcore::game::PendingChooseOne;
 use bgcore::overlay::{
     F_ACTIVE, F_ENABLER_OFFERED, F_ENABLER_TAKEN, F_FORCED_SELL, F_SHELL_LEGAL, F_SHELL_TAKEN,
-    OVERLAY_FLAGS, Overlay,
+    OVERLAY_FLAGS, Overlay, ShellLine,
 };
 use bgcore::{Action, Data, Game, N_ACTIONS};
 
@@ -84,7 +84,7 @@ fn the_beetle_comp_has_its_overlay_cards() {
 }
 
 #[test]
-fn the_shell_is_forced_after_a_loss_with_room() {
+fn the_shell_line_is_buy_then_play_then_sell() {
     let d = data();
     let o = Overlay::new(comps(&d), 2.0, &d);
     let mut g = sandbox(7);
@@ -93,12 +93,55 @@ fn the_shell_is_forced_after_a_loss_with_room() {
     place(&mut g, 0, 0, "Ravaging Scorpid", false);
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
+    let mut manual = g.clone();
+    let gold = g.players[0].gold;
+
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), Some(Action::CycleShop(0)));
+    let buy = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the buy");
+    assert!(matches!(buy, Action::Buy(_)), "{buy:?}");
+    assert_eq!(line.turn, g.turn);
     assert_eq!(f[F_SHELL_LEGAL], 1);
     assert_eq!(f[F_SHELL_TAKEN], 1);
-    assert_eq!(f[F_ACTIVE], 1);
+    g.step(buy).unwrap();
+
+    let mut f = flags();
+    let play = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the play");
+    assert_eq!(play, Action::Play { hand: 0, pos: 1 });
+    assert_eq!(line.slot, Some(1));
+    g.step(play).unwrap();
+
+    let mut f = flags();
+    let sell = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the sell");
+    assert_eq!(sell, Action::Sell(1));
+    assert_eq!(line, ShellLine::default());
+    g.step(sell).unwrap();
+
+    manual.step(Action::Buy(0)).unwrap();
+    manual.step(Action::Play { hand: 0, pos: 1 }).unwrap();
+    manual.step(Action::Sell(1)).unwrap();
+    assert_eq!(g.players[0], manual.players[0], "the line is the hand-played line");
+    assert_eq!(g.pool, manual.pool);
+    assert_eq!(g.players[0].gold, gold + 2, "+2 Gold after a loss");
+    assert_eq!(g.players[0].board.len(), 1, "the one board minion is still there");
+    assert!(g.players[0].hand.is_empty());
+}
+
+#[test]
+fn a_shell_already_on_the_board_is_not_sold() {
+    let d = data();
+    let o = Overlay::new(comps(&d), 2.0, &d);
+    let mut g = sandbox(8);
+    ready(&mut g);
+    g.players[0].lost_last_combat = true;
+    place(&mut g, 0, 0, "Tortollan Blue Shell", false);
+    mine(&mut g);
+    let mut line = ShellLine::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
+    assert_eq!(line, ShellLine::default());
 }
 
 #[test]
@@ -110,9 +153,10 @@ fn the_shell_is_not_forced_without_a_loss() {
     place(&mut g, 0, 0, "Ravaging Scorpid", false);
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), None);
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
     assert_eq!(f[F_SHELL_LEGAL], 0);
 }
 
@@ -130,9 +174,10 @@ fn a_full_board_shell_sells_the_non_comp_card() {
     }
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    let a = o.decide(&g, 0, &mut bonus, &mut f).expect("a forced sale");
+    let a = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("a forced sale");
     let Action::Sell(slot) = a else { panic!("not a sale: {a:?}") };
     assert_eq!(g.data.cards.get(g.players[0].board[slot as usize].card).name, "Microbot");
     assert_eq!(f[F_SHELL_LEGAL], 1);
@@ -152,9 +197,10 @@ fn a_full_board_shell_is_skipped_without_an_active_comp() {
     }
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), None);
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
     assert_eq!(f[F_SHELL_LEGAL], 0);
 }
 
@@ -169,9 +215,10 @@ fn an_enabler_at_a_discover_is_taken() {
     g.players[0].discover.push(banana);
     g.players[0].discover.push(scorp);
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), Some(Action::Choose(1)));
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), Some(Action::Choose(1)));
     assert_eq!(f[F_ENABLER_OFFERED], 1);
     assert_eq!(f[F_ENABLER_TAKEN], 1);
     assert_eq!(f[F_ACTIVE], 0, "not active until the card is taken");
@@ -186,9 +233,10 @@ fn an_enabler_is_not_taken_outside_the_lobby() {
     let scorp = g.data.cards.by_name("Ravaging Scorpid").unwrap();
     g.players[0].discover.push(scorp);
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), None);
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
     assert_eq!(f[F_ENABLER_OFFERED], 0);
 }
 
@@ -211,9 +259,10 @@ fn a_choose_one_direct_card_enabler_is_taken() {
         repeats: 1,
     });
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), Some(Action::Choose(1)));
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), Some(Action::Choose(1)));
     assert_eq!(f[F_ENABLER_TAKEN], 1);
 }
 
@@ -231,9 +280,10 @@ fn payoff_and_filler_get_the_bonus() {
     place(&mut g, 0, 2, "Banana Slamma", false);
     place(&mut g, 0, 2, "Turquoise Skitterer", false);
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), None);
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
     assert_eq!(bonus[Action::Buy(0).index()], 4.0, "payoff buy");
     assert_eq!(bonus[Action::Buy(1).index()], 2.0, "filler buy");
     assert_eq!(bonus[Action::Play { hand: 0, pos: 2 }.index()], 4.0, "payoff play");
@@ -255,9 +305,10 @@ fn a_full_board_gets_a_bonus_for_selling_a_non_comp_card() {
     }
     place(&mut g, 0, 1, "Turquoise Skitterer", false);
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), None);
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
     assert_eq!(bonus[Action::Sell(0).index()], f32::NEG_INFINITY);
     assert_eq!(bonus[Action::Sell(1).index()], 2.0, "a non-comp card is worth selling");
 }
@@ -272,9 +323,10 @@ fn no_active_comp_changes_nothing() {
     place(&mut g, 0, 2, "Banana Slamma", false);
     place(&mut g, 0, 2, "Turquoise Skitterer", false);
     mine(&mut g);
+    let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut bonus, &mut f), None);
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
     assert!(bonus.iter().all(|&b| b == 0.0));
     assert!(f.iter().all(|&v| v == 0));
 }

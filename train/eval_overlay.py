@@ -306,8 +306,10 @@ def main():
                 flush=True,
             )
 
-    # The required exact off check.
-    print("\n512-game overlay-off check (must be 5.867):")
+    # The off check. The 200-action build's baseline was 5.867; removing the
+    # cycle actions renormalises the 183-action policy, so this is the new
+    # plain-network number.
+    print("\n512-game overlay-off check (the 200-action baseline was 5.867):")
     rec, _ = eval_search.play(net, 512, args.seed, dev, lineup=(1, 0, 0, 0, 0, 7),
                               boards=specs, gen_seed=args.seed, track=False)
     s = eval_search.summarize(rec)

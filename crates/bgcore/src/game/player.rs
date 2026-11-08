@@ -150,7 +150,6 @@ impl Player {
             pending_target: None,
             pending_shop_target: None,
             pending_discard: None,
-            pending_cycle: None,
             hogrider_pending: 0,
             pending_after_play: None,
             choose_queue: ArrayVec::new(),
