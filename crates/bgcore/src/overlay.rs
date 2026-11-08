@@ -1,9 +1,14 @@
 //! The comp overlay: standing rules and logit bonuses on top of a network.
 //!
 //! The overlay is not a bot. It returns a forced action or nothing, and a
-//! per-action bonus for the network's logits. With no active comp it only
-//! applies the Shell rule and takes an offered enabler; otherwise it leaves
-//! the network alone.
+//! per-action bonus for the network's logits. With no active comp it applies
+//! the dominance layer and takes an offered enabler; otherwise it leaves the
+//! network alone.
+//!
+//! The dominance layer is the general form of the Blue Shell play: at a shop
+//! decision it tries short buy-play-sell lines on copies of the game and
+//! forces the first line whose end strictly dominates the start
+//! (`crate::search::Position`). The card names are never consulted.
 //!
 //! A comp is ACTIVE for a player once one of its `enabler` cards is on that
 //! player's board or in their hand. While active: an enabler or payoff cannot
@@ -15,25 +20,89 @@ use crate::cards::{ChooseOption, SpellEffect};
 use crate::comps::{Comp, Comps};
 use crate::game::Game;
 use crate::minion::CardId;
-use crate::{Action, BOARD, DISCOVER, N_ACTIONS, Data};
+use crate::search::Position;
+use crate::{Action, BOARD, DISCOVER, HAND, N_ACTIONS, Data};
 
 /// The overlay's per-decision flags, in `[i32; OVERLAY_FLAGS]` order.
 pub const OVERLAY_FLAGS: usize = 6;
-pub const F_SHELL_LEGAL: usize = 0;
-pub const F_SHELL_TAKEN: usize = 1;
+/// A new dominating line started at this decision; the action is its first.
+pub const F_LINE_FOUND: usize = 0;
+/// This action is part of a dominating line (its first action included).
+pub const F_LINE_FORCED: usize = 1;
 pub const F_ENABLER_OFFERED: usize = 2;
 pub const F_ENABLER_TAKEN: usize = 3;
 pub const F_ACTIVE: usize = 4;
-pub const F_FORCED_SELL: usize = 5;
+/// No longer set; kept so the flag array stays six wide.
+pub const F_UNUSED: usize = 5;
 
-/// The Tortollan Blue Shell line for one seat: buy, play, sell as three
-/// ordinary actions. `turn` is 0 when no line is running; `slot` is the board
-/// slot the line put the Shell in, so a Shell that was already on the board
-/// for another reason is not sold.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The longest forced line, in ordinary actions. A line buys or plays one
+/// card, sells it, then plays and sells what that card generated. The game
+/// caps a turn at 60 actions, so this is only a bound on one line.
+pub const LINE_MAX: usize = 24;
+
+/// The dominating line for one seat: one ordinary action per step. `turn` is
+/// 0 when no line is running. `slot` is kept for the comp planner, which has
+/// its own Shell rule; the overlay does not use it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShellLine {
     pub turn: u32,
     pub slot: Option<u8>,
+    plan: [u8; LINE_MAX],
+    len: u8,
+    next: u8,
+}
+
+impl Default for ShellLine {
+    fn default() -> ShellLine {
+        ShellLine { turn: 0, slot: None, plan: [0; LINE_MAX], len: 0, next: 0 }
+    }
+}
+
+impl ShellLine {
+    fn clear(&mut self) {
+        *self = ShellLine::default();
+    }
+
+    fn start(&mut self, turn: u32, plan: &Plan) {
+        *self = ShellLine::default();
+        self.turn = turn;
+        self.len = plan.len as u8;
+        for (slot, a) in self.plan.iter_mut().zip(plan.actions.iter()) {
+            *slot = a.index() as u8;
+        }
+        self.next = 0;
+    }
+
+    fn next_action(&mut self) -> Option<Action> {
+        if self.next >= self.len {
+            return None;
+        }
+        let a = Action::from_index(self.plan[self.next as usize] as usize)?;
+        self.next += 1;
+        Some(a)
+    }
+}
+
+/// One judged line: its ordinary actions in order.
+#[derive(Clone, Copy)]
+struct Plan {
+    actions: [Action; LINE_MAX],
+    len: usize,
+}
+
+impl Plan {
+    fn new() -> Plan {
+        Plan { actions: [Action::Roll; LINE_MAX], len: 0 }
+    }
+
+    fn push(&mut self, a: Action) -> Option<()> {
+        if self.len >= LINE_MAX {
+            return None;
+        }
+        self.actions[self.len] = a;
+        self.len += 1;
+        Some(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,12 +117,18 @@ enum Pick {
 pub struct Overlay {
     pub comps: Comps,
     pub bonus: f32,
-    shell: Option<CardId>,
+    /// Whether the dominance layer runs (on unless `set_dominance(false)`).
+    pub dominance: bool,
 }
 
 impl Overlay {
-    pub fn new(comps: Comps, bonus: f32, data: &Data) -> Overlay {
-        Overlay { comps, bonus, shell: data.cards.by_name("Tortollan Blue Shell") }
+    pub fn new(comps: Comps, bonus: f32, _data: &Data) -> Overlay {
+        Overlay { comps, bonus, dominance: true }
+    }
+
+    /// Turn the dominance layer on or off without reloading the comp library.
+    pub fn set_dominance(&mut self, on: bool) {
+        self.dominance = on;
     }
 
     /// The comp that is active for `p`, if any.
@@ -83,10 +158,37 @@ impl Overlay {
         if active.is_some() {
             flags[F_ACTIVE] = 1;
         }
-        if let Some(a) = self.shell(game, p, line, active, flags) {
-            return Some(a);
+        // A line already judged plays its next action, one per decision.
+        if line.turn != 0 && line.turn != game.turn {
+            line.clear();
+        }
+        if line.turn == game.turn {
+            if let Some(a) = line.next_action() {
+                if game.is_legal(a) {
+                    flags[F_LINE_FORCED] = 1;
+                    if line.next >= line.len {
+                        line.clear();
+                    }
+                    return Some(a);
+                }
+                line.clear();
+            } else {
+                line.clear();
+            }
         }
         if let Some(a) = self.choice(game, p, active, flags) {
+            return Some(a);
+        }
+        if self.dominance
+            && let Some(plan) = self.dominating_line(game, p)
+        {
+            line.start(game.turn, &plan);
+            let a = line.next_action()?;
+            flags[F_LINE_FOUND] = 1;
+            flags[F_LINE_FORCED] = 1;
+            if line.next >= line.len {
+                line.clear();
+            }
             return Some(a);
         }
         if let Some(ci) = active {
@@ -99,123 +201,137 @@ impl Overlay {
         comp.tribes.is_empty() || comp.tribes.iter().any(|t| game.lobby.has(*t))
     }
 
-    fn shell(
-        &self,
-        game: &Game,
-        p: usize,
-        line: &mut ShellLine,
-        active: Option<usize>,
-        flags: &mut [i32; OVERLAY_FLAGS],
-    ) -> Option<Action> {
-        let shell = self.shell?;
+    /// The first dominating line from this shop decision, if any. Lines are
+    /// tried in the search's order: each Tavern minion, then each hand card.
+    fn dominating_line(&self, game: &Game, p: usize) -> Option<Plan> {
+        if !game.shopping(p) {
+            return None;
+        }
         let pl = &game.players[p];
-        if line.turn != 0 && line.turn != game.turn {
-            *line = ShellLine::default();
-        }
-        if !pl.lost_last_combat {
-            *line = ShellLine::default();
-            return None;
-        }
-        // A line already started: play the Shell in hand, then sell the one
-        // this line played. The stored slot tells it from a Shell that was
-        // already on the board for another reason.
-        if line.turn == game.turn {
-            if let Some(h) = pl.hand.iter().position(|m| m.card == shell) {
-                let pos = pl.board.len() as u8;
-                let a = Action::Play { hand: h as u8, pos };
-                if game.is_legal(a) {
-                    flags[F_SHELL_LEGAL] = 1;
-                    flags[F_SHELL_TAKEN] = 1;
-                    line.slot = Some(pos);
-                    return Some(a);
-                }
-                return self.make_room(game, p, active, flags);
-            }
-            if let Some(slot) = line
-                .slot
-                .filter(|&slot| {
-                    (slot as usize) < pl.board.len() && pl.board[slot as usize].card == shell
-                })
-                .or_else(|| pl.board.iter().position(|m| m.card == shell).map(|s| s as u8))
-            {
-                let a = Action::Sell(slot);
-                if game.is_legal(a) {
-                    flags[F_SHELL_LEGAL] = 1;
-                    flags[F_SHELL_TAKEN] = 1;
-                    *line = ShellLine::default();
-                    return Some(a);
-                }
-            }
-            *line = ShellLine::default();
-            return None;
-        }
-        // Start a line: a Shell in the Tavern is bought first, a Shell in
-        // hand is played first. A Shell already on the board is not sold
-        // unless this line put it there.
-        let shop = pl.shop.iter().position(|m| m.card == shell);
-        let hand = pl.hand.iter().position(|m| m.card == shell);
-        let shop_ok = shop.is_some_and(|_| {
-            pl.gold >= game.data.cards.get(shell).cost && !pl.hand.is_full()
-        });
-        if shop_ok && !pl.board.is_full() {
-            let a = Action::Buy(shop.unwrap() as u8);
-            if game.is_legal(a) {
-                flags[F_SHELL_LEGAL] = 1;
-                flags[F_SHELL_TAKEN] = 1;
-                line.turn = game.turn;
-                line.slot = None;
-                return Some(a);
-            }
-        }
+        // A line plays the card it bought or took from hand, so it needs a
+        // free board slot. On a full board the only way to make one is to
+        // sell a minion first, and a sale on its own loses a minion: no line
+        // from a full board can dominate.
         if pl.board.is_full() {
-            // Only sell for a Shell the line can actually use.
-            if !shop_ok && hand.is_none() {
-                return None;
-            }
-            return self.make_room(game, p, active, flags);
+            return None;
         }
-        if let Some(h) = hand {
-            let pos = pl.board.len() as u8;
+        let pos = pl.board.len() as u8;
+        for s in 0..pl.shop.len() {
+            let a = Action::Buy(s as u8);
+            if game.is_legal(a)
+                && let Some(plan) = self.line_from(game, p, a)
+            {
+                return Some(plan);
+            }
+        }
+        for h in 0..pl.hand.len() {
             let a = Action::Play { hand: h as u8, pos };
-            if game.is_legal(a) {
-                flags[F_SHELL_LEGAL] = 1;
-                flags[F_SHELL_TAKEN] = 1;
-                line.turn = game.turn;
-                line.slot = Some(pos);
-                return Some(a);
+            if game.is_legal(a)
+                && let Some(plan) = self.line_from(game, p, a)
+            {
+                return Some(plan);
             }
         }
         None
     }
 
-    /// On a full board, sell the weakest card that is not in the active comp.
-    /// With no active comp the rule does not know what to sell, so it skips.
-    fn make_room(
-        &self,
-        game: &Game,
-        p: usize,
-        active: Option<usize>,
-        flags: &mut [i32; OVERLAY_FLAGS],
-    ) -> Option<Action> {
+    /// Try one line: buy (for a Tavern card) and play the source card, sell
+    /// it, then play and sell whatever the line put in the hand. A line that
+    /// opens a Discover, a Choose One or another answer is dropped: the
+    /// overlay would answer it, but answering on a copy would need the
+    /// network's choice, and the short lines this layer judges have no
+    /// business making one. A generated card that cannot be played is left in
+    /// the hand, which the dominance judge counts as the gain it is.
+    fn line_from(&self, game: &Game, p: usize, source: Action) -> Option<Plan> {
+        let before = Position::of(game, p);
         let pl = &game.players[p];
-        if !pl.board.is_full() {
+        let hand_before: [CardId; HAND] =
+            std::array::from_fn(|i| pl.hand.get(i).map_or(CardId::MAX, |m| m.card));
+        let hand_len = pl.hand.len();
+        let mut sim = game.clone();
+        let mut plan = Plan::new();
+        let (card, played_pos) = match source {
+            Action::Buy(s) => {
+                let card = pl.shop.get(s as usize)?.card;
+                let pos = pl.board.len() as u8;
+                plan.push(source)?;
+                sim.step(source).ok()?;
+                let hand = sim.players[p].hand.iter().rposition(|m| m.card == card)?;
+                let play = Action::Play { hand: hand as u8, pos };
+                plan.push(play)?;
+                sim.step(play).ok()?;
+                (card, pos)
+            }
+            Action::Play { hand, pos } => {
+                let card = pl.hand.get(hand as usize)?.card;
+                plan.push(source)?;
+                sim.step(source).ok()?;
+                (card, pos)
+            }
+            _ => return None,
+        };
+        // A source whose play waits on an answer is out: the layer leaves
+        // Discover, Choose One, target and discard lines alone.
+        if !sim.shopping(p) || sim.current_player() != Some(p) {
             return None;
         }
-        let ci = active?;
-        let comp = &self.comps.comps[ci];
-        let sell = (0..pl.board.len())
-            .filter(|&s| !comp.in_comp(pl.board[s].card))
-            .min_by_key(|&s| {
-                let m = &pl.board[s];
-                m.attack + m.health
-            })?;
-        let a = Action::Sell(sell as u8);
-        if game.is_legal(a) {
-            flags[F_SHELL_LEGAL] = 1;
-            flags[F_FORCED_SELL] = 1;
-            return Some(a);
+        if sim.players[p].board.get(played_pos as usize).map(|m| m.card) != Some(card) {
+            return None;
         }
-        None
+        // What the play put in the hand, as a multiset difference, before the
+        // played card is sold (a sale may give cards too; those are gains).
+        let mut generated = [0 as CardId; HAND];
+        let mut n_generated = 0;
+        let mut used = [false; HAND];
+        for m in &sim.players[p].hand {
+            if let Some(i) = (0..hand_len).find(|&i| !used[i] && hand_before[i] == m.card) {
+                used[i] = true;
+            } else if n_generated < HAND {
+                generated[n_generated] = m.card;
+                n_generated += 1;
+            }
+        }
+        // Sell the played card first, which frees its slot for the cards the
+        // play generated. The reverse order (generated first) cannot help on
+        // a full board and gives up the slot a generated card needs.
+        let sell = Action::Sell(played_pos);
+        if sim.is_legal(sell) {
+            plan.push(sell)?;
+            sim.step(sell).ok()?;
+        }
+        for &card in &generated[..n_generated] {
+            let Some(hand) = sim.players[p].hand.iter().position(|m| m.card == card) else {
+                continue;
+            };
+            let pos = sim.players[p].board.len() as u8;
+            if pos >= BOARD as u8 {
+                // No slot for it: it stays in the hand, a gain.
+                continue;
+            }
+            let play = Action::Play { hand: hand as u8, pos };
+            if !sim.is_legal(play) {
+                continue;
+            }
+            plan.push(play)?;
+            sim.step(play).ok()?;
+            if !sim.shopping(p) || sim.current_player() != Some(p) {
+                return None;
+            }
+            // A spell leaves no minion at the slot: only sell what was put
+            // there, never the minion that happened to stand in that slot.
+            if sim.players[p].board.get(pos as usize).map(|m| m.card) != Some(card) {
+                continue;
+            }
+            let sell = Action::Sell(pos);
+            if sim.is_legal(sell) {
+                plan.push(sell)?;
+                sim.step(sell).ok()?;
+            }
+        }
+        if !sim.shopping(p) || sim.current_player() != Some(p) {
+            return None;
+        }
+        if before.judge(&sim).dominates { Some(plan) } else { None }
     }
 
     fn choice(

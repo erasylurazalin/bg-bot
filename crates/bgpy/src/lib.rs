@@ -336,12 +336,16 @@ impl VecEnv {
     }
 
     /// Load the comp library for the overlay. `bonus` is B, the payoff
-    /// purchase/play bonus. The overlay is off until this is called.
-    fn set_overlay(&mut self, comps: &str, bonus: f32) -> PyResult<()> {
+    /// purchase/play bonus. `dominance` says whether the dominance layer runs
+    /// (it is on by default). The overlay is off until this is called.
+    #[pyo3(signature = (comps, bonus, dominance=true))]
+    fn set_overlay(&mut self, comps: &str, bonus: f32, dominance: bool) -> PyResult<()> {
         let text = std::fs::read_to_string(comps)
             .map_err(|e| PyValueError::new_err(format!("{comps}: {e}")))?;
         let comps = Comps::from_toml(&text, &self.data).map_err(PyValueError::new_err)?;
-        self.overlay_rules = Some(Arc::new(Overlay::new(comps, bonus, &self.data)));
+        let mut rules = Overlay::new(comps, bonus, &self.data);
+        rules.set_dominance(dominance);
+        self.overlay_rules = Some(Arc::new(rules));
         Ok(())
     }
 
@@ -2148,6 +2152,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("N_ACTIONS", N_ACTIONS)?;
     m.add("N_CARDS", n_cards)?;
     m.add("PLAYERS", PLAYERS)?;
+    m.add("OVERLAY_FLAGS", OVERLAY_FLAGS)?;
     m.add("MAX_TIER", MAX_TIER as usize)?;
     m.add("TRIBES", TRIBES)?;
     m.add("BOARD", bgcore::BOARD)?;
