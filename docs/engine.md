@@ -1827,12 +1827,24 @@ sell it) and `Action::CycleHand(j)` (play hand slot j, sell it) are one
 action that runs the whole line through the ordinary `step`, one ordinary
 action at a time; each substep counts towards the 200-action turn cap. After
 the played card is sold, every minion the line generated is played and sold
-in hand order (a generated spell cannot be sold, and a generated minion
-whose play opens a choice is left in hand). The action is legal only for a
-minion, with a free board slot, no open choice, and, for `CycleShop`, the
-Gold for the buy and room in the hand; a card whose own play opens a choice
-(Choose One, Discover, target, discard) has no cycle action, which leaves 17
-of the 348 minion cards out. `CardDb::play_opens_choice` is the data test.
+in hand order (a generated spell stays in hand, except the Triple Reward,
+whose Discover is part of the line). A play or a sell that
+opens a choice pauses the line: `Player.pending_cycle` holds the phase (play
+the bought card, sell the played card, or sell the generated cards), the
+played card's slot and id, the hand before the line, the hand when the pause
+began, and the choice's payoff cards. The normal choice actions answer it;
+once nothing is left to answer, that same answering `step` finishes the line
+from the marker. The payoff cards (the Discovered card, the Choose One card,
+a triple reward) stay in hand; the line's other generated minions are sold.
+The marker is `Copy`, fixed-size card-id arrays, no heap. A choice that
+loses every answer fizzles and drops the marker, and a line whose hero dies
+or whose game ends drops it too. A triple mid-line adds the Triple Reward
+spell to hand; the line plays that spell, so its Discover pauses like the
+card's own choice, and the Discovered card stays. `Faceless Manipulator` is the
+one excluded minion: its play replaces it with the copied card, so there is
+no played card left to sell (`CardDb::cycle_play_unsafe`). The action is
+legal only for a minion, with a free board slot, no open choice, and, for
+`CycleShop`, the Gold for the buy and room in the hand.
 The new kind is last in `ACTION_KINDS` (17 actions, `N_ACTIONS` 200), so an
 old recording's action indices still mean the same actions.
 

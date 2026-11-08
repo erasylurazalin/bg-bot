@@ -4634,6 +4634,14 @@ impl CardDb {
         })
     }
 
+    /// Whether a cycle cannot finish after this minion's play because the
+    /// play replaces it: Faceless Manipulator becomes the copied minion, so
+    /// there is no "played card" left to sell. This is the one data-driven
+    /// cycle exclusion; every other choice is answered and then finished.
+    pub fn cycle_play_unsafe(&self, id: CardId) -> bool {
+        matches!(self.get(id).battlecry, Some(Effect::BecomeCopyChosen))
+    }
+
     /// The types of a minion: its card's, or all ten when a Dark Gift gives
     /// it every type (Amalgamation). Every tribe question about a minion on a
     /// board, in a hand or in a fight goes through here.

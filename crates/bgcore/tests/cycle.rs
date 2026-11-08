@@ -213,18 +213,33 @@ fn cycle_legality_is_cheap_and_strict() {
     mine(&mut g);
     assert!(!legal(&g, Action::CycleHand(0)), "a hand spell is not a cycle");
 
-    // The card's own play opens a Choose One.
+    // The card's own play opens a Choose One: it is a cycle that pauses on
+    // the choice now.
     let mut g = sandbox(31);
     ready(&mut g);
     place(&mut g, 0, 2, "Fearless Foodie", false);
     mine(&mut g);
     assert!(g.data.cards.play_opens_choice(g.players[0].shop[0].card));
-    assert!(!legal(&g, Action::CycleShop(0)), "a Choose One play is not one action");
+    assert!(legal(&g, Action::CycleShop(0)), "a Choose One can be cycled");
     let mut g = sandbox(37);
     ready(&mut g);
     place(&mut g, 0, 1, "Fearless Foodie", false);
     mine(&mut g);
-    assert!(!legal(&g, Action::CycleHand(0)), "a Choose One play is not one action");
+    assert!(legal(&g, Action::CycleHand(0)), "a Choose One can be cycled");
+
+    // Faceless Manipulator is the one unsafe play: it becomes the copied
+    // card, so there is no played card left to sell.
+    let mut g = sandbox(38);
+    ready(&mut g);
+    place(&mut g, 0, 2, "Faceless Manipulator", false);
+    mine(&mut g);
+    assert!(g.data.cards.cycle_play_unsafe(g.players[0].shop[0].card));
+    assert!(!legal(&g, Action::CycleShop(0)), "Faceless has no played card to sell");
+    let mut g = sandbox(39);
+    ready(&mut g);
+    place(&mut g, 0, 1, "Faceless Manipulator", false);
+    mine(&mut g);
+    assert!(!legal(&g, Action::CycleHand(0)), "Faceless has no played card to sell");
 
     // And a plain minion is fine.
     let mut g = sandbox(41);
@@ -234,4 +249,125 @@ fn cycle_legality_is_cheap_and_strict() {
     assert!(legal(&g, Action::CycleHand(0)));
 }
 
+
+
+#[test]
+fn foodie_choice_cycle_matches_the_hand_line() {
+    let mut g = sandbox(43);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Felboar", false);
+    place(&mut g, 0, 2, "Fearless Foodie", false);
+    mine(&mut g);
+    assert!(legal(&g, Action::CycleShop(0)));
+
+    let mut hand = g.clone();
+    hand.step(Action::Buy(0)).unwrap();
+    hand.step(Action::Play { hand: 0, pos: 1 }).unwrap();
+    hand.step(Action::Choose(1)).unwrap();
+    hand.step(Action::Sell(1)).unwrap();
+
+    g.step(Action::CycleShop(0)).unwrap();
+    assert!(g.players[0].pending_cycle.is_some(), "the Choose One pauses the cycle");
+    assert!(g.choice_waiting(0));
+    assert!(!legal(&g, Action::EndTurn), "the open choice blocks End Turn");
+    assert!(g.step(Action::EndTurn).is_err());
+    g.step(Action::Choose(1)).unwrap();
+    assert!(g.players[0].pending_cycle.is_none(), "the marker clears");
+    assert_eq!(g.players[0], hand.players[0], "the cycle is the same line");
+    assert_eq!(g.pool, hand.pool, "every pool copy came back the same way");
+}
+
+#[test]
+fn discover_cycle_keeps_the_discovered_spell() {
+    let mut g = sandbox(47);
+    ready(&mut g);
+    place(&mut g, 0, 2, "Rodeo Performer", false);
+    mine(&mut g);
+    assert!(legal(&g, Action::CycleShop(0)));
+
+    let mut hand = g.clone();
+    hand.step(Action::Buy(0)).unwrap();
+    hand.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+    hand.step(Action::Choose(0)).unwrap();
+    hand.step(Action::Sell(0)).unwrap();
+
+    g.step(Action::CycleShop(0)).unwrap();
+    assert!(g.players[0].pending_cycle.is_some(), "the Discover pauses the cycle");
+    assert!(g.choice_waiting(0));
+    g.step(Action::Choose(0)).unwrap();
+    assert!(g.players[0].pending_cycle.is_none());
+    assert_eq!(g.players[0], hand.players[0], "the cycle is the same line");
+    assert_eq!(g.pool, hand.pool);
+    assert_eq!(g.players[0].hand.len(), 1, "the Discovered spell stays");
+    assert!(db().get(g.players[0].hand[0].card).is_spell());
+}
+
+#[test]
+fn a_generated_choice_minion_pauses_and_finishes() {
+    for seed in 50..400 {
+        let mut g = sandbox(seed);
+        ready(&mut g);
+        place(&mut g, 0, 2, "Highkeeper Ra", false);
+        mine(&mut g);
+        let mut probe = g.clone();
+        probe.step(Action::Buy(0)).unwrap();
+        probe.step(Action::Play { hand: 0, pos: 0 }).unwrap();
+        let Some(_) = probe
+            .players[0]
+            .hand
+            .iter()
+            .find(|m| db().get(m.card).name == "Veteran Brigand")
+        else {
+            continue;
+        };
+        g.step(Action::CycleShop(0)).unwrap();
+        assert!(g.players[0].pending_cycle.is_some(), "the generated Choose One pauses");
+        assert!(g.choice_waiting(0));
+        g.step(Action::Choose(0)).unwrap();
+        assert!(g.players[0].pending_cycle.is_none());
+        assert_eq!(g.players[0].gold, 9, "Ra and Brigand bought and sold");
+        assert!(g.players[0].board.is_empty());
+        return;
+    }
+    panic!("no seed in 50..400 made Highkeeper Ra give Veteran Brigand");
+}
+
+#[test]
+fn a_triple_on_the_buy_finishes_through_the_golden_choice() {
+    let mut g = sandbox(53);
+    ready(&mut g);
+    place(&mut g, 0, 1, "Fearless Foodie", false);
+    place(&mut g, 0, 1, "Fearless Foodie", false);
+    place(&mut g, 0, 2, "Fearless Foodie", false);
+    mine(&mut g);
+    assert!(legal(&g, Action::CycleShop(0)));
+
+    let gold = g.players[0].gold;
+    g.step(Action::CycleShop(0)).unwrap();
+    // The golden Foodie's Choose One pauses first; its eight Gems are the
+    // payoff. The Triple Reward spell the buy generated is then played as
+    // part of the line, and its Discover pauses too.
+    assert!(g.players[0].pending_cycle.is_some(), "the golden Foodie's choice pauses");
+    assert!(g.choice_waiting(0));
+    g.step(Action::Choose(1)).unwrap();
+    assert!(g.players[0].pending_cycle.is_some(), "the Triple Reward Discover pauses");
+    assert!(g.choice_waiting(0));
+    g.step(Action::Choose(0)).unwrap();
+    assert!(g.players[0].pending_cycle.is_none());
+    assert_eq!(g.players[0].gold, gold - 2, "buy 3, sell the golden Foodie for 1");
+    assert_eq!(
+        g.players[0].hand.iter().filter(|m| db().get(m.card).blood_gem).count(),
+        8,
+        "the golden Foodie's eight Gems stay"
+    );
+    let reward: Vec<_> = g.players[0]
+        .hand
+        .iter()
+        .filter(|m| !db().get(m.card).blood_gem)
+        .map(|m| m.card)
+        .collect();
+    assert_eq!(reward.len(), 1, "one Triple Reward card stays: {reward:?}");
+    assert!(!db().get(reward[0]).is_spell());
+    assert!(!g.players[0].hand.iter().any(|m| db().get(m.card).name == "Fearless Foodie"));
+}
 

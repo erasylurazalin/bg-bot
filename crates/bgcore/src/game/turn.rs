@@ -399,6 +399,9 @@ impl Game {
     }
 
     pub(super) fn finish_shop(&mut self, p: usize) {
+        // A paused cycle cannot outlive the shop turn: the cap or End Turn
+        // ends the line where it stands.
+        self.players[p].pending_cycle = None;
         self.resolve_open_choices(p);
         self.resolve_doomed(p);
         self.resolve_hogrider(p);
@@ -458,6 +461,11 @@ impl Game {
     }
 
     pub(super) fn start_turn(&mut self) {
+        // A cycle line never spans a turn: if a choice or a knockout ended
+        // the last one, the marker is stale.
+        for p in 0..PLAYERS {
+            self.players[p].pending_cycle = None;
+        }
         self.turn += 1;
         let turn = self.turn;
         let base_turn_gold = self.data.rules.gold(turn);
