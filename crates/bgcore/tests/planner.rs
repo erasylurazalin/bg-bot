@@ -174,13 +174,13 @@ fn it_commits_to_beetles_and_switches_to_scam_on_give_up() {
     let c = comps(&d);
     let mut g = sandbox(17);
     ready(&mut g);
-    place(&mut g, 0, 0, "Banana Slamma", false);
+    place(&mut g, 0, 0, "Ravaging Scorpid", false);
     g.turn = 5;
     g.players[0].tier = 3;
     mine(&mut g);
     let mut p = Planner::new(c, 17, &d);
     let _ = p.action(&g, 0);
-    assert_eq!(p.comp_name(), Some("beetles"), "Banana Slamma is a core signal");
+    assert_eq!(p.comp_name(), Some("beetles"), "Ravaging Scorpid is the signal");
     assert_eq!(p.state.committed_turn, Some(5));
 
     // Past the give-up turn, with only one weak core piece: drop to scam.

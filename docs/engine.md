@@ -34,6 +34,7 @@ crates/
     src/bots.rs       random, standard-curve and rush-curve bots
     src/comps.rs      the comp library: cards by name, weights, signals, give-up, level
     src/planner.rs    the comp planner bot (see "The comp planner")
+    src/overlay.rs    the comp overlay: forced rules and logit bonuses (see "The comp overlay")
     src/rules.rs      Rules from rules.toml
     src/rng.rs        xoshiro256++, written here so replays never change
     src/record.rs     recorded sandbox games: TOML writer and the loader back into Minions
@@ -108,6 +109,7 @@ train/
                       judges, playouts (see "The shop-turn search")
   eval_search.py      the search's evaluation: N games plain against the
                       search, and the Blue Shell, Warden and cycle-rate tests
+  eval_overlay.py     the comp overlay's evaluation: N games, B 2/4/8, off
   status.py           prints a run's metrics.csv as a table
 ref/                  (git-ignored) Blizzard card data snapshots, see below
 docs/                 concept, pool analysis, mechanics inventory (a snapshot from before
@@ -1990,6 +1992,47 @@ name.
   plain. `bgbench fuzz ... --planner PATH` lets seat 0 play the planner while
   the fuzzer checks the invariants after every action.
 
+## The comp overlay
+
+`crates/bgcore/src/overlay.rs` is the rules-on-top-of-a-network layer
+(`docs/briefs/comp-overlay-1.md`): a forced action or nothing, plus a logit
+bonus per action. It is not a bot. The network plays by default; a comp
+becomes ACTIVE when one of its `enabler` cards is on the player's board or in
+their hand.
+
+- **The comp fields:** `enabler` (cards that turn the comp on), `payoff` (the
+  cards that matter) and `filler` (cards bought only to feed it). The old
+  planner fields stay. Beetles: enabler Ravaging Scorpid; payoffs Banana Slamma
+  and Ravaging Scorpid; filler Turquoise Skitterer, Forest Rover, Buzzing
+  Vermin and Headhunter Gryphon. Scam has no enabler in this round.
+- **Forced:** the Tortollan Blue Shell after a lost fight, when it is in the
+  Tavern, affordable and there is a free board slot, is the `CycleShop` action.
+  On a full board an active comp sells a card that is not in the comp first;
+  with no active comp the sale is skipped. A Discover or Choose One that offers
+  an enabler takes it when the comp's tribe is in the lobby; an active comp
+  takes a payoff, then a filler. The enabler/offered flags are in the overlay
+  stats array.
+- **Bonuses:** while a comp is active, buying or playing a payoff is worth
+  `B`, a filler `B/2`, and a full board sells a non-comp card for `B` when a
+  comp card waits in the hand or Tavern. Selling an enabler or a payoff is
+  masked with `-inf`. With no active comp the bonus array is all zero.
+- **`bgpy.VecEnv`:** `set_overlay(comps_path, B)` loads the rules,
+  `clear_overlay()` turns them off, `overlay(forced, bonus, flags)` fills the
+  arrays (n by 8 seats, `forced` -1 or an action, `bonus` n by 8 by
+  `N_ACTIONS`, `flags` n by 8 by 6), and `remember_boards()` must be called
+  after `observe` and before `step` when `final_boards()` is needed.
+  `final_boards()` returns the last completed game's board card ids per seat.
+  Only the current player's row is computed, because `Game::is_legal` is
+  current-player only; the other seats are neutral.
+- **`train/eval_overlay.py --games 2048 --bonus 0 2 4 8`** runs the network
+  seat against seven real boards. It prints the place with a 95% interval,
+  Shell legal/taken/rate, enabler offered/taken/active and active turn, the
+  active games' comp-board share and place, and the forced full-board sells.
+  It also prints the overlay call's cost per step (relative while a training
+  run is on the machine) and the 512-game overlay-off check, which must be
+  5.867 exactly. With no overlay it uses `train/eval_search.py`'s own
+  `play` function, so the off number is the baseline by construction.
+
 ## Era's turns, with Era's luck
 
 `train/era_turns.py` measures the bot on Era's own turns (the compiled plan's
@@ -2073,6 +2116,7 @@ cargo build --release -p bgbench
 ./target/release/bgbench collect-actions # write Era's action files, boards/actions/
 ./target/release/bgbench check-actions   # add up the turns of boards/actions/
 ./target/release/bgbench planner         # the comp planner against real boards
+.venv/bin/python train/eval_overlay.py --games 2048 --bonus 0 2 4 8
 cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 ```
 

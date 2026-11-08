@@ -20,6 +20,10 @@
 # the final board; scale = true means the card's own growth (improvements,
 # Magnetizations, Golden) is worth extra progress.
 #
+# enabler, payoff, filler: the overlay's cards. An enabler on the board or in
+# hand makes the comp ACTIVE. A payoff is worth a purchase/play bonus B, a
+# filler B/2. The overlay masks selling an enabler or a payoff.
+#
 # [comp.early] cards and strong_stats: what keeps the comp alive before it
 # comes together.
 #
@@ -55,6 +59,9 @@ fallback = false
 commit_turn = [4, 12]
 scales = "beetles"
 not_in_comp = ["Humming Bird", "Cage Gnawer", "Sewer Lord", "Hoarding Hyena"]
+enabler = ["Ravaging Scorpid"]
+payoff = ["Banana Slamma", "Ravaging Scorpid"]
+filler = ["Turquoise Skitterer", "Forest Rover", "Buzzing Vermin", "Headhunter Gryphon"]
 
 [[comp.core]]
 name = "Ravaging Scorpid"
@@ -112,6 +119,9 @@ draft = true
 fallback = true
 level = []
 scales = "none"
+enabler = []
+payoff = []
+filler = []
 
 # Scam has no level curve of its own: it is what the planner switches to when
 # another comp's give_up fires, or picks late when nothing else is there.

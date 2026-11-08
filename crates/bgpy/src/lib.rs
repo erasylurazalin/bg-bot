@@ -16,13 +16,16 @@ use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::comps::Comps;
+use bgcore::overlay::{Overlay, OVERLAY_FLAGS};
 use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{
     RealBoard, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
 };
 use bgcore::shop_replay::{SeatedStep, ShopSnapshot};
 use bgcore::search::Position;
-use bgcore::{ACTION_KINDS, Action, Data, Game, Keywords, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES};
+use bgcore::{
+    ACTION_KINDS, Action, BOARD, Data, Game, Keywords, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES,
+};
 use numpy::{PyReadonlyArray1, PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -117,6 +120,10 @@ struct Env {
     rng: Rng,
     /// Seats whose placement was already reported.
     reported: [bool; PLAYERS],
+    /// Each seat's board card ids at its last decision, -1 for an empty slot.
+    /// `remember_boards` updates this; `final_boards` returns it after a
+    /// game ends.
+    last_board: [[i16; BOARD]; PLAYERS],
 }
 
 impl Env {
@@ -147,7 +154,7 @@ impl Env {
                 boards.expect("real seats need real boards").clone(),
             )
         };
-        Env { game, kinds, rng, reported: [false; PLAYERS] }
+        Env { game, kinds, rng, reported: [false; PLAYERS], last_board: [[-1; BOARD]; PLAYERS] }
     }
 
     fn is_python(&self, p: usize) -> bool {
@@ -204,6 +211,7 @@ impl Env {
             }
         }
     }
+
 }
 
 #[pyclass]
@@ -215,6 +223,10 @@ struct VecEnv {
     next_seed: u64,
     /// Whether opponents' last-seen boards are written (see `obs::OldBoards`).
     old_boards: OldBoards,
+    /// The comp rules, when the overlay is on.
+    overlay_rules: Option<Arc<Overlay>>,
+    /// The last completed game's final board card ids per seat, -1 empty.
+    finals: Vec<[[i16; BOARD]; PLAYERS]>,
 }
 
 fn check_lineup(lineup: [u8; SEAT_KINDS], boards: bool) -> PyResult<[u8; SEAT_KINDS]> {
@@ -291,7 +303,16 @@ impl VecEnv {
         let mut envs: Vec<Env> =
             (0..n as u64).map(|i| Env::new(&data, seed + i, &lineup, boards.as_ref())).collect();
         envs.par_iter_mut().for_each(Env::advance);
-        Ok(VecEnv { data, envs, lineup, boards, next_seed: seed + n as u64, old_boards })
+        Ok(VecEnv {
+            data,
+            envs,
+            lineup,
+            boards,
+            next_seed: seed + n as u64,
+            old_boards,
+            overlay_rules: None,
+            finals: vec![[[-1; BOARD]; PLAYERS]; n],
+        })
     }
 
     /// The lineup for games that start from now on.
@@ -303,6 +324,94 @@ impl VecEnv {
     #[getter]
     fn n(&self) -> usize {
         self.envs.len()
+    }
+
+    /// Load the comp library for the overlay. `bonus` is B, the payoff
+    /// purchase/play bonus. The overlay is off until this is called.
+    fn set_overlay(&mut self, comps: &str, bonus: f32) -> PyResult<()> {
+        let text = std::fs::read_to_string(comps)
+            .map_err(|e| PyValueError::new_err(format!("{comps}: {e}")))?;
+        let comps = Comps::from_toml(&text, &self.data).map_err(PyValueError::new_err)?;
+        self.overlay_rules = Some(Arc::new(Overlay::new(comps, bonus, &self.data)));
+        Ok(())
+    }
+
+    fn clear_overlay(&mut self) {
+        self.overlay_rules = None;
+    }
+
+    /// The overlay's forced action and logit bonus for every game and seat,
+    /// in one call. `forced[i, p]` is an action index or -1; `bonus[i, p, a]`
+    /// is added to the logits (and may be -inf, which masks the action);
+    /// `flags[i, p, f]` holds the `overlay` flag constants. Only the current
+    /// player of each game is computed, because the engine's legality check
+    /// is current-player only; the other seats are -1 and zero.
+    #[pyo3(signature = (forced, bonus, flags))]
+    fn overlay(
+        &self,
+        py: Python<'_>,
+        mut forced: PyReadwriteArray2<i64>,
+        mut bonus: PyReadwriteArray3<f32>,
+        mut flags: PyReadwriteArray3<i32>,
+    ) -> PyResult<()> {
+        let n = self.envs.len();
+        let forced = forced.as_slice_mut()?;
+        let bonus = bonus.as_slice_mut()?;
+        let flags = flags.as_slice_mut()?;
+        if forced.len() != n * PLAYERS
+            || bonus.len() != n * PLAYERS * N_ACTIONS
+            || flags.len() != n * PLAYERS * OVERLAY_FLAGS
+        {
+            return Err(PyValueError::new_err("overlay array sizes don't match"));
+        }
+        let rules = self.overlay_rules.clone();
+        py.detach(|| {
+            self.envs
+                .par_iter()
+                .zip(forced.par_chunks_mut(PLAYERS))
+                .zip(bonus.par_chunks_mut(PLAYERS * N_ACTIONS))
+                .zip(flags.par_chunks_mut(PLAYERS * OVERLAY_FLAGS))
+                .for_each(|(((env, forced), bonus), flags)| {
+                    forced.fill(-1);
+                    bonus.fill(0.0);
+                    flags.fill(0);
+                    let Some(rules) = &rules else { return };
+                    let Some(p) = env.game.current_player() else { return };
+                    let mut row = [0.0f32; N_ACTIONS];
+                    let mut f = [0i32; OVERLAY_FLAGS];
+                    if let Some(a) = rules.decide(&env.game, p, &mut row, &mut f) {
+                        forced[p] = a.index() as i64;
+                    }
+                    bonus[p * N_ACTIONS..(p + 1) * N_ACTIONS].copy_from_slice(&row);
+                    flags[p * OVERLAY_FLAGS..(p + 1) * OVERLAY_FLAGS].copy_from_slice(&f);
+                });
+        });
+        Ok(())
+    }
+
+    /// Snapshot the current player's board card ids in every game. Call it
+    /// after `observe` and before `step`; the last snapshot before combat is
+    /// the board the player finished the turn with. Eval-only bookkeeping;
+    /// training does not need it.
+    fn remember_boards(&mut self) {
+        self.envs.par_iter_mut().for_each(|env| {
+            let Some(p) = env.game.current_player() else { return };
+            let mut row = [-1i16; BOARD];
+            for (k, m) in env.game.players[p].board.iter().enumerate() {
+                row[k] = m.card as i16;
+            }
+            env.last_board[p] = row;
+        });
+    }
+
+    /// The final board card ids of the last completed game, for every seat:
+    /// `[game][seat][slot]`, -1 for an empty slot. Read after `step` reports
+    /// a reset.
+    fn final_boards(&self) -> Vec<Vec<Vec<i16>>> {
+        self.finals
+            .iter()
+            .map(|game| game.iter().map(|row| row.to_vec()).collect())
+            .collect()
     }
 
     /// Take `actions[i]` for the waiting seat of game i. Fills
@@ -338,6 +447,7 @@ impl VecEnv {
         }
         let (data, lineup, boards, base) = (&self.data, self.lineup, &self.boards, self.next_seed);
         let envs = &mut self.envs;
+        let finals = &mut self.finals;
         let bad = py.detach(|| {
             envs.par_iter_mut()
                 .zip(actions)
@@ -345,8 +455,9 @@ impl VecEnv {
                 .zip(tier_turns.par_chunks_mut(PLAYERS * nt))
                 .zip(tribes.par_chunks_mut(PLAYERS * TRIBES))
                 .zip(reset.par_iter_mut())
+                .zip(finals.par_iter_mut())
                 .enumerate()
-                .map(|(i, (((((env, &a), places), tier_turns), tribes), reset))| {
+                .map(|(i, ((((((env, &a), places), tier_turns), tribes), reset), finals))| {
                     places.fill(0);
                     tier_turns.fill(0);
                     tribes.fill(0);
@@ -360,6 +471,7 @@ impl VecEnv {
                     env.advance();
                     env.report(places, tier_turns, tribes);
                     if env.game.over {
+                        *finals = env.last_board;
                         *env = Env::new(data, base + i as u64, &lineup, boards.as_ref());
                         env.advance();
                         *reset = true;

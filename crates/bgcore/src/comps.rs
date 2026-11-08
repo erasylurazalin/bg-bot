@@ -92,6 +92,12 @@ pub struct Comp {
     pub level: Option<Vec<u8>>,
     pub scales: Scales,
     pub core: Vec<CoreCard>,
+    /// Cards that make the comp ACTIVE once one is on the board or in hand.
+    pub enabler: Vec<CardId>,
+    /// Cards that matter when the comp is active.
+    pub payoff: Vec<CardId>,
+    /// Cards bought only to feed the comp.
+    pub filler: Vec<CardId>,
     pub early: Early,
     pub signals: Vec<Signal>,
     pub give_up: Option<GiveUp>,
@@ -114,6 +120,37 @@ impl Comp {
 
     pub fn early_has(&self, id: CardId) -> bool {
         self.early.cards.contains(&id)
+    }
+
+    pub fn is_enabler(&self, id: CardId) -> bool {
+        self.enabler.contains(&id)
+    }
+
+    pub fn is_payoff(&self, id: CardId) -> bool {
+        self.payoff.contains(&id)
+    }
+
+    pub fn is_filler(&self, id: CardId) -> bool {
+        self.filler.contains(&id)
+    }
+
+    /// A card that belongs to the comp: enabler, payoff, filler or an old
+    /// planner core card. The full-board sell treats all of them as "in the
+    /// comp"; only enabler and payoff are actually unsellable.
+    pub fn in_comp(&self, id: CardId) -> bool {
+        self.is_enabler(id)
+            || self.is_payoff(id)
+            || self.is_filler(id)
+            || self.is_core(id)
+    }
+
+    pub fn is_enabler_or_payoff(&self, id: CardId) -> bool {
+        self.is_enabler(id) || self.is_payoff(id)
+    }
+
+    /// A card that can make the comp active.
+    pub fn has_enabler(&self) -> bool {
+        !self.enabler.is_empty()
     }
 
     /// The tier target for a turn: the comp's own curve, else the library
@@ -221,6 +258,9 @@ impl Comps {
             if core.is_empty() {
                 return Err(fail("core is empty".to_string()));
             }
+            let enabler = card_list(&data.cards, &r.enabler).map_err(fail)?;
+            let payoff = card_list(&data.cards, &r.payoff).map_err(fail)?;
+            let filler = card_list(&data.cards, &r.filler).map_err(fail)?;
             let early = r.early.unwrap_or_default();
             let mut early_cards = Vec::with_capacity(early.cards.len());
             for c in &early.cards {
@@ -254,6 +294,9 @@ impl Comps {
                 level: r.level,
                 scales,
                 core,
+                enabler,
+                payoff,
+                filler,
                 early: Early { cards: early_cards, strong_stats: early.strong_stats },
                 signals,
                 give_up: r.give_up.map(|g| GiveUp {
@@ -291,6 +334,14 @@ impl Comps {
 
 fn card(cards: &CardDb, name: &str) -> Option<CardId> {
     cards.by_name(name)
+}
+
+fn card_list(cards: &CardDb, names: &[String]) -> Result<Vec<CardId>, String> {
+    let mut ids = Vec::with_capacity(names.len());
+    for name in names {
+        ids.push(card(cards, name).ok_or_else(|| format!("unknown card {name:?}"))?);
+    }
+    Ok(ids)
 }
 
 fn signal(raw: RawSignal, data: &Data) -> Result<Signal, String> {
@@ -371,6 +422,12 @@ struct RawComp {
     scales: Option<String>,
     #[serde(default)]
     core: Vec<RawCore>,
+    #[serde(default)]
+    enabler: Vec<String>,
+    #[serde(default)]
+    payoff: Vec<String>,
+    #[serde(default)]
+    filler: Vec<String>,
     #[serde(default)]
     early: Option<RawEarly>,
     #[serde(default)]
