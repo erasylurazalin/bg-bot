@@ -632,12 +632,13 @@ def ck_model(ck):
     return kind, model_opts(kind, **saved)
 
 
-def _grow_action_outputs(src, own):
+def _grow_action_outputs(src, own, cycle_bias=None):
     """Carry a checkpoint's action outputs over when this build has more
     actions at the end (the cycle kind). The old rows are copied exactly and
     the new rows keep `own`'s fresh start (`kind_prior`, so `CYCLE_BIAS`), so
     every old action's logit is unchanged on a position where no cycle is
-    legal. Handles the mlp's policy layer and the slot models' head bias."""
+    legal. `cycle_bias` overrides that start for the new bias rows only.
+    Handles the mlp's policy layer and the slot models' head bias."""
     grown = {}
     for name in ("head.bias", "policy.weight", "policy.bias"):
         w, v = own.get(name), src.get(name)
@@ -645,20 +646,22 @@ def _grow_action_outputs(src, own):
             continue
         table = w.clone()
         table[:v.shape[0]] = v
+        if cycle_bias is not None and name.endswith("bias"):
+            table[v.shape[0]:] = cycle_bias
         grown[name] = table
     return grown
 
 
-def load(path, dev="cpu", compile=False):
+def load(path, dev="cpu", compile=False, cycle_bias=None):
     """The network saved in a ppo.py checkpoint, built as the model it was
     trained with. An older checkpoint with fewer actions (before the cycle
     kind) loads with its old rows copied and its new cycle rows at
-    `CYCLE_BIAS`."""
+    `CYCLE_BIAS`, or at `cycle_bias` when given."""
     ck = torch.load(path, map_location=dev)
     kind, opts = ck_model(ck)
     net = build(kind, compile=compile, **opts).to(dev)
     state = dict(ck["net"])
-    state.update(_grow_action_outputs(state, net.state_dict()))
+    state.update(_grow_action_outputs(state, net.state_dict(), cycle_bias))
     net.load_state_dict(state)
     return net
 
@@ -750,7 +753,8 @@ def _grown_opp_scalars(kind, net, src):
     return old
 
 
-def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_heroes=None):
+def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_heroes=None,
+               cycle_bias=None):
     """Load every entry of the checkpoint at `path` whose name and shape match
     `net` (a `kind` model). The card and hero embeddings are matched by name
     instead, row by row, so a card added, removed or moved in cards.toml
@@ -762,9 +766,11 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     An input layer that only grew (the 2026-11-06 opponent view widened the
     opponent block) keeps every old column where the column map puts it and
     starts the new ones at zero, so the loaded network answers exactly as it
-    did until it learns to use the new inputs. Returns (loaded, fresh,
-    skipped, src_opts, remapped) where remapped describes each table matched
-    by name and each input layer carried over column by column."""
+    did until it learns to use the new inputs. A checkpoint from before the
+    cycle kind starts its new bias rows at `cycle_bias` when given (otherwise
+    `CYCLE_BIAS`). Returns (loaded, fresh, skipped, src_opts, remapped) where
+    remapped describes each table matched by name and each input layer
+    carried over column by column."""
     ck = torch.load(path, map_location="cpu")
     src_kind, src_opts = ck_model(ck)
     if src_kind != kind:
@@ -776,7 +782,7 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     # An older checkpoint has fewer actions: its action outputs grow with the
     # cycle kind at the end, the old rows copied exactly and the new ones at
     # the fresh start (`CYCLE_BIAS`).
-    take.update(_grow_action_outputs(src, own))
+    take.update(_grow_action_outputs(src, own, cycle_bias))
     remapped = []
     tables = (("card.weight", cards, ck.get("card_names") or old_cards),
               ("hero.weight", heroes, ck.get("hero_names") or old_heroes))

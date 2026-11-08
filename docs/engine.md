@@ -2080,7 +2080,8 @@ Deleting `.venv` undoes it.
   checkpoint's old actions keep their probabilities until PPO explores the
   cycles. (-3 put 6 to 7% of a loaded checkpoint's actions on cycles and
   cost it 1.7 places against real boards; -9 starts under 1% and keeps the
-  old 5.8.) `ppo.py` logs `cycle_move` and `top_cycles` beside `buys`.
+  old 5.8.) `ppo.py --cycle-bias B` overrides that start for an
+  `--init-from` checkpoint saved before the cycle kind. `ppo.py` logs `cycle_move` and `top_cycles` beside `buys`.
 - Snapshots of itself are taken every 250 updates (at about 95 updates a
   minute, 10 was only 2 minutes of history).
 - Every eval writes a row to `runs/NAME/metrics.csv`: placement against

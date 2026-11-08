@@ -89,6 +89,9 @@ def args():
     a.add_argument("--compile", action=argparse.BooleanOptionalAction,
                    help="torch.compile the attention layers (default: on for attn)")
     a.add_argument("--init-from", help="checkpoint to take matching weights from, for a new run")
+    a.add_argument("--cycle-bias", type=float,
+                   help="--init-from from before the cycle kind: the starting bias of the 17 "
+                        "new cycle actions (default model.CYCLE_BIAS, -9)")
     a.add_argument("--init-cards-rev",
                    help="git revision whose cards.toml and heroes.toml an --init-from checkpoint "
                         "was trained on, for checkpoints saved before they stored card names")
@@ -472,7 +475,7 @@ def main():
             old_cards, old_heroes = names_at_rev(cfg.init_cards_rev)
         loaded, fresh, skipped, src_opts, remapped = warm_start(
             net, cfg.model, cfg.init_from, cards=names, heroes=hero_names,
-            old_cards=old_cards, old_heroes=old_heroes)
+            old_cards=old_cards, old_heroes=old_heroes, cycle_bias=cfg.cycle_bias)
         print(f"init from {cfg.init_from} ({cfg.model} {src_opts}): {len(loaded)} parameter "
               f"tensors loaded, {len(fresh)} fresh: {', '.join(fresh) or 'none'}; "
               f"not used: {', '.join(skipped) or 'none'}")
@@ -493,7 +496,8 @@ def main():
             # start Adam and the snapshot pool fresh, since their tensors and
             # the pool's state dicts have the old shapes.
             loaded, fresh, _, _, carried = warm_start(
-                net, cfg.model, cfg.resume, cards=names, heroes=hero_names)
+                net, cfg.model, cfg.resume, cards=names, heroes=hero_names,
+                cycle_bias=cfg.cycle_bias)
             print(f"resumed {cfg.resume}: its observation is narrower than this build's, so "
                   f"{len(loaded)} tensors loaded, {len(fresh)} fresh: "
                   f"{', '.join(fresh) or 'none'}")
