@@ -109,8 +109,7 @@ train/
                       judges, playouts (see "The shop-turn search")
   eval_search.py      the search's evaluation: N games plain against the
                       search, and the Blue Shell, Warden and cycle-rate tests
-  eval_overlay.py     the comp overlay's evaluation: N games, B 2/4/8, off,
-                      dominance on/off and the forced lines
+  eval_overlay.py     the comp overlay's evaluation: N games, B 2/4/8, off
   status.py           prints a run's metrics.csv as a table
 ref/                  (git-ignored) Blizzard card data snapshots, see below
 docs/                 concept, pool analysis, mechanics inventory (a snapshot from before
@@ -1995,59 +1994,35 @@ their hand.
   planner fields stay. Beetles: enabler Ravaging Scorpid; payoffs Banana Slamma
   and Ravaging Scorpid; filler Turquoise Skitterer, Forest Rover, Buzzing
   Vermin and Headhunter Gryphon. Scam has no enabler in this round.
-- **Forced, the dominance layer:** at a shop decision with no choice open the
-  overlay tries short lines on copies of the game, the general form of the
-  Blue Shell play. A line buys a Tavern minion (or plays one from hand), plays
-  it, sells it, then plays and sells whatever the play put in the hand. The
-  end is judged with `crate::search::Position`; the first line that dominates
-  is forced, one ordinary action per decision, and the rest of its actions
-  wait in the seat's `ShellLine` plan. Before any copy is made, a source card
-  is tried only when its own data has a Battlecry or an `on_sell` effect
-  (Era's rule: nothing else can make a bought card worth cycling), and it is
-  skipped when any comp whose tribes are in the lobby lists it as an enabler
-  or a payoff (`protected_card`; the comp file is the only source of that
-  list). A seat that found no line at a position skips the search until its
-  gold, lost-fight flag, board, hand or Tavern changes (`line_key`). A line
-  that opens a Discover, a Choose One, a target or a discard is dropped
-  rather than answered on the copy: the short lines this layer judges do not
-  make choices. A generated card that cannot be played, a generated spell,
-  and a generated comp card stay in the hand, which dominance counts as a
-  gain. Nothing matches a card name; the Blue Shell is a test, not a rule. A
-  full board has no line, because making a slot means selling a minion and
-  that sale on its own is a loss. A Discover or Choose One that offers an
-  enabler takes it when the comp's tribe is in the lobby; an active comp
-  takes a payoff, then a filler. The line and enabler flags are in the
-  overlay stats array.
+- **Forced:** the Tortollan Blue Shell after a lost fight is three ordinary
+  forced actions, buy, then play, then sell. A small `ShellLine` marker per
+  seat records the turn and the board slot the line put it in, so a Shell
+  that was already on the board is not sold. On a full board an active comp
+  sells a card that is not in the comp first; with no active comp the sale is
+  skipped. A Discover or Choose One that offers an enabler takes it when the
+  comp's tribe is in the lobby; an active comp takes a payoff, then a filler.
+  The enabler/offered flags are in the overlay stats array.
 - **Bonuses:** while a comp is active, buying or playing a payoff is worth
   `B`, a filler `B/2`, and a full board sells a non-comp card for `B` when a
   comp card waits in the hand or Tavern. Selling an enabler or a payoff is
   masked with `-inf`. With no active comp the bonus array is all zero.
-- **`bgpy.VecEnv`:** `set_overlay(comps_path, B, dominance=True)` loads the
-  rules (`dominance=False` keeps the comp bonuses and turns the line search
-  off), `clear_overlay()` turns them all off, `overlay(forced, bonus, flags)`
-  fills the arrays (n by 8 seats, `forced` -1 or an action, `bonus` n by 8 by
-  `N_ACTIONS`, `flags` n by 8 by `bgpy.OVERLAY_FLAGS`), and
-  `remember_boards()` must be called after `observe` and before `step` when
-  `final_boards()` is needed. `final_boards()` returns the last completed
-  game's board card ids per seat. Only the current player's row is computed,
-  because `Game::is_legal` is current-player only; the other seats are
-  neutral. The overlay's parallel loop runs on its own 4-thread Rayon pool
-  (`OVERLAY_THREADS`), not the global one: the search on the global pool woke
-  all 32 workers, and their spinning delayed the network forward that follows
-  (the eval loop's forward went from about 10 ms to 25 ms a step; on the small
-  pool it is back to about 11 ms).
+- **`bgpy.VecEnv`:** `set_overlay(comps_path, B)` loads the rules,
+  `clear_overlay()` turns them off, `overlay(forced, bonus, flags)` fills the
+  arrays (n by 8 seats, `forced` -1 or an action, `bonus` n by 8 by
+  `N_ACTIONS`, `flags` n by 8 by 6), and `remember_boards()` must be called
+  after `observe` and before `step` when `final_boards()` is needed.
+  `final_boards()` returns the last completed game's board card ids per seat.
+  Only the current player's row is computed, because `Game::is_legal` is
+  current-player only; the other seats are neutral.
 - **`train/eval_overlay.py --games 2048 --bonus 0 2 4 8`** runs the network
   seat against seven real boards. It prints the place with a 95% interval,
-  Shell bought/taken against Tavern turns with a free slot (the old named rule
-  is gone; the eval measures the Shell from the observation), lines forced and
-  lines per game, enabler offered/taken/active and active turn, the active
-  games' comp-board share and place, and the steps per second of the loop.
-  `--no-dominance` is the same run with the dominance layer off on the same
-  seeds; `--lines` also records the line cards and 10 full before/after
-  examples (measurement only). It also prints the overlay call's cost per
-  step and the 512-game overlay-off check, which is the plain-network
-  baseline on this build. With no overlay it uses `train/eval_search.py`'s
-  own `play` function, so the off number is the baseline by construction.
+  Shell legal/taken/rate, enabler offered/taken/active and active turn, the
+  active games' comp-board share and place, and the forced full-board sells.
+  `--real-lobby-filter` draws a real seat's boards only from the game's
+  lobby. It also prints the overlay call's cost per step (relative while a
+  training run is on the machine) and the 512-game overlay-off check, which
+  must be 5.867 exactly. With no overlay it uses `train/eval_search.py`'s own
+  `play` function, so the off number is the baseline by construction.
 
 ## Era's turns, with Era's luck
 
@@ -2229,9 +2204,8 @@ Deleting `.venv` undoes it.
   real seats play boards from `--real-boards`, default `boards/real` when
   the lineup has any).
 - The comp overlay is off in training unless `--overlay-comps FILE` is given
-  (`--overlay-bonus B`, default 8; `--no-dominance` keeps the comp bonuses
-  and turns the line search off). A PPO forced press (Dark Gift, level) wins
-  over the overlay on that row.
+  (`--overlay-bonus B`, default 8). A PPO forced press (Dark Gift, level)
+  wins over the overlay on that row.
 - Reward is placement only (+1 for 1st to -1 for 8th), minus 0.002 per
   Move action (`--action-cost`, `--cost-kinds move`) so it doesn't shuffle
   its board for free; buys, sells, plays and refreshes cost nothing extra,

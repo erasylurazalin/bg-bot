@@ -1,6 +1,5 @@
-//! The comp overlay: active comp detection, the dominance lines (the Shell
-//! and the Warden cycle without naming either), enabler picks at a Discover
-//! or Choose One, the bonus array and the sell mask.
+//! The comp overlay: active comp detection, the Shell rules, enabler picks at
+//! a Discover or Choose One, the bonus array and the sell mask.
 
 use std::sync::Arc;
 
@@ -8,10 +7,9 @@ use bgcore::cards::{ChooseOption, SpellEffect, Tribes};
 use bgcore::comps::Comps;
 use bgcore::game::PendingChooseOne;
 use bgcore::overlay::{
-    F_ACTIVE, F_ENABLER_OFFERED, F_ENABLER_TAKEN, F_LINE_FORCED, F_LINE_FOUND, OVERLAY_FLAGS,
-    Overlay, ShellLine,
+    F_ACTIVE, F_ENABLER_OFFERED, F_ENABLER_TAKEN, F_FORCED_SELL, F_SHELL_LEGAL, F_SHELL_TAKEN,
+    OVERLAY_FLAGS, Overlay, ShellLine,
 };
-use bgcore::search::Position;
 use bgcore::{Action, Data, Game, N_ACTIONS};
 
 fn data() -> Arc<Data> {
@@ -86,7 +84,7 @@ fn the_beetle_comp_has_its_overlay_cards() {
 }
 
 #[test]
-fn the_shell_line_is_found_without_naming_the_card() {
+fn the_shell_line_is_buy_then_play_then_sell() {
     let d = data();
     let o = Overlay::new(comps(&d), 2.0, &d);
     let mut g = sandbox(7);
@@ -102,23 +100,21 @@ fn the_shell_line_is_found_without_naming_the_card() {
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     let buy = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the buy");
-    assert_eq!(buy, Action::Buy(0));
+    assert!(matches!(buy, Action::Buy(_)), "{buy:?}");
     assert_eq!(line.turn, g.turn);
-    assert_eq!(f[F_LINE_FOUND], 1);
-    assert_eq!(f[F_LINE_FORCED], 1);
+    assert_eq!(f[F_SHELL_LEGAL], 1);
+    assert_eq!(f[F_SHELL_TAKEN], 1);
     g.step(buy).unwrap();
 
     let mut f = flags();
     let play = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the play");
     assert_eq!(play, Action::Play { hand: 0, pos: 1 });
-    assert_eq!(f[F_LINE_FOUND], 0, "the line started on the buy");
-    assert_eq!(f[F_LINE_FORCED], 1);
+    assert_eq!(line.slot, Some(1));
     g.step(play).unwrap();
 
     let mut f = flags();
     let sell = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the sell");
     assert_eq!(sell, Action::Sell(1));
-    assert_eq!(f[F_LINE_FORCED], 1);
     assert_eq!(line, ShellLine::default());
     g.step(sell).unwrap();
 
@@ -133,164 +129,27 @@ fn the_shell_line_is_found_without_naming_the_card() {
 }
 
 #[test]
-fn a_card_that_sells_for_less_is_not_forced() {
+fn a_shell_already_on_the_board_is_not_sold() {
+    let d = data();
+    let o = Overlay::new(comps(&d), 2.0, &d);
+    let mut g = sandbox(8);
+    ready(&mut g);
+    g.players[0].lost_last_combat = true;
+    place(&mut g, 0, 0, "Tortollan Blue Shell", false);
+    mine(&mut g);
+    let mut line = ShellLine::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
+    assert_eq!(line, ShellLine::default());
+}
+
+#[test]
+fn the_shell_is_not_forced_without_a_loss() {
     let d = data();
     let o = Overlay::new(comps(&d), 2.0, &d);
     let mut g = sandbox(11);
     ready(&mut g);
-    // The Shell sells for 5 only after a loss; without one it costs 3 and
-    // sells for less, so the line loses Gold and does not dominate.
-    place(&mut g, 0, 2, "Tortollan Blue Shell", false);
-    mine(&mut g);
-    let mut line = ShellLine::default();
-    let mut bonus = [0.0f32; N_ACTIONS];
-    let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(line.turn, 0);
-    assert_eq!(f[F_LINE_FOUND], 0);
-}
-
-#[test]
-fn a_full_board_has_no_dominating_line() {
-    let d = data();
-    let o = Overlay::new(comps(&d), 2.0, &d);
-    let mut g = sandbox(13);
-    ready(&mut g);
-    g.players[0].lost_last_combat = true;
-    for _ in 0..7 {
-        g.players[0].lost_last_combat = true;
-    place(&mut g, 0, 0, "Microbot", false);
-    }
-    place(&mut g, 0, 2, "Tortollan Blue Shell", false);
-    mine(&mut g);
-    // A line needs a free slot. Making one means selling a minion first, and
-    // the sale on its own is a loss that dominance cannot call free value.
-    let mut line = ShellLine::default();
-    let mut bonus = [0.0f32; N_ACTIONS];
-    let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(line.turn, 0);
-    assert_eq!(f[F_LINE_FOUND], 0);
-}
-
-#[test]
-fn a_comp_card_is_not_consumed_by_a_line() {
-    let d = data();
-    // The real library protects the Beetle cards. Here the same Shell line
-    // that dominates in the test above is listed as a comp enabler, so only
-    // the comp guard can stop it. The comp file is the whole source of the
-    // protection.
-    let custom = Comps::from_toml(
-        r#"
-[defaults]
-level = [1]
-dying_health = 10
-
-[[comp]]
-name = "test"
-tribes = []
-enabler = ["Tortollan Blue Shell"]
-payoff = []
-filler = []
-
-[[comp.core]]
-name = "Tortollan Blue Shell"
-weight = 1.0
-scale = false
-"#,
-        &d,
-    )
-    .expect("the test comp library");
-    let mut g = sandbox(23);
-    ready(&mut g);
-    g.players[0].lost_last_combat = true;
-    place(&mut g, 0, 0, "Microbot", false);
-    place(&mut g, 0, 2, "Tortollan Blue Shell", false);
-    mine(&mut g);
-    let mut bonus = [0.0f32; N_ACTIONS];
-
-    let protected = Overlay::new(custom, 2.0, &d);
-    let mut line = ShellLine::default();
-    let mut f = flags();
-    assert_eq!(protected.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-
-    // The same position without the comp entry does force the line, so the
-    // guard, not the card filter, is what changed the answer.
-    let control = Overlay::new(comps(&d), 2.0, &d);
-    let mut line = ShellLine::default();
-    let mut f = flags();
-    assert!(
-        control.decide(&g, 0, &mut line, &mut bonus, &mut f).is_some(),
-        "the Shell line dominates when it is not a comp card"
-    );
-}
-
-#[test]
-fn comp_card_protection_needs_the_comp_tribe_in_the_lobby() {
-    let d = data();
-    let custom = Comps::from_toml(
-        r#"
-[defaults]
-level = [1]
-dying_health = 10
-
-[[comp]]
-name = "test"
-tribes = ["beast"]
-enabler = ["Tortollan Blue Shell"]
-payoff = []
-filler = []
-
-[[comp.core]]
-name = "Tortollan Blue Shell"
-weight = 1.0
-scale = false
-"#,
-        &d,
-    )
-    .expect("the test comp library");
-    let mut g = Game::new_sandbox(data(), 29, Some(Tribes::of(bgcore::Tribe::Mech)), 0);
-    ready(&mut g);
-    g.players[0].lost_last_combat = true;
-    place(&mut g, 0, 0, "Microbot", false);
-    place(&mut g, 0, 2, "Tortollan Blue Shell", false);
-    mine(&mut g);
-    let o = Overlay::new(custom, 2.0, &d);
-    let mut line = ShellLine::default();
-    let mut bonus = [0.0f32; N_ACTIONS];
-    let mut f = flags();
-    assert!(
-        o.decide(&g, 0, &mut line, &mut bonus, &mut f).is_some(),
-        "the beast comp is not in a mech lobby, so the Shell is not protected"
-    );
-}
-
-#[test]
-fn a_card_without_a_play_or_sell_effect_is_not_tried() {
-    let d = data();
-    let o = Overlay::new(comps(&d), 2.0, &d);
-    let mut g = sandbox(31);
-    ready(&mut g);
-    place(&mut g, 0, 0, "Microbot", false);
-    // A plain 1/1 bought, played and sold keeps Gold and the board as they
-    // were; only the action counters would move, so Era's rule says no copy.
-    place(&mut g, 0, 2, "Microbot", false);
-    mine(&mut g);
-    let mut line = ShellLine::default();
-    let mut bonus = [0.0f32; N_ACTIONS];
-    let mut f = flags();
-    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(line.turn, 0);
-}
-
-#[test]
-fn no_gold_means_no_line() {
-    let d = data();
-    let o = Overlay::new(comps(&d), 2.0, &d);
-    let mut g = sandbox(17);
-    ready(&mut g);
-    g.players[0].lost_last_combat = true;
-    g.players[0].gold = 2;
     place(&mut g, 0, 0, "Ravaging Scorpid", false);
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
@@ -298,54 +157,51 @@ fn no_gold_means_no_line() {
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(line.turn, 0);
-}
-
-/// Era's free Dragon cycle: Brann, Kalecgos and four Dragons on the board,
-/// a Draconic Warden in the Tavern for 3 Gold.
-fn warden_position(seed: u64) -> Game {
-    let mut g = sandbox(seed);
-    ready(&mut g);
-    for name in ["Brann Bronzebeard", "Kalecgos, Arcane Aspect"] {
-        place(&mut g, 0, 0, name, false);
-    }
-    for name in ["Bronze Warden", "Blue Whelp", "Tarecgosa", "Persistent Poet"] {
-        place(&mut g, 0, 0, name, false);
-    }
-    place(&mut g, 0, 2, "Draconic Warden", false);
-    mine(&mut g);
-    g
+    assert_eq!(f[F_SHELL_LEGAL], 0);
 }
 
 #[test]
-fn the_warden_cycle_is_found_without_naming_the_card() {
+fn a_full_board_shell_sells_the_non_comp_card() {
     let d = data();
     let o = Overlay::new(comps(&d), 2.0, &d);
-    let mut g = warden_position(19);
-    let before = Position::of(&g, 0);
-    let gold = g.players[0].gold;
-    let board = g.players[0].board.len();
-    let mut manual = g.clone();
+    let mut g = sandbox(13);
+    ready(&mut g);
+    g.players[0].lost_last_combat = true;
+    place(&mut g, 0, 0, "Ravaging Scorpid", false);
+    place(&mut g, 0, 0, "Banana Slamma", false);
+    for _ in 0..5 {
+        place(&mut g, 0, 0, "Microbot", false);
+    }
+    place(&mut g, 0, 2, "Tortollan Blue Shell", false);
+    mine(&mut g);
     let mut line = ShellLine::default();
     let mut bonus = [0.0f32; N_ACTIONS];
-    let mut forced = Vec::new();
-    for _ in 0..40 {
-        let mut f = flags();
-        let Some(a) = o.decide(&g, 0, &mut line, &mut bonus, &mut f) else { break };
-        assert_eq!(f[F_LINE_FORCED], 1);
-        forced.push(a);
-        g.step(a).unwrap();
+    let mut f = flags();
+    let a = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("a forced sale");
+    let Action::Sell(slot) = a else { panic!("not a sale: {a:?}") };
+    assert_eq!(g.data.cards.get(g.players[0].board[slot as usize].card).name, "Microbot");
+    assert_eq!(f[F_SHELL_LEGAL], 1);
+    assert_eq!(f[F_FORCED_SELL], 1);
+    assert_eq!(f[F_SHELL_TAKEN], 0);
+}
+
+#[test]
+fn a_full_board_shell_is_skipped_without_an_active_comp() {
+    let d = data();
+    let o = Overlay::new(comps(&d), 2.0, &d);
+    let mut g = sandbox(17);
+    ready(&mut g);
+    g.players[0].lost_last_combat = true;
+    for _ in 0..7 {
+        place(&mut g, 0, 0, "Microbot", false);
     }
-    assert!(!forced.is_empty(), "the Warden cycle is free value");
-    for a in &forced {
-        manual.step(*a).unwrap();
-    }
-    assert_eq!(g.players[0], manual.players[0], "the line is the hand-played line");
-    assert_eq!(g.pool, manual.pool);
-    assert_eq!(g.players[0].gold, gold, "the cycle is free: {gold}");
-    assert_eq!(g.players[0].board.len(), board, "the board is as wide as it was");
-    let d = before.judge(&g);
-    assert!(d.dominates, "blocked by {:?}", d.blocked);
+    place(&mut g, 0, 2, "Tortollan Blue Shell", false);
+    mine(&mut g);
+    let mut line = ShellLine::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
+    assert_eq!(f[F_SHELL_LEGAL], 0);
 }
 
 #[test]
@@ -445,8 +301,7 @@ fn a_full_board_gets_a_bonus_for_selling_a_non_comp_card() {
     ready(&mut g);
     place(&mut g, 0, 0, "Ravaging Scorpid", false);
     for _ in 0..6 {
-        g.players[0].lost_last_combat = true;
-    place(&mut g, 0, 0, "Microbot", false);
+        place(&mut g, 0, 0, "Microbot", false);
     }
     place(&mut g, 0, 1, "Turquoise Skitterer", false);
     mine(&mut g);
@@ -464,7 +319,6 @@ fn no_active_comp_changes_nothing() {
     let o = Overlay::new(comps(&d), 8.0, &d);
     let mut g = sandbox(41);
     ready(&mut g);
-    g.players[0].lost_last_combat = true;
     place(&mut g, 0, 0, "Microbot", false);
     place(&mut g, 0, 2, "Banana Slamma", false);
     place(&mut g, 0, 2, "Turquoise Skitterer", false);

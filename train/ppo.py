@@ -106,9 +106,7 @@ def args():
     a.add_argument("--overlay-comps", default=None,
                    help="comp file for the overlay during training; absent means no overlay")
     a.add_argument("--overlay-bonus", type=float, default=8.0,
-                   help="B, the comp payoff bonus (the dominance layer runs at any B)")
-    a.add_argument("--no-dominance", action="store_true",
-                   help="keep the comp overlay but turn the dominance line search off")
+                   help="B, the comp payoff bonus")
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
     a.add_argument("--lineup", default="4,2,1,1,0,0",
                    help="learner,snapshot,standard,rush,random,real seats")
@@ -480,9 +478,8 @@ def main():
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS,
                       real_lobby_filter=REAL_LOBBY_FILTER)
     if cfg.overlay_comps:
-        env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus, not cfg.no_dominance)
-        print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}, dominance "
-              f"{'off' if cfg.no_dominance else 'on'}")
+        env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus)
+        print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}")
     names = env.card_names()
     hero_names = env.hero_names()
     if cfg.compile is None:
