@@ -48,40 +48,43 @@ name = "beetles"
 tribes = ["beast"]
 draft = true
 fallback = false
-commit_turn = [4, 9]
+# Era, 2026-11-08: the comp is unplayable without an early Ravaging Scorpid
+# (usually the tier 6 Discover from a Triple Reward). The commit signal is
+# Scorpid. 99% of the scaling comes from it; the other Beetle cards only
+# summon Beetles for it to buff. Commit window widened to fit a late find.
+commit_turn = [4, 12]
 scales = "beetles"
 not_in_comp = ["Humming Bird", "Cage Gnawer", "Sewer Lord", "Hoarding Hyena"]
 
-# A short core on purpose: the beetle scaling, the summon bodies and the
-# Attack doubler. The draft leaves out every other Beast.
 [[comp.core]]
 name = "Ravaging Scorpid"
-weight = 6.0
-scale = true
-
-[[comp.core]]
-name = "Turquoise Skitterer"
-weight = 6.0
+weight = 10.0
 scale = true
 
 [[comp.core]]
 name = "Banana Slamma"
-weight = 7.0
+weight = 6.0
 scale = true
 
+# Economy, and a chance at more Beetle cards and Banana Slammas.
 [[comp.core]]
 name = "Headhunter Gryphon"
-weight = 4.0
+weight = 3.0
+scale = false
+
+[[comp.core]]
+name = "Turquoise Skitterer"
+weight = 2.0
 scale = false
 
 [[comp.core]]
 name = "Forest Rover"
-weight = 3.0
-scale = true
+weight = 2.0
+scale = false
 
 [[comp.core]]
 name = "Buzzing Vermin"
-weight = 2.0
+weight = 1.0
 scale = false
 
 [comp.early]
@@ -89,26 +92,13 @@ cards = ["Buzzing Vermin", "Forest Rover"]
 strong_stats = true
 
 [[comp.signals]]
-cards = ["Ravaging Scorpid", "Turquoise Skitterer", "Banana Slamma"]
-weight = 4.0
+cards = ["Ravaging Scorpid"]
+weight = 6.0
 
-[[comp.signals]]
-cards = ["Headhunter Gryphon"]
-weight = 2.0
-
-[[comp.signals]]
-tribe = "beast"
-min_count = 1
-weight = 0.5
-
-[[comp.signals]]
-tribe = "beast"
-min_count = 2
-weight = 1.5
-
+# Add-ons, not core.
 [[comp.signals]]
 trinket = "Beetle Band"
-weight = 5.0
+weight = 1.0
 
 [comp.give_up]
 after_turn = 11
