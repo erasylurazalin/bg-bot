@@ -177,7 +177,8 @@ def load(folder):
     missing = {"obs_size", "n_actions", "count"} - set(header)
     if missing:
         raise SystemExit(f"{folder}/header.json has no {', '.join(sorted(missing))}")
-    if header.get("obs_size") != bgpy.OBS_SIZE or header.get("n_actions") != bgpy.N_ACTIONS:
+    old_actions = int(header.get("n_actions", 0))
+    if header.get("obs_size") != bgpy.OBS_SIZE or not 0 < old_actions <= bgpy.N_ACTIONS:
         raise SystemExit(f"{folder}/header.json holds {header.get('obs_size')} observations and "
                          f"{header.get('n_actions')} actions, but this bgpy holds "
                          f"{bgpy.OBS_SIZE} and {bgpy.N_ACTIONS}: the data is from another build")
@@ -187,11 +188,15 @@ def load(folder):
     if obs.size != count * bgpy.OBS_SIZE:
         raise SystemExit(f"{folder}/obs.f32 is {obs.size} floats, expected "
                          f"{count} x {bgpy.OBS_SIZE}")
-    if mask.size != count * bgpy.N_ACTIONS:
+    if mask.size != count * old_actions:
         raise SystemExit(f"{folder}/mask.u8 is {mask.size} bytes, expected "
-                         f"{count} x {bgpy.N_ACTIONS}")
+                         f"{count} x {old_actions}")
     obs = obs.reshape(count, bgpy.OBS_SIZE)
-    mask = mask.reshape(count, bgpy.N_ACTIONS) != 0
+    mask = mask.reshape(count, old_actions) != 0
+    if old_actions < bgpy.N_ACTIONS:
+        # An older recording ends before the cycle kind: its action indices
+        # still mean the same actions, and the new actions are illegal there.
+        mask = np.concatenate([mask, np.zeros((count, bgpy.N_ACTIONS - old_actions), bool)], 1)
     meta = read_meta(folder / "meta.tsv", count)
     dom_path = folder / "dom.u8"
     if dom_path.exists():

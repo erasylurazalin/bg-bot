@@ -1793,6 +1793,35 @@ impl Game {
             Action::HeroPower => self.power_usable(p),
             Action::HeroPower2 => self.power_usable2(p),
             Action::DarkGift => self.dark_gift_usable(p),
+            Action::CycleShop(s) => {
+                let s = s as usize;
+                if s >= pl.shop.len() || pl.hand.is_full() || pl.board.is_full() {
+                    return false;
+                }
+                let card_id = pl.shop[s].card;
+                if self.data.cards.get(card_id).is_spell()
+                    || self.data.cards.play_opens_choice(card_id)
+                {
+                    return false;
+                }
+                match self.minion_price(p, s) {
+                    MinionPrice::Gold(g) => pl.gold >= g,
+                    MinionPrice::Health(h) => {
+                        pl.can_pay_health(h as i32, &self.data.cards)
+                    }
+                }
+            }
+            Action::CycleHand(h) => {
+                let h = h as usize;
+                if h >= pl.hand.len() || pl.board.is_full() {
+                    return false;
+                }
+                let m = pl.hand[h];
+                let card = self.data.cards.get(m.card);
+                !card.is_spell()
+                    && !m.locked_in_hand(pl.tier, pl.counts.gold_spent)
+                    && !self.data.cards.play_opens_choice(m.card)
+            }
         }
     }
 
@@ -1866,7 +1895,8 @@ impl Game {
         mask.fill(false);
         let Some(p) = self.current_player() else { return };
         let pl = &self.players[p];
-        let mut ask = |a: Action| mask[a.index()] = self.is_legal(a);
+        // A macro, not a closure: the cycle loops read `mask` between asks.
+        macro_rules! ask { ($a:expr) => { mask[$a.index()] = self.is_legal($a); } }
         // A choice that nothing can answer is fizzled by `step`, so the
         // normal actions are the legal ones then, as in `is_legal`.
         let pending = pl.pending_target.is_some()
@@ -1876,22 +1906,22 @@ impl Game {
         let open = !pending || !self.choice_stuck(p);
         if open && self.turn == 0 && pl.hero_offer.iter().any(|&h| h != u8::MAX) {
             for k in 0..DISCOVER as u8 {
-                ask(Action::Choose(k));
+                ask!(Action::Choose(k));
             }
         } else if open && !pl.trinket_offer.is_empty() && !Self::other_choice_open(pl) {
             // A trinket offer: the answers, and passing (see `is_legal`).
             for k in 0..pl.trinket_offer.len() as u8 {
-                ask(Action::ChooseTrinket(k));
+                ask!(Action::ChooseTrinket(k));
             }
-            ask(Action::Freeze);
-            ask(Action::EndTurn);
+            ask!(Action::Freeze);
+            ask!(Action::EndTurn);
         } else if open && let Some(pt) = pl.pending_target {
             for s in 0..BOARD as u8 {
-                ask(Action::Target(s));
+                ask!(Action::Target(s));
             }
             if pt.kind.takes_shop() {
                 for s in 0..SHOP as u8 {
-                    ask(Action::TargetShop(s));
+                    ask!(Action::TargetShop(s));
                 }
             }
         } else if open && let Some(pst) = pl.pending_shop_target {
@@ -1900,70 +1930,87 @@ impl Game {
                 last += 1;
             }
             for s in 0..last as u8 {
-                ask(Action::TargetShop(s));
+                ask!(Action::TargetShop(s));
             }
         } else if open && pl.pending_discard.is_some() {
             for s in 0..pl.hand.len() as u8 {
-                ask(Action::Discard(s));
+                ask!(Action::Discard(s));
             }
         } else if open && pl.pending_choose_one.is_some() {
             for k in 0..2 {
-                ask(Action::Choose(k));
+                ask!(Action::Choose(k));
             }
         } else if open && !pl.discover.is_empty() {
             for k in 0..pl.discover.len() as u8 {
-                ask(Action::Choose(k));
+                ask!(Action::Choose(k));
             }
         } else if open && !pl.power_offer.is_empty() {
             for k in 0..pl.power_offer.len() as u8 {
-                ask(Action::Choose(k));
+                ask!(Action::Choose(k));
             }
         } else if open && !pl.secret_offer.is_empty() {
             for k in 0..pl.secret_offer.len() as u8 {
-                ask(Action::Choose(k));
+                ask!(Action::Choose(k));
             }
         } else if open && (pl.wager_offer.is_some() || pl.holmes_offer.is_some()) {
             for k in 0..2 {
-                ask(Action::Choose(k));
+                ask!(Action::Choose(k));
             }
         } else if open && self.turn_skipped(p) {
             // A skipped turn: Freeze and End Turn only.
-            ask(Action::Freeze);
-            ask(Action::EndTurn);
+            ask!(Action::Freeze);
+            ask!(Action::EndTurn);
         } else {
             for s in 0..pl.shop.len() as u8 {
-                ask(Action::Buy(s));
+                ask!(Action::Buy(s));
             }
-            ask(Action::BuySpell);
+            ask!(Action::BuySpell);
             for s in 0..pl.board.len() as u8 {
-                ask(Action::Sell(s));
-                ask(Action::Activate(s));
+                ask!(Action::Sell(s));
+                ask!(Action::Activate(s));
             }
             // A minion goes in a slot from 0 to the board's length, and a
             // spell only at 0: no position past the board can be legal.
             for hand in 0..pl.hand.len() as u8 {
                 for pos in 0..=pl.board.len() as u8 {
-                    ask(Action::Play { hand, pos });
+                    ask!(Action::Play { hand, pos });
                 }
             }
             for from in 0..pl.board.len() as u8 {
                 for to in 0..pl.board.len() as u8 {
-                    ask(Action::Move { from, to });
+                    ask!(Action::Move { from, to });
                 }
             }
-            ask(Action::Roll);
-            ask(Action::Freeze);
-            ask(Action::Level);
-            ask(Action::HeroPower);
-            ask(Action::HeroPower2);
-            ask(Action::DarkGift);
-            ask(Action::EndTurn);
+            ask!(Action::Roll);
+            ask!(Action::Freeze);
+            ask!(Action::Level);
+            ask!(Action::HeroPower);
+            ask!(Action::HeroPower2);
+            ask!(Action::DarkGift);
+            // A cycle needs a free board slot, and its first action (Buy or
+            // Play at the end) is already legal from the loops above: ask
+            // only those slots, so an older position without a cycle pays
+            // nothing for the new kind.
+            if !pl.board.is_full() {
+                for s in 0..pl.shop.len() as u8 {
+                    if mask[Action::Buy(s).index()] {
+                        ask!(Action::CycleShop(s));
+                    }
+                }
+                let pos = pl.board.len() as u8;
+                for h in 0..pl.hand.len() as u8 {
+                    if mask[Action::Play { hand: h, pos }.index()] {
+                        ask!(Action::CycleHand(h));
+                    }
+                }
+            }
+            ask!(Action::EndTurn);
         }
         // A skipped turn can freeze or end whatever else is open (the End
         // Turn answers it), which the branches above do not all ask for.
         if pl.skipped {
-            ask(Action::Freeze);
-            ask(Action::EndTurn);
+            ask!(Action::Freeze);
+            ask!(Action::EndTurn);
         }
     }
 
@@ -2300,6 +2347,13 @@ impl Game {
 
     /// Take an action for the current player.
     pub fn step(&mut self, a: Action) -> Result<(), IllegalAction> {
+        // A cycle is one action that runs its line through this same `step`,
+        // one ordinary action at a time (so every trigger, pool count and
+        // counter is exactly what separate actions give), and each of them
+        // counts towards the turn's action cap.
+        if matches!(a, Action::CycleShop(_) | Action::CycleHand(_)) {
+            return self.step_cycle(a);
+        }
         // A choice nothing can answer fizzles here, before it is answered:
         // `is_legal` already let the normal actions through on that basis.
         if let Some(p) = self.current_player()
@@ -2393,6 +2447,188 @@ impl Game {
         #[cfg(debug_assertions)]
         self.check_invariants().unwrap();
         Ok(())
+    }
+
+    /// Run a cycle action as the ordinary actions it stands for. Each one
+    /// goes through `step`, so it increments the action count and can end the
+    /// turn exactly where the separate actions would; the line stops when the
+    /// turn it started in is no longer shopping (a choice opened, the cap was
+    /// reached, or the game moved on).
+    fn step_cycle(&mut self, a: Action) -> Result<(), IllegalAction> {
+        if !self.is_legal(a) {
+            return Err(IllegalAction);
+        }
+        let p = self.current_player().unwrap();
+        let turn = self.turn;
+        let original = self.players[p].hand.clone();
+        match a {
+            Action::CycleShop(s) => {
+                let card = self.players[p].shop[s as usize].card;
+                let hand_before = self.players[p].hand.len();
+                self.step(Action::Buy(s))?;
+                if !self.cycle_more(p, turn) {
+                    return Ok(());
+                }
+                let Some(hand) = self.cycle_bought_hand(p, hand_before, card) else {
+                    return Ok(());
+                };
+                let pos = self.players[p].board.len() as u8;
+                let play = Action::Play { hand, pos };
+                if !self.is_legal(play) {
+                    return Ok(());
+                }
+                self.step(play)?;
+                if !self.cycle_more(p, turn) {
+                    return Ok(());
+                }
+                self.cycle_sell_played(p, pos, card);
+                if !self.cycle_more(p, turn) {
+                    return Ok(());
+                }
+            }
+            Action::CycleHand(hand) => {
+                let card = self.players[p].hand[hand as usize].card;
+                let pos = self.players[p].board.len() as u8;
+                self.step(Action::Play { hand, pos })?;
+                if !self.cycle_more(p, turn) {
+                    return Ok(());
+                }
+                self.cycle_sell_played(p, pos, card);
+                if !self.cycle_more(p, turn) {
+                    return Ok(());
+                }
+            }
+            _ => unreachable!("step_cycle only takes a cycle action"),
+        }
+        self.cycle_sell_generated(p, &original, turn);
+        Ok(())
+    }
+
+    /// Whether a cycle line may take its next ordinary action: the same turn,
+    /// still the same player, and still a plain shop decision (no choice
+    /// opened, the action cap not reached).
+    fn cycle_more(&self, p: usize, turn: u32) -> bool {
+        self.turn == turn && self.current_player() == Some(p) && self.shopping(p)
+    }
+
+    /// The hand slot the bought minion is in. It is pushed at the end of the
+    /// hand (`hand_before`), but a triple can replace it with its Golden copy
+    /// later in the hand, which is the card the player would play.
+    fn cycle_bought_hand(&self, p: usize, hand_before: usize, card: CardId) -> Option<u8> {
+        let hand = &self.players[p].hand;
+        if hand.get(hand_before).is_some_and(|m| m.card == card) {
+            return Some(hand_before as u8);
+        }
+        (hand_before..hand.len())
+            .rev()
+            .find(|&i| hand[i].card == card)
+            .map(|i| i as u8)
+    }
+
+    /// The board slot the played card landed in: the end it was played at,
+    /// unless a Battlecry moved the board and the card with it.
+    fn cycle_played_pos(&self, p: usize, pos: u8, card: CardId) -> Option<u8> {
+        let board = &self.players[p].board;
+        if board.get(pos as usize).is_some_and(|m| m.card == card) {
+            return Some(pos);
+        }
+        (0..board.len())
+            .rev()
+            .find(|&i| board[i].card == card)
+            .map(|i| i as u8)
+    }
+
+    /// The cards the line put in the hand that were not there before it, in
+    /// hand order (a multiset difference by card, like the search's cycle).
+    fn cycle_generated(&self, p: usize, original: &[Minion]) -> ArrayVec<CardId, HAND> {
+        let mut used = [false; HAND];
+        let mut out = ArrayVec::new();
+        for m in &self.players[p].hand {
+            let mut was_there = false;
+            for (j, x) in original.iter().enumerate() {
+                if !used[j] && x.card == m.card {
+                    used[j] = true;
+                    was_there = true;
+                    break;
+                }
+            }
+            if !was_there {
+                let _ = out.try_push(m.card);
+            }
+        }
+        out
+    }
+
+    /// The first hand slot holding a generated `card` (not one of the cards
+    /// the line started with), in hand order.
+    fn cycle_generated_hand(
+        &self,
+        p: usize,
+        original: &[Minion],
+        card: CardId,
+    ) -> Option<u8> {
+        let mut used = [false; HAND];
+        for (i, m) in self.players[p].hand.iter().enumerate() {
+            let mut was_there = false;
+            for (j, x) in original.iter().enumerate() {
+                if !used[j] && x.card == m.card {
+                    used[j] = true;
+                    was_there = true;
+                    break;
+                }
+            }
+            if !was_there && m.card == card {
+                return Some(i as u8);
+            }
+        }
+        None
+    }
+
+    /// Play and sell each minion the line generated, in hand order. A spell
+    /// cannot be sold and a minion whose play opens a choice can't be run
+    /// inside this one action, so both stay in the hand.
+    fn cycle_sell_generated(&mut self, p: usize, original: &[Minion], turn: u32) {
+        let generated = self.cycle_generated(p, original);
+        for card in generated {
+            if !self.cycle_more(p, turn) {
+                return;
+            }
+            if self.data.cards.get(card).is_spell()
+                || self.data.cards.play_opens_choice(card)
+            {
+                continue;
+            }
+            let Some(hand) = self.cycle_generated_hand(p, original, card) else {
+                continue;
+            };
+            let pos = self.players[p].board.len() as u8;
+            let play = Action::Play { hand, pos };
+            if !self.is_legal(play) {
+                continue;
+            }
+            if self.step(play).is_err() {
+                return;
+            }
+            if !self.cycle_more(p, turn) {
+                return;
+            }
+            let Some(slot) = self.cycle_played_pos(p, pos, card) else {
+                continue;
+            };
+            if self.is_legal(Action::Sell(slot)) {
+                let _ = self.step(Action::Sell(slot));
+            }
+        }
+    }
+
+    /// Sell the card the line played, if it is still on the board.
+    fn cycle_sell_played(&mut self, p: usize, pos: u8, card: CardId) {
+        let Some(slot) = self.cycle_played_pos(p, pos, card) else {
+            return;
+        };
+        if self.is_legal(Action::Sell(slot)) {
+            let _ = self.step(Action::Sell(slot));
+        }
     }
 
     /// Recompute the standing rules a hero power or a trinket sets, the way a
@@ -2879,6 +3115,11 @@ impl Game {
             Action::ChooseTrinket(k) => self.pick_trinket(p, k as usize),
             Action::DarkGift => self.press_dark_gift(p),
             Action::EndTurn => {}
+            // A cycle runs its line in `step_cycle`, one ordinary action at
+            // a time; `apply` never sees the cycle itself.
+            Action::CycleShop(_) | Action::CycleHand(_) => {
+                unreachable!("a cycle action is expanded by step_cycle")
+            }
         }
     }
 

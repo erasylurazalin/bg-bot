@@ -1591,8 +1591,8 @@ through exactly that card's code. The engine never matches a gift by name:
   counts taken now, and the counter. Everything else the gift does is read
   later from its card by the existing paths; `Minion::has_gift` is the one
   flag test a fight pays for a gift with no trigger.
-- **The button.** `Action::DarkGift` (the last action, `N_ACTIONS` grew by
-  one); `dark_gift_usable` is the rule (rules.toml's `dark_gift_cost`,
+- **The button.** `Action::DarkGift` (the last global action, right before
+  the cycle kind; `N_ACTIONS` grew by one); `dark_gift_usable` is the rule (rules.toml's `dark_gift_cost`,
   `_uses` and `_turn`, once a turn, 3 uses a game, locked until turn 3).
   A press pays, opens `DiscoverRequest::DarkGift(DarkGiftPlan)`, and
   `deal_dark_gift_offer` draws the three offers. The plan is the source's:
@@ -1819,6 +1819,22 @@ minions in the hand.
   takes the loaded specs, and real seats are played in Rust like the bot
   seats. `ppo.py` adds a `vs7 real` eval (one learner against 7 real seats,
   `place_vs_real`) whenever real boards are loaded.
+
+## The cycle action
+
+`Action::CycleShop(i)` (buy Tavern slot i, play it at the end of the board,
+sell it) and `Action::CycleHand(j)` (play hand slot j, sell it) are one
+action that runs the whole line through the ordinary `step`, one ordinary
+action at a time; each substep counts towards the 200-action turn cap. After
+the played card is sold, every minion the line generated is played and sold
+in hand order (a generated spell cannot be sold, and a generated minion
+whose play opens a choice is left in hand). The action is legal only for a
+minion, with a free board slot, no open choice, and, for `CycleShop`, the
+Gold for the buy and room in the hand; a card whose own play opens a choice
+(Choose One, Discover, target, discard) has no cycle action, which leaves 17
+of the 348 minion cards out. `CardDb::play_opens_choice` is the data test.
+The new kind is last in `ACTION_KINDS` (17 actions, `N_ACTIONS` 200), so an
+old recording's action indices still mean the same actions.
 
 ## The shop-turn search
 
@@ -2059,7 +2075,12 @@ Deleting `.venv` undoes it.
   Discounting is per turn, not per action; with per-action discounting
   nothing learned, because a turn can be up to 200 actions.
 - The starting policy is uniform over action kinds, not over all actions,
-  or it almost never ends a turn.
+  or it almost never ends a turn. The cycle kind starts lower: its logits
+  share the buy and play slot columns and get a -9 bias, so an older
+  checkpoint's old actions keep their probabilities until PPO explores the
+  cycles. (-3 put 6 to 7% of a loaded checkpoint's actions on cycles and
+  cost it 1.7 places against real boards; -9 starts under 1% and keeps the
+  old 5.8.) `ppo.py` logs `cycle_move` and `top_cycles` beside `buys`.
 - Snapshots of itself are taken every 250 updates (at about 95 updates a
   minute, 10 was only 2 minutes of history).
 - Every eval writes a row to `runs/NAME/metrics.csv`: placement against
@@ -2071,7 +2092,12 @@ Deleting `.venv` undoes it.
 - `--stop-flat N` stops a run after N minutes without gains, but only when
   it also no longer beats its oldest snapshot.
 - Any change to the action space or observation breaks old checkpoints;
-  start a new run. The 2026-10-25 observation rewrite (all ten tribes, the
+  start a new run, except where the change only appends actions or input
+  columns. The cycle kind (2026-11-08) is appended after `dark_gift`, so
+  `model.load` and `warm_start` copy an old checkpoint's action rows exactly
+  and start the 17 new rows at -9 (`N_ACTIONS` 183 to 200); an old recording's
+  action indices still mean the same actions, and `imitate.py` pads its mask
+  with the new actions illegal. The 2026-10-25 observation rewrite (all ten tribes, the
   lobby, the Deity, Blood Gems, attachments, and opponents' Deity, gem value
   and spell power as last seen; OBS_SIZE 2658 to 6362) broke every earlier
   checkpoint, expected. The heroes run the same day added own and opponents'

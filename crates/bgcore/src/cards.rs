@@ -4614,6 +4614,26 @@ impl CardDb {
         &self.cards[id as usize]
     }
 
+    /// Whether playing this minion opens a choice the player has to answer
+    /// (a Choose One, a Discover, a target or a discard), read from the card
+    /// data alone. The cycle action runs a whole line as one action and can't
+    /// answer anything, so a minion whose play asks has no cycle action.
+    pub fn play_opens_choice(&self, id: CardId) -> bool {
+        let card = self.get(id);
+        if card.choose_one.is_some() {
+            return true;
+        }
+        card.battlecry.is_some_and(|e| {
+            e.needs_choice()
+                || matches!(
+                    e,
+                    Effect::DiscoverTribeIfAnother { .. }
+                        | Effect::DiscoverDemonTierDamage(_)
+                        | Effect::DiscoverSpell { .. }
+                )
+        })
+    }
+
     /// The types of a minion: its card's, or all ten when a Dark Gift gives
     /// it every type (Amalgamation). Every tribe question about a minion on a
     /// board, in a hand or in a fight goes through here.

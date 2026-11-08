@@ -48,6 +48,10 @@ KINDS = [name for name, _ in bgpy.ACTION_KINDS]
 KIND_OF = torch.tensor([k for k, (_, n) in enumerate(bgpy.ACTION_KINDS) for _ in range(n)])
 END_TURN = bgpy.END_TURN
 SHOP_START = bgpy.SHOP_START
+HAND_START = bgpy.HAND_START
+CYCLE_KIND = KINDS.index("cycle")
+CYCLE_SHOP_START = sum(n for _, n in bgpy.ACTION_KINDS[:CYCLE_KIND])
+CYCLE_HAND_START = CYCLE_SHOP_START + bgpy.SHOP
 ACTIONS_LEFT = bgpy.SCALAR_ACTIONS_LEFT
 
 TRIBE_NAMES = ("beast", "mech", "dragon", "murloc", "demon", "pirate",
@@ -72,7 +76,7 @@ EVAL_KEYS = [
 TRIBE_COLS = {t: k for k, t in enumerate(TRIBE_NAMES)}
 TRAIN_KEYS = [
     "entropy", "approx_kl", "clipfrac", "value_loss", "explained_var", "steps_per_s",
-    "actions_per_turn", "tier_t6", "tier_t10", "health_end",
+    "actions_per_turn", "tier_t6", "tier_t10", "health_end", "cycle_move",
 ]
 
 
@@ -533,7 +537,7 @@ def main():
             *EVAL_KEYS,
             *TRAIN_KEYS,
             *[f"act_{k}" for k in KINDS],
-            "top_buys",
+            "top_buys", "top_cycles",
         ])
 
     b = Bufs(N)
@@ -744,6 +748,19 @@ def main():
             ev = 1 - (f_ret - f_val).var() / (f_ret.var() + 1e-8)
             n_ends = ends.reshape(-1)[sel].sum().item()
             term = dones.reshape(-1)[sel] > 0
+            is_cycle = k == CYCLE_KIND
+            shop_cycle = is_cycle & (f_act >= CYCLE_SHOP_START) & (f_act < CYCLE_HAND_START)
+            hand_cycle = is_cycle & (f_act >= CYCLE_HAND_START)
+            cycle_ids = torch.cat([
+                f_obs[shop_cycle,
+                      SHOP_START + (f_act[shop_cycle] - CYCLE_SHOP_START) * bgpy.SLOT_FEATURES
+                      + bgpy.SLOT_CARD_ID],
+                f_obs[hand_cycle,
+                      HAND_START + (f_act[hand_cycle] - CYCLE_HAND_START) * bgpy.SLOT_FEATURES
+                      + bgpy.SLOT_CARD_ID],
+            ]).long() - 1
+            cycle_ids = cycle_ids[cycle_ids >= 0]
+            cycle_counts = torch.bincount(cycle_ids, minlength=len(names))
             stats = {
                 "entropy": np.mean(ents), "approx_kl": np.mean(kls), "clipfrac": np.mean(clips),
                 "value_loss": np.mean(vls), "explained_var": ev.item(),
@@ -752,11 +769,19 @@ def main():
                 "tier_t6": t6.mean().item() if len(t6) else float("nan"),
                 "tier_t10": t10.mean().item() if len(t10) else float("nan"),
                 "health_end": health[term].mean().item() if term.any() else float("nan"),
+                "cycle_move": (counts[CYCLE_KIND] / counts.sum()).item(),
                 **{f"act_{KINDS[i]}": (counts[i] / counts.sum()).item() for i in range(len(KINDS))},
             }
             top = buy_counts.argsort(descending=True)[:5]
             total = max(buy_counts.sum().item(), 1)
             top_buys = " ".join(f"{names[i]}:{buy_counts[i].item() / total:.0%}" for i in top.tolist())
+            if cycle_counts.sum().item() > 0:
+                top = cycle_counts.argsort(descending=True)[:5]
+                total = cycle_counts.sum().item()
+                top_cycles = " ".join(f"{names[i]}:{cycle_counts[i].item() / total:.0%}"
+                                      for i in top.tolist())
+            else:
+                top_cycles = "-"
         for key, val in stats.items():
             tb.add_scalar(f"train/{key}", val, update)
 
@@ -804,7 +829,7 @@ def main():
                 *[f"{eval_vals[k]:.3f}" for k in EVAL_KEYS],
                 *[f"{stats[k]:.4g}" for k in TRAIN_KEYS],
                 *[f"{stats[f'act_{k}']:.3f}" for k in KINDS],
-                top_buys,
+                top_buys, top_cycles,
             ])
             csv_file.flush()
             score = vs_real if best_by == "real" else 0.5 * (vs_std + vs_rush)
@@ -844,7 +869,8 @@ def main():
                 "trb(" + " ".join(
                     f"{t[:2]} {rep[f'tribe_{t}']:.0%}@{rep[f'place_{t}']:.2f}"
                     for t in REPORT_GROUPS) + ")  "
-                f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}",
+                f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}  "
+                f"cycles {stats['cycle_move']:.2%} {top_cycles}",
                 flush=True,
             )
         if done:
