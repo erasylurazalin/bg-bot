@@ -90,8 +90,11 @@ def args():
                    help="torch.compile the attention layers (default: on for attn)")
     a.add_argument("--init-from", help="checkpoint to take matching weights from, for a new run")
     a.add_argument("--cycle-bias", type=float,
-                   help="--init-from from before the cycle kind: the starting bias of the 17 "
-                        "new cycle actions (default model.CYCLE_BIAS, -9)")
+                   help="the starting bias of the 17 cycle actions, for a fresh network or an "
+                        "--init-from from before the cycle kind (default model.CYCLE_BIAS, -9; "
+                        "-2.83 is neutral, what kind_prior gives any other kind of 17)")
+    a.add_argument("--no-cycles", action="store_true",
+                   help="never offer the cycle actions: a control run for the cycle kind")
     a.add_argument("--init-cards-rev",
                    help="git revision whose cards.toml and heroes.toml an --init-from checkpoint "
                         "was trained on, for checkpoints saved before they stored card names")
@@ -217,6 +220,7 @@ DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
 # Discovery first thing when it can (once per turn, the tutorial line). Set
 # from the flag in main().
 FORCE_DARK = False
+NO_CYCLES = False
 DARK_TURNS = (3, 4, 5)
 
 
@@ -230,6 +234,9 @@ def force_mask(obs, mask, curve_rows=None):
     --force-turn2-level, a free seat on turn 2 at tier 1 must too. The forced
     mask is the one stored for the update, so a forced action has
     log-probability 0 and no gradient."""
+    if NO_CYCLES:
+        mask = mask.clone()
+        mask[:, CYCLE_SHOP_START:] = False
     rows = torch.zeros(obs.shape[0], dtype=torch.bool, device=obs.device)
     if FORCE_TURN2:
         rows |= (obs[:, bgpy.SCALAR_TURN] == 2) & (obs[:, bgpy.SCALAR_TIER] == 1)
@@ -398,10 +405,11 @@ def summarize_records(records):
 
 
 def main():
-    global FORCE_TURN2, FORCE_DARK
+    global FORCE_TURN2, FORCE_DARK, NO_CYCLES
     cfg = args()
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
+    NO_CYCLES = cfg.no_cycles
     # a training setting, not a model one: the checkpoint and its weights are
     # the same with the blocks recomputed or kept
     set_recompute(not cfg.no_recompute)
@@ -469,6 +477,12 @@ def main():
     if cfg.compile is None:
         cfg.compile = cfg.model == "attn"
     net = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
+    if cfg.cycle_bias is not None and not cfg.init_from and not cfg.resume:
+        with torch.no_grad():
+            bias = dict(net.named_parameters())
+            bias = bias.get("head.bias", bias.get("policy.bias"))
+            bias[CYCLE_SHOP_START:] = cfg.cycle_bias
+        print(f"fresh network: cycle actions start at bias {cfg.cycle_bias}")
     if cfg.init_from:
         old_cards = old_heroes = None
         if cfg.init_cards_rev:
