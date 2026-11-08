@@ -1915,26 +1915,36 @@ free, the Dragons buffed).
 
 `crates/bgcore/src/planner.rs` is a bot that plays a comp written as data
 (`data/comps/comps.toml`, loaded by `crates/bgcore/src/comps.rs`). The plan is
-`docs/notes/comp-planner.md`; the first build is
-`docs/briefs/comp-planner-1.md`. The effects still live in `cards.toml`: the
-planner may name cards, as the scripted bots do, but no rule matches a name.
+`docs/notes/comp-planner.md`; the builds are `docs/briefs/comp-planner-1.md`
+and `docs/briefs/comp-planner-2.md`. The effects still live in `cards.toml`:
+the planner may name cards, as the scripted bots do, but no rule matches a
+name.
 
-- **The file:** one `[[comp]]` per comp. `name`, `tribes`, `draft`, `fallback`,
-  `commit_turn` (first and last turn it may commit), `level` (the tier target
-  for turn 1, 2, ...), `scales` (`none`, `beetles` or `stats`), `core` cards
-  with a weight and a `scale` flag, `early` (cards and `strong_stats`),
-  `signals` (cards, a tribe with a minimum count, a hero, a trinket, or a
-  keyword, each with a weight), `give_up` (`after_turn`, `progress_below`,
-  `to`) and `not_in_comp`. Every card, hero and trinket is checked against the
-  loaded data; an unknown name fails the load with the comp and the name.
-  `data/comps/comps.toml` holds two `draft = true` entries: `beetles` (the
-  first comp) and `scam` (its fallback, also the late fallback when nothing
-  else was found). Scam has no level curve of its own.
+- **The file:** `[defaults]` holds the shared `level` curve (the tier target
+  for turn 1, 2, ...) and `dying_health`, the Health at or below which the
+  planner stops leveling. One `[[comp]]` per comp: `name`, `tribes`, `draft`,
+  `fallback`, `commit_turn` (first and last turn it may commit), `level` (an
+  own curve; absent inherits `[defaults]`, `level = []` means no curve),
+  `scales` (`none`, `beetles` or `stats`), `core` cards with a weight and a
+  `scale` flag, `early` (cards and `strong_stats`), `signals` (cards, a tribe
+  with a minimum count, a hero, a trinket, or a keyword, each with a weight),
+  `give_up` (`after_turn`, `progress_below`, `to`) and `not_in_comp`. Every
+  card, hero and trinket is checked against the loaded data; an unknown name
+  fails the load with the comp and the name. `data/comps/comps.toml` holds two
+  `draft = true` entries: `beetles` (the first comp) and `scam` (its fallback,
+  also the late fallback when nothing else was found). Scam has
+  `level = []`: no level curve of its own. The shipped default is the
+  standard curve: Era's own timing (tier 4 on turn 6, tier 5 on turn 8) was
+  measured at 7.27 against 7.02 for this one, so it is left in
+  `docs/notes/mining/sure-plays.md` for a comp to override.
 - **One decision:** answer an open choice (a comp card first), apply the
   standing rules, level when the comp's curve or the default curve says so
-  (unless Health is at or below 10), make room on a full board (the lowest
-  comp weight card goes, never a core card), take a dominating cycle
-  (`search::Position`), then score the legal moves.
+  (unless Health is at or below `dying_health`; an unaffordable level is
+  skipped and tried again on the next decision), buy a sure-buy spell, cast a
+  spell already in hand, make room on a full board (the lowest comp weight
+  card goes, never a core card), take a dominating cycle
+  (`search::Position`), then score the legal moves. Turns 1 to 3 play the
+  standard curve bot, so the opening board has known tempo.
 - **The score:** `strong + w(turn) * comp progress`. `strong` is the average of
   `FIGHTS` (16) `search::fight_outcome` fights against the real boards of the
   turn, preferring the next opponent's tier and leaderboard tribe through
@@ -1944,22 +1954,35 @@ planner may name cards, as the scripted bots do, but no rule matches a name.
   and signal cards, the player-wide beetle or improvement scaling, less
   `not_in_comp` cards. `w(turn)` is 0.10 on turns 0 to 3, 0.25 on 4 to 6,
   0.50 on 7 to 9, 1.00 on 10 to 12 and 2.00 after. The weight is 10 points per
-  progress point. A full board refuses a non-core buy unless it can replace a
-  weaker card; a core card in hand or in the Tavern always gets a slot.
-  `bgbench planner` prints the measured decision time.
+  progress point. A full board refuses a non-core buy unless it is the third
+  copy for a triple, a Magnetic merge, or a card the make-room rule is already
+  replacing a weaker card with. A core card in hand or in the Tavern always
+  gets a slot. A Refresh is worth 1.0 when the Gold would otherwise be left
+  over, so the planner looks again instead of ending with unspent Gold; a Hero
+  Power is worth 2.0, so a free or useful power is pressed before that
+  Refresh. `bgbench planner` prints the measured decision time and the
+  end-of-turn hand and Gold.
 - **Standing rules:** after a lost fight, a Tortollan Blue Shell in the Tavern,
   affordable and with room, is a `CycleShop` (buy, play, sell, +2 Gold); on a
   full board the lowest comp weight card is sold first, and the cycle is
   skipped when every card on the board is core. The same rule makes room for a
-  core card. Trinket, hero and Discover offers prefer the comp's signals. The
-  constants are in `planner.rs` (`FIGHTS`, `CANDIDATES`, `COMMIT_MIN`,
-  `REPLACE_MARGIN`, `TRIBE_PROGRESS`, `DYING_HEALTH`, `DEFAULT_CURVE`).
+  core card. Leaf Through the Pages, Wealthy Bounty and Fandral's Fortune are
+  bought whenever offered and affordable. A hand spell is cast at once unless
+  it is one Era holds (`HOLD_SPELLS`: Them Apples, Sludge Corrosion,
+  Methodical Madness, Hasty Excavation, Corrupted Coin) or a stat buff with
+  Gold still to spend (those wait until the buying is done). Trinket, hero and
+  Discover offers prefer the comp's signals. The constants are in
+  `planner.rs` (`FIGHTS`, `CANDIDATES`, `COMMIT_MIN`, `REPLACE_MARGIN`,
+  `TRIBE_PROGRESS`, `HOLD_SPELLS`, `STANDARD_OPENING_TURNS`) and the two
+  defaults are in `data/comps/comps.toml`.
 - **`bgbench planner --comps PATH --games N --vs real [--seat planner|standard|rush]`:**
   one seat 0 bot against seven real-board seats. It prints average place,
   top-4 and first rates, the comps committed to and their average commit turn,
   the share of final boards with at least half the comp's core weight and at
   least two core cards, Shell cycles on the turns the rule applied, the median
-  tier turns, the decision time and ten final boards in full.
+  tier turns, the end-of-turn cards-in-hand and Gold (overall and by turn
+  bucket, with the most held spell and minion names), the decision time and
+  ten final boards in full.
 - **Python:** `bgpy.Planner(comps, seed, real_boards)` has `action(path)` for
   `EraTurnPath`, `reset(seed)`, `comp`, `committed_turn`, `shell_cycles`,
   `shell_chances` and `level_turns`. `train/era_turns.py --planner PATH` adds

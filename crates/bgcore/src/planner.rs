@@ -31,8 +31,6 @@ pub const FIGHTS: usize = 16;
 /// Candidates whose fights are played out. The rest are ranked by the cheap
 /// score and dropped.
 pub const CANDIDATES: usize = 20;
-/// Health at or below which the planner stops leveling.
-pub const DYING_HEALTH: i32 = 10;
 /// Turns the standard curve bot plays before the planner takes over. It gives
 /// the early board a known-good tempo opening; the comp rules start on turn 4.
 pub const STANDARD_OPENING_TURNS: u32 = 3;
@@ -43,10 +41,16 @@ pub const REPLACE_MARGIN: f32 = 6.0;
 pub const COMMIT_MIN: f32 = 4.0;
 /// Progress for a body of the comp's tribe that is not a named core card.
 pub const TRIBE_PROGRESS: f32 = 0.8;
-
-/// The default tier target for turn 1, 2, ... when the planner has no comp
-/// yet: the standard curve.
-pub const DEFAULT_CURVE: [u8; 12] = [1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6];
+/// Spells Era holds rather than casting at once (`docs/notes/mining/sure-plays.md`,
+/// "Spells that are always cast on buy"). Everything else is cast from hand
+/// before the planner scores a move.
+pub const HOLD_SPELLS: [&str; 5] = [
+    "Them Apples",
+    "Sludge Corrosion",
+    "Methodical Madness",
+    "Hasty Excavation",
+    "Corrupted Coin",
+];
 
 /// The weight between "strong now" and comp progress, by turn. Low early
 /// (survive), high late (build).
@@ -90,6 +94,7 @@ pub struct Planner {
     boards: Option<Arc<RealBoards>>,
     fights: usize,
     shell: Option<CardId>,
+    sure_buys: Vec<CardId>,
 }
 
 impl Planner {
@@ -101,6 +106,10 @@ impl Planner {
             boards: None,
             fights: FIGHTS,
             shell: data.cards.by_name("Tortollan Blue Shell"),
+            sure_buys: ["Leaf Through the Pages", "Wealthy Bounty", "Fandral's Fortune"]
+                .iter()
+                .filter_map(|n| data.cards.by_name(n))
+                .collect(),
         }
     }
 
@@ -200,6 +209,12 @@ impl Planner {
             return crate::bots::standard_action(game);
         }
         if let Some(a) = self.level_action(game, p) {
+            return a;
+        }
+        if let Some(a) = self.sure_buy_action(game, p) {
+            return a;
+        }
+        if let Some(a) = self.cast_spell_action(game, p) {
             return a;
         }
         if let Some(a) = self.make_room_action(game, p) {
@@ -446,12 +461,16 @@ impl Planner {
 
     fn level_action(&mut self, game: &Game, p: usize) -> Option<Action> {
         let pl = &game.players[p];
-        if pl.health <= DYING_HEALTH {
+        if pl.health <= self.comps.defaults.dying_health {
             return None;
         }
+        let default = &self.comps.defaults.level;
         let target = match self.state.comp.or(self.state.lean) {
-            Some(ci) => self.comps.comps[ci].level_at(game.turn),
-            None => Some(DEFAULT_CURVE[(game.turn.saturating_sub(1) as usize).min(DEFAULT_CURVE.len() - 1)]),
+            Some(ci) => self.comps.comps[ci].level_at(game.turn, default),
+            None => {
+                let index = (game.turn.saturating_sub(1) as usize).min(default.len().saturating_sub(1));
+                default.get(index).copied()
+            }
         }?;
         if pl.tier >= target || !game.is_legal(Action::Level) {
             return None;
@@ -460,6 +479,57 @@ impl Planner {
             self.state.level_turns.push((game.turn, target));
         }
         Some(Action::Level)
+    }
+
+    /// Era's always-bought economy spells (docs/notes/mining/sure-plays.md):
+    /// Leaf Through the Pages, Wealthy Bounty and Fandral's Fortune. Each is
+    /// bought when it is offered and affordable, in that order. The cast rule
+    /// then casts it the same turn.
+    fn sure_buy_action(&self, game: &Game, p: usize) -> Option<Action> {
+        let pl = &game.players[p];
+        for &id in &self.sure_buys {
+            if pl.shop_spell == Some(id) && game.is_legal(Action::BuySpell) {
+                return Some(Action::BuySpell);
+            }
+            if let Some(slot) = pl.shop.iter().position(|m| m.card == id)
+                && pl.gold >= game.data.cards.get(id).cost
+            {
+                let a = Action::Buy(slot as u8);
+                if game.is_legal(a) {
+                    return Some(a);
+                }
+            }
+        }
+        None
+    }
+
+    /// Cast a spell already in hand unless it is one Era holds. This is the
+    /// standing "cast what you bought" rule: targeted and generated spells do
+    /// not change the board in their own `Play` state, so the one-step score
+    /// alone would leave them in hand forever.
+    fn cast_spell_action(&self, game: &Game, p: usize) -> Option<Action> {
+        let pl = &game.players[p];
+        let mut best: Option<(u8, u8)> = None;
+        for h in 0..pl.hand.len() {
+            let c = game.data.cards.get(pl.hand[h].card);
+            if !c.is_spell() || HOLD_SPELLS.contains(&c.name.as_str()) {
+                continue;
+            }
+            if c.pay_health && pl.health - c.cost as i32 <= 5 {
+                continue;
+            }
+            let a = Action::Play { hand: h as u8, pos: 0 };
+            if !game.is_legal(a) {
+                continue;
+            }
+            // Cast the cheapest first: a 0-cost generated spell clears hand
+            // space for the rest, and a spell that opens a choice pauses here.
+            let key = c.cost;
+            if best.is_none_or(|(_, b)| key < b) {
+                best = Some((h as u8, key));
+            }
+        }
+        best.map(|(hand, _)| Action::Play { hand, pos: 0 })
     }
 
     /// With a full board, sell a card that is not in the comp to make room for
@@ -605,8 +675,30 @@ impl Planner {
             }
             let Some(a) = Action::from_index(i) else { continue };
             match a {
-                Action::Buy(_)
-                | Action::BuySpell
+                Action::Buy(s) => {
+                    let m = &pl.shop[s as usize];
+                    let c = game.data.cards.get(m.card);
+                    // A full board can only take a card it can play: a core
+                    // card, a Magnetic merge, or the third copy of a triple.
+                    // The make-room rule already sold a slot for a stronger
+                    // card before this point.
+                    let core = comp.is_some_and(|ci| {
+                        self.comps.comps[ci].core_weight(m.card).is_some()
+                    });
+                    let held = pl
+                        .board
+                        .iter()
+                        .chain(&pl.hand)
+                        .filter(|x| x.card == m.card && !x.golden)
+                        .count();
+                    let magnetic = m.keywords.has(Keywords::MAGNETIC)
+                        && pl.board.iter().any(|x| game.data.cards.tribes_of(x).has(crate::Tribe::Mech));
+                    if pl.board.is_full() && !c.is_spell() && !core && held != 2 && !magnetic {
+                        continue;
+                    }
+                    actions.push(a);
+                }
+                Action::BuySpell
                 | Action::Sell(_)
                 | Action::Activate(_)
                 | Action::Level
@@ -631,7 +723,7 @@ impl Planner {
             let stat = self.board_stat(&after, p);
             let mut extra = 0.0;
             match a {
-                Action::Roll if self.roll_hope(game, p, comp) => extra += 1.0,
+                Action::Roll => extra += self.roll_value(game, p),
                 Action::DarkGift => {
                     // Do not spend the last buy's gold on the button.
                     let r = &game.data.rules;
@@ -639,7 +731,7 @@ impl Planner {
                         extra += if (3..=5).contains(&turn) { 4.0 } else { 1.0 };
                     }
                 }
-                Action::HeroPower | Action::HeroPower2 => extra += 1.0,
+                Action::HeroPower | Action::HeroPower2 => extra += 2.0,
                 Action::Activate(_) => extra += 1.0,
                 Action::Buy(s) => {
                     if let Some(m) = pl.shop.get(s as usize) {
@@ -723,18 +815,12 @@ impl Planner {
         })
     }
 
-    fn roll_hope(&self, game: &Game, p: usize, comp: Option<usize>) -> bool {
-        let Some(ci) = comp else { return false };
+    /// A Refresh is worth taking when the Gold would otherwise be left over
+    /// and no move scored better. The brief's "spend the gold": if the Tavern
+    /// has nothing worth buying, look again.
+    fn roll_value(&self, game: &Game, p: usize) -> f32 {
         let pl = &game.players[p];
-        if pl.free_rolls == 0
-            && pl.gold < game.data.rules.roll_cost.saturating_add(game.data.rules.buy_cost)
-        {
-            return false;
-        }
-        self.comps.comps[ci]
-            .core
-            .iter()
-            .any(|c| !pl.board.iter().chain(&pl.hand).any(|m| m.card == c.id))
+        if pl.free_rolls > 0 || pl.gold >= game.data.rules.roll_cost { 1.0 } else { 0.0 }
     }
 
     fn board_stat(&self, game: &Game, p: usize) -> f32 {

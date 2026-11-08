@@ -11,7 +11,8 @@
 #   draft        true while Era has not corrected the entry
 #   fallback     true when the planner may pick it late with no other comp
 #   commit_turn  [first, last] turn the planner may commit on a signal
-#   level        the tier target for turn 1, 2, ...; absent means no curve
+#   level        the tier target for turn 1, 2, ...; absent inherits
+#                [defaults], and level = [] means the comp has no curve
 #   scales       "none", "beetles" or "stats": the player-wide counter that
 #                makes the comp grow (beetles reads Player.beetle_bonus)
 #
@@ -31,13 +32,23 @@
 #
 # not_in_comp: cards that look good but are sold first (the Balinda rule).
 
+[defaults]
+# The default curve, the standard bot's. Era's timing from
+# docs/notes/mining/sure-plays.md is tier 2 on turn 2, tier 3 on turn 5,
+# tier 4 on turn 6, tier 5 on turn 8 when affordable; it measured 7.27
+# against 7.02 for this curve on the 512-game test, so a comp that wants it
+# can set it here (or set its own `level`). dying_health is the Health at or
+# below which no level is taken.
+
+level = [1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6]
+dying_health = 10
+
 [[comp]]
 name = "beetles"
 tribes = ["beast"]
 draft = true
 fallback = false
 commit_turn = [4, 9]
-level = [1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6]
 scales = "beetles"
 not_in_comp = ["Humming Bird", "Cage Gnawer", "Sewer Lord", "Hoarding Hyena"]
 
@@ -109,6 +120,7 @@ name = "scam"
 tribes = []
 draft = true
 fallback = true
+level = []
 scales = "none"
 
 # Scam has no level curve of its own: it is what the planner switches to when

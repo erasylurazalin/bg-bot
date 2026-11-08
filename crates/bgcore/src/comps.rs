@@ -116,9 +116,18 @@ impl Comp {
         self.early.cards.contains(&id)
     }
 
-    /// The tier target for a turn, from the comp's own curve.
-    pub fn level_at(&self, turn: u32) -> Option<u8> {
-        let levels = self.level.as_ref()?;
+    /// The tier target for a turn: the comp's own curve, else the library
+    /// default. `level = []` is a comp with no curve, which returns None.
+    pub fn level_at(&self, turn: u32, default: &[u8]) -> Option<u8> {
+        let levels = match self.level.as_ref() {
+            Some(own) => {
+                if own.is_empty() {
+                    return None;
+                }
+                own.as_slice()
+            }
+            None => default,
+        };
         if levels.is_empty() {
             return None;
         }
@@ -127,10 +136,30 @@ impl Comp {
     }
 }
 
+/// The library defaults a comp inherits. A comp's own `level` overrides the
+/// level list; `level = []` means the comp has no level curve at all.
+#[derive(Clone, Debug)]
+pub struct Defaults {
+    /// The tier target for turn 1, 2, ...
+    pub level: Vec<u8>,
+    /// Health at or below which the planner stops leveling.
+    pub dying_health: i32,
+}
+
+pub const FALLBACK_LEVEL: [u8; 12] = [1, 2, 2, 2, 3, 4, 4, 5, 5, 5, 5, 6];
+pub const FALLBACK_DYING_HEALTH: i32 = 10;
+
+impl Default for Defaults {
+    fn default() -> Defaults {
+        Defaults { level: FALLBACK_LEVEL.to_vec(), dying_health: FALLBACK_DYING_HEALTH }
+    }
+}
+
 /// The loaded comp library.
 #[derive(Clone, Debug, Default)]
 pub struct Comps {
     pub comps: Vec<Comp>,
+    pub defaults: Defaults,
 }
 
 impl Comps {
@@ -140,6 +169,20 @@ impl Comps {
         let raw: RawFile = toml::from_str(text).map_err(|e| format!("comps: {e}"))?;
         if raw.comp.is_empty() {
             return Err("comps: the file has no [[comp]] entry".to_string());
+        }
+        let mut defaults = Defaults::default();
+        if let Some(d) = raw.defaults {
+            if let Some(level) = d.level {
+                if let Some(&t) = level.iter().find(|&&t| t == 0 || t > MAX_TIER) {
+                    return Err(format!("defaults: level target {t} is not a tier"));
+                }
+                if !level.is_empty() {
+                    defaults.level = level;
+                }
+            }
+            if let Some(h) = d.dying_health {
+                defaults.dying_health = h;
+            }
         }
         let mut comps: Vec<Comp> = Vec::with_capacity(raw.comp.len());
         for r in raw.comp {
@@ -153,13 +196,10 @@ impl Comps {
             {
                 return Err(fail(format!("commit_turn {lo}..{hi} is backwards")));
             }
-            if let Some(levels) = &r.level {
-                if levels.is_empty() {
-                    return Err(fail("level is empty".to_string()));
-                }
-                if let Some(&t) = levels.iter().find(|&&t| t == 0 || t > MAX_TIER) {
-                    return Err(fail(format!("level target {t} is not a tier")));
-                }
+            if let Some(levels) = &r.level
+                && let Some(&t) = levels.iter().find(|&&t| t == 0 || t > MAX_TIER)
+            {
+                return Err(fail(format!("level target {t} is not a tier")));
             }
             let scales = match r.scales.as_deref().unwrap_or("none") {
                 "none" => Scales::None,
@@ -237,7 +277,7 @@ impl Comps {
             };
             comps[i].give_up.as_mut().expect("just borrowed").to_index = j;
         }
-        Ok(Comps { comps })
+        Ok(Comps { comps, defaults })
     }
 
     pub fn index_of(&self, name: &str) -> Option<usize> {
@@ -299,7 +339,18 @@ fn signal(raw: RawSignal, data: &Data) -> Result<Signal, String> {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawFile {
+    #[serde(default)]
+    defaults: Option<RawDefaults>,
     comp: Vec<RawComp>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct RawDefaults {
+    #[serde(default)]
+    level: Option<Vec<u8>>,
+    #[serde(default)]
+    dying_health: Option<i32>,
 }
 
 #[derive(Deserialize)]

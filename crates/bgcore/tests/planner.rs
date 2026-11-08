@@ -227,3 +227,132 @@ fn the_same_seed_plays_the_same_actions() {
     assert_eq!(g1.players[0], g2.players[0]);
     assert_eq!(g1.pool, g2.pool);
 }
+
+#[test]
+fn the_level_defaults_and_a_comps_override_load() {
+    let d = data();
+    let text = r#"
+[defaults]
+level = [1, 2, 3]
+dying_health = 12
+
+[[comp]]
+name = "inherits"
+core = [{ name = "Buzzing Vermin", weight = 1.0 }]
+
+[[comp]]
+name = "no curve"
+level = []
+core = [{ name = "Buzzing Vermin", weight = 1.0 }]
+
+[[comp]]
+name = "overrides"
+level = [2, 2]
+core = [{ name = "Buzzing Vermin", weight = 1.0 }]
+"#;
+    let c = Comps::from_toml(text, &d).expect("the inline library");
+    assert_eq!(c.defaults.level, vec![1, 2, 3]);
+    assert_eq!(c.defaults.dying_health, 12);
+    let inherits = &c.comps[c.index_of("inherits").unwrap()];
+    assert_eq!(inherits.level, None);
+    assert_eq!(inherits.level_at(2, &c.defaults.level), Some(2));
+    assert_eq!(inherits.level_at(3, &c.defaults.level), Some(3));
+    let no_curve = &c.comps[c.index_of("no curve").unwrap()];
+    assert_eq!(no_curve.level_at(2, &c.defaults.level), None);
+    let overrides = &c.comps[c.index_of("overrides").unwrap()];
+    assert_eq!(overrides.level_at(2, &c.defaults.level), Some(2));
+}
+
+#[test]
+fn the_real_file_inherits_the_default_and_scam_has_no_curve() {
+    let d = data();
+    let c = comps(&d);
+    let beetles = &c.comps[c.index_of("beetles").unwrap()];
+    assert_eq!(beetles.level, None, "beetles inherits the default");
+    assert_eq!(beetles.level_at(2, &c.defaults.level), Some(2));
+    let scam = &c.comps[c.index_of("scam").unwrap()];
+    assert_eq!(scam.level, Some(Vec::new()), "scam has no level curve");
+    assert_eq!(scam.level_at(2, &c.defaults.level), None);
+}
+
+#[test]
+fn a_targeted_spell_in_hand_is_cast() {
+    let d = data();
+    let c = comps(&d);
+    let mut g = sandbox(31);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Microbot", false);
+    place(&mut g, 0, 1, "Blood Gem", false);
+    g.turn = 5;
+    g.players[0].tier = 3;
+    mine(&mut g);
+    assert!(g.is_legal(Action::Play { hand: 0, pos: 0 }), "Blood Gem is castable");
+    let mut p = Planner::new(c, 31, &d);
+    assert_eq!(p.action(&g, 0), Action::Play { hand: 0, pos: 0 });
+}
+
+#[test]
+fn a_sure_buy_spell_is_bought_when_offered() {
+    let d = data();
+    let c = comps(&d);
+    let mut g = sandbox(37);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Microbot", false);
+    let id = g.data.cards.by_name("Leaf Through the Pages").expect("Leaf");
+    g.players[0].shop_spell = Some(id);
+    g.turn = 5;
+    g.players[0].tier = 3;
+    g.players[0].gold = 10;
+    mine(&mut g);
+    assert!(g.is_legal(Action::BuySpell));
+    let mut p = Planner::new(c, 37, &d);
+    assert_eq!(p.action(&g, 0), Action::BuySpell);
+}
+
+#[test]
+fn spare_gold_is_spent_on_a_refresh() {
+    let d = data();
+    let c = comps(&d);
+    let mut g = sandbox(41);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Microbot", false);
+    g.players[0].gold = 2;
+    g.turn = 5;
+    g.players[0].tier = 3;
+    mine(&mut g);
+    assert!(g.is_legal(Action::Roll));
+    let mut p = Planner::new(c, 41, &d);
+    assert_eq!(p.action(&g, 0), Action::Roll);
+}
+
+#[test]
+fn a_full_board_does_not_buy_a_weak_non_core_minion() {
+    let d = data();
+    let c = comps(&d);
+    let mut g = sandbox(43);
+    ready(&mut g);
+    for _ in 0..7 {
+        place(&mut g, 0, 0, "Microbot", false);
+    }
+    place(&mut g, 0, 2, "Flittering Bat", false);
+    g.turn = 5;
+    g.players[0].tier = 3;
+    g.players[0].gold = 10;
+    mine(&mut g);
+    let mut p = Planner::new(c, 43, &d);
+    let a = p.action(&g, 0);
+    assert!(!matches!(a, Action::Buy(_)), "the hand would only clog: {a:?}");
+}
+
+#[test]
+fn a_full_hand_refuses_a_buy() {
+    let mut g = sandbox(47);
+    ready(&mut g);
+    for _ in 0..10 {
+        place(&mut g, 0, 1, "Microbot", false);
+    }
+    place(&mut g, 0, 2, "Microbot", false);
+    mine(&mut g);
+    assert!(g.players[0].hand.is_full());
+    assert!(!g.is_legal(Action::Buy(0)), "the ten-card hand is the cap");
+}

@@ -29,8 +29,8 @@ use bgcore::planner::Planner;
 use bgcore::fight_check::{CheckOptions, CheckReport, check_fight};
 use bgcore::real_boards::{CardIdMap, RealBoards, pair_fights, parse_board_files};
 use bgcore::{
-    Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, PLAYERS, RealBoardSpec, Rng,
-    fight, fight_with,
+    Action, Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, PLAYERS, RealBoardSpec,
+    Rng, fight, fight_with,
 };
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -349,6 +349,19 @@ impl Seat {
 
 /// One game of the `planner` command: the seat 0 result and, for the planner,
 /// what it committed to and did.
+/// One end-of-turn snapshot of seat 0, before End Turn.
+struct TurnRec {
+    turn: u32,
+    hand: usize,
+    minions: usize,
+    spells: usize,
+    spell_names: Vec<String>,
+    minion_names: Vec<String>,
+    gold: u8,
+    tier: u8,
+    board: usize,
+}
+
 struct GameRec {
     seed: u64,
     place: u8,
@@ -367,6 +380,7 @@ struct GameRec {
     hand: Vec<String>,
     decisions: u64,
     nanos: u128,
+    turns: Vec<TurnRec>,
 }
 
 fn minion_text(game: &Game, m: &Minion) -> String {
@@ -420,6 +434,7 @@ fn play_one(
     let mut decisions = 0u64;
     let mut last_board: Vec<Minion> = Vec::new();
     let mut last_hand: Vec<Minion> = Vec::new();
+    let mut turn_recs: Vec<TurnRec> = Vec::new();
     while let Some(p) = g.current_player() {
         assert_eq!(p, 0, "seed {seed}: a real-board seat is the current player");
         if !g.players[0].board.is_empty() {
@@ -437,6 +452,33 @@ fn play_one(
             Seat::Standard => standard_action(&g),
             Seat::Rush => rush_action(&g),
         };
+        if p == 0 && a == Action::EndTurn {
+            let pl = &g.players[0];
+            let spell_names: Vec<String> = pl
+                .hand
+                .iter()
+                .filter(|m| g.data.cards.get(m.card).is_spell())
+                .map(|m| g.data.cards.get(m.card).name.clone())
+                .collect();
+            let minion_names: Vec<String> = pl
+                .hand
+                .iter()
+                .filter(|m| !g.data.cards.get(m.card).is_spell())
+                .map(|m| g.data.cards.get(m.card).name.clone())
+                .collect();
+            let spells = spell_names.len();
+            turn_recs.push(TurnRec {
+                turn: g.turn,
+                hand: pl.hand.len(),
+                minions: minion_names.len(),
+                spells,
+                spell_names,
+                minion_names,
+                gold: pl.gold,
+                tier: pl.tier,
+                board: pl.board.len(),
+            });
+        }
         g.step(a).unwrap_or_else(|_| panic!("seed {seed}: {} picked illegal {a:?}", seat.name()));
     }
     let pl = &g.players[0];
@@ -479,7 +521,70 @@ fn play_one(
         hand: last_hand.iter().map(|m| minion_text(&g, m)).collect(),
         decisions,
         nanos,
+        turns: turn_recs,
     }
+}
+
+/// Cards in hand and Gold left at the end of each turn, overall and by turn
+/// bucket. These are the numbers the comp-planner-2 brief asks for.
+fn print_turn_stats(recs: &[GameRec]) {
+    let all: Vec<&TurnRec> = recs.iter().flat_map(|r| r.turns.iter()).collect();
+    if all.is_empty() {
+        return;
+    }
+    let max_hand = all.iter().map(|t| t.hand).max().unwrap_or(0);
+    let over_cap = all.iter().filter(|t| t.hand > 10).count();
+    let n = all.len() as f64;
+    let avg_hand = all.iter().map(|t| t.hand as f64).sum::<f64>() / n;
+    let hand6 = all.iter().filter(|t| t.hand >= 6).count() as f64 / n;
+    let avg_gold = all.iter().map(|t| t.gold as f64).sum::<f64>() / n;
+    let gold3 = all.iter().filter(|t| t.gold >= 3).count() as f64 / n;
+    let avg_minions = all.iter().map(|t| t.minions as f64).sum::<f64>() / n;
+    let avg_spells = all.iter().map(|t| t.spells as f64).sum::<f64>() / n;
+    let avg_tier = all.iter().map(|t| t.tier as f64).sum::<f64>() / n;
+    let avg_board = all.iter().map(|t| t.board as f64).sum::<f64>() / n;
+    println!(
+        "end of turn: {avg_hand:.2} cards in hand ({:.1}% with 6+, max {max_hand}), {avg_gold:.2} Gold ({:.1}% with 3+) at tier {avg_tier:.2} with {avg_board:.2} board minions, {avg_minions:.2} hand minions, {avg_spells:.2} hand spells",
+        hand6 * 100.0,
+        gold3 * 100.0,
+    );
+    if over_cap > 0 {
+        println!("  turns with more than 10 cards in hand: {over_cap}");
+    }
+    for (lo, hi, name) in [(1u32, 4u32, "turns 1-4"), (5, 7, "turns 5-7"), (8, 10, "turns 8-10"), (11, u32::MAX, "turns 11+")] {
+        let bucket: Vec<&TurnRec> = all.iter().copied().filter(|t| t.turn >= lo && t.turn <= hi).collect();
+        if bucket.is_empty() {
+            continue;
+        }
+        let n = bucket.len() as f64;
+        println!(
+            "  {name}: {:.2} cards ({:.1}% with 6+), {:.2} Gold ({:.1}% with 3+), {:.2} minions, {:.2} spells",
+            bucket.iter().map(|t| t.hand as f64).sum::<f64>() / n,
+            bucket.iter().filter(|t| t.hand >= 6).count() as f64 / n * 100.0,
+            bucket.iter().map(|t| t.gold as f64).sum::<f64>() / n,
+            bucket.iter().filter(|t| t.gold >= 3).count() as f64 / n * 100.0,
+            bucket.iter().map(|t| t.minions as f64).sum::<f64>() / n,
+            bucket.iter().map(|t| t.spells as f64).sum::<f64>() / n,
+        );
+    }
+    let mut by_spell: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut by_minion: BTreeMap<&str, usize> = BTreeMap::new();
+    for t in &all {
+        for name in &t.spell_names {
+            *by_spell.entry(name.as_str()).or_default() += 1;
+        }
+        for name in &t.minion_names {
+            *by_minion.entry(name.as_str()).or_default() += 1;
+        }
+    }
+    let top = |map: &BTreeMap<&str, usize>| {
+        let mut v: Vec<(&str, usize)> = map.iter().map(|(&n, &c)| (n, c)).collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        v.truncate(8);
+        v.iter().map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+    };
+    println!("  most held spells (turn cards): {}", top(&by_spell));
+    println!("  most held minions (turn cards): {}", top(&by_minion));
 }
 
 fn bench_planner(comps_path: &str, games: usize, seat: Seat, boards_dir: &str) {
@@ -578,6 +683,7 @@ fn bench_planner(comps_path: &str, games: usize, seat: Seat, boards_dir: &str) {
             );
         }
     }
+    print_turn_stats(&recs);
     println!("{games} games in {secs:.1} s");
     println!("\n10 final boards:");
     for r in recs.iter().take(10) {
