@@ -30,7 +30,7 @@ pub mod trinkets;
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
 pub use cards::{Card, CardDb, Effect, Tribe, Tribes};
 pub use comps::{Comp, Comps};
-pub use overlay::{Overlay, ShellLine};
+pub use overlay::{Overlay, OverlayState, ShellLine};
 pub use planner::Planner;
 pub use darkgifts::{Gift, GiftCond, GiftDb};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};

@@ -8,7 +8,7 @@ use bgcore::comps::Comps;
 use bgcore::game::PendingChooseOne;
 use bgcore::overlay::{
     F_ACTIVE, F_ENABLER_OFFERED, F_ENABLER_TAKEN, F_FORCED_SELL, F_SHELL_LEGAL, F_SHELL_TAKEN,
-    OVERLAY_FLAGS, Overlay, ShellLine,
+    OVERLAY_FLAGS, Overlay, OverlayState, ShellLine,
 };
 use bgcore::{Action, Data, Game, N_ACTIONS};
 
@@ -74,13 +74,121 @@ fn flags() -> [i32; OVERLAY_FLAGS] {
 fn the_beetle_comp_has_its_overlay_cards() {
     let d = data();
     let c = comps(&d);
-    let beetles = &c.comps[c.index_of("beetles").unwrap()];
-    assert_eq!(beetles.enabler.len(), 1);
-    assert!(beetles.is_enabler(beetles.enabler[0]));
+    let beetles = &c.comps[c.index_of("Beasts - Beetles").unwrap()];
+    assert_eq!(beetles.enabler.len(), 2, "Scorpid or Skitterer");
+    let scorpid = d.cards.by_name("Ravaging Scorpid").unwrap();
+    assert!(beetles.is_enabler(scorpid));
     assert!(beetles.payoff.iter().any(|&id| beetles.is_payoff(id)));
     assert_eq!(beetles.filler.len(), 4);
-    let scam = &c.comps[c.index_of("scam").unwrap()];
-    assert!(scam.enabler.is_empty(), "scam has no trigger in this round");
+    let scam = &c.comps[c.index_of("Murlocs - Venom Scam").unwrap()];
+    assert!(scam.enabler.is_empty(), "the fallback has no state trigger here");
+}
+
+#[test]
+fn a_two_card_enabler_needs_both_cards() {
+    let d = data();
+    let o = Overlay::new(comps(&d), 2.0, &d);
+    let mut g = sandbox(43);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Headhunter Gryphon", false);
+    mine(&mut g);
+    let mut line = OverlayState::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
+    assert_eq!(f[F_ACTIVE], 0, "Gryphon without Deathstrider");
+
+    place(&mut g, 0, 1, "Deathstrider", false);
+    let mut f = flags();
+    let _ = o.decide(&g, 0, &mut line, &mut bonus, &mut f);
+    assert_eq!(f[F_ACTIVE], 1, "Gryphon + Deathstrider");
+}
+
+#[test]
+fn an_aborted_comp_does_not_activate_later() {
+    let d = data();
+    let o = Overlay::new(comps(&d), 2.0, &d);
+    let mut g = sandbox(47);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Microbot", false);
+    g.players[0].tier = 3;
+    mine(&mut g);
+    let mut line = OverlayState::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    let _ = o.decide(&g, 0, &mut line, &mut bonus, &mut f);
+    assert_eq!(f[F_ACTIVE], 0, "Tier 3 without an enabler aborts Self Damage");
+
+    // The enabler arriving later does not turn the comp back on.
+    place(&mut g, 0, 0, "Soul Rewinder", false);
+    let mut f = flags();
+    let _ = o.decide(&g, 0, &mut line, &mut bonus, &mut f);
+    assert_eq!(f[F_ACTIVE], 0, "the abort is latched for the game");
+
+    // Below the abort Tier it is still live.
+    let mut g = sandbox(47);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Soul Rewinder", false);
+    g.players[0].tier = 2;
+    mine(&mut g);
+    let mut line = OverlayState::default();
+    let mut f = flags();
+    let _ = o.decide(&g, 0, &mut line, &mut bonus, &mut f);
+    assert_eq!(f[F_ACTIVE], 1);
+}
+
+#[test]
+fn a_comp_needs_every_lobby_tribe() {
+    let d = data();
+    let o = Overlay::new(comps(&d), 2.0, &d);
+    let mut g = Game::new_sandbox(data(), 49, Some(Tribes::of(bgcore::Tribe::Mech)), 0);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Glambot", false);
+    place(&mut g, 0, 1, "Balinda Stonehearth", false);
+    mine(&mut g);
+    let mut line = OverlayState::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    let _ = o.decide(&g, 0, &mut line, &mut bonus, &mut f);
+    assert_eq!(f[F_ACTIVE], 0, "Mechs also needs Quilboar for its gem cycle");
+
+    let mut all = sandbox(49);
+    ready(&mut all);
+    place(&mut all, 0, 0, "Glambot", false);
+    place(&mut all, 0, 1, "Balinda Stonehearth", false);
+    mine(&mut all);
+    let mut f = flags();
+    let _ = o.decide(&all, 0, &mut line, &mut bonus, &mut f);
+    assert_eq!(f[F_ACTIVE], 1);
+}
+
+#[test]
+fn a_health_cost_is_punished_without_a_rewind() {
+    let d = data();
+    let o = Overlay::new(comps(&d), 2.0, &d);
+    let mut g = sandbox(51);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Microbot", false);
+    let hasty = d.cards.by_name("Hasty Excavation").unwrap();
+    g.players[0].shop_spell = Some(hasty);
+    g.players[0].gold = 10;
+    mine(&mut g);
+    let mut line = OverlayState::default();
+    let mut bonus = [0.0f32; N_ACTIONS];
+    let mut f = flags();
+    let _ = o.decide(&g, 0, &mut line, &mut bonus, &mut f);
+    assert_eq!(bonus[Action::BuySpell.index()], -10.0, "no active comp is no excuse");
+
+    let mut g = sandbox(51);
+    ready(&mut g);
+    place(&mut g, 0, 0, "Microbot", false);
+    place(&mut g, 0, 0, "Soul Rewinder", false);
+    g.players[0].shop_spell = Some(hasty);
+    g.players[0].gold = 10;
+    mine(&mut g);
+    let mut f = flags();
+    let _ = o.decide(&g, 0, &mut line, &mut bonus, &mut f);
+    assert_eq!(bonus[Action::BuySpell.index()], 0.0, "Soul Rewinder rewinds it");
 }
 
 #[test]
@@ -96,12 +204,12 @@ fn the_shell_line_is_buy_then_play_then_sell() {
     let mut manual = g.clone();
     let gold = g.players[0].gold;
 
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     let buy = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the buy");
     assert!(matches!(buy, Action::Buy(_)), "{buy:?}");
-    assert_eq!(line.turn, g.turn);
+    assert_eq!(line.shell.turn, g.turn);
     assert_eq!(f[F_SHELL_LEGAL], 1);
     assert_eq!(f[F_SHELL_TAKEN], 1);
     g.step(buy).unwrap();
@@ -109,13 +217,13 @@ fn the_shell_line_is_buy_then_play_then_sell() {
     let mut f = flags();
     let play = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the play");
     assert_eq!(play, Action::Play { hand: 0, pos: 1 });
-    assert_eq!(line.slot, Some(1));
+    assert_eq!(line.shell.slot, Some(1));
     g.step(play).unwrap();
 
     let mut f = flags();
     let sell = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("the sell");
     assert_eq!(sell, Action::Sell(1));
-    assert_eq!(line, ShellLine::default());
+    assert_eq!(line.shell, ShellLine::default());
     g.step(sell).unwrap();
 
     manual.step(Action::Buy(0)).unwrap();
@@ -137,11 +245,11 @@ fn a_shell_already_on_the_board_is_not_sold() {
     g.players[0].lost_last_combat = true;
     place(&mut g, 0, 0, "Tortollan Blue Shell", false);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
-    assert_eq!(line, ShellLine::default());
+    assert_eq!(line.shell, ShellLine::default());
 }
 
 #[test]
@@ -153,7 +261,7 @@ fn the_shell_is_not_forced_without_a_loss() {
     place(&mut g, 0, 0, "Ravaging Scorpid", false);
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
@@ -174,7 +282,7 @@ fn a_full_board_shell_sells_the_non_comp_card() {
     }
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     let a = o.decide(&g, 0, &mut line, &mut bonus, &mut f).expect("a forced sale");
@@ -197,7 +305,7 @@ fn a_full_board_shell_is_skipped_without_an_active_comp() {
     }
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
@@ -215,7 +323,7 @@ fn an_enabler_at_a_discover_is_taken() {
     g.players[0].discover.push(banana);
     g.players[0].discover.push(scorp);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), Some(Action::Choose(1)));
@@ -233,7 +341,7 @@ fn an_enabler_is_not_taken_outside_the_lobby() {
     let scorp = g.data.cards.by_name("Ravaging Scorpid").unwrap();
     g.players[0].discover.push(scorp);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
@@ -259,7 +367,7 @@ fn a_choose_one_direct_card_enabler_is_taken() {
         repeats: 1,
     });
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), Some(Action::Choose(1)));
@@ -274,13 +382,13 @@ fn payoff_and_filler_get_the_bonus() {
     ready(&mut g);
     place(&mut g, 0, 0, "Ravaging Scorpid", false);
     place(&mut g, 0, 0, "Banana Slamma", false);
-    place(&mut g, 0, 0, "Turquoise Skitterer", false);
+    place(&mut g, 0, 0, "Forest Rover", false);
     place(&mut g, 0, 1, "Banana Slamma", false);
-    place(&mut g, 0, 1, "Turquoise Skitterer", false);
+    place(&mut g, 0, 1, "Forest Rover", false);
     place(&mut g, 0, 2, "Banana Slamma", false);
-    place(&mut g, 0, 2, "Turquoise Skitterer", false);
+    place(&mut g, 0, 2, "Forest Rover", false);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
@@ -305,7 +413,7 @@ fn a_full_board_gets_a_bonus_for_selling_a_non_comp_card() {
     }
     place(&mut g, 0, 1, "Turquoise Skitterer", false);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);
@@ -323,7 +431,7 @@ fn no_active_comp_changes_nothing() {
     place(&mut g, 0, 2, "Banana Slamma", false);
     place(&mut g, 0, 2, "Turquoise Skitterer", false);
     mine(&mut g);
-    let mut line = ShellLine::default();
+    let mut line = OverlayState::default();
     let mut bonus = [0.0f32; N_ACTIONS];
     let mut f = flags();
     assert_eq!(o.decide(&g, 0, &mut line, &mut bonus, &mut f), None);

@@ -70,18 +70,31 @@ fn name(g: &Game, m: &Minion) -> String {
 }
 
 #[test]
-fn the_comp_file_loads_both_drafts() {
+fn the_comp_file_loads_the_ten_drafts() {
     let d = data();
     let c = comps(&d);
-    assert_eq!(c.comps.len(), 2);
-    assert!(c.index_of("beetles").is_some());
-    assert!(c.index_of("scam").is_some());
+    assert_eq!(c.comps.len(), 10);
+    for name in [
+        "Beasts - Tasty Lobstah",
+        "Beasts - Leviathan",
+        "Beasts - Beetles",
+        "Demons - Deathrattle/Shop Buff",
+        "Mechs - Magnetics/Spells",
+        "Quilboar - Choose One",
+        "Murlocs - Keyword",
+        "Demons - Self Damage",
+        "Menagerie",
+        "Murlocs - Venom Scam",
+    ] {
+        assert!(c.index_of(name).is_some(), "{name} is in the file");
+    }
     for comp in &c.comps {
         assert!(comp.draft, "{} is marked draft", comp.name);
         assert!(!comp.core.is_empty(), "{} has a core", comp.name);
     }
-    let beetles = c.index_of("beetles").map(|i| &c.comps[i]).unwrap();
-    assert_eq!(beetles.give_up.as_ref().map(|g| g.to.as_str()), Some("scam"));
+    let scam = &c.comps[c.index_of("Murlocs - Venom Scam").unwrap()];
+    assert!(scam.fallback);
+    assert!(scam.level.as_ref().is_some_and(Vec::is_empty), "the fallback has no curve");
 }
 
 #[test]
@@ -156,14 +169,13 @@ fn the_blue_shell_cycle_does_not_fire_without_the_loss() {
 }
 
 #[test]
-fn a_full_board_sells_the_lowest_comp_weight_not_the_weakest() {
+fn a_full_board_sells_a_non_comp_card_before_a_core_card() {
     let d = data();
     let c = comps(&d);
     let mut g = sandbox(13);
     ready(&mut g);
     g.players[0].lost_last_combat = true;
     place(&mut g, 0, 2, "Tortollan Blue Shell", false);
-    // The core is positive weight; the Humming Bird is not_in_comp.
     for card in [
         "Buzzing Vermin",
         "Ravaging Scorpid",
@@ -175,25 +187,19 @@ fn a_full_board_sells_the_lowest_comp_weight_not_the_weakest() {
     ] {
         place(&mut g, 0, 0, card, false);
     }
-    let bird = (0..g.players[0].board.len())
-        .find(|&i| name(&g, &g.players[0].board[i]) == "Humming Bird")
-        .expect("the bird is on the board");
-    let weakest = (0..g.players[0].board.len())
-        .min_by_key(|&i| {
-            let m = &g.players[0].board[i];
-            m.attack + m.health
-        })
-        .expect("a board");
-    assert_ne!(bird, weakest, "the bird is not the weakest by stats");
     mine(&mut g);
     let mut p = Planner::new(c, 13, &d);
     let a = p.action(&g, 0);
-    assert_eq!(a, Action::Sell(bird as u8), "sell the non-comp card, not the 1/1 core");
+    let Action::Sell(slot) = a else { panic!("not a sale: {a:?}") };
+    let sold = name(&g, &g.players[0].board[slot as usize]);
+    for core in ["Ravaging Scorpid", "Turquoise Skitterer", "Banana Slamma"] {
+        assert_ne!(sold, core, "never sells a core card to make room");
+    }
     assert_eq!(p.state.shell_chance_turns, vec![1], "the chance is recorded once");
 }
 
 #[test]
-fn it_commits_to_beetles_and_switches_to_scam_on_give_up() {
+fn it_commits_to_the_beetle_comp() {
     let d = data();
     let c = comps(&d);
     let mut g = sandbox(17);
@@ -204,18 +210,45 @@ fn it_commits_to_beetles_and_switches_to_scam_on_give_up() {
     mine(&mut g);
     let mut p = Planner::new(c, 17, &d);
     let _ = p.action(&g, 0);
-    assert_eq!(p.comp_name(), Some("beetles"), "Ravaging Scorpid is the signal");
+    assert_eq!(p.comp_name(), Some("Beasts - Beetles"), "Ravaging Scorpid is the signal");
     assert_eq!(p.state.committed_turn, Some(5));
+}
 
-    // Past the give-up turn, with only one weak core piece: drop to scam.
+#[test]
+fn a_latched_abort_sends_the_planner_to_the_fallback() {
+    let d = data();
+    let c = comps(&d);
+    let mut g = sandbox(19);
     ready(&mut g);
-    place(&mut g, 0, 0, "Buzzing Vermin", false);
-    g.turn = 11;
-    g.players[0].tier = 6;
-    g.players[0].done = false;
+    place(&mut g, 0, 0, "Soul Rewinder", false);
+    g.turn = 5;
+    g.players[0].tier = 2;
+    mine(&mut g);
+    let mut p = Planner::new(c, 19, &d);
     let _ = p.action(&g, 0);
-    assert_eq!(p.comp_name(), Some("scam"));
-    assert_eq!(p.state.switched_turn, Some(11));
+    assert_eq!(p.comp_name(), Some("Demons - Self Damage"));
+
+    // Reaching Tier 3 with no enabler latches the abort.
+    ready(&mut g);
+    g.turn = 6;
+    g.players[0].tier = 3;
+    let _ = p.action(&g, 0);
+    assert_eq!(p.comp_name(), Some("Murlocs - Venom Scam"));
+    assert_eq!(p.state.switched_turn, Some(6));
+}
+
+#[test]
+fn with_no_signal_late_the_planner_takes_the_fallback() {
+    let d = data();
+    let c = comps(&d);
+    let mut g = sandbox(21);
+    ready(&mut g);
+    g.turn = 10;
+    g.players[0].tier = 5;
+    mine(&mut g);
+    let mut p = Planner::new(c, 21, &d);
+    let _ = p.action(&g, 0);
+    assert_eq!(p.comp_name(), Some("Murlocs - Venom Scam"));
 }
 
 #[test]
@@ -288,14 +321,14 @@ core = [{ name = "Buzzing Vermin", weight = 1.0 }]
 }
 
 #[test]
-fn the_real_file_inherits_the_default_and_scam_has_no_curve() {
+fn the_real_file_inherits_the_default_and_the_fallback_has_no_curve() {
     let d = data();
     let c = comps(&d);
-    let beetles = &c.comps[c.index_of("beetles").unwrap()];
-    assert_eq!(beetles.level, None, "beetles inherits the default");
+    let beetles = &c.comps[c.index_of("Beasts - Beetles").unwrap()];
+    assert_eq!(beetles.level, None, "Beetles inherits the default");
     assert_eq!(beetles.level_at(2, &c.defaults.level), Some(2));
-    let scam = &c.comps[c.index_of("scam").unwrap()];
-    assert_eq!(scam.level, Some(Vec::new()), "scam has no level curve");
+    let scam = &c.comps[c.index_of("Murlocs - Venom Scam").unwrap()];
+    assert_eq!(scam.level, Some(Vec::new()), "the fallback has no level curve");
     assert_eq!(scam.level_at(2, &c.defaults.level), None);
 }
 

@@ -5,26 +5,30 @@
 //! applies the Shell rule and takes an offered enabler; otherwise it leaves
 //! the network alone.
 //!
-//! A comp is ACTIVE for a player once one of its `enabler` cards is on that
-//! player's board or in their hand. While active: an enabler or payoff cannot
-//! be sold (the bonus is `-inf`), buying or playing a payoff is worth `B`, a
-//! filler `B/2`, and on a full board selling a card that is not in the comp
-//! is worth `B` when a comp card is waiting in the hand or Tavern.
+//! A comp is ACTIVE for a player once one of its enabler entries is complete:
+//! every group has one of its cards on that player's board or in their hand,
+//! the comp's lobby tribes are all present, and its abort rule has not fired.
+//! While active: an enabler or payoff cannot be sold (the bonus is `-inf`),
+//! buying or playing a payoff is worth `B`, a filler `B/2`, and on a full
+//! board selling a card that is not in the comp is worth `B` when a comp card
+//! is waiting in the hand or Tavern.
 
-use crate::cards::{ChooseOption, SpellEffect};
+use crate::cards::{ChooseOption, SpellEffect, Tribe};
 use crate::comps::{Comp, Comps};
-use crate::game::Game;
+use crate::game::{Game, TargetKind};
 use crate::minion::CardId;
 use crate::{Action, BOARD, DISCOVER, N_ACTIONS, Data};
 
 /// The overlay's per-decision flags, in `[i32; OVERLAY_FLAGS]` order.
-pub const OVERLAY_FLAGS: usize = 6;
+pub const OVERLAY_FLAGS: usize = 7;
 pub const F_SHELL_LEGAL: usize = 0;
 pub const F_SHELL_TAKEN: usize = 1;
 pub const F_ENABLER_OFFERED: usize = 2;
 pub const F_ENABLER_TAKEN: usize = 3;
 pub const F_ACTIVE: usize = 4;
 pub const F_FORCED_SELL: usize = 5;
+/// The active comp's index plus one, or zero when no comp is active.
+pub const F_COMP: usize = 6;
 
 /// The Tortollan Blue Shell line for one seat: buy, play, sell as three
 /// ordinary actions. `turn` is 0 when no line is running; `slot` is the board
@@ -34,6 +38,27 @@ pub const F_FORCED_SELL: usize = 5;
 pub struct ShellLine {
     pub turn: u32,
     pub slot: Option<u8>,
+}
+
+/// The overlay's per-seat, per-game state: the Shell line and one bit per comp
+/// whose abort rule has fired. A bit stays set for the rest of the game, so an
+/// aborted comp's enabler never activates it later.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OverlayState {
+    pub shell: ShellLine,
+    pub aborted: u64,
+}
+
+impl OverlayState {
+    pub fn is_aborted(&self, comp: usize) -> bool {
+        comp < crate::comps::MAX_COMPS && self.aborted & (1 << comp) != 0
+    }
+
+    fn abort(&mut self, comp: usize) {
+        if comp < crate::comps::MAX_COMPS {
+            self.aborted |= 1 << comp;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,22 +74,34 @@ pub struct Overlay {
     pub comps: Comps,
     pub bonus: f32,
     shell: Option<CardId>,
+    wrath_weaver: Option<CardId>,
 }
 
 impl Overlay {
     pub fn new(comps: Comps, bonus: f32, data: &Data) -> Overlay {
-        Overlay { comps, bonus, shell: data.cards.by_name("Tortollan Blue Shell") }
+        Overlay {
+            comps,
+            bonus,
+            shell: data.cards.by_name("Tortollan Blue Shell"),
+            wrath_weaver: data.cards.by_name("Wrath Weaver"),
+        }
     }
 
-    /// The comp that is active for `p`, if any.
-    pub fn active_comp(&self, game: &Game, p: usize) -> Option<usize> {
+    /// The comp that is active for `p`, if any. Several comps can be active;
+    /// the first in file order wins (the order the file lists them in).
+    pub fn active_comp(&self, game: &Game, p: usize, state: &OverlayState) -> Option<usize> {
         let pl = &game.players[p];
-        self.comps.comps.iter().position(|c| {
-            c.has_enabler()
-                && c.enabler.iter().any(|id| {
-                    pl.board.iter().chain(&pl.hand).any(|m| m.card == *id)
-                })
-        })
+        for (i, c) in self.comps.comps.iter().enumerate() {
+            if !state.is_aborted(i)
+                && c.has_enabler()
+                && c.lobby_ok(&game.lobby)
+                && c.enabler_held(&pl.board, &pl.hand)
+                && !c.abort_condition(game.turn, pl.tier, &pl.board, &pl.hand)
+            {
+                return Some(i);
+            }
+        }
+        None
     }
 
     /// Fill `bonus` for one decision and return the forced action, if any.
@@ -73,17 +110,33 @@ impl Overlay {
         &self,
         game: &Game,
         p: usize,
-        line: &mut ShellLine,
+        state: &mut OverlayState,
         bonus: &mut [f32; N_ACTIONS],
         flags: &mut [i32; OVERLAY_FLAGS],
     ) -> Option<Action> {
         bonus.fill(0.0);
         flags.fill(0);
-        let active = self.active_comp(game, p);
-        if active.is_some() {
-            flags[F_ACTIVE] = 1;
+        // Latch every comp whose abort condition is true now; the state keeps
+        // it latched for the rest of the game.
+        let pl = &game.players[p];
+        for i in 0..self.comps.comps.len() {
+            if !state.is_aborted(i)
+                && self.comps.comps[i].abort_condition(game.turn, pl.tier, &pl.board, &pl.hand)
+            {
+                state.abort(i);
+            }
         }
-        if let Some(a) = self.shell(game, p, line, active, flags) {
+        let active = self.active_comp(game, p, state);
+        if let Some(ci) = active {
+            flags[F_ACTIVE] = 1;
+            flags[F_COMP] = ci as i32 + 1;
+        }
+        // Era's Health-loss rule: a Health cost on the player's own turn is
+        // heavily punished while no rewind (Soul Rewinder or Ashen Corruptor)
+        // is on the board. It is a rule for every comp and every card, so it
+        // is applied before and regardless of the active comp.
+        self.health_penalties(game, p, bonus);
+        if let Some(a) = self.shell(game, p, &mut state.shell, active, flags) {
             return Some(a);
         }
         if let Some(a) = self.choice(game, p, active, flags) {
@@ -96,7 +149,7 @@ impl Overlay {
     }
 
     fn comp_in_lobby(&self, game: &Game, comp: &Comp) -> bool {
-        comp.tribes.is_empty() || comp.tribes.iter().any(|t| game.lobby.has(*t))
+        comp.lobby_ok(&game.lobby)
     }
 
     fn shell(
@@ -309,6 +362,94 @@ impl Overlay {
             }
         }
         None
+    }
+
+    /// Era's Health-loss rule (`docs/notes/era-strategy.md` "Taking damage on
+    /// your own turn"): any action that costs the hero Health while no Soul
+    /// Rewinder or Ashen Corruptor is on the board gets a large negative
+    /// bonus. Both cards are the engine's `can_rewind`; the rule applies with
+    /// no active comp and to every comp and card.
+    fn health_penalties(&self, game: &Game, p: usize, bonus: &mut [f32; N_ACTIONS]) {
+        let pen = self.comps.defaults.health_loss_penalty;
+        if pen >= 0.0 {
+            return;
+        }
+        let pl = &game.players[p];
+        // A rewind on the board gives the Health back, so there is no loss to
+        // punish. The engine's check is exactly Soul Rewinder or Ashen
+        // Corruptor (the only two cards with a rewind).
+        if pl.can_rewind(&game.data.cards) {
+            return;
+        }
+        let mut punish = |a: Action| {
+            if game.is_legal(a) {
+                bonus[a.index()] += pen;
+            }
+        };
+        for s in 0..pl.shop.len() {
+            let m = &pl.shop[s];
+            let c = game.data.cards.get(m.card);
+            let costs_health = if c.is_spell() {
+                c.pay_health || pl.tp.spell_health_left > 0
+            } else {
+                game.minion_costs_health(p, s)
+            };
+            if costs_health {
+                punish(Action::Buy(s as u8));
+            }
+        }
+        if let Some(id) = pl.shop_spell
+            && (game.data.cards.get(id).pay_health || pl.tp.spell_health_left > 0)
+        {
+            punish(Action::BuySpell);
+        }
+        // A Refresh paid in Health (Malchezaar, Prince of Dance, or a
+        // trinket's Health Refreshes).
+        if pl.free_rolls == 0 && pl.can_refresh_with_health(&game.data.cards, &game.data.rules) {
+            punish(Action::Roll);
+        }
+        // Playing a Demon while Wrath Weaver is on the board hurts the hero.
+        // Wrath Weaver's own play is excluded by the engine (`just_played`),
+        // and a Golden one triggers twice.
+        if let Some(ww) = self.wrath_weaver {
+            for h in 0..pl.hand.len() {
+                let m = &pl.hand[h];
+                if game.data.cards.get(m.card).is_spell()
+                    || !game.data.cards.tribes_of(m).has(Tribe::Demon)
+                {
+                    continue;
+                }
+                let hits: i32 = pl
+                    .board
+                    .iter()
+                    .filter(|b| b.card == ww)
+                    .map(|b| if b.golden { 2 } else { 1 })
+                    .sum();
+                if hits == 0 {
+                    continue;
+                }
+                if let Some(pos) = (0..=BOARD as u8)
+                    .find(|&pos| game.is_legal(Action::Play { hand: h as u8, pos }))
+                {
+                    punish(Action::Play { hand: h as u8, pos });
+                }
+            }
+        }
+        // Imposing Percussionist's Discover: the pick costs Health equal to
+        // the chosen Demon's Tier.
+        if pl.discover_damage_from.is_some() {
+            for k in 0..pl.discover.len().min(DISCOVER) {
+                punish(Action::Choose(k as u8));
+            }
+        }
+        // Graveyard Shift's card steal takes Health in the Tavern.
+        if let Some(pt) = pl.pending_target
+            && matches!(pt.kind, TargetKind::StealShopCard { damage } if damage > 0)
+        {
+            for s in 0..=pl.shop.len() {
+                punish(Action::TargetShop(s as u8));
+            }
+        }
     }
 
     fn card_bonus(&self, comp: &Comp, id: CardId) -> f32 {

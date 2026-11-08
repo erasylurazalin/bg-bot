@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::comps::Comps;
-use bgcore::overlay::{Overlay, OVERLAY_FLAGS, ShellLine};
+use bgcore::overlay::{Overlay, OVERLAY_FLAGS, OverlayState};
 use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{
     RealBoard, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
@@ -130,8 +130,8 @@ struct Env {
     /// `remember_boards` updates this; `final_boards` returns it after a
     /// game ends.
     last_board: [[i16; BOARD]; PLAYERS],
-    /// The Shell line in progress, per seat.
-    shell_lines: [ShellLine; PLAYERS],
+    /// The Shell line and abort bits, per seat and game.
+    overlay_states: [OverlayState; PLAYERS],
 }
 
 impl Env {
@@ -177,7 +177,7 @@ impl Env {
             rng,
             reported: [false; PLAYERS],
             last_board: [[-1; BOARD]; PLAYERS],
-            shell_lines: [ShellLine::default(); PLAYERS],
+            overlay_states: [OverlayState::default(); PLAYERS],
         }
     }
 
@@ -425,7 +425,7 @@ impl VecEnv {
                     let Some(p) = env.game.current_player() else { return };
                     let mut row = [0.0f32; N_ACTIONS];
                     let mut f = [0i32; OVERLAY_FLAGS];
-                    if let Some(a) = rules.decide(&env.game, p, &mut env.shell_lines[p], &mut row, &mut f) {
+                    if let Some(a) = rules.decide(&env.game, p, &mut env.overlay_states[p], &mut row, &mut f) {
                         forced[p] = a.index() as i64;
                     }
                     bonus[p * N_ACTIONS..(p + 1) * N_ACTIONS].copy_from_slice(&row);

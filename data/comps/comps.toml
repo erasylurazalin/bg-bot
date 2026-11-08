@@ -1,5 +1,10 @@
 # The comp library the planner bot plays (docs/briefs/comp-planner-1.md).
 #
+# The ten comps are JeefHS's current-patch HSReplay guides
+# (docs/notes/comps/hsreplay-2026-11-09.json), chosen by Era on 2026-11-09:
+# the easy or S-tier comps whose commit is a card, plus Murlocs - Venom Scam
+# as the fallback. The APM and infinite-gold comps wait.
+#
 # Every card is named as cards.toml names it. The loader rejects a name that
 # cards.toml does not hold, and a hero or trinket that heroes.toml or
 # trinkets.toml does not hold. Change the file and rerun: no rebuild needed.
@@ -8,6 +13,10 @@
 #   name         the comp's name, unique, the target of a give_up
 #   tribes       the card tribes the comp plays (for target and Discover
 #                preference); empty for a comp with no tribe
+#   lobby        every tribe the comp needs in the lobby; empty means any
+#                lobby. The overlay and planner only use the comp when all of
+#                them are there (Menagerie: none; Mechs needs Quilboar too
+#                for its Blood Gem spell cycle)
 #   draft        true while Era has not corrected the entry
 #   fallback     true when the planner may pick it late with no other comp
 #   commit_turn  [first, last] turn the planner may commit on a signal
@@ -16,20 +25,34 @@
 #   scales       "none", "beetles" or "stats": the player-wide counter that
 #                makes the comp grow (beetles reads Player.beetle_bonus)
 #
-# [[comp.core]] name, weight, scale. The weight is what the card is worth on
-# the final board; scale = true means the card's own growth (improvements,
-# Magnetizations, Golden) is worth extra progress.
+# core: name, weight, scale. The weight is what the card is worth on the final
+# board; scale = true means the card's own growth (improvements,
+# Magnetizations, Golden) is worth extra progress. The guide's core cards are
+# the payoffs.
 #
-# enabler, payoff, filler: the overlay's cards. An enabler on the board or in
-# hand makes the comp ACTIVE. A payoff is worth a purchase/play bonus B, a
-# filler B/2. The overlay masks selling an enabler or a payoff.
+# enabler: a list of alternatives. Each one is `all = [[...], [...]]`: every
+# group must have one of its cards on the board or in the hand, and a group
+# with several names is an either/or. One entry has to be complete for the
+# comp to be ACTIVE. Several entries are the guide's several commit
+# alternatives. The guide's when-to-commit text is the enabler; the common
+# enabler line is used only when it adds something the commit text does not
+# say (noted per comp).
+#
+# payoff, filler: the overlay's cards. A payoff is worth a purchase/play bonus
+# B, a filler B/2. The overlay masks selling an enabler or a payoff.
 #
 # [comp.early] cards and strong_stats: what keeps the comp alive before it
 # comes together.
 #
-# [[comp.signals]] weight, plus one of: cards (a list, one point per distinct
-# card seen on the board, in hand or in the Tavern), tribe + min_count, hero,
-# trinket, keyword.
+# signals: weight, plus one of: cards (a list, one point per distinct card
+# seen on the board, in hand or in the Tavern), tribe + min_count, hero,
+# trinket, keyword. These are the planner's commit reasons.
+#
+# abort: the comp's enabler no longer activates it once the threshold turn has
+# passed (`after_turn`, checked as turn > after_turn) or the player has reached
+# `min_tier`, with no enabler held. Both are one-way. Only where the guide
+# says a latest turn (Demons - Deathrattle/Shop Buff, turn 6) and Era's Self
+# Damage rule (Tier 3 without an enabler).
 #
 # [comp.give_up] after_turn, progress_below, to: the comp is dropped after
 # that turn when its progress is below that number.
@@ -43,138 +66,311 @@
 # against 7.02 for this curve on the 512-game test, so a comp that wants it
 # can set it here (or set its own `level`). dying_health is the Health at or
 # below which no level is taken.
-
 level = [1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6]
 dying_health = 10
+# Era's Health-loss rule (docs/notes/era-strategy.md "Taking damage on your
+# own turn"): a large negative bonus, not a mask, for any action that costs
+# Health on the player's own turn while no Soul Rewinder or Ashen Corruptor
+# is on the board. Applies to every comp and card.
+health_loss_penalty = -10.0
 
 [[comp]]
-name = "beetles"
+name = "Beasts - Tasty Lobstah"
 tribes = ["beast"]
+lobby = ["beast"]
 draft = true
 fallback = false
-# Era, 2026-11-08: the comp is unplayable without an early Ravaging Scorpid
-# (usually the tier 6 Discover from a Triple Reward). The commit signal is
-# Scorpid. 99% of the scaling comes from it; the other Beetle cards only
-# summon Beetles for it to buff. Commit window widened to fit a late find.
 commit_turn = [4, 12]
-scales = "beetles"
-not_in_comp = ["Humming Bird", "Cage Gnawer", "Sewer Lord", "Hoarding Hyena"]
-enabler = ["Ravaging Scorpid"]
-payoff = ["Banana Slamma", "Ravaging Scorpid"]
-filler = ["Turquoise Skitterer", "Forest Rover", "Buzzing Vermin", "Headhunter Gryphon"]
-
-[[comp.core]]
-name = "Ravaging Scorpid"
-weight = 10.0
-scale = true
-
-[[comp.core]]
-name = "Banana Slamma"
-weight = 6.0
-scale = true
-
-# Economy, and a chance at more Beetle cards and Banana Slammas.
-[[comp.core]]
-name = "Headhunter Gryphon"
-weight = 3.0
-scale = false
-
-[[comp.core]]
-name = "Turquoise Skitterer"
-weight = 2.0
-scale = false
-
-[[comp.core]]
-name = "Forest Rover"
-weight = 2.0
-scale = false
-
-[[comp.core]]
-name = "Buzzing Vermin"
-weight = 1.0
-scale = false
-
-[comp.early]
-cards = ["Buzzing Vermin", "Forest Rover"]
-strong_stats = true
-
-[[comp.signals]]
-cards = ["Ravaging Scorpid"]
-weight = 6.0
-
-# Add-ons, not core.
-[[comp.signals]]
-trinket = "Beetle Band"
-weight = 1.0
-
-[comp.give_up]
-after_turn = 11
-progress_below = 8.0
-to = "scam"
+scales = "none"
+enabler = [
+  { all = [["Headhunter Gryphon"], ["Deathstrider"]] },
+]
+payoff = ["Titus Rivendare", "Tasty Lobster", "Headhunter Gryphon", "Deathstrider"]
+filler = ["Sin'dorei Straight Shot", "Lurking Lionfish", "Hoarding Hyena"]
+core = [
+  { name = "Titus Rivendare", weight = 6.0, scale = false },
+  { name = "Tasty Lobster", weight = 10.0, scale = true },
+  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
+  { name = "Deathstrider", weight = 8.0, scale = false },
+]
+early = { cards = ["Lurking Lionfish", "Hoarding Hyena"], strong_stats = true }
+signals = [
+  { cards = ["Tasty Lobster"], weight = 6.0 },
+  { cards = ["Headhunter Gryphon", "Deathstrider"], weight = 4.0 },
+  { cards = ["Titus Rivendare"], weight = 3.0 },
+]
+not_in_comp = []
 
 [[comp]]
-name = "scam"
-tribes = []
+name = "Beasts - Leviathan"
+tribes = ["beast"]
+lobby = ["beast"]
 draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "stats"
+enabler = [
+  { all = [["Lurking Leviathan"], ["Sewer Lord", "Hoarding Hyena", "Buzzing Vermin", "Forest Rover", "Turquoise Skitterer", "Ravaging Scorpid"]] },
+]
+payoff = ["Banana Slamma", "Lurking Leviathan", "Sewer Lord", "Headhunter Gryphon"]
+filler = ["Ravaging Scorpid"]
+core = [
+  { name = "Banana Slamma", weight = 8.0, scale = false },
+  { name = "Lurking Leviathan", weight = 10.0, scale = true },
+  { name = "Sewer Lord", weight = 6.0, scale = false },
+  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
+]
+early = { cards = ["Hoarding Hyena", "Buzzing Vermin", "Forest Rover", "Turquoise Skitterer", "Ravaging Scorpid"], strong_stats = true }
+signals = [
+  { cards = ["Lurking Leviathan"], weight = 8.0 },
+  { cards = ["Sewer Lord"], weight = 4.0 },
+  { cards = ["Banana Slamma"], weight = 4.0 },
+  { cards = ["Headhunter Gryphon"], weight = 2.0 },
+]
+not_in_comp = []
+
+[[comp]]
+name = "Beasts - Beetles"
+tribes = ["beast"]
+lobby = ["beast"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "beetles"
+enabler = [
+  { all = [["Ravaging Scorpid"]] },
+  { all = [["Turquoise Skitterer"]] },
+]
+payoff = ["Banana Slamma", "Turquoise Skitterer", "Headhunter Gryphon", "Ravaging Scorpid"]
+filler = ["Forest Rover", "Buzzing Vermin", "Lurking Leviathan", "Sewer Lord"]
+core = [
+  { name = "Banana Slamma", weight = 7.0, scale = false },
+  { name = "Turquoise Skitterer", weight = 6.0, scale = false },
+  { name = "Headhunter Gryphon", weight = 4.0, scale = false },
+  { name = "Ravaging Scorpid", weight = 10.0, scale = true },
+]
+early = { cards = ["Buzzing Vermin", "Forest Rover"], strong_stats = true }
+signals = [
+  { cards = ["Ravaging Scorpid"], weight = 6.0 },
+  { cards = ["Turquoise Skitterer"], weight = 4.0 },
+  { cards = ["Banana Slamma"], weight = 3.0 },
+  { cards = ["Headhunter Gryphon"], weight = 2.0 },
+]
+not_in_comp = []
+
+[[comp]]
+name = "Demons - Deathrattle/Shop Buff"
+tribes = ["demon"]
+lobby = ["demon"]
+draft = true
+fallback = false
+# The guide: "early Sacrificial Wrathguard (turn 6 latest)".
+commit_turn = [2, 6]
+abort = { after_turn = 6 }
+scales = "stats"
+enabler = [
+  { all = [["Sacrificial Wrathguard"]] },
+]
+payoff = ["Titus Rivendare", "Sacrificial Wrathguard", "Imp-lusionist"]
+filler = ["Twisted Wrathguard", "Balinda Stonehearth", "Soulkeeping Jailer"]
+core = [
+  { name = "Titus Rivendare", weight = 8.0, scale = false },
+  { name = "Sacrificial Wrathguard", weight = 10.0, scale = true },
+  { name = "Imp-lusionist", weight = 6.0, scale = false },
+]
+early = { cards = ["Twisted Wrathguard", "Soulkeeping Jailer"], strong_stats = true }
+signals = [
+  { cards = ["Sacrificial Wrathguard"], weight = 8.0 },
+  { cards = ["Titus Rivendare"], weight = 4.0 },
+  { cards = ["Imp-lusionist"], weight = 3.0 },
+]
+not_in_comp = []
+
+[[comp]]
+name = "Mechs - Magnetics/Spells"
+tribes = ["mech"]
+# The guide cycles Fearless Foodie's Blood Gems to feed Glambot; Era's note
+# says Glambot Mechs needs Quilboar in the lobby for that reason.
+lobby = ["mech", "quilboar"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "stats"
+enabler = [
+  { all = [["Glambot"], ["Balinda Stonehearth"]] },
+]
+payoff = ["Utility Drone", "Hot-Air Surveyor", "Balinda Stonehearth", "Glambot"]
+filler = ["Drakkari Enchanter", "Victorious Geomant", "Rescue Bot"]
+core = [
+  { name = "Utility Drone", weight = 8.0, scale = false },
+  { name = "Hot-Air Surveyor", weight = 6.0, scale = false },
+  { name = "Balinda Stonehearth", weight = 7.0, scale = false },
+  { name = "Glambot", weight = 10.0, scale = false },
+]
+early = { cards = ["Victorious Geomant", "Rescue Bot"], strong_stats = true }
+signals = [
+  { cards = ["Glambot"], weight = 8.0 },
+  { cards = ["Balinda Stonehearth"], weight = 5.0 },
+  { cards = ["Utility Drone"], weight = 3.0 },
+  { cards = ["Hot-Air Surveyor"], weight = 2.0 },
+]
+not_in_comp = []
+
+[[comp]]
+name = "Quilboar - Choose One"
+tribes = ["quilboar"]
+lobby = ["quilboar"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "none"
+# Gem Rat or Bramble Tunneler with Turbo Hogrider (the guide's commit), plus
+# Sanguine Refiner, which the how-to-play says "could be" the gem scaling.
+enabler = [
+  { all = [["Gem Rat"], ["Turbo Hogrider"]] },
+  { all = [["Bramble Tunneler"], ["Turbo Hogrider"]] },
+  { all = [["Sanguine Refiner"], ["Turbo Hogrider"]] },
+]
+payoff = ["Turbo Hogrider", "Gem Rat", "Sanguine Refiner", "Trench Fighter", "Bramble Tunneler"]
+filler = ["Sanguine Champion", "Thorned Trailblazer", "Sky-hatch Runaway"]
+core = [
+  { name = "Turbo Hogrider", weight = 10.0, scale = false },
+  { name = "Gem Rat", weight = 7.0, scale = false },
+  { name = "Sanguine Refiner", weight = 5.0, scale = false },
+  { name = "Trench Fighter", weight = 3.0, scale = false },
+  { name = "Bramble Tunneler", weight = 6.0, scale = false },
+]
+early = { cards = ["Trench Fighter", "Thorned Trailblazer"], strong_stats = true }
+signals = [
+  { cards = ["Turbo Hogrider"], weight = 8.0 },
+  { cards = ["Gem Rat"], weight = 5.0 },
+  { cards = ["Bramble Tunneler"], weight = 4.0 },
+  { cards = ["Sanguine Refiner"], weight = 3.0 },
+  { cards = ["Trench Fighter"], weight = 2.0 },
+]
+not_in_comp = []
+
+[[comp]]
+name = "Murlocs - Keyword"
+tribes = ["murloc"]
+lobby = ["murloc"]
+draft = true
+fallback = false
+commit_turn = [4, 12]
+scales = "none"
+enabler = [
+  { all = [["Brann Bronzebeard"], ["Sewer Escapee"]] },
+]
+payoff = ["Hackerfin", "Bile Spitter", "Sewer Escapee", "Kelp Keeper", "Brann Bronzebeard"]
+filler = ["Young Murk-Eye", "Bubble Gunner", "Gormling Gourmet"]
+core = [
+  { name = "Hackerfin", weight = 4.0, scale = false },
+  { name = "Bile Spitter", weight = 9.0, scale = false },
+  { name = "Sewer Escapee", weight = 10.0, scale = false },
+  { name = "Kelp Keeper", weight = 6.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 8.0, scale = false },
+]
+early = { cards = ["Young Murk-Eye", "Gormling Gourmet"], strong_stats = true }
+signals = [
+  { cards = ["Brann Bronzebeard"], weight = 6.0 },
+  { cards = ["Sewer Escapee"], weight = 6.0 },
+  { cards = ["Bile Spitter"], weight = 3.0 },
+  { cards = ["Kelp Keeper"], weight = 2.0 },
+]
+not_in_comp = []
+
+[[comp]]
+name = "Demons - Self Damage"
+tribes = ["demon"]
+lobby = ["demon"]
+draft = true
+fallback = false
+commit_turn = [2, 6]
+# Era's abort rule: reached Tier 3 without an enabler.
+abort = { min_tier = 3 }
+scales = "none"
+# Era: Soul Rewinder (the turns 3 to 5 enabler) and Ashen Corruptor both
+# count. The guide's common-enabler line is Wrath Weaver + Soul Rewinder, but
+# the brief says both rewind cards count, so each is an entry of its own.
+enabler = [
+  { all = [["Soul Rewinder"]] },
+  { all = [["Ashen Corruptor"]] },
+]
+payoff = ["Ashen Corruptor", "Balinda Stonehearth", "Eredar Escapist", "Devilish Distractor", "Brann Bronzebeard"]
+filler = ["Tichondrius", "Malchezaar, Prince of Dance", "Wrath Weaver"]
+core = [
+  { name = "Ashen Corruptor", weight = 10.0, scale = false },
+  { name = "Balinda Stonehearth", weight = 6.0, scale = false },
+  { name = "Eredar Escapist", weight = 9.0, scale = false },
+  { name = "Devilish Distractor", weight = 8.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 5.0, scale = false },
+]
+early = { cards = ["Wrath Weaver", "Malchezaar, Prince of Dance", "Tichondrius"], strong_stats = true }
+signals = [
+  { cards = ["Soul Rewinder"], weight = 6.0 },
+  { cards = ["Ashen Corruptor"], weight = 6.0 },
+  { cards = ["Eredar Escapist"], weight = 4.0 },
+  { cards = ["Devilish Distractor"], weight = 3.0 },
+  { cards = ["Wrath Weaver"], weight = 2.0 },
+]
+not_in_comp = []
+
+[[comp]]
+name = "Menagerie"
+tribes = []
+# Menagerie works in every lobby.
+lobby = []
+draft = true
+fallback = false
+commit_turn = [5, 14]
+scales = "none"
+# Gatekeeper Amalgam + Balinda, or spell power (the guide's named Dark
+# Puppeteer).
+enabler = [
+  { all = [["Gatekeeper Amalgam"], ["Balinda Stonehearth"]] },
+  { all = [["Dark Puppeteer"]] },
+]
+payoff = ["Hot-Air Surveyor", "Balinda Stonehearth", "Gatekeeper Amalgam", "Brann Bronzebeard"]
+filler = ["Felboar", "Felfire Conjurer", "Magicfin Mycologist", "Dark Puppeteer", "Victorious Geomant", "Enterprising Escapee"]
+core = [
+  { name = "Hot-Air Surveyor", weight = 7.0, scale = false },
+  { name = "Balinda Stonehearth", weight = 8.0, scale = false },
+  { name = "Gatekeeper Amalgam", weight = 10.0, scale = false },
+  { name = "Brann Bronzebeard", weight = 6.0, scale = false },
+]
+early = { cards = ["Felfire Conjurer", "Magicfin Mycologist", "Enterprising Escapee"], strong_stats = true }
+signals = [
+  { cards = ["Gatekeeper Amalgam"], weight = 8.0 },
+  { cards = ["Balinda Stonehearth"], weight = 5.0 },
+  { cards = ["Dark Puppeteer"], weight = 4.0 },
+  { cards = ["Brann Bronzebeard"], weight = 4.0 },
+  { cards = ["Hot-Air Surveyor"], weight = 3.0 },
+]
+not_in_comp = []
+
+[[comp]]
+name = "Murlocs - Venom Scam"
+tribes = ["murloc"]
+lobby = ["murloc"]
+draft = true
+# The fallback: the guide commits when there is no future or the board is
+# clearly outscaled. The overlay has no state signal for that, so this comp
+# has no enabler; the planner picks it late through `fallback`.
 fallback = true
 level = []
 scales = "none"
 enabler = []
-payoff = []
-filler = []
-
-# Scam has no level curve of its own: it is what the planner switches to when
-# another comp's give_up fires, or picks late when nothing else is there.
-[[comp.core]]
-name = "Heroic Underdog"
-weight = 5.0
-scale = false
-
-[[comp.core]]
-name = "Leeroy the Reckless"
-weight = 5.0
-scale = false
-
-[[comp.core]]
-name = "Sneed's New Shredder"
-weight = 5.0
-scale = false
-
-[[comp.core]]
-name = "Titus Rivendare"
-weight = 4.0
-scale = false
-
-[[comp.core]]
-name = "Deadly Spore"
-weight = 2.0
-scale = false
-
-[[comp.core]]
-name = "Bile Spitter"
-weight = 2.0
-scale = false
-
-[comp.early]
-cards = []
-strong_stats = false
-
-[[comp.signals]]
-cards = ["Deadly Spore", "Bile Spitter", "Heroic Underdog", "Leeroy the Reckless"]
-weight = 2.0
-
-[[comp.signals]]
-cards = ["Titus Rivendare", "Sneed's New Shredder"]
-weight = 1.5
-
-[[comp.signals]]
-keyword = "venomous"
-weight = 1.0
-
-[[comp.signals]]
-keyword = "poisonous"
-weight = 1.0
-
-[[comp.signals]]
-hero = "Sneed"
-weight = 4.0
+payoff = ["Leeroy the Reckless", "Bile Spitter", "Sewer Escapee"]
+filler = ["Diremuck Forager", "Heroic Underdog", "Sky-hatch Runaway", "Deadly Spore"]
+core = [
+  { name = "Leeroy the Reckless", weight = 8.0, scale = false },
+  { name = "Bile Spitter", weight = 8.0, scale = false },
+  { name = "Sewer Escapee", weight = 6.0, scale = false },
+]
+early = { cards = [], strong_stats = false }
+signals = [
+  { cards = ["Leeroy the Reckless", "Bile Spitter", "Sewer Escapee", "Heroic Underdog", "Deadly Spore"], weight = 3.0 },
+  { keyword = "venomous", weight = 1.0 },
+  { keyword = "poisonous", weight = 1.0 },
+]
+not_in_comp = []

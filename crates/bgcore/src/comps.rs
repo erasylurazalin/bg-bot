@@ -8,9 +8,12 @@
 
 use serde::Deserialize;
 
-use crate::cards::{CardDb, Tribe, tribe};
-use crate::minion::{CardId, Keywords};
+use crate::cards::{CardDb, Tribe, Tribes, tribe};
+use crate::minion::{CardId, Keywords, Minion};
 use crate::{Data, MAX_TIER};
+
+/// The abort state is one bit per comp, so the library is capped at 64.
+pub const MAX_COMPS: usize = 64;
 
 /// The player-wide counter that makes a comp grow.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -42,6 +45,25 @@ pub struct Early {
     /// Any minion with stats at least twice its Tier is a body worth having
     /// before turn 8.
     pub strong_stats: bool,
+}
+
+/// One way to make a comp ACTIVE. Every group is needed (one card from each
+/// group); a group with several cards is an either/or. A comp with several
+/// `Enabler` entries needs any one of them.
+#[derive(Clone, Debug, Default)]
+pub struct Enabler {
+    pub all: Vec<Vec<CardId>>,
+}
+
+/// When a comp's enabler no longer activates it. The thresholds are one-way:
+/// once the turn or Tier has passed with no enabler held, the comp is off for
+/// the rest of the game.
+#[derive(Clone, Debug, Default)]
+pub struct Abort {
+    /// From after this turn (`turn > after_turn`) with no enabler held.
+    pub after_turn: Option<u32>,
+    /// At or above this Tier with no enabler held.
+    pub min_tier: Option<u8>,
 }
 
 /// One reason to go for a comp.
@@ -83,7 +105,11 @@ pub struct GiveUp {
 #[derive(Clone, Debug)]
 pub struct Comp {
     pub name: String,
+    /// The card tribes the comp plays (for target and Discover preference).
     pub tribes: Vec<Tribe>,
+    /// Every tribe the comp needs in the lobby; empty for a comp that works
+    /// in any lobby (Menagerie).
+    pub lobby: Vec<Tribe>,
     pub draft: bool,
     /// The planner may pick this comp late with nothing else to play.
     pub fallback: bool,
@@ -92,14 +118,15 @@ pub struct Comp {
     pub level: Option<Vec<u8>>,
     pub scales: Scales,
     pub core: Vec<CoreCard>,
-    /// Cards that make the comp ACTIVE once one is on the board or in hand.
-    pub enabler: Vec<CardId>,
+    /// Ways to make the comp ACTIVE; any one of them is enough.
+    pub enabler: Vec<Enabler>,
     /// Cards that matter when the comp is active.
     pub payoff: Vec<CardId>,
     /// Cards bought only to feed the comp.
     pub filler: Vec<CardId>,
     pub early: Early,
     pub signals: Vec<Signal>,
+    pub abort: Option<Abort>,
     pub give_up: Option<GiveUp>,
     pub not_in_comp: Vec<CardId>,
 }
@@ -123,7 +150,36 @@ impl Comp {
     }
 
     pub fn is_enabler(&self, id: CardId) -> bool {
-        self.enabler.contains(&id)
+        self.enabler.iter().any(|e| e.all.iter().any(|g| g.contains(&id)))
+    }
+
+    /// Whether any one of the comp's enabler entries is complete: every group
+    /// has one of its cards on the board or in the hand.
+    pub fn enabler_held(&self, board: &[Minion], hand: &[Minion]) -> bool {
+        let held = |id: &CardId| {
+            board.iter().chain(hand).any(|m| m.card == *id)
+        };
+        self.enabler.iter().any(|e| {
+            !e.all.is_empty() && e.all.iter().all(|g| g.iter().any(held))
+        })
+    }
+
+    /// Whether the comp's abort condition holds now: a threshold turn or Tier
+    /// is here and no enabler is held. One-way state is kept by the caller
+    /// (`OverlayState` and `PlannerState`), because the threshold passing
+    /// without an enabler stays true for the rest of the game.
+    pub fn abort_condition(&self, turn: u32, tier: u8, board: &[Minion], hand: &[Minion]) -> bool {
+        let Some(abort) = self.abort.as_ref() else { return false };
+        if self.enabler_held(board, hand) {
+            return false;
+        }
+        abort.after_turn.is_some_and(|t| turn > t)
+            || abort.min_tier.is_some_and(|t| tier >= t)
+    }
+
+    /// Every tribe in `lobby` is in the lobby (an empty list is always fine).
+    pub fn lobby_ok(&self, lobby: &Tribes) -> bool {
+        self.lobby.iter().all(|t| lobby.has(*t))
     }
 
     pub fn is_payoff(&self, id: CardId) -> bool {
@@ -181,14 +237,22 @@ pub struct Defaults {
     pub level: Vec<u8>,
     /// Health at or below which the planner stops leveling.
     pub dying_health: i32,
+    /// The overlay's bonus for any action that costs Health on the player's
+    /// own turn while no Soul Rewinder or Ashen Corruptor is on the board.
+    pub health_loss_penalty: f32,
 }
 
 pub const FALLBACK_LEVEL: [u8; 12] = [1, 2, 2, 2, 3, 4, 4, 5, 5, 5, 5, 6];
 pub const FALLBACK_DYING_HEALTH: i32 = 10;
+pub const FALLBACK_HEALTH_LOSS_PENALTY: f32 = -10.0;
 
 impl Default for Defaults {
     fn default() -> Defaults {
-        Defaults { level: FALLBACK_LEVEL.to_vec(), dying_health: FALLBACK_DYING_HEALTH }
+        Defaults {
+            level: FALLBACK_LEVEL.to_vec(),
+            dying_health: FALLBACK_DYING_HEALTH,
+            health_loss_penalty: FALLBACK_HEALTH_LOSS_PENALTY,
+        }
     }
 }
 
@@ -197,15 +261,16 @@ impl Default for Defaults {
 pub struct Comps {
     pub comps: Vec<Comp>,
     pub defaults: Defaults,
-}
-
-impl Comps {
+}impl Comps {
     /// Read the library, resolving every name against `data`. The first
     /// unknown name is the error, with the comp and the name in it.
     pub fn from_toml(text: &str, data: &Data) -> Result<Comps, String> {
         let raw: RawFile = toml::from_str(text).map_err(|e| format!("comps: {e}"))?;
         if raw.comp.is_empty() {
             return Err("comps: the file has no [[comp]] entry".to_string());
+        }
+        if raw.comp.len() > MAX_COMPS {
+            return Err(format!("comps: the file has more than {MAX_COMPS} entries"));
         }
         let mut defaults = Defaults::default();
         if let Some(d) = raw.defaults {
@@ -219,6 +284,9 @@ impl Comps {
             }
             if let Some(h) = d.dying_health {
                 defaults.dying_health = h;
+            }
+            if let Some(p) = d.health_loss_penalty {
+                defaults.health_loss_penalty = p;
             }
         }
         let mut comps: Vec<Comp> = Vec::with_capacity(raw.comp.len());
@@ -258,7 +326,7 @@ impl Comps {
             if core.is_empty() {
                 return Err(fail("core is empty".to_string()));
             }
-            let enabler = card_list(&data.cards, &r.enabler).map_err(fail)?;
+            let enabler = enabler_list(&data.cards, r.enabler).map_err(fail)?;
             let payoff = card_list(&data.cards, &r.payoff).map_err(fail)?;
             let filler = card_list(&data.cards, &r.filler).map_err(fail)?;
             let early = r.early.unwrap_or_default();
@@ -285,9 +353,21 @@ impl Comps {
             for t in &r.tribes {
                 tribes.push(tribe(t).map_err(fail)?);
             }
+            let mut lobby = Vec::with_capacity(r.lobby.len());
+            for t in &r.lobby {
+                lobby.push(tribe(t).map_err(fail)?);
+            }
+            let abort = r.abort.map(|a| Abort { after_turn: a.after_turn, min_tier: a.min_tier });
+            if let Some(a) = &abort
+                && a.after_turn.is_none()
+                && a.min_tier.is_none()
+            {
+                return Err(fail("abort has neither after_turn nor min_tier".to_string()));
+            }
             comps.push(Comp {
                 name,
                 tribes,
+                lobby,
                 draft: r.draft,
                 fallback: r.fallback,
                 commit_turn: r.commit_turn.map(|[lo, hi]| (lo, hi)),
@@ -299,6 +379,7 @@ impl Comps {
                 filler,
                 early: Early { cards: early_cards, strong_stats: early.strong_stats },
                 signals,
+                abort,
                 give_up: r.give_up.map(|g| GiveUp {
                     after_turn: g.after_turn,
                     progress_below: g.progress_below,
@@ -342,6 +423,30 @@ fn card_list(cards: &CardDb, names: &[String]) -> Result<Vec<CardId>, String> {
         ids.push(card(cards, name).ok_or_else(|| format!("unknown card {name:?}"))?);
     }
     Ok(ids)
+}
+
+/// Resolve every enabler entry's groups. An entry with no group, or a group
+/// with no card, would be held by everyone, so both fail the load.
+fn enabler_list(cards: &CardDb, raw: Vec<RawEnabler>) -> Result<Vec<Enabler>, String> {
+    let mut out = Vec::with_capacity(raw.len());
+    for e in raw {
+        if e.all.is_empty() {
+            return Err("an enabler entry needs at least one group".to_string());
+        }
+        let mut all = Vec::with_capacity(e.all.len());
+        for group in e.all {
+            if group.is_empty() {
+                return Err("an enabler group needs at least one card".to_string());
+            }
+            let mut ids = Vec::with_capacity(group.len());
+            for name in group {
+                ids.push(card(cards, &name).ok_or_else(|| format!("unknown card {name:?}"))?);
+            }
+            all.push(ids);
+        }
+        out.push(Enabler { all });
+    }
+    Ok(out)
 }
 
 fn signal(raw: RawSignal, data: &Data) -> Result<Signal, String> {
@@ -402,6 +507,8 @@ struct RawDefaults {
     level: Option<Vec<u8>>,
     #[serde(default)]
     dying_health: Option<i32>,
+    #[serde(default)]
+    health_loss_penalty: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -410,6 +517,8 @@ struct RawComp {
     name: String,
     #[serde(default)]
     tribes: Vec<String>,
+    #[serde(default)]
+    lobby: Vec<String>,
     #[serde(default)]
     draft: bool,
     #[serde(default)]
@@ -423,7 +532,7 @@ struct RawComp {
     #[serde(default)]
     core: Vec<RawCore>,
     #[serde(default)]
-    enabler: Vec<String>,
+    enabler: Vec<RawEnabler>,
     #[serde(default)]
     payoff: Vec<String>,
     #[serde(default)]
@@ -433,9 +542,26 @@ struct RawComp {
     #[serde(default)]
     signals: Vec<RawSignal>,
     #[serde(default)]
+    abort: Option<RawAbort>,
+    #[serde(default)]
     give_up: Option<RawGiveUp>,
     #[serde(default)]
     not_in_comp: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEnabler {
+    all: Vec<Vec<String>>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct RawAbort {
+    #[serde(default)]
+    after_turn: Option<u32>,
+    #[serde(default)]
+    min_tier: Option<u8>,
 }
 
 #[derive(Deserialize)]

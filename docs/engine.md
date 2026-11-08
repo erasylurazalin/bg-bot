@@ -32,7 +32,7 @@ crates/
     src/action.rs     the flat action space and its index mapping
     src/obs.rs        the observation a player sees, as fixed-size f32
     src/bots.rs       random, standard-curve and rush-curve bots
-    src/comps.rs      the comp library: cards by name, weights, signals, give-up, level
+    src/comps.rs      the comp library: cards, lobby, enablers, abort, level
     src/planner.rs    the comp planner bot (see "The comp planner")
     src/overlay.rs    the comp overlay: forced rules and logit bonuses (see "The comp overlay")
     src/rules.rs      Rules from rules.toml
@@ -109,7 +109,7 @@ train/
                       judges, playouts (see "The shop-turn search")
   eval_search.py      the search's evaluation: N games plain against the
                       search, and the Blue Shell, Warden and cycle-rate tests
-  eval_overlay.py     the comp overlay's evaluation: N games, B 2/4/8, off
+  eval_overlay.py     the comp overlay's per-comp evaluation: N games, B, real or network
   status.py           prints a run's metrics.csv as a table
 ref/                  (git-ignored) Blizzard card data snapshots, see below
 docs/                 concept, pool analysis, mechanics inventory (a snapshot from before
@@ -1910,19 +1910,27 @@ the planner may name cards, as the scripted bots do, but no rule matches a
 name.
 
 - **The file:** `[defaults]` holds the shared `level` curve (the tier target
-  for turn 1, 2, ...) and `dying_health`, the Health at or below which the
-  planner stops leveling. One `[[comp]]` per comp: `name`, `tribes`, `draft`,
-  `fallback`, `commit_turn` (first and last turn it may commit), `level` (an
-  own curve; absent inherits `[defaults]`, `level = []` means no curve),
-  `scales` (`none`, `beetles` or `stats`), `core` cards with a weight and a
-  `scale` flag, `early` (cards and `strong_stats`), `signals` (cards, a tribe
-  with a minimum count, a hero, a trinket, or a keyword, each with a weight),
-  `give_up` (`after_turn`, `progress_below`, `to`) and `not_in_comp`. Every
-  card, hero and trinket is checked against the loaded data; an unknown name
-  fails the load with the comp and the name. `data/comps/comps.toml` holds two
-  `draft = true` entries: `beetles` (the first comp) and `scam` (its fallback,
-  also the late fallback when nothing else was found). Scam has
-  `level = []`: no level curve of its own. The shipped default is the
+  for turn 1, 2, ...), `dying_health`, the Health at or below which the
+  planner stops leveling, and `health_loss_penalty` (the overlay's negative
+  bonus for a Health cost with no Soul Rewinder or Ashen Corruptor on the
+  board). One `[[comp]]` per comp: `name`, `tribes` (the card tribes it
+  plays), `lobby` (every tribe it needs in the lobby; empty for any lobby),
+  `draft`, `fallback`, `commit_turn` (first and last turn it may commit),
+  `level` (an own curve; absent inherits `[defaults]`, `level = []` means no
+  curve), `scales` (`none`, `beetles` or `stats`), `core` cards with a weight
+  and a `scale` flag, `early` (cards and `strong_stats`), `signals` (cards, a
+  tribe with a minimum count, a hero, a trinket, or a keyword, each with a
+  weight), `enabler` (entries of `all` groups: every group needs one of its
+  cards held; a comp has any one entry), `abort` (`after_turn` or `min_tier`,
+  with no enabler held; one-way), `give_up` (`after_turn`,
+  `progress_below`, `to`) and `not_in_comp`. Every card, hero and trinket is
+  checked against the loaded data; an unknown name fails the load with the
+  comp and the name. `data/comps/comps.toml` holds ten `draft = true`
+  entries from JeefHS's current guides, chosen by Era on 2026-11-09: Beasts -
+  Tasty Lobstah, Beasts - Leviathan, Beasts - Beetles, Demons -
+  Deathrattle/Shop Buff, Mechs - Magnetics/Spells, Quilboar - Choose One,
+  Murlocs - Keyword, Demons - Self Damage, Menagerie and Murlocs - Venom Scam
+  (the fallback, `level = []`). The shipped default is the
   standard curve: Era's own timing (tier 4 on turn 6, tier 5 on turn 8) was
   measured at 7.27 against 7.02 for this one, so it is left in
   `docs/notes/mining/sure-plays.md` for a comp to override.
@@ -1986,43 +1994,59 @@ name.
 `crates/bgcore/src/overlay.rs` is the rules-on-top-of-a-network layer
 (`docs/briefs/comp-overlay-1.md`): a forced action or nothing, plus a logit
 bonus per action. It is not a bot. The network plays by default; a comp
-becomes ACTIVE when one of its `enabler` cards is on the player's board or in
-their hand.
+becomes ACTIVE when one of its enabler entries is complete (every group has
+one of its cards on the board or in the hand), all its `lobby` tribes are in
+the lobby, and its `abort` rule has not fired. Several active comps are
+resolved by file order: the first one wins. `OverlayState` keeps the Shell
+line and one abort bit per comp per seat and game, so an aborted comp is never
+turned back on.
 
-- **The comp fields:** `enabler` (cards that turn the comp on), `payoff` (the
-  cards that matter) and `filler` (cards bought only to feed it). The old
-  planner fields stay. Beetles: enabler Ravaging Scorpid; payoffs Banana Slamma
-  and Ravaging Scorpid; filler Turquoise Skitterer, Forest Rover, Buzzing
-  Vermin and Headhunter Gryphon. Scam has no enabler in this round.
+- **The comp fields:** `enabler` (entries of groups that turn the comp on),
+  `payoff` (the core cards that matter) and `filler` (the add-ons bought only
+  to feed it). Beetles: two enabler entries, Ravaging Scorpid or Turquoise
+  Skitterer; payoffs Banana Slamma, Turquoise Skitterer, Headhunter Gryphon
+  and Ravaging Scorpid; filler Forest Rover, Buzzing Vermin, Lurking Leviathan
+  and Sewer Lord. Murlocs - Venom Scam has no enabler: the overlay cannot
+  measure no_future or outscaled, so it is the planner's `fallback` only.
+- **Health rule (Era):** any action that costs the hero Health while no Soul
+  Rewinder or Ashen Corruptor is on the board gets `health_loss_penalty` (a
+  large negative bonus, not a mask). It applies with no active comp and to
+  every comp and card, and covers a Health-priced Tavern minion or spell, a
+  Refresh paid in Health, playing a Demon with Wrath Weaver on the board,
+  Imposing Percussionist's Discover and Graveyard Shift's card steal.
 - **Forced:** the Tortollan Blue Shell after a lost fight is three ordinary
   forced actions, buy, then play, then sell. A small `ShellLine` marker per
   seat records the turn and the board slot the line put it in, so a Shell
   that was already on the board is not sold. On a full board an active comp
   sells a card that is not in the comp first; with no active comp the sale is
   skipped. A Discover or Choose One that offers an enabler takes it when the
-  comp's tribe is in the lobby; an active comp takes a payoff, then a filler.
-  The enabler/offered flags are in the overlay stats array.
+  comp's lobby tribes are all in the lobby; an active comp takes a payoff,
+  then a filler. The enabler/offered flags are in the overlay stats array.
 - **Bonuses:** while a comp is active, buying or playing a payoff is worth
   `B`, a filler `B/2`, and a full board sells a non-comp card for `B` when a
   comp card waits in the hand or Tavern. Selling an enabler or a payoff is
-  masked with `-inf`. With no active comp the bonus array is all zero.
+  masked with `-inf`. With no active comp the bonus array is all zero apart
+  from the Health rule.
 - **`bgpy.VecEnv`:** `set_overlay(comps_path, B)` loads the rules,
   `clear_overlay()` turns them off, `overlay(forced, bonus, flags)` fills the
   arrays (n by 8 seats, `forced` -1 or an action, `bonus` n by 8 by
-  `N_ACTIONS`, `flags` n by 8 by 6), and `remember_boards()` must be called
+  `N_ACTIONS`, `flags` n by 8 by `OVERLAY_FLAGS`, now 7: the active comp's
+  index plus one is `F_COMP`), and `remember_boards()` must be called
   after `observe` and before `step` when `final_boards()` is needed.
   `final_boards()` returns the last completed game's board card ids per seat.
   Only the current player's row is computed, because `Game::is_legal` is
   current-player only; the other seats are neutral.
-- **`train/eval_overlay.py --games 2048 --bonus 0 2 4 8`** runs the network
-  seat against seven real boards. It prints the place with a 95% interval,
-  Shell legal/taken/rate, enabler offered/taken/active and active turn, the
-  active games' comp-board share and place, and the forced full-board sells.
-  `--real-lobby-filter` draws a real seat's boards only from the game's
-  lobby. It also prints the overlay call's cost per step (relative while a
-  training run is on the machine) and the 512-game overlay-off check, which
-  must be 5.867 exactly. With no overlay it uses `train/eval_search.py`'s own
-  `play` function, so the off number is the baseline by construction.
+- **`train/eval_overlay.py --games 2048 --bonus 8`** runs the network seat
+  against seven real boards (`--opponents network` plays seven network seats
+  instead). It prints the place with a 95% interval, top-4, first, Shell
+  legal/taken/rate, enabler offered/taken/active and active turn, the active
+  games' comp-board share and place, the forced full-board sells, and a per
+  comp table: games active, activation turn, boards ending as the comp and
+  their share and place. `--real-lobby-filter` draws a real seat's boards only
+  from the game's lobby. It also prints the overlay call's cost per step
+  (relative while a training run is on the machine) and a 512-game
+  overlay-off check, which is the network-only baseline. With no overlay it
+  uses `train/eval_search.py`'s own `play` function.
 
 ## Era's turns, with Era's luck
 
@@ -2107,7 +2131,7 @@ cargo build --release -p bgbench
 ./target/release/bgbench collect-actions # write Era's action files, boards/actions/
 ./target/release/bgbench check-actions   # add up the turns of boards/actions/
 ./target/release/bgbench planner         # the comp planner against real boards
-.venv/bin/python train/eval_overlay.py --games 2048 --bonus 0 2 4 8
+.venv/bin/python train/eval_overlay.py --games 2048 --bonus 8 --real-lobby-filter
 cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 ```
 

@@ -82,6 +82,8 @@ pub struct PlannerState {
     pub level_turns: Vec<(u32, u8)>,
     /// The turn a give-up rule switched the comp.
     pub switched_turn: Option<u32>,
+    /// Comps whose abort rule has fired this game (one bit per comp).
+    pub aborted: u64,
     /// Decisions made this game.
     pub decisions: u64,
 }
@@ -230,7 +232,36 @@ impl Planner {
     // ---- the comp -------------------------------------------------------
 
     fn update_comp(&mut self, game: &Game, p: usize) {
+        let pl = &game.players[p];
+        // Latch every comp whose abort condition holds now. A latched comp
+        // stays off for the rest of the game, so a later enabler never turns
+        // it back on.
+        for i in 0..self.comps.comps.len().min(crate::comps::MAX_COMPS) {
+            if self.state.aborted & (1 << i) == 0
+                && self.comps.comps[i].abort_condition(game.turn, pl.tier, &pl.board, &pl.hand)
+            {
+                self.state.aborted |= 1 << i;
+            }
+        }
+        let aborted = |state: &PlannerState, i: usize| state.aborted & (1 << i) != 0;
         if let Some(ci) = self.state.comp {
+            // A latched comp is off: its enabler no longer activates it, and
+            // the planner goes to the fallback instead.
+            if aborted(&self.state, ci) {
+                let next = self
+                    .comps
+                    .comps
+                    .iter()
+                    .enumerate()
+                    .position(|(i, c)| {
+                        i != ci && c.fallback && !aborted(&self.state, i) && c.lobby_ok(&game.lobby)
+                    });
+                self.state.comp = next;
+                self.state.lean = next;
+                self.state.committed_turn = next.map(|_| game.turn);
+                self.state.switched_turn = Some(game.turn);
+                return;
+            }
             let give = self.comps.comps[ci].give_up.clone();
             if let Some(g) = give {
                 let progress = self.progress_for(game, p, Some(ci));
@@ -247,6 +278,9 @@ impl Planner {
         let mut best: Option<usize> = None;
         let mut best_score = 0.0f32;
         for (i, comp) in self.comps.comps.iter().enumerate() {
+            if aborted(&self.state, i) || !comp.lobby_ok(&game.lobby) {
+                continue;
+            }
             let s = self.signal_score(game, p, comp);
             if s > best_score {
                 best_score = s;
@@ -265,9 +299,12 @@ impl Planner {
             self.state.lean = Some(b);
             return;
         }
-        // No signal at all: late in the game, scam is the honest fallback.
+        // No signal at all: late in the game, the fallback is the honest
+        // choice when its lobby is there.
         if game.turn >= 10
-            && let Some(f) = self.comps.fallback()
+            && let Some(f) = self.comps.comps.iter().enumerate().position(|(i, c)| {
+                c.fallback && !aborted(&self.state, i) && c.lobby_ok(&game.lobby)
+            })
         {
             self.state.comp = Some(f);
             self.state.lean = Some(f);

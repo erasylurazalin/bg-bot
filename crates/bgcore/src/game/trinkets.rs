@@ -2034,6 +2034,12 @@ impl Game {
         }
     }
 
+    /// Whether buying the minion in Tavern slot `s` costs Health right now.
+    /// The overlay's Health-loss rule asks this before it punishes a buy.
+    pub fn minion_costs_health(&self, p: usize, slot: usize) -> bool {
+        matches!(self.minion_price(p, slot), MinionPrice::Health(_))
+    }
+
     /// Whether this Tavern slot holds one of the highest-Tier minions on
     /// offer (Demonic Tapestry).
     fn is_highest_tier_slot(&self, p: usize, slot: usize) -> bool {
