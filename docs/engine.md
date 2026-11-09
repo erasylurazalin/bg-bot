@@ -103,6 +103,7 @@ crates/
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
   model.py            policy and value network
+  card_text.py        card text to token ids for the network (--card-text)
   ppo.py              PPO self-play, evals, checkpoints
   real_boards.py      loads boards/real for training (card id to name, summary)
   search.py           the shop-turn search: candidates, cycles, the two
@@ -2384,6 +2385,19 @@ Deleting `.venv` undoes it.
   `warm_start` into this build and checks that it answers exactly as its own
   network did on the same positions, the grew-in columns at zero (how an old
   run crosses an observation that only grew).
+- `--card-text` (2026-11-09) adds a vector read from each card's printed
+  Battlegrounds text to its id embedding (the id embedding stays). `card_text.py`
+  reads the text by name from `ref/hsjson-cards.json`, drops markup and
+  `(N left!)` counters, makes `+N/+M` one `<buff>` token and every other
+  number `<num>`, then builds a fixed table: one word embedding, one
+  pre-norm self-attention layer over the card's words, the mean over its
+  present words, projected to `emb`. The whole table is computed once per
+  forward and indexed by card id; a textless card's vector is zero. The
+  vocabulary and token table are saved in `model_opts`, so `--resume` and
+  the eval scripts rebuild the model without reading `ref/`; a checkpoint
+  without them has no text parameters and is unchanged. The shared slot
+  encoder means all three models (`mlp`, `attn`, `pool`) read it. Heroes,
+  powers, trinkets and Dark Gifts keep their own id embeddings.
 - `--init-from PATH` starts a new run (fresh optimizer) from every
   parameter of another checkpoint of the same model whose name and shape
   match, for example `attn` with `full` into `next`; it prints what was

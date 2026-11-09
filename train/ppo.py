@@ -40,9 +40,10 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
+import card_text
 import comp_specs
 import real_boards
-from model import (build, ck_model, masked, model_args, model_opts, set_recompute,
+from model import (build, ck_model, masked, model_args, model_opts, opts_text, set_recompute,
                    table_names, warm_start)
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
@@ -145,6 +146,10 @@ def args():
                    help="attn: keep each layer's activations instead of recomputing them in the "
                         "backward pass: the same update, about a third less learning time, more "
                         "GPU memory (bgt's night strength)")
+    a.add_argument("--card-text", action="store_true",
+                   help="give every card's id embedding a vector read from its printed text "
+                        "(train/card_text.py); the vocabulary and token table are saved in the "
+                        "checkpoint, and --resume keeps the run's own")
     a.add_argument("--obs-fp16", action="store_true",
                    help="store the rollout's observations in float16 (half the buffer) and widen "
                         "them to float32 just before the network sees them; exact, because every "
@@ -666,6 +671,7 @@ def main():
     global OVERLAY_COMPS, OVERLAY_BONUS, COMP_HEALTH_PENALTY, COMP_SPECS, COMP_COUNT
     global SCENARIO_NAMES, SCENARIO_TURN_MIN, SCENARIO_TURN_MAX, SCENARIO_LABELS
     cfg = args()
+    want_text = cfg.card_text
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
     REAL_LOBBY_FILTER = cfg.real_lobby_filter
@@ -706,11 +712,13 @@ def main():
             raise SystemExit("--resume and --init-from don't go together")
         saved, opts = ck_model(ck)
         given = {"model": cfg.model, **{k: getattr(cfg, k) for k in model_opts(saved)
-                                        if hasattr(cfg, k)}}
+                                        if hasattr(cfg, k) and k != "card_text"}}
         for k, v in given.items():
             if v and v != {"model": saved, **opts}[k]:
                 print(f"--{k.replace('_', '-')} {v} ignored: {cfg.resume} holds "
-                      f"{saved} {opts}")
+                      f"{saved} {opts_text(opts)}")
+        if want_text and not opts.get("card_text"):
+            print(f"--card-text ignored: {cfg.resume} has no card text table")
         cfg.model = saved
         if opts.get("n_comps", 0) != COMP_COUNT:
             raise SystemExit(f"--overlay-comps {cfg.overlay_comps}: the comp file has "
@@ -770,6 +778,13 @@ def main():
         print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}")
     names = env.card_names()
     hero_names = env.hero_names()
+    if want_text and ck is None and not opts.get("card_text"):
+        opts["card_text"] = card_text.build_table(names)
+        cfg.card_text = opts["card_text"]
+    if opts.get("card_text"):
+        table = opts["card_text"]
+        print(f"card text: {len(table['vocab'])} words, {len(table['tokens'])} cards, "
+              f"{len(table['tokens'][0])} tokens, {len(table.get('missing', []))} without text")
     COMP_SPECS = comp_specs.ids(raw_specs, names) if raw_specs else []
     if SCENARIO_NAMES:
         by_name = {s["name"]: s for s in COMP_SPECS}
@@ -791,7 +806,7 @@ def main():
         loaded, fresh, skipped, src_opts, remapped = warm_start(
             net, cfg.model, cfg.init_from, cards=names, heroes=hero_names,
             old_cards=old_cards, old_heroes=old_heroes)
-        print(f"init from {cfg.init_from} ({cfg.model} {src_opts}): {len(loaded)} parameter "
+        print(f"init from {cfg.init_from} ({cfg.model} {opts_text(src_opts)}): {len(loaded)} parameter "
               f"tensors loaded, {len(fresh)} fresh: {', '.join(fresh) or 'none'}; "
               f"not used: {', '.join(skipped) or 'none'}")
         for r in remapped:
@@ -841,7 +856,8 @@ def main():
     # last entry holds for later turns)
     late_need = torch.tensor([float(x) for x in cfg.deadline_curve.split(",")],
                              device=dev, dtype=torch.float32)
-    print(f"{cfg.model} {opts or ''}: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M "
+    print(f"{cfg.model} {opts_text(opts) or ''}: "
+          f"{sum(p.numel() for p in net.parameters()) / 1e6:.2f}M "
           f"parameters on {dev}{', compiled' if cfg.compile and cfg.model == 'attn' else ''}")
 
     tb = SummaryWriter(out / "tb")

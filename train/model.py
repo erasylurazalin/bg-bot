@@ -154,13 +154,75 @@ assert len(OPP_SCALE) == bgpy.OPP_SCALARS
 assert len(SLOT_SCALE) == SF
 
 
+class CardTextEncoder(nn.Module):
+    """The text vector of every card, from its token ids.
+
+    One word embedding, one pre-norm self-attention layer over a card's words,
+    then the mean over its present words, projected to `emb`. The whole table
+    is computed once per forward (it is small) and indexed by card id. A card
+    with no text gets a zero vector, so its card embedding stays the id
+    embedding alone."""
+
+    def __init__(self, emb, card_text):
+        super().__init__()
+        tokens = torch.tensor(card_text["tokens"], dtype=torch.long)
+        self.vocab = list(card_text["vocab"])
+        self.register_buffer("tokens", tokens)
+        self.word = nn.Embedding(len(self.vocab) + 1, emb, padding_idx=0)
+        self.norm = nn.LayerNorm(emb)
+        heads = 4 if emb % 4 == 0 else 1
+        self.heads = heads
+        self.qkv = nn.Linear(emb, 3 * emb)
+        self.out = nn.Linear(emb, emb)
+        self.proj = nn.Linear(emb, emb)
+
+    def table(self):
+        """(n_cards + 1, emb), row 0 and textless cards zero."""
+        ids = self.tokens
+        present = ids != 0
+        x = self.word(ids)
+        h = self.norm(x)
+        b, n, d = h.shape
+        q, k, v = self.qkv(h).view(b, n, 3, self.heads, d // self.heads).permute(
+            2, 0, 3, 1, 4)
+        # Keep one key per card so a textless row still has a finite softmax;
+        # its key is the zero padding embedding, so the result stays zero.
+        keep = present.clone()
+        keep[:, 0] = True
+        a = F.scaled_dot_product_attention(q, k, v, attn_mask=keep[:, None, None, :])
+        x = x + self.out(a.transpose(1, 2).reshape(b, n, d))
+        mask = present[..., None]
+        mean = (x * mask).sum(1) / mask.sum(1).clamp(min=1)
+        return self.proj(mean) * present.any(1, keepdim=True)
+
+
+def _card_vectors(card, weight, ids):
+    """The card embedding: the id embedding, plus the text vector when the
+    run reads card text. `weight` is the whole combined table, once per
+    forward; one embedding lookup keeps the backward as cheap as without
+    text (adding a gathered table would scatter-add for every slot)."""
+    return card(ids) if weight is None else F.embedding(ids, weight)
+
+
+def opts_text(opts):
+    """A print-safe copy of model_opts: the card text table is a summary."""
+    out = dict(opts)
+    table = out.get("card_text")
+    if table:
+        rows = table["tokens"]
+        out["card_text"] = (f"{len(table['vocab'])} words, {len(rows)} cards, "
+                            f"{len(rows[0])} tokens")
+    return out
+
+
 class Net(nn.Module):
     def __init__(self, n_cards=bgpy.N_CARDS, n_heroes=N_HERO_IDS,
                  n_trinkets=bgpy.N_TRINKETS, emb=32, slot=64, hidden=512,
-                 n_comps=0):
+                 n_comps=0, card_text=None):
         super().__init__()
         self.n_comps = n_comps
         self.card = nn.Embedding(n_cards + 1, emb)  # 0 is an empty slot or no card
+        self.text = CardTextEncoder(emb, card_text) if card_text else None
         self.hero = nn.Embedding(n_heroes + 1, emb)  # 0 is no hero
         self.trinket = nn.Embedding(n_trinkets + 1, emb)  # 0 is no trinket
         feats = [i for i in range(SF) if i not in SLOT_IDS]
@@ -197,6 +259,7 @@ class Net(nn.Module):
 
     def forward(self, obs, comp=None):
         b = obs.shape[0]
+        weight = self.card.weight + self.text.table() if self.text is not None else None
         if self.n_comps:
             if comp is None:
                 comp = obs.new_zeros((b, self.n_comps))
@@ -205,7 +268,8 @@ class Net(nn.Module):
         raw = obs[:, :bgpy.SCALARS]
         scalars = raw / self.s_scale * self.s_keep
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
-        s_cards = self.card(raw[:, SCALAR_IDS].long()).reshape(b, -1)
+        s_ids = raw[:, SCALAR_IDS].long()
+        s_cards = _card_vectors(self.card, weight, s_ids).reshape(b, -1)
         s_heroes = self.hero(raw[:, HERO_IDS].long()).reshape(b, -1)
         s_trinkets = self.trinket(raw[:, TRINKET_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
@@ -218,7 +282,8 @@ class Net(nn.Module):
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
         n = slots.shape[1]
-        cards = self.card(slots[:, :, SLOT_IDS].long()).reshape(b, n, -1)
+        cards = _card_vectors(self.card, weight, slots[:, :, SLOT_IDS].long()
+                              ).reshape(b, n, -1)
         feats = slots[:, :, self.feats] / self.m_scale
         feats[:, :, self.log_cols] = torch.log1p(feats[:, :, self.log_cols].clamp(min=0))
         enc = self.slot(torch.cat([cards, feats], 2)).reshape(b, -1)
@@ -277,10 +342,11 @@ class SlotInputs(nn.Module):
     that opponent's zone embedding, shared with its board)."""
 
     def __init__(self, n_cards, d, emb, n_heroes=N_HERO_IDS, n_trinkets=bgpy.N_TRINKETS,
-                 n_comps=0):
+                 n_comps=0, card_text=None):
         super().__init__()
         self.n_comps = n_comps
         self.card = nn.Embedding(n_cards + 1, emb)
+        self.text = CardTextEncoder(emb, card_text) if card_text else None
         self.hero = nn.Embedding(n_heroes + 1, emb)
         self.trinket = nn.Embedding(n_trinkets + 1, emb)  # 0 is no trinket
         feats = [i for i in range(SF) if i not in SLOT_IDS]
@@ -316,6 +382,7 @@ class SlotInputs(nn.Module):
     def forward(self, obs, comp=None):
         """(slots (B, 77, d), present (B, 77) bool, me (B, d), opp (B, OPP, d))"""
         b = obs.shape[0]
+        weight = self.card.weight + self.text.table() if self.text is not None else None
         if self.n_comps:
             if comp is None:
                 comp = obs.new_zeros((b, self.n_comps))
@@ -324,7 +391,7 @@ class SlotInputs(nn.Module):
         raw = obs[:, :bgpy.SCALARS]
         scalars = raw / self.s_scale * self.s_keep
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
-        s_cards = self.card(raw[:, SCALAR_IDS].long()).reshape(b, -1)
+        s_cards = _card_vectors(self.card, weight, raw[:, SCALAR_IDS].long()).reshape(b, -1)
         s_heroes = self.hero(raw[:, HERO_IDS].long()).reshape(b, -1)
         s_trinkets = self.trinket(raw[:, TRINKET_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
@@ -337,7 +404,7 @@ class SlotInputs(nn.Module):
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
         n = slots.shape[1]
-        cards = self.card(slots[:, :, SLOT_IDS].long()).reshape(b, n, -1)
+        cards = _card_vectors(self.card, weight, slots[:, :, SLOT_IDS].long()).reshape(b, n, -1)
         feats = slots[:, :, self.feats] / self.m_scale
         feats[:, :, self.log_cols] = torch.log1p(feats[:, :, self.log_cols].clamp(min=0))
         tok = self.enc(torch.cat([cards, feats], 2)) + self.zone(self.zone_of) + self.pos(self.pos_of)
@@ -510,13 +577,13 @@ class AttnNet(nn.Module):
     It is not a shape setting and never goes into a checkpoint."""
 
     def __init__(self, n_cards=bgpy.N_CARDS, d=128, layers=3, heads=4, ff=256, emb=32, bf16=True,
-                 opp_boards="next", n_comps=0):
+                 opp_boards="next", n_comps=0, card_text=None):
         super().__init__()
         assert opp_boards in OPP_BOARDS, opp_boards
         self.bf16 = bf16
         self.opp_boards = opp_boards
         self.n_comps = n_comps
-        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps)
+        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps, card_text=card_text)
         self.blocks = nn.ModuleList(Block(d, heads, ff) for _ in range(layers))
         self.norm = nn.LayerNorm(d)
         self.head = ActionHead(d, d)
@@ -567,10 +634,11 @@ class PoolNet(nn.Module):
     tokens into an MLP. Actions come from ActionHead on the slot tokens, with
     a summary projected from the MLP; the value from the MLP."""
 
-    def __init__(self, n_cards=bgpy.N_CARDS, d=64, hidden=256, emb=32, n_comps=0):
+    def __init__(self, n_cards=bgpy.N_CARDS, d=64, hidden=256, emb=32, n_comps=0,
+                 card_text=None):
         super().__init__()
         self.n_comps = n_comps
-        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps)
+        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps, card_text=card_text)
         n_in = len(ZONES) * 2 * d + d + OPP * d
         self.trunk = nn.Sequential(nn.Linear(n_in, hidden), nn.ReLU(),
                                    nn.Linear(hidden, hidden), nn.ReLU())
@@ -594,10 +662,10 @@ class PoolNet(nn.Module):
 MODELS = {"mlp": Net, "attn": AttnNet, "pool": PoolNet}
 # Settings that change a model's shape, with their defaults; other models
 # ignore them.
-MODEL_OPTS = {"mlp": {"n_comps": 0},
+MODEL_OPTS = {"mlp": {"n_comps": 0, "card_text": None},
               "attn": {"opp_boards": "next", "d": 128, "layers": 3, "heads": 4, "ff": 256,
-                       "n_comps": 0},
-              "pool": {"n_comps": 0}}
+                       "n_comps": 0, "card_text": None},
+              "pool": {"n_comps": 0, "card_text": None}}
 
 
 def model_opts(kind, **given):
@@ -923,7 +991,7 @@ def check_warm_start(path, n=256):
         assert d < 1e-5, f"{name}: {d} from the old checkpoint's own answers"
     assert (moved_value - want_value).abs().max().item() < 1e-5
     assert (flat_value - want_value).abs().max().item() < 1e-5
-    print(f"warm start from {path} ({kind} {opts}, {old_opp} opponent scalars then): "
+    print(f"warm start from {path} ({kind} {opts_text(opts)}, {old_opp} opponent scalars then): "
           f"logits within {max(d_logits, d_moved, d_flat):.2e}, value within "
           f"{max(d_value, (moved_value - want_value).abs().max().item()):.2e}, "
           f"on {len(obs)} positions")
@@ -988,7 +1056,7 @@ def check_pointers():
                     assert torch.allclose(grid0[:, perm][:, :, perm], grid1, atol=1e-4, equal_nan=True), kind
                 assert torch.allclose(l0[:, glob], l1[:, glob], atol=1e-4), (kind, label, "global")
                 assert torch.allclose(v0, v1, atol=1e-4), (kind, label, "value")
-        print(f"{kind} {opts}: pointer logits follow their slots")
+        print(f"{kind} {opts_text(opts)}: pointer logits follow their slots")
 
 
 if __name__ == "__main__":

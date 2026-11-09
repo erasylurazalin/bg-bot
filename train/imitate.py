@@ -51,7 +51,7 @@ import numpy as np
 import torch
 
 import bgpy
-from model import build, ck_model, masked, model_args, model_opts, warm_start
+from model import build, ck_model, masked, model_args, model_opts, opts_text, warm_start
 
 KINDS = [name for name, _ in bgpy.ACTION_KINDS]
 KIND_OF = np.repeat(np.arange(len(KINDS)), [count for _, count in bgpy.ACTION_KINDS])
@@ -450,7 +450,8 @@ def main():
         for r in remapped:
             print(f"  by name: {r}", flush=True)
     net = net.to(dev)
-    print(f"network: {cfg.model} {opts}, {sum(p.numel() for p in net.parameters())} parameters "
+    print(f"network: {cfg.model} {opts_text(opts)}, "
+          f"{sum(p.numel() for p in net.parameters())} parameters "
           f"on {dev}", flush=True)
     anchor = None
     if cfg.anchor_kl > 0:
@@ -568,7 +569,8 @@ def main():
         f"- games: {len(set(meta['game']))}, {len(held)} held out (seed {cfg.seed}, "
         f"--holdout {cfg.holdout})",
         f"- patches: " + ", ".join(f"{p} {n}" for p, n in patches.items()),
-        f"- network: {cfg.model} {opts}, {sum(p.numel() for p in net.parameters())} parameters",
+        f"- network: {cfg.model} {opts_text(opts)}, "
+        f"{sum(p.numel() for p in net.parameters())} parameters",
         (f"- training: Adam lr {cfg.lr}, batch {cfg.batch}, weight (9 - place) / 8, "
          f"cross-entropy over the legal actions, policy head only"
          if not cfg.value else
