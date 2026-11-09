@@ -1950,6 +1950,15 @@ seed, so a line is reproducible and a search sees its future. The mode is
   instead of a 157 KiB `Game`; one mutable game is restored to the parent for
   each action. The end-of-turn carry is capped at 4,096 states even when the
   beam is wider.
+- **The NRPA search:** `crates/bgbench/src/bin/lobster_nrpa.rs` replaces the
+  beam with Nested Rollout Policy Adaptation over the same mode. A move code
+  is the action kind plus the card it acts on, never a bare slot. The default
+  policy is one global weight per move code with a uniform prior, and end turn
+  is a code like any other; a level shifts its weights toward that level's best
+  line. A rollout samples legal moves by a softmax with a small uniform chance,
+  and runs one turn or turns 10 to 13 as one line. The control run puts Era's
+  logged turn 10 Taverns in place of the seeded stream. It writes `nrpa.md`
+  and `nrpa.json` under `train/runs/lobster-search/`.
 - **The run:** `cargo run --release -p bgbench --bin lobster_search` with no
   options runs the brief's grid. It writes `report.md` and `results.json`
   under `train/runs/lobster-search/`, with Fishbait attacks and Deathstrider
