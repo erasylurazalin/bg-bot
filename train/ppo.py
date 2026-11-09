@@ -150,6 +150,9 @@ def args():
                    help="give every card's id embedding a vector read from its printed text "
                         "(train/card_text.py); the vocabulary and token table are saved in the "
                         "checkpoint, and --resume keeps the run's own")
+    a.add_argument("--card-form", action="store_true",
+                   help="with --card-text: also add every card's fixed effect form "
+                        "(data/card_forms.json), saved in the checkpoint like the text")
     a.add_argument("--obs-fp16", action="store_true",
                    help="store the rollout's observations in float16 (half the buffer) and widen "
                         "them to float32 just before the network sees them; exact, because every "
@@ -780,11 +783,16 @@ def main():
     hero_names = env.hero_names()
     if want_text and ck is None and not opts.get("card_text"):
         opts["card_text"] = card_text.build_table(names)
+        if cfg.card_form:
+            opts["card_text"].update(card_text.build_forms(names))
         cfg.card_text = opts["card_text"]
     if opts.get("card_text"):
         table = opts["card_text"]
         print(f"card text: {len(table['vocab'])} words, {len(table['tokens'])} cards, "
               f"{len(table['tokens'][0])} tokens, {len(table.get('missing', []))} without text")
+        if table.get("forms"):
+            print(f"card forms: {len(table['form_vocab'])} values, "
+                  f"{len(table.get('form_missing', []))} cards without a form")
     COMP_SPECS = comp_specs.ids(raw_specs, names) if raw_specs else []
     if SCENARIO_NAMES:
         by_name = {s["name"]: s for s in COMP_SPECS}

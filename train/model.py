@@ -175,6 +175,12 @@ class CardTextEncoder(nn.Module):
         self.qkv = nn.Linear(emb, 3 * emb)
         self.out = nn.Linear(emb, emb)
         self.proj = nn.Linear(emb, emb)
+        # --card-form: each card's fixed effect form, projected and added
+        forms = card_text.get("forms")
+        self.form = None
+        if forms:
+            self.register_buffer("forms", torch.tensor(forms, dtype=torch.float32))
+            self.form = nn.Linear(len(forms[0]), emb)
 
     def table(self):
         """(n_cards + 1, emb), row 0 and textless cards zero."""
@@ -193,7 +199,11 @@ class CardTextEncoder(nn.Module):
         x = x + self.out(a.transpose(1, 2).reshape(b, n, d))
         mask = present[..., None]
         mean = (x * mask).sum(1) / mask.sum(1).clamp(min=1)
-        return self.proj(mean) * present.any(1, keepdim=True)
+        out = self.proj(mean) * present.any(1, keepdim=True)
+        if self.form is not None:
+            # a card with no form (row 0 included) stays zero despite the bias
+            out = out + self.form(self.forms) * (self.forms != 0).any(1, keepdim=True)
+        return out
 
 
 def _card_vectors(card, weight, ids):

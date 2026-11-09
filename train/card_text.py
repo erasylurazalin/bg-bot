@@ -19,6 +19,7 @@ ref/ again; `missing` is only for the run's report.
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 import tomllib
@@ -136,6 +137,37 @@ def build_table(names, path=REF):
         ids = [index[token] for token in tokens[:MAX_TOKENS]]
         rows.append(ids + [0] * (MAX_TOKENS - len(ids)))
     return {"vocab": vocab, "tokens": rows, "missing": missing}
+
+
+FORMS = ROOT / "data" / "card_forms.json"
+FORM_FIELDS = ("trigger", "effect", "target", "tribes", "scaling", "scales_with", "wants")
+
+
+def build_forms(names, path=FORMS):
+    """One numeric row per card from data/card_forms.json, row 0 the empty
+    card: a multi-hot of every field value, then log1p of the two buff
+    numbers. A card with no form is all zero. The vocabulary comes from the
+    file, sorted, and is saved with the rows in the checkpoint."""
+    forms = json.loads(Path(path).read_text())
+    vocab = sorted({f"{f}={v}" for form in forms.values() for f in FORM_FIELDS
+                    for v in (form[f] if isinstance(form[f], list) else [form[f]])})
+    col = {k: i for i, k in enumerate(vocab)}
+    n = len(vocab) + 2
+    rows = [[0.0] * n]
+    missing = []
+    for name in names:
+        row = [0.0] * n
+        form = forms.get(name)
+        if form is None:
+            missing.append(name)
+        else:
+            for f in FORM_FIELDS:
+                for v in form[f] if isinstance(form[f], list) else [form[f]]:
+                    row[col[f"{f}={v}"]] = 1.0
+            row[-2] = math.log1p(form["buff_attack"]) / 3.0
+            row[-1] = math.log1p(form["buff_health"]) / 3.0
+        rows.append(row)
+    return {"form_vocab": vocab, "forms": rows, "form_missing": missing}
 
 
 def table_names(path=CARDS_TOML):
