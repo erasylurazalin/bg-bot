@@ -2042,6 +2042,26 @@ turned back on.
   `final_boards()` returns the last completed game's board card ids per seat.
   Only the current player's row is computed, because `Game::is_legal` is
   current-player only; the other seats are neutral.
+  `overlay_comp(comp)` fills every seat's active comp index or -1 without
+  changing a Shell line or latching an abort, and `overlay_probe(forced,
+  flags)` gives the overlay's advice on a copy of the state. The second is
+  how eval measures a network with the wheels off: the comp input stays on,
+  but no forced move or bonus is applied. `overlay(forced, bonus, flags)`
+  remains the training call, the only one that advances the state.
+- **Training wheels (`train/ppo.py`):** the network takes the active comp as
+  an extra one-hot input (`n_comps` is a model shape setting, 26 for the
+  current comp file). During training the overlay's forced moves and bonus
+  steer the behaviour policy; an aux cross-entropy on the network's own
+  logits (no bonus) teaches the overlay's choice at those rows, and both fade
+  with `--wheels-full`/`--wheels-end` games (`--aux-weight` is lambda). The
+  rollout stores the bonus compactly as four bitmasks (B, B/2, the Health
+  penalty, -inf) plus those raw values, so the update rebuilds the exact
+  scaled bonus the behaviour policy acted under. Forced rows are excluded
+  from the policy gradient; the aux loss is what teaches them. The checkpoint
+  stores the games played, so a `go.sh` restart continues the fade instead of
+  putting the wheels back to full. Evals set the overlay to B 0 and only
+  probe it, so the comp line (`comp_active_share`, `comp_end_share`,
+  `shell_rate`, `first_share`) is wheels-off.
 - **`train/eval_overlay.py --games 2048 --bonus 8`** runs the network seat
   against seven real boards (`--opponents network` plays seven network seats
   instead). It prints the place with a 95% interval, top-4, first, Shell
@@ -2051,8 +2071,10 @@ turned back on.
   their share and place. `--real-lobby-filter` draws a real seat's boards only
   from the game's lobby. It also prints the overlay call's cost per step
   (relative while a training run is on the machine) and a 512-game
-  overlay-off check, which is the network-only baseline. With no overlay it
-  uses `train/eval_search.py`'s own `play` function.
+  overlay-off check, which is the network-only baseline. A network with no
+  comp input and B 0 still uses `train/eval_search.py`'s own `play` function;
+  a comp-input network uses the same loop with the overlay probed only, so
+  its comp input stays on.
 
 ## Era's turns, with Era's luck
 

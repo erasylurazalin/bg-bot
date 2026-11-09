@@ -156,8 +156,10 @@ assert len(SLOT_SCALE) == SF
 
 class Net(nn.Module):
     def __init__(self, n_cards=bgpy.N_CARDS, n_heroes=N_HERO_IDS,
-                 n_trinkets=bgpy.N_TRINKETS, emb=32, slot=64, hidden=512):
+                 n_trinkets=bgpy.N_TRINKETS, emb=32, slot=64, hidden=512,
+                 n_comps=0):
         super().__init__()
+        self.n_comps = n_comps
         self.card = nn.Embedding(n_cards + 1, emb)  # 0 is an empty slot or no card
         self.hero = nn.Embedding(n_heroes + 1, emb)  # 0 is no hero
         self.trinket = nn.Embedding(n_trinkets + 1, emb)  # 0 is no trinket
@@ -166,7 +168,8 @@ class Net(nn.Module):
         n_slots = bgpy.TOTAL_SLOTS
         n_in = (n_slots * slot + bgpy.SCALARS
                 + (len(SCALAR_IDS) + len(HERO_IDS) + len(TRINKET_IDS)) * emb
-                + OPP * (bgpy.OPP_SCALARS + emb + len(OPP_TRINKET_IDS) * emb))
+                + OPP * (bgpy.OPP_SCALARS + emb + len(OPP_TRINKET_IDS) * emb)
+                + n_comps)
         self.trunk = nn.Sequential(
             nn.Linear(n_in, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
@@ -192,8 +195,13 @@ class Net(nn.Module):
         self.register_buffer("feats", torch.tensor(feats, dtype=torch.long))
         self.register_buffer("log_cols", torch.tensor([feats.index(i) for i in SLOT_LOG]))
 
-    def forward(self, obs):
+    def forward(self, obs, comp=None):
         b = obs.shape[0]
+        if self.n_comps:
+            if comp is None:
+                comp = obs.new_zeros((b, self.n_comps))
+        else:
+            comp = None
         raw = obs[:, :bgpy.SCALARS]
         scalars = raw / self.s_scale * self.s_keep
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
@@ -214,7 +222,10 @@ class Net(nn.Module):
         feats = slots[:, :, self.feats] / self.m_scale
         feats[:, :, self.log_cols] = torch.log1p(feats[:, :, self.log_cols].clamp(min=0))
         enc = self.slot(torch.cat([cards, feats], 2)).reshape(b, -1)
-        h = self.trunk(torch.cat([enc, scalars, s_cards, s_heroes, s_trinkets, opp_scalars], 1))
+        parts = [enc, scalars, s_cards, s_heroes, s_trinkets, opp_scalars]
+        if comp is not None:
+            parts.append(comp)
+        h = self.trunk(torch.cat(parts, 1))
         return self.policy(h), self.value(h).squeeze(1)
 
 
@@ -265,8 +276,10 @@ class SlotInputs(nn.Module):
     spell and pending card embedded) and one per opponent's scalars (plus
     that opponent's zone embedding, shared with its board)."""
 
-    def __init__(self, n_cards, d, emb, n_heroes=N_HERO_IDS, n_trinkets=bgpy.N_TRINKETS):
+    def __init__(self, n_cards, d, emb, n_heroes=N_HERO_IDS, n_trinkets=bgpy.N_TRINKETS,
+                 n_comps=0):
         super().__init__()
+        self.n_comps = n_comps
         self.card = nn.Embedding(n_cards + 1, emb)
         self.hero = nn.Embedding(n_heroes + 1, emb)
         self.trinket = nn.Embedding(n_trinkets + 1, emb)  # 0 is no trinket
@@ -275,7 +288,8 @@ class SlotInputs(nn.Module):
                                  nn.Linear(d, d))
         self.zone = nn.Embedding(len(ZONES), d)
         self.pos = nn.Embedding(max(ZONES), d)
-        self.me = nn.Linear(bgpy.SCALARS + (len(SCALAR_IDS) + len(HERO_IDS) + len(TRINKET_IDS)) * emb, d)
+        self.me = nn.Linear(bgpy.SCALARS + (len(SCALAR_IDS) + len(HERO_IDS) + len(TRINKET_IDS)) * emb
+                            + n_comps, d)
         self.opp = nn.Linear(bgpy.OPP_SCALARS - len(OPP_IDS) - len(OPP_TRINKET_IDS)
                              + emb + len(OPP_TRINKET_IDS) * emb, d)
         keep = torch.ones(bgpy.SCALARS)
@@ -299,9 +313,14 @@ class SlotInputs(nn.Module):
         self.register_buffer("pos_of", torch.tensor(POS_OF))
         self.register_buffer("opp_zone", torch.arange(5, 5 + OPP))
 
-    def forward(self, obs):
+    def forward(self, obs, comp=None):
         """(slots (B, 77, d), present (B, 77) bool, me (B, d), opp (B, OPP, d))"""
         b = obs.shape[0]
+        if self.n_comps:
+            if comp is None:
+                comp = obs.new_zeros((b, self.n_comps))
+        else:
+            comp = None
         raw = obs[:, :bgpy.SCALARS]
         scalars = raw / self.s_scale * self.s_keep
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
@@ -323,7 +342,10 @@ class SlotInputs(nn.Module):
         feats[:, :, self.log_cols] = torch.log1p(feats[:, :, self.log_cols].clamp(min=0))
         tok = self.enc(torch.cat([cards, feats], 2)) + self.zone(self.zone_of) + self.pos(self.pos_of)
         present = slots[:, :, bgpy.SLOT_PRESENT] > 0
-        me = self.me(torch.cat([scalars, s_cards, s_heroes, s_trinkets], 1))
+        me_in = [scalars, s_cards, s_heroes, s_trinkets]
+        if comp is not None:
+            me_in.append(comp)
+        me = self.me(torch.cat(me_in, 1))
         opp_tok = self.opp(opp_scalars) + self.zone(self.opp_zone)
         return tok, present, me, opp_tok
 
@@ -488,12 +510,13 @@ class AttnNet(nn.Module):
     It is not a shape setting and never goes into a checkpoint."""
 
     def __init__(self, n_cards=bgpy.N_CARDS, d=128, layers=3, heads=4, ff=256, emb=32, bf16=True,
-                 opp_boards="next"):
+                 opp_boards="next", n_comps=0):
         super().__init__()
         assert opp_boards in OPP_BOARDS, opp_boards
         self.bf16 = bf16
         self.opp_boards = opp_boards
-        self.inp = SlotInputs(n_cards, d, emb)
+        self.n_comps = n_comps
+        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps)
         self.blocks = nn.ModuleList(Block(d, heads, ff) for _ in range(layers))
         self.norm = nn.LayerNorm(d)
         self.head = ActionHead(d, d)
@@ -509,8 +532,8 @@ class AttnNet(nn.Module):
         for blk in self.blocks:
             blk.compile(dynamic=True)
 
-    def forward(self, obs):
-        slots, present, me, opp = self.inp(obs)
+    def forward(self, obs, comp=None):
+        slots, present, me, opp = self.inp(obs, comp)
         b = obs.shape[0]
         if self.opp_boards == "full":
             toks, keep = slots, present
@@ -544,9 +567,10 @@ class PoolNet(nn.Module):
     tokens into an MLP. Actions come from ActionHead on the slot tokens, with
     a summary projected from the MLP; the value from the MLP."""
 
-    def __init__(self, n_cards=bgpy.N_CARDS, d=64, hidden=256, emb=32):
+    def __init__(self, n_cards=bgpy.N_CARDS, d=64, hidden=256, emb=32, n_comps=0):
         super().__init__()
-        self.inp = SlotInputs(n_cards, d, emb)
+        self.n_comps = n_comps
+        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps)
         n_in = len(ZONES) * 2 * d + d + OPP * d
         self.trunk = nn.Sequential(nn.Linear(n_in, hidden), nn.ReLU(),
                                    nn.Linear(hidden, hidden), nn.ReLU())
@@ -554,8 +578,8 @@ class PoolNet(nn.Module):
         self.head = ActionHead(d, hidden)
         self.value = nn.Linear(hidden, 1)
 
-    def forward(self, obs):
-        slots, present, me, opp = self.inp(obs)
+    def forward(self, obs, comp=None):
+        slots, present, me, opp = self.inp(obs, comp)
         m = present[:, :, None]
         pools = []
         for start, n in zip(ZONE_START, ZONES):
@@ -570,7 +594,10 @@ class PoolNet(nn.Module):
 MODELS = {"mlp": Net, "attn": AttnNet, "pool": PoolNet}
 # Settings that change a model's shape, with their defaults; other models
 # ignore them.
-MODEL_OPTS = {"attn": {"opp_boards": "next", "d": 128, "layers": 3, "heads": 4, "ff": 256}}
+MODEL_OPTS = {"mlp": {"n_comps": 0},
+              "attn": {"opp_boards": "next", "d": 128, "layers": 3, "heads": 4, "ff": 256,
+                       "n_comps": 0},
+              "pool": {"n_comps": 0}}
 
 
 def model_opts(kind, **given):
@@ -669,6 +696,7 @@ def _input_cols(kind, net, opp_scalars):
                  for o in range(OPP) for j in range(len(OPP_IDS)) for k in range(emb)]
         cols += [("opp_trinket", o, j, k)
                  for o in range(OPP) for j in range(len(OPP_TRINKET_IDS)) for k in range(emb)]
+        cols += [("comp", i) for i in range(net.n_comps)]
         return {"trunk.0.weight": (cols, OPP)}
     # attn and pool: one opponent's scalars at a time, without the columns the
     # hero and trinket embeddings replace.

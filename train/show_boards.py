@@ -18,6 +18,7 @@ import numpy as np
 import torch
 
 import bgpy
+import comp_specs
 import ppo
 import real_boards
 from model import load
@@ -62,6 +63,15 @@ def main():
         real, _ = real_boards.load(real_boards.DEFAULT_DIR)
     n = min(cfg.games, 32)
     env = bgpy.VecEnv(n, cfg.seed, LINEUPS[cfg.vs], real_boards=real)
+    comps = trained.get("overlay_comps")
+    if net.n_comps and comps:
+        path = Path(comps)
+        if not path.exists():
+            path = Path(__file__).resolve().parent / comps
+        if comp_specs.count(path) != net.n_comps:
+            raise SystemExit(f"{cfg.ckpt} was built for {net.n_comps} comps, "
+                             f"{path} has {comp_specs.count(path)}")
+        env.set_overlay(str(path), 0.0)
     b = Bufs(n)
     env.kinds(b.kinds)
     results = []
@@ -70,7 +80,12 @@ def main():
         env.observe(b.obs, b.mask, b.seat, b.kind)
         turns = b.obs[:, bgpy.SCALAR_TURN].astype(int)
         o = torch.from_numpy(b.obs).to(dev)
-        acts, _, _, _ = act(net, o, force_mask(o, torch.from_numpy(b.mask).to(dev)))
+        comp = None
+        if net.n_comps:
+            env.overlay_comp(b.comp)
+            comp = ppo.comp_onehot(b.comp[np.arange(n), b.seat], net.n_comps, dev)
+        acts, _, _, _ = act(net, o, force_mask(o, torch.from_numpy(b.mask).to(dev)),
+                            comp=comp)
         kinds = b.kinds.copy()
         env.step(acts.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
         for e, s in zip(*np.nonzero(b.places)):

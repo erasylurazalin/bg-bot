@@ -435,6 +435,67 @@ impl VecEnv {
         Ok(())
     }
 
+    /// The comp the overlay sees for every seat, as an index or -1 for none.
+    /// Read-only: no Shell line changes and no abort bit is latched, so it is
+    /// safe for seats that are not the current player. This is the network's
+    /// comp input with the wheels off as well as on.
+    fn overlay_comp(&self, mut comp: PyReadwriteArray2<i64>) -> PyResult<()> {
+        let n = self.envs.len();
+        let comp = comp.as_slice_mut()?;
+        if comp.len() != n * PLAYERS {
+            return Err(PyValueError::new_err("comp array sizes don't match"));
+        }
+        let rules = self.overlay_rules.as_ref();
+        self.envs
+            .par_iter()
+            .zip(comp.par_chunks_mut(PLAYERS))
+            .for_each(|(env, row)| {
+                row.fill(-1);
+                let Some(rules) = rules else { return };
+                for p in 0..PLAYERS {
+                    if let Some(ci) = rules.active_comp(&env.game, p, &env.overlay_states[p]) {
+                        row[p] = ci as i64;
+                    }
+                }
+            });
+        Ok(())
+    }
+
+    /// The overlay's advice without applying it: `forced[i]` is the current
+    /// player's action or -1, and `flags[i, p, f]` as `overlay` fills them,
+    /// both computed on a copy of the state. For eval with the wheels off.
+    #[pyo3(signature = (forced, flags))]
+    fn overlay_probe(
+        &self,
+        mut forced: PyReadwriteArray1<i64>,
+        mut flags: PyReadwriteArray3<i32>,
+    ) -> PyResult<()> {
+        let n = self.envs.len();
+        let forced = forced.as_slice_mut()?;
+        let flags = flags.as_slice_mut()?;
+        if forced.len() != n || flags.len() != n * PLAYERS * OVERLAY_FLAGS {
+            return Err(PyValueError::new_err("probe array sizes don't match"));
+        }
+        let rules = self.overlay_rules.as_ref();
+        self.envs
+            .par_iter()
+            .zip(forced.par_iter_mut())
+            .zip(flags.par_chunks_mut(PLAYERS * OVERLAY_FLAGS))
+            .for_each(|((env, forced), flags)| {
+                *forced = -1;
+                flags.fill(0);
+                let Some(rules) = rules else { return };
+                let Some(p) = env.game.current_player() else { return };
+                let mut row = [0.0f32; N_ACTIONS];
+                let mut f = [0i32; OVERLAY_FLAGS];
+                if let Some(a) = rules.decide_probe(&env.game, p, &env.overlay_states[p], &mut row, &mut f) {
+                    *forced = a.index() as i64;
+                }
+                flags[p * OVERLAY_FLAGS..(p + 1) * OVERLAY_FLAGS].copy_from_slice(&f);
+            });
+        Ok(())
+    }
+
     /// Snapshot the current player's board card ids in every game. Call it
     /// after `observe` and before `step`; the last snapshot before combat is
     /// the board the player finished the turn with. Eval-only bookkeeping;

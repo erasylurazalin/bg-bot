@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import time
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,6 +26,7 @@ import numpy as np
 import torch
 
 import bgpy
+import comp_specs
 import eval_search
 import ppo
 import real_boards
@@ -39,6 +39,9 @@ P = bgpy.PLAYERS
 # The overlay flag order is in crates/bgcore/src/overlay.rs.
 F_ACTIVE = 4
 F_COMP = 6
+load_comps = comp_specs.load_comps
+names_to_ids = comp_specs.names_to_ids
+ends_as_comp = comp_specs.ends_as_comp
 
 
 class Bufs:
@@ -55,6 +58,7 @@ class Bufs:
         self.reset = np.zeros(n, bool)
         self.kinds = np.zeros((n, P), np.int64)
         self.forced = np.full((n, P), -1, np.int64)
+        self.forced1 = np.full(n, -1, np.int64)
         self.bonus = np.zeros((n, P, bgpy.N_ACTIONS), np.float32)
         self.flags = np.zeros((n, P, bgpy.OVERLAY_FLAGS), np.int32)
 
@@ -73,13 +77,13 @@ class GameStats:
     final: list[int] = field(default_factory=list)
 
 
-def sample_bonus(net, obs, mask, gen, dev, bonus=None, forced=None):
+def sample_bonus(net, obs, mask, gen, dev, bonus=None, forced=None, comp=None):
     """Sample like eval_search.sample, adding the overlay bonus and taking a
     forced action where the overlay gives one."""
     o = torch.from_numpy(obs).to(dev)
     m = torch.from_numpy(mask).to(dev)
     with torch.no_grad():
-        logits, _ = net(o)
+        logits, _ = net(o, comp=comp)
     m = ppo.force_mask(o, m)
     logits = logits.float().cpu()
     if bonus is not None:
@@ -93,17 +97,21 @@ def sample_bonus(net, obs, mask, gen, dev, bonus=None, forced=None):
     return actions
 
 
-def stats_of(b, flags, i, seat, turn):
-    """Fold one decision's flags into game i's stats."""
+def stats_of(b, flags, i, seat, turn, forced=None, action=None):
+    """Fold one decision's flags into game i's stats. With `forced` (the
+    wheels-off probe), taken means the network actually took the overlay's
+    advice, not that the overlay would have."""
     f = flags[i, seat]
     s = stats_of.games[i]
+    took = f[1] if forced is None else bool(f[0] and forced == action)
+    enabler = f[3] if forced is None else bool(f[2] and forced == action)
     if f[0]:
         s.shell_legal.add(turn)
-    if f[1]:
+    if took:
         s.shell_taken.add(turn)
     if f[2]:
         s.enabler_offered = True
-    if f[3]:
+    if enabler:
         s.enabler_taken = True
     if f[F_ACTIVE]:
         ci = int(f[F_COMP]) - 1
@@ -111,7 +119,7 @@ def stats_of(b, flags, i, seat, turn):
             s.comp_turns[ci] = turn
         if s.active_turn is None:
             s.active_turn = turn
-    if f[5]:
+    if f[5] and (forced is None or forced == action):
         s.forced_sell.add(turn)
 
 
@@ -122,14 +130,17 @@ def play(net, n_games, seed, dev, boards, comps_path=None, bonus=0.0,
          gen_seed=0, opponents="real"):
     """Play `n_games` with the overlay on (`bonus > 0`) or off.
 
-    Off uses the exact eval_search.play path, so it reproduces the 5.867
-    baseline. On uses the same loop with the overlay call. Returns
-    (records, game_stats, timing)."""
+    Off uses the exact eval_search.play path for a network with no comp input,
+    so it still reproduces the old baseline. A network trained with a comp
+    input always uses the same loop: with `bonus` 0 the overlay is only
+    probed, so the comp input stays on and no forced move or bonus is
+    applied. Returns (records, game_stats, timing)."""
     t = time.time()
     real = opponents == "real"
     lineup = (1, 0, 0, 0, 0, 7) if real else (1, 7, 0, 0, 0, 0)
     boards_arg = boards if real else None
-    if bonus <= 0.0:
+    n_comps = getattr(net, "n_comps", 0)
+    if bonus <= 0.0 and not n_comps:
         records, _ = eval_search.play(
             net, n_games, seed, dev, lineup=lineup,
             boards=boards_arg, gen_seed=gen_seed, track=False,
@@ -140,7 +151,7 @@ def play(net, n_games, seed, dev, boards, comps_path=None, bonus=0.0,
     env = bgpy.VecEnv(n, seed, list(lineup), real_boards=boards_arg,
                       old_boards=ppo.OLD_BOARDS,
                       real_lobby_filter=ppo.REAL_LOBBY_FILTER)
-    env.set_overlay(str(comps_path), float(bonus))
+    env.set_overlay(str(comps_path), float(max(bonus, 0.0)))
     b = Bufs(n)
     env.kinds(b.kinds)
     gen = torch.Generator(device="cpu")
@@ -155,21 +166,35 @@ def play(net, n_games, seed, dev, boards, comps_path=None, bonus=0.0,
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
         env.remember_boards()
+        rows = np.arange(n)
         t0 = time.perf_counter_ns()
-        env.overlay(b.forced, b.bonus, b.flags)
+        if bonus > 0.0:
+            env.overlay(b.forced, b.bonus, b.flags)
+            bonus_rows = b.bonus[rows, b.seat]
+            forced_rows = b.forced[rows, b.seat]
+            forced1 = None
+        else:
+            env.overlay_probe(b.forced1, b.flags)
+            bonus_rows = forced_rows = None
+            forced1 = b.forced1
         overlay_ns += time.perf_counter_ns() - t0
         steps += 1
+        comp_idx = b.flags[rows, b.seat, F_COMP] - 1
+        comp = ppo.comp_onehot(comp_idx, n_comps, dev)
+        actions = sample_bonus(
+            net, b.obs, b.mask, gen, dev,
+            bonus=bonus_rows, forced=forced_rows, comp=comp,
+        )
         for i in range(n):
             if b.kind[i] != bgpy.LEARNER:
                 continue
             seat = int(b.seat[i])
             turn = int(b.obs[i, bgpy.SCALAR_TURN])
-            stats_of(b, b.flags, i, seat, turn)
-        actions = sample_bonus(
-            net, b.obs, b.mask, gen, dev,
-            bonus=b.bonus[np.arange(n), b.seat],
-            forced=b.forced[np.arange(n), b.seat],
-        )
+            if forced1 is not None:
+                stats_of(b, b.flags, i, seat, turn, forced=int(forced1[i]),
+                         action=int(actions[i]))
+            else:
+                stats_of(b, b.flags, i, seat, turn)
         turn = b.obs[:, bgpy.SCALAR_TURN].astype(np.int64)
         turns += (turn > np.maximum(turns, 0)) & (b.kind == bgpy.LEARNER)
         kinds = b.kinds.copy()
@@ -206,19 +231,6 @@ def play(net, n_games, seed, dev, boards, comps_path=None, bonus=0.0,
             env.kinds(b.kinds)
         done += int(b.reset.sum())
     return records, completed, {"seconds": time.time() - t, "overlay_ns": overlay_ns, "steps": steps}
-
-
-def ends_as_comp(final, spec):
-    """A final board that is the comp: one enabler entry complete and at
-    least two of its core cards."""
-    final_set = set(final)
-    if not spec["enabler_groups_ids"]:
-        return False
-    complete = any(
-        all(any(card in final_set for card in group) for group in entry)
-        for entry in spec["enabler_groups_ids"]
-    )
-    return complete and sum(1 for card in spec["core_ids"] if card in final_set) >= 2
 
 
 def summarize(records, game_stats, comps):
@@ -267,33 +279,6 @@ def summarize(records, game_stats, comps):
     }
 
 
-def load_comps(path):
-    """Every comp's enabler groups, core and payoff/filler names."""
-    data = tomllib.loads(Path(path).read_text())
-    out = []
-    for c in data.get("comp", []):
-        groups = [list(e.get("all", [])) for e in c.get("enabler", [])]
-        names = sorted({name for entry in groups for group in entry for name in group})
-        out.append({
-            "name": c.get("name", "?"),
-            "enabler_groups": groups,
-            "enabler_names": names,
-            "core": [core["name"] for core in c.get("core", [])],
-            "payoff": c.get("payoff", []),
-            "filler": c.get("filler", []),
-        })
-    return out
-
-
-def names_to_ids(names, wanted):
-    out = []
-    for name in wanted:
-        if name not in names:
-            raise SystemExit(f"card {name!r} is not in the card set")
-        out.append(names.index(name))
-    return out
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--ckpt", default=str(DEFAULT_CKPT))
@@ -327,6 +312,9 @@ def main():
           f"opponents {args.opponents}, filter {args.real_lobby_filter}")
 
     comp_specs = load_comps(args.comps)
+    if net.n_comps and net.n_comps != len(comp_specs):
+        raise SystemExit(f"{args.ckpt} was built for {net.n_comps} comps, "
+                         f"{args.comps} has {len(comp_specs)}")
     names = None
     results = {}
     for b in args.bonus:
@@ -360,34 +348,33 @@ def main():
         )
         summary["label"] = f"B {b:g}" if b > 0 else "off"
         results[b] = summary
-        if b == 0:
-            print(
-                f"off: place {summary['place']} {summary['place_ci']}, "
-                f"top4 {summary['top4']:.1%}, first {summary['first']:.1%}, "
-                f"{summary['seconds']} s (rules not recorded)",
-                flush=True,
-            )
-        else:
-            print(
-                f"{summary['label']}: place {summary['place']} {summary['place_ci']}, "
-                f"top4 {summary['top4']:.1%}, first {summary['first']:.1%}, "
-                f"shell {summary['shell_taken']}/{summary['shell_legal']} "
-                f"({0 if not summary['shell_legal'] else 100*summary['shell_taken']/summary['shell_legal']:.1f}%), "
-                f"enabler offered/taken {summary['enabler_offered']}/{summary['enabler_taken']}, "
-                f"active {summary['active']} ({summary['active_share']:.1%}, turn {summary['active_turn']}), "
-                f"comp {summary['comp_share']:.1%} of active, active place {summary['active_place']}, "
-                f"forced sells {summary['forced_sell']}, {summary['seconds']} s",
-                flush=True,
-            )
+        print(
+            f"{summary['label']}: place {summary['place']} {summary['place_ci']}, "
+            f"top4 {summary['top4']:.1%}, first {summary['first']:.1%}, "
+            f"shell {summary['shell_taken']}/{summary['shell_legal']} "
+            f"({0 if not summary['shell_legal'] else 100*summary['shell_taken']/summary['shell_legal']:.1f}%), "
+            f"enabler offered/taken {summary['enabler_offered']}/{summary['enabler_taken']}, "
+            f"active {summary['active']} ({summary['active_share']:.1%}, turn {summary['active_turn']}), "
+            f"comp {summary['comp_share']:.1%} of active, active place {summary['active_place']}, "
+            f"forced sells {summary['forced_sell']}, {summary['seconds']} s",
+            flush=True,
+        )
 
     # The network-only baseline, same seeds and opponents.
     print("\n512-game overlay-off check:")
-    rec, _ = eval_search.play(
-        net, 512, args.seed, dev,
-        lineup=(1, 0, 0, 0, 0, 7) if args.opponents == "real" else (1, 7, 0, 0, 0, 0),
-        boards=specs if args.opponents == "real" else None,
-        gen_seed=args.seed, track=False,
-    )
+    if net.n_comps:
+        # A comp-input network keeps that input on with the wheels off.
+        rec, _, _ = play(
+            net, 512, args.seed, dev, specs, args.comps, 0.0,
+            gen_seed=args.seed, opponents=args.opponents,
+        )
+    else:
+        rec, _ = eval_search.play(
+            net, 512, args.seed, dev,
+            lineup=(1, 0, 0, 0, 0, 7) if args.opponents == "real" else (1, 7, 0, 0, 0, 0),
+            boards=specs if args.opponents == "real" else None,
+            gen_seed=args.seed, track=False,
+        )
     s = eval_search.summarize(rec)
     print(f"  off 512: place {s['place']} {s['place_ci']}, top4 {s['top4']:.1%}, first {s['first']:.1%}")
 
@@ -395,12 +382,6 @@ def main():
     print("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for b in args.bonus:
         r = results[b]
-        if b == 0:
-            print(
-                f"| {r['label']} | {r['place']} ({r['place_ci'][0]} to {r['place_ci'][1]}) | "
-                f"{r['top4']:.1%} | {r['first']:.1%} | - | - | - | - | - | - | - |"
-            )
-            continue
         rate = 0 if not r["shell_legal"] else 100 * r["shell_taken"] / r["shell_legal"]
         print(
             f"| {r['label']} | {r['place']} ({r['place_ci'][0]} to {r['place_ci'][1]}) | "
@@ -409,25 +390,23 @@ def main():
             f"{r['active_turn']} | {r['comp_boards']} ({r['comp_share']:.1%}) | {r['active_place']} | {r['forced_sell']} |"
         )
 
-    print("\nPer comp (B > 0):")
+    print("\nPer comp (every B):")
     print("| comp | games active | activation turn | ending as comp | share | active place | comp place |")
     print("|---|---:|---:|---:|---:|---:|---:|")
     for b in args.bonus:
-        if b <= 0:
-            continue
         for c in results[b]["per_comp"]:
             print(
                 f"| {c['name']} | {c['active']} | {c['active_turn']} | {c['comp_boards']} | "
                 f"{c['comp_share']:.1%} | {c['active_place']} | {c['comp_place']} |"
             )
     for b in args.bonus:
-        if b <= 0:
-            continue
         r = results[b]
-        print(f"\nB {b:g}: any comp active in {r['active']}/{r['games']} = {r['active_share']:.1%} "
+        print(f"\n{r['label']}: any comp active in {r['active']}/{r['games']} = "
+              f"{r['active_share']:.1%} "
               f"(target at least a third: {'PASS' if r['active_share'] >= 1/3 else 'FAIL'})")
-        print("Overlay call cost per step (B > 0):")
-        print(f"  B {b:g}: {r['overlay_ms_per_step']} ms/step, {r['overlay_share']}% of the loop")
+        print("Overlay call cost per step:")
+        print(f"  {r['label']}: {r['overlay_ms_per_step']} ms/step, "
+              f"{r['overlay_share']}% of the loop")
 
     if args.out:
         out = Path(args.out)

@@ -31,13 +31,16 @@ import copy
 import csv
 import random
 import time
+import tomllib
 from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
+import comp_specs
 import real_boards
 from model import (build, ck_model, masked, model_args, model_opts, set_recompute,
                    table_names, warm_start)
@@ -63,6 +66,8 @@ EVAL_KEYS = [
     # last, so rows appended to a metrics.csv from before real seats stay
     # aligned with its header (the extra value just trails the old columns)
     "place_vs_real",
+    # the wheels-off comp line, after every older column for the same reason
+    "comp_active_share", "comp_end_share", "shell_rate", "first_share",
 ]
 # Columns of bgpy's tribe counts: the ten tribes in bgcore's `Tribe::EVERY`
 # order, then neutral.
@@ -70,6 +75,7 @@ TRIBE_COLS = {t: k for k, t in enumerate(TRIBE_NAMES)}
 TRAIN_KEYS = [
     "entropy", "approx_kl", "clipfrac", "value_loss", "explained_var", "steps_per_s",
     "actions_per_turn", "tier_t6", "tier_t10", "health_end",
+    "aux_loss", "wheels_b", "wheels_lambda", "comp_active",
 ]
 
 
@@ -104,6 +110,13 @@ def args():
                    help="comp file for the overlay during training; absent means no overlay")
     a.add_argument("--overlay-bonus", type=float, default=8.0,
                    help="B, the comp payoff bonus")
+    a.add_argument("--wheels-full", type=int, default=0,
+                   help="games with the overlay at full strength (0 with --wheels-end 0: no fade)")
+    a.add_argument("--wheels-end", type=int, default=0,
+                   help="games where the overlay has faded to none; between the two, B and lambda "
+                        "fall linearly and forced moves stop at the end")
+    a.add_argument("--aux-weight", type=float, default=1.0,
+                   help="lambda, the weight of the overlay-choice cross-entropy at full strength")
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
     a.add_argument("--lineup", default="2,2,0,0,0,4",
                    help="learner,snapshot,standard,rush,random,real seats")
@@ -195,8 +208,10 @@ class Bufs:
         self.reset = np.zeros(n, bool)
         self.kinds = np.zeros((n, P), np.int64)
         self.forced = np.full((n, P), -1, np.int64)
+        self.forced1 = np.full(n, -1, np.int64)
         self.bonus = np.zeros((n, P, bgpy.N_ACTIONS), np.float32)
         self.flags = np.zeros((n, P, bgpy.OVERLAY_FLAGS), np.int32)
+        self.comp = np.full((n, P), -1, np.int64)
 
 
 # --force-turn2-level: on turn 2 a tier 1 seat that can level must level
@@ -217,6 +232,111 @@ DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
 # from the flag in main().
 FORCE_DARK = False
 DARK_TURNS = (3, 4, 5)
+# --overlay-comps, --overlay-bonus and the comp file's health penalty. Set in
+# main(); the eval games need the same comp input and comp specs.
+OVERLAY_COMPS = None
+OVERLAY_BONUS = 8.0
+COMP_HEALTH_PENALTY = 0.0
+COMP_SPECS = []
+COMP_COUNT = 0
+# The overlay flag order is in crates/bgcore/src/overlay.rs.
+F_SHELL_LEGAL = 0
+F_SHELL_TAKEN = 1
+F_ACTIVE = 4
+F_COMP = 6
+# The actions an active comp's aux loss points at: buys, a Tavern spell, a
+# Discover/Choose pick, and playing a comp card. A forced full-board sell is
+# left out (it is not the "buy/pick" the brief names).
+AUX_KINDS = {"buy", "buy_spell", "play", "choose"}
+AUX_ACTIONS = np.zeros(bgpy.N_ACTIONS, bool)
+for _kind, _n in bgpy.ACTION_KINDS:
+    if _kind in AUX_KINDS:
+        _start = sum(n for k, n in bgpy.ACTION_KINDS[:KINDS.index(_kind)])
+        AUX_ACTIONS[_start:_start + _n] = True
+
+
+def wheels_scale(games, full, end):
+    """The wheels' strength after `games` games: 1 before `full`, linear to 0
+    at `end`, 0 after. With both zero the fade is off and the wheels stay at
+    full strength (the old behaviour)."""
+    if full <= 0 and end <= 0:
+        return 1.0
+    if games < full:
+        return 1.0
+    if end <= full or games >= end:
+        return 0.0 if games >= end else 1.0
+    return (end - games) / (end - full)
+
+
+def comp_onehot(idx, n_comps, dev):
+    """A one-hot comp input, all zero for no active comp (index -1)."""
+    if not n_comps:
+        return None
+    idx = torch.as_tensor(np.asarray(idx), dtype=torch.long)
+    out = torch.zeros((idx.numel(), n_comps), dtype=torch.float32)
+    ok = idx >= 0
+    if ok.any():
+        out[torch.arange(idx.numel())[ok], idx[ok]] = 1.0
+    return out.to(dev)
+
+
+class BonusStore:
+    """The overlay bonus each row acted under, packed as four bitmasks.
+
+    The overlay's bonus is a sum of at most four things: B, B/2, the Health
+    penalty, and -inf. Storing the whole float32 array would be 48 MB for a
+    64 by 1024 rollout. Four bitmasks of N_ACTIONS (23 bytes each) plus the
+    raw bonus values and the wheel scale rebuild the same float32 array, so
+    the PPO update sees exactly the policy that acted."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.nbytes = (bgpy.N_ACTIONS + 7) // 8
+        self.masks = np.zeros((rows, 4, self.nbytes), np.uint8)
+        self.b = 0.0
+        self.half = 0.0
+        self.hp = 0.0
+        self.scale = 0.0
+
+    def set_scale(self, scale, b, hp):
+        self.scale = float(scale)
+        self.b = float(b)
+        self.half = float(b) * 0.5
+        self.hp = float(hp)
+
+    def put(self, rows, raw):
+        """Store unscaled overlay bonuses `raw` (rows by N_ACTIONS)."""
+        if self.scale <= 0.0:
+            return
+        bits = np.zeros((len(rows), 4, bgpy.N_ACTIONS), bool)
+        values = [np.float32(self.b), np.float32(self.half), np.float32(self.hp)]
+        # The bonus can be a sum (the Health rule and a comp bonus can land on
+        # the same action), so mark every combination that adds up to it.
+        for combo in range(1, 8):
+            val = np.float32(0.0)
+            for i in range(3):
+                if combo >> i & 1:
+                    val += values[i]
+            hit = (raw == val) & (raw != 0)
+            for i in range(3):
+                if combo >> i & 1:
+                    bits[:, i] |= hit
+        bits[:, 3] = np.isneginf(raw)
+        self.masks[rows] = np.packbits(bits, axis=-1)
+
+    def get(self, sel, dev):
+        """The scaled float32 bonus for the selected flat rows."""
+        n = int(sel.sum())
+        if self.scale <= 0.0:
+            return torch.zeros((n, bgpy.N_ACTIONS), dtype=torch.float32, device=dev)
+        bits = np.unpackbits(self.masks[sel], axis=-1)[..., :bgpy.N_ACTIONS]
+        values = [np.float32(self.b), np.float32(self.half), np.float32(self.hp)]
+        raw = np.zeros((n, bgpy.N_ACTIONS), np.float32)
+        for i in range(3):
+            raw += bits[:, i, :].astype(np.float32) * values[i]
+        raw[bits[:, 3, :] > 0] = -np.inf
+        raw *= np.float32(self.scale)
+        return torch.from_numpy(raw).to(dev)
 
 
 def force_mask(obs, mask):
@@ -248,8 +368,8 @@ def force_mask(obs, mask):
     return mask
 
 
-def act(net, obs, mask, greedy=False, bonus=None, forced=None):
-    logits, value = net(obs)
+def act(net, obs, mask, greedy=False, bonus=None, forced=None, comp=None):
+    logits, value = net(obs, comp=comp)
     if bonus is not None:
         logits = logits + bonus
     dist = torch.distributions.Categorical(logits=masked(logits, mask))
@@ -294,28 +414,80 @@ def evaluate(net, n_games, lineup, dev, seed, real_boards=None):
 
 
 def _evaluate(net, n_games, lineup, dev, seed, real_boards=None):
-    """Play n_games with `lineup` and return (avg_place, learner_records)."""
+    """Play n_games with `lineup` and return (avg_place, learner_records).
+
+    With --overlay-comps the comp input is on and the wheels are off: the
+    overlay is only probed for its flags (no forced move and no bonus is
+    applied). Each record carries the game's first active comp, final board,
+    and the turns the Shell was legal and taken, for the comp eval line."""
     n = min(n_games, 1024)
     env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
                       real_lobby_filter=REAL_LOBBY_FILTER)
+    if OVERLAY_COMPS:
+        env.set_overlay(OVERLAY_COMPS, 0.0)
     b = Bufs(n)
     env.kinds(b.kinds)
     records, done = [], 0
+    place_seen = np.zeros((n, P), np.int8)
+    tier_seen = np.zeros((n, P, bgpy.MAX_TIER), np.int8)
+    tribe_seen = np.zeros((n, P, bgpy.TRIBES), np.int8)
+    comp_turn = np.zeros((n, P), np.int16)
+    shell_legal = [set() for _ in range(n * P)]
+    shell_taken = [set() for _ in range(n * P)]
+    ar = np.arange(n)
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
         o = torch.from_numpy(b.obs).to(dev)
-        a, _, _, _ = act(net, o, force_mask(o, torch.from_numpy(b.mask).to(dev)))
+        m = force_mask(o, torch.from_numpy(b.mask).to(dev))
+        comp_idx = np.full(n, -1, np.int64)
+        if OVERLAY_COMPS:
+            env.overlay_probe(b.forced1, b.flags)
+            comp_idx = b.flags[ar, b.seat, F_COMP] - 1
+        a, _, _, _ = act(net, o, m, comp=comp_onehot(comp_idx, COMP_COUNT, dev))
+        acts = a.cpu().numpy()
+        turns = b.obs[:, bgpy.SCALAR_TURN].astype(np.int64)
+        if OVERLAY_COMPS:
+            for e in np.nonzero(b.kind == LEARNER)[0]:
+                s = int(b.seat[e])
+                key = e * P + s
+                if comp_idx[e] >= 0 and comp_turn[e, s] == 0:
+                    comp_turn[e, s] = turns[e]
+                if b.flags[e, s, F_SHELL_LEGAL]:
+                    shell_legal[key].add(int(turns[e]))
+                    if b.forced1[e] == acts[e]:
+                        shell_taken[key].add(int(turns[e]))
+            env.remember_boards()
         kinds = b.kinds.copy()
-        env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
+        env.step(acts, b.places, b.tier_turns, b.tribes, b.reset)
         for e, s in zip(*np.nonzero(b.places)):
             if kinds[e, s] == LEARNER:
-                records.append((
-                    int(b.places[e, s]),
-                    b.tier_turns[e, s].copy(),
-                    b.tribes[e, s].copy(),
-                ))
+                place_seen[e, s] = b.places[e, s]
+                tier_seen[e, s] = b.tier_turns[e, s]
+                tribe_seen[e, s] = b.tribes[e, s]
         done += int(b.reset.sum())
         if b.reset.any():
+            finals = env.final_boards() if OVERLAY_COMPS else None
+            for e in np.nonzero(b.reset)[0]:
+                for s in np.nonzero(kinds[e] == LEARNER)[0]:
+                    key = e * P + s
+                    records.append((
+                        int(place_seen[e, s]),
+                        tier_seen[e, s].copy(),
+                        tribe_seen[e, s].copy(),
+                        {
+                            "comp_turn": int(comp_turn[e, s]),
+                            "final": ([int(x) for x in finals[e][s] if x >= 0]
+                                      if finals is not None else []),
+                            "shell_legal": shell_legal[key],
+                            "shell_taken": shell_taken[key],
+                        },
+                    ))
+                    place_seen[e, s] = 0
+                    tier_seen[e, s] = 0
+                    tribe_seen[e, s] = 0
+                    comp_turn[e, s] = 0
+                    shell_legal[key] = set()
+                    shell_taken[key] = set()
             env.kinds(b.kinds)
     avg_place = float(np.mean([r[0] for r in records]))
     return avg_place, records
@@ -326,17 +498,26 @@ def evaluate_vs(net, other, n_games, dev, seed):
     """4 learner seats against 4 seats of `other`. Learners' average place."""
     n = min(n_games, 1024)
     env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0, 0], old_boards=OLD_BOARDS)
+    if OVERLAY_COMPS:
+        env.set_overlay(OVERLAY_COMPS, 0.0)
     b = Bufs(n)
     env.kinds(b.kinds)
     places, done = [], 0
+    ar = np.arange(n)
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
         o, m = torch.from_numpy(b.obs).to(dev), torch.from_numpy(b.mask).to(dev)
         m = force_mask(o, m)
-        a, _, _, _ = act(net, o, m)
+        comp_idx = np.full(n, -1, np.int64)
+        if OVERLAY_COMPS:
+            env.overlay_probe(b.forced1, b.flags)
+            comp_idx = b.flags[ar, b.seat, F_COMP] - 1
+        comp = comp_onehot(comp_idx, COMP_COUNT, dev)
+        a, _, _, _ = act(net, o, m, comp=comp)
         sn = torch.from_numpy(b.kind == SNAPSHOT).to(dev)
         if sn.any():
-            a[sn] = act(other, o[sn], m[sn])[0]
+            a[sn] = act(other, o[sn], m[sn],
+                        comp=comp[sn] if comp is not None else None)[0]
         kinds = b.kinds.copy()
         env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
         for e, s in zip(*np.nonzero(b.places)):
@@ -388,12 +569,40 @@ def summarize_records(records):
     }
 
 
+def summarize_comps(records, specs):
+    """The wheels-off comp line from finished learner records: games with a
+    comp active, of those the share ending as the comp, the Shell taken per
+    legal turn, and the first-place share."""
+    places = np.array([r[0] for r in records], dtype=np.float64)
+    active = [r for r in records if r[3]["comp_turn"] > 0]
+    ended = sum(
+        1 for r in active
+        if any(comp_specs.ends_as_comp(r[3]["final"], spec) for spec in specs)
+    )
+    legal = sum(len(r[3]["shell_legal"]) for r in records)
+    taken = sum(len(r[3]["shell_taken"]) for r in records)
+    return {
+        "comp_active_share": float(len(active) / len(records)) if records else 0.0,
+        "comp_end_share": float(ended / len(active)) if active else 0.0,
+        "shell_rate": float(taken / legal) if legal else 0.0,
+        "first_share": float((places == 1).mean()) if records else 0.0,
+    }
+
+
 def main():
     global FORCE_TURN2, FORCE_DARK, REAL_LOBBY_FILTER
+    global OVERLAY_COMPS, OVERLAY_BONUS, COMP_HEALTH_PENALTY, COMP_SPECS, COMP_COUNT
     cfg = args()
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
     REAL_LOBBY_FILTER = cfg.real_lobby_filter
+    OVERLAY_COMPS = cfg.overlay_comps
+    OVERLAY_BONUS = cfg.overlay_bonus
+    raw_specs = []
+    if cfg.overlay_comps:
+        COMP_COUNT = comp_specs.count(cfg.overlay_comps)
+        COMP_HEALTH_PENALTY = comp_specs.health_penalty(cfg.overlay_comps)
+        raw_specs = comp_specs.load_comps(cfg.overlay_comps)
     # a training setting, not a model one: the checkpoint and its weights are
     # the same with the blocks recomputed or kept
     set_recompute(not cfg.no_recompute)
@@ -408,18 +617,24 @@ def main():
         if cfg.init_from:
             raise SystemExit("--resume and --init-from don't go together")
         saved, opts = ck_model(ck)
-        given = {"model": cfg.model, **{k: getattr(cfg, k) for k in model_opts(saved)}}
+        given = {"model": cfg.model, **{k: getattr(cfg, k) for k in model_opts(saved)
+                                        if hasattr(cfg, k)}}
         for k, v in given.items():
             if v and v != {"model": saved, **opts}[k]:
                 print(f"--{k.replace('_', '-')} {v} ignored: {cfg.resume} holds "
                       f"{saved} {opts}")
         cfg.model = saved
+        if opts.get("n_comps", 0) != COMP_COUNT:
+            raise SystemExit(f"--overlay-comps {cfg.overlay_comps}: the comp file has "
+                             f"{COMP_COUNT} comps but {cfg.resume} was built for "
+                             f"{opts.get('n_comps', 0)}")
     else:
         if cfg.init_from and not cfg.model:
             cfg.model = ck_model(torch.load(cfg.init_from, map_location="cpu"))[0]
         cfg.model = cfg.model or "mlp"
         opts = model_opts(cfg.model, opp_boards=cfg.opp_boards, d=cfg.d, layers=cfg.layers,
                           heads=cfg.heads, ff=cfg.ff)
+        opts["n_comps"] = COMP_COUNT
     for k, v in opts.items():
         setattr(cfg, k, v)
     if cfg.init_from:
@@ -459,6 +674,10 @@ def main():
         print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}")
     names = env.card_names()
     hero_names = env.hero_names()
+    COMP_SPECS = comp_specs.ids(raw_specs, names) if raw_specs else []
+    if cfg.overlay_comps:
+        print(f"overlay {cfg.overlay_comps}: {COMP_COUNT} comps, B {cfg.overlay_bonus:g}, "
+              f"wheels full {cfg.wheels_full} end {cfg.wheels_end}, lambda {cfg.aux_weight:g}")
     if cfg.compile is None:
         cfg.compile = cfg.model == "attn"
     net = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
@@ -551,9 +770,18 @@ def main():
     dones = torch.zeros((T, N), device=dev)
     learn = torch.zeros((T, N), dtype=torch.bool, device=dev)
     seats = torch.zeros((T, N), dtype=torch.long, device=dev)
+    # The comp input (index or -1), the overlay rows whose action was forced,
+    # and the aux loss's target action, for each rollout row.
+    comp_idx = np.full((T, N), -1, np.int64)
+    forced_rows = np.zeros((T, N), bool)
+    aux_target = np.full((T, N), -1, np.int64)
+    comp_active = np.zeros((T, N), bool)
+    bonus_store = BonusStore(T * N)
     # step of each (env, seat)'s latest learner sample in this rollout, -1 for none
     last = np.full((N, P), -1, np.int64)
-    games = 0
+    # The wheels fade on games, so a restart continues from the checkpoint's
+    # count instead of putting them back to full strength.
+    games = int(ck.get("games", 0)) if ck is not None else 0
     start = time.time()
     last_keep = t_total
     history, flat_best, flat_since = [], 9.0, t_total
@@ -575,6 +803,13 @@ def main():
             dl_scale = 1.0
         else:
             dl_scale = (cfg.deadline_end - run_min) / (cfg.deadline_end - cfg.deadline_full)
+        wheel = wheels_scale(games, cfg.wheels_full, cfg.wheels_end)
+        if cfg.overlay_bonus == 0.0 and cfg.aux_weight == 0.0:
+            # B = 0 and lambda = 0 is the old PPO: no forced move, no bonus,
+            # no aux loss, and the comp input is the only thing left on.
+            wheel = 0.0
+        aux_w = cfg.aux_weight * wheel
+        bonus_store.set_scale(wheel, cfg.overlay_bonus, COMP_HEALTH_PENALTY)
         with torch.no_grad():
             for t in range(T):
                 env.observe(b.obs, b.mask, b.seat, b.kind)
@@ -582,23 +817,48 @@ def main():
                 m = torch.from_numpy(b.mask).to(dev, non_blocking=True)
                 is_learner = torch.from_numpy(b.kind == LEARNER).to(dev)
                 m = force_mask(o, m)
-                bonus = forced = None
+                bonus = forced = comp = None
+                target = np.full(N, -1, np.int64)
                 if cfg.overlay_comps:
                     env.overlay(b.forced, b.bonus, b.flags)
-                    bonus = torch.from_numpy(b.bonus[np.arange(N), b.seat]).to(dev)
-                    forced = torch.from_numpy(b.forced[np.arange(N), b.seat]).to(dev)
+                    rows = np.arange(N)
+                    raw = b.bonus[rows, b.seat].copy()
+                    forced_np = b.forced[rows, b.seat].copy()
+                    comp_idx[t] = b.flags[rows, b.seat, F_COMP] - 1
+                    comp_active[t] = comp_idx[t] >= 0
+                    comp = comp_onehot(comp_idx[t], COMP_COUNT, dev)
                     # A PPO forced press (Dark Gift, level) wins over the
                     # overlay for that row.
                     blocked = (m != torch.from_numpy(b.mask).to(dev)).any(1)
-                    forced[blocked] = -1
-                    bonus[blocked] = 0.0
-                a, lp, v, _ = act(net, o, m, bonus=bonus, forced=forced)
+                    blocked = blocked.cpu().numpy()
+                    forced_np[blocked] = -1
+                    raw[blocked] = 0.0
+                    if wheel > 0.0:
+                        # Forced moves cannot be scaled: they are on until the
+                        # end of the fade, and gone after it.
+                        bonus = torch.from_numpy(
+                            (raw * np.float32(wheel)).astype(np.float32)).to(dev)
+                        forced = torch.from_numpy(forced_np).to(dev)
+                        forced_rows[t] = forced_np >= 0
+                        bonus_store.put(t * N + rows, raw)
+                        # The aux target: the forced action, else the best
+                        # payoff/filler buy, Tavern spell, pick or play that
+                        # is legal and positively bonused while a comp is on.
+                        target = forced_np.copy()
+                        pos = (b.mask & AUX_ACTIONS[None, :] & (raw > 0)
+                               & ~blocked[:, None])
+                        cand = (target < 0) & comp_active[t] & pos.any(1)
+                        score = np.where(pos, raw, -np.inf)
+                        target[cand] = score[cand].argmax(1)
+                aux_target[t] = target
+                a, lp, v, _ = act(net, o, m, bonus=bonus, forced=forced, comp=comp)
                 sn = ~is_learner
                 if sn.any():
                     sa, _, _, _ = act(
                         snap, o[sn], m[sn],
                         bonus=bonus[sn] if bonus is not None else None,
                         forced=forced[sn] if forced is not None else None,
+                        comp=comp[sn] if comp is not None else None,
                     )
                     a[sn] = sa
                 obs[t], masks[t], acts[t], logps[t], vals[t] = o, m, a, lp, v
@@ -636,13 +896,18 @@ def main():
 
             # bootstrap from every live learner seat's current view
             all_obs = np.zeros((N, P, bgpy.OBS_SIZE), np.float32)
+            all_comp = np.full((N, P), -1, np.int64)
             live = np.zeros((N, P), bool)
             env.observe_all(all_obs, live)
+            if cfg.overlay_comps:
+                env.overlay_comp(all_comp)
+            flat_comp = all_comp.reshape(-1)
             # in chunks: one pass over all N * P seats is the run's biggest activation peak
             flat = torch.from_numpy(all_obs.reshape(N * P, -1))
             if cfg.obs_fp16:
                 flat = flat.half()  # the same rounding the rollout buffer gets
-            boot = torch.cat([net(flat[i:i + 1024].to(dev).float())[1]
+            boot = torch.cat([net(flat[i:i + 1024].to(dev).float(),
+                                 comp=comp_onehot(flat_comp[i:i + 1024], COMP_COUNT, dev))[1]
                               for i in range(0, N * P, 1024)])
             next_v = (boot.reshape(N, P) * torch.from_numpy(live).to(dev)).clone()
             next_a = torch.zeros((N, P), device=dev)
@@ -668,6 +933,7 @@ def main():
         t_roll = time.time() - t0
 
         sel = learn.reshape(-1)
+        sel_np = sel.cpu().numpy()
         f_obs = obs.reshape(T * N, -1)[sel]
         f_mask = masks.reshape(T * N, -1)[sel]
         f_act = acts.reshape(-1)[sel]
@@ -675,11 +941,15 @@ def main():
         f_adv = adv.reshape(-1)[sel]
         f_ret = rets.reshape(-1)[sel]
         f_val = vals.reshape(-1)[sel]
+        f_comp = comp_onehot(comp_idx.reshape(-1)[sel_np], COMP_COUNT, dev)
+        f_forced = torch.from_numpy(forced_rows.reshape(-1)[sel_np]).to(dev)
+        f_aux = torch.from_numpy(aux_target.reshape(-1)[sel_np]).to(dev)
+        f_bonus = bonus_store.get(sel_np, dev) if cfg.overlay_comps and wheel > 0.0 else None
         n = f_obs.shape[0]
         if cfg.warmup:
             for g in opt.param_groups:
                 g["lr"] = cfg.lr * min(1.0, (update + 1) / cfg.warmup)
-        kls, clips, ents, vls = [], [], [], []
+        kls, clips, ents, vls, auxs = [], [], [], [], []
         for _ in range(cfg.epochs):
             perm = torch.randperm(n, device=dev)
             for i in range(0, n, cfg.minibatch):
@@ -695,34 +965,56 @@ def main():
                 m = idx.numel()
                 step = cfg.micro_batch or m
                 opt.zero_grad()
-                kl_s = clip_s = ent_s = vl_s = 0.0
+                kl_s = clip_s = ent_s = vl_s = aux_s = 0.0
                 for j in range(0, m, step):
                     sub = idx[j:j + step]
                     w = sub.numel() / m
-                    logits, v = net(f_obs[sub].float())
-                    dist = torch.distributions.Categorical(logits=masked(logits, f_mask[sub]))
+                    logits, v = net(
+                        f_obs[sub].float(),
+                        comp=f_comp[sub] if f_comp is not None else None,
+                    )
+                    # The policy that acted is the network plus the stored
+                    # bonus; the ratio and the KL use it. Entropy and the aux
+                    # cross-entropy are the network's own policy, which is
+                    # what survives when the wheels are gone.
+                    act_logits = logits if f_bonus is None else logits + f_bonus[sub]
+                    dist = torch.distributions.Categorical(logits=masked(act_logits, f_mask[sub]))
+                    own_dist = (dist if f_bonus is None
+                                else torch.distributions.Categorical(
+                                    logits=masked(logits, f_mask[sub])))
                     lp = dist.log_prob(f_act[sub])
                     ratio = (lp - f_logp[sub]).exp()
                     ad = (f_adv[sub] - ad_mean) / ad_std
-                    pg = torch.max(-ad * ratio, -ad * ratio.clamp(1 - cfg.clip, 1 + cfg.clip)).mean()
+                    pg_i = torch.max(-ad * ratio, -ad * ratio.clamp(1 - cfg.clip, 1 + cfg.clip))
+                    # An overlay-forced action has no policy gradient: the
+                    # aux loss teaches that choice instead.
+                    keep = ~f_forced[sub]
+                    pg = (pg_i * keep).sum() / keep.sum().clamp(min=1)
                     vl = 0.5 * ((v - f_ret[sub]) ** 2).mean()
-                    ent = dist.entropy().mean()
+                    ent = own_dist.entropy().mean()
+                    target = f_aux[sub]
+                    valid = target >= 0
+                    aux = (-F.log_softmax(own_dist.logits[valid], -1)
+                           .gather(1, target[valid, None]).mean()
+                           if valid.any() else logits.sum() * 0.0)
                     if update < cfg.value_warmup:
                         loss = cfg.vf * vl
                     else:
-                        loss = pg + cfg.vf * vl - cfg.ent * ent
+                        loss = pg + cfg.vf * vl - cfg.ent * ent + aux_w * aux
                     (loss * w).backward()
                     with torch.no_grad():
                         kl_s += w * ((ratio - 1) - (lp - f_logp[sub])).mean().item()
                         clip_s += w * ((ratio - 1).abs() > cfg.clip).float().mean().item()
                         ent_s += w * ent.item()
                         vl_s += w * vl.item()
+                        aux_s += w * aux.item()
                 torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
                 opt.step()
                 kls.append(kl_s)
                 clips.append(clip_s)
                 ents.append(ent_s)
                 vls.append(vl_s)
+                auxs.append(aux_s)
         update += 1
 
         # behaviour, from this rollout's learner samples
@@ -749,6 +1041,10 @@ def main():
                 "tier_t6": t6.mean().item() if len(t6) else float("nan"),
                 "tier_t10": t10.mean().item() if len(t10) else float("nan"),
                 "health_end": health[term].mean().item() if term.any() else float("nan"),
+                "aux_loss": float(np.mean(auxs)) if auxs else 0.0,
+                "wheels_b": wheel * cfg.overlay_bonus,
+                "wheels_lambda": aux_w,
+                "comp_active": float(comp_active.reshape(-1)[sel_np].mean()),
                 **{f"act_{KINDS[i]}": (counts[i] / counts.sum()).item() for i in range(len(KINDS))},
             }
             top = buy_counts.argsort(descending=True)[:5]
@@ -775,11 +1071,19 @@ def main():
             vs_snap = evaluate_vs(net, snap, cfg.eval_games // 2, dev, seed + 5)
             # One learner against 7 real seats: does it beat real boards?
             vs_real = float("nan")
+            rec_real = None
             if real is not None:
-                vs_real, _ = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev, seed + 6, real)
+                vs_real, rec_real = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7],
+                                             dev, seed + 6, real)
             net.train()
 
             rep = summarize_records(rec_std + rec_rush + rec_4s + rec_4r + rec_4m)
+            # The comp line is the wheels-off view: the real-board eval when
+            # there is one, so --real-lobby-filter is the same as the score.
+            comp_rep = summarize_comps(
+                rec_real if rec_real is not None else rec_std + rec_rush + rec_4s + rec_4r + rec_4m,
+                COMP_SPECS,
+            )
             eval_vals = {
                 "place_vs_std": vs_std,
                 "place_vs_rush": vs_rush,
@@ -789,6 +1093,7 @@ def main():
                 "place_vs_snapshot": vs_snap,
                 "place_vs_real": vs_real,
                 **rep,
+                **comp_rep,
             }
             for key, val in eval_vals.items():
                 tb.add_scalar(f"eval/{key}", val, update)
@@ -803,8 +1108,9 @@ def main():
             csv_file.flush()
             score = vs_real if best_by == "real" else 0.5 * (vs_std + vs_rush)
             ck = {"net": net.state_dict(), "opt": opt.state_dict(), "pool": pool, "update": update,
-                  "best": best, "best_by": best_by, "t_total": minutes, "cfg": vars(cfg), "model": cfg.model,
-                  "model_opts": opts, "card_names": names, "hero_names": hero_names}
+                  "best": best, "best_by": best_by, "t_total": minutes, "games": games,
+                  "cfg": vars(cfg), "model": cfg.model, "model_opts": opts,
+                  "card_names": names, "hero_names": hero_names}
             if score < best:
                 best = score
                 ck["best"] = best
@@ -838,6 +1144,11 @@ def main():
                 "trb(" + " ".join(
                     f"{t[:2]} {rep[f'tribe_{t}']:.0%}@{rep[f'place_{t}']:.2f}"
                     for t in REPORT_GROUPS) + ")  "
+                f"comp(active {comp_rep['comp_active_share']:.0%} "
+                f"end {comp_rep['comp_end_share']:.0%} "
+                f"shell {comp_rep['shell_rate']:.0%} first {comp_rep['first_share']:.0%})  "
+                f"wheels(B {stats['wheels_b']:.2f} lam {stats['wheels_lambda']:.2f} "
+                f"aux {stats['aux_loss']:.3f} active {stats['comp_active']:.0%})  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}",
                 flush=True,
             )

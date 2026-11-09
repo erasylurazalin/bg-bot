@@ -148,6 +148,21 @@ impl Overlay {
         None
     }
 
+    /// `decide` on a copy of `state`: the forced action and flags the overlay
+    /// would give, without starting a Shell line or latching an abort. Used
+    /// to measure the network with the wheels off.
+    pub fn decide_probe(
+        &self,
+        game: &Game,
+        p: usize,
+        state: &OverlayState,
+        bonus: &mut [f32; N_ACTIONS],
+        flags: &mut [i32; OVERLAY_FLAGS],
+    ) -> Option<Action> {
+        let mut state = *state;
+        self.decide(game, p, &mut state, bonus, flags)
+    }
+
     fn comp_in_lobby(&self, game: &Game, comp: &Comp) -> bool {
         comp.lobby_ok(&game.lobby)
     }
