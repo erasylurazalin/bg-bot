@@ -986,6 +986,9 @@ pub struct Player {
     /// How many times each "improve your future ..." effect has triggered
     /// this game (Tasty Lobster).
     pub improve: [u16; N_COUNTERS],
+    /// The lobster search mode's fixed streams (docs/briefs/lobster-search.md),
+    /// None in every normal game.
+    pub lobster: Option<crate::lobster::LobsterMode>,
     /// The counters the hero powers keep (see `HeroCounts`).
     pub counts: HeroCounts,
     /// The standing rules a hero power sets (hero batch 2), kept in sync by
@@ -1378,6 +1381,55 @@ pub struct SandboxFight {
     pub winner: Option<usize>,
     /// What the player's side carried over, as the game applied it.
     pub side: SideOutcome,
+}
+
+/// The parts of a one-player shop game that an action can change, captured so
+/// a search can store a small state instead of a 157 KiB `Game` per beam node.
+/// The static side (card data, lobby, the dead opponents) stays in the game
+/// the state is restored into.
+#[derive(Clone, Hash)]
+pub struct ShopStateCapture {
+    pub turn: u32,
+    pub rng: Rng,
+    pub player: Player,
+    pub pool: Vec<u8>,
+    consumed: Vec<u32>,
+    board_triple_check: bool,
+    pending_triples: ArrayVec<CardId, 4>,
+    defer_triples: bool,
+    over: bool,
+}
+
+impl Game {
+    /// Capture player `p`'s shop state. The lobster search restores it before
+    /// each action instead of cloning the whole game for every successor.
+    pub fn capture_shop_state(&self, p: usize) -> ShopStateCapture {
+        ShopStateCapture {
+            turn: self.turn,
+            rng: self.rng.clone(),
+            player: self.players[p].clone(),
+            pool: self.pool.clone(),
+            consumed: self.consumed.clone(),
+            board_triple_check: self.board_triple_check,
+            pending_triples: self.pending_triples.clone(),
+            defer_triples: self.defer_triples,
+            over: self.over,
+        }
+    }
+
+    /// Put a captured shop state back on a game whose static side is the same
+    /// as the one it came from.
+    pub fn restore_shop_state(&mut self, p: usize, state: &ShopStateCapture) {
+        self.turn = state.turn;
+        self.rng = state.rng.clone();
+        self.players[p] = state.player.clone();
+        self.pool.clone_from(&state.pool);
+        self.consumed.clone_from(&state.consumed);
+        self.board_triple_check = state.board_triple_check;
+        self.pending_triples.clone_from(&state.pending_triples);
+        self.defer_triples = state.defer_triples;
+        self.over = state.over;
+    }
 }
 
 impl Game {
@@ -2505,7 +2557,12 @@ impl Game {
             } else {
                 let pl = &mut self.players[p];
                 pl.actions += 1;
-                if a == Action::EndTurn || pl.actions >= self.data.rules.max_actions_per_turn {
+                // The lobster search owns the turn's end at the cap: it stops
+                // expanding at 200 and ends the turn itself, without a fight.
+                if a == Action::EndTurn
+                    || (pl.actions >= self.data.rules.max_actions_per_turn
+                        && pl.lobster.is_none())
+                {
                     self.finish_shop(p);
                 }
             }

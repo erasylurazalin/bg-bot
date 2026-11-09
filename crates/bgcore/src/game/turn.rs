@@ -337,6 +337,19 @@ impl Game {
         self.destroy_in_shop(p, &victims, None);
     }
 
+    /// Start the next turn without pairing or a fight, which is the lobster
+    /// search's turn step (docs/briefs/lobster-search.md): end every shop
+    /// turn still going, then run the start of the next turn as normal. Only
+    /// the mode uses it; a normal game's turn always goes through `advance`.
+    pub fn next_shop_turn_without_fight(&mut self) {
+        for p in 0..PLAYERS {
+            if self.players[p].alive && !self.players[p].done {
+                self.finish_shop(p);
+            }
+        }
+        self.start_turn();
+    }
+
     /// Answer everything the player left open, taking the first option that
     /// can be taken (the end of their turn cannot ask).
     pub(super) fn resolve_open_choices(&mut self, p: usize) {
@@ -460,6 +473,15 @@ impl Game {
     pub(super) fn start_turn(&mut self) {
         self.turn += 1;
         let turn = self.turn;
+        // The lobster mode's streams are per turn: the Tavern starts at roll 0
+        // and so does the Gryphon's Beast stream.
+        for p in 0..PLAYERS {
+            if let Some(mode) = &mut self.players[p].lobster {
+                mode.turn = turn;
+                mode.refresh = 0;
+                mode.beast = 0;
+            }
+        }
         let base_turn_gold = self.data.rules.gold(turn);
         for p in 0..PLAYERS {
             if !self.players[p].alive {

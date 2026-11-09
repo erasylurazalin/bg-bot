@@ -52,6 +52,8 @@ crates/
                       comparison of two positions, the full pool a playout's
                       Refresh draws from, and the coming fight against the
                       boards of Era's real games (see "The shop-turn search")
+    src/lobster.rs    the lobster search mode's fixed Tavern and Gryphon Beast
+                      streams (see "The lobster search mode")
     tests/            one file per tribe (beast_mech, dragons, murlocs, demons, pirates, elementals, undead, quilboar, aberration, neutrals),
                       heroes.rs (the hero frame: pick, armor, the 22 powers, the two spells),
                       trinkets.rs (the trinket frame: the two offers, the guarantee and the
@@ -1899,6 +1901,64 @@ free, the Dragons buffed).
   (`bgpy.shop_replay_turns`, `bgpy.sandbox_position`). `train/era_turns.py
   --sample N` plays N turns spread evenly over the seatable turns (every
   k-th, all comps), not the first N in file order; 0 plays all.
+
+## The lobster search mode
+
+`docs/briefs/lobster-search.md` is its own mode, off in every normal game:
+the Tavern and Headhunter Gryphon's random Beasts come from streams fixed by a
+seed, so a line is reproducible and a search sees its future. The mode is
+`LobsterMode` in `src/lobster.rs`, an `Option` on `Player` (`Player.lobster`).
+
+- **The streams:** a draw is a pure function of the seed, the turn, the
+  stream's index and the slot, so nothing another path did can change it. The
+  Tavern's index is 0 at the start of the turn, then 1 for every explicit
+  Refresh and every Refresh effect (a sold Snarky Shark); the Gryphon's Beast
+  index is 0 at the start of the turn, then one per random Beast. A normal
+  Tavern card is weighted like a fresh pool at its tier; a normal Beast is
+  uniform over the pool's Beasts, the engine's `random_pool_minion` rule.
+- **The Shark knob:** before each normal draw, a per-mille roll can replace it
+  with a Snarky Shark or a Lurking Lionfish, equal odds. `p` is 0, 0.1, 0.25
+  or 0.5. The mode neither reads nor consumes the pool, and an extra Shark or
+  Lionfish is a generated token: `pool_untracked` is set, so the normal
+  invariant checker stays out of this mode. A bought or sold normal card does
+  not change what a later stream index holds.
+- **The turn:** `Game::next_shop_turn_without_fight` ends every open shop turn
+  and runs the start of the next turn without pairing or a fight, which is the
+  mode's turn step. `Action::EndTurn` and the rule cap do not auto-finish a
+  mode turn: the search stops expanding at
+  `rules.max_actions_per_turn` and ends the turn itself.
+- **The counters:** `LobsterMode` counts every Fishbait the left-most Beast
+  attacked and every Deathstrider deathrattle fire (`SideOutcome`'s new
+  `deathstrider_fires`), so search turns and the logged-turn replay can report
+  them. The Tasty Lobster count stays the player's `improve[TastyLobster]`.
+- **The log switches:** `LobsterMode.stream_tavern` and `stream_beasts` turn
+  the fixed streams off for the logged-turn replay, which puts the log's own
+  Tavern in place and lets the Gryphon use the engine RNG. A Shark's Refresh
+  in that replay still places and attacks a Fishbait even though the stream is
+  off; that is replay plumbing, not a normal game rule.
+- **The search:** `crates/bgbench/src/bin/lobster_search.rs` is a beam over the
+  legal shop actions of turns 10 to 13. It scores a state by the Tasty Lobster
+  counter (triggers so far), then board Attack plus Health; fewer actions only
+  breaks a tie. Every state is also an end-of-turn candidate. Duplicate states
+  merge on the player, turn, lobby and RNG, and a bounded heap keeps the best
+  beam width. A move is only tried to the front of the board, and a minion is
+  only played to the front or the end; two moves cannot follow each other. A
+  state that has not raised triggers or board stats in 60 actions is an end
+  candidate but is not expanded. No rule looks at a card name.
+- **The compact node:** a search copy stores `ShopStateCapture` (the player,
+  RNG, turn, pool and pending-triple flags, from `Game::capture_shop_state`)
+  instead of a 157 KiB `Game`; one mutable game is restored to the parent for
+  each action. The end-of-turn carry is capped at 4,096 states even when the
+  beam is wider.
+- **The run:** `cargo run --release -p bgbench --bin lobster_search` with no
+  options runs the brief's grid. It writes `report.md` and `results.json`
+  under `train/runs/lobster-search/`, with Fishbait attacks and Deathstrider
+  fires per turn. The worker pool uses a 32 MiB stack and a path is an `Arc`
+  chain with an iterative drop.
+- **The turn 10 replay:** `cargo run --release -p bgbench --bin
+  lobster_replay` seats each of Era's logged turn 10 steps from the log's own
+  state, plays the shop replay's actions in the mode, and writes
+  `train/runs/lobster-search/replay-turn10.md`.
 
 ## The comp planner
 

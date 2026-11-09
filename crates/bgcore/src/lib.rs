@@ -14,6 +14,7 @@ pub mod fight;
 pub mod fight_check;
 pub mod game;
 pub mod heroes;
+pub mod lobster;
 pub mod minion;
 pub mod obs;
 pub mod overlay;
@@ -37,9 +38,10 @@ pub use darkgifts::{Gift, GiftCond, GiftDb};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
 pub use game::{
     FightResult, Game, IllegalAction, Leaderboard, Opponent, Player, PowerState, Sandbox,
-    SandboxFight,
+    SandboxFight, ShopStateCapture,
 };
 pub use heroes::{Hero, HeroDb, HeroPower, PowerEffect};
+pub use lobster::LobsterMode;
 pub use minion::{Attached, CardId, GiftOn, Keywords, MAX_ATTACHED, MAX_GIFTS, Minion};
 pub use real_boards::{
     CardIdMap, LATE_TURN, RealBoard, RealBoardSpec, RealBoards, RealFightSpec, RealMinionSpec,

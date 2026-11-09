@@ -101,6 +101,7 @@ impl Player {
             volumizer_bonus: (0, 0),
             beetle_bonus: (0, 0),
             improve: [0; N_COUNTERS],
+            lobster: None,
             counts: HeroCounts::default(),
             shop_fewer: 0,
             freeze_end: false,

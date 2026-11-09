@@ -535,11 +535,24 @@ impl Game {
             }
             Effect::GetRandomMinion { tribe } => {
                 let tier = self.players[p].tier;
-                for _ in 0..mul * runs as i32 {
-                    if let Some(c) =
-                        self.data.cards.random_pool_minion(tribe, tier, self.lobby, &mut self.rng)
-                    {
-                        self.give_generated_tracking(p, c, pos);
+                // The lobster search's mode gives this draw its own fixed
+                // stream (Headhunter Gryphon's Rally), in both streams the
+                // brief names.
+                if tribe == Tribe::Beast
+                    && self.players[p].lobster.is_some_and(|m| m.stream_beasts)
+                {
+                    for _ in 0..mul * runs as i32 {
+                        if let Some(c) = self.lobster_next_beast(p) {
+                            self.give_generated_tracking(p, c, pos);
+                        }
+                    }
+                } else {
+                    for _ in 0..mul * runs as i32 {
+                        if let Some(c) =
+                            self.data.cards.random_pool_minion(tribe, tier, self.lobby, &mut self.rng)
+                        {
+                            self.give_generated_tracking(p, c, pos);
+                        }
                     }
                 }
             }

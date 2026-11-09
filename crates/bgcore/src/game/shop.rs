@@ -439,6 +439,9 @@ impl Game {
         lobby: Tribes,
         kind: RefreshKind,
     ) -> (u8, u8) {
+        if pl.lobster.is_some() {
+            return Self::fill_shop_lobster(pl, pool, cards, rules, lobby);
+        }
         let fodders = match kind {
             RefreshKind::Explicit => pl.take_fodder_for_refresh(),
             RefreshKind::TurnStart | RefreshKind::Effect => 0,
@@ -589,6 +592,69 @@ impl Game {
         // range is the one this fill drew in, since a Guiding Candle Refresh
         // has spent its own by the time the Fodder refills its slot.
         (lo, hi)
+    }
+
+    /// The lobster mode's Tavern: one full roll from the seeded stream, with
+    /// no pool reads and no pool copies. Every fill advances the refresh
+    /// number, so the turn's own roll is 0 and a sold Snarky Shark's Refresh
+    /// takes 1, whatever path the line took to get there.
+    fn fill_shop_lobster(
+        pl: &mut Player,
+        pool: &mut [u8],
+        cards: &CardDb,
+        rules: &Rules,
+        lobby: Tribes,
+    ) -> (u8, u8) {
+        let Some(mut mode) = pl.lobster else { return (1, pl.tier) };
+        let refresh = mode.refresh;
+        let tier = pl.tier;
+        for m in pl.shop.drain(..) {
+            give_back(pool, cards, &m);
+        }
+        pl.shop_spell = None;
+        if !mode.stream_tavern {
+            // The logged-turn replay replaces the Tavern with the log's own
+            // next state, so do not draw the seeded stream at all.
+            mode.refresh = refresh.saturating_add(1);
+            pl.lobster = Some(mode);
+            return (1, tier);
+        }
+        let size = pl.shop_size(rules).min(crate::SHOP - 1);
+        for slot in 0..size as u32 {
+            if let Some(c) = mode.tavern_minion(cards, rules, lobby, tier, refresh, slot) {
+                let mut m = pl.make_card(cards, c, false, 0);
+                pl.apply_tavern_buffs(cards, &mut m);
+                pl.shop.push(m);
+            }
+        }
+        pl.shop_spell = mode.tavern_spell(cards, lobby, tier, refresh);
+        mode.refresh = refresh.saturating_add(1);
+        pl.lobster = Some(mode);
+        (1, tier)
+    }
+
+    /// Seat the start position's Tavern in the lobster mode without waiting a
+    /// turn: the loaded board and hand stay, the Tavern is the stream's roll 0
+    /// of the current turn.
+    pub fn seat_lobster_tavern(&mut self, p: usize) {
+        let turn = self.turn;
+        if let Some(mode) = &mut self.players[p].lobster {
+            mode.turn = turn;
+            mode.refresh = 0;
+        } else {
+            return;
+        }
+        let Game { data, rng, players, pool, lobby, .. } = self;
+        let pl = &mut players[p];
+        let _ = Self::refresh_shop(
+            pl,
+            pool,
+            &data.cards,
+            &data.rules,
+            rng,
+            *lobby,
+            RefreshKind::TurnStart,
+        );
     }
 
     /// The tier range the Tavern draws minions from right now: Bob-blehead's
@@ -1153,6 +1219,19 @@ impl Game {
             );
         }
         self.trinket_event(p, Event::Refresh, None, 1);
+        // The logged-turn replay turns the seeded Tavern off and its Refresh
+        // leaves the shop empty; the Fishbait still has to attack, since the
+        // log's own Tavern had cards. This is replay plumbing, not a normal
+        // game rule.
+        if self.players[p].shop.is_empty()
+            && self.players[p].lobster.is_some_and(|m| !m.stream_tavern)
+        {
+            let bait = self.data.cards.make(card, golden);
+            if self.players[p].shop.try_push(bait).is_ok() {
+                self.tavern_attack(p, 0);
+            }
+            return;
+        }
         if !self.players[p].shop.is_empty() {
             self.put_fishbait(p, 0, card, golden);
         }
@@ -1175,6 +1254,13 @@ impl Game {
             pl.counters(data, *lobby),
             rng,
         );
+        if let Some(mut mode) = pl.lobster {
+            mode.fishbait_attacks = mode.fishbait_attacks.saturating_add(1);
+            mode.deathstrider_fires = mode
+                .deathstrider_fires
+                .saturating_add(out.side.deathstrider_fires as u32);
+            pl.lobster = Some(mode);
+        }
         // A Beast that dies to the Fishbait dies for real, so its pool copy
         // goes back with it (the same rule a shop-phase destroy follows);
         // the ones still standing keep theirs. Only the copies change hands

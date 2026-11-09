@@ -369,6 +369,9 @@ pub struct SideOutcome {
     pub beast_bonus_gain: (i32, i32),
     /// Deathrattles the player triggered in this fight (Falling Sky Golem).
     pub deathrattles_triggered: u16,
+    /// Deathrattle triggers a Deathstrider caused here, its golden second
+    /// trigger included.
+    pub deathstrider_fires: u16,
     /// Generated cards added to the player's hand during this fight
     /// (Headhunter Gryphon, Conveyor Construct, Rescue Bot).
     pub cards: [CardId; HAND],
@@ -2444,7 +2447,17 @@ impl<'a> Side<'a> {
                 }
             }
             Effect::TriggerDeathrattle { times } => {
+                let deathstrider = self.ms.iter().find(|f| f.uid == fx.host).is_some_and(|f| {
+                    f.m.parts().any(|(c, _)| {
+                        db.get(c).after_friendly_attacks.is_some_and(|t| {
+                            matches!(t.effect, Effect::TriggerDeathrattle { .. })
+                        })
+                    })
+                });
                 for _ in 0..times as i32 * mul {
+                    if deathstrider {
+                        self.out.deathstrider_fires = self.out.deathstrider_fires.saturating_add(1);
+                    }
                     let Some(idx) = self.ms.iter().position(|f| {
                         f.m.health > 0 && f.m.parts().any(|(c, _)| db.get(c).deathrattle.is_some())
                     }) else {
