@@ -1,0 +1,10283 @@
+{
+  "Buzzing Vermin": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Flittering Bat": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Cord Puller": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Lullabot": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "buff_self",
+      "magnetize"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 1
+  },
+  "Suspicious Prisonguard": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Razorfen Geomancer": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Tusked Camper": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Forest Rover": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats",
+      "summon"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "battlecries",
+      "summons",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Humming Bird": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Lurking Lionfish": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "left",
+      "shop_minion"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs",
+      "position_left"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Blue Volumizer": {
+    "trigger": [
+      "on_buy"
+    ],
+    "effect": [
+      "buff_stats",
+      "magnetize"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 3
+  },
+  "Green Volumizer": {
+    "trigger": [
+      "on_buy"
+    ],
+    "effect": [
+      "buff_stats",
+      "magnetize"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Red Volumizer": {
+    "trigger": [
+      "on_buy"
+    ],
+    "effect": [
+      "buff_stats",
+      "magnetize"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 0
+  },
+  "Mechagnome Interpreter": {
+    "trigger": [
+      "on_play_friend"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 1
+  },
+  "Patient Scout": {
+    "trigger": [
+      "end_of_turn",
+      "on_sell"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Decoy Conjurer": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "shop_minion"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Intrepid Botanist": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "spells"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Crater Miner": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card",
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Prodigious Tusker": {
+    "trigger": [
+      "on_attack"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Roadboar": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sprightly Scarab": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Tasty Lobster": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Wolf Pup": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "many_minions"
+    ],
+    "buff_attack": 4,
+    "buff_health": 1
+  },
+  "Treasure Parrot": {
+    "trigger": [
+      "on_attack"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Accord-o-Tron": {
+    "trigger": [
+      "start_of_turn"
+    ],
+    "effect": [
+      "gain_gold",
+      "magnetize"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold",
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Auto Accelerator": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Annoy-o-Module": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Relentless Deflector": {
+    "trigger": [
+      "avenge",
+      "aura"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Rescue Bot": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Prosthetic Hand": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech",
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Deadly Spore": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Iron Groundskeeper": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Fruit Vendor": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Disguised Graverobber": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Fearless Foodie": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "gems"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Gem Rat": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Mangled Bandit": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sly Infiltrator": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "gain_gem",
+      "refresh_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gold",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Thorned Trailblazer": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Trench Fighter": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Banana Slamma": {
+    "trigger": [
+      "on_summon_friend"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "summons",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Cage Gnawer": {
+    "trigger": [
+      "on_attack"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Headhunter Gryphon": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Hoarding Hyena": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Snarky Shark": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "left"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling",
+      "gold",
+      "position_left"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Conveyor Construct": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Drone Duplicator": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Enchanted Sentinel": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "magnetize",
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "keywords"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Glambot": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gearfin": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Boom-in-a-Box": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "deal_damage"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Humon'gozz": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 1,
+    "buff_health": 2
+  },
+  "Heroic Underdog": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Holy Vanguard": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 30,
+    "buff_health": 30
+  },
+  "Sin'dorei Straight Shot": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Tortollan Blue Shell": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "refund"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bonker": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "gems",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bramble Tunneler": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Geomagus Roogug": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Hot-Air Surveyor": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Razorfen Flapper": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Snare Trapper": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card",
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Ghastcoiler": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Lurking Leviathan": {
+    "trigger": [
+      "on_summon_friend"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 0
+  },
+  "Goldrinn, the Great Wolf": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 7,
+    "buff_health": 7
+  },
+  "Turquoise Skitterer": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats",
+      "summon"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 5,
+    "buff_health": 5
+  },
+  "Sewer Lord": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Resourceful Robot": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "magnetize",
+      "copy"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Spark Snapper": {
+    "trigger": [
+      "on_play_friend"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Charging Czarina": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "divine_shields",
+      "many_minions"
+    ],
+    "buff_attack": 4,
+    "buff_health": 0
+  },
+  "Brann Bronzebeard": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Titus Rivendare": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Drakkari Enchanter": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "turns",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Cataclysmic Harbinger": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Nightmare Par-tea Guest": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Leeroy the Reckless": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Rodeo Performer": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Razorfen Vineweaver": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sanguine Refiner": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "gems"
+    ],
+    "buff_attack": 1,
+    "buff_health": 2
+  },
+  "Ravaging Scorpid": {
+    "trigger": [
+      "deathrattle",
+      "on_attack"
+    ],
+    "effect": [
+      "buff_stats",
+      "summon"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Deathstrider": {
+    "trigger": [
+      "on_attack"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "left"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "rally",
+      "position_left"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Auto Reveille": {
+    "trigger": [
+      "on_buy"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "buying",
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Falling Sky Golem": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "deathrattles",
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 2
+  },
+  "Utility Drone": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "count",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 4,
+    "buff_health": 5
+  },
+  "Balinda Stonehearth": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gatekeeper Amalgam": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Nadina the Red": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "keywords",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Tyrael": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 50,
+    "buff_health": 50
+  },
+  "Glim Guardian": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 0
+  },
+  "Scarlet Survivor": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bronze Warden": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Electric Synthesizer": {
+    "trigger": [
+      "battlecry",
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Tarecgosa": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Amber Guardian": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Blue Whelp": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 1
+  },
+  "Hired Mount": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Roaring Recruiter": {
+    "trigger": [
+      "on_attack"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 3,
+    "buff_health": 1
+  },
+  "Timecap'n Hooktail": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Bronze Timewalker": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Persistent Poet": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "adjacent"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords",
+      "same_tribe",
+      "position_next_to"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Runic Arcanist": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sky-hatch Runaway": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Felfire Conjurer": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "turns",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Draconic Warden": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Hopebringer": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "divine_shields",
+      "many_minions"
+    ],
+    "buff_attack": 4,
+    "buff_health": 3
+  },
+  "Kalecgos, Arcane Aspect": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Firescale Hoarder": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Crimson Vindicator": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Heroic Broodmother": {
+    "trigger": [
+      "rally",
+      "start_of_combat"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bubble Gunner": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Flighty Scout": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "summon",
+      "copy"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Expert Aviator": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Murcules": {
+    "trigger": [
+      "on_kill"
+    ],
+    "effect": [
+      "buff_hand"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Tad": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Very Hungry Winterfinner": {
+    "trigger": [
+      "on_damaged"
+    ],
+    "effect": [
+      "buff_hand"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Diremuck Forager": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Shoalfin Mystic": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "selling"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Bream Counter": {
+    "trigger": [
+      "on_play_friend"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 6,
+    "buff_health": 6
+  },
+  "Gormling Gourmet": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Kelp Keeper": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Twilight Tidehunter": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_hand"
+    ],
+    "target": [
+      "left",
+      "hand"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "position_left"
+    ],
+    "buff_attack": 8,
+    "buff_health": 8
+  },
+  "Bile Spitter": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Costume Enthusiast": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Hackerfin": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "keywords",
+      "many_minions"
+    ],
+    "buff_attack": 3,
+    "buff_health": 2
+  },
+  "Primalfin Lookout": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sewer Escapee": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 7,
+    "buff_health": 7
+  },
+  "Shamanic Tidecaller": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Choral Mrrrglr": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Magicfin Mycologist": {
+    "trigger": [
+      "on_buy"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells",
+      "buying"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Young Murk-Eye": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "adjacent"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "position_next_to"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Wrath Weaver": {
+    "trigger": [
+      "on_play_friend"
+    ],
+    "effect": [
+      "buff_self",
+      "deal_damage"
+    ],
+    "target": [
+      "self",
+      "hero"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Ominous Seer": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "reduce_cost"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "spells",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Laboratory Assistant": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Mind Muck": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen",
+      "shop_minion"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "shop_buffs",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Soul Rewinder": {
+    "trigger": [
+      "on_damaged"
+    ],
+    "effect": [
+      "buff_stats",
+      "heal_or_armor"
+    ],
+    "target": [
+      "self",
+      "hero"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 2
+  },
+  "Devout Hellcaller": {
+    "trigger": [
+      "on_damaged"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Malchezaar, Prince of Dance": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Trapped Clapper": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Ashen Corruptor": {
+    "trigger": [
+      "on_damaged"
+    ],
+    "effect": [
+      "buff_shop",
+      "heal_or_armor"
+    ],
+    "target": [
+      "shop_all",
+      "hero"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Imp-lusionist": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Imposing Percussionist": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "chosen",
+      "hero"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sacrificial Wrathguard": {
+    "trigger": [
+      "deathrattle",
+      "activated"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Soulkeeping Jailer": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Flaming Enforcer": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Deft Deserter": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "buff_shop",
+      "give_keyword"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "shop_buffs",
+      "keywords",
+      "many_minions"
+    ],
+    "buff_attack": 8,
+    "buff_health": 8
+  },
+  "Devilish Distractor": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 2
+  },
+  "Insatiable Ur'zul": {
+    "trigger": [
+      "on_play_friend"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Tichondrius": {
+    "trigger": [
+      "on_damaged"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends",
+      "hero"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Felboar": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Eredar Escapist": {
+    "trigger": [
+      "on_damaged"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Twisted Wrathguard": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sanguine Champion": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "battlecries",
+      "gems"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Turbo Hogrider": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "gems",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Veteran Brigand": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gems",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Victorious Geomant": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "left"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gems",
+      "position_left"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Polarizing Beatboxer": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "magnetize",
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Champion of Sargeras": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "battlecries",
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 8,
+    "buff_health": 8
+  },
+  "Obsidian Ravager": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "deal_damage"
+    ],
+    "target": [
+      "enemy",
+      "adjacent"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "position_next_to"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Futurefin": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "buff_hand"
+    ],
+    "target": [
+      "left",
+      "hand"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "position_left"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Highkeeper Ra": {
+    "trigger": [
+      "battlecry",
+      "deathrattle",
+      "rally"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries",
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "The Last One Standing": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "rally",
+      "many_minions"
+    ],
+    "buff_attack": 15,
+    "buff_health": 15
+  },
+  "Stalwart Kodo": {
+    "trigger": [
+      "on_summon_friend"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Aureate Laureate": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Southsea Busker": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bilgewater Breakout": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card",
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Clever Castaway": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Surfing Sylvar": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "adjacent"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "position_next_to"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Azsharan Cutlassier": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "spells"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Greedy Conniver": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Locked-up Mutineer": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card",
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bigwig Bandit": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "pirate"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Blade Collector": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "deal_damage"
+    ],
+    "target": [
+      "adjacent",
+      "enemy"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "position_next_to"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gunpowder Courier": {
+    "trigger": [
+      "on_gold_spent"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "pirate"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "gold",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 1
+  },
+  "Lovesick Balladist": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "pirate"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gold",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 2
+  },
+  "Maritime Extortionist": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 7,
+    "buff_health": 7
+  },
+  "Elite Navigator": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "pirate"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Enterprising Escapee": {
+    "trigger": [
+      "on_gold_spent"
+    ],
+    "effect": [
+      "generate_card",
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Proud Privateer": {
+    "trigger": [
+      "aura"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Ship Master Eudora": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "many_minions"
+    ],
+    "buff_attack": 6,
+    "buff_health": 6
+  },
+  "Shipwrecked Rascal": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "pirate"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Hooktusk, Master Marauder": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "pirate"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Silent Deliverer": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sky Admiral Rogers": {
+    "trigger": [
+      "on_gold_spent"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "pirate"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Captain Sanders": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Crackling Cyclone": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Dune Dweller": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "shop_buffs",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Fire Baller": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "selling",
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Sellemental": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Snow Baller": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "selling",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 1
+  },
+  "Waveling": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_minion"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Wildfire Elemental": {
+    "trigger": [
+      "on_kill"
+    ],
+    "effect": [
+      "deal_damage"
+    ],
+    "target": [
+      "adjacent",
+      "enemy"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "position_next_to"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Air Baller": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "selling",
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "En-Djinn Blazer": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_minion"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 10,
+    "buff_health": 10
+  },
+  "Ichoron the Protector": {
+    "trigger": [
+      "on_play_friend"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Leyline Surfacer": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Living Prison": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Refreshing Anomaly": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Tavern Tempest": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Air Revenant": {
+    "trigger": [
+      "on_gold_spent"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "gold",
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Firelands Fugitive": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Living Azerite": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "shop_buffs",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 4,
+    "buff_health": 3
+  },
+  "Elemental of Surprise": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Ultraviolet Ascendant": {
+    "trigger": [
+      "start_of_combat",
+      "on_play_friend"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Unbound Tempest": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Stone Age Slab": {
+    "trigger": [
+      "on_buy"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "buying",
+      "one_big_minion"
+    ],
+    "buff_attack": 20,
+    "buff_health": 20
+  },
+  "Harmless Bonehead": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Risen Rider": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Eternal Knight": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "count",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 2
+  },
+  "Nerubian Deathswarmer": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Scarlet Skull": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 1,
+    "buff_health": 2
+  },
+  "Cadaver Caretaker": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Handless Forsaken": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Mummifier": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Dead Bellringer": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Friendly Geist": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "spells"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Maw Caster": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "discover",
+      "other"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Plaguerunner": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 2,
+    "buff_health": 0
+  },
+  "Barrier Banshee": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self",
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 8,
+    "buff_health": 8
+  },
+  "Drustfallen Butcher": {
+    "trigger": [
+      "avenge"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Eternal Summoner": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Eternal Tycoon": {
+    "trigger": [
+      "avenge"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Lichling Hoarder": {
+    "trigger": [
+      "avenge"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Deathly Striker": {
+    "trigger": [
+      "deathrattle",
+      "avenge"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Forsaken Weaver": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "compounding",
+    "scales_with": "count",
+    "wants": [
+      "spells",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 0
+  },
+  "Snazzy Phantom": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "right"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Stitched Salvager": {
+    "trigger": [
+      "deathrattle",
+      "start_of_combat"
+    ],
+    "effect": [
+      "summon",
+      "other"
+    ],
+    "target": [
+      "left"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions",
+      "position_left"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Jailbird Juggernaut": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Joyous": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Zoatroid": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Brain Rotter": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Underrot Spawn": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats",
+      "summon"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "aberration"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Wandering Willbreaker": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells",
+      "selling"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Abyssal Envoy": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Drifting Sacrifice": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Fetid Corroder": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Unwilling Slacker": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Vicious Mindslasher": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_self",
+      "buff_stats"
+    ],
+    "target": [
+      "self",
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "one_big_minion"
+    ],
+    "buff_attack": 1,
+    "buff_health": 2
+  },
+  "Cutthroat K'Thir": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self",
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Faceless Operative": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "aberration"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "selling"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Mindbending Recruiter": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "aberration"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Nightmare Corroder": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Parasitic Fleshling": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "left"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "one_big_minion",
+      "position_left"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "De-volition-ist": {
+    "trigger": [
+      "on_attack"
+    ],
+    "effect": [
+      "deal_damage"
+    ],
+    "target": [
+      "enemy"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Faceless Converter": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "count",
+    "wants": [
+      "deathrattles",
+      "spells",
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Mindbender Ghur'sha": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Mysterious K'Thir": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "spells",
+      "one_big_minion"
+    ],
+    "buff_attack": 7,
+    "buff_health": 7
+  },
+  "N'raqi Frostcaller": {
+    "trigger": [
+      "activated"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "turns",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "N'raqi Sapper": {
+    "trigger": [
+      "battlecry",
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Dark Puppeteer": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 4
+  },
+  "Harbinger Aph'lass": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_stats",
+      "buff_self"
+    ],
+    "target": [
+      "self",
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "count",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "The Shadow of Doubt": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 5
+  },
+  "Sha of Fear": {
+    "trigger": [
+      "on_cast_spell"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "spells",
+      "many_minions"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Dark Paradox t3": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 3,
+    "buff_health": 0
+  },
+  "Dark Paradox t4": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Dark Paradox t5": {
+    "trigger": [
+      "rally",
+      "passive"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Dark Paradox t6": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "battlecries",
+      "one_big_minion"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Dark Paradox t9": {
+    "trigger": [
+      "deathrattle",
+      "passive"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Stand-in": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Beetle": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Foraging Bat": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sewer Rat": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Half-Shell": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Fishbait": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 5,
+    "buff_health": 5
+  },
+  "Microbot": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Satellite": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Black Chromadrake": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 1
+  },
+  "Blue Chromadrake": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bronze Chromadrake": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 1
+  },
+  "Green Chromadrake": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 1,
+    "buff_health": 3
+  },
+  "Red Chromadrake": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "battlecries",
+      "spells"
+    ],
+    "buff_attack": 1,
+    "buff_health": 0
+  },
+  "Magicfin Apprentice": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Water Droplet": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Demon Fodder": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Skeleton": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Helping Hand": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Golem": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Blood Golem": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Aberrant Tentacle": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "C'Thun": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Y'Shaarj": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "aberration"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Tide Oracle Morgl": {
+    "trigger": [
+      "on_kill"
+    ],
+    "effect": [
+      "buff_hand"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Arcane Behemoth": {
+    "trigger": [
+      "on_sell"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "selling",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Dr. Boom's Monster": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self",
+      "magnetize"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "keywords",
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Doubloon Grifter": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "pirate"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bassgill": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Faceless Manipulator": {
+    "trigger": [
+      "battlecry"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Flourishing Frostling": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Fish of N'Zoth": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Amalgam": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Mishmash": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Timewarped Poet": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Rusted Reggie": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech",
+      "demon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Magtheridon Prime": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech",
+      "demon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Baltharak": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech",
+      "demon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Shield of the Legion": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "mech",
+      "demon"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "All-Seeing Elder": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sneed's New Shredder": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Onyxian Whelp": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Ozumat's Tentacle": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Cobra": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Stone Elemental": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Offensive Sacrifice": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 10,
+    "buff_health": 0
+  },
+  "Gift: Defensive Sacrifice": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "random_friend"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 10
+  },
+  "Gift: Charisma": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Incubation": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "turns",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Gift: Mystic Essence": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Resistance": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Admiration": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Echoing Voice": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "turns",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Double Vision": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Persisting Horror": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Harpy's Talons": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Gilding": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Toreth's Blessing": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "divine_shields"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Jaws of Death": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Replication": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Time Turning": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "turns",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Amalgamation": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Battle Scars": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Gift: Battle Scars strong": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Gift: Death's Embrace": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Gift: Death's Embrace strong": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Gift: Spell Siphon": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Gift: Spell Siphon strong": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Gift: Tarecgosa's Blessing": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Steady Growth": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "turns",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Fresh Perspective": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Invulnerability": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Golemancy": {
+    "trigger": [
+      "deathrattle"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "deathrattles",
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Sunken Persistence": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Dexterity": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Gift: Dexterity strong": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Gift: Polarization": {
+    "trigger": [
+      "end_of_turn"
+    ],
+    "effect": [
+      "magnetize"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "mech"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Demonology": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "summons",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Toxicity": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Hostility": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Titanic Strength": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 1000,
+    "buff_health": 0
+  },
+  "Gift: Fortitude": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 5,
+    "buff_health": 5
+  },
+  "Gift: Sharpened Sword": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 3,
+    "buff_health": 0
+  },
+  "Gift: Toughened Shield": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 3
+  },
+  "Gift: Efficiency": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Furtiveness": {
+    "trigger": [
+      "none"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Consanguinity": {
+    "trigger": [
+      "rally"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "rally",
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Transcendence": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Affinity": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Desecration": {
+    "trigger": [
+      "passive"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "count",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Gift: Worship": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gift: Doppelganger": {
+    "trigger": [
+      "start_of_combat"
+    ],
+    "effect": [
+      "summon"
+    ],
+    "target": [
+      "self"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "linear",
+    "scales_with": "events",
+    "wants": [
+      "summons",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Tavern Coin": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Tavern Dish Banana": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Fortify": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 3
+  },
+  "Them Apples": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 2
+  },
+  "Alliance Flag": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 3,
+    "buff_health": 1
+  },
+  "Recruit a Trainee": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Enchanted Lasso": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "shop_minion"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "A New Sprout": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Leaf Through the Pages": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Might of Stormwind": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Winner's Bread": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 3
+  },
+  "Chef's Choice": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Strike Oil": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Hasty Excavation": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Search Through Time": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "hand"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Careful Investment": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Overconfidence": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Shiny Ring": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Repair Job": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 8
+  },
+  "Time Management": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Planar Telescope": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Robust Evolution": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Staff of Enrichment": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Tricky Trousers": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 1,
+    "buff_health": 2
+  },
+  "Mighty Dragonbreath": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "dragon"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 3,
+    "buff_health": 2
+  },
+  "Boon of Beetles": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "summon",
+      "give_keyword"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "summons",
+      "keywords",
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Defender's Rites": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 7,
+    "buff_health": 7
+  },
+  "Natural Blessing": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen",
+      "all_friends"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion",
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 1
+  },
+  "Boundless Potential": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Seafood Stew": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Duplicating Lens": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "The Goldenizer": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Cloning Conch": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Methodical Madness": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Eonar's Favor": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "chosen",
+      "shop_all"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Misplaced Tea Set": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Sludge Corrosion": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Weapons Forge": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Pointy Arrow": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 0
+  },
+  "Brood of Nozdormu": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "left"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion",
+      "position_left"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Forest's Bounty": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends",
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion",
+      "many_minions"
+    ],
+    "buff_attack": 6,
+    "buff_health": 6
+  },
+  "Upper Hand": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "enemy"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Golden Touch": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "shop_minion"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Contracted Corpse": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Hired Headhunter": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Corrupted Cupcakes": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "demon"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Channel the Devourer": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen",
+      "random_friend"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Saloon's Finest": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Perfect Vision": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 20,
+    "buff_health": 20
+  },
+  "Azerite Empowerment": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Lost Staff of Hamuul": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Eyes of the Earth Mother": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sacred Gift": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Sharing is Caring": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_self"
+    ],
+    "target": [
+      "left"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion",
+      "position_left"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Hallowed Ritual": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Menagerie Tableware": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 3,
+    "buff_health": 3
+  },
+  "Friendly Bounty": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "any_tribe"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Healthy Bounty": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 4
+  },
+  "Hostile Bounty": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 4,
+    "buff_health": 0
+  },
+  "Selfish Bounty": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "left"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion",
+      "position_left"
+    ],
+    "buff_attack": 6,
+    "buff_health": 6
+  },
+  "Wealthy Bounty": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Wave of Gold": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "all_friends"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "many_minions"
+    ],
+    "buff_attack": 3,
+    "buff_health": 2
+  },
+  "Lockbox": {
+    "trigger": [
+      "on_event"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Easterly Winds": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_minion"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 9,
+    "buff_health": 9
+  },
+  "Temperature Shift": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Arcane Absorption": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen",
+      "shop_minion"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Conflagration": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "elemental"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion",
+      "same_tribe"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "Tomb Turning": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Butchering": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen",
+      "all_friends"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "many_minions",
+      "same_tribe"
+    ],
+    "buff_attack": 8,
+    "buff_health": 0
+  },
+  "Blood Gem Barrage": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "shop_buffs",
+      "gems",
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Gem Confiscation": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Fandral's Fortune": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Corrupted Coin": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Energizing Chamber": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 7,
+    "buff_health": 7
+  },
+  "Armor Stash": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "heal_or_armor"
+    ],
+    "target": [
+      "hero"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Unmasked Identity": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Blood Gem": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Blood Gem (Taunt)": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Blood Gem (Divine Shield)": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Blood Gem (Reborn)": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gem Day": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gem"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "quilboar"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "gems"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Triple Reward": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Banana Bunch": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Crystallization": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "other"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Gacha Gift": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Big Brann Play": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Evolving Tavern": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Gruul Rules": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 4,
+    "buff_health": 4
+  },
+  "I'm Still Just a Rat in a Cage": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 0
+  },
+  "Mageroyal Blossom": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "On the House": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "The Bouncer": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "The Unlimited Coin": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Time Thief": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "All That Glitters": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "shop_minion"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "B.A.N.A.N.A.S.": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Buy the Holy Light": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 10,
+    "buff_health": 0
+  },
+  "Mindflayer Goggles": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "copy"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Repeat Customer": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "other"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 6,
+    "buff_health": 6
+  },
+  "Reserve Prices": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "reduce_cost"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Top Shelf": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Training Session": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Triple Prize": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Big Winner!": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "discover"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Fresh Tab": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "gain_gold"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Friends and Family Discount": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "reduce_cost"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold",
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Give a Dog a Bone": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 15,
+    "buff_health": 15
+  },
+  "Gorgeous Goblet": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "New Recruit": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Open Bar": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Raise the Stakes": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Rocking and Rolling": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "The Good Stuff": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_shop"
+    ],
+    "target": [
+      "shop_all"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "compounding",
+    "scales_with": "events",
+    "wants": [
+      "shop_buffs",
+      "many_minions"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Unfurled Codex": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "spells"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Vibrant Bubble": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "murloc"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "keywords"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Ophidian Staff": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats",
+      "give_keyword"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "beast"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "keywords",
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  },
+  "Jailer Sticker": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card",
+      "other"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Jailer Sticker (Greater)": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "generate_card",
+      "other"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "undead"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Floating Candle": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "trigger_again"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "deathrattles"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Token of the Old Gods": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "transform"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "none"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Chillmere Mosaic": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "refresh_shop"
+    ],
+    "target": [
+      "none"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "none",
+    "scales_with": "none",
+    "wants": [
+      "battlecries",
+      "gold"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Makeshift Master": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 0,
+    "buff_health": 0
+  },
+  "Bananas": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 1,
+    "buff_health": 1
+  },
+  "Big Banana": {
+    "trigger": [
+      "cast"
+    ],
+    "effect": [
+      "buff_stats"
+    ],
+    "target": [
+      "chosen"
+    ],
+    "tribes": [
+      "none"
+    ],
+    "scaling": "one_time",
+    "scales_with": "none",
+    "wants": [
+      "one_big_minion"
+    ],
+    "buff_attack": 2,
+    "buff_health": 2
+  }
+}
