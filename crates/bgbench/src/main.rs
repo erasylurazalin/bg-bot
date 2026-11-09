@@ -19,7 +19,9 @@
 //!
 //! `fuzz` and `games` also take --real-boards DIR [--real-seats N] to seat
 //! real-board seats playing the boards of DIR (docs/real-boards.md), the
-//! small fixture crate bgcore/tests/data/real-boards included.
+//! small fixture crate bgcore/tests/data/real-boards included. With
+//! --scenario-comps "A;B" a share of the games start late with a real board
+//! and a comp's core cards in hand (docs/briefs/comp-starts.md).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -31,6 +33,7 @@ use bgcore::comps::Comps;
 use bgcore::planner::Planner;
 use bgcore::fight_check::{CheckOptions, CheckReport, check_fight};
 use bgcore::real_boards::{CardIdMap, RealBoards, pair_fights, parse_board_files};
+use bgcore::scenario::ScenarioConfig;
 use bgcore::{
     Action, Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, PLAYERS, RealBoardSpec,
     Rng, fight, fight_with,
@@ -159,22 +162,40 @@ fn bench_fights(n: usize) {
 /// Plays one game with random actions. Returns (steps, turns). With `real`,
 /// that many seats are real-board seats instead (players 0.., or 1.. when a
 /// planner seat is present). With `planner`, player 0 plays the comp planner.
+/// With `scenario`, a share of the games start late with a real board and a
+/// comp's core cards in hand (`bgcore::scenario`).
 fn play(
     data: &Arc<Data>,
     seed: u64,
     check: bool,
     real: Real,
     planner: Option<Arc<Comps>>,
+    scenario: Option<&Arc<ScenarioConfig>>,
 ) -> Result<(u64, u32), String> {
-    let mut g = match &real {
-        Some((boards, n)) => {
-            // The planner always takes seat 0; real seats start at 1.
-            let first = if planner.is_some() { 1 } else { 0 };
+    let first = if planner.is_some() { 1 } else { 0 };
+    let real_seats: Vec<usize> = match &real {
+        Some((_, n)) => {
             assert!(*n + first <= bgcore::PLAYERS, "a planner seat leaves at most 7 real seats");
-            let seats: Vec<usize> = (first..first + *n).collect();
-            Game::new_random_heroes_real(data.clone(), seed, &seats, boards.clone())
+            (first..first + *n).collect()
         }
-        None => Game::new_random_heroes(data.clone(), seed),
+        None => Vec::new(),
+    };
+    let scenario_seats: Vec<usize> = (first..bgcore::PLAYERS)
+        .filter(|p| !real_seats.contains(p))
+        .collect();
+    let plan = scenario.and_then(|c| c.plan(seed, data, &scenario_seats));
+    let mut g = if let Some(plan) = &plan {
+        let (boards, _) = real
+            .as_ref()
+            .expect("scenario games need --real-boards: the body is a real board");
+        Game::new_scenario(data.clone(), seed, &real_seats, boards.clone(), plan)
+    } else {
+        match &real {
+            Some((boards, _)) => {
+                Game::new_random_heroes_real(data.clone(), seed, &real_seats, boards.clone())
+            }
+            None => Game::new_random_heroes(data.clone(), seed),
+        }
     };
     let mut rng = Rng::new(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
     let mut bot = planner.map(|c| Planner::new((*c).clone(), seed ^ 0x51ed_2a17, data));
@@ -209,7 +230,12 @@ fn play(
     Ok((steps, g.turn))
 }
 
-fn bench_games(secs: u64, real: Real, planner: Option<Arc<Comps>>) {
+fn bench_games(
+    secs: u64,
+    real: Real,
+    planner: Option<Arc<Comps>>,
+    scenario: Option<Arc<ScenarioConfig>>,
+) {
     let data = Arc::new(Data::bundled());
     // one core first, for the per-game time
     let t = Instant::now();
@@ -217,7 +243,8 @@ fn bench_games(secs: u64, real: Real, planner: Option<Arc<Comps>>) {
     let mut turns = 0;
     let n = 2000;
     for seed in 0..n {
-        let (s, tu) = play(&data, seed, false, real.clone(), planner.clone()).unwrap();
+        let (s, tu) = play(&data, seed, false, real.clone(), planner.clone(), scenario.as_ref())
+            .unwrap();
         steps += s;
         turns += tu as u64;
     }
@@ -238,7 +265,7 @@ fn bench_games(secs: u64, real: Real, planner: Option<Arc<Comps>>) {
     (0..threads as u64).into_par_iter().for_each(|th| {
         let mut seed = th << 40;
         while !stop.load(Ordering::Relaxed) {
-            play(&data, seed, false, real.clone(), planner.clone()).unwrap();
+            play(&data, seed, false, real.clone(), planner.clone(), scenario.as_ref()).unwrap();
             seed += 1;
             games.fetch_add(1, Ordering::Relaxed);
             if t.elapsed() >= deadline {
@@ -251,11 +278,13 @@ fn bench_games(secs: u64, real: Real, planner: Option<Arc<Comps>>) {
     println!("{threads} threads: {g} games in {el:.1} s, {:.0} games per second", g as f64 / el);
 }
 
-fn fuzz(n: u64, real: Real, planner: Option<Arc<Comps>>) {
+fn fuzz(n: u64, real: Real, planner: Option<Arc<Comps>>, scenario: Option<Arc<ScenarioConfig>>) {
     let data = Arc::new(Data::bundled());
     let t = Instant::now();
-    let results: Vec<Result<(u64, u32), String>> =
-        (0..n).into_par_iter().map(|seed| play(&data, seed, true, real.clone(), planner.clone())).collect();
+    let results: Vec<Result<(u64, u32), String>> = (0..n)
+        .into_par_iter()
+        .map(|seed| play(&data, seed, true, real.clone(), planner.clone(), scenario.as_ref()))
+        .collect();
     let steps: u64 = results.iter().filter_map(|r| r.as_ref().ok()).map(|r| r.0).sum();
     let errors: Vec<&String> = results.iter().filter_map(|r| r.as_ref().err()).collect();
     println!("{n} games, {steps} actions, invariants checked after each, in {:.1?}", t.elapsed());
@@ -1108,6 +1137,57 @@ fn main() {
         }
         None
     };
+    let scenario = if let Some(k) = args.iter().position(|a| a == "--scenario-comps") {
+        let Some(names) = args.get(k + 1) else {
+            eprintln!("--scenario-comps needs a semicolon-separated list of comp names");
+            std::process::exit(2);
+        };
+        let names: Vec<String> =
+            names.split(';').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
+        let opt = |name: &str, default: &str| {
+            args.iter()
+                .position(|a| a == name)
+                .and_then(|k| args.get(k + 1))
+                .cloned()
+                .unwrap_or_else(|| default.to_string())
+        };
+        let file = opt("--scenario-file", "data/comps/comps.toml");
+        let share: f64 = opt("--scenario-share", "100").parse().unwrap_or_else(|_| {
+            eprintln!("--scenario-share needs a percent, like 30");
+            std::process::exit(2);
+        });
+        let turns = opt("--scenario-turns", "7,11");
+        let (turn_min, turn_max) = turns.split_once(',').and_then(|(a, b)| {
+            Some((a.trim().parse::<u32>().ok()?, b.trim().parse::<u32>().ok()?))
+        }).unwrap_or_else(|| {
+            eprintln!("--scenario-turns needs MIN,MAX, like 7,11");
+            std::process::exit(2);
+        });
+        let text = std::fs::read_to_string(&file).unwrap_or_else(|e| {
+            eprintln!("{file}: {e}");
+            std::process::exit(2);
+        });
+        let comps = Comps::from_toml(&text, &Data::bundled()).unwrap_or_else(|e| {
+            eprintln!("{file}: {e}");
+            std::process::exit(2);
+        });
+        let cfg = ScenarioConfig::new(comps, &names, turn_min, turn_max, share / 100.0)
+            .unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(2);
+            });
+        if real.is_none() {
+            eprintln!("--scenario-comps needs --real-boards DIR: the body is a real board");
+            std::process::exit(2);
+        }
+        Some(Arc::new(cfg))
+    } else {
+        if args.iter().any(|a| a == "--scenario-share" || a == "--scenario-turns") {
+            eprintln!("--scenario-share and --scenario-turns need --scenario-comps");
+            std::process::exit(2);
+        }
+        None
+    };
     match args.get(1).map(String::as_str) {
         Some("fight") => bench_fights(num(1_000_000) as usize),
         Some("fightcheck") => {
@@ -1158,8 +1238,8 @@ fn main() {
         Some("check-actions") => check_actions::run(&args),
         Some("collect-actions") => collect_actions::run(&args),
         Some("collect-boards") => collect_boards::run(&args),
-        Some("games") => bench_games(num(10), real, load_planner_arg(&args)),
-        Some("fuzz") => fuzz(num(10_000), real, load_planner_arg(&args)),
+        Some("games") => bench_games(num(10), real, load_planner_arg(&args), scenario),
+        Some("fuzz") => fuzz(num(10_000), real, load_planner_arg(&args), scenario),
         Some("planner") => {
             let opt = |name: &str, default: &str| {
                 args.iter()
@@ -1205,7 +1285,9 @@ fn main() {
                  \x20      bgbench record [--actions DIR] [--out DIR] [--seeds N]\n\
                  \x20      bgbench eraseat [--boards DIR] [--runs N | --games N] [--seed N]\n\
                  \x20                      [--real-lobby-filter] [--out FILE]\n\
-                 \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N] [--real-lobby-filter]"
+                 \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N] [--real-lobby-filter]\n\
+                 \x20                      [--scenario-comps \"A;B\"] [--scenario-file PATH]\n\
+                 \x20                      [--scenario-share PCT] [--scenario-turns MIN,MAX]"
             );
             std::process::exit(2);
         }

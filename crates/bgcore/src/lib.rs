@@ -22,6 +22,7 @@ pub mod real_boards;
 pub mod record;
 pub mod rng;
 pub mod rules;
+pub mod scenario;
 pub mod search;
 pub mod secrets;
 pub mod shop_replay;
@@ -47,6 +48,7 @@ pub use real_boards::{
 };
 pub use rng::Rng;
 pub use rules::Rules;
+pub use scenario::{ScenarioConfig, ScenarioPlan, ScenarioSeat, deadline_tier};
 pub use secrets::Secrets;
 pub use trinkets::{Trinket, TrinketDb, TRINKET_CHOICES, TRINKET_SLOTS};
 

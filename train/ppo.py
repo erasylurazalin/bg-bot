@@ -110,6 +110,13 @@ def args():
                    help="comp file for the overlay during training; absent means no overlay")
     a.add_argument("--overlay-bonus", type=float, default=8.0,
                    help="B, the comp payoff bonus")
+    a.add_argument("--scenario-comps", default=None,
+                   help="semicolon-separated comp names (from --overlay-comps) that scenario "
+                        "games start with; absent means no scenario games")
+    a.add_argument("--scenario-share", type=float, default=0.0,
+                   help="fraction of training games that start as scenario games (0: off)")
+    a.add_argument("--scenario-turns", default="7,11",
+                   help="MIN,MAX turn a scenario game starts on, drawn uniformly")
     a.add_argument("--wheels-full", type=int, default=0,
                    help="games with the overlay at full strength (0 with --wheels-end 0: no fade)")
     a.add_argument("--wheels-end", type=int, default=0,
@@ -239,6 +246,14 @@ OVERLAY_BONUS = 8.0
 COMP_HEALTH_PENALTY = 0.0
 COMP_SPECS = []
 COMP_COUNT = 0
+# --scenario-comps/--scenario-share/--scenario-turns: the comp names a
+# scenario game may start with, the turn range, and the keys the scenario eval
+# writes. Set in main; evals use the turn range so a scenario eval matches the
+# training starts.
+SCENARIO_NAMES = []
+SCENARIO_TURN_MIN = 7
+SCENARIO_TURN_MAX = 11
+SCENARIO_LABELS = []  # (label, names, specs) for each comp and "pooled"
 # The overlay flag order is in crates/bgcore/src/overlay.rs.
 F_SHELL_LEGAL = 0
 F_SHELL_TAKEN = 1
@@ -400,29 +415,34 @@ def names_at_rev(rev):
     return table_names(cards), hero_list
 
 
-def evaluate(net, n_games, lineup, dev, seed, real_boards=None):
+def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None):
     """_evaluate, retried on a new seed when a scripted bot hits the engine's
     illegal-action panic (a known engine bug, 2026-11-02), so one bad test
     game doesn't kill the training run."""
     for attempt in range(4):
         try:
-            return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards)
+            return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards,
+                             scenario_names)
         except BaseException as e:  # pyo3 PanicException is a BaseException
             if type(e).__name__ != "PanicException" or attempt == 3:
                 raise
             print(f"eval panic ({e}); retrying with a new seed", flush=True)
 
 
-def _evaluate(net, n_games, lineup, dev, seed, real_boards=None):
+def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None):
     """Play n_games with `lineup` and return (avg_place, learner_records).
 
     With --overlay-comps the comp input is on and the wheels are off: the
     overlay is only probed for its flags (no forced move and no bonus is
     applied). Each record carries the game's first active comp, final board,
-    and the turns the Shell was legal and taken, for the comp eval line."""
+    the turns the Shell was legal and taken, and, with `scenario_names`, the
+    scenario starting body, for the comp eval line."""
     n = min(n_games, 1024)
+    scenario = dict(scenario_comps=OVERLAY_COMPS, scenario_names=list(scenario_names),
+                    scenario_share=1.0, scenario_turn_min=SCENARIO_TURN_MIN,
+                    scenario_turn_max=SCENARIO_TURN_MAX) if scenario_names is not None else {}
     env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
-                      real_lobby_filter=REAL_LOBBY_FILTER)
+                      real_lobby_filter=REAL_LOBBY_FILTER, **scenario)
     if OVERLAY_COMPS:
         env.set_overlay(OVERLAY_COMPS, 0.0)
     b = Bufs(n)
@@ -432,6 +452,9 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None):
     tier_seen = np.zeros((n, P, bgpy.MAX_TIER), np.int8)
     tribe_seen = np.zeros((n, P, bgpy.TRIBES), np.int8)
     comp_turn = np.zeros((n, P), np.int16)
+    start_body = np.full((n, P, bgpy.BOARD), -1, np.int16)
+    if scenario_names is not None:
+        start_body[:] = np.asarray(env.scenario_bodies(), dtype=np.int16)
     shell_legal = [set() for _ in range(n * P)]
     shell_taken = [set() for _ in range(n * P)]
     ar = np.arange(n)
@@ -467,6 +490,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None):
         done += int(b.reset.sum())
         if b.reset.any():
             finals = env.final_boards() if OVERLAY_COMPS else None
+            fresh_body = np.asarray(env.scenario_bodies(), dtype=np.int16) \
+                if scenario_names is not None else None
             for e in np.nonzero(b.reset)[0]:
                 for s in np.nonzero(kinds[e] == LEARNER)[0]:
                     key = e * P + s
@@ -478,6 +503,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None):
                             "comp_turn": int(comp_turn[e, s]),
                             "final": ([int(x) for x in finals[e][s] if x >= 0]
                                       if finals is not None else []),
+                            "body_start": [int(x) for x in start_body[e, s] if x >= 0],
                             "shell_legal": shell_legal[key],
                             "shell_taken": shell_taken[key],
                         },
@@ -488,6 +514,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None):
                     comp_turn[e, s] = 0
                     shell_legal[key] = set()
                     shell_taken[key] = set()
+                if fresh_body is not None:
+                    start_body[e] = fresh_body[e]
             env.kinds(b.kinds)
     avg_place = float(np.mean([r[0] for r in records]))
     return avg_place, records
@@ -589,9 +617,54 @@ def summarize_comps(records, specs):
     }
 
 
+def scenario_slug(name):
+    """A metrics.csv-safe label for a comp's scenario columns."""
+    out = "".join(c.lower() if c.isalnum() else "_" for c in name)
+    while "__" in out:
+        out = out.replace("__", "_")
+    return out.strip("_") or "comp"
+
+
+def summarize_scenario(records, specs):
+    """The scenario eval's numbers: average place, top-4 and first place, the
+    share ending as the comp (the comp eval line's test), and the share of the
+    starting body's minions no longer on the final board.
+
+    The body is a multiset of card ids: a starting copy counts as kept when
+    the final board has a copy of that card left. A body that triple-merged
+    therefore counts the two merged copies as gone, which is the closest the
+    final card ids can say."""
+    places = np.array([r[0] for r in records], dtype=np.float64)
+    ended = sum(
+        1 for r in records
+        if any(comp_specs.ends_as_comp(r[3]["final"], spec) for spec in specs)
+    )
+    sold, sold_games = 0, 0
+    for r in records:
+        start = r[3]["body_start"]
+        if not start:
+            continue
+        left = list(r[3]["final"])
+        kept = 0
+        for card in start:
+            if card in left:
+                left.remove(card)
+                kept += 1
+        sold += len(start) - kept
+        sold_games += len(start)
+    return {
+        "place": float(places.mean()) if records else float("nan"),
+        "top4": float((places <= 4).mean()) if records else 0.0,
+        "first": float((places == 1).mean()) if records else 0.0,
+        "end": float(ended / len(records)) if records else 0.0,
+        "body_sold": float(sold / sold_games) if sold_games else float("nan"),
+    }
+
+
 def main():
     global FORCE_TURN2, FORCE_DARK, REAL_LOBBY_FILTER
     global OVERLAY_COMPS, OVERLAY_BONUS, COMP_HEALTH_PENALTY, COMP_SPECS, COMP_COUNT
+    global SCENARIO_NAMES, SCENARIO_TURN_MIN, SCENARIO_TURN_MAX, SCENARIO_LABELS
     cfg = args()
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
@@ -603,6 +676,21 @@ def main():
         COMP_COUNT = comp_specs.count(cfg.overlay_comps)
         COMP_HEALTH_PENALTY = comp_specs.health_penalty(cfg.overlay_comps)
         raw_specs = comp_specs.load_comps(cfg.overlay_comps)
+    if cfg.scenario_comps:
+        if not cfg.overlay_comps:
+            raise SystemExit("--scenario-comps needs --overlay-comps: the names come from that file")
+        SCENARIO_NAMES = [n.strip() for n in cfg.scenario_comps.split(";") if n.strip()]
+        known = {s["name"] for s in raw_specs}
+        for name in SCENARIO_NAMES:
+            if name not in known:
+                raise SystemExit(f"--scenario-comps: no comp named {name!r} in {cfg.overlay_comps}")
+        try:
+            lo, hi = (int(x) for x in cfg.scenario_turns.split(","))
+        except ValueError:
+            raise SystemExit(f"--scenario-turns {cfg.scenario_turns}: needs MIN,MAX")
+        if lo < 1 or hi < lo:
+            raise SystemExit(f"--scenario-turns {cfg.scenario_turns}: need 1 <= MIN <= MAX")
+        SCENARIO_TURN_MIN, SCENARIO_TURN_MAX = lo, hi
     # a training setting, not a model one: the checkpoint and its weights are
     # the same with the blocks recomputed or kept
     set_recompute(not cfg.no_recompute)
@@ -667,14 +755,29 @@ def main():
     cfg.old_boards = OLD_BOARDS
     print(f"opponents' old boards: {OLD_BOARDS}")
     N, T = cfg.envs, cfg.steps
+    if SCENARIO_NAMES and real is None:
+        raise SystemExit("--scenario-comps needs real boards: the starting body is a real board")
+    scenario_kw = (
+        dict(scenario_comps=cfg.overlay_comps, scenario_names=SCENARIO_NAMES,
+             scenario_share=cfg.scenario_share, scenario_turn_min=SCENARIO_TURN_MIN,
+             scenario_turn_max=SCENARIO_TURN_MAX)
+        if SCENARIO_NAMES else {}
+    )
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS,
-                      real_lobby_filter=REAL_LOBBY_FILTER)
+                      real_lobby_filter=REAL_LOBBY_FILTER, **scenario_kw)
     if cfg.overlay_comps:
         env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus)
         print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}")
     names = env.card_names()
     hero_names = env.hero_names()
     COMP_SPECS = comp_specs.ids(raw_specs, names) if raw_specs else []
+    if SCENARIO_NAMES:
+        by_name = {s["name"]: s for s in COMP_SPECS}
+        SCENARIO_LABELS = [(name, [name], [by_name[name]]) for name in SCENARIO_NAMES]
+        SCENARIO_LABELS.append(
+            ("pooled", list(SCENARIO_NAMES), [by_name[name] for name in SCENARIO_NAMES]))
+        print(f"scenario starts: {cfg.scenario_share:.0%} of games, turns "
+              f"{SCENARIO_TURN_MIN}..{SCENARIO_TURN_MAX}, comps {', '.join(SCENARIO_NAMES)}")
     if cfg.overlay_comps:
         print(f"overlay {cfg.overlay_comps}: {COMP_COUNT} comps, B {cfg.overlay_bonus:g}, "
               f"wheels full {cfg.wheels_full} end {cfg.wheels_end}, lambda {cfg.aux_weight:g}")
@@ -746,10 +849,15 @@ def main():
     new_csv = not csv_path.exists()
     csv_file = open(csv_path, "a", newline="")
     log = csv.writer(csv_file)
+    scen_metrics = ("place", "top4", "first", "end", "body_sold")
+    eval_keys = list(EVAL_KEYS) + [
+        f"scen_{scenario_slug(label)}_{metric}"
+        for label, _, _ in SCENARIO_LABELS for metric in scen_metrics
+    ]
     if new_csv:
         log.writerow([
             "update", "minutes", "games",
-            *EVAL_KEYS,
+            *eval_keys,
             *TRAIN_KEYS,
             *[f"act_{k}" for k in KINDS],
             "top_buys",
@@ -1075,6 +1183,16 @@ def main():
             if real is not None:
                 vs_real, rec_real = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7],
                                              dev, seed + 6, real)
+            # Scenario starts, wheels off, for every comp and pooled. Each is
+            # one learner against seven real seats, the body sold measured
+            # against the board the scenario started with.
+            scen_vals = {}
+            if SCENARIO_LABELS and rec_real is not None:
+                for k, (label, snames, specs) in enumerate(SCENARIO_LABELS):
+                    _, rec_s = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
+                                        seed + 20 + 3 * k, real, scenario_names=snames)
+                    for metric, val in summarize_scenario(rec_s, specs).items():
+                        scen_vals[f"scen_{scenario_slug(label)}_{metric}"] = val
             net.train()
 
             rep = summarize_records(rec_std + rec_rush + rec_4s + rec_4r + rec_4m)
@@ -1094,13 +1212,14 @@ def main():
                 "place_vs_real": vs_real,
                 **rep,
                 **comp_rep,
+                **scen_vals,
             }
             for key, val in eval_vals.items():
                 tb.add_scalar(f"eval/{key}", val, update)
 
             log.writerow([
                 update, f"{minutes:.1f}", games,
-                *[f"{eval_vals[k]:.3f}" for k in EVAL_KEYS],
+                *[f"{eval_vals[k]:.3f}" for k in eval_keys],
                 *[f"{stats[k]:.4g}" for k in TRAIN_KEYS],
                 *[f"{stats[f'act_{k}']:.3f}" for k in KINDS],
                 top_buys,
@@ -1134,6 +1253,16 @@ def main():
                 print(f"stopping: no gain for {minutes - flat_since:.0f} min and even with the "
                       f"oldest snapshot ({snap_recent:.2f})", flush=True)
                 done = True
+            scen_txt = ""
+            if scen_vals:
+                parts = []
+                for label, _, _ in SCENARIO_LABELS:
+                    slug = scenario_slug(label)
+                    short = label.split(" - ")[-1].replace(" ", "")
+                    v = {m: scen_vals[f"scen_{slug}_{m}"] for m in scen_metrics}
+                    parts.append(f"{short} {v['place']:.2f}/{v['top4']:.0%}/"
+                                 f"{v['first']:.0%}/{v['end']:.0%}/{v['body_sold']:.0%}")
+                scen_txt = "  scen(" + " ".join(parts) + ")"
             print(
                 f"update {update:5d}  {minutes:5.1f} min  {games:7d} games  "
                 f"vs7(std {vs_std:.2f} rush {vs_rush:.2f} real {vs_real:.2f})  "
@@ -1149,7 +1278,8 @@ def main():
                 f"shell {comp_rep['shell_rate']:.0%} first {comp_rep['first_share']:.0%})  "
                 f"wheels(B {stats['wheels_b']:.2f} lam {stats['wheels_lambda']:.2f} "
                 f"aux {stats['aux_loss']:.3f} active {stats['comp_active']:.0%})  "
-                f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  buys {top_buys}",
+                f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  "
+                f"buys {top_buys}{scen_txt}",
                 flush=True,
             )
         if done:

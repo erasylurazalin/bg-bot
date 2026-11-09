@@ -42,11 +42,15 @@ pub struct ShellLine {
 
 /// The overlay's per-seat, per-game state: the Shell line and one bit per comp
 /// whose abort rule has fired. A bit stays set for the rest of the game, so an
-/// aborted comp's enabler never activates it later.
+/// aborted comp's enabler never activates it later. `scenario_comp` is set
+/// only in a scenario game: the comp the seat was started with. When several
+/// comps are active, the overlay reports that one instead of the file's first
+/// (its enabler still has to pass the normal check; see `active_comp`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OverlayState {
     pub shell: ShellLine,
     pub aborted: u64,
+    pub scenario_comp: Option<u8>,
 }
 
 impl OverlayState {
@@ -88,20 +92,27 @@ impl Overlay {
     }
 
     /// The comp that is active for `p`, if any. Several comps can be active;
-    /// the first in file order wins (the order the file lists them in).
+    /// the first in file order wins (the order the file lists them in),
+    /// except that a scenario seat's own comp wins when its enabler passes
+    /// (otherwise the scenario comp would lose to an earlier comp whose
+    /// enabler happens to be a subset).
     pub fn active_comp(&self, game: &Game, p: usize, state: &OverlayState) -> Option<usize> {
         let pl = &game.players[p];
-        for (i, c) in self.comps.comps.iter().enumerate() {
-            if !state.is_aborted(i)
+        let active = |i: usize| {
+            let c = &self.comps.comps[i];
+            !state.is_aborted(i)
                 && c.has_enabler()
                 && c.lobby_ok(&game.lobby)
                 && c.enabler_held(&pl.board, &pl.hand)
                 && !c.abort_condition(game.turn, pl.tier, &pl.board, &pl.hand)
-            {
-                return Some(i);
-            }
+        };
+        if let Some(ci) = state.scenario_comp.map(usize::from)
+            && ci < self.comps.comps.len()
+            && active(ci)
+        {
+            return Some(ci);
         }
-        None
+        (0..self.comps.comps.len()).find(|&i| active(i))
     }
 
     /// Fill `bonus` for one decision and return the forced action, if any.

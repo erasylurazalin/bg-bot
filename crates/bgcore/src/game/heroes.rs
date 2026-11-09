@@ -72,6 +72,17 @@ impl Game {
     /// then only waits for Finley's power Discover; with none open, turn 1
     /// starts right away.
     pub(super) fn deal_random_heroes(&mut self) {
+        self.deal_heroes();
+        match self.order.iter().position(|&p| !self.players[p as usize].done) {
+            Some(c) => self.cursor = c,
+            None => self.start_turn(),
+        }
+    }
+
+    /// The hero deal without starting the game: a scenario start places its
+    /// boards and hands before turn T begins (`Game::new_scenario`). Leaves
+    /// `done` set for the seats waiting on a pick, like `deal_random_heroes`.
+    pub(super) fn deal_heroes(&mut self) {
         let mut deck: Vec<u8> = self.data.heroes.lobby_allowed(self.lobby).collect();
         self.rng.shuffle(&mut deck);
         let mut at = 0;
@@ -86,10 +97,6 @@ impl Game {
         }
         self.order = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
         self.rng.shuffle(&mut self.order);
-        match self.order.iter().position(|&p| !self.players[p as usize].done) {
-            Some(c) => self.cursor = c,
-            None => self.start_turn(),
-        }
     }
 
     /// Give player `p` this hero outright, no offer: the pick phase's

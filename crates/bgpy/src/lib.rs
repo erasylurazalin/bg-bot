@@ -21,6 +21,7 @@ use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{
     RealBoard, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
 };
+use bgcore::scenario::ScenarioConfig;
 use bgcore::shop_replay::{SeatedStep, ShopSnapshot};
 use bgcore::search::Position;
 use bgcore::{
@@ -130,6 +131,9 @@ struct Env {
     /// `remember_boards` updates this; `final_boards` returns it after a
     /// game ends.
     last_board: [[i16; BOARD]; PLAYERS],
+    /// The board a scenario seat started the game with, -1 for a normal seat.
+    /// `scenario_bodies` returns it, so the eval can measure the body sold.
+    scenario_body: [[i16; BOARD]; PLAYERS],
     /// The Shell line and abort bits, per seat and game.
     overlay_states: [OverlayState; PLAYERS],
 }
@@ -141,6 +145,7 @@ impl Env {
         lineup: &[u8; SEAT_KINDS],
         boards: Option<&Arc<RealBoards>>,
         era_game: Option<&(String, u32)>,
+        scenario: Option<&Arc<ScenarioConfig>>,
     ) -> Env {
         let mut rng = Rng::new(seed ^ 0x6a09_e667_f3bc_c908);
         let mut kinds = [LEARNER; PLAYERS];
@@ -153,31 +158,58 @@ impl Env {
         }
         rng.shuffle(&mut kinds);
         let real: Vec<usize> = (0..PLAYERS).filter(|&p| kinds[p] == REAL).collect();
-        let game = match era_game {
-            Some((source, game)) => Game::new_random_heroes_era(
+        let plan = scenario.and_then(|sc| {
+            let seats: Vec<usize> =
+                (0..PLAYERS).filter(|&p| matches!(kinds[p], LEARNER | SNAPSHOT)).collect();
+            sc.plan(seed, data, &seats)
+        });
+        let game = if let Some(plan) = &plan {
+            Game::new_scenario(
                 data.clone(),
                 seed,
                 &real,
-                boards.expect("real seats need real boards").clone(),
-                real[0],
-                source.clone(),
-                *game,
-            ),
-            None if real.is_empty() => Game::new_random_heroes(data.clone(), seed),
-            None => Game::new_random_heroes_real(
-                data.clone(),
-                seed,
-                &real,
-                boards.expect("real seats need real boards").clone(),
-            ),
+                boards.expect("a scenario game needs real boards").clone(),
+                plan,
+            )
+        } else {
+            match era_game {
+                Some((source, game)) => Game::new_random_heroes_era(
+                    data.clone(),
+                    seed,
+                    &real,
+                    boards.expect("real seats need real boards").clone(),
+                    real[0],
+                    source.clone(),
+                    *game,
+                ),
+                None if real.is_empty() => Game::new_random_heroes(data.clone(), seed),
+                None => Game::new_random_heroes_real(
+                    data.clone(),
+                    seed,
+                    &real,
+                    boards.expect("real seats need real boards").clone(),
+                ),
+            }
         };
+        let mut overlay_states = [OverlayState::default(); PLAYERS];
+        let mut scenario_body = [[-1i16; BOARD]; PLAYERS];
+        if let Some(plan) = &plan {
+            for p in 0..PLAYERS {
+                let Some(seat) = &plan.seats[p] else { continue };
+                overlay_states[p].scenario_comp = Some(seat.comp as u8);
+                for (k, m) in game.players[p].board.iter().enumerate() {
+                    scenario_body[p][k] = m.card as i16;
+                }
+            }
+        }
         Env {
             game,
             kinds,
             rng,
             reported: [false; PLAYERS],
             last_board: [[-1; BOARD]; PLAYERS],
-            overlay_states: [OverlayState::default(); PLAYERS],
+            scenario_body,
+            overlay_states,
         }
     }
 
@@ -251,6 +283,8 @@ struct VecEnv {
     old_boards: OldBoards,
     /// The comp rules, when the overlay is on.
     overlay_rules: Option<Arc<Overlay>>,
+    /// The scenario-start settings, when scenario games are on.
+    scenario: Option<Arc<ScenarioConfig>>,
     /// The last completed game's final board card ids per seat, -1 empty.
     finals: Vec<[[i16; BOARD]; PLAYERS]>,
 }
@@ -286,8 +320,12 @@ impl VecEnv {
     /// this game's lobby (docs/real-boards.md "The lobby filter").
     /// `era_game`: (source, game) whose own boards the first real seat plays,
     /// with the other real seats' pool leaving that game out.
+    /// `scenario_comps`/`scenario_names`: a comp file and the comp names a
+    /// scenario game may start with; `scenario_share` is the share of new
+    /// games that are scenario games (0: off), and `scenario_turn_min`/
+    /// `scenario_turn_max` the turn it starts on (uniform, inclusive).
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -300,6 +338,11 @@ impl VecEnv {
         old_boards: Option<&str>,
         real_lobby_filter: bool,
         era_game: Option<(String, u32)>,
+        scenario_comps: Option<&str>,
+        scenario_names: Option<Vec<String>>,
+        scenario_share: f64,
+        scenario_turn_min: u32,
+        scenario_turn_max: u32,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -313,6 +356,28 @@ impl VecEnv {
             }
         };
         let data = Arc::new(data);
+        let scenario = match (scenario_comps, scenario_names) {
+            (None, None) => None,
+            (Some(path), Some(names)) => {
+                let text = std::fs::read_to_string(path)
+                    .map_err(|e| PyValueError::new_err(format!("{path}: {e}")))?;
+                let comps = Comps::from_toml(&text, &data).map_err(PyValueError::new_err)?;
+                let cfg = ScenarioConfig::new(
+                    comps,
+                    &names,
+                    scenario_turn_min,
+                    scenario_turn_max,
+                    scenario_share,
+                )
+                .map_err(PyValueError::new_err)?;
+                Some(Arc::new(cfg))
+            }
+            _ => {
+                return Err(PyValueError::new_err(
+                    "scenario games need both scenario_comps (the comp file) and scenario_names",
+                ));
+            }
+        };
         let boards = real_boards.map(|raw| {
             let specs = real_board_specs(raw);
             // Names that match no card are dropped here; train/real_boards.py
@@ -323,6 +388,11 @@ impl VecEnv {
             Arc::new(boards)
         });
         let lineup = check_lineup(lineup, boards.is_some())?;
+        if scenario.is_some() && boards.is_none() {
+            return Err(PyValueError::new_err(
+                "scenario games need real_boards: the starting body is a real board",
+            ));
+        }
         if let Some((source, game)) = &era_game {
             if lineup[REAL as usize] == 0 {
                 return Err(PyValueError::new_err("era_game needs a real seat"));
@@ -344,7 +414,16 @@ impl VecEnv {
         };
         let seed = seed.wrapping_mul(1 << 32);
         let mut envs: Vec<Env> = (0..n as u64)
-            .map(|i| Env::new(&data, seed + i, &lineup, boards.as_ref(), era_game.as_ref()))
+            .map(|i| {
+                Env::new(
+                    &data,
+                    seed + i,
+                    &lineup,
+                    boards.as_ref(),
+                    era_game.as_ref(),
+                    scenario.as_ref(),
+                )
+            })
             .collect();
         envs.par_iter_mut().for_each(Env::advance);
         Ok(VecEnv {
@@ -356,6 +435,7 @@ impl VecEnv {
             next_seed: seed + n as u64,
             old_boards,
             overlay_rules: None,
+            scenario,
             finals: vec![[[-1; BOARD]; PLAYERS]; n],
         })
     }
@@ -521,6 +601,17 @@ impl VecEnv {
             .collect()
     }
 
+    /// Every game's scenario starting board: `[game][seat][slot]`, -1 for a
+    /// seat and slot that did not start with a body. The eval reads it when a
+    /// game starts, also after each reset, to measure how much of that body
+    /// was sold by the end.
+    fn scenario_bodies(&self) -> Vec<Vec<Vec<i16>>> {
+        self.envs
+            .iter()
+            .map(|env| env.scenario_body.iter().map(|row| row.to_vec()).collect())
+            .collect()
+    }
+
     /// Take `actions[i]` for the waiting seat of game i. Fills
     /// `places[i, seat]`, `tier_turns[i, seat, 0..6]` and
     /// `tribes[i, seat, 0..TRIBES]` (the ten tribes in `Tribe::EVERY` order,
@@ -552,8 +643,14 @@ impl VecEnv {
         {
             return Err(PyValueError::new_err("array sizes don't match the number of games"));
         }
-        let (data, lineup, boards, era_game, base) =
-            (&self.data, self.lineup, &self.boards, &self.era_game, self.next_seed);
+        let (data, lineup, boards, era_game, scenario, base) = (
+            &self.data,
+            self.lineup,
+            &self.boards,
+            &self.era_game,
+            &self.scenario,
+            self.next_seed,
+        );
         let envs = &mut self.envs;
         let finals = &mut self.finals;
         let bad = py.detach(|| {
@@ -586,6 +683,7 @@ impl VecEnv {
                             &lineup,
                             boards.as_ref(),
                             era_game.as_ref(),
+                            scenario.as_ref(),
                         );
                         env.advance();
                         *reset = true;

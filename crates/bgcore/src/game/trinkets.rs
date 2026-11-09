@@ -765,6 +765,11 @@ impl Game {
     /// start-of-turn effects (which a trinket picked this turn never gets,
     /// because the offer is dealt here and picked later).
     pub(super) fn trinket_start_of_turn(&mut self, p: usize) {
+        // A scenario game hands out no Trinkets: a synthetic history never
+        // earned one (docs/briefs/comp-starts.md). Normal games are unchanged.
+        if self.scenario_game && !self.players[p].real {
+            return;
+        }
         self.open_trinket_offers(p);
         if self.players[p].trinket_events & crate::trinkets::STARTS_TURN == 0 {
             return;

@@ -140,6 +140,10 @@ impl Game {
     /// `dark_gift_cost` Gold, works once a turn, has `dark_gift_uses` uses a
     /// game and is locked until `dark_gift_turn` (docs/rules/darkgifts.md).
     pub(super) fn dark_gift_usable(&self, p: usize) -> bool {
+        // A scenario game hands out no Dark Gifts (docs/briefs/comp-starts.md).
+        if self.scenario_game && !self.players[p].real {
+            return false;
+        }
         if self.data.gifts.is_empty() || self.turn < self.data.rules.dark_gift_turn as u32 {
             return false;
         }

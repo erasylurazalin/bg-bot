@@ -2040,8 +2040,10 @@ turned back on.
   index plus one is `F_COMP`), and `remember_boards()` must be called
   after `observe` and before `step` when `final_boards()` is needed.
   `final_boards()` returns the last completed game's board card ids per seat.
-  Only the current player's row is computed, because `Game::is_legal` is
-  current-player only; the other seats are neutral.
+  `scenario_bodies()` returns the board a scenario seat started with, for the
+  scenario eval's body-sold measure. Only the current player's row is computed,
+  because `Game::is_legal` is current-player only; the other seats are
+  neutral.
   `overlay_comp(comp)` fills every seat's active comp index or -1 without
   changing a Shell line or latching an abort, and `overlay_probe(forced,
   flags)` gives the overlay's advice on a copy of the state. The second is
@@ -2075,6 +2077,50 @@ turned back on.
   comp input and B 0 still uses `train/eval_search.py`'s own `play` function;
   a comp-input network uses the same loop with the overlay probed only, so
   its comp input stays on.
+
+## Scenario starts
+
+`crates/bgcore/src/scenario.rs` and `Game::new_scenario` are the training
+mode from `docs/briefs/comp-starts.md`: a game can begin on a later turn with
+a real board already on the board and a comp's core cards in hand, so the
+network gets to practice playing an assembled comp. It is off unless asked
+for; normal games never read it.
+
+- **What a scenario game gets:** a turn drawn from `MIN..MAX` (uniform), a
+  lobby that holds the comp's `lobby` tribes and every core card's own tribe
+  or lobby tie (so every core card is in the pool), and one real board of
+  that turn as each scenario seat's body. The body comes from `RealBoards`
+  with the lobby filter, exactly as a real seat draws it, so its minions hold
+  no pool copies. The seat's hand is replaced by the comp's `core` cards,
+  highest `weight` first and at most `HAND` of them, each taken out of the
+  pool. Tier is the higher of the scenario deadline curve (`0,0,0,0,3,3,4,5`,
+  tier 6 from turn 9) and the comp's highest core card; Health is uniform 15
+  to 35 after the turn's start-of-turn effects; Gold is the normal Gold for
+  the turn; the hero is drawn as usual. Scenario seats get no Trinkets and
+  no Dark Gifts, and the Dark Discovery action is illegal for them. Real
+  seats play as they do now.
+- **The comp input:** `OverlayState.scenario_comp` names the comp a seat was
+  started with. When several comps are active, `Overlay::active_comp` reports
+  that one if its normal enabler check passes; otherwise the file-order rule
+  is unchanged. This keeps a scenario comp from losing the tie to an earlier
+  comp whose enabler happens to be a subset (Beetles against Tasty Lobstah,
+  or Unbound Tempest against Demons - Shop Buff's Brann).
+- **`bgpy.VecEnv`:** `scenario_comps` is the comp file,
+  `scenario_names` the comp names a game may start with, `scenario_share`
+  the share of new games that are scenario games (0: off), and
+  `scenario_turn_min`/`scenario_turn_max` the turn range. The choice is
+  drawn from the game seed with its own RNG, so a scenario game is
+  deterministic. `scenario_bodies()` gives the starting body for the eval.
+- **`train/ppo.py`:** `--scenario-comps "A;B;C"`, `--scenario-share S` and
+  `--scenario-turns MIN,MAX` turn it on. The eval block adds one scenario
+  eval per comp and a pooled one (`scen_<comp>_place`, `_top4`, `_first`,
+  `_end`, `_body_sold` in `metrics.csv`): one learner against seven real
+  seats from scenario starts, wheels off. `_body_sold` is the share of the
+  starting body's card copies no longer on the final board.
+- **`bgbench fuzz|games`:** `--scenario-comps "A;B"`, `--scenario-file PATH`,
+  `--scenario-share PCT` and `--scenario-turns MIN,MAX`, with
+  `--real-boards DIR` for the bodies. The fuzzer then checks pool accounting
+  after every action in scenario games too.
 
 ## Era's turns, with Era's luck
 
@@ -2258,6 +2304,9 @@ Deleting `.venv` undoes it.
 - The comp overlay is off in training unless `--overlay-comps FILE` is given
   (`--overlay-bonus B`, default 8). A PPO forced press (Dark Gift, level)
   wins over the overlay on that row.
+- Scenario starts are off unless `--scenario-comps "A;B"` is given
+  (`--scenario-share`, `--scenario-turns`; see "Scenario starts"). They need
+  real boards and the overlay's comp file.
 - Reward is placement only (+1 for 1st to -1 for 8th), minus 0.002 per
   Move action (`--action-cost`, `--cost-kinds move`) so it doesn't shuffle
   its board for free; buys, sells, plays and refreshes cost nothing extra,
@@ -2273,7 +2322,8 @@ Deleting `.venv` undoes it.
   standard, economy rush and slow games), a tribe report, entropy and the
   action mix. With real boards loaded (real seats in the lineup, or
   `--real-boards` given), `place_vs_real` holds the one-learner-vs-7-real-
-  seats eval.
+  seats eval. With scenario starts on, the `scen_...` columns hold the
+  scenario eval per comp and pooled.
 - `--stop-flat N` stops a run after N minutes without gains, but only when
   it also no longer beats its oldest snapshot.
 - Any change to the action space or observation breaks old checkpoints;

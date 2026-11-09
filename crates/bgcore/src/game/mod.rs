@@ -32,7 +32,9 @@ use crate::heroes::PowerEffect;
 use crate::darkgifts::DarkGiftPlan;
 use crate::minion::{CardId, GiftOn, Keywords, Minion};
 use crate::real_boards::RealBoards;
+use crate::scenario::ScenarioPlan;
 use crate::trinkets::{CardMod, Event};
+use self::shop::give_back;
 use self::trinkets::MinionPrice;
 use crate::rng::Rng;
 use crate::{
@@ -1312,6 +1314,10 @@ pub struct Game {
     /// Set only by `Game::new_sandbox`: one player, a rigged Tavern and a
     /// fight against a copy of the player's own board. None in a normal game.
     pub sandbox: Option<Sandbox>,
+    /// Set only by `Game::new_scenario`: a training game that started late.
+    /// Its non-real seats get no Trinkets and no Dark Gifts (the scenario
+    /// brief's "none"), so a synthetic history cannot hand them out.
+    pub scenario_game: bool,
     /// The boards real seats (`Player.real`) draw from, set with them by
     /// `Game::new_random_heroes_real`. None in a game without real seats.
     pub real_boards: Option<Arc<RealBoards>>,
@@ -1456,6 +1462,90 @@ impl Game {
         g
     }
 
+    /// A scenario game (`docs/briefs/comp-starts.md`): turn `plan.turn`
+    /// begins with every seat alive. Each seat with a `ScenarioSeat` gets a
+    /// real board of that turn as its board, its comp's core cards in hand
+    /// (taken from the pool), the plan's tier and Health. Real seats play as
+    /// usual. The rest of the game is a normal game, except that scenario
+    /// games hand out no Trinkets and no Dark Gifts.
+    pub fn new_scenario(
+        data: Arc<Data>,
+        seed: u64,
+        real: &[usize],
+        boards: Arc<RealBoards>,
+        plan: &ScenarioPlan,
+    ) -> Game {
+        assert!(plan.turn >= 1, "a scenario starts at turn 1 or later");
+        let mut g = Game::unstarted(data, seed, Some(plan.lobby));
+        g.scenario_game = true;
+        g.seat_real(real);
+        g.real_boards = Some(boards);
+        g.turn = plan.turn - 1;
+        g.deal_heroes();
+        // A hero pick can open a Discover (Finley): normal games answer it
+        // before turn 1, so answer it before the scenario turn starts. It
+        // sees tier 1, the tier the pick phase happens at.
+        for p in 0..PLAYERS {
+            if Self::choice_open(&g.players[p]) {
+                g.resolve_open_choices(p);
+            }
+        }
+        let boards = g.real_boards.clone().expect("a scenario needs real boards");
+        for (p, seat) in plan.seats.iter().enumerate() {
+            let Some(seat) = seat else { continue };
+            let board = boards.draw_filtered(plan.turn, plan.lobby, None, &mut g.rng);
+            // What the hero deal put in hand or on board (Choose Your
+            // Champion's Tier 7 pick, a starting minion) is replaced by the
+            // scenario's own body and hand. Its pool copies go back first, or
+            // clearing the zones would lose them.
+            let old: Vec<_> = g.players[p]
+                .hand
+                .iter()
+                .chain(g.players[p].board.iter())
+                .copied()
+                .collect();
+            for m in &old {
+                give_back(&mut g.pool, &g.data.cards, m);
+            }
+            let pl = &mut g.players[p];
+            pl.board.clear();
+            for m in &board.minions {
+                let _ = pl.board.try_push(*m);
+            }
+            pl.hand.clear();
+            pl.tier = seat.tier;
+            pl.take_real_counters(&board.counters, board.deity);
+            for &id in &seat.core {
+                let card = g.data.cards.get(id);
+                // Tokens and spells hold no pool copy; a pool card comes out
+                // of the pool like a buy. A card with no copy left is skipped
+                // (the test comps never ask for one that is out).
+                let copies = if card.token || card.is_spell() {
+                    0
+                } else {
+                    let slot = card.pool_slot as usize;
+                    if g.pool[slot] == 0 {
+                        continue;
+                    }
+                    g.pool[slot] -= 1;
+                    1
+                };
+                let m = g.players[p].make_card(&g.data.cards, id, false, copies);
+                let _ = g.players[p].hand.try_push(m);
+            }
+        }
+        g.start_turn();
+        // The Health the brief asks for, exact: a start-of-turn heal does not
+        // move it. The Holy Vanguard aura follows the new Health.
+        for (p, seat) in plan.seats.iter().enumerate() {
+            if let Some(seat) = seat {
+                g.players[p].health = seat.health;
+                g.sync_vanguard(p);
+            }
+        }
+        g
+    }
+
     /// The hero game with a fixed lobby, for tests and the sandbox.
     pub fn new_heroes_with_lobby(data: Arc<Data>, seed: u64, lobby: Tribes) -> Game {
         let mut g = Game::unstarted(data, seed, Some(lobby));
@@ -1592,6 +1682,7 @@ impl Game {
             over: false,
             pool_untracked: false,
             sandbox: None,
+            scenario_game: false,
             real_boards: None,
             era_seat: None,
             era_game: None,

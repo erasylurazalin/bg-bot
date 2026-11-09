@@ -38,24 +38,30 @@ until=$(awk "BEGIN{print int($start + $hours * 60)}")   # HOURS may be fractiona
 lineup=2,2,0,0,0,4
 [ -f "runs/$run-lineup.txt" ] && lineup=$(cat "runs/$run-lineup.txt")
 # extra ppo.py flags for this run, one line (a resume takes them from the
-# command line, not the checkpoint), e.g. "--low-penalty 0.02"
-extra=""
-[ -f "runs/$run-args.txt" ] && extra=$(cat "runs/$run-args.txt")
+# command line, not the checkpoint), e.g. "--low-penalty 0.02". Read as shell
+# words so a quoted value with spaces (--scenario-comps "A;B") is one flag.
+extra=()
+[ -f "runs/$run-args.txt" ] && eval "extra=($(cat "runs/$run-args.txt"))"
 # flags for the first start only (no checkpoint yet), e.g. "--init-from ..."
 # (ppo.py refuses --init-from together with --resume)
-first=""
-[ -f "runs/$run-init.txt" ] && first=$(cat "runs/$run-init.txt")
+first=()
+[ -f "runs/$run-init.txt" ] && eval "first=($(cat "runs/$run-init.txt"))"
 
 (
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-  echo "$(date '+%F %T') go $hours h: $run from $start to $until min, lineup $lineup $extra" >> $log
+  echo "$(date '+%F %T') go $hours h: $run from $start to $until min, lineup $lineup ${extra[*]}" >> $log
   for try in 1 2 3 4 5; do
     t=$(t_total)
     [ "$t" -ge "$until" ] && break
     out=runs/$run-$(date +%Y%m%d-%H%M).out
     echo "$(date '+%F %T')   start at $t min, log $out" >> $log
+    if [ -f "$ck" ]; then
+      resume=(--resume "$ck")
+    else
+      resume=("${first[@]}")
+    fi
     $py ppo.py --name $run --minutes $until --compile --snapshot-every 50 \
-      --lineup $lineup $extra $([ -f "$ck" ] && echo --resume $ck || echo $first) > $out 2>&1
+      --lineup $lineup "${extra[@]}" "${resume[@]}" > $out 2>&1
     rc=$?
     echo "$(date '+%F %T')   exit $rc" >> $log
     grep -q 'no legal action' $out && echo "$(date '+%F %T')   NOTE: 'no legal action' state dump in $out" >> $log
