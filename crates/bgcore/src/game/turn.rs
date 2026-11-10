@@ -499,6 +499,7 @@ impl Game {
                 self.era_turns_added += 1;
                 self.era_outlived = true;
             }
+            let lag = self.lag;
             let Game {
                 data, rng, players, pool, sandbox, real_boards, lobby, era_seat, era_game, ..
             } = self;
@@ -537,7 +538,7 @@ impl Game {
                         .map(|(source, game)| (source.as_str(), *game));
                     // The lag applies to the real seats' draw only, not to
                     // the Era seat above (docs/engine.md).
-                    let draw_turn = turn.saturating_sub(boards.lag()).max(1);
+                    let draw_turn = turn.saturating_sub(lag).max(1);
                     boards.draw_filtered(draw_turn, *lobby, exclude, rng)
                 };
                 pl.tier = board.tier;

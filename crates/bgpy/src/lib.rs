@@ -322,6 +322,9 @@ struct VecEnv {
     scenario: Option<Arc<ScenarioConfig>>,
     /// The Era-start settings, when Era starts are on.
     era: Option<Arc<EraStartConfig>>,
+    /// Whether observations carry the game's lag as one extra scalar
+    /// (`obs::SCALAR_LAG`). Off is the old layout exactly.
+    lag_in_obs: bool,
     /// The last completed game's final board card ids per seat, -1 empty.
     finals: Vec<[[i16; BOARD]; PLAYERS]>,
 }
@@ -372,6 +375,12 @@ impl VecEnv {
     /// this game's lobby (docs/real-boards.md "The lobby filter").
     /// `real_lag`: how many turns behind a real seat's draw is; 0 is the old
     /// draw exactly. The Era seat is not lagged.
+    /// `real_lag_mix`: a weighted list of (lag, weight) pairs each game draws
+    /// its lag from at its start (docs/engine.md "The lag"); None or empty
+    /// keeps `real_lag` as a fixed lag.
+    /// `lag_in_obs`: write the game's lag as one extra scalar at the end of
+    /// the own scalars (obs::SCALAR_LAG). Off is the old observation exactly;
+    /// `real_lags()` reports every game's drawn lag.
     /// `era_game`: (source, game) whose own boards the first real seat plays,
     /// with the other real seats' pool leaving that game out.
     /// `scenario_comps`/`scenario_names`: a comp file and the comp names a
@@ -383,7 +392,7 @@ impl VecEnv {
     /// `era_turn_min`/`era_turn_max` the turn range, and `era_split` "train",
     /// "holdout" or "all" the source games it may draw from.
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train"))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train", real_lag_mix=None, lag_in_obs=false))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -407,6 +416,8 @@ impl VecEnv {
         era_turn_min: u32,
         era_turn_max: u32,
         era_split: &str,
+        real_lag_mix: Option<Vec<(u32, u32)>>,
+        lag_in_obs: bool,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -450,6 +461,9 @@ impl VecEnv {
             let (mut boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
             boards.set_lobby_filter(real_lobby_filter);
             boards.set_lag(real_lag);
+            if let Some(mix) = &real_lag_mix {
+                boards.set_lag_mix(mix);
+            }
             Arc::new(boards)
         });
         let era = match era_starts {
@@ -537,6 +551,7 @@ impl VecEnv {
             overlay_rules: None,
             scenario,
             era,
+            lag_in_obs,
             finals: vec![[[-1; BOARD]; PLAYERS]; n],
         })
     }
@@ -851,7 +866,8 @@ impl VecEnv {
         let mask = mask.as_slice_mut()?;
         let seat = seat.as_slice_mut()?;
         let kind = kind.as_slice_mut()?;
-        if obs.len() != n * OBS_SIZE
+        let size = if self.lag_in_obs { obs::OBS_SIZE_WITH_LAG } else { OBS_SIZE };
+        if obs.len() != n * size
             || mask.len() != n * N_ACTIONS
             || seat.len() != n
             || kind.len() != n
@@ -859,17 +875,22 @@ impl VecEnv {
             return Err(PyValueError::new_err("array sizes don't match"));
         }
         let old_boards = self.old_boards;
+        let lag_in_obs = self.lag_in_obs;
         py.detach(|| {
             self.envs
                 .par_iter()
-                .zip(obs.par_chunks_mut(OBS_SIZE))
+                .zip(obs.par_chunks_mut(size))
                 .zip(mask.par_chunks_mut(N_ACTIONS))
                 .zip(seat.par_iter_mut())
                 .zip(kind.par_iter_mut())
                 .for_each(|((((env, o), m), s), k)| {
                     let p = env.game.current_player().expect("a waiting game is never over");
                     debug_assert!(env.is_python(p));
-                    obs::write_with(&env.game, p, o, old_boards);
+                    if lag_in_obs {
+                        obs::write_with_lag(&env.game, p, o, old_boards);
+                    } else {
+                        obs::write_with(&env.game, p, o, old_boards);
+                    }
                     let m: &mut [bool; N_ACTIONS] = m.try_into().unwrap();
                     env.game.legal_mask(m);
                     *s = p as i64;
@@ -891,23 +912,25 @@ impl VecEnv {
         let n = self.envs.len();
         let obs = obs.as_slice_mut()?;
         let live = live.as_slice_mut()?;
-        if obs.len() != n * PLAYERS * OBS_SIZE || live.len() != n * PLAYERS {
+        let size = if self.lag_in_obs { obs::OBS_SIZE_WITH_LAG } else { OBS_SIZE };
+        if obs.len() != n * PLAYERS * size || live.len() != n * PLAYERS {
             return Err(PyValueError::new_err("array sizes don't match"));
         }
         let old_boards = self.old_boards;
+        let lag_in_obs = self.lag_in_obs;
         py.detach(|| {
             self.envs
                 .par_iter()
-                .zip(obs.par_chunks_mut(PLAYERS * OBS_SIZE))
+                .zip(obs.par_chunks_mut(PLAYERS * size))
                 .zip(live.par_chunks_mut(PLAYERS))
                 .for_each(|((env, o), l)| {
                     for p in 0..PLAYERS {
-                        obs::write_with(
-                            &env.game,
-                            p,
-                            &mut o[p * OBS_SIZE..(p + 1) * OBS_SIZE],
-                            old_boards,
-                        );
+                        let out = &mut o[p * size..(p + 1) * size];
+                        if lag_in_obs {
+                            obs::write_with_lag(&env.game, p, out, old_boards);
+                        } else {
+                            obs::write_with(&env.game, p, out, old_boards);
+                        }
                         l[p] = env.kinds[p] == LEARNER && env.game.players[p].alive;
                     }
                 });
@@ -934,6 +957,11 @@ impl VecEnv {
             let s = b.filter_stats();
             (s.draws, s.current, s.widened, s.unfiltered)
         })
+    }
+
+    /// Each game's drawn lag, in game order (0 without a real-board mix).
+    fn real_lags(&self) -> Vec<u32> {
+        self.envs.iter().map(|e| e.game.lag).collect()
     }
 
     /// Turns the Era seats have played past their real game, and how many
@@ -1507,6 +1535,48 @@ fn take_card(g: &mut Game, name: &str) -> PyResult<bgcore::Minion> {
     };
     let cards = &g.data.cards;
     Ok(g.players[0].make_card(cards, c, false, copies))
+}
+
+/// Switch the observation layout to include the game's lag (`--lag-in-obs`).
+/// Must be called before the observation arrays and the network are built:
+/// it updates bgpy's layout constants (`OBS_SIZE`, `SCALARS`, `OWN_END` and
+/// the own slot starts). Off restores the old layout exactly.
+#[pyfunction]
+fn set_lag_in_obs(py: Python<'_>, on: bool) -> PyResult<()> {
+    let m = py.import("bgpy")?;
+    let (obs_size, scalars, own_end, shop_start, shop_spell, hand, board, discover) = if on {
+        (
+            obs::OBS_SIZE_WITH_LAG,
+            obs::SCALARS_WITH_LAG,
+            obs::OWN_END_WITH_LAG,
+            obs::SHOP_START_WITH_LAG,
+            obs::SHOP_SPELL_START_WITH_LAG,
+            obs::HAND_START_WITH_LAG,
+            obs::BOARD_START_WITH_LAG,
+            obs::DISCOVER_START_WITH_LAG,
+        )
+    } else {
+        (
+            OBS_SIZE,
+            obs::SCALARS,
+            obs::OWN_END,
+            obs::SHOP_START,
+            obs::SHOP_SPELL_START,
+            obs::HAND_START,
+            obs::BOARD_START,
+            obs::DISCOVER_START,
+        )
+    };
+    m.setattr("LAG_IN_OBS", on)?;
+    m.setattr("OBS_SIZE", obs_size)?;
+    m.setattr("SCALARS", scalars)?;
+    m.setattr("OWN_END", own_end)?;
+    m.setattr("SHOP_START", shop_start)?;
+    m.setattr("SHOP_SPELL_START", shop_spell)?;
+    m.setattr("HAND_START", hand)?;
+    m.setattr("BOARD_START", board)?;
+    m.setattr("DISCOVER_START", discover)?;
+    Ok(())
 }
 
 /// A one-player sandbox position with the board, hand and Tavern a test
@@ -2494,12 +2564,19 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Planner>()?;
     m.add_class::<RealFights>()?;
     m.add_function(wrap_pyfunction!(sandbox_position, m)?)?;
+    m.add_function(wrap_pyfunction!(set_lag_in_obs, m)?)?;
     m.add_function(wrap_pyfunction!(shop_replay_turns, m)?)?;
     m.add_function(wrap_pyfunction!(era_replays, m)?)?;
     m.add("N_HEROES", n_heroes)?;
     m.add("N_POWERS", n_powers)?;
     m.add("N_TRINKETS", n_trinkets)?;
     m.add("OBS_SIZE", OBS_SIZE)?;
+    m.add("SCALARS", obs::SCALARS)?;
+    m.add("SCALAR_LAG", obs::SCALAR_LAG)?;
+    m.add("SCALARS_WITH_LAG", obs::SCALARS_WITH_LAG)?;
+    m.add("OWN_END_WITH_LAG", obs::OWN_END_WITH_LAG)?;
+    m.add("OBS_SIZE_WITH_LAG", obs::OBS_SIZE_WITH_LAG)?;
+    m.add("LAG_IN_OBS", false)?;
     m.add("N_ACTIONS", N_ACTIONS)?;
     m.add("N_CARDS", n_cards)?;
     m.add("PLAYERS", PLAYERS)?;
@@ -2515,7 +2592,6 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SHOP_SPELL", obs::SHOP_SPELL)?;
     m.add("SLOT_FEATURES", obs::SLOT_FEATURES)?;
     m.add("MINION_FEATURES", obs::MINION_FEATURES)?;
-    m.add("SCALARS", obs::SCALARS)?;
     m.add("OPP_SCALARS", obs::OPP_SCALARS)?;
     m.add("OWN_SLOTS", obs::OWN_SLOTS)?;
     m.add("OPP_SLOTS", obs::OPP_SLOTS)?;

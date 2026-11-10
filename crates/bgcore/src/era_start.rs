@@ -362,6 +362,7 @@ impl Game {
         // cards); its own logged hero and power go in after the deal.
         g.players[plan.seat].real = true;
         g.seat_real(real);
+        g.lag = boards.lag_for_game(seed);
         g.real_boards = Some(boards.clone());
         g.turn = pos.turn - 1;
         let era_hero: Vec<u8> = pos.player.hero.into_iter().collect();

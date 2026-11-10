@@ -1846,6 +1846,26 @@ minions in the hand.
   nearest-turn, lobby-filter and widening rules. The Era seat (`draw_era`) is
   not lagged. On `bgpy.VecEnv` it is `real_lag=K`; lag 0 is the old draw
   exactly.
+- **The per-game lag mix:** `RealBoards::set_lag_mix(&[(lag, weight)])` makes
+  every game draw its real seats' lag at game start from that weighted list.
+  The game's lag is fixed for the whole game (`Game.lag`, read from
+  `bgpy.VecEnv.real_lags()`). The draw is deterministic from the game's seed
+  and uses an RNG of its own, so it never moves the game's other draws: a game
+  that draws lag 0 is byte for byte the old game. `set_lag`/`real_lag` still
+  give a fixed lag, and an empty mix uses it. On `bgpy.VecEnv` it is
+  `real_lag_mix=[(0, 1), (1, 1), (2, 1)]`; `ppo.py` takes
+  `--real-lag-mix 0:1,1:1,2:1`, logs each eval's share of games and place per
+  lag, and keeps its `vs7 real` score at lag 0. The fixed starting bodies of
+  scenario and Era-start games are setup, not a real seat's turn draw, so
+  `new_scenario` and `new_era_start` place them unlagged; every later turn
+  draw uses the game's lag.
+- **The lag in the observation:** `--lag-in-obs` (off by default) writes
+  `Game.lag` as one extra own scalar at `obs::SCALAR_LAG`, after every old
+  scalar, so every own slot moves one place later and the observation is one
+  value wider (`OBS_SIZE_WITH_LAG`). Off is the old `OBS_SIZE` observation
+  byte for byte, which is what an old checkpoint reads. `bgpy` exposes
+  `set_lag_in_obs(on)` to switch its layout constants before the arrays and
+  network are built.
 
 ## The shop-turn search
 

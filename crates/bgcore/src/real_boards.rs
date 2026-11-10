@@ -475,8 +475,14 @@ pub struct RealBoards {
     lobby_filter: bool,
     /// How many turns behind a real seat's draw is (`draw_filtered`): with
     /// lag k a seat on turn t draws a board of turn `max(1, t - k)`. Off by
-    /// default: the old draw is then byte for byte the same.
+    /// default: the old draw is then byte for byte the same. This is the
+    /// fixed lag, used when `lag_mix` is empty.
     lag: u32,
+    /// A weighted list of lags a game draws from at its start (`lag_for_game`).
+    /// Empty means the fixed `lag` above. The draw uses its own RNG seeded
+    /// from the game's seed, so it never moves the game's own draws and lag 0
+    /// games stay byte for byte the old ones.
+    lag_mix: Vec<(u32, u32)>,
     filter: Arc<FilterCounters>,
 }
 
@@ -754,6 +760,7 @@ impl RealBoards {
                 era,
                 lobby_filter: false,
                 lag: 0,
+                lag_mix: Vec::new(),
                 filter: Arc::new(FilterCounters::default()),
             },
             unmatched,
@@ -773,13 +780,52 @@ impl RealBoards {
     /// Lag a real seat's draw by `k` turns: on turn t it draws a board of
     /// turn `max(1, t - k)`, through the same rules as lag 0 (the late
     /// bucket, the nearest earlier turn, the lobby filter). 0 (the default)
-    /// is the old draw exactly.
+    /// is the old draw exactly. This is the fixed lag; it replaces any mix
+    /// set by `set_lag_mix`.
     pub fn set_lag(&mut self, k: u32) {
         self.lag = k;
+        self.lag_mix.clear();
     }
 
     pub fn lag(&self) -> u32 {
         self.lag
+    }
+
+    /// Draw each game's lag from a weighted list of `(lag, weight)` pairs
+    /// instead of the fixed `lag`. A weight of 0 is ignored. The draw is
+    /// deterministic from the game's seed (`lag_for_game`) and uses an RNG
+    /// of its own, so the rest of a game is unchanged whichever lag it drew.
+    /// An empty list, or one whose weights are all 0, goes back to the fixed
+    /// lag.
+    pub fn set_lag_mix(&mut self, mix: &[(u32, u32)]) {
+        self.lag_mix = mix.iter().copied().filter(|&(_, w)| w > 0).collect();
+    }
+
+    pub fn lag_mix(&self) -> &[(u32, u32)] {
+        &self.lag_mix
+    }
+
+    /// This game's lag: the fixed `lag` when there is no mix, else one draw
+    /// from the mix. The draw is a pure function of the seed and the mix, and
+    /// uses a separate RNG so the game's own RNG is never moved.
+    pub fn lag_for_game(&self, seed: u64) -> u32 {
+        if self.lag_mix.is_empty() {
+            return self.lag;
+        }
+        let total: u64 = self.lag_mix.iter().map(|&(_, w)| w as u64).sum();
+        if total == 0 {
+            return self.lag;
+        }
+        let mut rng = Rng::new(seed ^ 0x4c41_474d_4958_0000);
+        let mut take = rng.next_u64() % total;
+        for &(lag, weight) in &self.lag_mix {
+            let weight = weight as u64;
+            if take < weight {
+                return lag;
+            }
+            take -= weight;
+        }
+        self.lag_mix.last().map_or(self.lag, |&(lag, _)| lag)
     }
 
     pub fn filter_stats(&self) -> FilterStats {

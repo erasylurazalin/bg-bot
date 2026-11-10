@@ -40,6 +40,15 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 import bgpy
+
+# --lag-in-obs changes the observation layout (one extra own scalar), and
+# model reads bgpy's layout constants when it is imported: settle the flag
+# before that import. Off restores the old layout exactly.
+_pre = argparse.ArgumentParser(add_help=False)
+_pre.add_argument("--lag-in-obs", action="store_true")
+LAG_IN_OBS = _pre.parse_known_args()[0].lag_in_obs
+bgpy.set_lag_in_obs(LAG_IN_OBS)
+
 import card_text
 import comp_specs
 import real_boards
@@ -178,6 +187,14 @@ def args():
                         "Discovery first thing when it can, in training and test games")
     a.add_argument("--real-lobby-filter", action="store_true",
                    help="a real seat draws only boards whose minions fit this game's lobby")
+    a.add_argument("--real-lag-mix", default=None,
+                   help="weighted lags each training game draws its real seats' lag from at "
+                        "game start, as LAG:WEIGHT pairs, e.g. 0:1,1:1,2:1. Each game keeps its "
+                        "lag; absent means 0. The in-run vs7 real eval stays at lag 0, and a "
+                        "separate mixed-lag eval reports the share and place per lag")
+    a.add_argument("--lag-in-obs", action="store_true",
+                   help="write the game's lag as one extra own scalar, so the value head can "
+                        "tell easy games from hard ones. Off is the old observation exactly")
     a.add_argument("--low-penalty", type=float, default=0.0,
                    help="reward taken off at each turn end per tier below the standard curve")
     a.add_argument("--low-penalty-fade", type=float, default=240,
@@ -246,6 +263,10 @@ OLD_BOARDS = "keep"
 # game's lobby (bgpy's real_lobby_filter). Set from the flag in main(), so
 # every eval game sees what the training games see.
 REAL_LOBBY_FILTER = False
+# --real-lag-mix: the weighted lags training games draw from, and the lags the
+# mixed-lag eval reports (sorted). Empty means every game is lag 0.
+REAL_LAG_MIX = []
+LAG_MIX_LAGS = []
 LEVEL = int(np.nonzero(KIND_OF.numpy() == KINDS.index("level"))[0][0])
 DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
 # --force-dark-gift: on turns 3, 4 and 5 every Python seat presses Dark
@@ -437,14 +458,14 @@ def names_at_rev(rev):
 
 
 def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
-             era_starts=None, era_split="train"):
+             era_starts=None, era_split="train", real_lag_mix=None):
     """_evaluate, retried on a new seed when a scripted bot hits the engine's
     illegal-action panic (a known engine bug, 2026-11-02), so one bad test
     game doesn't kill the training run."""
     for attempt in range(4):
         try:
             return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards,
-                             scenario_names, era_starts, era_split)
+                             scenario_names, era_starts, era_split, real_lag_mix)
         except BaseException as e:  # pyo3 PanicException is a BaseException
             if type(e).__name__ != "PanicException" or attempt == 3:
                 raise
@@ -452,14 +473,14 @@ def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=N
 
 
 def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
-              era_starts=None, era_split="train"):
+              era_starts=None, era_split="train", real_lag_mix=None):
     """Play n_games with `lineup` and return (avg_place, learner_records).
 
     With --overlay-comps the comp input is on and the wheels are off: the
     overlay is only probed for its flags (no forced move and no bonus is
     applied). Each record carries the game's first active comp, final board,
-    the turns the Shell was legal and taken, and, with `scenario_names`, the
-    scenario starting body, for the comp eval line."""
+    the turns the Shell was legal and taken, the game's drawn lag, and, with
+    `scenario_names`, the scenario starting body, for the comp eval line."""
     n = min(n_games, 1024)
     scenario = dict(scenario_comps=OVERLAY_COMPS, scenario_names=list(scenario_names),
                     scenario_share=1.0, scenario_turn_min=SCENARIO_TURN_MIN,
@@ -469,7 +490,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
                era_turn_min=ERA_TURN_MIN, era_turn_max=ERA_TURN_MAX,
                era_split=era_split) if era_mode else {}
     env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
-                      real_lobby_filter=REAL_LOBBY_FILTER, **scenario, **era)
+                      real_lobby_filter=REAL_LOBBY_FILTER, real_lag_mix=real_lag_mix,
+                      lag_in_obs=LAG_IN_OBS, **scenario, **era)
     if OVERLAY_COMPS:
         env.set_overlay(OVERLAY_COMPS, 0.0)
     b = Bufs(n)
@@ -494,6 +516,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
     shell_legal = [set() for _ in range(n * P)]
     shell_taken = [set() for _ in range(n * P)]
     ar = np.arange(n)
+    lags = env.real_lags()
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
         o = torch.from_numpy(b.obs).to(dev)
@@ -540,6 +563,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
                         {
                             "comp_turn": int(comp_turn[e, s]),
                             "era_turn": int(era_turn[e, s]),
+                            "real_lag": int(lags[e]),
                             "final": ([int(x) for x in finals[e][s] if x >= 0]
                                       if finals is not None else []),
                             "body_start": [int(x) for x in start_body[e, s] if x >= 0],
@@ -558,6 +582,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
                 if fresh_era is not None:
                     start_body[e] = fresh_era[e]
             env.kinds(b.kinds)
+            lags = env.real_lags()
     avg_place = float(np.mean([r[0] for r in records]))
     return avg_place, records
 
@@ -566,7 +591,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
 def evaluate_vs(net, other, n_games, dev, seed):
     """4 learner seats against 4 seats of `other`. Learners' average place."""
     n = min(n_games, 1024)
-    env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0, 0], old_boards=OLD_BOARDS)
+    env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0, 0], old_boards=OLD_BOARDS,
+                      lag_in_obs=LAG_IN_OBS)
     if OVERLAY_COMPS:
         env.set_overlay(OVERLAY_COMPS, 0.0)
     b = Bufs(n)
@@ -729,6 +755,7 @@ def summarize_era(records):
 
 def main():
     global FORCE_TURN2, FORCE_DARK, REAL_LOBBY_FILTER
+    global REAL_LAG_MIX, LAG_MIX_LAGS
     global OVERLAY_COMPS, OVERLAY_BONUS, COMP_HEALTH_PENALTY, COMP_SPECS, COMP_COUNT
     global SCENARIO_NAMES, SCENARIO_TURN_MIN, SCENARIO_TURN_MAX, SCENARIO_LABELS
     global ERA_STARTS, ERA_TURN_MIN, ERA_TURN_MAX
@@ -737,6 +764,20 @@ def main():
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
     REAL_LOBBY_FILTER = cfg.real_lobby_filter
+    if cfg.real_lag_mix:
+        mix = []
+        try:
+            for part in cfg.real_lag_mix.split(","):
+                lag, weight = part.split(":")
+                mix.append((int(lag), int(weight)))
+        except ValueError:
+            raise SystemExit(f"--real-lag-mix {cfg.real_lag_mix}: needs LAG:WEIGHT pairs, "
+                             "e.g. 0:1,1:1,2:1")
+        if any(lag < 0 or weight < 0 for lag, weight in mix) or sum(w for _, w in mix) <= 0:
+            raise SystemExit(f"--real-lag-mix {cfg.real_lag_mix}: lags and weights must be "
+                             "non-negative and at least one weight positive")
+        REAL_LAG_MIX = mix
+        LAG_MIX_LAGS = sorted({lag for lag, weight in mix if weight > 0})
     OVERLAY_COMPS = cfg.overlay_comps
     OVERLAY_BONUS = cfg.overlay_bonus
     raw_specs = []
@@ -785,6 +826,11 @@ def main():
     if ck is not None:
         if cfg.init_from:
             raise SystemExit("--resume and --init-from don't go together")
+        saved_lag = (ck.get("cfg") or {}).get("lag_in_obs", False)
+        if saved_lag != cfg.lag_in_obs:
+            raise SystemExit(
+                f"--lag-in-obs {'on' if cfg.lag_in_obs else 'off'} but {cfg.resume} was "
+                f"trained with it {'on' if saved_lag else 'off'}: the observation width differs")
         saved, opts = ck_model(ck)
         given = {"model": cfg.model, **{k: getattr(cfg, k) for k in model_opts(saved)
                                         if hasattr(cfg, k) and k != "card_text"}}
@@ -829,6 +875,8 @@ def main():
         real_boards.print_summary(real, unknown)
         if not real:
             raise SystemExit(f"no real boards in {folder}")
+    if REAL_LAG_MIX and (real is None or lineup[bgpy.REAL] == 0):
+        raise SystemExit("--real-lag-mix needs real seats and real boards")
 
     global OLD_BOARDS
     saved_boards = (ck.get("cfg") or {}).get("old_boards") if ck is not None else None
@@ -853,7 +901,8 @@ def main():
         if cfg.era_starts else {}
     )
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS,
-                      real_lobby_filter=REAL_LOBBY_FILTER, **scenario_kw, **era_kw)
+                      real_lobby_filter=REAL_LOBBY_FILTER, real_lag_mix=REAL_LAG_MIX,
+                      lag_in_obs=LAG_IN_OBS, **scenario_kw, **era_kw)
     if cfg.overlay_comps:
         env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus)
         print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}")
@@ -882,6 +931,12 @@ def main():
     if cfg.era_starts:
         print(f"Era starts: {cfg.era_share:.0%} of games, turns "
               f"{ERA_TURN_MIN}..{ERA_TURN_MAX}, train split, {cfg.era_starts}")
+    if REAL_LAG_MIX:
+        print("real lag mix: " + " ".join(
+            f"{lag}:{weight:g}" for lag, weight in REAL_LAG_MIX)
+            + (f"  lag in obs (OBS_SIZE {bgpy.OBS_SIZE})" if LAG_IN_OBS else ""))
+    elif LAG_IN_OBS:
+        print(f"lag in obs: on (OBS_SIZE {bgpy.OBS_SIZE})")
     if cfg.overlay_comps:
         print(f"overlay {cfg.overlay_comps}: {COMP_COUNT} comps, B {cfg.overlay_bonus:g}, "
               f"wheels full {cfg.wheels_full} end {cfg.wheels_end}, lambda {cfg.aux_weight:g}")
@@ -959,6 +1014,11 @@ def main():
         f"scen_{scenario_slug(label)}_{metric}"
         for label, _, _ in SCENARIO_LABELS for metric in scen_metrics
     ] + ([f"era_{metric}" for metric in ERA_METRICS] if cfg.era_starts else [])
+    if REAL_LAG_MIX:
+        eval_keys += ["place_vs_real_mix"] + [
+            f"real_lag_{lag}_{metric}"
+            for lag in LAG_MIX_LAGS for metric in ("share", "place")
+        ]
     if new_csv:
         log.writerow([
             "update", "minutes", "games",
@@ -1288,6 +1348,20 @@ def main():
             if real is not None:
                 vs_real, rec_real = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7],
                                              dev, seed + 6, real)
+            # The same game at the training lag mix, for the share and the
+            # place at each lag. The vs7 real number above stays at lag 0.
+            lag_vals = {}
+            if REAL_LAG_MIX and real is not None:
+                _, rec_lag = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
+                                      seed + 60, real, real_lag_mix=REAL_LAG_MIX)
+                lag_places = np.array([r[0] for r in rec_lag], dtype=np.float64)
+                lag_drawn = np.array([r[3]["real_lag"] for r in rec_lag], dtype=np.int64)
+                lag_vals["place_vs_real_mix"] = float(lag_places.mean())
+                for lag in LAG_MIX_LAGS:
+                    at = lag_drawn == lag
+                    lag_vals[f"real_lag_{lag}_share"] = float(at.mean())
+                    lag_vals[f"real_lag_{lag}_place"] = (
+                        float(lag_places[at].mean()) if at.any() else float("nan"))
             # Scenario starts, wheels off, for every comp and pooled. Each is
             # one learner against seven real seats, the body sold measured
             # against the board the scenario started with.
@@ -1328,6 +1402,7 @@ def main():
                 **comp_rep,
                 **scen_vals,
                 **era_vals,
+                **lag_vals,
             }
             for key, val in eval_vals.items():
                 tb.add_scalar(f"eval/{key}", val, update)
@@ -1383,6 +1458,15 @@ def main():
                 era_txt = (f"  era(place {era_vals['era_place']:.2f}"
                            f"/{era_vals['era_top4']:.0%}/{era_vals['era_first']:.0%}"
                            f"/body {era_vals['era_body_kept']:.0%})")
+            lag_txt = ""
+            if lag_vals:
+                parts = [
+                    f"{lag} {lag_vals[f'real_lag_{lag}_share']:.0%}"
+                    f"@{lag_vals[f'real_lag_{lag}_place']:.2f}"
+                    for lag in LAG_MIX_LAGS
+                ]
+                lag_txt = (f"  lagmix(all {lag_vals['place_vs_real_mix']:.2f}; "
+                           + " ".join(parts) + ")")
             print(
                 f"update {update:5d}  {minutes:5.1f} min  {games:7d} games  "
                 f"vs7(std {vs_std:.2f} rush {vs_rush:.2f} real {vs_real:.2f})  "
@@ -1399,7 +1483,7 @@ def main():
                 f"wheels(B {stats['wheels_b']:.2f} lam {stats['wheels_lambda']:.2f} "
                 f"aux {stats['aux_loss']:.3f} active {stats['comp_active']:.0%})  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  "
-                f"buys {top_buys}{scen_txt}{era_txt}",
+                f"buys {top_buys}{scen_txt}{era_txt}{lag_txt}",
                 flush=True,
             )
         if done:

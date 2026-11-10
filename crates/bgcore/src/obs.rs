@@ -249,6 +249,20 @@ pub const OWN_END: usize = SCALARS + OWN_SLOTS * SLOT_FEATURES;
 pub const OPP_BLOCK: usize = OPP_SCALARS + BOARD * SLOT_FEATURES;
 pub const OBS_SIZE: usize = OWN_END + (PLAYERS - 1) * OPP_BLOCK;
 
+/// The lag scalar's slot with `--lag-in-obs` on: one value after every old
+/// scalar. The old layout (and `OBS_SIZE`) does not change when it is off.
+pub const SCALAR_LAG: usize = SCALARS;
+/// The own scalar block with the lag scalar.
+pub const SCALARS_WITH_LAG: usize = SCALARS + 1;
+pub const OWN_END_WITH_LAG: usize = SCALARS_WITH_LAG + OWN_SLOTS * SLOT_FEATURES;
+pub const OBS_SIZE_WITH_LAG: usize = OWN_END_WITH_LAG + (PLAYERS - 1) * OPP_BLOCK;
+
+pub const SHOP_START_WITH_LAG: usize = SCALARS_WITH_LAG;
+pub const SHOP_SPELL_START_WITH_LAG: usize = SHOP_START_WITH_LAG + SHOP * SLOT_FEATURES;
+pub const HAND_START_WITH_LAG: usize = SHOP_SPELL_START_WITH_LAG + SHOP_SPELL * SLOT_FEATURES;
+pub const BOARD_START_WITH_LAG: usize = HAND_START_WITH_LAG + BOARD * SLOT_FEATURES;
+pub const DISCOVER_START_WITH_LAG: usize = BOARD_START_WITH_LAG + BOARD * SLOT_FEATURES;
+
 pub const SHOP_START: usize = SCALARS;
 pub const SHOP_SPELL_START: usize = SHOP_START + SHOP * SLOT_FEATURES;
 pub const HAND_START: usize = SHOP_SPELL_START + SHOP_SPELL * SLOT_FEATURES;
@@ -1224,10 +1238,35 @@ pub fn write(game: &Game, p: usize, out: &mut [f32]) {
 
 /// Write player `p`'s view into `out`, which must hold OBS_SIZE values.
 pub fn write_with(game: &Game, p: usize, out: &mut [f32], old_boards: OldBoards) {
-    assert_eq!(out.len(), OBS_SIZE);
+    write_with_layout(game, p, out, old_boards, false);
+}
+
+/// Write player `p`'s view with the game's lag as one extra scalar at
+/// `SCALAR_LAG`. `out` must hold OBS_SIZE_WITH_LAG values. With the option
+/// off `write_with` is byte for byte what it was, which is what an old
+/// checkpoint reads.
+pub fn write_with_lag(game: &Game, p: usize, out: &mut [f32], old_boards: OldBoards) {
+    write_with_layout(game, p, out, old_boards, true);
+}
+
+fn write_with_layout(
+    game: &Game,
+    p: usize,
+    out: &mut [f32],
+    old_boards: OldBoards,
+    lag_in_obs: bool,
+) {
+    let scalars = if lag_in_obs { SCALARS_WITH_LAG } else { SCALARS };
+    assert_eq!(
+        out.len(),
+        if lag_in_obs { OBS_SIZE_WITH_LAG } else { OBS_SIZE }
+    );
     let pl = &game.players[p];
     let db = &game.data.cards;
     write_scalars(game, p, &mut out[..SCALARS]);
+    if lag_in_obs {
+        out[SCALAR_LAG] = game.lag as f32;
+    }
     let on_board = Owner {
         beast_bonus: (0, 0),
         tier: pl.tier,
@@ -1238,7 +1277,7 @@ pub fn write_with(game: &Game, p: usize, out: &mut [f32], old_boards: OldBoards)
         tier: pl.tier,
         gold_spent: pl.counts.gold_spent,
     };
-    let mut i = SCALARS;
+    let mut i = scalars;
     i += write_slots(game, &mut out[i..], SHOP, pl.shop.iter(), off_board);
     out[i..i + SHOP_SPELL * SLOT_FEATURES].fill(0.0);
     if let Some(sp) = pl.shop_spell {
@@ -1330,5 +1369,5 @@ pub fn write_with(game: &Game, p: usize, out: &mut [f32], old_boards: OldBoards)
             i += n;
         }
     }
-    debug_assert_eq!(i, OBS_SIZE);
+    debug_assert_eq!(i, out.len());
 }

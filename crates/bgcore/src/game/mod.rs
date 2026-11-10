@@ -1330,6 +1330,10 @@ pub struct Game {
     /// The boards real seats (`Player.real`) draw from, set with them by
     /// `Game::new_random_heroes_real`. None in a game without real seats.
     pub real_boards: Option<Arc<RealBoards>>,
+    /// This game's lag for every real seat's draw (docs/engine.md "The lag"):
+    /// drawn from `RealBoards`' mix at game start, or its fixed lag when the
+    /// mix is empty. 0 is the old draw exactly. Fixed for the whole game.
+    pub lag: u32,
     /// The one seat that plays Era's own boards of one game instead of a
     /// random real board (`Game::new_random_heroes_era`). No seat is the Era
     /// seat in an ordinary game.
@@ -1477,6 +1481,7 @@ impl Game {
     ) -> Game {
         let mut g = Game::unstarted(data, seed, None);
         g.seat_real(real);
+        g.lag = boards.lag_for_game(seed);
         g.real_boards = Some(boards);
         g.deal_random_heroes();
         g
@@ -1515,6 +1520,7 @@ impl Game {
         g.seat_real(real);
         g.era_seat = Some(era_seat);
         g.era_game = Some((source, game));
+        g.lag = boards.lag_for_game(seed);
         g.real_boards = Some(boards);
         g.deal_random_heroes();
         g
@@ -1537,6 +1543,7 @@ impl Game {
         let mut g = Game::unstarted(data, seed, Some(plan.lobby));
         g.scenario_game = true;
         g.seat_real(real);
+        g.lag = boards.lag_for_game(seed);
         g.real_boards = Some(boards);
         g.turn = plan.turn - 1;
         g.deal_heroes();
@@ -1744,6 +1751,7 @@ impl Game {
             era_start_seat: None,
             era_start_turn: None,
             real_boards: None,
+            lag: 0,
             era_seat: None,
             era_game: None,
             era_turns_added: 0,

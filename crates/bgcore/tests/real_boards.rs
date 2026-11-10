@@ -1260,3 +1260,119 @@ fn lag_three_makes_turn_eight_play_the_turn_five_board() {
     assert_eq!(pl.board[0].attack, 505);
     assert_ne!(pl.board[0].attack, 508, "turn 8 drew its own board");
 }
+
+// ---- the per-game lag mix (2026-11-10) ----
+
+#[test]
+fn the_lag_mix_draws_each_lag_at_its_share_and_follows_the_seed() {
+    let mut boards = (*build(&folder_like())).clone();
+    boards.set_lag_mix(&[(0, 1), (1, 2), (2, 1), (9, 0)]);
+    assert_eq!(boards.lag_mix(), &[(0, 1), (1, 2), (2, 1)],
+               "a zero weight is dropped");
+    let n = 20_000u64;
+    let mut counts = [0u32; 3];
+    for seed in 0..n {
+        let lag = boards.lag_for_game(seed);
+        assert_eq!(lag, boards.lag_for_game(seed), "seed {seed} drew twice");
+        counts[lag as usize] += 1;
+    }
+    // 1/4, 1/2, 1/4: generous bounds for a 20,000 draw.
+    for (lag, want) in [(0, 0.25), (1, 0.5), (2, 0.25)] {
+        let share = counts[lag as usize] as f64 / n as f64;
+        assert!((share - want).abs() < 0.02,
+                "lag {lag}: share {share:.3}, want about {want}");
+    }
+    // A fixed lag still wins when there is no mix.
+    boards.set_lag(4);
+    assert!(boards.lag_mix().is_empty());
+    assert_eq!(boards.lag_for_game(1234), 4);
+    // An empty or all-zero list goes back to the fixed lag.
+    boards.set_lag_mix(&[(0, 0)]);
+    assert_eq!(boards.lag_for_game(1234), 4);
+}
+
+#[test]
+fn a_game_that_drew_lag_zero_is_the_old_game() {
+    let d = data();
+    let plain = build(&folder_like());
+    let mut mixed = (*plain).clone();
+    mixed.set_lag_mix(&[(0, 1), (1, 1)]);
+    let mixed = Arc::new(mixed);
+    let seed = (0..10_000u64)
+        .find(|&seed| mixed.lag_for_game(seed) == 0)
+        .expect("the mix never drew lag 0");
+    let mut a = Game::new_random_heroes_real(d.clone(), seed, &[0], plain.clone());
+    let mut b = Game::new_random_heroes_real(d, seed, &[0], mixed.clone());
+    assert_eq!(a.lag, 0);
+    assert_eq!(b.lag, 0);
+    let mut ra = Rng::new(seed ^ 0x1a6);
+    let mut rb = Rng::new(seed ^ 0x1a6);
+    let mut step = 0;
+    while !a.over || !b.over {
+        assert_eq!(a.over, b.over, "seed {seed}: games ended on different steps");
+        let aa = random_action(&a, &mut ra);
+        let ab = random_action(&b, &mut rb);
+        assert_eq!(aa, ab, "seed {seed} step {step}: actions differ");
+        a.step(aa).unwrap();
+        b.step(ab).unwrap();
+        a.check_invariants().unwrap();
+        b.check_invariants().unwrap();
+        // The two board sets differ in their mix (the plain one has none), so
+        // take them out of the debug view: everything the game did is still
+        // compared.
+        let aboards = a.real_boards.take();
+        let bboards = b.real_boards.take();
+        let da = format!("{a:?}");
+        let db = format!("{b:?}");
+        a.real_boards = aboards;
+        b.real_boards = bboards;
+        assert_eq!(da, db, "seed {seed} step {step}: a lag 0 game changed");
+        step += 1;
+    }
+}
+
+#[test]
+fn the_same_seed_draws_the_same_game_lag() {
+    let d = data();
+    let mut boards = (*build(&folder_like())).clone();
+    boards.set_lag_mix(&[(0, 1), (1, 1), (2, 1)]);
+    let boards = Arc::new(boards);
+    for seed in [0u64, 7, 14606, 999_999] {
+        let a = Game::new_random_heroes_real(d.clone(), seed, &[0], boards.clone());
+        let b = Game::new_random_heroes_real(d.clone(), seed, &[0], boards.clone());
+        assert_eq!(a.lag, b.lag);
+        assert_eq!(a.lag, boards.lag_for_game(seed));
+    }
+}
+
+#[test]
+fn lag_in_obs_off_is_the_old_observation_and_on_inserts_one_scalar() {
+    use bgcore::obs::{
+        self, OBS_SIZE, OBS_SIZE_WITH_LAG, OWN_END, OWN_END_WITH_LAG, SCALARS, SCALARS_WITH_LAG,
+        SCALAR_LAG,
+    };
+    use bgcore::obs::OldBoards;
+
+    let d = data();
+    let mut g = Game::new_random_heroes(d, 17);
+    g.lag = 5;
+    let mut off = vec![0.0f32; OBS_SIZE];
+    obs::write_with(&g, 0, &mut off, OldBoards::Keep);
+    let mut plain = vec![0.0f32; OBS_SIZE];
+    obs::write(&g, 0, &mut plain);
+    assert_eq!(off, plain);
+    // The option off never reads the lag.
+    g.lag = 0;
+    let mut zero = vec![0.0f32; OBS_SIZE];
+    obs::write_with(&g, 0, &mut zero, OldBoards::Keep);
+    assert_eq!(off, zero, "the old observation does not carry the lag");
+    g.lag = 5;
+    let mut on = vec![0.0f32; OBS_SIZE_WITH_LAG];
+    obs::write_with_lag(&g, 0, &mut on, OldBoards::Keep);
+    assert_eq!(on.len(), off.len() + 1);
+    assert_eq!(&on[..SCALARS], &off[..SCALARS]);
+    assert_eq!(on[SCALAR_LAG], 5.0);
+    assert_eq!(&on[SCALARS_WITH_LAG..OWN_END_WITH_LAG], &off[SCALARS..OWN_END]);
+    assert_eq!(&on[OWN_END_WITH_LAG..], &off[OWN_END..]);
+}
+
