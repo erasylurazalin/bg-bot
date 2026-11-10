@@ -192,6 +192,9 @@ def args():
                         "game start, as LAG:WEIGHT pairs, e.g. 0:1,1:1,2:1. Each game keeps its "
                         "lag; absent means 0. The in-run vs7 real eval stays at lag 0, and a "
                         "separate mixed-lag eval reports the share and place per lag")
+    a.add_argument("--real-lag-from", type=int, default=1,
+                   help="first turn the real seats' lag applies on; before it they draw their "
+                        "own turn as at lag 0 (default 1: every turn)")
     a.add_argument("--lag-in-obs", action="store_true",
                    help="write the game's lag as one extra own scalar, so the value head can "
                         "tell easy games from hard ones. Off is the old observation exactly")
@@ -267,6 +270,9 @@ REAL_LOBBY_FILTER = False
 # mixed-lag eval reports (sorted). Empty means every game is lag 0.
 REAL_LAG_MIX = []
 LAG_MIX_LAGS = []
+# --real-lag-from: the first turn the real seats' lag applies on. Before it
+# they draw their own turn as at lag 0. 1 lags every turn, the old behavior.
+REAL_LAG_FROM = 1
 LEVEL = int(np.nonzero(KIND_OF.numpy() == KINDS.index("level"))[0][0])
 DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
 # --force-dark-gift: on turns 3, 4 and 5 every Python seat presses Dark
@@ -491,6 +497,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
                era_split=era_split) if era_mode else {}
     env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
                       real_lobby_filter=REAL_LOBBY_FILTER, real_lag_mix=real_lag_mix,
+                      real_lag_from=REAL_LAG_FROM,
                       lag_in_obs=LAG_IN_OBS, **scenario, **era)
     if OVERLAY_COMPS:
         env.set_overlay(OVERLAY_COMPS, 0.0)
@@ -755,7 +762,7 @@ def summarize_era(records):
 
 def main():
     global FORCE_TURN2, FORCE_DARK, REAL_LOBBY_FILTER
-    global REAL_LAG_MIX, LAG_MIX_LAGS
+    global REAL_LAG_MIX, LAG_MIX_LAGS, REAL_LAG_FROM
     global OVERLAY_COMPS, OVERLAY_BONUS, COMP_HEALTH_PENALTY, COMP_SPECS, COMP_COUNT
     global SCENARIO_NAMES, SCENARIO_TURN_MIN, SCENARIO_TURN_MAX, SCENARIO_LABELS
     global ERA_STARTS, ERA_TURN_MIN, ERA_TURN_MAX
@@ -778,6 +785,9 @@ def main():
                              "non-negative and at least one weight positive")
         REAL_LAG_MIX = mix
         LAG_MIX_LAGS = sorted({lag for lag, weight in mix if weight > 0})
+    if cfg.real_lag_from < 0:
+        raise SystemExit(f"--real-lag-from {cfg.real_lag_from}: the first turn cannot be negative")
+    REAL_LAG_FROM = cfg.real_lag_from
     OVERLAY_COMPS = cfg.overlay_comps
     OVERLAY_BONUS = cfg.overlay_bonus
     raw_specs = []
@@ -902,6 +912,7 @@ def main():
     )
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS,
                       real_lobby_filter=REAL_LOBBY_FILTER, real_lag_mix=REAL_LAG_MIX,
+                      real_lag_from=REAL_LAG_FROM,
                       lag_in_obs=LAG_IN_OBS, **scenario_kw, **era_kw)
     if cfg.overlay_comps:
         env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus)
@@ -934,6 +945,7 @@ def main():
     if REAL_LAG_MIX:
         print("real lag mix: " + " ".join(
             f"{lag}:{weight:g}" for lag, weight in REAL_LAG_MIX)
+            + f"  from turn {REAL_LAG_FROM}"
             + (f"  lag in obs (OBS_SIZE {bgpy.OBS_SIZE})" if LAG_IN_OBS else ""))
     elif LAG_IN_OBS:
         print(f"lag in obs: on (OBS_SIZE {bgpy.OBS_SIZE})")

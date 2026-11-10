@@ -1345,6 +1345,135 @@ fn the_same_seed_draws_the_same_game_lag() {
     }
 }
 
+// ---- the first lagged turn (2026-11-10) ----
+
+#[test]
+fn lag_from_defaults_to_one_and_one_is_exactly_todays_lag() {
+    let d = data();
+    let plain = build(&folder_like());
+    assert_eq!(plain.lag(), 0, "the default fixed lag is still 0");
+    assert_eq!(plain.lag_from(), 1, "the default first lagged turn is 1");
+    assert!(plain.lag_mix().is_empty());
+
+    let mut today = (*plain).clone();
+    today.set_lag(2);
+    let mut explicit = (*plain).clone();
+    explicit.set_lag(2);
+    explicit.set_lag_from(1);
+    let today = Arc::new(today);
+    let explicit = Arc::new(explicit);
+    for seed in 0..2u64 {
+        let mut a = Game::new_random_heroes_real(d.clone(), seed, &[0], today.clone());
+        let mut b = Game::new_random_heroes_real(d.clone(), seed, &[0], explicit.clone());
+        let mut ra = Rng::new(seed ^ 0x1a6);
+        let mut rb = Rng::new(seed ^ 0x1a6);
+        let mut step = 0;
+        while !a.over || !b.over {
+            assert_eq!(a.over, b.over, "seed {seed}: games ended on different steps");
+            let aa = random_action(&a, &mut ra);
+            let ab = random_action(&b, &mut rb);
+            assert_eq!(aa, ab, "seed {seed} step {step}: actions differ");
+            a.step(aa).unwrap();
+            b.step(ab).unwrap();
+            a.check_invariants().unwrap();
+            b.check_invariants().unwrap();
+            assert_eq!(format!("{a:?}"), format!("{b:?}"),
+                       "seed {seed} step {step}: lag_from 1 changed the game");
+            step += 1;
+        }
+    }
+}
+
+#[test]
+fn lag_from_seven_keeps_turns_one_to_six_exactly_the_plain_game() {
+    let d = data();
+    let plain = build(&folder_like());
+    let mut late = (*plain).clone();
+    late.set_lag(2);
+    late.set_lag_from(7);
+    let late = Arc::new(late);
+    for seed in 0..2u64 {
+        let mut a = Game::new_random_heroes_real(d.clone(), seed, &[0], plain.clone());
+        let mut b = Game::new_random_heroes_real(d.clone(), seed, &[0], late.clone());
+        let mut ra = Rng::new(seed ^ 0x1a6);
+        let mut rb = Rng::new(seed ^ 0x1a6);
+        let mut step = 0;
+        // Every state the game shows before the turn 7 draw must match.
+        while !a.over && !b.over && a.turn < 7 {
+            let aa = random_action(&a, &mut ra);
+            let ab = random_action(&b, &mut rb);
+            assert_eq!(aa, ab, "seed {seed} step {step}: actions differ");
+            a.step(aa).unwrap();
+            b.step(ab).unwrap();
+            a.check_invariants().unwrap();
+            b.check_invariants().unwrap();
+            if a.turn < 7 {
+                // The two board sets differ only in their lag settings, which
+                // the turn 7 draw is allowed to feel: take them, and the
+                // game's drawn lag, out of the debug view. Everything the game
+                // did is still compared.
+                let aboards = a.real_boards.take();
+                let bboards = b.real_boards.take();
+                let blag = b.lag;
+                b.lag = a.lag;
+                let da = format!("{a:?}");
+                let db = format!("{b:?}");
+                a.real_boards = aboards;
+                b.real_boards = bboards;
+                b.lag = blag;
+                assert_eq!(da, db, "seed {seed} step {step}: lag_from 7 changed an early turn");
+            }
+            step += 1;
+        }
+        assert!(a.turn >= 7, "seed {seed}: the game ended before turn 7");
+        assert!(b.turn >= 7, "seed {seed}: the game ended before turn 7");
+    }
+}
+
+#[test]
+fn lag_from_seven_draws_the_turn_five_board_on_turn_seven() {
+    let d = data();
+    // One board per turn, each with its turn in its Attack, and enough Health
+    // that the real seat survives past turn 7.
+    let mut specs = Vec::new();
+    for turn in 1..=9u32 {
+        specs.push(spec(turn, 4, &[("Bonker", 500 + turn as i32, 5000, false, &[])]));
+    }
+    for mixed in [false, true] {
+        let (mut boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
+        if mixed {
+            boards.set_lag_mix(&[(2, 1)]);
+        } else {
+            boards.set_lag(2);
+        }
+        boards.set_lag_from(7);
+        let boards = Arc::new(boards);
+        let mut g = Game::new_random_heroes_real(d.clone(), 21, &[0], boards.clone());
+        let mut rng = Rng::new(31);
+        while g.turn < 6 && !g.over {
+            let a = random_action(&g, &mut rng);
+            g.step(a).unwrap();
+            g.check_invariants().unwrap();
+        }
+        assert!(!g.over, "the real seat died before turn 6");
+        assert_eq!(g.turn, 6);
+        assert_eq!(g.players[0].board[0].attack, 506, "turn 6 was lagged");
+        while g.turn < 7 && !g.over {
+            let a = random_action(&g, &mut rng);
+            g.step(a).unwrap();
+            g.check_invariants().unwrap();
+        }
+        assert!(!g.over, "the real seat died before turn 7");
+        assert_eq!(g.turn, 7);
+        let pl = &g.players[0];
+        let want = &boards.boards_at(5)[0];
+        assert_eq!(pl.board.as_slice(), want.minions.as_slice());
+        assert_eq!(pl.tier, want.tier);
+        assert_eq!(pl.board[0].attack, 505, "turn 7 did not draw the turn 5 board");
+        assert_ne!(pl.board[0].attack, 507, "turn 7 drew its own board");
+    }
+}
+
 #[test]
 fn lag_in_obs_off_is_the_old_observation_and_on_inserts_one_scalar() {
     use bgcore::obs::{

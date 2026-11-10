@@ -1333,6 +1333,8 @@ pub struct Game {
     /// This game's lag for every real seat's draw (docs/engine.md "The lag"):
     /// drawn from `RealBoards`' mix at game start, or its fixed lag when the
     /// mix is empty. 0 is the old draw exactly. Fixed for the whole game.
+    /// `RealBoards::lag_from` says the first turn it applies on; earlier
+    /// turns draw their own board as at lag 0.
     pub lag: u32,
     /// The one seat that plays Era's own boards of one game instead of a
     /// random real board (`Game::new_random_heroes_era`). No seat is the Era

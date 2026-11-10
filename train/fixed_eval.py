@@ -69,6 +69,9 @@ def parse_args():
                    help="turn off the real seats' lobby filter (on by default)")
     a.add_argument("--real-lag", type=int, default=0,
                    help="lag the real seats' draw by this many turns (default 0)")
+    a.add_argument("--real-lag-from", type=int, default=1,
+                   help="first turn the real seats' lag applies on; before it they draw "
+                        "their own turn as at lag 0 (default 1: every turn)")
     a.add_argument("--era-starts", nargs="?", const=str(FROZEN_ACTIONS), default=None,
                    help="start every game from Era's logged positions in this action folder "
                         f"(default {FROZEN_ACTIONS.relative_to(ROOT)} when Era starts are on)")
@@ -222,7 +225,8 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
         env = bgpy.VecEnv(n, args.seed_base + chunk, LINEUP, real_boards=real,
                           old_boards=info["old_boards"],
                           real_lobby_filter=not args.no_lobby_filter,
-                          real_lag=args.real_lag, **era_kw)
+                          real_lag=args.real_lag,
+                          real_lag_from=args.real_lag_from, **era_kw)
         if info["overlay_comps"]:
             env.set_overlay(info["overlay_comps"], 0.0)
         b = Bufs(n)
@@ -434,6 +438,7 @@ def build_report(name: str, args, n_board_files: int, rev: str,
     lines.append(f"- lineup: {','.join(str(x) for x in LINEUP)} (learner then 7 real)")
     lines.append(f"- lobby filter: {'off' if args.no_lobby_filter else 'on'}")
     lines.append(f"- real lag: {args.real_lag} turn{'s' if args.real_lag != 1 else ''}")
+    lines.append(f"- real lag from: turn {args.real_lag_from}")
     if args.era_folder is not None:
         lines.append(f"- mode: Era starts ({args.era_split} split, turns "
                      f"{args.era_turn_min}..{args.era_turn_max}, "
@@ -669,6 +674,7 @@ def main():
         "boards": {"path": str(args.boards), "files": n_board_files},
         "lobby_filter": not args.no_lobby_filter,
         "real_lag": args.real_lag,
+        "real_lag_from": args.real_lag_from,
         "era": {
             "path": str(args.era_folder) if args.era_folder is not None else None,
             "files": (n_action_files if args.era_folder is not None else 0),

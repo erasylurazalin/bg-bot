@@ -375,6 +375,9 @@ impl VecEnv {
     /// this game's lobby (docs/real-boards.md "The lobby filter").
     /// `real_lag`: how many turns behind a real seat's draw is; 0 is the old
     /// draw exactly. The Era seat is not lagged.
+    /// `real_lag_from`: the first turn the lag applies on; before it a real
+    /// seat draws its own turn as at lag 0. 1 (the default) lags every turn
+    /// and is the old draw exactly.
     /// `real_lag_mix`: a weighted list of (lag, weight) pairs each game draws
     /// its lag from at its start (docs/engine.md "The lag"); None or empty
     /// keeps `real_lag` as a fixed lag.
@@ -392,7 +395,7 @@ impl VecEnv {
     /// `era_turn_min`/`era_turn_max` the turn range, and `era_split` "train",
     /// "holdout" or "all" the source games it may draw from.
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train", real_lag_mix=None, lag_in_obs=false))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train", real_lag_mix=None, lag_in_obs=false, real_lag_from=1))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -418,6 +421,7 @@ impl VecEnv {
         era_split: &str,
         real_lag_mix: Option<Vec<(u32, u32)>>,
         lag_in_obs: bool,
+        real_lag_from: u32,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -461,6 +465,7 @@ impl VecEnv {
             let (mut boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
             boards.set_lobby_filter(real_lobby_filter);
             boards.set_lag(real_lag);
+            boards.set_lag_from(real_lag_from);
             if let Some(mix) = &real_lag_mix {
                 boards.set_lag_mix(mix);
             }

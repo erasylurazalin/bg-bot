@@ -537,8 +537,13 @@ impl Game {
                         .as_ref()
                         .map(|(source, game)| (source.as_str(), *game));
                     // The lag applies to the real seats' draw only, not to
-                    // the Era seat above (docs/engine.md).
-                    let draw_turn = turn.saturating_sub(lag).max(1);
+                    // the Era seat above (docs/engine.md). Before the first
+                    // lagged turn the seat draws its own turn as at lag 0.
+                    let draw_turn = if turn >= boards.lag_from() {
+                        turn.saturating_sub(lag).max(1)
+                    } else {
+                        turn
+                    };
                     boards.draw_filtered(draw_turn, *lobby, exclude, rng)
                 };
                 pl.tier = board.tier;

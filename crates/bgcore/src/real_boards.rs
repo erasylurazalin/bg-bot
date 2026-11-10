@@ -478,6 +478,11 @@ pub struct RealBoards {
     /// default: the old draw is then byte for byte the same. This is the
     /// fixed lag, used when `lag_mix` is empty.
     lag: u32,
+    /// The first turn the lag applies on (`set_lag_from`): turn t is lagged
+    /// only when `t >= lag_from`, and earlier turns draw their own board as
+    /// at lag 0. 1 (the default) lags every turn and is the old draw exactly.
+    /// The per-game mix's lag follows the same first turn.
+    lag_from: u32,
     /// A weighted list of lags a game draws from at its start (`lag_for_game`).
     /// Empty means the fixed `lag` above. The draw uses its own RNG seeded
     /// from the game's seed, so it never moves the game's own draws and lag 0
@@ -760,6 +765,7 @@ impl RealBoards {
                 era,
                 lobby_filter: false,
                 lag: 0,
+                lag_from: 1,
                 lag_mix: Vec::new(),
                 filter: Arc::new(FilterCounters::default()),
             },
@@ -789,6 +795,18 @@ impl RealBoards {
 
     pub fn lag(&self) -> u32 {
         self.lag
+    }
+
+    /// The first turn the lag applies on: turn t is lagged only when
+    /// `t >= lag_from`, and before that the seat draws its own turn's board
+    /// as at lag 0. The default, 1, lags every turn and is the old draw
+    /// exactly. It applies to the fixed lag and to the per-game mix alike.
+    pub fn set_lag_from(&mut self, from: u32) {
+        self.lag_from = from;
+    }
+
+    pub fn lag_from(&self) -> u32 {
+        self.lag_from
     }
 
     /// Draw each game's lag from a weighted list of `(lag, weight)` pairs

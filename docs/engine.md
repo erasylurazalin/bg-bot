@@ -1846,6 +1846,15 @@ minions in the hand.
   nearest-turn, lobby-filter and widening rules. The Era seat (`draw_era`) is
   not lagged. On `bgpy.VecEnv` it is `real_lag=K`; lag 0 is the old draw
   exactly.
+- **The first lagged turn:** `RealBoards::set_lag_from(k)` (default 1) makes
+  the lag apply only when `t >= k`; before that a real seat draws turn t as
+  at lag 0. So `lag_from=7, lag=2` plays the full board through turn 6 and
+  the turn 5 board on turn 7. It applies to the fixed lag and to the
+  per-game mix alike, and the floor at turn 1 stays. On `bgpy.VecEnv` it is
+  `real_lag_from=N`; `fixed_eval.py` takes `--real-lag-from N` and writes it
+  in its report and results, and `ppo.py` takes it for the training env and
+  the mixed-lag eval and prints it with the mix. The default 1 lags every
+  turn and is the old draw exactly.
 - **The per-game lag mix:** `RealBoards::set_lag_mix(&[(lag, weight)])` makes
   every game draw its real seats' lag at game start from that weighted list.
   The game's lag is fixed for the whole game (`Game.lag`, read from
