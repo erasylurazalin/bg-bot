@@ -2387,6 +2387,15 @@ Deleting `.venv` undoes it.
   or it almost never ends a turn.
 - Snapshots of itself are taken every 250 updates (at about 95 updates a
   minute, 10 was only 2 minutes of history).
+- `train/fixed_eval.py CKPT [CKPT2 ...] --vram-gb 10 [--games 2048]`
+  is the fixed yardstick for comparing checkpoints: one learner against
+  seven real seats, exactly one game per seed, played to its end (unlike
+  the eval inside `ppo.py`, which stops at the first N finished games and
+  over-counts short ones). It runs in chunks of 512 envs and writes
+  `train/runs/fixed-eval/NAME/report.md` and `results.json`; with two or
+  more checkpoints it adds a paired table. The real seats come from
+  `boards/frozen/real-2026-11-10/`, a frozen copy checked against its
+  `MANIFEST.txt` before the run.
 - Every eval writes a row to `runs/NAME/metrics.csv`: placement against
   each bot, a curve report (turn reaching tiers 3, 4, 5; share of rush,
   standard, economy rush and slow games), a tribe report, entropy and the
