@@ -1321,6 +1321,12 @@ pub struct Game {
     /// Its non-real seats get no Trinkets and no Dark Gifts (the scenario
     /// brief's "none"), so a synthetic history cannot hand them out.
     pub scenario_game: bool,
+    /// The one network seat an Era-start game began with Era's position on
+    /// (`Game::new_era_start`), and the turn it began on. None in every other
+    /// game. The seat's start-of-turn effects already ran in the logged game,
+    /// so only its first turn's effects are skipped.
+    pub era_start_seat: Option<usize>,
+    pub era_start_turn: Option<u32>,
     /// The boards real seats (`Player.real`) draw from, set with them by
     /// `Game::new_random_heroes_real`. None in a game without real seats.
     pub real_boards: Option<Arc<RealBoards>>,
@@ -1478,7 +1484,7 @@ impl Game {
 
     /// The real seats' own setup, before the heroes are dealt: no hero, flat
     /// 30 Health and 10 armor.
-    fn seat_real(&mut self, real: &[usize]) {
+    pub(crate) fn seat_real(&mut self, real: &[usize]) {
         for &p in real {
             assert!(p < PLAYERS, "real seat {p} is not a player");
             let pl = &mut self.players[p];
@@ -1672,7 +1678,7 @@ impl Game {
         g
     }
 
-    fn unstarted(data: Arc<Data>, seed: u64, fixed: Option<Tribes>) -> Game {
+    pub(crate) fn unstarted(data: Arc<Data>, seed: u64, fixed: Option<Tribes>) -> Game {
         let mut rng = Rng::new(seed);
         let lobby = fixed.unwrap_or_else(|| Tribes::random_lobby(5, &mut rng));
         let mut pool: Vec<u8> = (0..data.cards.pool_cards)
@@ -1735,6 +1741,8 @@ impl Game {
             pool_untracked: false,
             sandbox: None,
             scenario_game: false,
+            era_start_seat: None,
+            era_start_turn: None,
             real_boards: None,
             era_seat: None,
             era_game: None,

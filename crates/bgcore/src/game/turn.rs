@@ -286,7 +286,7 @@ impl Game {
     /// takes the first option, then end-of-turn effects run.
     /// A played Tomb Turning Undead dies once its Battlecry, and whatever it
     /// asked the player to choose or Discover, is done.
-    pub(super) fn choice_open(pl: &Player) -> bool {
+    pub(crate) fn choice_open(pl: &Player) -> bool {
         Self::other_choice_open(pl) || !pl.trinket_offer.is_empty()
     }
 
@@ -352,7 +352,7 @@ impl Game {
 
     /// Answer everything the player left open, taking the first option that
     /// can be taken (the end of their turn cannot ask).
-    pub(super) fn resolve_open_choices(&mut self, p: usize) {
+    pub(crate) fn resolve_open_choices(&mut self, p: usize) {
         loop {
             let pl = &self.players[p];
             if let Some(pt) = pl.pending_target {
@@ -470,7 +470,7 @@ impl Game {
         self.players[p].done = true;
     }
 
-    pub(super) fn start_turn(&mut self) {
+    pub(crate) fn start_turn(&mut self) {
         self.turn += 1;
         let turn = self.turn;
         // The lobster mode's streams are per turn: the Tavern starts at roll 0
@@ -502,6 +502,9 @@ impl Game {
             let Game {
                 data, rng, players, pool, sandbox, real_boards, lobby, era_seat, era_game, ..
             } = self;
+            let era_seat_start = (self.era_start_seat == Some(p)
+                && self.era_start_turn == Some(turn))
+                .then_some(p);
             let pl = &mut players[p];
             if pl.real {
                 // A real seat doesn't shop: it takes a fresh random board of
@@ -548,6 +551,18 @@ impl Game {
                 }
                 pl.take_real_counters(&board.counters, board.deity);
                 pl.done = true;
+                continue;
+            }
+            // An Era-start seat's position is the turn's start as the logged
+            // game already had it: its start-of-turn effects ran there. Only
+            // the Tavern is rolled fresh, as the brief asks.
+            if era_seat_start == Some(p) {
+                pl.done = false;
+                let size = pl.shop_size(&data.rules);
+                let _ = Self::fill_shop(
+                    pl, pool, &data.cards, &data.rules, size, rng, self.lobby,
+                    RefreshKind::TurnStart,
+                );
                 continue;
             }
             if let Some(sb) = sandbox {
@@ -719,7 +734,7 @@ impl Game {
             // back, the unlock conditions, and what a passive does now
             // (Clairvoyance's free Refresh, A Tale of Kings' new tribe, a
             // flightpath's countdown, Bananarama's Bananas).
-            if self.players[p].alive && !self.players[p].real {
+            if self.players[p].alive && !self.players[p].real && !self.era_start_arrival(p) {
                 self.power_start_of_turn(p);
             }
         }
@@ -732,7 +747,7 @@ impl Game {
             // Trinkets at the start of the player's turn: the two offers (and
             // the one a hero power owes), the counters, the uses back and the
             // start-of-turn effects.
-            if self.players[p].alive && !self.players[p].real {
+            if self.players[p].alive && !self.players[p].real && !self.era_start_arrival(p) {
                 self.trinket_start_of_turn(p);
             }
         }
@@ -740,7 +755,7 @@ impl Game {
             // Dark Gifts at the start of the player's turn: the button is
             // pressable again, and a Time Turning minion runs its end of turn
             // effects again. The countdown gifts tick at the end of the turn.
-            if self.players[p].alive && !self.players[p].real {
+            if self.players[p].alive && !self.players[p].real && !self.era_start_arrival(p) {
                 self.players[p].dark_gift_pressed = false;
                 self.dark_gift_start_of_turn(p);
             }
@@ -748,7 +763,7 @@ impl Game {
         for p in 0..PLAYERS {
             // A real board's stats already include everything its thresholds
             // gave it in the real game, so they don't fire here.
-            if self.players[p].alive && !self.players[p].real {
+            if self.players[p].alive && !self.players[p].real && !self.era_start_arrival(p) {
                 self.check_attack_thresholds(p);
             }
         }

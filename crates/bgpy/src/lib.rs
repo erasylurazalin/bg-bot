@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::comps::Comps;
+use bgcore::era_start::{EraSplit, EraStartConfig, EraStarts};
 use bgcore::overlay::{Overlay, OVERLAY_FLAGS, OverlayState};
 use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{
@@ -134,6 +135,11 @@ struct Env {
     /// The board a scenario seat started the game with, -1 for a normal seat.
     /// `scenario_bodies` returns it, so the eval can measure the body sold.
     scenario_body: [[i16; BOARD]; PLAYERS],
+    /// The seat an Era-start game gave Era's position to, and its board and
+    /// start turn. None and -1 in a normal game.
+    era_seat: Option<usize>,
+    era_turn: u32,
+    era_body: [[i16; BOARD]; PLAYERS],
     /// The Shell line and abort bits, per seat and game.
     overlay_states: [OverlayState; PLAYERS],
 }
@@ -146,6 +152,7 @@ impl Env {
         boards: Option<&Arc<RealBoards>>,
         era_game: Option<&(String, u32)>,
         scenario: Option<&Arc<ScenarioConfig>>,
+        era: Option<&Arc<EraStartConfig>>,
     ) -> Env {
         let mut rng = Rng::new(seed ^ 0x6a09_e667_f3bc_c908);
         let mut kinds = [LEARNER; PLAYERS];
@@ -158,17 +165,30 @@ impl Env {
         }
         rng.shuffle(&mut kinds);
         let real: Vec<usize> = (0..PLAYERS).filter(|&p| kinds[p] == REAL).collect();
-        let plan = scenario.and_then(|sc| {
-            let seats: Vec<usize> =
-                (0..PLAYERS).filter(|&p| matches!(kinds[p], LEARNER | SNAPSHOT)).collect();
-            sc.plan(seed, data, &seats)
-        });
+        let seats: Vec<usize> =
+            (0..PLAYERS).filter(|&p| matches!(kinds[p], LEARNER | SNAPSHOT)).collect();
+        let plan = scenario.and_then(|sc| sc.plan(seed, data, &seats));
+        let era_plan = if plan.is_none() {
+            era.and_then(|c| c.plan(seed, &seats))
+        } else {
+            None
+        };
         let game = if let Some(plan) = &plan {
             Game::new_scenario(
                 data.clone(),
                 seed,
                 &real,
                 boards.expect("a scenario game needs real boards").clone(),
+                plan,
+            )
+        } else if let Some(plan) = &era_plan {
+            let config = era.expect("an Era plan comes from the Era config");
+            Game::new_era_start(
+                data.clone(),
+                seed,
+                &real,
+                boards.expect("Era starts need real boards: the bodies are real boards").clone(),
+                &config.starts,
                 plan,
             )
         } else {
@@ -202,6 +222,18 @@ impl Env {
                 }
             }
         }
+        let mut era_body = [[-1i16; BOARD]; PLAYERS];
+        let mut era_turn = 0;
+        if let Some(plan) = &era_plan {
+            era_turn = era
+                .expect("an Era plan comes from the Era config")
+                .starts
+                .position(plan.position)
+                .turn;
+            for (k, m) in game.players[plan.seat].board.iter().enumerate() {
+                era_body[plan.seat][k] = m.card as i16;
+            }
+        }
         Env {
             game,
             kinds,
@@ -209,6 +241,9 @@ impl Env {
             reported: [false; PLAYERS],
             last_board: [[-1; BOARD]; PLAYERS],
             scenario_body,
+            era_seat: era_plan.as_ref().map(|p| p.seat),
+            era_turn,
+            era_body,
             overlay_states,
         }
     }
@@ -285,8 +320,25 @@ struct VecEnv {
     overlay_rules: Option<Arc<Overlay>>,
     /// The scenario-start settings, when scenario games are on.
     scenario: Option<Arc<ScenarioConfig>>,
+    /// The Era-start settings, when Era starts are on.
+    era: Option<Arc<EraStartConfig>>,
     /// The last completed game's final board card ids per seat, -1 empty.
     finals: Vec<[[i16; BOARD]; PLAYERS]>,
+}
+
+/// The card id mapping `ref/bg-cards.json`, looked up from the project root
+/// and from `train/` (where `go.sh` starts ppo.py).
+fn ref_card_ids() -> PyResult<bgcore::CardIdMap> {
+    let mut last = String::from("not found");
+    for path in ["ref/bg-cards.json", "../ref/bg-cards.json"] {
+        match std::fs::read_to_string(path) {
+            Ok(text) => return bgcore::CardIdMap::parse(&text).map_err(PyValueError::new_err),
+            Err(e) => last = format!("{path}: {e}"),
+        }
+    }
+    Err(PyValueError::new_err(format!(
+        "the card id mapping: {last}"
+    )))
 }
 
 fn check_lineup(lineup: [u8; SEAT_KINDS], boards: bool) -> PyResult<[u8; SEAT_KINDS]> {
@@ -326,8 +378,12 @@ impl VecEnv {
     /// scenario game may start with; `scenario_share` is the share of new
     /// games that are scenario games (0: off), and `scenario_turn_min`/
     /// `scenario_turn_max` the turn it starts on (uniform, inclusive).
+    /// `era_starts`: the action folder to seat Era's positions from;
+    /// `era_share` is the share of new games that start from one (0: off),
+    /// `era_turn_min`/`era_turn_max` the turn range, and `era_split` "train",
+    /// "holdout" or "all" the source games it may draw from.
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train"))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -346,6 +402,11 @@ impl VecEnv {
         scenario_turn_min: u32,
         scenario_turn_max: u32,
         real_lag: u32,
+        era_starts: Option<&str>,
+        era_share: f64,
+        era_turn_min: u32,
+        era_turn_max: u32,
+        era_split: &str,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -391,6 +452,40 @@ impl VecEnv {
             boards.set_lag(real_lag);
             Arc::new(boards)
         });
+        let era = match era_starts {
+            Some(dir) => {
+                if era_turn_min < 1 || era_turn_max < era_turn_min {
+                    return Err(PyValueError::new_err(format!(
+                        "era_turn_min/era_turn_max {era_turn_min},{era_turn_max}: need 1 <= MIN <= MAX"
+                    )));
+                }
+                let split = EraSplit::parse(era_split).ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "era_split is train, holdout or all, not {era_split:?}"
+                    ))
+                })?;
+                let files = action_files(dir)?;
+                let ids = ref_card_ids()?;
+                let mut specs = bgcore::shop_replay::parse_action_files(&files)
+                    .map_err(PyValueError::new_err)?;
+                bgcore::shop_replay::seat_taught_spells(&mut specs, &ids);
+                let (starts, _) = EraStarts::build(&specs, &data, &ids, era_turn_min, era_turn_max);
+                let cfg = EraStartConfig::new(Arc::new(starts), era_share, split)
+                    .map_err(PyValueError::new_err)?;
+                Some(Arc::new(cfg))
+            }
+            None if era_share != 0.0 => {
+                return Err(PyValueError::new_err(
+                    "era_share needs era_starts: the action folder of Era's positions",
+                ));
+            }
+            None => None,
+        };
+        if era.is_some() && boards.is_none() {
+            return Err(PyValueError::new_err(
+                "Era starts need real_boards: the other seats' bodies are real boards",
+            ));
+        }
         let lineup = check_lineup(lineup, boards.is_some())?;
         if scenario.is_some() && boards.is_none() {
             return Err(PyValueError::new_err(
@@ -426,6 +521,7 @@ impl VecEnv {
                     boards.as_ref(),
                     era_game.as_ref(),
                     scenario.as_ref(),
+                    era.as_ref(),
                 )
             })
             .collect();
@@ -440,6 +536,7 @@ impl VecEnv {
             old_boards,
             overlay_rules: None,
             scenario,
+            era,
             finals: vec![[[-1; BOARD]; PLAYERS]; n],
         })
     }
@@ -616,6 +713,37 @@ impl VecEnv {
             .collect()
     }
 
+    /// Every game's Era seat: `[game]`, the seat index or -1 for a game that
+    /// did not start from Era's position.
+    fn era_seats(&self) -> Vec<i64> {
+        self.envs
+            .iter()
+            .map(|env| env.era_seat.map_or(-1, |p| p as i64))
+            .collect()
+    }
+
+    /// Every game's Era start turn, 0 for a game that did not start from one.
+    fn era_turns(&self) -> Vec<u32> {
+        self.envs.iter().map(|env| env.era_turn).collect()
+    }
+
+    /// Every game's Era-seat starting board: `[game][seat][slot]`, -1 for a
+    /// seat and slot that did not start with Era's body.
+    fn era_bodies(&self) -> Vec<Vec<Vec<i16>>> {
+        self.envs
+            .iter()
+            .map(|env| env.era_body.iter().map(|row| row.to_vec()).collect())
+            .collect()
+    }
+
+    /// The positions per turn, the split sizes, and what was dropped and why.
+    fn era_start_report(&self) -> String {
+        self.era
+            .as_ref()
+            .map(|e| e.starts.report())
+            .unwrap_or_default()
+    }
+
     /// Take `actions[i]` for the waiting seat of game i. Fills
     /// `places[i, seat]`, `tier_turns[i, seat, 0..6]` and
     /// `tribes[i, seat, 0..TRIBES]` (the ten tribes in `Tribe::EVERY` order,
@@ -647,12 +775,13 @@ impl VecEnv {
         {
             return Err(PyValueError::new_err("array sizes don't match the number of games"));
         }
-        let (data, lineup, boards, era_game, scenario, base) = (
+        let (data, lineup, boards, era_game, scenario, era, base) = (
             &self.data,
             self.lineup,
             &self.boards,
             &self.era_game,
             &self.scenario,
+            &self.era,
             self.next_seed,
         );
         let envs = &mut self.envs;
@@ -688,6 +817,7 @@ impl VecEnv {
                             boards.as_ref(),
                             era_game.as_ref(),
                             scenario.as_ref(),
+                            era.as_ref(),
                         );
                         env.advance();
                         *reset = true;

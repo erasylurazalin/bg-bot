@@ -767,7 +767,7 @@ impl Player {
     /// a real seat, and a number the log did not show is the base value
     /// (`RealCounters::default`). Its Health, armor, tier and hand are the
     /// seat's own and set elsewhere.
-    pub(super) fn take_real_counters(&mut self, c: &RealCounters, deity: Option<Deity>) {
+    pub(crate) fn take_real_counters(&mut self, c: &RealCounters, deity: Option<Deity>) {
         self.gem_attack = c.gem_attack;
         self.gem_health = c.gem_health;
         self.beetle_bonus = (c.beetle_attack, c.beetle_health);

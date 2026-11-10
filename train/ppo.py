@@ -118,6 +118,12 @@ def args():
                    help="fraction of training games that start as scenario games (0: off)")
     a.add_argument("--scenario-turns", default="7,11",
                    help="MIN,MAX turn a scenario game starts on, drawn uniformly")
+    a.add_argument("--era-starts", default=None,
+                   help="start some games from Era's logged positions in this action folder")
+    a.add_argument("--era-share", type=float, default=0.0,
+                   help="fraction of training games that start from Era's positions (0: off)")
+    a.add_argument("--era-turns", default="7,11",
+                   help="MIN,MAX turn an Era start begins on (default 7,11)")
     a.add_argument("--wheels-full", type=int, default=0,
                    help="games with the overlay at full strength (0 with --wheels-end 0: no fade)")
     a.add_argument("--wheels-end", type=int, default=0,
@@ -262,6 +268,13 @@ SCENARIO_NAMES = []
 SCENARIO_TURN_MIN = 7
 SCENARIO_TURN_MAX = 11
 SCENARIO_LABELS = []  # (label, names, specs) for each comp and "pooled"
+# --era-starts/--era-share/--era-turns: Era's logged turn-start positions, the
+# share of training games that start from one, and the turn range. Evals use
+# the holdout split; training draws from the train split.
+ERA_STARTS = None
+ERA_TURN_MIN = 7
+ERA_TURN_MAX = 11
+ERA_METRICS = ("place", "top4", "first", "body_kept")
 # The overlay flag order is in crates/bgcore/src/overlay.rs.
 F_SHELL_LEGAL = 0
 F_SHELL_TAKEN = 1
@@ -423,21 +436,23 @@ def names_at_rev(rev):
     return table_names(cards), hero_list
 
 
-def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None):
+def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
+             era_starts=None, era_split="train"):
     """_evaluate, retried on a new seed when a scripted bot hits the engine's
     illegal-action panic (a known engine bug, 2026-11-02), so one bad test
     game doesn't kill the training run."""
     for attempt in range(4):
         try:
             return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards,
-                             scenario_names)
+                             scenario_names, era_starts, era_split)
         except BaseException as e:  # pyo3 PanicException is a BaseException
             if type(e).__name__ != "PanicException" or attempt == 3:
                 raise
             print(f"eval panic ({e}); retrying with a new seed", flush=True)
 
 
-def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None):
+def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
+              era_starts=None, era_split="train"):
     """Play n_games with `lineup` and return (avg_place, learner_records).
 
     With --overlay-comps the comp input is on and the wheels are off: the
@@ -449,8 +464,12 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
     scenario = dict(scenario_comps=OVERLAY_COMPS, scenario_names=list(scenario_names),
                     scenario_share=1.0, scenario_turn_min=SCENARIO_TURN_MIN,
                     scenario_turn_max=SCENARIO_TURN_MAX) if scenario_names is not None else {}
+    era_mode = era_starts is not None
+    era = dict(era_starts=era_starts, era_share=1.0,
+               era_turn_min=ERA_TURN_MIN, era_turn_max=ERA_TURN_MAX,
+               era_split=era_split) if era_mode else {}
     env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
-                      real_lobby_filter=REAL_LOBBY_FILTER, **scenario)
+                      real_lobby_filter=REAL_LOBBY_FILTER, **scenario, **era)
     if OVERLAY_COMPS:
         env.set_overlay(OVERLAY_COMPS, 0.0)
     b = Bufs(n)
@@ -461,8 +480,17 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
     tribe_seen = np.zeros((n, P, bgpy.TRIBES), np.int8)
     comp_turn = np.zeros((n, P), np.int16)
     start_body = np.full((n, P, bgpy.BOARD), -1, np.int16)
+    era_turn = np.zeros((n, P), np.int16)
     if scenario_names is not None:
         start_body[:] = np.asarray(env.scenario_bodies(), dtype=np.int16)
+    if era_mode:
+        era_seats = np.asarray(env.era_seats(), dtype=np.int64)
+        start_body[:] = np.asarray(env.era_bodies(), dtype=np.int16)
+        era_turns = np.asarray(env.era_turns(), dtype=np.int64)
+        for e in range(n):
+            s = int(era_seats[e])
+            if s >= 0:
+                era_turn[e, s] = era_turns[e]
     shell_legal = [set() for _ in range(n * P)]
     shell_taken = [set() for _ in range(n * P)]
     ar = np.arange(n)
@@ -477,6 +505,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
         a, _, _, _ = act(net, o, m, comp=comp_onehot(comp_idx, COMP_COUNT, dev))
         acts = a.cpu().numpy()
         turns = b.obs[:, bgpy.SCALAR_TURN].astype(np.int64)
+        if OVERLAY_COMPS or era_mode:
+            env.remember_boards()
         if OVERLAY_COMPS:
             for e in np.nonzero(b.kind == LEARNER)[0]:
                 s = int(b.seat[e])
@@ -487,7 +517,6 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
                     shell_legal[key].add(int(turns[e]))
                     if b.forced1[e] == acts[e]:
                         shell_taken[key].add(int(turns[e]))
-            env.remember_boards()
         kinds = b.kinds.copy()
         env.step(acts, b.places, b.tier_turns, b.tribes, b.reset)
         for e, s in zip(*np.nonzero(b.places)):
@@ -497,9 +526,10 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
                 tribe_seen[e, s] = b.tribes[e, s]
         done += int(b.reset.sum())
         if b.reset.any():
-            finals = env.final_boards() if OVERLAY_COMPS else None
+            finals = env.final_boards() if OVERLAY_COMPS or era_mode else None
             fresh_body = np.asarray(env.scenario_bodies(), dtype=np.int16) \
                 if scenario_names is not None else None
+            fresh_era = np.asarray(env.era_bodies(), dtype=np.int16) if era_mode else None
             for e in np.nonzero(b.reset)[0]:
                 for s in np.nonzero(kinds[e] == LEARNER)[0]:
                     key = e * P + s
@@ -509,6 +539,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
                         tribe_seen[e, s].copy(),
                         {
                             "comp_turn": int(comp_turn[e, s]),
+                            "era_turn": int(era_turn[e, s]),
                             "final": ([int(x) for x in finals[e][s] if x >= 0]
                                       if finals is not None else []),
                             "body_start": [int(x) for x in start_body[e, s] if x >= 0],
@@ -524,6 +555,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
                     shell_taken[key] = set()
                 if fresh_body is not None:
                     start_body[e] = fresh_body[e]
+                if fresh_era is not None:
+                    start_body[e] = fresh_era[e]
             env.kinds(b.kinds)
     avg_place = float(np.mean([r[0] for r in records]))
     return avg_place, records
@@ -669,10 +702,36 @@ def summarize_scenario(records, specs):
     }
 
 
+def summarize_era(records):
+    """The Era eval: average place, top 4, firsts, and the share of the
+    starting board's card copies still on the final board. A copy counts as
+    kept when the final board has a card of that id left (the same multiset
+    rule as the scenario body)."""
+    places = np.array([r[0] for r in records], dtype=np.float64)
+    kept, total = 0, 0
+    for r in records:
+        start = r[3]["body_start"]
+        if not start:
+            continue
+        left = list(r[3]["final"])
+        for card in start:
+            if card in left:
+                left.remove(card)
+                kept += 1
+        total += len(start)
+    return {
+        "place": float(places.mean()) if records else float("nan"),
+        "top4": float((places <= 4).mean()) if records else 0.0,
+        "first": float((places == 1).mean()) if records else 0.0,
+        "body_kept": kept / total if total else float("nan"),
+    }
+
+
 def main():
     global FORCE_TURN2, FORCE_DARK, REAL_LOBBY_FILTER
     global OVERLAY_COMPS, OVERLAY_BONUS, COMP_HEALTH_PENALTY, COMP_SPECS, COMP_COUNT
     global SCENARIO_NAMES, SCENARIO_TURN_MIN, SCENARIO_TURN_MAX, SCENARIO_LABELS
+    global ERA_STARTS, ERA_TURN_MIN, ERA_TURN_MAX
     cfg = args()
     want_text = cfg.card_text
     FORCE_TURN2 = cfg.force_turn2_level
@@ -700,6 +759,19 @@ def main():
         if lo < 1 or hi < lo:
             raise SystemExit(f"--scenario-turns {cfg.scenario_turns}: need 1 <= MIN <= MAX")
         SCENARIO_TURN_MIN, SCENARIO_TURN_MAX = lo, hi
+    if cfg.era_starts:
+        try:
+            lo, hi = (int(x) for x in cfg.era_turns.split(","))
+        except ValueError:
+            raise SystemExit(f"--era-turns {cfg.era_turns}: needs MIN,MAX")
+        if lo < 1 or hi < lo:
+            raise SystemExit(f"--era-turns {cfg.era_turns}: need 1 <= MIN <= MAX")
+        ERA_STARTS = cfg.era_starts
+        ERA_TURN_MIN, ERA_TURN_MAX = lo, hi
+        if cfg.era_share < 0 or cfg.era_share > 1:
+            raise SystemExit(f"--era-share {cfg.era_share}: needs 0 to 1")
+    elif cfg.era_share:
+        raise SystemExit("--era-share needs --era-starts DIR")
     # a training setting, not a model one: the checkpoint and its weights are
     # the same with the blocks recomputed or kept
     set_recompute(not cfg.no_recompute)
@@ -750,7 +822,7 @@ def main():
     # Real seats need the boards; --real-boards alone still adds the vs7 real
     # eval, so a run can watch that number without training against them.
     real = None
-    if lineup[bgpy.REAL] > 0 or cfg.real_boards:
+    if lineup[bgpy.REAL] > 0 or cfg.real_boards or cfg.era_starts:
         folder = cfg.real_boards or real_boards.DEFAULT_DIR
         real, unknown = real_boards.load(folder)
         print(f"real boards from {folder}:")
@@ -774,8 +846,14 @@ def main():
              scenario_turn_max=SCENARIO_TURN_MAX)
         if SCENARIO_NAMES else {}
     )
+    era_kw = (
+        dict(era_starts=cfg.era_starts, era_share=cfg.era_share,
+             era_turn_min=ERA_TURN_MIN, era_turn_max=ERA_TURN_MAX,
+             era_split="train")
+        if cfg.era_starts else {}
+    )
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS,
-                      real_lobby_filter=REAL_LOBBY_FILTER, **scenario_kw)
+                      real_lobby_filter=REAL_LOBBY_FILTER, **scenario_kw, **era_kw)
     if cfg.overlay_comps:
         env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus)
         print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}")
@@ -801,6 +879,9 @@ def main():
             ("pooled", list(SCENARIO_NAMES), [by_name[name] for name in SCENARIO_NAMES]))
         print(f"scenario starts: {cfg.scenario_share:.0%} of games, turns "
               f"{SCENARIO_TURN_MIN}..{SCENARIO_TURN_MAX}, comps {', '.join(SCENARIO_NAMES)}")
+    if cfg.era_starts:
+        print(f"Era starts: {cfg.era_share:.0%} of games, turns "
+              f"{ERA_TURN_MIN}..{ERA_TURN_MAX}, train split, {cfg.era_starts}")
     if cfg.overlay_comps:
         print(f"overlay {cfg.overlay_comps}: {COMP_COUNT} comps, B {cfg.overlay_bonus:g}, "
               f"wheels full {cfg.wheels_full} end {cfg.wheels_end}, lambda {cfg.aux_weight:g}")
@@ -877,7 +958,7 @@ def main():
     eval_keys = list(EVAL_KEYS) + [
         f"scen_{scenario_slug(label)}_{metric}"
         for label, _, _ in SCENARIO_LABELS for metric in scen_metrics
-    ]
+    ] + ([f"era_{metric}" for metric in ERA_METRICS] if cfg.era_starts else [])
     if new_csv:
         log.writerow([
             "update", "minutes", "games",
@@ -1217,6 +1298,15 @@ def main():
                                         seed + 20 + 3 * k, real, scenario_names=snames)
                     for metric, val in summarize_scenario(rec_s, specs).items():
                         scen_vals[f"scen_{scenario_slug(label)}_{metric}"] = val
+            # Era starts from the holdout split, wheels off: one learner
+            # against seven real seats, every game an Era start.
+            era_vals = {}
+            if cfg.era_starts:
+                _, rec_era = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
+                                      seed + 50, real, era_starts=cfg.era_starts,
+                                      era_split="holdout")
+                for metric, val in summarize_era(rec_era).items():
+                    era_vals[f"era_{metric}"] = val
             net.train()
 
             rep = summarize_records(rec_std + rec_rush + rec_4s + rec_4r + rec_4m)
@@ -1237,6 +1327,7 @@ def main():
                 **rep,
                 **comp_rep,
                 **scen_vals,
+                **era_vals,
             }
             for key, val in eval_vals.items():
                 tb.add_scalar(f"eval/{key}", val, update)
@@ -1287,6 +1378,11 @@ def main():
                     parts.append(f"{short} {v['place']:.2f}/{v['top4']:.0%}/"
                                  f"{v['first']:.0%}/{v['end']:.0%}/{v['body_sold']:.0%}")
                 scen_txt = "  scen(" + " ".join(parts) + ")"
+            era_txt = ""
+            if era_vals:
+                era_txt = (f"  era(place {era_vals['era_place']:.2f}"
+                           f"/{era_vals['era_top4']:.0%}/{era_vals['era_first']:.0%}"
+                           f"/body {era_vals['era_body_kept']:.0%})")
             print(
                 f"update {update:5d}  {minutes:5.1f} min  {games:7d} games  "
                 f"vs7(std {vs_std:.2f} rush {vs_rush:.2f} real {vs_real:.2f})  "
@@ -1303,7 +1399,7 @@ def main():
                 f"wheels(B {stats['wheels_b']:.2f} lam {stats['wheels_lambda']:.2f} "
                 f"aux {stats['aux_loss']:.3f} active {stats['comp_active']:.0%})  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  "
-                f"buys {top_buys}{scen_txt}",
+                f"buys {top_buys}{scen_txt}{era_txt}",
                 flush=True,
             )
         if done:

@@ -2197,6 +2197,63 @@ for; normal games never read it.
   `--real-boards DIR` for the bodies. The fuzzer then checks pool accounting
   after every action in scenario games too.
 
+## Era starts
+
+`crates/bgcore/src/era_start.rs` and `Game::new_era_start` are the training
+mode from `docs/briefs/era-starts.md`: a game can begin on a turn Era really
+played, with Era's own board, hand, Gold, tier, Health, hero, trinkets and
+counters at the start of that turn. It is off unless asked for; normal games
+never read it.
+
+- **The positions:** every turn in a range of `boards/actions/*.json`, seated
+  exactly as the shop replay seats the turn's first step
+  (`shop_replay::turn_start_game`). A position whose seating reports anything
+  missing is dropped and counted with its reason. `EraStarts` builds the list
+  once and shares it (`Arc`), like `RealBoards`. The list is split by source
+  game, by a stable hash of the file name and game number (15 in 100 held
+  out), so adding a file does not move another game's side.
+- **What an Era game gets:** the source game's lobby, the position's turn, and
+  one network seat with the logged board, hand, Gold, tier, upgrade cost,
+  Health and armor, hero and hero-power state, trinkets, Dark Gifts, and the
+  player counters the replay seats. Its board and hand minions hold no pool
+  copies, exactly like a scenario body. The logged Tavern and frozen cards
+  are not kept: the engine rolls the start of that turn. The position is
+  already past the turn's start-of-turn effects, so only the Tavern is rolled
+  for that seat on the first turn; later turns run normally. Trinkets and
+  Dark Gifts are on, not off as in a scenario game.
+- **The other network seats:** a real board of that turn through the lobby
+  filter as their body, with an empty hand, the board's tier and recorded
+  Health and armor (the scenario's 15 to 35 Health when the file has none).
+  Their heroes are dealt as usual. Real seats play a fresh real board each
+  turn as in a scenario game; a scenario real seat has a flat 30 Health and
+  10 armor, and an Era-start real seat takes the recorded Health and armor of
+  a random real board of the start turn instead.
+- **Choosing:** each new game is an Era start with probability `share`, drawn
+  from the game seed with its own RNG. The position is uniform over the
+  allowed positions of the turn range and split, and which network seat gets
+  it is drawn from the same RNG. `EraSplit` is `train`, `holdout` or `all`.
+- **`bgpy.VecEnv`:** `era_starts` is the action folder, `era_share` the share
+  (0: off), `era_turn_min`/`era_turn_max` the turn range, and `era_split` the
+  side to draw from. `era_bodies()` gives each game's Era starting board,
+  `era_seats()` the seat, `era_turns()` the start turn, and
+  `era_start_report()` the positions per turn and the dropped ones.
+- **`train/ppo.py`:** `--era-starts DIR`, `--era-share S` (default 0) and
+  `--era-turns MIN,MAX` (default 7,11); training draws from the train split.
+  When on, the eval block adds one eval from the holdout split
+  (`era_place`, `era_top4`, `era_first`, `era_body_kept` in `metrics.csv`),
+  one learner against seven real seats, wheels off. `era_body_kept` is the
+  share of the starting board's card copies still on the final board. The
+  normal `vs7 real` eval and `best.pt` are unchanged.
+- **`train/fixed_eval.py`:** `--era-starts DIR --era-turns MIN,MAX
+  --era-split holdout|train|all` starts every game from Era's position, one
+  game per seed. It adds body kept, place split by starting turn, and the Era
+  seat's board total at the start turn and 2, 4 and 6 turns later. The
+  default folder is `boards/frozen/actions-2026-11-10/`, checked against its
+  `MANIFEST.txt`. Without Era flags the old fixed eval is unchanged.
+- **`bgbench fuzz|games`:** `--era-starts DIR`, `--era-share PCT` and
+  `--era-turns MIN,MAX`, with `--real-boards DIR` for the bodies. The fuzzer
+  then checks pool accounting after every action in Era-start games too.
+
 ## Era's turns, with Era's luck
 
 `train/era_turns.py` measures the bot on Era's own turns (the compiled plan's
@@ -2288,7 +2345,10 @@ cargo run --release -p bgsandbox        # the sandbox, boards go to boards/
 to seat real-board seats playing DIR's boards (docs/real-boards.md); without
 a real boards/ folder, `crates/bgcore/tests/data/real-boards/` is a small
 stand-in. Needs `ref/bg-cards.json` for the card id mapping. `--planner PATH`
-on either gives seat 0 the comp planner.
+on either gives seat 0 the comp planner. `--era-starts DIR --era-share PCT
+--era-turns MIN,MAX` start that share of games from Era's logged positions
+(see "Era starts"); the fuzzer checks pool accounting after every action in
+them too.
 
 `planner [--comps PATH] [--games N] [--vs real] [--seat planner|standard|rush]`
 (see "The comp planner") plays one seat against seven real-board seats and
@@ -2382,6 +2442,9 @@ Deleting `.venv` undoes it.
 - Scenario starts are off unless `--scenario-comps "A;B"` is given
   (`--scenario-share`, `--scenario-turns`; see "Scenario starts"). They need
   real boards and the overlay's comp file.
+- Era starts are off unless `--era-starts DIR` is given (`--era-share`,
+  default 0, and `--era-turns`, default 7,11; see "Era starts"). Training
+  draws from the train split; they need real boards.
 - Reward is placement only (+1 for 1st to -1 for 8th), minus 0.002 per
   Move action (`--action-cost`, `--cost-kinds move`) so it doesn't shuffle
   its board for free; buys, sells, plays and refreshes cost nothing extra,
@@ -2400,14 +2463,18 @@ Deleting `.venv` undoes it.
   `train/runs/fixed-eval/NAME/report.md` and `results.json`; with two or
   more checkpoints it adds a paired table. The real seats come from
   `boards/frozen/real-2026-11-10/`, a frozen copy checked against its
-  `MANIFEST.txt` before the run.
+  `MANIFEST.txt` before the run. With `--era-starts` (default
+  `boards/frozen/actions-2026-11-10/`, also manifest checked),
+  `--era-turns` and `--era-split`, every game is an Era start and the
+  report adds body kept, place by start turn and the Era board's totals.
 - Every eval writes a row to `runs/NAME/metrics.csv`: placement against
   each bot, a curve report (turn reaching tiers 3, 4, 5; share of rush,
   standard, economy rush and slow games), a tribe report, entropy and the
   action mix. With real boards loaded (real seats in the lineup, or
   `--real-boards` given), `place_vs_real` holds the one-learner-vs-7-real-
   seats eval. With scenario starts on, the `scen_...` columns hold the
-  scenario eval per comp and pooled.
+  scenario eval per comp and pooled. With Era starts on, the `era_...`
+  columns hold the holdout-split Era eval.
 - `--stop-flat N` stops a run after N minutes without gains, but only when
   it also no longer beats its oldest snapshot.
 - Any change to the action space or observation breaks old checkpoints;

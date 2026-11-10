@@ -10,6 +10,7 @@ pub mod bots;
 pub mod cards;
 pub mod comps;
 pub mod darkgifts;
+pub mod era_start;
 pub mod fight;
 pub mod fight_check;
 pub mod game;
@@ -35,6 +36,7 @@ pub use comps::{Comp, Comps};
 pub use overlay::{Overlay, OverlayState, ShellLine};
 pub use planner::Planner;
 pub use darkgifts::{Gift, GiftCond, GiftDb};
+pub use era_start::{EraPosition, EraSplit, EraStartConfig, EraStartPlan, EraStarts};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
 pub use game::{
     FightResult, Game, IllegalAction, Leaderboard, Opponent, Player, PowerState, Sandbox,

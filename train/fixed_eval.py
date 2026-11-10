@@ -41,6 +41,7 @@ from ppo import F_COMP, LEARNER, Bufs, act, comp_onehot, force_mask
 ROOT = Path(__file__).resolve().parent.parent
 TRAIN = ROOT / "train"
 FROZEN = ROOT / "boards" / "frozen" / "real-2026-11-10"
+FROZEN_ACTIONS = ROOT / "boards" / "frozen" / "actions-2026-11-10"
 OUT_ROOT = TRAIN / "runs" / "fixed-eval"
 
 SEED_BASE = 20261110
@@ -68,6 +69,13 @@ def parse_args():
                    help="turn off the real seats' lobby filter (on by default)")
     a.add_argument("--real-lag", type=int, default=0,
                    help="lag the real seats' draw by this many turns (default 0)")
+    a.add_argument("--era-starts", nargs="?", const=str(FROZEN_ACTIONS), default=None,
+                   help="start every game from Era's logged positions in this action folder "
+                        f"(default {FROZEN_ACTIONS.relative_to(ROOT)} when Era starts are on)")
+    a.add_argument("--era-turns", default="7,11",
+                   help="MIN,MAX turn an Era start begins on (default 7,11)")
+    a.add_argument("--era-split", choices=["holdout", "train", "all"], default=None,
+                   help="which side of the source-game split to draw from (default holdout)")
     return a.parse_args()
 
 
@@ -199,6 +207,13 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
     ppo.FORCE_TURN2 = False
     ppo.OLD_BOARDS = info["old_boards"]
     ppo.REAL_LOBBY_FILTER = not args.no_lobby_filter
+    era_mode = args.era_folder is not None
+    era_kw = {}
+    if era_mode:
+        era_kw = dict(era_starts=str(args.era_folder), era_share=1.0,
+                      era_turn_min=args.era_turn_min, era_turn_max=args.era_turn_max,
+                      era_split=args.era_split)
+    names = None
     rows: list[dict] = []
     chunk = 0
     while chunk * CHUNK < args.games:
@@ -207,13 +222,24 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
         env = bgpy.VecEnv(n, args.seed_base + chunk, LINEUP, real_boards=real,
                           old_boards=info["old_boards"],
                           real_lobby_filter=not args.no_lobby_filter,
-                          real_lag=args.real_lag)
+                          real_lag=args.real_lag, **era_kw)
         if info["overlay_comps"]:
             env.set_overlay(info["overlay_comps"], 0.0)
         b = Bufs(n)
         env.kinds(b.kinds)
         done = np.zeros(n, dtype=bool)
-        board_totals = [{str(t): None for t in TARGET_TURNS} for _ in range(n)]
+        era_seats = np.asarray(env.era_seats(), dtype=np.int64)
+        era_turns = np.asarray(env.era_turns(), dtype=np.int64)
+        era_bodies = np.asarray(env.era_bodies(), dtype=np.int16)
+        if era_mode and names is None:
+            names = env.card_names()
+        collect_turns = set(TARGET_TURNS)
+        if era_mode:
+            for t0 in era_turns:
+                if t0:
+                    collect_turns.update((int(t0), int(t0) + 2, int(t0) + 4, int(t0) + 6))
+        board_totals = [{str(t): None for t in collect_turns} for _ in range(n)]
+        last_names: list[list[str]] = [[] for _ in range(n)]
         rec: list[dict | None] = [None] * n
         ar = np.arange(n)
         torch.manual_seed(args.seed_base + chunk)
@@ -224,13 +250,16 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
             # The board before the learner's last action of a target turn.
             # The last such action is normally EndTurn, so this is the board
             # the shop phase finished with, before combat.
-            wanted = (~done) & (b.kind == LEARNER) & np.isin(turns, TARGET_TURNS)
-            for e in np.nonzero(wanted)[0]:
+            current = (~done) & (b.kind == LEARNER)
+            wanted = current & np.isin(turns, sorted(collect_turns))
+            for e in np.nonzero(current)[0]:
                 e = int(e)
                 s = int(b.seat[e])
                 board = env.seats(e)[s][5]
-                board_totals[e][str(int(turns[e]))] = int(
-                    sum(m[2] + m[3] for m in board))
+                last_names[e] = [m[0] for m in board]
+                if wanted[e]:
+                    board_totals[e][str(int(turns[e]))] = int(
+                        sum(m[2] + m[3] for m in board))
             o = torch.from_numpy(b.obs).to(dev)
             mask = force_mask(o, torch.from_numpy(b.mask).to(dev))
             comp_idx = np.full(n, -1, np.int64)
@@ -247,7 +276,7 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
                 if kinds[e, s] != LEARNER or done[e]:
                     continue
                 place = int(b.places[e, s])
-                rec[e] = {
+                row = {
                     "game": start + e,
                     "chunk": chunk,
                     "env": e,
@@ -257,6 +286,13 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
                     "tiers": [int(x) for x in b.tier_turns[e, s]],
                     "board_totals": board_totals[e],
                 }
+                if era_mode:
+                    e_seat = int(era_seats[e])
+                    start_ids = [int(x) for x in era_bodies[e, e_seat] if x >= 0]
+                    row["era_turn"] = int(era_turns[e])
+                    row["era_body"] = [names[c] for c in start_ids]
+                    row["final_names"] = list(last_names[e])
+                rec[e] = row
                 done[e] = True
             if b.reset.any():
                 env.kinds(b.kinds)
@@ -324,6 +360,39 @@ def summarize(rows: list[dict]) -> dict:
             "reached": len(vals),
             "mean_turn": float(np.mean(vals)) if vals else None,
         }
+    extra = {}
+    if rows and "era_turn" in rows[0]:
+        kept, total = 0, 0
+        for r in rows:
+            left = list(r["final_names"])
+            for card in r["era_body"]:
+                if card in left:
+                    left.remove(card)
+                    kept += 1
+            total += len(r["era_body"])
+        extra["era_body_kept"] = kept / total if total else float("nan")
+        extra["era_body_total"] = total
+        by_turn = {}
+        for turn in sorted({r["era_turn"] for r in rows}):
+            sel = [r for r in rows if r["era_turn"] == turn]
+            vals = np.array([r["place"] for r in sel], dtype=np.float64)
+            by_turn[turn] = {
+                "games": len(sel),
+                "place": float(vals.mean()) if len(vals) else None,
+                "top4": float((vals <= 4).mean()) if len(vals) else None,
+                "first": float((vals == 1).mean()) if len(vals) else None,
+            }
+        extra["era_place_by_turn"] = by_turn
+        growth = {}
+        for offset in (0, 2, 4, 6):
+            vals = [r["board_totals"].get(str(r["era_turn"] + offset)) for r in rows]
+            vals = [v for v in vals if v is not None]
+            growth[offset] = {
+                "reached": len(vals),
+                "mean": float(np.mean(vals)) if vals else None,
+                "median": float(np.median(vals)) if vals else None,
+            }
+        extra["era_boards"] = growth
     return {
         "n": n,
         "place": {"mean": mean, "lo": lo, "hi": hi},
@@ -339,6 +408,7 @@ def summarize(rows: list[dict]) -> dict:
         "boards": boards,
         "boards_at16": board16,
         "tiers": tiers,
+        **extra,
     }
 
 
@@ -364,6 +434,10 @@ def build_report(name: str, args, n_board_files: int, rev: str,
     lines.append(f"- lineup: {','.join(str(x) for x in LINEUP)} (learner then 7 real)")
     lines.append(f"- lobby filter: {'off' if args.no_lobby_filter else 'on'}")
     lines.append(f"- real lag: {args.real_lag} turn{'s' if args.real_lag != 1 else ''}")
+    if args.era_folder is not None:
+        lines.append(f"- mode: Era starts ({args.era_split} split, turns "
+                     f"{args.era_turn_min}..{args.era_turn_max}, "
+                     f"`{args.era_folder}`)")
     lines.append(f"- git: {rev}")
     lines.append(f"- bgpy: OBS_SIZE {bgpy.OBS_SIZE}, N_ACTIONS {bgpy.N_ACTIONS}")
     lines.append(f"- written: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
@@ -390,6 +464,26 @@ def build_report(name: str, args, n_board_files: int, rev: str,
         lines.append(f"Firsts: **{s['first']['count']}** ({pct(s['first']['share'])}, "
                      f"95% Wilson {pct(s['first']['lo'])} to {pct(s['first']['hi'])})")
         lines.append("")
+        if "era_body_kept" in s:
+            lines.append(f"Era body kept: **{pct(s['era_body_kept'])}** of the starting "
+                         f"board's card copies ({s['era_body_total']} copies)")
+            lines.append("")
+            lines.append("### Place by Era starting turn")
+            lines.append("")
+            lines.append("| start turn | games | average place | top 4 | firsts |")
+            lines.append("|---|---|---|---|---|")
+            for turn, d in s["era_place_by_turn"].items():
+                lines.append(f"| {turn} | {d['games']} | {num(d['place'], 2)} | "
+                             f"{pct(d['top4'])} | {pct(d['first'])} |")
+            lines.append("")
+            lines.append("### Era seat's board total from its start turn")
+            lines.append("")
+            lines.append("| turns after start | games reached | mean total | median total |")
+            lines.append("|---|---|---|---|")
+            for offset, d in s["era_boards"].items():
+                lines.append(f"| {offset} | {d['reached']} | {num(d['mean'], 1)} | "
+                             f"{num(d['median'], 1)} |")
+            lines.append("")
         lines.append("### Place distribution")
         lines.append("")
         lines.append("| place | games | share |")
@@ -511,6 +605,28 @@ def main():
     print(f"real boards from {folder}: {n_board_files} files, {len(real)} boards"
           + (f", {len(set(unknown))} unmatched minion names" if unknown else ""), flush=True)
 
+    era_mode = args.era_starts is not None or args.era_split is not None
+    n_action_files = 0
+    if era_mode:
+        try:
+            args.era_turn_min, args.era_turn_max = (
+                int(x) for x in args.era_turns.split(","))
+        except ValueError:
+            raise SystemExit(f"--era-turns {args.era_turns}: needs MIN,MAX")
+        if args.era_turn_min < 1 or args.era_turn_max < args.era_turn_min:
+            raise SystemExit(f"--era-turns {args.era_turns}: need 1 <= MIN <= MAX")
+        args.era_split = args.era_split or "holdout"
+        era_folder = Path(args.era_starts or FROZEN_ACTIONS).resolve()
+        n_action_files = check_boards(era_folder)
+        args.era_folder = era_folder
+        print(f"Era starts from {era_folder}: {n_action_files} files, "
+              f"{args.era_split} split, turns {args.era_turn_min}..{args.era_turn_max}",
+              flush=True)
+    else:
+        args.era_folder = None
+        args.era_turn_min = args.era_turn_max = 0
+        args.era_split = None
+
     dev = torch.device("cpu" if args.cpu else
                        ("cuda" if torch.cuda.is_available() else "cpu"))
     if dev.type == "cuda":
@@ -553,6 +669,12 @@ def main():
         "boards": {"path": str(args.boards), "files": n_board_files},
         "lobby_filter": not args.no_lobby_filter,
         "real_lag": args.real_lag,
+        "era": {
+            "path": str(args.era_folder) if args.era_folder is not None else None,
+            "files": (n_action_files if args.era_folder is not None else 0),
+            "split": args.era_split,
+            "turns": [args.era_turn_min, args.era_turn_max],
+        },
         "git": git_rev(),
         "obs_size": bgpy.OBS_SIZE,
         "n_actions": bgpy.N_ACTIONS,

@@ -82,8 +82,20 @@ impl Game {
     /// The hero deal without starting the game: a scenario start places its
     /// boards and hands before turn T begins (`Game::new_scenario`). Leaves
     /// `done` set for the seats waiting on a pick, like `deal_random_heroes`.
-    pub(super) fn deal_heroes(&mut self) {
-        let mut deck: Vec<u8> = self.data.heroes.lobby_allowed(self.lobby).collect();
+    pub(crate) fn deal_heroes(&mut self) {
+        self.deal_heroes_excluding(&[]);
+    }
+
+    /// `deal_heroes` with heroes in `excluded` left out of the deck: an Era
+    /// start takes its logged hero after the deal, so no other seat may have
+    /// been given that hero.
+    pub(crate) fn deal_heroes_excluding(&mut self, excluded: &[u8]) {
+        let mut deck: Vec<u8> = self
+            .data
+            .heroes
+            .lobby_allowed(self.lobby)
+            .filter(|h| !excluded.contains(h))
+            .collect();
         self.rng.shuffle(&mut deck);
         let mut at = 0;
         for p in 0..PLAYERS {

@@ -30,10 +30,12 @@ use std::time::{Duration, Instant};
 
 use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::comps::Comps;
+use bgcore::era_start::{EraSplit, EraStartConfig, EraStarts};
 use bgcore::planner::Planner;
 use bgcore::fight_check::{CheckOptions, CheckReport, check_fight};
 use bgcore::real_boards::{CardIdMap, RealBoards, pair_fights, parse_board_files};
 use bgcore::scenario::ScenarioConfig;
+use bgcore::shop_replay;
 use bgcore::{
     Action, Attached, BOARD, CardId, Counters, Data, Game, Keywords, Minion, PLAYERS, RealBoardSpec,
     Rng, fight, fight_with,
@@ -76,6 +78,28 @@ fn read_board_files(dir: &str) -> Result<Vec<(String, String)>, String> {
         return Err(format!("{dir}: no board files"));
     }
     Ok(files)
+}
+
+/// Seat every position of `dir` in the turn range, through the shop replay
+/// (`docs/briefs/era-starts.md`). Prints the positions per turn and what was
+/// dropped.
+fn load_era_starts(dir: &str, turn_min: u32, turn_max: u32) -> Result<Arc<EraStarts>, String> {
+    let files = read_board_files(dir)?;
+    let ids_text = std::fs::read_to_string("ref/bg-cards.json")
+        .map_err(|e| format!("ref/bg-cards.json (the card id mapping): {e}"))?;
+    let ids = CardIdMap::parse(&ids_text)?;
+    let mut specs = shop_replay::parse_action_files(&files)?;
+    shop_replay::seat_taught_spells(&mut specs, &ids);
+    let data = Arc::new(Data::bundled());
+    let (starts, missing) = EraStarts::build(&specs, &data, &ids, turn_min, turn_max);
+    println!("{}", starts.report());
+    if !missing.is_empty() {
+        println!("  ({} loader misses across the dropped positions)", missing.len());
+    }
+    if starts.is_empty() {
+        return Err(format!("{dir}: no Era positions start on turns {turn_min}..{turn_max}"));
+    }
+    Ok(Arc::new(starts))
 }
 
 /// Read the board files in `dir` (docs/real-boards.md) and resolve them
@@ -171,6 +195,7 @@ fn play(
     real: Real,
     planner: Option<Arc<Comps>>,
     scenario: Option<&Arc<ScenarioConfig>>,
+    era: Option<&Arc<EraStartConfig>>,
 ) -> Result<(u64, u32), String> {
     let first = if planner.is_some() { 1 } else { 0 };
     let real_seats: Vec<usize> = match &real {
@@ -184,11 +209,22 @@ fn play(
         .filter(|p| !real_seats.contains(p))
         .collect();
     let plan = scenario.and_then(|c| c.plan(seed, data, &scenario_seats));
+    let era_plan = if plan.is_none() {
+        era.and_then(|c| c.plan(seed, &scenario_seats))
+    } else {
+        None
+    };
     let mut g = if let Some(plan) = &plan {
         let (boards, _) = real
             .as_ref()
             .expect("scenario games need --real-boards: the body is a real board");
         Game::new_scenario(data.clone(), seed, &real_seats, boards.clone(), plan)
+    } else if let Some(plan) = &era_plan {
+        let (boards, _) = real
+            .as_ref()
+            .expect("Era-start games need --real-boards: the bodies are real boards");
+        let config = era.expect("an Era plan comes from the Era config");
+        Game::new_era_start(data.clone(), seed, &real_seats, boards.clone(), &config.starts, plan)
     } else {
         match &real {
             Some((boards, _)) => {
@@ -235,6 +271,7 @@ fn bench_games(
     real: Real,
     planner: Option<Arc<Comps>>,
     scenario: Option<Arc<ScenarioConfig>>,
+    era: Option<Arc<EraStartConfig>>,
 ) {
     let data = Arc::new(Data::bundled());
     // one core first, for the per-game time
@@ -243,8 +280,10 @@ fn bench_games(
     let mut turns = 0;
     let n = 2000;
     for seed in 0..n {
-        let (s, tu) = play(&data, seed, false, real.clone(), planner.clone(), scenario.as_ref())
-            .unwrap();
+        let (s, tu) = play(
+            &data, seed, false, real.clone(), planner.clone(), scenario.as_ref(), era.as_ref(),
+        )
+        .unwrap();
         steps += s;
         turns += tu as u64;
     }
@@ -265,7 +304,10 @@ fn bench_games(
     (0..threads as u64).into_par_iter().for_each(|th| {
         let mut seed = th << 40;
         while !stop.load(Ordering::Relaxed) {
-            play(&data, seed, false, real.clone(), planner.clone(), scenario.as_ref()).unwrap();
+            play(
+                &data, seed, false, real.clone(), planner.clone(), scenario.as_ref(), era.as_ref(),
+            )
+            .unwrap();
             seed += 1;
             games.fetch_add(1, Ordering::Relaxed);
             if t.elapsed() >= deadline {
@@ -278,12 +320,22 @@ fn bench_games(
     println!("{threads} threads: {g} games in {el:.1} s, {:.0} games per second", g as f64 / el);
 }
 
-fn fuzz(n: u64, real: Real, planner: Option<Arc<Comps>>, scenario: Option<Arc<ScenarioConfig>>) {
+fn fuzz(
+    n: u64,
+    real: Real,
+    planner: Option<Arc<Comps>>,
+    scenario: Option<Arc<ScenarioConfig>>,
+    era: Option<Arc<EraStartConfig>>,
+) {
     let data = Arc::new(Data::bundled());
     let t = Instant::now();
     let results: Vec<Result<(u64, u32), String>> = (0..n)
         .into_par_iter()
-        .map(|seed| play(&data, seed, true, real.clone(), planner.clone(), scenario.as_ref()))
+        .map(|seed| {
+            play(
+                &data, seed, true, real.clone(), planner.clone(), scenario.as_ref(), era.as_ref(),
+            )
+        })
         .collect();
     let steps: u64 = results.iter().filter_map(|r| r.as_ref().ok()).map(|r| r.0).sum();
     let errors: Vec<&String> = results.iter().filter_map(|r| r.as_ref().err()).collect();
@@ -1188,6 +1240,53 @@ fn main() {
         }
         None
     };
+    let era = if let Some(k) = args.iter().position(|a| a == "--era-starts") {
+        let Some(dir) = args.get(k + 1) else {
+            eprintln!("--era-starts needs an action folder");
+            std::process::exit(2);
+        };
+        let opt = |name: &str, default: &str| {
+            args.iter()
+                .position(|a| a == name)
+                .and_then(|k| args.get(k + 1))
+                .cloned()
+                .unwrap_or_else(|| default.to_string())
+        };
+        let share: f64 = opt("--era-share", "100").parse().unwrap_or_else(|_| {
+            eprintln!("--era-share needs a percent, like 30");
+            std::process::exit(2);
+        });
+        let turns = opt("--era-turns", "7,11");
+        let (turn_min, turn_max) = turns.split_once(',').and_then(|(a, b)| {
+            Some((a.trim().parse::<u32>().ok()?, b.trim().parse::<u32>().ok()?))
+        }).unwrap_or_else(|| {
+            eprintln!("--era-turns needs MIN,MAX, like 7,11");
+            std::process::exit(2);
+        });
+        if turn_min < 1 || turn_max < turn_min {
+            eprintln!("--era-turns needs 1 <= MIN <= MAX");
+            std::process::exit(2);
+        }
+        if real.is_none() {
+            eprintln!("--era-starts needs --real-boards DIR: the other seats' bodies are real boards");
+            std::process::exit(2);
+        }
+        let starts = load_era_starts(dir, turn_min, turn_max).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        });
+        let cfg = EraStartConfig::new(starts, share / 100.0, EraSplit::All).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        });
+        Some(Arc::new(cfg))
+    } else {
+        if args.iter().any(|a| a == "--era-share" || a == "--era-turns") {
+            eprintln!("--era-share and --era-turns need --era-starts");
+            std::process::exit(2);
+        }
+        None
+    };
     match args.get(1).map(String::as_str) {
         Some("fight") => bench_fights(num(1_000_000) as usize),
         Some("fightcheck") => {
@@ -1238,8 +1337,10 @@ fn main() {
         Some("check-actions") => check_actions::run(&args),
         Some("collect-actions") => collect_actions::run(&args),
         Some("collect-boards") => collect_boards::run(&args),
-        Some("games") => bench_games(num(10), real, load_planner_arg(&args), scenario),
-        Some("fuzz") => fuzz(num(10_000), real, load_planner_arg(&args), scenario),
+        Some("games") => {
+            bench_games(num(10), real, load_planner_arg(&args), scenario, era)
+        }
+        Some("fuzz") => fuzz(num(10_000), real, load_planner_arg(&args), scenario, era),
         Some("planner") => {
             let opt = |name: &str, default: &str| {
                 args.iter()
@@ -1287,7 +1388,8 @@ fn main() {
                  \x20                      [--real-lobby-filter] [--out FILE]\n\
                  \x20      bgbench fuzz|games N --real-boards DIR [--real-seats N] [--real-lobby-filter]\n\
                  \x20                      [--scenario-comps \"A;B\"] [--scenario-file PATH]\n\
-                 \x20                      [--scenario-share PCT] [--scenario-turns MIN,MAX]"
+                 \x20                      [--scenario-share PCT] [--scenario-turns MIN,MAX]\n\
+                 \x20                      [--era-starts DIR] [--era-share PCT] [--era-turns MIN,MAX]"
             );
             std::process::exit(2);
         }
