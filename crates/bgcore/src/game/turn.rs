@@ -532,7 +532,10 @@ impl Game {
                     let exclude = era_game
                         .as_ref()
                         .map(|(source, game)| (source.as_str(), *game));
-                    boards.draw_filtered(turn, *lobby, exclude, rng)
+                    // The lag applies to the real seats' draw only, not to
+                    // the Era seat above (docs/engine.md).
+                    let draw_turn = turn.saturating_sub(boards.lag()).max(1);
+                    boards.draw_filtered(draw_turn, *lobby, exclude, rng)
                 };
                 pl.tier = board.tier;
                 pl.board.clear();

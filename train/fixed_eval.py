@@ -46,7 +46,8 @@ OUT_ROOT = TRAIN / "runs" / "fixed-eval"
 SEED_BASE = 20261110
 CHUNK = 512
 LINEUP = [1, 0, 0, 0, 0, 7]
-TARGET_TURNS = (6, 8, 10, 12, 14)
+TARGET_TURNS = (6, 8, 10, 12, 14, 16)
+TARGET_TURNS_16 = (8, 10, 12, 14, 16)
 TIER_TARGETS = (3, 4, 5, 6)
 TRIBE_NAMES = ppo.TRIBE_NAMES
 
@@ -65,6 +66,8 @@ def parse_args():
     a.add_argument("--cpu", action="store_true", help="run on the CPU")
     a.add_argument("--no-lobby-filter", action="store_true",
                    help="turn off the real seats' lobby filter (on by default)")
+    a.add_argument("--real-lag", type=int, default=0,
+                   help="lag the real seats' draw by this many turns (default 0)")
     return a.parse_args()
 
 
@@ -203,7 +206,8 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
         n = min(CHUNK, args.games - start)
         env = bgpy.VecEnv(n, args.seed_base + chunk, LINEUP, real_boards=real,
                           old_boards=info["old_boards"],
-                          real_lobby_filter=not args.no_lobby_filter)
+                          real_lobby_filter=not args.no_lobby_filter,
+                          real_lag=args.real_lag)
         if info["overlay_comps"]:
             env.set_overlay(info["overlay_comps"], 0.0)
         b = Bufs(n)
@@ -295,6 +299,24 @@ def summarize(rows: list[dict]) -> dict:
             "mean": float(np.mean(vals)) if vals else None,
             "median": float(np.median(vals)) if vals else None,
         }
+    # The same games for every turn, so growth is not read on survivors of
+    # different lengths: only games with a board total at turn 16.
+    at16 = [r for r in rows if r["board_totals"].get("16") is not None]
+    board16 = {"games": len(at16), "turns": {}}
+    for t in TARGET_TURNS_16:
+        vals = [r["board_totals"][str(t)] for r in at16
+                if r["board_totals"].get(str(t)) is not None]
+        board16["turns"][t] = {
+            "reached": len(vals),
+            "mean": float(np.mean(vals)) if vals else None,
+            "median": float(np.median(vals)) if vals else None,
+        }
+    def ratio(a, b):
+        x = board16["turns"][a]["mean"]
+        y = board16["turns"][b]["mean"]
+        return x / y if x is not None and y else None
+    board16["ratio_16_12"] = ratio(16, 12)
+    board16["ratio_12_8"] = ratio(12, 8)
     tiers = {}
     for tier in TIER_TARGETS:
         vals = [r["tiers"][tier - 1] for r in rows if r["tiers"][tier - 1] > 0]
@@ -315,6 +337,7 @@ def summarize(rows: list[dict]) -> dict:
                   "share": float(mixed.mean()) if n else None},
         "tribes": tribes,
         "boards": boards,
+        "boards_at16": board16,
         "tiers": tiers,
     }
 
@@ -340,6 +363,7 @@ def build_report(name: str, args, n_board_files: int, rev: str,
     lines.append(f"- games: {args.games}, chunk size {CHUNK}, one game per seed")
     lines.append(f"- lineup: {','.join(str(x) for x in LINEUP)} (learner then 7 real)")
     lines.append(f"- lobby filter: {'off' if args.no_lobby_filter else 'on'}")
+    lines.append(f"- real lag: {args.real_lag} turn{'s' if args.real_lag != 1 else ''}")
     lines.append(f"- git: {rev}")
     lines.append(f"- bgpy: OBS_SIZE {bgpy.OBS_SIZE}, N_ACTIONS {bgpy.N_ACTIONS}")
     lines.append(f"- written: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
@@ -404,6 +428,23 @@ def build_report(name: str, args, n_board_files: int, rev: str,
             d = s["boards"][t]
             lines.append(f"| {t} | {d['reached']} | {num(d['mean'], 1)} | "
                          f"{num(d['median'], 1)} |")
+        lines.append("")
+        g = s["boards_at16"]
+        lines.append(f"### Board Attack plus Health, games that reached turn 16 ({g['games']} games)")
+        lines.append("")
+        if g["games"]:
+            lines.append("| turn | games | mean total | median total |")
+            lines.append("|---|---|---|---|")
+            for t in TARGET_TURNS_16:
+                d = g["turns"][t]
+                lines.append(f"| {t} | {d['reached']} | {num(d['mean'], 1)} | "
+                             f"{num(d['median'], 1)} |")
+            lines.append("")
+            lines.append(f"Growth on these games: total at 16 divided by total at 12 = "
+                         f"**{num(g['ratio_16_12'])}**; at 12 divided by 8 = "
+                         f"**{num(g['ratio_12_8'])}**.")
+        else:
+            lines.append("No game reached turn 16.")
         lines.append("")
         lines.append("### Tier-up turns")
         lines.append("")
@@ -511,6 +552,7 @@ def main():
         "lineup": LINEUP,
         "boards": {"path": str(args.boards), "files": n_board_files},
         "lobby_filter": not args.no_lobby_filter,
+        "real_lag": args.real_lag,
         "git": git_rev(),
         "obs_size": bgpy.OBS_SIZE,
         "n_actions": bgpy.N_ACTIONS,

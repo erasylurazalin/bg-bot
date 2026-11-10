@@ -1841,6 +1841,11 @@ minions in the hand.
   `eval_search.py` and `eval_overlay.py` the flag is `--real-lobby-filter`;
   on `bgpy.VecEnv` it is `real_lobby_filter=True`. Off is the old draw
   exactly.
+- **The lag:** `RealBoards::set_lag(k)` (default 0) makes a real seat on
+  turn t draw a board of turn `max(1, t - k)`, through the same late-turn,
+  nearest-turn, lobby-filter and widening rules. The Era seat (`draw_era`) is
+  not lagged. On `bgpy.VecEnv` it is `real_lag=K`; lag 0 is the old draw
+  exactly.
 
 ## The shop-turn search
 

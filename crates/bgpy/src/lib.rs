@@ -318,6 +318,8 @@ impl VecEnv {
     /// observation keeps its size either way (see `bgcore::obs::OldBoards`).
     /// `real_lobby_filter`: a real seat draws only boards whose minions fit
     /// this game's lobby (docs/real-boards.md "The lobby filter").
+    /// `real_lag`: how many turns behind a real seat's draw is; 0 is the old
+    /// draw exactly. The Era seat is not lagged.
     /// `era_game`: (source, game) whose own boards the first real seat plays,
     /// with the other real seats' pool leaving that game out.
     /// `scenario_comps`/`scenario_names`: a comp file and the comp names a
@@ -325,7 +327,7 @@ impl VecEnv {
     /// games that are scenario games (0: off), and `scenario_turn_min`/
     /// `scenario_turn_max` the turn it starts on (uniform, inclusive).
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -343,6 +345,7 @@ impl VecEnv {
         scenario_share: f64,
         scenario_turn_min: u32,
         scenario_turn_max: u32,
+        real_lag: u32,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -385,6 +388,7 @@ impl VecEnv {
             // stays quiet: every eval VecEnv would repeat the line.
             let (mut boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
             boards.set_lobby_filter(real_lobby_filter);
+            boards.set_lag(real_lag);
             Arc::new(boards)
         });
         let lineup = check_lineup(lineup, boards.is_some())?;

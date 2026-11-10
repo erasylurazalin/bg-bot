@@ -1196,3 +1196,67 @@ fn the_flag_off_draw_is_exactly_the_old_draw() {
     }
     assert_eq!(boards.filter_stats(), Default::default(), "the filter never ran");
 }
+
+// ---- the lag on a real seat's draw (2026-11-10) ----
+
+#[test]
+fn lag_zero_is_exactly_the_old_game() {
+    let d = data();
+    let plain = build(&folder_like());
+    let mut lagged = (*plain).clone();
+    lagged.set_lag(0);
+    assert_eq!(lagged.lag(), 0);
+    let lagged = Arc::new(lagged);
+    for seed in 0..3u64 {
+        let mut a = Game::new_random_heroes_real(d.clone(), seed, &[0], plain.clone());
+        let mut b = Game::new_random_heroes_real(d.clone(), seed, &[0], lagged.clone());
+        let mut ra = Rng::new(seed ^ 0x1a6);
+        let mut rb = Rng::new(seed ^ 0x1a6);
+        let mut step = 0;
+        while !a.over || !b.over {
+            assert_eq!(a.over, b.over, "seed {seed}: games ended on different steps");
+            let aa = random_action(&a, &mut ra);
+            let ab = random_action(&b, &mut rb);
+            assert_eq!(aa, ab, "seed {seed} step {step}: actions differ");
+            a.step(aa).unwrap();
+            b.step(ab).unwrap();
+            a.check_invariants().unwrap();
+            b.check_invariants().unwrap();
+            assert_eq!(format!("{a:?}"), format!("{b:?}"),
+                       "seed {seed} step {step}: lag 0 changed the game");
+            step += 1;
+        }
+    }
+}
+
+#[test]
+fn lag_three_makes_turn_eight_play_the_turn_five_board() {
+    let d = data();
+    // One board per turn, each with its turn in its Attack, and enough Health
+    // that the real seat survives to turn 8 against the random shoppers.
+    let mut specs = Vec::new();
+    for turn in 1..=8u32 {
+        specs.push(spec(turn, 4, &[("Bonker", 500 + turn as i32, 5000, false, &[])]));
+    }
+    let (mut boards, _) = RealBoards::build(&specs, &d.cards, &d.gifts);
+    assert_eq!(boards.lag(), 0, "the default lag is 0");
+    boards.set_lag(3);
+    assert_eq!(boards.lag(), 3);
+    let boards = Arc::new(boards);
+    let mut g = Game::new_random_heroes_real(d, 21, &[0], boards.clone());
+    let mut rng = Rng::new(31);
+    while g.turn < 8 && !g.over {
+        let a = random_action(&g, &mut rng);
+        g.step(a).unwrap();
+        g.check_invariants().unwrap();
+    }
+    assert!(!g.over, "the real seat died before turn 8");
+    assert_eq!(g.turn, 8);
+    let pl = &g.players[0];
+    // Lag 3 on turn 8 reads the turn 5 bucket, not turn 8's.
+    let want = &boards.boards_at(5)[0];
+    assert_eq!(pl.board.as_slice(), want.minions.as_slice());
+    assert_eq!(pl.tier, want.tier);
+    assert_eq!(pl.board[0].attack, 505);
+    assert_ne!(pl.board[0].attack, 508, "turn 8 drew its own board");
+}

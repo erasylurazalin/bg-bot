@@ -473,6 +473,10 @@ pub struct RealBoards {
     /// the game's lobby (`draw_filtered`). Off by default: the old draw is
     /// then byte for byte the same.
     lobby_filter: bool,
+    /// How many turns behind a real seat's draw is (`draw_filtered`): with
+    /// lag k a seat on turn t draws a board of turn `max(1, t - k)`. Off by
+    /// default: the old draw is then byte for byte the same.
+    lag: u32,
     filter: Arc<FilterCounters>,
 }
 
@@ -749,6 +753,7 @@ impl RealBoards {
                 meta,
                 era,
                 lobby_filter: false,
+                lag: 0,
                 filter: Arc::new(FilterCounters::default()),
             },
             unmatched,
@@ -763,6 +768,18 @@ impl RealBoards {
 
     pub fn lobby_filter(&self) -> bool {
         self.lobby_filter
+    }
+
+    /// Lag a real seat's draw by `k` turns: on turn t it draws a board of
+    /// turn `max(1, t - k)`, through the same rules as lag 0 (the late
+    /// bucket, the nearest earlier turn, the lobby filter). 0 (the default)
+    /// is the old draw exactly.
+    pub fn set_lag(&mut self, k: u32) {
+        self.lag = k;
+    }
+
+    pub fn lag(&self) -> u32 {
+        self.lag
     }
 
     pub fn filter_stats(&self) -> FilterStats {
