@@ -4160,8 +4160,24 @@ pub fn turn_start_game(
     turn: &ShopTurnSpec,
     seed: u64,
 ) -> Option<(Game, Vec<String>)> {
-    let step = turn.actions.first()?;
-    let before = state_before(turn, 0)?;
+    seat_turn_start(data, ids, file, turn, seed).ok()
+}
+
+/// The same, with the loader's own reason when the turn's first state cannot
+/// be built: the whole-turn replay records it as a turn that stops at step 0.
+fn seat_turn_start(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    seed: u64,
+) -> Result<(Game, Vec<String>), StepError> {
+    let step = turn
+        .actions
+        .first()
+        .ok_or_else(|| ("the turn has no steps".to_string(), Vec::new()))?;
+    let before = state_before(turn, 0)
+        .ok_or_else(|| ("no state before the turn's first step".to_string(), Vec::new()))?;
     let turn_index = file.turns.iter().position(|t| t.turn == turn.turn).unwrap_or(0);
     let one = OneStep {
         file,
@@ -4173,8 +4189,229 @@ pub fn turn_start_game(
         armed: whistle_armed(file, turn_index, 0),
         last_spell: last_tavern_spell(data, ids, file, turn_index, 0),
     };
-    let seated = seat(data, ids, &one, seed).ok()?;
-    Some((seated.game, seated.missing))
+    let seated = seat(data, ids, &one, seed)?;
+    Ok((seated.game, seated.missing))
+}
+
+/// Why a whole-turn replay could not follow the log's next step.
+#[derive(Clone, Debug, Default)]
+pub struct TurnStop {
+    /// The step's index in the turn's action list (0 based, as `StepResult`
+    /// has it): the step the replay could not play.
+    pub step: usize,
+    /// The logged step's kind (`buy`, `play`, `end_turn`, ...).
+    pub kind: String,
+    /// The card the step acted on, when the file names one.
+    pub card: Option<String>,
+    /// `start` when the turn's own start could not be seated, `seat` when a
+    /// later step's state could not be built, `missing` when the loader had
+    /// to leave a card out, `illegal` when the engine refused one of the
+    /// step's actions, `ended` when the engine ended the turn early.
+    pub class: String,
+    /// What the engine or the loader said, in its own words.
+    pub reason: String,
+}
+
+/// One logged turn played forward from its own start on one game: the state
+/// the engine reached after `played` steps, and where (if anywhere) it could
+/// not follow the log.
+#[derive(Clone, Debug)]
+pub struct TurnRun {
+    /// The carried game after the last good step, with the running board,
+    /// hand, Gold and counters.
+    pub game: Game,
+    /// The logged steps in the turn.
+    pub steps: usize,
+    /// The steps played, in order, before the turn's end or the stop.
+    pub played: usize,
+    /// The step that could not be followed, None for a turn played to the end.
+    pub stop: Option<TurnStop>,
+    /// What the loader could not use along the way, in the report's words.
+    pub missing: Vec<String>,
+}
+
+impl TurnRun {
+    /// Whether every logged step of the turn was played.
+    pub fn complete(&self) -> bool {
+        self.stop.is_none() && self.played == self.steps
+    }
+
+    /// The log's own state after the last good step: the state before the
+    /// step the run stopped at (or the turn's end for a complete run).
+    pub fn log_state<'a>(&self, turn: &'a ShopTurnSpec) -> Option<&'a ShopStateSpec> {
+        if let Some(stop) = &self.stop {
+            state_before(turn, stop.step)
+        } else {
+            turn.end
+                .as_ref()
+                .or_else(|| turn.actions.last().and_then(|a| a.after.as_ref()))
+        }
+    }
+}
+
+/// Put a logged Tavern on a carried game: its minion slots, its spell slot and
+/// its freeze, with the pool copies the old Tavern held going back and the new
+/// cards taking theirs. The rest of the player is the game's own carried
+/// state, not the log's: this is what lets a whole turn's actions be played
+/// one after the other without re-seating, while every Buy and Activate still
+/// names the card the log shows in that slot.
+fn place_tavern(
+    data: &Data,
+    game: &mut Game,
+    spec: &ShopStateSpec,
+    missing: &mut Vec<String>,
+) {
+    let turn = game.turn;
+    let (tavern_slots, spell_slot) = tavern_split(spec);
+    let old: Vec<Minion> = game.players[ME].shop.iter().copied().collect();
+    give_back_copies(&mut game.pool, &data.cards, &old);
+    let mut tavern: Vec<Minion> = Vec::new();
+    for m in &tavern_slots {
+        let (mut minion, bad) = build_minion(data, m, turn);
+        if let Some(name) = bad {
+            missing.push(format!("minion not built: {name} (a Stand-in with its stats)"));
+        }
+        minion.frozen = m.frozen;
+        take_pool_copy(&mut game.pool, &data.cards, &mut minion);
+        tavern.push(minion);
+    }
+    let spell_card = spell_slot.map(|m| {
+        let (minion, bad) = build_minion(data, m, turn);
+        if let Some(name) = bad {
+            missing.push(format!("card not built: {name} (a Stand-in with its stats)"));
+        }
+        minion.card
+    });
+    let pl = &mut game.players[ME];
+    pl.shop.clear();
+    for m in tavern {
+        let _ = pl.shop.try_push(m);
+    }
+    pl.shop_spell = spell_card;
+    // The freeze is one state: the log's flag, or a frozen card, as `seat`
+    // reads it, then off the cards so a Freeze click toggles the whole Tavern.
+    pl.frozen = spec.frozen || pl.shop.iter().any(|m| m.frozen);
+    for m in pl.shop.iter_mut() {
+        m.frozen = false;
+    }
+}
+
+/// Play one logged turn forward on one game: seat the turn's start once
+/// (`turn_start_game`), then play every logged step in order with the shop
+/// replay's own action mapping (`seat_step`), carrying the state from step to
+/// step instead of re-seating it. Before each step the log's Tavern is put in
+/// place (`place_tavern`), so a Buy, Activate or Move still names the card the
+/// log acted on; every other random effect is the engine's draw.
+///
+/// The run stops at the first step it cannot follow, with the carried state
+/// as it stood after the last good step. The error is the loader's reason when
+/// even the turn's start cannot be seated.
+pub fn replay_whole_turn(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    seed: u64,
+) -> Result<TurnRun, StepError> {
+    let (mut game, mut missing) = seat_turn_start(data, ids, file, turn, seed)?;
+    let steps = turn.actions.len();
+    for i in 0..steps {
+        let Some(before) = state_before(turn, i) else {
+            return Ok(TurnRun {
+                game,
+                steps,
+                played: i,
+                stop: Some(TurnStop {
+                    step: i,
+                    kind: turn.actions[i].step.clone(),
+                    card: turn.actions[i].card.as_ref().and_then(|c| c.name.clone()),
+                    class: "seat".to_string(),
+                    reason: "no state before the step (the file has no step before it to load)"
+                        .to_string(),
+                }),
+                missing,
+            });
+        };
+        place_tavern(data, &mut game, before, &mut missing);
+        let seated = match seat_step(data, ids, file, turn, i, seed) {
+            Ok(s) => s,
+            Err((why, miss)) => {
+                missing.extend(miss);
+                return Ok(TurnRun {
+                    game,
+                    steps,
+                    played: i,
+                    stop: Some(TurnStop {
+                        step: i,
+                        kind: turn.actions[i].step.clone(),
+                        card: turn.actions[i].card.as_ref().and_then(|c| c.name.clone()),
+                        class: "seat".to_string(),
+                        reason: why,
+                    }),
+                    missing,
+                });
+            }
+        };
+        if !seated.missing.is_empty() {
+            let reason = seated.missing.join("; ");
+            missing.extend(seated.missing);
+            return Ok(TurnRun {
+                game,
+                steps,
+                played: i,
+                stop: Some(TurnStop {
+                    step: i,
+                    kind: turn.actions[i].step.clone(),
+                    card: turn.actions[i].card.as_ref().and_then(|c| c.name.clone()),
+                    class: "missing".to_string(),
+                    reason,
+                }),
+                missing,
+            });
+        }
+        // The carried state is kept for the stop's own comparison when the
+        // step cannot be played: `play_on` takes the game it plays.
+        match seated.play_on(data, ids, game.clone()) {
+            Ok((next, miss, _text)) => {
+                missing.extend(miss);
+                game = next;
+            }
+            Err((why, miss)) => {
+                missing.extend(miss);
+                return Ok(TurnRun {
+                    game,
+                    steps,
+                    played: i,
+                    stop: Some(TurnStop {
+                        step: i,
+                        kind: turn.actions[i].step.clone(),
+                        card: turn.actions[i].card.as_ref().and_then(|c| c.name.clone()),
+                        class: "illegal".to_string(),
+                        reason: why,
+                    }),
+                    missing,
+                });
+            }
+        }
+        if game.turn != turn.turn || game.over {
+            // The turn ended before its logged actions did (a step that ends
+            // the shop phase, or a game over): the rest cannot be played.
+            return Ok(TurnRun {
+                game,
+                steps,
+                played: i + 1,
+                stop: Some(TurnStop {
+                    step: i + 1,
+                    kind: turn.actions.get(i + 1).map(|s| s.step.clone()).unwrap_or_default(),
+                    card: turn.actions.get(i + 1).and_then(|s| s.card.as_ref()).and_then(|c| c.name.clone()),
+                    class: "ended".to_string(),
+                    reason: format!("the engine ended the turn after step {}", i + 1),
+                }),
+                missing,
+            });
+        }
+    }
+    Ok(TurnRun { game, steps, played: steps, stop: None, missing })
 }
 
 /// Apply one step to a seated state and snapshot the result. The error is what

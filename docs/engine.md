@@ -46,8 +46,9 @@ crates/
                       the three files it writes (docs/real-boards.md "The
                       fight check")
     src/shop_replay.rs the shop replay: one logged shop state loaded into a
-                      game, one step played in it, and the three files it
-                      writes (docs/real-boards.md "The shop replay")
+                      game, one step played in it, the three files it writes
+                      (docs/real-boards.md "The shop replay"), and a whole
+                      turn played forward from its own start
     src/search.rs     what the shop-turn search needs: the dominance
                       comparison of two positions, the full pool a playout's
                       Refresh draws from, and the coming fight against the
@@ -2327,6 +2328,14 @@ seeded from the turn's seed (a repeat's).
   carry a turn forward): the replay's report is byte for byte what it was.
   `bgbench shopreplay` and the search still use `replay_step`, which seats and
   plays one step without help.
+- **Whole-turn replay:** `shop_replay::replay_whole_turn` seats one logged turn
+  from its own start, puts each step's logged Tavern in place (`place_tavern`,
+  with the old Tavern's pool copies returned and the new cards' taken), and
+  plays the logged steps in order with `SeatedStep::play_on` on the carried
+  game. It stops at the first step it cannot follow and returns the step index,
+  kind and reason. `bgbench turn_replay` runs turns 7 to 12 of every action
+  file at several seeds and writes `train/runs/engine-pays/turns.json`; the
+  report is `train/runs/engine-pays/report.md`. Measurement only.
 - **`bgpy.RealFights`** loads `boards/real` through
   `real_boards::parse_board_files`, so every board keeps the file and game it
   came from: `opponent(file, game, turn)` is the board Era really fought after
@@ -2375,6 +2384,7 @@ cargo build --release -p bgbench
 ./target/release/bgbench peak [n]       # peak boards of each build against each other
 ./target/release/bgbench fightcheck      # play Era's real fights, write boards/checks/
 ./target/release/bgbench shopreplay      # replay Era's real shop steps, write boards/checks/
+./target/release/turn_replay             # whole-turn replay, train/runs/engine-pays/
 ./target/release/bgbench collect-boards  # write Era's board files, boards/real/
 ./target/release/bgbench collect-actions # write Era's action files, boards/actions/
 ./target/release/bgbench check-actions   # add up the turns of boards/actions/

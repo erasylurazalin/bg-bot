@@ -4113,3 +4113,64 @@ fn a_seated_step_played_alone_is_the_replay_step() {
         }
     }
 }
+
+/// The card id map the real logs use (`ref/bg-cards.json`, git-ignored but
+/// present in the working tree).
+fn logged_ids() -> CardIdMap {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+    let text = std::fs::read_to_string(format!("{root}ref/bg-cards.json"))
+        .expect("the card id mapping");
+    CardIdMap::parse(&text).expect("the card id mapping parses")
+}
+
+/// The whole-turn mode on the Tras'tath turn the lobster replay used
+/// (`Hearthstone_2026_10_28_22_11_50-g2` turn 10). The per-step replay seats
+/// every step from the log and ends at count 18 and 1044/818; played forward
+/// on one game, the engine's own Discover draws move the hand, so the run
+/// stops at the Sprightly Scarab play before the last Fishbait attacks. The
+/// test pins that difference: the turn is playable up to step 41, and what
+/// stops it is the carried hand no longer holding the card at the logged
+/// slot, not a seating failure.
+#[test]
+fn the_whole_turn_mode_on_the_tras_tath_turn_stops_at_the_moved_hand() {
+    use bgcore::cards::Counter;
+    use bgcore::shop_replay::replay_whole_turn;
+
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+    let name = "Hearthstone_2026_10_28_22_11_50-g2.json";
+    let text = std::fs::read_to_string(format!("{root}boards/actions/{name}"))
+        .expect("the logged game");
+    let ids = logged_ids();
+    let mut files = parse_action_files(&[(name.to_string(), text)]).expect("the action file");
+    seat_taught_spells(&mut files, &ids);
+    let file = &files[0];
+    let turn = file
+        .turns
+        .iter()
+        .find(|t| t.turn == 10)
+        .expect("the logged turn 10");
+    let run = replay_whole_turn(&data(), &ids, file, turn, 1).expect("the turn's start seats");
+    let stop = run.stop.as_ref().expect("the whole-turn run stops on this turn");
+    assert_eq!(stop.step, 40, "the Sprightly Scarab play (0-based step 40)");
+    assert_eq!(stop.kind, "play");
+    assert_eq!(stop.card.as_deref(), Some("Sprightly Scarab"));
+    assert_eq!(stop.class, "illegal");
+    assert_eq!(run.played, 40);
+    assert_eq!(run.steps, 47);
+    // The last good step is the Snarky Shark sell. The carried state diverged
+    // earlier in the turn, which stops the third Fishbait attack: the count is
+    // 15 here, not the per-step replay's 18, and the board is the engine's
+    // own. The log's board after the same step is 1847 Attack plus Health.
+    let pl = &run.game.players[ME];
+    assert_eq!(
+        pl.improve[Counter::TastyLobster.index()],
+        15,
+        "the Tasty Lobster count after step 40"
+    );
+    let attack: i32 = pl.board.iter().map(|m| m.attack).sum();
+    let health: i32 = pl.board.iter().map(|m| m.health).sum();
+    assert_eq!((attack, health), (684, 559), "the board at the last good step");
+    let log_state = run.log_state(turn).expect("the log's state after step 40");
+    let log_total: i32 = log_state.board.iter().map(|m| m.attack + m.health).sum();
+    assert_eq!(log_total, 1847, "the log's board after step 40");
+}
