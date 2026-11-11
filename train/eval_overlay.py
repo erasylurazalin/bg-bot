@@ -34,6 +34,9 @@ from model import load
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CKPT = ROOT / "train" / "runs" / "r1106-keep" / "ckpt.pt"
+# --real-lag/--real-lag-from, set in main() (0 and 1: the old draw).
+REAL_LAG = 0
+REAL_LAG_FROM = 1
 DEFAULT_COMPS = ROOT / "data" / "comps" / "comps.toml"
 P = bgpy.PLAYERS
 # The overlay flag order is in crates/bgcore/src/overlay.rs.
@@ -150,7 +153,8 @@ def play(net, n_games, seed, dev, boards, comps_path=None, bonus=0.0,
     n = min(n_games, 512)
     env = bgpy.VecEnv(n, seed, list(lineup), real_boards=boards_arg,
                       old_boards=ppo.OLD_BOARDS,
-                      real_lobby_filter=ppo.REAL_LOBBY_FILTER)
+                      real_lobby_filter=ppo.REAL_LOBBY_FILTER,
+                      real_lag=REAL_LAG, real_lag_from=REAL_LAG_FROM)
     env.set_overlay(str(comps_path), float(max(bonus, 0.0)))
     b = Bufs(n)
     env.kinds(b.kinds)
@@ -293,9 +297,15 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--vram-gb", type=float, default=6.0,
                     help="cap this process's GPU memory (6 while Era games)")
+    ap.add_argument("--real-lag", type=int, default=0,
+                    help="lag the real seats' draw by this many turns (overlay games only)")
+    ap.add_argument("--real-lag-from", type=int, default=1,
+                    help="first turn the lag applies on")
     ap.add_argument("--real-lobby-filter", action="store_true",
                     help="a real seat draws only boards whose minions fit this game's lobby")
     args = ap.parse_args()
+    global REAL_LAG, REAL_LAG_FROM
+    REAL_LAG, REAL_LAG_FROM = args.real_lag, args.real_lag_from
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     if dev == "cuda" and args.vram_gb > 0:
