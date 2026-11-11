@@ -190,6 +190,7 @@ impl Env {
                 boards.expect("Era starts need real boards: the bodies are real boards").clone(),
                 &config.starts,
                 plan,
+                config.era_start_lag,
             )
         } else {
             match era_game {
@@ -392,10 +393,12 @@ impl VecEnv {
     /// `scenario_turn_max` the turn it starts on (uniform, inclusive).
     /// `era_starts`: the action folder to seat Era's positions from;
     /// `era_share` is the share of new games that start from one (0: off),
-    /// `era_turn_min`/`era_turn_max` the turn range, and `era_split` "train",
-    /// "holdout" or "all" the source games it may draw from.
+    /// `era_turn_min`/`era_turn_max` the turn range, `era_split` "train",
+    /// "holdout" or "all" the source games it may draw from, and
+    /// `era_start_lag` the fixed lag of every late-start game (None: the same
+    /// draw as a normal game; it needs `era_starts`).
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train", real_lag_mix=None, lag_in_obs=false, real_lag_from=1))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train", real_lag_mix=None, lag_in_obs=false, real_lag_from=1, era_start_lag=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -422,6 +425,7 @@ impl VecEnv {
         real_lag_mix: Option<Vec<(u32, u32)>>,
         lag_in_obs: bool,
         real_lag_from: u32,
+        era_start_lag: Option<u32>,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -489,8 +493,13 @@ impl VecEnv {
                     .map_err(PyValueError::new_err)?;
                 bgcore::shop_replay::seat_taught_spells(&mut specs, &ids);
                 let (starts, _) = EraStarts::build(&specs, &data, &ids, era_turn_min, era_turn_max);
-                let cfg = EraStartConfig::new(Arc::new(starts), era_share, split)
-                    .map_err(PyValueError::new_err)?;
+                let cfg = EraStartConfig::new(
+                    Arc::new(starts),
+                    era_share,
+                    split,
+                    era_start_lag,
+                )
+                .map_err(PyValueError::new_err)?;
                 Some(Arc::new(cfg))
             }
             None if era_share != 0.0 => {
@@ -503,6 +512,11 @@ impl VecEnv {
         if era.is_some() && boards.is_none() {
             return Err(PyValueError::new_err(
                 "Era starts need real_boards: the other seats' bodies are real boards",
+            ));
+        }
+        if era_start_lag.is_some() && era.is_none() {
+            return Err(PyValueError::new_err(
+                "era_start_lag needs era_starts: it lags late-start games only",
             ));
         }
         let lineup = check_lineup(lineup, boards.is_some())?;

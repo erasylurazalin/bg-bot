@@ -1868,6 +1868,15 @@ minions in the hand.
   scenario and Era-start games are setup, not a real seat's turn draw, so
   `new_scenario` and `new_era_start` place them unlagged; every later turn
   draw uses the game's lag.
+- **The late-start lag:** a late-start game draws its lag like a normal game
+  unless `era_start_lag` is set. Then that fixed lag is the game's lag
+  whatever the mix or fixed lag says, while normal games in the same `VecEnv`
+  keep drawing from the mix. On `bgpy.VecEnv` it is `era_start_lag=K` (None
+  keeps today's draw; it needs `era_starts`). `ppo.py` takes
+  `--era-start-lag K`, uses it for training and for the in-run holdout Era
+  eval, and prints it on the Era starts line; the vs7 real eval and `best.pt`
+  stay lag 0 from normal starts. `fixed_eval.py` needs no separate flag: its
+  `--real-lag` is a fixed lag with no mix, so it already covers late starts.
 - **The lag in the observation:** `--lag-in-obs` (off by default) writes
   `Game.lag` as one extra own scalar at `obs::SCALAR_LAG`, after every old
   scalar, so every own slot moves one place later and the observation is one
@@ -2262,22 +2271,26 @@ never read it.
   allowed positions of the turn range and split, and which network seat gets
   it is drawn from the same RNG. `EraSplit` is `train`, `holdout` or `all`.
 - **`bgpy.VecEnv`:** `era_starts` is the action folder, `era_share` the share
-  (0: off), `era_turn_min`/`era_turn_max` the turn range, and `era_split` the
-  side to draw from. `era_bodies()` gives each game's Era starting board,
-  `era_seats()` the seat, `era_turns()` the start turn, and
-  `era_start_report()` the positions per turn and the dropped ones.
-- **`train/ppo.py`:** `--era-starts DIR`, `--era-share S` (default 0) and
-  `--era-turns MIN,MAX` (default 7,11); training draws from the train split.
-  When on, the eval block adds one eval from the holdout split
-  (`era_place`, `era_top4`, `era_first`, `era_body_kept` in `metrics.csv`),
-  one learner against seven real seats, wheels off. `era_body_kept` is the
-  share of the starting board's card copies still on the final board. The
-  normal `vs7 real` eval and `best.pt` are unchanged.
+  (0: off), `era_turn_min`/`era_turn_max` the turn range, `era_split` the
+  side to draw from, and `era_start_lag` the fixed lag of every late-start
+  game (None: the same draw as a normal game). `era_bodies()` gives each
+  game's Era starting board, `era_seats()` the seat, `era_turns()` the start
+  turn, and `era_start_report()` the positions per turn and the dropped ones.
+- **`train/ppo.py`:** `--era-starts DIR`, `--era-share S` (default 0),
+  `--era-turns MIN,MAX` (default 7,11) and `--era-start-lag K` (default:
+  draw like a normal game); training draws from the train split. When on, the
+  eval block adds one eval from the holdout split (`era_place`, `era_top4`,
+  `era_first`, `era_body_kept` in `metrics.csv`), one learner against seven
+  real seats, wheels off, at the same era-start lag as training.
+  `era_body_kept` is the share of the starting board's card copies still on
+  the final board. The normal `vs7 real` eval and `best.pt` are unchanged.
 - **`train/fixed_eval.py`:** `--era-starts DIR --era-turns MIN,MAX
   --era-split holdout|train|all` starts every game from Era's position, one
-  game per seed. It adds body kept, place split by starting turn, and the Era
-  seat's board total at the start turn and 2, 4 and 6 turns later. The
-  default folder is `boards/frozen/actions-2026-11-10/`, checked against its
+  game per seed. `--real-lag` fixes the lag of every real seat and, because
+  there is no mix, of every late start too; there is no separate Era-start lag
+  flag. It adds body kept, place split by starting turn, and the Era seat's
+  board total at the start turn and 2, 4 and 6 turns later. The default
+  folder is `boards/frozen/actions-2026-11-10/`, checked against its
   `MANIFEST.txt`. Without Era flags the old fixed eval is unchanged.
 - **`bgbench fuzz|games`:** `--era-starts DIR`, `--era-share PCT` and
   `--era-turns MIN,MAX`, with `--real-boards DIR` for the bodies. The fuzzer

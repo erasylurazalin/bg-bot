@@ -224,7 +224,7 @@ fn play(
             .as_ref()
             .expect("Era-start games need --real-boards: the bodies are real boards");
         let config = era.expect("an Era plan comes from the Era config");
-        Game::new_era_start(data.clone(), seed, &real_seats, boards.clone(), &config.starts, plan)
+        Game::new_era_start(data.clone(), seed, &real_seats, boards.clone(), &config.starts, plan, config.era_start_lag)
     } else {
         match &real {
             Some((boards, _)) => {
@@ -1275,7 +1275,7 @@ fn main() {
             eprintln!("{e}");
             std::process::exit(2);
         });
-        let cfg = EraStartConfig::new(starts, share / 100.0, EraSplit::All).unwrap_or_else(|e| {
+        let cfg = EraStartConfig::new(starts, share / 100.0, EraSplit::All, None).unwrap_or_else(|e| {
             eprintln!("{e}");
             std::process::exit(2);
         });

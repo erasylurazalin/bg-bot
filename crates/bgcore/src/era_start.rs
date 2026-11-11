@@ -299,6 +299,10 @@ pub struct EraStartConfig {
     pub starts: Arc<EraStarts>,
     pub choices: Vec<usize>,
     pub share: f64,
+    /// The fixed lag of every late-start game, whatever the real-seat lag mix
+    /// says. None keeps today's behavior: the game draws from the mix, or the
+    /// fixed lag when there is no mix. Normal games are never affected.
+    pub era_start_lag: Option<u32>,
 }
 
 impl EraStartConfig {
@@ -306,6 +310,7 @@ impl EraStartConfig {
         starts: Arc<EraStarts>,
         share: f64,
         split: EraSplit,
+        era_start_lag: Option<u32>,
     ) -> Result<EraStartConfig, String> {
         if !(0.0..=1.0).contains(&share) {
             return Err(format!("era starts: share {share} is not between 0 and 1"));
@@ -317,7 +322,7 @@ impl EraStartConfig {
                 split.name()
             ));
         }
-        Ok(EraStartConfig { starts, choices, share })
+        Ok(EraStartConfig { starts, choices, share, era_start_lag })
     }
 
     /// An Era-start plan for one game, or None when this game is normal.
@@ -345,6 +350,8 @@ impl Game {
     /// holding a real board of that turn as a body, and the real seats playing
     /// as usual. The lobby is the file's, the Tavern is the engine's roll.
     /// The rest of the game runs normally, Trinkets and Dark Gifts included.
+    /// `era_start_lag`, when set, is this game's lag whatever the boards' mix
+    /// or fixed lag says; None keeps the old draw (`boards.lag_for_game`).
     pub fn new_era_start(
         data: Arc<Data>,
         seed: u64,
@@ -352,6 +359,7 @@ impl Game {
         boards: Arc<crate::real_boards::RealBoards>,
         starts: &EraStarts,
         plan: &EraStartPlan,
+        era_start_lag: Option<u32>,
     ) -> Game {
         let pos = starts.position(plan.position);
         assert!(pos.turn >= 1, "an Era start begins at turn 1 or later");
@@ -362,7 +370,7 @@ impl Game {
         // cards); its own logged hero and power go in after the deal.
         g.players[plan.seat].real = true;
         g.seat_real(real);
-        g.lag = boards.lag_for_game(seed);
+        g.lag = era_start_lag.unwrap_or_else(|| boards.lag_for_game(seed));
         g.real_boards = Some(boards.clone());
         g.turn = pos.turn - 1;
         let era_hero: Vec<u8> = pos.player.hero.into_iter().collect();

@@ -92,7 +92,7 @@ fn era_game(
         .expect("a position on that turn");
     let real: Vec<usize> = (1..PLAYERS).collect();
     let plan = EraStartPlan { position, seat: 0 };
-    (Game::new_era_start(d, 12345, &real, boards, &starts, &plan), starts, position)
+    (Game::new_era_start(d, 12345, &real, boards, &starts, &plan, None), starts, position)
 }
 
 #[test]
@@ -224,15 +224,15 @@ fn the_same_seed_starts_the_same_era_game() {
     let d = data();
     let (starts, _) = EraStarts::build(&specs, &d, &ids, 3, 7);
     let starts = Arc::new(starts);
-    let config = EraStartConfig::new(starts.clone(), 1.0, EraSplit::All).expect("a config");
+    let config = EraStartConfig::new(starts.clone(), 1.0, EraSplit::All, None).expect("a config");
     let seats = [0usize, 1, 2];
     let a = config.plan(99, &seats).expect("an Era game");
     let b = config.plan(99, &seats).expect("an Era game");
     assert_eq!(a.position, b.position);
     assert_eq!(a.seat, b.seat);
 
-    let mut ga = Game::new_era_start(d.clone(), 99, &[1, 2, 3, 4, 5, 6, 7], boards.clone(), &starts, &a);
-    let mut gb = Game::new_era_start(d, 99, &[1, 2, 3, 4, 5, 6, 7], boards, &starts, &b);
+    let mut ga = Game::new_era_start(d.clone(), 99, &[1, 2, 3, 4, 5, 6, 7], boards.clone(), &starts, &a, None);
+    let mut gb = Game::new_era_start(d, 99, &[1, 2, 3, 4, 5, 6, 7], boards, &starts, &b, None);
     let mut ra = Rng::new(7);
     let mut rb = Rng::new(7);
     for _ in 0..100 {
@@ -252,5 +252,101 @@ fn the_same_seed_starts_the_same_era_game() {
     }
     assert_eq!(ga.over, gb.over);
     assert_eq!(ga.placements(), gb.placements());
+}
+
+#[test]
+fn era_start_lag_overrides_the_late_start_mix() {
+    let (specs, ids, boards) = one_turn_specs(3);
+    let d = data();
+    let (starts, _) = EraStarts::build(&specs, &d, &ids, 3, 7);
+    let mut boards = (*boards).clone();
+    boards.set_lag_mix(&[(0, 1), (1, 1), (2, 1)]);
+    let boards = Arc::new(boards);
+    let config = EraStartConfig::new(Arc::new(starts), 1.0, EraSplit::All, Some(2))
+        .expect("a config");
+    let real: Vec<usize> = (1..PLAYERS).collect();
+    let seats = [0usize];
+    for seed in 0..60 {
+        let plan = config.plan(seed, &seats).expect("an Era game");
+        let g = Game::new_era_start(
+            d.clone(), seed, &real, boards.clone(), &config.starts, &plan,
+            config.era_start_lag,
+        );
+        assert_eq!(g.lag, 2, "seed {seed}: the late start took the mix");
+    }
+    // Normal games of the same batch still draw the mix, at its shares.
+    let mut counts = [0usize; 3];
+    let n = 3000;
+    for seed in 0..n {
+        counts[boards.lag_for_game(seed) as usize] += 1;
+    }
+    for (lag, count) in counts.iter().enumerate() {
+        let share = *count as f64 / n as f64;
+        assert!(
+            (share - 1.0 / 3.0).abs() < 0.03,
+            "lag {lag}: normal games draw it {share:.3}, want about 0.333"
+        );
+    }
+    for seed in 0..30 {
+        let g = Game::new_random_heroes_real(d.clone(), seed, &real, boards.clone());
+        assert_eq!(
+            g.lag,
+            boards.lag_for_game(seed),
+            "seed {seed}: a normal game left the mix"
+        );
+    }
+}
+
+#[test]
+fn unset_era_start_lag_keeps_todays_draw_and_play() {
+    let (specs, ids, boards) = one_turn_specs(3);
+    let d = data();
+    let (starts, _) = EraStarts::build(&specs, &d, &ids, 3, 7);
+    let starts = Arc::new(starts);
+    let mut boards = (*boards).clone();
+    boards.set_lag_mix(&[(0, 1), (1, 1), (2, 1)]);
+    let boards = Arc::new(boards);
+    let config = EraStartConfig::new(starts.clone(), 1.0, EraSplit::All, None)
+        .expect("a config");
+    let real: Vec<usize> = (1..PLAYERS).collect();
+    let seats = [0usize];
+    let mut seen = [false; 3];
+    for seed in 0..60 {
+        let drawn = boards.lag_for_game(seed);
+        let plan = config.plan(seed, &seats).expect("an Era game");
+        let mut a = Game::new_era_start(
+            d.clone(), seed, &real, boards.clone(), &starts, &plan, None,
+        );
+        assert_eq!(a.lag, drawn, "seed {seed}: unset lag is not today's draw");
+        let mut b = Game::new_era_start(
+            d.clone(), seed, &real, boards.clone(), &starts, &plan, Some(drawn),
+        );
+        let mut ra = Rng::new(11);
+        let mut rb = Rng::new(11);
+        for _ in 0..80 {
+            assert_eq!(a.turn, b.turn);
+            assert_eq!(a.current_player(), b.current_player());
+            assert_eq!(a.pool, b.pool);
+            let aa = bgcore::bots::random_action(&a, &mut ra);
+            let ba = bgcore::bots::random_action(&b, &mut rb);
+            assert_eq!(aa, ba);
+            a.step(aa).expect("the first copy's action is legal");
+            b.step(ba).expect("the second copy's action is legal");
+            a.check_invariants().expect("first copy invariants");
+            b.check_invariants().expect("second copy invariants");
+            if a.over {
+                break;
+            }
+        }
+        assert_eq!(a.over, b.over);
+        assert_eq!(a.placements(), b.placements());
+        if drawn < 3 {
+            seen[drawn as usize] = true;
+        }
+        if seen.iter().all(|&s| s) {
+            break;
+        }
+    }
+    assert!(seen.iter().all(|&s| s), "the mix never drew all three lags");
 }
 

@@ -133,6 +133,9 @@ def args():
                    help="fraction of training games that start from Era's positions (0: off)")
     a.add_argument("--era-turns", default="7,11",
                    help="MIN,MAX turn an Era start begins on (default 7,11)")
+    a.add_argument("--era-start-lag", type=int, default=None,
+                   help="fixed lag for every late-start game; normal games still draw from "
+                        "--real-lag-mix. Absent: a late start draws like a normal game")
     a.add_argument("--wheels-full", type=int, default=0,
                    help="games with the overlay at full strength (0 with --wheels-end 0: no fade)")
     a.add_argument("--wheels-end", type=int, default=0,
@@ -301,6 +304,9 @@ SCENARIO_LABELS = []  # (label, names, specs) for each comp and "pooled"
 ERA_STARTS = None
 ERA_TURN_MIN = 7
 ERA_TURN_MAX = 11
+# --era-start-lag: the fixed lag of every late-start game (None: the same
+# draw as a normal game). Set in main; the holdout Era eval uses it too.
+ERA_START_LAG = None
 ERA_METRICS = ("place", "top4", "first", "body_kept")
 # The overlay flag order is in crates/bgcore/src/overlay.rs.
 F_SHELL_LEGAL = 0
@@ -464,14 +470,15 @@ def names_at_rev(rev):
 
 
 def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
-             era_starts=None, era_split="train", real_lag_mix=None):
+             era_starts=None, era_split="train", real_lag_mix=None, era_start_lag=None):
     """_evaluate, retried on a new seed when a scripted bot hits the engine's
     illegal-action panic (a known engine bug, 2026-11-02), so one bad test
     game doesn't kill the training run."""
     for attempt in range(4):
         try:
             return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards,
-                             scenario_names, era_starts, era_split, real_lag_mix)
+                             scenario_names, era_starts, era_split, real_lag_mix,
+                             era_start_lag)
         except BaseException as e:  # pyo3 PanicException is a BaseException
             if type(e).__name__ != "PanicException" or attempt == 3:
                 raise
@@ -479,7 +486,7 @@ def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=N
 
 
 def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
-              era_starts=None, era_split="train", real_lag_mix=None):
+              era_starts=None, era_split="train", real_lag_mix=None, era_start_lag=None):
     """Play n_games with `lineup` and return (avg_place, learner_records).
 
     With --overlay-comps the comp input is on and the wheels are off: the
@@ -494,7 +501,7 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
     era_mode = era_starts is not None
     era = dict(era_starts=era_starts, era_share=1.0,
                era_turn_min=ERA_TURN_MIN, era_turn_max=ERA_TURN_MAX,
-               era_split=era_split) if era_mode else {}
+               era_split=era_split, era_start_lag=era_start_lag) if era_mode else {}
     env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
                       real_lobby_filter=REAL_LOBBY_FILTER, real_lag_mix=real_lag_mix,
                       real_lag_from=REAL_LAG_FROM,
@@ -765,7 +772,7 @@ def main():
     global REAL_LAG_MIX, LAG_MIX_LAGS, REAL_LAG_FROM
     global OVERLAY_COMPS, OVERLAY_BONUS, COMP_HEALTH_PENALTY, COMP_SPECS, COMP_COUNT
     global SCENARIO_NAMES, SCENARIO_TURN_MIN, SCENARIO_TURN_MAX, SCENARIO_LABELS
-    global ERA_STARTS, ERA_TURN_MIN, ERA_TURN_MAX
+    global ERA_STARTS, ERA_TURN_MIN, ERA_TURN_MAX, ERA_START_LAG
     cfg = args()
     want_text = cfg.card_text
     FORCE_TURN2 = cfg.force_turn2_level
@@ -823,6 +830,12 @@ def main():
             raise SystemExit(f"--era-share {cfg.era_share}: needs 0 to 1")
     elif cfg.era_share:
         raise SystemExit("--era-share needs --era-starts DIR")
+    if cfg.era_start_lag is not None:
+        if not cfg.era_starts:
+            raise SystemExit("--era-start-lag needs --era-starts DIR")
+        if cfg.era_start_lag < 0:
+            raise SystemExit("--era-start-lag: the lag cannot be negative")
+        ERA_START_LAG = cfg.era_start_lag
     # a training setting, not a model one: the checkpoint and its weights are
     # the same with the blocks recomputed or kept
     set_recompute(not cfg.no_recompute)
@@ -907,7 +920,7 @@ def main():
     era_kw = (
         dict(era_starts=cfg.era_starts, era_share=cfg.era_share,
              era_turn_min=ERA_TURN_MIN, era_turn_max=ERA_TURN_MAX,
-             era_split="train")
+             era_split="train", era_start_lag=ERA_START_LAG)
         if cfg.era_starts else {}
     )
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS,
@@ -940,8 +953,11 @@ def main():
         print(f"scenario starts: {cfg.scenario_share:.0%} of games, turns "
               f"{SCENARIO_TURN_MIN}..{SCENARIO_TURN_MAX}, comps {', '.join(SCENARIO_NAMES)}")
     if cfg.era_starts:
+        era_lag_txt = (f"lag {ERA_START_LAG}" if ERA_START_LAG is not None
+                       else "lag from the mix")
         print(f"Era starts: {cfg.era_share:.0%} of games, turns "
-              f"{ERA_TURN_MIN}..{ERA_TURN_MAX}, train split, {cfg.era_starts}")
+              f"{ERA_TURN_MIN}..{ERA_TURN_MAX}, train split, {era_lag_txt}, "
+              f"{cfg.era_starts}")
     if REAL_LAG_MIX:
         print("real lag mix: " + " ".join(
             f"{lag}:{weight:g}" for lag, weight in REAL_LAG_MIX)
@@ -1390,7 +1406,7 @@ def main():
             if cfg.era_starts:
                 _, rec_era = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
                                       seed + 50, real, era_starts=cfg.era_starts,
-                                      era_split="holdout")
+                                      era_split="holdout", era_start_lag=ERA_START_LAG)
                 for metric, val in summarize_era(rec_era).items():
                     era_vals[f"era_{metric}"] = val
             net.train()

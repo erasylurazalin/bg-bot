@@ -68,7 +68,8 @@ def parse_args():
     a.add_argument("--no-lobby-filter", action="store_true",
                    help="turn off the real seats' lobby filter (on by default)")
     a.add_argument("--real-lag", type=int, default=0,
-                   help="lag the real seats' draw by this many turns (default 0)")
+                   help="lag the real seats' draw by this many turns (default 0); this is "
+                        "also the lag of every Era-start game")
     a.add_argument("--real-lag-from", type=int, default=1,
                    help="first turn the real seats' lag applies on; before it they draw "
                         "their own turn as at lag 0 (default 1: every turn)")
@@ -443,6 +444,8 @@ def build_report(name: str, args, n_board_files: int, rev: str,
         lines.append(f"- mode: Era starts ({args.era_split} split, turns "
                      f"{args.era_turn_min}..{args.era_turn_max}, "
                      f"`{args.era_folder}`)")
+        lines.append(f"- Era start lag: {args.real_lag} (from --real-lag, the fixed "
+                     "lag covers late starts too)")
     lines.append(f"- git: {rev}")
     lines.append(f"- bgpy: OBS_SIZE {bgpy.OBS_SIZE}, N_ACTIONS {bgpy.N_ACTIONS}")
     lines.append(f"- written: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
@@ -625,8 +628,8 @@ def main():
         n_action_files = check_boards(era_folder)
         args.era_folder = era_folder
         print(f"Era starts from {era_folder}: {n_action_files} files, "
-              f"{args.era_split} split, turns {args.era_turn_min}..{args.era_turn_max}",
-              flush=True)
+              f"{args.era_split} split, turns {args.era_turn_min}..{args.era_turn_max}, "
+              f"real lag {args.real_lag} (covers late starts too)", flush=True)
     else:
         args.era_folder = None
         args.era_turn_min = args.era_turn_max = 0
