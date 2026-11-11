@@ -365,6 +365,65 @@ fn spark_snapper_and_mechagnome_interpreter_distinguish_play_from_direct_attach(
     g.check_invariants().unwrap();
 }
 
+/// Put a Volumizer host carrying Resourceful Robot and Lullabot on player
+/// 0's board, with one plain copy of the Volumizer in hand. The Robot's own
+/// Volumizer is the third copy, so its triple takes the host off the board.
+/// Returns the Volumizer's card.
+fn end_of_turn_tripling_volumizer_host(g: &mut Game) -> bgcore::CardId {
+    let mut probe = g.rng.clone();
+    let v = g.data.cards.random_volumizer(g.lobby, &mut probe).expect("a Volumizer");
+    let slot = g.data.cards.get(v).pool_slot as usize;
+    g.pool[slot] -= 1;
+    let hand = g.players[0].make_card(&g.data.cards, v, false, 1);
+    g.players[0].hand.push(hand);
+    g.pool[slot] -= 1;
+    let mut host = g.players[0].make_card(&g.data.cards, v, false, 1);
+    for name in ["Resourceful Robot", "Lullabot"] {
+        let c = g.data.cards.by_name(name).unwrap();
+        // Generated parts hold no pool copy, so the test's hand-built board
+        // stays inside the pool accounting.
+        let part = g.players[0].make_card(&g.data.cards, c, false, 0);
+        host.magnetize(&g.data.cards, part);
+    }
+    g.players[0].board.push(host);
+    v
+}
+
+#[test]
+fn end_of_turn_effects_stop_when_a_part_takes_its_minion_off_the_board() {
+    // A minion's earlier part can change the board before its later parts
+    // run. The Robot's own Volumizer is the third copy, so the triple takes
+    // the host off the board (one hand copy, the host, and the new one) and
+    // the Lullabot's end-of-turn buff must not index the slot it left
+    // (2026-11-11).
+    let mut g = game(108);
+    let v = end_of_turn_tripling_volumizer_host(&mut g);
+    act(&mut g, 0, Action::EndTurn);
+    assert!(g.players[0].board.is_empty(), "the Volumizer triple took the host off the board");
+    assert!(
+        g.players[0].hand.iter().any(|m| m.card == v && m.golden),
+        "the triple's Golden Volumizer is in the hand"
+    );
+}
+
+#[test]
+fn end_of_turn_parts_do_not_buff_the_minion_that_takes_the_slot() {
+    // The same triple leaves a bystander in the host's slot. The Lullabot's
+    // +0/+1 is the host's, not the bystander's (2026-11-11).
+    let mut g = game(109);
+    let v = end_of_turn_tripling_volumizer_host(&mut g);
+    put_on_board(&mut g, 0, "Cord Puller");
+    let before = (g.players[0].board[1].attack, g.players[0].board[1].health);
+    act(&mut g, 0, Action::EndTurn);
+    assert_eq!(g.players[0].board.len(), 1, "only the bystander is left");
+    assert_eq!((g.players[0].board[0].attack, g.players[0].board[0].health), before);
+    assert!(
+        g.players[0].hand.iter().any(|m| m.card == v && m.golden),
+        "the triple's Golden Volumizer is in the hand"
+    );
+}
+
+
 #[test]
 fn beetle_bonus_from_forest_rover_and_ravaging_scorpid() {
     let mut g = game(104);

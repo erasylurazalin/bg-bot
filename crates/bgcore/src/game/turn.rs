@@ -167,6 +167,17 @@ impl Game {
         }
     }
 
+    /// Whether board slot `pos` still holds the minion `m` whose end of turn
+    /// effects are running. An earlier part or run can take the minion off
+    /// the board (a triple) or move another one into its slot, and a later
+    /// part must not act on the newcomer (2026-11-11).
+    fn end_of_turn_slot_holds(&self, p: usize, pos: usize, m: &Minion) -> bool {
+        self.players[p]
+            .board
+            .get(pos)
+            .is_some_and(|b| b.card == m.card && b.golden == m.golden)
+    }
+
     /// One board minion's end of turn effects, `runs` times. A gift that puts
     /// its minion's end of turn effects at the start of the turn as well
     /// (Time Turning) runs the same code from `start_turn`.
@@ -175,9 +186,16 @@ impl Game {
         // old local variable.
         let pos = &mut *pos;
         {
-            let m = self.players[p].board[*pos];
+            let Some(m) = self.players[p].board.get(*pos).copied() else { return };
             for _ in 0..runs {
                 for (card, golden) in m.parts() {
+                    // An earlier part or run can change the board: a triple
+                    // takes minions off it, and a Battlecry or Magnetization
+                    // can move them. Stop this minion's remaining effects
+                    // once its slot is gone or holds another minion.
+                    if !self.end_of_turn_slot_holds(p, *pos, &m) {
+                        return;
+                    }
                     let mul = if golden { 2 } else { 1 };
                     match self.data.cards.get(card).end_of_turn {
                         Some(EndOfTurn::BuffSelf { attack, health }) => {
@@ -189,7 +207,7 @@ impl Game {
                                 // getting the Volumizer can change the board
                                 // (a triple, a "when you get a card" trinket),
                                 // so the Robot's slot may be gone (2026-10-31)
-                                if *pos >= self.players[p].board.len() {
+                                if !self.end_of_turn_slot_holds(p, *pos, &m) {
                                     break;
                                 }
                                 if let Some(v_id) = self.data.cards.random_volumizer(self.lobby, &mut self.rng)
@@ -234,7 +252,7 @@ impl Game {
                         Some(EndOfTurn::TriggerOwnBattlecry) => {
                             let at = *pos;
                             self.run_battlecry_at(p, at, true);
-                            if self.players[p].board.len() <= at {
+                            if !self.end_of_turn_slot_holds(p, at, &m) {
                                 return;
                             }
                         }
@@ -242,7 +260,7 @@ impl Game {
                         // pool Magnetizes onto it, like Resourceful Robot's
                         // Volumizer.
                         Some(EndOfTurn::MagnetizeRandomMech) => {
-                            if *pos >= self.players[p].board.len() {
+                            if !self.end_of_turn_slot_holds(p, *pos, &m) {
                                 break;
                             }
                             let Some(v_id) = self
@@ -262,7 +280,7 @@ impl Game {
                         Some(EndOfTurn::GiftBuffSelf) => {
                             let landed = m.gift_state(card).unwrap_or(0) as u32;
                             let (a, h) = self.data.gifts.steady_growth.numbers(landed);
-                            if *pos < self.players[p].board.len() {
+                            if self.end_of_turn_slot_holds(p, *pos, &m) {
                                 buff(&mut self.players[p].board[*pos], a, h);
                             }
                         }
@@ -272,10 +290,12 @@ impl Game {
                 // Gruul Rules: what a Prize gave this minion to gain at the
                 // end of every turn (its own card, not a part). An earlier
                 // part can have taken the slot away, so it is read again.
-                if let Some(m) = self.players[p].board.get_mut(*pos) {
-                    let (ga, gh) = m.end_turn_gain;
+                if self.end_of_turn_slot_holds(p, *pos, &m)
+                    && let Some(slot) = self.players[p].board.get_mut(*pos)
+                {
+                    let (ga, gh) = slot.end_turn_gain;
                     if (ga, gh) != (0, 0) {
-                        buff(m, ga, gh);
+                        buff(slot, ga, gh);
                     }
                 }
             }
