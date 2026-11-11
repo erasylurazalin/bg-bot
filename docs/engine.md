@@ -2487,12 +2487,14 @@ Deleting `.venv` undoes it.
 - Era starts are off unless `--era-starts DIR` is given (`--era-share`,
   default 0, and `--era-turns`, default 7,11; see "Era starts"). Training
   draws from the train split; they need real boards.
-- Reward is placement only (+1 for 1st to -1 for 8th), minus 0.002 per
-  Move action (`--action-cost`, `--cost-kinds move`) so it doesn't shuffle
-  its board for free; buys, sells, plays and refreshes cost nothing extra,
-  since gold already limits them and long gold-neutral loops are good play.
-  Discounting is per turn, not per action; with per-action discounting
-  nothing learned, because a turn can be up to 200 actions.
+- Reward is placement only (+1 for 1st to -1 for 8th), plus an optional
+  `--first-bonus` for 1st and `--second-bonus` for 2nd (both default 0, which
+  is exactly the linear reward), minus 0.002 per Move action (`--action-cost`,
+  `--cost-kinds move`) so it doesn't shuffle its board for free; buys, sells,
+  plays and refreshes cost nothing extra, since gold already limits them and
+  long gold-neutral loops are good play. Discounting is per turn, not per
+  action; with per-action discounting nothing learned, because a turn can be
+  up to 200 actions.
 - The starting policy is uniform over action kinds, not over all actions,
   or it almost never ends a turn.
 - Snapshots of itself are taken every 250 updates (at about 95 updates a

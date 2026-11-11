@@ -17,7 +17,8 @@ Each game seats learners (this network, trained), snapshots (older copies of
 it), standard curve bots, rush curve bots, random bots and real seats
 (--lineup has all six counts; a real seat plays a board of the current turn
 from Era's games, --real-boards, and never shops). Reward is placement
-only: +1 for 1st down to -1 for 8th, given when the seat is knocked out or the
+only: +1 for 1st down to -1 for 8th (plus optional --first-bonus and
+--second-bonus for 1st and 2nd), given when the seat is knocked out or the
 game ends, minus a tiny cost per board move (--action-cost, --cost-kinds) so
 it doesn't shuffle its board for free.
 
@@ -201,6 +202,10 @@ def args():
     a.add_argument("--lag-in-obs", action="store_true",
                    help="write the game's lag as one extra own scalar, so the value head can "
                         "tell easy games from hard ones. Off is the old observation exactly")
+    a.add_argument("--first-bonus", type=float, default=0.0,
+                   help="extra reward for 1st place, added to the linear placement reward")
+    a.add_argument("--second-bonus", type=float, default=0.0,
+                   help="extra reward for 2nd place, added to the linear placement reward")
     a.add_argument("--low-penalty", type=float, default=0.0,
                    help="reward taken off at each turn end per tier below the standard curve")
     a.add_argument("--low-penalty-fade", type=float, default=240,
@@ -234,8 +239,13 @@ def args():
     return a.parse_args()
 
 
-def reward(place):
-    return (4.5 - place) / 3.5
+def reward(place, first_bonus=0.0, second_bonus=0.0):
+    value = (4.5 - place) / 3.5
+    if place == 1 and first_bonus:
+        return value + first_bonus
+    if place == 2 and second_bonus:
+        return value + second_bonus
+    return value
 
 
 class Bufs:
@@ -774,6 +784,12 @@ def main():
     global SCENARIO_NAMES, SCENARIO_TURN_MIN, SCENARIO_TURN_MAX, SCENARIO_LABELS
     global ERA_STARTS, ERA_TURN_MIN, ERA_TURN_MAX, ERA_START_LAG
     cfg = args()
+    if cfg.first_bonus or cfg.second_bonus:
+        print(f"placement reward with first bonus {cfg.first_bonus:g} and "
+              f"second bonus {cfg.second_bonus:g}:")
+        print("  " + "  ".join(
+            f"{p}: {reward(p, cfg.first_bonus, cfg.second_bonus):.2f}"
+            for p in range(1, P + 1)))
     want_text = cfg.card_text
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
@@ -1187,7 +1203,8 @@ def main():
                 env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
                 for e, s in zip(*np.nonzero(b.places)):
                     if kinds[e, s] == LEARNER and last[e, s] >= 0:
-                        rews[last[e, s], e] += reward(b.places[e, s])
+                        rews[last[e, s], e] += reward(
+                            b.places[e, s], cfg.first_bonus, cfg.second_bonus)
                         dones[last[e, s], e] = 1.0
                 if b.reset.any():
                     r = np.nonzero(b.reset)[0]
