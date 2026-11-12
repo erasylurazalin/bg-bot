@@ -405,6 +405,10 @@ fight without a game behind it uses). Nothing outside the lobby can appear, and
 a draw with no in-lobby candidate returns None (the effect fizzles). The Deity
 exists only when Aberration is in the lobby. A draw filter is just a `Tribes`
 mask, so a future trinket or hero effect can pass a wider one for its own draw.
+A Timewarped minion (`cards.toml timewarp = "minor"` or `"major"`, the 2-cost
+Timeworn Candelabra lists) is a token outside the pool table, and
+`Card::lobby_ok` is false for it, so no normal Tavern, Discover or random-minion
+draw can hand one out; the Candelabra's own list will read the marker.
 
 Tests and the sandbox can fix the lobby: `Game::new_with_lobby(data, seed,
 lobby)` (a test may pass more than 5 to reach its cards) and

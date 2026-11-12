@@ -574,6 +574,11 @@ Triple Reward spell.
   `exclude` list in darkgifts.toml names host cards it never lands on
   (Furtiveness and Relentless Deflector); the loader turns the names into
   card ids.
+- **Timewarp minions.** The 2-cost Timewarped minions are `[[token]]` entries
+  with `timewarp = "minor"` or `"major"`. They take no pool slot, and
+  `Card::lobby_ok` is false for them, so no normal Tavern, Discover or
+  random-minion draw can hand one out. The marker is what the Timeworn
+  Candelabra's own list will read; golden stats double the printed ones.
 - **Pool accounting is exact and checked after every fuzz action.** Drawn cards carry
   `pool_copies` (1, or up to 3 for a Golden minion); generated cards and tokens have 0
   and never touch the pool. Selling returns `pool_copies` (`give_back`). A Golden

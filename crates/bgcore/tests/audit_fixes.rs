@@ -238,7 +238,7 @@ fn ultraviolet_ascendant_ignores_its_own_play() {
 
 #[test]
 fn no_card_reacts_to_its_own_play_in_the_data() {
-    // Every after_play_tribe card is covered above; this guards the list.
+    // Every after_play_tribe card is covered in the suite; this guards the list.
     let db = db();
     let mut found: Vec<String> = Vec::new();
     for c in 0..db.cards.len() {
@@ -247,7 +247,16 @@ fn no_card_reacts_to_its_own_play_in_the_data() {
         }
     }
     found.sort();
-    assert_eq!(found, ["Insatiable Ur'zul", "Ultraviolet Ascendant", "Wrath Weaver"]);
+    assert_eq!(
+        found,
+        [
+            "Insatiable Ur'zul",
+            "Timewarped Anub'arak",
+            "Timewarped Nomi",
+            "Ultraviolet Ascendant",
+            "Wrath Weaver",
+        ]
+    );
 }
 
 // ================= Disguised Graverobber =================

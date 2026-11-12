@@ -31,7 +31,7 @@ pub mod shop_replay;
 pub mod trinkets;
 
 pub use action::{ACTION_KINDS, Action, N_ACTIONS, N_KINDS};
-pub use cards::{Card, CardDb, Effect, Tribe, Tribes};
+pub use cards::{Card, CardDb, Effect, Timewarp, Tribe, Tribes};
 pub use comps::{Comp, Comps};
 pub use overlay::{Overlay, OverlayState, ShellLine};
 pub use planner::Planner;

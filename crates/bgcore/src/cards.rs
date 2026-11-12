@@ -1461,6 +1461,15 @@ pub struct AfterSummonGiveStats {
     pub different: bool,
 }
 
+/// The side a Timewarped minion belongs to: the Minor list comes from the
+/// lesser Timeworn Candelabra and the Major list from the greater one. The
+/// marker also keeps the card out of every normal draw (`Card::lobby_ok`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Timewarp {
+    Minor,
+    Major,
+}
+
 #[derive(Clone, Debug)]
 pub struct Card {
     pub name: String,
@@ -1505,6 +1514,10 @@ pub struct Card {
     /// it keeps its id, its effects and its place in old boards and logs,
     /// but no draw may offer it again. See `Card::lobby_ok`.
     pub out_of_pool: bool,
+    /// A Timewarped minion from the Timeworn Candelabra, and which side's
+    /// 2-cost list it belongs to. These are tokens outside the pool table;
+    /// `Card::lobby_ok` never offers one to a normal draw.
+    pub timewarp: Option<Timewarp>,
     /// Index in `Game::pool` that holds copies of this card. Shared pool
     /// groups (such as the three Volumizers) all point to their first card's
     /// slot.
@@ -1742,10 +1755,13 @@ impl Card {
     /// game data's `lobby_subsets`), and a card that has not left the pool
     /// (`Card.out_of_pool`: no Tavern, Discover, random draw or trinket offer
     /// may hand out an out-of-pool card again, though a board or log that
-    /// already holds one keeps it). An all-type minion is always in. A wider
-    /// mask widens the draw (a future trinket), `Tribes::ALL` is no filter.
+    /// already holds one keeps it). A Timewarped minion (`Card.timewarp`) is
+    /// offered only by the Timeworn Candelabra's own list, never by a normal
+    /// draw, so it is false here too. An all-type minion is always in. A
+    /// wider mask widens the draw (a future trinket), `Tribes::ALL` is no
+    /// filter.
     pub fn lobby_ok(&self, lobby: Tribes) -> bool {
-        if self.out_of_pool {
+        if self.out_of_pool || self.timewarp.is_some() {
             return false;
         }
         match self.lobby {
@@ -1943,6 +1959,9 @@ struct RawCard {
     /// for old logs and boards, never drawn or offered again.
     #[serde(default)]
     out_of_pool: bool,
+    /// "minor" or "major": a 2-cost Timewarped minion from the Timeworn
+    /// Candelabra. It is a token and no normal draw offers it.
+    timewarp: Option<String>,
     volumizer_buff: Option<[i32; 2]>,
     spell_buff: Option<[i32; 2]>,
     battlecry: Option<RawEffect>,
@@ -4192,6 +4211,13 @@ impl CardDb {
                 }),
             };
 
+            let timewarp = match c.timewarp.as_deref() {
+                None => None,
+                Some("minor") => Some(Timewarp::Minor),
+                Some("major") => Some(Timewarp::Major),
+                Some(other) => return Err(err(format!("timewarp must be minor or major, got {other:?}"))),
+            };
+
             let magnetize_tribes = if c.magnetize_to_tribes.is_empty() {
                 let mut t = Tribes::NONE.with(Tribe::Mech);
                 if c.magnetize_to_undead {
@@ -4228,6 +4254,7 @@ impl CardDb {
                 is_beetle: c.beetle,
                 is_volumizer,
                 out_of_pool: c.out_of_pool,
+                timewarp,
                 pool_slot,
                 volumizer_buff,
                 spell_buff,
@@ -4448,6 +4475,7 @@ impl CardDb {
                 is_beetle: false,
                 is_volumizer: false,
                 out_of_pool: false,
+                timewarp: None,
                 pool_slot: id,
                 volumizer_buff: None,
                 spell_buff: None,

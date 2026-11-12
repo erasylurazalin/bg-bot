@@ -3788,3 +3788,109 @@ tier = 1
 tribe = "neutral"
 stats = [0, 0]
 start_of_combat = { summon_own_copy = true }
+
+# --- Timewarped minions (Timeworn Candelabra, 2-cost) ---
+# The 2-cost Timewarped minions are tokens: they take no pool slot, and
+# `Card::lobby_ok` never offers one to a normal Tavern, Discover or random
+# draw. `timewarp` says which side's list the Candelabra will draw from
+# ("minor" or "major"). Their golden stats double the printed ones.
+
+[[token]]
+name = "Timewarped Copter"
+tier = 3
+tribe = "mech"
+stats = [4, 6]
+timewarp = "minor"
+keywords = ["divine_shield"]
+avenge = { every = 3, effect = { random_minion = "mech" } }
+
+[[token]]
+name = "Timewarped Jazzer"
+tier = 3
+tribe = "quilboar"
+stats = [5, 3]
+timewarp = "minor"
+deathrattle = { effect = { gem_bonus = [0, 2] } }
+
+[[token]]
+name = "Timewarped Pillager"
+tier = 3
+tribe = "undead"
+stats = [4, 3]
+timewarp = "minor"
+keywords = ["taunt", "reborn"]
+deathrattle = { get = "Tavern Coin" }
+
+[[token]]
+name = "Timewarped Duskmaw"
+tier = 5
+tribe = "dragon"
+stats = [6, 14]
+timewarp = "major"
+avenge = { every = 1, effect = { buff = [6, 4], target = "all", tribe = "dragon" } }
+
+[[token]]
+name = "Timewarped Geist"
+tier = 5
+tribe = "undead"
+stats = [10, 6]
+timewarp = "major"
+deathrattle = { effect = { spell_bonus = [2, 2] } }
+
+[[token]]
+name = "Timewarped Goldrinn"
+tier = 5
+tribe = "beast"
+stats = [6, 6]
+timewarp = "major"
+deathrattle = { combat_beast_buff = [4, 4] }
+
+[[token]]
+name = "Timewarped Hooktail"
+tier = 5
+tribes = ["dragon", "pirate"]
+stats = [6, 12]
+timewarp = "major"
+on_cast_spell = { buff_all = [2, 2] }
+
+[[token]]
+name = "Timewarped Imp-filtrator"
+tier = 5
+tribe = "demon"
+stats = [13, 7]
+timewarp = "major"
+on_event = { event = "gold_spent", every = 8, effect = { tavern_buff = [3, 3] } }
+
+[[token]]
+name = "Timewarped Anub'arak"
+tier = 5
+tribe = "undead"
+stats = [12, 8]
+timewarp = "major"
+after_play_tribe = { tribe = "undead", effects = [{ undead_bonus = [3, 0] }] }
+
+[[token]]
+name = "Timewarped Nomi"
+tier = 5
+tribe = "neutral"
+lobby = "elemental"
+stats = [10, 10]
+timewarp = "major"
+after_play_tribe = { tribe = "elemental", effects = [{ tavern_buff = [4, 3] }] }
+
+[[token]]
+name = "Timewarped Nalaa"
+tier = 5
+tribe = "neutral"
+stats = [12, 12]
+timewarp = "major"
+on_event = { event = "all_spells_cast", every = 1, effect = { buff_each_type = [4, 3] } }
+
+[[token]]
+name = "Timewarped Substrate"
+tier = 5
+tribe = "elemental"
+stats = [8, 8]
+timewarp = "major"
+keywords = ["divine_shield"]
+end_of_turn = { get = "Temperature Shift" }
