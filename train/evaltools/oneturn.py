@@ -1,8 +1,12 @@
 """One-turn and whole-game fine-tunes on the r1111 network.
 
 --mode turn (default): every game starts from Era's logged turn 7..11
-position, the episode is the learner's first turn, and the reward is the
-fight that follows (+1 win, 0 tie, -1 loss). This is the original diagnostic.
+position, the episode is the learner's first --turns turns, and each turn's
+fight gives +1 win, 0 tie, -1 loss at that turn's ending action. Returns are
+Monte Carlo with --gamma applied once per turn end. --turns 1 is the original
+diagnostic. --deadlines and --entropy-moves-as-one work in turn mode too.
+The test measures each turn's fight, cycles, sells, plays, rolls, levels and
+the starting board kept, split by the late carry cards.
 
 --mode game: normal games from turn 1, one learner against seven real seats.
 The episode is the learner's whole game. Rewards are optional and add up:
@@ -22,8 +26,10 @@ so train/fixed_eval.py can load it.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -93,6 +99,29 @@ CARD_TARGETS = (
     "Eternal Knight", "Nightmare Par-tea Guest", "Mighty Dragonbreath",
     "Misplaced Tea Set",
 )
+# Era's 20 carry cards, ranked by their share of Era's top-4 turn-12 stats:
+# train/runs/late-buys/report.md section 1. A start is "carry" when its
+# first-observation board holds one of them.
+CARRY_CARDS = (
+    "Felboar", "Hooktusk, Master Marauder", "Gatekeeper Amalgam",
+    "Enterprising Escapee", "Twisted Wrathguard", "Sacrificial Wrathguard",
+    "Polarizing Beatboxer", "Drone Duplicator", "Deathstrider",
+    "Devilish Distractor", "Blade Collector", "Headhunter Gryphon", "Glambot",
+    "Wildfire Elemental", "Drustfallen Butcher", "Tasty Lobster",
+    "Felfire Conjurer", "Magicfin Mycologist", "Living Azerite",
+    "Blue Volumizer",
+)
+# The plan's pass lines, docs/notes/plan-2026-11-12.md section 5.2. Sells and
+# plays are reported but have no pass line.
+PASS_LINES = {
+    "first_win": 0.40,
+    "board_ratio_median": 1.55,
+    "cycle_per_turn": 0.40,
+    "level_per_turn": 0.45,
+    "board_kept": 0.50,
+}
+SELL0 = sum(n for name, n in bgpy.ACTION_KINDS[:KINDS.index("sell")])
+assert [x[1] for x in bgpy.ACTION_KINDS[:2]] == [bgpy.SHOP, 1]
 SF = bgpy.SLOT_FEATURES
 SHOP_COLS = [bgpy.SHOP_START + i * SF for i in range(bgpy.SHOP)] + [
     bgpy.SHOP_SPELL_START]
@@ -201,11 +230,214 @@ def close_view(ep, turn, offers, bought):
                 ep.card_bought[name] += 1
 
 
+def board_names(obs, names):
+    """The learner board's card names, in slot order, from an observation."""
+    out = []
+    for base in BOARD_COLS:
+        if obs[base + bgpy.SLOT_PRESENT] > 0:
+            name = slot_name(obs, base, names)
+            if name is not None:
+                out.append(name)
+    return out
+
+
+def seat_board_names(env, e, seat, names):
+    board = env.seats(e)[seat][5]
+    return [row[0] for row in board]
+
+
+def kept_share(start, end):
+    """Share of the start board still on the end board, by name with
+    multiplicity. Card instances are not in the observation, and golden cards
+    share their plain card's name."""
+    if not start or end is None:
+        return float("nan")
+    left = Counter(end)
+    kept = 0
+    for name in start:
+        if left[name] > 0:
+            left[name] -= 1
+            kept += 1
+    return kept / len(start)
+
+
+def sell_name(obs, action, names):
+    slot = int(action) - SELL0
+    if 0 <= slot < len(BOARD_COLS):
+        return slot_name(obs, BOARD_COLS[slot], names)
+    return None
+
+
+# Era's action logs, for the reference line on the same held-out starts.
+_ERA_TURNS = None
+_ERA_POS = None
+
+
+def era_logs():
+    global _ERA_TURNS
+    if _ERA_TURNS is None:
+        logs = {}
+        for path in sorted(FROZEN_ACTIONS.glob("*.json")):
+            data = json.loads(path.read_text())
+            logs[(data["source"], data["game"])] = {
+                int(t["turn"]): t for t in data["turns"]}
+        _ERA_TURNS = logs
+    return _ERA_TURNS
+
+
+def era_positions():
+    """(start turn, sorted board names) to source game, over turns 7..11."""
+    global _ERA_POS
+    if _ERA_POS is None:
+        pos = {}
+        for (source, game), turns in era_logs().items():
+            for turn, rec in turns.items():
+                if ERA_TURN_MIN <= turn <= ERA_TURN_MAX:
+                    names = tuple(sorted(
+                        c["name"] for c in rec["start"].get("board") or []))
+                    pos.setdefault((turn, names), (source, game))
+        _ERA_POS = pos
+    return _ERA_POS
+
+
+def env_era_keys(env):
+    """(start turn, sorted board names) of every env's Era start, or None."""
+    bodies = env.era_bodies()
+    seats = env.era_seats()
+    turns = env.era_turns()
+    names = env.card_names()
+    keys = []
+    for e, seat in enumerate(seats):
+        if seat < 0:
+            keys.append(None)
+            continue
+        board = [names[c] for c in bodies[e][seat]
+                 if 0 <= c < len(names)]
+        keys.append((int(turns[e]), tuple(sorted(board))))
+    return keys
+
+
+def log_buy_is_spell(step, pre):
+    if step.get("spell"):
+        return True
+    slot = step.get("slot")
+    card = step.get("card") or {}
+    for c in pre.get("tavern") or []:
+        if c.get("slot") == slot and c.get("id") == card.get("id"):
+            return c.get("kind") == "spell"
+    return card.get("kind") == "spell"
+
+
+def log_turn_counts(rec):
+    """sells, plays, rolls, levels and buy-then-sell cycles of one logged turn.
+
+    The walk is train/evaltools/turn_profile/era_profile.py's: a cycle is a
+    sell whose card entity id (card id when the log omits it) is one this turn
+    bought.
+    """
+    pre = rec["start"]
+    sells = plays = rolls = levels = cycles = 0
+    bought = []
+    for a in rec.get("actions") or []:
+        step = a["step"]
+        if step == "roll":
+            rolls += 1
+        elif step == "sell":
+            sells += 1
+            card = a.get("card") or {}
+            cid = card.get("id")
+            card_id = card.get("card_id")
+            hit = None
+            if cid is not None:
+                for i, b in enumerate(bought):
+                    if b[0] == cid:
+                        hit = i
+                        break
+            if hit is None and card_id is not None:
+                for i, b in enumerate(bought):
+                    if b[1] == card_id:
+                        hit = i
+                        break
+            if hit is not None:
+                del bought[hit]
+                cycles += 1
+        elif step == "buy":
+            if not log_buy_is_spell(a, pre):
+                card = a.get("card") or {}
+                bought.append((card.get("id"), card.get("card_id")))
+        elif step == "play":
+            plays += 1
+        elif step == "level":
+            levels += 1
+        pre = a.get("after") or pre
+    return {"sells": sells, "plays": plays, "rolls": rolls,
+            "levels": levels, "cycles": cycles}
+
+
+def log_board_total(cards):
+    return float(sum((c.get("attack") or 0) + (c.get("health") or 0)
+                     for c in cards or []))
+
+
+def era_reference(key, turns):
+    """Era's line for the same start, over its first `turns` logged turns."""
+    source, game = era_positions()[key]
+    tt = key[0]
+    turns_data = era_logs()[(source, game)]
+    recs = [turns_data.get(tt + i) for i in range(turns)]
+    present = [r for r in recs if r is not None]
+    start = recs[0]["start"]
+    start_names = [c["name"] for c in start.get("board") or []]
+    start_total = log_board_total(start.get("board"))
+    first_end = recs[0].get("end")
+    ratio = float("nan")
+    if first_end is not None and start_total > 0:
+        ratio = log_board_total(first_end.get("board")) / start_total
+    fights = []
+    for i in range(turns):
+        nxt = turns_data.get(tt + i + 1)
+        if nxt is None:
+            fights.append(float("nan"))
+        else:
+            fights.append(1.0 if nxt["start"].get("won_last_combat") else 0.0)
+    counts = [log_turn_counts(r) for r in present]
+    n = len(counts)
+    per_turn = {
+        k: (float(sum(c[k] for c in counts)) / n if n else float("nan"))
+        for k in ("cycles", "sells", "plays", "levels", "rolls")
+    }
+    last_end = recs[-1].get("end") if recs[-1] is not None else None
+    end_names = [c["name"] for c in (last_end or {}).get("board") or []] \
+        if last_end is not None else None
+    return {
+        "first_win": fights[0],
+        "fights": fights,
+        "board_ratio": ratio,
+        "cycle_per_turn": per_turn["cycles"],
+        "sell_per_turn": per_turn["sells"],
+        "play_per_turn": per_turn["plays"],
+        "roll_per_turn": per_turn["rolls"],
+        "level_per_turn": per_turn["levels"],
+        "board_kept": kept_share(start_names, end_names),
+        "carry": 1 if any(x in CARRY_CARDS for x in start_names) else 0,
+        "turns": n,
+    }
+
+
+ERA_REF_ROWS = []
+
+
 def parse_args():
     a = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     a.add_argument("--name", required=True, help="run folder under train/runs/oneturn")
     a.add_argument("--mode", choices=["turn", "game"], default="turn",
-                   help="turn: the original first-turn diagnostic; game: whole games")
+                   help="turn: the first --turns turns from Era's position; "
+                        "game: whole games")
+    a.add_argument("--turns", type=int, default=1,
+                   help="turn mode: turns per episode, then the game is thrown "
+                        "away (default 1)")
+    a.add_argument("--test-every", type=float, default=5.0,
+                   help="turn mode: minutes between held-out tests (default 5)")
     a.add_argument("--init", required=True, help="checkpoint to start from")
     a.add_argument("--minutes", type=float, default=30.0,
                    help="training minutes, tests do not count (default 30)")
@@ -223,7 +455,7 @@ def parse_args():
     a.add_argument("--no-moves", action="store_true",
                    help="clear move actions when another action is legal")
     a.add_argument("--deadlines", action="store_true",
-                   help="game mode: add Era's levelling deadline penalty")
+                   help="turn and game mode: add Era's levelling deadline penalty")
     a.add_argument("--lag-mix", action="store_true",
                    help="game mode: real seats draw lag 0/1/2 from turn 7")
     a.add_argument("--prior", default=None,
@@ -231,32 +463,90 @@ def parse_args():
     a.add_argument("--prior-weight", type=float, default=0.0,
                    help="game mode: weight of the BuyPrior cross-entropy")
     a.add_argument("--entropy-moves-as-one", action="store_true",
-                   help="game mode: count all move actions as one entropy atom")
+                   help="turn and game mode: count all move actions as one "
+                        "entropy atom")
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--cpu", action="store_true", help="run on the CPU")
     return a.parse_args()
 
 
 class Episode:
-    """One env's first turn, kept until its outcome is known."""
+    """One env's first --turns turns, kept until its outcome is known."""
 
-    __slots__ = ("obs", "mask", "act", "logp", "val", "cost", "start_board",
-                 "end_board", "gold", "entropy", "end_prob")
+    __slots__ = ("obs", "mask", "act", "logp", "val", "cost", "reward",
+                 "turn_end", "pending_idx", "fights", "turns_played",
+                 "penalty", "start_board", "first_end_board", "end_board",
+                 "gold", "entropy", "end_prob", "start_names", "end_names",
+                 "events", "carry", "started", "died", "test")
 
-    def __init__(self):
+    def __init__(self, test=False):
         self.obs = []
         self.mask = []
         self.act = []
         self.logp = []
         self.val = []
         self.cost = []
+        self.reward = []
+        self.turn_end = []
+        self.pending_idx = None
+        self.fights = []
+        self.turns_played = 0
+        self.penalty = 0.0
         self.start_board = None
+        self.first_end_board = None
         self.end_board = None
         self.gold = None
         self.entropy = []
         self.end_prob = []
+        self.start_names = None
+        self.end_names = None
+        self.events = [] if test else None
+        self.carry = False
+        self.started = False
+        self.died = False
+        self.test = test
 
+    def record(self, obs, mask, action, logp, val, ent, endp):
+        cost = float(COST_OF[action])
+        self.obs.append(obs)
+        self.mask.append(mask)
+        self.act.append(int(action))
+        self.logp.append(float(logp))
+        self.val.append(float(val))
+        self.cost.append(cost)
+        self.reward.append(-cost)
+        self.turn_end.append(False)
+        self.entropy.append(float(ent))
+        self.end_prob.append(float(endp))
 
+    def record_test(self, turn, obs, action, names):
+        """One sampled test step, with the data the new measures need."""
+        kind = int(KIND_OF[action])
+        buy = bought_name(obs, action, names) if KINDS[kind] == "buy" else None
+        sell = sell_name(obs, action, names) if KINDS[kind] == "sell" else None
+        self.events.append((int(turn), kind, buy, sell))
+
+    def mark_turn_end(self, idx=None):
+        if idx is None:
+            idx = len(self.act) - 1
+        self.pending_idx = int(idx)
+        self.turn_end[int(idx)] = True
+
+    def add_fight(self, outcome):
+        """Record the fight after the pending turn end and its reward."""
+        self.reward[self.pending_idx] += float(outcome)
+        self.pending_idx = None
+        self.fights.append(int(outcome))
+        self.turns_played += 1
+
+    def add_place(self, outcome):
+        """The learner was knocked out or won the game: its last reward."""
+        idx = (self.pending_idx if self.pending_idx is not None
+               else len(self.act) - 1)
+        self.reward[idx] += float(outcome)
+        self.pending_idx = None
+        self.fights.append(int(outcome))
+        self.turns_played += 1
 class GameEpisode:
     """One env's whole game, or the statistics of one game for a test."""
 
@@ -369,18 +659,29 @@ class Batch:
     def samples(self):
         return len(self.act)
 
-    def add(self, ep: Episode, reward: float, died: bool):
+    def add(self, ep: Episode, gamma: float = 1.0):
         n = len(ep.act)
-        costs = np.asarray(ep.cost, dtype=np.float64)
-        # return at step i = reward - the move costs from i to the turn's end
-        suffix = np.cumsum(costs[::-1])[::-1]
-        ret = reward - suffix
+        ends = [i for i, flag in enumerate(ep.turn_end) if flag]
+        reward = float(sum(ep.fights)) if ep.fights else 0.0
+        if len(ends) == 1 and ends[0] == n - 1:
+            # One turn: the original arithmetic, so --turns 1 is unchanged.
+            costs = np.asarray(ep.cost, dtype=np.float64)
+            suffix = np.cumsum(costs[::-1])[::-1]
+            ret = reward - ep.penalty - suffix
+        else:
+            ret = np.empty(n, dtype=np.float64)
+            acc = 0.0
+            for t in range(n - 1, -1, -1):
+                acc = ep.reward[t] + (gamma if ep.turn_end[t] else 1.0) * acc
+                ret[t] = acc
         self.obs.extend(ep.obs)
         self.mask.extend(ep.mask)
         self.act.extend(ep.act)
         self.logp.extend(ep.logp)
         self.val.extend(ep.val)
         self.ret.extend(ret.tolist())
+        # Fight rewards only: action costs and deadline penalties are in the
+        # returns, as they were before --turns.
         self.rewards.append(reward)
         self.lengths.append(n)
         if reward > 0:
@@ -389,6 +690,13 @@ class Batch:
             self.losses += 1
         else:
             self.ties += 1
+        for outcome in ep.fights:
+            if outcome > 0:
+                self.fights_won += 1
+            elif outcome < 0:
+                self.fights_lost += 1
+            else:
+                self.fights_tied += 1
 
     def add_game(self, ep: GameEpisode, gamma: float):
         n = len(ep.act)
@@ -578,11 +886,19 @@ def update(batch: Batch, net, opt, dev, update_idx, cfg, state,
 
 
 def run_test(net, real, split, do_nothing, label, minutes, dev, out_path,
-             rows, no_moves=False):
-    """First game's first turn on every seed, two chunks of 512 envs."""
+             rows, no_moves=False, turns=1):
+    """First game's first `turns` turns on every seed, two chunks of 512."""
     chunk_rows = []
+    era_rows = []
     for chunk in range(TEST_CHUNKS):
         env = make_env(TEST_CHUNK, TEST_SEED_BASE + chunk, split, real)
+        names = env.card_names()
+        if split == "holdout" and not do_nothing:
+            keys = env_era_keys(env)
+            known = era_positions()
+            for key in keys:
+                if key is not None and key in known:
+                    era_rows.append(era_reference(key, turns))
         b = ppo.Bufs(TEST_CHUNK)
         env.kinds(b.kinds)
         n = TEST_CHUNK
@@ -590,7 +906,7 @@ def run_test(net, real, split, do_nothing, label, minutes, dev, out_path,
         pending = np.zeros(n, dtype=bool)
         active = np.ones(n, dtype=bool)
         started = np.zeros(n, dtype=bool)
-        ep = [Episode() for _ in range(n)]
+        ep = [Episode(test=True) for _ in range(n)]
         rec = [None] * n
         gen = torch.Generator(device=dev.type if dev.type == "cuda" else "cpu")
         gen.manual_seed(TEST_SEED_BASE + 1000 * chunk + (0 if do_nothing else 1))
@@ -600,11 +916,19 @@ def run_test(net, real, split, do_nothing, label, minutes, dev, out_path,
             # which is the learner's next turn in the same game.
             for e in np.nonzero(pending)[0]:
                 e = int(e)
-                reward, died = outcome_after(b.places, e, int(b.seat[e]), b.obs[e])
-                rec[e] = test_row(env, e, int(b.seat[e]), ep[e], reward, died,
-                                  minutes, label, split, do_nothing)
+                o = b.obs[e]
+                outcome = 1 if o[WON] > 0.5 else (-1 if o[LOST] > 0.5 else 0)
+                ep[e].add_fight(outcome)
+                # The board after the turn is the next turn's first
+                # observation, so this includes the ending action.
+                ep[e].end_names = board_names(o, names)
                 pending[e] = False
-                done[e] = True
+                if ep[e].turns_played >= turns:
+                    rec[e] = test_row(ep[e], minutes, label, split, do_nothing,
+                                      turns)
+                    done[e] = True
+                else:
+                    active[e] = True
 
             if done.all():
                 break
@@ -612,6 +936,9 @@ def run_test(net, real, split, do_nothing, label, minutes, dev, out_path,
             for e in np.nonzero(active & ~started)[0]:
                 e = int(e)
                 ep[e].start_board = board_total(env, e, int(b.seat[e]))
+                ep[e].start_names = board_names(b.obs[e], names)
+                ep[e].carry = any(x in CARRY_CARDS for x in ep[e].start_names)
+                ep[e].started = True
                 started[e] = True
 
             acts = np.empty(n, dtype=np.int64)
@@ -637,20 +964,21 @@ def run_test(net, real, split, do_nothing, label, minutes, dev, out_path,
                     endp_np = endp.cpu().numpy()
                 for k, e in enumerate(to_sample):
                     e = int(e)
-                    ep[e].obs.append(b.obs[e].copy())
-                    ep[e].mask.append(fmask[k].cpu().numpy().copy())
-                    ep[e].act.append(int(a_np[k]))
-                    ep[e].logp.append(float(lp_np[k]))
-                    ep[e].val.append(float(val_np[k]))
-                    ep[e].cost.append(float(COST_OF[a_np[k]]))
-                    ep[e].entropy.append(float(ent_np[k]))
-                    ep[e].end_prob.append(float(endp_np[k]))
-                    acts[e] = int(a_np[k])
+                    action = int(a_np[k])
+                    obs_row = b.obs[e]
+                    ep[e].record(obs_row.copy(), fmask[k].cpu().numpy().copy(),
+                                 action, lp_np[k], val_np[k], ent_np[k],
+                                 endp_np[k])
+                    ep[e].record_test(int(obs_row[TURN]), obs_row, action, names)
+                    acts[e] = action
                     ended[e] = (acts[e] == END_TURN
-                                or b.obs[e, ACTIONS_LEFT] <= 1)
-                    ep[e].gold = float(b.obs[e, GOLD])
+                                or obs_row[ACTIONS_LEFT] <= 1)
+                    ep[e].gold = float(obs_row[GOLD])
                     if ended[e]:
                         ep[e].end_board = board_total(env, e, int(b.seat[e]))
+                        if ep[e].first_end_board is None:
+                            ep[e].first_end_board = ep[e].end_board
+                        ep[e].end_names = board_names(obs_row, names)
 
             for e in np.nonzero(~active | done)[0]:
                 acts[e] = throwaway(b.mask[e])
@@ -660,67 +988,130 @@ def run_test(net, real, split, do_nothing, label, minutes, dev, out_path,
 
             for e in np.nonzero(active)[0]:
                 e = int(e)
-                reward, died = outcome_after(b.places, e, int(seats[e]))
-                if died or (b.places[e, int(seats[e])] != 0):
+                seat = int(seats[e])
+                place = int(b.places[e, seat])
+                if place != 0:
+                    outcome = 1.0 if place == 1 else -1.0
+                    if ended[e]:
+                        ep[e].mark_turn_end()
+                    ep[e].add_place(outcome)
+                    ep[e].died = place > 1
+                    if ep[e].end_names is None:
+                        ep[e].end_names = seat_board_names(env, e, seat, names)
+                    if ep[e].first_end_board is None:
+                        ep[e].first_end_board = board_total(env, e, seat)
                     if ep[e].end_board is None:
-                        ep[e].end_board = board_total(env, e, int(seats[e]))
-                    rec[e] = test_row(env, e, int(seats[e]), ep[e], reward, died,
-                                      minutes, label, split, do_nothing)
+                        ep[e].end_board = board_total(env, e, seat)
+                    rec[e] = test_row(ep[e], minutes, label, split, do_nothing,
+                                      turns)
                     active[e] = False
                     done[e] = True
                 elif ended[e]:
+                    ep[e].mark_turn_end()
                     active[e] = False
                     pending[e] = True
 
         chunk_rows.extend(r for r in rec if r is not None)
+    if era_rows:
+        ERA_REF_ROWS[:] = era_rows
     rows.extend(chunk_rows)
     print(f"  test {label}: {len(chunk_rows)} episodes", flush=True)
-    write_tests(out_path, summarize_tests(rows))
+    write_tests(out_path, summarize_tests(rows, turns), turns)
     return chunk_rows
 
 
-def test_row(env, e, seat, ep, reward, died, minutes, label, split, do_nothing):
+def test_row(ep, minutes, label, split, do_nothing, turns):
     acts = np.asarray(ep.act, dtype=np.int64)
     counts = np.bincount(KIND_OF[acts], minlength=len(KINDS))
     start = ep.start_board if ep.start_board is not None else 0
+    first_end = (ep.first_end_board if ep.first_end_board is not None
+                 else ep.end_board)
+    first_end = first_end if first_end is not None else 0
     end = ep.end_board if ep.end_board is not None else 0
     gold = ep.gold if ep.gold is not None else float("nan")
+    fights = ep.fights
+    first = fights[0] if fights else 0
+    by_turn = {}
+    total_cycles = 0
+    for turn, kind, buy, sell in ep.events:
+        st = by_turn.setdefault(turn, {"bought": [], "cycles": 0, "sells": 0,
+                                       "plays": 0, "rolls": 0, "levels": 0})
+        name = KINDS[kind]
+        if name == "buy":
+            st["bought"].append(buy)
+        elif name == "sell":
+            st["sells"] += 1
+            if sell is not None and sell in st["bought"]:
+                st["bought"].remove(sell)
+                st["cycles"] += 1
+                total_cycles += 1
+        elif name == "play":
+            st["plays"] += 1
+        elif name == "roll":
+            st["rolls"] += 1
+        elif name == "level":
+            st["levels"] += 1
+    played = ep.turns_played
+    denom = played if played else 0
+    kept = kept_share(ep.start_names, ep.end_names) if played >= turns \
+        else float("nan")
     row = {
         "label": label,
         "split": split,
         "policy": "do-nothing" if do_nothing else "net",
+        "carry": 1 if ep.carry else 0,
         "minutes": minutes,
         "episodes": 1,
-        "win": 1 if reward > 0 else 0,
-        "tie": 1 if reward == 0 else 0,
-        "loss": 1 if reward < 0 else 0,
-        "died": 1 if died else 0,
+        "turns_played": int(played),
+        "win": 1 if first > 0 else 0,
+        "tie": 1 if first == 0 else 0,
+        "loss": 1 if first < 0 else 0,
+        "died": 1 if ep.died else 0,
         "actions": int(len(acts)),
         "gold_left": float(gold),
         "board_start": float(start),
         "board_end": float(end),
-        "board_ratio": float(end / start) if start > 0 else float("nan"),
+        "board_ratio": float(first_end / start) if start > 0 else float("nan"),
+        "board_kept": kept,
+        "cycle_per_turn": (total_cycles / denom if denom
+                           else float("nan")),
+        "sell_per_turn": (sum(st["sells"] for st in by_turn.values()) / denom
+                          if denom else float("nan")),
+        "play_per_turn": (sum(st["plays"] for st in by_turn.values()) / denom
+                          if denom else float("nan")),
+        "roll_per_turn": (sum(st["rolls"] for st in by_turn.values()) / denom
+                          if denom else float("nan")),
+        "level_per_turn": (sum(st["levels"] for st in by_turn.values()) / denom
+                           if denom else float("nan")),
         "entropy": float(np.mean(ep.entropy)) if ep.entropy and not do_nothing
         else float("nan"),
         "end_turn_prob": float(np.mean(ep.end_prob)) if ep.end_prob and not do_nothing
         else float("nan"),
     }
+    for i in range(turns):
+        row[f"win_t{i + 1}"] = ((1.0 if fights[i] > 0 else 0.0)
+                                if i < len(fights) else float("nan"))
+        row[f"n_t{i + 1}"] = 1 if i < len(fights) else 0
     for k, name in enumerate(KINDS):
         row[f"act_{name}"] = int(counts[k])
     return row
 
 
-def test_columns():
-    return (["label", "split", "policy", "minutes", "episodes", "win", "tie",
-             "loss", "died", "actions", "gold_left", "board_start_mean",
-             "board_start_median", "board_end_mean", "board_end_median",
-             "board_ratio_median", "entropy", "end_turn_prob"]
+def test_columns(turns=1):
+    return (["label", "split", "policy", "carry", "minutes", "episodes",
+             "turns_played", "win", "tie", "loss", "died", "actions",
+             "gold_left", "board_start_mean", "board_start_median",
+             "board_end_mean", "board_end_median", "board_ratio_median",
+             "board_kept", "cycle_per_turn", "sell_per_turn", "play_per_turn",
+             "roll_per_turn", "level_per_turn", "entropy", "end_turn_prob"]
+            + [f"win_t{i}" for i in range(1, turns + 1)]
+            + [f"n_t{i}" for i in range(1, turns + 1)]
             + [f"act_{k}" for k in KINDS])
 
 
-def write_tests(path: Path, rows):
+def write_tests(path: Path, rows, turns=1):
     path.parent.mkdir(parents=True, exist_ok=True)
-    cols = test_columns()
+    cols = test_columns(turns)
     with path.open("w") as f:
         f.write("\t".join(cols) + "\n")
         for row in rows:
@@ -738,8 +1129,9 @@ def nanmedian(x):
     return float(np.nanmedian(x)) if np.isfinite(x).any() else float("nan")
 
 
-def summarize_tests(rows):
-    """Aggregate per-episode test rows to one row per (label, split, policy)."""
+def summarize_tests(rows, turns=1):
+    """Aggregate per-episode test rows to one row per (label, split, policy,
+    carry), with carry "all", "carry" or "other"."""
     groups = {}
     order = []
     for row in rows:
@@ -750,36 +1142,58 @@ def summarize_tests(rows):
         groups[key].append(row)
     out = []
     for key in order:
-        rs = groups[key]
-        n = len(rs)
-        acts = np.array([r["actions"] for r in rs], dtype=float)
-        gold = np.array([r["gold_left"] for r in rs], dtype=float)
-        start = np.array([r["board_start"] for r in rs], dtype=float)
-        end = np.array([r["board_end"] for r in rs], dtype=float)
-        ratio = np.array([r["board_ratio"] for r in rs], dtype=float)
-        ratio = ratio[~np.isnan(ratio)]
-        ent = np.array([r["entropy"] for r in rs], dtype=float)
-        endp = np.array([r["end_turn_prob"] for r in rs], dtype=float)
-        agg = {
-            "label": key[0], "split": key[1], "policy": key[2],
-            "minutes": rs[0]["minutes"], "episodes": n,
-            "win": np.mean([r["win"] for r in rs]),
-            "tie": np.mean([r["tie"] for r in rs]),
-            "loss": np.mean([r["loss"] for r in rs]),
-            "died": np.mean([r["died"] for r in rs]),
-            "actions": float(acts.mean()),
-            "gold_left": nanmean(gold),
-            "board_start_mean": nanmean(start),
-            "board_start_median": nanmedian(start),
-            "board_end_mean": nanmean(end),
-            "board_end_median": nanmedian(end),
-            "board_ratio_median": float(np.median(ratio)) if len(ratio) else float("nan"),
-            "entropy": nanmean(ent),
-            "end_turn_prob": nanmean(endp),
-        }
-        for k in KINDS:
-            agg[f"act_{k}"] = float(np.mean([r[f"act_{k}"] for r in rs]))
-        out.append(agg)
+        base = groups[key]
+        for carry in ("all", "carry", "other"):
+            if carry == "all":
+                rs = base
+            else:
+                want = 1 if carry == "carry" else 0
+                rs = [r for r in base if r["carry"] == want]
+            if not rs:
+                continue
+            n = len(rs)
+            acts = np.array([r["actions"] for r in rs], dtype=float)
+            gold = np.array([r["gold_left"] for r in rs], dtype=float)
+            start = np.array([r["board_start"] for r in rs], dtype=float)
+            end = np.array([r["board_end"] for r in rs], dtype=float)
+            ratio = np.array([r["board_ratio"] for r in rs], dtype=float)
+            ratio = ratio[~np.isnan(ratio)]
+            ent = np.array([r["entropy"] for r in rs], dtype=float)
+            endp = np.array([r["end_turn_prob"] for r in rs], dtype=float)
+            kept = np.array([r["board_kept"] for r in rs], dtype=float)
+            agg = {
+                "label": key[0], "split": key[1], "policy": key[2],
+                "carry": carry,
+                "minutes": rs[0]["minutes"], "episodes": n,
+                "turns_played": float(np.mean([r["turns_played"] for r in rs])),
+                "win": np.mean([r["win"] for r in rs]),
+                "tie": np.mean([r["tie"] for r in rs]),
+                "loss": np.mean([r["loss"] for r in rs]),
+                "died": np.mean([r["died"] for r in rs]),
+                "actions": float(acts.mean()),
+                "gold_left": nanmean(gold),
+                "board_start_mean": nanmean(start),
+                "board_start_median": nanmedian(start),
+                "board_end_mean": nanmean(end),
+                "board_end_median": nanmedian(end),
+                "board_ratio_median": float(np.median(ratio)) if len(ratio) else float("nan"),
+                "board_kept": nanmean(kept),
+                "board_kept_n": int(np.isfinite(kept).sum()),
+                "cycle_per_turn": nanmean([r["cycle_per_turn"] for r in rs]),
+                "sell_per_turn": nanmean([r["sell_per_turn"] for r in rs]),
+                "play_per_turn": nanmean([r["play_per_turn"] for r in rs]),
+                "roll_per_turn": nanmean([r["roll_per_turn"] for r in rs]),
+                "level_per_turn": nanmean([r["level_per_turn"] for r in rs]),
+                "entropy": nanmean(ent),
+                "end_turn_prob": nanmean(endp),
+            }
+            for i in range(1, turns + 1):
+                vals = [r[f"win_t{i}"] for r in rs]
+                agg[f"win_t{i}"] = nanmean(vals)
+                agg[f"n_t{i}"] = int(sum(r[f"n_t{i}"] for r in rs))
+            for k in KINDS:
+                agg[f"act_{k}"] = float(np.mean([r[f"act_{k}"] for r in rs]))
+            out.append(agg)
     return out
 
 
@@ -1183,41 +1597,159 @@ def fmt(x, digits=3):
     return f"{x:.{digits}f}"
 
 
+def summarize_era(carry="all"):
+    if not ERA_REF_ROWS:
+        return None
+    if carry == "all":
+        rs = ERA_REF_ROWS
+    else:
+        want = 1 if carry == "carry" else 0
+        rs = [r for r in ERA_REF_ROWS if r["carry"] == want]
+    if not rs:
+        return None
+    return {
+        "n": len(rs),
+        "first_win": nanmean([r["first_win"] for r in rs]),
+        "board_ratio_median": nanmedian([r["board_ratio"] for r in rs]),
+        "cycle_per_turn": nanmean([r["cycle_per_turn"] for r in rs]),
+        "sell_per_turn": nanmean([r["sell_per_turn"] for r in rs]),
+        "play_per_turn": nanmean([r["play_per_turn"] for r in rs]),
+        "roll_per_turn": nanmean([r["roll_per_turn"] for r in rs]),
+        "level_per_turn": nanmean([r["level_per_turn"] for r in rs]),
+        "board_kept": nanmean([r["board_kept"] for r in rs]),
+        "board_kept_n": int(np.isfinite(
+            [r["board_kept"] for r in rs]).sum()),
+    }
+
+
+def era_cell(value, digits=2):
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return "not in the logs"
+    return fmt(value, digits)
+
+
 def write_report(path: Path, name, args, rows, state, n_updates, n_samples,
                  leftover_episodes, leftover_samples):
-    agg = summarize_tests(rows)
+    turns = args.turns
+    agg = summarize_tests(rows, turns)
+    all_rows = [a for a in agg if a["carry"] == "all"]
+    holdout = [a for a in agg if a["split"] == "holdout"]
     lines = [f"# oneturn {name}", "",
              f"- init: `{args.init}`",
-             f"- seed {args.seed}, envs {args.envs}, training minutes {args.minutes:g}",
+             f"- mode turn, turns {turns}, gamma {args.gamma:g}, "
+             f"deadlines {args.deadlines}, "
+             f"entropy-moves-as-one {args.entropy_moves_as_one}, "
+             f"no-moves {args.no_moves}",
+             f"- seed {args.seed}, envs {args.envs}, training minutes {args.minutes:g}, "
+             f"test every {args.test_every:g} min",
              f"- updates {n_updates}, samples {n_samples}, leftover episodes "
              f"{leftover_episodes} ({leftover_samples} samples)",
              f"- final lr {state['lr']:.3g}", ""]
     lines.append("## Tests")
     lines.append("")
-    lines.append("| test | split | policy | min | win | tie | loss | died | actions | "
-                 "sells | rolls | buys | gold | end/start | entropy | EndTurn p |")
-    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-    for a in agg:
+    head = ("| test | split | policy | min | turns | first win | "
+            + " | ".join(f"win t{i}" for i in range(2, turns + 1))
+            + (" | " if turns > 1 else "")
+            + "died | actions | cycles/t | sells/t | plays/t | rolls/t | "
+              "levels/t | board kept | gold | end/start | entropy | EndTurn p |")
+    lines.append(head)
+    lines.append("|" + "---|" * (head.count("|") - 1))
+    for a in all_rows:
+        wins = "".join(f"{fmt(a[f'win_t{i}'])} ({a[f'n_t{i}']}) | "
+                       for i in range(2, turns + 1))
         lines.append(
-            f"| {a['label']} | {a['split']} | {a['policy']} | {a['minutes']:.1f} | "
-            f"{fmt(a['win'])} | {fmt(a['tie'])} | {fmt(a['loss'])} | {fmt(a['died'])} | "
-            f"{fmt(a['actions'], 1)} | {fmt(a['act_sell'], 2)} | {fmt(a['act_roll'], 2)} | "
-            f"{fmt(a['act_buy'] + a['act_buy_spell'], 2)} | {fmt(a['gold_left'], 1)} | "
-            f"{fmt(a['board_ratio_median'], 2)} | {fmt(a['entropy'], 2)} | "
-            f"{fmt(a['end_turn_prob'], 2)} |")
+            f"| {a['label']} | {a['split']} | {a['policy']} | "
+            f"{a['minutes']:.1f} | {fmt(a['turns_played'], 1)} | "
+            f"{fmt(a['win'])} | {wins}{fmt(a['died'])} | "
+            f"{fmt(a['actions'], 1)} | {fmt(a['cycle_per_turn'], 2)} | "
+            f"{fmt(a['sell_per_turn'], 2)} | {fmt(a['play_per_turn'], 2)} | "
+            f"{fmt(a['roll_per_turn'], 2)} | {fmt(a['level_per_turn'], 2)} | "
+            f"{fmt(a['board_kept'])} ({a['board_kept_n']}) | "
+            f"{fmt(a['gold_left'], 1)} | {fmt(a['board_ratio_median'], 2)} | "
+            f"{fmt(a['entropy'], 2)} | {fmt(a['end_turn_prob'], 2)} |")
+    lines.append("")
+    lines.append("## Gate measures (holdout, network)")
+    lines.append("")
+    era = summarize_era("all")
+    net_rows = [a for a in holdout
+                if a["policy"] == "net" and a["carry"] == "all"]
+    labels = [a["label"] for a in net_rows]
+    lines.append("| measure | pass | Era | " + " | ".join(labels) + " |")
+    lines.append("|" + "---|" * (3 + len(labels)))
+    measures = [
+        ("first fight won", "first_win", "win", "first_win"),
+        ("board growth, first turn (median)", "board_ratio_median",
+         "board_ratio_median", "board_ratio_median"),
+        ("cycles a turn", "cycle_per_turn", "cycle_per_turn",
+         "cycle_per_turn"),
+        ("sells a turn", None, "sell_per_turn", "sell_per_turn"),
+        ("plays a turn", None, "play_per_turn", "play_per_turn"),
+        ("levels a turn", "level_per_turn", "level_per_turn",
+         "level_per_turn"),
+        ("starting board kept", "board_kept", "board_kept", "board_kept"),
+    ]
+    for title, pass_key, key, era_key in measures:
+        pass_line = PASS_LINES.get(pass_key) if pass_key else None
+        vals = " | ".join(fmt(a[key], 2) for a in net_rows)
+        lines.append(f"| {title} | {fmt(pass_line, 2) if pass_line else '-'} | "
+                     f"{era_cell(era[era_key] if era else None, 2)} | {vals} |")
+    lines.append("")
+    lines.append("## Carry split (holdout)")
+    lines.append("")
+    lines.append("| test | policy | carry | episodes | first win | board growth "
+                 "(median) | cycles/t | sells/t | plays/t | rolls/t | levels/t | "
+                 "board kept |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for a in holdout:
+        if a["carry"] == "all":
+            continue
+        lines.append(
+            f"| {a['label']} | {a['policy']} | {a['carry']} | "
+            f"{a['episodes']} | {fmt(a['win'])} | "
+            f"{fmt(a['board_ratio_median'], 2)} | "
+            f"{fmt(a['cycle_per_turn'], 2)} | {fmt(a['sell_per_turn'], 2)} | "
+            f"{fmt(a['play_per_turn'], 2)} | {fmt(a['roll_per_turn'], 2)} | "
+            f"{fmt(a['level_per_turn'], 2)} | "
+            f"{fmt(a['board_kept'])} ({a['board_kept_n']}) |")
+    lines.append("")
+    lines.append("Era's line from the same held-out starts' logs, by carry:")
+    lines.append("")
+    lines.append("| carry | starts | first win | board growth (median) | "
+                 "cycles/t | sells/t | plays/t | rolls/t | levels/t | board kept |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    for carry in ("all", "carry", "other"):
+        e = summarize_era(carry)
+        if e is None:
+            lines.append(f"| {carry} | 0 | not in the logs | not in the logs | "
+                         "not in the logs | not in the logs | not in the logs | "
+                         "not in the logs | not in the logs | not in the logs |")
+            continue
+        lines.append(
+            f"| {carry} | {e['n']} | {era_cell(e['first_win'])} | "
+            f"{era_cell(e['board_ratio_median'])} | "
+            f"{era_cell(e['cycle_per_turn'])} | {era_cell(e['sell_per_turn'])} | "
+            f"{era_cell(e['play_per_turn'])} | {era_cell(e['roll_per_turn'])} | "
+            f"{era_cell(e['level_per_turn'])} | "
+            f"{era_cell(e['board_kept'])} ({e['board_kept_n']}) |")
     lines.append("")
     lines.append("## Board totals")
     lines.append("")
     lines.append("| test | start mean | start median | end mean | end median | median end/start |")
     lines.append("|---|---|---|---|---|---|")
-    for a in agg:
+    for a in all_rows:
         lines.append(f"| {a['label']} | {fmt(a['board_start_mean'], 1)} | "
                      f"{fmt(a['board_start_median'], 1)} | {fmt(a['board_end_mean'], 1)} | "
                      f"{fmt(a['board_end_median'], 1)} | {fmt(a['board_ratio_median'], 2)} |")
     lines.append("")
     lines.append("Baselines: do-nothing on the holdout and the starting network on the "
                  "train split were run once before training; the train split was run "
-                 "again at the end. Tests are two chunks of 512 fixed holdout seeds.")
+                 "again at the end. Tests are two chunks of 512 fixed holdout seeds. "
+                 "A cycle is a minion bought and sold in the same turn. Cards are "
+                 "matched by name with multiplicity: the observation has no card "
+                 "instance, and golden cards share their plain card's name. The "
+                 "starting board kept is measured from the first observation and "
+                 "the board after the last turn, only for episodes that played all "
+                 "turns (the count in brackets is how many did).")
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -1425,6 +1957,12 @@ def main():
         raise SystemExit("--envs must be at least 1")
     if args.minutes <= 0:
         raise SystemExit("--minutes must be positive")
+    if args.turns < 1:
+        raise SystemExit("--turns must be at least 1")
+    if args.mode == "game" and args.turns != 1:
+        raise SystemExit("--turns is a turn-mode option")
+    if args.test_every <= 0:
+        raise SystemExit("--test-every must be positive")
 
     dev = torch.device("cpu" if args.cpu else
                        ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -1499,11 +2037,11 @@ def main():
     # training time.
     net.eval()
     run_test(net, real, "holdout", False, "update-0", 0.0, dev, tests_path, rows,
-             args.no_moves)
+             args.no_moves, turns=args.turns)
     run_test(net, real, "holdout", True, "do-nothing", 0.0, dev, tests_path, rows,
-             args.no_moves)
+             args.no_moves, turns=args.turns)
     run_test(net, real, "train", False, "train-start", 0.0, dev, tests_path, rows,
-             args.no_moves)
+             args.no_moves, turns=args.turns)
     net.train()
 
     env = make_env(args.envs, args.seed, "train", real)
@@ -1519,7 +2057,7 @@ def main():
 
     wall0 = time.time()
     test_wall = 0.0
-    next_test = 300.0
+    next_test = args.test_every * 60.0
     limit = args.minutes * 60.0
 
     def elapsed():
@@ -1529,24 +2067,32 @@ def main():
         if elapsed() >= next_test and next_test < limit:
             net.eval()
             t0 = time.time()
-            run_test(net, real, "holdout", False, f"t{int(next_test // 60)}",
-                     elapsed() / 60.0, dev, tests_path, rows, args.no_moves)
+            run_test(net, real, "holdout", False, f"t{next_test / 60:g}",
+                     elapsed() / 60.0, dev, tests_path, rows, args.no_moves,
+                     turns=args.turns)
             test_wall += time.time() - t0
             net.train()
-            next_test += 300.0
+            next_test += args.test_every * 60.0
             continue
 
         env.observe(b.obs, b.mask, b.seat, b.kind)
         for e in np.nonzero(pending)[0]:
             e = int(e)
-            reward, _ = outcome_after(b.places, e, int(b.seat[e]), b.obs[e])
-            batch.add(ep[e], reward, False)
-            ep[e] = None
+            o = b.obs[e]
+            outcome = 1 if o[WON] > 0.5 else (-1 if o[LOST] > 0.5 else 0)
+            ep[e].add_fight(outcome)
             pending[e] = False
+            if ep[e].turns_played >= args.turns:
+                batch.add(ep[e], args.gamma)
+                ep[e] = None
+            else:
+                active[e] = True
 
+        turns = b.obs[:, TURN].astype(np.int64)
+        tiers = b.obs[:, TIER].astype(np.int64)
         acts = np.empty(N, dtype=np.int64)
-        to_sample = np.nonzero(active)[0]
         ended = np.zeros(N, dtype=bool)
+        to_sample = np.nonzero(active)[0]
         if len(to_sample):
             o = torch.from_numpy(b.obs[to_sample]).to(dev)
             fmask = ppo.force_mask(o, torch.from_numpy(b.mask[to_sample]).to(dev))
@@ -1561,17 +2107,18 @@ def main():
             mask_np = fmask.cpu().numpy()
             for k, e in enumerate(to_sample):
                 e = int(e)
-                ep[e].obs.append(b.obs[e].copy())
-                ep[e].mask.append(mask_np[k].copy())
-                ep[e].act.append(int(a_np[k]))
-                ep[e].logp.append(float(lp_np[k]))
-                ep[e].val.append(float(val_np[k]))
-                ep[e].cost.append(float(COST_OF[a_np[k]]))
-                ep[e].entropy.append(float(ent_np[k]))
-                ep[e].end_prob.append(float(endp_np[k]))
-                acts[e] = int(a_np[k])
+                action = int(a_np[k])
+                ep[e].record(b.obs[e].copy(), mask_np[k].copy(), action,
+                             lp_np[k], val_np[k], ent_np[k], endp_np[k])
+                acts[e] = action
                 ended[e] = (acts[e] == END_TURN
                             or b.obs[e, ACTIONS_LEFT] <= 1)
+                if ended[e]:
+                    ep[e].mark_turn_end()
+                    if args.deadlines:
+                        pen = deadline_penalty(turns[e], tiers[e])
+                        ep[e].reward[-1] -= pen
+                        ep[e].penalty += pen
         for e in np.nonzero(~active)[0]:
             acts[e] = throwaway(b.mask[e])
 
@@ -1582,8 +2129,15 @@ def main():
             e = int(e)
             place = int(b.places[e, int(seats[e])])
             if place != 0:
-                reward = 1.0 if place == 1 else -1.0
-                batch.add(ep[e], reward, place > 1)
+                outcome = 1 if place == 1 else -1
+                if not ended[e]:
+                    ep[e].mark_turn_end()
+                    if args.deadlines:
+                        pen = deadline_penalty(turns[e], tiers[e])
+                        ep[e].reward[-1] -= pen
+                        ep[e].penalty += pen
+                ep[e].add_fight(outcome)
+                batch.add(ep[e], args.gamma)
                 ep[e] = None
                 active[e] = False
             elif ended[e]:
@@ -1600,6 +2154,8 @@ def main():
             stats = update(batch, net, opt, dev, n_updates, args, state)
             episodes = len(batch.rewards)
             samples = batch.samples()
+            fights = (batch.fights_won + batch.fights_tied
+                      + batch.fights_lost)
             n_updates += 1
             n_samples += samples
             row = {
@@ -1608,7 +2164,8 @@ def main():
                 "episodes": episodes,
                 "samples": samples,
                 "mean_reward": float(np.mean(batch.rewards)),
-                "win_share": batch.wins / max(episodes, 1),
+                "win_share": (batch.fights_won / fights if fights
+                              else float("nan")),
                 "mean_length": samples / max(episodes, 1),
                 "entropy": stats["entropy"],
                 "entropy_plain": stats.get("entropy_plain", stats["entropy"]),
@@ -1636,11 +2193,11 @@ def main():
     net.eval()
     t0 = time.time()
     run_test(net, real, "holdout", False, "end", elapsed() / 60.0, dev,
-             tests_path, rows, args.no_moves)
+             tests_path, rows, args.no_moves, turns=args.turns)
     test_wall += time.time() - t0
     t0 = time.time()
     run_test(net, real, "train", False, "train-end", elapsed() / 60.0, dev,
-             tests_path, rows, args.no_moves)
+             tests_path, rows, args.no_moves, turns=args.turns)
     test_wall += time.time() - t0
 
     leftover_episodes = int(active.sum())
@@ -1652,7 +2209,9 @@ def main():
         "init": str(args.init), "name": args.name, "mode": "turn",
         "seed": args.seed, "minutes": args.minutes, "updates": n_updates,
         "samples": n_samples, "lr": state["lr"],
-        "no_moves": bool(args.no_moves),
+        "no_moves": bool(args.no_moves), "turns": args.turns,
+        "gamma": args.gamma, "deadlines": bool(args.deadlines),
+        "entropy_moves_as_one": bool(args.entropy_moves_as_one),
     }
     torch.save(raw_ckpt, out / "final.pt")
 
