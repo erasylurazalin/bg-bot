@@ -325,6 +325,27 @@ so)
   too).
 - Probably never: the StarCraft heroes (Raynor, Artanis, Kerrigan).
 
+## Timewarp (Era, 2026-11-12)
+
+- Every Timewarp card in the card data is in the game: all cards with
+  `battlegroundsTimewarpCard`, the Minor Timewarp at `techLevel` 3 (66
+  minions, 21 spells) and the Major at `techLevel` 5 (92 minions, 17
+  spells). Their price is the card's `cost` in Chronum.
+- Only Morchie (Warped Conflux: on turn 5, visit the Minor Timewarp) and
+  Murozond, Unbounded (Alternate Timeline: on turn 8, visit the Major
+  Timewarp) open a Timewarped shop. The lobby-wide Timewarped Tavern on
+  turns 6 and 9 (`BG34_BlackMarket`) is not in the game.
+- A visit gives 2 Chronum, lasts one whole turn, and you must spend all of
+  it to leave the shop. Saving Chronum for later, adding Chronum
+  (Timewarped Investment, Boon of Chronum, Twisting Hourglass) and the
+  3-cost spells are past patches, not in the game. Era's logs show a
+  Murozond visit as Discover steps from Alternate Timeline at the start of
+  turn 8 (`Hearthstone_2026_10_24_17_59_26-g2`).
+- Timeworn Candelabra only Discovers: a 2-cost minion from the Minor
+  Timewarp (lesser) or the Major Timewarp (greater), no visit.
+- Morchie and Murozond are skipped for now (Era, 2026-11-12); the
+  Candelabras get built.
+
 ## Secrets (Era, 2026-11-01)
 
 The Great Akazamzarak's Prestidigitation costs 0 and can be used once each turn from turn 1. It offers every combat Secret you don't already have, and you pick one. With all four up, the power can't be used.
