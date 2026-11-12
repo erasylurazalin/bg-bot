@@ -2488,6 +2488,14 @@ Deleting `.venv` undoes it.
   `--lineup` (learner, snapshot, standard bot, rush bot, random, real; the
   real seats play boards from `--real-boards`, default `boards/real` when
   the lineup has any).
+- With more than one learner seat per game, a placement is credited only to
+  a seat that has acted in the current rollout (`last[e, s] >= 0` in
+  `ppo.py`). A seat knocked out before it acts again in a new rollout gets
+  no reward for its place: 13.2% of learner placements, about a quarter of
+  6th to 8th places (measured 2026-11-11 on the lineup `2,2,0,0,0,4`; the
+  wasted samples are not biased given the state). With one
+  learner seat (`1,0,0,0,0,7`) every placement arrives in the same step as
+  the seat's End Turn, so nothing is lost; no fix yet for the wider lineups.
 - The comp overlay is off in training unless `--overlay-comps FILE` is given
   (`--overlay-bonus B`, default 8). A PPO forced press (Dark Gift, level)
   wins over the overlay on that row.

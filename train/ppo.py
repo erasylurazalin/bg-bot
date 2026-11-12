@@ -45,7 +45,9 @@ import bgpy
 # --lag-in-obs changes the observation layout (one extra own scalar), and
 # model reads bgpy's layout constants when it is imported: settle the flag
 # before that import. Off restores the old layout exactly.
-_pre = argparse.ArgumentParser(add_help=False)
+# allow_abbrev=False: with prefix matching, any importer's option that starts
+# with --lag (say --lag 2) would switch the layout without a word.
+_pre = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
 _pre.add_argument("--lag-in-obs", action="store_true")
 LAG_IN_OBS = _pre.parse_known_args()[0].lag_in_obs
 bgpy.set_lag_in_obs(LAG_IN_OBS)
@@ -451,8 +453,9 @@ def act(net, obs, mask, greedy=False, bonus=None, forced=None, comp=None):
     logits, value = net(obs, comp=comp)
     if bonus is not None:
         logits = logits + bonus
-    dist = torch.distributions.Categorical(logits=masked(logits, mask))
-    a = logits.argmax(1) if greedy else dist.sample()
+    ml = masked(logits, mask)
+    dist = torch.distributions.Categorical(logits=ml)
+    a = ml.argmax(1) if greedy else dist.sample()
     if forced is not None:
         a = torch.where(forced >= 0, forced, a)
     return a, dist.log_prob(a), value, dist.entropy()
