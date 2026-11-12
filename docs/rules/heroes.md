@@ -344,7 +344,9 @@ so)
 - Timeworn Candelabra only Discovers: a 2-cost minion from the Minor
   Timewarp (lesser) or the Major Timewarp (greater), no visit.
 - Morchie and Murozond are skipped for now (Era, 2026-11-12); the
-  Candelabras get built.
+  Candelabras get built, with every 2-cost Timewarped minion except the
+  Naga ones (Era: "no nagas"). The open rules are guesses in
+  docs/notes/UNSURE.md.
 
 ## Secrets (Era, 2026-11-01)
 
