@@ -2513,6 +2513,11 @@ Deleting `.venv` undoes it.
   long gold-neutral loops are good play. Discounting is per turn, not per
   action; with per-action discounting nothing learned, because a turn can be
   up to 200 actions.
+- `--entropy-moves-as-one` counts all Move actions as one entropy atom (their
+  summed probability) instead of one per move, so the bonus stops paying for
+  board shuffles; moves stay legal and sampled, off is the old loss, and
+  `metrics.csv` appends `entropy_plain` (the ordinary term) and
+  `moves_per_turn` (learner moves over learner turn ends).
 - The starting policy is uniform over action kinds, not over all actions,
   or it almost never ends a turn.
 - Snapshots of itself are taken every 250 updates (at about 95 updates a

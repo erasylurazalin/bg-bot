@@ -90,6 +90,8 @@ TRAIN_KEYS = [
     "actions_per_turn", "tier_t6", "tier_t10", "health_end",
     "aux_loss", "wheels_b", "wheels_lambda", "comp_active",
 ]
+# Appended after top_buys, so rows in an older metrics.csv keep their columns.
+EXTRA_KEYS = ["entropy_plain", "moves_per_turn"]
 
 
 def args():
@@ -181,6 +183,9 @@ def args():
                         "2026-11-06: largest 472, none changed)")
     a.add_argument("--clip", type=float, default=0.2)
     a.add_argument("--ent", type=float, default=0.01)
+    a.add_argument("--entropy-moves-as-one", action="store_true",
+                   help="count all Move actions as one entropy atom (their summed probability) "
+                        "instead of one atom per move; moves stay legal and sampled")
     a.add_argument("--vf", type=float, default=0.5)
     a.add_argument("--gamma", type=float, default=0.99, help="discount per turn, not per action")
     a.add_argument("--lam", type=float, default=0.95, help="per turn, like --gamma")
@@ -250,6 +255,23 @@ def reward(place, first_bonus=0.0, second_bonus=0.0):
     return value
 
 
+def entropy_term(dist, moves_as_one, move_idx=None):
+    """The entropy bonus: ordinary entropy, or with moves_as_one the summed
+    probability of the move actions treated as one atom (as oneturn.py does).
+    Off returns the plain term exactly, with no extra arithmetic."""
+    if not moves_as_one:
+        return dist.entropy().mean()
+    probs = dist.probs
+    if move_idx is None:
+        move_idx = MOVE_IDX
+    idx = torch.as_tensor(move_idx, dtype=torch.long, device=probs.device)
+    move_p = probs[:, idx].sum(1)
+    nonmove = probs.clone()
+    nonmove[:, idx] = 0
+    return (-(nonmove * torch.log(nonmove.clamp_min(1e-12))).sum(1)
+            - move_p * torch.log(move_p.clamp_min(1e-12))).mean()
+
+
 class Bufs:
     """The numpy arrays bgpy fills in, one set per VecEnv."""
 
@@ -290,6 +312,10 @@ LAG_MIX_LAGS = []
 REAL_LAG_FROM = 1
 LEVEL = int(np.nonzero(KIND_OF.numpy() == KINDS.index("level"))[0][0])
 DARK = int(np.nonzero(KIND_OF.numpy() == KINDS.index("dark_gift"))[0][0])
+MOVE = KINDS.index("move")
+# --entropy-moves-as-one: the move actions are all of this kind, from bgpy's
+# action layout rather than a hand-written index range.
+MOVE_IDX = np.nonzero(KIND_OF.numpy() == MOVE)[0]
 # --force-dark-gift: on turns 3, 4 and 5 every Python seat presses Dark
 # Discovery first thing when it can (once per turn, the tutorial line). Set
 # from the flag in main().
@@ -1073,6 +1099,7 @@ def main():
             *TRAIN_KEYS,
             *[f"act_{k}" for k in KINDS],
             "top_buys",
+            *EXTRA_KEYS,
         ])
 
     b = Bufs(N)
@@ -1270,7 +1297,9 @@ def main():
         if cfg.warmup:
             for g in opt.param_groups:
                 g["lr"] = cfg.lr * min(1.0, (update + 1) / cfg.warmup)
-        kls, clips, ents, vls, auxs = [], [], [], [], []
+        kls, clips, ents, plains, vls, auxs = [], [], [], [], [], []
+        move_idx = (torch.as_tensor(MOVE_IDX, dtype=torch.long, device=dev)
+                    if cfg.entropy_moves_as_one else None)
         for _ in range(cfg.epochs):
             perm = torch.randperm(n, device=dev)
             for i in range(0, n, cfg.minibatch):
@@ -1286,7 +1315,7 @@ def main():
                 m = idx.numel()
                 step = cfg.micro_batch or m
                 opt.zero_grad()
-                kl_s = clip_s = ent_s = vl_s = aux_s = 0.0
+                kl_s = clip_s = ent_s = plain_s = vl_s = aux_s = 0.0
                 for j in range(0, m, step):
                     sub = idx[j:j + step]
                     w = sub.numel() / m
@@ -1312,7 +1341,9 @@ def main():
                     keep = ~f_forced[sub]
                     pg = (pg_i * keep).sum() / keep.sum().clamp(min=1)
                     vl = 0.5 * ((v - f_ret[sub]) ** 2).mean()
-                    ent = own_dist.entropy().mean()
+                    ent = entropy_term(own_dist, cfg.entropy_moves_as_one, move_idx)
+                    plain_ent = (own_dist.entropy().mean()
+                                 if cfg.entropy_moves_as_one else None)
                     target = f_aux[sub]
                     valid = target >= 0
                     aux = (-F.log_softmax(own_dist.logits[valid], -1)
@@ -1327,6 +1358,8 @@ def main():
                         kl_s += w * ((ratio - 1) - (lp - f_logp[sub])).mean().item()
                         clip_s += w * ((ratio - 1).abs() > cfg.clip).float().mean().item()
                         ent_s += w * ent.item()
+                        if cfg.entropy_moves_as_one:
+                            plain_s += w * plain_ent.item()
                         vl_s += w * vl.item()
                         aux_s += w * aux.item()
                 torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
@@ -1334,6 +1367,8 @@ def main():
                 kls.append(kl_s)
                 clips.append(clip_s)
                 ents.append(ent_s)
+                # Off, the term is the plain entropy already: no second sync.
+                plains.append(plain_s if cfg.entropy_moves_as_one else ent_s)
                 vls.append(vl_s)
                 auxs.append(aux_s)
         update += 1
@@ -1347,6 +1382,7 @@ def main():
             health = f_obs[:, bgpy.SCALAR_HEALTH]
             t6, t10 = tier[turn == 6], tier[turn == 10]
             is_buy = (k == 0) | (k == 1)
+            n_moves = (k == MOVE).sum().item()
             buys = f_act[is_buy]
             card_ids = f_obs[is_buy, SHOP_START + buys * bgpy.SLOT_FEATURES + bgpy.SLOT_CARD_ID].long() - 1
             card_ids = card_ids[card_ids >= 0]
@@ -1366,6 +1402,8 @@ def main():
                 "wheels_b": wheel * cfg.overlay_bonus,
                 "wheels_lambda": aux_w,
                 "comp_active": float(comp_active.reshape(-1)[sel_np].mean()),
+                "entropy_plain": np.mean(plains),
+                "moves_per_turn": n_moves / max(n_ends, 1),
                 **{f"act_{KINDS[i]}": (counts[i] / counts.sum()).item() for i in range(len(KINDS))},
             }
             top = buy_counts.argsort(descending=True)[:5]
@@ -1461,6 +1499,7 @@ def main():
                 *[f"{stats[k]:.4g}" for k in TRAIN_KEYS],
                 *[f"{stats[f'act_{k}']:.3f}" for k in KINDS],
                 top_buys,
+                *[f"{stats[k]:.4g}" for k in EXTRA_KEYS],
             ])
             csv_file.flush()
             score = vs_real if best_by == "real" else 0.5 * (vs_std + vs_rush)
