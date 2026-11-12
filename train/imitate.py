@@ -433,10 +433,11 @@ def main():
           f"held-out examples ({len(set(meta['game'])) - len(held)} and {len(held)} games)",
           flush=True)
 
-    # The card and hero names ppo.py puts in its checkpoints, from the engine
-    # itself, so --init-from can match embedding rows by name.
+    # The card, hero and trinket names ppo.py puts in its checkpoints, from
+    # the engine itself, so --init-from can match embedding rows by name.
     env = bgpy.VecEnv(1, cfg.seed, [4, 2, 1, 1, 0, 0])
     card_names, hero_names = env.card_names(), env.hero_names()
+    trinket_names = env.trinket_names()
     opts = model_opts(cfg.model, opp_boards=cfg.opp_boards, d=cfg.d, layers=cfg.layers,
                       heads=cfg.heads, ff=cfg.ff)
     if init_ck is not None:
@@ -444,7 +445,8 @@ def main():
     net = build(cfg.model, len(card_names), **opts)
     if init_ck is not None:
         loaded, fresh, skipped, _, remapped = warm_start(
-            net, cfg.model, cfg.init_from, cards=card_names, heroes=hero_names)
+            net, cfg.model, cfg.init_from, cards=card_names, heroes=hero_names,
+            trinkets=trinket_names)
         print(f"init from {cfg.init_from}: {len(loaded)} tensors loaded, fresh "
               f"{', '.join(fresh) or 'none'}, not used {', '.join(skipped) or 'none'}", flush=True)
         for r in remapped:
@@ -513,6 +515,7 @@ def main():
             torch.save({"net": {k: v.detach().cpu() for k, v in net.state_dict().items()},
                         "model": cfg.model, "model_opts": opts,
                         "card_names": card_names, "hero_names": hero_names,
+                        "trinket_names": trinket_names,
                         "epoch": epoch, "val_top1": ev["top1"], "val_top3": ev["top3"],
                         "val_loss": ev["loss"],
                         "val_value_loss": ev.get("value_loss", float("nan")),

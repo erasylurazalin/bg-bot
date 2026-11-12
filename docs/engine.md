@@ -2667,14 +2667,22 @@ Deleting `.venv` undoes it.
   parameter of another checkpoint of the same model whose name and shape
   match, for example `attn` with `full` into `next`; it prints what was
   fresh. `--warmup N` ramps the learning rate up over N updates.
-- The card and hero embeddings carry over by name, not by position: a
-  card added, removed or moved in `cards.toml` (a new patch, a token)
-  keeps every other card's row, and only new cards start fresh. Every
-  checkpoint saves `card_names` and `hero_names` for this. A checkpoint
-  from before 2026-10-25 has none; `--init-cards-rev REV` rebuilds them
-  from `cards.toml` and `heroes.toml` at the commit it trained on
-  (`runs/n1025-attn` trained on `7b545bd`). `--resume` still needs the
-  same cards: after a card change, start a new run with `--init-from`.
+- The card, hero and trinket embeddings carry over by name, not by position:
+  a card added, removed or moved in `cards.toml` (a new patch, a token) keeps
+  every other card's row, and only new cards start fresh. Every checkpoint
+  saves `card_names`, `hero_names` and `trinket_names` for this; a trinket
+  name can occur twice (a lesser and a greater version), so rows match by
+  occurrence in that table's order. A checkpoint from before those names were
+  saved has none; `--init-cards-rev REV` rebuilds them from `cards.toml`,
+  `heroes.toml` and `trinkets.toml` at the commit it trained on
+  (`runs/n1025-attn` trained on `7b545bd`). Without that flag, a missing
+  table is rebuilt from the newest commit at or before the checkpoint's mtime
+  whose table has the checkpoint's size. The eval
+  scripts' `model.load` remaps the same three tables (and the card-text
+  buffers, which are card-indexed) on load: a name it did not know gets the
+  empty row (0), so the loaded network answers as it did on everything it
+  knew. `--resume` still needs the same cards: after a card change, start a
+  new run with `--init-from`.
 
 ## An older simulator
 

@@ -1043,9 +1043,20 @@ impl VecEnv {
     }
 
     /// Hero names by index, for matching a checkpoint's hero embedding by
-    /// name.
+    /// name. A hero id and a power id share the table, and the starting
+    /// powers come first, one per hero in hero order: the tails are the
+    /// `[[power]]` entries a hero only reaches later.
     fn hero_names(&self) -> Vec<String> {
-        self.data.heroes.heroes.iter().map(|h| h.name.clone()).collect()
+        let db = &self.data.heroes;
+        let mut names: Vec<String> = db.heroes.iter().map(|h| h.name.clone()).collect();
+        names.extend(db.powers.iter().skip(names.len()).map(|p| p.name.clone()));
+        names
+    }
+
+    /// Trinket names by id, for matching a checkpoint's trinket embedding by
+    /// name.
+    fn trinket_names(&self) -> Vec<String> {
+        self.data.trinkets.trinkets.iter().map(|t| t.name.clone()).collect()
     }
 
     /// A search batch holding a copy of game `i` at its waiting seat

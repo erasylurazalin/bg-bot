@@ -46,7 +46,7 @@ import buy_prior as bp
 import ppo
 import real_boards
 from fixed_eval import check_boards, load_ckpt
-from model import masked
+from model import current_names, masked
 
 FROZEN = ROOT / "boards" / "frozen" / "real-2026-11-10"
 FROZEN_ACTIONS = ROOT / "boards" / "frozen" / "actions-2026-11-10"
@@ -1993,6 +1993,12 @@ def main():
     print(f"loading {args.init}", flush=True)
     info = load_ckpt(args.init, dev)
     raw_ckpt = torch.load(args.init, map_location="cpu", weights_only=False)
+    # final.pt keeps this dict with the new net: give it today's names so a
+    # later load matches the tables by name, not by the old checkpoint's ids.
+    names = current_names()
+    raw_ckpt["card_names"] = names["cards"]
+    raw_ckpt["hero_names"] = names["heroes"]
+    raw_ckpt["trinket_names"] = names["trinkets"]
     ppo.FORCE_DARK = info["force_dark_gift"]
     ppo.FORCE_TURN2 = False
     ppo.OLD_BOARDS = OLD_BOARDS

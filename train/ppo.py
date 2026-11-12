@@ -57,8 +57,9 @@ bgpy.set_lag_in_obs(LAG_IN_OBS)
 import card_text
 import comp_specs
 import real_boards
-from model import (build, ck_model, masked, model_args, model_opts, opts_text, set_recompute,
-                   table_names, warm_start)
+from model import (build, ck_model, masked, model_args, model_opts,
+                   names_at_rev as toml_names_at_rev, opts_text, set_recompute,
+                   warm_start)
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
@@ -109,8 +110,9 @@ def args():
                    help="torch.compile the attention layers (default: on for attn)")
     a.add_argument("--init-from", help="checkpoint to take matching weights from, for a new run")
     a.add_argument("--init-cards-rev",
-                   help="git revision whose cards.toml and heroes.toml an --init-from checkpoint "
-                        "was trained on, for checkpoints saved before they stored card names")
+                   help="git revision whose cards.toml, heroes.toml and trinkets.toml an "
+                        "--init-from checkpoint was trained on, for checkpoints saved before "
+                        "they stored their table names")
     a.add_argument("--warmup", type=int, default=0, help="updates of linear lr warmup")
     a.add_argument("--value-warmup", type=int, default=0,
                    help="first updates that train only the value loss (no policy or entropy "
@@ -526,23 +528,19 @@ def act(net, obs, mask, greedy=False, bonus=None, forced=None, comp=None):
 
 @torch.no_grad()
 def names_at_rev(rev):
-    """Card and hero names by id as cards.toml and heroes.toml stood at a git
-    revision (no heroes before heroes.toml existed)."""
-    import subprocess
-    import tomllib
-    root = Path(__file__).resolve().parent.parent
-
-    def show(path):
-        r = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{path}"],
-                           capture_output=True, text=True)
-        return r.stdout if r.returncode == 0 else None
-
-    cards = show("cards.toml")
-    if cards is None:
-        raise SystemExit(f"--init-cards-rev {rev}: no cards.toml there")
-    heroes = show("heroes.toml")
-    hero_list = [h["name"] for h in tomllib.loads(heroes).get("hero", [])] if heroes else []
-    return table_names(cards), hero_list
+    """Card, hero and trinket names by id as their TOML files stood at a git
+    revision (no heroes before heroes.toml existed, no trinkets before
+    trinkets.toml)."""
+    cards = toml_names_at_rev(rev, "cards")
+    try:
+        heroes = toml_names_at_rev(rev, "heroes")
+    except SystemExit:
+        heroes = []
+    try:
+        trinkets = toml_names_at_rev(rev, "trinkets")
+    except SystemExit:
+        trinkets = []
+    return cards, heroes, trinkets
 
 
 def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
@@ -1014,6 +1012,7 @@ def main():
         print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}")
     names = env.card_names()
     hero_names = env.hero_names()
+    trinket_names = env.trinket_names()
     if want_text and ck is None and not opts.get("card_text"):
         opts["card_text"] = card_text.build_table(names)
         if cfg.card_form:
@@ -1054,12 +1053,13 @@ def main():
         cfg.compile = cfg.model == "attn"
     net = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
     if cfg.init_from:
-        old_cards = old_heroes = None
+        old_cards = old_heroes = old_trinkets = None
         if cfg.init_cards_rev:
-            old_cards, old_heroes = names_at_rev(cfg.init_cards_rev)
+            old_cards, old_heroes, old_trinkets = names_at_rev(cfg.init_cards_rev)
         loaded, fresh, skipped, src_opts, remapped = warm_start(
             net, cfg.model, cfg.init_from, cards=names, heroes=hero_names,
-            old_cards=old_cards, old_heroes=old_heroes)
+            trinkets=trinket_names, old_cards=old_cards, old_heroes=old_heroes,
+            old_trinkets=old_trinkets)
         print(f"init from {cfg.init_from} ({cfg.model} {opts_text(src_opts)}): {len(loaded)} parameter "
               f"tensors loaded, {len(fresh)} fresh: {', '.join(fresh) or 'none'}; "
               f"not used: {', '.join(skipped) or 'none'}")
@@ -1080,7 +1080,8 @@ def main():
             # start Adam and the snapshot pool fresh, since their tensors and
             # the pool's state dicts have the old shapes.
             loaded, fresh, _, _, carried = warm_start(
-                net, cfg.model, cfg.resume, cards=names, heroes=hero_names)
+                net, cfg.model, cfg.resume, cards=names, heroes=hero_names,
+                trinkets=trinket_names)
             print(f"resumed {cfg.resume}: its observation is narrower than this build's, so "
                   f"{len(loaded)} tensors loaded, {len(fresh)} fresh: "
                   f"{', '.join(fresh) or 'none'}")
@@ -1596,7 +1597,8 @@ def main():
             ck = {"net": net.state_dict(), "opt": opt.state_dict(), "pool": pool, "update": update,
                   "best": best, "best_by": best_by, "t_total": minutes, "games": games,
                   "cfg": vars(cfg), "model": cfg.model, "model_opts": opts,
-                  "card_names": names, "hero_names": hero_names}
+                  "card_names": names, "hero_names": hero_names,
+                  "trinket_names": trinket_names}
             if score < best:
                 best = score
                 ck["best"] = best
@@ -1605,7 +1607,8 @@ def main():
             if minutes - last_keep >= cfg.keep_every:
                 (out / "keep").mkdir(exist_ok=True)
                 torch.save({"net": net.state_dict(), "update": update, "model": cfg.model,
-                            "model_opts": opts, "card_names": names, "hero_names": hero_names},
+                            "model_opts": opts, "card_names": names, "hero_names": hero_names,
+                            "trinket_names": trinket_names},
                            out / "keep" / f"net_{update}.pt")
                 last_keep = minutes
             # plateau: the rolling score hasn't improved for a while and it no

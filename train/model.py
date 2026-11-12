@@ -20,6 +20,7 @@ Both score per-slot actions from the token of the slot they act on
 import contextlib
 import math
 import sys
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -720,39 +721,275 @@ def ck_model(ck):
     return kind, model_opts(kind, **saved)
 
 
+def _align_card_text(opts, ck, path, new_names):
+    """A checkpoint's card-text buffers cover its card ids. Widen them to
+    today's card ids, row by row by card name (row 0 stays the empty row and
+    a card the checkpoint did not know gets zero text), so the built network's
+    text table has as many rows as its card embedding."""
+    ct = opts.get("card_text")
+    if not ct:
+        return opts
+    tokens = torch.as_tensor(ct["tokens"])
+    old_names = ck.get("card_names")
+    if old_names is None or len(old_names) != tokens.shape[0] - 1:
+        inferred = _infer_names(path, "cards", tokens.shape[0] - 1)
+        old_names = inferred[0] if inferred else None
+    if old_names is None or len(old_names) == len(new_names):
+        return opts
+    old_at = {}
+    for i, n in enumerate(old_names):
+        old_at.setdefault(n, []).append(i)
+    used = {}
+    row = [0] * (len(new_names) + 1)
+    for i, n in enumerate(new_names):
+        at = old_at.get(n)
+        k = used.get(n, 0)
+        if at is not None and k < len(at):
+            row[i + 1] = at[k] + 1
+            used[n] = k + 1
+    at = torch.tensor(row, dtype=torch.long)
+    ct = dict(ct)
+    ct["tokens"] = tokens[at].tolist()
+    if ct.get("forms") is not None:
+        ct["forms"] = torch.as_tensor(ct["forms"])[at].tolist()
+    opts = dict(opts)
+    opts["card_text"] = ct
+    return opts
+
+
 def load(path, dev="cpu", compile=False):
     """The network saved in a ppo.py checkpoint, built as the model it was
-    trained with."""
+    trained with.
+
+    A checkpoint from before cards, heroes or trinkets were added has
+    differently sized (or ordered) tables. Those are matched by name: every
+    name the checkpoint knew keeps its row, a name it did not know gets the
+    empty row (0), and a name it had that is gone is dropped. Each remapped
+    table prints one line with its kept, new and dropped counts."""
     ck = torch.load(path, map_location=dev)
     kind, opts = ck_model(ck)
+    if opts.get("card_text"):
+        opts = _align_card_text(opts, ck, path, current_names()["cards"])
     net = build(kind, compile=compile, **opts).to(dev)
-    net.load_state_dict(dict(ck["net"]))
+    src = dict(ck["net"])
+    own = net.state_dict()
+    take = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
+    notes = _remap_tables(src, own, take, ck, path, base=0)
+    missing, _ = net.load_state_dict(take, strict=False)
+    params = {name for name, _ in net.named_parameters()}
+    missing = [name for name in missing if name in params]
+    if missing:
+        raise SystemExit(f"load {path}: {len(missing)} parameters are not in the "
+                         f"checkpoint: {', '.join(missing)}")
+    for note in notes:
+        print(f"load {path}: {note}")
     return net
 
 
-def table_names(text):
-    """Card names by id from a cards.toml text, in the engine's order:
-    minions, then tokens, then spells (CardDb::parse)."""
+# The three embedding tables a checkpoint's names describe, by table name:
+# the checkpoint key, the embedding suffix in a network, and the TOML file
+# names are rebuilt from for a checkpoint saved before it stored them.
+TABLE_KEYS = {"cards": "card_names", "heroes": "hero_names", "trinkets": "trinket_names"}
+TABLE_SUFFIX = {"cards": "card.weight", "heroes": "hero.weight", "trinkets": "trinket.weight"}
+TABLE_FILE = {"cards": "cards.toml", "heroes": "heroes.toml", "trinkets": "trinkets.toml"}
+
+_CURRENT_NAMES = None
+_INFER_CACHE = {}
+
+
+def table_names(text, what="cards"):
+    """Names by id of one table (`cards`, `heroes` or `trinkets`) in a TOML
+    text, in the engine's order. Cards: minions, then tokens, then spells
+    (CardDb::parse). Heroes: the heroes, then the `[[power]]` entries the
+    shared hero/power table holds after its one starting power per hero.
+    Trinkets: the `[[trinket]]` order (TrinketDb::parse)."""
+    if what == "trinkets":
+        # tomllib rejects trinkets.toml's multi-line inline tables (the Rust
+        # `toml` crate accepts them), so read each block's first name line.
+        import re
+        names, block = [], False
+        for line in text.splitlines():
+            s = line.strip()
+            if s == "[[trinket]]":
+                block = True
+            elif s.startswith("[["):
+                block = False
+            elif block:
+                m = re.match(r'name\s*=\s*"(.*)"\s*(?:#.*)?$', s)
+                if m:
+                    names.append(m.group(1))
+                    block = False
+        return names
     import tomllib
     raw = tomllib.loads(text)
-    return [c["name"] for part in ("minion", "token", "spell") for c in raw.get(part, [])]
+    if what == "cards":
+        return [c["name"] for part in ("minion", "token", "spell") for c in raw.get(part, [])]
+    if what == "heroes":
+        return ([h["name"] for h in raw.get("hero", [])]
+                + [p["name"] for p in raw.get("power", [])])
+    raise SystemExit(f"model.py: unknown name table {what!r}")
 
 
-def _remap(src_w, own_w, old_names, new_names):
+def names_at_rev(rev, what):
+    """The names of one table as its TOML stood at a git revision."""
+    import subprocess
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{TABLE_FILE[what]}"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(f"{what}.toml is not at git revision {rev}")
+    return table_names(r.stdout, what)
+
+
+def _infer_names(path, what, size):
+    """(names, revision) for a table a checkpoint saved before names were
+    stored, or None.
+
+    Checkpoints do not record their git revision, so the rule is the newest
+    commit at or before the checkpoint file's mtime whose table has `size`
+    entries (falling back to the newest commit with that size when the file
+    was copied and its mtime is newer than any match). This finds the commit
+    the checkpoint trained on for every added-at-the-end change, and stays
+    right when more cards or trinkets land later."""
+    import os
+    import subprocess
+    key = (str(path), what, size)
+    if key in _INFER_CACHE:
+        return _INFER_CACHE[key]
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run(["git", "-C", str(root), "log", "--format=%H %ct", "--",
+                        TABLE_FILE[what]], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    rows = [line.split() for line in r.stdout.splitlines() if line.strip()]
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = None
+    order = list(rows)
+    if mtime is not None:
+        order.sort(key=lambda row: int(row[1]) > mtime + 120)
+    found = None
+    for rev, _ in order:
+        names = names_at_rev(rev, what)
+        if len(names) == size:
+            found = (names, rev)
+            break
+    _INFER_CACHE[key] = found
+    return found
+
+
+def current_names():
+    """Today's card, hero and trinket names by id, read once per process."""
+    global _CURRENT_NAMES
+    if _CURRENT_NAMES is None:
+        env = bgpy.VecEnv(1, 0, [4, 2, 1, 1, 0, 0])
+        _CURRENT_NAMES = {"cards": env.card_names(), "heroes": env.hero_names(),
+                          "trinkets": env.trinket_names()}
+    return _CURRENT_NAMES
+
+
+def _same_positions(src_w, own_w, old_names, new_names):
+    """True when `src_w`'s rows already sit where `own_w` wants them: same
+    shape and the names both lists share come in the same order. Names one
+    list has and the other does not are tails at unchanged positions (the
+    hero/power table's extra powers), so they need no move either."""
+    if src_w.shape != own_w.shape:
+        return False
+    n = min(len(old_names), len(new_names))
+    return old_names[:n] == new_names[:n]
+
+
+def _remap(src_w, own_w, old_names, new_names, base=None):
     """An embedding table for `new_names` with each name's row from `src_w`
-    (laid out by `old_names`); row 0 (empty) is carried, new names keep
-    `own_w`'s fresh rows. Returns (table, kept, new, dropped) counts."""
+    (laid out by `old_names`); row 0 (empty) is carried. A name that occurs
+    more than once (lesser and greater trinkets share a name) is matched by
+    occurrence: the first in `new_names` takes the first in `old_names`, the
+    second the second. A new name keeps `own_w`'s fresh row, or gets row
+    `base` of `src_w` when base is not None (for loading an old checkpoint,
+    row 0 is the neutral "no card" row). Rows the names do not cover keep
+    their position when both tables have the same number of rows. Returns
+    (table, kept, new, dropped) counts."""
+    from collections import Counter, defaultdict
     w = own_w.clone()
     w[0] = src_w[0]
-    old = {n: i for i, n in enumerate(old_names)}
+    old_at = defaultdict(list)
+    for i, n in enumerate(old_names):
+        old_at[n].append(i)
+    used = Counter()
     kept = 0
     for i, n in enumerate(new_names):
-        j = old.get(n)
-        if j is not None and j + 1 < src_w.shape[0]:
-            w[i + 1] = src_w[j + 1]
+        at = old_at.get(n)
+        k = used[n]
+        if at is not None and k < len(at) and at[k] + 1 < src_w.shape[0]:
+            w[i + 1] = src_w[at[k] + 1]
+            used[n] += 1
             kept += 1
-    dropped = len(set(old_names) - set(new_names))
-    return w, kept, len(new_names) - kept, dropped
+        elif base is not None:
+            w[i + 1] = src_w[base]
+    old_counts, new_counts = Counter(old_names), Counter(new_names)
+    dropped = sum(max(0, c - new_counts[n]) for n, c in old_counts.items())
+    tail = 0
+    if src_w.shape[0] == own_w.shape[0] and len(old_names) + 1 < src_w.shape[0]:
+        tail = src_w.shape[0] - 1 - len(old_names)
+        w[len(old_names) + 1:] = src_w[len(old_names) + 1:]
+    # Names past the old list that the shared tail rows already carried are
+    # not "new": they kept their row by position.
+    tail_names = max(0, len(new_names) - len(old_names)) if tail else 0
+    return w, kept + tail, len(new_names) - kept - tail_names, dropped
+
+
+def _table_keys(own, suffix):
+    return [k for k in own if k == suffix or k.endswith("." + suffix)]
+
+
+def _remap_tables(src, own, take, ck, path, base=None, names=None, old_cards=None,
+                  old_heroes=None, old_trinkets=None):
+    """Match the checkpoint's card, hero and trinket embeddings to `own` by
+    name, putting each table into `take`. `base` is the source row a new name
+    gets (None: leave the fresh row in `own`). `names` overrides today's names
+    (keys `cards`, `heroes`, `trinkets`); `old_cards` / `old_heroes` /
+    `old_trinkets` override names for a checkpoint saved before it stored
+    them. Returns one note per table actually remapped."""
+    given = {"cards": old_cards, "heroes": old_heroes, "trinkets": old_trinkets}
+    new = dict(current_names())
+    if names:
+        new.update({k: v for k, v in names.items() if v is not None})
+    notes = []
+    for what in ("cards", "heroes", "trinkets"):
+        keys = _table_keys(own, TABLE_SUFFIX[what])
+        keys = [k for k in keys if k in src]
+        if not keys:
+            continue
+        src_w, own_w = src[keys[0]], own[keys[0]]
+        old_names = given[what] or ck.get(TABLE_KEYS[what])
+        inferred = None
+        # Names can be missing entirely (checkpoints before the table saved
+        # names) or cover only a prefix (old hero_names stopped at the powers).
+        # Rebuild the full list from the commit whose table has this size, so
+        # even an order change in a table the checkpoint did not name can be
+        # seen.
+        if old_names is None or len(old_names) < src_w.shape[0] - 1:
+            inferred = _infer_names(path, what, src_w.shape[0] - 1)
+            if inferred:
+                old_names = inferred[0]
+        if old_names is None:
+            if src_w.shape != own_w.shape:
+                raise SystemExit(
+                    f"{path}: its {what} table has {src_w.shape[0]} rows and today's "
+                    f"{own_w.shape[0]}, but the checkpoint has no {what} names and no "
+                    f"git commit with {src_w.shape[0] - 1} entries was found")
+            continue
+        if _same_positions(src_w, own_w, old_names, new[what]):
+            continue
+        w, kept, fresh, dropped = _remap(src_w, own_w, old_names, new[what], base=base)
+        for k in keys:
+            take[k] = w
+        note = f"{what}: {kept} kept, {fresh} new, {dropped} dropped"
+        if inferred:
+            note += f" (names from {inferred[1][:8]})"
+        notes.append(note)
+    return notes
 
 
 def _input_cols(kind, net, opp_scalars):
@@ -818,14 +1055,18 @@ def _grown_opp_scalars(kind, net, src):
     return old
 
 
-def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_heroes=None):
+def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_heroes=None,
+               trinkets=None, old_trinkets=None):
     """Load every entry of the checkpoint at `path` whose name and shape match
-    `net` (a `kind` model). The card and hero embeddings are matched by name
-    instead, row by row, so a card added, removed or moved in cards.toml
-    keeps what the model knew about every other card: `cards` / `heroes` are
-    this run's names by id, the checkpoint's own come from the checkpoint
-    (`card_names`, `hero_names`) or `old_cards` / `old_heroes` for one saved
-    before it stored them.
+    `net` (a `kind` model). The card, hero and trinket embeddings are matched
+    by name instead, row by row, so a card added, removed or moved in
+    cards.toml keeps what the model knew about every other card: `cards` /
+    `heroes` / `trinkets` are this run's names by id, the checkpoint's own
+    come from the checkpoint (`card_names`, `hero_names`, `trinket_names`) or
+    `old_cards` / `old_heroes` / `old_trinkets` for one saved before it
+    stored them. A table whose rows are already in the right places is left
+    alone, so the rows for hero powers and other unnamed tail entries stay
+    as the checkpoint had them.
 
     An input layer that only grew (the 2026-11-06 opponent view widened the
     opponent block) keeps every old column where the column map puts it and
@@ -841,17 +1082,11 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     src = ck["net"]
     own = net.state_dict()
     take = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
-    remapped = []
-    tables = (("card.weight", cards, ck.get("card_names") or old_cards),
-              ("hero.weight", heroes, ck.get("hero_names") or old_heroes))
-    for suffix, new_names, old_names in tables:
-        if new_names is None or old_names is None:
-            continue
-        for k in own:
-            if k.endswith(suffix) and k in src:
-                w, kept, new, dropped = _remap(src[k], own[k], old_names, new_names)
-                take[k] = w
-                remapped.append(f"{k}: {kept} kept, {new} new, {dropped} dropped")
+    remapped = _remap_tables(src, own, take, ck, path, base=None,
+                             names={"cards": cards, "heroes": heroes,
+                                    "trinkets": trinkets},
+                             old_cards=old_cards, old_heroes=old_heroes,
+                             old_trinkets=old_trinkets)
     old_opp = _grown_opp_scalars(kind, net, src)
     if old_opp is not None:
         for name, (cols, _) in _input_cols(kind, net, bgpy.OPP_SCALARS).items():
