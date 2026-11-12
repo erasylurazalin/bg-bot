@@ -512,7 +512,8 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     /// Get this many random Magnetic Mecha-Demons (Mecha-Jaraxxus Sticker):
     /// the tokens `CardDb.mecha_demons` holds, generated.
     MechaDemon(u8),
-    // ---- block 6: the compasses (docs/rules/trinkets.md, 2026-11-01) ----
+    // ---- block 6: the compasses and Minion Bait
+    // (docs/rules/trinkets.md, 2026-11-01 and 2026-11-12) ----
     /// Read the player's most common minion type now and keep it on this
     /// trinket's slot for the rest of the game: "the type is fixed at the
     /// pick" (Colorful Compass, Gold-plated Compass). A `RandomMostCommonType`
@@ -522,6 +523,10 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     /// becomes Golden, and it is not a triple: playing it gives no Triple
     /// Reward (docs/rules/design.md). The type is spent by the buy (Gold-plated Compass).
     GoldenBoughtType,
+    /// Every Refresh holds this many extra minions of the type the pick
+    /// locked in, after the normal fill and before the spell (Minion Bait).
+    /// The type is read when the act runs, so `lock_type` sits before it.
+    RefreshExtraType(u8),
 }
 
 /// A rewrite a portrait applies to every copy of a card the player has or
@@ -1072,6 +1077,7 @@ struct RawAct {
     buff_all_per_golden: Option<[i32; 2]>,
     buff_leftmost_two_per_battlecry: Option<[i32; 2]>,
     random_most_common_type: Option<u8>,
+    refresh_extra_type: Option<u8>,
     buff_random_other: Option<[i32; 2]>,
     offer_replace: Option<u8>,
     discover_remember: Option<u8>,
@@ -1578,6 +1584,8 @@ impl TrinketDb {
                     Act::OfferReplace(n)
                 } else if let Some(n) = a.random_most_common_type {
                     Act::RandomMostCommonType(n)
+                } else if let Some(n) = a.refresh_extra_type {
+                    Act::RefreshExtraType(n)
                 } else if let Some(tier) = a.discover_remember {
                     Act::DiscoverRemember { tier, typed: a.discover_remember_typed }
                 } else if let Some(tier) = a.discover_tier {

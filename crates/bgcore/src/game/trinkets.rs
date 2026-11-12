@@ -607,7 +607,9 @@ impl Game {
             // The hero power's rule. `hold_trinket` sets the triggers too (a
             // fight reads them), to the same value.
             | Act::PowerTriggers(_)
-            | Act::PowerGold(_) => self.run_trinket_act(p, slot, act),
+            | Act::PowerGold(_)
+            // Minion Bait's extras outlast the pick; the type is the slot's.
+            | Act::RefreshExtraType(_) => self.run_trinket_act(p, slot, act),
             // ---- both, and only the standing half here ----
             // The flag stays; the Golden minion it pays out and the card in
             // hand are the file's.
@@ -1929,6 +1931,14 @@ impl Game {
                 // turn 9).
                 self.players[p].hand[at] = m;
                 self.players[p].trinkets[slot].tribe = None;
+            }
+            Act::RefreshExtraType(n) => {
+                // Minion Bait: the type is the one the pick locked, and the
+                // count holds for every Refresh. Read after `LockType` so the
+                // order in the data is the one the pick runs.
+                self.players[p].tp.refresh_extra = n;
+                self.players[p].tp.refresh_extra_tribe =
+                    self.players[p].trinkets[slot].tribe;
             }
         }
     }

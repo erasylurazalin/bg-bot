@@ -708,6 +708,10 @@ pub struct TrinketPowers {
     pub extra_high_tier: bool,
     /// One extra Magnetic Mech in the Tavern (Electrode Attractor).
     pub extra_magnetic: bool,
+    /// How many extra minions of a locked type every Refresh holds (Minion
+    /// Bait), and that type. 0 when no such trinket is held.
+    pub refresh_extra: u8,
+    pub refresh_extra_tribe: Option<Tribe>,
     /// What a Magnetic Mech costs, 0 for its own price (Electrode Attractor).
     pub magnetic_cost: u8,
     /// Tier 6 Refreshes left this turn that draw only Tier 6 minions, and

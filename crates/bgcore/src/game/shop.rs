@@ -455,6 +455,30 @@ impl Game {
         let base = base.saturating_sub(pl.shop_fewer as usize);
         // New Recruit: the extra slot is drawn with the rest of them.
         let base = base + u8::from(pl.prize.extra_shop) as usize;
+        // Minion Bait: the extra cards of the locked type take the last slots
+        // before the spell, so the normal fill leaves room for them. The log
+        // (Hearthstone_2026_11_08_03_26_06-g4, turns 6 to 13) shows four
+        // normal minions in slots 1 to 4, the spell in slot 5, and the two
+        // extras in slots 6 and 7 at every Tier from 4 to 6; the Tavern never
+        // holds more than seven cards.
+        // A frozen Tavern keeps its cards and is not Refreshed, so it gets
+        // no extras; the fill is only topping up its missing slots. A real
+        // fill starts with an empty Tavern (every Refresh drains it first).
+        let add_extras = pl.tp.refresh_extra_tribe.is_some() && pl.shop.is_empty();
+        let extra_type = if add_extras {
+            (pl.tp.refresh_extra as usize).min(crate::SHOP - 1)
+        } else {
+            0
+        };
+        // Only a Minion Bait fill reserves those slots. Without it, the
+        // Tavern keeps the shape it had (New Recruit can build seven minions
+        // and leave no spell slot).
+        let (base, size) = if add_extras {
+            let room = (crate::SHOP - 1).saturating_sub(extra_type);
+            (base.min(room), size.min(room))
+        } else {
+            (base, size)
+        };
         // Twice as Nice's copy takes one of the Tavern's normal slots, so this
         // fill leaves the last of them empty for it: `after_refresh_powers`
         // runs once the Refresh is done and copies a card that is there, so
@@ -563,6 +587,25 @@ impl Game {
             }
             for (k, m) in made.into_iter().enumerate() {
                 pl.shop.insert(k, m);
+            }
+        }
+        // Minion Bait's extra cards: two minions of the type the pick locked,
+        // drawn in the Refresh's own tier range, after the normal fill and
+        // before the spell. A Whistle Refresh still holds them when there is
+        // room (the log has no Whistle and Minion Bait on the same Refresh).
+        if add_extras && let Some(t) = pl.tp.refresh_extra_tribe {
+            for _ in 0..extra_type {
+                if pl.shop.len() >= crate::SHOP - 1 {
+                    break;
+                }
+                let Some(c) = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |c| {
+                    c.tribes.has(t)
+                }) else {
+                    break;
+                };
+                let mut m = pl.make_card(cards, c, false, 1);
+                pl.apply_tavern_buffs(cards, &mut m);
+                pl.shop.push(m);
             }
         }
         // The spell slot is the Tavern's last card, so it appears whenever

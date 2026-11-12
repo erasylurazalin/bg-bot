@@ -1177,6 +1177,13 @@ Triple Reward spell.
   live board when the slot holds none, so a card can use it for "of the type
   this trinket locked in". The observation carries the stored type per slot in
   `SCALAR_TRINKET_TRIBE`.
+- **A trinket that adds cards to every Refresh.** `refresh_extra_type = 2`
+  on `on_pick` (`Act::RefreshExtraType`) keeps the slot's stored type and the
+  count in `TrinketPowers.refresh_extra*`. `fill_shop` leaves that many of the
+  last minion slots before the spell for minions of the type, drawn in the
+  Refresh's tier range and taking pool copies like any Tavern card; a frozen
+  Tavern is not Refreshed and gets none (Minion Bait,
+  `Hearthstone_2026_11_08_03_26_06-g4`).
 - **A trinket that makes a bought minion Golden.** `golden_bought` on `on_buy`
   (`Act::GoldenBoughtType`) makes the minion just bought Golden when its
   tribes include the slot's stored type: `golden_up` for the stats, then the

@@ -5624,6 +5624,90 @@ fn the_gold_plated_compass_makes_the_next_minion_of_its_type_golden() {
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn minion_bait_locks_the_most_common_type_at_the_pick() {
+    let mut g = game(507);
+    // Three Beasts and one Demon: the board's type is Beast.
+    put_on_board(&mut g, 0, "Flittering Bat");
+    put_on_board(&mut g, 0, "Lurking Lionfish");
+    put_on_board(&mut g, 0, "Humming Bird");
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    take(&mut g, 0, "Minion Bait");
+    assert_eq!(g.players[0].trinkets[0].tribe, Some(Tribe::Beast), "fixed at the pick");
+    assert_eq!(g.players[0].tp.refresh_extra, 2, "two extra minions");
+    assert_eq!(g.players[0].tp.refresh_extra_tribe, Some(Tribe::Beast));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn minion_bait_refresh_holds_two_extra_beasts_before_the_spell() {
+    // At Tier 4, 5 and 6 the log's Tavern holds four normal minions in slots
+    // 1 to 4, the spell in slot 5, and the two extras in slots 6 and 7
+    // (Hearthstone_2026_11_08_03_26_06-g4, every Refresh from turn 6 on).
+    for tier in [4u8, 5, 6] {
+        let mut g = game(508 + tier as u64);
+        g.players[0].tier = tier;
+        g.players[0].gold = 20;
+        put_on_board(&mut g, 0, "Flittering Bat");
+        take(&mut g, 0, "Minion Bait");
+        act(&mut g, 0, Action::Roll);
+        let pl = &g.players[0];
+        assert_eq!(pl.shop.len(), bgcore::SHOP - 1, "six minions at Tier {tier}");
+        assert_eq!(
+            pl.shop.iter().filter(|m| g.data.cards.get(m.card).is_spell()).count(),
+            0,
+            "the spell stays in its own slot"
+        );
+        assert!(pl.shop_spell.is_some(), "one spell, as before");
+        for m in &pl.shop[pl.shop.len() - 2..] {
+            assert!(g.data.cards.tribes_of(m).has(Tribe::Beast), "the two extras are Beasts");
+        }
+        g.check_invariants().unwrap();
+    }
+}
+
+#[test]
+fn minion_bait_extras_stay_within_the_tavern_tier() {
+    let mut g = game(511);
+    g.players[0].tier = 2;
+    g.players[0].gold = 20;
+    put_on_board(&mut g, 0, "Flittering Bat");
+    take(&mut g, 0, "Minion Bait");
+    act(&mut g, 0, Action::Roll);
+    let pl = &g.players[0];
+    let tier = pl.tier;
+    assert_eq!(pl.shop.len(), 6, "Tier 2's four normal minions plus the two extras");
+    for m in &pl.shop[pl.shop.len() - 2..] {
+        assert!(g.data.cards.tribes_of(m).has(Tribe::Beast), "Beasts");
+        assert!(g.data.cards.get(m.card).tier <= tier, "no card above the Tavern tier");
+    }
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn minion_bait_start_of_turn_refresh_adds_them_and_a_frozen_tavern_keeps_them() {
+    let mut g = game(512);
+    put_on_board(&mut g, 0, "Flittering Bat");
+    take(&mut g, 0, "Minion Bait");
+    next_turn(&mut g);
+    let pl = &g.players[0];
+    assert_eq!(pl.shop.len(), 5, "Tier 1's three normal minions plus the two extras");
+    assert!(pl.shop_spell.is_some(), "and its spell");
+    for m in &pl.shop[pl.shop.len() - 2..] {
+        assert!(g.data.cards.tribes_of(m).has(Tribe::Beast), "the start of the turn's Beasts");
+    }
+    let ids: Vec<CardId> = pl.shop.iter().map(|m| m.card).collect();
+    let spell = pl.shop_spell;
+    // A frozen Tavern is not Refreshed: it keeps the same cards, extras
+    // included, and adds none.
+    act(&mut g, 0, Action::Freeze);
+    next_turn(&mut g);
+    let pl = &g.players[0];
+    assert_eq!(pl.shop.iter().map(|m| m.card).collect::<Vec<_>>(), ids);
+    assert_eq!(pl.shop_spell, spell);
+    g.check_invariants().unwrap();
+}
+
 /// A full hand (docs/rules/design.md "A full hand", Era 2026-11-02): a card that arrives
 /// at the start of your turn is queued and joins as soon as there is room,
 /// while a card got during your shop phase or in combat is lost. The hand
@@ -5861,21 +5945,31 @@ fn offers_over_seeds(tribes: &[Tribe], seeds: u64) -> Vec<(u32, u8)> {
                 if g.over {
                     break;
                 }
-                turn_of(&mut g, p);
-                // Clear whatever the turn opened that is not the offer (a
-                // Hero Power Discover, a pending target), so the offer can be
-                // read and then answered.
-                while !g.over {
-                    let pl = &g.players[p];
-                    let open = !pl.power_offer.is_empty()
-                        || !pl.discover.is_empty()
-                        || pl.pending_target.is_some()
-                        || pl.pending_shop_target.is_some()
-                        || pl.pending_choose_one.is_some()
-                        || pl.pending_discard.is_some();
-                    if !open || !answer(&mut g) {
+                // Bring p's turn back and clear whatever it opened that is
+                // not the offer (a Hero Power Discover, a pending target, or
+                // the Dark Gift a trinket pick opened). Answering one is an
+                // action, so the cursor moves to the next player; ask for p's
+                // turn again before reading the offer and ending it.
+                loop {
+                    turn_of(&mut g, p);
+                    while !g.over {
+                        let pl = &g.players[p];
+                        let open = !pl.power_offer.is_empty()
+                            || !pl.discover.is_empty()
+                            || pl.pending_target.is_some()
+                            || pl.pending_shop_target.is_some()
+                            || pl.pending_choose_one.is_some()
+                            || pl.pending_discard.is_some();
+                        if !open || !answer(&mut g) {
+                            break;
+                        }
+                    }
+                    if g.over || g.current_player() == Some(p) {
                         break;
                     }
+                }
+                if g.over {
+                    break;
                 }
                 for &(of, _) in &g.players[p].trinket_offer {
                     seen.push((turn, of));
@@ -5942,6 +6036,34 @@ fn the_wand_of_divination_is_banned_in_a_quillboar_lobby() {
         without.iter().any(|&(_, of)| of == wand),
         "never offered in a lobby it is allowed in"
     );
+}
+
+#[test]
+fn a_trinket_pick_that_opens_a_dark_gift_leaves_the_turn_endable() {
+    // Seed 9, turn 9, player 2: the state that made the offer loop end the
+    // wrong player's turn. The greater offer is Wax Lance, whose pick opens
+    // a Dark Gift Discover. Answering it is an action, so the cursor moves
+    // away from the player; ending the turn needs their turn brought back
+    // first.
+    let mut g = game_lobby(9, &Tribe::EVERY);
+    to_turn(&mut g, 9);
+    let p = 2;
+    g.players[p].gold = 20;
+    turn_of(&mut g, p);
+    let wax = trinket(&g, "Wax Lance");
+    g.players[p].trinket_offer.clear();
+    g.players[p].trinket_offer_slot = 2;
+    g.players[p].trinket_offer.push((wax, 0));
+    assert!(answer(&mut g), "the offer is picked");
+    assert_eq!(g.players[p].discover.len(), 3, "Wax Lance's Dark Gift offer");
+    while !g.players[p].discover.is_empty() {
+        turn_of(&mut g, p);
+        assert!(answer(&mut g), "the Dark Gift is answered");
+    }
+    turn_of(&mut g, p);
+    assert!(g.is_legal(Action::EndTurn), "the turn is endable again");
+    g.step(Action::EndTurn).unwrap();
+    g.check_invariants().unwrap();
 }
 
 #[test]

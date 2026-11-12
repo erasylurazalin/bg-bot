@@ -44,7 +44,11 @@ fn print_plain_game_digest() {
 
 #[test]
 fn plain_game_is_unchanged() {
-    assert_eq!(plain_game_digest(), 0x00ea_a43c_73c9_5b49);
+    // The trinket table is part of the game: building a new trinket changes
+    // the offers a plain game draws, so this baseline moves with the card
+    // set (Minion Bait, 2026-11-12). The test still pins that the lobster
+    // mode leaves the plain game alone.
+    assert_eq!(plain_game_digest(), 0xd12c_a418_337b_57d3);
 }
 
 #[test]

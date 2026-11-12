@@ -1528,8 +1528,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   tier coming and those turns. Tests: the block 5 section at the end of
   `tests/trinkets.rs` (one per card) and `tests/heroes_batch4.rs` for
   Tickatus.
-- **The compasses and the Poet Portrait (block 6).** A trinket can lock a
-  minion type in at the pick. `lock_type` (`Act::LockType`) reads the board's
+- **The compasses, Minion Bait and the Poet Portrait (block 6).** A trinket
+  can lock a minion type in at the pick. `lock_type` (`Act::LockType`) reads the board's
   most common type through `crate::darkgifts::most_common_type`, the same read
   the Dark Discovery's "your type" slot uses (the all-type minions count for
   every tribe, a tie is broken at random, an empty or all-neutral board gives
@@ -1537,8 +1537,16 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   with the rest of the slot. `random_most_common_type` hands out minions of
   the type the slot holds and only reads the board when it holds none (a
   Colorful Compass therefore keeps its type however the board changes, and a
-  copy a portrait made over it still does something). The Gold-plated
-  Compass's `golden_bought` is an `on_buy` act (`Act::GoldenBoughtType`): the
+  copy a portrait made over it still does something). Minion Bait uses the
+  same lock (`refresh_extra_type` in `trinkets.toml`,
+  `Act::RefreshExtraType`) and adds two minions of the type to every Refresh
+  it makes: the normal fill leaves the last two minion slots before the spell
+  for them, so at Tiers 4 to 6 the Tavern holds four normal minions, the two
+  extras and the spell (log `Hearthstone_2026_11_08_03_26_06-g4` turns 6 to
+  13). A frozen Tavern is not Refreshed and gets none. The extras draw in the
+  Refresh's own tier range and take their pool copies like any Tavern card.
+  The Gold-plated Compass's `golden_bought` is an `on_buy` act
+  (`Act::GoldenBoughtType`): the
   minion just bought is `TrinketPowers.bought_card`, written beside
   `bought_stats` just before the Buy event, so the act makes that hand minion
   Golden with `golden_up` and spends the slot's type. It is a Golden bought and
@@ -2358,14 +2366,6 @@ seeded from the turn's seed (a repeat's).
   board, the comp label for a game the comps run has no name for.
   `RealBoards::places_at`/`indexed` keep a bucket's boards tied to their place
   in the spec list.
-- **Not measurable:** a turn whose first step is a trinket pick whose offer
-  holds a trinket the trinket table does not build cannot be seated (turns 6
-  and 9 are mostly lost that way), and a step the loader cannot seat ends the
-  path mid-turn; the report counts both.
-
-## Adding a card
-
-See `docs/adding-cards.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).
 - **`bgpy.BoardFight`** (`crates/bgpy/src/fight.rs`) fights two arbitrary
   boards from the tracker (`~/projects/bg`). Each board is a JSON object in a
   board file's shape (one entry of its `boards` array, so `real_boards`'s
@@ -2381,6 +2381,14 @@ See `docs/adding-cards.md` (hook index, recipes, new-tribe checklist, test helpe
   builds, for the tracker's coverage report. The first attacker is the
   engine's rule (more minions first, a coin flip when even): the tracker
   cannot pass the log's first attacker.
+- **Not measurable:** a turn whose first step is a trinket pick whose offer
+  holds a trinket the trinket table does not build cannot be seated (turns 6
+  and 9 are mostly lost that way), and a step the loader cannot seat ends the
+  path mid-turn; the report counts both.
+
+## Adding a card
+
+See `docs/adding-cards.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).
 
 ## Card data snapshots (`ref/`, git-ignored)
 

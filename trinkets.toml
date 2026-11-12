@@ -2153,3 +2153,16 @@ slot = "greater"
 cost = 0
 on_pick = [{ lock_type = true }, { free_refreshes = 5 }]
 on_buy = [{ golden_bought = true }]
+
+# The Tavern offers 2 extra minions of the type every time it is Refreshed.
+# The type is the most common one at the pick, fixed like the compasses
+# (docs/rules/trinkets.md). Hearthstone_2026_11_08_03_26_06-g4 turns 6 to 13:
+# the log's first number is 20 (Beast), the board at the pick is four Beasts
+# and two other types, and every Refreshed Tavern from then on has two extra
+# Beasts in slots 6 and 7 next to the normal four minions and the spell.
+[[trinket]]
+name = "Minion Bait"
+card_id = "BG30_MagicItem_973"
+slot = "lesser"
+cost = 0
+on_pick = [{ lock_type = true }, { refresh_extra_type = 2 }]
