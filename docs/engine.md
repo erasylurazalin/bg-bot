@@ -2513,6 +2513,10 @@ Deleting `.venv` undoes it.
   long gold-neutral loops are good play. Discounting is per turn, not per
   action; with per-action discounting nothing learned, because a turn can be
   up to 200 actions.
+- `--fight-reward W` adds +W at a learner turn end when the fight after it is
+  won, 0 for a tie and -W for a loss or a knockout (1st place is a win); W = 0
+  is the old reward, and `metrics.csv` appends `fight_reward_per_turn`, the
+  mean term per learner turn.
 - `--entropy-moves-as-one` counts all Move actions as one entropy atom (their
   summed probability) instead of one per move, so the bonus stops paying for
   board shuffles; moves stay legal and sampled, off is the old loss, and

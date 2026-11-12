@@ -16,11 +16,13 @@ parameter whose name and shape match, with a fresh optimizer:
 Each game seats learners (this network, trained), snapshots (older copies of
 it), standard curve bots, rush curve bots, random bots and real seats
 (--lineup has all six counts; a real seat plays a board of the current turn
-from Era's games, --real-boards, and never shops). Reward is placement
-only: +1 for 1st down to -1 for 8th (plus optional --first-bonus and
+from Era's games, --real-boards, and never shops). Reward is placement:
++1 for 1st down to -1 for 8th (plus optional --first-bonus and
 --second-bonus for 1st and 2nd), given when the seat is knocked out or the
 game ends, minus a tiny cost per board move (--action-cost, --cost-kinds) so
-it doesn't shuffle its board for free.
+it doesn't shuffle its board for free. --fight-reward W adds +W to a learner
+turn end when the fight that follows is won, 0 for a tie and -W for a loss
+(default 0: no fight term).
 
 Everything lands in runs/<name>/: metrics.csv (one row per eval), a
 TensorBoard log, ckpt.pt (latest) and best.pt (best eval: vs7 real when the
@@ -65,6 +67,9 @@ KIND_OF = torch.tensor([k for k, (_, n) in enumerate(bgpy.ACTION_KINDS) for _ in
 END_TURN = bgpy.END_TURN
 SHOP_START = bgpy.SHOP_START
 ACTIONS_LEFT = bgpy.SCALAR_ACTIONS_LEFT
+WON_LAST_COMBAT = bgpy.SCALAR_WON_LAST_COMBAT
+LOST_LAST_COMBAT = bgpy.SCALAR_LOST_LAST_COMBAT
+TURN = bgpy.SCALAR_TURN
 
 TRIBE_NAMES = ("beast", "mech", "dragon", "murloc", "demon", "pirate",
                "elemental", "undead", "quilboar", "aberration")
@@ -91,7 +96,7 @@ TRAIN_KEYS = [
     "aux_loss", "wheels_b", "wheels_lambda", "comp_active",
 ]
 # Appended after top_buys, so rows in an older metrics.csv keep their columns.
-EXTRA_KEYS = ["entropy_plain", "moves_per_turn"]
+EXTRA_KEYS = ["entropy_plain", "moves_per_turn", "fight_reward_per_turn"]
 
 
 def args():
@@ -191,6 +196,9 @@ def args():
     a.add_argument("--lam", type=float, default=0.95, help="per turn, like --gamma")
     a.add_argument("--action-cost", type=float, default=0.002,
                    help="reward taken off each action of --cost-kinds, so it doesn't dither")
+    a.add_argument("--fight-reward", type=float, default=0.0,
+                   help="+W when the fight after a learner turn is won, -W when lost, 0 for "
+                        "a tie; a knockout is a loss and 1st place is a win")
     a.add_argument("--force-turn2-level", action="store_true",
                    help="a tier 1 seat that can level on turn 2 must level (learner and snapshots)")
     a.add_argument("--force-dark-gift", action="store_true",
@@ -253,6 +261,35 @@ def reward(place, first_bonus=0.0, second_bonus=0.0):
     if place == 2 and second_bonus:
         return value + second_bonus
     return value
+
+
+def fight_outcome(won, lost):
+    """+1 for a won fight, -1 for a lost one, 0 for a tie."""
+    if won > 0.5:
+        return 1
+    if lost > 0.5:
+        return -1
+    return 0
+
+
+def place_fight_outcome(place):
+    """1st place is a win; any other placement is a loss."""
+    return 1 if place == 1 else -1
+
+
+def credit_fight(rews, pending, env, seat, outcome, weight):
+    """Credit weight * outcome to the pending turn-end step for (env, seat).
+
+    Returns the term added, or None when no turn is pending there. The
+    pending index is cleared either way, so one fight is credited once.
+    """
+    step = int(pending[env, seat])
+    if step < 0:
+        return None
+    pending[env, seat] = -1
+    term = weight * outcome
+    rews[step, env] += term
+    return term
 
 
 def entropy_term(dist, moves_as_one, move_idx=None):
@@ -1157,9 +1194,27 @@ def main():
             wheel = 0.0
         aux_w = cfg.aux_weight * wheel
         bonus_store.set_scale(wheel, cfg.overlay_bonus, COMP_HEALTH_PENALTY)
+        fight_on = cfg.fight_reward != 0.0
+        pending = np.full((N, P), -1, np.int64) if fight_on else None
+        pending_turn = np.full((N, P), -1, np.int64) if fight_on else None
+        fight_sum, fight_turns = 0.0, 0
         with torch.no_grad():
             for t in range(T):
                 env.observe(b.obs, b.mask, b.seat, b.kind)
+                if fight_on:
+                    # A learner's next view carries the fight after its
+                    # pending turn, perhaps several steps after that turn.
+                    for e in np.nonzero(b.kind == LEARNER)[0]:
+                        s = int(b.seat[e])
+                        if pending[e, s] < 0 or b.obs[e, TURN] <= pending_turn[e, s]:
+                            continue
+                        term = credit_fight(
+                            rews, pending, int(e), s,
+                            fight_outcome(b.obs[e, WON_LAST_COMBAT],
+                                          b.obs[e, LOST_LAST_COMBAT]),
+                            cfg.fight_reward)
+                        if term is not None:
+                            fight_sum += term
                 o = torch.from_numpy(b.obs).to(dev, non_blocking=True)
                 m = torch.from_numpy(b.mask).to(dev, non_blocking=True)
                 is_learner = torch.from_numpy(b.kind == LEARNER).to(dev)
@@ -1229,6 +1284,12 @@ def main():
                 seats[t] = torch.from_numpy(b.seat).to(dev)
                 le = np.nonzero(b.kind == LEARNER)[0]
                 last[le, b.seat[le]] = t
+                if fight_on:
+                    ended_turn = ((a == END_TURN) | (o[:, ACTIONS_LEFT] <= 1)).cpu().numpy()
+                    for e in np.nonzero((b.kind == LEARNER) & ended_turn)[0]:
+                        pending[e, int(b.seat[e])] = t
+                        pending_turn[e, int(b.seat[e])] = int(b.obs[e, TURN])
+                        fight_turns += 1
                 kinds = b.kinds.copy()
                 env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
                 for e, s in zip(*np.nonzero(b.places)):
@@ -1236,6 +1297,13 @@ def main():
                         rews[last[e, s], e] += reward(
                             b.places[e, s], cfg.first_bonus, cfg.second_bonus)
                         dones[last[e, s], e] = 1.0
+                        if fight_on:
+                            term = credit_fight(
+                                rews, pending, e, s,
+                                place_fight_outcome(int(b.places[e, s])),
+                                cfg.fight_reward)
+                            if term is not None:
+                                fight_sum += term
                 if b.reset.any():
                     r = np.nonzero(b.reset)[0]
                     last[r] = -1
@@ -1247,6 +1315,27 @@ def main():
             all_comp = np.full((N, P), -1, np.int64)
             live = np.zeros((N, P), bool)
             env.observe_all(all_obs, live)
+            if fight_on:
+                # A turn that ended on the rollout's last step resolves from
+                # this bootstrap view, before the advantages are computed.
+                for e, s in zip(*np.nonzero(live)):
+                    s = int(s)
+                    # The combat scalars only change when the round's fight
+                    # has happened; before that they are the previous fight.
+                    if pending[e, s] < 0 or all_obs[e, s, TURN] <= pending_turn[e, s]:
+                        continue
+                    term = credit_fight(
+                        rews, pending, int(e), s,
+                        fight_outcome(all_obs[e, s, WON_LAST_COMBAT],
+                                      all_obs[e, s, LOST_LAST_COMBAT]),
+                        cfg.fight_reward)
+                    if term is not None:
+                        fight_sum += term
+                unresolved = int((pending >= 0).sum())
+                if unresolved:
+                    print(f"fight reward: {unresolved} learner turns unresolved at the "
+                          "rollout boundary, credited 0")
+                pending.fill(-1)
             if cfg.overlay_comps:
                 env.overlay_comp(all_comp)
             flat_comp = all_comp.reshape(-1)
@@ -1404,6 +1493,7 @@ def main():
                 "comp_active": float(comp_active.reshape(-1)[sel_np].mean()),
                 "entropy_plain": np.mean(plains),
                 "moves_per_turn": n_moves / max(n_ends, 1),
+                "fight_reward_per_turn": fight_sum / fight_turns if fight_turns else 0.0,
                 **{f"act_{KINDS[i]}": (counts[i] / counts.sum()).item() for i in range(len(KINDS))},
             }
             top = buy_counts.argsort(descending=True)[:5]
