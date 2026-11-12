@@ -1878,20 +1878,25 @@ impl Game {
         {
             return matches!(a, Action::Choose(k) if k < 2 && self.can_choose_option(p, pco.options[k as usize]));
         }
-        if !pl.discover.is_empty() {
-            return matches!(a, Action::Choose(k) if (k as usize) < pl.discover.len());
-        }
-        // A Hero Power Discover (Unmasked Identity, Finley) or a chooser's
-        // list (Bru'kan's Elements, Galewing's flightpaths): like a Discover.
+        // These are `resolve_choose`'s answers in its own order: a Hero
+        // Power Discover (Power of the Storm, Unmasked Identity, Finley) or a
+        // chooser's list, then Prestidigitation's Secrets, then a wager or a
+        // guess, and only then a Discover. The two prompts can be open at
+        // once (an end of turn Discover beside Power of the Storm's offer),
+        // so the mask must not offer an answer the resolver gives to the
+        // other prompt: a third option that only the Discover has would pick
+        // no power and leave both open.
         if !pl.power_offer.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.power_offer.len());
         }
-        // Prestidigitation's offer of Secrets: answered the same way.
         if !pl.secret_offer.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.secret_offer.len());
         }
         if pl.wager_offer.is_some() || pl.holmes_offer.is_some() {
             return matches!(a, Action::Choose(k) if k < 2);
+        }
+        if !pl.discover.is_empty() {
+            return matches!(a, Action::Choose(k) if (k as usize) < pl.discover.len());
         }
         // A skipped turn (Procrastinate, Expedition Plans): Freeze and End
         // Turn (already answered above) and the answers to whatever choice the
@@ -2118,10 +2123,6 @@ impl Game {
             for k in 0..2 {
                 ask!(Action::Choose(k));
             }
-        } else if open && !pl.discover.is_empty() {
-            for k in 0..pl.discover.len() as u8 {
-                ask!(Action::Choose(k));
-            }
         } else if open && !pl.power_offer.is_empty() {
             for k in 0..pl.power_offer.len() as u8 {
                 ask!(Action::Choose(k));
@@ -2132,6 +2133,10 @@ impl Game {
             }
         } else if open && (pl.wager_offer.is_some() || pl.holmes_offer.is_some()) {
             for k in 0..2 {
+                ask!(Action::Choose(k));
+            }
+        } else if open && !pl.discover.is_empty() {
+            for k in 0..pl.discover.len() as u8 {
                 ask!(Action::Choose(k));
             }
         } else if open && self.turn_skipped(p) {
