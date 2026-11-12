@@ -11,6 +11,8 @@
 // Seat numbers index several per-seat arrays at once.
 #![allow(clippy::needless_range_loop)]
 
+mod fight;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -332,7 +334,7 @@ struct VecEnv {
 
 /// The card id mapping `ref/bg-cards.json`, looked up from the project root
 /// and from `train/` (where `go.sh` starts ppo.py).
-fn ref_card_ids() -> PyResult<bgcore::CardIdMap> {
+pub(crate) fn ref_card_ids() -> PyResult<bgcore::CardIdMap> {
     let mut last = String::from("not found");
     for path in ["ref/bg-cards.json", "../ref/bg-cards.json"] {
         match std::fs::read_to_string(path) {
@@ -2582,6 +2584,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<EraReplay>()?;
     m.add_class::<Planner>()?;
     m.add_class::<RealFights>()?;
+    m.add_class::<fight::BoardFight>()?;
     m.add_function(wrap_pyfunction!(sandbox_position, m)?)?;
     m.add_function(wrap_pyfunction!(set_lag_in_obs, m)?)?;
     m.add_function(wrap_pyfunction!(shop_replay_turns, m)?)?;

@@ -2366,6 +2366,21 @@ seeded from the turn's seed (a repeat's).
 ## Adding a card
 
 See `docs/adding-cards.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).
+- **`bgpy.BoardFight`** (`crates/bgpy/src/fight.rs`) fights two arbitrary
+  boards from the tracker (`~/projects/bg`). Each board is a JSON object in a
+  board file's shape (one entry of its `boards` array, so `real_boards`'s
+  parser is the only parser) with `turn`, `tier`, `minions`, `hand`,
+  `hand_hidden`, `counters`, `hero_power`, `trinkets`, `rewards` and `deity`.
+  The constructor seats both sides with `fight_check::prepare`, so hero
+  powers, trinkets, rewards, Dark Gifts and hands work as in the fight check.
+  `fight(n, seed)` plays them `n` times and returns win/tie/loss shares (for
+  the first board), the mean damage it deals when it wins, the mean damage it
+  takes when it loses, the same two means over every fight, the pieces the
+  engine does not build, and the boards' turn. `missing()`/`complete()` say
+  the same before a fight. `built_card_names()` lists what the card data
+  builds, for the tracker's coverage report. The first attacker is the
+  engine's rule (more minions first, a coin flip when even): the tracker
+  cannot pass the log's first attacker.
 
 ## Card data snapshots (`ref/`, git-ignored)
 
