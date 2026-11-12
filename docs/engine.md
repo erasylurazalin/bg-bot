@@ -2390,6 +2390,15 @@ seeded from the turn's seed (a repeat's).
   builds, for the tracker's coverage report. The first attacker is the
   engine's rule (more minions first, a coin flip when even): the tracker
   cannot pass the log's first attacker.
+- **The fight-state export:** `bgpy.VecEnv.record_fights(True)` makes each
+  game keep every seat's last fight at the moment `Game::combat` fixes the
+  boards, hands and counters (not at End Turn). `fight_snapshot(i, seat)`
+  returns both sides as board-file JSON objects plus the paired seat, and
+  `fight_export_limits()` lists what the shape cannot carry. A fight that
+  ends the game survives the env reset. Off (the default) is one `Option`
+  check per fight and no allocation; on is one box per game and an inline
+  copy of the board and hand. `bgcore::fight_export` writes the JSON, so
+  `bgpy.BoardFight` reads an exported pair exactly as a board file.
 - **Not measurable:** a turn whose first step is a trinket pick whose offer
   holds a trinket the trinket table does not build cannot be seated (turns 6
   and 9 are mostly lost that way), and a step the loader cannot seat ends the

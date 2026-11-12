@@ -1,9 +1,10 @@
 """Does swapping one minion for Leeroy or Deadly Spore change a late fight?
 
-For docs/briefs/swap-check.md. Plays the same fixed eval as the scam check
-(2,048 games per lag, the same seeds, lineup, frozen boards and lobby filter)
-and saves, for every learner turn from 10 on at lag 0 and at lag 2 from turn
-7, the board that fought and the opponent it fought, in the board-file JSON
+For docs/briefs/swap-check.md and docs/briefs/swap-state.md. Plays the same
+fixed eval as the scam check (2,048 games per lag, the same seeds, lineup,
+frozen boards and lobby filter) and saves, for every learner turn from 10 on
+at lag 0 and at lag 2 from turn 7, both sides of the fight as the engine fixed
+them at the start of combat (`VecEnv.fight_snapshot`), in the board-file JSON
 shape `bgpy.BoardFight` takes. Ghost fights are left out. The fight's actual
 result is resolved from the learner's next observation (won/lost flags, both
 false for a tie) or from the placement when the fight knocked it out.
@@ -18,8 +19,10 @@ points.
 
     .venv/bin/python train/evaltools/swap_check.py collect --vram-gb 10
     .venv/bin/python train/evaltools/swap_check.py analyze
+    .venv/bin/python train/evaltools/swap_check.py analyze --split survived
+    .venv/bin/python train/evaltools/swap_check.py analyze --split ended
 
-Writes train/runs/swap-check/pairs.json (collect), then sanity.json,
+Writes train/runs/swap-check-2/pairs.json (collect), then sanity.json,
 rows.json and report.md (analyze). Measurement only.
 """
 
@@ -29,11 +32,9 @@ import argparse
 import json
 import math
 import multiprocessing as mp
-import re
 import statistics
 import sys
 import time
-import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,14 +50,12 @@ import fixed_eval
 import ppo
 import real_boards
 from ppo import Bufs, F_COMP, LEARNER, comp_onehot, force_mask
-from scam_check import board_from_seat, board_from_slots, opponent_block
 
 CKPT = ROOT / "train" / "runs" / "r1111-lagmix" / "best.pt"
-OUT = ROOT / "train" / "runs" / "swap-check"
+OUT = ROOT / "train" / "runs" / "swap-check-2"
 REF = ROOT / "ref" / "bg-cards.json"
 FIRST_TURN = 10
 FIGHTS = 100
-KEEP_POWER_TRINKETS = False
 LEEROY_NAME = "Leeroy the Reckless"
 SPORE_NAME = "Deadly Spore"
 LEEROY_TIER = 5
@@ -102,8 +101,9 @@ def parse_args():
                     help="worker processes for the fights (default 8)")
     a_.add_argument("--force", action="store_true",
                     help="continue even when the sanity check misses by over 2 points")
-    a_.add_argument("--with-power-trinkets", action="store_true",
-                    help="fight the hero power and trinkets the observation exposes too")
+    a_.add_argument("--split", choices=("all", "survived", "ended"), default="all",
+                    help="analyze every pair, only fights the learner survived, or "
+                         "only fights that knocked it out (default all)")
     return a.parse_args()
 
 
@@ -143,24 +143,6 @@ def minion_json(m, ids) -> dict:
     }
 
 
-def own_counters(row) -> dict:
-    return {
-        "gem_attack": int(row[bgpy.SCALAR_GEM_ATTACK]),
-        "gem_health": int(row[bgpy.SCALAR_GEM_HEALTH]),
-        "spell_attack": int(row[bgpy.SCALAR_SPELL_ATTACK]),
-        "spell_health": int(row[bgpy.SCALAR_SPELL_HEALTH]),
-    }
-
-
-def opp_counters(row, block) -> dict:
-    return {
-        "gem_attack": int(row[block + bgpy.OPP_GEM_ATTACK]),
-        "gem_health": int(row[block + bgpy.OPP_GEM_HEALTH]),
-        "spell_attack": int(row[block + bgpy.OPP_SPELL_ATTACK]),
-        "spell_health": int(row[block + bgpy.OPP_SPELL_HEALTH]),
-    }
-
-
 def board_json(turn, tier, minions, counters, power=None, trinkets=None) -> dict:
     board = {
         "turn": int(turn),
@@ -175,115 +157,58 @@ def board_json(turn, tier, minions, counters, power=None, trinkets=None) -> dict
     return board
 
 
-def power_and_trinket_tables():
-    """Starting-power card ids by hero name, standalone powers by power name,
-    and trinkets in table order as (name, card id, slot)."""
-    heroes = tomllib.loads((ROOT / "heroes.toml").read_text())
-    power_ids: dict[str, str] = {}
-    for h in heroes.get("hero", []):
-        p = h.get("power")
-        if p:
-            power_ids[h["name"]] = p["card_id"]
-            power_ids.setdefault(p["name"], p["card_id"])
-    for p in heroes.get("power", []):
-        power_ids.setdefault(p["name"], p["card_id"])
-    # trinkets.toml has multi-line inline tables, which TOML 1.0 does not
-    # allow; read the three keys a board needs block by block.
-    trinkets: list[tuple[str, str, str]] = []
-    text = (ROOT / "trinkets.toml").read_text()
-    for block in re.split(r"(?m)^\[\[trinket\]\]$", text)[1:]:
-        name = re.search(r'^name = "([^"]+)"', block, re.M)
-        card = re.search(r'^card_id = "([^"]+)"', block, re.M)
-        slot = re.search(r'^slot = "([^"]+)"', block, re.M)
-        if name and card:
-            trinkets.append((name.group(1), card.group(1),
-                             slot.group(1) if slot else "lesser"))
-    return power_ids, trinkets
-
-
-def own_power(row, hero_names, power_ids) -> dict | None:
-    i = int(row[bgpy.SCALAR_POWER_HERO])
-    if i <= 0 or i > len(hero_names):
-        return None
-    name = hero_names[i - 1]
-    cid = power_ids.get(name)
-    if not cid:
-        return None
-    # Onyxia's Broodmother is the one fight power whose magnitude is a number.
-    numbers = ([int(row[bgpy.SCALAR_POWER_PROGRESS])]
-               if cid == "BG22_HERO_305p" else [])
-    return {"card_id": cid, "name": name, "numbers": numbers}
-
-
-def side_trinkets(row, base, trinkets) -> list[dict]:
-    out = []
-    for slot in range(bgpy.TRINKET_SLOTS):
-        i = int(row[base + slot])
-        if i <= 0 or i > len(trinkets):
-            continue
-        name, cid, slot_kind = trinkets[i - 1]
-        out.append({"card_id": cid, "name": name,
-                    "greater": slot_kind == "greater", "numbers": []})
-    return out
-
-
 # ---- collect --------------------------------------------------------------
 
 
-def block_for(learner_seat: int, opp_seat: int) -> int | None:
-    """The opponent block of `opp_seat` in a learner observation, or None."""
-    k = (opp_seat - learner_seat) % bgpy.PLAYERS
-    if k == 0:
-        return None
-    return bgpy.OWN_END + (k - 1) * bgpy.OPP_BLOCK
-
-
-def last_opponent_block(o, learner_seat: int) -> tuple[int | None, int | None]:
-    """The opponent block the observation marks as the last one fought."""
-    for k in range(1, bgpy.PLAYERS):
-        block = bgpy.OWN_END + (k - 1) * bgpy.OPP_BLOCK
-        if o[block + bgpy.OPP_LAST] > 0.5:
-            return (learner_seat + k) % bgpy.PLAYERS, block
-    return None, None
-
-
-def make_pair(game, lag, turn, seats, row, names, learner_seat, ids,
-              hero_names, power_ids, trinkets) -> dict | None:
-    opp_seat, block, opp_alive = opponent_block(row, learner_seat)
-    if opp_seat is None or row[bgpy.SCALAR_GHOST] > 0.5 or not opp_alive:
-        return None
-    board = [minion_json(m, ids) for m in board_from_seat(seats, learner_seat)]
-    opp_board = [minion_json(m, ids) for m in board_from_seat(seats, opp_seat)]
-    tier = int(row[bgpy.SCALAR_TIER])
-    opp_tier = int(row[block + bgpy.OPP_TIER])
-    power = own_power(row, hero_names, power_ids)
-    own_trinkets = side_trinkets(row, bgpy.SCALAR_TRINKET, trinkets)
-    opp_trinkets = side_trinkets(row, block + bgpy.OPP_TRINKET, trinkets)
+def pending_pair(game, lag, turn, learner_seat: int) -> dict:
+    """The row for a fight the learner has just ended its turn into. The
+    boards come from the engine's snapshot after the combat; this holds the
+    places to fill."""
     return {
         "game": int(game),
         "lag": int(lag),
         "turn": int(turn),
         "learner_seat": int(learner_seat),
-        "opp_seat": int(opp_seat),
-        "tier": tier,
-        "opp_tier": opp_tier,
-        "board": board_json(turn, tier, board, own_counters(row),
-                            power=power, trinkets=own_trinkets),
-        "opp_board": board_json(turn, opp_tier, opp_board,
-                                opp_counters(row, block),
-                                trinkets=opp_trinkets),
-        "opp_board_source": "env.seats",
+        "opp_seat": None,
+        "tier": 0,
+        "opp_tier": 0,
+        "board": None,
+        "opp_board": None,
+        "opp_board_source": "fight_snapshot",
         "actual": None,
     }
 
 
-def collect_lag(args, info, real, lag: int, lag_from: int, dev, ids,
-                power_ids, trinkets) -> list[dict]:
+def fill_pair(env, e: int, row: dict) -> str:
+    """Both sides of the fight the learner just had, from the engine's
+    snapshot at the start of combat. `ok`, `ghost`, or `wait` when the
+    round's combat has not happened yet (another Python seat still has to
+    act, or the snapshot is still the previous round's)."""
+    found = env.fight_snapshot(e, row["learner_seat"])
+    if found is None:
+        return "wait"
+    me_text, opp_text, opp_seat = found
+    me = json.loads(me_text)
+    if int(me["turn"]) != row["turn"]:
+        return "wait"
+    if opp_seat is None:
+        return "ghost"
+    opp = json.loads(opp_text)
+    row["opp_seat"] = int(opp_seat)
+    row["tier"] = int(me["tier"])
+    row["opp_tier"] = int(opp["tier"])
+    row["board"] = me
+    row["opp_board"] = opp
+    return "ok"
+
+
+def collect_lag(args, info, real, lag: int, lag_from: int, dev) -> list[dict]:
     net = info["net"]
     pairs: list[dict] = []
     started = time.time()
     chunk = 0
-    drops = {"cap": 0, "unresolved": 0, "ghost": 0}
+    drops = {"cap": 0, "unresolved": 0, "ghost": 0, "snapshot": 0}
+    limits_printed = False
     while chunk * fixed_eval.CHUNK < args.games:
         start = chunk * fixed_eval.CHUNK
         n = min(fixed_eval.CHUNK, args.games - start)
@@ -291,10 +216,13 @@ def collect_lag(args, info, real, lag: int, lag_from: int, dev, ids,
                           real_boards=real, old_boards=info["old_boards"],
                           real_lobby_filter=True, real_lag=lag,
                           real_lag_from=lag_from)
+        env.record_fights(True)
+        if not limits_printed:
+            print("  fight export cannot carry: "
+                  + "; ".join(env.fight_export_limits()), flush=True)
+            limits_printed = True
         if info["overlay_comps"]:
             env.set_overlay(info["overlay_comps"], 0.0)
-        names = env.card_names()
-        hero_names = env.hero_names()
         b = Bufs(n)
         env.kinds(b.kinds)
         done = np.zeros(n, dtype=bool)
@@ -307,7 +235,8 @@ def collect_lag(args, info, real, lag: int, lag_from: int, dev, ids,
             turns = b.obs[:, bgpy.SCALAR_TURN].astype(np.int64)
             left = b.obs[:, bgpy.SCALAR_ACTIONS_LEFT].astype(np.int64)
             current = (~done) & (b.kind == LEARNER)
-            # Resolve the last turn's fight from this turn's flags.
+            # Resolve the last turn's fight from this turn's flags. The boards
+            # and counters were saved from the engine at the start of combat.
             for e in np.nonzero(current)[0]:
                 e = int(e)
                 learner_seat[e] = int(b.seat[e])
@@ -318,24 +247,6 @@ def collect_lag(args, info, real, lag: int, lag_from: int, dev, ids,
                     o = b.obs[e]
                     p["actual"] = ("win" if o[WON] > 0.5
                                    else ("loss" if o[LOST] > 0.5 else "tie"))
-                    # The seen block holds the opponent board that went into
-                    # the fight, after its last shop and before combat. The
-                    # End Turn snapshot can predate that shop.
-                    seat, block = last_opponent_block(o, int(b.seat[e]))
-                    if block is not None:
-                        seen = [minion_json(m, ids) for m in board_from_slots(
-                            o, block + bgpy.OPP_SCALARS, names)]
-                        if seen:
-                            p["opp_seat"] = seat
-                            p["opp_board"] = board_json(
-                                p["turn"], p["opp_tier"], seen,
-                                opp_counters(o, block),
-                                trinkets=p["opp_board"].get("trinkets"))
-                            p["opp_board_source"] = "observation_last_seen"
-                        fb = block
-                        if o[fb + bgpy.OPP_FIGHT_HAPPENED] > 0.5:
-                            p["actual_opp"] = int(round(
-                                o[fb + bgpy.OPP_FIGHT_OUTCOME]))
                     p["actual_won"] = bool(o[WON] > 0.5)
                     p["actual_lost"] = bool(o[LOST] > 0.5)
                     p["actual_last_damage"] = int(o[bgpy.SCALAR_LAST_DAMAGE])
@@ -358,38 +269,27 @@ def collect_lag(args, info, real, lag: int, lag_from: int, dev, ids,
                 turn = int(turns[e])
                 if turn < FIRST_TURN:
                     continue
-                row = make_pair(start + e, lag, turn, env.seats(e),
-                                b.obs[e], names, int(b.seat[e]), ids,
-                                hero_names, power_ids, trinkets)
-                if row is None:
-                    drops["ghost"] += 1
-                    continue
+                row = pending_pair(start + e, lag, turn, int(b.seat[e]))
                 row["ended_by"] = ("end_turn" if int(acts_np[e]) == ppo.END_TURN
                                    else "cap")
                 pending[e] = row
 
-            # A learner who ended the turn early still has opponents shopping
-            # after it. Keep the pending row's opponent board at the latest
-            # pre-combat snapshot, so a fight that knocks the learner out is
-            # not compared with a board from before those shops.
-            for e in np.nonzero((~done) & (b.kind != LEARNER))[0]:
-                e = int(e)
-                p_row = pending[e]
-                if p_row is None:
-                    continue
-                seats = env.seats(e)
-                opp = p_row["opp_seat"]
-                if opp >= len(seats):
-                    continue
-                seen = [minion_json(m, ids) for m in board_from_seat(seats, opp)]
-                if seen:
-                    p_row["opp_board"] = board_json(
-                        p_row["turn"], p_row["opp_tier"], seen,
-                        p_row["opp_board"]["counters"],
-                        trinkets=p_row["opp_board"].get("trinkets"))
-                    p_row["opp_board_source"] = "latest_snapshot"
-
             env.step(acts_np, b.places, b.tier_turns, b.tribes, b.reset)
+            # Take both sides from the engine's snapshot at the start of
+            # combat; it survives a reset for the fight that ended the game.
+            # A row waits for its own turn's snapshot, so a round with another
+            # Python seat still to act is filled on the step that fights it.
+            for e, p_row in enumerate(pending):
+                if (p_row is None or p_row["board"] is not None
+                        or p_row["ended_by"] != "end_turn"):
+                    continue
+                status = fill_pair(env, e, p_row)
+                if status == "ghost":
+                    drops["ghost"] += 1
+                    pending[e] = None
+                elif status == "missing":
+                    drops["snapshot"] += 1
+                    pending[e] = None
             need_all = False
             for e, s in zip(*np.nonzero(b.places)):
                 e, s = int(e), int(s)
@@ -411,28 +311,17 @@ def collect_lag(args, info, real, lag: int, lag_from: int, dev, ids,
                 if p is not None:
                     if p["ended_by"] == "end_turn":
                         # The dead learner's own observation, when the game
-                        # goes on, still carries the fight's result and the
-                        # board that fought. A reset game has neither.
+                        # goes on, still carries the fight's result. The boards
+                        # came from the snapshot already; a reset game has no
+                        # observation, so place 1 is the game win, which is
+                        # also a won fight.
                         if allobs is not None and not b.reset[e]:
                             o = allobs[e, s]
                             p["actual"] = ("win" if o[WON] > 0.5
                                            else ("loss" if o[LOST] > 0.5
                                                  else "loss"))
                             p["resolved_by"] = "dead_observation"
-                            seat, block = last_opponent_block(o, s)
-                            if block is not None:
-                                seen = [minion_json(m, ids) for m in board_from_slots(
-                                    o, block + bgpy.OPP_SCALARS, names)]
-                                if seen:
-                                    p["opp_seat"] = seat
-                                    p["opp_board"] = board_json(
-                                        p["turn"], p["opp_tier"], seen,
-                                        opp_counters(o, block),
-                                        trinkets=p["opp_board"].get("trinkets"))
-                                    p["opp_board_source"] = "dead_observation"
                         else:
-                            # A reset game keeps no observation: place 1 is
-                            # the game win, which is also a won fight.
                             p["actual"] = ("win" if int(b.places[e, s]) == 1
                                            else "loss")
                             p["resolved_by"] = "reset_place"
@@ -458,7 +347,8 @@ def collect_lag(args, info, real, lag: int, lag_from: int, dev, ids,
         chunk += 1
     pairs.sort(key=lambda r: (r["game"], r["turn"]))
     print(f"  lag {lag}: dropped {drops['ghost']} ghost or empty opponent rows, "
-          f"{drops['cap']} cap rows, {drops['unresolved']} unresolved", flush=True)
+          f"{drops['cap']} cap rows, {drops['unresolved']} unresolved, "
+          f"{drops['snapshot']} fights without a snapshot", flush=True)
     return pairs
 
 
@@ -494,15 +384,12 @@ def collect(args):
     print(f"  update {info['update']}, force_dark_gift {info['force_dark_gift']}, "
           f"old_boards {info['old_boards']}, comp inputs {info['n_comps']}", flush=True)
 
-    ids = ref_ids()
-    power_ids, trinkets = power_and_trinket_tables()
     started = time.time()
     pairs: list[dict] = []
     for lag in lags:
         lag_from = 1 if lag == 0 else args.lag2_from
         print(f"lag {lag} from turn {lag_from}", flush=True)
-        pairs.extend(collect_lag(args, info, real, lag, lag_from, dev, ids,
-                                 power_ids, trinkets))
+        pairs.extend(collect_lag(args, info, real, lag, lag_from, dev))
 
     written = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     lags_text = ", ".join(
@@ -627,8 +514,7 @@ def pair_seed(pair) -> int:
 def baseline_worker(item):
     pair, ids = item
     try:
-        r = one_fight(fight_board(pair["board"]),
-                      fight_board(pair["opp_board"]), pair_seed(pair))
+        r = one_fight(pair["board"], pair["opp_board"], pair_seed(pair))
     except Exception as exc:
         return {"game": pair["game"], "lag": pair["lag"], "turn": pair["turn"],
                 "error": f"{type(exc).__name__}: {exc}"}
@@ -650,16 +536,9 @@ def baseline_worker(item):
     }
 
 
-def fight_board(board) -> dict:
-    if KEEP_POWER_TRINKETS:
-        return board
-    return {k: v for k, v in board.items()
-            if k not in ("hero_power", "trinkets")}
-
-
 def arms_for(pair, ids) -> dict:
-    board = fight_board(pair["board"])
-    opp = fight_board(pair["opp_board"])
+    board = pair["board"]
+    opp = pair["opp_board"]
     seed = pair_seed(pair)
     minions = board["minions"]
     out = {}
@@ -898,13 +777,15 @@ def diag_table(rows, labels_and_match, title):
 
 
 def analyze(args):
-    global KEEP_POWER_TRINKETS
-    KEEP_POWER_TRINKETS = args.with_power_trinkets
     args.out_dir.mkdir(parents=True, exist_ok=True)
     payload = json.loads(args.pairs.read_text())
     pairs = payload["pairs"]
+    if args.split == "survived":
+        pairs = [p for p in pairs if not p.get("resolved_by")]
+    elif args.split == "ended":
+        pairs = [p for p in pairs if p.get("resolved_by")]
     ids = ref_ids()
-    print(f"{len(pairs)} pairs from {args.pairs}", flush=True)
+    print(f"{len(pairs)} {args.split} pairs from {args.pairs}", flush=True)
 
     jobs = max(1, args.jobs)
     ctx = mp.get_context("fork") if jobs > 1 else None
@@ -956,25 +837,8 @@ def analyze(args):
         "worst_points": 100 * worst,
         "incomplete": incomplete,
         "errors": len(errors),
-        "power_trinkets": KEEP_POWER_TRINKETS,
+        "split": args.split,
     }
-    alt = None
-    if not KEEP_POWER_TRINKETS:
-        KEEP_POWER_TRINKETS = True
-        alt_rows = run_all(baseline_worker, ((p, ids) for p in pairs))
-        KEEP_POWER_TRINKETS = False
-        alt_rows = [r for r in alt_rows if "error" not in r]
-        if alt_rows:
-            alt_pred = {k: statistics.fmean([r[k] for r in alt_rows])
-                        for k in ("win", "tie", "loss")}
-            alt_diff = {k: alt_pred[k] - actual_share[k]
-                        for k in ("win", "tie", "loss")}
-            alt = {
-                "predicted": alt_pred,
-                "diff_points": {k: 100 * d for k, d in alt_diff.items()},
-                "worst_points": 100 * max(abs(d) for d in alt_diff.values()),
-            }
-            sanity["with_power_trinkets"] = alt
     print(f"sanity: actual {actual_share}, predicted {predicted}, "
           f"worst {100 * worst:.2f} points, incomplete {incomplete}, "
           f"errors {len(errors)}", flush=True)
@@ -987,6 +851,7 @@ def analyze(args):
         stop = ["# Swap check: stopped at the sanity check", ""]
         stop.append(f"- checkpoint: `{payload['checkpoint']}` (update {payload['update']})")
         stop.append(f"- pairs: {n}; {incomplete} baseline boards `complete()` rejects")
+        stop.append(f"- split: {args.split}")
         stop.append("")
         stop.append("## Result")
         stop.append("")
@@ -1001,9 +866,6 @@ def analyze(args):
                         f"{fmt_pct(predicted[key])} | {100 * diffs[key]:+.2f} |")
         stop.append("")
         stop.append(f"- worst difference: {100 * worst:.2f} points (limit 2)")
-        if alt is not None:
-            stop.append(f"- with the observed hero power and trinkets passed in: "
-                        f"{alt['worst_points']:.2f} points")
         stop.append(f"- fights the parser refused: {len(errors)}")
         if missing:
             top = sorted(missing.items(), key=lambda x: -x[1])[:12]
@@ -1022,17 +884,11 @@ def analyze(args):
         stop.append("")
         stop.append("## Where the miss comes from")
         stop.append("")
-        stop.append("The miss is not spread evenly. `observation_last_seen` rows "
-                    "are fights the learner survived, where the next observation "
-                    "carried the opponent board that went into the fight. "
-                    "`env.seats` rows are fights that ended the game: the learner "
-                    "died and the env reset before a later observation could be "
-                    "read, so those rows keep the opponent board from the "
-                    "learner's End Turn. The learner was the last shop before "
-                    "combat in those rows (otherwise the row would say "
-                    "`latest_snapshot`), so the minions are the last ones seen; "
-                    "the pair can still have changed at combat, and the pieces "
-                    "below are still missing.")
+        stop.append("Both sides now come from the engine's snapshot at the start "
+                    "of combat, so the miss is not a board taken at End Turn or a "
+                    "stale observation. It is in the pieces the board-file shape "
+                    "cannot carry, or in the fight's own randomness, and the "
+                    "splits below say where.")
         stop.append("")
         stop.extend(diag_table(
             sanity_rows,
@@ -1063,21 +919,21 @@ def analyze(args):
             "By turn"))
         stop.append("## What the boards carry")
         stop.append("")
-        stop.append("- Minions with stats, keywords, golden flags and position, "
-                    "the turn and tier, and the Blood Gem and Tavern spell "
-                    "counters for both sides.")
-        stop.append("- The observation also exposes the learner's hero power "
-                    "and both sides' trinkets. Passing them to the fight made "
-                    "the sanity check worse, because the observation does not "
-                    "carry the power's numbers, its pressed state, the power "
-                    "Lock and Load still owes, or a trinket's current value. "
-                    "This run leaves them out; `--with-power-trinkets` includes "
-                    "them and the same check misses further.")
-        stop.append("- The saved board does not carry Dark Gifts, minion "
-                    "`numbers` (a scaling card's count), the opponent's other "
-                    "player-level counters (beetle, undead, spells cast) or a "
-                    "hand, because the observation does not expose them for "
-                    "both sides.")
+        stop.append("- Both sides' minions with stats, keywords, golden flags, "
+                    "position, numbers and Dark Gifts; both hands; the counters "
+                    "the board shape has; the hero power with its numbers and "
+                    "waiting minion; trinkets with values and slots; a Deity; "
+                    "the Secret zone. Everything is read at the start of combat.")
+        stop.append("- The shape cannot carry a Dark Gift's countdown, a second "
+                    "hero power, a power's pressed state or presses left, the "
+                    "Beast/Boon/Brood/Sharing is Caring counters, a chosen "
+                    "warband, the engine slot of a power trinket when the "
+                    "shape's slot order moves it, or minion marks with no key "
+                    "(temporary Divine Shield/Reborn, extra tribes, attached "
+                    "parts and Magnetizations).")
+        stop.append("- The ref card file has no id for a Blood Gem token in hand "
+                    "(`Blood Gem (Reborn)`, `Blood Gem (Taunt)`), so those hands "
+                    "load a Stand-in; the board minions themselves are unaffected.")
         stop.append("")
         (args.out_dir / "report.md").write_text("\n".join(stop) + "\n")
         (args.out_dir / "rows.json").write_text(json.dumps({
@@ -1124,8 +980,10 @@ def analyze(args):
     lines.append(f"- frozen boards: `{payload['boards']}` "
                  f"({payload['n_board_files']} files, manifest checked)")
     lines.append(f"- lags: {payload['lags_text']}")
-    lines.append("- a board is the board at the learner's End Turn, the one that "
-                 "fought; the opponent is the one the engine paired with it")
+    lines.append(f"- split: {args.split}")
+    lines.append("- a board is the engine's snapshot at the start of combat, after "
+                 "the last shop and the start of the turn; the opponent is the "
+                 "seat it was paired with")
     lines.append("- ghost fights left out; fights whose actual result could not "
                  "be read are left out")
     lines.append(f"- pairs: {n} with a result; {incomplete} baseline boards "
@@ -1266,20 +1124,29 @@ def analyze(args):
                  "slot, so this is an upper bound on what scam is worth.")
     lines.append("- Era's side of the scam check rested on 85 boards, so compare "
                  "with it loosely.")
-    lines.append("- The boards carry minion stats, keywords, golden flags, tier, "
-                 "turn and the Blood Gem and Tavern spell counters for both sides. "
-                 "The observation does not expose hero powers, trinkets, the other "
-                 "player-level counters (beetle, undead, spells cast) or a hand for "
-                 "the opponent, so those fights are plain boards. The sanity check "
-                 "above is the measure of how much that costs.")
+    lines.append("- The boards carry both sides' minions (stats, keywords, golden, "
+                 "numbers and Dark Gifts), both hands, the board-shape counters, "
+                 "the hero power with its numbers and waiting minion, trinkets "
+                 "with values and slots, a Deity and the Secret zone, all read at "
+                 "the start of combat.")
+    lines.append("- The shape cannot carry a Dark Gift countdown, a second hero "
+                 "power, a pressed state or presses left, the Beast/Boon/Brood/"
+                 "Sharing is Caring counters, a chosen warband, a power "
+                 "trinket's engine slot when the slot order moves it, or minion "
+                 "marks with no key (temporary Divine Shield/Reborn, extra "
+                 "tribes, attached parts and Magnetizations).")
+    lines.append("- The ref card file has no id for a Blood Gem token in hand "
+                 "(`Blood Gem (Reborn)`, `Blood Gem (Taunt)`), so those hands load "
+                 "a Stand-in; the board minions themselves are unaffected.")
     lines.append("- `best slot` tries every insertion position of the board after "
                  "the replaced minion is taken out (7 on a full board). The add "
                  "variants append the card at the end.")
     lines.append("- The median minion for the control is the lower median on an "
                  "even board, copied at its current stats and with its keywords, "
                  "not golden.")
-    lines.append("- Pairs are a turn-end board and the paired opponent; a shop-phase "
-                 "knockout in the final action is not detected, as in the scam check.")
+    lines.append("- Pairs are the two boards at the start of combat; the fight's "
+                 "actual result is read from the learner's next observation or, "
+                 "when it was knocked out, from the placement.")
     lines.append("")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)

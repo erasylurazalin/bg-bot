@@ -1332,6 +1332,11 @@ pub struct CardIdMap {
     /// rather than a name (a Magicfin token's taught spell is one, in its
     /// first number).
     by_dbf: HashMap<u32, String>,
+    /// A card name to a plain id that builds it, and to a golden id. Built in
+    /// the ref file's order, first hit wins. The export of a fight's state
+    /// (`bgpy`) needs a card id for a name it only has from the engine.
+    by_name: HashMap<String, String>,
+    by_golden_name: HashMap<String, String>,
 }
 
 /// Dark Paradox: the game's five versions are all named "Dark Paradox" in the
@@ -1388,6 +1393,8 @@ impl CardIdMap {
         }
         let mut by_id = HashMap::new();
         let mut by_dbf = HashMap::new();
+        let mut by_name = HashMap::new();
+        let mut by_golden_name = HashMap::new();
         for c in raw.cards {
             // The ids whose logged name does not name the card we build.
             if RENAMED_BY_ID.iter().any(|(id, _)| *id == c.card_id)
@@ -1397,6 +1404,9 @@ impl CardIdMap {
                 if c.dbf_id != 0 {
                     by_dbf.insert(c.dbf_id, name.clone());
                 }
+                let names_for_kind =
+                    if c.is_golden { &mut by_golden_name } else { &mut by_name };
+                names_for_kind.entry(name.clone()).or_insert_with(|| c.card_id.clone());
                 by_id.insert(c.card_id, (name, c.is_golden));
                 continue;
             }
@@ -1413,15 +1423,34 @@ impl CardIdMap {
             if c.dbf_id != 0 {
                 by_dbf.insert(c.dbf_id, name.clone());
             }
+            let names_for_kind =
+                if c.is_golden { &mut by_golden_name } else { &mut by_name };
+            names_for_kind.entry(name.clone()).or_insert_with(|| c.card_id.clone());
             by_id.insert(c.card_id, (name, c.is_golden));
         }
-        Ok(CardIdMap { by_id, by_dbf })
+        Ok(CardIdMap { by_id, by_dbf, by_name, by_golden_name })
     }
 
     /// The card a file minion's id stands for: its name, and whether the id
     /// itself is a golden card.
     pub fn get(&self, card_id: &str) -> Option<(&str, bool)> {
         self.by_id.get(card_id).map(|(name, golden)| (name.as_str(), *golden))
+    }
+
+    /// A ref card id that builds a card of `name`, plain or golden. The first
+    /// card of that name in the ref file wins, so the plain map gives the base
+    /// id and a golden id is used only for a card with no plain one. The
+    /// engine has card names but not the game's ids; the fight-state export
+    /// needs one to write a board file.
+    pub fn id_for_name(&self, name: &str, golden: bool) -> Option<&str> {
+        if golden {
+            self.by_golden_name
+                .get(name)
+                .or_else(|| self.by_name.get(name))
+                .map(String::as_str)
+        } else {
+            self.by_name.get(name).map(String::as_str)
+        }
     }
 
     /// The name of the card the game's dbf id names, when the ref data has

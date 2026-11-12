@@ -31,7 +31,8 @@ use crate::fight::{Counters, Deity, SeenCounters, SideOutcome};
 use crate::heroes::PowerEffect;
 use crate::darkgifts::DarkGiftPlan;
 use crate::minion::{CardId, GiftOn, Keywords, Minion};
-use crate::real_boards::RealBoards;
+use crate::real_boards::{RealBoards, RealCounters};
+use crate::secrets::Secrets;
 use crate::scenario::ScenarioPlan;
 use crate::trinkets::{CardMod, Event};
 use self::shop::give_back;
@@ -1379,6 +1380,10 @@ pub struct Game {
     /// Cards this action gained whose own triple check also waits for the end
     /// of the action (`Game::give_generated_later`), in the order they came.
     pending_triples: ArrayVec<CardId, 4>,
+    /// Each seat's last fight at the moment its boards were fixed, or None
+    /// when the game records no snapshots. One check per fight when off. Only
+    /// the eval export turns it on (`Game::record_fights`).
+    pub fight_snapshots: Option<Box<[Option<FightSnapshot>; PLAYERS]>>,
 }
 
 /// Settings and results of a sandbox game (see `Game::new_sandbox`).
@@ -1405,6 +1410,146 @@ pub struct SandboxFight {
     pub winner: Option<usize>,
     /// What the player's side carried over, as the game applied it.
     pub side: SideOutcome,
+}
+
+/// One side's state at the moment a fight's boards were fixed: the board and
+/// the hand that went in, the counters the fight read, and the hero power,
+/// trinkets, Deity and Secrets it carried. Read only by the snapshot export
+/// (`bgpy`'s `VecEnv::fight_snapshot`); nothing in a game reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FightSideSnapshot {
+    pub board: ArrayVec<Minion, BOARD>,
+    pub hand: ArrayVec<Minion, HAND>,
+    /// The full counters `fight_with_hands` was given. The export can carry
+    /// only the part `RealCounters` represents; this is kept for the test
+    /// that replays the engine's own fight.
+    pub counters: Counters,
+    /// The part of the counters a board file can carry (`RealCounters`).
+    pub real: RealCounters,
+    pub health: i32,
+    pub armor: i32,
+    pub tier: u8,
+    pub power: Option<PowerState>,
+    pub power2: Option<PowerState>,
+    pub trinkets: [TrinketState; crate::TRINKET_SLOTS],
+    pub deity: Option<Deity>,
+    pub secrets: Secrets,
+    /// The minion Lock and Load still owes the board (the power's `waiting`).
+    pub waiting: Option<Minion>,
+}
+
+/// Both sides of one player's last fight, taken at the start of combat.
+/// `seat` is whose side this is; `opp` is the paired seat, None for a ghost.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FightSnapshot {
+    pub turn: u32,
+    pub seat: u8,
+    pub opp: Option<u8>,
+    pub me: FightSideSnapshot,
+    pub opp_side: FightSideSnapshot,
+}
+
+/// The counters a board file can carry, built from the player and the fight's
+/// full counters. The Tavern buffs a fight never reads go into the three
+/// shapes `RealCounters` has; other tribes (and a typed-only buff) have no
+/// key and are left out.
+fn export_counters(pl: &Player, c: &Counters) -> RealCounters {
+    let mut real = RealCounters {
+        gem_attack: c.gem_attack,
+        gem_health: c.gem_health,
+        beetle_attack: c.beetle_attack,
+        beetle_health: c.beetle_health,
+        undead_attack: c.undead_attack,
+        undead_health: c.undead_health,
+        spell_attack: c.spell_attack,
+        spell_health: c.spell_health,
+        spells_cast: c.spells_cast,
+        knight_deaths: c.knight_deaths,
+        golden_played: pl.golden_played,
+        improve: c.improve,
+        gold_spent: c.gold_spent,
+        upper_hand: c.upper_hand as u32,
+        refresh_attack: pl.refresh_buff.0,
+        refresh_health: pl.refresh_buff.1,
+        barrage_attack: pl.barrage.0,
+        barrage_health: pl.barrage.1,
+        volumizer_attack: pl.volumizer_bonus.0,
+        volumizer_health: pl.volumizer_bonus.1,
+        ..RealCounters::default()
+    };
+    for b in &pl.tavern_buffs {
+        match (b.tribe, b.this_turn) {
+            (None, true) => {
+                real.tavern_turn_attack += b.attack;
+                real.tavern_turn_health += b.health;
+            }
+            (None, false) => {
+                real.tavern_attack += b.attack;
+                real.tavern_health += b.health;
+            }
+            (Some(Tribe::Elemental), false) => {
+                real.tavern_elemental_attack += b.attack;
+                real.tavern_elemental_health += b.health;
+            }
+            _ => {}
+        }
+    }
+    real
+}
+
+impl FightSideSnapshot {
+    /// One player's side as the fight saw it. `board` is the board the fight
+    /// was given and `hand` the player's whole hand (the fight itself may
+    /// have been given an empty hand when nothing read it).
+    fn of(pl: &Player, board: &[Minion], hand: &[Minion], counters: Counters) -> FightSideSnapshot {
+        let mut b: ArrayVec<Minion, BOARD> = ArrayVec::new();
+        for m in board {
+            let _ = b.try_push(*m);
+        }
+        let mut h: ArrayVec<Minion, HAND> = ArrayVec::new();
+        for m in hand {
+            let _ = h.try_push(*m);
+        }
+        FightSideSnapshot {
+            board: b,
+            hand: h,
+            counters,
+            real: export_counters(pl, &counters),
+            health: pl.health,
+            armor: pl.armor,
+            tier: pl.tier,
+            power: pl.power,
+            power2: pl.power2,
+            trinkets: pl.trinkets,
+            deity: pl.deity,
+            secrets: pl.secrets,
+            waiting: pl.locked_and_loaded,
+        }
+    }
+
+    /// A ghost's side: no player, so no hero, trinkets or Secrets, and the
+    /// counters the ghost was seated with.
+    fn ghost(board: &[Minion], counters: Counters, tier: u8) -> FightSideSnapshot {
+        let mut b: ArrayVec<Minion, BOARD> = ArrayVec::new();
+        for m in board {
+            let _ = b.try_push(*m);
+        }
+        FightSideSnapshot {
+            board: b,
+            hand: ArrayVec::new(),
+            counters,
+            real: RealCounters::default(),
+            health: 0,
+            armor: 0,
+            tier,
+            power: None,
+            power2: None,
+            trinkets: [TrinketState::default(); crate::TRINKET_SLOTS],
+            deity: None,
+            secrets: Secrets::new(),
+            waiting: None,
+        }
+    }
 }
 
 /// The parts of a one-player shop game that an action can change, captured so
@@ -1453,6 +1598,22 @@ impl Game {
         self.pending_triples.clone_from(&state.pending_triples);
         self.defer_triples = state.defer_triples;
         self.over = state.over;
+    }
+
+    /// Turn the last-fight snapshot on or off. Off is the default: combat then
+    /// pays one `Option` check and allocates nothing for it. On allocates one
+    /// box once (not per fight); the snapshots themselves are inline
+    /// `ArrayVec`s, so a fight copies its board and hand into the box and
+    /// allocates nothing else.
+    pub fn record_fights(&mut self, on: bool) {
+        if on {
+            if self.fight_snapshots.is_none() {
+                self.fight_snapshots =
+                    Some(Box::new(std::array::from_fn(|_| None)));
+            }
+        } else {
+            self.fight_snapshots = None;
+        }
     }
 }
 
@@ -1776,6 +1937,7 @@ impl Game {
             defer_triples: false,
             board_triple_check: false,
             pending_triples: ArrayVec::new(),
+            fight_snapshots: None,
         }
     }
 

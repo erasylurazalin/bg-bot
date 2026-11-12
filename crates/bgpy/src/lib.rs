@@ -22,13 +22,14 @@ use bgcore::era_start::{EraSplit, EraStartConfig, EraStarts};
 use bgcore::overlay::{Overlay, OVERLAY_FLAGS, OverlayState};
 use bgcore::obs::{self, OBS_SIZE, OldBoards};
 use bgcore::real_boards::{
-    RealBoard, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
+    CardIdMap, RealBoard, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec, RealMinionSpec,
 };
 use bgcore::scenario::ScenarioConfig;
 use bgcore::shop_replay::{SeatedStep, ShopSnapshot};
 use bgcore::search::Position;
 use bgcore::{
-    ACTION_KINDS, Action, BOARD, Data, Game, Keywords, MAX_TIER, N_ACTIONS, PLAYERS, Rng, TRIBES,
+    ACTION_KINDS, Action, BOARD, Data, FightSnapshot, Game, Keywords, MAX_TIER, N_ACTIONS,
+    PLAYERS, Rng, TRIBES,
 };
 use numpy::{PyReadonlyArray1, PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3};
 use pyo3::exceptions::PyValueError;
@@ -144,6 +145,11 @@ struct Env {
     era_body: [[i16; BOARD]; PLAYERS],
     /// The Shell line and abort bits, per seat and game.
     overlay_states: [OverlayState; PLAYERS],
+    /// Whether this env records the fight state of each seat's last fight.
+    record_fights: bool,
+    /// The last completed game's fight snapshots, kept across the reset so a
+    /// fight that knocked the learner out can still be read.
+    saved_fights: Option<Box<[Option<FightSnapshot>; PLAYERS]>>,
 }
 
 impl Env {
@@ -248,11 +254,40 @@ impl Env {
             era_turn,
             era_body,
             overlay_states,
+            record_fights: false,
+            saved_fights: None,
+        }
+    }
+
+    /// Turn the last-fight snapshot on or off for this game. Off drops the
+    /// saved copy too: nothing then pays for it.
+    fn set_record_fights(&mut self, on: bool) {
+        self.record_fights = on;
+        self.game.record_fights(on);
+        if !on {
+            self.saved_fights = None;
         }
     }
 
     fn is_python(&self, p: usize) -> bool {
         matches!(self.kinds[p], LEARNER | SNAPSHOT)
+    }
+
+    /// A seat's last fight: the current game's when it has one, else the
+    /// snapshot kept across a reset. The current game wins, so a saved fight
+    /// never masks the new game's first one.
+    fn fight_snapshot(&self, seat: usize) -> Option<&FightSnapshot> {
+        self.game
+            .fight_snapshots
+            .as_ref()
+            .and_then(|s| s.get(seat))
+            .and_then(Option::as_ref)
+            .or_else(|| {
+                self.saved_fights
+                    .as_ref()
+                    .and_then(|s| s.get(seat))
+                    .and_then(Option::as_ref)
+            })
     }
 
     /// Play rule and random seats until a Python seat is up or the game ends.
@@ -330,6 +365,11 @@ struct VecEnv {
     lag_in_obs: bool,
     /// The last completed game's final board card ids per seat, -1 empty.
     finals: Vec<[[i16; BOARD]; PLAYERS]>,
+    /// Whether `fight_snapshot` is on. Off is the default and costs nothing.
+    record_fights: bool,
+    /// The ref card id map the fight export writes with, loaded when the
+    /// recording is turned on.
+    fight_ids: Option<Arc<CardIdMap>>,
 }
 
 /// The card id mapping `ref/bg-cards.json`, looked up from the project root
@@ -574,6 +614,8 @@ impl VecEnv {
             era,
             lag_in_obs,
             finals: vec![[[-1; BOARD]; PLAYERS]; n],
+            record_fights: false,
+            fight_ids: None,
         })
     }
 
@@ -728,6 +770,50 @@ impl VecEnv {
         });
     }
 
+    /// Record each seat's last fight at the start of combat, for
+    /// `fight_snapshot`. On is a box per game and a few inline copies per
+    /// fight; off (the default) is one `Option` check per fight and nothing
+    /// else. Turning it off drops the saved snapshots too.
+    fn record_fights(&mut self, on: bool) -> PyResult<()> {
+        if on && self.fight_ids.is_none() {
+            self.fight_ids = Some(Arc::new(ref_card_ids()?));
+        }
+        self.record_fights = on;
+        self.envs.par_iter_mut().for_each(|env| env.set_record_fights(on));
+        Ok(())
+    }
+
+    /// Game `i`'s last fight for `seat`, as two board-file JSON objects and
+    /// the seat it fought (None for a ghost): `(me, opp, opp_seat)`. None when
+    /// the seat has not fought since the recording was turned on. The state is
+    /// the one the engine fixed at the start of combat, so a fight that ended
+    /// the game is still readable after the reset. Call `record_fights(True)`
+    /// first.
+    #[allow(clippy::type_complexity)]
+    fn fight_snapshot(
+        &self,
+        i: usize,
+        seat: usize,
+    ) -> PyResult<Option<(String, String, Option<usize>)>> {
+        let env = self.envs.get(i).ok_or_else(|| PyValueError::new_err("no such game"))?;
+        if seat >= PLAYERS {
+            return Err(PyValueError::new_err("no such seat"));
+        }
+        let Some(snapshot) = env.fight_snapshot(seat) else { return Ok(None) };
+        let ids = self
+            .fight_ids
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("call record_fights(True) first"))?;
+        let (me, opp, opp_seat) = bgcore::fight_export::pair_json(snapshot, &self.data, ids);
+        Ok(Some((me, opp, opp_seat)))
+    }
+
+    /// What the fight export cannot carry, one line each (the collector puts
+    /// them in its report).
+    fn fight_export_limits(&self) -> Vec<String> {
+        bgcore::fight_export::limitations().into_iter().map(str::to_string).collect()
+    }
+
     /// The final board card ids of the last completed game, for every seat:
     /// `[game][seat][slot]`, -1 for an empty slot. Read after `step` reports
     /// a reset.
@@ -846,7 +932,12 @@ impl VecEnv {
                     env.report(places, tier_turns, tribes);
                     if env.game.over {
                         *finals = env.last_board;
-                        *env = Env::new(
+                        // The last fight of the game goes with the reset: keep
+                        // it so the collector can still read a fight that
+                        // knocked the learner out.
+                        let saved = env.game.fight_snapshots.take();
+                        let record = env.record_fights;
+                        let mut fresh = Env::new(
                             data,
                             base + i as u64,
                             &lineup,
@@ -855,6 +946,9 @@ impl VecEnv {
                             scenario.as_ref(),
                             era.as_ref(),
                         );
+                        fresh.set_record_fights(record);
+                        fresh.saved_fights = saved;
+                        *env = fresh;
                         env.advance();
                         *reset = true;
                     }

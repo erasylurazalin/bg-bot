@@ -23,6 +23,8 @@ use crate::{
 };
 use super::{
     FightResult,
+    FightSideSnapshot,
+    FightSnapshot,
     Game,
     Ghost,
     Leaderboard,
@@ -1151,6 +1153,57 @@ impl Game {
             }
             let turn = self.turn;
             let my_tier = self.players[p].tier;
+            // The snapshot is taken here, with the boards, hands and counters
+            // the fight is about to be given, not at End Turn: everything the
+            // shop phase and the start of the turn do has already happened.
+            // Off, this is one `Option` check and no allocation.
+            let fight_snapshot = if self.fight_snapshots.is_some() {
+                let opp_seat = match self.players[p].opponent {
+                    Some(Opponent::Player(q)) => Some(q),
+                    _ => None,
+                };
+                let my = FightSideSnapshot::of(
+                    &self.players[p],
+                    &me,
+                    &self.players[p].hand,
+                    my_counters,
+                );
+                let their = match opp_seat {
+                    Some(q) => FightSideSnapshot::of(
+                        &self.players[q as usize],
+                        &them,
+                        &self.players[q as usize].hand,
+                        their_counters,
+                    ),
+                    // A ghost has no player state; its board and counters are
+                    // all the fight was given.
+                    None => FightSideSnapshot::ghost(&them, their_counters, tier),
+                };
+                Some((turn, p as u8, opp_seat, my, their))
+            } else {
+                None
+            };
+            if let (Some(snaps), Some((turn, seat, opp, my, their))) =
+                (self.fight_snapshots.as_mut(), fight_snapshot)
+            {
+                let my_snapshot = FightSnapshot {
+                    turn,
+                    seat,
+                    opp,
+                    me: my.clone(),
+                    opp_side: their.clone(),
+                };
+                snaps[seat as usize] = Some(my_snapshot);
+                if let Some(q) = opp {
+                    snaps[q as usize] = Some(FightSnapshot {
+                        turn,
+                        seat: q,
+                        opp: Some(seat),
+                        me: their,
+                        opp_side: my,
+                    });
+                }
+            }
             let hands: [&[Minion]; 2] = [my_hand, their_hand];
             let out = fight_with_hands(
                 &self.data.cards,

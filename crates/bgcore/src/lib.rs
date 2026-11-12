@@ -13,6 +13,7 @@ pub mod darkgifts;
 pub mod era_start;
 pub mod fight;
 pub mod fight_check;
+pub mod fight_export;
 pub mod game;
 pub mod heroes;
 pub mod lobster;
@@ -39,8 +40,8 @@ pub use darkgifts::{Gift, GiftCond, GiftDb};
 pub use era_start::{EraPosition, EraSplit, EraStartConfig, EraStartPlan, EraStarts};
 pub use fight::{Counters, Outcome, SideOutcome, fight, fight_with};
 pub use game::{
-    FightResult, Game, IllegalAction, Leaderboard, Opponent, Player, PowerState, Sandbox,
-    SandboxFight, ShopStateCapture,
+    FightResult, FightSideSnapshot, FightSnapshot, Game, IllegalAction, Leaderboard, Opponent,
+    Player, PowerState, Sandbox, SandboxFight, ShopStateCapture, TrinketState,
 };
 pub use heroes::{Hero, HeroDb, HeroPower, PowerEffect};
 pub use lobster::LobsterMode;
