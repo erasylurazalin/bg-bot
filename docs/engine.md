@@ -2381,7 +2381,10 @@ seeded from the turn's seed (a repeat's).
   powers, trinkets, rewards, Dark Gifts and hands work as in the fight check.
   `fight(n, seed)` plays them `n` times and returns win/tie/loss shares (for
   the first board), the mean damage it deals when it wins, the mean damage it
-  takes when it loses, the same two means over every fight, the pieces the
+  takes when it loses, the same two means over every fight, the same four
+  damage figures uncapped (the tier plus surviving minion tiers before the
+  turn's cap: `damage_dealt_uncapped`, `damage_taken_uncapped`,
+  `damage_dealt_uncapped_mean`, `damage_taken_uncapped_mean`), the pieces the
   engine does not build, and the boards' turn. `missing()`/`complete()` say
   the same before a fight. `built_card_names()` lists what the card data
   builds, for the tracker's coverage report. The first attacker is the

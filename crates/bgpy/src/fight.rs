@@ -60,7 +60,8 @@ fn damage(raw: i32, data: &Data, turn: u32) -> i32 {
 }
 
 /// What a batch of fights did: wins, ties and losses for `me`, and the damage
-/// sum of every win (`dealt`) and loss (`taken`).
+/// sum of every win (`dealt`) and loss (`taken`), capped as the rules of the
+/// turn cap it, beside the uncapped sum before that cap.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Tally {
     wins: u32,
@@ -68,17 +69,21 @@ struct Tally {
     losses: u32,
     dealt: i64,
     taken: i64,
+    dealt_uncapped: i64,
+    taken_uncapped: i64,
 }
 
 impl Tally {
-    fn add_win(&mut self, amount: i32) {
+    fn add_win(&mut self, capped: i32, uncapped: i32) {
         self.wins += 1;
-        self.dealt += amount as i64;
+        self.dealt += capped as i64;
+        self.dealt_uncapped += uncapped as i64;
     }
 
-    fn add_loss(&mut self, amount: i32) {
+    fn add_loss(&mut self, capped: i32, uncapped: i32) {
         self.losses += 1;
-        self.taken += amount as i64;
+        self.taken += capped as i64;
+        self.taken_uncapped += uncapped as i64;
     }
 }
 
@@ -107,17 +112,15 @@ fn fight_tally(
             &mut (),
         );
         match out.winner {
-            Some(0) => tally.add_win(damage(
-                me_tier as i32 + out.survivor_tiers,
-                data,
-                turn,
-            )),
+            Some(0) => {
+                let raw = me_tier as i32 + out.survivor_tiers;
+                tally.add_win(damage(raw, data, turn), raw);
+            }
             None => tally.ties += 1,
-            Some(_) => tally.add_loss(damage(
-                opp_tier as i32 + out.survivor_tiers,
-                data,
-                turn,
-            )),
+            Some(_) => {
+                let raw = opp_tier as i32 + out.survivor_tiers;
+                tally.add_loss(damage(raw, data, turn), raw);
+            }
         }
     }
     tally
@@ -175,7 +178,8 @@ impl BoardFight {
     /// Fight the two boards `n` times with `seed`. Returns the shares of wins,
     /// ties and losses for `me`, the mean damage `me` deals when it wins, the
     /// mean damage `me` takes when it loses, and the same two means over every
-    /// run. A tie deals no damage.
+    /// run. Each damage mean has an uncapped twin: the tier plus surviving
+    /// minion tiers before the turn's cap. A tie deals no damage.
     fn fight(&self, py: Python<'_>, n: u32, seed: u64) -> PyResult<Py<PyDict>> {
         let t = fight_tally(
             &self.data,
@@ -207,6 +211,32 @@ impl BoardFight {
         )?;
         out.set_item("damage_dealt_mean", round4(t.dealt as f64 / runs))?;
         out.set_item("damage_taken_mean", round4(t.taken as f64 / runs))?;
+        // The same sums before the turn's cap: what the board would deal or
+        // take on an uncapped turn.
+        out.set_item(
+            "damage_dealt_uncapped",
+            if t.wins == 0 {
+                0.0
+            } else {
+                round4(t.dealt_uncapped as f64 / t.wins as f64)
+            },
+        )?;
+        out.set_item(
+            "damage_taken_uncapped",
+            if t.losses == 0 {
+                0.0
+            } else {
+                round4(t.taken_uncapped as f64 / t.losses as f64)
+            },
+        )?;
+        out.set_item(
+            "damage_dealt_uncapped_mean",
+            round4(t.dealt_uncapped as f64 / runs),
+        )?;
+        out.set_item(
+            "damage_taken_uncapped_mean",
+            round4(t.taken_uncapped as f64 / runs),
+        )?;
         out.set_item("complete", self.prepared.is_complete())?;
         out.set_item("missing", self.prepared.missing_lines())?;
         out.set_item("turn", self.turn)?;
@@ -271,6 +301,75 @@ mod tests {
             200,
             42,
         );
-        assert_eq!(tally, Tally { wins: 200, ties: 0, losses: 0, dealt: 600, taken: 0 });
+        assert_eq!(
+            tally,
+            Tally {
+                wins: 200,
+                ties: 0,
+                losses: 0,
+                dealt: 600,
+                taken: 0,
+                dealt_uncapped: 600,
+                taken_uncapped: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn uncapped_damage_keeps_the_survivor_tiers_before_the_turn_cap() {
+        let data = Data::bundled();
+        let ids = card_ids();
+        // Seven 5/5 Campers against one 1/1 Bat: all seven survive, so the
+        // raw win is tier 1 + seven tier-1 bodies = 8, and turn 1 caps it at 5.
+        let seven = r#"{"turn":1,"tier":1,"minions":[
+            {"card_id":"BG33_886","attack":5,"health":5},
+            {"card_id":"BG33_886","attack":5,"health":5},
+            {"card_id":"BG33_886","attack":5,"health":5},
+            {"card_id":"BG33_886","attack":5,"health":5},
+            {"card_id":"BG33_886","attack":5,"health":5},
+            {"card_id":"BG33_886","attack":5,"health":5},
+            {"card_id":"BG33_886","attack":5,"health":5}]}"#;
+        let one = r#"{"turn":1,"tier":1,"minions":[
+            {"card_id":"BG36_200","attack":1,"health":1}]}"#;
+        let seven = board_spec_text(&ids, seven).unwrap();
+        let one = board_spec_text(&ids, one).unwrap();
+        // The seven as the winner: capped 5 a win, raw 8.
+        let won = prepare(
+            &data,
+            &RealFightSpec { me: seven.clone(), opp: one.clone(), next: None },
+        );
+        assert!(won.is_complete());
+        let tally = fight_tally(&data, &won, 1, 1, 1, 200, 7);
+        assert_eq!(
+            tally,
+            Tally {
+                wins: 200,
+                ties: 0,
+                losses: 0,
+                dealt: 1000,
+                taken: 0,
+                dealt_uncapped: 1600,
+                taken_uncapped: 0,
+            }
+        );
+        // The same pair the other way: capped 5 a loss, raw 8.
+        let lost = prepare(
+            &data,
+            &RealFightSpec { me: one, opp: seven, next: None },
+        );
+        assert!(lost.is_complete());
+        let tally = fight_tally(&data, &lost, 1, 1, 1, 200, 7);
+        assert_eq!(
+            tally,
+            Tally {
+                wins: 0,
+                ties: 0,
+                losses: 200,
+                dealt: 0,
+                taken: 1000,
+                dealt_uncapped: 0,
+                taken_uncapped: 1600,
+            }
+        );
     }
 }
