@@ -4386,3 +4386,63 @@ fn a_second_discover_replaces_the_engines_open_offer() {
     assert!(!game.players[ME].hand.iter().any(|m| m.card == stale), "not the engine's pick");
     game.check_invariants().expect("the pool stays exact");
 }
+
+/// Every fixture step, seated and then played on a carried clone, leaves the
+/// pool exact. This is the regression that a Discover landing in the Tavern
+/// caught: `seat` took a copy per offer option, then `take_step_prompts`
+/// refunded the carried game's copies and put the log's offer back without
+/// taking its copies again, so the pool held one extra copy per option (the
+/// Galakrond's Greed fixture is the case).
+#[test]
+fn every_fixture_step_keeps_the_pool_exact() {
+    use bgcore::shop_replay::seat_step;
+
+    let data = data();
+    let ids = ids();
+    for file in fixtures() {
+        for turn in &file.turns {
+            for i in 0..turn.actions.len() {
+                let step = &turn.actions[i];
+                let who = format!(
+                    "{} turn {} step {} ({})",
+                    file.file(),
+                    turn.turn,
+                    i,
+                    step.step
+                );
+                let seated = seat_step(&data, &ids, &file, turn, i, 1)
+                    .unwrap_or_else(|(why, _)| panic!("{who}: {why}"));
+                seated
+                    .game
+                    .check_invariants()
+                    .unwrap_or_else(|why| panic!("{who}, seated: {why}"));
+                let carry = seated.game.clone();
+                let (game, _missing, _text) = seated
+                    .play_on(&data, &ids, carry)
+                    .unwrap_or_else(|(why, _)| panic!("{who}: {why}"));
+                game.check_invariants()
+                    .unwrap_or_else(|why| panic!("{who}, played: {why}"));
+            }
+        }
+    }
+}
+
+/// A whole turn played forward on one game also leaves the pool exact: the
+/// Tavern and hand the replay puts back after each step move their copies.
+#[test]
+fn every_fixture_turn_keeps_the_pool_exact() {
+    use bgcore::shop_replay::replay_whole_turn;
+
+    let data = data();
+    let ids = ids();
+    for file in fixtures() {
+        for turn in &file.turns {
+            let who = format!("{} turn {} (whole turn)", file.file(), turn.turn);
+            let run = replay_whole_turn(&data, &ids, &file, turn, 1)
+                .unwrap_or_else(|(why, _)| panic!("{who}: {why}"));
+            run.game
+                .check_invariants()
+                .unwrap_or_else(|why| panic!("{who}: {why}"));
+        }
+    }
+}

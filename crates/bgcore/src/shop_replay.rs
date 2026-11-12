@@ -4612,6 +4612,36 @@ fn refund_open_discover(pool: &mut [u8], cards: &crate::cards::CardDb, pl: &mut 
     pl.repeat_discover = 0;
 }
 
+/// Take the pool copies the step's own Discover offers, matching what `seat`
+/// took on its game. A ready-made offer (`discover_minions`) holds none, and a
+/// spell or token holds none. The count is the copies the offer says: three
+/// for a Golden Dark Gift offer, the recorded ones for a Dark Gift, one for
+/// every other minion.
+fn take_open_discover(pool: &mut [u8], cards: &crate::cards::CardDb, pl: &mut Player) {
+    if !pl.discover_minions.is_empty() {
+        return;
+    }
+    for (i, &card) in pl.discover.iter().enumerate() {
+        let c = cards.get(card);
+        if c.token || c.is_spell() {
+            continue;
+        }
+        let want = if pl.dark_offer {
+            pl.discover_copies.get(i).copied().unwrap_or(1)
+        } else {
+            1
+        };
+        let slot = c.pool_slot as usize;
+        if slot < pool.len() {
+            let take = want.min(pool[slot]);
+            pool[slot] -= take;
+            if pl.dark_offer {
+                pl.discover_copies[i] = take;
+            }
+        }
+    }
+}
+
 /// Put the offers the step was seated with on the game the step is played on.
 /// The whole-turn replay and `train/era_turns.py` carry a game forward, while
 /// `seat` builds the step's prompts (a forced Discover or Dark Gift offer, a
@@ -4619,7 +4649,8 @@ fn refund_open_discover(pool: &mut [u8], cards: &crate::cards::CardDb, pl: &mut 
 /// game would answer its own draw instead of the log's. It also replaces an
 /// offer the engine left open, returning that offer's pool copies, which is
 /// what a multi-pick Discover needs (its second pick is the log's, not the
-/// engine's own).
+/// engine's own). The new offer's copies come out of the carried game's pool,
+/// as they came out of the seated game's pool when `seat` forced them.
 fn take_step_prompts(data: &Data, pool: &mut [u8], from: &Player, to: &mut Player) {
     refund_open_discover(pool, &data.cards, to);
     to.discover = from.discover.clone();
@@ -4658,6 +4689,7 @@ fn take_step_prompts(data: &Data, pool: &mut [u8], from: &Player, to: &mut Playe
     to.tp.discover_stats = from.tp.discover_stats;
     to.tp.whistle = from.tp.whistle;
     to.tp.choose_one_all = from.tp.choose_one_all;
+    take_open_discover(pool, &data.cards, to);
 }
 
 /// Put the log's hand on the carried game after a step. The engine draws its
