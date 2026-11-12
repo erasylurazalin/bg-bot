@@ -1064,22 +1064,37 @@ impl Game {
         if cards.get(pl.hand[last].card).is_spell() {
             return;
         }
-        if !cards.get(pl.hand[last].card).fixed_stats {
-            for i in 0..pl.board.len() {
-                let slab = pl.board[i].parts().find_map(|(card, golden)| {
-                    cards.get(card).after_buy.map(|a| (a, golden))
-                });
-                if let Some((a, golden)) = slab
-                    && !pl.board[i].activated
-                {
-                    pl.board[i].activated = true;
-                    let b = &mut pl.hand[last];
-                    b.attack += a.attack;
-                    b.health += a.health;
-                    let times = if golden { a.golden_multiply } else { a.multiply };
-                    b.attack = b.attack.saturating_mul(times);
-                    b.health = b.health.saturating_mul(times);
-                }
+        let bought_fixed = cards.get(pl.hand[last].card).fixed_stats;
+        let bought_tribes = cards.tribes_of(&pl.hand[last]);
+        for i in 0..pl.board.len() {
+            let after = pl.board[i].parts().find_map(|(card, golden)| {
+                cards.get(card).after_buy.map(|a| (a, golden))
+            });
+            let Some((a, golden)) = after else { continue };
+            if pl.board[i].activated {
+                continue;
+            }
+            if a.tribe.is_some_and(|t| !bought_tribes.has(t)) {
+                continue;
+            }
+            if a.gain_bought_stats {
+                pl.board[i].activated = true;
+                let bought = pl.hand[last];
+                let times = if golden { a.golden_multiply } else { a.multiply };
+                pl.board[i].attack = pl.board[i]
+                    .attack
+                    .saturating_add(bought.attack.saturating_mul(times));
+                pl.board[i].health = pl.board[i]
+                    .health
+                    .saturating_add(bought.health.saturating_mul(times));
+            } else if !bought_fixed {
+                pl.board[i].activated = true;
+                let b = &mut pl.hand[last];
+                b.attack += a.attack;
+                b.health += a.health;
+                let times = if golden { a.golden_multiply } else { a.multiply };
+                b.attack = b.attack.saturating_mul(times);
+                b.health = b.health.saturating_mul(times);
             }
         }
         let bought = pl.hand[last];
@@ -1166,7 +1181,10 @@ impl Game {
                 }
                 // Handled below: the minion with this text is on the board,
                 // not the one being sold.
-                Some(OnSell::GainSoldStats { .. }) | Some(OnSell::GoldIfLost(_)) | None => {}
+                Some(OnSell::GainSoldStats { .. })
+                | Some(OnSell::AfterSellTier { .. })
+                | Some(OnSell::GoldIfLost(_))
+                | None => {}
             }
         }
         // "After you sell an Elemental, gain its stats" (Arcane Behemoth):
@@ -1192,6 +1210,25 @@ impl Game {
                 o.attack = o.attack.saturating_add(m.attack * mul);
                 o.health = o.health.saturating_add(m.health * mul);
             }
+        }
+        // "After you sell a Tier 2 minion" (Timewarped Skipper): the text
+        // sits on a minion that stays on the board, so every copy on the
+        // board fires for the sold tier.
+        let sold_tier = self.data.cards.get(m.card).tier;
+        let mut fires: ArrayVec<(usize, Effect, bool), { crate::BOARD }> = ArrayVec::new();
+        for i in 0..self.players[p].board.len() {
+            for (card, golden) in self.players[p].board[i].parts() {
+                if let Some(OnSell::AfterSellTier { tier, effect }) =
+                    self.data.cards.get(card).on_sell
+                    && tier == sold_tier
+                {
+                    let _ = fires.try_push((i, effect, golden));
+                }
+            }
+        }
+        for (i, effect, golden) in fires {
+            let mut pos = i;
+            self.run_effect(p, &mut pos, effect, golden, 1);
         }
         self.fire_event(p, EventKind::MinionsSold, 1);
         self.trinket_event(p, Event::Sell, Some(m.card), 1);

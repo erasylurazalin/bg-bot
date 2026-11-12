@@ -1277,3 +1277,50 @@ hooks in.
   `apply_side_outcome`, the offer and the Ice Block, and the observation.
   `tests/trinkets.rs` and `tests/heroes_batch4.rs` read the Ice Block through
   the zone now.
+
+## 17. Systems the Timewarp run added (2026-11-12)
+
+- **The Timewarp marker.** `cards.toml timewarp = "minor"` or `"major"` on a
+  `[[token]]`; `Card.timewarp` holds the side, and `Card::lobby_ok` is false
+  for it, so no normal Tavern, Discover or random-minion draw reaches one.
+  The Timeworn Candelabra's own list will read the marker. See the Gotchas
+  note.
+- **Whenever a friendly minion is attacked.** `when_friendly_attacked = [a, h]`
+  on a card (Timewarped Arm). `Side::when_friendly_attacked` runs from
+  `attack_swings_at` before the hit and gives the defender the stats through
+  `gain_permanent_at`, so they reach `SideOutcome.permanent_stats`. Golden
+  doubles the numbers.
+- **A per-combat cap on taking damage.** `when_damaged_max = N` (Timewarped
+  Piper); `Fm.damaged_fires` counts the trigger this fight. `0` is no cap.
+- **After a friendly minion is Reborn.** `on_reborn = { buff_all = [a, h] }`
+  gives every friendly minion the stats permanently through
+  `gain_permanent_at` (Timewarped Jelly Belly). The reborn minion itself does
+  not fire its own copy, as before.
+- **End of turn.** `buff_board_and_hand = [a, h]` buffs every board and hand
+  minion (Timewarped Elegist); `low_flier = [a, h]` buffs minions below the
+  host's Attack, then below its Health (Timewarped Low-Flier);
+  `get_named_minion = "Name"` gets a named minion as a generated copy with no
+  pool copy (`Game::give_named_minion`, Timewarped Sellemental), the same rule
+  as every other "get" card.
+- **Avenge extras.** `get_gem_and_bonus = [a, h]` gets one Blood Gem and
+  raises the Gem value (Timewarped Geomancer); `max_gold = N` now runs in a
+  fight and reaches `SideOutcome::max_gold_gain` (Timewarped Recycler).
+- **On-kill Triple Reward.** `on_kill = "triple_reward"` pays once per combat
+  (`Fm.triple_reward_used`), two cards on a golden one (Timewarped Pagle).
+- **Permanent rally keyword and Gems.** `permanent_keyword = true` on
+  `buff_random_other` keeps the keyword through `permanent_keywords`
+  (Timewarped Guard); `gem_others_permanent = N` plays permanent Gems on the
+  other friendly minions (Timewarped Bonker).
+- **After you buy.** `after_buy` now takes `tribe` and
+  `gain_bought_stats = true`, which adds the bought minion's current stats to
+  the minion with the text (Timewarped Behemoth). `multiply`/`golden_multiply`
+  still scale a fixed buff.
+- **After you sell a tier.** `on_sell = { tier = N, effect = ... }` sits on a
+  board minion and fires when a minion of that tier is sold (Timewarped
+  Skipper). It is handled beside `GainSoldStats`, not on the sold card itself.
+- **Deathrattle summon overflow.** `deathrattle = { summon = "...", count, overflow_undead_attack = N }`
+  summons the tokens and turns each one that does not fit into `N` Attack for
+  your Undead this game (Timewarped Caretaker), through `gain_undead`.
+- **Random spell at least a cost.** `random_spell_at_least = N` is now on
+  `RawEffect` too, so a Deathrattle can get a Tavern spell costing at least N
+  (Timewarped Sporebat).

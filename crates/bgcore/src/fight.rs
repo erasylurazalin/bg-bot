@@ -361,6 +361,9 @@ pub struct SideOutcome {
     pub permanent_stats: [(i32, i32); BOARD],
     /// Bonus Keywords kept permanently, by starting board slot.
     pub permanent_keywords: [u8; BOARD],
+    /// Increase to the player's maximum Gold for good (Timewarped
+    /// Recycler).
+    pub max_gold_gain: u8,
     /// Increase to the player's Tavern spell bonus this game (Blue Whelp,
     /// and any spell bonus an effect grants in a fight).
     pub spell_bonus_gain: (i32, i32),
@@ -565,6 +568,11 @@ struct Fm {
     start_slot: Option<u8>,
     /// Friendly minions that died while this one lived (Avenge).
     avenge: u16,
+    /// Times this minion's "whenever this takes damage" trigger has fired
+    /// this fight (Timewarped Piper's cap).
+    damaged_fires: u8,
+    /// Timewarped Pagle's once-per-combat Triple Reward.
+    triple_reward_used: bool,
     /// The uid of the minion that dealt the damage that killed this one.
     killer: Option<u16>,
     /// Damage this minion's Health has taken in this fight. Its maximum
@@ -600,6 +608,8 @@ struct Side<'a> {
     hand_bonus: [(i32, i32); HAND],
     /// Whether any minion on the board reacts to taking damage.
     damage_trigger: bool,
+    /// A friendly minion was attacked: Timewarped Arm.
+    attacked_trigger: bool,
     /// Whether any minion on the board gives stats to minions summoned
     /// after it (Stalwart Kodo).
     gift_trigger: bool,
@@ -707,12 +717,15 @@ impl<'a> Side<'a> {
     ) -> Side<'a> {
         let mut ms = ArrayVec::new();
         for (slot, &m) in board.iter().take(BOARD).enumerate() {
-            ms.push(Fm { m, uid: *uid, start_slot: Some(slot as u8), avenge: 0, killer: None, taken: 0, gifts: 0 });
+            ms.push(Fm { m, uid: *uid, start_slot: Some(slot as u8), avenge: 0, damaged_fires: 0, triple_reward_used: false, killer: None, taken: 0, gifts: 0 });
             *uid += 1;
         }
         let damage_trigger = ms
             .iter()
             .any(|f| f.m.parts().any(|(c, _)| db.get(c).when_damaged.is_some()));
+        let attacked_trigger = ms
+            .iter()
+            .any(|f| f.m.parts().any(|(c, _)| db.get(c).when_friendly_attacked.is_some()));
         let gift_trigger = ms
             .iter()
             .any(|f| f.m.parts().any(|(c, _)| db.get(c).after_summon_give_stats.is_some()));
@@ -725,6 +738,7 @@ impl<'a> Side<'a> {
             hand: &hand[..hand.len().min(HAND)],
             hand_bonus: [(0, 0); HAND],
             damage_trigger,
+            attacked_trigger,
             gift_trigger,
             hand_taken: 0,
             ptr: 0,
@@ -892,6 +906,11 @@ impl<'a> Side<'a> {
         let host = self.ms[i].uid;
         for (card, golden) in m.parts() {
             if let Some(e) = db.get(card).when_damaged {
+                let max = db.get(card).when_damaged_max;
+                if max > 0 && self.ms[i].damaged_fires >= max {
+                    continue;
+                }
+                self.ms[i].damaged_fires = self.ms[i].damaged_fires.saturating_add(1);
                 let fx = Fx { side, host, killer: None, attacker: None, skip_ptr: false };
                 let mut at = i + 1;
                 self.run_effect(db, e, golden, fx, &mut at, uid, rng, w);
@@ -1094,6 +1113,37 @@ impl<'a> Side<'a> {
         }
     }
 
+    /// The minion in slot `i` gains a keyword it keeps after the fight
+    /// regardless of other keepers (Timewarped Guard).
+    fn gain_keyword_permanent_at(&mut self, i: usize, keyword: u8) {
+        self.ms[i].m.keywords.set(keyword);
+        if let Some(slot) = self.ms[i].start_slot {
+            self.out.permanent_keywords[slot as usize] |= keyword;
+        }
+    }
+
+    /// A friendly minion in `def_uid` was attacked: every Timewarped Arm on
+    /// its side gives it Attack for good, before the hit lands. Golden doubles
+    /// the amount.
+    fn when_friendly_attacked(&mut self, db: &CardDb, def_uid: u16) {
+        let Some(di) = self.index_of(def_uid) else { return };
+        let mut hits: ArrayVec<(i32, i32), BOARD> = ArrayVec::new();
+        for f in &self.ms {
+            if f.m.health <= 0 {
+                continue;
+            }
+            for (card, golden) in f.m.parts() {
+                if let Some((attack, health)) = db.get(card).when_friendly_attacked {
+                    let mul = if golden { 2 } else { 1 };
+                    let _ = hits.try_push((attack * mul, health * mul));
+                }
+            }
+        }
+        for (attack, health) in hits {
+            self.gain_permanent_at(db, di, attack, health);
+        }
+    }
+
     /// A friendly minion just lost Divine Shield: every Hopebringer on this
     /// side improves by one for the rest of the game. The count lives in its
     /// `improvements` and is carried to the player's real board.
@@ -1220,7 +1270,7 @@ impl<'a> Side<'a> {
     /// The minion in slot `idx` just came back through Reborn: every other
     /// friendly minion that reacts to a Reborn does (Barrier Banshee, Snazzy
     /// Phantom). A minion never reacts to its own Reborn.
-    fn note_reborn(&mut self, db: &CardDb, idx: usize) {
+    fn note_reborn(&mut self, db: &CardDb, idx: usize, dead_slot: Option<u8>) {
         let rb_uid = self.ms[idx].uid;
         let rb_attack = self.ms[idx].m.attack;
         let mut hosts: ArrayVec<(u16, OnReborn, bool), BOARD> = ArrayVec::new();
@@ -1241,6 +1291,32 @@ impl<'a> Side<'a> {
                     if let Some(i) = self.index_of(host) {
                         self.gain_at(db, i, attack * mul, health * mul);
                         self.ms[i].m.keywords.set(Keywords::DIVINE_SHIELD);
+                    }
+                }
+                OnReborn::BuffAll { attack, health } => {
+                    for i in 0..self.ms.len() {
+                        if self.ms[i].m.health > 0 {
+                            self.gain_permanent_at(db, i, attack * mul, health * mul);
+                        }
+                    }
+                    // The reborn copy is a summoned minion with no starting
+                    // slot. It still stands in the dead minion's slot, so
+                    // its share of a permanent buff comes back there
+                    // (Timewarped Jelly Belly). This runs only for a card
+                    // with this OnReborn, so normal games are unchanged.
+                    if let Some(slot) = dead_slot
+                        && self.ms.get(idx).is_some_and(|f| {
+                            f.start_slot.is_none() && f.m.health > 0
+                        })
+                    {
+                        self.out.permanent_stats[slot as usize].0 = self.out.permanent_stats
+                            [slot as usize]
+                            .0
+                            .saturating_add(attack * mul);
+                        self.out.permanent_stats[slot as usize].1 = self.out.permanent_stats
+                            [slot as usize]
+                            .1
+                            .saturating_add(health * mul);
                     }
                 }
                 OnReborn::Phantom => {
@@ -1731,6 +1807,9 @@ impl<'a> Side<'a> {
         if c.when_damaged.is_some() {
             self.damage_trigger = true;
         }
+        if c.when_friendly_attacked.is_some() {
+            self.attacked_trigger = true;
+        }
         if c.after_summon_give_stats.is_some() {
             self.gift_trigger = true;
         }
@@ -1740,7 +1819,7 @@ impl<'a> Side<'a> {
         }
         self.insert(
             pos,
-            Fm { m, uid: *uid, start_slot: None, avenge: 0, killer: None, taken: 0, gifts: 0 },
+            Fm { m, uid: *uid, start_slot: None, avenge: 0, damaged_fires: 0, triple_reward_used: false, killer: None, taken: 0, gifts: 0 },
         );
         *uid += 1;
         // Sprout It Out! (Greybough): minions summoned during combat gain
@@ -2290,6 +2369,18 @@ impl<'a> Side<'a> {
                 let n = self.counters.spells_cast as i32;
                 self.buff_deity((attack + per_spell.0 * n) * mul, (health + per_spell.1 * n) * mul);
             }
+            Effect::GetRandomSpellAtLeast { cost, count } => {
+                for _ in 0..count as i32 * mul {
+                    if let Some(c) = db.random_spell_at_least(
+                        cost,
+                        self.counters.tier,
+                        self.counters.lobby,
+                        rng,
+                    ) {
+                        self.out.push_card(c);
+                    }
+                }
+            }
             Effect::GetRandomSpellUpTo { cost, count } => {
                 for _ in 0..count as i32 * mul {
                     let card = match cost {
@@ -2397,6 +2488,12 @@ impl<'a> Side<'a> {
                 if let Some(i) = self.index_of(fx.host) {
                     self.gain_keyword_at(db, i, keyword);
                 }
+            }
+            Effect::MaxGold(n) => {
+                self.out.max_gold_gain = self
+                    .out
+                    .max_gold_gain
+                    .saturating_add(n.saturating_mul(mul as u8));
             }
             Effect::GetRandomMinion { tribe } => {
                 for _ in 0..mul {
@@ -2509,7 +2606,14 @@ impl<'a> Side<'a> {
                     self.gain_at(db, i, attack * mul, health * mul);
                 }
             }
-            Effect::BuffRandomOther { tribe, attack, health, keyword, count } => {
+            Effect::BuffRandomOther {
+                tribe,
+                attack,
+                health,
+                keyword,
+                count,
+                permanent_keyword,
+            } => {
                 // A golden Amber Guardian picks two Dragons, not bigger buffs.
                 let n = count as u32 * mul as u32;
                 let mut ok: ArrayVec<usize, BOARD> = ArrayVec::new();
@@ -2526,7 +2630,11 @@ impl<'a> Side<'a> {
                     let i = ok.remove(k);
                     self.gain_at(db, i, attack, health);
                     if keyword != 0 {
-                        self.gain_keyword_at(db, i, keyword);
+                        if permanent_keyword {
+                            self.gain_keyword_permanent_at(i, keyword);
+                        } else {
+                            self.gain_keyword_at(db, i, keyword);
+                        }
                     }
                 }
             }
@@ -2811,6 +2919,14 @@ impl<'a> Side<'a> {
                     }
                 }
             }
+            Effect::GemOthersPermanent(count) => {
+                let n = count as i32 * mul;
+                for i in 0..self.ms.len() {
+                    if self.ms[i].uid != fx.host && self.ms[i].m.health > 0 {
+                        self.gem_at(db, i, n, true, false, rng);
+                    }
+                }
+            }
             Effect::GemAttacker(count) => {
                 if let Some(a) = fx.attacker
                     && let Some(i) = self.index_of(a)
@@ -2822,6 +2938,15 @@ impl<'a> Side<'a> {
             Effect::GemBonus { attack, health } => {
                 // "This game": the fight's Gems grow now, the player's for
                 // good through the outcome.
+                self.counters.gem_attack += attack * mul;
+                self.counters.gem_health += health * mul;
+                self.out.gem_gain.0 += attack * mul;
+                self.out.gem_gain.1 += health * mul;
+            }
+            Effect::GetGemAndBonus { attack, health } => {
+                if let Some(gem) = db.blood_gem {
+                    self.out.push_card(gem);
+                }
                 self.counters.gem_attack += attack * mul;
                 self.counters.gem_health += health * mul;
                 self.out.gem_gain.0 += attack * mul;
@@ -2914,6 +3039,30 @@ impl<'a> Side<'a> {
                             if self.summon(db, side, pos, m, uid, rng, w) {
                                 pos += 1;
                             }
+                        }
+                    }
+                    Deathrattle::SummonOverflowUndeadAttack {
+                        card: tok,
+                        count,
+                        golden_doubles_count,
+                        attack,
+                    } => {
+                        let (n, tok_golden) = if golden_doubles_count {
+                            (count * mul as u8, false)
+                        } else {
+                            (count, golden)
+                        };
+                        let mut overflow = 0u8;
+                        for _ in 0..n {
+                            let m = db.make(tok, tok_golden);
+                            if self.summon(db, side, pos, m, uid, rng, w) {
+                                pos += 1;
+                            } else {
+                                overflow += 1;
+                            }
+                        }
+                        if overflow > 0 {
+                            self.gain_undead(db, attack * overflow as i32, 0);
                         }
                     }
                     Deathrattle::SummonByAttack { card: tok } => {
@@ -3300,7 +3449,7 @@ impl<'a> Side<'a> {
                 }
                 if self.summon(db, side, i, m, uid, rng, w) {
                     self.ms[i].taken = (full - 1).max(0);
-                    self.note_reborn(db, i);
+                    self.note_reborn(db, i, fm.start_slot);
                     let plain = self.ms[i].m;
                     let u = self.ms[i].uid;
                     self.trinket_hook(db, side, When::Reborn, Some((u, plain)), uid, rng, w);
@@ -4298,6 +4447,9 @@ fn attack_swings_at(
             sides[turn ^ 1].attack_secrets(db, turn ^ 1, def_uid, uid, rng, w);
         }
 
+        if sides[turn ^ 1].attacked_trigger {
+            sides[turn ^ 1].when_friendly_attacked(db, def_uid);
+        }
         let Some(ai) = sides[turn].index_of(me) else { break };
         let Some(di) = sides[turn ^ 1].index_of(def_uid) else { break };
         let attacker = sides[turn].ms[ai].m;
@@ -4464,6 +4616,16 @@ fn attack_swings_at(
                     }
                     KillReward::BuffHand { attack, health } => {
                         att.buff_random_hand(db, attack * mult, health * mult, rng);
+                    }
+                    KillReward::TripleReward => {
+                        if !att.ms[ai].triple_reward_used {
+                            att.ms[ai].triple_reward_used = true;
+                            if let Some(tok) = db.triple_reward {
+                                for _ in 0..mult {
+                                    att.out.push_card(tok);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -4883,7 +5045,7 @@ mod tests {
         let (mut s, mut uid) = side2(&db, &["Cage Gnawer"]);
         s.ms.insert(
             0,
-            Fm { m: gold, uid: 99, start_slot: None, avenge: 0, killer: None, taken: 0, gifts: 0 },
+            Fm { m: gold, uid: 99, start_slot: None, avenge: 0, damaged_fires: 0, triple_reward_used: false, killer: None, taken: 0, gifts: 0 },
         );
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());

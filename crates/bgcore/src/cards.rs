@@ -306,6 +306,9 @@ pub enum Effect {
     GetRandomMinion { tribe: Tribe },
     /// Get `count` random Tavern spells that cost `cost`.
     GetRandomSpell { cost: u8, count: u8 },
+    /// Get `count` random Tavern spells that cost at least `cost`
+    /// (Unfurled Codex, Timewarped Sporebat).
+    GetRandomSpellAtLeast { cost: u8, count: u8 },
     /// Summon `count` random pool minions that have a Deathrattle. Fights only.
     SummonRandomDeathrattle { count: u8 },
     /// Trigger your left-most Deathrattle `times` times. Fights only.
@@ -358,7 +361,16 @@ pub enum Effect {
     BuffAttacker { attack: i32, health: i32 },
     /// Give `count` random other friendly minions of a tribe stats and a
     /// keyword (Amber Guardian). A golden minion picks `count` twice as many.
-    BuffRandomOther { tribe: Option<Tribe>, attack: i32, health: i32, keyword: u8, count: u8 },
+    /// `permanent_keyword` keeps the keyword after the fight (Timewarped
+    /// Guard's "permanently").
+    BuffRandomOther {
+        tribe: Option<Tribe>,
+        attack: i32,
+        health: i32,
+        keyword: u8,
+        count: u8,
+        permanent_keyword: bool,
+    },
     /// Summon the `count` highest-Attack minions of a tribe (or any minion)
     /// from hand, for this combat only (Expert Aviator, Diremuck Forager,
     /// Sneed's New Shredder). The copies leave the hand for the rest of the
@@ -372,6 +384,9 @@ pub enum Effect {
     /// Give the minions of a tribe on the board and in hand stats (Shamanic
     /// Tidecaller).
     BuffTribeBoardAndHand { tribe: Tribe, attack: i32, health: i32 },
+    /// Give every minion on the board and in hand stats (Timewarped
+    /// Elegist).
+    BuffBoardAndHand { attack: i32, health: i32 },
     /// Trigger a friendly minion's Battlecry, chosen by the player, in the
     /// shop (Kelp Keeper).
     TriggerBattlecry,
@@ -448,6 +463,10 @@ pub enum Effect {
     /// Give the minions next to this one +attack, once and again for each
     /// friendly Golden minion (Surfing Sylvar).
     BuffAdjacentPerGolden { attack: i32 },
+    /// Give your minions with less Attack than this +attack, then your
+    /// minions with less Health than this +health (Timewarped Low-Flier).
+    /// The host's own stats are the threshold and do not change during it.
+    LowFlier { attack: i32, health: i32 },
     /// Buff one other friendly minion the player picks (of a tribe), by
     /// `attack`/`health` plus `per_gold` for each Gold spent this turn
     /// (Lovesick Balladist).
@@ -552,12 +571,18 @@ pub enum Effect {
     GemSelf { count: u8, permanent: bool },
     /// Play `count` Blood Gems on every other friendly minion (Bonker).
     GemOthers(u8),
+    /// Play `count` permanent Blood Gems on every other friendly minion
+    /// (Timewarped Bonker).
+    GemOthersPermanent(u8),
     /// Play `count` Blood Gems on the minion that just attacked (Prodigious
     /// Tusker). Fights only.
     GemAttacker(u8),
     /// Your Blood Gems give an extra +attack/+health this game (Sanguine
     /// Refiner's Rally, Sanguine Champion, Fearless Foodie, Gem Day).
     GemBonus { attack: i32, health: i32 },
+    /// Get one Blood Gem and raise the Gem value this game (Timewarped
+    /// Geomancer). The Gem count is always one; golden doubles the value.
+    GetGemAndBonus { attack: i32, health: i32 },
     /// Get `count` random Choose One cards, any tribe, up to your tier
     /// (Bramble Tunneler). Golden gets twice as many.
     GetRandomChooseOne(u8),
@@ -649,6 +674,7 @@ impl Effect {
             | Effect::BuffKiller { .. }
             | Effect::GainKeyword { .. }
             | Effect::GetRandomMinion { .. }
+            | Effect::GetRandomSpellAtLeast { .. }
             | Effect::SummonRandomDeathrattle { .. }
             | Effect::TriggerDeathrattle { .. }
             | Effect::BeetleBuff { .. }
@@ -684,8 +710,11 @@ impl Effect {
             | Effect::GetGems(_)
             | Effect::GemSelf { .. }
             | Effect::GemOthers(_)
+            | Effect::GemOthersPermanent(_)
             | Effect::GemAttacker(_)
             | Effect::GemBonus { .. }
+            | Effect::GetGemAndBonus { .. }
+            | Effect::MaxGold(_)
             | Effect::GetRandomChooseOne(_)
             | Effect::SummonStatCopyAttacker { .. }
             | Effect::GetAnyTavernSpell
@@ -1113,6 +1142,14 @@ pub enum Deathrattle {
     SummonByAttack {
         card: CardId,
     },
+    /// Summon `count` plain tokens; each one that does not fit gives your
+    /// Undead +attack Attack this game (Timewarped Caretaker).
+    SummonOverflowUndeadAttack {
+        card: CardId,
+        count: u8,
+        golden_doubles_count: bool,
+        attack: i32,
+    },
     CombatBeastBuff {
         attack: i32,
         health: i32,
@@ -1168,6 +1205,9 @@ pub enum EndOfTurn {
     BuffPerMagnetization { attack: i32, health: i32 },
     ImproveTier,
     GetCard { card: CardId, count: u8 },
+    /// Get a named minion as a generated copy, with no pool copy
+    /// (Timewarped Sellemental).
+    GetNamedMinion { card: CardId, count: u8 },
     CopyLastSpell,
     /// Any generic effect (one that needs no choice).
     Effect(Effect),
@@ -1302,6 +1342,9 @@ pub enum OnSummonBeast {
 pub enum OnReborn {
     /// Gain Divine Shield and stats (Barrier Banshee).
     Banshee { attack: i32, health: i32 },
+    /// Give every friendly minion stats permanently (Timewarped Jelly
+    /// Belly).
+    BuffAll { attack: i32, health: i32 },
     /// Give your right-most Undead stats equal to the Attack the Reborn
     /// minion came back with (Snazzy Phantom).
     Phantom,
@@ -1359,6 +1402,9 @@ pub enum OnSell {
     /// Gain the stats of the minion sold when it is of `tribe` (Arcane
     /// Behemoth). Golden doubles them.
     GainSoldStats { tribe: Option<Tribe> },
+    /// After you sell a minion of this tier, run the effect (Timewarped
+    /// Skipper). Golden doubles the effect's count.
+    AfterSellTier { tier: u8, effect: Effect },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1392,6 +1438,9 @@ pub enum KillReward {
     MaxStatsToHand,
     /// Give a random minion in the owner's hand +attack/+health (Murcules).
     BuffHand { attack: i32, health: i32 },
+    /// Once per combat, get a Triple Reward (Timewarped Pagle). Golden gets
+    /// two.
+    TripleReward,
 }
 
 /// A card's role in a "how many times" count (docs/rules/design.md "Set versus add, as
@@ -1444,6 +1493,11 @@ pub struct AfterBuy {
     pub health: i32,
     pub multiply: i32,
     pub golden_multiply: i32,
+    /// Only a bought minion of this tribe fires it (Timewarped Behemoth).
+    pub tribe: Option<Tribe>,
+    /// Gain the bought minion's current stats instead of buffing it
+    /// (Timewarped Behemoth).
+    pub gain_bought_stats: bool,
 }
 
 /// "After you summon a minion in combat, give it some multiple of this
@@ -1550,6 +1604,12 @@ pub struct Card {
     /// Whenever this minion takes damage in a fight (Very Hungry
     /// Winterfinner).
     pub when_damaged: Option<Effect>,
+    /// A fight trigger's per-combat cap (`0` is no cap): Timewarped Piper's
+    /// "3 times per combat".
+    pub when_damaged_max: u8,
+    /// Whenever a friendly minion is attacked, give it these stats for good
+    /// (Timewarped Arm). Golden doubles them.
+    pub when_friendly_attacked: Option<(i32, i32)>,
     /// While this is in its owner's hand, after they play a minion of a
     /// tribe (Bream Counter).
     pub while_in_hand: Option<WhileInHand>,
@@ -1851,6 +1911,7 @@ impl Card {
             || self.on_cast_spell_on_self.is_some()
             || self.on_cast_spell_on_tribe.is_some()
             || self.when_damaged.is_some()
+            || self.when_friendly_attacked.is_some()
             || self.while_in_hand.is_some()
             || self.whenever_friendly_attacks.is_some()
             || self.after_friendly_attacks.is_some()
@@ -1982,6 +2043,10 @@ struct RawCard {
     on_cast_spell_on_self: Option<RawEffect>,
     on_cast_spell_on_tribe: Option<RawOnCastSpellOnTribe>,
     when_damaged: Option<RawEffect>,
+    /// "3 times per combat" on a `when_damaged` trigger.
+    when_damaged_max: Option<u8>,
+    /// Whenever a friendly minion is attacked, give it these stats for good.
+    when_friendly_attacked: Option<[i32; 2]>,
     while_in_hand: Option<RawWhileInHand>,
     #[serde(default)]
     teaches_spell: bool,
@@ -2119,6 +2184,7 @@ struct RawOnReborn {
     banshee: Option<[i32; 2]>,
     #[serde(default)]
     phantom: bool,
+    buff_all: Option<[i32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -2127,6 +2193,11 @@ struct RawAfterBuy {
     buff: [i32; 2],
     multiply: i32,
     golden_multiply: i32,
+    /// Only a bought minion of this tribe fires it.
+    tribe: Option<String>,
+    /// Gain the bought minion's current stats instead of buffing it.
+    #[serde(default)]
+    gain_bought_stats: bool,
 }
 
 #[derive(Deserialize)]
@@ -2450,6 +2521,9 @@ struct RawEffect {
     per_keyword: Option<[i32; 2]>,
     #[serde(default)]
     random_keyword: bool,
+    /// Keep a keyword granted by `buff_random_other` after the fight.
+    #[serde(default)]
+    permanent_keyword: bool,
     /// "chosen", "random" or "highest_health".
     consume: Option<String>,
     /// The consumer is a friendly minion the player picks (of `tribe`).
@@ -2530,6 +2604,8 @@ struct RawEffect {
     gain_keyword: Option<String>,
     /// Get `count` random Tavern spells with this cost.
     random_spell_cost: Option<u8>,
+    /// Get `count` random Tavern spells costing at least this much.
+    random_spell_at_least: Option<u8>,
     summon_random_deathrattle: Option<u8>,
     #[serde(default)]
     trigger_deathrattle: bool,
@@ -2639,6 +2715,9 @@ struct RawEffect {
     /// minion's `improvements` (The Last One Standing's Rally).
     #[serde(default)]
     improves_self: bool,
+    /// Give every minion on the board and in hand stats (Timewarped
+    /// Elegist).
+    buff_board_and_hand: Option<[i32; 2]>,
     /// Your Undead have +buff this game (wherever they are).
     undead_bonus: Option<[i32; 2]>,
     /// The Attack `undead_bonus` gives when it runs outside combat.
@@ -2679,15 +2758,22 @@ struct RawEffect {
     gem_permanent: bool,
     /// Play this many Blood Gems on the other friendly minions.
     gem_others: Option<u8>,
+    /// Play this many permanent Blood Gems on the other friendly minions.
+    gem_others_permanent: Option<u8>,
     /// Play this many Blood Gems on the minion that just attacked.
     gem_attacker: Option<u8>,
     /// Your Blood Gems give this much extra this game.
     gem_bonus: Option<[i32; 2]>,
+    /// Get one Blood Gem and raise the Gem value this game.
+    get_gem_and_bonus: Option<[i32; 2]>,
     /// Get this many random Choose One cards.
     random_choose_one: Option<u8>,
     /// Rally: summon a copy of this card with this minion's stats, which
     /// attacks the target first (Jailbird Juggernaut).
     summon_stat_copy: Option<String>,
+    /// Give your minions below this one's stats the printed stats
+    /// (Timewarped Low-Flier).
+    low_flier: Option<[i32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -2718,6 +2804,9 @@ struct RawDeathrattle {
     count: Option<u8>,
     #[serde(default)]
     golden_doubles_count: bool,
+    /// Each summoned token that does not fit gives your Undead this much
+    /// Attack this game (Timewarped Caretaker).
+    overflow_undead_attack: Option<i32>,
     beetle_buff: Option<[i32; 2]>,
     summon_by_attack: Option<String>,
     combat_beast_buff: Option<[i32; 2]>,
@@ -2751,6 +2840,8 @@ struct RawEndOfTurn {
     buff_per_magnetization: Option<[i32; 2]>,
     improve_tier: Option<bool>,
     get: Option<String>,
+    /// Get a named minion as a generated copy, with no pool copy.
+    get_named_minion: Option<String>,
     count: Option<u8>,
     copy_last_spell: Option<bool>,
     effect: Option<RawEffect>,
@@ -2923,6 +3014,8 @@ struct RawOnSell {
     count: Option<u8>,
     discover_by_tier: Option<bool>,
     gold_if_lost: Option<u8>,
+    /// A sold minion of this tier fires the effect (Timewarped Skipper).
+    tier: Option<u8>,
     effect: Option<RawEffect>,
     /// Gain the stats of the sold minion when it is of this tribe (Arcane
     /// Behemoth); an empty string is any minion.
@@ -3470,12 +3563,18 @@ impl CardDb {
                 Effect::GemSelf { count: n, permanent: b.gem_permanent }
             } else if let Some(n) = b.gem_others {
                 Effect::GemOthers(n)
+            } else if let Some(n) = b.gem_others_permanent {
+                Effect::GemOthersPermanent(n)
             } else if let Some(n) = b.gem_attacker {
                 Effect::GemAttacker(n)
             } else if let Some([attack, health]) = b.gem_bonus {
                 Effect::GemBonus { attack, health }
+            } else if let Some([attack, health]) = b.get_gem_and_bonus {
+                Effect::GetGemAndBonus { attack, health }
             } else if let Some(n) = b.random_choose_one {
                 Effect::GetRandomChooseOne(n)
+            } else if let Some([attack, health]) = b.low_flier {
+                Effect::LowFlier { attack, health }
             } else if let Some(name) = &b.summon_stat_copy {
                 Effect::SummonStatCopyAttacker { card: minion_id(name)? }
             } else if b.get_any_tavern_spell {
@@ -3523,6 +3622,8 @@ impl CardDb {
                 Effect::GetLockbox { sooner: n }
             } else if b.random_bounty {
                 Effect::GetRandomBounty
+            } else if let Some([attack, health]) = b.buff_board_and_hand {
+                Effect::BuffBoardAndHand { attack, health }
             } else if let Some([attack, health]) = b.buff {
                 let per_keyword = b.per_keyword.map_or((0, 0), |[a, h]| (a, h));
                 match b.target.as_deref() {
@@ -3586,6 +3687,8 @@ impl CardDb {
                 Effect::GainKeyword { keyword: keyword_bit(k)? }
             } else if let Some(cost) = b.random_spell_cost {
                 Effect::GetRandomSpell { cost, count: b.count.unwrap_or(1) }
+            } else if let Some(cost) = b.random_spell_at_least {
+                Effect::GetRandomSpellAtLeast { cost, count: b.count.unwrap_or(1) }
             } else if let Some(n) = b.summon_random_deathrattle {
                 Effect::SummonRandomDeathrattle { count: n }
             } else if b.trigger_deathrattle {
@@ -3664,6 +3767,7 @@ impl CardDb {
                     health,
                     keyword,
                     count: b.count.unwrap_or(1),
+                    permanent_keyword: b.permanent_keyword,
                 }
             } else if let Some([attack, health]) = b.set_stats_any {
                 Effect::SetStatsAnyMinion { attack, health }
@@ -3881,11 +3985,20 @@ impl CardDb {
                 None => None,
                 Some(d) => Some(if let Some(name) = &d.summon {
                     let card = token_id(name).map_err(&err)?;
-                    Deathrattle::Summon {
-                        card,
-                        count: d.count.unwrap_or(1),
-                        golden_doubles_count: d.golden_doubles_count,
-                        beetle_buff: d.beetle_buff.map(|[a, h]| (a, h)),
+                    if let Some(attack) = d.overflow_undead_attack {
+                        Deathrattle::SummonOverflowUndeadAttack {
+                            card,
+                            count: d.count.unwrap_or(1),
+                            golden_doubles_count: d.golden_doubles_count,
+                            attack,
+                        }
+                    } else {
+                        Deathrattle::Summon {
+                            card,
+                            count: d.count.unwrap_or(1),
+                            golden_doubles_count: d.golden_doubles_count,
+                            beetle_buff: d.beetle_buff.map(|[a, h]| (a, h)),
+                        }
                     }
                 } else if let Some(name) = &d.summon_by_attack {
                     let card = token_id(name).map_err(&err)?;
@@ -3933,6 +4046,9 @@ impl CardDb {
                     EndOfTurn::BuffPerMagnetization { attack, health }
                 } else if e.improve_tier == Some(true) {
                     EndOfTurn::ImproveTier
+                } else if let Some(name) = &e.get_named_minion {
+                    let card = minion_id(name).map_err(&err)?;
+                    EndOfTurn::GetNamedMinion { card, count: e.count.unwrap_or(1) }
                 } else if let Some(name) = &e.get {
                     let card = generated_id(name).map_err(&err)?;
                     EndOfTurn::GetCard { card, count: e.count.unwrap_or(1) }
@@ -4118,6 +4234,11 @@ impl CardDb {
                     Some(effect)
                 }
             };
+            let when_damaged_max = c.when_damaged_max.unwrap_or(0);
+            if when_damaged_max > 0 && when_damaged.is_none() {
+                return Err(err("when_damaged_max needs when_damaged".into()));
+            }
+            let when_friendly_attacked = c.when_friendly_attacked.map(|[a, h]| (a, h));
 
             let while_in_hand = match &c.while_in_hand {
                 None => None,
@@ -4165,6 +4286,9 @@ impl CardDb {
                     OnSell::DiscoverByTier
                 } else if let Some(g) = s.gold_if_lost {
                     OnSell::GoldIfLost(g)
+                } else if let Some(tier) = s.tier {
+                    let effect = s.effect.as_ref().ok_or("on_sell tier needs effect")?;
+                    OnSell::AfterSellTier { tier, effect: parse_effect(effect).map_err(&err)? }
                 } else if let Some(e) = &s.effect {
                     OnSell::Effect(parse_effect(e).map_err(&err)?)
                 } else if let Some(t) = &s.gain_sold_stats {
@@ -4204,6 +4328,8 @@ impl CardDb {
                 None => None,
                 Some(r) => Some(if let Some([attack, health]) = r.banshee {
                     OnReborn::Banshee { attack, health }
+                } else if let Some([attack, health]) = r.buff_all {
+                    OnReborn::BuffAll { attack, health }
                 } else if r.phantom {
                     OnReborn::Phantom
                 } else {
@@ -4274,6 +4400,8 @@ impl CardDb {
                 on_cast_spell_on_self,
                 on_cast_spell_on_tribe,
                 when_damaged,
+                when_damaged_max,
+                when_friendly_attacked,
                 while_in_hand,
                 teaches_spell: c.teaches_spell,
                 no_triple: c.no_triple,
@@ -4315,6 +4443,7 @@ impl CardDb {
                     None => None,
                     Some(RawOnKill::Name(n)) => match n.as_str() {
                         "max_stats_to_hand" => Some(KillReward::MaxStatsToHand),
+                        "triple_reward" => Some(KillReward::TripleReward),
                         other => return Err(err(format!("unknown on_kill {other:?}"))),
                     },
                     Some(RawOnKill::Reward { buff_hand: [attack, health] }) => {
@@ -4332,12 +4461,17 @@ impl CardDb {
                     .transpose()
                     .map_err(&err)?,
                 play_shield: c.play_shield.as_deref().map(tribe).transpose().map_err(&err)?,
-                after_buy: c.after_buy.as_ref().map(|a| AfterBuy {
-                    attack: a.buff[0],
-                    health: a.buff[1],
-                    multiply: a.multiply,
-                    golden_multiply: a.golden_multiply,
-                }),
+                after_buy: match &c.after_buy {
+                    None => None,
+                    Some(a) => Some(AfterBuy {
+                        attack: a.buff[0],
+                        health: a.buff[1],
+                        multiply: a.multiply,
+                        golden_multiply: a.golden_multiply,
+                        tribe: a.tribe.as_deref().map(tribe).transpose().map_err(&err)?,
+                        gain_bought_stats: a.gain_bought_stats,
+                    }),
+                },
                 buff_per_kind_death: c.buff_per_kind_death.map(|[a, h]| (a, h)),
                 on_reborn,
                 deity: c.deity.as_deref().map(|s| match s {
@@ -4495,6 +4629,8 @@ impl CardDb {
                 on_cast_spell_on_self: None,
                 on_cast_spell_on_tribe: None,
                 when_damaged: None,
+                when_damaged_max: 0,
+                when_friendly_attacked: None,
                 while_in_hand: None,
                 teaches_spell: false,
                 no_triple: false,

@@ -237,6 +237,14 @@ impl Game {
                                 self.give_generated_tracking(p, tok, pos);
                             }
                         }
+                        Some(EndOfTurn::GetNamedMinion { card: tok, count }) => {
+                            let n = count * (mul as u8);
+                            for _ in 0..n {
+                                if !self.give_named_minion(p, tok) {
+                                    break;
+                                }
+                            }
+                        }
                         Some(EndOfTurn::Effect(e)) => {
                             self.run_effect(p, pos, e, golden, 1);
                         }
@@ -923,6 +931,10 @@ impl Game {
             deity.health += so.deity_gain.1;
         }
         self.players[p].spells_cast = self.players[p].spells_cast.saturating_add(so.spells_cast_gain);
+        if so.max_gold_gain > 0 {
+            self.players[p].extra_max_gold =
+                self.players[p].extra_max_gold.saturating_add(so.max_gold_gain);
+        }
         let (sa, sh) = so.spell_bonus_gain;
         if sa != 0 || sh != 0 {
             self.players[p].spell_bonus.0 += sa;

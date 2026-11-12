@@ -3262,6 +3262,24 @@ impl Game {
         }
     }
 
+    /// Give a named minion as a generated copy, with no pool copy (Timewarped
+    /// Sellemental). False when the hand is full.
+    fn give_named_minion(&mut self, p: usize, card: CardId) -> bool {
+        if self.players[p].hand.is_full() {
+            return false;
+        }
+        if self.data.cards.get(card).is_spell() {
+            return false;
+        }
+        let m = self.players[p].make_card(&self.data.cards, card, false, 0);
+        if self.add_to_hand(p, m) {
+            self.check_triple(p, card);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Take a card straight into a player's hand. Pool minions come out of
     /// `self.pool`; spells and tokens are generated with `pool_copies = 0`.
     /// For tests and setting up positions, not part of the game.

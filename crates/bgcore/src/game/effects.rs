@@ -593,6 +593,17 @@ impl Game {
                     }
                 }
             }
+            Effect::GetRandomSpellAtLeast { cost, count } => {
+                let tier = self.players[p].tier;
+                let total = count as i32 * mul * runs as i32;
+                for _ in 0..total {
+                    if let Some(c) =
+                        self.data.cards.random_spell_at_least(cost, tier, self.lobby, &mut self.rng)
+                    {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
             Effect::ReplaceWithFishbait { card } => {
                 self.start_fishbait(p, *pos, card, golden);
             }
@@ -708,6 +719,18 @@ impl Game {
                     }
                 }
             }
+            Effect::BuffBoardAndHand { attack, health } => {
+                let n = mul * runs as i32;
+                let cards = &self.data.cards;
+                for o in &mut self.players[p].board {
+                    buff(o, attack * n, health * n);
+                }
+                for o in &mut self.players[p].hand {
+                    if !cards.get(o.card).is_spell() {
+                        buff(o, attack * n, health * n);
+                    }
+                }
+            }
             Effect::DiscoverTribeIfAnother { tribe, count } => {
                 let n = count.saturating_mul(mul as u8).saturating_mul(runs);
                 let cards = &self.data.cards;
@@ -815,6 +838,23 @@ impl Game {
                 for _ in 0..mul as u8 * runs {
                     if let Some(c) = self.data.cards.random_bounty(self.lobby, &mut self.rng) {
                         self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
+            Effect::LowFlier { attack, health } => {
+                let (host_attack, host_health) = match self.players[p].board.get(*pos) {
+                    Some(m) => (m.attack, m.health),
+                    None => return,
+                };
+                let n = mul * runs as i32;
+                for o in &mut self.players[p].board {
+                    if o.attack < host_attack {
+                        buff(o, attack * n, 0);
+                    }
+                }
+                for o in &mut self.players[p].board {
+                    if o.health < host_health {
+                        buff(o, 0, health * n);
                     }
                 }
             }
@@ -1067,8 +1107,24 @@ impl Game {
                     }
                 }
             }
+            Effect::GemOthersPermanent(count) => {
+                let times = count.saturating_mul(mul as u8).saturating_mul(runs);
+                let board_len = self.players[p].board.len();
+                for i in 0..board_len {
+                    if i != *pos {
+                        self.play_gems_on_board(p, i, times);
+                    }
+                }
+            }
             Effect::GemBonus { attack, health } => {
                 let n = mul * runs as i32;
+                let pl = &mut self.players[p];
+                pl.gem_attack += attack * n;
+                pl.gem_health += health * n;
+            }
+            Effect::GetGemAndBonus { attack, health } => {
+                let n = mul * runs as i32;
+                self.give_gems(p, 1);
                 let pl = &mut self.players[p];
                 pl.gem_attack += attack * n;
                 pl.gem_health += health * n;

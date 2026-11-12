@@ -3894,3 +3894,131 @@ stats = [8, 8]
 timewarp = "major"
 keywords = ["divine_shield"]
 end_of_turn = { get = "Temperature Shift" }
+
+# --- Timewarped minions, Phase 2 (Timeworn Candelabra, 2-cost) ---
+# Same marker as the Phase 1 tokens: no normal draw reaches them.
+
+[[token]]
+name = "Timewarped Arm"
+tier = 3
+tribe = "neutral"
+stats = [8, 8]
+timewarp = "minor"
+when_friendly_attacked = [8, 0]
+
+[[token]]
+name = "Timewarped Elegist"
+tier = 3
+tribe = "murloc"
+stats = [3, 5]
+timewarp = "minor"
+end_of_turn = { effect = { buff_board_and_hand = [2, 1] } }
+
+[[token]]
+name = "Timewarped Geomancer"
+tier = 3
+tribe = "quilboar"
+stats = [2, 9]
+timewarp = "minor"
+avenge = { every = 5, effect = { get_gem_and_bonus = [1, 1] } }
+
+[[token]]
+name = "Timewarped Jelly Belly"
+tier = 3
+tribe = "undead"
+stats = [5, 6]
+timewarp = "minor"
+on_reborn = { buff_all = [2, 2] }
+
+[[token]]
+name = "Timewarped Low-Flier"
+tier = 3
+tribe = "dragon"
+stats = [10, 10]
+timewarp = "minor"
+end_of_turn = { effect = { low_flier = [2, 2] } }
+
+[[token]]
+name = "Timewarped Pagle"
+tier = 3
+tribe = "pirate"
+stats = [8, 6]
+timewarp = "minor"
+on_kill = "triple_reward"
+
+[[token]]
+name = "Timewarped Piper"
+tier = 3
+tribe = "quilboar"
+stats = [2, 8]
+timewarp = "minor"
+when_damaged = { gem_bonus = [1, 0] }
+when_damaged_max = 3
+
+[[token]]
+name = "Timewarped Recycler"
+tier = 3
+tribe = "undead"
+stats = [2, 7]
+timewarp = "minor"
+avenge = { every = 4, effect = { max_gold = 1 } }
+
+[[token]]
+name = "Timewarped Guard"
+tier = 3
+tribe = "mech"
+stats = [5, 10]
+timewarp = "minor"
+keywords = ["divine_shield"]
+rally = { buff_random_other = [0, 0], keyword = "divine_shield", permanent_keyword = true }
+
+[[token]]
+name = "Timewarped Bonker"
+tier = 5
+tribe = "quilboar"
+stats = [7, 14]
+timewarp = "major"
+keywords = ["windfury"]
+rally = { gem_others_permanent = 2 }
+
+[[token]]
+name = "Timewarped Sellemental"
+tier = 3
+tribe = "elemental"
+stats = [8, 8]
+timewarp = "minor"
+end_of_turn = { get_named_minion = "Sellemental" }
+
+[[token]]
+name = "Timewarped Skipper"
+tier = 3
+tribe = "murloc"
+stats = [5, 6]
+timewarp = "minor"
+on_sell = { tier = 2, effect = { random_tier_minion = 1 } }
+
+[[token]]
+name = "Timewarped Sporebat"
+tier = 3
+tribe = "beast"
+stats = [9, 2]
+timewarp = "minor"
+keywords = ["taunt"]
+deathrattle = { effect = { random_spell_at_least = 2 } }
+
+[[token]]
+name = "Timewarped Behemoth"
+tier = 5
+tribe = "elemental"
+stats = [9, 11]
+timewarp = "major"
+keywords = ["taunt"]
+after_buy = { buff = [0, 0], multiply = 1, golden_multiply = 2, tribe = "elemental", gain_bought_stats = true }
+
+[[token]]
+name = "Timewarped Caretaker"
+tier = 5
+tribe = "undead"
+stats = [5, 5]
+timewarp = "major"
+deathrattle = { summon = "Skeleton", count = 5, golden_doubles_count = true, overflow_undead_attack = 1 }
