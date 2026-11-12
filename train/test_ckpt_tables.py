@@ -92,6 +92,21 @@ class CheckpointTablesTest(unittest.TestCase):
         self.assertTrue(torch.equal(w[4], src[0]))
         self.assertEqual((kept, fresh, dropped), (3, 1, 0))
 
+    def test_word_rows_follow_words_and_new_words_take_the_base_row(self):
+        src = torch.arange(8, dtype=torch.float32).reshape(4, 2)
+        own = torch.zeros(5, 2)
+        w, kept, fresh, dropped = model._remap_words(
+            src, own, ["a", "b", "c"], ["b", "a", "d", "c"], base=0)
+        self.assertTrue(torch.equal(w[1], src[2]))
+        self.assertTrue(torch.equal(w[2], src[1]))
+        self.assertTrue(torch.equal(w[3], src[0]))
+        self.assertTrue(torch.equal(w[4], src[3]))
+        self.assertEqual((kept, fresh, dropped), (3, 1, 0))
+        # warm_start leaves a word it did not know on its fresh row instead.
+        own = torch.full((5, 2), 7.0)
+        w, _, _, _ = model._remap_words(src, own, ["a", "b"], ["a", "c"], base=None)
+        self.assertTrue(torch.equal(w[2], own[2]))
+
 
 if __name__ == "__main__":
     unittest.main()

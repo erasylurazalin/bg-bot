@@ -2659,7 +2659,9 @@ Deleting `.venv` undoes it.
   present words, projected to `emb`. The whole table is computed once per
   forward and indexed by card id; a textless card's vector is zero. The
   vocabulary and token table are saved in `model_opts`, so `--resume` and
-  the eval scripts rebuild the model without reading `ref/`; a checkpoint
+  the eval scripts rebuild the model without reading `ref/`; `model.load` does
+  read today's export once to widen the word table when the vocabulary grew,
+  and falls back to the saved list when `ref/` is absent. A checkpoint
   without them has no text parameters and is unchanged. The shared slot
   encoder means all three models (`mlp`, `attn`, `pool`) read it. Heroes,
   powers, trinkets and Dark Gifts keep their own id embeddings.
@@ -2677,12 +2679,15 @@ Deleting `.venv` undoes it.
   `heroes.toml` and `trinkets.toml` at the commit it trained on
   (`runs/n1025-attn` trained on `7b545bd`). Without that flag, a missing
   table is rebuilt from the newest commit at or before the checkpoint's mtime
-  whose table has the checkpoint's size. The eval
-  scripts' `model.load` remaps the same three tables (and the card-text
-  buffers, which are card-indexed) on load: a name it did not know gets the
-  empty row (0), so the loaded network answers as it did on everything it
-  knew. `--resume` still needs the same cards: after a card change, start a
-  new run with `--init-from`.
+  whose table has the checkpoint's size. The card-text word embedding carries
+  over by word too: the word list is the `card_text["vocab"]` every
+  `--card-text` checkpoint saves, and a word it did not know starts fresh in
+  `warm_start` or takes the padding row in `model.load`. The eval scripts'
+  `model.load` remaps the same three tables and the card-text buffers (card
+  ids and word ids) on load: a name it did not know gets the empty row (0),
+  so the loaded network answers as it did on everything it knew. `--resume`
+  still needs the same cards: after a card change, start a new run with
+  `--init-from`.
 
 ## An older simulator
 

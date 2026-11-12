@@ -10,8 +10,10 @@ Keywords stay words. Golden and normal copies share the name and so the text.
 The output is `{"vocab": [...], "tokens": [[...], ...], "missing": [...]}`:
 row 0 is the empty card and every row is padded with 0 to MAX_TOKENS. The
 vocabulary is sorted, token id = index + 1, 0 is padding. `tokens` and
-`vocab` go into the checkpoint's model_opts, so resume and eval never read
-ref/ again; `missing` is only for the run's report.
+`vocab` go into the checkpoint's model_opts, so resume and the eval scripts
+rebuild the model without the export. `model.load` reads today's export once
+to widen the word table when the vocabulary grew (and falls back to the saved
+list when `ref/` is absent); `missing` is only for the run's report.
 
     python3 -I train/card_text.py
 """

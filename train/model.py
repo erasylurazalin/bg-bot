@@ -721,40 +721,119 @@ def ck_model(ck):
     return kind, model_opts(kind, **saved)
 
 
+def _ck_card_text(ck):
+    """The card-text table a checkpoint saved, from model_opts or cfg."""
+    ct = (ck.get("model_opts") or {}).get("card_text")
+    if ct:
+        return ct
+    return (ck.get("cfg") or {}).get("card_text")
+
+
+def current_vocab(names=None):
+    """Today's card-text words, in card_text.py's sorted order, read once.
+    An empty list when the card export is not there: the checkpoint's own
+    saved vocabulary is still usable then."""
+    global _CURRENT_VOCAB
+    if _CURRENT_VOCAB is None:
+        import card_text
+        try:
+            _CURRENT_VOCAB = card_text.build_table(
+                names or current_names()["cards"])["vocab"]
+        except OSError:
+            _CURRENT_VOCAB = []
+    return _CURRENT_VOCAB
+
+
 def _align_card_text(opts, ck, path, new_names):
-    """A checkpoint's card-text buffers cover its card ids. Widen them to
-    today's card ids, row by row by card name (row 0 stays the empty row and
-    a card the checkpoint did not know gets zero text), so the built network's
-    text table has as many rows as its card embedding."""
+    """A checkpoint's card-text buffers cover its card ids and word ids.
+    Widen the rows to today's card ids by card name (row 0 stays the empty
+    row; a card the checkpoint did not know gets zero text), and move the
+    token ids onto today's vocabulary (a word that is gone becomes padding).
+    The stored text of a known card is unchanged."""
     ct = opts.get("card_text")
     if not ct:
         return opts
+    ct = dict(ct)
     tokens = torch.as_tensor(ct["tokens"])
+    changed = False
+    old_vocab = ct.get("vocab")
+    new_vocab = current_vocab(new_names)
+    if old_vocab and new_vocab and list(old_vocab) != list(new_vocab):
+        at = {word: i + 1 for i, word in enumerate(new_vocab)}
+        lut = torch.tensor([0] + [at.get(word, 0) for word in old_vocab], dtype=torch.long)
+        tokens = lut[tokens]
+        ct["vocab"] = list(new_vocab)
+        changed = True
+
     old_names = ck.get("card_names")
     if old_names is None or len(old_names) != tokens.shape[0] - 1:
         inferred = _infer_names(path, "cards", tokens.shape[0] - 1)
         old_names = inferred[0] if inferred else None
-    if old_names is None or len(old_names) == len(new_names):
+    if old_names is not None and len(old_names) != len(new_names):
+        old_at = {}
+        for i, n in enumerate(old_names):
+            old_at.setdefault(n, []).append(i)
+        used = {}
+        row = [0] * (len(new_names) + 1)
+        for i, n in enumerate(new_names):
+            at = old_at.get(n)
+            k = used.get(n, 0)
+            if at is not None and k < len(at):
+                row[i + 1] = at[k] + 1
+                used[n] = k + 1
+        at = torch.tensor(row, dtype=torch.long)
+        tokens = tokens[at]
+        if ct.get("forms") is not None:
+            ct["forms"] = torch.as_tensor(ct["forms"])[at].tolist()
+        changed = True
+    if not changed:
         return opts
-    old_at = {}
-    for i, n in enumerate(old_names):
-        old_at.setdefault(n, []).append(i)
-    used = {}
-    row = [0] * (len(new_names) + 1)
-    for i, n in enumerate(new_names):
-        at = old_at.get(n)
-        k = used.get(n, 0)
-        if at is not None and k < len(at):
-            row[i + 1] = at[k] + 1
-            used[n] = k + 1
-    at = torch.tensor(row, dtype=torch.long)
-    ct = dict(ct)
-    ct["tokens"] = tokens[at].tolist()
-    if ct.get("forms") is not None:
-        ct["forms"] = torch.as_tensor(ct["forms"])[at].tolist()
+    ct["tokens"] = tokens.tolist()
     opts = dict(opts)
     opts["card_text"] = ct
     return opts
+
+
+def _remap_words(src_w, own_w, old_vocab, new_vocab, base=None):
+    """The word embedding for `new_vocab`, each word's row from `src_w`
+    (laid out by `old_vocab`); row 0 (padding) is carried. A new word keeps
+    `own_w`'s fresh row, or gets row `base` of `src_w` when base is not None
+    (model.load uses the padding row, so an old network answers as before)."""
+    w = own_w.clone()
+    w[0] = src_w[0]
+    old = {word: i + 1 for i, word in enumerate(old_vocab)}
+    kept = 0
+    for i, word in enumerate(new_vocab):
+        j = old.get(word)
+        if j is not None and j < src_w.shape[0]:
+            w[i + 1] = src_w[j]
+            kept += 1
+        elif base is not None:
+            w[i + 1] = src_w[base]
+    dropped = len(set(old_vocab) - set(new_vocab))
+    return w, kept, len(new_vocab) - kept, dropped
+
+
+def _remap_word_table(src, own, take, ck, net, base=None):
+    """Carry `inp.text.word.weight` over by word. The checkpoint's word list
+    is the one it saved in card_text["vocab"]; a checkpoint that saved tokens
+    without a word list cannot be matched by word and is left as it was.
+    Returns one note when the table was remapped."""
+    keys = [k for k in own if k.endswith("text.word.weight") and k in src]
+    if not keys:
+        return []
+    old_vocab = (_ck_card_text(ck) or {}).get("vocab")
+    text = getattr(net, "text", None) or getattr(getattr(net, "inp", None), "text", None)
+    new_vocab = getattr(text, "vocab", None)
+    if not old_vocab or not new_vocab:
+        return []
+    src_w, own_w = src[keys[0]], own[keys[0]]
+    if src_w.shape == own_w.shape and list(old_vocab) == list(new_vocab):
+        return []
+    w, kept, fresh, dropped = _remap_words(src_w, own_w, old_vocab, new_vocab, base=base)
+    for k in keys:
+        take[k] = w
+    return [f"text words: {kept} kept, {fresh} new, {dropped} dropped"]
 
 
 def load(path, dev="cpu", compile=False):
@@ -775,6 +854,7 @@ def load(path, dev="cpu", compile=False):
     own = net.state_dict()
     take = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
     notes = _remap_tables(src, own, take, ck, path, base=0)
+    notes += _remap_word_table(src, own, take, ck, net, base=0)
     missing, _ = net.load_state_dict(take, strict=False)
     params = {name for name, _ in net.named_parameters()}
     missing = [name for name in missing if name in params]
@@ -794,6 +874,7 @@ TABLE_SUFFIX = {"cards": "card.weight", "heroes": "hero.weight", "trinkets": "tr
 TABLE_FILE = {"cards": "cards.toml", "heroes": "heroes.toml", "trinkets": "trinkets.toml"}
 
 _CURRENT_NAMES = None
+_CURRENT_VOCAB = None
 _INFER_CACHE = {}
 
 
@@ -1066,7 +1147,9 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     `old_cards` / `old_heroes` / `old_trinkets` for one saved before it
     stored them. A table whose rows are already in the right places is left
     alone, so the rows for hero powers and other unnamed tail entries stay
-    as the checkpoint had them.
+    as the checkpoint had them. The card-text word embedding is matched by
+    word from the checkpoint's saved `card_text["vocab"]`; a word it did not
+    know starts fresh.
 
     An input layer that only grew (the 2026-11-06 opponent view widened the
     opponent block) keeps every old column where the column map puts it and
@@ -1087,6 +1170,7 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
                                     "trinkets": trinkets},
                              old_cards=old_cards, old_heroes=old_heroes,
                              old_trinkets=old_trinkets)
+    remapped += _remap_word_table(src, own, take, ck, net, base=None)
     old_opp = _grown_opp_scalars(kind, net, src)
     if old_opp is not None:
         for name, (cols, _) in _input_cols(kind, net, bgpy.OPP_SCALARS).items():
