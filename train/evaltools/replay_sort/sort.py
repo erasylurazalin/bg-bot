@@ -2,21 +2,20 @@
 """Sort every stopped whole-turn replay by the first step that diverged.
 
 The input is train/runs/engine-pays/turns.json (seed 1). The first diverging
-step is not in that file, so this script runs a logging build of turn_replay
-that replays every prefix of a stopped turn and compares the engine's state
-after each step with the state the log records after it. The logging build is
-target/replay-sort-bin/turn_replay_trace; it was built from a scratch copy of
-the tree under target/replay-sort-src/repo (only the trace output was added).
+step is not in that file, so this script runs `turn_replay --trace`: the same
+replay, logging every prefix of a stopped turn and comparing the engine's
+state after each step with the state the log records after it.
 
 Usage, from the repo root:
 
     python3 train/evaltools/replay_sort/sort.py
     python3 train/evaltools/replay_sort/sort.py --run-trace
 
---run-trace rebuilds the trace from boards/actions instead of reusing
-train/runs/replay-sort/trace.json. The action files are pinned to the ones the
-engine-pays run used, so the 490 turns stay the same even after Era adds more
-games to boards/actions.
+`--trace` is part of `bgbench`'s own `turn_replay` now (build it with
+`cargo build --release -p bgbench`). `--run-trace` rebuilds the trace from
+boards/actions instead of reusing train/runs/replay-sort/trace.json. The
+action files are pinned to the ones the engine-pays run used, so the 490
+turns stay the same even after Era adds more games to boards/actions.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-TRACE_BIN = ROOT / "target/replay-sort-bin/turn_replay_trace"
+TRACE_BIN = ROOT / "target/release/turn_replay"
 
 
 def blocks(text: str) -> list[str]:
@@ -314,17 +313,32 @@ def classify(trace, engine, actions):
         )
 
     def a_or_loader(name):
-        # A name the engine builds as a trinket or hero power, offered as a
-        # Discover option, is a replay loader miss, not missing content:
-        # force_offer resolves every option as a card. A name the engine does
-        # not build is group (a).
+        # A name the engine builds (a trinket, hero power, Dark Gift or card)
+        # that a step could not offer is a replay loader miss, not missing
+        # content: `force_offer` seats an offer by its kind, and an option
+        # from another table (a hero offered in a power list, a spell in a
+        # trinket offer) still fails. A name the engine does not build at all
+        # is group (a).
         if not built(name):
             return ("a", name, "")
+        reason = trace["stop_reason"] or ""
+        variant = re.search(
+            r"(hero power|trinket) not built: ([^(]+) \(([^)]+)\)", reason
+        )
+        if variant and variant.group(2).strip() == name:
+            table = engine["powers"] if variant.group(1) == "hero power" else engine["trinkets"]
+            if table.get(name) != variant.group(3):
+                return (
+                    "a",
+                    name,
+                    "the log's " + variant.group(1) + " is a variant the engine does not build ("
+                    + variant.group(3) + ")",
+                )
         kind = engine["kind"](name)
         return (
             "c",
             kind + " option: " + name,
-            name + " is built, but the replay's force_offer resolves the option as a card",
+            name + " is built, but force_offer cannot offer it as the step's kind",
         )
 
     # A missing source (Alternate Timeline) is the thing to build, not each
@@ -448,7 +462,7 @@ def main():
             sys.exit(
                 "the traced replay is missing: "
                 + str(TRACE_BIN)
-                + " (build it from target/replay-sort-src/repo)"
+                + " (build it with cargo build --release -p bgbench)"
             )
         pinned = ROOT / "target/replay-sort-src/actions-replay-sort"
         pinned.mkdir(parents=True, exist_ok=True)
@@ -514,8 +528,9 @@ def main():
     lines = []
     lines.append("# Every stopped replay turn, sorted by its first cause")
     lines.append("")
+    shown_turns = turns_path.relative_to(ROOT) if turns_path.is_relative_to(ROOT) else turns_path
     lines.append("Replay: `bgbench turn_replay`, seed 1, turns 7 to 12. "
-                 "Input `train/runs/engine-pays/turns.json`; the first "
+                 "Input `" + str(shown_turns) + "`; the first "
                  "diverging step comes from the traced prefix replay. "
                  "Script: `train/evaltools/replay_sort/sort.py`. In `turns.json`, "
                  "`stop_step` and `first_diverging_step` are 0 based as the replay "
@@ -582,13 +597,18 @@ def main():
 
     table("a", "(a) Not in the engine at all", "Name, kind and card text. The name is the first unbuilt thing the state needed.", True)
     table("b", "(b) In the engine but behaving differently", "The one-line difference for each name; the per-turn state is in `turns.json`.", with_reason=True)
-    loader = [r for r in rows if r["group"] == "c" and r["name"].startswith(("trinket option:", "hero power option:"))]
+    loader = [
+        r
+        for r in rows
+        if r["group"] == "c"
+        and r["name"].startswith(("trinket option:", "hero power option:", "spell option:", "gift option:"))
+    ]
     random_c = [r for r in rows if r["group"] == "c" and r not in loader]
     raw_option_stops = sum(
         1 for r in rows if "an option the card set does not build" in (r["stop_reason"] or "")
     )
     c_intro = ("(c) has two kinds. " + str(len(random_c)) + " turns first diverge at a draw the engine makes itself (a Refreshed Tavern, a Discover or a generated card). "
-               + str(len(loader)) + " turns first diverge at an option the engine does build but the replay cannot offer: `force_offer` resolves every option as a card, so a trinket or hero power option fails before the trinket branch. "
+               + str(len(loader)) + " turns first diverge at an option the engine builds but `force_offer` cannot offer as the step's kind: a hero offered in a power list, a spell in a trinket offer, or an option from another table. "
                + "Those " + str(len(loader)) + " turns across " + str(len({r['name'] for r in loader})) + " names are a replay-tool problem, not missing content. "
                + "The raw stop reason says an option the card set does not build on " + str(raw_option_stops) + " turns; " + str(len(loader)) + " of those first diverge at the option, and the other " + str(raw_option_stops - len(loader)) + " first diverged earlier.")
     table("c", "(c) In the engine, only the replay cannot follow", intro=c_intro, with_reason=True)
@@ -601,36 +621,32 @@ def main():
     grouped = defaultdict(list)
     for (group, name), turns in by_name.items():
         label = name
-        if name.startswith(("trinket option:", "hero power option:")):
+        if name.endswith(" option:"):
             label = "loader: built option the replay cannot offer"
         grouped[(group, label)] += turns
     top = sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:10]
     for (group, name), turns in top:
         lines.append(f"| {name} | {group} | {len(turns)} |")
     lines.append("")
-    lines.append("The loader row pools the 65 `trinket option:` and `hero power option:` names; the (c) table lists them one by one.")
+    lines.append("The loader row pools every `trinket option:`, `hero power option:`, `spell option:` and `gift option:` name; the (c) table lists them one by one.")
     lines.append("")
     lines.append("## Replay tool problems seen")
     lines.append("")
     lines.append(
-        "1. `force_offer` resolves every offer option with `resolve_card`, which "
-        "only knows `cards.toml`. A trinket option (Trinket pick, Mystery Cube, "
-        "Trip Vouchers, Eastern Plaguelands, Growing Collection) or a hero power "
-        "option (Conviction, Shift your Hero Power) therefore fails as 'an option "
-        "the card set does not build' even though `trinkets.toml` or `heroes.toml` "
-        "builds it. This is the largest single cause in the run: " + str(len(loader))
-        + " turns. The trinket branch of `force_offer` is never reached because the "
-        "card resolution above it fails first."
+        "1. `force_offer` seats an offer by the table its options come from "
+        "(`trinkets.toml`, `heroes.toml` or `cards.toml`). A step whose options "
+        "are not all from one table (a hero offered in a power list, a spell in "
+        "a trinket offer) still fails as 'an option the card set does not "
+        "build'. Those are the remaining `* option:` rows: " + str(len(loader))
+        + " turns."
     )
     lines.append("")
     lines.append(
         "2. A multi-pick effect (`Book of Medivh` with two Discovers, `Token of the "
-        "Old Gods`, `Kel'Thuzad's Kitty`, `Triple Reward` after a play) leaves the "
-        "engine's own Discover offer open. `force_offer` adds the log's options "
-        "without clearing that offer, so the `Choose` index can pick an engine "
-        "option or fall outside the log's offer. That shows up as the group (c) "
-        "Discover rows and as some illegal `Choose` stops. This is replay plumbing, "
-        "not a game rule: a traced prefix replay shows it."
+        "Old Gods`, `Kel'Thuzad's Kitty`, `Triple Reward` after a play) now has its "
+        "next offer replace the engine's open one (`take_step_prompts`). Turns that "
+        "still stop in a Discover have a different first cause, named by the trace's "
+        "`first_kind` and `diffs`."
     )
     lines.append("")
     (out / "report.md").write_text("\n".join(lines) + "\n")

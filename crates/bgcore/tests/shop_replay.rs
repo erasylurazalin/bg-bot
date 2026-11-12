@@ -4125,15 +4125,14 @@ fn logged_ids() -> CardIdMap {
 
 /// The whole-turn mode on the Tras'tath turn the lobster replay used
 /// (`Hearthstone_2026_10_28_22_11_50-g2` turn 10). The per-step replay seats
-/// every step from the log and ends at count 18 and 1044/818; played forward
-/// on one game, the engine's own Discover draws move the hand, so the run
-/// stops at the Sprightly Scarab play before the last Fishbait attacks. The
-/// test pins that difference: the turn is playable up to step 41, and what
-/// stops it is the carried hand no longer holding the card at the logged
-/// slot, not a seating failure.
+/// every step from the log and ends at count 18 and 1044/818. Played forward
+/// on one game, the engine's own Discover and generated-card draws move the
+/// hand; the whole-turn replay now puts the log's hand in place after every
+/// step, so the Sprightly Scarab play finds its card and the last Fishbait
+/// attacks run. The test pins that the turn plays to the end and that the
+/// engine's own end board stays close to the log's, not that the two match.
 #[test]
-fn the_whole_turn_mode_on_the_tras_tath_turn_stops_at_the_moved_hand() {
-    use bgcore::cards::Counter;
+fn the_whole_turn_mode_plays_the_tras_tath_turn_to_the_end() {
     use bgcore::shop_replay::replay_whole_turn;
 
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
@@ -4150,27 +4149,240 @@ fn the_whole_turn_mode_on_the_tras_tath_turn_stops_at_the_moved_hand() {
         .find(|t| t.turn == 10)
         .expect("the logged turn 10");
     let run = replay_whole_turn(&data(), &ids, file, turn, 1).expect("the turn's start seats");
-    let stop = run.stop.as_ref().expect("the whole-turn run stops on this turn");
-    assert_eq!(stop.step, 40, "the Sprightly Scarab play (0-based step 40)");
-    assert_eq!(stop.kind, "play");
-    assert_eq!(stop.card.as_deref(), Some("Sprightly Scarab"));
-    assert_eq!(stop.class, "illegal");
-    assert_eq!(run.played, 40);
+    assert!(run.complete(), "the whole turn plays to the end: {run:?}");
+    assert_eq!(run.played, run.steps);
     assert_eq!(run.steps, 47);
-    // The last good step is the Snarky Shark sell. The carried state diverged
-    // earlier in the turn, which stops the third Fishbait attack: the count is
-    // 15 here, not the per-step replay's 18, and the board is the engine's
-    // own. The log's board after the same step is 1847 Attack plus Health.
+    // The carried hand is the log's after every step, so the last Fishbait
+    // attacks run and the engine reaches the log's end. Its board is its own,
+    // 1793 against the log's 1862.
     let pl = &run.game.players[ME];
-    assert_eq!(
-        pl.improve[Counter::TastyLobster.index()],
-        15,
-        "the Tasty Lobster count after step 40"
-    );
     let attack: i32 = pl.board.iter().map(|m| m.attack).sum();
     let health: i32 = pl.board.iter().map(|m| m.health).sum();
-    assert_eq!((attack, health), (684, 559), "the board at the last good step");
-    let log_state = run.log_state(turn).expect("the log's state after step 40");
+    let log_state = run.log_state(turn).expect("the log's end state");
     let log_total: i32 = log_state.board.iter().map(|m| m.attack + m.health).sum();
-    assert_eq!(log_total, 1847, "the log's board after step 40");
+    assert_eq!(log_total, 1862, "the log's end board");
+    assert_eq!(attack + health, 1793, "the engine's end board is close to the log's");
+}
+
+/// A one-turn file from its JSON, with the one action it holds.
+fn one_turn(text: &str) -> ShopFileSpec {
+    parse_action_files(&[("one.json".to_string(), text.to_string())])
+        .expect("the one-turn file parses")
+        .remove(0)
+}
+
+/// A logged state with the zones a test names and the same numbers every
+/// synthetic turn uses.
+fn state(gold: i32, hand: &str, tavern: &str, powers: &str, trinkets: &str) -> String {
+    format!(
+        r#""board": [], "hand": {hand}, "tavern": {tavern}, "gold": {gold},
+           "tier": 4, "upgrade_cost": 8, "health": 30, "armor": 0,
+           "free_refreshes": 0, "frozen": false, "secrets": [],
+           "hero_powers": {powers}, "trinkets": {trinkets}"#
+    )
+}
+
+/// A trinket pick's options come from `trinkets.toml`, not `cards.toml`: the
+/// pick is answered with `ChooseTrinket`, the slot comes from the step's
+/// `slot_kind`, and the trinket lands in that slot.
+#[test]
+fn a_trinket_pick_offer_resolves_against_the_trinket_table() {
+    use bgcore::shop_replay::replay_whole_turn;
+
+    let start = state(10, "[]", "[]", "[]", "[]");
+    let after = state(
+        7,
+        "[]",
+        "[]",
+        "[]",
+        r#"[{"card_id": "BG32_MagicItem_951", "name": "Gold Pendant", "greater": false}]"#,
+    );
+    let text = format!(
+        r#"{{"source": "test", "game": 1, "turns": [
+          {{"turn": 9,
+           "start": {{{start}}},
+           "actions": [
+             {{"step": "trinket_pick",
+               "source": {{"id": 1, "card_id": "BG30_Trinket_1st", "name": "Lesser Trinket"}},
+               "options": [
+                 {{"id": 11, "card_id": "BG32_MagicItem_951", "name": "Gold Pendant"}},
+                 {{"id": 12, "card_id": "BG36_MagicItem_300", "name": "Frigid Blossom"}}],
+               "slot_kind": "lesser", "paid": {{"gold": 3, "health": 0}},
+               "picked": {{"id": 11, "card_id": "BG32_MagicItem_951", "name": "Gold Pendant"}},
+               "after": {{{after}}}}}
+           ], "end": null}}]}}"#
+    );
+    let file = one_turn(&text);
+    let ids = ids();
+    let data = data();
+    let run = replay_whole_turn(&data, &ids, &file, &file.turns[0], 1)
+        .expect("the turn's start seats");
+    assert!(run.complete(), "{run:?}");
+    let gold = data
+        .trinkets
+        .by_card_id("BG32_MagicItem_951")
+        .expect("Gold Pendant is built");
+    assert_eq!(run.game.players[ME].trinkets[0].of, gold + 1);
+    run.game.check_invariants().expect("the pool stays exact");
+}
+
+/// A Hero Power Discover's options come from `heroes.toml`: the engine's
+/// `power_offer` is filled, `Choose` picks it, and the power lands in the
+/// main or second slot the state after the pick names.
+#[test]
+fn a_hero_power_offer_resolves_against_the_hero_table() {
+    use bgcore::shop_replay::replay_whole_turn;
+
+    let powers = r#"[{"card_id": "TB_BaconShop_HP_052", "name": "Arcane Alteration",
+                   "second": false, "used_this_turn": 0}]"#;
+    let start = state(10, "[]", "[]", "[]", "[]");
+    let after = state(10, "[]", "[]", powers, "[]");
+    let text = format!(
+        r#"{{"source": "test", "game": 1, "turns": [
+          {{"turn": 8,
+           "start": {{{start}}},
+           "actions": [
+             {{"step": "discover", "kind": "discover",
+               "source": {{"id": 1, "card_id": "BG20_HERO_202pt", "name": "Shift your Hero Power"}},
+               "options": [
+                 {{"id": 21, "card_id": "TB_BaconShop_HP_014", "name": "Stay Frosty"}},
+                 {{"id": 22, "card_id": "TB_BaconShop_HP_052", "name": "Arcane Alteration"}}],
+               "picked": {{"id": 22, "card_id": "TB_BaconShop_HP_052", "name": "Arcane Alteration"}},
+               "after": {{{after}}}}}
+           ], "end": null}}]}}"#
+    );
+    let file = one_turn(&text);
+    let ids = ids();
+    let data = data();
+    let run = replay_whole_turn(&data, &ids, &file, &file.turns[0], 1)
+        .expect("the turn's start seats");
+    assert!(run.complete(), "{run:?}");
+    let st = run.game.players[ME].power.expect("the picked power is in the main slot");
+    assert_eq!(data.heroes.power(st.of).card_id, "TB_BaconShop_HP_052");
+    run.game.check_invariants().expect("the pool stays exact");
+}
+
+/// A roll's logged Tavern replaces the engine's own draw: after the step the
+/// shop holds the log's card, and the pool has given one copy back and taken
+/// the new one, so the accounting holds.
+#[test]
+fn a_forced_roll_puts_the_logs_tavern_in_place() {
+    use bgcore::shop_replay::replay_whole_turn;
+
+    let before_tavern = r#"[{"id": 31, "slot": 1, "card_id": "X1", "name": "Southsea Busker",
+                          "attack": 3, "health": 1, "kind": "minion"}]"#;
+    let after_tavern = r#"[{"id": 41, "slot": 1, "card_id": "X2", "name": "Bilgewater Breakout",
+                          "attack": 3, "health": 2, "kind": "minion"}]"#;
+    let start = state(10, "[]", before_tavern, "[]", "[]");
+    let after = state(8, "[]", after_tavern, "[]", "[]");
+    let text = format!(
+        r#"{{"source": "test", "game": 1, "turns": [
+          {{"turn": 8,
+           "start": {{{start}}},
+           "actions": [
+             {{"step": "roll", "option": 1, "paid": {{"gold": 2, "health": 0}}, "cost": 2,
+               "after": {{{after}}}}}
+           ], "end": null}}]}}"#
+    );
+    let file = one_turn(&text);
+    let ids = ids();
+    let data = data();
+    let run = replay_whole_turn(&data, &ids, &file, &file.turns[0], 1)
+        .expect("the turn's start seats");
+    assert!(run.complete(), "{run:?}");
+    let pl = &run.game.players[ME];
+    let want = data.cards.by_name("Bilgewater Breakout").expect("the logged Tavern card");
+    assert_eq!(pl.shop.len(), 1);
+    assert_eq!(pl.shop[0].card, want, "the log's Tavern, not the engine's draw");
+    run.game.check_invariants().expect("the pool stays exact");
+}
+
+/// A Discover's logged options replace the engine's own draw: the picked card
+/// lands in the hand, and the pool copy moves with it.
+#[test]
+fn a_forced_discover_follows_the_logs_offer() {
+    use bgcore::shop_replay::replay_whole_turn;
+
+    let hand = r#"[{"index": 1, "card_id": "X2", "name": "Bilgewater Breakout",
+                  "attack": 3, "health": 2, "golden": false, "kind": "minion"}]"#;
+    let start = state(10, "[]", "[]", "[]", "[]");
+    let after = state(10, hand, "[]", "[]", "[]");
+    let text = format!(
+        r#"{{"source": "test", "game": 1, "turns": [
+          {{"turn": 8,
+           "start": {{{start}}},
+           "actions": [
+             {{"step": "discover", "kind": "discover",
+               "source": {{"id": 1, "card_id": "BG31_890", "name": "Boundless Potential"}},
+               "options": [
+                 {{"id": 51, "card_id": "X1", "name": "Southsea Busker",
+                   "attack": 3, "health": 1, "golden": false}},
+                 {{"id": 52, "card_id": "X2", "name": "Bilgewater Breakout",
+                   "attack": 3, "health": 2, "golden": false}},
+                 {{"id": 53, "card_id": "X3", "name": "Clever Castaway",
+                   "attack": 2, "health": 3, "golden": false}}],
+               "picked": {{"id": 52, "card_id": "X2", "name": "Bilgewater Breakout",
+                 "attack": 3, "health": 2, "golden": false}},
+               "moved": {{"id": 52, "from": {{"where": "offer"}},
+                 "to": {{"where": "hand", "index": 1}}}},
+               "after": {{{after}}}}}
+           ], "end": null}}]}}"#
+    );
+    let file = one_turn(&text);
+    let ids = ids();
+    let data = data();
+    let want = data.cards.by_name("Bilgewater Breakout").expect("the picked card");
+    let run = replay_whole_turn(&data, &ids, &file, &file.turns[0], 1)
+        .expect("the turn's start seats");
+    assert!(run.complete(), "{run:?}");
+    assert!(run.game.players[ME].hand.iter().any(|m| m.card == want));
+    run.game.check_invariants().expect("the pool stays exact");
+}
+
+/// A second pick replaces an engine offer still open, which is the multi-pick
+/// case (the log has the next offer, so the engine's own is not offered). The
+/// old offer's pool copy goes back and the log's pick lands.
+#[test]
+fn a_second_discover_replaces_the_engines_open_offer() {
+    use bgcore::shop_replay::{seat_step, turn_start_game};
+
+    let hand = r#"[{"index": 1, "card_id": "X2", "name": "Bilgewater Breakout",
+                  "attack": 3, "health": 2, "golden": false, "kind": "minion"}]"#;
+    let start = state(10, "[]", "[]", "[]", "[]");
+    let after = state(10, hand, "[]", "[]", "[]");
+    let text = format!(
+        r#"{{"source": "test", "game": 1, "turns": [
+          {{"turn": 8,
+           "start": {{{start}}},
+           "actions": [
+             {{"step": "discover", "kind": "discover",
+               "source": {{"id": 1, "card_id": "BG31_890", "name": "Boundless Potential"}},
+               "options": [
+                 {{"id": 51, "card_id": "X1", "name": "Southsea Busker",
+                   "attack": 3, "health": 1, "golden": false}},
+                 {{"id": 52, "card_id": "X2", "name": "Bilgewater Breakout",
+                   "attack": 3, "health": 2, "golden": false}},
+                 {{"id": 53, "card_id": "X3", "name": "Clever Castaway",
+                   "attack": 2, "health": 3, "golden": false}}],
+               "picked": {{"id": 52, "card_id": "X2", "name": "Bilgewater Breakout",
+                 "attack": 3, "health": 2, "golden": false}},
+               "moved": {{"id": 52, "from": {{"where": "offer"}},
+                 "to": {{"where": "hand", "index": 1}}}},
+               "after": {{{after}}}}}
+           ], "end": null}}]}}"#
+    );
+    let file = one_turn(&text);
+    let ids = ids();
+    let data = data();
+    let turn = &file.turns[0];
+    let want = data.cards.by_name("Bilgewater Breakout").expect("the picked card");
+    let (mut game, _missing) = turn_start_game(&data, &ids, &file, turn, 1).expect("the start seats");
+    let stale = data.cards.by_name("Surfing Sylvar").expect("a card not in the offer");
+    let _ = game.players[ME].discover.try_push(stale);
+    let seated = seat_step(&data, &ids, &file, turn, 0, 1).expect("the step seats");
+    let (game, _missing, _text) = seated.play_on(&data, &ids, game).expect("the step plays");
+    assert!(game.players[ME].discover.is_empty(), "the old offer is replaced");
+    assert!(game.players[ME].hand.iter().any(|m| m.card == want));
+    assert!(!game.players[ME].hand.iter().any(|m| m.card == stale), "not the engine's pick");
+    game.check_invariants().expect("the pool stays exact");
 }

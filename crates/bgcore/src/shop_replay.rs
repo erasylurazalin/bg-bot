@@ -3407,8 +3407,8 @@ fn holmes_offer_answer(
     ids: &CardIdMap,
     step: &ShopStepSpec,
 ) -> Option<([CardId; 2], u8)> {
-    let source = step.source.as_ref()?.card_id.as_deref()?;
-    let i = data.heroes.power_by_card_id(source)?;
+    let source = step.source.as_ref()?;
+    let i = resolve_power(data, source)?;
     let coin = match data.heroes.power(i).effect {
         crate::heroes::PowerEffect::DetectiveForHire { coin } => coin,
         _ => return None,
@@ -3430,9 +3430,105 @@ fn holmes_offer_answer(
     Some((cards, correct))
 }
 
+/// What an offer's options are made of, which says how to seat them: the
+/// trinket table (a trinket offer, and a Discover a power deals from
+/// trinkets), the hero power table (a Hero Power Discover or a chooser), or
+/// `cards.toml` (every other Discover and Dark Gift offer).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OfferKind {
+    Trinket,
+    Power,
+    Card,
+}
+
+/// The trinket a place names, by card id first and by name after: the log's
+/// token copy of a trinket can carry a card id the trinket table does not (the
+/// game's own `t` variant), while the name is the table's.
+fn resolve_trinket(data: &Data, place: &ShopPlace) -> Option<u8> {
+    if let Some(id) = place.card_id.as_deref()
+        && let Some(i) = data.trinkets.by_card_id(id)
+    {
+        return Some(i);
+    }
+    place.name.as_deref().and_then(|n| data.trinkets.by_name(n))
+}
+
+/// The hero power a place names: by card id, then by name for the game's own
+/// token variant of a power.
+fn resolve_power(data: &Data, place: &ShopPlace) -> Option<u8> {
+    if let Some(id) = place.card_id.as_deref()
+        && let Some(i) = data.heroes.power_by_card_id(id)
+    {
+        return Some(i);
+    }
+    let name = place.name.as_deref()?;
+    data.heroes
+        .powers
+        .iter()
+        .position(|p| p.name == name)
+        .map(|i| i as u8)
+}
+
+/// The table the log's options come from. A step is a whole offer of one kind:
+/// the game never mixes a trinket with a minion in one Discover. A
+/// `trinket_pick` can still deal cards: Book of Medivh's pick opens a choice
+/// of Tavern spells, which the game logs under the same step name.
+fn offer_kind(data: &Data, step: &ShopStepSpec) -> OfferKind {
+    if step.options.is_empty() {
+        return OfferKind::Card;
+    }
+    // A trinket offer can have an option the trinket table does not build; it
+    // is still a trinket offer (the missing one is content, not a card
+    // lookup). A step named `trinket_pick` whose options are no trinkets at
+    // all is Book of Medivh's choice of Tavern spells, which the game logs
+    // under the same name.
+    if step.options.iter().any(|o| resolve_trinket(data, o).is_some()) {
+        return OfferKind::Trinket;
+    }
+    if step.options.iter().any(|o| resolve_power(data, o).is_some()) {
+        return OfferKind::Power;
+    }
+    OfferKind::Card
+}
+
+/// The trinket slot the pick went into, as the loader seats the state's
+/// trinket list: the first non-Greater is the Lesser slot, the next Greater
+/// the Greater slot, and anything after them the power's slot. A trinket a
+/// power offers (Fantastic Treasure, Growing Collection) is in that last one,
+/// so the pick must land there and not in the Greater slot.
+fn trinket_slot_of(after: &ShopStateSpec, picked: &str) -> Option<u8> {
+    let mut slot = 0usize;
+    for t in &after.trinkets {
+        let want = if slot == 0 && !t.greater {
+            0
+        } else if slot <= 1 && t.greater {
+            1
+        } else {
+            2
+        };
+        slot = want + 1;
+        if t.card_id.as_deref() == Some(picked) {
+            return Some(want as u8 + 1);
+        }
+    }
+    None
+}
+
+/// Whether the picked power went into the second slot, from the state the
+/// pick left: Unmasked Identity replaces the main one, Reinvigorating Light
+/// and Genn's first pick the second.
+fn power_offer_second(after: &ShopStateSpec, picked: &str) -> bool {
+    after
+        .hero_powers
+        .iter()
+        .find(|p| p.card_id.as_deref() == Some(picked))
+        .is_some_and(|p| p.second)
+}
+
 /// Put the log's offer on the player before answering it: a Discover's
-/// options, a Dark Discovery's offers with their gifts, or a trinket offer.
-/// Returns the index of the option the log picked.
+/// options, a Dark Discovery's offers with their gifts, a trinket offer, or a
+/// Hero Power Discover's options. Returns the index of the option the log
+/// picked.
 fn force_offer(
     data: &Data,
     ids: &CardIdMap,
@@ -3451,6 +3547,90 @@ fn force_offer(
         .iter()
         .position(|o| o.id == picked.id)
         .ok_or_else(|| "the pick is not one of the options".to_string())?;
+    let kind = offer_kind(data, step);
+    if kind == OfferKind::Trinket {
+        // A trinket offer, whether the log writes it as a pick or as the
+        // Discover a power's offer deals. The engine's offer holds trinket
+        // table indices and their prices. The cost the pick was sold at is not
+        // in the options, only what the step paid: the picked one carries
+        // that, the others nothing.
+        let paid = step.paid.map_or(0, |p| p.gold);
+        let picked_id = picked.card_id.as_deref().unwrap_or_default();
+        // The state the pick left says which slot it filled. A trinket pick
+        // carries its own `slot_kind`; a power's offer does not, and after
+        // the pick the state's list places it (the loader reads that list the
+        // same way).
+        let slot = match step.slot_kind.as_deref() {
+            Some("greater") => 2,
+            Some("lesser") => 1,
+            // A Discover a power deals from trinkets carries no kind: the
+            // state the pick left places it. A trinket pick's own kind comes
+            // first because the state can hold the same card in two slots
+            // (Souvenir Stand turns into a copy of the Greater pick, so both
+            // slots name Colorful Compass and only the kind says which one
+            // was bought).
+            _ => step
+                .after
+                .as_ref()
+                .and_then(|after| trinket_slot_of(after, picked_id))
+                .unwrap_or_else(|| {
+                    if step.step == "trinket_pick" {
+                        missing.push("a trinket slot the engine has no kind for: unknown".to_string());
+                        1
+                    } else {
+                        3
+                    }
+                }),
+        };
+        let mut offers = Vec::new();
+        for (k, option) in step.options.iter().enumerate() {
+            let index = resolve_trinket(data, option).ok_or_else(|| {
+                format!(
+                    "a trinket the trinket table does not build: {}",
+                    option.name.clone().unwrap_or_default()
+                )
+            })?;
+            let price = if k == at { paid.clamp(0, u8::MAX as i32) as u8 } else { 0 };
+            offers.push((index, price));
+        }
+        let pl = &mut game.players[ME];
+        for (index, price) in offers {
+            let _ = pl.trinket_offer.try_push((index, price));
+        }
+        pl.trinket_offer_slot = slot;
+        return Ok(at);
+    }
+    if kind == OfferKind::Power {
+        // A Hero Power Discover or a chooser (Power of the Storm, Unmasked
+        // Identity, King of Duality, Embrace the Elements, Dungar's Gryphon):
+        // the engine's offer holds power table indices, answered with
+        // `Action::Choose`.
+        let picked_id = picked.card_id.as_deref().unwrap_or_default();
+        let second = step
+            .after
+            .as_ref()
+            .is_some_and(|after| power_offer_second(after, picked_id));
+        let mut offers = Vec::new();
+        for option in &step.options {
+            let index = resolve_power(data, option).ok_or_else(|| {
+                format!(
+                    "a hero power the hero table does not build: {}",
+                    option.name.clone().unwrap_or_default()
+                )
+            })?;
+            offers.push(index);
+        }
+        let pl = &mut game.players[ME];
+        for index in offers {
+            let _ = pl.power_offer.try_push(index);
+        }
+        pl.power_offer_second = second;
+        // Each logged pick is one offer. The log has a step for the next pick
+        // (King of Duality's second), and that step seats its own offer, so
+        // the engine must not deal another one here.
+        pl.power_offer_left = 0;
+        return Ok(at);
+    }
     let mut cards = Vec::new();
     for option in &step.options {
         match resolve_card(data, ids, option) {
@@ -3466,41 +3646,6 @@ fn force_offer(
         }
     }
     let pl = &mut game.players[ME];
-    if step.step == "trinket_pick" {
-        // The engine's offer holds trinket table indices and their prices. The
-        // cost the pick was sold at is not in the options, only what the step
-        // paid: the picked one carries that, the others nothing.
-        let paid = step.paid.map_or(0, |p| p.gold);
-        let mut offers = Vec::new();
-        for (k, option) in step.options.iter().enumerate() {
-            let index = option
-                .card_id
-                .as_deref()
-                .and_then(|id| data.trinkets.by_card_id(id))
-                .ok_or_else(|| {
-                    format!(
-                        "a trinket the trinket table does not build: {}",
-                        option.name.clone().unwrap_or_default()
-                    )
-                })?;
-            let price = if k == at { paid.clamp(0, u8::MAX as i32) as u8 } else { 0 };
-            offers.push((index, price));
-        }
-        for (index, price) in offers {
-            let _ = pl.trinket_offer.try_push((index, price));
-        }
-        pl.trinket_offer_slot = match step.slot_kind.as_deref() {
-            Some("greater") => 2,
-            Some("lesser") => 1,
-            other => {
-                if let Some(k) = other {
-                    missing.push(format!("a trinket slot the engine has no kind for: {k}"));
-                }
-                1
-            }
-        };
-        return Ok(at);
-    }
     // Detective for Hire's two cards are a guess, not a Discover: the engine
     // keeps them in its own offer and the pick lands nothing but the Coin.
     if let Some((cards, correct)) = holmes_offer_answer(data, ids, step) {
@@ -3544,8 +3689,7 @@ fn force_offer(
     let set_stats = step
         .source
         .as_ref()
-        .and_then(|s| s.card_id.as_deref())
-        .and_then(|id| data.trinkets.by_card_id(id))
+        .and_then(|s| resolve_trinket(data, s))
         .and_then(|i| {
             data.trinkets.get(i).on_pick.iter().find_map(|a| match a {
                 crate::trinkets::Act::DiscoverTierStats { attack, health, .. } => {
@@ -3885,7 +4029,13 @@ fn actions_for(
             }
             seat_cast_after_pick(data, ids, &mut loaded.game, step);
             let at = force_offer(data, ids, &mut loaded.game, step, turn, landing, missing)?;
-            out.push(Action::Choose(at as u8));
+            // A trinket offer is answered with its own action; a Discover
+            // (and a Hero Power Discover) with `Choose`.
+            if offer_kind(data, step) == OfferKind::Trinket {
+                out.push(Action::ChooseTrinket(at as u8));
+            } else {
+                out.push(Action::Choose(at as u8));
+            }
         }
         other => {
             return Err(format!("a step the engine has no action for: {other}"));
@@ -4081,8 +4231,12 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
     // spent: the game answers the choice first (`Action::Activate`).
     seat_gold_spent_at_pick(data, ids, &mut loaded, one);
     // A Souvenir Stand the log turns into a copy of the Greater trinket in
-    // this step rather than at its pick.
-    if let Some(after) = step.after.as_ref() {
+    // this step rather than at its pick. The pick step's own `pick_trinket`
+    // does that transform, so seating it before the offer is installed would
+    // start the whole turn with the after state's trinkets.
+    if step.step != "trinket_pick"
+        && let Some(after) = step.after.as_ref()
+    {
         seat_souvenir_copy(data, &mut loaded.game, before, after);
     }
     let press_not_built = step.step == "hero_power"
@@ -4375,6 +4529,18 @@ pub fn replay_whole_turn(
             Ok((next, miss, _text)) => {
                 missing.extend(miss);
                 game = next;
+                // The log's hand goes on the engine's draw, card by card,
+                // with the pool copies moving with it.
+                force_hand(data, &mut game, &turn.actions[i], &mut missing);
+                // Put the log's Tavern in place as the step left it, so a
+                // Refresh (a Roll, a free one, a start-of-turn refresh) and
+                // every other change follow the log's cards from here on:
+                // `place_tavern` gives the old Tavern's pool copies back and
+                // takes the new cards' copies, so the pool stays exact and
+                // the next random draw is not held in the old cards' slots.
+                if let Some(after) = turn.actions[i].after.as_ref() {
+                    place_tavern(data, &mut game, after, &mut missing);
+                }
             }
             Err((why, miss)) => {
                 missing.extend(miss);
@@ -4412,6 +4578,139 @@ pub fn replay_whole_turn(
         }
     }
     Ok(TurnRun { game, steps, played: steps, stop: None, missing })
+}
+
+/// Give back the pool copies an open Discover holds, so the carried game can
+/// take the log's offer in its place:
+fn refund_open_discover(pool: &mut [u8], cards: &crate::cards::CardDb, pl: &mut Player) {
+    if pl.discover_minions.is_empty() {
+        for (i, &card) in pl.discover.iter().enumerate() {
+            let c = cards.get(card);
+            if c.token || c.is_spell() {
+                continue;
+            }
+            let n = if pl.dark_offer {
+                pl.discover_copies.get(i).copied().unwrap_or(1)
+            } else {
+                1
+            };
+            let slot = c.pool_slot as usize;
+            if slot < pool.len() {
+                pool[slot] += n;
+            }
+        }
+    }
+    pl.discover.clear();
+    pl.discover_minions.clear();
+    pl.discover_gifts.clear();
+    pl.discover_copies.clear();
+    pl.discover_queue.clear();
+    pl.dark_offer = false;
+    pl.dark_offer_golden = false;
+    pl.dark_offer_locked = 0;
+    pl.discover_silent = false;
+    pl.repeat_discover = 0;
+}
+
+/// Put the offers the step was seated with on the game the step is played on.
+/// The whole-turn replay and `train/era_turns.py` carry a game forward, while
+/// `seat` builds the step's prompts (a forced Discover or Dark Gift offer, a
+/// trinket offer, a power offer) on a fresh one: without this the carried
+/// game would answer its own draw instead of the log's. It also replaces an
+/// offer the engine left open, returning that offer's pool copies, which is
+/// what a multi-pick Discover needs (its second pick is the log's, not the
+/// engine's own).
+fn take_step_prompts(data: &Data, pool: &mut [u8], from: &Player, to: &mut Player) {
+    refund_open_discover(pool, &data.cards, to);
+    to.discover = from.discover.clone();
+    to.discover_minions = from.discover_minions.clone();
+    to.discover_gifts = from.discover_gifts.clone();
+    to.discover_copies = from.discover_copies.clone();
+    to.discover_queue = from.discover_queue.clone();
+    to.dark_offer = from.dark_offer;
+    to.dark_offer_turn = from.dark_offer_turn;
+    to.dark_offer_golden = from.dark_offer_golden;
+    to.dark_offer_locked = from.dark_offer_locked;
+    to.discover_silent = from.discover_silent;
+    to.repeat_discover = from.repeat_discover;
+    to.discover_damage_from = from.discover_damage_from;
+    to.discover_locked = from.discover_locked;
+    to.discover_locked_tier = from.discover_locked_tier;
+    to.discover_locked_gold = from.discover_locked_gold;
+    to.discover_doomed = from.discover_doomed;
+    to.discover_both = from.discover_both;
+    to.discover_into_shop = from.discover_into_shop;
+    to.power_offer = from.power_offer.clone();
+    to.power_offer_second = from.power_offer_second;
+    to.power_offer_left = from.power_offer_left;
+    to.power_excludes = from.power_excludes.clone();
+    to.trinket_offer = from.trinket_offer.clone();
+    to.trinket_offer_slot = from.trinket_offer_slot;
+    to.secret_offer = from.secret_offer.clone();
+    to.holmes_offer = from.holmes_offer;
+    to.wager_offer = from.wager_offer;
+    to.pending_battlecries = from.pending_battlecries;
+    to.pending_gold_spent = from.pending_gold_spent;
+    to.last_spell = from.last_spell;
+    to.recent_buys = from.recent_buys.clone();
+    to.fodder_refreshes = from.fodder_refreshes.clone();
+    to.tp.transform_slot = from.tp.transform_slot;
+    to.tp.discover_stats = from.tp.discover_stats;
+    to.tp.whistle = from.tp.whistle;
+    to.tp.choose_one_all = from.tp.choose_one_all;
+}
+
+/// Put the log's hand on the carried game after a step. The engine draws its
+/// own random cards for a "get a random Beast", a Lockbox that opens on a
+/// Refresh, an Activate that hands a Tavern spell over, an end-of-turn trigger
+/// and the rest, and some of those draws record no `entered` entry at all (a
+/// Lockbox replaced by its card on a Roll is one). The log's state after the
+/// step is the outcome, so a hand slot that holds a different card takes the
+/// log's, and its pool copy moves with it: the old card gives its copy back
+/// and the new one takes its own. A slot the engine already has right is left
+/// alone, and a hand longer than the log's gives the extra cards' copies back.
+fn force_hand(data: &Data, game: &mut Game, step: &ShopStepSpec, missing: &mut Vec<String>) {
+    let Some(after) = step.after.as_ref() else { return };
+    let target = after.hand.len();
+    for i in 0..target {
+        let spec = &after.hand[i];
+        let (mut minion, bad) = build_minion(data, spec, game.turn);
+        if let Some(name) = bad {
+            missing.push(format!("minion not built: {name} (a Stand-in with its stats)"));
+        }
+        minion.frozen = false;
+        minion.pool_copies = 0;
+        let same = game.players[ME].hand.get(i).is_some_and(|m| {
+            m.card == minion.card
+                && m.attack == minion.attack
+                && m.health == minion.health
+                && m.golden == minion.golden
+                && m.keywords == minion.keywords
+                && m.gifts[..m.n_gifts as usize] == minion.gifts[..minion.n_gifts as usize]
+        });
+        if same {
+            continue;
+        }
+        take_pool_copy(&mut game.pool, &data.cards, &mut minion);
+        let hand = &mut game.players[ME].hand;
+        if i < hand.len() {
+            let old = hand[i];
+            give_back_copies(&mut game.pool, &data.cards, &[old]);
+            hand[i] = minion;
+        } else if i == hand.len() {
+            let _ = hand.try_push(minion);
+        } else {
+            give_back_copies(&mut game.pool, &data.cards, &[minion]);
+            missing.push(format!(
+                "a generated card at hand slot {} with no slot before it",
+                i + 1
+            ));
+        }
+    }
+    while game.players[ME].hand.len() > target {
+        let old = game.players[ME].hand.pop().expect("the hand holds a card");
+        give_back_copies(&mut game.pool, &data.cards, &[old]);
+    }
 }
 
 /// Apply one step to a seated state and snapshot the result. The error is what
@@ -4492,7 +4791,10 @@ impl SeatedStep {
         ids: &CardIdMap,
         mut game: Game,
     ) -> Result<(Game, Vec<String>, String), StepError> {
-        let SeatedStep { game: _, actions, missing, step, answer, press_not_built } = self;
+        let SeatedStep { game: seated, actions, missing, step, answer, press_not_built } = self;
+        // The prompts this step was seated with are the log's: put them on the
+        // game the step is played on, replacing whatever offer it carried.
+        take_step_prompts(data, &mut game.pool, &seated.players[ME], &mut game.players[ME]);
         if step.step == "end_turn" {
             // The end of turn effects, without the fight that follows them: the
             // logged turn ends before the fight.

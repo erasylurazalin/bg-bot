@@ -3,9 +3,11 @@
 //! board against the log's. Measurement only; no game rule changes.
 //!
 //!   bgbench turn_replay [--actions DIR] [--out DIR] [--seeds N]
-//!                       [--turns MIN,MAX] [--only SUBSTR]
+//!                       [--turns MIN,MAX] [--only SUBSTR] [--trace]
 //!
-//! `train/runs/engine-pays/analyze.py` turns `turns.json` into the report.
+//! `--trace` also writes `trace.json`, the first step of every stopped turn
+//! whose engine state differs from the log's; `train/evaltools/replay_sort/
+//! sort.py` sorts those stops by cause.
 
 use std::sync::Arc;
 
@@ -189,6 +191,198 @@ fn turn_row(
     }
 }
 
+#[derive(Debug, Serialize)]
+struct TraceRow {
+    file: String,
+    source: String,
+    game: u32,
+    turn: u32,
+    steps: usize,
+    stop_step: Option<usize>,
+    stop_class: Option<String>,
+    stop_reason: Option<String>,
+    first_step: Option<usize>,
+    first_step_number: Option<usize>,
+    at_start: bool,
+    step_kind: Option<String>,
+    step_card: Option<String>,
+    step_source: Option<String>,
+    step_options: Vec<String>,
+    diffs: Vec<String>,
+    log_missing: Vec<String>,
+    engine_missing: Vec<String>,
+    engine_state: Option<String>,
+    log_state: Option<String>,
+    start_error: Option<String>,
+    note: Option<String>,
+}
+
+fn snap_text(s: &shop_replay::ShopSnapshot) -> String {
+    fn zone(z: &[shop_replay::SnapMinion]) -> String {
+        z.iter().map(|m| m.text()).collect::<Vec<_>>().join(" | ")
+    }
+    let powers = s
+        .powers
+        .iter()
+        .map(|p| format!("{} uses_left {} number {}", p.card_id, p.uses_left, p.number))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let trinkets = s
+        .trinkets
+        .iter()
+        .map(|(id, greater)| format!("{id}{}", if *greater { " (greater)" } else { "" }))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    format!(
+        "gold {} tier {} upgrade {} health {} armor {} free_refreshes {} frozen {} board [{}] hand [{}] tavern [{}] powers [{}] trinkets [{}]",
+        s.gold,
+        s.tier,
+        s.upgrade_cost.map_or("none".to_string(), |c| c.to_string()),
+        s.health,
+        s.armor,
+        s.free_refreshes,
+        s.frozen,
+        zone(&s.board),
+        zone(&s.hand),
+        zone(&s.tavern),
+        powers,
+        trinkets,
+    )
+}
+
+fn option_names(step: &shop_replay::ShopStepSpec) -> Vec<String> {
+    step.options
+        .iter()
+        .map(|o| o.name.clone().or_else(|| o.card_id.clone()).unwrap_or_default())
+        .collect()
+}
+
+fn trace_turn(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &shop_replay::ShopFileSpec,
+    turn: &shop_replay::ShopTurnSpec,
+    row: &TurnRow,
+) -> TraceRow {
+    let stop_step = row.stop.as_ref().map(|s| s.step);
+    let limit = stop_step.unwrap_or(turn.actions.len());
+    let mut first: Option<usize> = None;
+    let mut at_start = false;
+    let mut diffs = Vec::new();
+    let mut log_missing = Vec::new();
+    let mut engine_missing = Vec::new();
+    let mut engine_state = None;
+    let mut log_state = None;
+    let mut start_error = None;
+    let mut note = None;
+    for k in 0..=limit {
+        if k == 0 {
+            match shop_replay::turn_start_game(data, ids, file, turn, 1) {
+                Some((game, missing)) => {
+                    let log_spec = &turn.start;
+                    let ours = shop_replay::ShopSnapshot::of_game(data, &game, shop_replay::ME);
+                    let mut lm = Vec::new();
+                    let log = shop_replay::ShopSnapshot::of_state(data, log_spec, turn.turn, &mut lm);
+                    let d = shop_replay::compare(&ours, &log);
+                    if !d.is_empty() || !lm.is_empty() {
+                        first = Some(0);
+                        at_start = true;
+                        diffs = d;
+                        log_missing = lm;
+                        engine_missing = missing.clone();
+                        engine_state = Some(snap_text(&ours));
+                        log_state = Some(snap_text(&log));
+                        break;
+                    }
+                }
+                None => {
+                    first = Some(0);
+                    at_start = true;
+                    start_error = row.stop.as_ref().map(|s| s.reason.clone());
+                    break;
+                }
+            }
+            continue;
+        }
+        let mut prefix = turn.clone();
+        prefix.actions.truncate(k);
+        match shop_replay::replay_whole_turn(data, ids, file, &prefix, 1) {
+            Ok(run) if run.stop.is_none() && run.played == k => {
+                let Some(log_spec) = turn.actions.get(k - 1).and_then(|a| a.after.as_ref()) else {
+                    first = Some(k - 1);
+                    note = Some(format!("the log has no state after step {}", k - 1));
+                    break;
+                };
+                let ours = shop_replay::ShopSnapshot::of_game(data, &run.game, shop_replay::ME);
+                let mut lm = Vec::new();
+                let log = shop_replay::ShopSnapshot::of_state(data, log_spec, turn.turn, &mut lm);
+                let d = shop_replay::compare(&ours, &log);
+                if !d.is_empty() || !lm.is_empty() {
+                    first = Some(k - 1);
+                    diffs = d;
+                    log_missing = lm;
+                    engine_missing = run.missing.clone();
+                    engine_state = Some(snap_text(&ours));
+                    log_state = Some(snap_text(&log));
+                    break;
+                }
+            }
+            Ok(run) => {
+                let step = run
+                    .stop
+                    .as_ref()
+                    .map(|s| s.step)
+                    .unwrap_or(run.played);
+                first = Some(step);
+                note = Some(format!(
+                    "an earlier prefix stopped at step {step}: {}",
+                    run.stop.as_ref().map(|s| s.reason.clone()).unwrap_or_default()
+                ));
+                engine_missing = run.missing.clone();
+                break;
+            }
+            Err((why, missing)) => {
+                first = Some(0);
+                at_start = true;
+                start_error = Some(why);
+                engine_missing = missing;
+                break;
+            }
+        }
+    }
+    if first.is_none() {
+        first = stop_step;
+        if let Some(s) = &row.stop {
+            note = Some(format!("no state after the last good step differs; the stop itself is the first divergence ({})", s.reason));
+        }
+    }
+    let step = first.and_then(|i| turn.actions.get(i));
+    TraceRow {
+        file: file.file(),
+        source: file.source.clone(),
+        game: file.game,
+        turn: turn.turn,
+        steps: turn.actions.len(),
+        stop_step,
+        stop_class: row.stop.as_ref().map(|s| s.class.clone()),
+        stop_reason: row.stop.as_ref().map(|s| s.reason.clone()),
+        first_step: first,
+        first_step_number: first.map(|i| i + 1),
+        at_start,
+        step_kind: step.map(|s| s.step.clone()),
+        step_card: step.and_then(|s| s.card.as_ref()).and_then(|c| c.name.clone()),
+        step_source: step.and_then(|s| s.source.as_ref()).and_then(|s| s.name.clone()),
+        step_options: step.map(option_names).unwrap_or_default(),
+        diffs,
+        log_missing,
+        engine_missing,
+        engine_state,
+        log_state,
+        start_error,
+        note,
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let opt = |name: &str, default: &str| {
@@ -212,6 +406,7 @@ fn main() {
             std::process::exit(2);
         });
     let only = Some(opt("--only", "")).filter(|s| !s.is_empty());
+    let trace = args.iter().any(|a| a == "--trace");
     let base = seeds.max(1);
 
     let mut files: Vec<(String, String)> = std::fs::read_dir(&actions)
@@ -284,4 +479,24 @@ fn main() {
         println!("  stop {n}: {reason}");
     }
     println!("wrote {path}");
+    if trace {
+        // The sort's prefix trace: every stopped turn's first step whose
+        // engine state differs from the log's. Logging only; turns.json is
+        // unchanged.
+        let mut trace_rows = Vec::new();
+        for &(fi, ti) in &wanted {
+            let file = &specs[fi];
+            let turn = &file.turns[ti];
+            let Some(row) = rows.iter().find(|r| {
+                r.seed == 1 && r.file == file.file() && r.turn == turn.turn && !r.complete
+            }) else {
+                continue;
+            };
+            trace_rows.push(trace_turn(&data, &ids, file, turn, row));
+        }
+        let path = format!("{out}/trace.json");
+        let text = serde_json::to_string(&trace_rows).expect("the trace rows serialize");
+        std::fs::write(&path, text).unwrap_or_else(|e| panic!("{path}: {e}"));
+        println!("wrote {path} ({} stopped turns)", trace_rows.len());
+    }
 }
