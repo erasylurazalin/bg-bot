@@ -2528,7 +2528,13 @@ Deleting `.venv` undoes it.
   the eval inside `ppo.py`, which stops at the first N finished games and
   over-counts short ones). It runs in chunks of 512 envs and writes
   `train/runs/fixed-eval/NAME/report.md` and `results.json`; with two or
-  more checkpoints it adds a paired table. The real seats come from
+  more checkpoints it adds a paired table. `--temp T` (default 1.0, which
+  is the old path; it must be above 0) divides the network's logits by T
+  before sampling. Each checkpoint's report and `results.json` also carry
+  the tier curve: share levelling on turn 2, and tier at the end of turns
+  5 and 8 (over games alive after that turn), computed as
+  `review2/tiercurve.py` does and shown against the plan's minimums of
+  90%, 2.85 and 4.60 with PASS or FAIL. The real seats come from
   `boards/frozen/real-2026-11-10/`, a frozen copy checked against its
   `MANIFEST.txt` before the run. With `--era-starts` (default
   `boards/frozen/actions-2026-11-10/`, also manifest checked),

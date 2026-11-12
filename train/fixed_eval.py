@@ -1,7 +1,7 @@
 """One fixed yardstick for every checkpoint.
 
     .venv/bin/python train/fixed_eval.py CKPT [CKPT2 ...] --vram-gb 10 \
-        [--games 2048] [--name NAME]
+        [--games 2048] [--name NAME] [--temp T]
 
 One learner seat against seven real seats (lineup 1,0,0,0,0,7), one game per
 seed, played to its end. Games run in chunks of CHUNK envs; chunk k is
@@ -12,7 +12,8 @@ must match its MANIFEST.txt.
 
 The checkpoint's own force_dark_gift and old_boards are used, and a network
 with a comp input gets the overlay probed for the comp index only (wheels
-off: no forced move, no bonus). Actions are sampled, like ppo.py's eval.
+off: no forced move, no bonus). Actions are sampled, like ppo.py's eval,
+with the network's logits divided by `--temp` (default 1.0, the old path).
 
 The report (report.md) and the per-game rows (results.json) are written to
 train/runs/fixed-eval/NAME/.
@@ -36,6 +37,7 @@ import comp_specs
 import ppo
 import real_boards
 from model import load as load_model
+from model import masked
 from ppo import F_COMP, LEARNER, Bufs, act, comp_onehot, force_mask
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,12 +53,21 @@ TARGET_TURNS = (6, 8, 10, 12, 14, 16)
 TARGET_TURNS_16 = (8, 10, 12, 14, 16)
 TIER_TARGETS = (3, 4, 5, 6)
 TRIBE_NAMES = ppo.TRIBE_NAMES
+# The plan's tier-curve minimums (docs/notes/plan-2026-11-12.md, 2.1).
+TIER_CURVE_MIN = {
+    "level_turn2": 0.90,
+    "tier_turn5": 2.85,
+    "tier_turn8": 4.60,
+}
 
 
 def parse_args():
     a = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     a.add_argument("ckpts", nargs="+", help="checkpoint paths, first is the paired baseline")
     a.add_argument("--games", type=int, default=2048, help="games (default 2048)")
+    a.add_argument("--temp", type=float, default=1.0,
+                   help="divide the network's logits by this before sampling "
+                        "(default 1.0; must be above 0)")
     a.add_argument("--name", help="run folder under train/runs/fixed-eval")
     a.add_argument("--boards", type=Path, default=FROZEN,
                    help=f"frozen boards folder (default {FROZEN.relative_to(ROOT)})")
@@ -205,6 +216,36 @@ def mean_range(values, z: float = 1.96) -> tuple[float, float, float]:
     return (mean, mean - z * se, mean + z * se)
 
 
+def sample_actions(net, o, mask, comp, temp: float):
+    """Sample every network seat's action; temp 1.0 keeps ppo.act's path."""
+    if temp == 1.0:
+        acts, _, _, _ = act(net, o, mask, comp=comp)
+        return acts
+    with torch.no_grad():
+        logits, _ = net(o, comp=comp)
+    dist = torch.distributions.Categorical(logits=masked(logits, mask) / temp)
+    return dist.sample()
+
+
+def tier_curve(rows: list[dict]) -> dict:
+    """The plan's three tier-curve numbers, as review2/tiercurve.py computes them."""
+    t = np.array([r["tiers"] for r in rows], dtype=np.int64)
+    ko = np.array([r["knocked_out_turn"] or 99 for r in rows], dtype=np.int64)
+
+    def tier_at(turn: int) -> float | None:
+        tt = np.zeros(len(rows), dtype=np.int64)
+        for k in range(6):
+            tt = np.where((t[:, k] > 0) & (t[:, k] <= turn), k + 1, tt)
+        alive = ko > turn
+        return float(tt[alive].mean()) if alive.any() else None
+
+    return {
+        "level_turn2": float((t[:, 1] == 2).mean()) if rows else None,
+        "tier_turn5": tier_at(5),
+        "tier_turn8": tier_at(8),
+    }
+
+
 def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
     net = info["net"]
     ppo.FORCE_DARK = info["force_dark_gift"]
@@ -273,7 +314,7 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
                 env.overlay_probe(b.forced1, b.flags)
                 comp_idx = b.flags[ar, b.seat, F_COMP] - 1
                 comp = comp_onehot(comp_idx, net.n_comps, dev)
-            acts, _, _, _ = act(net, o, mask, comp=comp)
+            acts = sample_actions(net, o, mask, comp, args.temp)
             kinds = b.kinds.copy()
             env.step(acts.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
             for e, s in zip(*np.nonzero(b.places)):
@@ -429,6 +470,10 @@ def num(x: float | None, places: int = 3) -> str:
     return "n/a" if x is None else f"{x:.{places}f}"
 
 
+def pass_fail(value: float | None, minimum: float) -> str:
+    return "PASS" if value is not None and value >= minimum else "FAIL"
+
+
 def build_report(name: str, args, n_board_files: int, rev: str,
                  infos: list[dict], results: list[dict]) -> str:
     lines = [f"# Fixed eval: {name}", ""]
@@ -436,6 +481,7 @@ def build_report(name: str, args, n_board_files: int, rev: str,
     lines.append(f"- boards: `{args.boards}` ({n_board_files} files, manifest checked)")
     lines.append(f"- seed base: {args.seed_base}")
     lines.append(f"- games: {args.games}, chunk size {CHUNK}, one game per seed")
+    lines.append(f"- temp: {args.temp:g}")
     lines.append(f"- lineup: {','.join(str(x) for x in LINEUP)} (learner then 7 real)")
     lines.append(f"- lobby filter: {'off' if args.no_lobby_filter else 'on'}")
     lines.append(f"- real lag: {args.real_lag} turn{'s' if args.real_lag != 1 else ''}")
@@ -556,6 +602,19 @@ def build_report(name: str, args, n_board_files: int, rev: str,
             d = s["tiers"][tier]
             lines.append(f"| {tier} | {d['reached']} | {num(d['mean_turn'], 1)} |")
         lines.append("")
+        tc = result["tier_curve"]
+        lines.append("### Tier curve")
+        lines.append("")
+        lines.append(f"- Levelling on turn 2: **{pct(tc['level_turn2'])}** "
+                     f"(minimum {100 * TIER_CURVE_MIN['level_turn2']:.0f}%, "
+                     f"{pass_fail(tc['level_turn2'], TIER_CURVE_MIN['level_turn2'])})")
+        lines.append(f"- Tier at the end of turn 5: **{num(tc['tier_turn5'], 2)}** "
+                     f"(minimum {num(TIER_CURVE_MIN['tier_turn5'], 2)}, "
+                     f"{pass_fail(tc['tier_turn5'], TIER_CURVE_MIN['tier_turn5'])})")
+        lines.append(f"- Tier at the end of turn 8: **{num(tc['tier_turn8'], 2)}** "
+                     f"(minimum {num(TIER_CURVE_MIN['tier_turn8'], 2)}, "
+                     f"{pass_fail(tc['tier_turn8'], TIER_CURVE_MIN['tier_turn8'])})")
+        lines.append("")
 
     if len(results) > 1:
         lines.extend(build_pairs(infos, results))
@@ -605,6 +664,8 @@ def main():
     args = parse_args()
     if args.games < 1:
         raise SystemExit("--games must be at least 1")
+    if not args.temp > 0:
+        raise SystemExit(f"--temp {args.temp}: temperature must be above 0")
     folder = args.boards.resolve()
     n_board_files = check_boards(folder)
     real, unknown = real_boards.load(folder)
@@ -659,7 +720,8 @@ def main():
         rows = eval_checkpoint(info, args, real, dev)
         if len(rows) != args.games:
             raise SystemExit(f"{path}: got {len(rows)} games, wanted {args.games}")
-        results.append({"rows": rows, "summary": summarize(rows)})
+        results.append({"rows": rows, "summary": summarize(rows),
+                        "tier_curve": tier_curve(rows)})
         infos.append(info)
         del info["net"]
         if dev.type == "cuda":
@@ -673,6 +735,7 @@ def main():
         "seed_base": args.seed_base,
         "games": args.games,
         "chunk_size": CHUNK,
+        "temp": args.temp,
         "lineup": LINEUP,
         "boards": {"path": str(args.boards), "files": n_board_files},
         "lobby_filter": not args.no_lobby_filter,
@@ -697,6 +760,7 @@ def main():
                 "overlay_comps": info["overlay_comps"],
                 "n_comps": info["n_comps"],
                 "summary": result["summary"],
+                "tier_curve": result["tier_curve"],
                 "rows": result["rows"],
             }
             for info, result in zip(infos, results)
