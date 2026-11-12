@@ -5525,6 +5525,27 @@ impl CardDb {
         Some(self.resolve_bounty(id, &[], rng))
     }
 
+    /// A random built Timewarped minion from one side, ignoring the lobby
+    /// (the Timeworn Candelabra). The marker is the whole list: every built
+    /// `timewarp` token is in it, and an unbuilt export card is not.
+    pub fn random_timewarp(
+        &self,
+        side: Timewarp,
+        exclude: &[CardId],
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        let ok = |id: CardId| {
+            let c = &self.cards[id as usize];
+            c.timewarp == Some(side) && !exclude.contains(&id)
+        };
+        let count = (0..self.cards.len() as CardId).filter(|&id| ok(id)).count() as u32;
+        if count == 0 {
+            return None;
+        }
+        let k = rng.below(count) as usize;
+        (0..self.cards.len() as CardId).filter(|&id| ok(id)).nth(k)
+    }
+
     /// A random Tavern spell that gives stats, of Tier `max_tier` or lower
     /// (Timewarped Tender).
     pub fn random_stat_spell(

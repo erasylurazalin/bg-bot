@@ -370,6 +370,9 @@ impl Game {
                     DiscoverRequest::SpellMaxTier(t) => {
                         data.cards.random_spell_up_to(t, &pl.discover, *lobby, rng)
                     }
+                    DiscoverRequest::Timewarp(side) => {
+                        data.cards.random_timewarp(side, pl.discover.as_slice(), rng)
+                    }
                     DiscoverRequest::DeathrattleMinion(max_t) => draw_filtered(
                         pool,
                         &data.cards,
@@ -578,6 +581,12 @@ impl Game {
         let doomed = std::mem::take(&mut pl.discover_doomed);
         let both = std::mem::take(&mut pl.discover_both);
         let c = pl.discover[k];
+        // A Timewarped minion is a token outside the pool: no offer held a
+        // pool copy, and the pick brings none.
+        let warp_offer = pl
+            .discover
+            .iter()
+            .any(|&o| data.cards.get(o).timewarp.is_some());
         // A Dark Gift offer: the gift on the pick, the pool copies each offer
         // held (a Golden offer holds three, a Dagger copy none).
         let dark = pl.dark_offer;
@@ -590,7 +599,10 @@ impl Game {
         for (i, &o) in pl.discover.iter().enumerate() {
             if dark {
                 copies[i] = pl.discover_copies.get(i).copied().unwrap_or(0);
-            } else if data.cards.get(o).is_spell() || data.cards.get(o).prize.is_some() {
+            } else if data.cards.get(o).is_spell()
+                || data.cards.get(o).prize.is_some()
+                || warp_offer
+            {
                 copies[i] = 0;
             }
             if i != k && copies[i] > 0 && !data.cards.get(o).is_spell() {
@@ -670,7 +682,7 @@ impl Game {
             // A normal minion offer holds one pool copy; a Golden Dark Gift
             // offer, a token-free offer (a Prize's minion) and a spell hold
             // what `copies` says.
-            let pool_copies = if is_spell { 0 } else { copies[k] };
+            let pool_copies = if is_spell || warp_offer { 0 } else { copies[k] };
             let mut m = pl.make_card(&data.cards, c, golden_offer, pool_copies);
             if golden_offer {
                 // Gilding and Sinister Invitation: no Triple Reward.

@@ -289,8 +289,10 @@ fn nothing_outside_the_lobby_ever_shows_up_in_whole_games() {
             g.step(a).unwrap();
             for c in visible_cards(&g) {
                 let card = g.data.cards.get(c);
+                // A Timewarped minion is the Candelabra's, not a lobby
+                // draw: its list ignores the lobby by rule.
                 assert!(
-                    card.lobby_ok(g.lobby),
+                    card.lobby_ok(g.lobby) || card.timewarp.is_some(),
                     "seed {seed}, step {steps}, player {p}: {} is outside the lobby",
                     card.name
                 );

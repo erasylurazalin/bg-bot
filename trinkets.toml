@@ -2166,3 +2166,23 @@ card_id = "BG30_MagicItem_973"
 slot = "lesser"
 cost = 0
 on_pick = [{ lock_type = true }, { refresh_extra_type = 2 }]
+
+# The Timeworn Candelabra, both sides. It reads the built Timewarped tokens,
+# not the pool, and ignores the lobby (docs/notes/UNSURE.md, log support: a
+# pure Beast was offered without Beasts in the lobby). The Minor list and the
+# Major list are the cards with cards.toml `timewarp = "minor"` / `"major"`.
+[[trinket]]
+name = "Timeworn Candelabra"
+cube = false
+card_id = "BG35_MagicItem_823"
+slot = "lesser"
+cost = 0
+on_pick = [{ discover_timewarp = "minor" }]
+
+[[trinket]]
+name = "Timeworn Candelabra"
+cube = false
+card_id = "BG35_MagicItem_823t"
+slot = "greater"
+cost = 0
+on_pick = [{ discover_timewarp = "major" }]

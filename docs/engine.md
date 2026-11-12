@@ -408,7 +408,9 @@ mask, so a future trinket or hero effect can pass a wider one for its own draw.
 A Timewarped minion (`cards.toml timewarp = "minor"` or `"major"`, the 2-cost
 Timeworn Candelabra lists) is a token outside the pool table, and
 `Card::lobby_ok` is false for it, so no normal Tavern, Discover or random-minion
-draw can hand one out; the Candelabra's own list will read the marker.
+draw can hand one out. The Candelabra's own Discover is
+`DiscoverRequest::Timewarp(side)` and `CardDb::random_timewarp`, which reads
+the marker and has no lobby argument: 19 built Minor and 39 built Major cards.
 
 Tests and the sandbox can fix the lobby: `Game::new_with_lobby(data, seed,
 lobby)` (a test may pass more than 5 to reach its cards) and

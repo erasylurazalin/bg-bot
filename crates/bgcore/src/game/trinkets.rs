@@ -657,6 +657,7 @@ impl Game {
             | Act::DiscoverSpell(_)
             | Act::DiscoverDeathrattle(_)
             | Act::DiscoverTier(_)
+            | Act::DiscoverTimewarp(_)
             | Act::DiscoverRemember { .. }
             | Act::DiscoverTierStats { .. }
             | Act::DiscoverPrize(_)
@@ -1341,6 +1342,12 @@ impl Game {
             }
             Act::DiscoverTier(tier) => {
                 let _ = self.players[p].discover_queue.try_push(super::DiscoverRequest::MinionTier(tier));
+                self.maybe_start_discover(p);
+            }
+            Act::DiscoverTimewarp(side) => {
+                let _ = self.players[p]
+                    .discover_queue
+                    .try_push(super::DiscoverRequest::Timewarp(side));
                 self.maybe_start_discover(p);
             }
             Act::CopyBuys(n) => {

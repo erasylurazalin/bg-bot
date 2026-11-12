@@ -147,7 +147,7 @@ fn what_the_engine_does_not_build_is_named() {
  {"who": "me", "turn": 5, "result": "win", "tier": 3, "health": 30, "armor": 9,
   "hero_power": {"card_id": "TB_BaconShop_HP_020", "name": "Prestidigitation",
                  "numbers": [0, 0, 0, 0]},
-  "trinkets": [{"card_id": "BG35_MagicItem_823", "name": "Unbuilt Trinket",
+  "trinkets": [{"card_id": "BG35_MagicItem_9999", "name": "Unbuilt Trinket",
                 "greater": false, "numbers": []}],
   "rewards": [{"card_id": "BG24_Quest_000", "name": "A Quest Reward",
                "numbers": [1, 0, 0, 0]}],

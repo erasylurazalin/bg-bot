@@ -578,7 +578,9 @@ Triple Reward spell.
   with `timewarp = "minor"` or `"major"`. They take no pool slot, and
   `Card::lobby_ok` is false for them, so no normal Tavern, Discover or
   random-minion draw can hand one out. The marker is what the Timeworn
-  Candelabra's own list will read; golden stats double the printed ones.
+  Candelabra's own list reads (`CardDb::random_timewarp`, no lobby filter);
+  golden stats double the printed ones. There are 19 built Minor and 39
+  built Major tokens.
 - **Pool accounting is exact and checked after every fuzz action.** Drawn cards carry
   `pool_copies` (1, or up to 3 for a Golden minion); generated cards and tokens have 0
   and never touch the pool. Selling returns `pool_copies` (`give_back`). A Golden
@@ -1283,8 +1285,8 @@ hooks in.
 - **The Timewarp marker.** `cards.toml timewarp = "minor"` or `"major"` on a
   `[[token]]`; `Card.timewarp` holds the side, and `Card::lobby_ok` is false
   for it, so no normal Tavern, Discover or random-minion draw reaches one.
-  The Timeworn Candelabra's own list will read the marker. See the Gotchas
-  note.
+  The Timeworn Candelabra's own list reads the marker with no lobby filter.
+  See the Gotchas note.
 - **Whenever a friendly minion is attacked.** `when_friendly_attacked = [a, h]`
   on a card (Timewarped Arm). `Side::when_friendly_attacked` runs from
   `attack_swings_at` before the hit and gives the defender the stats through
@@ -1398,3 +1400,30 @@ hooks in.
 - **Deathrattle copy.** `CopyLeftDeathrattles` takes the left-most friendly
   printed or gained Deathrattles, skips other Whirl-O-Trons, and appends
   them to the host's `gained_dr`.
+
+## 19. The Timeworn Candelabra (2026-11-12)
+
+- **The trinkets.** `trinkets.toml` has both sides with the same name and
+  distinct card ids: `BG35_MagicItem_823` (`slot = "lesser"`,
+  `discover_timewarp = "minor"`) and `BG35_MagicItem_823t`
+  (`slot = "greater"`, `discover_timewarp = "major"`). Both are free and
+  neutral in the lobby. Use `TrinketDb::by_card_id` when a test needs the
+  greater one: `by_name` sees the lesser first.
+- **The Discover.** `Act::DiscoverTimewarp(side)` queues
+  `DiscoverRequest::Timewarp(side)`. The offer loop calls
+  `CardDb::random_timewarp`, which filters only on the card's `timewarp`
+  marker and the three already offered ids. It has no lobby argument, which
+  is the logged rule: Chameleon was offered in a lobby without Beasts.
+- **The lists.** The built cards are 19 Minor and 39 Major. A card missing
+  from `cards.toml` is absent from its list, never a data error: Lei
+  (Buddies), the six Naga and Festergut (Build-An-Undead) are not built. The
+  seven logged Candelabra Discovers offer eighteen names; only Timewarped
+  Lei cannot be offered.
+- **Pool accounting.** A Timewarped minion is a token with no pool slot. A
+  Timewarp Discover sets every offer's copies to 0 and the pick's
+  `pool_copies` to 0, so the offers and the pick move no pool copy. The
+  ordinary triple check still sees the card that joined the hand.
+- Tests: `crates/bgcore/tests/timewarp5.rs` covers both slots, the 19 and
+  39 counts, the no-lobby list, the seven logged offers, and the zero pool
+  copies. The whole-game lobby test allows a marked Timewarp card because
+  the Candelabra is the one draw allowed to break the lobby filter.

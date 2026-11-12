@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::cards::{CardDb, Tribe, Tribes};
+use crate::cards::{CardDb, Timewarp, Tribe, Tribes};
 use crate::minion::{CardId, Keywords};
 
 /// Lesser slot, greater slot, and the trinket a hero power can become
@@ -303,6 +303,9 @@ pub enum Act {    /// Get `count` generated copies of a card (`get`).
     DiscoverRemember { tier: u8, typed: bool },
     /// Discover a minion of exactly this tier (Azeroth Model Globe).
     DiscoverTier(u8),
+    /// Discover a built Timewarped minion from one side, ignoring the lobby
+    /// (the Timeworn Candelabra).
+    DiscoverTimewarp(Timewarp),
     /// The next `n` minions bought also come as an exact copy (Transcribing
     /// Typewriter).
     CopyBuys(u8),
@@ -1084,6 +1087,7 @@ struct RawAct {
     #[serde(default)]
     discover_remember_typed: bool,
     discover_tier: Option<u8>,
+    discover_timewarp: Option<String>,
     copy_buys: Option<u8>,
     get_remembered: Option<u8>,
     random_battlecry: Option<u8>,
@@ -1590,6 +1594,12 @@ impl TrinketDb {
                     Act::DiscoverRemember { tier, typed: a.discover_remember_typed }
                 } else if let Some(tier) = a.discover_tier {
                     Act::DiscoverTier(tier)
+                } else if let Some(side) = &a.discover_timewarp {
+                    Act::DiscoverTimewarp(match side.as_str() {
+                        "minor" => Timewarp::Minor,
+                        "major" => Timewarp::Major,
+                        _ => return Err(format!("unknown timewarp side {side:?}")),
+                    })
                 } else if let Some(n) = a.copy_buys {
                     Act::CopyBuys(n)
                 } else if let Some(n) = a.get_remembered {

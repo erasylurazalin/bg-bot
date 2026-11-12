@@ -576,6 +576,9 @@ pub enum DiscoverRequest {
     /// A plain copy of a minion from the last opponent's warband as it was
     /// last seen (Time Thief).
     LastOpponentWarband,
+    /// A built Timewarped minion from one side, ignoring the lobby (the
+    /// Timeworn Candelabra).
+    Timewarp(crate::cards::Timewarp),
 }
 
 /// Why the Tavern is filled. Only the player's own Refresh action (paid with
