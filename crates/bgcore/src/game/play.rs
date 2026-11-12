@@ -4,6 +4,7 @@ use arrayvec::ArrayVec;
 use crate::cards::{
     Aura,
     ChooseOption,
+    Effect,
     OnCastSpellOnMech,
     OnPlayMech,
     OnPlayOrMagnetizeMech,
@@ -218,8 +219,9 @@ impl Game {
     fn add_magnetize_buffs(&self, p: usize, m: &mut Minion) {
         for o in &self.players[p].board {
             for (card, golden) in o.parts() {
-                if let Some(OnPlayOrMagnetizeMech::Buff { attack, health }) =
+                if let Some(OnPlayOrMagnetizeMech::Buff { attack, health, all_mechs }) =
                     self.data.cards.get(card).on_play_or_magnetize_mech
+                    && !all_mechs
                 {
                     let mul = if golden { 2 } else { 1 };
                     m.attack += attack * mul;
@@ -249,7 +251,7 @@ impl Game {
     /// from it (`Hearthstone_2026_10_29_22_20_04-g3` turn 14 step 20, two
     /// Beatboxers taking three copies each of a golden Green Volumizer: the
     /// log's two end +4140 and +4146 bigger, three even copies +4122).
-    fn beatboxers_copy(&mut self, p: usize, host: Option<usize>, m: Minion) -> (i32, i32) {
+    pub(super) fn beatboxers_copy(&mut self, p: usize, host: Option<usize>, m: Minion) -> (i32, i32) {
         let onto_beatboxer = host
             .and_then(|h| self.players[p].board.get(h))
             .is_some_and(|h| self.carries_beatboxer(h));
@@ -338,11 +340,19 @@ impl Game {
             let m = self.players[p].board[i];
             for (card, golden) in m.parts() {
                 let c = self.data.cards.get(card);
-                if let Some(OnPlayOrMagnetizeMech::Buff { attack, health }) =
+                if let Some(OnPlayOrMagnetizeMech::Buff { attack, health, all_mechs }) =
                     c.on_play_or_magnetize_mech
                 {
                     let mul = if golden { 2 } else { 1 };
-                    buff(&mut self.players[p].board[target_pos], attack * mul, health * mul);
+                    if all_mechs {
+                        for j in 0..self.players[p].board.len() {
+                            if self.data.cards.tribes_of(&self.players[p].board[j]).has(Tribe::Mech) {
+                                buff(&mut self.players[p].board[j], attack * mul, health * mul);
+                            }
+                        }
+                    } else {
+                        buff(&mut self.players[p].board[target_pos], attack * mul, health * mul);
+                    }
                 }
                 if from_play
                     && let Some(OnPlayMech::MagnetizeSatellite { card: sat_id, attack: sa, health: sh }) =
@@ -372,16 +382,24 @@ impl Game {
             let mut dh = 0;
             let mut imp_gain = 0u16;
             for (card, golden) in m.parts() {
-                if let Some(OnSummonBeast::Buff { attack, health, improve_permanently }) =
-                    self.data.cards.get(card).on_summon_beast
-                {
-                    let mul = if golden { 2 } else { 1 };
-                    let stacks = if improve_permanently { 1 + (imp + imp_gain) as i32 } else { 1 };
-                    da += attack * mul * stacks;
-                    dh += health * mul * stacks;
-                    if improve_permanently {
-                        imp_gain += 1;
+                match self.data.cards.get(card).on_summon_beast {
+                    Some(OnSummonBeast::Buff { attack, health, improve_permanently }) => {
+                        let mul = if golden { 2 } else { 1 };
+                        let stacks =
+                            if improve_permanently { 1 + (imp + imp_gain) as i32 } else { 1 };
+                        da += attack * mul * stacks;
+                        dh += health * mul * stacks;
+                        if improve_permanently {
+                            imp_gain += 1;
+                        }
                     }
+                    Some(OnSummonBeast::BuffOnSpell { attack, health }) => {
+                        let mul = if golden { 2 } else { 1 };
+                        let stacks = 1 + (imp + imp_gain) as i32;
+                        da += attack * mul * stacks;
+                        dh += health * mul * stacks;
+                    }
+                    _ => {}
                 }
             }
             if imp_gain > 0 {
@@ -456,6 +474,26 @@ impl Game {
             }
             pos += 1;
         }
+        // "After you play a minion with no type" (Timewarped Theotar). The
+        // played minion itself is still `just_played`, so it never counts.
+        if tribes.is_empty() {
+            let mut pos = 0;
+            while pos < self.players[p].board.len() {
+                let m = self.players[p].board[pos];
+                let mut effects: arrayvec::ArrayVec<Effect, 8> = m
+                    .parts()
+                    .filter_map(|(card, _)| self.data.cards.get(card).after_play_neutral.as_ref())
+                    .flat_map(|e| e.iter().copied())
+                    .take(8)
+                    .collect();
+                if !m.just_played {
+                    for e in effects.iter_mut() {
+                        self.run_effect(p, &mut pos, *e, m.golden, 1);
+                    }
+                }
+                pos += 1;
+            }
+        }
     }
 
     /// Fire the "after you play an X" triggers a play still owes, once nothing
@@ -469,16 +507,106 @@ impl Game {
     /// hero damage come before the Wrath Weavers' trigger blocks.
     pub(super) fn resolve_after_play(&mut self, p: usize) {
         let pl = &self.players[p];
-        if pl.pending_after_play.is_none() || !pl.alive || Self::choice_open(pl) {
+        if (pl.pending_after_play.is_none() && pl.pending_after_play_tier.is_none())
+            || !pl.alive
+            || Self::choice_open(pl)
+        {
             return;
         }
-        let Some(tribes) = self.players[p].pending_after_play.take() else { return };
-        self.fire_after_play_tribe(p, tribes);
+        let tribes = self.players[p].pending_after_play.take();
+        let tier = self.players[p].pending_after_play_tier.take();
+        if let Some(tribes) = tribes {
+            self.fire_after_play_tribe(p, tribes);
+            self.fire_after_play_type_tavern(p, tribes);
+        }
+        if let Some(tier) = tier {
+            self.fire_after_play_tier(p, tier);
+        }
         // The play is done: from now on even the minion it played is an
         // ordinary one, wherever its Battlecry left it (the mark is on the
         // minion, not on a slot the effects may have moved).
         for m in &mut self.players[p].board {
             m.just_played = false;
+        }
+    }
+
+    /// "After you play a minion, give minions of its type in the Tavern
+    /// stats this game" (Timewarped Amalgam). The minion being played never
+    /// counts for itself.
+    fn fire_after_play_type_tavern(&mut self, p: usize, tribes: crate::cards::Tribes) {
+        if tribes.is_empty() {
+            return;
+        }
+        let mut hosts: arrayvec::ArrayVec<(usize, crate::cards::AfterPlayTypeTavern, bool), { crate::BOARD }> =
+            arrayvec::ArrayVec::new();
+        for i in 0..self.players[p].board.len() {
+            let m = self.players[p].board[i];
+            if m.just_played {
+                continue;
+            }
+            for (card, golden) in m.parts() {
+                if let Some(t) = self.data.cards.get(card).after_play_type_tavern {
+                    let _ = hosts.try_push((i, t, golden));
+                }
+            }
+        }
+        for (_i, t, golden) in hosts {
+            let twice = golden && t.golden_twice;
+            for _ in 0..if twice { 2 } else { 1 } {
+                for tribe in Tribe::EVERY {
+                    if !tribes.has(tribe) {
+                        continue;
+                    }
+                    self.players[p].add_tavern_buff(
+                        &self.data.cards,
+                        crate::game::TavernBuff {
+                            tribe: Some(tribe),
+                            attack: t.attack,
+                            health: t.health,
+                            this_turn: false,
+                            typed_only: false,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    /// "After you play a card from Tier N or above" (Timewarped Raider).
+    pub(super) fn fire_after_play_tier(&mut self, p: usize, tier: u8) {
+        // Timewarped Painter: a card of Tier 3 or below improves it.
+        for i in 0..self.players[p].board.len() {
+            let grows = self.players[p].board[i].parts().any(|(card, _)| {
+                self.data.cards
+                    .get(card)
+                    .improve_on_play_max_tier
+                    .is_some_and(|max| tier <= max)
+            });
+            if grows {
+                self.players[p].board[i].improvements =
+                    self.players[p].board[i].improvements.saturating_add(1);
+            }
+        }
+        let len = self.players[p].board.len();
+        for i in 0..len {
+            let m = self.players[p].board[i];
+            for (card, golden) in m.parts() {
+                let Some(t) = self.data.cards.get(card).after_play_tier.as_ref() else {
+                    continue;
+                };
+                if tier < t.min_tier {
+                    continue;
+                }
+                let twice = golden && t.golden_twice;
+                let effects: arrayvec::ArrayVec<Effect, 8> =
+                    t.effects.iter().copied().take(8).collect();
+                for _ in 0..if twice { 2 } else { 1 } {
+                    for e in effects.iter() {
+                        let mut pos = i;
+                        self.run_effect(p, &mut pos, *e, golden && !twice, 1);
+                    }
+                }
+            }
         }
     }
 

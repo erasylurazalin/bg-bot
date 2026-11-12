@@ -139,6 +139,17 @@ impl Game {
                     }
                 }
             }
+            Some(OnCastSpell::CopySpell) => {
+                let Some(spell) = self.players[p].last_spell else { return };
+                let Some(host) = self.players[p].board.get_mut(i) else { return };
+                if host.uses_left == 0 {
+                    return;
+                }
+                host.uses_left -= 1;
+                for _ in 0..(if golden { 2 } else { 1 }) {
+                    self.give_generated(p, spell);
+                }
+            }
             None => {}
         }
     }
@@ -282,6 +293,7 @@ impl Game {
             self.trinket_event(p, Event::CastSpell, Some(card), 1);
         }
         self.maybe_start_discover(p);
+        self.improve_beast_on_spell(p);
     }
 
     /// A Blood Gem the player's own Activate casts on the friendly minion in
@@ -386,7 +398,14 @@ impl Game {
     }
 
     pub(super) fn brann_mult(&self, p: usize) -> u8 {
-        self.times_count(p, |a| (a == Aura::Brann).then_some(TimesRole::Setter))
+        self.times_count(p, |a| {
+            (a == Aura::Brann || a == Aura::Deios).then_some(TimesRole::Setter)
+        })
+    }
+
+    /// Timewarped Deios: your Rallies trigger twice (three times when golden).
+    pub(super) fn rally_mult(&self, p: usize) -> u8 {
+        self.times_count(p, |a| (a == Aura::Deios).then_some(TimesRole::Setter))
     }
 
     pub(super) fn drakkari_mult(&self, p: usize) -> u8 {
@@ -483,6 +502,24 @@ impl Game {
         if !from_roogug {
             self.roogug_on_gem(p, pos);
         }
+        self.twirler_on_gem(p, pos);
+    }
+
+    /// Timewarped Twirler: a Blood Gem landed on it, so cast Blood Gem
+    /// Barrage. A golden one casts it twice. The cast is the minion's, not
+    /// the player's.
+    fn twirler_on_gem(&mut self, p: usize, pos: usize) {
+        let mut casts: arrayvec::ArrayVec<(CardId, u8), { crate::BOARD }> =
+            arrayvec::ArrayVec::new();
+        let Some(m) = self.players[p].board.get(pos).copied() else { return };
+        for (card, golden) in m.parts() {
+            if let Some(spell) = self.data.cards.get(card).gem_self_cast {
+                let _ = casts.try_push((spell, if golden { 2 } else { 1 }));
+            }
+        }
+        for (spell, times) in casts {
+            self.cast_named_spell(p, spell, times as u32, true);
+        }
     }
 
     /// Play `times` Blood Gems on a friendly minion: the Gems a minion's or a
@@ -500,6 +537,7 @@ impl Game {
     pub(super) fn roogug_reacts(&mut self, p: usize, pos: usize, gems: u8) {
         for _ in 0..gems {
             self.roogug_on_gem(p, pos);
+            self.twirler_on_gem(p, pos);
         }
     }
 
@@ -780,6 +818,7 @@ impl Game {
         if self.players[p].pending_target.is_some() && self.choice_stuck(p) {
             self.players[p].pending_target = None;
         }
+        self.improve_beast_on_spell(p);
         took_all
     }
 
@@ -823,6 +862,24 @@ impl Game {
         // The cast's "after you cast" triggers have run: a Tavern buff the
         // spell's own effect gave lands now, not before them.
         self.players[p].flush_tavern_buffs(&self.data.cards);
+    }
+
+    /// Timewarped Jungle King: a spell was cast, so every one on the board
+    /// improves its "after you summon a Beast" buff.
+    fn improve_beast_on_spell(&mut self, p: usize) {
+        let cards = &self.data.cards;
+        for i in 0..self.players[p].board.len() {
+            let grows = self.players[p].board[i].parts().any(|(c, _)| {
+                matches!(
+                    cards.get(c).on_summon_beast,
+                    Some(crate::cards::OnSummonBeast::BuffOnSpell { .. })
+                )
+            });
+            if grows {
+                self.players[p].board[i].improvements =
+                    self.players[p].board[i].improvements.saturating_add(1);
+            }
+        }
     }
 
     /// Whether a spell has anything to land on right now. A spell cast

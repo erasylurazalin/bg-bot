@@ -832,12 +832,15 @@ impl Game {
                 self.start_consume(p, s, pick, keywords, count, stat_mul);
             }
             TargetKind::TriggerRally => {
+                let times = self.rally_mult(p);
                 for _ in 0..pt.runs {
                     let Some(m) = self.players[p].board.get(s).copied() else { break };
                     for (card, golden) in m.parts() {
                         let Some(e) = self.data.cards.get(card).rally else { continue };
-                        let mut pos = s;
-                        self.run_effect(p, &mut pos, e, golden, 1);
+                        for _ in 0..times {
+                            let mut pos = s;
+                            self.run_effect(p, &mut pos, e, golden, 1);
+                        }
                     }
                 }
             }

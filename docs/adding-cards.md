@@ -1324,3 +1324,77 @@ hooks in.
 - **Random spell at least a cost.** `random_spell_at_least = N` is now on
   `RawEffect` too, so a Deathrattle can get a Tavern spell costing at least N
   (Timewarped Sporebat).
+
+## 18. Systems the Timewarp run added, Phase 3 and 4 (2026-11-12)
+
+- **Limited trigger uses.** `turn_uses` and `turn_uses_golden` on a card are
+  copied into `Minion.uses_left` by `Minion::turn_uses`; a trigger that
+  finds a use spends it. They are the "(N left!)" counters: Centurion's spell
+  copies, Electron's two Refreshes, Embalmer's two summons. `Card.turn_uses`
+  is separate from the older Health Refresh and Magicfin uses, which share
+  the same field.
+- **"After you cast a Tavern spell" copies.** `on_cast_spell = { after = true, copy_spell = true }`
+  adds a copy of the cast Tavern spell to hand (`OnCastSpell::CopySpell`,
+  `Player.last_spell`), capped by the card's uses.
+- **Event triggers with a per-turn cap.** `run_event_triggers` spends
+  `uses_left` for a card with `turn_uses` (Electron's
+  `magnetize_satellite_all_mechs`).
+- **A Satellite to every Mech.** `Effect::MagnetizeSatelliteAllMechs` (the
+  `magnetize_satellite_all_mechs` field) magnetizes a token to every friendly
+  Mech and runs the ordinary Magnetize hooks.
+- **A friendly minion lost Divine Shield.** `on_friendly_shield_lost` runs
+  from `Side::note_shield_lost` and buffs every friendly minion permanently
+  (Grease Bot).
+- **A friendly minion gained Attack.** `on_friendly_gain_attack` runs from
+  `Side::gain_at`/`gain_permanent_at`, and the shop's post-action stat
+  snapshot (`Game::apply_attack_gain_watchers`) gives the Health. The Health
+  gain has no Attack, so it never re-enters the trigger (Whelp Smuggler).
+- **A minion gained stats.** `after_gain_stats_to_hand` gives the gained pair
+  to the first `count` minions in hand, in shop (`apply_attack_gain_watchers`)
+  and in combat (`Side::note_gain_to_hand` through `hand_stats`).
+- **Any Deathrattle triggered.** `after_deathrattle_buff_all` runs from
+  `Side::note_deathrattle`; `gain_permanent_at` uses `gain_at` inside a shop
+  `Side` (`outside`), so a Floating Candle buff lands on the real board.
+- **A Beast was summoned, revised by spells.** `OnSummonBeast::BuffOnSpell`
+  reads `improvements` but does not raise it; `Game::improve_beast_on_spell`
+  raises it after a player's spell cast (Jungle King).
+- **After you play a card of a tier.** `after_play_tier` and
+  `improve_on_play_max_tier` run from `Game::fire_after_play_tier`, which
+  `resolve_after_play` calls with the played card's tier. Raider buffs
+  Pirates; Painter improves. A spell and a minion both count.
+- **After you play a minion of no type.** `after_play_neutral` runs in
+  `fire_after_play_tribe` when the played minion's `Tribes` is empty
+  (Theotar).
+- **After you play a minion, its types in the Tavern.**
+  `after_play_type_tavern` adds one Tavern buff per type of the played
+  minion; a dual-type minion gives both, a neutral gives none (Amalgam).
+- **Refreshes.** `refresh_golden` starts `improvements` at N and
+  `Player::after_refresh_elise` counts explicit Refreshes down; at zero it
+  makes the highest-Tier non-Golden Tavern minions Golden, leftmost first,
+  two on a golden Elise.
+- **Summons and Reborn.** `on_summon_give_reborn` spends `uses_left` from
+  `Game::embalmer_on_summon` (shop `Effect::Summon`) and
+  `Side::embalmer_on_summon` (combat `Side::summon`, and a shop destroy's
+  `Side`). `Side.no_summon_hooks` keeps a Reborn copy from counting.
+- **Start of Combat additions.** `TriggerAllFriendlyDeathrattles`,
+  `AdjacentMurlocsHandStats`, `BecomeCopyLeft` and `CopyLeftDeathrattles`;
+  `BuffAllPerImprovement` is the Promo-Drake Start of Combat buff.
+- **An aura that changes Rallies and Deathrattles.** `Aura::Deios` is a
+  setter beside Brann and Titus: `brann_mult`, `rally_mult`,
+  `Side::deathrattle_fires` and the generic fight Rally all read it. A
+  special Rally (Jailbird Juggernaut, Heroic Underdog) is still run once.
+- **Extra Demons.** `extra_demons` makes `fill_shop` leave room for two
+  Demons per copy and draws them with `(1 + improvements)` times the printed
+  stats; `end_of_turn = { effect = { improve_self = 1 } }` raises the count
+  (Kil'jaeden).
+- **A random opponent's warband.** `Deathrattle::OpponentWarband` reads
+  `Counters.warband`, one other player's board chosen by the game before the
+  fight; a fight without a game behind it falls back to `Side.enemy`, the
+  actual opponent. It summons a copy and adds a plain card to hand
+  (Magnanimoose).
+- **Elemental gifts.** `Player.elemental_bonus` is added when a Swirler is
+  played, and `Effect::with_elemental_bonus` raises the common buff effects
+  (including a Tavern buff) when the effect's host is an Elemental.
+- **Deathrattle copy.** `CopyLeftDeathrattles` takes the left-most friendly
+  printed or gained Deathrattles, skips other Whirl-O-Trons, and appends
+  them to the host's `gained_dr`.

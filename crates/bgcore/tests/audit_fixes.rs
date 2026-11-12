@@ -253,6 +253,7 @@ fn no_card_reacts_to_its_own_play_in_the_data() {
             "Insatiable Ur'zul",
             "Timewarped Anub'arak",
             "Timewarped Nomi",
+            "Timewarped Squallfin",
             "Ultraviolet Ascendant",
             "Wrath Weaver",
         ]

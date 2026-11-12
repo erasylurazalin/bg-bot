@@ -327,7 +327,8 @@ impl Minion {
             let mul: u8 = if golden { 2 } else { 1 };
             uses = uses
                 .max(card.health_refreshes.saturating_mul(mul))
-                .max(if card.teaches_spell { mul } else { 0 });
+                .max(if card.teaches_spell { mul } else { 0 })
+                .max(if golden { card.turn_uses_golden } else { card.turn_uses });
         }
         uses
     }

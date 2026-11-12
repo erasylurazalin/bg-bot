@@ -91,6 +91,9 @@ pub struct Counters {
     /// (Runic Arcanist, Crimson Vindicator).
     pub spell_attack: i32,
     pub spell_health: i32,
+    /// Timewarped Swirler: your Elementals give this much extra stats.
+    pub elemental_attack: i32,
+    pub elemental_health: i32,
     /// The player's Undead bonus "wherever they are" (Nerubian Deathswarmer,
     /// Plaguerunner, Butchering, Forsaken Weaver). Undead on the board and in
     /// the hand already carry it; Undead made in the fight get it.
@@ -156,6 +159,11 @@ pub struct Counters {
     /// Empty for a fight without a game behind it, which every hook answers
     /// from this one field.
     pub secrets: crate::secrets::Secrets,
+    /// Timewarped Magnanimoose: one other player's warband as last seen,
+    /// chosen by the game before the fight. Empty for a fight without a game
+    /// behind it, which falls back to the actual opponent.
+    pub warband: [Option<Minion>; BOARD],
+    pub n_warband: u8,
 }
 
 /// Every player's Blood Gems start at +1/+1, so a fight without the player's
@@ -185,6 +193,10 @@ impl Default for Counters {
             sharing_is_caring: 0,
             spell_attack: 0,
             spell_health: 0,
+            elemental_attack: 0,
+            elemental_health: 0,
+            warband: [None; BOARD],
+            n_warband: 0,
             undead_attack: 0,
             undead_health: 0,
             aura_attack: 0,
@@ -599,6 +611,9 @@ struct Fx {
 
 struct Side<'a> {
     ms: ArrayVec<Fm, BOARD>,
+    /// The opponent's board as the fight began, for "a random opponent's
+    /// warband" (Timewarped Magnanimoose).
+    enemy: &'a [Minion],
     /// The hand as of the start of the fight, borrowed: it is empty unless
     /// something on the board (or in the hand) reads it. The fight never
     /// writes to it; combat-time gains live in `hand_bonus` and permanent
@@ -610,6 +625,8 @@ struct Side<'a> {
     damage_trigger: bool,
     /// A friendly minion was attacked: Timewarped Arm.
     attacked_trigger: bool,
+    /// A Reborn copy is being placed: do not let summon triggers see it.
+    no_summon_hooks: bool,
     /// Whether any minion on the board gives stats to minions summoned
     /// after it (Stalwart Kodo).
     gift_trigger: bool,
@@ -735,10 +752,12 @@ impl<'a> Side<'a> {
         // "Triples"), so a fight adds nothing on top.
         Side {
             ms,
+            enemy: &[],
             hand: &hand[..hand.len().min(HAND)],
             hand_bonus: [(0, 0); HAND],
             damage_trigger,
             attacked_trigger,
+            no_summon_hooks: false,
             gift_trigger,
             hand_taken: 0,
             ptr: 0,
@@ -1029,11 +1048,97 @@ impl<'a> Side<'a> {
                 self.out.permanent_stats[s].1.saturating_add(dh.saturating_mul(mul));
         }
         self.amalgam_gain_at(db, i, da, dh);
+        if da > 0 {
+            self.attack_gain_watchers(db, i, da);
+        }
+        self.note_gain_to_hand(db, i, da, dh);
+    }
+
+    /// Timewarped Expeditioner: this minion gained stats, so the two
+    /// left-most minions in hand gain the same.
+    fn note_gain_to_hand(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
+        if da == 0 && dh == 0 {
+            return;
+        }
+        let mut gifts: ArrayVec<(i32, i32, u8), BOARD> = ArrayVec::new();
+        for (card, golden) in self.ms[i].m.parts() {
+            if let Some(count) = db.get(card).after_gain_stats_to_hand {
+                let mul = if golden { 2 } else { 1 };
+                let _ = gifts.try_push((da * mul, dh * mul, count));
+            }
+        }
+        for (ga, gh, count) in gifts {
+            let mut given = 0;
+            for k in 0..self.hand.len() {
+                if given >= count as usize {
+                    break;
+                }
+                if !self.hand_taken(k) && !db.get(self.hand[k].card).is_spell() {
+                    self.hand_buff(db, k, ga, gh);
+                    given += 1;
+                }
+            }
+        }
+    }
+
+    /// Timewarped Embalmer: one summoned minion each turn gains Reborn. A
+    /// Reborn copy does not count (the flag is set around its insert).
+    fn embalmer_on_summon(&mut self, db: &CardDb, pos: usize) {
+        if self.no_summon_hooks || pos >= self.ms.len() {
+            return;
+        }
+        let mut hosts: ArrayVec<usize, BOARD> = ArrayVec::new();
+        for i in 0..self.ms.len() {
+            if self.ms[i].m.health > 0
+                && self.ms[i]
+                    .m
+                    .parts()
+                    .any(|(c, _)| db.get(c).on_summon_give_reborn)
+            {
+                let _ = hosts.try_push(i);
+            }
+        }
+        for i in hosts {
+            if self.ms[i].m.uses_left == 0 {
+                continue;
+            }
+            self.ms[i].m.uses_left -= 1;
+            self.ms[pos].m.keywords.set(Keywords::REBORN);
+        }
+    }
+
+    /// Timewarped Whelp Smuggler: a friendly minion gained Attack, so every
+    /// one on this side gives it Health. The Health gain has no Attack, so
+    /// it never re-enters this.
+    fn attack_gain_watchers(&mut self, db: &CardDb, i: usize, da: i32) {
+        if da <= 0 || i >= self.ms.len() {
+            return;
+        }
+        let mut heals: ArrayVec<i32, BOARD> = ArrayVec::new();
+        for f in &self.ms {
+            if f.m.health <= 0 {
+                continue;
+            }
+            for (card, golden) in f.m.parts() {
+                if let Some((_, health)) = db.get(card).on_friendly_gain_attack {
+                    let _ = heals.try_push(health * if golden { 2 } else { 1 });
+                }
+            }
+        }
+        for health in heals {
+            self.gain_at(db, i, 0, health);
+        }
     }
 
     /// Give the minion in slot `i` stats that it keeps after the fight
     /// regardless of other keepers (Devout Hellcaller).
     fn gain_permanent_at(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
+        // A shop destroy's Side is "outside" a real combat: its board is the
+        // game's board when the dust settles, so the gain is a normal one.
+        if self.outside {
+            self.gain_at(db, i, da, dh);
+            return;
+        }
         if db.get(self.ms[i].m.card).fixed_stats {
             return;
         }
@@ -1046,6 +1151,10 @@ impl<'a> Side<'a> {
             self.out.permanent_stats[s].1 = self.out.permanent_stats[s].1.saturating_add(dh);
         }
         self.amalgam_gain_at(db, i, da, dh);
+        if da > 0 {
+            self.attack_gain_watchers(db, i, da);
+        }
+        self.note_gain_to_hand(db, i, da, dh);
     }
 
     /// A friendly Demon (`attacker_uid`) dealt damage: every other friendly
@@ -1167,6 +1276,27 @@ impl<'a> Side<'a> {
                 let s = slot as usize;
                 self.out.permanent_improvements[s] =
                     self.out.permanent_improvements[s].saturating_add(n);
+            }
+        }
+        // Timewarped Grease Bot: a friendly minion lost Divine Shield, so
+        // every one on this side gives all friendly minions stats for good.
+        let mut buffs: ArrayVec<(i32, i32), BOARD> = ArrayVec::new();
+        for f in &self.ms {
+            if f.m.health <= 0 {
+                continue;
+            }
+            for (card, golden) in f.m.parts() {
+                if let Some((attack, health)) = db.get(card).on_friendly_shield_lost {
+                    let mul = if golden { 2 } else { 1 };
+                    let _ = buffs.try_push((attack * mul, health * mul));
+                }
+            }
+        }
+        for (attack, health) in buffs {
+            for i in 0..self.ms.len() {
+                if self.ms[i].m.health > 0 {
+                    self.gain_permanent_at(db, i, attack, health);
+                }
             }
         }
     }
@@ -1348,6 +1478,38 @@ impl<'a> Side<'a> {
     }
 
     /// False when the board is full and the minion is lost.
+    /// Timewarped Magnanimoose: summon and get minions from the opponent's
+    /// warband as the fight began. The hand copy is a plain card.
+    #[allow(clippy::too_many_arguments)]
+    fn summon_opponent_warband(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        mut pos: usize,
+        count: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) {
+        let pool_b: ArrayVec<Minion, BOARD> = if self.counters.n_warband > 0 {
+            self.counters.warband.iter().flatten().copied().collect()
+        } else {
+            self.enemy.iter().copied().collect()
+        };
+        if pool_b.is_empty() {
+            return;
+        }
+        for _ in 0..count {
+            let k = rng.below(pool_b.len() as u32) as usize;
+            let mut m = pool_b[k];
+            m.pool_copies = 0;
+            if self.summon(db, side, pos, m, uid, rng, w) {
+                pos += 1;
+            }
+            self.out.push_card(m.card);
+        }
+    }
+
     fn insert(&mut self, i: usize, f: Fm) -> bool {
         if self.ms.is_full() {
             return false;
@@ -1395,6 +1557,27 @@ impl<'a> Side<'a> {
                 if let Some((a, h)) = db.get(card).buff_per_deathrattle {
                     let mul = if golden { 2 } else { 1 };
                     self.gain_at(db, i, a * mul, h * mul);
+                }
+            }
+        }
+        // Timewarped Ghoul-acabra: a Deathrattle was triggered, so every one
+        // on this side gives all friendly minions stats for good.
+        let mut buffs: ArrayVec<(i32, i32), BOARD> = ArrayVec::new();
+        for f in &self.ms {
+            if f.m.health <= 0 {
+                continue;
+            }
+            for (card, golden) in f.m.parts() {
+                if let Some((attack, health)) = db.get(card).after_deathrattle_buff_all {
+                    let mul = if golden { 2 } else { 1 };
+                    let _ = buffs.try_push((attack * mul, health * mul));
+                }
+            }
+        }
+        for (attack, health) in buffs {
+            for i in 0..self.ms.len() {
+                if self.ms[i].m.health > 0 {
+                    self.gain_permanent_at(db, i, attack, health);
                 }
             }
         }
@@ -1822,6 +2005,7 @@ impl<'a> Side<'a> {
             Fm { m, uid: *uid, start_slot: None, avenge: 0, damaged_fires: 0, triple_reward_used: false, killer: None, taken: 0, gifts: 0 },
         );
         *uid += 1;
+        self.embalmer_on_summon(db, pos);
         // Sprout It Out! (Greybough): minions summoned during combat gain
         // +1/+2 and Taunt.
         if !self.outside && self.counters.sprout_it_out > 0 {
@@ -1842,20 +2026,27 @@ impl<'a> Side<'a> {
                 let mut dh_total = 0;
                 let mut imp_gain = 0u16;
                 for (card, golden) in self.ms[j].m.parts() {
-                    if let Some(OnSummonBeast::Buff { attack, health, improve_permanently }) =
-                        db.get(card).on_summon_beast
-                    {
-                        let mul = if golden { 2 } else { 1 };
-                        let stacks = if improve_permanently {
-                            1 + (imp + imp_gain) as i32
-                        } else {
-                            1
-                        };
-                        da_total += attack * mul * stacks;
-                        dh_total += health * mul * stacks;
-                        if improve_permanently {
-                            imp_gain += 1;
+                    match db.get(card).on_summon_beast {
+                        Some(OnSummonBeast::Buff { attack, health, improve_permanently }) => {
+                            let mul = if golden { 2 } else { 1 };
+                            let stacks = if improve_permanently {
+                                1 + (imp + imp_gain) as i32
+                            } else {
+                                1
+                            };
+                            da_total += attack * mul * stacks;
+                            dh_total += health * mul * stacks;
+                            if improve_permanently {
+                                imp_gain += 1;
+                            }
                         }
+                        Some(OnSummonBeast::BuffOnSpell { attack, health }) => {
+                            let mul = if golden { 2 } else { 1 };
+                            let stacks = 1 + (imp + imp_gain) as i32;
+                            da_total += attack * mul * stacks;
+                            dh_total += health * mul * stacks;
+                        }
+                        _ => {}
                     }
                 }
                 if imp_gain > 0 {
@@ -2263,7 +2454,11 @@ impl<'a> Side<'a> {
     fn deathrattle_fires(&mut self, db: &CardDb) -> u32 {
         let n = {
             let parts = self.ms.iter().filter(|f| f.m.health > 0).flat_map(|f| f.m.parts());
-            how_many_times(db, parts, |a| (a == Aura::Titus).then_some(TimesRole::Adder)) as u32
+            how_many_times(db, parts, |a| match a {
+                Aura::Deios => Some(TimesRole::Setter),
+                Aura::Titus => Some(TimesRole::Adder),
+                _ => None,
+            }) as u32
         };
         // Deathly Phylactery: the first Deathrattle of the fight fires once
         // more than it otherwise would ("each combat": a shop destroy is not
@@ -2363,6 +2558,16 @@ impl<'a> Side<'a> {
         rng: &mut Rng,
         w: &mut impl Watch,
     ) {
+        let host_elemental = self.index_of(fx.host).is_some_and(|i| {
+            db.tribes_of(&self.ms[i].m).has(Tribe::Elemental)
+        });
+        let e = if host_elemental
+            && (self.counters.elemental_attack != 0 || self.counters.elemental_health != 0)
+        {
+            e.with_elemental_bonus((self.counters.elemental_attack, self.counters.elemental_health))
+        } else {
+            e
+        };
         let mul: i32 = if golden { 2 } else { 1 };
         match e {
             Effect::BuffDeity { attack, health, per_spell } => {
@@ -2573,6 +2778,34 @@ impl<'a> Side<'a> {
             Effect::BeetleBuff { attack, health } => {
                 self.add_beetle_buff(db, attack * mul, health * mul);
             }
+            Effect::BeetleBuffAndSummon { attack, health, count } => {
+                self.run_effect(
+                    db,
+                    Effect::BeetleBuff { attack, health },
+                    golden,
+                    fx,
+                    at,
+                    uid,
+                    rng,
+                    w,
+                );
+                if let Some(beetle) = db.beetle_token {
+                    self.run_effect(
+                        db,
+                        Effect::Summon {
+                            card: beetle,
+                            count,
+                            golden_doubles_count: true,
+                        },
+                        golden,
+                        fx,
+                        at,
+                        uid,
+                        rng,
+                        w,
+                    );
+                }
+            }
             Effect::RandomVolumizer => {
                 for _ in 0..mul {
                     if let Some(v) = db.random_volumizer(self.counters.lobby, rng) {
@@ -2683,6 +2916,15 @@ impl<'a> Side<'a> {
             Effect::RefreshBuff { attack, health } => {
                 self.out.refresh_buff_gain.0 += attack * mul;
                 self.out.refresh_buff_gain.1 += health * mul;
+            }
+            Effect::BuffAllPerImprovement { attack, health } => {
+                let Some(hi) = self.index_of(fx.host) else { return };
+                let n = 1 + self.ms[hi].m.improvements as i32;
+                for i in 0..self.ms.len() {
+                    if self.ms[i].m.health > 0 {
+                        self.gain_at(db, i, attack * mul * n, health * mul * n);
+                    }
+                }
             }
             Effect::BuffOthersPerImprovement { tribe, attack, health } => {
                 // Times one plus the host's `improvements` (Ultraviolet
@@ -2911,6 +3153,14 @@ impl<'a> Side<'a> {
                     self.gem_at(db, i, count as i32 * mul, permanent, false, rng);
                 }
             }
+            Effect::GemTribe { tribe, count } => {
+                let n = count as i32 * mul;
+                for i in 0..self.ms.len() {
+                    if self.ms[i].m.health > 0 && db.tribes_of(&self.ms[i].m).has(tribe) {
+                        self.gem_at(db, i, n, false, false, rng);
+                    }
+                }
+            }
             Effect::GemOthers(count) => {
                 let n = count as i32 * mul;
                 for i in 0..self.ms.len() {
@@ -3040,6 +3290,11 @@ impl<'a> Side<'a> {
                                 pos += 1;
                             }
                         }
+                    }
+                    Deathrattle::OpponentWarband { count } => {
+                        self.summon_opponent_warband(
+                            db, side, pos, count as usize * mul as usize, uid, rng, w,
+                        );
                     }
                     Deathrattle::SummonOverflowUndeadAttack {
                         card: tok,
@@ -3447,7 +3702,10 @@ impl<'a> Side<'a> {
                     }
                     m.shield_hits = dead.shield_hits;
                 }
-                if self.summon(db, side, i, m, uid, rng, w) {
+                self.no_summon_hooks = true;
+                let reborn = self.summon(db, side, i, m, uid, rng, w);
+                self.no_summon_hooks = false;
+                if reborn {
                     self.ms[i].taken = (full - 1).max(0);
                     self.note_reborn(db, i, fm.start_slot);
                     let plain = self.ms[i].m;
@@ -4089,6 +4347,99 @@ fn run_start_of_combat(
                         db, turn, &m, m.health, host, None, mi + 1, runs, uid, rng, w,
                     );
                 }
+                Some(StartOfCombat::TriggerAllFriendlyDeathrattles { times }) => {
+                    // Snapshot the living board: a Deathrattle that summons
+                    // another Deathrattle does not trigger it again here.
+                    let uids: ArrayVec<u16, BOARD> =
+                        sides[turn].ms.iter().filter(|f| f.m.health > 0).map(|f| f.uid).collect();
+                    let reps = times.saturating_mul(mul as u8) as u32;
+                    for u in uids {
+                        let Some(mi) = sides[turn].index_of(u) else { continue };
+                        if sides[turn].ms[mi].m.health <= 0 {
+                            continue;
+                        }
+                        let (m, host) = (sides[turn].ms[mi].m, u);
+                        let runs = sides[turn].deathrattle_fires(db).saturating_mul(reps);
+                        sides[turn].fire_deathrattles(
+                            db, turn, &m, m.health, host, None, mi + 1, runs, uid, rng, w,
+                        );
+                    }
+                }
+                Some(StartOfCombat::AdjacentMurlocsHandStats { times }) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let (mut da, mut dh) = (0, 0);
+                    for (i, m) in sides[turn].hand.iter().enumerate() {
+                        if !sides[turn].hand_taken(i) && !db.get(m.card).is_spell() {
+                            da += m.attack + sides[turn].hand_bonus[i].0;
+                            dh += m.health + sides[turn].hand_bonus[i].1;
+                        }
+                    }
+                    let reps = times.saturating_mul(mul as u8) as i32;
+                    for j in [mi.checked_sub(1), Some(mi + 1)].into_iter().flatten() {
+                        if j < sides[turn].ms.len()
+                            && sides[turn].ms[j].m.health > 0
+                            && db.tribes_of(&sides[turn].ms[j].m).has(Tribe::Murloc)
+                        {
+                            sides[turn].gain_at(db, j, da * reps, dh * reps);
+                        }
+                    }
+                }
+                Some(StartOfCombat::BecomeCopyLeft) => {
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    if mi == 0 {
+                        continue;
+                    }
+                    let mut copy = sides[turn].ms[mi - 1].m;
+                    copy.pool_copies = 0;
+                    if golden && !copy.golden {
+                        let base = db.get(copy.card);
+                        let (gold_a, gold_h) =
+                            base.golden_stats.unwrap_or((base.attack * 2, base.health * 2));
+                        copy.attack += (gold_a - base.attack).max(0);
+                        copy.health += (gold_h - base.health).max(0);
+                        copy.golden = true;
+                    }
+                    sides[turn].ms[mi].m = copy;
+                    // The copy's own Start of Combat fires too, unless it is
+                    // another Chameleon (which would chase its own left).
+                    let new = sides[turn].ms[mi].m;
+                    if new.parts().any(|(c, _)| {
+                        let sc = db.get(c).start_of_combat;
+                        sc.is_some() && !matches!(sc, Some(StartOfCombat::BecomeCopyLeft))
+                    }) && !soc[turn].is_full()
+                    {
+                        let _ = soc[turn].try_push(me);
+                    }
+                }
+                Some(StartOfCombat::CopyLeftDeathrattles { count, times }) => {
+                    let mut found: ArrayVec<Attached, BOARD> = ArrayVec::new();
+                    for f in &sides[turn].ms {
+                        if f.m.health <= 0 || f.uid == me {
+                            continue;
+                        }
+                        if f.m.parts().any(|(c, _)| db.get(c).whirl_o_tron) {
+                            continue;
+                        }
+                        for (card, golden) in f.m.parts() {
+                            if db.get(card).deathrattle.is_some() {
+                                let _ = found.try_push(Attached { card, golden });
+                            }
+                        }
+                        for &(uid, a) in &sides[turn].gained_dr {
+                            if uid == f.uid {
+                                let _ = found.try_push(a);
+                            }
+                        }
+                    }
+                    let reps = times.saturating_mul(mul as u8);
+                    for a in found.iter().take(count as usize) {
+                        for _ in 0..reps {
+                            if !sides[turn].gained_dr.is_full() {
+                                let _ = sides[turn].gained_dr.try_push((me, *a));
+                            }
+                        }
+                    }
+                }
                 Some(StartOfCombat::SummonOwnCopy) => {
                     let Some(mi) = sides[turn].index_of(me) else { break };
                     let mut m = sides[turn].ms[mi].m;
@@ -4307,16 +4658,28 @@ fn attack_triggers(
                         }
                     }
                     _ => {
-                        let Some(hi) = sides[turn].index_of(host) else { break };
-                        let fx = Fx {
-                            side: turn,
-                            host,
-                            killer: None,
-                            attacker: None,
-                            skip_ptr: true,
+                        let times = {
+                            let parts = sides[turn]
+                                .ms
+                                .iter()
+                                .filter(|f| f.m.health > 0)
+                                .flat_map(|f| f.m.parts());
+                            how_many_times(db, parts, |a| {
+                                (a == Aura::Deios).then_some(TimesRole::Setter)
+                            })
                         };
-                        let mut at = hi + 1;
-                        sides[turn].run_effect(db, e, golden, fx, &mut at, uid, rng, w);
+                        for _ in 0..times {
+                            let Some(hi) = sides[turn].index_of(host) else { break };
+                            let fx = Fx {
+                                side: turn,
+                                host,
+                                killer: None,
+                                attacker: None,
+                                skip_ptr: true,
+                            };
+                            let mut at = hi + 1;
+                            sides[turn].run_effect(db, e, golden, fx, &mut at, uid, rng, w);
+                        }
                     }
                 }
             }
@@ -4713,6 +5076,8 @@ pub fn fight_with_hands(
         Side::new(db, a, hands[0], counters[0], &mut uid),
         Side::new(db, b, hands[1], counters[1], &mut uid),
     ];
+    sides[0].enemy = b;
+    sides[1].enemy = a;
     let (na, nb) = (sides[0].ms.len(), sides[1].ms.len());
     let mut turn = if na > nb {
         0

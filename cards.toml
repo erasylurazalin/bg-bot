@@ -1310,7 +1310,7 @@ name = "Surfing Sylvar"
 tier = 2
 tribe = "pirate"
 stats = [1, 2]
-end_of_turn = { effect = { adjacent_per_golden = 1 } }
+end_of_turn = { effect = { adjacent_per_golden = [1, 0] } }
 
 [[minion]]
 name = "Azsharan Cutlassier"
@@ -4022,3 +4022,271 @@ tribe = "undead"
 stats = [5, 5]
 timewarp = "major"
 deathrattle = { summon = "Skeleton", count = 5, golden_doubles_count = true, overflow_undead_attack = 1 }
+
+# --- Timewarped minions, Phase 3 (Timeworn Candelabra, 2-cost) ---
+# The remaining new-code cards; same marker as Phase 1 and 2.
+
+[[token]]
+name = "Timewarped Centurion"
+tier = 5
+tribe = "dragon"
+stats = [8, 8]
+timewarp = "major"
+on_cast_spell = { after = true, copy_spell = true }
+turn_uses = 3
+
+[[token]]
+name = "Timewarped Electron"
+tier = 5
+tribe = "mech"
+stats = [9, 9]
+timewarp = "major"
+on_event = { event = "spells_cast", every = 2, effect = { magnetize_satellite_all_mechs = "Satellite" } }
+turn_uses = 2
+
+[[token]]
+name = "Timewarped Grease Bot"
+tier = 5
+tribe = "mech"
+stats = [6, 12]
+timewarp = "major"
+keywords = ["divine_shield"]
+on_friendly_shield_lost = [3, 3]
+
+[[token]]
+name = "Timewarped Hawkstrider"
+tier = 5
+tribe = "beast"
+stats = [8, 4]
+timewarp = "major"
+start_of_combat = { trigger_all_friendly_deathrattles = true }
+
+[[token]]
+name = "Timewarped Interpreter"
+tier = 5
+tribe = "mech"
+stats = [6, 8]
+timewarp = "major"
+on_play_or_magnetize_mech = { buff = [3, 3], all_mechs = true }
+
+[[token]]
+name = "Timewarped Lil' Quilboar"
+tier = 5
+tribe = "quilboar"
+stats = [5, 5]
+timewarp = "major"
+keywords = ["reborn"]
+deathrattle = { effect = { gem_tribe = "quilboar", count = 3 } }
+
+[[token]]
+name = "Timewarped Mrrrglr"
+tier = 5
+tribe = "murloc"
+stats = [8, 8]
+timewarp = "major"
+start_of_combat = { adjacent_murlocs_hand_stats = true }
+
+[[token]]
+name = "Timewarped Nest Swarmer"
+tier = 5
+tribe = "beast"
+stats = [7, 7]
+timewarp = "major"
+battlecry = { beetle_buff_and_summon = [2, 2] }
+deathrattle = { effect = { beetle_buff_and_summon = [2, 2] } }
+rally = { beetle_buff_and_summon = [2, 2] }
+
+[[token]]
+name = "Timewarped Peggy"
+tier = 5
+tribe = "pirate"
+stats = [9, 5]
+timewarp = "major"
+on_card_added_pirates = [1, 1]
+
+[[token]]
+name = "Timewarped Raider"
+tier = 5
+tribe = "pirate"
+stats = [14, 6]
+timewarp = "major"
+after_play_tier = { min_tier = 4, effects = [{ buff = [3, 2], target = "all", tribe = "pirate" }], golden_twice = true }
+
+[[token]]
+name = "Timewarped Squallfin"
+tier = 5
+tribe = "murloc"
+stats = [6, 14]
+timewarp = "major"
+after_play_tribe = { tribe = "murloc", effects = [{ buff_board_and_hand = [2, 2] }] }
+
+[[token]]
+name = "Timewarped Sylvar"
+tier = 5
+tribe = "pirate"
+stats = [7, 10]
+timewarp = "major"
+end_of_turn = { effect = { adjacent_per_golden = [8, 8] } }
+
+[[token]]
+name = "Timewarped Theotar"
+tier = 5
+tribe = "all"
+stats = [8, 8]
+timewarp = "major"
+after_play_neutral = [{ buff_each_type = [6, 6] }]
+
+[[token]]
+name = "Timewarped Twirler"
+tier = 5
+tribe = "quilboar"
+stats = [7, 5]
+timewarp = "major"
+gem_self_cast = "Blood Gem Barrage"
+
+[[token]]
+name = "Timewarped Shivarra"
+tier = 5
+tribe = "demon"
+stats = [4, 2]
+timewarp = "major"
+on_consume_gain_stats = true
+
+# --- Timewarped minions, Phase 4 (Timeworn Candelabra, 2-cost) ---
+# The cards whose rules are Era's guesses; see docs/notes/UNSURE.md.
+
+[[token]]
+name = "Timewarped Elise"
+tier = 3
+tribe = "neutral"
+stats = [6, 7]
+timewarp = "minor"
+refresh_golden = 5
+
+[[token]]
+name = "Timewarped Embalmer"
+tier = 3
+tribe = "undead"
+stats = [10, 10]
+timewarp = "minor"
+turn_uses = 1
+turn_uses_golden = 2
+on_summon_give_reborn = true
+
+[[token]]
+name = "Timewarped Tender"
+tier = 3
+tribe = "neutral"
+stats = [7, 5]
+timewarp = "minor"
+end_of_turn = { effect = { random_stat_spell = 2 } }
+
+[[token]]
+name = "Timewarped Whelp Smuggler"
+tier = 3
+tribe = "neutral"
+lobby = "dragon"
+stats = [3, 8]
+timewarp = "minor"
+on_friendly_gain_attack = [0, 3]
+
+[[token]]
+name = "Timewarped Amalgam"
+tier = 5
+tribe = "all"
+stats = [7, 9]
+timewarp = "major"
+after_play_type_tavern = { buff = [4, 4], golden_twice = true }
+
+[[token]]
+name = "Timewarped Chameleon"
+tier = 5
+tribe = "beast"
+stats = [6, 15]
+timewarp = "major"
+start_of_combat = { become_copy_left = true }
+
+[[token]]
+name = "Timewarped Deios"
+tier = 5
+tribe = "neutral"
+stats = [6, 10]
+timewarp = "major"
+aura = "deios"
+
+[[token]]
+name = "Timewarped Expeditioner"
+tier = 5
+tribe = "murloc"
+stats = [6, 12]
+timewarp = "major"
+after_gain_stats_to_hand = 2
+
+[[token]]
+name = "Timewarped Ghoul-acabra"
+tier = 5
+tribes = ["undead", "beast"]
+stats = [6, 15]
+timewarp = "major"
+after_deathrattle_buff_all = [3, 2]
+
+[[token]]
+name = "Timewarped Painter"
+tier = 5
+tribe = "murloc"
+stats = [4, 9]
+timewarp = "major"
+end_of_turn = { effect = { adjacent_per_improvement = [3, 2] } }
+improve_on_play_max_tier = 3
+
+[[token]]
+name = "Timewarped Promo-Drake"
+tier = 5
+tribe = "dragon"
+stats = [6, 6]
+timewarp = "major"
+start_of_combat = { effect = { buff_all_per_improvement = [5, 5] } }
+end_of_turn = { effect = { improve_self = 1 } }
+
+[[token]]
+name = "Timewarped Jungle King"
+tier = 5
+tribe = "beast"
+stats = [8, 12]
+timewarp = "major"
+keywords = ["stealth"]
+on_summon_beast = { buff = [4, 3], improve_on_spell = true }
+
+[[token]]
+name = "Timewarped Kil'jaeden"
+tier = 5
+tribe = "demon"
+stats = [7, 7]
+timewarp = "major"
+extra_demons = [7, 7]
+end_of_turn = { effect = { improve_self = 1 } }
+
+[[token]]
+name = "Timewarped Magnanimoose"
+tier = 5
+tribe = "beast"
+stats = [8, 2]
+timewarp = "major"
+deathrattle = { opponent_warband = 1 }
+
+[[token]]
+name = "Timewarped Swirler"
+tier = 5
+tribe = "elemental"
+stats = [9, 9]
+timewarp = "major"
+elemental_gift_bonus = [3, 3]
+
+[[token]]
+name = "Timewarped Whirl-O-Tron"
+tier = 5
+tribe = "mech"
+stats = [7, 5]
+timewarp = "major"
+whirl_o_tron = true
+start_of_combat = { copy_left_deathrattles = true }

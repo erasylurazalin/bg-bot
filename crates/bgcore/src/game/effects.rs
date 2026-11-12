@@ -148,6 +148,13 @@ impl Game {
     /// doubles it and `runs` repeats it (Brann). `pos` follows the minion
     /// when a triple takes board minions away to its left.
     pub(super) fn run_effect(&mut self, p: usize, pos: &mut usize, e: Effect, golden: bool, runs: u8) {
+        let host_elemental = *pos < self.players[p].board.len()
+            && self.data.cards.tribes_of(&self.players[p].board[*pos]).has(crate::cards::Tribe::Elemental);
+        let e = if host_elemental && self.players[p].elemental_bonus != (0, 0) {
+            e.with_elemental_bonus(self.players[p].elemental_bonus)
+        } else {
+            e
+        };
         let mul = if golden { 2 } else { 1 };
         let bonus_mask = self.data.rules.bonus_mask;
         match e {
@@ -476,6 +483,22 @@ impl Game {
                     self.add_beetle_bonus(p, attack * mul, health * mul);
                 }
             }
+            Effect::BeetleBuffAndSummon { attack, health, count } => {
+                self.run_effect(p, pos, Effect::BeetleBuff { attack, health }, golden, runs);
+                if let Some(beetle) = self.data.cards.beetle_token {
+                    self.run_effect(
+                        p,
+                        pos,
+                        Effect::Summon {
+                            card: beetle,
+                            count,
+                            golden_doubles_count: true,
+                        },
+                        golden,
+                        runs,
+                    );
+                }
+            }
             Effect::GoldNextTurn(g) => {
                 let gain = g.saturating_mul(mul as u8).saturating_mul(runs);
                 self.players[p].gold_next_turn =
@@ -593,6 +616,34 @@ impl Game {
                     }
                 }
             }
+            Effect::MagnetizeSatelliteAllMechs { card } => {
+                let times = mul * runs as i32;
+                let len = self.players[p].board.len();
+                for i in 0..len {
+                    if !self.data.cards.tribes_of(&self.players[p].board[i]).has(Tribe::Mech) {
+                        continue;
+                    }
+                    for _ in 0..times {
+                        let mut sat = self.data.cards.make(card, false);
+                        sat.pool_copies = 0;
+                        self.players[p].board[i].magnetize(&self.data.cards, sat);
+                        self.note_magnetized(p);
+                        self.trigger_mech_played_or_magnetized(p, i, false, false);
+                        let _ = self.beatboxers_copy(p, Some(i), sat);
+                    }
+                }
+            }
+            Effect::GetRandomStatSpell(count) => {
+                let tier = self.players[p].tier;
+                let total = count as i32 * mul * runs as i32;
+                for _ in 0..total {
+                    if let Some(c) =
+                        self.data.cards.random_stat_spell(tier, self.lobby, &mut self.rng)
+                    {
+                        self.give_generated_tracking(p, c, pos);
+                    }
+                }
+            }
             Effect::GetRandomSpellAtLeast { cost, count } => {
                 let tier = self.players[p].tier;
                 let total = count as i32 * mul * runs as i32;
@@ -643,6 +694,7 @@ impl Game {
                     // a Mycologist's teachings.
                     m.uses_left = m.turn_uses(&self.data.cards);
                     self.players[p].board.insert(at, m);
+                    self.embalmer_on_summon(p, at);
                     at += 1;
                 }
                 // Three summoned copies of one card are a triple too, and
@@ -858,7 +910,17 @@ impl Game {
                     }
                 }
             }
-            Effect::BuffAdjacentPerGolden { attack } => {
+            Effect::BuffAdjacentPerImprovement { attack, health } => {
+                let host = self.players[p].board.get(*pos).map_or(0, |m| m.improvements);
+                let n = (1 + host as i32) * mul * runs as i32;
+                let here = *pos;
+                for j in [here.checked_sub(1), Some(here + 1)].into_iter().flatten() {
+                    if let Some(o) = self.players[p].board.get_mut(j) {
+                        buff(o, attack * n, health * n);
+                    }
+                }
+            }
+            Effect::BuffAdjacentPerGolden { attack, health } => {
                 // Once, and again for each friendly Golden minion.
                 let golden_count = self.players[p].board.iter().filter(|m| m.golden).count() as i32;
                 let n = (1 + golden_count) * runs as i32;
@@ -866,7 +928,7 @@ impl Game {
                 let board = &mut self.players[p].board;
                 for j in [here.checked_sub(1), Some(here + 1)].into_iter().flatten() {
                     if let Some(o) = board.get_mut(j) {
-                        buff(o, attack * mul * n, 0);
+                        buff(o, attack * mul * n, health * mul * n);
                     }
                 }
             }
@@ -1098,6 +1160,20 @@ impl Game {
                 let times = count.saturating_mul(mul as u8).saturating_mul(runs);
                 self.play_gems_on_board(p, *pos, times);
             }
+            Effect::GemTribe { tribe, count } => {
+                let times = count.saturating_mul(mul as u8).saturating_mul(runs);
+                let cards = &self.data.cards;
+                let mut targets: arrayvec::ArrayVec<usize, { crate::BOARD }> =
+                    arrayvec::ArrayVec::new();
+                for i in 0..self.players[p].board.len() {
+                    if cards.tribes_of(&self.players[p].board[i]).has(tribe) {
+                        let _ = targets.try_push(i);
+                    }
+                }
+                for i in targets {
+                    self.play_gems_on_board(p, i, times);
+                }
+            }
             Effect::GemOthers(count) => {
                 let times = count.saturating_mul(mul as u8).saturating_mul(runs);
                 let board_len = self.players[p].board.len();
@@ -1163,6 +1239,7 @@ impl Game {
             | Effect::SummonSalvaged
             | Effect::BuffOthersPerImprovement { .. }
             | Effect::BuffAllKeepGolden { .. }
+            | Effect::BuffAllPerImprovement { .. }
             | Effect::DamageTargetAndNeighbor
             | Effect::BuffKiller { .. }
             | Effect::BuffAttacker { .. }
@@ -1397,6 +1474,20 @@ impl Game {
                 buff(&mut pl.board[j], da, dh);
             }
         }
+        // Timewarped Shivarra: every one on the board gains the consumed
+        // minion's stats too. Golden doubles them.
+        let (ea, eh) = (eaten.attack, eaten.health);
+        for j in 0..pl.board.len() {
+            let mut times = 0;
+            for (card, golden) in pl.board[j].parts() {
+                if data.cards.get(card).on_consume_gain_stats {
+                    times += if golden { 2 } else { 1 };
+                }
+            }
+            if times > 0 {
+                buff(&mut pl.board[j], ea * times, eh * times);
+            }
+        }
         let card = eaten.card;
         self.trinket_event(p, crate::trinkets::Event::Consume, Some(card), 1);
     }
@@ -1582,6 +1673,16 @@ impl Game {
                     } else {
                         count as u16
                     };
+                }
+                let cap = self.data.cards.get(card).turn_uses;
+                if cap > 0 {
+                    let left = self.players[p].board[pos].uses_left;
+                    if left == 0 {
+                        fires = 0;
+                    } else {
+                        fires = fires.min(left as u32);
+                        self.players[p].board[pos].uses_left -= fires as u8;
+                    }
                 }
                 for _ in 0..fires {
                     self.run_effect(p, &mut pos, t.effect, golden, 1);

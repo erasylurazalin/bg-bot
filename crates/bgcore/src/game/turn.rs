@@ -1129,7 +1129,26 @@ impl Game {
                 &[]
             };
             let me = self.players[p].board.clone();
-            let my_counters = self.players[p].counters(&self.data, self.lobby);
+            let mut my_counters = self.players[p].counters(&self.data, self.lobby);
+            // Timewarped Magnanimoose: pick one other player's warband as
+            // last seen before the fight. No draw happens without it.
+            if me.iter().any(|m| {
+                m.parts().any(|(c, _)| {
+                    matches!(
+                        self.data.cards.get(c).deathrattle,
+                        Some(crate::cards::Deathrattle::OpponentWarband { .. })
+                    )
+                })
+            }) {
+                let others: ArrayVec<usize, { crate::PLAYERS }> =
+                    (0..crate::PLAYERS).filter(|&q| q != p).collect();
+                if !others.is_empty() {
+                    let k = self.rng.below(others.len() as u32) as usize;
+                    let wb = self.players[others[k]].board.clone();
+                    my_counters.warband = std::array::from_fn(|i| wb.get(i).copied());
+                    my_counters.n_warband = wb.len().min(crate::BOARD) as u8;
+                }
+            }
             let turn = self.turn;
             let my_tier = self.players[p].tier;
             let hands: [&[Minion]; 2] = [my_hand, their_hand];

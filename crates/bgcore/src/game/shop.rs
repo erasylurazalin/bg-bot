@@ -249,10 +249,47 @@ impl Game {
         pl.shop_spell = None;
         let size = pl.shop_size(rules);
         let range = Self::fill_shop(pl, pool, cards, rules, size, rng, lobby, kind);
+        Self::after_refresh_elise(pl, cards);
         Self::apply_refresh_buff(pl, cards, rng);
         Self::apply_barrage(pl, cards, rng);
         Self::after_refresh_powers(pl, cards, rng, rules.bonus_mask);
         range
+    }
+
+    /// Timewarped Elise: every Refresh takes one off each Elise's countdown;
+    /// at zero it makes the highest-Tier non-Golden Tavern minions Golden
+    /// (the leftmost of a tie), two of them on a golden Elise.
+    fn after_refresh_elise(pl: &mut Player, cards: &CardDb) {
+        let mut hits: ArrayVec<(usize, u8, bool), { crate::BOARD }> = ArrayVec::new();
+        for i in 0..pl.board.len() {
+            let m = pl.board[i];
+            for (card, golden) in m.parts() {
+                if let Some(n) = cards.get(card).refresh_golden {
+                    let _ = hits.try_push((i, n, golden));
+                }
+            }
+        }
+        for (i, n, golden) in hits {
+            let left = pl.board[i].improvements;
+            if left > 1 {
+                pl.board[i].improvements = left - 1;
+                continue;
+            }
+            pl.board[i].improvements = n as u16;
+            let mut order: ArrayVec<usize, { crate::SHOP }> = (0..pl.shop.len())
+                .filter(|&k| {
+                    !cards.get(pl.shop[k].card).is_spell() && !pl.shop[k].golden
+                })
+                .collect();
+            order.sort_by_key(|&k| {
+                (std::cmp::Reverse(cards.get(pl.shop[k].card).tier), k)
+            });
+            for &k in order.iter().take(if golden { 2 } else { 1 }) {
+                let mut m = pl.shop[k];
+                golden_up(pl, cards, &mut m);
+                pl.shop[k] = m;
+            }
+        }
     }
 
     /// The Fodders this Refresh dealt feed themselves once the Refresh is
@@ -495,7 +532,21 @@ impl Game {
         // (docs/rules/design.md "Demon Fodder").
         let fodders = (fodders as usize).min(crate::SHOP);
         let minions = base.max(fodders);
-        let normal = minions.saturating_sub(fodders);
+        // Timewarped Kil'jaeden: two extra Demons per copy, with stats that
+        // grow with its `improvements`. The normal fill leaves room for them.
+        let mut kil: ArrayVec<([i32; 2], i32), { crate::BOARD * 2 }> = ArrayVec::new();
+        for f in &pl.board {
+            for (card, golden) in f.parts() {
+                if let Some([a, h]) = cards.get(card).extra_demons {
+                    let mul = if golden { 2 } else { 1 };
+                    let imp = f.improvements as i32;
+                    let _ = kil.try_push(([a * mul, h * mul], imp));
+                    let _ = kil.try_push(([a * mul, h * mul], imp));
+                }
+            }
+        }
+        let kil_extras = kil.len();
+        let normal = minions.saturating_sub(fodders).saturating_sub(kil_extras);
         // The tier bounds this Refresh draws in: Bob-blehead's floor, and
         // Guiding Candle's first Refreshes of a turn, which hold Tier 6 cards
         // only (free access to the tier, as the card says).
@@ -528,6 +579,23 @@ impl Game {
                     None => break,
                 }
             }
+        }
+        // Kil'jaeden's extra Demons.
+        for (stats, imp) in kil.iter().take(kil_extras) {
+            if pl.shop.len() >= crate::SHOP {
+                break;
+            }
+            let Some(c) = draw_filtered(pool, cards, rng, lo, hi, &[], lobby, |c| {
+                c.tribes.has(Tribe::Demon)
+            }) else {
+                break;
+            };
+            let mut m = pl.make_card(cards, c, false, 1);
+            pl.apply_tavern_buffs(cards, &mut m);
+            let n = 1 + imp;
+            m.attack += stats[0] * n;
+            m.health += stats[1] * n;
+            pl.shop.push(m);
         }
         // The extra slots (Innkeeper's Stein, Electrode Attractor): one
         // Magnetic Mech, then one minion of the tier above. `size` already

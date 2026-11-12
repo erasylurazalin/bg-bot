@@ -1082,6 +1082,8 @@ pub struct Player {
     /// Waveling, En-Djinn Blazer and Easterly Winds so far. Each explicit
     /// Refresh gives the whole amount to one random Tavern minion.
     pub refresh_buff: (i32, i32),
+    /// Timewarped Swirler: your Elementals give this much extra stats.
+    pub elemental_bonus: (i32, i32),
     pub spell_bonus: (i32, i32),
     pub spell_discount: u8,
     /// The last Tavern spell this player cast themselves: what Cataclysmic
@@ -1142,6 +1144,9 @@ pub struct Player {
     /// (`resolve_after_play`). One at a time: a play never happens while a
     /// choice is open, so an earlier play's triggers are always done.
     pub pending_after_play: Option<crate::cards::Tribes>,
+    /// The tier of the just-played card, for "after you play a card from
+    /// Tier N or above" (Timewarped Raider). Fired with `pending_after_play`.
+    pub pending_after_play_tier: Option<u8>,
     /// Options of a "both effects combined" Choose One that still have to
     /// run, after the one before them is done waiting on its target.
     pub choose_queue: ArrayVec<QueuedOption, 2>,
@@ -2528,7 +2533,10 @@ impl Game {
             return Err(IllegalAction);
         }
         let p = self.current_player().unwrap();
+        let before: arrayvec::ArrayVec<(i32, i32), { crate::BOARD }> =
+            self.players[p].board.iter().map(|m| (m.attack, m.health)).collect();
         self.apply(p, a);
+        self.apply_attack_gain_watchers(p, &before);
         // A Health price, damage or a heal this action dealt crosses Holy
         // Vanguard's 15: the aura goes into (or comes off) every Vanguard the
         // actor has before anything below reads their stats.
@@ -2876,6 +2884,7 @@ impl Game {
                     }
                 }
                 let card = self.data.cards.get(m.card);
+                self.players[p].pending_after_play_tier = Some(card.tier);
                 if card.is_spell() {
                     let choose_one = card.choose_one.is_some();
                     // A card played from the hand, of any kind: Blood Gems
@@ -2962,6 +2971,17 @@ impl Game {
                     // `just_played` keeps the played minion out of its own
                     // trigger, wherever its Battlecry left it on the board.
                     self.players[p].board[pos].just_played = true;
+                    // Timewarped Swirler: its aura starts as it lands.
+                    let mut gift = (0, 0);
+                    for (card, golden) in self.players[p].board[pos].parts() {
+                        if let Some([a, h]) = self.data.cards.get(card).elemental_gift_bonus {
+                            let mul = if golden { 2 } else { 1 };
+                            gift.0 += a * mul;
+                            gift.1 += h * mul;
+                        }
+                    }
+                    self.players[p].elemental_bonus.0 += gift.0;
+                    self.players[p].elemental_bonus.1 += gift.1;
                     self.players[p].pending_after_play = Some(t);
                     // A trinket that watches every minion played.
                     self.trinket_event_minion(p, Event::Play, &m, 1);
@@ -3188,6 +3208,25 @@ impl Game {
                 }
             }
         }
+        // Timewarped Peggy: a card joined the hand, so every Peggy gives
+        // your Pirates its buff. A golden one runs the buff twice.
+        let mut peggy: arrayvec::ArrayVec<(i32, i32, u8), { crate::BOARD }> = arrayvec::ArrayVec::new();
+        for m in &self.players[p].board {
+            for (card, golden) in m.parts() {
+                if let Some((attack, health)) = self.data.cards.get(card).on_card_added_pirates {
+                    let _ = peggy.try_push((attack, health, if golden { 2 } else { 1 }));
+                }
+            }
+        }
+        for (attack, health, times) in peggy {
+            for _ in 0..times {
+                for m in &mut self.players[p].board {
+                    if self.data.cards.tribes_of(m).has(crate::cards::Tribe::Pirate) {
+                        crate::game::effects::buff(m, attack, health);
+                    }
+                }
+            }
+        }
         // Dark Gifts Double Vision: the minion brings a plain copy of itself
         // along. The copy carries no gift, so this never chains.
         self.dark_gift_on_acquire(p, &m);
@@ -3277,6 +3316,87 @@ impl Game {
             true
         } else {
             false
+        }
+    }
+
+    /// Timewarped Embalmer: one summoned minion each turn gains Reborn. The
+    /// uses are the card's own; a Reborn copy is handled by the fight side.
+    fn embalmer_on_summon(&mut self, p: usize, pos: usize) {
+        if pos >= self.players[p].board.len() {
+            return;
+        }
+        let cards = &self.data.cards;
+        let mut hosts: arrayvec::ArrayVec<usize, { crate::BOARD }> = arrayvec::ArrayVec::new();
+        for i in 0..self.players[p].board.len() {
+            if self.players[p].board[i]
+                .parts()
+                .any(|(c, _)| cards.get(c).on_summon_give_reborn)
+            {
+                let _ = hosts.try_push(i);
+            }
+        }
+        for i in hosts {
+            if self.players[p].board[i].uses_left == 0 {
+                continue;
+            }
+            self.players[p].board[i].uses_left -= 1;
+            self.players[p].board[pos].keywords.set(Keywords::REBORN);
+        }
+    }
+
+    /// Timewarped Whelp Smuggler and Expeditioner: after an action, compare
+    /// the board's stats with how it started. A minion that gained Attack
+    /// gets the Whelp Health; a minion that gained either stat gives the
+    /// gained pair to the left-most hand minions.
+    fn apply_attack_gain_watchers(
+        &mut self,
+        p: usize,
+        before: &[(i32, i32)],
+    ) {
+        let cards = &self.data.cards;
+        let len = self.players[p].board.len().min(before.len());
+        for i in 0..len {
+            let (da, dh) = {
+                let m = &self.players[p].board[i];
+                (m.attack - before[i].0, m.health - before[i].1)
+            };
+            if da <= 0 && dh <= 0 {
+                continue;
+            }
+            let mut heals: arrayvec::ArrayVec<i32, { crate::BOARD }> = arrayvec::ArrayVec::new();
+            let mut hand_gifts: arrayvec::ArrayVec<(i32, i32, u8), { crate::BOARD }> =
+                arrayvec::ArrayVec::new();
+            for m in &self.players[p].board {
+                for (card, golden) in m.parts() {
+                    let mul = if golden { 2 } else { 1 };
+                    if let Some((_, health)) = cards.get(card).on_friendly_gain_attack {
+                        let _ = heals.try_push(health * mul);
+                    }
+                }
+            }
+            for (card, golden) in self.players[p].board[i].parts() {
+                let mul = if golden { 2 } else { 1 };
+                if let Some(count) = cards.get(card).after_gain_stats_to_hand {
+                    let _ = hand_gifts.try_push((da * mul, dh * mul, count));
+                }
+            }
+            if da > 0 {
+                for h in heals {
+                    crate::game::effects::buff(&mut self.players[p].board[i], 0, h);
+                }
+            }
+            for (ga, gh, count) in hand_gifts {
+                let mut given = 0;
+                for m in &mut self.players[p].hand {
+                    if given >= count as usize {
+                        break;
+                    }
+                    if !cards.get(m.card).is_spell() {
+                        crate::game::effects::buff(m, ga, gh);
+                        given += 1;
+                    }
+                }
+            }
         }
     }
 

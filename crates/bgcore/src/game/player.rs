@@ -133,6 +133,7 @@ impl Player {
             elementals_played: 0,
             magnetizations: 0,
             refresh_buff: (0, 0),
+            elemental_bonus: (0, 0),
             spell_bonus: (0, 0),
             spell_discount: 0,
             last_spell: None,
@@ -153,6 +154,7 @@ impl Player {
             pending_discard: None,
             hogrider_pending: 0,
             pending_after_play: None,
+            pending_after_play_tier: None,
             choose_queue: ArrayVec::new(),
             repeats: ArrayVec::new(),
             repeating: false,
@@ -475,6 +477,9 @@ impl Player {
         // Malchezaar summoned by a Tavern spell keeps its Health Refreshes
         // (docs/notes/KNOWN-GAPS.md, the first row).
         m.uses_left = m.turn_uses(cards);
+        if let Some(n) = cards.get(id).refresh_golden {
+            m.improvements = n as u16;
+        }
         // A portrait that gives this card more tribes (Bronzebeard
         // Portrait): every copy the player makes carries it.
         for (mod_card, kind) in self.tp.card_mods.iter().flatten() {
@@ -984,6 +989,10 @@ impl Player {
             sharing_is_caring: self.sharing_is_caring,
             spell_attack,
             spell_health,
+            elemental_attack: self.elemental_bonus.0,
+            elemental_health: self.elemental_bonus.1,
+            warband: [None; crate::BOARD],
+            n_warband: 0,
             undead_attack: self.undead_bonus.0,
             undead_health: self.undead_bonus.1,
             // Hammer of Twilight: the base plus a step per card discarded
