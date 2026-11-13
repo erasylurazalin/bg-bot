@@ -26,6 +26,9 @@ turn end when the fight that follows is won, 0 for a tie and -W for a loss
 (uncapped damage dealt - uncapped damage taken) / 48 at the same turn end, so
 a heavy loss differs from a light one; --fight-score-from skips early turns
 and --fight-score-fade lowers the weight to 0 by the run's planned end.
+--win-score W adds +W for a fight won, W/2 for a tie and 0 for a loss at the
+same turn end, from --win-score-from on (default 9), with --win-score-fade the
+same fade; a knockout is a loss.
 
 Everything lands in runs/<name>/: metrics.csv (one row per eval), a
 TensorBoard log, ckpt.pt (latest) and best.pt (best eval: vs7 real when the
@@ -101,7 +104,7 @@ TRAIN_KEYS = [
 ]
 # Appended after top_buys, so rows in an older metrics.csv keep their columns.
 EXTRA_KEYS = ["entropy_plain", "moves_per_turn", "fight_reward_per_turn",
-              "fight_score_per_turn"]
+              "fight_score_per_turn", "win_score_per_turn"]
 
 
 def args():
@@ -222,6 +225,14 @@ def args():
     a.add_argument("--fight-score-fade", type=float, default=0.0,
                    help="fraction of the run over which --fight-score falls linearly to 0 at "
                         "the run's planned end; 0 keeps it at full weight (default 0)")
+    a.add_argument("--win-score", type=float, default=0.0,
+                   help="W: add W for a won fight, W/2 for a tie and 0 for a loss at a learner "
+                        "turn end; a knockout is a loss (default 0: off)")
+    a.add_argument("--win-score-from", type=int, default=9,
+                   help="first turn whose fight pays --win-score (default 9)")
+    a.add_argument("--win-score-fade", type=float, default=0.0,
+                   help="fraction of the run over which --win-score falls linearly to 0 at "
+                        "the run's planned end; 0 keeps it at full weight (default 0)")
     a.add_argument("--force-turn2-level", action="store_true",
                    help="a tier 1 seat that can level on turn 2 must level (learner and snapshots)")
     a.add_argument("--force-dark-gift", action="store_true",
@@ -280,6 +291,8 @@ def args():
                 "start with a critic-only warm-up (the policy moves through the shared trunk)")
     if not 0.0 <= cfg.fight_score_fade <= 1.0:
         a.error("--fight-score-fade must be between 0 and 1")
+    if not 0.0 <= cfg.win_score_fade <= 1.0:
+        a.error("--win-score-fade must be between 0 and 1")
     return cfg
 
 
@@ -304,6 +317,20 @@ def fight_outcome(won, lost):
 def place_fight_outcome(place):
     """1st place is a win; any other placement is a loss."""
     return 1 if place == 1 else -1
+
+
+def win_score_outcome(won, lost):
+    """1 for a won fight, 0.5 for a tie, 0 for a loss."""
+    if won > 0.5:
+        return 1.0
+    if lost > 0.5:
+        return 0.0
+    return 0.5
+
+
+def place_win_score_outcome(place):
+    """1st place is a win; any other placement (a knockout) pays 0."""
+    return 1.0 if place == 1 else 0.0
 
 
 def credit_fight(rews, pending, env, seat, outcome, weight):
@@ -346,6 +373,25 @@ def credit_fight_score(rews, pending, pending_turn, env, seat, dealt, taken, wei
     return term
 
 
+def credit_win_score(rews, pending, pending_turn, env, seat, outcome, weight,
+                     from_turn=9):
+    """Credit weight * outcome at the turn-end step for (env, seat).
+
+    `outcome` is 1 for a won fight, 0.5 for a tie and 0 for a loss. A turn
+    before `from_turn` pays 0. Returns the term added, or None when no turn is
+    pending there; the pending index is cleared either way.
+    """
+    step = int(pending[env, seat])
+    if step < 0:
+        return None
+    pending[env, seat] = -1
+    if int(pending_turn[env, seat]) < from_turn:
+        return 0.0
+    term = weight * float(outcome)
+    rews[step, env] += term
+    return term
+
+
 def fight_score_fade_scale(run_min, run_start, run_end, fade):
     """The share of --fight-score still paid at `run_min`.
 
@@ -361,6 +407,12 @@ def fight_score_fade_scale(run_min, run_start, run_end, fade):
     if run_min >= run_end:
         return 0.0
     return (run_end - run_min) / (run_end - fade_start)
+
+
+def win_score_fade_scale(run_min, run_start, run_end, fade):
+    """The share of --win-score still paid at `run_min` (same shape as the
+    fight score's fade)."""
+    return fight_score_fade_scale(run_min, run_start, run_end, fade)
 
 
 def entropy_term(dist, moves_as_one, move_idx=None):
@@ -1242,6 +1294,11 @@ def main():
               f"{FIGHT_SCORE_SCALE:g}"
               + (f", fading over the last {cfg.fight_score_fade:g} of the run"
                  if cfg.fight_score_fade else ""))
+    if cfg.win_score:
+        print(f"win score {cfg.win_score:g}: +W win, W/2 tie, 0 loss, fights after turns "
+              f"{cfg.win_score_from}+"
+              + (f", fading over the last {cfg.win_score_fade:g} of the run"
+                 if cfg.win_score_fade else ""))
     print(f"{cfg.model} {opts_text(opts) or ''}: "
           f"{sum(p.numel() for p in net.parameters()) / 1e6:.2f}M "
           f"parameters on {dev}{', compiled' if cfg.compile and cfg.model == 'attn' else ''}")
@@ -1334,14 +1391,22 @@ def main():
         score_scale = fight_score_fade_scale(
             run_min, run_start_min, cfg.minutes, cfg.fight_score_fade)
         score_weight = cfg.fight_score * score_scale
+        # --win-score-fade: the same fade, by the same planned end.
+        win_scale = win_score_fade_scale(
+            run_min, run_start_min, cfg.minutes, cfg.win_score_fade)
+        win_weight = cfg.win_score * win_scale
         reward_on = cfg.fight_reward != 0.0
         score_on = cfg.fight_score != 0.0
-        fight_on = reward_on or score_on
+        win_on = cfg.win_score != 0.0
+        fight_on = reward_on or score_on or win_on
         pending = np.full((N, P), -1, np.int64) if reward_on else None
         pending_turn = np.full((N, P), -1, np.int64) if reward_on else None
         pending_score = np.full((N, P), -1, np.int64) if score_on else None
         pending_score_turn = np.full((N, P), -1, np.int64) if score_on else None
+        pending_win = np.full((N, P), -1, np.int64) if win_on else None
+        pending_win_turn = np.full((N, P), -1, np.int64) if win_on else None
         fight_sum, fight_turns, score_sum = 0.0, 0, 0.0
+        win_sum, win_turns = 0.0, 0
         with torch.no_grad():
             for t in range(T):
                 env.observe(b.obs, b.mask, b.seat, b.kind)
@@ -1373,6 +1438,22 @@ def main():
                             score_weight, cfg.fight_score_from)
                         if term is not None:
                             score_sum += term
+                if win_on:
+                    # The result comes from the won/lost scalars, not the
+                    # damage: a won ghost fight deals 0, and a loss can take
+                    # 0, so damage cannot tell a win from a tie or a loss.
+                    for e in np.nonzero(b.kind == LEARNER)[0]:
+                        s = int(b.seat[e])
+                        if (pending_win[e, s] < 0
+                                or b.obs[e, TURN] <= pending_win_turn[e, s]):
+                            continue
+                        term = credit_win_score(
+                            rews, pending_win, pending_win_turn, int(e), s,
+                            win_score_outcome(b.obs[e, WON_LAST_COMBAT],
+                                              b.obs[e, LOST_LAST_COMBAT]),
+                            win_weight, cfg.win_score_from)
+                        if term is not None:
+                            win_sum += term
                 o = torch.from_numpy(b.obs).to(dev, non_blocking=True)
                 m = torch.from_numpy(b.mask).to(dev, non_blocking=True)
                 is_learner = torch.from_numpy(b.kind == LEARNER).to(dev)
@@ -1453,6 +1534,13 @@ def main():
                         if score_on:
                             pending_score[e, s] = t
                             pending_score_turn[e, s] = turn
+                        if win_on:
+                            pending_win[e, s] = t
+                            pending_win_turn[e, s] = turn
+                            # The per-turn log divides by the turns the term
+                            # can pay on, not the early ones it skips.
+                            if turn >= cfg.win_score_from:
+                                win_turns += 1
                         fight_turns += 1
                 kinds = b.kinds.copy()
                 env.step(a.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
@@ -1481,6 +1569,14 @@ def main():
                                 score_weight, cfg.fight_score_from)
                             if term is not None:
                                 score_sum += term
+                        if win_on:
+                            # A knockout is a loss, so only 1st place pays.
+                            term = credit_win_score(
+                                rews, pending_win, pending_win_turn, e, s,
+                                place_win_score_outcome(int(b.places[e, s])),
+                                win_weight, cfg.win_score_from)
+                            if term is not None:
+                                win_sum += term
                 if b.reset.any():
                     r = np.nonzero(b.reset)[0]
                     last[r] = -1
@@ -1532,6 +1628,24 @@ def main():
                     print(f"fight score: {unresolved} learner turns unresolved at the "
                           "rollout boundary, credited 0")
                 pending_score.fill(-1)
+            if win_on:
+                for e, s in zip(*np.nonzero(live)):
+                    s = int(s)
+                    if (pending_win[e, s] < 0
+                            or all_obs[e, s, TURN] <= pending_win_turn[e, s]):
+                        continue
+                    term = credit_win_score(
+                        rews, pending_win, pending_win_turn, int(e), s,
+                        win_score_outcome(all_obs[e, s, WON_LAST_COMBAT],
+                                          all_obs[e, s, LOST_LAST_COMBAT]),
+                        win_weight, cfg.win_score_from)
+                    if term is not None:
+                        win_sum += term
+                unresolved = int((pending_win >= 0).sum())
+                if unresolved:
+                    print(f"win score: {unresolved} learner turns unresolved at the "
+                          "rollout boundary, credited 0")
+                pending_win.fill(-1)
             if cfg.overlay_comps:
                 env.overlay_comp(all_comp)
             flat_comp = all_comp.reshape(-1)
@@ -1691,6 +1805,7 @@ def main():
                 "moves_per_turn": n_moves / max(n_ends, 1),
                 "fight_reward_per_turn": fight_sum / fight_turns if fight_turns else 0.0,
                 "fight_score_per_turn": score_sum / fight_turns if fight_turns else 0.0,
+                "win_score_per_turn": win_sum / win_turns if win_turns else 0.0,
                 **{f"act_{KINDS[i]}": (counts[i] / counts.sum()).item() for i in range(len(KINDS))},
             }
             top = buy_counts.argsort(descending=True)[:5]
@@ -1864,7 +1979,8 @@ def main():
                 f"wheels(B {stats['wheels_b']:.2f} lam {stats['wheels_lambda']:.2f} "
                 f"aux {stats['aux_loss']:.3f} active {stats['comp_active']:.0%})  "
                 f"fight(rew {stats['fight_reward_per_turn']:.3f} "
-                f"score {stats['fight_score_per_turn']:.3f})  "
+                f"score {stats['fight_score_per_turn']:.3f} "
+                f"win {stats['win_score_per_turn']:.3f})  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  "
                 f"buys {top_buys}{scen_txt}{era_txt}{lag_txt}{gate_txt}",
                 flush=True,

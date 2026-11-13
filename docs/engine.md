@@ -2604,6 +2604,15 @@ Deleting `.venv` undoes it.
   last fraction F of the run's planned end (`--minutes`). `--fight-score` with
   `--value-warmup` is refused. `metrics.csv` appends `fight_score_per_turn`,
   the mean term per learner turn.
+- `--win-score W` (default 0) adds +W for a fight won, W/2 for a tie and 0
+  for a loss at the same learner turn end, from the observation's won/lost
+  last-combat scalars (exact where damage is not: a won ghost fight deals 0,
+  and a loss can take 0). `--win-score-from T` (default 9) pays only fights
+  after turn T on; a knockout is a loss, and 1st place (the final fight won)
+  pays W. `--win-score-fade F` (default 0) falls linearly to 0 over the last
+  fraction F of the run's planned end (`--minutes`), like the fight score's
+  fade. It may be used with `--value-warmup`. `metrics.csv` appends
+  `win_score_per_turn`, the mean term per learner turn from turn T on.
 - `--entropy-moves-as-one` counts all Move actions as one entropy atom (their
   summed probability) instead of one per move, so the bonus stops paying for
   board shuffles; moves stay legal and sampled, off is the old loss, and
