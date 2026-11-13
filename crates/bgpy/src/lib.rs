@@ -156,6 +156,7 @@ struct Env {
 }
 
 impl Env {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         data: &Arc<Data>,
         seed: u64,
@@ -164,6 +165,7 @@ impl Env {
         era_game: Option<&(String, u32)>,
         scenario: Option<&Arc<ScenarioConfig>>,
         era: Option<&Arc<EraStartConfig>>,
+        learner_heroes: &[u8],
     ) -> Env {
         let mut rng = Rng::new(seed ^ 0x6a09_e667_f3bc_c908);
         let mut kinds = [LEARNER; PLAYERS];
@@ -178,6 +180,16 @@ impl Env {
         let real: Vec<usize> = (0..PLAYERS).filter(|&p| kinds[p] == REAL).collect();
         let seats: Vec<usize> =
             (0..PLAYERS).filter(|&p| matches!(kinds[p], LEARNER | SNAPSHOT)).collect();
+        // The learner seats get a hero from the option's list; an empty list
+        // is every seat's normal random hero.
+        let forced: Vec<(usize, &[u8])> = if learner_heroes.is_empty() {
+            Vec::new()
+        } else {
+            (0..PLAYERS)
+                .filter(|&p| kinds[p] == LEARNER)
+                .map(|p| (p, learner_heroes))
+                .collect()
+        };
         let plan = scenario.and_then(|sc| sc.plan(seed, data, &seats));
         let era_plan = if plan.is_none() {
             era.and_then(|c| c.plan(seed, &seats))
@@ -185,16 +197,17 @@ impl Env {
             None
         };
         let game = if let Some(plan) = &plan {
-            Game::new_scenario(
+            Game::new_scenario_forced(
                 data.clone(),
                 seed,
                 &real,
                 boards.expect("a scenario game needs real boards").clone(),
                 plan,
+                &forced,
             )
         } else if let Some(plan) = &era_plan {
             let config = era.expect("an Era plan comes from the Era config");
-            Game::new_era_start(
+            Game::new_era_start_forced(
                 data.clone(),
                 seed,
                 &real,
@@ -202,10 +215,11 @@ impl Env {
                 &config.starts,
                 plan,
                 config.era_start_lag,
+                &forced,
             )
         } else {
             match era_game {
-                Some((source, game)) => Game::new_random_heroes_era(
+                Some((source, game)) => Game::new_random_heroes_era_forced(
                     data.clone(),
                     seed,
                     &real,
@@ -213,13 +227,17 @@ impl Env {
                     real[0],
                     source.clone(),
                     *game,
+                    &forced,
                 ),
-                None if real.is_empty() => Game::new_random_heroes(data.clone(), seed),
-                None => Game::new_random_heroes_real(
+                None if real.is_empty() => {
+                    Game::new_random_heroes_forced(data.clone(), seed, &forced)
+                }
+                None => Game::new_random_heroes_real_forced(
                     data.clone(),
                     seed,
                     &real,
                     boards.expect("real seats need real boards").clone(),
+                    &forced,
                 ),
             }
         };
@@ -367,6 +385,9 @@ struct VecEnv {
     data: Arc<Data>,
     envs: Vec<Env>,
     lineup: [u8; SEAT_KINDS],
+    /// The hero indices a learner seat may be given; empty is the normal
+    /// random hero deal.
+    learner_heroes: Vec<u8>,
     boards: Option<Arc<RealBoards>>,
     /// The game whose boards the Era seat plays, when there is one.
     era_game: Option<(String, u32)>,
@@ -458,8 +479,11 @@ impl VecEnv {
     /// "holdout" or "all" the source games it may draw from, and
     /// `era_start_lag` the fixed lag of every late-start game (None: the same
     /// draw as a normal game; it needs `era_starts`).
+    /// `learner_heroes`: hero names; every learner seat is given one of them
+    /// per game, picked with the game's RNG, and no other seat gets it. Empty
+    /// or None is the normal random hero deal for every seat.
     #[new]
-    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train", real_lag_mix=None, lag_in_obs=false, real_lag_from=1, era_start_lag=None))]
+    #[pyo3(signature = (n, seed, lineup, cards_toml=None, rules_toml=None, heroes_toml=None, real_boards=None, old_boards=None, real_lobby_filter=false, era_game=None, scenario_comps=None, scenario_names=None, scenario_share=0.0, scenario_turn_min=7, scenario_turn_max=11, real_lag=0, era_starts=None, era_share=0.0, era_turn_min=7, era_turn_max=11, era_split="train", real_lag_mix=None, lag_in_obs=false, real_lag_from=1, era_start_lag=None, learner_heroes=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         n: usize,
@@ -487,6 +511,7 @@ impl VecEnv {
         lag_in_obs: bool,
         real_lag_from: u32,
         era_start_lag: Option<u32>,
+        learner_heroes: Option<Vec<String>>,
     ) -> PyResult<VecEnv> {
         let data = match (cards_toml, rules_toml, heroes_toml) {
             (None, None, None) => Data::bundled(),
@@ -500,6 +525,30 @@ impl VecEnv {
             }
         };
         let data = Arc::new(data);
+        let learner_heroes: Vec<u8> = match learner_heroes {
+            None => Vec::new(),
+            Some(names) => {
+                let mut ids = Vec::with_capacity(names.len());
+                let mut unknown = Vec::new();
+                for name in &names {
+                    match data.heroes.by_name(name) {
+                        Some(h) => ids.push(h),
+                        None => unknown.push(name.clone()),
+                    }
+                }
+                if !unknown.is_empty() {
+                    let valid: Vec<&str> =
+                        data.heroes.heroes.iter().map(|h| h.name.as_str()).collect();
+                    return Err(PyValueError::new_err(format!(
+                        "learner_heroes: unknown hero name{} {}; valid heroes: {}",
+                        if unknown.len() == 1 { "" } else { "s" },
+                        unknown.join(", "),
+                        valid.join(", "),
+                    )));
+                }
+                ids
+            }
+        };
         let scenario = match (scenario_comps, scenario_names) {
             (None, None) => None,
             (Some(path), Some(names)) => {
@@ -616,6 +665,7 @@ impl VecEnv {
                     era_game.as_ref(),
                     scenario.as_ref(),
                     era.as_ref(),
+                    &learner_heroes,
                 )
             })
             .collect();
@@ -624,6 +674,7 @@ impl VecEnv {
             data,
             envs,
             lineup,
+            learner_heroes,
             boards,
             era_game,
             next_seed: seed + n as u64,
@@ -916,9 +967,10 @@ impl VecEnv {
         {
             return Err(PyValueError::new_err("array sizes don't match the number of games"));
         }
-        let (data, lineup, boards, era_game, scenario, era, base) = (
+        let (data, lineup, learner_heroes, boards, era_game, scenario, era, base) = (
             &self.data,
             self.lineup,
+            &self.learner_heroes,
             &self.boards,
             &self.era_game,
             &self.scenario,
@@ -968,6 +1020,7 @@ impl VecEnv {
                             era_game.as_ref(),
                             scenario.as_ref(),
                             era.as_ref(),
+                            learner_heroes,
                         );
                         fresh.set_record_fights(record);
                         fresh.saved_fights = saved;

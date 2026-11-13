@@ -15,8 +15,14 @@ a.add_argument('--lag', type=int, default=0); a.add_argument('--lag-from', type=
 a.add_argument('--vram-gb', type=float, required=True)
 a.add_argument('--seed-base', type=int, default=20261110)
 a.add_argument('--from-turn', type=int, default=7)
+a.add_argument('--learner-heroes', default=None,
+               help='comma-separated hero names every learner seat is given instead of the '
+                    'random hero deal (e.g. "Trade Prince Gallywix"); empty keeps the normal deal')
 a.add_argument('--out', default=ROOT + '/train/runs/hero-check')
 args = a.parse_args()
+learner_heroes = [name.strip() for name in (args.learner_heroes or '').split(',')
+                  if name.strip()]
+ppo.LEARNER_HEROES = learner_heroes
 KIND_OF = ppo.KIND_OF.numpy(); END = bgpy.END_TURN
 KI = {k: i for i, k in enumerate(KINDS)}
 COUNT = {'hero_power': ['hero_power'], 'sell': ['sell'], 'roll': ['roll'], 'buy': ['buy', 'buy_spell']}
@@ -34,7 +40,8 @@ for chunk in range((args.games + 511) // 512):
     n = min(512, args.games - chunk * 512)
     env = bgpy.VecEnv(n, args.seed_base + chunk, [1, 0, 0, 0, 0, 7], real_boards=real,
                       old_boards=info['old_boards'], real_lobby_filter=True,
-                      real_lag=args.lag, real_lag_from=args.lag_from)
+                      real_lag=args.lag, real_lag_from=args.lag_from,
+                      learner_heroes=learner_heroes or None)
     b = Bufs(n); env.kinds(b.kinds); done = np.zeros(n, bool)
     hero = [None] * n
     cnt = [collections.Counter() for _ in range(n)]

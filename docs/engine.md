@@ -436,6 +436,17 @@ build hero-less games so old tests pass unchanged, and
   a short hero table still feeds everyone), the players answer with
   `Action::Choose` in shuffled order (nothing else is legal), and turn 1
   starts once all have picked (`advance`). Player.hero_offer holds the offer.
+- **Forced learner heroes:** `Game::new_random_heroes_forced` and the
+  `_forced` forms of the real-seat, Era-seat, scenario and Era-start
+  constructors take (seat, allowed heroes) pairs. Each such seat gets one of
+  its heroes with the game's RNG, and those heroes leave the deck, so no other
+  seat is dealt one; a list shorter than the seats repeats a name after every
+  one has been used. The empty list is the old deal exactly, RNG included.
+  `bgpy.VecEnv(learner_heroes=[..])` resolves hero names and applies it to
+  every learner seat, refusing an unknown name by name; `ppo.py
+  --learner-heroes` passes the list to training and every eval. An Era-start
+  seat keeps its logged hero, so it and a forced hero equal to it are left
+  out.
 - **Health and armor**: take_hero applies armor, extra Health and the power.
   Every hero damage takes armor first (`take_hero_damage`, the combat damage
   in `combat`, Health costs via `can_pay_health`); a rewind gives back what
@@ -1847,7 +1858,10 @@ minions in the hand.
   `learner,snapshot,standard,rush,random,real` (default `2,2,0,0,0,4`); `bgpy.VecEnv(n, seed, lineup, real_boards=..)`
   takes the loaded specs, and real seats are played in Rust like the bot
   seats. `ppo.py` adds a `vs7 real` eval (one learner against 7 real seats,
-  `place_vs_real`) whenever real boards are loaded.
+  `place_vs_real`) whenever real boards are loaded. `ppo.py
+  --learner-heroes NAMES` fixes every learner seat's hero in training and in
+  every eval; `train/fixed_eval.py` and `train/evaltools/hero_check.py` take
+  the same flag.
 - **The Era seat:** `Game::new_random_heroes_era` marks one real seat to play
   Era's own boards of one finished game (`who: me`, nearest earlier turn, the
   last board again past the game's end) and leaves that game out of every

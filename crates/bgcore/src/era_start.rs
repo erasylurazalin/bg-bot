@@ -361,6 +361,25 @@ impl Game {
         plan: &EraStartPlan,
         era_start_lag: Option<u32>,
     ) -> Game {
+        Self::new_era_start_forced(
+            data, seed, real, boards, starts, plan, era_start_lag, &[],
+        )
+    }
+
+    /// `new_era_start` with a hero forced on some seats. The Era seat keeps
+    /// its logged hero, so it is left out here, and a forced hero equal to
+    /// that logged hero is dropped: no hero is played twice.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_era_start_forced(
+        data: Arc<Data>,
+        seed: u64,
+        real: &[usize],
+        boards: Arc<crate::real_boards::RealBoards>,
+        starts: &EraStarts,
+        plan: &EraStartPlan,
+        era_start_lag: Option<u32>,
+        forced: &[(usize, &[u8])],
+    ) -> Game {
         let pos = starts.position(plan.position);
         assert!(pos.turn >= 1, "an Era start begins at turn 1 or later");
         let mut g = Game::unstarted(data, seed, pos.lobby);
@@ -374,7 +393,22 @@ impl Game {
         g.real_boards = Some(boards.clone());
         g.turn = pos.turn - 1;
         let era_hero: Vec<u8> = pos.player.hero.into_iter().collect();
-        g.deal_heroes_excluding(&era_hero);
+        let options: Vec<Vec<u8>> = forced
+            .iter()
+            .map(|(_, hs)| {
+                hs.iter()
+                    .copied()
+                    .filter(|h| !era_hero.contains(h))
+                    .collect()
+            })
+            .collect();
+        let forced: Vec<(usize, &[u8])> = forced
+            .iter()
+            .zip(options.iter())
+            .filter(|((p, _), _)| *p != plan.seat)
+            .map(|((p, _), hs)| (*p, hs.as_slice()))
+            .collect();
+        g.deal_heroes_excluding_forced(&era_hero, &forced);
         for p in 0..PLAYERS {
             if Self::choice_open(&g.players[p]) {
                 g.resolve_open_choices(p);

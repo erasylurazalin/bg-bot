@@ -1647,8 +1647,19 @@ impl Game {
     /// hero, no pick (Era, 2026-10-25). Finley's power Discover still waits
     /// for an answer before turn 1.
     pub fn new_random_heroes(data: Arc<Data>, seed: u64) -> Game {
+        Self::new_random_heroes_forced(data, seed, &[])
+    }
+
+    /// `new_random_heroes` with a hero forced on some seats (the learner
+    /// option in `crates/bgpy`): each forced seat gets one of its listed
+    /// heroes, and those heroes are left out of the deck for the other seats.
+    pub fn new_random_heroes_forced(
+        data: Arc<Data>,
+        seed: u64,
+        forced: &[(usize, &[u8])],
+    ) -> Game {
         let mut g = Game::unstarted(data, seed, None);
-        g.deal_random_heroes();
+        g.deal_random_heroes_forced(forced);
         g
     }
 
@@ -1664,11 +1675,22 @@ impl Game {
         real: &[usize],
         boards: Arc<RealBoards>,
     ) -> Game {
+        Self::new_random_heroes_real_forced(data, seed, real, boards, &[])
+    }
+
+    /// `new_random_heroes_real` with a hero forced on some seats.
+    pub fn new_random_heroes_real_forced(
+        data: Arc<Data>,
+        seed: u64,
+        real: &[usize],
+        boards: Arc<RealBoards>,
+        forced: &[(usize, &[u8])],
+    ) -> Game {
         let mut g = Game::unstarted(data, seed, None);
         g.seat_real(real);
         g.lag = boards.lag_for_game(seed);
         g.real_boards = Some(boards);
-        g.deal_random_heroes();
+        g.deal_random_heroes_forced(forced);
         g
     }
 
@@ -1700,6 +1722,25 @@ impl Game {
         source: String,
         game: u32,
     ) -> Game {
+        Self::new_random_heroes_era_forced(
+            data, seed, real, boards, era_seat, source, game, &[],
+        )
+    }
+
+    /// `new_random_heroes_era` with a hero forced on some seats. The Era seat
+    /// is one of `real`, so the deal leaves it out; the forced seats are the
+    /// network seats that are not the Era seat.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_random_heroes_era_forced(
+        data: Arc<Data>,
+        seed: u64,
+        real: &[usize],
+        boards: Arc<RealBoards>,
+        era_seat: usize,
+        source: String,
+        game: u32,
+        forced: &[(usize, &[u8])],
+    ) -> Game {
         assert!(real.contains(&era_seat), "the Era seat must be a real seat");
         let mut g = Game::unstarted(data, seed, None);
         g.seat_real(real);
@@ -1707,7 +1748,7 @@ impl Game {
         g.era_game = Some((source, game));
         g.lag = boards.lag_for_game(seed);
         g.real_boards = Some(boards);
-        g.deal_random_heroes();
+        g.deal_random_heroes_forced(forced);
         g
     }
 
@@ -1724,6 +1765,18 @@ impl Game {
         boards: Arc<RealBoards>,
         plan: &ScenarioPlan,
     ) -> Game {
+        Self::new_scenario_forced(data, seed, real, boards, plan, &[])
+    }
+
+    /// `new_scenario` with a hero forced on some seats.
+    pub fn new_scenario_forced(
+        data: Arc<Data>,
+        seed: u64,
+        real: &[usize],
+        boards: Arc<RealBoards>,
+        plan: &ScenarioPlan,
+        forced: &[(usize, &[u8])],
+    ) -> Game {
         assert!(plan.turn >= 1, "a scenario starts at turn 1 or later");
         let mut g = Game::unstarted(data, seed, Some(plan.lobby));
         g.scenario_game = true;
@@ -1731,7 +1784,7 @@ impl Game {
         g.lag = boards.lag_for_game(seed);
         g.real_boards = Some(boards);
         g.turn = plan.turn - 1;
-        g.deal_heroes();
+        g.deal_heroes_excluding_forced(&[], forced);
         // A hero pick can open a Discover (Finley): normal games answer it
         // before turn 1, so answer it before the scenario turn starts. It
         // sees tier 1, the tier the pick phase happens at.

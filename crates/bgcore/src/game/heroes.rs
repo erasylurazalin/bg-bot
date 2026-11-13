@@ -70,9 +70,10 @@ impl Game {
     /// Every living player takes a random hero the lobby allows, no two the
     /// same. A real seat gets none and uses up no hero from the deck. Turn 0
     /// then only waits for Finley's power Discover; with none open, turn 1
-    /// starts right away.
-    pub(super) fn deal_random_heroes(&mut self) {
-        self.deal_heroes();
+    /// starts right away. `forced` names the seats given a listed hero
+    /// instead (see `deal_heroes_excluding_forced`).
+    pub(super) fn deal_random_heroes_forced(&mut self, forced: &[(usize, &[u8])]) {
+        self.deal_heroes_excluding_forced(&[], forced);
         match self.order.iter().position(|&p| !self.players[p as usize].done) {
             Some(c) => self.cursor = c,
             None => self.start_turn(),
@@ -81,25 +82,62 @@ impl Game {
 
     /// The hero deal without starting the game: a scenario start places its
     /// boards and hands before turn T begins (`Game::new_scenario`). Leaves
-    /// `done` set for the seats waiting on a pick, like `deal_random_heroes`.
-    pub(crate) fn deal_heroes(&mut self) {
-        self.deal_heroes_excluding(&[]);
-    }
-
-    /// `deal_heroes` with heroes in `excluded` left out of the deck: an Era
-    /// start takes its logged hero after the deal, so no other seat may have
-    /// been given that hero.
-    pub(crate) fn deal_heroes_excluding(&mut self, excluded: &[u8]) {
+    /// `done` set for the seats waiting on a pick, like
+    /// `deal_random_heroes_forced`.
+    ///
+    /// `excluded` leaves heroes out of the deck: an Era start takes its
+    /// logged hero after the deal, so no other seat may have been given it.
+    /// `forced` holds (seat, the built heroes that seat may get); the seat
+    /// gets one of them, picked with the game's RNG. Those heroes are then
+    /// taken out of the deck, so no other seat can be dealt one: the lobby
+    /// has no hero twice unless the forced list has fewer names than forced
+    /// seats, in which case the extra seats reuse a name after every one has
+    /// been used. With `forced` empty this is the old deal exactly, RNG
+    /// included.
+    pub(crate) fn deal_heroes_excluding_forced(
+        &mut self,
+        excluded: &[u8],
+        forced: &[(usize, &[u8])],
+    ) {
+        let mut picked: Vec<(usize, u8)> = Vec::new();
+        let mut used: Vec<u8> = Vec::new();
+        for &(p, options) in forced {
+            if p >= PLAYERS
+                || !self.players[p].alive
+                || self.players[p].real
+                || options.is_empty()
+                || picked.iter().any(|&(q, _)| q == p)
+            {
+                continue;
+            }
+            let free: Vec<u8> = options.iter().copied().filter(|h| !used.contains(h)).collect();
+            let choices: &[u8] = if free.is_empty() { options } else { free.as_slice() };
+            let at = if choices.len() > 1 {
+                self.rng.below(choices.len() as u32) as usize
+            } else {
+                0
+            };
+            let hero = choices[at];
+            picked.push((p, hero));
+            if !used.contains(&hero) {
+                used.push(hero);
+            }
+        }
         let mut deck: Vec<u8> = self
             .data
             .heroes
             .lobby_allowed(self.lobby)
-            .filter(|h| !excluded.contains(h))
+            .filter(|h| !excluded.contains(h) && !used.contains(h))
             .collect();
         self.rng.shuffle(&mut deck);
         let mut at = 0;
         for p in 0..PLAYERS {
-            if self.players[p].alive && !self.players[p].real && at < deck.len() {
+            if !self.players[p].alive || self.players[p].real {
+                continue;
+            }
+            if let Some(&(_, hero)) = picked.iter().find(|&&(q, _)| q == p) {
+                self.take_hero(p, hero);
+            } else if at < deck.len() {
                 self.take_hero(p, deck[at]);
                 at += 1;
             }

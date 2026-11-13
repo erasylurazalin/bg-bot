@@ -1144,6 +1144,42 @@ fn random_hero_games_deal_everyone_a_different_hero_without_a_pick() {
 }
 
 #[test]
+fn forced_learner_hero_is_the_only_gallywix_for_200_games() {
+    let d = data();
+    let gally = d.heroes.by_name("Trade Prince Gallywix").expect("Gallywix");
+    for seed in 0..200 {
+        let g = Game::new_random_heroes_forced(d.clone(), seed, &[(0, &[gally])]);
+        assert_eq!(g.players[0].hero, Some(gally), "seed {seed}: seat 0");
+        let mut seen = vec![gally];
+        for p in 1..8 {
+            let h = g.players[p].hero.unwrap_or_else(|| panic!("seed {seed}: seat {p} has no hero"));
+            assert_ne!(h, gally, "seed {seed}: seat {p} got the forced hero too");
+            assert!(!seen.contains(&h), "seed {seed}: seat {p} repeated a hero");
+            seen.push(h);
+        }
+    }
+}
+
+#[test]
+fn empty_forced_heroes_is_the_old_random_deal() {
+    let d = data();
+    for seed in 0..50 {
+        let old = Game::new_random_heroes(d.clone(), seed);
+        let same = Game::new_random_heroes_forced(d.clone(), seed, &[]);
+        assert_eq!(old.rng, same.rng, "seed {seed}: RNG moved");
+        assert_eq!(old.lobby, same.lobby, "seed {seed}: lobby");
+        assert_eq!(old.turn, same.turn, "seed {seed}: turn");
+        assert_eq!(old.pool, same.pool, "seed {seed}: pool");
+        for p in 0..8 {
+            assert_eq!(old.players[p].hero, same.players[p].hero, "seed {seed}: seat {p} hero");
+            assert_eq!(old.players[p].health, same.players[p].health, "seed {seed}: seat {p} Health");
+            assert_eq!(old.players[p].armor, same.players[p].armor, "seed {seed}: seat {p} armor");
+            assert_eq!(old.players[p].power, same.players[p].power, "seed {seed}: seat {p} power");
+        }
+    }
+}
+
+#[test]
 fn finley_finding_all_patched_up_starts_with_60_health_and_his_armor() {
     let d = data();
     for seed in 0..1500 {

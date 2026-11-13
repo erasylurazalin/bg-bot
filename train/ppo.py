@@ -162,6 +162,10 @@ def args():
     a.add_argument("--steps", type=int, default=64, help="steps per env per rollout")
     a.add_argument("--lineup", default="2,2,0,0,0,4",
                    help="learner,snapshot,standard,rush,random,real seats")
+    a.add_argument("--learner-heroes", default=None,
+                   help="comma-separated hero names every learner seat is given instead of "
+                        "the random hero deal (e.g. \"Trade Prince Gallywix\"); no other seat "
+                        "gets one of them. Empty keeps the normal deal")
     a.add_argument("--real-boards", default=None,
                    help="folder of real boards for real seats (docs/real-boards.md); "
                         "default boards/real when the lineup has real seats. Given without "
@@ -410,6 +414,10 @@ OLD_BOARDS = "keep"
 # game's lobby (bgpy's real_lobby_filter). Set from the flag in main(), so
 # every eval game sees what the training games see.
 REAL_LOBBY_FILTER = False
+# --learner-heroes: hero names every learner seat is given, one per game with
+# the game's RNG; empty is the normal random hero deal. Set from the flag in
+# main(), so the training games and every eval use the same list.
+LEARNER_HEROES = []
 # --real-lag-mix: the weighted lags training games draw from, and the lags the
 # mixed-lag eval reports (sorted). Empty means every game is lag 0.
 REAL_LAG_MIX = []
@@ -647,7 +655,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
     env = bgpy.VecEnv(n, seed, lineup, real_boards=real_boards, old_boards=OLD_BOARDS,
                       real_lobby_filter=REAL_LOBBY_FILTER, real_lag_mix=real_lag_mix,
                       real_lag_from=REAL_LAG_FROM,
-                      lag_in_obs=LAG_IN_OBS, **scenario, **era)
+                      lag_in_obs=LAG_IN_OBS, learner_heroes=LEARNER_HEROES or None,
+                      **scenario, **era)
     if OVERLAY_COMPS:
         env.set_overlay(OVERLAY_COMPS, 0.0)
     b = Bufs(n)
@@ -748,7 +757,7 @@ def evaluate_vs(net, other, n_games, dev, seed):
     """4 learner seats against 4 seats of `other`. Learners' average place."""
     n = min(n_games, 1024)
     env = bgpy.VecEnv(n, seed, [4, 4, 0, 0, 0, 0], old_boards=OLD_BOARDS,
-                      lag_in_obs=LAG_IN_OBS)
+                      lag_in_obs=LAG_IN_OBS, learner_heroes=LEARNER_HEROES or None)
     if OVERLAY_COMPS:
         env.set_overlay(OVERLAY_COMPS, 0.0)
     b = Bufs(n)
@@ -915,7 +924,11 @@ def main():
     global OVERLAY_COMPS, OVERLAY_BONUS, COMP_HEALTH_PENALTY, COMP_SPECS, COMP_COUNT
     global SCENARIO_NAMES, SCENARIO_TURN_MIN, SCENARIO_TURN_MAX, SCENARIO_LABELS
     global ERA_STARTS, ERA_TURN_MIN, ERA_TURN_MAX, ERA_START_LAG
+    global LEARNER_HEROES
     cfg = args()
+    LEARNER_HEROES = [name.strip() for name in (cfg.learner_heroes or "").split(",")
+                      if name.strip()]
+    cfg.learner_heroes = LEARNER_HEROES
     if cfg.first_bonus or cfg.second_bonus:
         print(f"placement reward with first bonus {cfg.first_bonus:g} and "
               f"second bonus {cfg.second_bonus:g}:")
@@ -1078,7 +1091,8 @@ def main():
     env = bgpy.VecEnv(N, cfg.seed, lineup, real_boards=real, old_boards=OLD_BOARDS,
                       real_lobby_filter=REAL_LOBBY_FILTER, real_lag_mix=REAL_LAG_MIX,
                       real_lag_from=REAL_LAG_FROM,
-                      lag_in_obs=LAG_IN_OBS, **scenario_kw, **era_kw)
+                      lag_in_obs=LAG_IN_OBS, learner_heroes=LEARNER_HEROES or None,
+                      **scenario_kw, **era_kw)
     if cfg.overlay_comps:
         env.set_overlay(cfg.overlay_comps, cfg.overlay_bonus)
         print(f"overlay {cfg.overlay_comps} B {cfg.overlay_bonus:g}")
@@ -1147,6 +1161,8 @@ def main():
             + (f"  lag in obs (OBS_SIZE {bgpy.OBS_SIZE})" if LAG_IN_OBS else ""))
     elif LAG_IN_OBS:
         print(f"lag in obs: on (OBS_SIZE {bgpy.OBS_SIZE})")
+    print("learner heroes: "
+          + (", ".join(LEARNER_HEROES) if LEARNER_HEROES else "random (the normal deal)"))
     if cfg.overlay_comps:
         print(f"overlay {cfg.overlay_comps}: {COMP_COUNT} comps, B {cfg.overlay_bonus:g}, "
               f"wheels full {cfg.wheels_full} end {cfg.wheels_end}, lambda {cfg.aux_weight:g}")
