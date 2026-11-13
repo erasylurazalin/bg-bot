@@ -39,6 +39,7 @@ import argparse
 import copy
 import csv
 import random
+import sys
 import time
 import tomllib
 from pathlib import Path
@@ -66,6 +67,9 @@ import real_boards
 from model import (build, ck_model, load as load_model, masked, model_args,
                    model_opts, names_at_rev as toml_names_at_rev, opts_text,
                    set_recompute, text_gates, warm_start)
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "evaltools"))
+import buy_prior as bp
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
@@ -132,6 +136,16 @@ DEMO_EVAL_BATCH = 4096
 # The BASE the demonstration dataset was built against, for the startup kind
 # agreement. Its absence only skips that reference, never a run.
 DEMO_BASE_CKPT = Path(__file__).resolve().parent / "runs" / "r1113-a1" / "best.pt"
+# The buy prior's slots: the 7 Tavern minions and the Tavern spell, matching
+# buy_prior.py's offer order.
+BUY_PRIOR_KEYS = ["buy_prior_top1"]
+BUY0 = sum(n for _, n in bgpy.ACTION_KINDS[:KINDS.index("buy")])
+BUY_ACTIONS = list(range(BUY0, BUY0 + bgpy.SHOP + 1))
+SHOP_COLS = [bgpy.SHOP_START + i * bgpy.SLOT_FEATURES for i in range(bgpy.SHOP)] + [
+    bgpy.SHOP_SPELL_START]
+BOARD_COLS = [bgpy.BOARD_START + i * bgpy.SLOT_FEATURES for i in range(bgpy.BOARD)]
+# The startup reference plays this many standard-bot eval games with BASE.
+BASE_BUY_PRIOR_GAMES = 128
 
 
 def args():
@@ -274,6 +288,15 @@ def args():
                         "masked policy summed over the legal actions of each grouped action kind "
                         "and Era's kind, on the same fresh train-split demonstration minibatch "
                         "(needs --demo; may be used with or without --demo-weight; default 0: off)")
+    a.add_argument("--buy-prior", help="BuyPrior checkpoint from train/evaltools/buy_prior.py "
+                                       "(which Tavern cards strong players buy)")
+    a.add_argument("--buy-prior-weight", type=float, default=0.0,
+                   help="W: each update adds W times the cross-entropy from the buy model's "
+                        "softmax over the legal buy slots to the network's own softmax over the "
+                        "same slots (needs --buy-prior; default 0: off)")
+    a.add_argument("--buy-prior-fade", type=float, default=0.0,
+                   help="fraction of the run over which --buy-prior-weight falls linearly to 0 "
+                        "at the run's planned end; 0 keeps it at full weight (default 0)")
     a.add_argument("--force-turn2-level", action="store_true",
                    help="a tier 1 seat that can level on turn 2 must level (learner and snapshots)")
     a.add_argument("--force-dark-gift", action="store_true",
@@ -344,6 +367,12 @@ def args():
         a.error("--demo-kind-weight needs --demo PATH")
     if not 0.0 <= cfg.demo_fade <= 1.0:
         a.error("--demo-fade must be between 0 and 1")
+    if cfg.buy_prior_weight < 0.0:
+        a.error("--buy-prior-weight cannot be negative")
+    if cfg.buy_prior_weight and not cfg.buy_prior:
+        a.error("--buy-prior-weight needs --buy-prior PATH")
+    if not 0.0 <= cfg.buy_prior_fade <= 1.0:
+        a.error("--buy-prior-fade must be between 0 and 1")
     return cfg
 
 
@@ -640,6 +669,83 @@ def print_base_demo_kind(demo):
           f"{vals['demo_kind_top1_train']:.1%} train")
 
 
+def buy_prior_cross_entropy(logits, mask, prior_logits):
+    """The prior's softmax over the legal buy slots as target, the network's
+    log-softmax over the same slots as prediction, averaged over the rows with
+    at least two legal buys (one legal slot is not a choice)."""
+    legal = mask[:, BUY_ACTIONS]
+    valid = legal.sum(1) >= 2
+    if not valid.any():
+        return logits.sum() * 0.0
+    target_logits = prior_logits[valid].masked_fill(~legal[valid], -1e9)
+    target = torch.softmax(target_logits, 1)
+    buy_logits = logits[valid][:, BUY_ACTIONS].masked_fill(~legal[valid], -1e9)
+    logpred = torch.log_softmax(buy_logits, 1)
+    return -(target * logpred).sum(1).mean()
+
+
+def add_buy_prior_loss(loss, logits, mask, prior_logits, weight):
+    """Add the buy-prior term to a PPO loss. Weight 0 returns `loss` itself,
+    so today's loss is unchanged exactly."""
+    if weight == 0.0:
+        return loss
+    return loss + weight * buy_prior_cross_entropy(logits, mask, prior_logits)
+
+
+def buy_prior_top1(logits, mask, prior_logits):
+    """(hits, rows): rows with at least two legal buys where the network's
+    top legal buy slot is the buy model's top legal buy slot."""
+    legal = mask[:, BUY_ACTIONS]
+    valid = legal.sum(1) >= 2
+    if not valid.any():
+        return 0, 0
+    net_buy = logits[valid][:, BUY_ACTIONS].masked_fill(~legal[valid], -1e9)
+    prior_buy = prior_logits[valid].masked_fill(~legal[valid], -1e9)
+    return int((net_buy.argmax(1) == prior_buy.argmax(1)).sum()), int(valid.sum())
+
+
+@torch.no_grad()
+def buy_prior_agreement(logits, obs, mask, prior, ck, pidx, rows=None):
+    """The buy-slot top-1 agreement for the selected rows (all rows when
+    `rows` is None), with at least two legal buy slots. `logits` is the
+    network's full action logits for `obs`; the prior runs on the CPU and
+    `pidx` maps engine card ids to its vocabulary."""
+    legal = mask[:, BUY_ACTIONS]
+    valid = legal.sum(1) >= 2
+    if rows is not None:
+        valid = valid & rows
+    if not valid.any():
+        return 0, 0
+    sub = valid.nonzero(as_tuple=False).squeeze(1)
+    prior_logits = bp.prior_logits_for(
+        obs[sub].detach().float().cpu().numpy(), pidx, prior, ck, "cpu",
+        SHOP_COLS, BOARD_COLS, TURN,
+        bgpy.SLOT_PRESENT, bgpy.SLOT_CARD_ID).to(obs.device)
+    return buy_prior_top1(logits[sub], mask[sub], prior_logits)
+
+
+def print_base_buy_prior(prior_data, dev, games=BASE_BUY_PRIOR_GAMES):
+    """BASE's buy-slot agreement once at startup, on the standard-bot eval.
+    A missing or unreadable checkpoint is a note, not a reason to stop."""
+    if not DEMO_BASE_CKPT.is_file():
+        print(f"base {DEMO_BASE_CKPT}: not found, no reference buy agreement")
+        return
+    try:
+        net = load_model(str(DEMO_BASE_CKPT), dev).eval()
+        _, _, agree = evaluate(net, min(games, 1024),
+                               [1, 0, 7, 0, 0, 0], dev, 10_000,
+                               buy_prior=prior_data)
+    except (Exception, SystemExit) as e:
+        print(f"base {DEMO_BASE_CKPT}: cannot read ({e}), no reference buy agreement")
+        return
+    hits, total = agree
+    if not total:
+        print(f"base {DEMO_BASE_CKPT.parent.name}: no buy decisions")
+        return
+    print(f"base {DEMO_BASE_CKPT.parent.name}: buy prior top1 {hits / total:.1%} "
+          f"({hits}/{total} decisions, {min(games, 1024)} standard-bot games)")
+
+
 def entropy_term(dist, moves_as_one, move_idx=None):
     """The entropy bonus: ordinary entropy, or with moves_as_one the summed
     probability of the move actions treated as one atom (as oneturn.py does).
@@ -867,8 +973,10 @@ def force_mask(obs, mask):
     return mask
 
 
-def act(net, obs, mask, greedy=False, bonus=None, forced=None, comp=None):
+def act(net, obs, mask, greedy=False, bonus=None, forced=None, comp=None,
+        return_logits=False):
     logits, value = net(obs, comp=comp)
+    own_logits = logits
     if bonus is not None:
         logits = logits + bonus
     ml = masked(logits, mask)
@@ -876,6 +984,8 @@ def act(net, obs, mask, greedy=False, bonus=None, forced=None, comp=None):
     a = ml.argmax(1) if greedy else dist.sample()
     if forced is not None:
         a = torch.where(forced >= 0, forced, a)
+    if return_logits:
+        return a, dist.log_prob(a), value, dist.entropy(), own_logits
     return a, dist.log_prob(a), value, dist.entropy()
 
 
@@ -897,15 +1007,17 @@ def names_at_rev(rev):
 
 
 def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
-             era_starts=None, era_split="train", real_lag_mix=None, era_start_lag=None):
+             era_starts=None, era_split="train", real_lag_mix=None, era_start_lag=None,
+             buy_prior=None):
     """_evaluate, retried on a new seed when a scripted bot hits the engine's
     illegal-action panic (a known engine bug, 2026-11-02), so one bad test
-    game doesn't kill the training run."""
+    game doesn't kill the training run. With `buy_prior` it also returns
+    (hits, rows) for the buy-slot agreement; without it, the old two values."""
     for attempt in range(4):
         try:
             return _evaluate(net, n_games, lineup, dev, seed + attempt * 7919, real_boards,
                              scenario_names, era_starts, era_split, real_lag_mix,
-                             era_start_lag)
+                             era_start_lag, buy_prior)
         except BaseException as e:  # pyo3 PanicException is a BaseException
             if type(e).__name__ != "PanicException" or attempt == 3:
                 raise
@@ -913,14 +1025,18 @@ def evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=N
 
 
 def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=None,
-              era_starts=None, era_split="train", real_lag_mix=None, era_start_lag=None):
-    """Play n_games with `lineup` and return (avg_place, learner_records).
+              era_starts=None, era_split="train", real_lag_mix=None, era_start_lag=None,
+              buy_prior=None):
+    """Play n_games with `lineup` and return (avg_place, learner_records), plus
+    (hits, rows) as a third value when `buy_prior` is given.
 
     With --overlay-comps the comp input is on and the wheels are off: the
     overlay is only probed for its flags (no forced move and no bonus is
     applied). Each record carries the game's first active comp, final board,
     the turns the Shell was legal and taken, the game's drawn lag, and, with
-    `scenario_names`, the scenario starting body, for the comp eval line."""
+    `scenario_names`, the scenario starting body, for the comp eval line.
+    `buy_prior` is (model, checkpoint, card index); agree is its (hits, rows)
+    on learner decisions with at least two legal buy slots, or None."""
     n = min(n_games, 1024)
     scenario = dict(scenario_comps=OVERLAY_COMPS, scenario_names=list(scenario_names),
                     scenario_share=1.0, scenario_turn_min=SCENARIO_TURN_MIN,
@@ -959,6 +1075,8 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
     shell_taken = [set() for _ in range(n * P)]
     ar = np.arange(n)
     lags = env.real_lags()
+    learner_rows = torch.from_numpy(b.kind == LEARNER).to(dev)
+    buy_hits = buy_rows = 0
     while done < n_games:
         env.observe(b.obs, b.mask, b.seat, b.kind)
         o = torch.from_numpy(b.obs).to(dev)
@@ -967,7 +1085,16 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
         if OVERLAY_COMPS:
             env.overlay_probe(b.forced1, b.flags)
             comp_idx = b.flags[ar, b.seat, F_COMP] - 1
-        a, _, _, _ = act(net, o, m, comp=comp_onehot(comp_idx, COMP_COUNT, dev))
+        comp = comp_onehot(comp_idx, COMP_COUNT, dev)
+        if buy_prior is None:
+            a, _, _, _ = act(net, o, m, comp=comp)
+        else:
+            a, _, _, _, net_logits = act(net, o, m, comp=comp,
+                                         return_logits=True)
+            hits, rows = buy_prior_agreement(
+                net_logits, o, m, *buy_prior, rows=learner_rows)
+            buy_hits += hits
+            buy_rows += rows
         acts = a.cpu().numpy()
         turns = b.obs[:, bgpy.SCALAR_TURN].astype(np.int64)
         if OVERLAY_COMPS or era_mode:
@@ -1026,7 +1153,9 @@ def _evaluate(net, n_games, lineup, dev, seed, real_boards=None, scenario_names=
             env.kinds(b.kinds)
             lags = env.real_lags()
     avg_place = float(np.mean([r[0] for r in records]))
-    return avg_place, records
+    if buy_prior is None:
+        return avg_place, records
+    return avg_place, records, (buy_hits, buy_rows)
 
 
 @torch.no_grad()
@@ -1477,6 +1606,21 @@ def main():
                  if cfg.demo_fade else ""))
         if cfg.demo_kind_weight:
             print_base_demo_kind(demo)
+    buy_prior_model = buy_prior_ck = buy_prior_pidx = buy_prior_data = None
+    if cfg.buy_prior_weight > 0.0:
+        prior_path = Path(cfg.buy_prior)
+        if not prior_path.is_file():
+            raise SystemExit(f"--buy-prior {prior_path}: does not exist")
+        try:
+            buy_prior_model, buy_prior_ck = bp.load_prior(prior_path, "cpu")
+        except (Exception, SystemExit) as e:
+            raise SystemExit(f"--buy-prior {prior_path}: cannot read: {e}")
+        buy_prior_pidx = bp.make_pidx(names, buy_prior_ck, "cpu")
+        buy_prior_data = (buy_prior_model, buy_prior_ck, buy_prior_pidx)
+        print(f"buy prior {prior_path}: weight {cfg.buy_prior_weight:g}"
+              + (f", fading over the last {cfg.buy_prior_fade:g} of the run"
+                 if cfg.buy_prior_fade else ""))
+        print_base_buy_prior(buy_prior_data, dev)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     pool = []  # snapshot state dicts, on the CPU
     update, best, t_total = 0, 9.0, 0.0
@@ -1565,6 +1709,8 @@ def main():
         eval_keys += DEMO_KEYS
         if cfg.demo_kind_weight:
             eval_keys += DEMO_KIND_KEYS
+    if buy_prior_model is not None:
+        eval_keys += BUY_PRIOR_KEYS
     if new_csv:
         log.writerow([
             "update", "minutes", "games",
@@ -1648,6 +1794,9 @@ def main():
         demo_kind_weight = (cfg.demo_kind_weight * demo_fade_scale(
             run_min, run_start_min, cfg.minutes, cfg.demo_fade)
             if demo is not None else 0.0)
+        buy_prior_weight = (cfg.buy_prior_weight * demo_fade_scale(
+            run_min, run_start_min, cfg.minutes, cfg.buy_prior_fade)
+            if buy_prior_model is not None else 0.0)
         reward_on = cfg.fight_reward != 0.0
         score_on = cfg.fight_score != 0.0
         win_on = cfg.win_score != 0.0
@@ -1941,6 +2090,15 @@ def main():
         f_adv = adv.reshape(-1)[sel]
         f_ret = rets.reshape(-1)[sel]
         f_val = vals.reshape(-1)[sel]
+        f_prior = None
+        if (buy_prior_model is not None and buy_prior_weight > 0.0
+                and update >= cfg.value_warmup):
+            with torch.no_grad():
+                f_prior = bp.prior_logits_for(
+                    f_obs.detach().float().cpu().numpy(), buy_prior_pidx,
+                    buy_prior_model, buy_prior_ck, "cpu",
+                    SHOP_COLS, BOARD_COLS, TURN,
+                    bgpy.SLOT_PRESENT, bgpy.SLOT_CARD_ID).to(dev)
         f_comp = comp_onehot(comp_idx.reshape(-1)[sel_np], COMP_COUNT, dev)
         f_forced = torch.from_numpy(forced_rows.reshape(-1)[sel_np]).to(dev)
         f_aux = torch.from_numpy(aux_target.reshape(-1)[sel_np]).to(dev)
@@ -2024,6 +2182,10 @@ def main():
                         if demo_kind_weight > 0.0:
                             loss = add_demo_kind_loss(
                                 loss, net, d_obs, d_mask, d_action, demo_kind_weight)
+                    if f_prior is not None:
+                        loss = add_buy_prior_loss(
+                            loss, logits, f_mask[sub], f_prior[sub],
+                            buy_prior_weight)
                     (loss * w).backward()
                     with torch.no_grad():
                         kl_s += w * ((ratio - 1) - (lp - f_logp[sub])).mean().item()
@@ -2098,25 +2260,38 @@ def main():
                                         with_kind=bool(cfg.demo_kind_weight))
                          if demo is not None else {})
             seed = 10_000 + update * 10
-            vs_std, rec_std = evaluate(net, cfg.eval_games, [1, 0, 7, 0, 0, 0], dev, seed)
-            vs_rush, rec_rush = evaluate(net, cfg.eval_games, [1, 0, 0, 7, 0, 0], dev, seed + 1)
-            v4_std, rec_4s = evaluate(net, cfg.eval_games // 2, [4, 0, 4, 0, 0, 0], dev, seed + 2)
-            v4_rush, rec_4r = evaluate(net, cfg.eval_games // 2, [4, 0, 0, 4, 0, 0], dev, seed + 3)
-            v4_mix, rec_4m = evaluate(net, cfg.eval_games // 2, [4, 0, 2, 2, 0, 0], dev, seed + 4)
+            std_result = evaluate(
+                net, cfg.eval_games, [1, 0, 7, 0, 0, 0], dev, seed,
+                buy_prior=buy_prior_data)
+            if buy_prior_data is None:
+                vs_std, rec_std = std_result
+                agree_std = None
+            else:
+                vs_std, rec_std, agree_std = std_result
+            vs_rush, rec_rush = evaluate(
+                net, cfg.eval_games, [1, 0, 0, 7, 0, 0], dev, seed + 1)
+            v4_std, rec_4s = evaluate(
+                net, cfg.eval_games // 2, [4, 0, 4, 0, 0, 0], dev, seed + 2)
+            v4_rush, rec_4r = evaluate(
+                net, cfg.eval_games // 2, [4, 0, 0, 4, 0, 0], dev, seed + 3)
+            v4_mix, rec_4m = evaluate(
+                net, cfg.eval_games // 2, [4, 0, 2, 2, 0, 0], dev, seed + 4)
             snap.load_state_dict(pool[0])  # the oldest snapshot kept
             vs_snap = evaluate_vs(net, snap, cfg.eval_games // 2, dev, seed + 5)
             # One learner against 7 real seats: does it beat real boards?
             vs_real = float("nan")
             rec_real = None
             if real is not None:
-                vs_real, rec_real = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7],
-                                             dev, seed + 6, real)
+                vs_real, rec_real = evaluate(
+                    net, cfg.eval_games, [1, 0, 0, 0, 0, 7],
+                    dev, seed + 6, real)
             # The same game at the training lag mix, for the share and the
             # place at each lag. The vs7 real number above stays at lag 0.
             lag_vals = {}
             if REAL_LAG_MIX and real is not None:
-                _, rec_lag = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
-                                      seed + 60, real, real_lag_mix=REAL_LAG_MIX)
+                _, rec_lag = evaluate(
+                    net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
+                    seed + 60, real, real_lag_mix=REAL_LAG_MIX)
                 lag_places = np.array([r[0] for r in rec_lag], dtype=np.float64)
                 lag_drawn = np.array([r[3]["real_lag"] for r in rec_lag], dtype=np.int64)
                 lag_vals["place_vs_real_mix"] = float(lag_places.mean())
@@ -2131,17 +2306,19 @@ def main():
             scen_vals = {}
             if SCENARIO_LABELS and rec_real is not None:
                 for k, (label, snames, specs) in enumerate(SCENARIO_LABELS):
-                    _, rec_s = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
-                                        seed + 20 + 3 * k, real, scenario_names=snames)
+                    _, rec_s = evaluate(
+                        net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
+                        seed + 20 + 3 * k, real, scenario_names=snames)
                     for metric, val in summarize_scenario(rec_s, specs).items():
                         scen_vals[f"scen_{scenario_slug(label)}_{metric}"] = val
             # Era starts from the holdout split, wheels off: one learner
             # against seven real seats, every game an Era start.
             era_vals = {}
             if cfg.era_starts:
-                _, rec_era = evaluate(net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
-                                      seed + 50, real, era_starts=cfg.era_starts,
-                                      era_split="holdout", era_start_lag=ERA_START_LAG)
+                _, rec_era = evaluate(
+                    net, cfg.eval_games, [1, 0, 0, 0, 0, 7], dev,
+                    seed + 50, real, era_starts=cfg.era_starts,
+                    era_split="holdout", era_start_lag=ERA_START_LAG)
                 for metric, val in summarize_era(rec_era).items():
                     era_vals[f"era_{metric}"] = val
             net.train()
@@ -2153,6 +2330,11 @@ def main():
                 rec_real if rec_real is not None else rec_std + rec_rush + rec_4s + rec_4r + rec_4m,
                 COMP_SPECS,
             )
+            prior_vals = {}
+            if buy_prior_model is not None:
+                hits, total = agree_std
+                prior_vals["buy_prior_top1"] = (hits / total if total
+                                                else float("nan"))
             eval_vals = {
                 "place_vs_std": vs_std,
                 "place_vs_rush": vs_rush,
@@ -2167,6 +2349,7 @@ def main():
                 **era_vals,
                 **lag_vals,
                 **demo_vals,
+                **prior_vals,
             }
             for key, val in eval_vals.items():
                 tb.add_scalar(f"eval/{key}", val, update)
@@ -2245,6 +2428,9 @@ def main():
                     parts.append(
                         f"kindtrain {demo_vals['demo_kind_top1_train']:.1%}")
                 demo_txt = "  demo(" + " ".join(parts) + ")"
+            prior_txt = ""
+            if prior_vals:
+                prior_txt = f"  buy_prior {prior_vals['buy_prior_top1']:.1%}"
             gate_txt = ""
             gates = text_gates(net)
             if gates:
@@ -2269,7 +2455,7 @@ def main():
                 f"score {stats['fight_score_per_turn']:.3f} "
                 f"win {stats['win_score_per_turn']:.3f})  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  "
-                f"buys {top_buys}{demo_txt}{scen_txt}{era_txt}{lag_txt}{gate_txt}",
+                f"buys {top_buys}{prior_txt}{demo_txt}{scen_txt}{era_txt}{lag_txt}{gate_txt}",
                 flush=True,
             )
         if done:

@@ -164,40 +164,12 @@ def no_moves_mask(mask):
     return out
 
 
-def load_prior(path, dev):
-    ck = torch.load(path, map_location="cpu", weights_only=False)
-    sd = ck["state_dict"]
-    model = bp.BuyPrior(sd["card.weight"].shape[0],
-                        sd["meta.weight"].shape[0],
-                        bool(ck.get("use_meta", False)))
-    model.load_state_dict(sd)
-    return model.to(dev).eval(), ck
-
-
-def make_pidx(env, ck, dev):
-    idx = ck["card_idx"]
-    return torch.tensor([0] + [idx.get(n, 1) for n in env.card_names()],
-                        dtype=torch.long, device=dev)
-
-
-def prior_logits_for(obs_np, pidx, prior, ck, dev):
+def prior_logits(obs_np, pidx, prior, ck, dev):
     """The prior's 8 buy-slot logits for each observation row."""
-    o = torch.from_numpy(obs_np).to(dev)
-    sc = torch.tensor(SHOP_COLS, dtype=torch.long, device=dev)
-    bc = torch.tensor(BOARD_COLS, dtype=torch.long, device=dev)
-    sid = (o[:, sc + bgpy.SLOT_CARD_ID]
-           * (o[:, sc + bgpy.SLOT_PRESENT] > 0)).long()
-    bid = (o[:, bc + bgpy.SLOT_CARD_ID]
-           * (o[:, bc + bgpy.SLOT_PRESENT] > 0)).long()
-    offers = pidx[sid]
-    board = pidx[bid]
-    bmask = (bid > 0).float()
-    turns = o[:, TURN].long().clamp(0, int(ck.get("max_turn", 40)))
-    meta = torch.zeros((len(o), 1), dtype=torch.long, device=dev)
-    meta_mask = torch.zeros((len(o), 1), dtype=torch.float32, device=dev)
-    with torch.no_grad():
-        logits, _ = prior(offers, board, bmask, meta, meta_mask, turns)
-    return logits
+    return bp.prior_logits_for(
+        obs_np, pidx, prior, ck, dev,
+        SHOP_COLS, BOARD_COLS, TURN,
+        bgpy.SLOT_PRESENT, bgpy.SLOT_CARD_ID)
 
 
 def slot_name(obs, base, names):
@@ -1207,7 +1179,7 @@ def run_game_test(net, real, label, minutes, dev, out_path, rows,
         env.kinds(b.kinds)
         names = env.card_names()
         if prior_model is not None and pidx is None:
-            pidx = make_pidx(env, prior_ck, dev)
+            pidx = bp.make_pidx(names, prior_ck, dev)
         n = TEST_CHUNK
         done = np.zeros(n, dtype=bool)
         pending = np.zeros(n, dtype=bool)
@@ -1259,7 +1231,7 @@ def run_game_test(net, real, label, minutes, dev, out_path, rows,
                 a_np = a.cpu().numpy()
                 prior_np = None
                 if prior_model is not None:
-                    prior_np = prior_logits_for(
+                    prior_np = prior_logits(
                         b.obs[to_sample], pidx, prior_model, prior_ck, dev
                     ).cpu().numpy()
                 for k, e in enumerate(to_sample):
@@ -1767,7 +1739,7 @@ def train_game(args, real, out, net, opt, dev, state, raw_ckpt, log_f,
     env = make_game_env(args.envs, args.seed, real, lag_mix=args.lag_mix)
     b = ppo.Bufs(args.envs)
     env.kinds(b.kinds)
-    train_pidx = (make_pidx(env, train_prior_ck, dev)
+    train_pidx = (bp.make_pidx(env.card_names(), train_prior_ck, dev)
                   if train_prior is not None else None)
     N = args.envs
     active = np.ones(N, dtype=bool)
@@ -1866,7 +1838,7 @@ def train_game(args, real, out, net, opt, dev, state, raw_ckpt, log_f,
             mask_np = fmask.cpu().numpy()
             prior_np = None
             if train_prior is not None:
-                prior_np = prior_logits_for(
+                prior_np = prior_logits(
                     b.obs[to_sample], train_pidx, train_prior,
                     train_prior_ck, dev).cpu().numpy()
             for k, e in enumerate(to_sample):
@@ -2025,11 +1997,11 @@ def main():
         test_prior_path = Path(args.prior or TEST_PRIOR)
         if not test_prior_path.is_file():
             raise SystemExit(f"prior {test_prior_path} does not exist")
-        test_prior, test_prior_ck = load_prior(test_prior_path, dev)
+        test_prior, test_prior_ck = bp.load_prior(test_prior_path, dev)
         train_prior = train_prior_ck = None
         if args.prior and args.prior_weight > 0:
             train_prior_path = Path(args.prior)
-            train_prior, train_prior_ck = load_prior(train_prior_path, dev)
+            train_prior, train_prior_ck = bp.load_prior(train_prior_path, dev)
             print(f"prior {train_prior_path} weight {args.prior_weight:g}",
                   flush=True)
         train_game(args, real, out, net, opt, dev, state, raw_ckpt, log_f,

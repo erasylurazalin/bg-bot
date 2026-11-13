@@ -2647,6 +2647,19 @@ Deleting `.venv` undoes it.
   agreement, logged as `demo_kind_top1` and `demo_kind_top1_train`, and
   startup prints BASE's held-out kind agreement once, for reference. The
   policy that acts is unchanged.
+- `--buy-prior PATH --buy-prior-weight W --buy-prior-fade F` (default off)
+  loads the streamer buy model (`train/evaltools/buy_prior.py`, the class and
+  its loading and logit helpers are shared with `oneturn.py`). Each PPO update
+  adds W times the cross-entropy from the model's softmax over the legal buy
+  slots to the network's own softmax over the same slots, on rows with at least
+  two legal buys. The 8 slots are the 7 Tavern minions and the Tavern spell,
+  in the buy actions' order. The term is skipped during `--value-warmup`, and
+  `--buy-prior-fade` uses `--demo-fade`'s fade to 0 at the run's planned end.
+  Every eval also compares the network's top legal buy slot with the model's
+  top legal buy slot on the learner decisions of the standard-bot eval, logs
+  `buy_prior_top1`, and prints it in the update line; startup prints BASE's
+  value on 128 standard-bot games once, for reference. The policy that acts is
+  unchanged. With W = 0 nothing is loaded and the run is exactly as before.
 - `--entropy-moves-as-one` counts all Move actions as one entropy atom (their
   summed probability) instead of one per move, so the bonus stops paying for
   board shuffles; moves stay legal and sampled, off is the old loss, and

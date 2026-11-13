@@ -361,6 +361,51 @@ class BuyPrior(nn.Module):
         return logits, refresh_logit
 
 
+def load_prior(path, dev):
+    """Load a saved BuyPrior and its checkpoint (card ids and turn cap)."""
+    ck = torch.load(path, map_location="cpu", weights_only=False)
+    sd = ck["state_dict"]
+    model = BuyPrior(sd["card.weight"].shape[0],
+                     sd["meta.weight"].shape[0],
+                     bool(ck.get("use_meta", False)))
+    model.load_state_dict(sd)
+    return model.to(dev).eval(), ck
+
+
+def make_pidx(card_names, ck, dev):
+    """Map engine card ids (0 empty) to the prior's (0 empty, 1 unknown)."""
+    idx = ck["card_idx"]
+    return torch.tensor([0] + [idx.get(name, 1) for name in card_names],
+                        dtype=torch.long, device=dev)
+
+
+def prior_logits_for(obs_np, pidx, prior, ck, dev,
+                     shop_cols, board_cols, turn_col,
+                     slot_present, slot_card_id):
+    """The prior's logits for the 7 Tavern minions and the Tavern spell.
+
+    `shop_cols` and `board_cols` are the first observation column of each
+    slot; `turn_col` is the turn scalar. `pidx` is make_pidx's mapping for
+    the engine that wrote the observations. Returns one row of 8 logits per
+    observation row, in the same slot order as shop_cols."""
+    o = torch.from_numpy(obs_np).to(dev, dtype=torch.float32)
+    sc = torch.tensor(shop_cols, dtype=torch.long, device=dev)
+    bc = torch.tensor(board_cols, dtype=torch.long, device=dev)
+    sid = (o[:, sc + slot_card_id]
+           * (o[:, sc + slot_present] > 0)).long()
+    bid = (o[:, bc + slot_card_id]
+           * (o[:, bc + slot_present] > 0)).long()
+    offers = pidx[sid]
+    board = pidx[bid]
+    bmask = (bid > 0).float()
+    turns = o[:, turn_col].long().clamp(0, int(ck.get("max_turn", MAX_TURN)))
+    meta = torch.zeros((len(o), 1), dtype=torch.long, device=dev)
+    meta_mask = torch.zeros((len(o), 1), dtype=torch.float32, device=dev)
+    with torch.no_grad():
+        logits, _ = prior(offers, board, bmask, meta, meta_mask, turns)
+    return logits
+
+
 def train_model(train_encoded, card_names, meta_names, use_meta, seed):
     torch.manual_seed(seed)
     model = BuyPrior(len(card_names) + 2, len(meta_names) + 2, use_meta)
