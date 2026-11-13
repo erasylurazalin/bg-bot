@@ -150,6 +150,9 @@ struct Env {
     /// The last completed game's fight snapshots, kept across the reset so a
     /// fight that knocked the learner out can still be read.
     saved_fights: Option<Box<[Option<FightSnapshot>; PLAYERS]>>,
+    /// The last completed game's uncapped fight damage per seat, kept across
+    /// the reset so a fight that knocked the learner out can still be read.
+    saved_damage: Option<([i32; PLAYERS], [i32; PLAYERS])>,
 }
 
 impl Env {
@@ -256,6 +259,22 @@ impl Env {
             overlay_states,
             record_fights: false,
             saved_fights: None,
+            saved_damage: None,
+        }
+    }
+
+    /// The seat's last real fight's uncapped damage dealt and taken: the
+    /// current game's while it has fought, else the last game's saved values.
+    fn fight_damage(&self, seat: usize) -> (i32, i32) {
+        if self.game.fight_recorded {
+            (
+                self.game.fight_dealt_uncapped[seat],
+                self.game.fight_taken_uncapped[seat],
+            )
+        } else if let Some((dealt, taken)) = &self.saved_damage {
+            (dealt[seat], taken[seat])
+        } else {
+            (0, 0)
         }
     }
 
@@ -936,6 +955,10 @@ impl VecEnv {
                         // it so the collector can still read a fight that
                         // knocked the learner out.
                         let saved = env.game.fight_snapshots.take();
+                        let saved_damage = Some((
+                            env.game.fight_dealt_uncapped,
+                            env.game.fight_taken_uncapped,
+                        ));
                         let record = env.record_fights;
                         let mut fresh = Env::new(
                             data,
@@ -948,6 +971,7 @@ impl VecEnv {
                         );
                         fresh.set_record_fights(record);
                         fresh.saved_fights = saved;
+                        fresh.saved_damage = saved_damage;
                         *env = fresh;
                         env.advance();
                         *reset = true;
@@ -1047,6 +1071,40 @@ impl VecEnv {
                             obs::write_with(&env.game, p, out, old_boards);
                         }
                         l[p] = env.kinds[p] == LEARNER && env.game.players[p].alive;
+                    }
+                });
+        });
+        Ok(())
+    }
+
+    /// Each seat's last real fight's uncapped damage, `[n, PLAYERS]` int32
+    /// each: `dealt` and `taken`, the raw sum before the rules' turn cap
+    /// (`Game::combat`'s tier plus surviving minion tiers). A fight that
+    /// knocked a seat out survives the env reset. Zero before the first
+    /// fight, on a tie, and on a won ghost fight (a ghost has no hero).
+    /// Filled into the caller's arrays, like `observe`.
+    fn fight_damage(
+        &self,
+        py: Python<'_>,
+        mut dealt: PyReadwriteArray2<i32>,
+        mut taken: PyReadwriteArray2<i32>,
+    ) -> PyResult<()> {
+        let n = self.envs.len();
+        let dealt = dealt.as_slice_mut()?;
+        let taken = taken.as_slice_mut()?;
+        if dealt.len() != n * PLAYERS || taken.len() != n * PLAYERS {
+            return Err(PyValueError::new_err("array sizes don't match the number of games"));
+        }
+        py.detach(|| {
+            self.envs
+                .par_iter()
+                .zip(dealt.par_chunks_mut(PLAYERS))
+                .zip(taken.par_chunks_mut(PLAYERS))
+                .for_each(|((env, d), t)| {
+                    for p in 0..PLAYERS {
+                        let (dealt, taken) = env.fight_damage(p);
+                        d[p] = dealt;
+                        t[p] = taken;
                     }
                 });
         });

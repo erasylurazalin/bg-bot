@@ -2399,6 +2399,10 @@ seeded from the turn's seed (a repeat's).
   check per fight and no allocation; on is one box per game and an inline
   copy of the board and hand. `bgcore::fight_export` writes the JSON, so
   `bgpy.BoardFight` reads an exported pair exactly as a board file.
+  `bgpy.VecEnv.fight_damage(dealt, taken)` fills each seat's last real
+  fight's damage before the turn cap, dealt and taken, as two `[n, 8]` int32
+  arrays; a knockout's raw hit survives the env reset, and a tie or a won
+  ghost fight is 0. It always records: no flag, no allocation.
 - **Not measurable:** a turn whose first step is a trinket pick whose offer
   holds a trinket the trinket table does not build cannot be seated (turns 6
   and 9 are mostly lost that way), and a step the loader cannot seat ends the
@@ -2569,6 +2573,15 @@ Deleting `.venv` undoes it.
   won, 0 for a tie and -W for a loss or a knockout (1st place is a win); W = 0
   is the old reward, and `metrics.csv` appends `fight_reward_per_turn`, the
   mean term per learner turn.
+- `--fight-score W` (default 0) adds W * (uncapped damage dealt - uncapped
+  damage taken) / 48 at the same learner turn end, with the engine's raw
+  damage before the damage cap (`bgpy.VecEnv.fight_damage`), so a heavy loss
+  differs from a light one; a tie is 0, and a knockout counts the raw hit
+  that decided it. `--fight-score-from T` (default 1) pays only fights after
+  turn T, and `--fight-score-fade F` (default 0) falls linearly to 0 over the
+  last fraction F of the run's planned end (`--minutes`). `--fight-score` with
+  `--value-warmup` is refused. `metrics.csv` appends `fight_score_per_turn`,
+  the mean term per learner turn.
 - `--entropy-moves-as-one` counts all Move actions as one entropy atom (their
   summed probability) instead of one per move, so the bonus stops paying for
   board shuffles; moves stay legal and sampled, off is the old loss, and

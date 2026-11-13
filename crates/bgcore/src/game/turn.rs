@@ -1069,6 +1069,7 @@ impl Game {
             self.sandbox_combat();
             return;
         }
+        self.fight_recorded = true;
         // The leaderboard's tribe line for every living player, taken here:
         // after the shop, before any combat, whatever pairings this round
         // makes, and held until the next round's snapshot
@@ -1236,7 +1237,12 @@ impl Game {
                     // the fight: the loser takes what the winner deals.
                     match out.winner {
                         Some(0) => {
-                            let dealt = capped(my_tier as i32 + out.survivor_tiers);
+                            let raw = my_tier as i32 + out.survivor_tiers;
+                            self.fight_dealt_uncapped[p] = raw;
+                            self.fight_taken_uncapped[p] = 0;
+                            self.fight_dealt_uncapped[q] = 0;
+                            self.fight_taken_uncapped[q] = raw;
+                            let dealt = capped(raw);
                             damage[q] += dealt;
                             self.players[p].lost_last_combat = false;
                             self.players[p].won_last_combat = true;
@@ -1254,7 +1260,12 @@ impl Game {
                             });
                         }
                         Some(_) => {
-                            let taken = capped(tier as i32 + out.survivor_tiers);
+                            let raw = tier as i32 + out.survivor_tiers;
+                            self.fight_dealt_uncapped[p] = 0;
+                            self.fight_taken_uncapped[p] = raw;
+                            self.fight_dealt_uncapped[q] = raw;
+                            self.fight_taken_uncapped[q] = 0;
+                            let taken = capped(raw);
                             damage[p] += taken;
                             self.players[p].lost_last_combat = true;
                             self.players[p].won_last_combat = false;
@@ -1272,6 +1283,10 @@ impl Game {
                             });
                         }
                         None => {
+                            self.fight_dealt_uncapped[p] = 0;
+                            self.fight_taken_uncapped[p] = 0;
+                            self.fight_dealt_uncapped[q] = 0;
+                            self.fight_taken_uncapped[q] = 0;
                             self.players[p].lost_last_combat = false;
                             self.players[p].won_last_combat = false;
                             self.players[q].lost_last_combat = false;
@@ -1291,6 +1306,8 @@ impl Game {
                     // damage; only the living side's line changes.
                     match out.winner {
                         Some(0) => {
+                            self.fight_dealt_uncapped[p] = 0;
+                            self.fight_taken_uncapped[p] = 0;
                             self.players[p].lost_last_combat = false;
                             self.players[p].won_last_combat = true;
                             self.players[p].note_fight(FightResult {
@@ -1300,7 +1317,10 @@ impl Game {
                             });
                         }
                         Some(_) => {
-                            let taken = capped(tier as i32 + out.survivor_tiers);
+                            let raw = tier as i32 + out.survivor_tiers;
+                            self.fight_dealt_uncapped[p] = 0;
+                            self.fight_taken_uncapped[p] = raw;
+                            let taken = capped(raw);
                             damage[p] += taken;
                             self.players[p].lost_last_combat = true;
                             self.players[p].won_last_combat = false;
@@ -1311,6 +1331,8 @@ impl Game {
                             });
                         }
                         None => {
+                            self.fight_dealt_uncapped[p] = 0;
+                            self.fight_taken_uncapped[p] = 0;
                             self.players[p].lost_last_combat = false;
                             self.players[p].won_last_combat = false;
                             self.players[p].note_fight(FightResult { happened: true, ..Default::default() });

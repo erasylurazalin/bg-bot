@@ -1384,6 +1384,16 @@ pub struct Game {
     /// when the game records no snapshots. One check per fight when off. Only
     /// the eval export turns it on (`Game::record_fights`).
     pub fight_snapshots: Option<Box<[Option<FightSnapshot>; PLAYERS]>>,
+    /// Each seat's last real combat before the rules' damage cap: the damage
+    /// its hero dealt and took. Zero on a tie, on a won ghost fight (a ghost
+    /// has no hero to damage) and before the seat's first fight. Plain
+    /// integers in fixed arrays: no allocation per fight.
+    pub fight_dealt_uncapped: [i32; PLAYERS],
+    pub fight_taken_uncapped: [i32; PLAYERS],
+    /// Whether a real combat has happened in this game. The saved values
+    /// above are zero at the start of a fresh game, so this tells "no fight
+    /// yet" from "a fight that tied".
+    pub fight_recorded: bool,
 }
 
 /// Settings and results of a sandbox game (see `Game::new_sandbox`).
@@ -1938,6 +1948,9 @@ impl Game {
             board_triple_check: false,
             pending_triples: ArrayVec::new(),
             fight_snapshots: None,
+            fight_dealt_uncapped: [0; PLAYERS],
+            fight_taken_uncapped: [0; PLAYERS],
+            fight_recorded: false,
         }
     }
 

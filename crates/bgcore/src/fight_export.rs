@@ -442,4 +442,75 @@ mod tests {
         assert_eq!(exported, engine);
         assert_eq!(exported, (200, 0, 0, 600, 600, 0, 0));
     }
+
+    #[test]
+    fn a_real_fight_records_the_uncapped_damage_the_export_tallies() {
+        // Six 5/5 Campers beat a 1/4 Bat on turn 1. The raw win is the
+        // winner's tier plus its surviving minions' tiers: 1 + 6 = 7, and the
+        // turn 1 cap is 5, so capped and uncapped differ.
+        let mut game =
+            Game::new_with_lobby(Arc::new(Data::bundled()), 7, Tribes::ALL);
+        let camper = game.data.cards.by_name("Tusked Camper").expect("a Camper");
+        let bat = game.data.cards.by_name("Flittering Bat").expect("a Bat");
+        let mut camper = game.data.cards.make(camper, false);
+        camper.attack = 5;
+        camper.health = 5;
+        let mut bat = game.data.cards.make(bat, false);
+        bat.attack = 1;
+        bat.health = 4;
+        let Some(Opponent::Player(q)) = game.players[0].opponent else {
+            panic!("player 0 was not paired with a player");
+        };
+        game.players[0].board.clear();
+        for _ in 0..6 {
+            game.players[0].board.push(camper);
+        }
+        game.players[q as usize].board.clear();
+        game.players[q as usize].board.push(bat);
+        let before = game.players[q as usize].health;
+        game.record_fights(true);
+        for _ in 0..PLAYERS {
+            game.step(Action::EndTurn).expect("End Turn is legal");
+        }
+
+        assert!(game.fight_recorded);
+        assert_eq!(game.fight_dealt_uncapped[0], 7);
+        assert_eq!(game.fight_taken_uncapped[0], 0);
+        assert_eq!(game.fight_dealt_uncapped[q as usize], 0);
+        assert_eq!(game.fight_taken_uncapped[q as usize], 7);
+        assert_eq!(before - game.players[q as usize].health, 5, "the cap applied");
+
+        // The same fight through the export's own tally: the uncapped dealt is
+        // the raw 7, the capped dealt 5.
+        let snapshot = game
+            .fight_snapshots
+            .as_ref()
+            .and_then(|s| s[0].as_ref())
+            .expect("player 0 fought in the round");
+        let ids = card_ids();
+        let (me_json, opp_json, opp_seat) = pair_json(snapshot, &game.data, &ids);
+        assert_eq!(opp_seat, Some(q as usize));
+        let me_spec = parse_one(&me_json, &ids);
+        let opp_spec = parse_one(&opp_json, &ids);
+        let prepared = prepare(
+            &game.data,
+            &RealFightSpec { me: me_spec, opp: opp_spec, next: None },
+        );
+        assert!(prepared.is_complete(), "{:?}", prepared.missing_lines());
+        let (wins, ties, losses, dealt, dealt_uncapped, taken, taken_uncapped) = tally(
+            &game.data,
+            snapshot.turn,
+            snapshot.me.tier,
+            snapshot.opp_side.tier,
+            &snapshot.me.board,
+            &snapshot.opp_side.board,
+            [&snapshot.me.hand, &snapshot.opp_side.hand],
+            [snapshot.me.counters, snapshot.opp_side.counters],
+            1,
+            42,
+        );
+        assert_eq!((wins, ties, losses), (1, 0, 0));
+        assert_eq!((dealt, dealt_uncapped), (5, 7));
+        assert_eq!((taken, taken_uncapped), (0, 0));
+    }
 }
