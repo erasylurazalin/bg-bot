@@ -106,7 +106,7 @@ crates/
   bgsandbox/          terminal sandbox: play shop phases alone, boards recorded to boards/
 train/
   model.py            policy and value network
-  card_text.py        card text to token ids for the network (--card-text)
+  card_text.py        card text to token ids for the network (--card-text, --power-text)
   ppo.py              PPO self-play, evals, checkpoints
   real_boards.py      loads boards/real for training (card id to name, summary)
   search.py           the shop-turn search: candidates, cycles, the two
@@ -2690,8 +2690,22 @@ Deleting `.venv` undoes it.
   read today's export once to widen the word table when the vocabulary grew,
   and falls back to the saved list when `ref/` is absent. A checkpoint
   without them has no text parameters and is unchanged. The shared slot
-  encoder means all three models (`mlp`, `attn`, `pool`) read it. Heroes,
-  powers, trinkets and Dark Gifts keep their own id embeddings.
+  encoder means all three models (`mlp`, `attn`, `pool`) read it.
+- `--power-text` (2026-11-13) adds the printed text of every hero power and
+  trinket to those id embeddings, through one learned scalar gate per table
+  that starts at exactly 0: a checkpoint loaded into it answers as before
+  until the gate learns. The rows are read by card id from `heroes.toml`
+  (one starting power per hero, then the `[[power]]` entries) and
+  `trinkets.toml`, share the card-text word embedding and vocabulary, and are
+  saved in `model_opts` like the card table. `model.load(path,
+  power_text=True)` and `warm_start` widen an older card vocabulary by word,
+  start the new rows fresh and leave the gates at 0. Dark Gifts need no
+  separate input: the observation shows them only as their effect card's id
+  in the main card table (the gift slots on minions, and a Discover slot's
+  gift field during an offer), so the card text already covers them.
+  `fixed_eval.py --power-text`
+  forces the fresh parts for the gate-0 check, and `ppo.py` prints the gate
+  values at startup and in each update line.
 - `--init-from PATH` starts a new run (fresh optimizer) from every
   parameter of another checkpoint of the same model whose name and shape
   match, for example `attn` with `full` into `next`; it prints what was
@@ -2710,9 +2724,12 @@ Deleting `.venv` undoes it.
   over by word too: the word list is the `card_text["vocab"]` every
   `--card-text` checkpoint saves, and a word it did not know starts fresh in
   `warm_start` or takes the padding row in `model.load`. The eval scripts'
-  `model.load` remaps the same three tables and the card-text buffers (card
-  ids and word ids) on load: a name it did not know gets the empty row (0),
-  so the loaded network answers as it did on everything it knew. `--resume`
+  `model.load` remaps the same three tables and the text buffers (card,
+  power and trinket ids and word ids) on load: a name it did not know gets
+  the empty row (0), so the loaded network answers as it did on everything it
+  knew. The fresh token rows are kept from today's export rather than copied
+  from the checkpoint, since a moved word id would undo the vocabulary
+  alignment. `--resume`
   still needs the same cards: after a card change, start a new run with
   `--init-from`.
 

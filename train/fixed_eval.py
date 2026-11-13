@@ -69,6 +69,9 @@ def parse_args():
                    help="divide the network's logits by this before sampling "
                         "(default 1.0; must be above 0)")
     a.add_argument("--name", help="run folder under train/runs/fixed-eval")
+    a.add_argument("--power-text", action="store_true",
+                   help="build the hero-power and trinket text parts fresh with their gates at "
+                        "0, even when the checkpoint has none: the gate-0 equivalence check")
     a.add_argument("--boards", type=Path, default=FROZEN,
                    help=f"frozen boards folder (default {FROZEN.relative_to(ROOT)})")
     a.add_argument("--seed-base", type=int, default=SEED_BASE,
@@ -161,10 +164,10 @@ def resolve_overlay(value: str) -> Path:
     return path
 
 
-def load_ckpt(path: str, dev: torch.device) -> dict:
+def load_ckpt(path: str, dev: torch.device, power_text: bool = False) -> dict:
     ck = torch.load(path, map_location="cpu", weights_only=False)
     cfg = ck.get("cfg") or {}
-    net = load_model(path, dev).eval()
+    net = load_model(path, dev, power_text=True if power_text else None).eval()
     overlay = cfg.get("overlay_comps")
     overlay_path = None
     if net.n_comps:
@@ -184,6 +187,7 @@ def load_ckpt(path: str, dev: torch.device) -> dict:
         "old_boards": cfg.get("old_boards") or "keep",
         "overlay_comps": str(overlay_path) if overlay_path else None,
         "n_comps": net.n_comps,
+        "power_text": power_text,
         "net": net,
     }
 
@@ -486,6 +490,8 @@ def build_report(name: str, args, n_board_files: int, rev: str,
     lines.append(f"- lobby filter: {'off' if args.no_lobby_filter else 'on'}")
     lines.append(f"- real lag: {args.real_lag} turn{'s' if args.real_lag != 1 else ''}")
     lines.append(f"- real lag from: turn {args.real_lag_from}")
+    if args.power_text:
+        lines.append("- power text: hero-power and trinket parts added fresh, gates at 0")
     if args.era_folder is not None:
         lines.append(f"- mode: Era starts ({args.era_split} split, turns "
                      f"{args.era_turn_min}..{args.era_turn_max}, "
@@ -714,7 +720,7 @@ def main():
     infos, results = [], []
     for path in args.ckpts:
         print(f"loading {path}", flush=True)
-        info = load_ckpt(path, dev)
+        info = load_ckpt(path, dev, args.power_text)
         print(f"  update {info['update']}, force_dark_gift {info['force_dark_gift']}, "
               f"old_boards {info['old_boards']}, comp inputs {info['n_comps']}", flush=True)
         rows = eval_checkpoint(info, args, real, dev)

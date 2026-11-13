@@ -156,19 +156,38 @@ assert len(SLOT_SCALE) == SF
 
 
 class CardTextEncoder(nn.Module):
-    """The text vector of every card, from its token ids.
+    """The text vector of every card, hero power and trinket, from its token
+    ids.
 
-    One word embedding, one pre-norm self-attention layer over a card's words,
-    then the mean over its present words, projected to `emb`. The whole table
-    is computed once per forward (it is small) and indexed by card id. A card
-    with no text gets a zero vector, so its card embedding stays the id
-    embedding alone."""
+    One word embedding, one pre-norm self-attention layer over a text's
+    words, then the mean over its present words, projected to `emb`. The
+    whole table is computed once per forward (it is small) and indexed by id.
+    A text with no words gets a zero vector, so its id embedding stays the id
+    embedding alone.
 
-    def __init__(self, emb, card_text):
+    `card_text` holds the card rows (the model's card table); `power_text`
+    holds the hero/power and trinket rows. When both are given they share one
+    vocabulary and one word embedding. A gate per added table starts at
+    exactly 0 and scales its text vector before it is added to the id
+    embedding, so a checkpoint loaded into a network with `--power-text`
+    answers as it did until the gate learns."""
+
+    def __init__(self, emb, card_text=None, power_text=None):
         super().__init__()
-        tokens = torch.tensor(card_text["tokens"], dtype=torch.long)
-        self.vocab = list(card_text["vocab"])
-        self.register_buffer("tokens", tokens)
+        if card_text and power_text and (
+                list(card_text["vocab"]) != list(power_text["vocab"])):
+            raise SystemExit("model.py: card_text and power_text do not share one vocabulary")
+        source = card_text or power_text or {}
+        self.vocab = list(source.get("vocab") or [])
+        self.has_cards = card_text is not None
+        self.has_powers = power_text is not None
+        width = len((card_text or power_text)["tokens" if card_text else "powers"][0])
+        self.register_buffer("tokens", torch.tensor(
+            card_text["tokens"] if card_text else [[0] * width], dtype=torch.long))
+        self.register_buffer("power_tokens", torch.tensor(
+            power_text["powers"], dtype=torch.long) if power_text else None)
+        self.register_buffer("trinket_tokens", torch.tensor(
+            power_text["trinkets"], dtype=torch.long) if power_text else None)
         self.word = nn.Embedding(len(self.vocab) + 1, emb, padding_idx=0)
         self.norm = nn.LayerNorm(emb)
         heads = 4 if emb % 4 == 0 else 1
@@ -176,23 +195,25 @@ class CardTextEncoder(nn.Module):
         self.qkv = nn.Linear(emb, 3 * emb)
         self.out = nn.Linear(emb, emb)
         self.proj = nn.Linear(emb, emb)
+        # --power-text: one learned scalar per added table, exactly 0 first.
+        self.power_gate = nn.Parameter(torch.zeros(())) if power_text else None
+        self.trinket_gate = nn.Parameter(torch.zeros(())) if power_text else None
         # --card-form: each card's fixed effect form, projected and added
-        forms = card_text.get("forms")
+        forms = card_text.get("forms") if card_text else None
         self.form = None
         if forms:
             self.register_buffer("forms", torch.tensor(forms, dtype=torch.float32))
             self.form = nn.Linear(len(forms[0]), emb)
 
-    def table(self):
-        """(n_cards + 1, emb), row 0 and textless cards zero."""
-        ids = self.tokens
+    def _encode(self, ids):
+        """(rows, emb) text vectors; a row with no words is all zero."""
         present = ids != 0
         x = self.word(ids)
         h = self.norm(x)
         b, n, d = h.shape
         q, k, v = self.qkv(h).view(b, n, 3, self.heads, d // self.heads).permute(
             2, 0, 3, 1, 4)
-        # Keep one key per card so a textless row still has a finite softmax;
+        # Keep one key per row so a textless row still has a finite softmax;
         # its key is the zero padding embedding, so the result stays zero.
         keep = present.clone()
         keep[:, 0] = True
@@ -200,11 +221,57 @@ class CardTextEncoder(nn.Module):
         x = x + self.out(a.transpose(1, 2).reshape(b, n, d))
         mask = present[..., None]
         mean = (x * mask).sum(1) / mask.sum(1).clamp(min=1)
-        out = self.proj(mean) * present.any(1, keepdim=True)
+        return self.proj(mean) * present.any(1, keepdim=True)
+
+    def table(self):
+        """(n_cards + 1, emb), row 0 and textless cards zero."""
+        out = self._encode(self.tokens)
         if self.form is not None:
             # a card with no form (row 0 included) stays zero despite the bias
             out = out + self.form(self.forms) * (self.forms != 0).any(1, keepdim=True)
         return out
+
+    def power_table(self):
+        """(N_HERO_IDS + 1, emb), row 0 and textless powers zero."""
+        return self._encode(self.power_tokens) if self.power_tokens is not None else None
+
+    def trinket_table(self):
+        """(N_TRINKETS + 1, emb), row 0 and textless trinkets zero."""
+        return self._encode(self.trinket_tokens) if self.trinket_tokens is not None else None
+
+    def embed_hero(self, emb, ids):
+        """The hero/power id embedding, plus its gated text vector."""
+        table = self.power_table()
+        if table is None:
+            return emb(ids)
+        return F.embedding(ids, emb.weight + self.power_gate * table)
+
+    def embed_trinket(self, emb, ids):
+        """The trinket id embedding, plus its gated text vector."""
+        table = self.trinket_table()
+        if table is None:
+            return emb(ids)
+        return F.embedding(ids, emb.weight + self.trinket_gate * table)
+
+
+def _hero_vectors(text, emb, ids):
+    return emb(ids) if text is None else text.embed_hero(emb, ids)
+
+
+def _trinket_vectors(text, emb, ids):
+    return emb(ids) if text is None else text.embed_trinket(emb, ids)
+
+
+def text_gates(net):
+    """(name, value) of each --power-text gate this network has."""
+    text = getattr(net, "text", None) or getattr(getattr(net, "inp", None), "text", None)
+    out = []
+    if text is not None:
+        if getattr(text, "power_gate", None) is not None:
+            out.append(("hero power", float(text.power_gate.detach())))
+        if getattr(text, "trinket_gate", None) is not None:
+            out.append(("trinket", float(text.trinket_gate.detach())))
+    return out
 
 
 def _card_vectors(card, weight, ids):
@@ -216,24 +283,30 @@ def _card_vectors(card, weight, ids):
 
 
 def opts_text(opts):
-    """A print-safe copy of model_opts: the card text table is a summary."""
+    """A print-safe copy of model_opts: the text tables are summaries."""
     out = dict(opts)
     table = out.get("card_text")
     if table:
         rows = table["tokens"]
         out["card_text"] = (f"{len(table['vocab'])} words, {len(rows)} cards, "
                             f"{len(rows[0])} tokens")
+    powers = out.get("power_text")
+    if powers:
+        out["power_text"] = (f"{len(powers['vocab'])} words, "
+                             f"{len(powers['powers']) - 1} hero powers, "
+                             f"{len(powers['trinkets']) - 1} trinkets")
     return out
 
 
 class Net(nn.Module):
     def __init__(self, n_cards=bgpy.N_CARDS, n_heroes=N_HERO_IDS,
                  n_trinkets=bgpy.N_TRINKETS, emb=32, slot=64, hidden=512,
-                 n_comps=0, card_text=None):
+                 n_comps=0, card_text=None, power_text=None):
         super().__init__()
         self.n_comps = n_comps
         self.card = nn.Embedding(n_cards + 1, emb)  # 0 is an empty slot or no card
-        self.text = CardTextEncoder(emb, card_text) if card_text else None
+        self.text = (CardTextEncoder(emb, card_text, power_text)
+                     if (card_text or power_text) else None)
         self.hero = nn.Embedding(n_heroes + 1, emb)  # 0 is no hero
         self.trinket = nn.Embedding(n_trinkets + 1, emb)  # 0 is no trinket
         feats = [i for i in range(SF) if i not in SLOT_IDS]
@@ -270,7 +343,8 @@ class Net(nn.Module):
 
     def forward(self, obs, comp=None):
         b = obs.shape[0]
-        weight = self.card.weight + self.text.table() if self.text is not None else None
+        weight = (self.card.weight + self.text.table()
+                  if self.text is not None and self.text.has_cards else None)
         if self.n_comps:
             if comp is None:
                 comp = obs.new_zeros((b, self.n_comps))
@@ -281,14 +355,17 @@ class Net(nn.Module):
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
         s_ids = raw[:, SCALAR_IDS].long()
         s_cards = _card_vectors(self.card, weight, s_ids).reshape(b, -1)
-        s_heroes = self.hero(raw[:, HERO_IDS].long()).reshape(b, -1)
-        s_trinkets = self.trinket(raw[:, TRINKET_IDS].long()).reshape(b, -1)
+        s_heroes = _hero_vectors(self.text, self.hero, raw[:, HERO_IDS].long()).reshape(b, -1)
+        s_trinkets = _trinket_vectors(
+            self.text, self.trinket, raw[:, TRINKET_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
         opp = obs[:, OWN_END:].reshape(b, OPP, OPP_BLOCK)
         o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale * self.o_keep
         o[:, :, self.o_log] = torch.log1p(o[:, :, self.o_log].clamp(min=0))
-        o_heroes = self.hero(opp[:, :, OPP_IDS].long()).reshape(b, -1)
-        o_trinkets = self.trinket(opp[:, :, OPP_TRINKET_IDS].long()).reshape(b, -1)
+        o_heroes = _hero_vectors(
+            self.text, self.hero, opp[:, :, OPP_IDS].long()).reshape(b, -1)
+        o_trinkets = _trinket_vectors(
+            self.text, self.trinket, opp[:, :, OPP_TRINKET_IDS].long()).reshape(b, -1)
         opp_scalars = torch.cat([o.reshape(b, -1), o_heroes, o_trinkets], 1)
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
@@ -353,11 +430,12 @@ class SlotInputs(nn.Module):
     that opponent's zone embedding, shared with its board)."""
 
     def __init__(self, n_cards, d, emb, n_heroes=N_HERO_IDS, n_trinkets=bgpy.N_TRINKETS,
-                 n_comps=0, card_text=None):
+                 n_comps=0, card_text=None, power_text=None):
         super().__init__()
         self.n_comps = n_comps
         self.card = nn.Embedding(n_cards + 1, emb)
-        self.text = CardTextEncoder(emb, card_text) if card_text else None
+        self.text = (CardTextEncoder(emb, card_text, power_text)
+                     if (card_text or power_text) else None)
         self.hero = nn.Embedding(n_heroes + 1, emb)
         self.trinket = nn.Embedding(n_trinkets + 1, emb)  # 0 is no trinket
         feats = [i for i in range(SF) if i not in SLOT_IDS]
@@ -393,7 +471,8 @@ class SlotInputs(nn.Module):
     def forward(self, obs, comp=None):
         """(slots (B, 77, d), present (B, 77) bool, me (B, d), opp (B, OPP, d))"""
         b = obs.shape[0]
-        weight = self.card.weight + self.text.table() if self.text is not None else None
+        weight = (self.card.weight + self.text.table()
+                  if self.text is not None and self.text.has_cards else None)
         if self.n_comps:
             if comp is None:
                 comp = obs.new_zeros((b, self.n_comps))
@@ -403,14 +482,17 @@ class SlotInputs(nn.Module):
         scalars = raw / self.s_scale * self.s_keep
         scalars[:, self.s_log] = torch.log1p(scalars[:, self.s_log].clamp(min=0))
         s_cards = _card_vectors(self.card, weight, raw[:, SCALAR_IDS].long()).reshape(b, -1)
-        s_heroes = self.hero(raw[:, HERO_IDS].long()).reshape(b, -1)
-        s_trinkets = self.trinket(raw[:, TRINKET_IDS].long()).reshape(b, -1)
+        s_heroes = _hero_vectors(self.text, self.hero, raw[:, HERO_IDS].long()).reshape(b, -1)
+        s_trinkets = _trinket_vectors(
+            self.text, self.trinket, raw[:, TRINKET_IDS].long()).reshape(b, -1)
         own = obs[:, bgpy.SCALARS:OWN_END].reshape(b, OWN_SLOTS, SF)
         opp = obs[:, OWN_END:].reshape(b, OPP, OPP_BLOCK)
         o = opp[:, :, :bgpy.OPP_SCALARS] / self.o_scale * self.o_keep
         o[:, :, self.o_log] = torch.log1p(o[:, :, self.o_log].clamp(min=0))
-        o_hero = self.hero(opp[:, :, OPP_IDS].long()).squeeze(2)
-        o_trinkets = self.trinket(opp[:, :, OPP_TRINKET_IDS].long()).reshape(b, OPP, -1)
+        o_hero = _hero_vectors(
+            self.text, self.hero, opp[:, :, OPP_IDS].long()).squeeze(2)
+        o_trinkets = _trinket_vectors(
+            self.text, self.trinket, opp[:, :, OPP_TRINKET_IDS].long()).reshape(b, OPP, -1)
         opp_scalars = torch.cat([o[:, :, self.o_cols], o_hero, o_trinkets], 2)
         opp_slots = opp[:, :, bgpy.OPP_SCALARS:].reshape(b, OPP * bgpy.BOARD, SF)
         slots = torch.cat([own, opp_slots], 1)
@@ -588,13 +670,14 @@ class AttnNet(nn.Module):
     It is not a shape setting and never goes into a checkpoint."""
 
     def __init__(self, n_cards=bgpy.N_CARDS, d=128, layers=3, heads=4, ff=256, emb=32, bf16=True,
-                 opp_boards="next", n_comps=0, card_text=None):
+                 opp_boards="next", n_comps=0, card_text=None, power_text=None):
         super().__init__()
         assert opp_boards in OPP_BOARDS, opp_boards
         self.bf16 = bf16
         self.opp_boards = opp_boards
         self.n_comps = n_comps
-        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps, card_text=card_text)
+        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps, card_text=card_text,
+                              power_text=power_text)
         self.blocks = nn.ModuleList(Block(d, heads, ff) for _ in range(layers))
         self.norm = nn.LayerNorm(d)
         self.head = ActionHead(d, d)
@@ -646,10 +729,11 @@ class PoolNet(nn.Module):
     a summary projected from the MLP; the value from the MLP."""
 
     def __init__(self, n_cards=bgpy.N_CARDS, d=64, hidden=256, emb=32, n_comps=0,
-                 card_text=None):
+                 card_text=None, power_text=None):
         super().__init__()
         self.n_comps = n_comps
-        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps, card_text=card_text)
+        self.inp = SlotInputs(n_cards, d, emb, n_comps=n_comps, card_text=card_text,
+                              power_text=power_text)
         n_in = len(ZONES) * 2 * d + d + OPP * d
         self.trunk = nn.Sequential(nn.Linear(n_in, hidden), nn.ReLU(),
                                    nn.Linear(hidden, hidden), nn.ReLU())
@@ -673,10 +757,10 @@ class PoolNet(nn.Module):
 MODELS = {"mlp": Net, "attn": AttnNet, "pool": PoolNet}
 # Settings that change a model's shape, with their defaults; other models
 # ignore them.
-MODEL_OPTS = {"mlp": {"n_comps": 0, "card_text": None},
+MODEL_OPTS = {"mlp": {"n_comps": 0, "card_text": None, "power_text": None},
               "attn": {"opp_boards": "next", "d": 128, "layers": 3, "heads": 4, "ff": 256,
-                       "n_comps": 0, "card_text": None},
-              "pool": {"n_comps": 0, "card_text": None}}
+                       "n_comps": 0, "card_text": None, "power_text": None},
+              "pool": {"n_comps": 0, "card_text": None, "power_text": None}}
 
 
 def model_opts(kind, **given):
@@ -729,68 +813,129 @@ def _ck_card_text(ck):
     return (ck.get("cfg") or {}).get("card_text")
 
 
-def current_vocab(names=None):
-    """Today's card-text words, in card_text.py's sorted order, read once.
-    An empty list when the card export is not there: the checkpoint's own
-    saved vocabulary is still usable then."""
+def current_vocab(names=None, power_text=False):
+    """Today's text words, in card_text.py's sorted order, read once.
+
+    `power_text` builds the shared card/power/trinket vocabulary the
+    --power-text model uses; without it, the card words alone. An empty list
+    when the card export is not there: the checkpoint's own saved vocabulary
+    is still usable then."""
     global _CURRENT_VOCAB
-    if _CURRENT_VOCAB is None:
+    key = bool(power_text)
+    if isinstance(_CURRENT_VOCAB, dict):
+        cached = _CURRENT_VOCAB.get(key)
+    else:
+        cached = None
+    if cached is None:
         import card_text
         try:
-            _CURRENT_VOCAB = card_text.build_table(
-                names or current_names()["cards"])["vocab"]
+            today = current_names()
+            if power_text:
+                _, table = card_text.build_text(
+                    names or today["cards"], today["heroes"], today["trinkets"])
+                cached = table["vocab"]
+            else:
+                cached = card_text.build_table(names or today["cards"])["vocab"]
         except OSError:
-            _CURRENT_VOCAB = []
-    return _CURRENT_VOCAB
+            cached = []
+        if not isinstance(_CURRENT_VOCAB, dict):
+            _CURRENT_VOCAB = {}
+        _CURRENT_VOCAB[key] = cached
+    return cached
+
+
+def _name_row_index(old_names, new_names):
+    """Rows of `new_names` in a table laid out by `old_names`, row 0 kept.
+
+    A repeated name (lesser and greater trinkets) matches by occurrence: the
+    first new one takes the first old one. A new name takes row 0."""
+    old_at = {}
+    for i, name in enumerate(old_names):
+        old_at.setdefault(name, []).append(i)
+    used = {}
+    row = [0] * (len(new_names) + 1)
+    for i, name in enumerate(new_names):
+        at = old_at.get(name)
+        k = used.get(name, 0)
+        if at is not None and k < len(at):
+            row[i + 1] = at[k] + 1
+            used[name] = k + 1
+    return torch.tensor(row, dtype=torch.long)
 
 
 def _align_card_text(opts, ck, path, new_names):
-    """A checkpoint's card-text buffers cover its card ids and word ids.
-    Widen the rows to today's card ids by card name (row 0 stays the empty
-    row; a card the checkpoint did not know gets zero text), and move the
-    token ids onto today's vocabulary (a word that is gone becomes padding).
-    The stored text of a known card is unchanged."""
+    """A checkpoint's card- and power-text buffers cover its ids and word
+    ids. Widen the rows to today's ids by name (row 0 stays the empty row; an
+    id the checkpoint did not know gets zero text), move the token ids onto
+    today's vocabulary (a word that is gone becomes padding), and keep the
+    card and power tables on one vocabulary. The stored text of a known id is
+    unchanged."""
     ct = opts.get("card_text")
-    if not ct:
+    pt = opts.get("power_text")
+    if not ct and not pt:
         return opts
-    ct = dict(ct)
-    tokens = torch.as_tensor(ct["tokens"])
+    if ct and pt and list(ct.get("vocab") or []) != list(pt.get("vocab") or []):
+        raise SystemExit(f"load {path}: card_text and power_text do not share one vocabulary")
+    ct = dict(ct) if ct else None
+    pt = dict(pt) if pt else None
     changed = False
-    old_vocab = ct.get("vocab")
-    new_vocab = current_vocab(new_names)
+    old_vocab = (ct or pt).get("vocab")
+    new_vocab = current_vocab(new_names, power_text=pt is not None)
+    lut = None
     if old_vocab and new_vocab and list(old_vocab) != list(new_vocab):
         at = {word: i + 1 for i, word in enumerate(new_vocab)}
         lut = torch.tensor([0] + [at.get(word, 0) for word in old_vocab], dtype=torch.long)
-        tokens = lut[tokens]
-        ct["vocab"] = list(new_vocab)
+        if ct:
+            ct["vocab"] = list(new_vocab)
+        if pt:
+            pt["vocab"] = list(new_vocab)
         changed = True
 
-    old_names = ck.get("card_names")
-    if old_names is None or len(old_names) != tokens.shape[0] - 1:
-        inferred = _infer_names(path, "cards", tokens.shape[0] - 1)
-        old_names = inferred[0] if inferred else None
-    if old_names is not None and len(old_names) != len(new_names):
-        old_at = {}
-        for i, n in enumerate(old_names):
-            old_at.setdefault(n, []).append(i)
-        used = {}
-        row = [0] * (len(new_names) + 1)
-        for i, n in enumerate(new_names):
-            at = old_at.get(n)
-            k = used.get(n, 0)
-            if at is not None and k < len(at):
-                row[i + 1] = at[k] + 1
-                used[n] = k + 1
-        at = torch.tensor(row, dtype=torch.long)
-        tokens = tokens[at]
-        if ct.get("forms") is not None:
-            ct["forms"] = torch.as_tensor(ct["forms"])[at].tolist()
-        changed = True
+    today = current_names()
+    if ct:
+        tokens = torch.as_tensor(ct["tokens"])
+        old_names = ck.get("card_names")
+        if old_names is None or len(old_names) != tokens.shape[0] - 1:
+            inferred = _infer_names(path, "cards", tokens.shape[0] - 1)
+            old_names = inferred[0] if inferred else None
+        if old_names is not None and list(old_names) != list(new_names):
+            at = _name_row_index(old_names, new_names)
+            tokens = tokens[at]
+            if ct.get("forms") is not None:
+                ct["forms"] = torch.as_tensor(ct["forms"])[at].tolist()
+            changed = True
+        if lut is not None:
+            tokens = lut[tokens]
+        ct["tokens"] = tokens.tolist()
+
+    if pt:
+        for key, what, names_key, today_names in (
+                ("powers", "heroes", "hero_names", today["heroes"]),
+                ("trinkets", "trinkets", "trinket_names", today["trinkets"])):
+            rows = torch.as_tensor(pt[key])
+            old_names = ck.get(names_key)
+            if old_names is None or len(old_names) != rows.shape[0] - 1:
+                inferred = _infer_names(path, what, rows.shape[0] - 1)
+                old_names = inferred[0] if inferred else None
+            if old_names is not None and list(old_names) != list(today_names):
+                at = _name_row_index(old_names, today_names)
+                rows = rows[at]
+                changed = True
+            if lut is not None:
+                rows = lut[rows]
+            if rows.shape[0] != len(today_names) + 1:
+                raise SystemExit(
+                    f"load {path}: its {what} text rows ({rows.shape[0] - 1}) do not "
+                    f"match today's {what} table ({len(today_names)})")
+            pt[key] = rows.tolist()
+
     if not changed:
         return opts
-    ct["tokens"] = tokens.tolist()
     opts = dict(opts)
-    opts["card_text"] = ct
+    if ct:
+        opts["card_text"] = ct
+    if pt:
+        opts["power_text"] = pt
     return opts
 
 
@@ -814,6 +959,18 @@ def _remap_words(src_w, own_w, old_vocab, new_vocab, base=None):
     return w, kept, len(new_vocab) - kept, dropped
 
 
+def _ck_text_vocab(ck):
+    """The vocabulary a checkpoint saved, from its card table or, when it has
+    only power text, that table."""
+    table = _ck_card_text(ck)
+    if table and table.get("vocab"):
+        return table["vocab"]
+    pt = (ck.get("model_opts") or {}).get("power_text")
+    if not pt:
+        pt = (ck.get("cfg") or {}).get("power_text")
+    return pt.get("vocab") if isinstance(pt, dict) else None
+
+
 def _remap_word_table(src, own, take, ck, net, base=None):
     """Carry `inp.text.word.weight` over by word. The checkpoint's word list
     is the one it saved in card_text["vocab"]; a checkpoint that saved tokens
@@ -822,7 +979,7 @@ def _remap_word_table(src, own, take, ck, net, base=None):
     keys = [k for k in own if k.endswith("text.word.weight") and k in src]
     if not keys:
         return []
-    old_vocab = (_ck_card_text(ck) or {}).get("vocab")
+    old_vocab = _ck_text_vocab(ck)
     text = getattr(net, "text", None) or getattr(getattr(net, "inp", None), "text", None)
     new_vocab = getattr(text, "vocab", None)
     if not old_vocab or not new_vocab:
@@ -836,7 +993,21 @@ def _remap_word_table(src, own, take, ck, net, base=None):
     return [f"text words: {kept} kept, {fresh} new, {dropped} dropped"]
 
 
-def load(path, dev="cpu", compile=False):
+def _drop_text_buffers(take):
+    """Keep the freshly built token rows: they are data, not weights, and a
+    moved word id in an old checkpoint's rows would otherwise undo the
+    vocabulary alignment. Returns the keys left out."""
+    dropped = []
+    for key in list(take):
+        parts = key.split(".")
+        if len(parts) >= 2 and parts[-2] == "text" and parts[-1] in (
+                "tokens", "power_tokens", "trinket_tokens", "forms"):
+            dropped.append(key)
+            del take[key]
+    return dropped
+
+
+def load(path, dev="cpu", compile=False, power_text=None):
     """The network saved in a ppo.py checkpoint, built as the model it was
     trained with.
 
@@ -844,23 +1015,47 @@ def load(path, dev="cpu", compile=False):
     differently sized (or ordered) tables. Those are matched by name: every
     name the checkpoint knew keeps its row, a name it did not know gets the
     empty row (0), and a name it had that is gone is dropped. Each remapped
-    table prints one line with its kept, new and dropped counts."""
+    table prints one line with its kept, new and dropped counts.
+
+    `power_text=True` builds the hero-power and trinket text parts even when
+    the checkpoint has none (for the gate-0 equivalence check); their rows and
+    gates are fresh, the gates exactly 0."""
     ck = torch.load(path, map_location=dev)
     kind, opts = ck_model(ck)
-    if opts.get("card_text"):
+    fresh_power = bool(power_text) and not opts.get("power_text")
+    if fresh_power:
+        import card_text
+        names = current_names()
+        opts = dict(opts)
+        try:
+            opts["power_text"] = card_text.build_power_table(
+                names["heroes"], names["trinkets"],
+                vocab=(opts.get("card_text") or {}).get("vocab"))
+        except OSError:
+            raise SystemExit(f"load {path}: --power-text needs ref/hsjson-cards.json")
+        if opts.get("card_text"):
+            opts["card_text"] = card_text.remap_table(
+                opts["card_text"], opts["power_text"]["vocab"])
+    if opts.get("card_text") or opts.get("power_text"):
         opts = _align_card_text(opts, ck, path, current_names()["cards"])
     net = build(kind, compile=compile, **opts).to(dev)
     src = dict(ck["net"])
     own = net.state_dict()
     take = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
+    _drop_text_buffers(take)
     notes = _remap_tables(src, own, take, ck, path, base=0)
     notes += _remap_word_table(src, own, take, ck, net, base=0)
     missing, _ = net.load_state_dict(take, strict=False)
     params = {name for name, _ in net.named_parameters()}
     missing = [name for name in missing if name in params]
+    allowed = [name for name in missing
+               if fresh_power and name.endswith(("power_gate", "trinket_gate"))]
+    missing = [name for name in missing if name not in allowed]
     if missing:
         raise SystemExit(f"load {path}: {len(missing)} parameters are not in the "
                          f"checkpoint: {', '.join(missing)}")
+    for name in allowed:
+        print(f"load {path}: {name} fresh at 0")
     for note in notes:
         print(f"load {path}: {note}")
     return net
@@ -1147,9 +1342,12 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     `old_cards` / `old_heroes` / `old_trinkets` for one saved before it
     stored them. A table whose rows are already in the right places is left
     alone, so the rows for hero powers and other unnamed tail entries stay
-    as the checkpoint had them. The card-text word embedding is matched by
-    word from the checkpoint's saved `card_text["vocab"]`; a word it did not
-    know starts fresh.
+    as the checkpoint had them. The text word embedding is matched by
+    word from the checkpoint's saved vocabulary; a word it did not know
+    starts fresh, and the token rows (and card forms) are today's export, not
+    the checkpoint's, so a widened vocabulary cannot misread them. A
+    `--power-text` network takes the new power and trinket rows and the two
+    gates fresh.
 
     An input layer that only grew (the 2026-11-06 opponent view widened the
     opponent block) keeps every old column where the column map puts it and
@@ -1165,12 +1363,16 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     src = ck["net"]
     own = net.state_dict()
     take = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
+    kept_today = _drop_text_buffers(take)
     remapped = _remap_tables(src, own, take, ck, path, base=None,
                              names={"cards": cards, "heroes": heroes,
                                     "trinkets": trinkets},
                              old_cards=old_cards, old_heroes=old_heroes,
                              old_trinkets=old_trinkets)
     remapped += _remap_word_table(src, own, take, ck, net, base=None)
+    if kept_today:
+        remapped.append(f"text rows: kept today's export ({len(kept_today)} buffers, "
+                        "not the checkpoint's)")
     old_opp = _grown_opp_scalars(kind, net, src)
     if old_opp is not None:
         for name, (cols, _) in _input_cols(kind, net, bgpy.OPP_SCALARS).items():
@@ -1195,7 +1397,7 @@ def warm_start(net, kind, path, cards=None, heroes=None, old_cards=None, old_her
     params = [k for k, _ in net.named_parameters()]
     loaded = [k for k in params if k in take]
     fresh = [k for k in params if k not in take]
-    skipped = [k for k in src if k not in take]
+    skipped = [k for k in src if k not in take and k not in kept_today]
     if not loaded:
         raise SystemExit(f"--init-from {path}: no parameter matches by name and shape")
     return loaded, fresh, skipped, src_opts, remapped

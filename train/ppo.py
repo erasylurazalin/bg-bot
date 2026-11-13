@@ -62,7 +62,7 @@ import comp_specs
 import real_boards
 from model import (build, ck_model, masked, model_args, model_opts,
                    names_at_rev as toml_names_at_rev, opts_text, set_recompute,
-                   warm_start)
+                   text_gates, warm_start)
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
@@ -184,6 +184,10 @@ def args():
                    help="give every card's id embedding a vector read from its printed text "
                         "(train/card_text.py); the vocabulary and token table are saved in the "
                         "checkpoint, and --resume keeps the run's own")
+    a.add_argument("--power-text", action="store_true",
+                   help="add the printed text of every hero power and trinket to its id "
+                        "embedding, through a gate that starts at 0; shares --card-text's word "
+                        "table, and the rows and gates are saved in the checkpoint")
     a.add_argument("--card-form", action="store_true",
                    help="with --card-text: also add every card's fixed effect form "
                         "(data/card_forms.json), saved in the checkpoint like the text")
@@ -919,6 +923,7 @@ def main():
             f"{p}: {reward(p, cfg.first_bonus, cfg.second_bonus):.2f}"
             for p in range(1, P + 1)))
     want_text = cfg.card_text
+    want_power = cfg.power_text
     FORCE_TURN2 = cfg.force_turn2_level
     FORCE_DARK = cfg.force_dark_gift
     REAL_LOBBY_FILTER = cfg.real_lobby_filter
@@ -1000,13 +1005,16 @@ def main():
                 f"trained with it {'on' if saved_lag else 'off'}: the observation width differs")
         saved, opts = ck_model(ck)
         given = {"model": cfg.model, **{k: getattr(cfg, k) for k in model_opts(saved)
-                                        if hasattr(cfg, k) and k != "card_text"}}
+                                        if hasattr(cfg, k)
+                                        and k not in ("card_text", "power_text")}}
         for k, v in given.items():
             if v and v != {"model": saved, **opts}[k]:
                 print(f"--{k.replace('_', '-')} {v} ignored: {cfg.resume} holds "
                       f"{saved} {opts_text(opts)}")
         if want_text and not opts.get("card_text"):
             print(f"--card-text ignored: {cfg.resume} has no card text table")
+        if want_power and not opts.get("power_text"):
+            print(f"--power-text: {cfg.resume} has no power text; its rows and gates start fresh")
         cfg.model = saved
         if opts.get("n_comps", 0) != COMP_COUNT:
             raise SystemExit(f"--overlay-comps {cfg.overlay_comps}: the comp file has "
@@ -1077,11 +1085,40 @@ def main():
     names = env.card_names()
     hero_names = env.hero_names()
     trinket_names = env.trinket_names()
-    if want_text and ck is None and not opts.get("card_text"):
-        opts["card_text"] = card_text.build_table(names)
-        if cfg.card_form:
-            opts["card_text"].update(card_text.build_forms(names))
-        cfg.card_text = opts["card_text"]
+    power_fresh = False
+    if ck is None and (want_text or want_power):
+        if want_text and want_power:
+            opts["card_text"], opts["power_text"] = card_text.build_text(
+                names, hero_names, trinket_names)
+            if cfg.card_form:
+                opts["card_text"].update(card_text.build_forms(names))
+            cfg.card_text = opts["card_text"]
+            cfg.power_text = opts["power_text"]
+            power_fresh = True
+        elif want_text and not opts.get("card_text"):
+            opts["card_text"] = card_text.build_table(names)
+            if cfg.card_form:
+                opts["card_text"].update(card_text.build_forms(names))
+            cfg.card_text = opts["card_text"]
+    if want_power and not opts.get("power_text"):
+        opts["power_text"] = card_text.build_power_table(
+            hero_names, trinket_names,
+            vocab=(opts.get("card_text") or {}).get("vocab"))
+        if opts.get("card_text"):
+            opts["card_text"] = card_text.remap_table(
+                opts["card_text"], opts["power_text"]["vocab"])
+            cfg.card_text = opts["card_text"]
+        cfg.power_text = opts["power_text"]
+        power_fresh = True
+    if opts.get("power_text"):
+        table = opts["power_text"]
+        missing = table.get("missing") or {}
+        print(f"power text: {len(table['powers']) - 1} hero powers, "
+              f"{len(table['trinkets']) - 1} trinkets, shared vocabulary "
+              f"{len(table['vocab'])} words, "
+              f"{len(missing.get('powers', []))} + {len(missing.get('trinkets', []))} "
+              f"without text"
+              + (" (fresh; gates 0)" if power_fresh else ""))
     if opts.get("card_text"):
         table = opts["card_text"]
         print(f"card text: {len(table['vocab'])} words, {len(table['tokens'])} cards, "
@@ -1138,15 +1175,19 @@ def main():
         try:
             net.load_state_dict(ck["net"])
         except RuntimeError:
-            # A checkpoint from before the 2026-11-06 opponent view: its
-            # input layers are narrower. Carry their old columns over (the
-            # network answers as it did until the new columns learn), and
-            # start Adam and the snapshot pool fresh, since their tensors and
-            # the pool's state dicts have the old shapes.
+            # A checkpoint from before the 2026-11-06 opponent view has
+            # narrower input layers, or one from before --power-text has the
+            # new text buffers and gates missing or wider. Carry the old
+            # columns/tables over (the network answers as it did until the
+            # new parts learn), and start Adam and the snapshot pool fresh,
+            # since their tensors and the pool's state dicts have the old
+            # shapes.
             loaded, fresh, _, _, carried = warm_start(
                 net, cfg.model, cfg.resume, cards=names, heroes=hero_names,
                 trinkets=trinket_names)
-            print(f"resumed {cfg.resume}: its observation is narrower than this build's, so "
+            why = ("the new power text is fresh" if power_fresh
+                   else "its observation is narrower than this build's")
+            print(f"resumed {cfg.resume}: {why}, so "
                   f"{len(loaded)} tensors loaded, {len(fresh)} fresh: "
                   f"{', '.join(fresh) or 'none'}")
             for r in carried:
@@ -1161,6 +1202,10 @@ def main():
         if ck.get("best_by", "std+rush") != best_by:
             best = 9.0  # best.pt was chosen by another eval: start over
         print(f"resumed {cfg.resume} at update {update}")
+    gates = text_gates(net)
+    if gates:
+        print("power text gates: " + ", ".join(
+            f"{name} {value:.6f}" for name, value in gates))
     if not pool:
         pool.append(copy.deepcopy({k: v.cpu() for k, v in net.state_dict().items()}))
     snap = build(cfg.model, len(names), compile=cfg.compile, **opts).to(dev)
@@ -1782,6 +1827,11 @@ def main():
                 ]
                 lag_txt = (f"  lagmix(all {lag_vals['place_vs_real_mix']:.2f}; "
                            + " ".join(parts) + ")")
+            gate_txt = ""
+            gates = text_gates(net)
+            if gates:
+                gate_txt = "  gate(" + " ".join(
+                    f"{name} {value:.4f}" for name, value in gates) + ")"
             print(
                 f"update {update:5d}  {minutes:5.1f} min  {games:7d} games  "
                 f"vs7(std {vs_std:.2f} rush {vs_rush:.2f} real {vs_real:.2f})  "
@@ -1800,7 +1850,7 @@ def main():
                 f"fight(rew {stats['fight_reward_per_turn']:.3f} "
                 f"score {stats['fight_score_per_turn']:.3f})  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  "
-                f"buys {top_buys}{scen_txt}{era_txt}{lag_txt}",
+                f"buys {top_buys}{scen_txt}{era_txt}{lag_txt}{gate_txt}",
                 flush=True,
             )
         if done:
