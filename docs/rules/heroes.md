@@ -371,3 +371,7 @@ Valdrakken Wind Chimes and Ancient Wishbone make every Start of Combat hero powe
 
 Frostwolf Fervor, Stormpike Strength and Rapid Reanimation copy the minion's state right now: damage included (a 10/10 that took 6 damage gives a 10/4 copy), and a Divine Shield that already popped stays popped on the copy.
 
+
+## Cookie the Cook (Era, 2026-11-13)
+
+Stir the Pot can throw a minion from the Tavern as well as one from your own board, and players throw Tavern minions. Eating your own is allowed but rarely right. The engine already offers both targets (`heroes.toml`, `crates/bgcore/src/game/targets.rs`).
