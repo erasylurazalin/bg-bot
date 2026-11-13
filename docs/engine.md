@@ -302,7 +302,11 @@ rules behind each are in docs/rules/design.md Part 2.
   docs/real-boards.md "The file", at `counters`.
 - **The hand in combat.** `fight_with_hands` passes a side's hand only when
   something on that side reads it. Murlocs summoned from hand come back
-  unchanged; Winterfinner's hand buffs are kept.
+  unchanged; Winterfinner's hand buffs are kept. A real board file's `waits`
+  is Diremuck Forager's summons still owed when its Start of Combat found the
+  board full: it becomes `Counters.waits`, and `Side::spawn_when_space` takes
+  the highest-Attack Murloc out of that side's hand through the same
+  `summon_from_hand` the card's own trigger uses.
 - **A full hand.** `Player.hand` holds `HAND` (10) cards; `add_to_hand` is
   the one way in. With a full hand the card is lost, which is what a card got
   during the shop phase or in combat does (Sky Admiral Rogers' Bounty, a
@@ -718,7 +722,10 @@ build hero-less games so old tests pass unchanged, and
     in the slot the minion stood in), Lock and Load's stored minion (summoned
     then pushed on `Side.immediate`, so it attacks at once), Frostwolf
     Fervor's and Stormpike Strength's one copy of the highest Attack or
-    Health (`Side.pick_highest`, ties at random) and Tentacular's Tentacle.
+    Health (`Side.pick_highest`, ties at random), Tentacular's Tentacle, and
+    Diremuck Forager's owed summons (`Side.waits_left`, from
+    `Counters.waits`, the highest-Attack Murloc out of the hand through
+    `Side::summon_from_hand`).
     `Side::exact_copy` is the copy: the minion as it stands, buffs, keywords
     and gifts kept, its damage carried over (a 10/10 at 4 Health copies as
     10/4, and `Side::summon_exact_copy` keeps the original's `taken` so its
@@ -1819,11 +1826,12 @@ minions in the hand.
   quest rewards and Secret zone the file carries, and
   `Player::from_real_board` seats the board, the hand, the tier, the numbers
   and the Deity on a player. The fight check
-  (`src/fight_check.rs`) adds the power, the trinkets, the Secret zone and
-  Ozumat's Tentacle sales (`Player::hold_power`, `Player::hold_trinket`) on
-  top; a real seat takes none of that yet (no hero, flat 30 Health and 10
-  armor). This is the seam a real seat would use to play with its hero power
-  and trinkets later.
+  (`src/fight_check.rs`) adds the power, the trinkets, the Secret zone,
+  Ozumat's Tentacle sales (`Player::hold_power`, `Player::hold_trinket`) and
+  the file's `waits` (Diremuck Forager summons it still owes) as
+  `Counters.waits` on top; a real seat takes none of that yet (no hero, flat
+  30 Health and 10 armor). This is the seam a real seat would use to play with
+  its hero power and trinkets later.
 - **The hand:** a real seat's hand reaches the fight through
   `fight_with_hands`, which already passes each side's hand whenever a card
   on either board reads it; the minions come out of it with no pool copies,

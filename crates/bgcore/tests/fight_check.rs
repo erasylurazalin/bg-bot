@@ -4,11 +4,12 @@
 
 use std::sync::Arc;
 
+use bgcore::fight::{Watch, fight_with_hands};
 use bgcore::fight_check::{
     CheckOptions, PreparedFight as FightPrepared, check_all, missing_kind, prepare,
 };
 use bgcore::real_boards::{CardIdMap, pair_fights, parse_board_files};
-use bgcore::{Data, Keywords};
+use bgcore::{Data, Keywords, Minion, Rng};
 
 fn data() -> Arc<Data> {
     Arc::new(Data::bundled())
@@ -428,5 +429,97 @@ fn the_secret_zone_reaches_the_fight_in_order() {
         p.missing_lines().iter().any(|l| l.contains("Secret not modelled")),
         "{:?}",
         p.missing_lines()
+    );
+}
+
+#[derive(Default)]
+struct Summons(Vec<(usize, bgcore::CardId)>);
+
+impl Watch for Summons {
+    fn summon(&mut self, side: usize, _pos: usize, m: &Minion) {
+        self.0.push((side, m.card));
+    }
+}
+
+/// A fight whose file owes Diremuck summons: the count is on the side's
+/// board and the fight takes the highest-Attack Murlocs out of that side's
+/// hand as slots open, one per owed count. A file without the key owes none.
+#[test]
+fn diremucks_owed_summons_come_out_of_the_hand_when_space_opens() {
+    let minion = r#"{"card_id": "BGS_115t", "name": "Water Droplet", "attack": 1,
+                     "health": 1, "golden": false, "keywords": [],
+                     "dark_gifts": [], "numbers": []}"#;
+    let six = [minion; 6].join(", ");
+    let hand = r#"{"card_id": "BG31_149", "name": "Bubble Gunner", "attack": 47,
+                   "health": 37, "golden": false, "keywords": [],
+                   "dark_gifts": [], "numbers": []},
+                  {"card_id": "BG26_137", "name": "Bream Counter", "attack": 6,
+                   "health": 6, "golden": false, "keywords": [],
+                   "dark_gifts": [], "numbers": []}"#;
+    let prepared = |waits: Option<u32>| {
+        let field = waits.map(|n| format!(r#""waits": {n},"#)).unwrap_or_default();
+        let text = format!(
+            r#"{{"source": "fight-check-waits", "game": 1, "boards": [
+ {{"who": "me", "turn": 5, "result": "win", "tier": 3, "health": 30, "armor": 9,
+  {field}
+  "minions": [{six}], "counters": {{}}, "deity": null,
+  "hand": [{hand}], "hand_hidden": 0}},
+ {{"who": "opp", "turn": 5, "result": "lose", "tier": 3, "health": 30, "armor": 9,
+  "minions": [{{"card_id": "BGS_115t", "name": "Water Droplet", "attack": 10,
+               "health": 500, "golden": false, "keywords": [],
+               "dark_gifts": [], "numbers": []}}],
+  "counters": {{}}, "deity": null, "hand": [], "hand_hidden": 0}}]}}"#
+        );
+        let files = vec![("fight-check-waits-g1.json".to_string(), text)];
+        let (specs, _) = parse_board_files(&files, &ids()).unwrap();
+        let (fights, unpaired) = pair_fights(specs);
+        assert!(unpaired.is_empty());
+        let d = data();
+        let p = prepare(&d, &fights[0]);
+        (d, p)
+    };
+
+    let (d, p) = prepared(Some(2));
+    assert!(p.is_complete(), "{:?}", p.missing_lines());
+    assert_eq!(p.sides[0].counters.waits, 2, "the file's count is seated");
+    let [me, opp] = &p.sides;
+    let mut log = Summons::default();
+    fight_with_hands(
+        &d.cards,
+        &me.board,
+        &opp.board,
+        [&me.hand, &opp.hand],
+        [me.counters, opp.counters],
+        d.rules.max_attacks,
+        &mut Rng::new(4),
+        &mut log,
+    );
+    let bubble = d.cards.by_name("Bubble Gunner").unwrap();
+    let bream = d.cards.by_name("Bream Counter").unwrap();
+    let mine: Vec<_> = log.0.iter().filter(|(side, _)| *side == 0).map(|(_, c)| *c).collect();
+    assert_eq!(
+        mine,
+        [bubble, bream],
+        "one owed summon fills the empty slot, the next comes out when a 1/1 dies"
+    );
+
+    // No key: the file owes nothing, and the same fight summons nothing.
+    let (d, p) = prepared(None);
+    assert_eq!(p.sides[0].counters.waits, 0, "an older file owes none");
+    let [me, opp] = &p.sides;
+    let mut log = Summons::default();
+    fight_with_hands(
+        &d.cards,
+        &me.board,
+        &opp.board,
+        [&me.hand, &opp.hand],
+        [me.counters, opp.counters],
+        d.rules.max_attacks,
+        &mut Rng::new(4),
+        &mut log,
+    );
+    assert!(
+        log.0.iter().all(|(side, _)| *side != 0),
+        "a board without owed summons leaves the hand alone"
     );
 }

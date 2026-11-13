@@ -151,6 +151,10 @@ pub struct Counters {
     /// Lock and Load (Tavish Stormpike): `(card, golden, attack, health,
     /// keywords, runs)`.
     pub locked_and_loaded: Option<(CardId, bool, i32, i32, Keywords, u8)>,
+    /// Diremuck Forager's owed summons: how many Murlocs it still has to pull
+    /// out of the hand as board slots open. A real board file's `waits` sets
+    /// it; a fight without one owes none.
+    pub waits: u8,
     /// Rapid Reanimation (Teron Gorefiend) runs when a marked minion is on
     /// the board.
     pub rapid_reanimation: u8,
@@ -228,6 +232,7 @@ impl Default for Counters {
             tentacular: None,
             broodmother: None,
             locked_and_loaded: None,
+            waits: 0,
             rapid_reanimation: 0,
             secrets: crate::secrets::Secrets::new(),
         }
@@ -697,6 +702,8 @@ struct Side<'a> {
     stormpike_left: u8,
     tentacular_left: u8,
     locked_and_loaded: Option<(CardId, bool, i32, i32, Keywords, u8)>,
+    /// Diremuck Forager summons this side still owes the board.
+    waits_left: u8,
     take_first_killed_left: u8,
     /// The minion that died last and where it stood (Blood Golem Sticker).
     last_dead: Option<Minion>,
@@ -786,6 +793,7 @@ impl<'a> Side<'a> {
             stormpike_left: counters.stormpike_strength,
             tentacular_left: counters.tentacular.map_or(0, |(_, n)| n),
             locked_and_loaded: counters.locked_and_loaded,
+            waits_left: counters.waits,
             take_first_killed_left: counters.take_first_killed,
             last_dead: None,
             dead_at: 0,
@@ -2397,6 +2405,32 @@ impl<'a> Side<'a> {
                     changed = true;
                 }
             }
+        }
+        // Diremuck Forager's owed summons. Its own Start of Combat reaches into
+        // the hand through `summon_from_hand`; a board that was full when it
+        // ran carries the count in the file's `waits`, and each one comes out
+        // as a slot opens.
+        while !self.ms.is_full() && self.waits_left > 0 {
+            let before = self.ms.len();
+            let mut at = before;
+            self.summon_from_hand(
+                db,
+                side,
+                &mut at,
+                1,
+                Some(Tribe::Murloc),
+                false,
+                false,
+                false,
+                uid,
+                rng,
+                w,
+            );
+            if self.ms.len() == before {
+                break;
+            }
+            self.waits_left -= 1;
+            changed = true;
         }
         changed
     }

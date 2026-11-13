@@ -1043,6 +1043,9 @@ impl Player {
                     self.tp.power_triggers.max(1),
                 )
             }),
+            // A real board file's owed Diremuck summons are the fight check's:
+            // a player built through the shop owes none.
+            waits: 0,
             broodmother: [self.power, self.power2]
                 .iter()
                 .flatten()

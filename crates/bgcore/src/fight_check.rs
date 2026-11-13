@@ -358,10 +358,12 @@ fn prepare_side(data: &Data, spec: &RealBoardSpec, side: usize, p: &mut Prepared
     // The lobby a real game had is not in the file: a card that draws a random
     // card inside the fight (Ghastcoiler, a random spell) may draw one that
     // game did not have. `Tribes::ALL` is the fight's "unknown lobby".
+    let mut counters = pl.counters(data, Tribes::ALL);
+    counters.waits = spec.waits.min(u8::MAX as u32) as u8;
     p.sides[side] = PreparedSide {
         board: pl.board.clone(),
         hand: pl.hand.clone(),
-        counters: pl.counters(data, Tribes::ALL),
+        counters,
     };
 }
 

@@ -303,6 +303,9 @@ pub struct RealBoardSpec {
     pub tier: u8,
     pub minions: Vec<RealMinionSpec>,
     pub hand: Vec<RealMinionSpec>,
+    /// Diremuck Forager summons still owed when a slot opens, from the file's
+    /// `waits`. Zero for a file written before the key existed.
+    pub waits: u32,
     pub counters: RealCounters,
     pub deity: Option<RealDeitySpec>,
     /// The game the board came from (the file's `source` and `game`), which
@@ -1198,6 +1201,10 @@ struct RawBoard {
     /// The cards in the hand the log did not name.
     #[serde(default)]
     hand_hidden: u32,
+    /// Diremuck Forager summons still owed when a slot opens. A file written
+    /// before the key existed owes none.
+    #[serde(default)]
+    waits: u32,
     minions: Vec<RawMinion>,
     /// The minions in the player's hand at the first attack (the opponent's
     /// too). A file without it has no hand.
@@ -1521,6 +1528,7 @@ pub fn parse_board_files(
                 tier: b.tier,
                 minions,
                 hand,
+                waits: b.waits,
                 counters,
                 deity,
                 source: raw.source.clone(),
