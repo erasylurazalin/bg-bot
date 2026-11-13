@@ -1,13 +1,13 @@
 #!/bin/bash
-# Build bgpy from a bg-bot commit and install it into ~/projects/bg's venv, so the
+# Build bgpy from a bg-bot commit and install it into ~/projects/bg-overlay's venv, so the
 # tracker's odds follow the committed engine. The post-commit hook runs it in the
 # background when a commit touches crates/; run it by hand with an optional commit
 # (default HEAD). Only committed code is built: the commit is exported with
-# git archive, so uncommitted work in the tree never reaches bg.
+# git archive, so uncommitted work in the tree never reaches the tracker.
 # A running tracker keeps the copy it loaded until it restarts. Log: target/bg-rebuild.log
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BG_PY="${BG_PY:-$HOME/projects/bg/.venv/bin/python}"
+BG_PY="${BG_PY:-$HOME/projects/bg-overlay/.venv/bin/python}"
 REV="$(git -C "$ROOT" rev-parse "${1:-HEAD}")"
 SRC="$ROOT/target/bg-rebuild/src"
 WHEELS="$ROOT/target/bg-rebuild/wheels"

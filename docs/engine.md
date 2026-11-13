@@ -2395,7 +2395,7 @@ seeded from the turn's seed (a repeat's).
   `RealBoards::places_at`/`indexed` keep a bucket's boards tied to their place
   in the spec list.
 - **`bgpy.BoardFight`** (`crates/bgpy/src/fight.rs`) fights two arbitrary
-  boards from the tracker (`~/projects/bg`). Each board is a JSON object in a
+  boards from the tracker (`~/projects/bg-overlay`). Each board is a JSON object in a
   board file's shape (one entry of its `boards` array, so `real_boards`'s
   parser is the only parser) with `turn`, `tier`, `minions`, `hand`,
   `hand_hidden`, `counters`, `hero_power`, `trinkets`, `rewards` and `deity`.
