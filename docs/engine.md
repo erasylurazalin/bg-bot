@@ -2635,6 +2635,18 @@ Deleting `.venv` undoes it.
   overall and on buys, plus the same count on a fixed train sample of the
   held-out size, and `metrics.csv` appends `demo_top1`, `demo_top1_buy` and
   `demo_top1_train`. The policy that acts is unchanged.
+- `--demo-kind-weight W` (default 0, needs `--demo`; it may run with or
+  without `--demo-weight`) adds W times the cross-entropy between the network's
+  masked policy summed over the legal actions of each grouped action kind and
+  Era's kind, on the same fresh train-split demonstration minibatch. The
+  groups are buy (buy and buy_spell), sell, play (play and activate), roll,
+  level, freeze, hero power (hero_power and hero_power2), move, choose
+  (choose, target, target_shop, discard, choose_trinket and dark_gift), and
+  end. It uses `--demo-fade` and is skipped during `--value-warmup`. With it
+  on, every eval also prints the held-out and fixed-train top-1 kind
+  agreement, logged as `demo_kind_top1` and `demo_kind_top1_train`, and
+  startup prints BASE's held-out kind agreement once, for reference. The
+  policy that acts is unchanged.
 - `--entropy-moves-as-one` counts all Move actions as one entropy atom (their
   summed probability) instead of one per move, so the bonus stops paying for
   board shuffles; moves stay legal and sampled, off is the old loss, and

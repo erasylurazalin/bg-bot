@@ -63,14 +63,33 @@ bgpy.set_lag_in_obs(LAG_IN_OBS)
 import card_text
 import comp_specs
 import real_boards
-from model import (build, ck_model, masked, model_args, model_opts,
-                   names_at_rev as toml_names_at_rev, opts_text, set_recompute,
-                   text_gates, warm_start)
+from model import (build, ck_model, load as load_model, masked, model_args,
+                   model_opts, names_at_rev as toml_names_at_rev, opts_text,
+                   set_recompute, text_gates, warm_start)
 
 LEARNER, SNAPSHOT = bgpy.LEARNER, bgpy.SNAPSHOT
 P = bgpy.PLAYERS
 KINDS = [name for name, _ in bgpy.ACTION_KINDS]
 KIND_OF = torch.tensor([k for k, (_, n) in enumerate(bgpy.ACTION_KINDS) for _ in range(n)])
+# --demo-kind-weight groups the 18 action kinds into the ten ways a turn moves.
+# Activate is using a board minion's own card, so it joins play; discard,
+# target and every pick answer an open prompt, so they join choose.
+DEMO_KIND_GROUPS = ("buy", "sell", "play", "roll", "level", "freeze",
+                    "hero_power", "move", "choose", "end")
+_KIND_GROUP = {
+    "buy": "buy", "buy_spell": "buy", "sell": "sell",
+    "activate": "play", "play": "play",
+    "target": "choose", "target_shop": "choose", "choose": "choose",
+    "discard": "choose", "move": "move", "roll": "roll", "freeze": "freeze",
+    "level": "level", "end": "end",
+    "hero_power": "hero_power", "hero_power2": "hero_power",
+    "choose_trinket": "choose", "dark_gift": "choose",
+}
+if set(_KIND_GROUP) != set(KINDS):
+    raise RuntimeError(f"demo kind groups do not cover the action kinds {KINDS}")
+DEMO_KIND_OF_KIND = torch.tensor(
+    [DEMO_KIND_GROUPS.index(_KIND_GROUP[name]) for name in KINDS])
+DEMO_KIND_OF = DEMO_KIND_OF_KIND[KIND_OF]
 END_TURN = bgpy.END_TURN
 SHOP_START = bgpy.SHOP_START
 ACTIONS_LEFT = bgpy.SCALAR_ACTIONS_LEFT
@@ -107,7 +126,12 @@ EXTRA_KEYS = ["entropy_plain", "moves_per_turn", "fight_reward_per_turn",
               "fight_score_per_turn", "win_score_per_turn"]
 # Appended after every older eval column, only when --demo is on.
 DEMO_KEYS = ["demo_top1", "demo_top1_buy", "demo_top1_train"]
+# Appended after the exact columns when --demo-kind-weight is on.
+DEMO_KIND_KEYS = ["demo_kind_top1", "demo_kind_top1_train"]
 DEMO_EVAL_BATCH = 4096
+# The BASE the demonstration dataset was built against, for the startup kind
+# agreement. Its absence only skips that reference, never a run.
+DEMO_BASE_CKPT = Path(__file__).resolve().parent / "runs" / "r1113-a1" / "best.pt"
 
 
 def args():
@@ -245,6 +269,11 @@ def args():
     a.add_argument("--demo-fade", type=float, default=0.0,
                    help="fraction of the run over which --demo-weight falls linearly to 0 at "
                         "the run's planned end; 0 keeps it at full weight (default 0)")
+    a.add_argument("--demo-kind-weight", type=float, default=0.0,
+                   help="W: each update adds W times the cross-entropy between the network's "
+                        "masked policy summed over the legal actions of each grouped action kind "
+                        "and Era's kind, on the same fresh train-split demonstration minibatch "
+                        "(needs --demo; may be used with or without --demo-weight; default 0: off)")
     a.add_argument("--force-turn2-level", action="store_true",
                    help="a tier 1 seat that can level on turn 2 must level (learner and snapshots)")
     a.add_argument("--force-dark-gift", action="store_true",
@@ -309,6 +338,10 @@ def args():
         a.error("--demo-weight cannot be negative")
     if cfg.demo_weight and not cfg.demo:
         a.error("--demo-weight needs --demo PATH")
+    if cfg.demo_kind_weight < 0.0:
+        a.error("--demo-kind-weight cannot be negative")
+    if cfg.demo_kind_weight and not cfg.demo:
+        a.error("--demo-kind-weight needs --demo PATH")
     if not 0.0 <= cfg.demo_fade <= 1.0:
         a.error("--demo-fade must be between 0 and 1")
     return cfg
@@ -454,6 +487,7 @@ class DemoData:
         self.obs = torch.as_tensor(np.ascontiguousarray(obs, dtype=np.float32))
         self.mask = torch.as_tensor(np.ascontiguousarray(mask, dtype=bool))
         self.action = torch.as_tensor(np.ascontiguousarray(action, dtype=np.int64))
+        self.kind = DEMO_KIND_OF[self.action]
         split = np.asarray(split)
         if self.obs.ndim != 2:
             raise SystemExit(f"{source}: obs must be 2-D, got shape {tuple(self.obs.shape)}")
@@ -522,32 +556,88 @@ def add_demo_loss(loss, net, obs, mask, action, weight):
     return loss + weight * demo_cross_entropy(net, obs, mask, action)
 
 
+def demo_kind_probs(logits, mask):
+    """The masked policy summed over the legal actions of each grouped kind:
+    one probability per row and DEMO_KIND_GROUPS entry. Illegal actions are
+    zero, so the row sums to 1 over the legal kinds."""
+    probs = torch.softmax(masked(logits, mask), -1)
+    out = torch.zeros((probs.shape[0], len(DEMO_KIND_GROUPS)),
+                      dtype=probs.dtype, device=probs.device)
+    index = DEMO_KIND_OF.to(probs.device).unsqueeze(0).expand_as(probs)
+    return out.scatter_add(1, index, probs)
+
+
+def demo_kind_cross_entropy(net, obs, mask, action):
+    """The grouped masked policy's cross-entropy to Era's kind, averaged over
+    rows: -log(sum of the legal actions' probabilities in Era's kind)."""
+    logits, _ = net(obs)
+    probs = demo_kind_probs(logits, mask)
+    target = DEMO_KIND_OF.to(probs.device)[action.to(probs.device)]
+    picked = probs.gather(1, target[:, None]).squeeze(1)
+    return -picked.clamp_min(1e-12).log().mean()
+
+
+def add_demo_kind_loss(loss, net, obs, mask, action, weight):
+    """Add the kind-level demonstration term to a PPO loss. Weight 0 returns
+    `loss` itself, so today's loss is unchanged exactly."""
+    if weight == 0.0:
+        return loss
+    return loss + weight * demo_kind_cross_entropy(net, obs, mask, action)
+
+
 @torch.no_grad()
-def demo_agreement(net, demo, dev, batch=DEMO_EVAL_BATCH):
-    """Masked top-1 agreement with Era on the held-out rows, on buys, and on
-    the fixed train sample (same rows at every eval)."""
+def demo_agreement(net, demo, dev, batch=DEMO_EVAL_BATCH, with_kind=True):
+    """Masked top-1 agreement with Era on the held-out rows, on buys, on the
+    grouped kinds and on the fixed train sample (same rows at every eval)."""
     def count(rows):
-        hits = total = buy_hits = buy_total = 0
+        hits = total = buy_hits = buy_total = kind_hits = 0
         for i in range(0, len(rows), batch):
             part = rows[i:i + batch]
             mask = demo.mask[part].to(dev)
             action = demo.action[part].to(dev)
-            pred = masked(net(demo.obs[part].to(dev))[0], mask).argmax(1)
+            logits, _ = net(demo.obs[part].to(dev))
+            pred = masked(logits, mask).argmax(1)
+            if with_kind:
+                kind_pred = demo_kind_probs(logits, mask).argmax(1)
+                kind_hits += int((kind_pred == demo.kind[part].to(dev)).sum())
             hit = pred == action
             buy = demo.is_buy[part].to(dev)
             hits += int(hit.sum())
             total += len(part)
             buy_hits += int((hit & buy).sum())
             buy_total += int(buy.sum())
-        return hits, total, buy_hits, buy_total
+        return hits, total, buy_hits, buy_total, kind_hits
 
-    hits, total, buy_hits, buy_total = count(demo.heldout)
-    train_hits, train_total, _, _ = count(demo.train_fixed)
-    return {
+    hits, total, buy_hits, buy_total, kind_hits = count(demo.heldout)
+    train_hits, train_total, _, _, train_kind_hits = count(demo.train_fixed)
+    vals = {
         "demo_top1": hits / total,
         "demo_top1_buy": buy_hits / buy_total if buy_total else float("nan"),
         "demo_top1_train": train_hits / train_total,
     }
+    if with_kind:
+        vals.update({
+            "demo_kind_top1": kind_hits / total,
+            "demo_kind_top1_train": train_kind_hits / train_total,
+        })
+    return vals
+
+
+def print_base_demo_kind(demo):
+    """BASE's held-out kind agreement once at startup. A missing or unreadable
+    checkpoint is a note, not a reason to stop the run."""
+    if not DEMO_BASE_CKPT.is_file():
+        print(f"base {DEMO_BASE_CKPT}: not found, no reference kind agreement")
+        return
+    try:
+        net = load_model(str(DEMO_BASE_CKPT), "cpu").eval()
+        vals = demo_agreement(net, demo, "cpu")
+    except (Exception, SystemExit) as e:
+        print(f"base {DEMO_BASE_CKPT}: cannot read ({e}), no reference kind agreement")
+        return
+    print(f"base {DEMO_BASE_CKPT.parent.name}: kind top1 "
+          f"{vals['demo_kind_top1']:.1%} heldout, "
+          f"{vals['demo_kind_top1_train']:.1%} train")
 
 
 def entropy_term(dist, moves_as_one, move_idx=None):
@@ -1381,8 +1471,12 @@ def main():
         demo_gen = torch.Generator().manual_seed(cfg.seed)
         print(f"demo {cfg.demo}: {len(demo.train)} train, {len(demo.heldout)} heldout rows, "
               f"weight {cfg.demo_weight:g}"
+              + (f", kind weight {cfg.demo_kind_weight:g}"
+                 if cfg.demo_kind_weight else "")
               + (f", fading over the last {cfg.demo_fade:g} of the run"
                  if cfg.demo_fade else ""))
+        if cfg.demo_kind_weight:
+            print_base_demo_kind(demo)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     pool = []  # snapshot state dicts, on the CPU
     update, best, t_total = 0, 9.0, 0.0
@@ -1469,6 +1563,8 @@ def main():
         ]
     if demo is not None:
         eval_keys += DEMO_KEYS
+        if cfg.demo_kind_weight:
+            eval_keys += DEMO_KIND_KEYS
     if new_csv:
         log.writerow([
             "update", "minutes", "games",
@@ -1547,6 +1643,9 @@ def main():
             run_min, run_start_min, cfg.minutes, cfg.win_score_fade)
         win_weight = cfg.win_score * win_scale
         demo_weight = (cfg.demo_weight * demo_fade_scale(
+            run_min, run_start_min, cfg.minutes, cfg.demo_fade)
+            if demo is not None else 0.0)
+        demo_kind_weight = (cfg.demo_kind_weight * demo_fade_scale(
             run_min, run_start_min, cfg.minutes, cfg.demo_fade)
             if demo is not None else 0.0)
         reward_on = cfg.fight_reward != 0.0
@@ -1868,7 +1967,9 @@ def main():
                 m = idx.numel()
                 step = cfg.micro_batch or m
                 demo_rows = None
-                if demo is not None and demo_weight > 0.0 and update >= cfg.value_warmup:
+                if (demo is not None
+                        and (demo_weight > 0.0 or demo_kind_weight > 0.0)
+                        and update >= cfg.value_warmup):
                     # Fresh every minibatch; the demo generator is separate so
                     # the auxiliary sample does not move the PPO RNG.
                     demo_rows = demo.train[torch.randint(
@@ -1914,10 +2015,15 @@ def main():
                         loss = pg + cfg.vf * vl - cfg.ent * ent + aux_w * aux
                     if demo_rows is not None:
                         dsub = demo_rows[j:j + sub.numel()]
-                        loss = add_demo_loss(
-                            loss, net, demo.obs[dsub].to(dev),
-                            demo.mask[dsub].to(dev), demo.action[dsub].to(dev),
-                            demo_weight)
+                        d_obs = demo.obs[dsub].to(dev)
+                        d_mask = demo.mask[dsub].to(dev)
+                        d_action = demo.action[dsub].to(dev)
+                        if demo_weight > 0.0:
+                            loss = add_demo_loss(
+                                loss, net, d_obs, d_mask, d_action, demo_weight)
+                        if demo_kind_weight > 0.0:
+                            loss = add_demo_kind_loss(
+                                loss, net, d_obs, d_mask, d_action, demo_kind_weight)
                     (loss * w).backward()
                     with torch.no_grad():
                         kl_s += w * ((ratio - 1) - (lp - f_logp[sub])).mean().item()
@@ -1988,7 +2094,9 @@ def main():
         done = minutes >= cfg.minutes
         if update % cfg.eval_every == 0 or done:
             net.eval()
-            demo_vals = demo_agreement(net, demo, dev) if demo is not None else {}
+            demo_vals = (demo_agreement(net, demo, dev,
+                                        with_kind=bool(cfg.demo_kind_weight))
+                         if demo is not None else {})
             seed = 10_000 + update * 10
             vs_std, rec_std = evaluate(net, cfg.eval_games, [1, 0, 7, 0, 0, 0], dev, seed)
             vs_rush, rec_rush = evaluate(net, cfg.eval_games, [1, 0, 0, 7, 0, 0], dev, seed + 1)
@@ -2128,9 +2236,15 @@ def main():
                            + " ".join(parts) + ")")
             demo_txt = ""
             if demo_vals:
-                demo_txt = (f"  demo(top1 {demo_vals['demo_top1']:.1%}"
-                            f" buy {demo_vals['demo_top1_buy']:.1%}"
-                            f" train {demo_vals['demo_top1_train']:.1%})")
+                parts = [f"top1 {demo_vals['demo_top1']:.1%}"]
+                if cfg.demo_kind_weight:
+                    parts.append(f"kind {demo_vals['demo_kind_top1']:.1%}")
+                parts += [f"buy {demo_vals['demo_top1_buy']:.1%}",
+                          f"train {demo_vals['demo_top1_train']:.1%}"]
+                if cfg.demo_kind_weight:
+                    parts.append(
+                        f"kindtrain {demo_vals['demo_kind_top1_train']:.1%}")
+                demo_txt = "  demo(" + " ".join(parts) + ")"
             gate_txt = ""
             gates = text_gates(net)
             if gates:
