@@ -105,6 +105,9 @@ TRAIN_KEYS = [
 # Appended after top_buys, so rows in an older metrics.csv keep their columns.
 EXTRA_KEYS = ["entropy_plain", "moves_per_turn", "fight_reward_per_turn",
               "fight_score_per_turn", "win_score_per_turn"]
+# Appended after every older eval column, only when --demo is on.
+DEMO_KEYS = ["demo_top1", "demo_top1_buy", "demo_top1_train"]
+DEMO_EVAL_BATCH = 4096
 
 
 def args():
@@ -233,6 +236,15 @@ def args():
     a.add_argument("--win-score-fade", type=float, default=0.0,
                    help="fraction of the run over which --win-score falls linearly to 0 at "
                         "the run's planned end; 0 keeps it at full weight (default 0)")
+    a.add_argument("--demo", help="demonstration dataset from train/evaltools/demo_dataset.py "
+                                  "(Era's observations, legal masks and actions)")
+    a.add_argument("--demo-weight", type=float, default=0.0,
+                   help="W: each update adds W times the cross-entropy between the network's "
+                        "masked policy and Era's action on a fresh train-split demonstration "
+                        "minibatch of the training minibatch's size (default 0: off)")
+    a.add_argument("--demo-fade", type=float, default=0.0,
+                   help="fraction of the run over which --demo-weight falls linearly to 0 at "
+                        "the run's planned end; 0 keeps it at full weight (default 0)")
     a.add_argument("--force-turn2-level", action="store_true",
                    help="a tier 1 seat that can level on turn 2 must level (learner and snapshots)")
     a.add_argument("--force-dark-gift", action="store_true",
@@ -293,6 +305,12 @@ def args():
         a.error("--fight-score-fade must be between 0 and 1")
     if not 0.0 <= cfg.win_score_fade <= 1.0:
         a.error("--win-score-fade must be between 0 and 1")
+    if cfg.demo_weight < 0.0:
+        a.error("--demo-weight cannot be negative")
+    if cfg.demo_weight and not cfg.demo:
+        a.error("--demo-weight needs --demo PATH")
+    if not 0.0 <= cfg.demo_fade <= 1.0:
+        a.error("--demo-fade must be between 0 and 1")
     return cfg
 
 
@@ -413,6 +431,123 @@ def win_score_fade_scale(run_min, run_start, run_end, fade):
     """The share of --win-score still paid at `run_min` (same shape as the
     fight score's fade)."""
     return fight_score_fade_scale(run_min, run_start, run_end, fade)
+
+
+# The demonstration loss fades exactly like the fight and win scores.
+demo_fade_scale = fight_score_fade_scale
+
+
+class DemoData:
+    """The Build A demonstration dataset: observations, legal masks, Era's
+    actions and the game split. Rows are held on the CPU; the training and
+    eval loops move only the rows they use."""
+
+    def __init__(self, obs, mask, action, split, source="<arrays>"):
+        if torch.is_tensor(obs):
+            obs = obs.detach().cpu().numpy()
+        if torch.is_tensor(mask):
+            mask = mask.detach().cpu().numpy()
+        if torch.is_tensor(action):
+            action = action.detach().cpu().numpy()
+        if torch.is_tensor(split):
+            split = split.detach().cpu().numpy()
+        self.obs = torch.as_tensor(np.ascontiguousarray(obs, dtype=np.float32))
+        self.mask = torch.as_tensor(np.ascontiguousarray(mask, dtype=bool))
+        self.action = torch.as_tensor(np.ascontiguousarray(action, dtype=np.int64))
+        split = np.asarray(split)
+        if self.obs.ndim != 2:
+            raise SystemExit(f"{source}: obs must be 2-D, got shape {tuple(self.obs.shape)}")
+        n = len(self.obs)
+        if self.mask.shape != (n, bgpy.N_ACTIONS):
+            raise SystemExit(f"{source}: mask must be ({n}, {bgpy.N_ACTIONS}), "
+                             f"got {tuple(self.mask.shape)}")
+        if self.action.shape != (n,):
+            raise SystemExit(f"{source}: action must be ({n},), got {tuple(self.action.shape)}")
+        if split.shape != (n,):
+            raise SystemExit(f"{source}: split must be ({n},), got {split.shape}")
+        train = np.flatnonzero(split == "train")
+        heldout = np.flatnonzero(split == "heldout")
+        if not len(train) or not len(heldout):
+            raise SystemExit(f"{source}: needs train and heldout rows, has "
+                             f"{len(train)} train and {len(heldout)} heldout")
+        self.train = torch.as_tensor(train, dtype=torch.long)
+        self.heldout = torch.as_tensor(heldout, dtype=torch.long)
+        # A fixed train sample the size of the held-out split, to watch
+        # overfitting through the same number as the held-out agreement.
+        rng = np.random.default_rng(0)
+        size = min(len(train), len(heldout))
+        pick = np.sort(rng.choice(len(train), size=size, replace=False))
+        self.train_fixed = self.train[torch.as_tensor(pick, dtype=torch.long)]
+        buy = KINDS.index("buy")
+        lo = sum(count for _, count in bgpy.ACTION_KINDS[:buy])
+        hi = lo + bgpy.ACTION_KINDS[buy][1]
+        self.is_buy = (self.action >= lo) & (self.action < hi)
+
+
+def load_demo(path, obs_size):
+    """Read a demonstration npz and refuse an observation layout this network
+    does not take."""
+    path = Path(path)
+    try:
+        npz = np.load(path, allow_pickle=False)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"--demo {path}: cannot read: {e}")
+    with npz as z:
+        missing = [k for k in ("obs", "mask", "action", "split") if k not in z.files]
+        if missing:
+            raise SystemExit(f"--demo {path}: missing {', '.join(missing)}")
+        obs, mask, action, split = z["obs"], z["mask"], z["action"], z["split"]
+    if obs.ndim != 2:
+        raise SystemExit(f"--demo {path}: obs must be 2-D, got shape {obs.shape}")
+    if obs.shape[1] != obs_size:
+        raise SystemExit(
+            f"--demo {path}: observations are {obs.shape[1]} wide, this network takes "
+            f"{obs_size}. The dataset must match the network's observation "
+            "(old_boards='keep' and no --lag-in-obs); rebuild it with "
+            "train/evaltools/demo_dataset.py")
+    return DemoData(obs, mask, action, split, source=str(path))
+
+
+def demo_cross_entropy(net, obs, mask, action):
+    """The masked policy's cross-entropy to Era's action, averaged over rows."""
+    logits, _ = net(obs)
+    return F.cross_entropy(masked(logits, mask), action)
+
+
+def add_demo_loss(loss, net, obs, mask, action, weight):
+    """Add the demonstration term to a PPO loss. Weight 0 returns `loss`
+    itself, so today's loss is unchanged exactly."""
+    if weight == 0.0:
+        return loss
+    return loss + weight * demo_cross_entropy(net, obs, mask, action)
+
+
+@torch.no_grad()
+def demo_agreement(net, demo, dev, batch=DEMO_EVAL_BATCH):
+    """Masked top-1 agreement with Era on the held-out rows, on buys, and on
+    the fixed train sample (same rows at every eval)."""
+    def count(rows):
+        hits = total = buy_hits = buy_total = 0
+        for i in range(0, len(rows), batch):
+            part = rows[i:i + batch]
+            mask = demo.mask[part].to(dev)
+            action = demo.action[part].to(dev)
+            pred = masked(net(demo.obs[part].to(dev))[0], mask).argmax(1)
+            hit = pred == action
+            buy = demo.is_buy[part].to(dev)
+            hits += int(hit.sum())
+            total += len(part)
+            buy_hits += int((hit & buy).sum())
+            buy_total += int(buy.sum())
+        return hits, total, buy_hits, buy_total
+
+    hits, total, buy_hits, buy_total = count(demo.heldout)
+    train_hits, train_total, _, _ = count(demo.train_fixed)
+    return {
+        "demo_top1": hits / total,
+        "demo_top1_buy": buy_hits / buy_total if buy_total else float("nan"),
+        "demo_top1_train": train_hits / train_total,
+    }
 
 
 def entropy_term(dist, moves_as_one, move_idx=None):
@@ -1234,6 +1369,20 @@ def main():
               f"not used: {', '.join(skipped) or 'none'}")
         for r in remapped:
             print(f"  carried: {r}")
+    demo = None
+    demo_gen = None
+    if cfg.demo:
+        if OLD_BOARDS != "keep":
+            raise SystemExit("--demo: the dataset was built with old_boards='keep'; "
+                             "this run uses old_boards='drop'")
+        # The network reads bgpy's layout constants when it is built, so this
+        # is the observation width it takes.
+        demo = load_demo(cfg.demo, bgpy.OBS_SIZE)
+        demo_gen = torch.Generator().manual_seed(cfg.seed)
+        print(f"demo {cfg.demo}: {len(demo.train)} train, {len(demo.heldout)} heldout rows, "
+              f"weight {cfg.demo_weight:g}"
+              + (f", fading over the last {cfg.demo_fade:g} of the run"
+                 if cfg.demo_fade else ""))
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     pool = []  # snapshot state dicts, on the CPU
     update, best, t_total = 0, 9.0, 0.0
@@ -1318,6 +1467,8 @@ def main():
             f"real_lag_{lag}_{metric}"
             for lag in LAG_MIX_LAGS for metric in ("share", "place")
         ]
+    if demo is not None:
+        eval_keys += DEMO_KEYS
     if new_csv:
         log.writerow([
             "update", "minutes", "games",
@@ -1395,6 +1546,9 @@ def main():
         win_scale = win_score_fade_scale(
             run_min, run_start_min, cfg.minutes, cfg.win_score_fade)
         win_weight = cfg.win_score * win_scale
+        demo_weight = (cfg.demo_weight * demo_fade_scale(
+            run_min, run_start_min, cfg.minutes, cfg.demo_fade)
+            if demo is not None else 0.0)
         reward_on = cfg.fight_reward != 0.0
         score_on = cfg.fight_score != 0.0
         win_on = cfg.win_score != 0.0
@@ -1713,6 +1867,12 @@ def main():
                 ad_mean, ad_std = ad_all.mean(), ad_all.std() + 1e-8
                 m = idx.numel()
                 step = cfg.micro_batch or m
+                demo_rows = None
+                if demo is not None and demo_weight > 0.0 and update >= cfg.value_warmup:
+                    # Fresh every minibatch; the demo generator is separate so
+                    # the auxiliary sample does not move the PPO RNG.
+                    demo_rows = demo.train[torch.randint(
+                        len(demo.train), (m,), generator=demo_gen)]
                 opt.zero_grad()
                 kl_s = clip_s = ent_s = plain_s = vl_s = aux_s = 0.0
                 for j in range(0, m, step):
@@ -1752,6 +1912,12 @@ def main():
                         loss = cfg.vf * vl
                     else:
                         loss = pg + cfg.vf * vl - cfg.ent * ent + aux_w * aux
+                    if demo_rows is not None:
+                        dsub = demo_rows[j:j + sub.numel()]
+                        loss = add_demo_loss(
+                            loss, net, demo.obs[dsub].to(dev),
+                            demo.mask[dsub].to(dev), demo.action[dsub].to(dev),
+                            demo_weight)
                     (loss * w).backward()
                     with torch.no_grad():
                         kl_s += w * ((ratio - 1) - (lp - f_logp[sub])).mean().item()
@@ -1822,6 +1988,7 @@ def main():
         done = minutes >= cfg.minutes
         if update % cfg.eval_every == 0 or done:
             net.eval()
+            demo_vals = demo_agreement(net, demo, dev) if demo is not None else {}
             seed = 10_000 + update * 10
             vs_std, rec_std = evaluate(net, cfg.eval_games, [1, 0, 7, 0, 0, 0], dev, seed)
             vs_rush, rec_rush = evaluate(net, cfg.eval_games, [1, 0, 0, 7, 0, 0], dev, seed + 1)
@@ -1891,6 +2058,7 @@ def main():
                 **scen_vals,
                 **era_vals,
                 **lag_vals,
+                **demo_vals,
             }
             for key, val in eval_vals.items():
                 tb.add_scalar(f"eval/{key}", val, update)
@@ -1958,6 +2126,11 @@ def main():
                 ]
                 lag_txt = (f"  lagmix(all {lag_vals['place_vs_real_mix']:.2f}; "
                            + " ".join(parts) + ")")
+            demo_txt = ""
+            if demo_vals:
+                demo_txt = (f"  demo(top1 {demo_vals['demo_top1']:.1%}"
+                            f" buy {demo_vals['demo_top1_buy']:.1%}"
+                            f" train {demo_vals['demo_top1_train']:.1%})")
             gate_txt = ""
             gates = text_gates(net)
             if gates:
@@ -1982,7 +2155,7 @@ def main():
                 f"score {stats['fight_score_per_turn']:.3f} "
                 f"win {stats['win_score_per_turn']:.3f})  "
                 f"ent {stats['entropy']:.2f}  {stats['steps_per_s']:.0f} steps/s  "
-                f"buys {top_buys}{scen_txt}{era_txt}{lag_txt}{gate_txt}",
+                f"buys {top_buys}{demo_txt}{scen_txt}{era_txt}{lag_txt}{gate_txt}",
                 flush=True,
             )
         if done:

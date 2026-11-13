@@ -2613,6 +2613,19 @@ Deleting `.venv` undoes it.
   fraction F of the run's planned end (`--minutes`), like the fight score's
   fade. It may be used with `--value-warmup`. `metrics.csv` appends
   `win_score_per_turn`, the mean term per learner turn from turn T on.
+- `--demo PATH --demo-weight W --demo-fade F` (default off) adds the
+  demonstration loss from the Build A dataset
+  (`train/evaltools/demo_dataset.py`): each PPO update adds W times the
+  cross-entropy between the network's masked policy and Era's action on a
+  fresh train-split demonstration minibatch the size of the training
+  minibatch. The weight falls linearly to 0 over the last fraction F of the
+  run's planned end, by the same helper as the fight and win score fades, and
+  the term is not added during `--value-warmup`. The dataset must have this
+  build's observation width, built with `old_boards='keep'` and no lag; a
+  mismatch is refused. Every eval prints the held-out masked top-1 agreement
+  overall and on buys, plus the same count on a fixed train sample of the
+  held-out size, and `metrics.csv` appends `demo_top1`, `demo_top1_buy` and
+  `demo_top1_train`. The policy that acts is unchanged.
 - `--entropy-moves-as-one` counts all Move actions as one entropy atom (their
   summed probability) instead of one per move, so the bonus stops paying for
   board shuffles; moves stay legal and sampled, off is the old loss, and
