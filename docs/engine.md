@@ -2412,6 +2412,15 @@ seeded from the turn's seed (a repeat's).
   builds, for the tracker's coverage report. The first attacker is the
   engine's rule (more minions first, a coin flip when even): the tracker
   cannot pass the log's first attacker.
+- **bg's copy of the engine:** the tracker's venv is Python 3.14 (its GTK
+  window needs the system PyGObject), so it needs its own build of bgpy.
+  `tools/bg-rebuild.sh [COMMIT]` exports a commit with `git archive`, builds
+  the wheel for bg's Python and installs it there; a local post-commit hook
+  (`.git/hooks/post-commit`, not in the repo) runs it in the background when
+  a commit touches `crates/`. Only committed code reaches bg. Log:
+  `target/bg-rebuild.log`; the installed commit is in
+  `target/bg-rebuild/installed`. A running tracker keeps its old copy until
+  it restarts.
 - **The fight-state export:** `bgpy.VecEnv.record_fights(True)` makes each
   game keep every seat's last fight at the moment `Game::combat` fixes the
   boards, hands and counters (not at End Turn). `fight_snapshot(i, seat)`
