@@ -610,8 +610,6 @@ struct Fx {
     killer: Option<u16>,
     /// uid of the minion that just attacked, for "give it +..." triggers.
     attacker: Option<u16>,
-    /// Summons made right of the attacker don't attack in the same round.
-    skip_ptr: bool,
 }
 
 struct Side<'a> {
@@ -862,7 +860,6 @@ impl<'a> Side<'a> {
         tribe: Option<Tribe>,
         by_health: bool,
         shield: bool,
-        skip_ptr: bool,
         uid: &mut u16,
         rng: &mut Rng,
         w: &mut impl Watch,
@@ -880,9 +877,6 @@ impl<'a> Side<'a> {
             if !self.summon_baked(db, side, *at, m, uid, rng, w) {
                 self.hand_taken &= !(1 << i);
                 break;
-            }
-            if skip_ptr && *at == self.ptr {
-                self.ptr += 1;
             }
             *at += 1;
         }
@@ -938,7 +932,7 @@ impl<'a> Side<'a> {
                     continue;
                 }
                 self.ms[i].damaged_fires = self.ms[i].damaged_fires.saturating_add(1);
-                let fx = Fx { side, host, killer: None, attacker: None, skip_ptr: false };
+                let fx = Fx { side, host, killer: None, attacker: None };
                 let mut at = i + 1;
                 self.run_effect(db, e, golden, fx, &mut at, uid, rng, w);
             }
@@ -2421,7 +2415,6 @@ impl<'a> Side<'a> {
                 Some(Tribe::Murloc),
                 false,
                 false,
-                false,
                 uid,
                 rng,
                 w,
@@ -2671,9 +2664,6 @@ impl<'a> Side<'a> {
                 for _ in 0..n {
                     let m = db.make(card, g);
                     if self.summon(db, fx.side, *at, m, uid, rng, w) {
-                        if fx.skip_ptr && *at == self.ptr {
-                            self.ptr += 1;
-                        }
                         *at += 1;
                     }
                 }
@@ -2907,9 +2897,7 @@ impl<'a> Side<'a> {
             }
             Effect::SummonFromHand { tribe, count, by_health, shield } => {
                 let n = count as u32 * mul as u32;
-                self.summon_from_hand(
-                    db, fx.side, at, n, tribe, by_health, shield, fx.skip_ptr, uid, rng, w,
-                );
+                self.summon_from_hand(db, fx.side, at, n, tribe, by_health, shield, uid, rng, w);
             }
             Effect::ShieldDragons { count } => {
                 // Dragons without Divine Shield come first; once every one
@@ -3096,9 +3084,6 @@ impl<'a> Side<'a> {
                 if self.summon(db, fx.side, *at, m, uid, rng, w) {
                     let new = *uid - 1;
                     let _ = self.immediate.try_push(new);
-                    if fx.skip_ptr && *at == self.ptr {
-                        self.ptr += 1;
-                    }
                     *at += 1;
                 }
             }
@@ -3129,9 +3114,6 @@ impl<'a> Side<'a> {
                     }
                     self.held.remove(0);
                     self.out.remove_card(c);
-                    if fx.skip_ptr && *at == self.ptr {
-                        self.ptr += 1;
-                    }
                     *at += 1;
                 }
             }
@@ -3168,9 +3150,6 @@ impl<'a> Side<'a> {
                         continue;
                     }
                     if self.summon_saved_copy(db, fx.side, *at, copy, damage, uid, rng, w) {
-                        if fx.skip_ptr && *at == self.ptr {
-                            self.ptr += 1;
-                        }
                         *at += 1;
                     }
                 }
@@ -3253,9 +3232,6 @@ impl<'a> Side<'a> {
                 m.attack = self.ms[hi].m.attack.saturating_mul(mul);
                 m.health = self.ms[hi].m.health.saturating_mul(mul);
                 if self.summon(db, fx.side, *at, m, uid, rng, w) {
-                    if fx.skip_ptr && *at == self.ptr {
-                        self.ptr += 1;
-                    }
                     *at += 1;
                 }
             }
@@ -3426,7 +3402,7 @@ impl<'a> Side<'a> {
                         }
                     }
                     Deathrattle::Effect(e) => {
-                        let fx = Fx { side, host, killer, attacker: None, skip_ptr: false };
+                        let fx = Fx { side, host, killer, attacker: None };
                         self.run_effect(db, e, golden, fx, &mut pos, uid, rng, w);
                     }
                 }
@@ -3500,7 +3476,7 @@ impl<'a> Side<'a> {
         }
         for (host, e, golden) in fire {
             let Some(i) = self.index_of(host) else { continue };
-            let fx = Fx { side, host, killer: None, attacker: None, skip_ptr: false };
+            let fx = Fx { side, host, killer: None, attacker: None };
             let mut at = i + 1;
             self.run_effect(db, e, golden, fx, &mut at, uid, rng, w);
         }
@@ -3564,7 +3540,7 @@ impl<'a> Side<'a> {
                 self.out.permanent_improvements[s] = self.out.permanent_improvements[s].saturating_add(n);
             }
             if before < ms.total && after >= ms.total {
-                let fx = Fx { side, host, killer: None, attacker: None, skip_ptr: false };
+                let fx = Fx { side, host, killer: None, attacker: None };
                 let mut at = i + 1;
                 self.run_effect(db, ms.effect, golden, fx, &mut at, uid, rng, w);
             }
@@ -4274,7 +4250,7 @@ fn run_start_of_combat(
                     }
                 }
                 Some(StartOfCombat::Effect(e)) => {
-                    let fx = Fx { side: turn, host: me, killer: None, attacker: None, skip_ptr: false };
+                    let fx = Fx { side: turn, host: me, killer: None, attacker: None };
                     let mut at = mi + 1;
                     sides[turn].run_effect(db, e, golden, fx, &mut at, uid, rng, w);
                 }
@@ -4709,7 +4685,6 @@ fn attack_triggers(
                                 host,
                                 killer: None,
                                 attacker: None,
-                                skip_ptr: true,
                             };
                             let mut at = hi + 1;
                             sides[turn].run_effect(db, e, golden, fx, &mut at, uid, rng, w);
@@ -4731,7 +4706,6 @@ fn attack_triggers(
                     host,
                     killer: None,
                     attacker: Some(me),
-                    skip_ptr: false,
                 };
                 let mut at = hi + 1;
                 sides[turn].run_effect(db, t.effect, golden, fx, &mut at, uid, rng, w);
@@ -5468,7 +5442,7 @@ mod tests {
         for seed in 0..8 {
             let mut rng = Rng::new(seed);
             let (mut s, mut uid) = side2(&db, &["Tasty Lobster", "Cage Gnawer"]);
-            let fx = Fx { side: 0, host: s.ms[1].uid, killer: None, attacker: None, skip_ptr: false };
+            let fx = Fx { side: 0, host: s.ms[1].uid, killer: None, attacker: None };
             let mut at = 0;
             let e = Effect::TriggerDeathrattle { times: 1 };
             s.run_effect(&db, e, false, fx, &mut at, &mut uid, &mut rng, &mut ());
@@ -5659,7 +5633,7 @@ mod tests {
         rng: &mut Rng,
     ) {
         let h = s.ms[host].uid;
-        let fx = Fx { side: 0, host: h, killer: None, attacker: None, skip_ptr: false };
+        let fx = Fx { side: 0, host: h, killer: None, attacker: None };
         let mut at = s.ms.len();
         s.run_effect(db, Effect::GemOthers(count), false, fx, &mut at, uid, rng, &mut ());
     }
@@ -5737,5 +5711,121 @@ mod tests {
         let before = stats(&s);
         s.gem_at(&db, 0, 1, false, false, &mut rng);
         assert_eq!(gems_taken(&before, &s), [1, 1]);
+    }
+
+    #[derive(Default)]
+    struct Attacks(Vec<(usize, CardId)>);
+
+    impl Watch for Attacks {
+        fn attack(&mut self, side: usize, attacker: &Minion, _defender: &Minion) {
+            self.0.push((side, attacker.card));
+        }
+    }
+
+    fn attack_names(db: &CardDb, rec: &Attacks, side: usize) -> Vec<String> {
+        rec.0
+            .iter()
+            .filter(|(s, _)| *s == side)
+            .map(|(_, c)| db.get(*c).name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_rally_summon_attacks_before_an_older_right_neighbour() {
+        // Hearthstone_2026_11_13_14_50_52 lines 80561 to 80960: Hoarding
+        // Hyena rallies a Tasty Lobster to its right, and the token attacks
+        // next, before the Hyena's older right neighbours.
+        let db = db();
+        let a = vec![
+            db.make(db.by_name("Flittering Bat").unwrap(), false),
+            db.make(db.by_name("Cord Puller").unwrap(), false),
+        ];
+        let mut b = vec![db.make(db.by_name("Aberrant Tentacle").unwrap(), false)];
+        b[0].health = 100;
+        let mut rng = Rng::new(1);
+        let mut rec = Attacks::default();
+        fight_watched(&db, &a, &b, 20, &mut rng, &mut rec);
+        let names = attack_names(&db, &rec, 0);
+        assert_eq!(names[0], "Flittering Bat");
+        assert_eq!(names[1], "Foraging Bat");
+    }
+
+    #[test]
+    fn a_rally_summon_at_the_right_edge_takes_the_next_attack() {
+        // Hearthstone_2026_11_13_14_50_52 lines 491415 and 491779: their
+        // only Flittering Bat is right-most, its Foraging Bat is summoned
+        // past it, and the token attacks next.
+        let db = db();
+        let a = vec![db.make(db.by_name("Flittering Bat").unwrap(), false)];
+        let mut b = vec![db.make(db.by_name("Aberrant Tentacle").unwrap(), false)];
+        b[0].health = 100;
+        let mut rng = Rng::new(1);
+        let mut rec = Attacks::default();
+        fight_watched(&db, &a, &b, 20, &mut rng, &mut rec);
+        let names = attack_names(&db, &rec, 0);
+        assert_eq!(names[0], "Flittering Bat");
+        assert_eq!(names[1], "Foraging Bat");
+    }
+
+    #[test]
+    fn an_attackers_deathrattle_summon_takes_its_slot() {
+        // No pure Deathrattle of the attacker was found in the logs. Helping
+        // Hand's Reborn copy at Hearthstone_2026_11_13_14_50_52 line 948920
+        // shows the same slot and the same order; Buzzing Vermin is the
+        // Deathrattle version of that case.
+        let db = db();
+        let mut a = vec![
+            db.make(db.by_name("Buzzing Vermin").unwrap(), false),
+            db.make(db.by_name("Cord Puller").unwrap(), false),
+        ];
+        a[0].attack = 1;
+        a[0].health = 1;
+        let mut b = vec![db.make(db.by_name("Aberrant Tentacle").unwrap(), false)];
+        b[0].attack = 1;
+        b[0].health = 100;
+        let mut rng = Rng::new(1);
+        let mut rec = Attacks::default();
+        fight_watched(&db, &a, &b, 20, &mut rng, &mut rec);
+        let names = attack_names(&db, &rec, 0);
+        assert_eq!(names[0], "Buzzing Vermin");
+        assert_eq!(names[1], "Beetle");
+    }
+
+    #[test]
+    fn a_summon_left_of_the_pointer_keeps_the_next_attacker() {
+        // Hearthstone_2026_11_08_03_26_06 lines 1064395 and 1064994: a
+        // friendly minted at position 3 while the pointer was past it did
+        // not jump the minion already next in line.
+        let db = db();
+        let (mut s, mut uid) = side(&db, &["Cord Puller", "Amber Guardian", "Deadly Spore"]);
+        let mut rng = Rng::new(1);
+        s.ptr = 2; // Deadly Spore is next
+        let m = db.make(db.by_name("Foraging Bat").unwrap(), false);
+        assert!(s.summon(&db, 0, 0, m, &mut uid, &mut rng, &mut ()));
+        assert_eq!(db.get(s.ms[s.next_attacker().unwrap()].m.card).name, "Deadly Spore");
+    }
+
+    #[test]
+    fn the_bg_odds_flittering_bat_fight_can_tie() {
+        // train/runs/bg-odds/report.md section 3: mine has Flittering Bat
+        // 2/2 and Aberrant Tentacle 0/2, theirs has Flittering Bat 1/4. The
+        // real fight was a tie.
+        let db = db();
+        let mut mine = vec![
+            db.make(db.by_name("Flittering Bat").unwrap(), false),
+            db.make(db.by_name("Aberrant Tentacle").unwrap(), false),
+        ];
+        mine[0].attack = 2;
+        mine[0].health = 2;
+        let theirs = vec![db.make(db.by_name("Flittering Bat").unwrap(), false)];
+        let mut ties = 0;
+        for seed in 0..1000 {
+            let mut rng = Rng::new(seed);
+            let o = fight(&db, &mine, &theirs, 500, &mut rng);
+            if o.winner.is_none() && o.attacks < 500 {
+                ties += 1;
+            }
+        }
+        assert!(ties > 0, "the boards tie in at least one seeded fight");
     }
 }

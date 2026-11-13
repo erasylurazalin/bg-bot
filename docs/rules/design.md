@@ -1130,7 +1130,10 @@ player is left, or at turn 40 (the rest ranked by health).
 simulator's engine, so the two can be compared): dead minions are handled
 one at a time in board order, each one's Deathrattle and then its Reborn
 before the next; the next attacker is tracked with a pointer that shifts
-when minions left of it die or appear; Windfury swings twice in a row.
+when minions left of it die or appear, and a minion summoned at the
+pointer's own slot is the next attacker (a Rally token summoned right of
+the attacker, a Reborn or Deathrattle summon in the attacker's slot: 25
+cases in Era's logs, 2026-11-13, none against); Windfury swings twice in a row.
 Safety cap: 500 attacks, then a tie.
 
 ## Heroes (2026-10-25)

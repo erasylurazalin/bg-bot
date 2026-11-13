@@ -437,7 +437,10 @@ fn attackers_go_left_to_right_and_wrap() {
     b[0].attack = 0;
     let (_, log) = watched(&a, &b, 1);
     let order: Vec<&str> = log.attacks.iter().filter(|x| x.0 == 0).map(|x| x.1.as_str()).take(6).collect();
-    assert_eq!(order, ["Buzzing Vermin", "Amber Guardian", "Flittering Bat", "Buzzing Vermin", "Amber Guardian", "Flittering Bat"]);
+    // Flittering Bat's Foraging Bat joins the line on its right and attacks
+    // before the wrap: Hearthstone_2026_11_13_14_50_52 lines 491120 and
+    // 491284. The old order kept the token back until the next round.
+    assert_eq!(order, ["Buzzing Vermin", "Amber Guardian", "Flittering Bat", "Foraging Bat", "Buzzing Vermin", "Amber Guardian"]);
 }
 
 #[test]

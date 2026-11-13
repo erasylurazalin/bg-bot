@@ -2203,16 +2203,19 @@ fn herding_horn_gives_a_free_refresh_for_every_rally_swing() {
     equip(&mut g, 0, 0, "Herding Horn");
     put_on_board(&mut g, 0, "Flittering Bat"); // has a Rally
     put_on_board(&mut g, 0, "Southsea Busker"); // and one without
-    // Two swings: the Bat's and the Pirate's.
-    let out = fight_wall(&g, 1, 0, 500, 2);
+    // The Bat, the Foraging Bat it summons, then the Pirate: only the first
+    // is a Rally swing.
+    let out = fight_wall(&g, 1, 0, 500, 3);
     assert_eq!(out.sides[0].free_refresh_gain, 1, "one free Refresh per Rally swing");
     // A Windfury Rally minion swings twice and gives two.
     let mut g = game(62);
     equip(&mut g, 0, 0, "Herding Horn");
     put_on_board(&mut g, 0, "Flittering Bat");
     g.players[0].board[0].keywords.set(bgcore::Keywords::WINDFURY);
-    // Two attacks, each a Windfury pair of swings: four.
-    let out = fight_wall(&g, 1, 0, 500, 2);
+    // Bat pair, then the two tokens it summons, then the Bat pair again:
+    // four Rally swings. The tokens take the attacks between them
+    // (Hearthstone_2026_11_13_14_50_52 lines 491120 and 491284).
+    let out = fight_wall(&g, 1, 0, 500, 4);
     assert_eq!(out.sides[0].free_refresh_gain, 4, "every swing counts");
 }
 
@@ -2224,7 +2227,10 @@ fn lionfish_portrait_buffs_every_attacking_beast() {
     put_on_board(&mut g, 0, "Flittering Bat"); // Beast 1/4
     put_on_board(&mut g, 0, "Southsea Busker"); // Pirate 3/1
     let mut seen = Seen::default();
-    let out = fight_wall_watched(&g, 1, 0, 500, 2, &mut seen);
+    // Bat, the Foraging Bat it summons, then the Pirate (the token takes the
+    // attack between them: Hearthstone_2026_11_13_14_50_52 lines 491120 and
+    // 491284).
+    let out = fight_wall_watched(&g, 1, 0, 500, 3, &mut seen);
     assert_eq!(swings(&seen, &g, "Flittering Bat"), [(5, 6)], "+4/+2 on the Beast");
     assert_eq!(swings(&seen, &g, "Southsea Busker"), [(3, 1)], "not on the Pirate");
     assert!(out.sides[0].cards_gained().is_empty(), "the fight itself gives no card");
@@ -2234,12 +2240,15 @@ fn lionfish_portrait_buffs_every_attacking_beast() {
 fn all_purpose_kibble_grows_with_every_beast_attack() {
     let mut g = game(64);
     equip_id(&mut g, 0, 1, "BG32_MagicItem_200");
-    put_on_board(&mut g, 0, "Flittering Bat"); // 1/4
+    // A plain Beast with no summon, so both swings are its own: Windfury
+    // gives the two attacks the trinket grows on.
+    put_on_board(&mut g, 0, "Tasty Lobster"); // 2/1
+    g.players[0].board[0].keywords.set(bgcore::Keywords::WINDFURY);
     let mut seen = Seen::default();
-    let out = fight_wall_watched(&g, 1, 0, 500, 2, &mut seen);
+    let out = fight_wall_watched(&g, 1, 0, 500, 1, &mut seen);
     assert_eq!(
-        swings(&seen, &g, "Flittering Bat"),
-        [(1 + 4, 4), (1 + 4 + 5, 4)],
+        swings(&seen, &g, "Tasty Lobster"),
+        [(2 + 4, 1), (2 + 4 + 5, 1)],
         "+4, then +5: it improved"
     );
     assert_eq!(out.sides[0].trinket_improve[1], 2, "two attacks improved it twice");

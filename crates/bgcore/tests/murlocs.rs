@@ -80,7 +80,10 @@ fn two_expert_aviators_take_the_two_highest_attack_murlocs_from_hand() {
     let hand = vec![mk(&db, "Hackerfin", false), mk(&db, "Bream Counter", false)];
     let before = hand.clone();
     let a = [mk(&db, "Expert Aviator", false), mk(&db, "Expert Aviator", false)];
-    let (out, log) = run(&db, &a, &[wall(&db)], [&hand, &[]], 2, 1);
+    // The Aviator's summoned Murloc takes the next attack on that side
+    // (Hearthstone_2026_11_13_14_50_52 lines 491120 and 491284), so the
+    // second Aviator swings after it, not on the next turn of the fight.
+    let (out, log) = run(&db, &a, &[wall(&db)], [&hand, &[]], 6, 1);
     // Bream Counter has 6 Attack, Hackerfin 5.
     assert_eq!(
         log.summons.iter().map(|s| s.0.as_str()).collect::<Vec<_>>(),
