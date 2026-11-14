@@ -366,6 +366,29 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     that opponent's own shop phase, so this board is the closest a state has to
     it. A file written before the key existed has the warband nowhere, and then
     those powers have nothing to copy.
+  - `lobby`, the other seven players at the turn's start, in the log's seat
+    order after mine (`seat` 1 to 7; `player_id` is the log's own id, for a
+    reader). It is written only in a turn's `start` and in a live partial turn;
+    a file written before the key existed has it nowhere. Each entry has the
+    hero (`hero_card`, the log's card id, skin included, `hero_base`, the base
+    hero the skin's `BACON_HEROPOWER_BASE_HERO_ID` names, and `hero_name`),
+    `health` and `armor` as the log shows them, `tier`, `alive` (Health above
+    0), `placement` (0 while alive, the final place once out), and `next`/`last`
+    for the player `NEXT_OPPONENT_PLAYER_ID` names this turn and the one I last
+    fought. `seen_turn`, `seen_tier`, `last_board`, `last_deity`, `gem_attack`,
+    `gem_health`, `spell_attack` and `spell_health` are the last fight I had
+    with them, in the shapes above. `trinkets` names each held slot by its card
+    id (`slot` 0 lesser, 1 greater, 2 the hero power's), read from the hero's
+    `BACON_FIRST_TRINKET_DATABASE_ID`, `BACON_SECOND_TRINKET_DATABASE_ID` and
+    `BACON_HEROPOWER_TRINKET_DATABASE_ID` through the card data's dbf ids; the
+    log does not show their numbers. The log has no leaderboard tribe line for
+    a player I did not fight, no other player's last three fights, and no
+    current board of a player outside my own fights, so those keys are absent
+    and the observation's matching fields stay zero. The shop replay seats the
+    block only when asked (`load_with_lobby`, `seat_step_with_lobby`,
+    `seat_live_with_lobby`, `turn_start_game_with_lobby`, and Python's
+    `EraReplay.from_file(..., lobby=True)`); without that option the seven
+    seats are the old dead sandbox players, byte for byte.
 - `end` is the state when the turn ended, after the end of turn effects and
   before the fight (null when the log ends inside the turn). It is the same
   object as the last step's `after`.

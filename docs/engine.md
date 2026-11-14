@@ -2302,7 +2302,12 @@ never read it.
   Their heroes are dealt as usual. Real seats play a fresh real board each
   turn as in a scenario game; a scenario real seat has a flat 30 Health and
   10 armor, and an Era-start real seat takes the recorded Health and armor of
-  a random real board of the start turn instead.
+  a random real board of the start turn instead. Unlike the shop replay, an
+  Era start is a normal game: its seven opponents are alive from the first
+  observation (`SCALAR_ALIVE = 8`), with their own Health, armor, tier and the
+  next opponent already set. Their seen boards, leaderboard lines and fight
+  histories are empty until each has been fought, because the logged position
+  carries no history for them.
 - **Choosing:** each new game is an Era start with probability `share`, drawn
   from the game seed with its own RNG. The position is uniform over the
   allowed positions of the turn range and split, and which network seat gets
@@ -2452,8 +2457,8 @@ A passive helper for `bg-overlay` during hand-played games. It never sends input
 
   Use `--once LOG` to score one log snapshot and print a single JSON event. Requires rebuilt `bgbench` (`live-actions`) and `bgpy` (`EraReplay.live` / `LivePosition`).
 - **What it cannot see (and `value: null`):**
-  - `value` is sent as `null`: trained checkpoints estimate turn-discounted return (`gamma=0.97` minus move costs and deadline penalties) rather than 1..8 placement, and `shop_replay::load` runs in a single-player sandbox (`SCALAR_ALIVE = 1`) where real lobby outcomes do not apply.
-  - All seven opponents' leaderboard scalars (`OPP_ALIVE`, `OPP_HEALTH`, `OPP_ARMOR`, `OPP_TIER`, `OPP_HERO`, `OPP_TRINKET`, `OPP_FIGHTS`, `OPP_NEXT`) are zeroed in `new_sandbox_with_hero`; only the most recently seen opponent board (`OPP_LAST`, `OPP_TRIBES`, and slot 1 minions) is filled when present.
+  - `value` is sent as `null`: trained checkpoints estimate turn-discounted return (`gamma=0.97` minus move costs and deadline penalties) rather than 1..8 placement.
+  - The suggester is the one path that eats the real lobby. It calls `EraReplay.from_file(..., lobby=True)`, so the action file's `lobby` block seats the seven opponents alive with their hero, Health, armor, tier, trinkets, next and last opponent, and the board and counters of the last fight with each (docs/real-boards.md "The action file"). Every other path keeps the old dead-seat sandbox (`SCALAR_ALIVE = 1`) until it is switched on by hand. What the log still cannot say stays zero: a player's leaderboard tribe line (`OPP_TOP_TRIBE`, `OPP_TRIBE_MIXED`, `OPP_TRIBE_COUNT`), their last three fights (`OPP_FIGHTS`), and the current board of a player I have not fought (only the last board I saw of them is seated).
   - `SCALAR_PARADOX` is drawn by the sandbox rather than parsed from `Power.log`, `dark_gift_uses` / `dark_gift_pressed` start at engine defaults, `SCALAR_LOBBY` holds only single-tribe minion types seen in the Tavern so far, `SCALAR_ACTIONS_LEFT` resets on each seated step, and remaining pool counts are omitted by `obs.rs` (only `SLOT_FROM_POOL` per card slot is present).
 
 ## Adding a card

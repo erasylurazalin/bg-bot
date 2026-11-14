@@ -235,6 +235,7 @@ fn collect(
     rewrite: bool,
 ) -> Result<(), String> {
     let cards = Cards::load(cards_path)?;
+    let dbf = load_dbf(cards_path)?;
     fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let state_path = out.join(".state.json");
     let mut state = State::read(&state_path);
@@ -259,7 +260,7 @@ fn collect(
         let mut steps = Tally::new();
         let mut unread = Tally::new();
         let mut games = 0;
-        for (index, record) in read_log(&path, &cards, &name)?.into_iter().enumerate() {
+        for (index, record) in read_log(&path, &cards, &name, &dbf)?.into_iter().enumerate() {
             let Some(record) = record else {
                 continue;
             };
@@ -495,6 +496,9 @@ struct Collector {
     log: PowerLog,
     tracker: Tracker,
     cards: Cards,
+    /// The game's dbf id to card id, from the same `--cards` file: a hero's
+    /// leaderboard tags name the other players' trinkets by dbf id.
+    dbf: HashMap<u32, String>,
     /// One record per game the log ends, `None` for a game with no shop turn.
     games: Vec<Option<Json>>,
     record: Json,
@@ -531,11 +535,17 @@ struct Collector {
 }
 
 impl Collector {
+    #[cfg(test)]
     fn new(cards: Cards, label: &str) -> Collector {
+        Collector::new_with_dbf(cards, label, HashMap::new())
+    }
+
+    fn new_with_dbf(cards: Cards, label: &str, dbf: HashMap<u32, String>) -> Collector {
         let mut collector = Collector {
             log: PowerLog::new(),
             tracker: Tracker::new(cards.clone()),
             cards,
+            dbf,
             games: Vec::new(),
             record: Json::Null,
             unread: Tally::new(),
@@ -1425,7 +1435,10 @@ impl Collector {
     /// The turn's start: the state the client first shows me, which is also what
     /// the first step of the turn is measured against.
     fn begin(&mut self, game: &Game) {
-        let state = self.full_state(game);
+        let mut state = self.full_state(game);
+        if let Some(object) = state.as_obj_mut() {
+            put(object, "lobby", self.lobby_state(game));
+        }
         if let Some(turn) = self.turn.as_mut() {
             set(turn, "start", state.clone());
         }
@@ -2563,6 +2576,176 @@ impl Collector {
         Json::Obj(state)
     }
 
+    /// The other seven players at the turn's start, as the Power.log shows
+    /// them (docs/real-boards.md "The action file"). The seats are in the log's
+    /// order after mine, so `seat` 1 is the first opponent the observation
+    /// writes. The board, Gem and Tavern spell numbers are the last fight I had
+    /// with that player; the log has no leaderboard tribe line and no other
+    /// player's fights, so those stay out.
+    fn lobby_state(&self, game: &Game) -> Json {
+        let Some(mine) = me(game) else {
+            return Json::Arr(Vec::new());
+        };
+        let seats = self.tracker.seats();
+        let ids: Vec<i32> = seats.keys().copied().collect();
+        let Some(at) = ids.iter().position(|&p| p == mine) else {
+            return Json::Arr(Vec::new());
+        };
+        let fights = self.tracker.fights();
+        let last_done = fights.iter().rev().find(|f| !f.result.is_empty());
+        let next = hero_entity(game)
+            .map(|h| h.int("NEXT_OPPONENT_PLAYER_ID"))
+            .filter(|n| *n > 0)
+            .or_else(|| {
+                game.player_entity(mine)
+                    .map(|p| p.int("NEXT_OPPONENT_PLAYER_ID"))
+                    .filter(|n| *n > 0)
+            })
+            .unwrap_or(0) as i32;
+        let mut out = Vec::new();
+        for k in 1..ids.len() {
+            let pid = ids[(at + k) % ids.len()];
+            let Some(seat) = seats.get(&pid) else {
+                continue;
+            };
+            let hero = game
+                .entities_in_order()
+                .filter(|e| {
+                    e.text("CARDTYPE") == "HERO"
+                        && e.int("PLAYER_ID") == pid as i64
+                        && matches!(e.text("ZONE"), "PLAY" | "SETASIDE")
+                })
+                .last();
+            let hero_card = if seat.hero_card.is_empty() {
+                hero.map(|h| h.card_id.clone()).unwrap_or_default()
+            } else {
+                seat.hero_card.clone()
+            };
+            let hero_base = hero
+                .and_then(|h| {
+                    let power_id = h.int("HERO_POWER_ENTITY");
+                    let hero_id = h.id as i64;
+                    let power = game
+                        .entities
+                        .get(&(power_id as i32))
+                        .filter(|e| e.text("CARDTYPE") == "HERO_POWER")
+                        .or_else(|| {
+                            game.entities_in_order().find(|e| {
+                                e.text("CARDTYPE") == "HERO_POWER"
+                                    && e.int("CREATOR") == hero_id
+                            })
+                        });
+                    power.and_then(|e| {
+                        let dbf = e.int("BACON_HEROPOWER_BASE_HERO_ID");
+                        (dbf > 0)
+                            .then(|| self.dbf.get(&(dbf as u32)).cloned())
+                            .flatten()
+                    })
+                })
+                .unwrap_or_default();
+            let alive = seat.health > 0;
+            let mut o = vec![
+                ("player_id".to_string(), Json::Int(pid as i64)),
+                ("seat".to_string(), Json::Int(k as i64)),
+                ("hero_card".to_string(), str_(&hero_card)),
+                ("hero_base".to_string(), str_(&hero_base)),
+                ("hero_name".to_string(), str_(&seat.hero)),
+                ("health".to_string(), Json::Int(seat.health)),
+                ("armor".to_string(), Json::Int(seat.armor)),
+                ("tier".to_string(), Json::Int(seat.tier)),
+                ("alive".to_string(), Json::Bool(alive)),
+                (
+                    "placement".to_string(),
+                    Json::Int(if alive { 0 } else { seat.place }),
+                ),
+                ("next".to_string(), Json::Bool(next == pid)),
+                (
+                    "last".to_string(),
+                    Json::Bool(last_done.is_some_and(|f| f.opponent == pid)),
+                ),
+            ];
+            if let Some(f) = fights
+                .iter()
+                .rev()
+                .find(|f| f.opponent == pid && !f.result.is_empty())
+            {
+                put(&mut o, "seen_turn", Json::Int(f.turn));
+                put(&mut o, "seen_tier", Json::Int(seat.tier));
+                if !f.theirs.is_empty() {
+                    let marks = &f.reanimates.1;
+                    let board: Vec<Json> = f
+                        .theirs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| {
+                            Json::Obj(minion_json(
+                                &self.cards,
+                                i,
+                                m,
+                                marks.get(i).copied().unwrap_or(false),
+                            ))
+                        })
+                        .collect();
+                    put(&mut o, "last_board", Json::Arr(board));
+                }
+                if let Some(d) = &f.deities.1 {
+                    put(
+                        &mut o,
+                        "last_deity",
+                        Json::Obj(vec![
+                            ("card_id".to_string(), str_(&d.card_id)),
+                            ("name".to_string(), str_(&d.name)),
+                            ("attack".to_string(), Json::Int(d.attack)),
+                            ("health".to_string(), Json::Int(d.health)),
+                            (
+                                "golden".to_string(),
+                                Json::Bool(d.card_id.contains("_G")),
+                            ),
+                        ]),
+                    );
+                }
+                put(&mut o, "gem_attack", Json::Int(f.gems.1.0));
+                put(&mut o, "gem_health", Json::Int(f.gems.1.1));
+                put(
+                    &mut o,
+                    "spell_attack",
+                    Json::Int(f.side_numbers.1.get("spell_attack").copied().unwrap_or(0)),
+                );
+                put(
+                    &mut o,
+                    "spell_health",
+                    Json::Int(f.side_numbers.1.get("spell_health").copied().unwrap_or(0)),
+                );
+            }
+            if let Some(hero) = hero {
+                let mut trinkets = Vec::new();
+                for (tag, slot) in [
+                    ("BACON_FIRST_TRINKET_DATABASE_ID", 0),
+                    ("BACON_SECOND_TRINKET_DATABASE_ID", 1),
+                    ("BACON_HEROPOWER_TRINKET_DATABASE_ID", 2),
+                ] {
+                    let dbf = hero.int(tag);
+                    if dbf <= 0 {
+                        continue;
+                    }
+                    let Some(card_id) = self.dbf.get(&(dbf as u32)) else {
+                        continue;
+                    };
+                    trinkets.push(Json::Obj(vec![
+                        ("slot".to_string(), Json::Int(slot)),
+                        ("card_id".to_string(), str_(card_id)),
+                        ("name".to_string(), str_(self.cards.name(card_id))),
+                    ]));
+                }
+                if !trinkets.is_empty() {
+                    put(&mut o, "trinkets", Json::Arr(trinkets));
+                }
+            }
+            out.push(Json::Obj(o));
+        }
+        Json::Arr(out)
+    }
+
     /// My hand and board and the Tavern, each card as `boards/real/` writes it
     /// plus where it sits.
     fn state(&mut self, game: &Game) -> Obj {
@@ -3147,13 +3330,38 @@ fn card_tribes(cards: &Cards, card_id: &str) -> Vec<String> {
     cards.tribes(card_id).to_vec()
 }
 
+/// The dbf id to card id of the `--cards` file (HearthstoneJSON). A hero's
+/// leaderboard tags name another player's trinkets by dbf id, and the card id
+/// is what the engine's trinket table knows.
+fn load_dbf(path: &str) -> Result<HashMap<u32, String>, String> {
+    #[derive(serde::Deserialize)]
+    struct RawCard {
+        #[serde(alias = "card_id")]
+        id: String,
+        #[serde(default, rename = "dbfId", alias = "dbf_id")]
+        dbf_id: u32,
+    }
+    let text = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let raw: Vec<RawCard> = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+    Ok(raw
+        .into_iter()
+        .filter(|c| c.dbf_id != 0)
+        .map(|c| (c.dbf_id, c.id))
+        .collect())
+}
+
 /// Every Battlegrounds game of a log, in order, with `None` for a game that has
 /// no shop turn: the Python's `read_log`. `label` is the log folder's name, for
 /// the warning a game with more than five lobby types prints.
-fn read_log(path: &Path, cards: &Cards, label: &str) -> Result<Vec<Option<Json>>, String> {
+fn read_log(
+    path: &Path,
+    cards: &Cards,
+    label: &str,
+    dbf: &HashMap<u32, String>,
+) -> Result<Vec<Option<Json>>, String> {
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = BufReader::with_capacity(1 << 20, file);
-    let mut collector = Collector::new(cards.clone(), label);
+    let mut collector = Collector::new_with_dbf(cards.clone(), label, dbf.clone());
     let mut bytes: Vec<u8> = Vec::new();
     loop {
         bytes.clear();
@@ -3257,6 +3465,7 @@ fn collect_live(
     follow: bool,
 ) -> Result<(), String> {
     let cards = Cards::load(cards_path)?;
+    let dbf = load_dbf(cards_path)?;
     fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let label = if !label_arg.is_empty() {
         label_arg.to_string()
@@ -3269,7 +3478,7 @@ fn collect_live(
     };
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = BufReader::with_capacity(1 << 20, file);
-    let mut collector = Collector::new(cards.clone(), &label);
+    let mut collector = Collector::new_with_dbf(cards.clone(), &label, dbf.clone());
     let mut bytes: Vec<u8> = Vec::new();
     let mut offset: u64 = 0;
     let mut saw_data = false;
@@ -3356,7 +3565,7 @@ fn collect_live(
             && let Ok(reopened) = File::open(path)
         {
             reader = BufReader::with_capacity(1 << 20, reopened);
-            collector = Collector::new(cards.clone(), &label);
+            collector = Collector::new_with_dbf(cards.clone(), &label, dbf.clone());
             bytes.clear();
             offset = 0;
             last_decision = None;

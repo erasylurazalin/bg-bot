@@ -105,17 +105,19 @@ def _collect_finished_actions(log_lines: list[str], out_dir: Path, name: str) ->
 
 
 def _era_turn_path_probs(
-    full_action_dir: Path,
+    action_file: Path,
     turn: int,
     target_step: int,
     ckpt_path: Path,
     top_k: int = 3,
 ) -> tuple[list[tuple[int, float]], int]:
-    """Reference offline evaluation via EraTurnPath at (turn, target_step)."""
+    """Reference offline evaluation via EraTurnPath at (turn, target_step),
+    with the same real lobby the live suggester seats."""
     scorer = suggest.PolicyScorer(ckpt_path, top_k=top_k)
-    replays, bad = bgpy.era_replays(str(full_action_dir), str(suggest.DEFAULT_REF_CARDS))
-    assert not bad and replays
-    path = replays[0].path(turn, 1, True)
+    replay = bgpy.EraReplay.from_file(
+        str(action_file), str(suggest.DEFAULT_REF_CARDS), lobby=True
+    )
+    path = replay.path(turn, 1, True)
     while not path.done and path.steps_on_path < target_step:
         a = path.era_action()
         assert a >= 0
@@ -197,7 +199,7 @@ class TestSuggest(unittest.TestCase):
             self.assertIsNone(decision["value"])
 
             ref_top, ref_step = _era_turn_path_probs(
-                full_json.parent, turn=8, target_step=7, ckpt_path=CKPT, top_k=3
+                full_json, turn=8, target_step=7, ckpt_path=CKPT, top_k=3
             )
             self.assertEqual(decision["step"], ref_step)
             self.assertEqual(len(decision["top"]), len(ref_top))

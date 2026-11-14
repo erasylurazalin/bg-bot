@@ -28,7 +28,7 @@ use crate::minion::Minion;
 use crate::real_boards::{
     CardIdMap, RealBoard, RealCounters, RealMinionSpec, RealPowerSpec, RealTrinketSpec,
 };
-use crate::{Action, BOARD, CardId, Data, Game, HAND, Keywords, MAX_TIER};
+use crate::{Action, BOARD, CardId, Data, Game, HAND, Keywords, MAX_TIER, PLAYERS};
 
 // ---- the action file (docs/real-boards.md "The action file") ----
 
@@ -303,6 +303,112 @@ pub struct ShopStateSpec {
     /// then the powers that copy a warband have nothing to copy.
     #[serde(default)]
     pub last_opponent_board: Option<Vec<ShopMinionSpec>>,
+    /// The other seven players at the shop step, by their seat after me
+    /// (docs/real-boards.md "The action file"). Only a turn's `start` and a
+    /// live partial turn write it, and a file written before the key existed
+    /// has it nowhere. It is read only when the loader is asked to seat the
+    /// lobby (`load_with_lobby`); without that option the seven seats stay the
+    /// sandbox's dead players, byte for byte as before.
+    #[serde(default)]
+    pub lobby: Vec<ShopLobbyPlayerSpec>,
+}
+
+/// One other player in a shop step's `lobby` block: what the Power.log shows
+/// of them while I shop. `seat` is the engine seat after me, 1 to 7, so the
+/// observation writes them in the log's own order after my seat.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ShopLobbyPlayerSpec {
+    /// The log's PlayerID, for a reader; the loader seats by `seat`.
+    #[serde(default)]
+    pub player_id: u32,
+    /// 1 to 7: the seat after me, in the observation's order.
+    #[serde(default)]
+    pub seat: u8,
+    #[serde(default)]
+    pub hero_card: Option<String>,
+    /// The base hero the logged skin stands for, from the hero's
+    /// `BACON_HEROPOWER_BASE_HERO_ID` dbf id; the card set builds the base,
+    /// not every skin.
+    #[serde(default)]
+    pub hero_base: Option<String>,
+    #[serde(default)]
+    pub hero_name: Option<String>,
+    #[serde(default)]
+    pub health: i32,
+    #[serde(default)]
+    pub armor: i32,
+    #[serde(default)]
+    pub tier: u8,
+    /// A player whose Health is 0 or less is out (the log keeps the hero at
+    /// its last Health, so `health > 0` is the mark).
+    #[serde(default = "lobby_alive_default")]
+    pub alive: bool,
+    /// Their final place once out, 0 while alive. This is the log's
+    /// `PLAYER_LEADERBOARD_PLACE` when dead, not the current rank.
+    #[serde(default)]
+    pub placement: u8,
+    /// The player `NEXT_OPPONENT_PLAYER_ID` names this turn.
+    #[serde(default)]
+    pub next: bool,
+    /// The player I fought in the last completed combat.
+    #[serde(default)]
+    pub last: bool,
+    /// The turn of the last fight I had with them, 0 for never. The other
+    /// seen fields are what that fight showed at its first attack.
+    #[serde(default)]
+    pub seen_turn: u32,
+    /// Their tier then; the log keeps no tier in the fight, so the collector
+    /// writes their tier at the shop step.
+    #[serde(default)]
+    pub seen_tier: u8,
+    /// The warband that went into that fight, in the `board` shape. Empty for
+    /// a player I have not fought, or one whose fight showed no board.
+    #[serde(default)]
+    pub last_board: Vec<ShopMinionSpec>,
+    #[serde(default)]
+    pub last_deity: Option<ShopLobbyDeitySpec>,
+    #[serde(default)]
+    pub gem_attack: i32,
+    #[serde(default)]
+    pub gem_health: i32,
+    #[serde(default)]
+    pub spell_attack: i32,
+    #[serde(default)]
+    pub spell_health: i32,
+    /// Their held trinkets, by slot (0 lesser, 1 greater, 2 the hero power's).
+    /// The log names each slot's card by dbf id; the numbers are not in it.
+    #[serde(default)]
+    pub trinkets: Vec<ShopLobbyTrinketSpec>,
+}
+
+fn lobby_alive_default() -> bool {
+    true
+}
+
+/// One trinket of a lobby seat: its slot and card id (or name).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ShopLobbyTrinketSpec {
+    #[serde(default)]
+    pub slot: u8,
+    #[serde(default)]
+    pub card_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// A lobby seat's Deity at the last fight I had with them.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ShopLobbyDeitySpec {
+    #[serde(default)]
+    pub card_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub attack: i32,
+    #[serde(default)]
+    pub health: i32,
+    #[serde(default)]
+    pub golden: bool,
 }
 
 /// Where a step's card or target sits, as the file writes it.
@@ -778,6 +884,9 @@ const THEM: usize = 1;
 /// logged state follows (the turn before, for a turn's start), which one
 /// turn-start trigger needs: a chosen hero power that completes at the start
 /// of the turn (Galewing's flightpaths).
+///
+/// The seven other seats stay the sandbox's dead players, exactly as before.
+/// `load_with_lobby` seats the state's `lobby` block instead.
 pub fn load(
     data: &Arc<Data>,
     spec: &ShopStateSpec,
@@ -786,6 +895,42 @@ pub fn load(
     turn: u32,
     seed: u64,
     previous: Option<&ShopStateSpec>,
+) -> LoadedShop {
+    load_with_lobby(data, spec, hero, lobby, turn, seed, previous, false)
+}
+
+/// `load`, with the state's `lobby` block seated when `seat_lobby` is on: the
+/// seven opponents alive with the logged hero, Health, armor, tier, trinkets
+/// and last seen board. Off (the default everywhere) is byte for byte the old
+/// one-player sandbox.
+#[allow(clippy::too_many_arguments)]
+pub fn load_with_lobby(
+    data: &Arc<Data>,
+    spec: &ShopStateSpec,
+    hero: Option<u8>,
+    lobby: Option<crate::cards::Tribes>,
+    turn: u32,
+    seed: u64,
+    previous: Option<&ShopStateSpec>,
+    seat_lobby: bool,
+) -> LoadedShop {
+    let specs: &[ShopLobbyPlayerSpec] = if seat_lobby { &spec.lobby } else { &[] };
+    load_with_lobby_specs(data, spec, hero, lobby, turn, seed, previous, specs)
+}
+
+/// `load`, with these seats put in place of the sandbox's dead players. Empty
+/// is the old one-player sandbox. The caller picks the block: a turn's `start`
+/// holds it, and a step after the first seats it from there (`load_step_state`).
+#[allow(clippy::too_many_arguments)]
+fn load_with_lobby_specs(
+    data: &Arc<Data>,
+    spec: &ShopStateSpec,
+    hero: Option<u8>,
+    lobby: Option<crate::cards::Tribes>,
+    turn: u32,
+    seed: u64,
+    previous: Option<&ShopStateSpec>,
+    lobby_specs: &[ShopLobbyPlayerSpec],
 ) -> LoadedShop {
     let mut missing = Vec::new();
     // A sandbox game has one player and no opponents, which is all a shop step
@@ -1189,7 +1334,123 @@ pub fn load(
             pl.spell_discount = pl.spell_discount.saturating_add(engine - price);
         }
     }
+    if !lobby_specs.is_empty() {
+        seat_lobby_players(data, &mut game, lobby_specs, turn);
+    }
     LoadedShop { game, missing, tavern_ids, hand_ids, board_ids, spell_id }
+}
+
+/// Put the file's other players in their seats, alive or out, with what the
+/// Power.log showed: hero, Health, armor, tier, trinkets, the next and last
+/// opponent, and the board and side numbers of the last fight I had with each.
+/// The seats not named stay the sandbox's dead players. An unknown hero,
+/// trinket or minion is left out: this block only feeds the observation, so it
+/// never makes a step incomplete.
+fn seat_lobby_players(
+    data: &Data,
+    game: &mut Game,
+    specs: &[ShopLobbyPlayerSpec],
+    turn: u32,
+) {
+    for spec in specs {
+        let q = spec.seat as usize;
+        if !(1..PLAYERS).contains(&q) {
+            continue;
+        }
+        let pl = &mut game.players[q];
+        pl.alive = spec.alive;
+        pl.health = spec.health;
+        pl.armor = spec.armor;
+        pl.tier = spec.tier.clamp(1, MAX_TIER);
+        pl.placement = if spec.alive {
+            0
+        } else if spec.placement > 0 {
+            spec.placement
+        } else {
+            pl.placement
+        };
+        pl.hero = lobby_hero(data, spec);
+        pl.vanguard_on = pl.vanguard_health_on();
+        for slot in 0..crate::TRINKET_SLOTS {
+            pl.trinkets[slot] = Default::default();
+        }
+        for t in &spec.trinkets {
+            let Some(card_id) = t.card_id.as_deref() else {
+                if let Some(name) = t.name.as_deref()
+                    && let Some(i) = data.trinkets.by_name(name)
+                {
+                    pl.hold_trinket(data, (t.slot as usize).min(crate::TRINKET_SLOTS - 1), i, 0);
+                }
+                continue;
+            };
+            if let Some(i) = data.trinkets.by_card_id(card_id) {
+                pl.hold_trinket(data, (t.slot as usize).min(crate::TRINKET_SLOTS - 1), i, 0);
+            }
+        }
+        let mut board: ArrayVec<Minion, BOARD> = ArrayVec::new();
+        for m in &spec.last_board {
+            let (minion, bad) = build_minion(data, m, turn);
+            if bad.is_none() {
+                let _ = board.try_push(minion);
+            }
+        }
+        let deity = spec.last_deity.as_ref().and_then(|d| {
+            let card = d
+                .name
+                .as_deref()
+                .and_then(|name| data.cards.by_name(name))?;
+            Some(crate::fight::Deity {
+                card,
+                attack: d.attack,
+                health: d.health,
+                golden: d.golden,
+            })
+        });
+        // Everything the observation reads about an opponent is on MY player:
+        // the seen board, the next opponent and the last one.
+        let seen_tier = if spec.seen_tier > 0 { spec.seen_tier } else { pl.tier };
+        let me = &mut game.players[ME];
+        me.seen[q] = crate::game::Seen {
+            board,
+            tier: seen_tier,
+            turn: spec.seen_turn,
+            deity,
+            gem: (spec.gem_attack, spec.gem_health),
+            spell: (spec.spell_attack, spec.spell_health),
+        };
+        if spec.last {
+            me.last_opponent = Some(Opponent::Player(q as u8));
+        }
+        if spec.next {
+            me.opponent = Some(if spec.alive {
+                Opponent::Player(q as u8)
+            } else {
+                Opponent::Ghost(q as u8)
+            });
+            if !me.seen[q].board.is_empty() {
+                me.next_board = me.seen[q].board.clone();
+            }
+        }
+    }
+}
+
+/// The hero a lobby seat names, through the game's id map or its name; a skin
+/// is stripped the way the file's own hero is (`ShopFileSpec::hero`).
+fn lobby_hero(data: &Data, spec: &ShopLobbyPlayerSpec) -> Option<u8> {
+    for card_id in [spec.hero_card.as_deref(), spec.hero_base.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        let base = card_id.split("_SKIN_").next().unwrap_or(card_id);
+        for id in [card_id, base] {
+            if let Some(h) = data.heroes.by_card_id(id) {
+                return Some(h);
+            }
+        }
+    }
+    spec.hero_name
+        .as_deref()
+        .and_then(|name| data.heroes.by_name(name))
 }
 
 /// Whether a step is the one the game's own triple check runs in: the state
@@ -4133,6 +4394,9 @@ struct OneStep<'a> {
     /// the file's own history: Cataclysmic Harbinger and the Galaxy's Lens
     /// copy it, and no single logged state carries it.
     last_spell: Option<CardId>,
+    /// Whether the turn's `lobby` block is seated in place of the sandbox's
+    /// dead opponents.
+    lobby: bool,
 }
 
 /// A Choose One's answer: which option the log took, and whether it gave both.
@@ -4232,20 +4496,42 @@ struct StepStateAt<'a> {
     turn_index: usize,
     index: usize,
     seed: u64,
+    lobby: bool,
 }
 
 /// Seat one logged step: everything `run_once` does before it plays the step's
 /// actions. The error is what made the step impossible, with what the loader
 /// could not use.
 fn load_step_state(data: &Arc<Data>, ids: &CardIdMap, at: StepStateAt<'_>) -> LoadedShop {
-    let StepStateAt { file, before, turn, turn_index, index, seed } = at;
+    let StepStateAt { file, before, turn, turn_index, index, seed, lobby } = at;
     let hero = file.hero(data, before);
     // The start of a turn follows the turn before's last state, which one
     // start-of-turn trigger needs (a chosen power's countdown).
     let previous = (index == 0)
         .then(|| state_before_turn(file, turn_index))
         .flatten();
-    let mut loaded = load(data, before, hero, file.lobby(), turn, seed, previous);
+    // The lobby block is written once, in the turn's start, so every step of
+    // the turn seats it from there; a state that carries one (the first step)
+    // wins.
+    let lobby_specs: &[ShopLobbyPlayerSpec] = if !lobby {
+        &[]
+    } else if !before.lobby.is_empty() {
+        &before.lobby
+    } else {
+        file.turns
+            .get(turn_index)
+            .map_or(&[][..], |t| &t.start.lobby)
+    };
+    let mut loaded = load_with_lobby_specs(
+        data,
+        before,
+        hero,
+        file.lobby(),
+        turn,
+        seed,
+        previous,
+        lobby_specs,
+    );
     loaded.game.players[ME].tp.whistle = whistle_armed(file, turn_index, index);
     loaded.game.players[ME].last_spell = last_tavern_spell(data, ids, file, turn_index, index);
     // The minions this turn has already bought, for Glaive Ricochet's plain
@@ -4280,11 +4566,11 @@ fn load_step_state(data: &Arc<Data>, ids: &CardIdMap, at: StepStateAt<'_>) -> Lo
 }
 
 fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<SeatedStep, StepError> {
-    let OneStep { file, before, step, turn, turn_index, index, armed, last_spell } = *one;
+    let OneStep { file, before, step, turn, turn_index, index, armed, last_spell, lobby } = *one;
     let mut loaded = load_step_state(
         data,
         ids,
-        StepStateAt { file, before, turn, turn_index, index, seed },
+        StepStateAt { file, before, turn, turn_index, index, seed, lobby },
     );
     // The state may hold three copies a summon left on the board before the
     // game's own triple check ran: the check runs as this step's action ends
@@ -4400,7 +4686,21 @@ pub fn turn_start_game(
     turn: &ShopTurnSpec,
     seed: u64,
 ) -> Option<(Game, Vec<String>)> {
-    seat_turn_start(data, ids, file, turn, seed).ok()
+    seat_turn_start(data, ids, file, turn, seed, false).ok()
+}
+
+/// `turn_start_game`, with the turn's `lobby` block seated when `seat_lobby`
+/// is on (the read-only comparison and a later training switch; every current
+/// caller leaves it off).
+pub fn turn_start_game_with_lobby(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    seed: u64,
+    seat_lobby: bool,
+) -> Option<(Game, Vec<String>)> {
+    seat_turn_start(data, ids, file, turn, seed, seat_lobby).ok()
 }
 
 /// The same, with the loader's own reason when the turn's first state cannot
@@ -4411,6 +4711,7 @@ fn seat_turn_start(
     file: &ShopFileSpec,
     turn: &ShopTurnSpec,
     seed: u64,
+    seat_lobby: bool,
 ) -> Result<(Game, Vec<String>), StepError> {
     let step = turn
         .actions
@@ -4428,6 +4729,7 @@ fn seat_turn_start(
         index: 0,
         armed: whistle_armed(file, turn_index, 0),
         last_spell: last_tavern_spell(data, ids, file, turn_index, 0),
+        lobby: seat_lobby,
     };
     let seated = seat(data, ids, &one, seed)?;
     Ok((seated.game, seated.missing))
@@ -4553,7 +4855,7 @@ pub fn replay_whole_turn(
     turn: &ShopTurnSpec,
     seed: u64,
 ) -> Result<TurnRun, StepError> {
-    let (mut game, mut missing) = seat_turn_start(data, ids, file, turn, seed)?;
+    let (mut game, mut missing) = seat_turn_start(data, ids, file, turn, seed, false)?;
     let steps = turn.actions.len();
     for i in 0..steps {
         let Some(before) = state_before(turn, i) else {
@@ -5043,6 +5345,19 @@ pub fn seat_step(
     i: usize,
     seed: u64,
 ) -> Result<SeatedStep, StepError> {
+    seat_step_with_lobby(data, ids, file, turn, i, seed, false)
+}
+
+/// `seat_step`, with the turn's `lobby` block seated when `seat_lobby` is on.
+pub fn seat_step_with_lobby(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    i: usize,
+    seed: u64,
+    seat_lobby: bool,
+) -> Result<SeatedStep, StepError> {
     let Some(before) = state_before(turn, i) else {
         return Err((
             "no state before the step (the file has no step before it to load)".to_string(),
@@ -5064,6 +5379,7 @@ pub fn seat_step(
         index: i,
         armed,
         last_spell,
+        lobby: seat_lobby,
     };
     let seated = seat(data, ids, &one, seed)?;
     Ok(seated)
@@ -5078,6 +5394,18 @@ pub fn seat_live(
     turn: &ShopTurnSpec,
     seed: u64,
 ) -> Result<(Game, Vec<String>), StepError> {
+    seat_live_with_lobby(data, ids, file, turn, seed, false)
+}
+
+/// `seat_live`, with the turn's `lobby` block seated when `seat_lobby` is on.
+pub fn seat_live_with_lobby(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    seed: u64,
+    seat_lobby: bool,
+) -> Result<(Game, Vec<String>), StepError> {
     let i = turn.actions.len();
     let Some(before) = state_before(turn, i) else {
         return Err((
@@ -5089,7 +5417,15 @@ pub fn seat_live(
     let mut loaded = load_step_state(
         data,
         ids,
-        StepStateAt { file, before, turn: turn.turn, turn_index, index: i, seed },
+        StepStateAt {
+            file,
+            before,
+            turn: turn.turn,
+            turn_index,
+            index: i,
+            seed,
+            lobby: seat_lobby,
+        },
     );
     let mut missing = std::mem::take(&mut loaded.missing);
     if let Some(choice) = turn.pending_choice.as_ref() {
@@ -5327,7 +5663,17 @@ pub fn replay_step(
     let turn_index = file.turns.iter().position(|t| t.turn == turn.turn).unwrap_or(0);
     let armed = whistle_armed(file, turn_index, i);
     let last_spell = last_tavern_spell(data, ids, file, turn_index, i);
-    let one = OneStep { file, before, step, turn: turn.turn, turn_index, index: i, armed, last_spell };
+    let one = OneStep {
+        file,
+        before,
+        step,
+        turn: turn.turn,
+        turn_index,
+        index: i,
+        armed,
+        last_spell,
+        lobby: false,
+    };
     let first = run_once(data, ids, &one, opts.seed);
     let (ours, load_missing, action) = match first {
         Ok(v) => v,
@@ -5938,4 +6284,121 @@ pub fn unknown_minions(data: &Data, spec: &ShopStateSpec) -> Vec<String> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod lobby_tests {
+    use super::*;
+    use crate::obs;
+
+    /// A state with one known card on someone's last board and a trinket in a
+    /// slot, for the seats to show.
+    fn state(data: &Data) -> ShopStateSpec {
+        let hero = data.heroes.heroes.first().expect("a bundled hero");
+        let trinket = data.trinkets.trinkets.first().map(|t| t.card_id.clone());
+        let mut spec = ShopStateSpec {
+            gold: 7,
+            tier: 5,
+            health: 22,
+            armor: 4,
+            ..Default::default()
+        };
+        for seat in 1..PLAYERS {
+            let alive = seat != 3;
+            let mut player = ShopLobbyPlayerSpec {
+                player_id: seat as u32,
+                seat: seat as u8,
+                hero_card: Some(hero.card_id.clone()),
+                hero_name: Some(hero.name.clone()),
+                health: 20 + seat as i32,
+                armor: seat as i32,
+                tier: 3 + (seat % 3) as u8,
+                alive,
+                placement: if alive { 0 } else { 7 },
+                next: seat == 2,
+                last: seat == 1,
+                seen_turn: if seat == 1 { 2 } else { 0 },
+                seen_tier: 3,
+                ..Default::default()
+            };
+            if seat == 1 {
+                player.last_board.push(ShopMinionSpec {
+                    card_id: Some("BG31_149".to_string()),
+                    name: Some("Bubble Gunner".to_string()),
+                    attack: 2,
+                    health: 3,
+                    ..Default::default()
+                });
+            }
+            if seat == 4
+                && let Some(card_id) = &trinket
+            {
+                player.trinkets.push(ShopLobbyTrinketSpec {
+                    slot: 0,
+                    card_id: Some(card_id.clone()),
+                    name: None,
+                });
+            }
+            spec.lobby.push(player);
+        }
+        spec
+    }
+
+    fn observation(game: &Game) -> Vec<f32> {
+        let mut out = vec![0.0; obs::OBS_SIZE];
+        obs::write(game, ME, &mut out);
+        out
+    }
+
+    #[test]
+    fn a_lobby_block_seats_the_opponents_and_the_option_off_is_unchanged() {
+        let data = Arc::new(Data::bundled());
+        let spec = state(&data);
+
+        let old = load(&data, &spec, None, None, 5, 1, None).game;
+        let off = load_with_lobby(&data, &spec, None, None, 5, 1, None, false).game;
+        assert_eq!(observation(&old), observation(&off));
+
+        let old = observation(&old);
+        assert_eq!(old[obs::SCALAR_ALIVE], 1.0);
+        for seat in 1..PLAYERS {
+            let at = obs::OWN_END + (seat - 1) * obs::OPP_BLOCK;
+            assert_eq!(old[at + obs::OPP_ALIVE], 0.0);
+            assert_eq!(old[at + obs::OPP_HEALTH], 30.0);
+            assert_eq!(old[at + obs::OPP_HERO], 0.0);
+        }
+
+        let game = load_with_lobby(&data, &spec, None, None, 5, 1, None, true).game;
+        let seen = observation(&game);
+        assert_eq!(seen[obs::SCALAR_ALIVE], 7.0);
+        let hero = data
+            .heroes
+            .by_card_id(&data.heroes.heroes[0].card_id)
+            .expect("the first hero");
+        for seat in 1..PLAYERS {
+            let at = obs::OWN_END + (seat - 1) * obs::OPP_BLOCK;
+            let pl = &spec.lobby[seat - 1];
+            assert_eq!(
+                seen[at + obs::OPP_ALIVE],
+                (seat != 3) as u8 as f32,
+                "seat {seat} alive"
+            );
+            assert_eq!(seen[at + obs::OPP_HEALTH], pl.health as f32);
+            assert_eq!(seen[at + obs::OPP_ARMOR], pl.armor as f32);
+            assert_eq!(seen[at + obs::OPP_TIER], pl.tier as f32);
+            assert_eq!(seen[at + obs::OPP_HERO], hero as f32 + 1.0);
+            assert_eq!(seen[at + obs::OPP_NEXT], (seat == 2) as u8 as f32);
+            assert_eq!(seen[at + obs::OPP_LAST], (seat == 1) as u8 as f32);
+            assert_eq!(seen[at + obs::OPP_PLACEMENT], if seat == 3 { 7.0 } else { 0.0 });
+        }
+        let at = obs::OWN_END;
+        assert_eq!(seen[at + obs::OPP_SEEN], 1.0);
+        assert_eq!(seen[at + obs::OPP_TURNS_SINCE], 3.0);
+        assert!(seen[at + obs::OPP_TRIBES..at + obs::OPP_TRIBES + obs::LOBBY_TRIBES]
+            .iter()
+            .sum::<f32>()
+            > 0.0);
+        let at = obs::OWN_END + 3 * obs::OPP_BLOCK;
+        assert_eq!(seen[at + obs::OPP_TRINKET], 1.0);
+    }
 }

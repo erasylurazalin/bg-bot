@@ -1979,6 +1979,10 @@ struct EraTurnPath {
     turn_index: usize,
     turn: u32,
     seed: u64,
+    /// Whether each step seats the turn's `lobby` block instead of the
+    /// sandbox's dead opponents. From `EraReplay.from_file(lobby=True)`;
+    /// `era_replays` leaves it off.
+    lobby: bool,
     /// The real boards the search's own judging fights use, if any.
     boards: Option<Arc<RealBoards>>,
     /// The state the bot decides from.
@@ -2012,13 +2016,14 @@ impl EraTurnPath {
     /// Seat logged step `i` as the state the bot decides from, keeping the
     /// seated step to play it if the bot takes it.
     fn seat_index(&mut self, i: usize) -> Result<(), (String, Vec<String>)> {
-        let seated = bgcore::shop_replay::seat_step(
+        let seated = bgcore::shop_replay::seat_step_with_lobby(
             &self.data,
             &self.ids,
             &self.file,
             &self.file.turns[self.turn_index],
             i,
             self.seed,
+            self.lobby,
         )?;
         if self.reseat {
             // The bot decides from the log's own before-state. The fidelity
@@ -2420,6 +2425,10 @@ struct EraReplay {
     ids: Arc<bgcore::CardIdMap>,
     spec: Arc<bgcore::shop_replay::ShopFileSpec>,
     name: String,
+    /// Whether a `lobby` block is seated in place of the sandbox's dead
+    /// opponents. `from_file` sets it; `live` may override it; every other
+    /// path (the demo dataset, the trinket check, Era's turns) leaves it off.
+    lobby: bool,
     boards: Option<Arc<RealBoards>>,
 }
 
@@ -2459,8 +2468,10 @@ impl EraReplay {
     }
 
     /// Load a single action file without scanning a whole directory.
+    /// `lobby` seats the turn's `lobby` block (the live suggester turns it on).
     #[staticmethod]
-    fn from_file(path: &str, ref_cards: &str) -> PyResult<EraReplay> {
+    #[pyo3(signature = (path, ref_cards, lobby=false))]
+    fn from_file(path: &str, ref_cards: &str, lobby: bool) -> PyResult<EraReplay> {
         let data = Arc::new(Data::bundled());
         let ids = Arc::new(
             bgcore::CardIdMap::parse(
@@ -2490,14 +2501,18 @@ impl EraReplay {
             ids,
             spec: Arc::new(spec),
             name,
+            lobby,
             boards: None,
         })
     }
 
     /// Seat the latest live mid-turn position (after all completed actions, plus
     /// any unanswered `pending_choice`). Defaults to the file's last turn.
-    #[pyo3(signature = (turn=None, seed=1))]
-    fn live(&self, turn: Option<u32>, seed: u64) -> PyResult<LivePosition> {
+    /// `lobby` overrides what `from_file` set: true seats the turn's `lobby`
+    /// block, false leaves the sandbox's dead opponents. None keeps `from_file`.
+    #[pyo3(signature = (turn=None, seed=1, lobby=None))]
+    fn live(&self, turn: Option<u32>, seed: u64, lobby: Option<bool>) -> PyResult<LivePosition> {
+        let seat_lobby = lobby.unwrap_or(self.lobby);
         let turn_spec = match turn {
             Some(t) => self
                 .spec
@@ -2512,28 +2527,35 @@ impl EraReplay {
                 .ok_or_else(|| PyValueError::new_err(format!("{} has no turns", self.name)))?,
         };
         let t = turn_spec.turn;
-        let (game, missing) =
-            bgcore::shop_replay::seat_live(&self.data, &self.ids, &self.spec, turn_spec, seed)
-                .map_err(|(why, miss)| {
-                    PyValueError::new_err(format!(
-                        "turn {t} cannot be seated live: {why}{}",
-                        if miss.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" ({})", miss.join("; "))
-                        }
-                    ))
-                })?;
+        let (game, missing) = bgcore::shop_replay::seat_live_with_lobby(
+            &self.data,
+            &self.ids,
+            &self.spec,
+            turn_spec,
+            seed,
+            seat_lobby,
+        )
+        .map_err(|(why, miss)| {
+            PyValueError::new_err(format!(
+                "turn {t} cannot be seated live: {why}{}",
+                if miss.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", miss.join("; "))
+                }
+            ))
+        })?;
         let prev_action = if turn_spec.actions.is_empty() {
             None
         } else {
-            bgcore::shop_replay::seat_step(
+            bgcore::shop_replay::seat_step_with_lobby(
                 &self.data,
                 &self.ids,
                 &self.spec,
                 turn_spec,
                 turn_spec.actions.len() - 1,
                 seed,
+                seat_lobby,
             )
             .ok()
             .and_then(|s| s.decision_index())
@@ -2560,13 +2582,14 @@ impl EraReplay {
             .iter()
             .position(|t| t.turn == turn)
             .ok_or_else(|| PyValueError::new_err(format!("{} has no turn {turn}", self.name)))?;
-        let seated = bgcore::shop_replay::seat_step(
+        let seated = bgcore::shop_replay::seat_step_with_lobby(
             &self.data,
             &self.ids,
             &self.spec,
             &self.spec.turns[turn_index],
             0,
             seed,
+            self.lobby,
         )
         .map_err(|(why, miss)| {
             PyValueError::new_err(format!(
@@ -2587,6 +2610,7 @@ impl EraReplay {
             turn_index,
             turn,
             seed,
+            lobby: self.lobby,
             boards: self.boards.clone(),
             game,
             step: 0,
@@ -2721,6 +2745,7 @@ fn era_replays(
                 ids: ids.clone(),
                 spec: Arc::new(spec),
                 name,
+                lobby: false,
                 boards: boards.clone(),
             }
         })

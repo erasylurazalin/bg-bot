@@ -532,7 +532,14 @@ def seat_action_file(
         prev_label = _describe_logged_step(actions[-1])
 
     if hasattr(bgpy.EraReplay, "from_file") and hasattr(bgpy.EraReplay, "live"):
-        replay = bgpy.EraReplay.from_file(str(action_json_path), str(ref_cards))
+        # The suggester is the one path that shows the real lobby: seat the
+        # action file's `lobby` block so the observation has the seven
+        # opponents the bot trained against. An older wheel has no such
+        # argument, and then the fallback below keeps the dead-seat sandbox.
+        try:
+            replay = bgpy.EraReplay.from_file(str(action_json_path), str(ref_cards), lobby=True)
+        except TypeError:
+            replay = bgpy.EraReplay.from_file(str(action_json_path), str(ref_cards))
         try:
             pos = replay.live(turn=target_turn_spec["turn"], seed=seed)
         except ValueError as err:
