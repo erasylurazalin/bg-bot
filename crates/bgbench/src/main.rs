@@ -1336,6 +1336,7 @@ fn main() {
         Some("tracker") => tracker::run(&args),
         Some("check-actions") => check_actions::run(&args),
         Some("collect-actions") => collect_actions::run(&args),
+        Some("live-actions") => collect_actions::run(&args),
         Some("collect-boards") => collect_boards::run(&args),
         Some("games") => {
             bench_games(num(10), real, load_planner_arg(&args), scenario, era)

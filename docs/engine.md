@@ -2439,6 +2439,23 @@ seeded from the turn's seed (a repeat's).
   and 9 are mostly lost that way), and a step the loader cannot seat ends the
   path mid-turn; the report counts both.
 
+## Live move suggester (`train/live/suggest.py`)
+
+A passive helper for `bg-overlay` during hand-played games. It never sends input to Hearthstone or modifies game files.
+
+- **How it works:** watches the newest `Hearthstone_*/Power.log` under `--logs` (default `~/hearthstone-linux/hearthstone/Logs`) through `./target/release/bgbench live-actions --live-log`, seats the latest shop state (including Turn 1 before the first fight, step 0 before the turn's first action, and unanswered Discover / Trinket / Power offers via `pending_choice`) using `bgcore::shop_replay::seat_live` and `bgpy.EraReplay.from_file().live()`, evaluates the policy checkpoint on CPU (`torch.set_num_threads(2)`), and serves v1 JSON lines (`hello`, `decision`, `unsupported`, `game_end`) over `$XDG_RUNTIME_DIR/bg-suggest.sock`.
+- **Running it:**
+
+```sh
+.venv/bin/python train/live/suggest.py --ckpt train/runs/r1113-a1/best.pt [--socket PATH] [--logs DIR] [--top 3]
+```
+
+  Use `--once LOG` to score one log snapshot and print a single JSON event. Requires rebuilt `bgbench` (`live-actions`) and `bgpy` (`EraReplay.live` / `LivePosition`).
+- **What it cannot see (and `value: null`):**
+  - `value` is sent as `null`: trained checkpoints estimate turn-discounted return (`gamma=0.97` minus move costs and deadline penalties) rather than 1..8 placement, and `shop_replay::load` runs in a single-player sandbox (`SCALAR_ALIVE = 1`) where real lobby outcomes do not apply.
+  - All seven opponents' leaderboard scalars (`OPP_ALIVE`, `OPP_HEALTH`, `OPP_ARMOR`, `OPP_TIER`, `OPP_HERO`, `OPP_TRINKET`, `OPP_FIGHTS`, `OPP_NEXT`) are zeroed in `new_sandbox_with_hero`; only the most recently seen opponent board (`OPP_LAST`, `OPP_TRIBES`, and slot 1 minions) is filled when present.
+  - `SCALAR_PARADOX` is drawn by the sandbox rather than parsed from `Power.log`, `dark_gift_uses` / `dark_gift_pressed` start at engine defaults, `SCALAR_LOBBY` holds only single-tribe minion types seen in the Tavern so far, `SCALAR_ACTIONS_LEFT` resets on each seated step, and remaining pool counts are omitted by `obs.rs` (only `SLOT_FROM_POOL` per card slot is present).
+
 ## Adding a card
 
 See `docs/adding-cards.md` (hook index, recipes, new-tribe checklist, test helpers, gotchas).

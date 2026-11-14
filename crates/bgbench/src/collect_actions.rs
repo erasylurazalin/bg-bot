@@ -34,7 +34,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Write};
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -195,6 +195,22 @@ pub fn run(args: &[String]) {
     let home = home();
     let out = flag(args, "--out", "boards/actions");
     let cards = flag(args, "--cards", "ref/hsjson-cards.json");
+    let live_log = flag(args, "--live-log", "");
+    let live_once = flag(args, "--live-once", "");
+    let label = flag(args, "--label", "");
+    if !live_log.is_empty() || !live_once.is_empty() {
+        let follow = !live_log.is_empty();
+        let path = if follow { &live_log } else { &live_once };
+        if let Err(e) = collect_live(Path::new(&out), &cards, Path::new(path), &label, follow) {
+            eprintln!("{e}");
+            exit(2);
+        }
+        return;
+    }
+    if args.get(1).map(String::as_str) == Some("live-actions") {
+        eprintln!("usage: bgbench live-actions --live-log <path> | --live-once <path> [--out <dir>] [--label <name>] [--cards <path>]");
+        exit(2);
+    }
     let archive = flag(args, "--archive", &text(&home.join(ARCHIVE)));
     let laptop = flag(args, "--laptop", &text(&home.join(LAPTOP_ARCHIVE)));
     let rewrite = args.iter().any(|a| a == "--rewrite");
@@ -511,6 +527,7 @@ struct Collector {
     lobby: BTreeMap<String, BTreeSet<String>>,
     /// The log folder this run's files are named after, for that warning.
     label: String,
+    game_complete: bool,
 }
 
 impl Collector {
@@ -542,6 +559,7 @@ impl Collector {
             tribes: BTreeSet::new(),
             lobby: BTreeMap::new(),
             label: label.to_string(),
+            game_complete: false,
         };
         collector.reset();
         collector
@@ -586,6 +604,7 @@ impl Collector {
         self.options = Options::default();
         self.choice = None;
         self.ended = false;
+        self.game_complete = false;
         self.last = None;
         self.last_gold = 0;
         self.last_health = 0;
@@ -1061,6 +1080,8 @@ impl Handler for Collector {
             self.close_step(game);
             self.ended = true;
             self.open_step(game, step_of("end_turn"), None);
+        } else if tag == "STATE" && value.as_text() == Some("COMPLETE") {
+            self.game_complete = true;
         }
     }
 
@@ -3149,6 +3170,202 @@ fn read_log(path: &Path, cards: &Cards, label: &str) -> Result<Vec<Option<Json>>
     }
     collector.last_game();
     Ok(collector.games)
+}
+
+impl Collector {
+    fn my_place(&self) -> Option<i64> {
+        let game = self.log.game()?;
+        let p = my_player(game)?;
+        if p.text("PLAYSTATE") == "WON" {
+            return Some(1);
+        }
+        let place = p.int("PLAYER_LEADERBOARD_PLACE");
+        (place > 0).then_some(place)
+    }
+
+    fn snapshot_live(&self) -> Option<(usize, u32, usize, bool, usize, Json)> {
+        let game = self.log.game()?;
+        if !game.game_type.starts_with("GT_BATTLEGROUNDS") || self.game_complete {
+            return None;
+        }
+        let turn_obj = self.turn.as_ref()?;
+        if self.ended || field(turn_obj, "start").map(Json::is_null).unwrap_or(true) {
+            return None;
+        }
+        let mut live_turn = turn_obj.clone();
+        set(&mut live_turn, "end", Json::Null);
+        let choice_len = self.choice.as_ref().map_or(0, |c| c.entities.len());
+        let has_choice = self.pending.is_none() && choice_len > 0;
+        if has_choice {
+            put(&mut live_turn, "pending_choice", Json::Obj(self.choice_step(game)));
+        }
+        let step_count = parts_of(turn_obj, "actions").len();
+        let turn_num = field(turn_obj, "turn")
+            .and_then(Json::as_int)
+            .unwrap_or(0) as u32;
+        let gi = self.games.len() + 1;
+
+        let mut turns = match self.record.as_obj().and_then(|o| field(o, "turns")) {
+            Some(Json::Arr(existing)) => existing.clone(),
+            _ => Vec::new(),
+        };
+        turns.push(Json::Obj(live_turn));
+
+        let mut fields: Obj = Vec::with_capacity(7);
+        put(&mut fields, "source", str_(&self.label));
+        put(&mut fields, "game", Json::Int(gi as i64));
+        put(&mut fields, "turns", Json::Arr(turns));
+        put(&mut fields, "hero", self.my_hero(game));
+        put(&mut fields, "unread", self.unread.to_json());
+        put(
+            &mut fields,
+            "tribes",
+            Json::Arr(self.tribes.iter().map(|t| str_(t)).collect()),
+        );
+        put(
+            &mut fields,
+            "lobby",
+            Json::Arr(self.lobby.keys().map(|t| str_(t)).collect()),
+        );
+        Some((gi, turn_num, step_count, has_choice, choice_len, Json::Obj(fields)))
+    }
+}
+
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn collect_live(
+    out: &Path,
+    cards_path: &str,
+    path: &Path,
+    label_arg: &str,
+    follow: bool,
+) -> Result<(), String> {
+    let cards = Cards::load(cards_path)?;
+    fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let label = if !label_arg.is_empty() {
+        label_arg.to_string()
+    } else {
+        path.parent()
+            .and_then(|p| p.file_name())
+            .map(|s| s.to_string_lossy().into_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "live".to_string())
+    };
+    let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut reader = BufReader::with_capacity(1 << 20, file);
+    let mut collector = Collector::new(cards.clone(), &label);
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut offset: u64 = 0;
+    let mut saw_data = false;
+    let mut last_decision: Option<(usize, u32, usize, bool, usize)> = None;
+    let mut last_ended_game: Option<usize> = None;
+    let mut stdout = io::stdout();
+
+    loop {
+        let prev_len = bytes.len();
+        let read = reader
+            .read_until(b'\n', &mut bytes)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        if read > 0 {
+            offset += read as u64;
+            if !follow || bytes.ends_with(b"\n") {
+                let line = String::from_utf8_lossy(&bytes);
+                collector.feed(&line);
+                bytes.clear();
+                saw_data = true;
+            }
+            continue;
+        }
+        // Keep partial trailing line buffered until its newline is flushed.
+        if bytes.len() == prev_len && !bytes.is_empty() && !follow {
+            let line = String::from_utf8_lossy(&bytes);
+            collector.feed(&line);
+            bytes.clear();
+            saw_data = true;
+        }
+        if collector.game_complete
+            && collector
+                .log
+                .game()
+                .is_some_and(|g| g.game_type.starts_with("GT_BATTLEGROUNDS"))
+        {
+            let gi = collector.games.len() + 1;
+            if last_ended_game != Some(gi) {
+                let game_id = format!("{label}-g{gi}");
+                let place = collector
+                    .my_place()
+                    .map_or_else(|| "null".to_string(), |p| p.to_string());
+                writeln!(
+                    stdout,
+                    "{{\"event\":\"game_end\",\"game\":{},\"place\":{place}}}",
+                    json_escape(&game_id)
+                )
+                .map_err(|e| format!("stdout: {e}"))?;
+                stdout.flush().map_err(|e| format!("stdout: {e}"))?;
+                last_ended_game = Some(gi);
+            }
+        } else if saw_data {
+            let waiting_choice_entities =
+                collector.pending.is_none() && collector.choice.as_ref().is_some_and(|c| c.entities.is_empty());
+            let settled = !follow || (collector.pending.is_none() && !waiting_choice_entities);
+            if settled && let Some((gi, turn, step, has_choice, choice_len, doc)) = collector.snapshot_live() {
+                let key = (gi, turn, step, has_choice, choice_len);
+                if last_decision != Some(key) {
+                    let game_id = format!("{label}-g{gi}");
+                    let json_path = out.join(format!("{game_id}.json"));
+                    let tmp_path = out.join(format!(".{game_id}.json.tmp"));
+                    fs::write(&tmp_path, render(&doc))
+                        .map_err(|e| format!("{}: {e}", tmp_path.display()))?;
+                    fs::rename(&tmp_path, &json_path)
+                        .map_err(|e| format!("{}: {e}", json_path.display()))?;
+                    let file_str = json_path.to_string_lossy();
+                    writeln!(
+                        stdout,
+                        "{{\"event\":\"decision\",\"game\":{},\"file\":{},\"turn\":{turn},\"step\":{step},\"pending_choice\":{has_choice}}}",
+                        json_escape(&game_id),
+                        json_escape(&file_str),
+                    )
+                    .map_err(|e| format!("stdout: {e}"))?;
+                    stdout.flush().map_err(|e| format!("stdout: {e}"))?;
+                    last_decision = Some(key);
+                }
+            }
+        }
+        if !follow {
+            break;
+        }
+        saw_data = false;
+        if let Ok(meta) = fs::metadata(path)
+            && meta.len() < offset
+            && let Ok(reopened) = File::open(path)
+        {
+            reader = BufReader::with_capacity(1 << 20, reopened);
+            collector = Collector::new(cards.clone(), &label);
+            bytes.clear();
+            offset = 0;
+            last_decision = None;
+            last_ended_game = None;
+            continue;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

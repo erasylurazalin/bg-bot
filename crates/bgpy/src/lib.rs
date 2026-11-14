@@ -2452,6 +2452,102 @@ impl EraReplay {
             .collect()
     }
 
+    /// Every logged turn in the file's order, including an active live turn
+    /// whose `actions` is still empty (step 0).
+    fn all_turns(&self) -> Vec<u32> {
+        self.spec.turns.iter().map(|t| t.turn).collect()
+    }
+
+    /// Load a single action file without scanning a whole directory.
+    #[staticmethod]
+    fn from_file(path: &str, ref_cards: &str) -> PyResult<EraReplay> {
+        let data = Arc::new(Data::bundled());
+        let ids = Arc::new(
+            bgcore::CardIdMap::parse(
+                &std::fs::read_to_string(ref_cards)
+                    .map_err(|e| PyValueError::new_err(format!("{ref_cards}: {e}")))?,
+            )
+            .map_err(PyValueError::new_err)?,
+        );
+        let p = std::path::Path::new(path);
+        let name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(path)
+            .to_string();
+        let text = std::fs::read_to_string(p)
+            .map_err(|e| PyValueError::new_err(format!("{path}: {e}")))?;
+        let mut specs = bgcore::shop_replay::parse_action_files(&[(name, text)])
+            .map_err(PyValueError::new_err)?;
+        bgcore::shop_replay::seat_taught_spells(&mut specs, &ids);
+        let spec = specs
+            .into_iter()
+            .next()
+            .ok_or_else(|| PyValueError::new_err(format!("{path}: no game parsed")))?;
+        let name = spec.file();
+        Ok(EraReplay {
+            data,
+            ids,
+            spec: Arc::new(spec),
+            name,
+            boards: None,
+        })
+    }
+
+    /// Seat the latest live mid-turn position (after all completed actions, plus
+    /// any unanswered `pending_choice`). Defaults to the file's last turn.
+    #[pyo3(signature = (turn=None, seed=1))]
+    fn live(&self, turn: Option<u32>, seed: u64) -> PyResult<LivePosition> {
+        let turn_spec = match turn {
+            Some(t) => self
+                .spec
+                .turns
+                .iter()
+                .find(|x| x.turn == t)
+                .ok_or_else(|| PyValueError::new_err(format!("{} has no turn {t}", self.name)))?,
+            None => self
+                .spec
+                .turns
+                .last()
+                .ok_or_else(|| PyValueError::new_err(format!("{} has no turns", self.name)))?,
+        };
+        let t = turn_spec.turn;
+        let (game, missing) =
+            bgcore::shop_replay::seat_live(&self.data, &self.ids, &self.spec, turn_spec, seed)
+                .map_err(|(why, miss)| {
+                    PyValueError::new_err(format!(
+                        "turn {t} cannot be seated live: {why}{}",
+                        if miss.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({})", miss.join("; "))
+                        }
+                    ))
+                })?;
+        let prev_action = if turn_spec.actions.is_empty() {
+            None
+        } else {
+            bgcore::shop_replay::seat_step(
+                &self.data,
+                &self.ids,
+                &self.spec,
+                turn_spec,
+                turn_spec.actions.len() - 1,
+                seed,
+            )
+            .ok()
+            .and_then(|s| s.decision_index())
+        };
+        Ok(LivePosition {
+            data: self.data.clone(),
+            game,
+            turn: t,
+            step: turn_spec.actions.len(),
+            missing,
+            prev_action,
+        })
+    }
+
     /// The turn seated as a path: the position at its first step, and the
     /// machinery to play it with the log's own outcomes. `seed` is the turn's
     /// own (a repeat's seed), and seeds the engine's draws once the path is
@@ -2506,6 +2602,94 @@ impl EraReplay {
             levelled: false,
             missing,
         })
+    }
+}
+
+/// A live mid-turn position seated directly for observation and policy scoring.
+#[pyclass]
+struct LivePosition {
+    data: Arc<Data>,
+    game: Game,
+    turn: u32,
+    step: usize,
+    missing: Vec<String>,
+    prev_action: Option<usize>,
+}
+
+#[pymethods]
+impl LivePosition {
+    #[getter]
+    fn turn(&self) -> u32 {
+        self.turn
+    }
+
+    #[getter]
+    fn step(&self) -> usize {
+        self.step
+    }
+
+    #[getter]
+    fn gold(&self) -> u8 {
+        self.game.players[ME].gold
+    }
+
+    #[getter]
+    fn tier(&self) -> u8 {
+        self.game.players[ME].tier
+    }
+
+    #[getter]
+    fn missing(&self) -> Vec<String> {
+        self.missing.clone()
+    }
+
+    #[getter]
+    fn prev_action(&self) -> Option<usize> {
+        self.prev_action
+    }
+
+    #[getter]
+    fn actions_left(&self) -> usize {
+        (self.data.rules.max_actions_per_turn as usize)
+            .saturating_sub(self.game.players[ME].actions as usize)
+    }
+
+    fn card_names(&self) -> Vec<String> {
+        self.data.cards.cards.iter().map(|c| c.name.clone()).collect()
+    }
+
+    fn power_names(&self) -> Vec<String> {
+        self.data.heroes.powers.iter().map(|p| p.name.clone()).collect()
+    }
+
+    fn hero_names(&self) -> Vec<String> {
+        self.data.heroes.heroes.iter().map(|h| h.name.clone()).collect()
+    }
+
+    fn trinket_names(&self) -> Vec<String> {
+        self.data.trinkets.trinkets.iter().map(|t| t.name.clone()).collect()
+    }
+
+    fn observe(
+        &self,
+        mut obs: PyReadwriteArray1<f32>,
+        mut mask: PyReadwriteArray1<bool>,
+    ) -> PyResult<()> {
+        let o = obs.as_slice_mut()?;
+        if o.len() != OBS_SIZE {
+            return Err(PyValueError::new_err("one observation"));
+        }
+        obs::write(&self.game, ME, o);
+        let m: &mut [bool; N_ACTIONS] = mask
+            .as_slice_mut()?
+            .try_into()
+            .map_err(|_| PyValueError::new_err("one legal mask"))?;
+        self.game.legal_mask(m);
+        Ok(())
+    }
+
+    fn describe(&self) -> Describe {
+        describe_player(&self.game, ME)
     }
 }
 
@@ -2798,6 +2982,7 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SearchBatch>()?;
     m.add_class::<EraTurnPath>()?;
     m.add_class::<EraReplay>()?;
+    m.add_class::<LivePosition>()?;
     m.add_class::<Planner>()?;
     m.add_class::<RealFights>()?;
     m.add_class::<fight::BoardFight>()?;

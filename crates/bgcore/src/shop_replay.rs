@@ -349,6 +349,8 @@ pub struct ShopPlace {
     pub index: Option<u8>,
     #[serde(default)]
     pub slot: Option<u8>,
+    #[serde(default)]
+    pub cost: Option<i32>,
     /// The stats a changed card had and has: a step's `changed` list writes
     /// each card as `was` and `now`. The Magnetic host is the card the played
     /// minion's own stats went into (`magnetize_host`).
@@ -497,6 +499,8 @@ pub struct ShopTurnSpec {
     pub actions: Vec<ShopStepSpec>,
     #[serde(default)]
     pub end: Option<ShopStateSpec>,
+    #[serde(default)]
+    pub pending_choice: Option<ShopStepSpec>,
 }
 
 /// One game as `boards/actions/` writes it.
@@ -3402,26 +3406,40 @@ fn pick_landing<'a>(
 /// picked (`Hearthstone_2026_11_02_00_10_22-g6` turn 7 step 2). The log's step
 /// says whether the Coin came (`entered`), so it says which index the game
 /// counted right.
+fn holmes_offer_pending(
+    data: &Data,
+    ids: &CardIdMap,
+    step: &ShopStepSpec,
+) -> Option<[CardId; 2]> {
+    let source = step.source.as_ref()?;
+    let i = resolve_power(data, source)?;
+    match data.heroes.power(i).effect {
+        crate::heroes::PowerEffect::DetectiveForHire { .. } => {}
+        _ => return None,
+    }
+    if step.options.len() != 2 || step.kind.as_deref() != Some("discover") {
+        return None;
+    }
+    Some([
+        resolve_card(data, ids, &step.options[0])?,
+        resolve_card(data, ids, &step.options[1])?,
+    ])
+}
+
 fn holmes_offer_answer(
     data: &Data,
     ids: &CardIdMap,
     step: &ShopStepSpec,
 ) -> Option<([CardId; 2], u8)> {
+    let cards = holmes_offer_pending(data, ids, step)?;
     let source = step.source.as_ref()?;
     let i = resolve_power(data, source)?;
     let coin = match data.heroes.power(i).effect {
         crate::heroes::PowerEffect::DetectiveForHire { coin } => coin,
         _ => return None,
     };
-    if step.options.len() != 2 || step.kind.as_deref() != Some("discover") {
-        return None;
-    }
     let picked = step.picked.as_ref()?.id;
     let at = step.options.iter().position(|o| o.id == picked)?;
-    let cards = [
-        resolve_card(data, ids, &step.options[0])?,
-        resolve_card(data, ids, &step.options[1])?,
-    ];
     let got = step
         .entered
         .iter()
@@ -3547,15 +3565,43 @@ fn force_offer(
         .iter()
         .position(|o| o.id == picked.id)
         .ok_or_else(|| "the pick is not one of the options".to_string())?;
+    install_offer(
+        data,
+        ids,
+        game,
+        step,
+        OfferContext { turn, turned, picked: Some((picked, at)) },
+        missing,
+    )?;
+    Ok(at)
+}
+
+struct OfferContext<'a> {
+    turn: u32,
+    turned: bool,
+    picked: Option<(&'a ShopPlace, usize)>,
+}
+
+fn install_offer(
+    data: &Data,
+    ids: &CardIdMap,
+    game: &mut Game,
+    step: &ShopStepSpec,
+    ctx: OfferContext<'_>,
+    missing: &mut Vec<String>,
+) -> Result<(), String> {
+    let OfferContext { turn, turned, picked } = ctx;
     let kind = offer_kind(data, step);
     if kind == OfferKind::Trinket {
         // A trinket offer, whether the log writes it as a pick or as the
         // Discover a power's offer deals. The engine's offer holds trinket
         // table indices and their prices. The cost the pick was sold at is not
-        // in the options, only what the step paid: the picked one carries
-        // that, the others nothing.
-        let paid = step.paid.map_or(0, |p| p.gold);
-        let picked_id = picked.card_id.as_deref().unwrap_or_default();
+        // in the options when picked, only what the step paid: the picked one
+        // carries that, the others nothing. Unanswered offers carry option cost.
+        let (paid, picked_id, at_opt) = match picked {
+            Some((p, at)) => (step.paid.map_or(0, |paid| paid.gold), p.card_id.as_deref().unwrap_or_default(), Some(at)),
+            None => (0, "", None),
+        };
         // The state the pick left says which slot it filled. A trinket pick
         // carries its own `slot_kind`; a power's offer does not, and after
         // the pick the state's list places it (the loader reads that list the
@@ -3590,7 +3636,11 @@ fn force_offer(
                     option.name.clone().unwrap_or_default()
                 )
             })?;
-            let price = if k == at { paid.clamp(0, u8::MAX as i32) as u8 } else { 0 };
+            let price = if let Some(at) = at_opt {
+                if k == at { paid.clamp(0, u8::MAX as i32) as u8 } else { 0 }
+            } else {
+                option.cost.unwrap_or(0).clamp(0, u8::MAX as i32) as u8
+            };
             offers.push((index, price));
         }
         let pl = &mut game.players[ME];
@@ -3598,18 +3648,19 @@ fn force_offer(
             let _ = pl.trinket_offer.try_push((index, price));
         }
         pl.trinket_offer_slot = slot;
-        return Ok(at);
+        return Ok(());
     }
     if kind == OfferKind::Power {
         // A Hero Power Discover or a chooser (Power of the Storm, Unmasked
         // Identity, King of Duality, Embrace the Elements, Dungar's Gryphon):
         // the engine's offer holds power table indices, answered with
         // `Action::Choose`.
-        let picked_id = picked.card_id.as_deref().unwrap_or_default();
-        let second = step
-            .after
-            .as_ref()
-            .is_some_and(|after| power_offer_second(after, picked_id));
+        let picked_id = picked.and_then(|(p, _)| p.card_id.as_deref()).unwrap_or_default();
+        let second = picked.is_some()
+            && step
+                .after
+                .as_ref()
+                .is_some_and(|after| power_offer_second(after, picked_id));
         let mut offers = Vec::new();
         for option in &step.options {
             let index = resolve_power(data, option).ok_or_else(|| {
@@ -3629,7 +3680,7 @@ fn force_offer(
         // (King of Duality's second), and that step seats its own offer, so
         // the engine must not deal another one here.
         pl.power_offer_left = 0;
-        return Ok(at);
+        return Ok(());
     }
     let mut cards = Vec::new();
     for option in &step.options {
@@ -3648,9 +3699,14 @@ fn force_offer(
     let pl = &mut game.players[ME];
     // Detective for Hire's two cards are a guess, not a Discover: the engine
     // keeps them in its own offer and the pick lands nothing but the Coin.
-    if let Some((cards, correct)) = holmes_offer_answer(data, ids, step) {
-        pl.holmes_offer = Some((cards, correct));
-        return Ok(at);
+    if picked.is_some() {
+        if let Some((cards, correct)) = holmes_offer_answer(data, ids, step) {
+            pl.holmes_offer = Some((cards, correct));
+            return Ok(());
+        }
+    } else if let Some(cards) = holmes_offer_pending(data, ids, step) {
+        pl.holmes_offer = Some((cards, 0));
+        return Ok(());
     }
     let dark = step.kind.as_deref() == Some("dark_gift");
     // The options as they stood: each becomes the minion the log shows (its
@@ -3698,13 +3754,22 @@ fn force_offer(
                 _ => None,
             })
         });
-    if step.step == "discover"
-        && let (Some((a, h)), Some(m)) = (set_stats, ready.get_mut(at))
-    {
-        let (wa, wh) = pl.wherever_stats(&data.cards, m);
-        m.attack = a + wa;
-        m.health = h + wh;
-        m.vanguard_aura = m.vanguard_pair(&data.cards, pl.vanguard_health_on());
+    if step.step == "discover" && let Some((a, h)) = set_stats {
+        let apply_set_stats = |m: &mut Minion| {
+            let (wa, wh) = pl.wherever_stats(&data.cards, m);
+            m.attack = a + wa;
+            m.health = h + wh;
+            m.vanguard_aura = m.vanguard_pair(&data.cards, pl.vanguard_health_on());
+        };
+        if let Some((_, at)) = picked {
+            if let Some(m) = ready.get_mut(at) {
+                apply_set_stats(m);
+            }
+        } else {
+            for m in &mut ready {
+                apply_set_stats(m);
+            }
+        }
     }
     // A pick that lands on the board or in a Tavern slot (a transform, or
     // Galakrond's Greed taking the slot) goes through the engine's transform
@@ -3724,7 +3789,7 @@ fn force_offer(
             pl.dark_offer_turn = turn;
             pl.dark_offer_golden = false;
         }
-        return Ok(at);
+        return Ok(());
     }
     // The offer holds one pool copy per minion option (three for a Golden Dark
     // Gift offer, as the engine's own offers do), so the pick and the copies
@@ -3773,7 +3838,7 @@ fn force_offer(
     if cards.is_empty() {
         return Err("the step offers nothing".to_string());
     }
-    Ok(at)
+    Ok(())
 }
 
 /// The board slot a played minion went into, from the state the step left.
@@ -4160,11 +4225,20 @@ fn logged_choose_one(
     }
 }
 
+struct StepStateAt<'a> {
+    file: &'a ShopFileSpec,
+    before: &'a ShopStateSpec,
+    turn: u32,
+    turn_index: usize,
+    index: usize,
+    seed: u64,
+}
+
 /// Seat one logged step: everything `run_once` does before it plays the step's
 /// actions. The error is what made the step impossible, with what the loader
 /// could not use.
-fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<SeatedStep, StepError> {
-    let OneStep { file, before, step, turn, turn_index, index, armed, last_spell } = *one;
+fn load_step_state(data: &Arc<Data>, ids: &CardIdMap, at: StepStateAt<'_>) -> LoadedShop {
+    let StepStateAt { file, before, turn, turn_index, index, seed } = at;
     let hero = file.hero(data, before);
     // The start of a turn follows the turn before's last state, which one
     // start-of-turn trigger needs (a chosen power's countdown).
@@ -4172,16 +4246,8 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
         .then(|| state_before_turn(file, turn_index))
         .flatten();
     let mut loaded = load(data, before, hero, file.lobby(), turn, seed, previous);
-    // The state may hold three copies a summon left on the board before the
-    // game's own triple check ran: the check runs as this step's action ends
-    // when the step's own states say it did (`board_triple_due`).
-    if let Some(after) = step.after.as_ref()
-        && board_triple_due(before, after)
-    {
-        loaded.game.note_triples_due();
-    }
-    loaded.game.players[ME].tp.whistle = armed;
-    loaded.game.players[ME].last_spell = last_spell;
+    loaded.game.players[ME].tp.whistle = whistle_armed(file, turn_index, index);
+    loaded.game.players[ME].last_spell = last_tavern_spell(data, ids, file, turn_index, index);
     // The minions this turn has already bought, for Glaive Ricochet's plain
     // copy of one of them.
     loaded.game.players[ME].recent_buys.clear();
@@ -4210,6 +4276,26 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
     // (`Minion.doomed`): no state carries the mark, and the turn's own pick
     // says which card has it.
     seat_tomb_turning_pick(data, ids, &mut loaded, file, turn_index, index);
+    loaded
+}
+
+fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<SeatedStep, StepError> {
+    let OneStep { file, before, step, turn, turn_index, index, armed, last_spell } = *one;
+    let mut loaded = load_step_state(
+        data,
+        ids,
+        StepStateAt { file, before, turn, turn_index, index, seed },
+    );
+    // The state may hold three copies a summon left on the board before the
+    // game's own triple check ran: the check runs as this step's action ends
+    // when the step's own states say it did (`board_triple_due`).
+    if let Some(after) = step.after.as_ref()
+        && board_triple_due(before, after)
+    {
+        loaded.game.note_triples_due();
+    }
+    loaded.game.players[ME].tp.whistle = armed;
+    loaded.game.players[ME].last_spell = last_spell;
     // What the play behind this pick still owed it, and no state carries: the
     // played minion's "after you play an X" triggers (an Imposing
     // Percussionist's Wrath Weavers) and a Turbo Hogrider's Gems for a Choose
@@ -4981,6 +5067,43 @@ pub fn seat_step(
     };
     let seated = seat(data, ids, &one, seed)?;
     Ok(seated)
+}
+
+/// Seat a live mid-turn position at the tail of `turn` (after all completed
+/// actions, plus any open unanswered `pending_choice`).
+pub fn seat_live(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    seed: u64,
+) -> Result<(Game, Vec<String>), StepError> {
+    let i = turn.actions.len();
+    let Some(before) = state_before(turn, i) else {
+        return Err((
+            "no state before the live step (the file has no state before it to load)".to_string(),
+            Vec::new(),
+        ));
+    };
+    let turn_index = file.turns.iter().position(|t| t.turn == turn.turn).unwrap_or(0);
+    let mut loaded = load_step_state(
+        data,
+        ids,
+        StepStateAt { file, before, turn: turn.turn, turn_index, index: i, seed },
+    );
+    let mut missing = std::mem::take(&mut loaded.missing);
+    if let Some(choice) = turn.pending_choice.as_ref() {
+        install_offer(
+            data,
+            ids,
+            &mut loaded.game,
+            choice,
+            OfferContext { turn: turn.turn, turned: false, picked: None },
+            &mut missing,
+        )
+        .map_err(|why| (why, missing.clone()))?;
+    }
+    Ok((loaded.game, missing))
 }
 
 /// The Warband Whistle: its pick makes the next Refresh deal plain copies of
