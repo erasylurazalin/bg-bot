@@ -349,14 +349,25 @@ class PriorDecision:
     labels: dict[int, str]
 
 
+def zero_opp_heroes(obs: np.ndarray) -> None:
+    """Zero each opponent's hero and trinkets. Networks trained with lineup 1,0,0,0,0,7
+    play seven real-board seats, which have no hero and no trinkets, so they have only
+    ever seen 0 there; the live lobby would fill them with ids the network never saw."""
+    for o in range(7):
+        base = bgpy.OWN_END + o * bgpy.OPP_BLOCK
+        obs[base + bgpy.OPP_HERO] = 0.0
+        obs[base + bgpy.OPP_TRINKET:base + bgpy.OPP_TRINKET + 3] = 0.0
+
+
 class PolicyScorer:
     """CPU policy scorer matching fixed_eval / demo_dataset masking."""
 
-    def __init__(self, ckpt_path: Path, top_k: int = 3):
+    def __init__(self, ckpt_path: Path, top_k: int = 3, keep_opp_heroes: bool = False):
         torch.set_num_threads(2)
         self.ckpt_path = resolve_path(ckpt_path)
         self.ckpt_name = ckpt_display_name(self.ckpt_path)
         self.top_k = max(1, int(top_k))
+        self.keep_opp_heroes = keep_opp_heroes
         self.dev = torch.device("cpu")
         info = fe.load_ckpt(str(self.ckpt_path), self.dev)
         if info["n_comps"]:
@@ -396,6 +407,8 @@ class PolicyScorer:
         obs_np = np.zeros(bgpy.OBS_SIZE, dtype=np.float32)
         mask_np = np.zeros(bgpy.N_ACTIONS, dtype=bool)
         pos.observe(obs_np, mask_np)
+        if not self.keep_opp_heroes:
+            zero_opp_heroes(obs_np)
 
         if not mask_np.any():
             raise UnsupportedPosition("no legal actions in this position")
@@ -936,6 +949,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--top", type=int, default=3, help="number of top moves to report")
     ap.add_argument("--bgbench", default=str(DEFAULT_BGBENCH), help="path to bgbench binary")
     ap.add_argument("--seed", type=int, default=1, help="engine seed for live seating")
+    ap.add_argument("--keep-opp-heroes", action="store_true",
+                    help="keep the opponents' heroes and trinkets in the observation (default: "
+                         "zeroed, as in training against real boards, whose seats have none)")
     ap.add_argument(
         "--once",
         default=None,
@@ -947,7 +963,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     bgbench_bin = resolve_path(args.bgbench)
-    scorer = PolicyScorer(Path(args.ckpt), top_k=args.top)
+    scorer = PolicyScorer(Path(args.ckpt), top_k=args.top, keep_opp_heroes=args.keep_opp_heroes)
     if args.once:
         msg = run_once(
             resolve_path(args.once),

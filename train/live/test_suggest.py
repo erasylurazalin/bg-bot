@@ -127,6 +127,7 @@ def _era_turn_path_probs(
     obs_np = np.zeros(bgpy.OBS_SIZE, dtype=np.float32)
     mask_np = np.zeros(bgpy.N_ACTIONS, dtype=bool)
     path.observe(obs_np, mask_np)
+    suggest.zero_opp_heroes(obs_np)  # the suggester's default, as in training
 
     scorer._apply_globals()
     o = torch.from_numpy(obs_np).unsqueeze(0)
