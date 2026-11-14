@@ -238,7 +238,8 @@ def args():
                         "table, and the rows and gates are saved in the checkpoint")
     a.add_argument("--power-gate-init", type=float, default=0.0,
                    help="with --power-text and --init-from a checkpoint without the text: "
-                        "start both fresh text gates at this value instead of 0 (default 0)")
+                        "start both fresh text gates at this value instead of 0 (default 0); "
+                        "ignored on --resume, which keeps the checkpoint's gates")
     a.add_argument("--card-form", action="store_true",
                    help="with --card-text: also add every card's fixed effect form "
                         "(data/card_forms.json), saved in the checkpoint like the text")
@@ -1601,7 +1602,8 @@ def main():
                     if name.removeprefix("_orig_mod.") in gate_names:
                         p.fill_(cfg.power_gate_init)
             print(f"--power-gate-init: {', '.join(gate_names)} start at {cfg.power_gate_init}")
-    elif cfg.power_gate_init:
+    elif cfg.power_gate_init and not cfg.resume:
+        # a resume keeps the checkpoint's own gates (go.sh passes the args file again)
         raise SystemExit("--power-gate-init needs --init-from")
     demo = None
     demo_gen = None
