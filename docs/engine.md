@@ -2783,7 +2783,9 @@ Deleting `.venv` undoes it.
   gift field during an offer), so the card text already covers them.
   `fixed_eval.py --power-text`
   forces the fresh parts for the gate-0 check, and `ppo.py` prints the gate
-  values at startup and in each update line.
+  values at startup and in each update line. With `--init-from` a
+  checkpoint that has no text, `--power-gate-init X` starts both fresh
+  gates at X instead of 0 (a gate at exactly 0 barely moved in 5 hours).
 - `--init-from PATH` starts a new run (fresh optimizer) from every
   parameter of another checkpoint of the same model whose name and shape
   match, for example `attn` with `full` into `next`; it prints what was
