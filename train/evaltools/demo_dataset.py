@@ -3,22 +3,24 @@
 
     .venv/bin/python train/evaltools/demo_dataset.py --cpu
 
-Every turn of `boards/frozen/actions-2026-11-10` that replays to its end is
+Every turn of `boards/frozen/actions-2026-11-15` that replays to its end is
 seated with `bgpy.EraReplay` / `EraTurnPath`, the same path as
-`train/era_turns.py` and `train/evaltools/trinket_picks.py`. Before every
-decision the script saves the observation and legal mask `ppo.py` would feed
-its network, and Era's logged action as the flat action index `ppo.py` uses.
-A logged action that the engine's mask does not allow is dropped and counted.
-Turns that cannot be seated or played through are dropped whole and counted.
+`train/era_turns.py` and `train/evaltools/trinket_picks.py`. The replay seats
+the turn's live `lobby` block by default; `--dead-lobby` asks for the old dead
+seats. Before every decision the script saves the observation and legal mask
+`ppo.py` would feed its network, and Era's logged action as the flat action
+index `ppo.py` uses. A logged action that the engine's mask does not allow is
+dropped and counted. Turns that cannot be seated or played through are dropped
+whole and counted.
 
-The split is by game: 85% train, 15% held out, fixed by a seeded shuffle of
-the action file list. The game list and its split are saved beside the rows,
-so a later rebuild keeps the same held-out games.
+The split is by game: the old dataset's saved game list and split are reused
+with `--split-from`, so the held-out games stay the same.
 
-Output in `train/runs/demo-dataset/`: `demo.npz` with `obs`, `mask`, `action`,
-`turn`, `game`, `split`, and the split list `games` / `game_split`; and
-`report.md` with the counts, the dropped turns, and BASE's masked-argmax
-agreement on the held-out part, overall and by action kind.
+Output in `train/runs/demo-dataset-live/`: `demo.npz` with `obs`, `mask`,
+`action`, `turn`, `game`, `split`, and the split list `games` / `game_split`;
+and `report.md` with the live-lobby alive check, the counts, the dropped turns,
+and BASE's masked-argmax agreement on the held-out part, overall, on buys, on
+the grouped kinds, and by action kind.
 
 Measurement and data only. It does not edit ppo.py, model.py or fixed_eval.py.
 """
@@ -42,12 +44,14 @@ os.chdir(ROOT)
 
 import bgpy
 
-ACTIONS = ROOT / "boards/frozen/actions-2026-11-10"
-OUT = ROOT / "train/runs/demo-dataset"
-CKPT = ROOT / "train/runs/r1113-a1/best.pt"
+ACTIONS = ROOT / "boards/frozen/actions-2026-11-15"
+OUT = ROOT / "train/runs/demo-dataset-live"
+CKPT = ROOT / "train/runs/r1115-school-text/best.pt"
+SPLIT_FROM = ROOT / "train/runs/demo-dataset/demo.npz"
 REPLAY_SEED = 1
 SPLIT_SEED = 1
 HOLDOUT = 0.15
+ALIVE_SAMPLE = 400
 
 KINDS = [name for name, _ in bgpy.ACTION_KINDS]
 KIND_OF = np.repeat(
@@ -110,6 +114,123 @@ def split_games(files: list[str], seed: int = SPLIT_SEED,
     held = set(order[:k])
     split = {name: ("heldout" if name in held else "train") for name in files}
     return split, order
+
+
+def load_saved_split(path: Path) -> tuple[list[str], dict[str, str]]:
+    """The old dataset's saved game list and its by-game split."""
+    with np.load(path, allow_pickle=False) as z:
+        games = [str(name) for name in z["games"]]
+        split = {
+            str(name): str(label)
+            for name, label in zip(z["games"], z["game_split"])
+        }
+    return games, split
+
+
+def lobby_block(name: str, turn: int) -> list[dict] | None:
+    """The turn's logged lobby, or None when the file has no block."""
+    for item in action_spec(name).get("turns", []):
+        if int(item.get("turn", 0)) == turn:
+            block = item.get("start", {}).get("lobby")
+            return block if block is not None else None
+    return None
+
+
+def alive_sample_rows(arrays: dict, files: list[str],
+                      target: int = ALIVE_SAMPLE) -> list[int]:
+    """At least `target` saved rows, spread over every game that has one.
+
+    Each game contributes the same number of evenly spaced rows (at least its
+    first row when it has fewer); the sample is deterministic.
+    """
+    by_game: dict[str, list[int]] = defaultdict(list)
+    for i, name in enumerate(arrays["game"]):
+        by_game[str(name)].append(i)
+    present = [name for name in files if by_game.get(name)]
+    per = max(1, math.ceil(target / max(1, len(present))))
+    picked: list[int] = []
+    for name in present:
+        rows = by_game[name]
+        k = min(per, len(rows))
+        if k == 1:
+            picked.append(rows[0])
+        else:
+            for j in range(k):
+                picked.append(rows[round(j * (len(rows) - 1) / (k - 1))])
+    return picked
+
+
+def alive_check(arrays: dict, files: list[str]) -> dict:
+    """Compare the observation's opponents with the turn's logged lobby.
+
+    `SCALAR_ALIVE` counts me and the seven seats, so it should be one plus the
+    lobby's living entries. Each of the seven `OPP_ALIVE`, `OPP_HEALTH` and
+    `OPP_TIER` values should be the logged entry's.
+    """
+    picked = alive_sample_rows(arrays, files)
+    problems: list[dict] = []
+    games: set[str] = set()
+    entries = 0
+    unnamed = 0
+    for i in picked:
+        name = str(arrays["game"][i])
+        turn = int(arrays["turn"][i])
+        games.add(name)
+        block = lobby_block(name, turn)
+        obs = arrays["obs"][i]
+        if block is None:
+            problems.append({"game": name, "turn": turn,
+                             "why": "the turn has no lobby block"})
+            continue
+        by_seat = {int(e.get("seat", 0)): e for e in block}
+        entries += len(block)
+        alive = sum(1 for e in block if e.get("alive"))
+        got = int(round(float(obs[bgpy.SCALAR_ALIVE])))
+        if got != 1 + alive:
+            problems.append({
+                "game": name, "turn": turn, "seat": "SCALAR_ALIVE",
+                "got": got, "want": 1 + alive,
+            })
+        for seat in range(1, 8):
+            entry = by_seat.get(seat)
+            at = bgpy.OWN_END + (seat - 1) * bgpy.OPP_BLOCK
+            got_alive = int(round(float(obs[at + bgpy.OPP_ALIVE])))
+            if entry is None:
+                # The log named no player in this seat. The loader leaves the
+                # sandbox's dead player there, so only its liveness is checked.
+                unnamed += 1
+                if got_alive != 0:
+                    problems.append({
+                        "game": name, "turn": turn, "seat": seat,
+                        "field": "OPP_ALIVE", "got": got_alive, "want": 0,
+                    })
+                continue
+            want = {
+                "OPP_ALIVE": 1 if entry.get("alive") else 0,
+                "OPP_HEALTH": int(entry.get("health", 30)),
+                # The first-turn block writes tier 0 before the log shows it;
+                # the loader clamps every tier into the game's 1..MAX_TIER.
+                "OPP_TIER": min(bgpy.MAX_TIER,
+                                max(1, int(entry.get("tier", 0)))),
+            }
+            got = {
+                "OPP_ALIVE": got_alive,
+                "OPP_HEALTH": int(round(float(obs[at + bgpy.OPP_HEALTH]))),
+                "OPP_TIER": int(round(float(obs[at + bgpy.OPP_TIER]))),
+            }
+            for key in want:
+                if got[key] != want[key]:
+                    problems.append({
+                        "game": name, "turn": turn, "seat": seat,
+                        "field": key, "got": got[key], "want": want[key],
+                    })
+    return {
+        "rows": len(picked),
+        "games": len(games),
+        "lobby_entries": entries,
+        "unnamed_seats": unnamed,
+        "problems": problems,
+    }
 
 
 def replay_turn(replay, turn: int, seed: int = REPLAY_SEED):
@@ -322,7 +443,7 @@ def load_base(ckpt: str, cpu: bool, vram_gb: float):
 
 
 def predict_base(net, arrays: dict, rows: np.ndarray, dev, batch: int):
-    """Plain masked argmax and the force_mask argmax on the selected rows."""
+    """Plain masked argmax, the force_mask argmax, and the grouped kind argmax."""
     import torch
 
     import ppo
@@ -330,6 +451,7 @@ def predict_base(net, arrays: dict, rows: np.ndarray, dev, batch: int):
 
     pred = np.empty(len(rows), dtype=np.int64)
     forced = np.empty(len(rows), dtype=np.int64)
+    kind = np.empty(len(rows), dtype=np.int64)
     for start in range(0, len(rows), batch):
         stop = min(start + batch, len(rows))
         o = torch.from_numpy(arrays["obs"][rows[start:stop]]).to(dev)
@@ -337,9 +459,10 @@ def predict_base(net, arrays: dict, rows: np.ndarray, dev, batch: int):
         with torch.no_grad():
             logits, _ = net(o, comp=None)
             pred[start:stop] = masked(logits, m).argmax(1).cpu().numpy()
+            kind[start:stop] = ppo.demo_kind_probs(logits, m).argmax(1).cpu().numpy()
             fm = ppo.force_mask(o, m)
             forced[start:stop] = masked(logits, fm).argmax(1).cpu().numpy()
-    return pred, forced
+    return pred, forced, kind
 
 
 def main() -> None:
@@ -348,6 +471,10 @@ def main() -> None:
     ap.add_argument("--actions", default=str(ACTIONS))
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--ckpt", default=str(CKPT))
+    ap.add_argument("--split-from", default=str(SPLIT_FROM),
+                    help="old dataset whose saved game list and split are reused")
+    ap.add_argument("--dead-lobby", action="store_true",
+                    help="seat the old dead opponents instead of the lobby block")
     ap.add_argument("--seed", type=int, default=REPLAY_SEED,
                     help="the turn's replay seed (the same for every turn)")
     ap.add_argument("--split-seed", type=int, default=SPLIT_SEED)
@@ -366,13 +493,32 @@ def main() -> None:
 
     files = action_files()
     split, _order = split_games(files, args.split_seed, args.holdout)
+    split_source = "a fresh seeded shuffle"
+    old = Path(args.split_from)
+    if old.is_file():
+        saved_files, saved_split = load_saved_split(old)
+        if set(saved_files) == set(files):
+            files = saved_files
+            split = {name: saved_split[name] for name in files}
+            split_source = f"`{old.relative_to(ROOT)}`"
+        else:
+            print(
+                f"{old}: its game list differs from {ACTIONS} "
+                f"({len(set(saved_files) - set(files))} files missing, "
+                f"{len(set(files) - set(saved_files))} new); using a fresh split",
+                flush=True,
+            )
     held = [name for name in files if split[name] == "heldout"]
     print(
-        f"{len(files)} games: {len(files) - len(held)} train, {len(held)} held out",
+        f"{len(files)} games: {len(files) - len(held)} train, {len(held)} held out "
+        f"(split from {split_source})",
         flush=True,
     )
 
-    replays, bad = bgpy.era_replays(str(ACTIONS), str(ROOT / "ref/bg-cards.json"))
+    replays, bad = bgpy.era_replays(
+        str(ACTIONS), str(ROOT / "ref/bg-cards.json"),
+        lobby=not args.dead_lobby,
+    )
     by_file = {replay.file: replay for replay in replays}
     for line in bad:
         print(f"loader: {line}", flush=True)
@@ -387,6 +533,25 @@ def main() -> None:
     arrays["split"] = np.asarray(
         [split[name] for name in arrays["game"]], dtype=str
     )
+    if args.dead_lobby:
+        alive = None
+        print("alive check skipped: --dead-lobby seats the old dead opponents",
+              flush=True)
+    else:
+        alive = alive_check(arrays, files)
+        print(
+            f"alive check: {alive['rows']} rows over {alive['games']} games, "
+            f"{alive['lobby_entries']} logged seats "
+            f"({alive['unnamed_seats']} unnamed), "
+            f"{len(alive['problems'])} mismatches",
+            flush=True,
+        )
+        if alive["problems"]:
+            for problem in alive["problems"][:20]:
+                print(f"alive mismatch: {problem}", flush=True)
+            raise SystemExit(
+                f"alive check failed: {len(alive['problems'])} mismatches"
+            )
     save_dataset(out, arrays, split, files)
 
     print(
@@ -410,25 +575,28 @@ def main() -> None:
     if args.no_eval:
         pred = None
         forced = None
+        kind_pred = None
         train_pred = None
         info = {"update": None, "force_dark_gift": None, "old_boards": "keep"}
         dev = None
     else:
         net, info, dev = load_base(args.ckpt, args.cpu, args.vram_gb)
-        pred, forced = predict_base(net, arrays, held_rows, dev, args.batch)
+        pred, forced, kind_pred = predict_base(
+            net, arrays, held_rows, dev, args.batch)
         # The same predictions on the train rows, for context only.
         if len(train_rows):
-            train_pred, _ = predict_base(net, arrays, train_rows, dev, args.batch)
+            train_pred, _, _ = predict_base(
+                net, arrays, train_rows, dev, args.batch)
         else:
             train_pred = None
 
     lines: list[str] = []
-    lines.append("# Demonstration dataset from Era's replayed turns")
+    lines.append("# Demonstration dataset from Era's replayed turns (live lobbies)")
     lines.append("")
     lines.append(
         "Build A of step 4 (`docs/notes/plan-2026-11-13.md`): the observation, "
         "legal mask and Era's action for every decision of every turn in "
-        "`boards/frozen/actions-2026-11-10` that replays to its end. Script: "
+        f"`{ACTIONS.relative_to(ROOT)}` that replays to its end. Script: "
         "`train/evaltools/demo_dataset.py`; data: `demo.npz`."
     )
     lines.append("")
@@ -436,7 +604,9 @@ def main() -> None:
         f"Turn replay seed {args.seed}. Replays use `bgpy.EraReplay` and "
         "`EraTurnPath` with `reseat=True`, the same seating as "
         "`train/evaltools/trinket_picks.py` and the path `train/era_turns.py` "
-        "uses for Era's own end-of-turn position. `EraTurnPath.observe` calls "
+        "uses for Era's own end-of-turn position. The turn's `lobby` block is "
+        "seated by default, so the seven opponents are the log's living "
+        "players; `--dead-lobby` is the old dead-seat opt-out. `EraTurnPath.observe` calls "
         "`obs::write`, the encoder `VecEnv.observe` calls with "
         f"`OldBoards::{info['old_boards'].capitalize()}`, which is BASE's "
         "setting. `era_action` returns `Action::index`, the flat index "
@@ -449,6 +619,43 @@ def main() -> None:
             f"{info['update']}, device {dev.type}."
         )
         lines.append("")
+
+    lines.append("## Live-lobby alive check")
+    lines.append("")
+    if alive is None:
+        lines.append("Skipped: `--dead-lobby` seats the old dead opponents.")
+    else:
+        lines.append(
+            f"Checked {alive['rows']} saved steps over {alive['games']} games "
+            f"({alive['lobby_entries']} logged lobby seats, "
+            f"{alive['unnamed_seats']} seats the log did not name): "
+            f"{len(alive['problems'])} mismatches."
+        )
+        lines.append("")
+        lines.append(
+            "For every sampled step, `SCALAR_ALIVE` equals one (me) plus the "
+            "living entries of the turn's `lobby` block, and each named "
+            "opponent's `OPP_ALIVE`, `OPP_HEALTH` and `OPP_TIER` equals the "
+            "block's. A seat the block does not name keeps the loader's dead "
+            "sandbox player and is checked only for not being alive. The "
+            "first-turn block writes tier 0 before the log shows a tier; the "
+            "loader clamps every tier to the game's 1 to 7, so the check reads "
+            "0 as 1. The rows are evenly spaced through every game that has a "
+            "saved step, so the sample is not just the early turns."
+        )
+        if alive["problems"]:
+            lines.append("")
+            lines.append("Mismatches:")
+            lines.append("")
+            lines.append("| game | turn | seat | field | got | want |")
+            lines.append("|---|---:|---:|---|---:|---:|")
+            for problem in alive["problems"][:50]:
+                lines.append(
+                    f"| `{problem.get('game')}` | {problem.get('turn')} | "
+                    f"{problem.get('seat')} | {problem.get('field', problem.get('why'))} | "
+                    f"{problem.get('got')} | {problem.get('want')} |"
+                )
+    lines.append("")
 
     lines.append("## Counts")
     lines.append("")
@@ -466,9 +673,9 @@ def main() -> None:
     )
     lines.append("")
     lines.append(
-        "The split is by game: `round(0.15 * 91) = 14` held out, the rest "
-        f"train, fixed by a seeded shuffle of the file list (seed "
-        f"{args.split_seed})."
+        f"The split is by game, reused from {split_source}: "
+        f"{len(held)} of {len(files)} games held out. The saved game list and "
+        "its labels are in `demo.npz` as `games` and `game_split`."
     )
     lines.append("")
     lines.append("Held-out games: " + ", ".join(f"`{name}`" for name in held))
@@ -576,10 +783,15 @@ def main() -> None:
         held_actions = action[held_rows]
         hits, n, r = rate(pred, held_actions)
         lo, hi = wilson(hits, n)
+        import ppo
+        kind_target = ppo.DEMO_KIND_OF.numpy()[held_actions]
+        kind_hits, kind_n, kind_r = rate(kind_pred, kind_target)
+        klo, khi = wilson(kind_hits, kind_n)
         lines.append(
             "Masked argmax, plain legal mask. The 95% range is Wilson. "
             "`random` is the mean 1 / legal actions at each row, a uniform "
-            "pick's expected agreement."
+            "pick's expected agreement (for the grouped kind, the mean legal "
+            "share of Era's kind)."
         )
         lines.append("")
         lines.append("| group | steps | top-1 | 95% | random |")
@@ -588,6 +800,17 @@ def main() -> None:
             f"| held out, all | {n} | {pct(r)} ({hits}/{n}) | "
             f"{pct(lo)} to {pct(hi)} | "
             f"{pct(float(np.mean(1.0 / arrays['mask'][held_rows].sum(1)))) if n else 'n/a'} |"
+        )
+        held_kind_target = kind_target
+        kind_mass = (
+            ((arrays['mask'][held_rows])
+             & (ppo.DEMO_KIND_OF.numpy()[None, :] == held_kind_target[:, None]))
+            .sum(1) / arrays['mask'][held_rows].sum(1)
+        )
+        lines.append(
+            f"| held out, grouped kind | {kind_n} | {pct(kind_r)} "
+            f"({kind_hits}/{kind_n}) | {pct(klo)} to {pct(khi)} | "
+            f"{pct(float(np.mean(kind_mass))) if kind_n else 'n/a'} |"
         )
         if train_pred is not None:
             train_hits, train_n, train_r = rate(train_pred, action[train_rows])
@@ -649,25 +872,36 @@ def main() -> None:
         "step count.",
         "A logged step the engine's mask rejects is dropped before its row is "
         "saved; the replay still plays the log's step and the turn continues. "
-        "The script counts those steps and names the log step kind. None "
-        "occurred in this run.",
+        "The script counts those steps and names the log step kind. "
+        f"{len(skipped)} occurred in this run.",
         "`EraTurnPath.observe` writes `OldBoards::Keep`. BASE's checkpoint has "
         "`old_boards='keep'` and `lag_in_obs=False`, so this is exactly the "
         "`VecEnv.observe` encoding ppo.py gives this checkpoint. An "
         "`old_boards='drop'` or `lag_in_obs=True` run would need the matching "
         "encoding, which this build does not add.",
-        "The split is by action file, not by game number across files. 14 of "
-        "91 files are held out, the nearest whole game to 15%, with a "
-        "seeded `random.Random(1)` shuffle. The full list and its labels are "
-        "in `demo.npz` as `games` and `game_split`.",
+        "The lobby is the default: `bgpy.era_replays` seats each turn's "
+        "`lobby` block, so the seven opponents are the log's, not the old dead "
+        "sandbox seats. `--dead-lobby` exists only to reproduce the old "
+        "observation.",
+        "The alive check samples every game that has a row, taking evenly "
+        "spaced rows from each game up to about 400 rows in total. It compares "
+        "`SCALAR_ALIVE` as one plus the lobby's living entries, and every "
+        "named seat's `OPP_ALIVE`, `OPP_HEALTH` and `OPP_TIER`. A seat the "
+        "block does not name is the loader's dead sandbox player and is "
+        "checked only for not being alive. Tier 0 in a first-turn block is "
+        "read as 1 because the loader clamps it to the game's 1 to 7.",
+        f"The split is reused from {split_source}, so the held-out games are "
+        f"the old dataset's: {len(held)} of {len(files)}. The full list and "
+        "its labels are in `demo.npz` as `games` and `game_split`.",
         "The per-row `game` is the action file name. `report.md` uses the "
         "reader-facing `<source>-g<n>` form in the dropped-turn list.",
         "The dataset is saved with `np.savez` (not compressed) so a training "
-        "process reads it quickly; it is about 0.61 GB. `demo.npz` holds "
-        "float32 observations and bool masks.",
+        "process reads it quickly. `demo.npz` holds float32 observations and "
+        "bool masks.",
         "BASE's agreement is plain masked argmax, without `ppo.force_mask`; "
-        "the force-mask number is reported once for comparison. No checkpoint "
-        "weights are changed.",
+        "the force-mask number is reported once for comparison. The grouped "
+        "kind row is `ppo.demo_kind_probs`' argmax, the measure the "
+        "kind-weight gates use. No checkpoint weights are changed.",
         "The report counts only turns with at least one logged step, which is "
         "what `EraReplay.turns(1)` returns. Turns with no steps have no "
         "decision to copy.",
@@ -696,20 +930,23 @@ def main() -> None:
     )
     lines.append("")
     lines.append(
-        "The main limitation is the one `trinket_picks.py` also records: the "
-        "replay is a one-player sandbox, so the opponent seats are dead and "
-        "empty and the current opponent Health, tier and board are not in the "
-        "action file. Everything on Era's own side is the log's state."
+        "The replay now seats the log's live lobby: the seven opponents' "
+        "heroes, health, armor, tier, placement and last-seen boards are the "
+        "logged ones. The log still has no other player's current board "
+        "outside my own fights and no leaderboard tribe line for a player I "
+        "did not fight, so those observation fields stay zero. Everything on "
+        "Era's own side is the log's state."
     )
     lines.append("")
     if pred is not None:
         buy = held_kind == "buy"
         buy_hits = int((pred[buy] == held_actions[buy]).sum()) if buy.any() else 0
         lines.append(
-            f"BASE's held-out top-1 is {pct(hits / n)} overall and "
-            f"{pct(buy_hits / buy.sum()) if buy.any() else 'n/a'} on buys, "
-            f"against {pct(float(np.mean(1.0 / held_mask.sum(1))))} for a "
-            "uniform pick over the legal actions."
+            f"BASE's held-out top-1 is {pct(hits / n)} overall, "
+            f"{pct(buy_hits / buy.sum()) if buy.any() else 'n/a'} on buys, and "
+            f"{pct(kind_r)} on the grouped kinds, against "
+            f"{pct(float(np.mean(1.0 / held_mask.sum(1))))} for a uniform pick "
+            "over the legal actions."
         )
         lines.append("")
     (out / "report.md").write_text("\n".join(lines) + "\n")

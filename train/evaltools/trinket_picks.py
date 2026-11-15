@@ -3,12 +3,13 @@
 
     .venv/bin/python train/evaltools/trinket_picks.py --vram-gb 4
 
-Every `trinket_pick` in boards/frozen/actions-2026-11-10 is one offer. The
+Every `trinket_pick` in boards/frozen/actions-2026-11-15 is one offer. The
 whole-turn replay (bgpy.EraReplay / EraTurnPath, the same seating as
 `bgbench turn_replay`) puts the engine in the logged state immediately before
-the pick, with the logged offer forced by the loader. BASE then reads the four
-option logits. The report compares BASE's greedy pick and the probability it
-gives Era's pick with a uniform pick and with a streamer-popular pick from
+the pick, with the logged offer forced by the loader. The replay seats the
+turn's live lobby by default. BASE then reads the four option logits. The
+report compares BASE's greedy pick and the probability it gives Era's pick
+with a uniform pick and with a streamer-popular pick from
 boards/twitch/games.
 
 Measurement only. Writes train/runs/trinket-picks/report.md and rows.json.
@@ -38,7 +39,7 @@ import ppo
 import torch
 from model import masked
 
-ACTIONS = ROOT / "boards/frozen/actions-2026-11-10"
+ACTIONS = ROOT / "boards/frozen/actions-2026-11-15"
 TWITCH = ROOT / "boards/twitch/games"
 OUT = ROOT / "train/runs/trinket-picks"
 CKPT = ROOT / "train/runs/r1113-a1/best.pt"
@@ -209,14 +210,18 @@ def advance_to(path, step_index: int) -> str | None:
 
 
 def main() -> None:
+    global ACTIONS
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--ckpt", default=str(CKPT))
+    ap.add_argument("--actions", default=str(ACTIONS),
+                    help="the frozen action folder (default the live-lobby set)")
     ap.add_argument("--vram-gb", type=float, required=True,
                     help="cap this process's GPU memory in GB (required)")
     ap.add_argument("--cpu", action="store_true", help="run on the CPU")
     ap.add_argument("--out", default=str(OUT))
     args = ap.parse_args()
 
+    ACTIONS = Path(args.actions).resolve()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -445,10 +450,11 @@ def main() -> None:
     lines.append("")
     lines.append(
         "Measurement only. Every `trinket_pick` in "
-        "`boards/frozen/actions-2026-11-10` is one offer. The engine is seated "
+        f"`{ACTIONS.relative_to(ROOT)}` is one offer. The engine is seated "
         "at the logged state immediately before the pick by `bgpy.EraReplay` "
         "and `EraTurnPath` (the same seating as `bgbench turn_replay`), with "
-        "the logged offer forced by the loader. BASE then reads the four "
+        "the logged offer forced by the loader and the turn's live lobby "
+        "seated by default. BASE then reads the four "
         "option logits. Script: `train/evaltools/trinket_picks.py`; rows: "
         "`rows.json`."
     )
@@ -533,13 +539,15 @@ def main() -> None:
     )
     lines.append("")
     lines.append(
-        "What differs from Era's real state: the replay is a one-player "
-        "sandbox game, so the opponent seats are dead and empty. The "
-        "file's `last_opponent_board` is seated as the last opponent's seen "
-        "board (the loader's own choice for Bob's Burgles and I Spy), but no "
-        "current opponent Health, tier, board or leaderboard is available in "
-        "the action file. Era's current opponent information at that moment is "
-        "therefore missing. Everything on Era's own side is the logged state, "
+        "What differs from Era's real state: the replay seats the log's live "
+        "lobby, so the seven opponents' heroes, health, armor, tier, placement "
+        "and last-seen boards are the logged ones. The file's "
+        "`last_opponent_board` is seated as the last opponent's seen board "
+        "(the loader's own choice for Bob's Burgles and I Spy), but no "
+        "current opponent board outside my fights and no leaderboard tribe "
+        "line for a player I did not fight is available in the action file. "
+        "Era's current opponent information at that moment can therefore "
+        "still be missing. Everything on Era's own side is the logged state, "
         "not the engine's own turn start."
     )
     lines.append("")

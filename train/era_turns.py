@@ -1032,7 +1032,8 @@ def main() -> None:
                     help="the search's fight weight (search v1's best: 1)")
     ap.add_argument("--replan", choices=["every", "turn", "cycle"], default="every")
     ap.add_argument("--real-boards", default=str(ROOT / "boards" / "real"))
-    ap.add_argument("--actions", default=str(ROOT / "boards" / "actions"))
+    ap.add_argument("--actions",
+                    default=str(ROOT / "boards" / "frozen" / "actions-2026-11-15"))
     ap.add_argument("--out", default=None, help="the output folder")
     ap.add_argument("--vram-gb", type=float, default=0.0,
                     help="cap this process at this much GPU memory (6 when pcbusy says ON)")

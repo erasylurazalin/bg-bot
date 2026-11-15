@@ -2358,6 +2358,14 @@ seeded from the turn's seed (a repeat's).
   without the fight, and `batch` gives a `SearchBatch` at the position for the
   search. `bought`/`played`/`sold` count the turn's cycles and `levelled` the
   tier button.
+- **The lobby is live by default:** `bgpy.era_replays` and
+  `EraReplay.from_file` seat each turn's `lobby` block, so the seven opponents
+  are the log's living players with their hero, Health, armor, tier,
+  placement and last-seen boards. `lobby=False` is the explicit old dead-seat
+  sandbox. The frozen set `boards/frozen/actions-2026-11-15/` carries the
+  block (same 91 games as `actions-2026-11-10`, re-collected from the logs);
+  `train/era_turns.py`, `train/evaltools/demo_dataset.py` and
+  `train/evaltools/trinket_picks.py` default to it.
 - **Seating every step alone** means a step whose actions the engine refuses
   ends the turn's path where it happens: `missing` carries the replay's own
   words for it. `reset` keeps the log's state before every decision; the
@@ -2458,7 +2466,7 @@ A passive helper for `bg-overlay` during hand-played games. It never sends input
   Use `--once LOG` to score one log snapshot and print a single JSON event. Requires rebuilt `bgbench` (`live-actions`) and `bgpy` (`EraReplay.live` / `LivePosition`).
 - **What it cannot see (and `value: null`):**
   - `value` is sent as `null`: trained checkpoints estimate turn-discounted return (`gamma=0.97` minus move costs and deadline penalties) rather than 1..8 placement.
-  - The suggester is the one path that eats the real lobby. It calls `EraReplay.from_file(..., lobby=True)`, so the action file's `lobby` block seats the seven opponents alive with their hero, Health, armor, tier, trinkets, next and last opponent, and the board and counters of the last fight with each (docs/real-boards.md "The action file"). Every other path keeps the old dead-seat sandbox (`SCALAR_ALIVE = 1`) until it is switched on by hand. What the log still cannot say stays zero: a player's leaderboard tribe line (`OPP_TOP_TRIBE`, `OPP_TRIBE_MIXED`, `OPP_TRIBE_COUNT`), their last three fights (`OPP_FIGHTS`), and the current board of a player I have not fought (only the last board I saw of them is seated). The suggester then zeroes each opponent's hero and trinkets (`OPP_HERO`, `OPP_TRINKET`) before the network sees them, because a network trained with lineup 1,0,0,0,0,7 only ever played real-board seats, which have none; `--keep-opp-heroes` keeps them.
+  - The suggester is one of the paths that eats the real lobby. It calls `EraReplay.from_file(..., lobby=True)`, and every other replay of Era's positions (`era_replays`, the demo dataset, the trinket check, `era_turns.py`) now does the same by default; `lobby=False` is the old dead-seat opt-out. The action file's `lobby` block seats the seven opponents alive with their hero, Health, armor, tier, trinkets, next and last opponent, and the board and counters of the last fight with each (docs/real-boards.md "The action file"). What the log still cannot say stays zero: a player's leaderboard tribe line (`OPP_TOP_TRIBE`, `OPP_TRIBE_MIXED`, `OPP_TRIBE_COUNT`), their last three fights (`OPP_FIGHTS`), and the current board of a player I have not fought (only the last board I saw of them is seated). The suggester then zeroes each opponent's hero and trinkets (`OPP_HERO`, `OPP_TRINKET`) before the network sees them, because a network trained with lineup 1,0,0,0,0,7 only ever played real-board seats, which have none; `--keep-opp-heroes` keeps them.
   - `SCALAR_PARADOX` is drawn by the sandbox rather than parsed from `Power.log`, `dark_gift_uses` / `dark_gift_pressed` start at engine defaults, `SCALAR_LOBBY` holds only single-tribe minion types seen in the Tavern so far, `SCALAR_ACTIONS_LEFT` resets on each seated step, and remaining pool counts are omitted by `obs.rs` (only `SLOT_FROM_POOL` per card slot is present).
 
 ## Adding a card
@@ -2648,10 +2656,12 @@ Deleting `.venv` undoes it.
   demonstration loss from the Build A dataset
   (`train/evaltools/demo_dataset.py`): each PPO update adds W times the
   cross-entropy between the network's masked policy and Era's action on a
-  fresh train-split demonstration minibatch the size of the training
-  minibatch. The weight falls linearly to 0 over the last fraction F of the
-  run's planned end, by the same helper as the fight and win score fades, and
-  the term is not added during `--value-warmup`. The dataset must have this
+  fresh train-split demonstration minibatch of `--demo-batch N` rows (the
+  PPO minibatch size when N is 0). The demonstration loss is a mean, so N
+  changes the cost, not the meaning of W. The weight falls linearly to 0
+  over the last fraction F of the run's planned end, by the same helper as
+  the fight and win score fades, and the term is not added during
+  `--value-warmup`. The dataset must have this
   build's observation width, built with `old_boards='keep'` and no lag; a
   mismatch is refused. Every eval prints the held-out masked top-1 agreement
   overall and on buys, plus the same count on a fixed train sample of the
@@ -2709,6 +2719,16 @@ Deleting `.venv` undoes it.
   `boards/frozen/actions-2026-11-10/`, also manifest checked),
   `--era-turns` and `--era-split`, every game is an Era start and the
   report adds body kept, place by start turn and the Era board's totals.
+- `train/evaltools/turn_motion.py A.pt B.pt ... --games N --vram-gb G`
+  measures rolls, buys, sells and cycles on turns 10 to 13, one learner
+  against seven real seats; `--cpu` runs the same measurement without the
+  GPU. A cycle is a minion sold in the same turn it was
+  bought. `cycles` counts every one; `cycles_fx` counts only minions whose
+  cards.toml data has a Battlecry, a Choose One, a play trigger or an
+  `on_sell` effect, so churn that pays nothing is separated from a cycle that
+  does something. The report and `results.json` carry both lines and, per
+  checkpoint, the ten most cycled card names with their counts and whether
+  each counts for `cycles_fx`.
 - Every eval writes a row to `runs/NAME/metrics.csv`: placement against
   each bot, a curve report (turn reaching tiers 3, 4, 5; share of rush,
   standard, economy rush and slow games), a tribe report, entropy and the
@@ -2719,6 +2739,11 @@ Deleting `.venv` undoes it.
   columns hold the holdout-split Era eval.
 - `--stop-flat N` stops a run after N minutes without gains, but only when
   it also no longer beats its oldest snapshot.
+- `--max-updates N` stops cleanly after update N, whichever of it and
+  `--minutes` comes first. The stop uses the same end-of-update path as the
+  minute limit, so `ckpt.pt`, `best.pt`, `metrics.csv` and the keep copies
+  are written exactly as at the end of a `--minutes` run. `train/go.sh`
+  passes it through with the run's other flags.
 - Any change to the action space or observation breaks old checkpoints;
   start a new run, except where the change only appends actions or input
   columns. The cycle action (2026-11-08) is removed, so `N_ACTIONS` is 183

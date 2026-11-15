@@ -152,6 +152,9 @@ def args():
     a = argparse.ArgumentParser()
     a.add_argument("--name", required=True)
     a.add_argument("--minutes", type=float, default=10)
+    a.add_argument("--max-updates", type=int, default=0,
+                   help="stop cleanly after this update number, whichever of it and "
+                        "--minutes comes first (0: never)")
     a.add_argument("--resume")
     model_args(a)
     a.add_argument("--compile", action=argparse.BooleanOptionalAction,
@@ -292,6 +295,10 @@ def args():
                         "masked policy summed over the legal actions of each grouped action kind "
                         "and Era's kind, on the same fresh train-split demonstration minibatch "
                         "(needs --demo; may be used with or without --demo-weight; default 0: off)")
+    a.add_argument("--demo-batch", type=int, default=0,
+                   help="demonstration rows drawn per training minibatch; 0 uses the PPO "
+                        "minibatch size (default 0). The demonstration loss is a mean, so "
+                        "the weight means the same thing at any size")
     a.add_argument("--buy-prior", help="BuyPrior checkpoint from train/evaltools/buy_prior.py "
                                        "(which Tavern cards strong players buy)")
     a.add_argument("--buy-prior-weight", type=float, default=0.0,
@@ -369,6 +376,10 @@ def args():
         a.error("--demo-kind-weight cannot be negative")
     if cfg.demo_kind_weight and not cfg.demo:
         a.error("--demo-kind-weight needs --demo PATH")
+    if cfg.demo_batch < 0:
+        a.error("--demo-batch cannot be negative")
+    if cfg.demo_batch and not cfg.demo:
+        a.error("--demo-batch needs --demo PATH")
     if not 0.0 <= cfg.demo_fade <= 1.0:
         a.error("--demo-fade must be between 0 and 1")
     if cfg.buy_prior_weight < 0.0:
@@ -579,6 +590,28 @@ def demo_cross_entropy(net, obs, mask, action):
     """The masked policy's cross-entropy to Era's action, averaged over rows."""
     logits, _ = net(obs)
     return F.cross_entropy(masked(logits, mask), action)
+
+
+def demo_rows_for_minibatch(demo, m, generator, demo_batch=0):
+    """The fresh train-split demonstration rows one PPO minibatch draws:
+    `demo_batch` of them, or `m` (the PPO minibatch size) when it is 0."""
+    n = demo_batch or m
+    return demo.train[torch.randint(len(demo.train), (n,), generator=generator)]
+
+
+def demo_piece(rows, j, step, m):
+    """The slice of `rows` the microbatch at offset `j` uses, split so every
+    drawn row is used once and none is repeated."""
+    n = rows.numel()
+    start = j * n // m
+    stop = (j + step) * n // m
+    return rows[start:stop]
+
+
+def training_done(minutes, minutes_limit, update, max_updates):
+    """Whether the run stops after this update: the planned minute or the
+    explicit update cap, whichever comes first."""
+    return minutes >= minutes_limit or (max_updates > 0 and update >= max_updates)
 
 
 def add_demo_loss(loss, net, obs, mask, action, weight):
@@ -2147,8 +2180,8 @@ def main():
                         and update >= cfg.value_warmup):
                     # Fresh every minibatch; the demo generator is separate so
                     # the auxiliary sample does not move the PPO RNG.
-                    demo_rows = demo.train[torch.randint(
-                        len(demo.train), (m,), generator=demo_gen)]
+                    demo_rows = demo_rows_for_minibatch(
+                        demo, m, demo_gen, cfg.demo_batch)
                 opt.zero_grad()
                 kl_s = clip_s = ent_s = plain_s = vl_s = aux_s = 0.0
                 for j in range(0, m, step):
@@ -2189,16 +2222,28 @@ def main():
                     else:
                         loss = pg + cfg.vf * vl - cfg.ent * ent + aux_w * aux
                     if demo_rows is not None:
-                        dsub = demo_rows[j:j + sub.numel()]
-                        d_obs = demo.obs[dsub].to(dev)
-                        d_mask = demo.mask[dsub].to(dev)
-                        d_action = demo.action[dsub].to(dev)
-                        if demo_weight > 0.0:
-                            loss = add_demo_loss(
-                                loss, net, d_obs, d_mask, d_action, demo_weight)
-                        if demo_kind_weight > 0.0:
-                            loss = add_demo_kind_loss(
-                                loss, net, d_obs, d_mask, d_action, demo_kind_weight)
+                        if cfg.demo_batch:
+                            # The smaller (or larger) demo batch is split over
+                            # the microbatches; each piece is weighted by its
+                            # share of the drawn rows so the mean is unchanged.
+                            dsub = demo_piece(demo_rows, j, step, m)
+                            demo_scale = ((dsub.numel() / demo_rows.numel()) / w
+                                          if dsub.numel() else 0.0)
+                        else:
+                            dsub = demo_rows[j:j + sub.numel()]
+                            demo_scale = 1.0
+                        if dsub.numel():
+                            d_obs = demo.obs[dsub].to(dev)
+                            d_mask = demo.mask[dsub].to(dev)
+                            d_action = demo.action[dsub].to(dev)
+                            if demo_weight > 0.0:
+                                loss = add_demo_loss(
+                                    loss, net, d_obs, d_mask, d_action,
+                                    demo_weight * demo_scale)
+                            if demo_kind_weight > 0.0:
+                                loss = add_demo_kind_loss(
+                                    loss, net, d_obs, d_mask, d_action,
+                                    demo_kind_weight * demo_scale)
                     if f_prior is not None:
                         loss = add_buy_prior_loss(
                             loss, logits, f_mask[sub], f_prior[sub],
@@ -2270,7 +2315,7 @@ def main():
             pool = pool[-cfg.snapshot_pool:]
 
         minutes = t_total + (time.time() - start) / 60
-        done = minutes >= cfg.minutes
+        done = training_done(minutes, cfg.minutes, update, cfg.max_updates)
         if update % cfg.eval_every == 0 or done:
             net.eval()
             demo_vals = (demo_agreement(net, demo, dev,
@@ -2476,6 +2521,9 @@ def main():
                 flush=True,
             )
         if done:
+            if (cfg.max_updates > 0 and update >= cfg.max_updates
+                    and minutes < cfg.minutes):
+                print(f"stopping at --max-updates {cfg.max_updates}", flush=True)
             break
 
 

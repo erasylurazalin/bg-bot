@@ -162,6 +162,14 @@ skips a log whose size has not changed; `--rewrite` reads them all again. A
 full run is about 30 seconds. No player names are stored. The same timer runs
 it right after `collect-boards`.
 
+The frozen action sets are re-collections of the same games from the archive,
+with a `MANIFEST.txt` of sha256 hashes per file. `boards/frozen/actions-2026-11-10/`
+has no per-turn `lobby` block; `boards/frozen/actions-2026-11-15/` holds the
+same 91 games with the block added, and the replay of Era's positions uses it
+by default. The lobby key is stripped and the rest of the JSON compared when a
+set is rebuilt, so a collector change since the old set shows up as a
+difference rather than being guessed away.
+
 The command is `crates/bgbench/src/collect_actions.rs`, ported from the
 Python `tools/collect_actions.py` (removed 2026-11-03), which wrote the same
 files byte for byte but for one thing: a minion that carries the same Dark
@@ -384,11 +392,12 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     log does not show their numbers. The log has no leaderboard tribe line for
     a player I did not fight, no other player's last three fights, and no
     current board of a player outside my own fights, so those keys are absent
-    and the observation's matching fields stay zero. The shop replay seats the
-    block only when asked (`load_with_lobby`, `seat_step_with_lobby`,
-    `seat_live_with_lobby`, `turn_start_game_with_lobby`, and Python's
-    `EraReplay.from_file(..., lobby=True)`); without that option the seven
-    seats are the old dead sandbox players, byte for byte.
+    and the observation's matching fields stay zero. The shop replay's own
+    commands keep their old default: it seats the block only when asked
+    (`load_with_lobby`, `seat_step_with_lobby`, `seat_live_with_lobby`,
+    `turn_start_game_with_lobby`). Python's `EraReplay.from_file` and
+    `era_replays` turn it on by default for every replay of Era's positions;
+    `lobby=False` asks for the old seven dead sandbox seats, byte for byte.
 - `end` is the state when the turn ended, after the end of turn effects and
   before the fight (null when the log ends inside the turn). It is the same
   object as the last step's `after`.

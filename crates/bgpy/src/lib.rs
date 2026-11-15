@@ -1980,8 +1980,8 @@ struct EraTurnPath {
     turn: u32,
     seed: u64,
     /// Whether each step seats the turn's `lobby` block instead of the
-    /// sandbox's dead opponents. From `EraReplay.from_file(lobby=True)`;
-    /// `era_replays` leaves it off.
+    /// sandbox's dead opponents. On by default; `EraReplay.from_file` and
+    /// `era_replays` take `lobby=False` for the old dead-seat observation.
     lobby: bool,
     /// The real boards the search's own judging fights use, if any.
     boards: Option<Arc<RealBoards>>,
@@ -2417,6 +2417,12 @@ impl EraTurnPath {
     }
 }
 
+/// The lobby seating option's default: on. `None` keeps it on; `Some(false)`
+/// is the explicit opt-out to the old dead-seat sandbox.
+fn seat_lobby_default(lobby: Option<bool>) -> bool {
+    lobby.unwrap_or(true)
+}
+
 /// One action file of Era's games, ready to seat any of its turns
 /// (`train/era_turns.py`).
 #[pyclass]
@@ -2426,8 +2432,8 @@ struct EraReplay {
     spec: Arc<bgcore::shop_replay::ShopFileSpec>,
     name: String,
     /// Whether a `lobby` block is seated in place of the sandbox's dead
-    /// opponents. `from_file` sets it; `live` may override it; every other
-    /// path (the demo dataset, the trinket check, Era's turns) leaves it off.
+    /// opponents. `from_file` sets it (on by default, `lobby=False` for the
+    /// old dead seats); `live` may override it.
     lobby: bool,
     boards: Option<Arc<RealBoards>>,
 }
@@ -2468,10 +2474,11 @@ impl EraReplay {
     }
 
     /// Load a single action file without scanning a whole directory.
-    /// `lobby` seats the turn's `lobby` block (the live suggester turns it on).
+    /// `lobby` seats the turn's `lobby` block, on by default; pass false for
+    /// the old dead-seat sandbox.
     #[staticmethod]
-    #[pyo3(signature = (path, ref_cards, lobby=false))]
-    fn from_file(path: &str, ref_cards: &str, lobby: bool) -> PyResult<EraReplay> {
+    #[pyo3(signature = (path, ref_cards, lobby=None))]
+    fn from_file(path: &str, ref_cards: &str, lobby: Option<bool>) -> PyResult<EraReplay> {
         let data = Arc::new(Data::bundled());
         let ids = Arc::new(
             bgcore::CardIdMap::parse(
@@ -2501,7 +2508,7 @@ impl EraReplay {
             ids,
             spec: Arc::new(spec),
             name,
-            lobby,
+            lobby: seat_lobby_default(lobby),
             boards: None,
         })
     }
@@ -2721,16 +2728,20 @@ impl LivePosition {
 /// the loader cannot build as `file: why` lines. `real_boards` is
 /// train/real_boards.py's spec list, the boards the search's own judging
 /// fights; without it the search plays blind, as it does for a cycle-rate run.
+/// `lobby` seats each turn's `lobby` block, on by default; pass `lobby=False`
+/// for the old dead-seat sandbox.
 #[pyfunction]
-#[pyo3(signature = (dir, ref_cards, real_boards=None))]
+#[pyo3(signature = (dir, ref_cards, real_boards=None, lobby=None))]
 fn era_replays(
     dir: &str,
     ref_cards: &str,
     real_boards: Option<PyBoards>,
+    lobby: Option<bool>,
 ) -> PyResult<(Vec<EraReplay>, Vec<String>)> {
     let data = Arc::new(Data::bundled());
     let (specs, ids, bad) = replay_specs(dir, ref_cards)?;
     let ids = Arc::new(ids);
+    let seat_lobby = seat_lobby_default(lobby);
     let boards = real_boards.map(|raw| {
         let specs = real_board_specs(raw);
         let (boards, _) = RealBoards::build(&specs, &data.cards, &data.gifts);
@@ -2745,7 +2756,7 @@ fn era_replays(
                 ids: ids.clone(),
                 spec: Arc::new(spec),
                 name,
-                lobby: false,
+                lobby: seat_lobby,
                 boards: boards.clone(),
             }
         })
@@ -3293,4 +3304,83 @@ fn bgpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("REAL", REAL)?;
     m.add("SEAT_KINDS", SEAT_KINDS)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod lobby_default_tests {
+    use super::seat_lobby_default;
+    use bgcore::{Data, PLAYERS, obs};
+    use std::sync::Arc;
+
+    const LOBBIES: &str = concat!(
+        "[",
+        "{\"player_id\":1,\"seat\":1,\"health\":30,\"armor\":0,\"tier\":1,",
+        "\"alive\":true,\"placement\":0},",
+        "{\"player_id\":2,\"seat\":2,\"health\":27,\"armor\":2,\"tier\":2,",
+        "\"alive\":true,\"placement\":0},",
+        "{\"player_id\":3,\"seat\":3,\"health\":0,\"armor\":0,\"tier\":2,",
+        "\"alive\":false,\"placement\":7},",
+        "{\"player_id\":4,\"seat\":4,\"health\":20,\"armor\":0,\"tier\":3,",
+        "\"alive\":true,\"placement\":0},",
+        "{\"player_id\":5,\"seat\":5,\"health\":18,\"armor\":1,\"tier\":3,",
+        "\"alive\":true,\"placement\":0},",
+        "{\"player_id\":6,\"seat\":6,\"health\":14,\"armor\":0,\"tier\":4,",
+        "\"alive\":true,\"placement\":0},",
+        "{\"player_id\":7,\"seat\":7,\"health\":9,\"armor\":0,\"tier\":4,",
+        "\"alive\":true,\"placement\":0}",
+        "]"
+    );
+
+    fn observation(game: &bgcore::Game) -> Vec<f32> {
+        let mut out = vec![0.0; obs::OBS_SIZE];
+        obs::write(game, 0, &mut out);
+        out
+    }
+
+    fn fixture() -> bgcore::shop_replay::ShopFileSpec {
+        let text = include_str!("../../bgcore/tests/data/actions/fixture-g2.json")
+            .replace("\"start\": {", &format!("\"start\": {{\"lobby\": {LOBBIES},"));
+        let mut specs = bgcore::shop_replay::parse_action_files(&[(
+            "fixture-g2.json".to_string(),
+            text,
+        )])
+        .unwrap();
+        specs.remove(0)
+    }
+
+    #[test]
+    fn the_default_seats_the_lobby_and_the_opt_out_is_the_old_seats() {
+        assert!(seat_lobby_default(None));
+        assert!(seat_lobby_default(Some(true)));
+        assert!(!seat_lobby_default(Some(false)));
+
+        let data = Arc::new(Data::bundled());
+        let spec = fixture();
+        let turn = &spec.turns[0];
+        let old = bgcore::shop_replay::load(
+            &data, &turn.start, None, None, turn.turn, 1, None).game;
+        let dead = observation(&old);
+        assert_eq!(dead[obs::SCALAR_ALIVE], 1.0);
+        for seat in 1..PLAYERS {
+            let at = obs::OWN_END + (seat - 1) * obs::OPP_BLOCK;
+            assert_eq!(dead[at + obs::OPP_ALIVE], 0.0);
+            assert_eq!(dead[at + obs::OPP_HEALTH], 30.0);
+        }
+
+        let off = bgcore::shop_replay::load_with_lobby(
+            &data, &turn.start, None, None, turn.turn, 1, None, false).game;
+        assert_eq!(observation(&off), dead);
+
+        let seated = bgcore::shop_replay::load_with_lobby(
+            &data, &turn.start, None, None, turn.turn, 1, None, true).game;
+        let seen = observation(&seated);
+        assert_eq!(seen[obs::SCALAR_ALIVE], 7.0);
+        for (i, entry) in spec.turns[0].start.lobby.iter().enumerate() {
+            let at = obs::OWN_END + i * obs::OPP_BLOCK;
+            assert_eq!(seen[at + obs::OPP_ALIVE],
+                       entry.alive as u8 as f32, "seat {}", entry.seat);
+            assert_eq!(seen[at + obs::OPP_HEALTH], entry.health as f32);
+            assert_eq!(seen[at + obs::OPP_TIER], entry.tier as f32);
+        }
+    }
 }
