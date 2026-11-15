@@ -290,6 +290,13 @@ def args():
     a.add_argument("--demo-fade", type=float, default=0.0,
                    help="fraction of the run over which --demo-weight falls linearly to 0 at "
                         "the run's planned end; 0 keeps it at full weight (default 0)")
+    a.add_argument("--demo-until", type=int, default=0,
+                   help="U: the demonstration losses keep full weight through update U, then "
+                        "fall linearly to 0 at --demo-zero-at (counted in updates, so a "
+                        "resume keeps the schedule; default 0: off)")
+    a.add_argument("--demo-zero-at", type=int, default=0,
+                   help="Z: the update from which the demonstration losses pay nothing "
+                        "(needs --demo-until; the held-out agreement is still printed)")
     a.add_argument("--demo-kind-weight", type=float, default=0.0,
                    help="W: each update adds W times the cross-entropy between the network's "
                         "masked policy summed over the legal actions of each grouped action kind "
@@ -382,6 +389,11 @@ def args():
         a.error("--demo-batch needs --demo PATH")
     if not 0.0 <= cfg.demo_fade <= 1.0:
         a.error("--demo-fade must be between 0 and 1")
+    if cfg.demo_until or cfg.demo_zero_at:
+        if not cfg.demo:
+            a.error("--demo-until and --demo-zero-at need --demo PATH")
+        if not 0 < cfg.demo_until < cfg.demo_zero_at:
+            a.error("--demo-until U and --demo-zero-at Z need 0 < U < Z")
     if cfg.buy_prior_weight < 0.0:
         a.error("--buy-prior-weight cannot be negative")
     if cfg.buy_prior_weight and not cfg.buy_prior:
@@ -512,6 +524,17 @@ def win_score_fade_scale(run_min, run_start, run_end, fade):
 
 # The demonstration loss fades exactly like the fight and win scores.
 demo_fade_scale = fight_score_fade_scale
+
+
+def demo_update_scale(update, until, zero_at):
+    """The share of the demonstration losses still paid at `update` under
+    --demo-until U --demo-zero-at Z: full through U, linear to 0 at Z, 0 after.
+    Off (1.0) when Z is 0."""
+    if zero_at <= 0 or update <= until:
+        return 1.0
+    if update >= zero_at:
+        return 0.0
+    return (zero_at - update) / (zero_at - until)
 
 
 class DemoData:
@@ -1653,7 +1676,9 @@ def main():
               + (f", kind weight {cfg.demo_kind_weight:g}"
                  if cfg.demo_kind_weight else "")
               + (f", fading over the last {cfg.demo_fade:g} of the run"
-                 if cfg.demo_fade else ""))
+                 if cfg.demo_fade else "")
+              + (f", full to update {cfg.demo_until}, 0 from update {cfg.demo_zero_at}"
+                 if cfg.demo_zero_at else ""))
         if cfg.demo_kind_weight:
             print_base_demo_kind(demo)
     buy_prior_model = buy_prior_ck = buy_prior_pidx = buy_prior_data = None
@@ -1838,10 +1863,12 @@ def main():
         win_scale = win_score_fade_scale(
             run_min, run_start_min, cfg.minutes, cfg.win_score_fade)
         win_weight = cfg.win_score * win_scale
-        demo_weight = (cfg.demo_weight * demo_fade_scale(
+        # --demo-until / --demo-zero-at: a schedule in updates, on top of the fade.
+        demo_sched = demo_update_scale(update, cfg.demo_until, cfg.demo_zero_at)
+        demo_weight = (cfg.demo_weight * demo_sched * demo_fade_scale(
             run_min, run_start_min, cfg.minutes, cfg.demo_fade)
             if demo is not None else 0.0)
-        demo_kind_weight = (cfg.demo_kind_weight * demo_fade_scale(
+        demo_kind_weight = (cfg.demo_kind_weight * demo_sched * demo_fade_scale(
             run_min, run_start_min, cfg.minutes, cfg.demo_fade)
             if demo is not None else 0.0)
         buy_prior_weight = (cfg.buy_prior_weight * demo_fade_scale(

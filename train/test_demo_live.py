@@ -165,5 +165,18 @@ class MaxUpdatesTest(unittest.TestCase):
         self.assertFalse(ppo.training_done(0.0, 10.0, 100, 0))
 
 
+class DemoScheduleTest(unittest.TestCase):
+    def test_full_then_linear_then_off(self):
+        f = ppo.demo_update_scale
+        self.assertEqual(f(0, 180, 300), 1.0)
+        self.assertEqual(f(180, 180, 300), 1.0)
+        self.assertAlmostEqual(f(240, 180, 300), 0.5)
+        self.assertEqual(f(300, 180, 300), 0.0)
+        self.assertEqual(f(1400, 180, 300), 0.0)
+
+    def test_off_by_default(self):
+        self.assertEqual(ppo.demo_update_scale(5000, 0, 0), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
