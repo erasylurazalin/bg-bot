@@ -2334,6 +2334,12 @@ never read it.
   board total at the start turn and 2, 4 and 6 turns later. The default
   folder is `boards/frozen/actions-2026-11-10/`, checked against its
   `MANIFEST.txt`. Without Era flags the old fixed eval is unchanged.
+  `--trinket-pick own|popular|random` (default `own`) forces every learner
+  trinket pick: own is the network, popular the offered trinket with the most
+  clean streamer picks (ties by offer slot), random uniform over the offer
+  from a generator seeded from the game seed. It overrides only a
+  `ChooseTrinket` action; an End Turn with the offer open still takes the
+  engine's cheapest option.
 - **`bgbench fuzz|games`:** `--era-starts DIR`, `--era-share PCT` and
   `--era-turns MIN,MAX`, with `--real-boards DIR` for the bodies. The fuzzer
   then checks pool accounting after every action in Era-start games too.
@@ -2667,6 +2673,26 @@ Deleting `.venv` undoes it.
   overall and on buys, plus the same count on a fixed train sample of the
   held-out size, and `metrics.csv` appends `demo_top1`, `demo_top1_buy` and
   `demo_top1_train`. The policy that acts is unchanged.
+- `--demo-augment` (default off, needs `--demo`) makes each drawn
+  demonstration row a different but equally true picture. It independently
+  permutes the seven Tavern minion slots and the ten hand slots in the
+  observation, remapping every action that names one (Buy and TargetShop;
+  Play with or without a board position, and Discard) and the legal mask with
+  the same permutation. It also replaces the next opponent's seven board
+  slots and `OPP_TRIBES` with one of the dataset's K alternative boards,
+  keeping the logged board with probability 1/(K+1); the named player's other
+  scalars stay as logged, and a row whose logged next board is empty keeps it
+  because there is no board to replace. The learner's own board is never
+  touched. The alternatives come from
+  `train/evaltools/demo_dataset.py --alt-boards K`,
+  which encodes real boards of the same turn through `EraTurnPath.observe`
+  (the engine's own observation code) and stores them as `alt_opp`. The
+  build's `--real-lobby-filter` uses the trainer's lobby-fit rule; a late turn
+  with fewer than K eligible boards repeats some of the same-turn boards. A
+  dataset without `alt_opp` makes `--demo-augment` stop with a clear error
+  rather than run the shuffles alone. `train/runs/demo-dataset-live-aug/demo.npz`
+  is the live dataset with K = 8 and the filter on. Off, the draw is exactly
+  the old one.
 - `--demo-kind-weight W` (default 0, needs `--demo`; it may run with or
   without `--demo-weight`) adds W times the cross-entropy between the network's
   masked policy summed over the legal actions of each grouped action kind and

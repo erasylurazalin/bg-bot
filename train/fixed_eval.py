@@ -24,7 +24,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import random
 import subprocess
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,6 +61,14 @@ TIER_CURVE_MIN = {
     "tier_turn5": 2.85,
     "tier_turn8": 4.60,
 }
+# The choose_trinket actions' range: every trinket pick is TRINKET_BASE + k.
+TRINKET_KIND = ppo.KINDS.index("choose_trinket")
+TRINKET_BASE = sum(n for _, n in bgpy.ACTION_KINDS[:TRINKET_KIND])
+TRINKET_CHOICES = bgpy.ACTION_KINDS[TRINKET_KIND][1]
+# A measuring tool (train/evaltools/trinket_where.py) sets this to a list and
+# gets one record per resolved learner trinket offer. None turns it off.
+TRINKET_LOG: list[dict] | None = None
+_STREAMER_COUNTS: Counter | None = None
 
 
 def parse_args():
@@ -68,6 +78,11 @@ def parse_args():
     a.add_argument("--temp", type=float, default=1.0,
                    help="divide the network's logits by this before sampling "
                         "(default 1.0; must be above 0)")
+    a.add_argument("--trinket-pick", choices=["own", "popular", "random"], default="own",
+                   help="force every learner trinket pick: own (the network, the default), "
+                        "popular (the most streamer-picked offered trinket, ties by offer "
+                        "slot), or random (uniform over the offered trinkets, seeded from "
+                        "the game seed)")
     a.add_argument("--name", help="run folder under train/runs/fixed-eval")
     a.add_argument("--power-text", action="store_true",
                    help="build the hero-power and trinket text parts fresh with their gates at "
@@ -254,6 +269,134 @@ def tier_curve(rows: list[dict]) -> dict:
     }
 
 
+def trinket_option(obs_row, slot: int) -> tuple[int, int]:
+    """The (trinket table index, price) at one offer position of an observation."""
+    at = bgpy.SCALAR_TRINKET_OPTION + slot * bgpy.TRINKET_OPTION_FEATURES
+    return int(round(float(obs_row[at]))) - 1, int(round(float(obs_row[at + 1])))
+
+
+def offered_trinket_slots(mask_row) -> list[int]:
+    """The legal choose_trinket offer positions, in the offer's own order."""
+    return [k for k in range(TRINKET_CHOICES) if mask_row[TRINKET_BASE + k]]
+
+
+def streamer_pick_counts() -> Counter:
+    """The streamers' clean trinket picks by name, as trinket_picks reads them."""
+    global _STREAMER_COUNTS
+    if _STREAMER_COUNTS is None:
+        evaltools = str(TRAIN / "evaltools")
+        if evaltools not in sys.path:
+            sys.path.insert(0, evaltools)
+        import trinket_picks
+        _, counts, _ = trinket_picks.streamer_picks()
+        _STREAMER_COUNTS = counts
+    return _STREAMER_COUNTS
+
+
+def popular_trinket_slot(ids: list[int], names: list[str],
+                         counts: Counter) -> int:
+    """The offer position of the most streamer-picked offered trinket.
+
+    A trinket the streamers never pick counts 0. Ties go to the lowest offer
+    position: the scan keeps the first maximum.
+    """
+    best, best_count = 0, -1
+    for slot, i in enumerate(ids):
+        c = counts.get(names[i], 0)
+        if c > best_count:
+            best, best_count = slot, c
+    return best
+
+
+def forced_trinket_slot(mode: str, ids: list[int], names: list[str] | None = None,
+                        counts: Counter | None = None, rng=None) -> int | None:
+    """The offer position a forced pick takes, or None for own.
+
+    `ids` are the offered trinket table indices, in offer order.
+    """
+    if mode == "own" or not ids:
+        return None
+    if mode == "popular":
+        return popular_trinket_slot(ids, names or [], counts or Counter())
+    if mode != "random":
+        raise ValueError(f"unknown trinket pick mode {mode!r}")
+    if rng is None:
+        raise ValueError("the random trinket pick needs a generator")
+    return int(rng.randrange(len(ids)))
+
+
+def apply_trinket_pick(acts, b, mode: str, names: list[str] | None,
+                       counts: Counter | None, rngs: dict[int, random.Random],
+                       game_seed_base: int) -> int:
+    """Override every learner ChooseTrinket action in `acts`, in place.
+
+    A non-trinket action is never touched, so an End Turn with an offer open
+    still buys the engine's cheapest option: that is not the learner's pick.
+    The random generator is one per game, seeded from the game's own seed.
+    """
+    if mode == "own":
+        return 0
+    changed = 0
+    for e in range(len(acts)):
+        a = int(acts[e])
+        if not (TRINKET_BASE <= a < TRINKET_BASE + TRINKET_CHOICES):
+            continue
+        slots = offered_trinket_slots(b.mask[e])
+        if not slots:
+            continue
+        ids = [trinket_option(b.obs[e], s)[0] for s in slots]
+        rng = None
+        if mode == "random":
+            rng = rngs.get(e)
+            if rng is None:
+                rng = random.Random(game_seed_base + e)
+                rngs[e] = rng
+        pick = forced_trinket_slot(mode, ids, names, counts, rng)
+        acts[e] = TRINKET_BASE + slots[pick]
+        changed += 1
+    return changed
+
+
+def collect_trinket_offers(b, acts, start: int, turns, done) -> None:
+    """Record each learner offer that this action resolves, when logging is on.
+
+    `done` keeps the later games an env plays while the chunk finishes out of
+    the log: only the first game of each index is the fixed eval's game.
+    """
+    if TRINKET_LOG is None:
+        return
+    for e in np.nonzero(b.obs[:, bgpy.SCALAR_PENDING_TRINKET] > 0)[0]:
+        e = int(e)
+        if done[e] or b.kind[e] != LEARNER:
+            continue
+        slots = offered_trinket_slots(b.mask[e])
+        if not slots:
+            continue
+        opts = [trinket_option(b.obs[e], s) for s in slots]
+        a = int(acts[e])
+        if a == bgpy.END_TURN:
+            # The engine's own pick when the turn ends with the offer open:
+            # the cheapest option, the first one on a price tie.
+            pick = min(range(len(opts)), key=lambda j: (opts[j][1], j))
+            auto = True
+        elif TRINKET_BASE <= a < TRINKET_BASE + TRINKET_CHOICES:
+            pick = a - TRINKET_BASE
+            auto = False
+        else:
+            # Freeze (or another legal pass): the offer stays open.
+            continue
+        TRINKET_LOG.append({
+            "game": int(start + e),
+            "turn": int(turns[e]),
+            "offer_slot": int(b.obs[e, bgpy.SCALAR_TRINKET_OFFER_SLOT]),
+            "offer": [i for i, _ in opts],
+            "prices": [p for _, p in opts],
+            "pick_slot": int(pick),
+            "pick": int(opts[pick][0]),
+            "auto": auto,
+        })
+
+
 def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
     net = info["net"]
     ppo.FORCE_DARK = info["force_dark_gift"]
@@ -267,6 +410,9 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
                       era_turn_min=args.era_turn_min, era_turn_max=args.era_turn_max,
                       era_split=args.era_split)
     names = None
+    mode = getattr(args, "trinket_pick", "own")
+    trinket_names = None
+    streamer_counts = None
     rows: list[dict] = []
     chunk = 0
     while chunk * CHUNK < args.games:
@@ -278,6 +424,11 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
                           real_lag=args.real_lag,
                           real_lag_from=args.real_lag_from,
                           learner_heroes=args.learner_heroes or None, **era_kw)
+        if mode != "own" and trinket_names is None:
+            trinket_names = env.trinket_names()
+            if mode == "popular":
+                streamer_counts = streamer_pick_counts()
+        rngs: dict[int, random.Random] = {}
         if info["overlay_comps"]:
             env.set_overlay(info["overlay_comps"], 0.0)
         b = Bufs(n)
@@ -324,8 +475,12 @@ def eval_checkpoint(info: dict, args, real, dev: torch.device) -> list[dict]:
                 comp_idx = b.flags[ar, b.seat, F_COMP] - 1
                 comp = comp_onehot(comp_idx, net.n_comps, dev)
             acts = sample_actions(net, o, mask, comp, args.temp)
+            acts_np = acts.cpu().numpy()
+            apply_trinket_pick(acts_np, b, mode, trinket_names, streamer_counts,
+                               rngs, (args.seed_base + chunk) << 32)
+            collect_trinket_offers(b, acts_np, start, turns, done)
             kinds = b.kinds.copy()
-            env.step(acts.cpu().numpy(), b.places, b.tier_turns, b.tribes, b.reset)
+            env.step(acts_np, b.places, b.tier_turns, b.tribes, b.reset)
             for e, s in zip(*np.nonzero(b.places)):
                 e, s = int(e), int(s)
                 if kinds[e, s] != LEARNER or done[e]:
@@ -491,6 +646,7 @@ def build_report(name: str, args, n_board_files: int, rev: str,
     lines.append(f"- seed base: {args.seed_base}")
     lines.append(f"- games: {args.games}, chunk size {CHUNK}, one game per seed")
     lines.append(f"- temp: {args.temp:g}")
+    lines.append(f"- trinket pick: {args.trinket_pick}")
     lines.append(f"- lineup: {','.join(str(x) for x in LINEUP)} (learner then 7 real)")
     lines.append(f"- lobby filter: {'off' if args.no_lobby_filter else 'on'}")
     lines.append(f"- real lag: {args.real_lag} turn{'s' if args.real_lag != 1 else ''}")
@@ -753,6 +909,7 @@ def main():
         "games": args.games,
         "chunk_size": CHUNK,
         "temp": args.temp,
+        "trinket_pick": args.trinket_pick,
         "lineup": LINEUP,
         "boards": {"path": str(args.boards), "files": n_board_files},
         "lobby_filter": not args.no_lobby_filter,

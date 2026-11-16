@@ -79,7 +79,7 @@ def num(x: float, places: int = 3) -> str:
 
 
 def load_trinkets() -> list[dict]:
-    """The trinket table in the engine's own order: name, card_id, slot."""
+    """The trinket table in the engine's own order: name, card_id, slot, cost."""
     text = (ROOT / "trinkets.toml").read_text()
     blocks = re.split(r"(?m)^\[\[[^\]]+\]\]\s*$", text)[1:]
     entries = []
@@ -87,11 +87,13 @@ def load_trinkets() -> list[dict]:
         name = re.search(r'(?m)^name = "([^"]+)"', block)
         card = re.search(r'(?m)^card_id = "([^"]+)"', block)
         slot = re.search(r'(?m)^slot = "([^"]+)"', block)
+        cost = re.search(r"(?m)^cost = (\d+)", block)
         if name and card:
             entries.append({
                 "name": name.group(1),
                 "card_id": card.group(1),
                 "slot": slot.group(1) if slot else None,
+                "cost": int(cost.group(1)) if cost else 0,
             })
     if len(entries) != bgpy.N_TRINKETS:
         raise SystemExit(
