@@ -283,6 +283,13 @@ def args():
                         "the run's planned end; 0 keeps it at full weight (default 0)")
     a.add_argument("--demo", help="demonstration dataset from train/evaltools/demo_dataset.py "
                                   "(Era's observations, legal masks and actions)")
+    a.add_argument("--demo-augment", action="store_true",
+                   help="each drawn demonstration row gets independent random shop and hand "
+                        "slot permutations (with Era's action and the legal mask remapped) and "
+                        "a random swap of the next opponent's board for one of the dataset's "
+                        "--alt-boards alternatives. Off is the old draw exactly. Needs a "
+                        "dataset built with alt_opp (train/evaltools/demo_dataset.py "
+                        "--alt-boards K)")
     a.add_argument("--demo-weight", type=float, default=0.0,
                    help="W: each update adds W times the cross-entropy between the network's "
                         "masked policy and Era's action on a fresh train-split demonstration "
@@ -387,6 +394,8 @@ def args():
         a.error("--demo-batch cannot be negative")
     if cfg.demo_batch and not cfg.demo:
         a.error("--demo-batch needs --demo PATH")
+    if cfg.demo_augment and not cfg.demo:
+        a.error("--demo-augment needs --demo PATH")
     if not 0.0 <= cfg.demo_fade <= 1.0:
         a.error("--demo-fade must be between 0 and 1")
     if cfg.demo_until or cfg.demo_zero_at:
@@ -540,9 +549,10 @@ def demo_update_scale(update, until, zero_at):
 class DemoData:
     """The Build A demonstration dataset: observations, legal masks, Era's
     actions and the game split. Rows are held on the CPU; the training and
-    eval loops move only the rows they use."""
+    eval loops move only the rows they use. `alt_opp` holds the dataset's K
+    next-opponent alternatives for every row, when it has them."""
 
-    def __init__(self, obs, mask, action, split, source="<arrays>"):
+    def __init__(self, obs, mask, action, split, source="<arrays>", alt_opp=None):
         if torch.is_tensor(obs):
             obs = obs.detach().cpu().numpy()
         if torch.is_tensor(mask):
@@ -551,6 +561,8 @@ class DemoData:
             action = action.detach().cpu().numpy()
         if torch.is_tensor(split):
             split = split.detach().cpu().numpy()
+        if torch.is_tensor(alt_opp):
+            alt_opp = alt_opp.detach().cpu().numpy()
         self.obs = torch.as_tensor(np.ascontiguousarray(obs, dtype=np.float32))
         self.mask = torch.as_tensor(np.ascontiguousarray(mask, dtype=bool))
         self.action = torch.as_tensor(np.ascontiguousarray(action, dtype=np.int64))
@@ -566,6 +578,16 @@ class DemoData:
             raise SystemExit(f"{source}: action must be ({n},), got {tuple(self.action.shape)}")
         if split.shape != (n,):
             raise SystemExit(f"{source}: split must be ({n},), got {split.shape}")
+        self.alt_opp = None
+        if alt_opp is not None:
+            alt_opp = np.asarray(alt_opp)
+            if (alt_opp.ndim != 3 or alt_opp.shape[0] != n
+                    or alt_opp.shape[2] != DEMO_ALT_OPP or alt_opp.shape[1] < 1):
+                raise SystemExit(
+                    f"{source}: alt_opp must be ({n}, K, {DEMO_ALT_OPP}) with K at "
+                    f"least 1, got {tuple(alt_opp.shape)}")
+            self.alt_opp = torch.as_tensor(
+                np.ascontiguousarray(alt_opp, dtype=np.float32))
         train = np.flatnonzero(split == "train")
         heldout = np.flatnonzero(split == "heldout")
         if not len(train) or not len(heldout):
@@ -585,9 +607,10 @@ class DemoData:
         self.is_buy = (self.action >= lo) & (self.action < hi)
 
 
-def load_demo(path, obs_size):
+def load_demo(path, obs_size, augment=False):
     """Read a demonstration npz and refuse an observation layout this network
-    does not take."""
+    does not take. With `augment`, the dataset must also hold alt_opp, the K
+    next-opponent alternatives the opponent swap draws from."""
     path = Path(path)
     try:
         npz = np.load(path, allow_pickle=False)
@@ -598,6 +621,7 @@ def load_demo(path, obs_size):
         if missing:
             raise SystemExit(f"--demo {path}: missing {', '.join(missing)}")
         obs, mask, action, split = z["obs"], z["mask"], z["action"], z["split"]
+        alt_opp = z["alt_opp"] if augment and "alt_opp" in z.files else None
     if obs.ndim != 2:
         raise SystemExit(f"--demo {path}: obs must be 2-D, got shape {obs.shape}")
     if obs.shape[1] != obs_size:
@@ -606,7 +630,13 @@ def load_demo(path, obs_size):
             f"{obs_size}. The dataset must match the network's observation "
             "(old_boards='keep' and no --lag-in-obs); rebuild it with "
             "train/evaltools/demo_dataset.py")
-    return DemoData(obs, mask, action, split, source=str(path))
+    if augment and alt_opp is None:
+        raise SystemExit(
+            f"--demo-augment: {path} has no alt_opp array, so the opponent board "
+            "cannot be swapped. Rebuild it with train/evaltools/demo_dataset.py "
+            "--alt-boards K (K = 8 for the live-aug dataset), or run without "
+            "--demo-augment")
+    return DemoData(obs, mask, action, split, source=str(path), alt_opp=alt_opp)
 
 
 def demo_cross_entropy(net, obs, mask, action):
@@ -629,6 +659,158 @@ def demo_piece(rows, j, step, m):
     start = j * n // m
     stop = (j + step) * n // m
     return rows[start:stop]
+
+
+# The action table's kind offsets, from bgpy.ACTION_KINDS (the same table the
+# engine's Action::index uses).
+KIND_BASE = {}
+_kind_total = 0
+for _kind_name, _kind_count in bgpy.ACTION_KINDS:
+    KIND_BASE[_kind_name] = _kind_total
+    _kind_total += _kind_count
+BUY_BASE = KIND_BASE["buy"]
+TARGET_SHOP_BASE = KIND_BASE["target_shop"]
+PLAY_BASE = KIND_BASE["play"]
+DISCARD_BASE = KIND_BASE["discard"]
+# One demonstration opponent alternative: the next opponent's board slots and
+# the board-derived tribe counts (OPP_TRIBES). The rest of the OPP_BLOCK is
+# the named player's, not the board's, and stays as logged.
+DEMO_ALT_OPP = bgpy.BOARD * bgpy.MINION_FEATURES + bgpy.LOBBY_TRIBES
+
+
+def _slot_sources(n, count, generator):
+    """A random source permutation per row: new slot i gets old slot src[i]."""
+    return torch.argsort(
+        torch.rand((n, count), generator=generator), dim=1
+    )
+
+
+def _permute_slots(obs, start, count, src):
+    """New slot i of a zone gets old slot src[i]."""
+    n = obs.shape[0]
+    width = bgpy.SLOT_FEATURES
+    slots = obs[:, start:start + count * width].reshape(n, count, width)
+    out = torch.gather(
+        slots, 1, src[:, :, None].expand(-1, -1, width)
+    )
+    obs[:, start:start + count * width] = out.reshape(n, count * width)
+
+
+def _permute_action_block(mask, base, count, width, src):
+    """Permute a contiguous action kind that names a slot, with the same
+    source permutation as the observation."""
+    n = mask.shape[0]
+    block = mask[:, base:base + count * width].reshape(n, count, width)
+    out = torch.gather(
+        block, 1, src[:, :, None].expand(-1, -1, width)
+    )
+    mask[:, base:base + count * width] = out.reshape(n, count * width)
+
+
+def _remap_actions(action, base, count, width, src):
+    """Map an action that names a slot by the same source permutation: old
+    slot j becomes the new slot dst[j] (the inverse of src)."""
+    dst = torch.argsort(src, dim=1)
+    rel = action - base
+    inside = (rel >= 0) & (rel < count * width)
+    if not bool(inside.any()):
+        return
+    rows = torch.nonzero(inside, as_tuple=False).squeeze(1)
+    old_slot = torch.div(rel[rows], width, rounding_mode="floor")
+    new_slot = dst[rows, old_slot]
+    action[rows] = base + new_slot * width + rel[rows] % width
+
+
+def apply_shop_shuffle(obs, mask, action, src):
+    """Shuffle the seven Tavern minion slots and every action that names one:
+    Buy and TargetShop. The Tavern spell slot is its own action and stays."""
+    _permute_slots(obs, bgpy.SHOP_START, bgpy.SHOP, src)
+    _permute_action_block(mask, BUY_BASE, bgpy.SHOP, 1, src)
+    _permute_action_block(mask, TARGET_SHOP_BASE, bgpy.SHOP, 1, src)
+    _remap_actions(action, BUY_BASE, bgpy.SHOP, 1, src)
+    _remap_actions(action, TARGET_SHOP_BASE, bgpy.SHOP, 1, src)
+
+
+def apply_hand_shuffle(obs, mask, action, src):
+    """Shuffle the ten hand slots and every action that names one: Play (with
+    or without a board position) and Discard. A board position is not a hand
+    slot and stays as logged."""
+    _permute_slots(obs, bgpy.HAND_START, bgpy.HAND, src)
+    _permute_action_block(mask, PLAY_BASE, bgpy.HAND, bgpy.BOARD + 1, src)
+    _permute_action_block(mask, DISCARD_BASE, bgpy.HAND, 1, src)
+    _remap_actions(action, PLAY_BASE, bgpy.HAND, bgpy.BOARD + 1, src)
+    _remap_actions(action, DISCARD_BASE, bgpy.HAND, 1, src)
+
+
+def demo_next_index(obs):
+    """The opponent block marked OPP_NEXT, one index per row, and whether the
+    row has one. -1 (and False) for the rows with no next opponent."""
+    n = obs.shape[0]
+    flags = torch.stack(
+        [obs[:, bgpy.OWN_END + i * bgpy.OPP_BLOCK + bgpy.OPP_NEXT]
+         for i in range(bgpy.PLAYERS - 1)], dim=1
+    )
+    index = flags.argmax(1)
+    has = flags.sum(1) > 0
+    index = torch.where(has, index, torch.full_like(index, -1))
+    return index, has
+
+
+def apply_opponent_swap(obs, alt_opp, picks):
+    """Replace the next opponent's board slots and OPP_TRIBES by an alternative
+    stored in the dataset. `picks` is one alt index per row, -1 to keep the
+    logged board. Only the board's minions and their tribe counts change; a
+    row whose logged next board is empty has nothing to replace, so it keeps
+    it."""
+    if not len(obs):
+        return
+    n, k = alt_opp.shape[0], alt_opp.shape[1]
+    next_index, has = demo_next_index(obs)
+    present = torch.zeros(n, dtype=torch.bool, device=obs.device)
+    rows = torch.arange(n, device=obs.device)
+    for slot in range(bgpy.BOARD):
+        at = (bgpy.OWN_END + next_index * bgpy.OPP_BLOCK + bgpy.OPP_SCALARS
+              + slot * bgpy.MINION_FEATURES + bgpy.SLOT_PRESENT)
+        present |= obs[rows, at] > 0.5
+    use = (picks >= 0) & (picks < k) & has & present
+    if not bool(use.any()):
+        return
+    rows = torch.nonzero(use, as_tuple=False).squeeze(1)
+    chosen = alt_opp[rows, picks[rows]]
+    width = bgpy.MINION_FEATURES
+    slots = chosen[:, :bgpy.BOARD * width].reshape(-1, bgpy.BOARD, width)
+    tribes = chosen[:, bgpy.BOARD * width:]
+    base = bgpy.OWN_END + next_index[rows] * bgpy.OPP_BLOCK
+    cols = (base + bgpy.OPP_SCALARS)[:, None] + torch.arange(
+        bgpy.BOARD * width, device=obs.device)[None, :]
+    obs[rows[:, None], cols] = slots.reshape(-1, bgpy.BOARD * width)
+    col = (base + bgpy.OPP_TRIBES)[:, None] + torch.arange(
+        bgpy.LOBBY_TRIBES, device=obs.device)[None, :]
+    obs[rows[:, None], col] = tribes
+
+
+def augment_demo_batch(demo, rows, generator):
+    """The drawn demonstration rows, each with independent random shop and hand
+    shuffles and, when the dataset has them, a random next-opponent board
+    swap. The logged board is kept with probability 1/(K+1) and otherwise
+    replaced by one of the K alternatives. The learner's own board is never
+    touched."""
+    obs = demo.obs[rows].clone()
+    mask = demo.mask[rows].clone()
+    action = demo.action[rows].clone()
+    n = len(rows)
+    if not n:
+        return obs, mask, action
+    apply_shop_shuffle(
+        obs, mask, action, _slot_sources(n, bgpy.SHOP, generator))
+    apply_hand_shuffle(
+        obs, mask, action, _slot_sources(n, bgpy.HAND, generator))
+    if demo.alt_opp is not None and demo.alt_opp.shape[1]:
+        k = demo.alt_opp.shape[1]
+        pick = torch.randint(0, k + 1, (n,), generator=generator)
+        picks = torch.where(pick < k, pick, torch.full_like(pick, -1))
+        apply_opponent_swap(obs, demo.alt_opp[rows], picks)
+    return obs, mask, action
 
 
 def training_done(minutes, minutes_limit, update, max_updates):
@@ -1663,14 +1845,19 @@ def main():
         raise SystemExit("--power-gate-init needs --init-from")
     demo = None
     demo_gen = None
+    demo_aug_gen = None
     if cfg.demo:
         if OLD_BOARDS != "keep":
             raise SystemExit("--demo: the dataset was built with old_boards='keep'; "
                              "this run uses old_boards='drop'")
         # The network reads bgpy's layout constants when it is built, so this
         # is the observation width it takes.
-        demo = load_demo(cfg.demo, bgpy.OBS_SIZE)
+        demo = load_demo(cfg.demo, bgpy.OBS_SIZE, augment=cfg.demo_augment)
         demo_gen = torch.Generator().manual_seed(cfg.seed)
+        if cfg.demo_augment:
+            # A generator of its own, so --demo-augment does not move the row
+            # sample the old draw used.
+            demo_aug_gen = torch.Generator().manual_seed(cfg.seed + 1)
         print(f"demo {cfg.demo}: {len(demo.train)} train, {len(demo.heldout)} heldout rows, "
               f"weight {cfg.demo_weight:g}"
               + (f", kind weight {cfg.demo_kind_weight:g}"
@@ -1678,7 +1865,9 @@ def main():
               + (f", fading over the last {cfg.demo_fade:g} of the run"
                  if cfg.demo_fade else "")
               + (f", full to update {cfg.demo_until}, 0 from update {cfg.demo_zero_at}"
-                 if cfg.demo_zero_at else ""))
+                 if cfg.demo_zero_at else "")
+              + (f", augmented with {demo.alt_opp.shape[1]} alternative boards"
+                 if cfg.demo_augment else ""))
         if cfg.demo_kind_weight:
             print_base_demo_kind(demo)
     buy_prior_model = buy_prior_ck = buy_prior_pidx = buy_prior_data = None
@@ -2260,9 +2449,16 @@ def main():
                             dsub = demo_rows[j:j + sub.numel()]
                             demo_scale = 1.0
                         if dsub.numel():
-                            d_obs = demo.obs[dsub].to(dev)
-                            d_mask = demo.mask[dsub].to(dev)
-                            d_action = demo.action[dsub].to(dev)
+                            if cfg.demo_augment:
+                                d_obs, d_mask, d_action = augment_demo_batch(
+                                    demo, dsub, demo_aug_gen)
+                                d_obs = d_obs.to(dev)
+                                d_mask = d_mask.to(dev)
+                                d_action = d_action.to(dev)
+                            else:
+                                d_obs = demo.obs[dsub].to(dev)
+                                d_mask = demo.mask[dsub].to(dev)
+                                d_action = demo.action[dsub].to(dev)
                             if demo_weight > 0.0:
                                 loss = add_demo_loss(
                                     loss, net, d_obs, d_mask, d_action,

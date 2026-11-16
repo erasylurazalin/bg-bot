@@ -16,11 +16,20 @@ whole and counted.
 The split is by game: the old dataset's saved game list and split are reused
 with `--split-from`, so the held-out games stay the same.
 
+`--alt-boards K` also stores K alternative next-opponent boards for every row
+in an `alt_opp` array, for `ppo.py --demo-augment`. Each alternative is a real
+board of the row's own turn from `boards/real`, encoded by the engine's own
+observation code: a copy of the action file gets the board as the next lobby
+entry's `last_board`, and `EraTurnPath.observe` writes it. Only the seven
+board slots and `OPP_TRIBES` are stored; the named player's other scalars
+stay as logged. The asset is `train/runs/demo-dataset-live-aug/` with K = 8.
+
 Output in `train/runs/demo-dataset-live/`: `demo.npz` with `obs`, `mask`,
 `action`, `turn`, `game`, `split`, and the split list `games` / `game_split`;
-and `report.md` with the live-lobby alive check, the counts, the dropped turns,
-and BASE's masked-argmax agreement on the held-out part, overall, on buys, on
-the grouped kinds, and by action kind.
+with `--alt-boards`, also `alt_opp`; and `report.md` with the live-lobby
+alive check, the counts, the dropped turns, the alternatives, and BASE's
+masked-argmax agreement on the held-out part, overall, on buys, on the
+grouped kinds, and by action kind.
 
 Measurement and data only. It does not edit ppo.py, model.py or fixed_eval.py.
 """
@@ -28,11 +37,13 @@ Measurement and data only. It does not edit ppo.py, model.py or fixed_eval.py.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import os
 import random
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -43,6 +54,7 @@ sys.path.insert(0, str(ROOT / "train"))
 os.chdir(ROOT)
 
 import bgpy
+import real_boards
 
 ACTIONS = ROOT / "boards/frozen/actions-2026-11-15"
 OUT = ROOT / "train/runs/demo-dataset-live"
@@ -384,6 +396,9 @@ def save_dataset(out: Path, arrays: dict, split: dict[str, str],
                  files: list[str]) -> None:
     """Write demo.npz with the rows and the full game list split."""
     game_split = np.asarray([split[name] for name in files], dtype=str)
+    extra = {}
+    if "alt_opp" in arrays:
+        extra["alt_opp"] = arrays["alt_opp"]
     np.savez(
         out / "demo.npz",
         obs=arrays["obs"],
@@ -394,7 +409,229 @@ def save_dataset(out: Path, arrays: dict, split: dict[str, str],
         split=arrays["split"],
         games=np.asarray(files, dtype=str),
         game_split=game_split,
+        **extra,
     )
+
+
+def gift_spec(gift) -> dict:
+    """A real board's Dark Gift as the action file's lobby shape."""
+    if isinstance(gift, str):
+        return {"card_id": gift}
+    return dict(gift)
+
+
+def real_minion_rows(spec) -> list[dict]:
+    """One `train/real_boards.py` board's minions as lobby `last_board` rows:
+    the same card names, stats, keywords and numbers the trainer builds."""
+    rows = []
+    for name, attack, health, golden, keywords, numbers, gifts in spec[2]:
+        rows.append({
+            "name": name,
+            "attack": int(attack),
+            "health": int(health),
+            "golden": bool(golden),
+            "keywords": list(keywords),
+            "numbers": list(numbers),
+            "dark_gifts": [gift_spec(g) for g in gifts],
+        })
+    return rows
+
+
+def lobby_tribes(name: str) -> set[str] | None:
+    """The game's lobby tribes, by `ShopFileSpec::lobby`'s rule: the file's
+    `lobby` list when it has one, else its `tribes` list."""
+    data = action_spec(name)
+    for key in ("lobby", "tribes"):
+        tribes = {str(t).lower() for t in (data.get(key) or [])}
+        if tribes:
+            return tribes
+    return None
+
+
+def card_tribes() -> dict[str, set[str]]:
+    """Card name to its tribe names, for the trainer's real lobby filter.
+    Names the file does not know (a Stand-in, a versioned Dark Paradox) are
+    left out and pass the filter, as an untyped minion does."""
+    cards = json.loads((ROOT / "ref/bg-cards.json").read_text())["cards"]
+    out: dict[str, set[str]] = {}
+    for card in cards:
+        tribes = {str(t).lower() for t in (card.get("tribes") or ())}
+        if not tribes:
+            continue
+        out.setdefault(card["name"], set()).update(tribes)
+    return out
+
+
+def board_fits(minions: list[tuple], lobby: set[str] | None,
+               tribes: dict[str, set[str]]) -> bool:
+    """The trainer's `RealBoards::board_fits`: neutral or unknown minions
+    always pass, a typed one passes when one of its types is in the lobby."""
+    if lobby is None:
+        return True
+    for minion in minions:
+        kinds = tribes.get(minion[0], set())
+        if kinds and not kinds & lobby:
+            return False
+    return True
+
+
+def alt_choices(files: list[str], specs: list[tuple], k: int, seed: int,
+                filter_on: bool) -> dict[str, dict[int, list[int]]]:
+    """For every game and turn, K real board indices from that same turn.
+
+    The trainer's real seats draw from the whole turn (all games) by default.
+    A seat never draws its own game, so boards from the row's own game are
+    avoided when the turn has enough others. With the lobby filter on, only
+    boards whose minions fit the game's lobby are eligible; a late turn with
+    fewer than K eligible boards repeats some of them, since widening to
+    another turn would no longer be the row's turn.
+    """
+    by_turn: dict[int, list[int]] = defaultdict(list)
+    for i, spec in enumerate(specs):
+        by_turn[int(spec[0])].append(i)
+    trains = card_tribes() if filter_on else {}
+    choices: dict[str, dict[int, list[int]]] = {}
+    for name in files:
+        data = action_spec(name)
+        source = str(data.get("source", name))
+        game = int(data.get("game", 0))
+        lobby = lobby_tribes(name) if filter_on else None
+        per_turn = {}
+        for turn_item in data.get("turns", []):
+            turn = int(turn_item.get("turn", 0))
+            if not turn_item.get("actions"):
+                continue
+            eligible = [
+                i for i in by_turn.get(turn, [])
+                if not filter_on
+                or board_fits(specs[i][2], lobby, trains)
+            ]
+            preferred = [
+                i for i in eligible
+                if not (str(specs[i][6]) == source and int(specs[i][7]) == game)
+            ]
+            if len(preferred) >= k:
+                eligible = preferred
+            if not eligible:
+                raise SystemExit(
+                    f"{name} turn {turn}: no real boards"
+                    + (" pass the lobby filter" if filter_on else ""))
+            rng = random.Random(f"{seed}:{name}:{turn}")
+            if len(eligible) >= k:
+                per_turn[turn] = rng.sample(eligible, k)
+            else:
+                # A filtered late turn can hold fewer than K. Repeating a real
+                # board of the same turn keeps K entries and the filter, where
+                # widening to another turn would not be the turn's boards.
+                per_turn[turn] = [rng.choice(eligible) for _ in range(k)]
+        choices[name] = per_turn
+    return choices
+
+
+def opponent_patch(obs: np.ndarray) -> np.ndarray | None:
+    """The OPP_NEXT block's board slots and OPP_TRIBES, in the dataset's
+    alternative layout. None when the row has no next opponent."""
+    for i in range(bgpy.PLAYERS - 1):
+        base = bgpy.OWN_END + i * bgpy.OPP_BLOCK
+        if obs[base + bgpy.OPP_NEXT] <= 0.5:
+            continue
+        start = base + bgpy.OPP_SCALARS
+        slots = obs[start:start + bgpy.BOARD * bgpy.MINION_FEATURES]
+        tribes = obs[base + bgpy.OPP_TRIBES:
+                     base + bgpy.OPP_TRIBES + bgpy.LOBBY_TRIBES]
+        return np.concatenate([slots, tribes])
+    return None
+
+
+def build_alt_opp(arrays: dict, files: list[str], k: int, seed: int,
+                  folder: Path, filter_on: bool) -> tuple[np.ndarray, dict]:
+    """Every row's K alternative next-opponent boards, encoded by the engine.
+
+    For each game and alternative index, a copy of the action file gets the
+    next opponent's lobby board replaced by the chosen real board for every
+    turn. `EraReplay` / `EraTurnPath.observe` then encodes that board through
+    `obs::write`, the same encoder the dataset rows use. Only the encoded
+    board slots and OPP_TRIBES are kept; the named player's other scalars stay
+    exactly as the row has them.
+    """
+    specs, unknown = real_boards.load(folder)
+    if not specs:
+        raise SystemExit(f"{folder}: no real boards for --alt-boards")
+    choices = alt_choices(files, specs, k, seed, filter_on)
+    patch_size = bgpy.BOARD * bgpy.MINION_FEATURES + bgpy.LOBBY_TRIBES
+    out = np.zeros((len(arrays["obs"]), k, patch_size), dtype=np.float32)
+    patches: dict[tuple[str, int, int], np.ndarray] = {}
+    ref_cards = str(ROOT / "ref/bg-cards.json")
+    missing = 0
+
+    with tempfile.TemporaryDirectory(prefix="bg-demo-alt-") as tmp:
+        tmp = Path(tmp)
+        for number, name in enumerate(files, 1):
+            base = action_spec(name)
+            game_turns = choices[name]
+            for j in range(k):
+                doc = copy.deepcopy(base)
+                for turn_item in doc.get("turns", []):
+                    turn = int(turn_item.get("turn", 0))
+                    picks = game_turns.get(turn)
+                    if picks is None:
+                        continue
+                    lobby = turn_item.get("start", {}).get("lobby")
+                    if not lobby:
+                        continue
+                    entry = next((e for e in lobby if e.get("next")), None)
+                    if entry is None:
+                        continue
+                    spec = specs[picks[j]]
+                    entry["last_board"] = real_minion_rows(spec)
+                    # The board's tier enters the slot encoding; the named
+                    # player's live tier (OPP_TIER) stays as logged.
+                    entry["seen_tier"] = int(spec[1])
+                path = tmp / f"{Path(name).stem}-alt{j}.json"
+                path.write_text(json.dumps(doc))
+                try:
+                    replay = bgpy.EraReplay.from_file(
+                        str(path), ref_cards, lobby=True)
+                    for turn_item in doc.get("turns", []):
+                        turn = int(turn_item.get("turn", 0))
+                        if not turn_item.get("actions") or turn not in game_turns:
+                            continue
+                        try:
+                            turn_path = replay.path(turn, REPLAY_SEED, True)
+                        except Exception:
+                            continue
+                        obs = np.zeros(bgpy.OBS_SIZE, dtype=np.float32)
+                        mask = np.zeros(bgpy.N_ACTIONS, dtype=bool)
+                        turn_path.observe(obs, mask)
+                        patch = opponent_patch(obs)
+                        if patch is not None:
+                            patches[(name, turn, j)] = patch
+                finally:
+                    path.unlink(missing_ok=True)
+            if number % 10 == 0 or number == len(files):
+                print(f"alt boards: {number}/{len(files)} games", flush=True)
+
+    for i, name in enumerate(arrays["game"]):
+        turn = int(arrays["turn"][i])
+        logged = opponent_patch(arrays["obs"][i])
+        for j in range(k):
+            patch = patches.get((str(name), turn, j))
+            if patch is not None:
+                out[i, j] = patch
+            elif logged is not None:
+                # No encoded alternative: keep the logged board rather than
+                # pretending the opponent's board is empty.
+                out[i, j] = logged
+                missing += 1
+            else:
+                missing += 1
+    return out, {
+        "k": k,
+        "specs": len(specs),
+        "unknown": unknown,
+        "filter": filter_on,
+        "missing": missing,
+    }
 
 
 def pct(x: float) -> str:
@@ -485,7 +722,19 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--no-eval", action="store_true",
                     help="write the dataset without reading BASE")
+    ap.add_argument("--alt-boards", type=int, default=0,
+                    help="K: store K alternative next-opponent boards per row, "
+                         "from real boards of the same turn (default 0: none)")
+    ap.add_argument("--alt-seed", type=int, default=REPLAY_SEED,
+                    help="seed for which alternative boards each game and turn draws")
+    ap.add_argument("--real-boards", default=str(real_boards.DEFAULT_DIR),
+                    help="folder of real boards the alternatives come from")
+    ap.add_argument("--real-lobby-filter", action="store_true",
+                    help="only use alternative boards whose minions fit the game's lobby, "
+                         "as trainer --real-lobby-filter does")
     args = ap.parse_args()
+    if args.alt_boards < 0:
+        raise SystemExit("--alt-boards cannot be negative")
 
     ACTIONS = Path(args.actions).resolve()
     out = Path(args.out)
@@ -552,6 +801,23 @@ def main() -> None:
             raise SystemExit(
                 f"alive check failed: {len(alive['problems'])} mismatches"
             )
+    alt_info = None
+    if args.alt_boards:
+        present = [name for name in files if name in by_file]
+        print(
+            f"alt boards: K={args.alt_boards} from {args.real_boards}"
+            + (", lobby filter on" if args.real_lobby_filter else ", lobby filter off"),
+            flush=True,
+        )
+        arrays["alt_opp"], alt_info = build_alt_opp(
+            arrays, present, args.alt_boards, args.alt_seed,
+            Path(args.real_boards), args.real_lobby_filter)
+        print(
+            f"alt boards: {arrays['alt_opp'].shape[1]} per row, "
+            f"{alt_info['specs']} real boards, "
+            f"{alt_info['missing']} rows without a patch",
+            flush=True,
+        )
     save_dataset(out, arrays, split, files)
 
     print(
@@ -679,6 +945,48 @@ def main() -> None:
     )
     lines.append("")
     lines.append("Held-out games: " + ", ".join(f"`{name}`" for name in held))
+    lines.append("")
+
+    lines.append("## Alternative opponent boards")
+    lines.append("")
+    if alt_info is None:
+        lines.append(
+            "None: built without `--alt-boards`, so `ppo.py --demo-augment` "
+            "refuses this dataset."
+        )
+    else:
+        lines.append(
+            f"K = {alt_info['k']} alternatives per row, from "
+            f"`{args.real_boards}` ({alt_info['specs']} real boards), "
+            "each from the row's own turn. "
+            + ("The games' lobby filter is on." if alt_info["filter"]
+               else "The games' lobby filter is off (the trainer's default).")
+        )
+        lines.append("")
+        lines.append(
+            "Each alternative replaces the next opponent's seven board slots "
+            "and `OPP_TRIBES`, encoded by `EraTurnPath.observe` from a copy of "
+            "the action file whose `next` lobby entry has the real board as "
+            "its `last_board` and its tier as `seen_tier`. The named player's "
+            "other scalars (Health, tier, hero, trinkets, deity, Gem and spell "
+            "bonuses, leaderboard, fights) stay as logged. Boards come from "
+            "another game when the turn has enough of them; with the lobby "
+            "filter on, a late turn with fewer than K eligible boards repeats "
+            "some of the same-turn boards."
+        )
+        lines.append("")
+        lines.append(
+            f"{alt_info['missing']} row/alternative slots had no encoded board; "
+            "they keep the logged board (or stay zero where the row has no next "
+            "opponent, which the swap leaves alone)."
+        )
+        if alt_info["unknown"]:
+            names = sorted(set(alt_info["unknown"]))
+            lines.append("")
+            lines.append(
+                f"Real-board minions not built ({len(alt_info['unknown'])}): "
+                + ", ".join(names)
+            )
     lines.append("")
 
     lines.append("## Steps by turn")
