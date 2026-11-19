@@ -898,3 +898,42 @@ fn a_volumizers_own_improvement_does_not_reach_its_host() {
     assert_eq!(in_hand, (6, 3), "the Green Volumizer still in hand grew by +3/+0");
     g.check_invariants().unwrap();
 }
+
+#[test]
+fn snarky_shark_is_in_the_tier_five_pool_and_not_tier_four() {
+    let mut g = game(347);
+    let shark_id = g.data.cards.by_name("Snarky Shark").unwrap();
+    let shark = g.data.cards.get(shark_id);
+    let pool_slot = shark.pool_slot as usize;
+    assert_eq!(shark.tier, 5, "patch 37.0.3: tier 4 to tier 5");
+    assert_eq!(
+        g.pool[pool_slot],
+        g.data.rules.copies(5),
+        "tier 5 copy count (9)"
+    );
+    assert!(
+        !g.data.cards.ids_up_to_tier[4].contains(&shark_id),
+        "not in tier 4 draw list"
+    );
+    assert!(
+        g.data.cards.ids_up_to_tier[5].contains(&shark_id),
+        "in tier 5 draw list"
+    );
+    let mut rng = Rng::new(99);
+    for _ in 0..500 {
+        assert_ne!(
+            g.data.cards.random_pool_minion(Tribe::Beast, 4, g.lobby, &mut rng),
+            Some(shark_id),
+            "never drawn at tier 4"
+        );
+    }
+    assert!(
+        (0..500).any(|_| {
+            g.data.cards.random_pool_minion(Tribe::Beast, 5, g.lobby, &mut rng) == Some(shark_id)
+        }),
+        "can be drawn at tier 5"
+    );
+    g.give(0, "Snarky Shark").unwrap();
+    assert_eq!(g.pool[pool_slot], g.data.rules.copies(5) - 1);
+    g.check_invariants().unwrap();
+}

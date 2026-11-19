@@ -1238,8 +1238,9 @@ struct RawTrinket {
     #[serde(default)]
     banned_tribes: Vec<String>,
     /// A trinket that has left the game (patch 37.0.2's Spell-powered
-    /// Wrench, Quilligraphy Set, Fridge Magnet, Writhing Tentacles): kept for
-    /// old logs and boards, never offered again.
+    /// Wrench, Quilligraphy Set, Fridge Magnet, Writhing Tentacles; patch
+    /// 37.0.3's Emergency Gearblade): kept for old logs and boards, never
+    /// offered again.
     #[serde(default)]
     out_of_pool: bool,
     #[serde(default)]

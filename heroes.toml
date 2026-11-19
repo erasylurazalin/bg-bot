@@ -122,12 +122,12 @@ power = { name = "Incubate", card_id = "BG36_HERO_000p", cost = 1, effect = { di
 
 # Get 2 random minions. When you play one, discard the other.
 [[hero]]
-# Patch 37.0.2: the hero now needs Undead in the lobby (tag 2347 on the
-# hero), so it is only offered there.
+# Patch 37.0.3: offered only in lobbies where Aberrations are present
+# (was Undead in 37.0.2).
 name = "Kith'ix"
 card_id = "BG36_HERO_002"
 armor = 8
-tribes = ["undead"]
+tribes = ["aberration"]
 power = { name = "Dark Ritual", card_id = "BG36_HERO_002p", cost = 2, effect = { get_linked_minions = 2 } }
 
 # Get a random Tavern spell.

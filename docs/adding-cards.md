@@ -564,16 +564,19 @@ Triple Reward spell.
 - **A card that leaves the game is marked out of the pool, never deleted**
   (patch 37.0.2: `out_of_pool = true` on Expert Aviator and on the trinkets
   Spell-powered Wrench, both Quilligraphy Sets, Fridge Magnet and Writhing
-  Tentacles). It keeps its id, its pool slot and every effect, because old
-  logs, `boards/real` and recorded games still hold it; `Card::lobby_ok`
-  returns false for it, and that is the filter every minion draw applies, so
-  the Tavern, Discovers, random generation and the Dark Gift pool never hand
-  it out. A trinket's `out_of_pool` is read by `deal_trinket_offer` and
-  `replace_trinket_at`, and `banned_tribes` (Wand of Divination in a Quilboar
-  lobby) keeps one out of the lobbies it is banned in. A Dark Gift's
-  `exclude` list in darkgifts.toml names host cards it never lands on
-  (Furtiveness and Relentless Deflector); the loader turns the names into
-  card ids.
+  Tentacles; patch 37.0.3: Emergency Gearblade). It keeps its id, its pool slot
+  and every effect, because old logs, `boards/real` and recorded games still
+  hold it; `Card::lobby_ok` returns false for it, and that is the filter every
+  minion draw applies, so the Tavern, Discovers, random generation and the
+  Dark Gift pool never hand it out. A trinket's `out_of_pool` is read by
+  `deal_trinket_offer` and `replace_trinket_at`, and `banned_tribes` (Wand of
+  Divination in a Quilboar lobby, both offers and `replace_trinket_at`) keeps
+  one out of the lobbies it is banned in. A Dark Gift's `exclude` list in
+  darkgifts.toml names host cards it never lands on (Furtiveness and
+  Relentless Deflector); the loader turns the names into card ids. Dark Gifts
+  `[pool]` also has `require_common_type_after` and `require_common_type`
+  (patch 37.0.3: after turn 9, named minions are offered only when one of
+  their tribes matches the board's most common minion type).
 - **Timewarp minions.** The 2-cost Timewarped minions are `[[token]]` entries
   with `timewarp = "minor"` or `"major"`. They take no pool slot, and
   `Card::lobby_ok` is false for them, so no normal Tavern, Discover or

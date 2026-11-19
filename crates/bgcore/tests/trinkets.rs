@@ -5999,6 +5999,7 @@ fn the_trinkets_that_left_the_pool_are_never_offered() {
         "BG30_MagicItem_410t2", // Quilligraphy Set, Greater
         "BG30_MagicItem_545", // Fridge Magnet
         "BG36_MagicItem_606", // Writhing Tentacles
+        "BG36_MagicItem_812", // Emergency Gearblade (patch 37.0.3)
     ];
     let mut gone_ids = Vec::new();
     for card_id in gone {
@@ -6081,7 +6082,7 @@ fn weighted_gauntlet_is_a_greater_trinket_that_starts_at_plus_seven() {
     let i = trinket(&g, "Weighted Gauntlet");
     let t = g.data.trinkets.get(i);
     assert_eq!(t.slot, bgcore::trinkets::Slot::Greater, "patch 37.0.2");
-    assert_eq!(t.cost, 3);
+    assert_eq!(t.cost, 5, "patch 37.0.3 (was 3)");
     assert_eq!(
         t.on_pick,
         vec![bgcore::trinkets::Act::GrowValue(7)],
@@ -6098,4 +6099,89 @@ fn weighted_gauntlet_is_a_greater_trinket_that_starts_at_plus_seven() {
         seen.iter().any(|&(turn, of)| turn == 9 && of == i),
         "the Gauntlet is offered in the Greater slot"
     );
+}
+
+#[test]
+fn patch_37_0_3_trinket_costs() {
+    use bgcore::trinkets::Slot;
+    let g = game(1);
+    let expect = [
+        // Lesser
+        ("BG30_MagicItem_962", "Training Certificate", Slot::Lesser, 5),
+        ("BG32_MagicItem_808", "Bloodbound Earrings", Slot::Lesser, 3),
+        ("BG32_MagicItem_892", "Vibrant Bubble", Slot::Lesser, 4),
+        ("BG36_MagicItem_409", "Ruby Tusk", Slot::Lesser, 1),
+        ("BG35_MagicItem_306", "Jailer Sticker", Slot::Lesser, 3),
+        ("BG36_MagicItem_800", "Demonic Bloodletter", Slot::Lesser, 1),
+        ("BG30_MagicItem_411", "Hoggy Bank", Slot::Lesser, 0),
+        ("BG36_MagicItem_307", "Wand of Divination", Slot::Lesser, 1),
+        ("BG32_MagicItem_278", "Reusable Batteries", Slot::Lesser, 0),
+        ("BG36_MagicItem_390", "Baller Portrait", Slot::Lesser, 0),
+        ("BG35_MagicItem_150", "Cursed Crystal", Slot::Lesser, 0),
+        ("BG30_MagicItem_821", "Fish Portrait", Slot::Lesser, 0),
+        ("BG36_MagicItem_402", "Mindslasher Portrait", Slot::Lesser, 2),
+        // Greater
+        ("BG30_MagicItem_442", "Blood Golem Sticker", Slot::Greater, 7),
+        ("BG36_MagicItem_450", "Snarky Portrait", Slot::Greater, 5),
+        ("BG35_MagicItem_732", "Soul Fermenter", Slot::Greater, 7),
+        ("BG36_MagicItem_308", "Trailblazer Sticker", Slot::Greater, 6),
+        ("BG36_MagicItem_414", "Weighted Gauntlet", Slot::Greater, 5),
+        ("BG36_MagicItem_423t", "Volumizer Portrait", Slot::Greater, 0),
+        ("BG30_MagicItem_801", "Sinstone Sticker", Slot::Greater, 1),
+        ("BG32_MagicItem_284", "Aggem Sticker", Slot::Greater, 0),
+        ("BG35_MagicItem_740", "Sky Golem Portrait", Slot::Greater, 0),
+        ("BG32_MagicItem_361t", "Portable Factory", Slot::Greater, 1),
+        ("BG30_MagicItem_914t", "Nerglish Phrasebook", Slot::Greater, 0),
+    ];
+    for (card_id, name, slot, cost) in expect {
+        let i = g.data.trinkets.by_card_id(card_id).unwrap_or_else(|| panic!("no {card_id}"));
+        let t = g.data.trinkets.get(i);
+        assert_eq!(t.name, name, "{card_id}");
+        assert_eq!(t.slot, slot, "{card_id} ({name})");
+        assert_eq!(t.cost, cost, "{card_id} ({name})");
+    }
+}
+
+#[test]
+fn emergency_gearblade_is_out_of_pool_and_never_offered() {
+    let g = game(1);
+    let gearblade = g.data.trinkets.by_card_id("BG36_MagicItem_812").unwrap();
+    assert!(g.data.trinkets.get(gearblade).out_of_pool);
+    let with_mechs = [Tribe::Mech, Tribe::Beast, Tribe::Dragon, Tribe::Murloc, Tribe::Demon];
+    let seen = offers_over_seeds(&with_mechs, 20);
+    assert!(!seen.is_empty());
+    assert!(
+        !seen.iter().any(|&(_, of)| of == gearblade),
+        "Emergency Gearblade was offered"
+    );
+    // Neither Mystery Cube nor Orb of the Unknown can offer or turn into it.
+    for seed in 0..300u64 {
+        let mut g = game_lobby(seed, &with_mechs);
+        take(&mut g, 0, "Orb of the Unknown");
+        assert_ne!(g.players[0].trinkets[0].of, gearblade + 1);
+    }
+}
+
+#[test]
+fn orb_of_the_unknown_never_gives_wand_of_divination_in_a_quilboar_lobby() {
+    let with_quill = [Tribe::Quilboar, Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc];
+    let without_quill = [Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Pirate];
+    let wand_slot = {
+        let g = game(1);
+        g.data.trinkets.by_card_id("BG36_MagicItem_307").unwrap() + 1
+    };
+    for seed in 0..800u64 {
+        let mut g = game_lobby(seed, &with_quill);
+        take(&mut g, 0, "Orb of the Unknown");
+        assert_ne!(
+            g.players[0].trinkets[0].of, wand_slot,
+            "seed {seed}: Orb of the Unknown became Wand of Divination in a Quilboar lobby"
+        );
+    }
+    let found_without = (0..800u64).any(|seed| {
+        let mut g = game_lobby(seed, &without_quill);
+        take(&mut g, 0, "Orb of the Unknown");
+        g.players[0].trinkets[0].of == wand_slot
+    });
+    assert!(found_without, "Orb of the Unknown can become Wand of Divination without Quilboar");
 }

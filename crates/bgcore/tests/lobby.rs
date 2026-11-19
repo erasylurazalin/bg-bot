@@ -287,12 +287,28 @@ fn nothing_outside_the_lobby_ever_shows_up_in_whole_games() {
         while let Some(p) = g.current_player() {
             let a = random_action(&g, &mut rng);
             g.step(a).unwrap();
+            let any_candelabra = g.players.iter().any(|pl| {
+                pl.trinkets.iter().any(|t| {
+                    t.of != 0 && g.data.trinkets.get(t.of - 1).name == "Timeworn Candelabra"
+                })
+            });
             for c in visible_cards(&g) {
                 let card = g.data.cards.get(c);
                 // A Timewarped minion is the Candelabra's, not a lobby
-                // draw: its list ignores the lobby by rule.
+                // draw: its list ignores the lobby by rule, and Timewarped
+                // Substrate / Sellemental can generate their Elemental cards.
+                let from_timewarp = card.timewarp.is_some()
+                    || (any_candelabra
+                        && matches!(
+                            card.name.as_str(),
+                            "Temperature Shift"
+                                | "Fire Baller"
+                                | "Snow Baller"
+                                | "Sellemental"
+                                | "Water Droplet"
+                        ));
                 assert!(
-                    card.lobby_ok(g.lobby) || card.timewarp.is_some(),
+                    card.lobby_ok(g.lobby) || from_timewarp,
                     "seed {seed}, step {steps}, player {p}: {} is outside the lobby",
                     card.name
                 );

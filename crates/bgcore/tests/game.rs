@@ -647,16 +647,16 @@ fn a_discover_spells_cast_triggers_wait_for_the_pick() {
     let mut g = game(145);
     put_on_board(&mut g, 0, "Felboar");
     set_shop(&mut g, 0, &["Wolf Pup", "Cord Puller"]);
-    // Two spells already counted: this cast is the third.
-    g.players[0].board[0].improvements = 2;
+    // Three spells already counted: this cast is the fourth.
+    g.players[0].board[0].improvements = 3;
     g.give(0, "A New Sprout").unwrap();
     let hand = g.players[0].hand.len() - 1;
     act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
     assert!(!g.players[0].discover.is_empty(), "the Discover is offered");
-    assert_eq!(g.players[0].board[0].improvements, 2, "the trigger waits for the pick");
+    assert_eq!(g.players[0].board[0].improvements, 3, "the trigger waits for the pick");
     assert_eq!(g.players[0].shop.len(), 2, "nothing eaten yet");
     act(&mut g, 0, Action::Choose(0));
-    assert_eq!(g.players[0].board[0].improvements, 0, "the third spell counted at the pick");
+    assert_eq!(g.players[0].board[0].improvements, 0, "the fourth spell counted at the pick");
     assert_eq!(g.players[0].shop.len(), 1, "and the Felboar eats once the cast has resolved");
     g.check_invariants().unwrap();
 }
@@ -676,13 +676,13 @@ fn a_triple_rewards_cast_is_a_spell_cast_at_its_pick() {
     let mut g = game(146);
     put_on_board(&mut g, 0, "Felboar");
     set_shop(&mut g, 0, &["Hired Mount"]);
-    // Two spells already counted: the reward's cast is the third.
-    g.players[0].board[0].improvements = 2;
+    // Three spells already counted: the reward's cast is the fourth.
+    g.players[0].board[0].improvements = 3;
     g.give(0, "Triple Reward").unwrap();
     let hand = g.players[0].hand.len() - 1;
     act(&mut g, 0, Action::Play { hand: hand as u8, pos: 0 });
     assert!(!g.players[0].discover.is_empty(), "the reward's Discover is offered");
-    assert_eq!(g.players[0].board[0].improvements, 2, "the cast waits for the pick");
+    assert_eq!(g.players[0].board[0].improvements, 3, "the cast waits for the pick");
     assert_eq!(g.players[0].shop.len(), 1, "nothing eaten yet");
     act(&mut g, 0, Action::Choose(0));
     assert_eq!(g.players[0].board[0].improvements, 0, "the reward's cast counted at the pick");

@@ -340,6 +340,7 @@ fn tribe_tied_heroes_need_a_lobby_tribe() {
                             | "Death Speaker Blackthorn"
                             | "Alexstrasza"
                             | "Drest'agath"
+                            | "Kith'ix"
                     ),
                     "seed {seed}: {name} offered without its tribe"
                 );
@@ -1203,4 +1204,42 @@ fn finley_finding_all_patched_up_starts_with_60_health_and_his_armor() {
         }
     }
     panic!("no Finley was offered All Patched Up in 1500 seeds");
+}
+
+#[test]
+fn kithix_is_offered_only_when_aberrations_are_in_the_lobby() {
+    let d = data();
+    let kithix = d.heroes.by_name("Kith'ix").unwrap();
+    let hero = d.heroes.get(kithix);
+    assert!(hero.tribes.has(Tribe::Aberration));
+    assert!(!hero.tribes.has(Tribe::Undead));
+
+    // Undead present, Aberrations absent: never offered.
+    let no_ab = lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Undead]);
+    assert!(!d.heroes.lobby_allowed(no_ab).any(|h| h == kithix));
+    for seed in 0..200u64 {
+        let mut g = Game::new_heroes_with_lobby(d.clone(), seed, no_ab);
+        while g.turn == 0 {
+            let p = g.current_player().unwrap();
+            assert!(!g.players[p].hero_offer.contains(&kithix), "seed {seed}: Kith'ix offered without Aberrations");
+            g.step(Action::Choose(0)).unwrap();
+        }
+    }
+
+    // Aberrations present (even without Undead): can be offered.
+    let with_ab = lobby(&[Tribe::Beast, Tribe::Mech, Tribe::Dragon, Tribe::Murloc, Tribe::Aberration]);
+    assert!(d.heroes.lobby_allowed(with_ab).any(|h| h == kithix));
+    let mut offered = false;
+    'seeds: for seed in 0..200u64 {
+        let mut g = Game::new_heroes_with_lobby(d.clone(), seed, with_ab);
+        while g.turn == 0 {
+            let p = g.current_player().unwrap();
+            if g.players[p].hero_offer.contains(&kithix) {
+                offered = true;
+                break 'seeds;
+            }
+            g.step(Action::Choose(0)).unwrap();
+        }
+    }
+    assert!(offered, "Kith'ix was never offered with Aberrations in 200 seeds");
 }

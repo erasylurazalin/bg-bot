@@ -1258,16 +1258,16 @@ fn a_lockbox_opens_before_the_fight_and_its_minion_can_be_summoned_from_hand() {
 fn a_bounty_cast_twice_is_two_spells_for_every_counter_and_trigger() {
     let mut g = game(110);
     put_on_board(&mut g, 0, "Proud Privateer", false);
-    put_on_board(&mut g, 0, "Felboar", false); // every 3 spells cast
+    put_on_board(&mut g, 0, "Felboar", false); // every 4 spells cast
     put_on_board(&mut g, 0, "Timecap'n Hooktail", false); // +1 Attack per spell
     let hooktail_attack = g.players[0].board[2].attack;
     cast(&mut g, "Wealthy Bounty");
     assert_eq!(g.players[0].board[1].improvements, 2, "two spells cast");
     // Hooktail gave its Attack to every minion twice
     assert_eq!(g.players[0].board[2].attack, hooktail_attack + 2);
-    // a third cast (two more) fires the Felboar's every-3 once and keeps 1
+    // a second cast (two more, 4 total) fires the Felboar's every-4 once and keeps 0
     cast(&mut g, "Wealthy Bounty");
-    assert_eq!(g.players[0].board[1].improvements, 1);
+    assert_eq!(g.players[0].board[1].improvements, 0);
     // without a Privateer a Bounty is one spell
     let mut g = game(111);
     put_on_board(&mut g, 0, "Felboar", false);

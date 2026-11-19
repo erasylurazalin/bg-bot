@@ -743,7 +743,7 @@ fn arcane_absorption_cannot_pick_a_non_elemental() {
 fn arcane_absorption_with_an_empty_tavern_gives_nothing_but_counts_as_a_cast() {
     let mut g = game(22);
     put_on_board(&mut g, 0, "Dune Dweller", false);
-    put_on_board(&mut g, 0, "Felboar", false); // every 3 spells cast
+    put_on_board(&mut g, 0, "Felboar", false); // every 4 spells cast
     set_shop(&mut g, 0, &[]);
     let before = stats(&g.players[0].board[0]);
     cast(&mut g, "Arcane Absorption");

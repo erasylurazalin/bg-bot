@@ -261,10 +261,20 @@ impl Game {
     pub(super) fn deal_dark_gift_offer(&mut self, p: usize, plan: DarkGiftPlan) {
         let mut used: ArrayVec<u8, DISCOVER> = ArrayVec::new();
         let mut taken: ArrayVec<CardId, DISCOVER> = ArrayVec::new();
+        let need_common = plan.gift_turn > self.data.gifts.pool.require_common_type_after as u32
+            && !self.data.gifts.pool.require_common_type.is_empty();
+        let common = if need_common { self.most_common_card_type(p) } else { None };
         for k in 0..DISCOVER {
             let slot = plan.slots[k];
-            let mine = if slot.yours { self.most_common_card_type(p) } else { None };
-            let Some(card) = self.draw_gift_minion(plan.gift_turn, slot, mine, &taken) else {
+            let mine = if !slot.yours {
+                None
+            } else if need_common {
+                common
+            } else {
+                self.most_common_card_type(p)
+            };
+            let Some(card) = self.draw_gift_minion(plan.gift_turn, slot, mine, common, &taken)
+            else {
                 continue;
             };
             let gift = {
@@ -385,6 +395,7 @@ impl Game {
         turn: u32,
         slot: OfferSlot,
         mine: Option<crate::cards::Tribe>,
+        common: Option<crate::cards::Tribe>,
         taken: &[CardId],
     ) -> Option<CardId> {
         let mut tiers: ArrayVec<u8, 8> = ArrayVec::new();
@@ -408,7 +419,8 @@ impl Game {
             };
             for k in 0..tiers.len().max(1) {
                 let tier = if tiers.is_empty() { 0 } else { tiers[(start + k) % tiers.len()] };
-                let found = self.pick_gift_pool(turn, tier, mine.filter(|_| want), taken);
+                let found =
+                    self.pick_gift_pool(turn, tier, mine.filter(|_| want), common, taken);
                 if let Some(card) = found {
                     let slot = self.data.cards.get(card).pool_slot as usize;
                     self.pool[slot] -= 1;
@@ -433,6 +445,7 @@ impl Game {
         turn: u32,
         tier: u8,
         tribe: Option<crate::cards::Tribe>,
+        common: Option<crate::cards::Tribe>,
         taken: &[CardId],
     ) -> Option<CardId> {
         let cards = &self.data.cards;
@@ -443,7 +456,7 @@ impl Game {
             let c = cards.get(id);
             (tier == 0 || c.tier == tier)
                 && c.lobby_ok(lobby)
-                && gifts.pool_allows(c, id, turn)
+                && gifts.pool_allows_for(c, id, turn, common)
                 && tribe.is_none_or(|t| c.tribes.has(t))
                 && !taken.contains(&id)
                 && pool[c.pool_slot as usize] > 0

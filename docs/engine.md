@@ -1652,11 +1652,15 @@ through exactly that card's code. The engine never matches a gift by name:
   (`Player.discover_copies`, three for a Golden offer, none for the Dagger's
   copies), gives the rest back on the pick, and `pl.discover_gifts` carries
   each offer's gift so the observation shows it before the pick.
-- **The pool the offers come from** is `GiftDb::pool_allows`: never a spell
-  or a token, never a Magnetic minion, one with "when you sell this" or one
-  whose effect works in hand, no Battlecry or Choose One minion before turn
-  5, and darkgifts.toml's `exclude` list (Leeroy the Reckless, Deadly
-  Spore).
+- **The pool the offers come from** is `GiftDb::pool_allows` (`pool_allows_for`
+  with the player's most common board type from `most_common_card_type`): never
+  a spell or a token, never a Magnetic minion, one with "when you sell this" or
+  one whose effect works in hand, no Battlecry or Choose One minion before turn
+  5, darkgifts.toml's `exclude` list (Leeroy the Reckless, Deadly Spore), and
+  darkgifts.toml's `require_common_type` list after `require_common_type_after`
+  (patch 37.0.3: after turn 9, Tyrael, Falling Sky Golem, Cataclysmic Harbinger
+  and De-volition-ist are offered only if one of their tribes matches the
+  board's most common type).
 - **Who gets a gift.** `GiftDb::pick` chooses at random among the gifts whose
   window holds the turn and whose condition the host meets, never one already
   on another offer of the press and never one whose darkgifts.toml `exclude`

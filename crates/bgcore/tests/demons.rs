@@ -1091,22 +1091,22 @@ fn ominous_seer_discounts_the_next_tavern_spell() {
 }
 
 #[test]
-fn felboar_consumes_after_three_spells_and_starts_over() {
+fn felboar_consumes_after_four_spells_and_starts_over() {
     let mut g = game(21);
     put_on_board(&mut g, 0, "Felboar");
     set_shop(&mut g, 0, &["Buzzing Vermin"]);
-    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(3));
-    for _ in 0..2 {
+    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(4));
+    for _ in 0..3 {
         g.give(0, "Tavern Coin").unwrap();
         act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
     }
-    assert_eq!(stats(&g.players[0].board[0]), (2, 6));
+    assert_eq!(stats(&g.players[0].board[0]), (2, 6), "third spell does not consume yet");
     assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(1));
     g.give(0, "Tavern Coin").unwrap();
     act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
-    assert_eq!(stats(&g.players[0].board[0]), (3, 7));
+    assert_eq!(stats(&g.players[0].board[0]), (3, 7), "fourth spell consumes");
     assert!(g.players[0].shop.is_empty());
-    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(3));
+    assert_eq!(g.players[0].board[0].events_left(&g.data.cards), Some(4));
     g.check_invariants().unwrap();
 }
 
@@ -1328,8 +1328,8 @@ fn staff_of_enrichments_own_buff_lands_after_the_casts_after_triggers() {
     let mut g = game(30);
     put_on_board(&mut g, 0, "Felboar");
     set_shop(&mut g, 0, &["Buzzing Vermin"]);
-    // Two spells already counted: this cast is the third.
-    g.players[0].board[0].improvements = 2;
+    // Three spells already counted: this cast is the fourth.
+    g.players[0].board[0].improvements = 3;
     g.give(0, "Staff of Enrichment").unwrap();
     let hand = (g.players[0].hand.len() - 1) as u8;
     act(&mut g, 0, Action::Play { hand, pos: 0 });

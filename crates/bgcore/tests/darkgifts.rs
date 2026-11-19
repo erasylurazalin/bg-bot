@@ -2322,3 +2322,197 @@ fn furtiveness_never_lands_on_relentless_deflector() {
         assert_ne!(pick, Some(furt), "the Deflector was offered Furtiveness");
     }
 }
+
+#[test]
+fn after_turn_nine_the_four_minions_require_matching_most_common_type() {
+    let restricted = [
+        "Tyrael",
+        "Falling Sky Golem",
+        "Cataclysmic Harbinger",
+        "De-volition-ist",
+    ];
+    let g = game(1);
+    let gifts = &g.data.gifts;
+    let db = &g.data.cards;
+
+    // On turn 9 (and earlier), all four are allowed regardless of common type.
+    for name in restricted {
+        let c = id(&g, name);
+        for common in [None, Some(Tribe::Beast), Some(Tribe::Mech), Some(Tribe::Aberration)] {
+            assert!(
+                gifts.pool_allows_for(db.get(c), c, 9, common),
+                "{name} should be allowed on turn 9 with common={common:?}"
+            );
+        }
+    }
+
+    // After turn 9 (turn 10+):
+    // - None / Beast: none of the four are allowed.
+    for common in [None, Some(Tribe::Beast)] {
+        for name in restricted {
+            let c = id(&g, name);
+            assert!(
+                !gifts.pool_allows_for(db.get(c), c, 10, common),
+                "{name} should NOT be allowed on turn 10 with common={common:?}"
+            );
+        }
+    }
+    // - Mech: Falling Sky Golem matches; the other three do not.
+    assert!(gifts.pool_allows_for(db.get(id(&g, "Falling Sky Golem")), id(&g, "Falling Sky Golem"), 10, Some(Tribe::Mech)));
+    for name in ["Tyrael", "Cataclysmic Harbinger", "De-volition-ist"] {
+        let c = id(&g, name);
+        assert!(!gifts.pool_allows_for(db.get(c), c, 10, Some(Tribe::Mech)), "{name}");
+    }
+    // - Aberration: De-volition-ist matches; the other three do not.
+    assert!(gifts.pool_allows_for(db.get(id(&g, "De-volition-ist")), id(&g, "De-volition-ist"), 10, Some(Tribe::Aberration)));
+    for name in ["Tyrael", "Falling Sky Golem", "Cataclysmic Harbinger"] {
+        let c = id(&g, name);
+        assert!(!gifts.pool_allows_for(db.get(c), c, 10, Some(Tribe::Aberration)), "{name}");
+    }
+}
+
+#[test]
+fn dark_gift_discovers_enforce_the_after_turn_nine_rule_in_game() {
+    let restricted_ids = |g: &Game| {
+        [
+            id(g, "Tyrael"),
+            id(g, "Falling Sky Golem"),
+            id(g, "Cataclysmic Harbinger"),
+            id(g, "De-volition-ist"),
+        ]
+    };
+
+    // On turn 9, even with no typed board minions, the four can still be offered.
+    let mut seen_on_turn9 = [false; 4];
+    for seed in 0..250u64 {
+        let mut g = game(seed);
+        let ids = restricted_ids(&g);
+        to_turn(&mut g, 9);
+        settle(&mut g, 0);
+        g.players[0].gold = 10;
+        act(&mut g, 0, Action::DarkGift);
+        for &c in &g.players[0].discover {
+            if let Some(k) = ids.iter().position(|&r| r == c) {
+                seen_on_turn9[k] = true;
+            }
+        }
+        if seen_on_turn9.iter().all(|&x| x) {
+            break;
+        }
+    }
+    assert!(
+        seen_on_turn9.iter().all(|&x| x),
+        "expected all four offered on turn 9 across seeds, got {seen_on_turn9:?}"
+    );
+
+    // On turn 10 with only hand minions (nothing typed on board), none of the four are offered
+    // (including golden offers and non-yours slots).
+    for seed in 0..120u64 {
+        let mut g = game(seed);
+        let ids = restricted_ids(&g);
+        g.give(0, "Lullabot").unwrap();
+        g.give(0, "Cord Puller").unwrap();
+        put_on_board(&mut g, 0, "Suspicious Prisonguard"); // neutral: no type
+        to_turn(&mut g, 10);
+        settle(&mut g, 0);
+        g.players[0].gold = 10;
+        act(&mut g, 0, Action::DarkGift);
+        for &c in &g.players[0].discover {
+            assert!(!ids.contains(&c), "seed {seed}: {} offered on turn 10 with no typed board", g.data.cards.get(c).name);
+        }
+        act(&mut g, 0, Action::Choose(0));
+        g.open_dark_gift_trinket(0, None, false, true, true);
+        for &c in &g.players[0].discover {
+            assert!(!ids.contains(&c), "seed {seed}: golden {} offered on turn 10 with no typed board", g.data.cards.get(c).name);
+        }
+        g.check_invariants().unwrap();
+    }
+
+    // On turn 10 with a Mech board (including golden Falling Sky Golem offers via Sinister
+    // Invitation): Falling Sky Golem can be offered; the other three cannot.
+    let mut saw_golem = false;
+    let mut saw_golden_golem = false;
+    for seed in 0..200u64 {
+        let mut g = game(seed);
+        let ids = restricted_ids(&g);
+        put_on_board(&mut g, 0, "Cord Puller");
+        to_turn(&mut g, 10);
+        settle(&mut g, 0);
+        g.players[0].gold = 10;
+        act(&mut g, 0, Action::DarkGift);
+        for &c in &g.players[0].discover {
+            assert!(
+                c == ids[1] || !ids.contains(&c),
+                "seed {seed}: non-Mech {} offered with Mech board",
+                g.data.cards.get(c).name
+            );
+            if c == ids[1] {
+                saw_golem = true;
+            }
+        }
+        act(&mut g, 0, Action::Choose(0));
+        g.open_dark_gift_trinket(0, None, false, true, true);
+        for &c in &g.players[0].discover {
+            assert!(
+                c == ids[1] || !ids.contains(&c),
+                "seed {seed}: golden non-Mech {} offered with Mech board",
+                g.data.cards.get(c).name
+            );
+            if c == ids[1] {
+                saw_golden_golem = true;
+            }
+        }
+        g.check_invariants().unwrap();
+        if saw_golem && saw_golden_golem {
+            break;
+        }
+    }
+    assert!(saw_golem, "Falling Sky Golem should be offered on turn 10 with Mech board");
+    assert!(saw_golden_golem, "Golden Falling Sky Golem should be offered on turn 10 with Mech board");
+
+    // On turn 10 with an Aberration board: De-volition-ist can be offered; the other three cannot.
+    let mut saw_devol = false;
+    for seed in 0..200u64 {
+        let mut g = game(seed);
+        let ids = restricted_ids(&g);
+        put_on_board(&mut g, 0, "Zoatroid");
+        to_turn(&mut g, 10);
+        settle(&mut g, 0);
+        g.players[0].gold = 10;
+        act(&mut g, 0, Action::DarkGift);
+        for &c in &g.players[0].discover {
+            assert!(
+                c == ids[3] || !ids.contains(&c),
+                "seed {seed}: non-Aberration {} offered with Aberration board",
+                g.data.cards.get(c).name
+            );
+            if c == ids[3] {
+                saw_devol = true;
+            }
+        }
+        if saw_devol {
+            break;
+        }
+    }
+    assert!(saw_devol, "De-volition-ist should be offered on turn 10 with Aberration board");
+
+    // Dual-tribe tie (e.g. a Beast/Mech dual-tribe minion on board): tie breaks randomly, so
+    // Falling Sky Golem can be offered when Mech wins the tie.
+    let mut saw_golem_tie = false;
+    for seed in 0..250u64 {
+        let mut g = game(seed);
+        let golem = id(&g, "Falling Sky Golem");
+        // Gatekeeper Amalgam has all tribes (counts once for each tribe), or 1 Beast + 1 Mech.
+        put_on_board(&mut g, 0, "Buzzing Vermin");
+        put_on_board(&mut g, 0, "Cord Puller");
+        to_turn(&mut g, 10);
+        settle(&mut g, 0);
+        g.players[0].gold = 10;
+        act(&mut g, 0, Action::DarkGift);
+        if g.players[0].discover.contains(&golem) {
+            saw_golem_tie = true;
+            break;
+        }
+    }
+    assert!(saw_golem_tie, "Falling Sky Golem should be offerable when Mech wins a board tie");
+}

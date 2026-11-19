@@ -32,6 +32,15 @@ exclude = [
     "Dark Paradox t6",
     "Dark Paradox t9",
 ]
+# Patch 37.0.3: after turn 9, these are offered only if one of their tribes
+# matches your most common minion type on the board.
+require_common_type_after = 9
+require_common_type = [
+    "Tyrael",
+    "Falling Sky Golem",
+    "Cataclysmic Harbinger",
+    "De-volition-ist",
+]
 
 # The tiers of the three offers by turn, and whether that slot wants a minion
 # of the player's most common type. Several tiers in one slot ("4,5") are

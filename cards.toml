@@ -356,7 +356,8 @@ rally = { summon = "Tasty Lobster" }
 
 [[minion]]
 name = "Snarky Shark"
-tier = 4
+# Patch 37.0.3: tier 4 to tier 5.
+tier = 5
 tribe = "beast"
 stats = [4, 5]
 on_sell = { effect = { refresh_with = "Fishbait" } }
@@ -1155,10 +1156,10 @@ name = "Felboar"
 tier = 5
 tribes = ["demon", "quilboar"]
 stats = [2, 6]
-# "After you cast 3 spells": every spell, Tavern spell or not (Felboar's
+# "After you cast 4 spells": every spell, Tavern spell or not (Felboar's
 # text has no "Tavern"), and "After" means once the spell has resolved, so it
-# consumes the minion the same cast buffed.
-on_event = { event = "all_spells_cast", every = 3, after = true, effect = { consume = "random" } }
+# consumes the minion the same cast buffed. (Patch 37.0.3: 3 to 4.)
+on_event = { event = "all_spells_cast", every = 4, after = true, effect = { consume = "random" } }
 
 [[minion]]
 name = "Eredar Escapist"
@@ -1181,8 +1182,8 @@ name = "Sanguine Champion"
 tier = 6
 tribe = "quilboar"
 stats = [9, 4]
-battlecry = { gem_bonus = [2, 1] }
-deathrattle = { effect = { gem_bonus = [2, 1] } }
+battlecry = { gem_bonus = [1, 1] }
+deathrattle = { effect = { gem_bonus = [1, 1] } }
 
 [[minion]]
 name = "Turbo Hogrider"

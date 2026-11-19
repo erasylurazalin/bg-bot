@@ -240,27 +240,27 @@ fn the_gem_value_grows_this_game_from_every_source() {
     play(&mut g, 0, 0, 0);
     act(&mut g, 0, Action::Choose(0));
     assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (2, 2));
-    // Sanguine Champion's Battlecry: +2/+1
+    // Sanguine Champion's Battlecry: +1/+1 (patch 37.0.3, was +2/+1)
     put_in_hand(&mut g, 0, "Sanguine Champion", false);
     play(&mut g, 0, 0, 0);
-    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (4, 3));
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (3, 3));
     // a Gem now gives the whole value
     put_on_board(&mut g, 0, "Tusked Camper", false);
     g.give(0, "Blood Gem").unwrap();
     let before = stats(&g.players[0].board[0]);
     cast_gem(&mut g, 0, 0);
-    assert_eq!(stats(&g.players[0].board[0]), (before.0 + 4, before.1 + 3));
+    assert_eq!(stats(&g.players[0].board[0]), (before.0 + 3, before.1 + 3));
     // Gem Day: +1 Attack or +1 Health
     g.give(0, "Gem Day").unwrap();
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 0);
     act(&mut g, 0, Action::Choose(0));
-    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (5, 3));
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (4, 3));
     g.give(0, "Gem Day").unwrap();
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 0);
     act(&mut g, 0, Action::Choose(1));
-    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (5, 4));
+    assert_eq!((g.players[0].gem_attack, g.players[0].gem_health), (4, 4));
     g.check_invariants().unwrap();
 }
 
@@ -287,7 +287,7 @@ fn golden_choose_one_cards_double_their_numbers() {
 
 #[test]
 fn blood_gems_are_plain_spells_no_counters_no_azerite_no_spell_power() {
-    // Felboar counts Tavern spells only
+    // Felboar counts every spell (every 4 spells), Blood Gems included
     let mut g = game(5);
     put_on_board(&mut g, 0, "Felboar", false);
     set_shop(&mut g, 0, &["Wolf Pup"]);
@@ -298,11 +298,11 @@ fn blood_gems_are_plain_spells_no_counters_no_azerite_no_spell_power() {
     for _ in 0..3 {
         cast_gem(&mut g, 0, 0);
     }
-    assert_eq!(g.players[0].board[0].improvements, 0, "gems do not count as spells");
+    assert_eq!(g.players[0].board[0].improvements, 3, "three gems count as spells");
     g.give(0, "Tavern Coin").unwrap();
     let h = g.players[0].hand.len() as u8 - 1;
     play(&mut g, 0, h, 0);
-    assert_eq!(g.players[0].board[0].improvements, 1, "a Tavern spell does");
+    assert_eq!(g.players[0].board[0].improvements, 0, "fourth spell consumes and resets");
 
     // Living Azerite reacts to Tavern spells only
     let mut g = game(6);
@@ -348,14 +348,14 @@ fn a_gem_on_the_amalgam_feeds_felboar_once_per_player_cast() {
 #[test]
 fn felboar_eats_the_tavern_minion_the_same_gem_buffed() {
     // docs/rules/design.md "Eating a minion with a spell": Felboar's "After
-    // you cast 3 spells" fires once the spell has resolved, so it takes the
+    // you cast 4 spells" fires once the spell has resolved, so it takes the
     // minion the gem itself buffed. The old order fired the trigger on the
     // play and ate the minion as it stood before the gem landed (log
     // 2026_11_02_00_10_22-g4 turn 9 step 39).
     let mut g = game(30);
     put_on_board(&mut g, 0, "Felboar", false);
     set_shop(&mut g, 0, &["Wolf Pup"]);
-    g.players[0].board[0].improvements = 2;
+    g.players[0].board[0].improvements = 3;
     g.players[0].gold = 10;
     g.give(0, "Blood Gem").unwrap();
     let gem = id(&g.data.cards, "Blood Gem");
@@ -393,8 +393,8 @@ fn a_three_cast_gem_feeds_felboar_between_its_casts() {
     put_on_board(&mut g, 0, "Balinda Stonehearth", false);
     put_on_board(&mut g, 0, "Hot-Air Surveyor", false);
     set_shop(&mut g, 0, &["Wolf Pup"]);
-    // Two spells already counted: this play's first cast is the third.
-    g.players[0].board[0].improvements = 2;
+    // Three spells already counted: this play's first cast is the fourth.
+    g.players[0].board[0].improvements = 3;
     g.players[0].gold = 10;
     g.give(0, "Blood Gem").unwrap();
     let before = (stats(&g.players[0].board[0]), stats(&g.players[0].shop[0]));
@@ -428,8 +428,8 @@ fn a_choose_one_spells_balinda_casts_feed_felboar_each_time() {
     put_on_board(&mut g, 0, "Balinda Stonehearth", true);
     put_on_board(&mut g, 0, "Bramble Tunneler", false);
     set_shop(&mut g, 0, &["Wolf Pup"]);
-    // One spell already counted: this play's second cast is the third.
-    g.players[0].board[0].improvements = 1;
+    // Two spells already counted: this play's second cast is the fourth.
+    g.players[0].board[0].improvements = 2;
     g.players[0].gold = 10;
     g.give(0, "Alliance Flag").unwrap();
     let before = stats(&g.players[0].board[0]);
@@ -870,10 +870,12 @@ fn veteran_brigand_casts_barrage_three_times_or_gems_the_board() {
     play(&mut g, 0, 0, 0);
     act(&mut g, 0, Action::Choose(1)); // cast Barrage 3 times
     assert_eq!(g.players[0].barrage, (6, 6), "three casts of +2/+2 add on top");
-    // each Barrage cast is a Tavern spell cast: after the 3 casts Felboar
-    // has consumed a Tavern minion (its "every 3 spells" counter cycled once)
+    // each Barrage cast is a Tavern spell cast: after 1 prior spell plus the
+    // 3 casts Felboar has consumed a Tavern minion (its "every 4 spells"
+    // counter cycled once)
     let mut g = game(19);
     put_on_board(&mut g, 0, "Felboar", false);
+    g.players[0].board[0].improvements = 1;
     set_shop(&mut g, 0, &["Wolf Pup"]);
     let wolf = stats(&g.players[0].shop[0]);
     let before = stats(&g.players[0].board[0]);
@@ -882,7 +884,7 @@ fn veteran_brigand_casts_barrage_three_times_or_gems_the_board() {
     act(&mut g, 0, Action::Choose(1));
     let felboar = g.players[0].board.iter().position(|m| name(&g, m) == "Felboar").unwrap();
     assert_eq!(stats(&g.players[0].board[felboar]), (before.0 + wolf.0, before.1 + wolf.1),
-        "three real casts fed Felboar once");
+        "four real casts fed Felboar once");
     assert_eq!(g.players[0].board[felboar].improvements, 0, "the count kept no remainder");
     // option 0: 3 gems on all your minions
     let mut g = game(18);
@@ -1662,7 +1664,7 @@ fn sanguine_champion_deathrattle_raises_the_gem_value_for_good() {
         &mut Rng::new(12),
         &mut (),
     );
-    assert_eq!(out.sides[0].gem_gain, (2, 1), "the Deathrattle, for good");
+    assert_eq!(out.sides[0].gem_gain, (1, 1), "the Deathrattle, for good");
 }
 
 #[test]
@@ -1776,5 +1778,37 @@ fn a_balinda_casts_a_geomants_leftover_gems_twice() {
             "Balinda casts each leftover Gem {casts} times"
         );
         g.check_invariants().unwrap();
+    }
+}
+
+#[test]
+fn sanguine_champion_battlecry_and_deathrattle_give_plus_one_one() {
+    for (golden, gain) in [(false, (1, 1)), (true, (2, 2))] {
+        let mut g = game(40);
+        put_in_hand(&mut g, 0, "Sanguine Champion", golden);
+        play(&mut g, 0, 0, 0);
+        assert_eq!(
+            (g.players[0].gem_attack, g.players[0].gem_health),
+            (1 + gain.0, 1 + gain.1),
+            "Battlecry golden={golden}"
+        );
+        g.check_invariants().unwrap();
+
+        let dbc = db();
+        let mut champ = mk(&dbc, "Sanguine Champion", golden);
+        champ.health = 1;
+        champ.keywords.set(bgcore::Keywords::TAUNT);
+        let mut killer = wall(&dbc);
+        killer.attack = 50;
+        let out = fight_with(
+            &dbc,
+            &[champ],
+            &[killer],
+            [Counters::default(); 2],
+            1,
+            &mut Rng::new(12),
+            &mut (),
+        );
+        assert_eq!(out.sides[0].gem_gain, gain, "Deathrattle golden={golden}");
     }
 }

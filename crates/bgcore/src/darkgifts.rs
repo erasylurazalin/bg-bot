@@ -145,6 +145,11 @@ pub struct GiftPool {
     pub no_choose_one_before: u8,
     /// Minions left out for balance, by card.
     pub exclude: Vec<CardId>,
+    /// After this turn (when > 0), minions in `require_common_type` are only
+    /// offered if one of their tribes matches the player's most common minion
+    /// type on the board (patch 37.0.3).
+    pub require_common_type_after: u8,
+    pub require_common_type: Vec<CardId>,
 }
 
 /// Steady Growth's numbers by the turn the gift was offered.
@@ -220,6 +225,10 @@ struct RawPool {
     no_choose_one_before: u8,
     #[serde(default)]
     exclude: Vec<String>,
+    #[serde(default)]
+    require_common_type_after: u8,
+    #[serde(default)]
+    require_common_type: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -319,16 +328,19 @@ impl GiftDb {
         }
         let raw: RawFile = toml::from_str(s).map_err(|e| format!("darkgifts.toml: {e}"))?;
         let err = |e: String| format!("darkgifts.toml: {e}");
+        let resolve_cards = |list: &[String]| -> Result<Vec<CardId>, String> {
+            list.iter()
+                .map(|n| cards.by_name(n).ok_or_else(|| err(format!("unknown card {n:?}"))))
+                .collect()
+        };
         let pool = match raw.pool {
             None => GiftPool::default(),
             Some(p) => GiftPool {
                 no_battlecry_before: p.no_battlecry_before,
                 no_choose_one_before: p.no_choose_one_before,
-                exclude: p
-                    .exclude
-                    .iter()
-                    .map(|n| cards.by_name(n).ok_or_else(|| err(format!("unknown card {n:?}"))))
-                    .collect::<Result<Vec<_>, _>>()?,
+                exclude: resolve_cards(&p.exclude)?,
+                require_common_type_after: p.require_common_type_after,
+                require_common_type: resolve_cards(&p.require_common_type)?,
             },
         };
         let mut db = GiftDb { pool, ..GiftDb::default() };
@@ -523,6 +535,18 @@ impl GiftDb {
     /// the card: a Magnetic minion, one with "when you sell this", one whose
     /// effect works in hand, and the balance list in darkgifts.toml.
     pub fn pool_allows(&self, card: &Card, id: CardId, turn: u32) -> bool {
+        self.pool_allows_for(card, id, turn, None)
+    }
+
+    /// Pool check with the player's most common board minion type `common`
+    /// (for cards restricted after `require_common_type_after`).
+    pub fn pool_allows_for(
+        &self,
+        card: &Card,
+        id: CardId,
+        turn: u32,
+        common: Option<Tribe>,
+    ) -> bool {
         if card.is_spell() || card.token || card.keywords.has(Keywords::MAGNETIC) {
             return false;
         }
@@ -541,7 +565,17 @@ impl GiftDb {
         if card.choose_one.is_some() && turn < self.pool.no_choose_one_before as u32 {
             return false;
         }
-        !self.pool.exclude.contains(&id)
+        if self.pool.exclude.contains(&id) {
+            return false;
+        }
+        if self.pool.require_common_type_after > 0
+            && turn > self.pool.require_common_type_after as u32
+            && self.pool.require_common_type.contains(&id)
+            && !common.is_some_and(|t| card.tribes.has(t))
+        {
+            return false;
+        }
+        true
     }
 }
 
