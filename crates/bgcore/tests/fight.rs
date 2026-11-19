@@ -181,9 +181,11 @@ fn titus_rivendare_and_sewer_lord() {
 #[test]
 fn turquoise_skitterer_and_ravaging_scorpid_buff_beetles_in_combat() {
     let db = s2_db();
-    // Existing Beetle on board (2/2) + Turquoise Skitterer dying (+5/+5, then summons a Beetle):
-    // both the existing Beetle and the newly summoned Beetle have +5/+5 (7/7), and the side
-    // outcome records +5/+5 Beetle gain.
+    // Existing Beetle on board (2/2) + Turquoise Skitterer dying: it summons
+    // its Beetle first, then gives all Beetles +5/+5, the order in Power.log
+    // 2026_11_11_02_43_24 line 152571. The Watch hook therefore sees the new
+    // Beetle at 2/2; the +5/+5 lands on it and on the old Beetle afterwards,
+    // and the side outcome records +5/+5 Beetle gain.
     let mut skitterer = db.make(db.by_name("Turquoise Skitterer").unwrap(), false);
     skitterer.keywords.set(Keywords::TAUNT);
     let beetle = db.make(db.by_name("Beetle").unwrap(), false);
@@ -202,7 +204,7 @@ fn turquoise_skitterer_and_ravaging_scorpid_buff_beetles_in_combat() {
     );
     assert_eq!(out.winner, Some(0));
     assert_eq!((out.sides[0].beetle_attack_gain, out.sides[0].beetle_health_gain), (5, 5));
-    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (7, 7));
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (2, 2));
 }
 
 #[test]

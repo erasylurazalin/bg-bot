@@ -682,6 +682,10 @@ struct Side<'a> {
     /// they stood in, exactly as they were then. They come back when this
     /// side's last minion dies.
     fermenter: ArrayVec<(usize, Minion), 3>,
+    /// Dead minions taken out of `ms` so a summon could use their board slot
+    /// before the deaths were handled, with the slot each stood in. `resolve`
+    /// still runs their Deathrattles and Reborn.
+    held_dead: ArrayVec<(usize, Fm), BOARD>,
     /// Minions Rapid Reanimation destroyed at Start of Combat, with the slot
     /// they stood in, waiting for a board slot.
     /// The minions Rapid Reanimation destroyed at Start of Combat, with the
@@ -783,6 +787,7 @@ impl<'a> Side<'a> {
             granted: ArrayVec::new(),
             gained_dr: ArrayVec::new(),
             fermenter: ArrayVec::new(),
+            held_dead: ArrayVec::new(),
             reanimate: ArrayVec::new(),
             self_destroyed: ArrayVec::new(),
             first_killed_by_enemy: None,
@@ -1970,7 +1975,19 @@ impl<'a> Side<'a> {
         bonus: bool,
     ) -> bool {
         if self.ms.is_full() {
-            return false;
+            // A dead minion does not hold a board slot. The log of Era's
+            // 2026-11-17 fight against Tickatus (Power.log 274478) shows a
+            // golden Ravaging Scorpid's Deathrattle, fired by Deathstrider
+            // after the attacking Headhunter Gryphon died, filling that
+            // Gryphon's slot before the DEATHS block ran: one Beetle fitted,
+            // the second was lost. Take the left-most dead minion out and let
+            // `resolve` handle its death after this summon, so its own
+            // Deathrattle and Reborn still run in their place.
+            let Some(j) = self.ms.iter().position(|f| f.m.health <= 0) else {
+                return false;
+            };
+            let fm = self.remove(j);
+            let _ = self.held_dead.try_push((j, fm));
         }
         let pos = pos.min(self.ms.len());
         let c = db.get(m.card);
@@ -3286,9 +3303,6 @@ impl<'a> Side<'a> {
                 let mul = if golden { 2 } else { 1 };
                 match dr {
                     Deathrattle::Summon { card: tok, count, golden_doubles_count, beetle_buff } => {
-                        if let Some((ba, bh)) = beetle_buff {
-                            self.add_beetle_buff(db, ba * mul, bh * mul);
-                        }
                         let (n, tok_golden) = if golden_doubles_count {
                             (count * mul as u8, false)
                         } else {
@@ -3299,6 +3313,15 @@ impl<'a> Side<'a> {
                             if self.summon(db, side, pos, m, uid, rng, w) {
                                 pos += 1;
                             }
+                        }
+                        // Turquoise Skitterer summons its Beetle first, then
+                        // gives all Beetles the buff: the log of 2026-11-11
+                        // (Power.log 152571) has the new Beetle at the old
+                        // bonus, and the buff lands on it after Banana
+                        // Slamma's doubling. The buff still applies when a
+                        // full board lost the summon.
+                        if let Some((ba, bh)) = beetle_buff {
+                            self.add_beetle_buff(db, ba * mul, bh * mul);
                         }
                     }
                     Deathrattle::OpponentWarband { count } => {
@@ -3641,6 +3664,14 @@ impl<'a> Side<'a> {
         w: &mut impl Watch,
     ) -> bool {
         let mut changed = false;
+        // Dead minions that a summon took out of `ms` go first, where they
+        // stood, so their Deathrattles and Reborn still happen.
+        while !self.held_dead.is_empty() {
+            let (i, fm) = self.held_dead.remove(0);
+            changed = true;
+            let i = i.min(self.ms.len());
+            self.resolve_dead(db, side, i, fm, uid, rng, w);
+        }
         let mut i = 0;
         while i < self.ms.len() {
             if self.ms[i].m.health > 0 {
@@ -3649,88 +3680,7 @@ impl<'a> Side<'a> {
             }
             changed = true;
             let fm = self.remove(i);
-            let dead = fm.m;
-            w.death(side, i, &dead);
-            self.out.note_dead_card(dead.card);
-            self.out.friendly_deaths = self.out.friendly_deaths.saturating_add(1);
-            if self.first_killed_by_enemy.is_none() && !self.self_destroyed.contains(&fm.uid) {
-                self.first_killed_by_enemy = Some(dead.card);
-            }
-            if self.counters.trinkets.count_deaths {
-                self.out.note_death_card(dead.card);
-                if self.counters.trinkets.count_death_tribes != 0 {
-                    let tribes = db.tribes_of(&dead);
-                    for (k, t) in Tribe::EVERY.into_iter().enumerate() {
-                        if tribes.has(t) {
-                            self.out.death_tribes[k] =
-                                self.out.death_tribes[k].saturating_add(1);
-                        }
-                    }
-                }
-            }
-            // A death is what a "whenever a friendly minion dies" trinket
-            // waits for, and what Avenge counts (its N runs of deaths).
-            self.last_dead = Some(dead);
-            self.dead_at = i;
-            self.trinket_hook(db, side, When::Death, Some((fm.uid, dead)), uid, rng, w);
-            self.trinket_hook(db, side, When::Avenge, Some((fm.uid, dead)), uid, rng, w);
-            if db.get(dead.card).buff_per_kind_death.is_some() {
-                self.note_knight_death(db);
-            }
-            // Fish of N'Zoth: a different friendly Deathrattle minion died,
-            // so every minion with that text gains its Deathrattle for the
-            // rest of the fight.
-            self.gain_deathrattles(db, fm.uid, &dead);
-            let runs = self.deathrattle_fires(db);
-            let dead_max = dead.health + fm.taken;
-            i += self.fire_deathrattles(
-                db, side, &dead, dead_max, fm.uid, fm.killer, i, runs, uid, rng, w,
-            );
-            self.note_deity_death(db, side, fm, uid, rng, w);
-            if self.count_avenge {
-                self.avenge_tick(db, side, uid, rng, w);
-                self.broodmother_tick(db, side, uid, rng, w);
-            }
-            if dead.keywords.has(Keywords::REBORN) {
-                let mut m = db.make(dead.card, dead.golden);
-                // It counts as damaged down to 1 Health, so its maximum
-                // Health is the full value (Stalwart Kodo reads it).
-                let full = m.health;
-                m.health = 1;
-                m.keywords.clear(Keywords::REBORN);
-                // Dark Gifts Persisting Horror: it comes back with full
-                // stats and its Bonus Keywords, and with the gifts it had.
-                if dead.has_gift(db, |c| c.reborn_full) {
-                    m.attack = dead.attack;
-                    m.health = dead.health.max(1);
-                    // Reborn itself is spent: the copy does not come back
-                    // a second time.
-                    let bonus = self.counters.bonus_keywords & !Keywords::REBORN;
-                    m.keywords.0 |= dead.keywords.0 & bonus;
-                    for &g in dead.gift_slice() {
-                        m.push_gift(g);
-                    }
-                    m.shield_hits = dead.shield_hits;
-                }
-                self.no_summon_hooks = true;
-                let reborn = self.summon(db, side, i, m, uid, rng, w);
-                self.no_summon_hooks = false;
-                if reborn {
-                    self.ms[i].taken = (full - 1).max(0);
-                    self.note_reborn(db, i, fm.start_slot);
-                    let plain = self.ms[i].m;
-                    let u = self.ms[i].uid;
-                    self.trinket_hook(db, side, When::Reborn, Some((u, plain)), uid, rng, w);
-                    i += 1;
-                }
-            }
-            // Redemption: a friendly minion died, so a fresh copy with 1
-            // Health comes back where it stood. It comes after this minion's
-            // own Deathrattles and its Reborn, so a board they filled makes
-            // it wait for room (docs/rules/heroes.md "Secrets").
-            if !self.secrets.is_empty() {
-                self.redemption(db, side, &dead, i, uid, rng, w);
-            }
+            i += self.resolve_dead(db, side, i, fm, uid, rng, w);
         }
         // Soul Fermenter: once this side's last minion is gone, the ones it
         // destroyed at Start of Combat come back exactly as they were.
@@ -3747,6 +3697,106 @@ impl<'a> Side<'a> {
             changed = true;
         }
         changed
+    }
+
+    /// Handle one dead minion at slot `i`: its Deathrattle, Avenge, Reborn
+    /// and Redemption. Returns how many minions this inserted at `i`.
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_dead(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        mut i: usize,
+        fm: Fm,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) -> usize {
+        let dead = fm.m;
+        w.death(side, i, &dead);
+        self.out.note_dead_card(dead.card);
+        self.out.friendly_deaths = self.out.friendly_deaths.saturating_add(1);
+        if self.first_killed_by_enemy.is_none() && !self.self_destroyed.contains(&fm.uid) {
+            self.first_killed_by_enemy = Some(dead.card);
+        }
+        if self.counters.trinkets.count_deaths {
+            self.out.note_death_card(dead.card);
+            if self.counters.trinkets.count_death_tribes != 0 {
+                let tribes = db.tribes_of(&dead);
+                for (k, t) in Tribe::EVERY.into_iter().enumerate() {
+                    if tribes.has(t) {
+                        self.out.death_tribes[k] =
+                            self.out.death_tribes[k].saturating_add(1);
+                    }
+                }
+            }
+        }
+        // A death is what a "whenever a friendly minion dies" trinket
+        // waits for, and what Avenge counts (its N runs of deaths).
+        self.last_dead = Some(dead);
+        self.dead_at = i;
+        self.trinket_hook(db, side, When::Death, Some((fm.uid, dead)), uid, rng, w);
+        self.trinket_hook(db, side, When::Avenge, Some((fm.uid, dead)), uid, rng, w);
+        if db.get(dead.card).buff_per_kind_death.is_some() {
+            self.note_knight_death(db);
+        }
+        // Fish of N'Zoth: a different friendly Deathrattle minion died,
+        // so every minion with that text gains its Deathrattle for the
+        // rest of the fight.
+        self.gain_deathrattles(db, fm.uid, &dead);
+        let runs = self.deathrattle_fires(db);
+        let dead_max = dead.health + fm.taken;
+        let mut added = self.fire_deathrattles(
+            db, side, &dead, dead_max, fm.uid, fm.killer, i, runs, uid, rng, w,
+        );
+        i += added;
+        self.note_deity_death(db, side, fm, uid, rng, w);
+        if self.count_avenge {
+            self.avenge_tick(db, side, uid, rng, w);
+            self.broodmother_tick(db, side, uid, rng, w);
+        }
+        if dead.keywords.has(Keywords::REBORN) {
+            let mut m = db.make(dead.card, dead.golden);
+            // It counts as damaged down to 1 Health, so its maximum
+            // Health is the full value (Stalwart Kodo reads it).
+            let full = m.health;
+            m.health = 1;
+            m.keywords.clear(Keywords::REBORN);
+            // Dark Gifts Persisting Horror: it comes back with full
+            // stats and its Bonus Keywords, and with the gifts it had.
+            if dead.has_gift(db, |c| c.reborn_full) {
+                m.attack = dead.attack;
+                m.health = dead.health.max(1);
+                // Reborn itself is spent: the copy does not come back
+                // a second time.
+                let bonus = self.counters.bonus_keywords & !Keywords::REBORN;
+                m.keywords.0 |= dead.keywords.0 & bonus;
+                for &g in dead.gift_slice() {
+                    m.push_gift(g);
+                }
+                m.shield_hits = dead.shield_hits;
+            }
+            self.no_summon_hooks = true;
+            let reborn = self.summon(db, side, i, m, uid, rng, w);
+            self.no_summon_hooks = false;
+            if reborn {
+                self.ms[i].taken = (full - 1).max(0);
+                self.note_reborn(db, i, fm.start_slot);
+                let plain = self.ms[i].m;
+                let u = self.ms[i].uid;
+                self.trinket_hook(db, side, When::Reborn, Some((u, plain)), uid, rng, w);
+                i += 1;
+                added += 1;
+            }
+        }
+        // Redemption: a friendly minion died, so a fresh copy with 1
+        // Health comes back where it stood. It comes after this minion's
+        // own Deathrattles and its Reborn, so a board they filled makes
+        // it wait for room (docs/rules/heroes.md "Secrets").
+        if !self.secrets.is_empty() {
+            self.redemption(db, side, &dead, i, uid, rng, w);
+        }
+        added
     }
 }
 
@@ -5357,6 +5407,76 @@ mod tests {
             names(&db, &s),
             ["Amber Guardian", "Amber Guardian", "Sewer Rat", "Amber Guardian", "Amber Guardian", "Amber Guardian", "Amber Guardian"]
         );
+    }
+
+    #[test]
+    fn a_skitterer_summons_then_buffs_its_beetle() {
+        // Power.log 2026_11_11_02_43_24 line 152571: the new Beetle stands
+        // at the old bonus (2 + 56 + Goldrinn's 7 = 65/62), Banana Slamma
+        // doubles it, and only then does the Skitterer's +5/+5 land.
+        let db = db();
+        let mut uid = 0;
+        let mut rng = Rng::new(1);
+        let mk = |name: &str| db.make(db.by_name(name).unwrap(), false);
+        let counters = Counters { beetle_attack: 5, beetle_health: 5, ..Counters::default() };
+        let mut s = Side::new(
+            &db,
+            &[mk("Turquoise Skitterer"), mk("Banana Slamma")],
+            &[],
+            counters,
+            &mut uid,
+        );
+        s.ms[0].m.health = 0;
+        s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
+        let beetle = s.ms.iter().find(|f| db.get(f.m.card).is_beetle).expect("a Beetle");
+        // Summoned 7/7, doubled to 14/7, then +5/+5 makes 19/12.
+        assert_eq!((beetle.m.attack, beetle.m.health), (19, 12));
+    }
+
+    #[test]
+    fn a_dead_minion_does_not_hold_its_slot_against_a_summon() {
+        // Power.log 274478, Era vs Tickatus 2026-11-17: a Headhunter Gryphon
+        // died on its attack, Deathstrider then fired the golden Ravaging
+        // Scorpid's Deathrattle, and the game used the dead Gryphon's slot
+        // for one Beetle (the second was lost). The deaths block ran after.
+        let db = db();
+        let (mut s, mut uid) = side(
+            &db,
+            &[
+                "Buzzing Vermin",
+                "Amber Guardian",
+                "Amber Guardian",
+                "Amber Guardian",
+                "Amber Guardian",
+                "Amber Guardian",
+                "Ravaging Scorpid",
+            ],
+        );
+        s.ms[0].m.health = 0;
+        s.ms[6].m = db.make(db.by_name("Ravaging Scorpid").unwrap(), true);
+        let host = s.ms[6].uid;
+        let fx = Fx { side: 0, host, killer: None, attacker: None };
+        let mut at = s.ms.len();
+        let mut rng = Rng::new(1);
+        s.run_effect(
+            &db,
+            Effect::TriggerDeathrattle { times: 1 },
+            false,
+            fx,
+            &mut at,
+            &mut uid,
+            &mut rng,
+            &mut (),
+        );
+        // Six living minions leave one slot: one of the two Beetles lands.
+        assert_eq!(names(&db, &s).iter().filter(|n| *n == "Beetle").count(), 1);
+        // The dead minion's own death was put aside, not skipped: its
+        // Deathrattle still runs when the fight resolves deaths.
+        assert_eq!(s.out.friendly_deaths, 0);
+        let before = s.out.deathrattles_triggered;
+        s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
+        assert_eq!(s.out.friendly_deaths, 1);
+        assert_eq!(s.out.deathrattles_triggered, before + 1);
     }
 
     #[test]

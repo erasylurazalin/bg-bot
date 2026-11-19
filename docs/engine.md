@@ -345,6 +345,15 @@ rules behind each are in docs/rules/design.md Part 2.
   deaths a Rally caused before the attack lands; when the target died, the
   swing fizzles (no hit, no retaliation) but "after a friendly minion
   attacks" still fires. Obsidian Ravager is the first Rally that damages.
+- **A dead minion does not hold a board slot.** A summon made by an
+  after-attack trigger while a minion is at 0 Health (before `resolve` runs)
+  takes the left-most dead minion out of `Side.ms` into `Side.held_dead`,
+  and `Side::resolve` runs that death after the summon. Power.log 274478 is
+  the case: a golden Ravaging Scorpid's Deathrattle, fired by Deathstrider,
+  filled the slot of the Headhunter Gryphon that had just died. A Deathrattle
+  that both summons and buffs Beetles (`Turquoise Skitterer`) summons first
+  and buffs second, as its log shows (Power.log 2026_11_11 152571): the new
+  Beetle stands at the old bonus and the buff lands after Banana Slamma.
 - **One pick per type.** `cards::pick_one_per_type` is the pick Misplaced
   Tea Set and The Last One Standing share: one random minion per type, each
   minion at most once.

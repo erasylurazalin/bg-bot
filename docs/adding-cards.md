@@ -64,7 +64,7 @@ legality in mod.rs.
 | Cleave | `cleave = true` | `attack_swings` + `cleave_targets` | Blade Collector |
 | Damage dealt milestone | `damage_milestone = { total, effect }` | `Side::count_damage` | Treasure Parrot |
 | Takes damage | `when_damaged = {..}` | `Side::when_damaged` | Very Hungry Winterfinner |
-| Summon in combat | `Effect::Summon`, `Deathrattle::Summon` | `Side::summon` (7 limit, Watch hook, summon triggers) | Cord Puller |
+| Summon in combat | `Effect::Summon`, `Deathrattle::Summon` | `Side::summon` (7 living minions, Watch hook, summon triggers; a dead minion does not hold a slot, see `Side.held_dead`) | Cord Puller |
 | After you summon (combat) | `after_summon_give_stats = { times, multiply, golden_multiply, different }`, `on_summon_beast` | `Side::summon`. `multiply`/`golden_multiply` are the multipliers of the summoner's Attack and maximum Health (Stalwart Kodo 2, golden 3), and `different` skips a summoned copy of the same card ("a different minion") | Stalwart Kodo |
 | Summon from hand | `summon_from_hand = "murloc"` | `Side::summon_from_hand`; a fight needs the hand when a card says so (`Card::needs_hand_in_fight`) | Expert Aviator |
 | Magnetize / Mech played | `on_play_mech`, `on_play_or_magnetize_mech`, `on_cast_spell_on_mech`, `aura = polarizing_beatboxer` | `magnetize_to` (a Magnetic played from hand first runs the played-Mech hooks in `magnetize_onto_played_mech`, so its Satellite joins it before the merge), `trigger_mech_played_or_magnetized`, `beatboxers_copy`, `Minion::magnetize` | Spark Snapper |
