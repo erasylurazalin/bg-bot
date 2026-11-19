@@ -13,6 +13,20 @@ rerun only reads logs that are new or grown; delete it to rewrite every file.
 `--archive DIR` is where the logs are copied, and `--no-archive` skips that
 copy.
 
+A reconnect starts a new session in the log, numbered like any other game. A
+reconnect mid-turn carries the running turn in its full-state dump; the board
+file still gets that session's fight boards, because they are staged after the
+reconnect, and the action file opens the turn from the dump and marks it
+`joined_mid_turn: true` for the actions lost before it. A session between the
+client's spectator markers is another player's game: lines from
+`================== Begin Spectating 1st player ==================` to
+`================== End Spectator Mode ==================` are skipped (an
+`End Spectator Game` line ends only one game of the watch, not the watch), so a
+session that is only spectating writes no file. The skipped session still takes
+its `-g<N>` number, so the files after it keep theirs. When the log ends inside
+a watch, each board file keeps the place of its own game, because there is no
+later real game to read it from.
+
 A minion's `dark_gifts` lists a gift once per copy: a golden that kept the
 same gift from two copies carries it twice, and the "+0/+0" buff a gift leaves
 is not a gift (`gifts_by_minion` in `crates/bglog/src/views.rs`). The Python
@@ -214,6 +228,9 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
 - A turn starts at the first decision the game offers me in it, not at the
   TURN tag's first change. That decision can be a choice rather than my
   options: 86 turns open with a trinket offer and 27 with some other Discover.
+  A turn a reconnect joined mid-shop carries `"joined_mid_turn": true`: it was
+  opened from the reconnect's full-state dump, and the actions before the
+  reconnect are missing from it. A normal turn has no such key.
 - `start` and `end` hold my hand, my board and Bob's Tavern the way
   `boards/real/` writes a minion (card id, name, attack, health, golden,
   keywords, dark gifts, script `numbers`, and its own Blood Gem stats as

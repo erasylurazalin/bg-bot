@@ -29,13 +29,36 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use serde::Deserializer;
 
 use bglog::{Cards, Fight, Minion, PLAYER_ENCHANTS, Seat, TagValue, Tracker};
+
+/// The `CREATE_GAME` line the collectors feed themselves when a spectator
+/// stretch starts or ends: it closes the game in hand without reading any of
+/// the spectated state, so the session numbers after it stay the log's own.
+pub(crate) const SYNTHETIC_CREATE_GAME: &str =
+    "D 00:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME";
+
+/// The line the client prints when a spectated game starts. It names the
+/// player watched ("1st player", and so on), so only the start is keyed on.
+pub(crate) fn begins_spectating(line: &str) -> bool {
+    line.contains("================== Begin Spectating ")
+}
+
+/// The line the client prints when spectating ends. `End Spectator Game` is
+/// only one game of the watch, not the end of it, so it is not this line.
+pub(crate) fn ends_spectating(line: &str) -> bool {
+    line.contains("================== End Spectator Mode ==================")
+}
+
+/// A game's own `CREATE_GAME`, not the `PowerTaskList` copy printed later.
+pub(crate) fn is_create_game(line: &str) -> bool {
+    line.contains("GameState.DebugPrintPower() - CREATE_GAME")
+}
 
 /// The Python's `sys.argv[1:]` handling: a flag's value, or a default.
 pub(crate) fn flag(args: &[String], name: &str, default: &str) -> String {
@@ -288,6 +311,7 @@ impl<'de> serde::de::Visitor<'de> for StateVisitor {
 
 /// One game of a log: its fights with the seats as they were when each was
 /// staged, and the lobby as it was when the game ended.
+#[derive(Default)]
 struct Game {
     fights: Vec<(Fight, SeatInfo, SeatInfo)>,
     seats: BTreeMap<i32, Seat>,
@@ -339,21 +363,51 @@ impl SeatInfo {
 fn read_log(path: &Path, cards: &Cards) -> Result<Vec<Game>, String> {
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = BufReader::with_capacity(1 << 20, file);
+    read_log_reader(&mut reader, cards).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The same reader over any stream, so a test can feed a trimmed log.
+fn read_log_reader(reader: &mut impl BufRead, cards: &Cards) -> io::Result<Vec<Game>> {
     let mut tracker = Tracker::new(cards.clone());
     let mut games: Vec<Game> = Vec::new();
     let mut current: Vec<(usize, SeatInfo, SeatInfo)> = Vec::new();
     let mut seen_past = 0;
     let mut n_fights = 0;
     let mut line = String::new();
+    let mut spectating = false;
+    let mut spectator_games = 0;
+    let mut last_me = None;
     loop {
         line.clear();
-        let read = reader
-            .read_line(&mut line)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let read = reader.read_line(&mut line)?;
         if read == 0 {
             break;
         }
-        tracker.feed(&line);
+        if spectating {
+            if ends_spectating(&line) {
+                // The spectated session is skipped but keeps its number: later
+                // games must still be g3, g4 and so on. A synthetic CREATE_GAME
+                // closes the empty game the start left behind.
+                spectating = false;
+                tracker.feed(SYNTHETIC_CREATE_GAME);
+                for _ in 0..spectator_games {
+                    games.push(Game::default());
+                }
+                spectator_games = 0;
+            } else if is_create_game(&line) {
+                spectator_games += 1;
+            }
+        } else if begins_spectating(&line) {
+            spectating = true;
+            // Close the game in hand at the marker, as its next CREATE_GAME in
+            // the spectator block would.
+            tracker.feed(SYNTHETIC_CREATE_GAME);
+        } else {
+            tracker.feed(&line);
+            if let Some(me) = tracker.me() {
+                last_me = Some(me);
+            }
+        }
         if tracker.past().len() > seen_past {
             // A game ended: its fights are done.
             seen_past = tracker.past().len();
@@ -364,7 +418,7 @@ fn read_log(path: &Path, cards: &Cards) -> Result<Vec<Game>, String> {
                     .map(|(index, mine, theirs)| (fights[index].clone(), mine, theirs))
                     .collect(),
                 seats: seats.clone(),
-                me: None,
+                me: last_me,
             });
             n_fights = 0;
         }
@@ -377,6 +431,13 @@ fn read_log(path: &Path, cards: &Cards) -> Result<Vec<Game>, String> {
             current.push((n_fights - 1, mine, theirs));
         }
     }
+    if spectating {
+        // The log ended during the watch: skip the unfinished session too.
+        tracker.feed(SYNTHETIC_CREATE_GAME);
+        for _ in 0..spectator_games {
+            games.push(Game::default());
+        }
+    }
     if !current.is_empty() && tracker.is_battlegrounds() {
         let fights = tracker.fights();
         let fights = current
@@ -386,12 +447,16 @@ fn read_log(path: &Path, cards: &Cards) -> Result<Vec<Game>, String> {
         games.push(Game {
             fights,
             seats: tracker.seats().clone(),
-            me: None,
+            me: last_me,
         });
     }
-    let me = tracker.me();
-    for game in &mut games {
-        game.me = me;
+    // The Python reads `place` off the last game's lobby for every game of the
+    // log. Keep that when the log ends in a real game, and each game's own me
+    // when it ends in a spectated one, where there is no final real me.
+    if let Some(me) = tracker.me() {
+        for game in &mut games {
+            game.me = Some(me);
+        }
     }
     Ok(games)
 }
@@ -808,6 +873,58 @@ mod tests {
             render(&value),
             "{\n \"a\": 1,\n \"b\": [],\n \"c\": \"N'Zoth \\\"x\\\" \\\\ \\u00e9\",\n \
              \"d\": null,\n \"e\": {\n  \"f\": [\n   1,\n   2\n  ]\n }\n}"
+        );
+    }
+
+    /// `crates/bglog/tests/data/fight.log`, a trimmed real log, with the turn
+    /// moved into the full-state dump a reconnect prints, instead of the
+    /// `TURN` tag change a normal turn starts with. The fight that follows is
+    /// still staged, so its board is written, not lost or moved to another
+    /// file.
+    fn reconnect_excerpt() -> String {
+        let text = include_str!("../../bglog/tests/data/fight.log");
+        let text = text.replacen(
+            "D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1\n",
+            "D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1\n\
+             D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=TURN value=3\n",
+            1,
+        );
+        text.replacen(
+            "D 00:58:25.1783940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=TURN value=1 \n",
+            "",
+            1,
+        )
+    }
+
+    #[test]
+    fn a_mid_turn_reconnect_keeps_its_board() {
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(reconnect_excerpt());
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        assert_eq!(games.len(), 1, "one game");
+        assert_eq!(games[0].fights.len(), 1, "its fight is there");
+        assert_eq!(games[0].fights[0].0.turn, 2, "the dump's TURN names it");
+        assert!(!games[0].fights[0].0.mine.is_empty(), "my board is recorded");
+        assert!(games[0].render("test", 1).is_some(), "and written");
+    }
+
+    /// A whole trimmed real game between the spectator markers is another
+    /// player's game: it writes no board file, and still takes its session
+    /// number so later games keep theirs.
+    #[test]
+    fn a_spectated_stretch_writes_no_board_file() {
+        let text = format!(
+            "D 00:00:00.0000000 ================== Begin Spectating 1st player ==================\n\
+             {}D 00:00:00.0000000 ================== End Spectator Mode ==================\n",
+            include_str!("../../bglog/tests/data/fight.log")
+        );
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(text);
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        assert_eq!(games.len(), 1, "the spectated session keeps its number");
+        assert!(
+            games[0].render("test", 1).is_none(),
+            "and has no board file"
         );
     }
 }

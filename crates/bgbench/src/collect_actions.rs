@@ -45,7 +45,10 @@ use bglog::{
     hero_enchants_by_minion, minion, pick_start, taken, trinkets,
 };
 
-use crate::collect_boards::{Json, State, flag, home, log_files, minion_numbers, numbers_json, render, text};
+use crate::collect_boards::{
+    SYNTHETIC_CREATE_GAME, Json, State, begins_spectating, ends_spectating, flag, home,
+    is_create_game, log_files, minion_numbers, numbers_json, render, text,
+};
 
 /// Where the client's logs are copied to, and the laptop's own archive.
 const ARCHIVE: &str = "bg-logs";
@@ -532,6 +535,11 @@ struct Collector {
     /// The log folder this run's files are named after, for that warning.
     label: String,
     game_complete: bool,
+    /// A `Begin Spectating` line was read and `End Spectator Mode` has not:
+    /// every line between them is skipped. The number of games inside the
+    /// stretch is kept so their session numbers can be left empty.
+    spectating: bool,
+    spectator_games: usize,
 }
 
 impl Collector {
@@ -570,19 +578,65 @@ impl Collector {
             lobby: BTreeMap::new(),
             label: label.to_string(),
             game_complete: false,
+            spectating: false,
+            spectator_games: 0,
         };
         collector.reset();
         collector
     }
 
     /// Read one line, into the tracker and into the reader this collector owns.
+    ///
+    /// A spectated stretch is skipped whole: it is another player's game, and
+    /// the collectors only keep Era's. The stretch still takes a session
+    /// number, so the games after it keep the numbers `collect-boards` gives
+    /// them.
     fn feed(&mut self, line: &str) {
+        if self.spectating {
+            if ends_spectating(line) {
+                self.spectating = false;
+                // Close the empty game the start left behind, then keep one
+                // empty record for every spectated game in the stretch.
+                self.feed_line(SYNTHETIC_CREATE_GAME);
+                for _ in 0..self.spectator_games {
+                    self.games.push(None);
+                }
+                self.spectator_games = 0;
+            } else if is_create_game(line) {
+                self.spectator_games += 1;
+            }
+            return;
+        }
+        if begins_spectating(line) {
+            self.spectating = true;
+            // Close the game in hand at the marker, as its next CREATE_GAME in
+            // the spectator block would.
+            self.feed_line(SYNTHETIC_CREATE_GAME);
+            return;
+        }
+        self.feed_line(line);
+    }
+
+    fn feed_line(&mut self, line: &str) {
         self.tracker.feed(line);
         // The reader reports to this collector and the collector owns it: hand
         // it over for the call and take it back after, as `Tracker::feed` does.
         let mut log = mem::take(&mut self.log);
         log.feed(line, self);
         self.log = log;
+    }
+
+    /// The end of a log: an unfinished spectator stretch is skipped too, so
+    /// its sessions never become files.
+    fn finish_log(&mut self) {
+        if self.spectating {
+            self.spectating = false;
+            self.feed_line(SYNTHETIC_CREATE_GAME);
+            for _ in 0..self.spectator_games {
+                self.games.push(None);
+            }
+            self.spectator_games = 0;
+        }
     }
 
     /// The game the log is reading, for the end of a log (the reader's own game
@@ -1301,6 +1355,32 @@ impl Collector {
         }
     }
 
+    /// A reconnect's full-state dump carries the turn already running, but a
+    /// `FULL_ENTITY` tag line fires no `tag_change`, so no `TURN` change opened
+    /// it. Open the shop turn the game is in, and mark it: the actions before
+    /// the reconnect are not in this log.
+    fn join_turn(&mut self, game: &Game) {
+        if self.turn.is_some() || !game.game_type.starts_with("GT_BATTLEGROUNDS") {
+            return;
+        }
+        let Some(entity) = game.game_entity() else {
+            return;
+        };
+        let value = entity.int("TURN");
+        if value % 2 != 1 {
+            return;
+        }
+        self.upper = 0;
+        self.turn = Some(vec![
+            ("turn".to_string(), Json::Int((value + 1) / 2)),
+            ("joined_mid_turn".to_string(), Json::Bool(true)),
+            ("start".to_string(), Json::Null),
+            ("actions".to_string(), Json::Arr(Vec::new())),
+            ("end".to_string(), Json::Null),
+        ]);
+        self.ended = false;
+    }
+
     /// Close the turn: the last step, then my hand, board and Gold as they were
     /// when the fight began (`before_fight`), or `None` when the game or the log
     /// ended before one.
@@ -1421,6 +1501,7 @@ impl Collector {
     /// The game is asking me what to do: close the last step and, in a new turn,
     /// take the state I was first offered.
     fn decision(&mut self, game: &Game) {
+        self.join_turn(game);
         self.close_step(game);
         let waiting = self
             .turn
@@ -1451,6 +1532,7 @@ impl Collector {
         let Some((index, sub, target)) = taken(body) else {
             return;
         };
+        self.join_turn(game);
         self.close_step(game);
         if self.turn.is_none() {
             self.unread.bump("a step outside a shop turn");
@@ -1702,6 +1784,7 @@ impl Collector {
 
     fn send_choices(&mut self, game: &Game, body: &str) {
         if pick_start(body).is_some() {
+            self.join_turn(game);
             self.close_step(game);
             if self.choice.is_none() || self.turn.is_none() {
                 return;
@@ -3361,13 +3444,24 @@ fn read_log(
 ) -> Result<Vec<Option<Json>>, String> {
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = BufReader::with_capacity(1 << 20, file);
+    read_log_reader(&mut reader, cards, label, dbf)
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The same reader over any stream, so a test can feed a trimmed log.
+fn read_log_reader(
+    reader: &mut impl BufRead,
+    cards: &Cards,
+    label: &str,
+    dbf: &HashMap<u32, String>,
+) -> Result<Vec<Option<Json>>, String> {
     let mut collector = Collector::new_with_dbf(cards.clone(), label, dbf.clone());
     let mut bytes: Vec<u8> = Vec::new();
     loop {
         bytes.clear();
         let read = reader
             .read_until(b'\n', &mut bytes)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+            .map_err(|e| format!("log: {e}"))?;
         if read == 0 {
             break;
         }
@@ -3376,6 +3470,7 @@ fn read_log(
         let line = String::from_utf8_lossy(&bytes);
         collector.feed(&line);
     }
+    collector.finish_log();
     collector.last_game();
     Ok(collector.games)
 }
@@ -3999,5 +4094,59 @@ mod tests {
         only.insert(GEM_TAGS[0].to_string(), TagValue::Int(0));
         only.insert(GEM_TAGS[1].to_string(), TagValue::Int(5));
         assert_eq!(gem_stats(&only), Some((0, 5)));
+    }
+
+    /// `crates/bglog/tests/data/fight.log`, a trimmed real log, with the turn
+    /// moved into the full-state dump the way a reconnect prints it: no
+    /// `TURN` tag change follows, so the collector has to open the turn from
+    /// the dump. The options dump and the click are the real ones' shape.
+    fn reconnect_excerpt() -> String {
+        let text = include_str!("../../bglog/tests/data/fight.log");
+        let text = text.replacen(
+            "D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1\n",
+            "D 00:57:53.6478530 GameState.DebugPrintPower() -     GameEntity EntityID=1\n\
+             D 00:57:53.6478530 GameState.DebugPrintPower() -         tag=TURN value=3\n",
+            1,
+        );
+        text.replacen(
+            "D 00:58:25.1783940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=TURN value=1 \n",
+            "D 00:58:25.1783940 GameState.DebugPrintOptions() - id=1\n\
+             D 00:58:25.1783940 GameState.DebugPrintOptions() -   option 0 type=END_TURN mainEntity= error=INVALID errorParam=\n\
+             D 00:58:25.1783940 GameState.SendOption() - selectedOption=0 selectedSubOption=-1 selectedTarget=0 selectedPosition=0\n",
+            1,
+        )
+    }
+
+    #[test]
+    fn a_mid_turn_reconnect_records_its_actions() {
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(reconnect_excerpt());
+        let games = read_log_reader(&mut reader, &cards, "test", &HashMap::new()).unwrap();
+        assert_eq!(games.len(), 1, "one game");
+        let game = games[0].as_ref().expect("the reconnected game has a file");
+        let got: serde_json::Value = serde_json::from_str(&render(game)).unwrap();
+        let turns = got["turns"].as_array().unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0]["turn"], 2);
+        assert_eq!(turns[0]["joined_mid_turn"], true);
+        assert_eq!(turns[0]["actions"].as_array().unwrap().len(), 1);
+        assert_eq!(turns[0]["actions"][0]["step"], "end_turn");
+    }
+
+    /// A whole trimmed real game between the spectator markers is another
+    /// player's game: it writes no action file, and still takes its session
+    /// number (a `None` record) so later games keep theirs.
+    #[test]
+    fn a_spectated_stretch_writes_no_action_file() {
+        let text = format!(
+            "D 00:00:00.0000000 ================== Begin Spectating 1st player ==================\n\
+             {}D 00:00:00.0000000 ================== End Spectator Mode ==================\n",
+            include_str!("../../bglog/tests/data/fight.log")
+        );
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(text);
+        let games = read_log_reader(&mut reader, &cards, "test", &HashMap::new()).unwrap();
+        assert_eq!(games.len(), 1, "the spectated session keeps its number");
+        assert!(games[0].is_none(), "and has no action file: {games:?}");
     }
 }
