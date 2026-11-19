@@ -28,9 +28,9 @@ tiers of the three offers by turn. "Yours" means a minion of your type
 | 4 | Tier 2 | Tier 2 | Tier 3 |
 | 5 | Tier 3 | Tier 3 | Tier 3 |
 | 6 | Tier 3, yours | Tier 4 | Tier 4 |
-| 7 | Tier 4, yours | Tier 4 | Tier 4 |
-| 8 | Tier 4, yours | Tier 5 | Tier 5 |
-| 9 | Tier 4 or 5, yours | Tier 5 | Tier 6 |
+| 7 | Tier 4, yours | Tier 4, yours | Tier 4 |
+| 8 | Tier 4, yours | Tier 5, yours | Tier 5 |
+| 9 | Tier 4 or 5, yours | Tier 5, yours | Tier 6 |
 | 10+ | Tier 5, yours | Tier 5 or 6, yours | Tier 5 or 6 |
 
 Era's logs confirm this table on all 127 presses:
@@ -38,6 +38,8 @@ on turn 9 the first slot was Tier 4 four times and Tier 5 three times, and
 on turn 10 the second and third were 5 or 6. The first slot is the
 player's most common type on the board (41 of 43 presses from turn 6; the
 hand doesn't count).
+
+**Since patch 37.0.2 (Era, 2026-11-20; logs from 2026-11-04 on):** from turn 7 the first two offers are your most common type, not only the first. In Era's logs every turn 7 and 8 offer from 2026-11-04 on has its first two slots of the board's most common type (56 of 58), against mostly one before. The engine (`darkgifts.toml`) already offers two from turn 7. Era times the third Dark Gift for turn 7 to use it.
 
 **The button (logs, 43 games):** costs 3 Gold, never changes, never
 discounted. Once per turn. 3 uses per game. Locked until turn 3.
