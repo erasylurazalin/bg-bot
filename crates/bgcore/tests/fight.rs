@@ -96,15 +96,16 @@ fn beast_summon_scaling_leviathan_banana_slamma() {
     wall.health = 100;
 
     // Beetle (2/2) + Lurking Leviathan (+3 Attack) = 5/2, then Banana Slamma
-    // doubles Attack to 10/2.
+    // sets the base Attack to twice 5 and keeps the +3: 13/2 (Power.log
+    // 2026_11_11_02_43_24: a 65 Attack Beetle with +63 of buffs went to 193).
     let mut log = Log { db: Some(db.clone()), ..Default::default() };
     fight_watched(&db, &[vermin, leviathan, slamma], &[wall], 500, &mut Rng::new(1), &mut log);
-    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (10, 2));
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (13, 2));
 
-    // With golden Banana Slamma in place of plain, 5/2 triples Attack to 15/2.
+    // A golden Banana Slamma sets it to three times 5, plus the +3: 18/2.
     let mut log2 = Log { db: Some(db.clone()), ..Default::default() };
     fight_watched(&db, &[vermin, leviathan, gold_slamma], &[wall], 500, &mut Rng::new(1), &mut log2);
-    assert_eq!((log2.summons[0].2.attack, log2.summons[0].2.health), (15, 2));
+    assert_eq!((log2.summons[0].2.attack, log2.summons[0].2.health), (18, 2));
 }
 
 #[test]

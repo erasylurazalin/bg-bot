@@ -97,6 +97,7 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
   | `knight_deaths` | `BG25_008pe` (Eternal Knight player enchant) number 1 |
   | `baller` | `BG31_816pe` (Baller player enchant) number 1 |
   | `upper_hand` | not a number in the log: the Upper Hands the side cast this turn (the spell's card goes back to SETASIDE), counted from the `PLAY` blocks of `BG28_573` |
+  | `brood_of_nozdormu` | the side's `BG34_889` copies in `ZONE=SECRET` before combat (bg-overlay writes it since 2026-11-20; older files have no key) |
 
   A Tasty Lobster's count is not in `counters`: the loader reads it off the
   card's own numbers, on the board or in the hand (see the paragraph about

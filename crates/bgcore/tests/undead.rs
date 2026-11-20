@@ -939,7 +939,9 @@ fn stitched_salvager_destroys_its_left_neighbour_and_summons_an_exact_copy_when_
     victim.health = 22;
     victim.keywords.set(Keywords::DIVINE_SHIELD);
     let salvager = taunt(with_health(mk(&db, "Stitched Salvager", false), 10));
-    let enemies = [killer(&db), wall(&db), wall(&db)];
+    // Five enemies: after Start of Combat this side has four (the Salvager
+    // and three Skeletons), and the side with more minions attacks first.
+    let enemies = [killer(&db), wall(&db), wall(&db), wall(&db), wall(&db)];
     let (_, log) = run(&db, &[victim, salvager], &enemies, [Counters::default(); 2], 1, 1);
     let caretaker = id(&db, "Cadaver Caretaker");
     // Start of Combat: the Caretaker dies (Deathrattle: three Skeletons)
@@ -996,7 +998,10 @@ fn salvager_never_copies_another_salvager_and_golden_takes_both_neighbours() {
     let a = mk(&db, "Harmless Bonehead", false);
     let b = mk(&db, "Cadaver Caretaker", false);
     let gold = taunt(with_health(mk(&db, "Stitched Salvager", true), 10));
-    let (_, log) = run(&db, &[a, gold, b], &[killer(&db), wall(&db), wall(&db), wall(&db)], [Counters::default(); 2], 1, 1);
+    // Seven enemies: after Start of Combat this side has six (the Salvager and
+    // the Skeletons both victims leave), so the enemy still attacks first.
+    let enemies = [killer(&db), wall(&db), wall(&db), wall(&db), wall(&db), wall(&db), wall(&db)];
+    let (_, log) = run(&db, &[a, gold, b], &enemies, [Counters::default(); 2], 1, 1);
     let deaths: Vec<CardId> = log
         .0
         .iter()

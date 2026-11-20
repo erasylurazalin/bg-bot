@@ -2078,6 +2078,13 @@ impl<'a> Side<'a> {
                 }
                 self.gain_at(db, pos, da_total, dh_total);
             }
+            // Banana Slamma sets the Beast's base Attack to twice (golden:
+            // three times) its current Attack and keeps every buff on top, so
+            // a 65 Attack Beetle with +63 of buffs goes to 130 + 63 = 193
+            // (Power.log 2026_11_11_02_43_24 around line 152571; an unbuffed
+            // 9/4 goes to 18/4). The base starts at the printed Attack and
+            // moves with each Slamma.
+            let mut base = db.make(self.ms[pos].m.card, self.ms[pos].m.golden).attack;
             for j in 0..self.ms.len() {
                 if j == pos || self.ms[j].m.health <= 0 {
                     continue;
@@ -2086,7 +2093,10 @@ impl<'a> Side<'a> {
                 for (card, golden) in mj.parts() {
                     if matches!(db.get(card).on_summon_beast, Some(OnSummonBeast::MultiplyAttackInCombat)) {
                         let factor = if golden { 3 } else { 2 };
-                        self.ms[pos].m.attack *= factor;
+                        let attack = self.ms[pos].m.attack;
+                        let buffs = attack - base;
+                        base = attack * factor;
+                        self.ms[pos].m.attack = (base + buffs).max(0);
                     }
                 }
             }
@@ -5136,6 +5146,11 @@ pub fn fight_with_hands(
     ];
     sides[0].enemy = b;
     sides[1].enemy = a;
+    run_start_of_combat(&mut sides, db, &mut uid, rng, w);
+    // Who attacks first is counted after Start of Combat: in Power.log
+    // 2026_11_11_02_43_24 (game 1, turn 9) a 6 minion side whose Herald
+    // Sticker made a Turquoise Skitterer summon a Beetle met 7 with 7 and
+    // won the coin flip.
     let (na, nb) = (sides[0].ms.len(), sides[1].ms.len());
     let mut turn = if na > nb {
         0
@@ -5144,7 +5159,6 @@ pub fn fight_with_hands(
     } else {
         rng.coin() as usize
     };
-    run_start_of_combat(&mut sides, db, &mut uid, rng, w);
     // What the client shows during combat: the counters at the first attack,
     // after Start of Combat effects (the tracker snapshots them then).
     for s in &mut sides {
@@ -5413,7 +5427,7 @@ mod tests {
     fn a_skitterer_summons_then_buffs_its_beetle() {
         // Power.log 2026_11_11_02_43_24 line 152571: the new Beetle stands
         // at the old bonus (2 + 56 + Goldrinn's 7 = 65/62), Banana Slamma
-        // doubles it, and only then does the Skitterer's +5/+5 land.
+        // makes it 193/62, and only then does the Skitterer's +5/+5 land.
         let db = db();
         let mut uid = 0;
         let mut rng = Rng::new(1);
@@ -5429,8 +5443,9 @@ mod tests {
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         let beetle = s.ms.iter().find(|f| db.get(f.m.card).is_beetle).expect("a Beetle");
-        // Summoned 7/7, doubled to 14/7, then +5/+5 makes 19/12.
-        assert_eq!((beetle.m.attack, beetle.m.health), (19, 12));
+        // Summoned 7/7 (2 printed + 5 of bonus), base doubled to 14 with the
+        // +5 kept on top (19/7), then +5/+5 makes 24/12.
+        assert_eq!((beetle.m.attack, beetle.m.health), (24, 12));
     }
 
     #[test]

@@ -186,6 +186,10 @@ pub struct RealCounters {
     /// Health to 1 at Start of Combat. A shop step also reads it (the Obs
     /// shows it), and a shop-phase destroy ignores it.
     pub upper_hand: u32,
+    /// Brood of Nozdormu casts this side has pending: each doubles the
+    /// leftmost minion's Attack at Start of Combat. bg-overlay reads it off
+    /// the `BG34_889` copies in the player's SECRET zone.
+    pub brood_of_nozdormu: u32,
     /// "After the Tavern is Refreshed this game" (Waveling, En-Djinn Blazer,
     /// Easterly Winds): what one Refresh gives one random Tavern minion. Only
     /// a shop step reads it.
@@ -229,6 +233,7 @@ impl Default for RealCounters {
             tavern_elemental_attack: 0,
             tavern_elemental_health: 0,
             upper_hand: 0,
+            brood_of_nozdormu: 0,
             refresh_attack: 0,
             refresh_health: 0,
             barrage_attack: 0,
@@ -243,7 +248,8 @@ impl RealCounters {
     /// Take one of the numbers a file holds, by its key: `gem_attack`,
     /// `gem_health`, `beetle_attack`, `beetle_health`, `undead_attack`,
     /// `undead_health`, `spell_attack`, `spell_health`, `spells_cast`,
-    /// `knight_deaths`, `tasty_lobster`, `baller`, and the numbers only a shop
+    /// `knight_deaths`, `tasty_lobster`, `baller`, `upper_hand`,
+    /// `brood_of_nozdormu`, and the numbers only a shop
     /// step reads: `golden_played`, `gold_spent`, `tavern_attack`, `tavern_health`,
     /// `tavern_elemental_attack`, `tavern_elemental_health`, `refresh_attack`,
     /// `refresh_health`, `barrage_attack`, `barrage_health`,
@@ -273,6 +279,7 @@ impl RealCounters {
             "tavern_turn_attack" => self.tavern_turn_attack = value,
             "tavern_turn_health" => self.tavern_turn_health = value,
             "upper_hand" => self.upper_hand = count(value),
+            "brood_of_nozdormu" => self.brood_of_nozdormu = count(value),
             "tavern_elemental_attack" => self.tavern_elemental_attack = value,
             "tavern_elemental_health" => self.tavern_elemental_health = value,
             "refresh_attack" => self.refresh_attack = value,

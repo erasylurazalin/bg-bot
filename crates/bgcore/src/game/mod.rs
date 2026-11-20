@@ -1479,6 +1479,7 @@ fn export_counters(pl: &Player, c: &Counters) -> RealCounters {
         improve: c.improve,
         gold_spent: c.gold_spent,
         upper_hand: c.upper_hand as u32,
+        brood_of_nozdormu: c.brood_of_nozdormu as u32,
         refresh_attack: pl.refresh_buff.0,
         refresh_health: pl.refresh_buff.1,
         barrage_attack: pl.barrage.0,

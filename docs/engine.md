@@ -354,6 +354,9 @@ rules behind each are in docs/rules/design.md Part 2.
   that both summons and buffs Beetles (`Turquoise Skitterer`) summons first
   and buffs second, as its log shows (Power.log 2026_11_11 152571): the new
   Beetle stands at the old bonus and the buff lands after Banana Slamma.
+  Banana Slamma sets the Beast's base Attack to twice (golden: three times)
+  its current Attack and keeps the buffs on top, so the 65 Attack Beetle
+  with +63 of buffs goes to 193, not 130 (`fight.rs`, the summon step).
 - **One pick per type.** `cards::pick_one_per_type` is the pick Misplaced
   Tea Set and The Last One Standing share: one random minion per type, each
   minion at most once.
@@ -2442,8 +2445,8 @@ seeded from the turn's seed (a repeat's).
   engine does not build, and the boards' turn. `missing()`/`complete()` say
   the same before a fight. `built_card_names()` lists what the card data
   builds, for the tracker's coverage report. The first attacker is the
-  engine's rule (more minions first, a coin flip when even): the tracker
-  cannot pass the log's first attacker.
+  engine's rule (more minions first after Start of Combat, a coin flip when
+  even): the tracker cannot pass the log's first attacker.
 - **bg's copy of the engine:** the tracker's venv is Python 3.14 (its GTK
   window needs the system PyGObject), so it needs its own build of bgpy.
   `tools/bg-rebuild.sh [COMMIT]` exports a commit with `git archive`, builds

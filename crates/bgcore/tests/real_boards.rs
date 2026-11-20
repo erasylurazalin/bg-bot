@@ -904,6 +904,28 @@ fn a_this_turn_tavern_buff_comes_off_at_the_end_of_the_turn() {
     );
 }
 
+/// bg-overlay sends a side's pending Brood of Nozdormu casts as
+/// `brood_of_nozdormu` (its `BG34_889` copies in the SECRET zone,
+/// `2026_11_17_00_28_04` game 1 turn 10): the seat takes the count and the
+/// fight doubles the leftmost minion's Attack that many times.
+#[test]
+fn a_board_carries_its_brood_of_nozdormu_casts() {
+    let data = Data::bundled();
+    let mut c = RealCounters::default();
+    c.set("brood_of_nozdormu", 2);
+    assert_eq!(c.brood_of_nozdormu, 2);
+    let mut g = Game::new_with_lobby(
+        Arc::new(Data::bundled()),
+        3,
+        bgcore::Tribe::EVERY.into_iter().fold(bgcore::Tribes::NONE, |m: bgcore::Tribes, t| m.with(t)),
+    );
+    g.players[0].take_real_counters_public(&c);
+    assert_eq!(g.players[0].counters(&data, Tribes::ALL).brood_of_nozdormu, 2);
+    // The next board without the key puts it back to none.
+    g.players[0].take_real_counters_public(&RealCounters::default());
+    assert_eq!(g.players[0].counters(&data, Tribes::ALL).brood_of_nozdormu, 0);
+}
+
 /// Dark Paradox: all five versions are named "Dark Paradox" in the ref data,
 /// golden included, and only the card id says which one; cards.toml builds
 /// them as "Dark Paradox t3" to "t9", so the id map names them that way and

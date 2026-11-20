@@ -157,7 +157,7 @@ fn numbers(m: &Minion, name: &str, data: &Data) -> Vec<i32> {
 fn counters_json(side: &FightSideSnapshot) -> Value {
     let c = &side.real;
     let mut out = Map::new();
-    let pairs: [(&str, i32); 23] = [
+    let pairs: [(&str, i32); 24] = [
         ("gem_attack", c.gem_attack),
         ("gem_health", c.gem_health),
         ("beetle_attack", c.beetle_attack),
@@ -177,6 +177,7 @@ fn counters_json(side: &FightSideSnapshot) -> Value {
         ("tavern_elemental_attack", c.tavern_elemental_attack),
         ("tavern_elemental_health", c.tavern_elemental_health),
         ("upper_hand", c.upper_hand as i32),
+        ("brood_of_nozdormu", c.brood_of_nozdormu as i32),
         ("refresh_attack", c.refresh_attack),
         ("refresh_health", c.refresh_health),
         ("barrage_attack", c.barrage_attack),
@@ -281,7 +282,7 @@ pub fn limitations() -> Vec<&'static str> {
         "Dark Gift countdowns: the board shape has no dark_gift_states key",
         "a second hero power: the board shape carries one hero_power",
         "a hero power's pressed state and presses left: the shape has no key",
-        "Beast bonus, Boon of Beetles, Brood of Nozdormu and Sharing is Caring counters: no board key",
+        "Beast bonus, Boon of Beetles and Sharing is Caring counters: no board key",
         "the warband a Magnanimoose chose: no board key",
         "a power trinket's own engine slot when the shape's slot order puts it elsewhere",
         "a minion's scaling count for cards the board loader does not map (Timewarped Painter and kin)",

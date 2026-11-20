@@ -1041,6 +1041,33 @@ fn stealth_cannot_be_targeted_until_it_attacks() {
     assert!(underdog_attacked > 0);
 }
 
+/// The side of the first attack in each fight.
+#[derive(Default)]
+struct FirstSide(Option<usize>);
+
+impl Watch for FirstSide {
+    fn attack(&mut self, side: usize, _a: &Minion, _d: &Minion) {
+        self.0.get_or_insert(side);
+    }
+}
+
+/// Who attacks first is counted after Start of Combat (Power.log
+/// 2026_11_11_02_43_24, game 1, turn 9: a 6 minion side summoned a Beetle at
+/// Start of Combat, met 7 with 7 and won the coin flip). Here Stitched
+/// Salvager destroys the minion to its left, so side 0 goes from 3 to 2 and
+/// side 1, with 3, always attacks first.
+#[test]
+fn the_first_attacker_is_counted_after_start_of_combat() {
+    let db = db();
+    let a = board(&db, &["Flittering Bat", "Stitched Salvager", "Flittering Bat"]);
+    let b = board(&db, &["Flittering Bat", "Flittering Bat", "Flittering Bat"]);
+    for seed in 0..100 {
+        let mut first = FirstSide::default();
+        fight_watched(&db, &a, &b, 500, &mut Rng::new(seed), &mut first);
+        assert_eq!(first.0, Some(1), "seed {seed}");
+    }
+}
+
 #[test]
 fn a_minion_that_attacked_can_be_hit_afterwards() {
     let db = db();

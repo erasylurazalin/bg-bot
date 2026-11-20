@@ -825,11 +825,12 @@ impl Player {
         }
         // Upper Hand: the pending Start of Combat triggers this side cast.
         self.upper_hand = c.upper_hand.min(u8::MAX as u32) as u8;
+        // Brood of Nozdormu: the pending Start of Combat doubles, the same way.
+        self.brood_of_nozdormu = c.brood_of_nozdormu.min(u8::MAX as u32) as u8;
         // A fight's outcome can move these too; they start from the base
         // again. None of them is read without a shop phase.
         self.beast_bonus = (0, 0);
         self.boon_of_beetles = 0;
-        self.brood_of_nozdormu = 0;
         self.sharing_is_caring = 0;
     }
 

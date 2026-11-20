@@ -216,7 +216,9 @@ board, except effects that say "permanently".
    the two players it is interleaved: a coin flip picks who starts each step,
    then they take turns. Medium confidence.
 2. **Attacks.** The side with more minions attacks first, a coin flip if
-   equal. The sides then alternate. Each side attacks with its minions left
+   equal, counted after Start of Combat: in Power.log `2026_11_11_02_43_24`
+   (game 1, turn 9) a 6 minion side whose Herald Sticker made a Turquoise
+   Skitterer summon a Beetle met 7 with 7 and attacked first. The sides then alternate. Each side attacks with its minions left
    to right and wraps around to the left after the last one. A minion with 0
    Attack never attacks.
 3. **Targets.** The defender is picked at random among the enemies. Taunt
