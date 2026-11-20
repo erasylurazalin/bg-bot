@@ -844,7 +844,14 @@ counter.
   X can be anything that is an Elemental, by any route: a printed
   Elemental, an all-type card (Gatekeeper Amalgam, Dark Paradox) or a
   minion the Amalgamation Dark Gift made every type. The golden result
-  always gets Divine Shield (Era, 2026-11-03).
+  always gets Divine Shield (Era, 2026-11-03). One Elemental copy of X is
+  enough: a Surprise, a plain Drakkari Enchanter and a Drakkari with the
+  Amalgamation made a golden Drakkari with Divine Shield (Era's game,
+  2026-11-20, Power.log Hearthstone_2026_11_20_01_10_46 line 878232). Two
+  copies of X with no Elemental among them don't triple with a Surprise.
+  Mister Clocksworth's Double Time (two copies make a golden): a Titus with
+  the Amalgamation plus one Surprise makes a golden Titus; a plain Titus
+  plus a Surprise does not (Era, 2026-11-03).
 - **"After you play an X"** never counts the card being played, for every
   card (Ultraviolet Ascendant, Unbound Tempest, Wrath Weaver, Insatiable
   Ur'zul, the Pirate and Demon cards). It fires once the played minion's
@@ -1089,7 +1096,10 @@ lobby ever shows up: every Discover, "get a random X" and random draw uses
 the lobby. Planar Telescope and Friendly Bounty count only lobby tribes
 for "your most common type" (a Felboar without Quilboar in the lobby is
 just a Demon). (Rare trinket, hero and timewarp effects break this in the real
-game; none exist here yet, and each can widen its own draw when it comes.)
+game, and each can widen its own draw. Era, 2026-11-20: the Timewarps really
+do sometimes ignore the lobby's tribes, so a Timewarped Substrate from
+Timeworn Candelabra makes its Temperature Shifts in a lobby without
+Elementals.)
 
 **What the bot sees (the observation, 2026-10-25).** What a player sees
 in the real client, nothing more. Own side: everything the interface or

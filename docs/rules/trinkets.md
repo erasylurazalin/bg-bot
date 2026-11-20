@@ -155,7 +155,9 @@ always afford one. A trinket with no cost in the game data is free.
   Knight you have or will have, in hand too.
 - **Bronzebeard Portrait:** your Branns count as Murlocs and Dragons
   everywhere (board, hand, "your most common type", tribe synergies, a
-  golden Brann), except Dark Discovery's "your type" slot.
+  golden Brann), Dark Discovery's "your type" slot included (Era,
+  2026-11-20: this replaces the earlier exception for that slot; the same
+  goes for Amalgamation, which counts as every type there too).
 - **Curator Sticker:** Golden Mishmash ("Whenever your Amalgam gains
   stats, this gains them twice") and a 10/10 Venomous Amalgam. Mishmash is
   a trinket-only token tagged as a buddy, for when buddies come.
@@ -214,8 +216,8 @@ Built 2026-11-01 (block 5): the Bronzebeard Portrait's "also Murlocs and
 Dragons" is a card modifier like the others, `also_tribes`, and it is read by
 `CardDb::tribes_of` through a `Minion.extra_tribes` field: every tribe check
 in the engine sees it (board, hand, the most common type, tribe synergies, a
-golden Brann, a fight), with the one exception Era named, the Dark
-Discovery's "your type" slot. The Eternal Portrait (Greater) is the greater
+golden Brann, a fight). Era's earlier exception for the Dark Discovery's
+"your type" slot was dropped on 2026-11-20: it counts there too. The Eternal Portrait (Greater) is the greater
 card (BG36_MagicItem_216), with a Golden Eternal Knight and +4/+2 for every
 friendly Undead death.
 

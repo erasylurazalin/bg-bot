@@ -1119,18 +1119,36 @@ fn two_surprises_plus_an_amalgamation_minion_make_a_golden_one() {
 }
 
 #[test]
-fn a_surprise_does_not_stand_in_when_one_copy_lost_the_gift() {
+fn a_surprise_stands_in_when_one_copy_has_the_gift() {
+    // Era's game of 2026-11-20 (Power.log Hearthstone_2026_11_20_01_10_46,
+    // line 878232): a Surprise, a plain Drakkari Enchanter and one with the
+    // Amalgamation made a golden Drakkari with Divine Shield.
     let mut g = game(51);
     put_in_hand(&mut g, 0, "Elemental of Surprise", false);
-    let host = put_on_board(&mut g, 0, "Titus Rivendare", false);
+    let host = put_on_board(&mut g, 0, "Drakkari Enchanter", false);
     amalgamate(&mut g, host);
-    // The second Titus arrives plain: one copy of the triple is no Elemental.
-    set_shop(&mut g, 0, &["Titus Rivendare"]);
+    // The second Drakkari arrives plain: only one copy is an Elemental.
+    set_shop(&mut g, 0, &["Drakkari Enchanter"]);
+    buy_slot0(&mut g);
+    let p = &g.players[0];
+    assert_eq!(p.hand.len(), 1, "the Surprise and both Drakkari are one card");
+    let gold = p.hand[0];
+    assert!(gold.golden);
+    assert_eq!(name(&g, &gold), "Drakkari Enchanter");
+    assert!(gold.keywords.has(Keywords::DIVINE_SHIELD), "the Surprise's shield");
+    assert!(p.board.is_empty(), "the gifted copy went into the golden one");
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_surprise_does_not_stand_in_when_no_copy_is_an_elemental() {
+    let mut g = game(53);
+    put_in_hand(&mut g, 0, "Elemental of Surprise", false);
+    put_on_board(&mut g, 0, "Drakkari Enchanter", false);
+    set_shop(&mut g, 0, &["Drakkari Enchanter"]);
     buy_slot0(&mut g);
     let p = &g.players[0];
     assert!(p.hand.iter().chain(&p.board).all(|m| !m.golden), "no triple");
-    assert_eq!(p.hand.len(), 2, "the Surprise and the plain Titus stay apart");
-    assert_eq!(p.board.len(), 1, "the gifted Titus stays");
     g.check_invariants().unwrap();
 }
 

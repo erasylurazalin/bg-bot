@@ -1545,8 +1545,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   `CardMod::AlsoTribes`: it writes `Minion.extra_tribes` on the copies the
   player has (the pick) and on every later one (`Player::make_card`), and
   `CardDb::tribes_of` ORs it in, so every tribe check in the shop and in a
-  fight sees it; `most_common_card_type` is the one place that reads the cards
-  alone, for the Dark Discovery's "your type" slot. Two of the reviewed rules
+  fight sees it, the Dark Discovery's "your type" slot included (Era,
+  2026-11-20, replacing the 2026-11-01 exception). Two of the reviewed rules
   needed no code of their own: a Prize is a spell, so `balinda_mult` already
   gives a Prize that targets a friendly minion `PendingTarget.runs = 2` (or 3
   with a golden Balinda), and a "then double it" buff doubles once per cast;
@@ -1653,7 +1653,7 @@ through exactly that card's code. The engine never matches a gift by name:
   copies), gives the rest back on the pick, and `pl.discover_gifts` carries
   each offer's gift so the observation shows it before the pick.
 - **The pool the offers come from** is `GiftDb::pool_allows` (`pool_allows_for`
-  with the player's most common board type from `most_common_card_type`): never
+  with the player's most common board type from `most_common_board_type`, Bronzebeard Portrait and Amalgamation counted): never
   a spell or a token, never a Magnetic minion, one with "when you sell this" or
   one whose effect works in hand, no Battlecry or Choose One minion before turn
   5, darkgifts.toml's `exclude` list (Leeroy the Reckless, Deadly Spore), and

@@ -200,11 +200,10 @@ impl Game {
         let wild_of = |id: CardId| cards.get(id).triple_wildcard;
         // The copies of `x` a triple would use: the hand-then-board order
         // `take_from` takes them in, and never a golden one. A wildcard
-        // stands in for `x` when every one of them is of its tribe, which a
+        // stands in for `x` when one of them is of its tribe, which a
         // printed card always is and a Dark Gift can make one (the
-        // Amalgamation on a minion with no type: Era, 2026-11-03,
-        // docs/rules/design.md "Elemental of Surprise"). A triple that would
-        // use a plain copy of `x` the gift never reached does not happen.
+        // Amalgamation on a minion with no type, docs/rules/design.md
+        // "Elemental of Surprise"): see `some_copy_of_tribe` below.
         let copies_of_tribe = |x: CardId, n: usize, t: Tribe| {
             let mut seen = 0;
             for m in pl.hand.iter().chain(&pl.board) {
@@ -220,10 +219,29 @@ impl Game {
             }
             seen == n
         };
+        // The copies `take_from` would use with at least one of them of the
+        // wildcard's tribe. Era's game of 2026-11-20 (Power.log
+        // Hearthstone_2026_11_20_01_10_46, line 878232): an Elemental of
+        // Surprise, a plain Drakkari Enchanter and one with the Amalgamation
+        // made a golden Drakkari, so one Elemental copy is enough.
+        let some_copy_of_tribe = |x: CardId, n: usize, t: Tribe| {
+            let mut seen = 0;
+            let mut hit = false;
+            for m in pl.hand.iter().chain(&pl.board) {
+                if seen == n {
+                    break;
+                }
+                if m.card == x && !m.golden {
+                    hit |= cards.tribes_of(m).has(t);
+                    seen += 1;
+                }
+            }
+            seen == n && hit
+        };
         let can_stand_in = |w: CardId, x: CardId, n: usize| {
             w != x
                 && wild_of(w)
-                    .is_some_and(|t| cards.get(x).tribes.has(t) || copies_of_tribe(x, n, t))
+                    .is_some_and(|t| cards.get(x).tribes.has(t) || some_copy_of_tribe(x, n, t))
         };
         // Designer Eyepatch: two copies of a Pirate make it Golden, so both
         // copies the pair would use have to be Pirates, by their printed card
