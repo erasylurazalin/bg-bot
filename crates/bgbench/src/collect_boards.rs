@@ -908,6 +908,25 @@ mod tests {
         assert!(games[0].render("test", 1).is_some(), "and written");
     }
 
+    /// The same trimmed log with the game step already past `MAIN_START`
+    /// (at `MAIN_ACTION`) when the setup block stages the fight, as in 7 of
+    /// the archived games (bg-vision's notes, 2026-11-20). The fight is
+    /// staged when its setup block closes, not lost.
+    #[test]
+    fn a_fight_staged_after_main_action_is_kept() {
+        let text = include_str!("../../bglog/tests/data/fight.log").replacen(
+            "D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_START \n",
+            "D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_ACTION \n",
+            1,
+        );
+        assert!(!text.contains("tag=STEP value=MAIN_START "), "the excerpt changed");
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(text);
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        assert_eq!(games[0].fights.len(), 1, "the fight is there");
+        assert!(!games[0].fights[0].0.mine.is_empty(), "with my board");
+    }
+
     /// A whole trimmed real game between the spectator markers is another
     /// player's game: it writes no board file, and still takes its session
     /// number so later games keep theirs.

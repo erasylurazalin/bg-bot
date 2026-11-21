@@ -10,8 +10,8 @@
 //! `BACON_CURRENT_COMBAT_PLAYER_ID` set to the PlayerIDs fighting, inside a setup
 //! block that also creates copies of both warbands in PLAY. Usually that happens
 //! before the game step goes to `MAIN_START`, and the snapshot is taken at
-//! `MAIN_START`. Sometimes the step comes first, and then the snapshot is taken
-//! when the setup block closes. Either way both boards are complete and nothing
+//! `MAIN_START`. Sometimes the step comes first (`MAIN_START`, or already
+//! `MAIN_ACTION`), and then the snapshot is taken when the setup block closes. Either way both boards are complete and nothing
 //! has attacked yet. When `BACON_CURRENT_COMBAT_PLAYER_ID` drops back to 0 the
 //! fight is over.
 //!
@@ -567,8 +567,12 @@ impl Handler for Tracker {
             // killed the whole enemy board), this is the last state there is.
             self.after_wingmen = Some(self.capture(g));
         }
+        // Usually the fight is staged before STEP reaches MAIN_START. Some
+        // turns the game goes on to MAIN_ACTION first and stages the fight in
+        // a block after that (bg-overlay's fallback, 2026-11-13 game 4 turn
+        // 10), so either step will do.
         if self.setup_depth.is_some_and(|setup| depth < setup)
-            && g.game_text("STEP") == "MAIN_START"
+            && matches!(g.game_text("STEP"), "MAIN_START" | "MAIN_ACTION")
         {
             self.start_fight(g);
         }
