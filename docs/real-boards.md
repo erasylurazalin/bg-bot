@@ -443,8 +443,14 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
 Every step says what it was and, where there is one, on which card or slot.
 Every step also has `time`: the local time of the log line that opened it,
 the same way as a board's `time` (files written before 2026-11-21 have none).
-A pick the turn timer made for me, or an End Turn the timer forced, looks
-the same in the log as my own click, so these steps can't say which it was.
+A pick the turn timer made for me is not a step: the server picks option 0
+about 0.75 s before `MAIN_END`, the log has no `SendChoices` line for it
+(the client prints `DoesLocalChoiceMatchPacket(): Null list passed in!`),
+and a pick step opens only on `SendChoices`. The card it gave turns up in
+the next state. A turn always ends by itself, so `end_turn` is the turn's
+end, not a click. (bg-vision brief 27, 2026-11-22: all 549 recorded picks
+in 33 games were real clicks, and the on-screen timer hits zero 3.15 s
+before `MAIN_END`, within 1.4 s on 229 of 230 turns.)
 
 | `step` | fields |
 |---|---|
