@@ -94,6 +94,9 @@ const DARK: &str = "BG36_Button_DarkGift";
 /// Invitation). Only Sinister Invitation's offers are Golden.
 const DARK_DISCOVERY: &str = "BG36_MidGameEffect_010";
 const TRIPLE: &str = "TB_BaconShop_Triples_01";
+/// The player's Tavern spells cast this game. The log has no name for the
+/// tag and prints its number.
+const TAVERN_SPELLS_CAST: &str = "3088";
 /// Trip Vouchers: its Greater trinket offer replaces it in the Lesser slot.
 const TRIP_VOUCHERS: &str = "BG30_MagicItem_891";
 
@@ -3298,12 +3301,16 @@ impl Collector {
             put(&mut out, "volumizer_attack", Json::Int(attack));
             put(&mut out, "volumizer_health", Json::Int(health));
         }
-        if player.int("NUM_SPELLS_PLAYED_THIS_GAME") != 0 {
-            put(
-                &mut out,
-                "spells_cast",
-                Json::Int(player.int("NUM_SPELLS_PLAYED_THIS_GAME")),
-            );
+        // Tavern spells cast this game: the player's tag 3088, which counts
+        // the ones triggers cast too (Sludge Corrosion) and leaves out the
+        // other spells played from hand, as the engine's `spells_cast` does.
+        // NUM_SPELLS_PLAYED_THIS_GAME counts spells played from hand, and read
+        // 33 where Faceless Converter's numbers showed 90
+        // (2026_10_28_22_11_50 game 6 turn 14). bg-overlay checked tag 3088
+        // against all 115 Converters in the logs: no mismatch.
+        let tavern_spells = player.int(TAVERN_SPELLS_CAST);
+        if tavern_spells != 0 {
+            put(&mut out, "spells_cast", Json::Int(tavern_spells));
         }
         if player.int("NUM_RESOURCES_SPENT_THIS_GAME") != 0 {
             put(

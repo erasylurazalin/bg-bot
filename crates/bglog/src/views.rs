@@ -584,14 +584,21 @@ pub const PLAYER_COUNTS: [(&str, &str); 2] =
     [("BG25_008pe", "knights"), ("BG_TTN_401pe", "automatons")];
 
 /// Game-long counters of one player at the first attack, for the engine:
-/// spells (mine only: the stand-in player carries none for the opponent),
-/// knights, automatons. Missing ones are left out.
+/// Tavern spells cast, knights, automatons. Missing ones are left out.
+///
+/// The spells are the player's tag 3088 (the log prints no name for it):
+/// the Tavern spells cast this game, triggers' casts included, which is what
+/// the engine's `spells_cast` counts. The stand-in player carries it for the
+/// opponent too. NUM_SPELLS_PLAYED_THIS_GAME counts spells played from hand,
+/// mine only, and read 33 where Faceless Converter's numbers showed 90
+/// (2026_10_28_22_11_50 game 6 turn 14); bg-overlay checked tag 3088 against
+/// all 115 Converters in the logs with no mismatch.
 pub fn counts(g: &Game, player: Option<&Entity>) -> BTreeMap<&'static str, i64> {
     let mut out = BTreeMap::new();
     let Some(player) = player else {
         return out;
     };
-    let spells = player.int("NUM_SPELLS_PLAYED_THIS_GAME");
+    let spells = player.int("3088");
     if spells != 0 {
         out.insert("spells", spells);
     }

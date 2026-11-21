@@ -280,9 +280,11 @@ fn the_hand_the_hidden_cards_and_the_game_long_counts() {
     // The stand-in player holds no hand of its own outside a fight.
     assert!(hand(game, &cards, Some(9)).is_empty());
 
-    // Spells cast is a tag on the player.
+    // Tavern spells cast is the player's tag 3088, not the spells played
+    // from hand (NUM_SPELLS_PLAYED_THIS_GAME, 41 here). The 52 is put in by
+    // hand: this trimmed log was cut before the tag was read.
     let me = game.player_entity(1).expect("my player entity");
-    assert_eq!(counts(game, Some(me)).get("spells"), Some(&41));
+    assert_eq!(counts(game, Some(me)).get("spells"), Some(&52));
     assert!(!counts(game, Some(me)).contains_key("knights"));
 
     // No Blood Gem tags on this player: a plain +1/+1.

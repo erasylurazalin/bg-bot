@@ -372,6 +372,7 @@ D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=1567 value=1
 D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=BACON_HEROPOWER_BASE_HERO_ID value=79719
 D 01:22:13.3271460 GameState.DebugPrintPower() -     tag=4901 value=1
 D 01:22:15.3552880 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=NUM_SPELLS_PLAYED_THIS_GAME value=41 
+D 01:22:15.3552880 GameState.DebugPrintPower() -     TAG_CHANGE Entity=Alice#1919 tag=3088 value=52 
 D 01:22:26.1278120 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=2 
 D 01:22:26.1278120 GameState.DebugPrintPower() -     TAG_CHANGE Entity=[entityName=Funeral Wreath id=288 zone=PLAY zonePos=0 cardId=BG36_MagicItem_217 player=1] tag=TAG_SCRIPT_DATA_NUM_1 value=1 
 D 01:22:26.1278120 GameState.DebugPrintPower() -         FULL_ENTITY - Creating ID=17878 CardID=BG32_324
