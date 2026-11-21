@@ -948,6 +948,29 @@ mod tests {
         assert_eq!(json["boards"][1]["time"], json["boards"][0]["time"], "both sides of one fight");
     }
 
+    /// The side-wide numbers are read as the fight is staged, before Start
+    /// of Combat, not at the first attack: the engine runs Start of Combat
+    /// itself (bg-overlay's Beetle bonus case, 2026_11_11_02_43_24 game 1
+    /// turn 9). The trimmed log gets my Tavern spell count set before the
+    /// fight is staged and raised again before the first attack.
+    #[test]
+    fn the_counters_are_read_before_start_of_combat() {
+        let text = include_str!("../../bglog/tests/data/fight.log");
+        let staged = "D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_START \n";
+        let attack = "D 00:59:12.8785010 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STEP value=MAIN_ACTION \n";
+        assert_eq!((text.matches(staged).count(), text.matches(attack).count()), (1, 1));
+        let set = |n: u32| format!("D 00:59:12.6839750 GameState.DebugPrintPower() - TAG_CHANGE Entity=Alice#1919 tag=3088 value={n} \n");
+        let text = text
+            .replacen(staged, &format!("{}{staged}", set(5)), 1)
+            .replacen(attack, &format!("{attack}{}", set(9)), 1);
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(text);
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        let fight = &games[0].fights[0].0;
+        assert!(fight.at_attack.is_some(), "the first attack was read");
+        assert_eq!(fight.counters.0.get("spells"), Some(&5));
+    }
+
     /// A whole trimmed real game between the spectator markers is another
     /// player's game: it writes no board file, and still takes its session
     /// number so later games keep theirs.

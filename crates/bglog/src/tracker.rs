@@ -48,8 +48,6 @@ pub struct Snapshot {
     pub hero_powers: (Option<HeroPower>, Option<HeroPower>),
     pub trinkets: (Vec<Trinket>, Vec<Trinket>),
     pub rewards: (Vec<Reward>, Vec<Reward>),
-    pub counters: (BTreeMap<&'static str, i64>, BTreeMap<&'static str, i64>),
-    pub side_numbers: (BTreeMap<&'static str, i64>, BTreeMap<&'static str, i64>),
     pub deities: (Option<Deity>, Option<Deity>),
 }
 
@@ -64,8 +62,6 @@ impl Snapshot {
         fight.hero_powers = self.hero_powers;
         fight.trinkets = self.trinkets;
         fight.rewards = self.rewards;
-        fight.counters = self.counters;
-        fight.side_numbers = self.side_numbers;
         fight.deities = self.deities;
     }
 }
@@ -227,11 +223,6 @@ impl Tracker {
                 rewards(g, &self.cards, me),
                 rewards(g, &self.cards, stand_pid),
             ),
-            counters: (counts(g, player(g, me)), counts(g, player(g, stand_pid))),
-            side_numbers: (
-                side_numbers(g, player(g, me)),
-                side_numbers(g, player(g, stand_pid)),
-            ),
             deities: (deity(g, &self.cards, me), deity(g, &self.cards, stand_pid)),
         }
     }
@@ -263,6 +254,17 @@ impl Tracker {
             board(g, &self.cards, Some(stand_pid)),
         );
         fight.clock = g.clock.clone();
+        // The side-wide numbers as they stand before Start of Combat: the
+        // engine runs Start of Combat itself, so numbers read at the first
+        // attack would count it twice. In Power.log 2026_11_11_02_43_24
+        // (game 1, turn 9) the Beetle bonus was 51/48 here and 66/63 at the
+        // first attack, after Herald Sticker set off two Turquoise
+        // Skitterers (bg-overlay found it, 2026-11-20).
+        fight.counters = (counts(g, player(g, me)), counts(g, player(g, Some(stand_pid))));
+        fight.side_numbers = (
+            side_numbers(g, player(g, me)),
+            side_numbers(g, player(g, Some(stand_pid))),
+        );
         fight.days = g.days;
         fight.secrets = (secrets(g, me), secrets(g, Some(stand_pid)));
         fight.reanimates = (reanimates(g, me), reanimates(g, Some(stand_pid)));

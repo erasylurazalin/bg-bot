@@ -153,13 +153,14 @@ pub struct Fight {
     pub trinkets: (Vec<Trinket>, Vec<Trinket>),
     /// The quest rewards each player has at the first attack.
     pub rewards: (Vec<Reward>, Vec<Reward>),
-    /// Game-long counts per side at the first attack, see [`counts`].
+    /// Game-long counts per side as the fight was staged, before Start of
+    /// Combat, see [`counts`].
     pub counters: (BTreeMap<&'static str, i64>, BTreeMap<&'static str, i64>),
     /// The Upper Hands each side cast before this fight, mine and theirs (see
     /// [`UPPER_HAND`]).
     pub upper_hands: (i64, i64),
-    /// What the log shows of each side's player at the first attack, mine and
-    /// theirs (see [`side_numbers`]).
+    /// What the log shows of each side's player as the fight was staged,
+    /// before Start of Combat, mine and theirs (see [`side_numbers`]).
     pub side_numbers: (BTreeMap<&'static str, i64>, BTreeMap<&'static str, i64>),
     /// Both Deities at the first attack.
     pub deities: (Option<Deity>, Option<Deity>),
@@ -583,7 +584,7 @@ pub fn waiting(g: &Game, player: Option<&Entity>) -> i64 {
 pub const PLAYER_COUNTS: [(&str, &str); 2] =
     [("BG25_008pe", "knights"), ("BG_TTN_401pe", "automatons")];
 
-/// Game-long counters of one player at the first attack, for the engine:
+/// Game-long counters of one player, for the engine:
 /// Tavern spells cast, knights, automatons. Missing ones are left out.
 ///
 /// The spells are the player's tag 3088 (the log prints no name for it):

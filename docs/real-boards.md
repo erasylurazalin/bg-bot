@@ -85,8 +85,12 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
   the first attack, each with its card id, name and current numbers (the
   {0} {1} {2} {3} of its text); a trinket also says whether it sits in the
   greater slot. Not used by training yet.
-- `counters` is what the side's player had at the first attack: the numbers
-  a fight reads off the player. A key is written only when the log shows the
+- `counters` is what the side's player had as the fight was staged, before
+  Start of Combat: the numbers a fight reads off the player. The engine runs
+  Start of Combat itself, so the numbers at the first attack would count it
+  twice (a Herald Sticker's Skitterers had raised one Beetle bonus from
+  51/48 to 66/63 by then). Files written before 2026-11-22 have the
+  first-attack numbers. A key is written only when the log shows the
   number; a missing one means the base value (0 spells cast, no spell
   bonus, Blood Gems +1/+1), never "unknown". Where each one is in the log:
 
