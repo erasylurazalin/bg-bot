@@ -447,7 +447,7 @@ Every step says what it was and, where there is one, on which card or slot:
 | `hero_power` | `which` (main or second), `cost`, `target` |
 | `dark_discovery` | `cost` (the Dark Gift button's price) |
 | `discover` | `kind`, `source`, `options`, `picked`: a Discover, a Choose One, a Dark Discovery's three minions with their gifts, a triple's reward |
-| `trinket_pick` | `slot_kind` (lesser or greater), `source`, `options`, `picked` |
+| `trinket_pick` | `slot_kind` (lesser or greater), `source`, `options`, `picked`. The two trinket offers, and Trip Vouchers' offer of trinkets (lesser: it replaces the voucher). A hero power's trinket Discover (Fantastic Treasure, Growing Collection) stays a `discover`, and the state after it places the pick |
 | `end_turn` | nothing: where my End Turn click lands, and where the game's end of turn effects go when they belong to my last step |
 
 - Every step also carries `after`, the whole state the step left (the same

@@ -94,12 +94,27 @@ const DARK: &str = "BG36_Button_DarkGift";
 /// Invitation). Only Sinister Invitation's offers are Golden.
 const DARK_DISCOVERY: &str = "BG36_MidGameEffect_010";
 const TRIPLE: &str = "TB_BaconShop_Triples_01";
+/// Trip Vouchers: its Greater trinket offer replaces it in the Lesser slot.
+const TRIP_VOUCHERS: &str = "BG30_MagicItem_891";
 
 /// The two trinket slots, by the card that fills them.
 const TRINKET_SLOTS: [(&str, &str); 2] = [
     ("BG30_Trinket_1st", "lesser"),
     ("BG30_Trinket_2nd", "greater"),
 ];
+
+/// The slot a choice's trinket pick fills, when the choice is one: the two
+/// trinket offers, and Trip Vouchers' own offer of trinkets, which replaces
+/// it in the Lesser slot (the engine's `greater_offer_into_lesser`). The
+/// minions or spells a voucher's block also names stay Discovers.
+fn trinket_slot_kind(source: &str, option_types: &[&str]) -> Option<&'static str> {
+    if let Some((_, slot)) = TRINKET_SLOTS.iter().find(|(card, _)| *card == source) {
+        return Some(slot);
+    }
+    let all_trinkets =
+        !option_types.is_empty() && option_types.iter().all(|t| *t == "BATTLEGROUND_TRINKET");
+    (source == TRIP_VOUCHERS && all_trinkets).then_some("lesser")
+}
 
 /// The steps that have a price of their own.
 const COSTED: [&str; 5] = ["buy", "roll", "level", "hero_power", "dark_discovery"];
@@ -1831,7 +1846,17 @@ impl Collector {
             ("source".to_string(), self.card_of(game, src.as_ref())),
             ("options".to_string(), Json::Arr(options)),
         ];
-        if let Some((_, slot)) = TRINKET_SLOTS.iter().find(|(card, _)| *card == cid) {
+        let option_types: Vec<&str> = self
+            .choice
+            .as_ref()
+            .map(|c| {
+                c.entities
+                    .values()
+                    .map(|r| game.entities.get(&r.id).map(|x| x.text("CARDTYPE")).unwrap_or(""))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(slot) = trinket_slot_kind(cid, &option_types) {
             set(&mut step, "step", str_("trinket_pick"));
             put(&mut step, "slot_kind", str_(slot));
         } else if cid == DARK_DISCOVERY {
@@ -3675,6 +3700,19 @@ fn collect_live(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Trip Vouchers' Trinket Shop is a trinket pick for the Lesser slot
+    /// (bg-vision's pilot game, turn 8), not a Discover; its other choices
+    /// and other powers' trinket Discovers are left as they were.
+    #[test]
+    fn trip_vouchers_trinkets_are_a_trinket_pick() {
+        let t = "BATTLEGROUND_TRINKET";
+        assert_eq!(trinket_slot_kind(TRIP_VOUCHERS, &[t, t, t, t]), Some("lesser"));
+        assert_eq!(trinket_slot_kind(TRIP_VOUCHERS, &["MINION", "MINION"]), None);
+        assert_eq!(trinket_slot_kind(TRIP_VOUCHERS, &[]), None);
+        assert_eq!(trinket_slot_kind("BG30_Trinket_2nd", &[t, t]), Some("greater"));
+        assert_eq!(trinket_slot_kind("BG30_HERO_304p", &[t, t]), None);
+    }
 
     #[test]
     fn a_tally_prints_as_the_python_counter_dict() {
