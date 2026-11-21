@@ -157,7 +157,9 @@ always afford one. A trinket with no cost in the game data is free.
   everywhere (board, hand, "your most common type", tribe synergies, a
   golden Brann), Dark Discovery's "your type" slot included (Era,
   2026-11-20: this replaces the earlier exception for that slot; the same
-  goes for Amalgamation, which counts as every type there too).
+  goes for Amalgamation, which counts as every type there too). A Discover
+  or draw that asks for one of those tribes can offer a Brann: Era was
+  offered one by a "Discover a Murloc" with the portrait (2026-11-22).
 - **Curator Sticker:** Golden Mishmash ("Whenever your Amalgam gains
   stats, this gains them twice") and a 10/10 Venomous Amalgam. Mishmash is
   a trinket-only token tagged as a buddy, for when buddies come.

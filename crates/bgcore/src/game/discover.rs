@@ -406,7 +406,7 @@ impl Game {
                     DiscoverRequest::TribeMinion(t) | DiscoverRequest::DoomedTribeMinion(t) => {
                         // a "Discover a Murloc" only offers up to the tier
                         draw_filtered(pool, &data.cards, rng, 1, pl.tier, &pl.discover, *lobby, |c| {
-                            c.tribes.has(t)
+                            pl.tribes_of_card(&data.cards, c).has(t)
                         })
                     }
                     // Three different Darkmoon Prizes of one tier: the list
@@ -431,7 +431,7 @@ impl Game {
                         t,
                         &pl.discover,
                         *lobby,
-                        |c| !c.tribes.is_neutral(),
+                        |c| !pl.tribes_of_card(&data.cards, c).is_neutral(),
                     ),
                     // Handled above, before the pool draws.
                     DiscoverRequest::DarkGift(_)
@@ -772,7 +772,7 @@ impl Game {
             }
             let Some(tribe) = Tribe::EVERY.get(slot as usize - 1).copied() else { continue };
             if let Some(c) = draw_filtered(pool, &data.cards, rng, 1, tier, &pl.discover, *lobby, |c| {
-                c.tribes.has(tribe)
+                pl.tribes_of_card(&data.cards, c).has(tribe)
             }) {
                 pl.discover.push(c);
             }

@@ -1817,9 +1817,10 @@ on_pick = [
 # Bronzebeard Portrait: built with block 5. "Your Brann Bronzebeards are both
 # Murlocs and Dragons" is a card modifier like the other portraits'
 # (`also_tribes`), and `CardDb::tribes_of` reads it, so every tribe check in
-# the engine sees it: board, hand, the most common type, tribe synergies, a
-# golden Brann and a fight. The Dark Discovery's "your type" slot is the one
-# exception (docs/rules/trinkets.md).
+# the engine sees it: board, hand, the most common type (the Dark
+# Discovery's "your type" slots too), tribe synergies, a golden Brann and a
+# fight. A Discover or draw that asks for a tribe reads it through
+# `Player::tribes_of_card`, so "Discover a Murloc" can offer a Brann.
 [[trinket]]
 name = "Bronzebeard Portrait"
 card_id = "BG30_MagicItem_418"

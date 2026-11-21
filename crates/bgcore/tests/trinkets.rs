@@ -5278,6 +5278,44 @@ fn a_bronzebeard_brann_counts_as_a_dragon_for_kalecgos() {
     g.check_invariants().unwrap();
 }
 
+/// "Discover a Murloc" offers a Brann once Bronzebeard Portrait makes every
+/// Brann a Murloc: the Discover reads the card's tribes the way the player
+/// has them, not the neutral card's (Era's game of 2026-11-22). Without the
+/// portrait it never does.
+#[test]
+fn a_bronzebeard_brann_can_be_discovered_as_a_murloc() {
+    let brann_offered = |g: &mut Game, seed: u64, portrait: bool| {
+        reset(g, seed);
+        if portrait {
+            take(g, 0, "Bronzebeard Portrait");
+        } else {
+            turn_of(g, 0);
+        }
+        g.players[0].tier = 6;
+        g.players[0].gold = 10;
+        g.players[0].discover_queue.push(bgcore::game::DiscoverRequest::TribeMinion(Tribe::Murloc));
+        put_in_hand(g, 0, "Sewer Rat");
+        let hand = g.players[0].hand.len() as u8 - 1;
+        let pos = g.players[0].board.len() as u8;
+        act(g, 0, Action::Play { hand, pos });
+        let brann = id(g, "Brann Bronzebeard");
+        assert!(!g.players[0].discover.is_empty(), "seed {seed}: the Discover is open");
+        let mut murlocs_only = true;
+        for &c in &g.players[0].discover {
+            let tribes = g.players[0].tribes_of_card(&g.data.cards, g.data.cards.get(c));
+            murlocs_only &= tribes.has(Tribe::Murloc);
+        }
+        assert!(murlocs_only, "seed {seed}: every offer is a Murloc to this player");
+        g.check_invariants().unwrap();
+        g.players[0].discover.contains(&brann)
+    };
+    let mut g = game(0);
+    let with = (0..80).filter(|&seed| brann_offered(&mut g, seed, true)).count();
+    let without = (0..80).filter(|&seed| brann_offered(&mut g, seed, false)).count();
+    assert!(with > 0, "a Brann is offered with the portrait");
+    assert_eq!(without, 0, "and never without it");
+}
+
 #[test]
 fn the_portraits_beast_buff_reaches_an_amalgamation() {
     // Snarky Portrait gives your Beasts +4/+4. A Drakkari Enchanter (no type,
@@ -5318,8 +5356,8 @@ fn bronzebeard_portrait_makes_every_brann_a_murloc_and_a_dragon() {
     let later = g.players[0].make_card(&g.data.cards, brann, false, 0);
     let tribes = g.data.cards.tribes_of(&later);
     assert!(tribes.has(Tribe::Murloc) && tribes.has(Tribe::Dragon));
-    // "Your most common type" counts it, but the Dark Discovery's "your
-    // type" slot does not.
+    // "Your most common type" counts it, the Dark Discovery's "your type"
+    // slots included (Era's rule, 2026-11-20).
     g.players[0].board.clear();
     g.players[0].board.push(later);
     assert!(g.most_common_board_type(0).is_some(), "a Murloc or a Dragon for the board");

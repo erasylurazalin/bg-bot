@@ -51,6 +51,24 @@ pub(super) fn tavern_buff_hits(cards: &CardDb, m: &Minion, b: &TavernBuff) -> bo
 }
 
 impl Player {
+    /// A pool card's tribes for this player: its own, plus any a portrait
+    /// gives it (Bronzebeard Portrait: Brann is a Murloc and a Dragon). A
+    /// Discover or a draw that asks for a tribe offers the card by these, as
+    /// the game does: Era's game of 2026-11-22 offered a Brann to "Discover a
+    /// Murloc" with the portrait. The minion made from it carries the same
+    /// tribes (`extra_tribes`).
+    pub fn tribes_of_card(&self, cards: &CardDb, c: &crate::Card) -> Tribes {
+        let mut tribes = c.tribes;
+        for (mod_card, kind) in self.tp.card_mods.iter().flatten() {
+            if let CardMod::AlsoTribes(t) = kind
+                && std::ptr::eq(cards.get(*mod_card), c)
+            {
+                tribes = tribes.with_all(*t);
+            }
+        }
+        tribes
+    }
+
     pub(super) fn new(data: &Data) -> Player {
         Player {
             health: data.rules.starting_health,
