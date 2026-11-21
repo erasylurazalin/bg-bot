@@ -441,6 +441,7 @@ fn read_log_reader(reader: &mut impl BufRead, cards: &Cards) -> io::Result<Vec<G
         }
     }
     if !current.is_empty() && tracker.is_battlegrounds() {
+        tracker.fill_missing_seats();
         let fights = tracker.fights();
         let fights = current
             .drain(..)
@@ -969,6 +970,33 @@ mod tests {
         let fight = &games[0].fights[0].0;
         assert!(fight.at_attack.is_some(), "the first attack was read");
         assert_eq!(fight.counters.0.get("spells"), Some(&5));
+    }
+
+    /// A session that starts with a reconnect's full-state dump has my hero
+    /// and its place in the dump only, and the place may never change again
+    /// (the last session of Hearthstone_2026_11_22_03_22_48, which I won,
+    /// wrote place 0). The place is read off the hero as the log ends.
+    #[test]
+    fn a_rejoined_session_keeps_my_place_from_the_dump() {
+        let dump_end = "D 00:57:53.6478530 GameState.DebugPrintGame() - BuildNumber=254477\n";
+        let text = include_str!("../../bglog/tests/data/fight.log");
+        assert_eq!(text.matches(dump_end).count(), 1);
+        let p = "D 00:57:53.6478530 GameState.DebugPrintPower() - ";
+        let hero = format!(
+            "{p}    FULL_ENTITY - Creating ID=118 CardID=TB_BaconShop_HERO_15\n\
+             {p}        tag=CONTROLLER value=1\n\
+             {p}        tag=CARDTYPE value=HERO\n\
+             {p}        tag=PLAYER_ID value=1\n\
+             {p}        tag=HEALTH value=30\n\
+             {p}        tag=PLAYER_LEADERBOARD_PLACE value=1\n"
+        );
+        let text = text.replacen(dump_end, &format!("{hero}{dump_end}"), 1);
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(text);
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&games[0].render("test", 1).unwrap()).unwrap();
+        assert_eq!(json["place"], 1);
     }
 
     /// A whole trimmed real game between the spectator markers is another

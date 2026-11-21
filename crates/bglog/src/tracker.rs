@@ -318,6 +318,33 @@ impl Tracker {
     }
 
     /// The lobby seat of the leaderboard hero an entity is.
+    /// Seat every lobby hero the session has not seen a place for, from its
+    /// entity as it stands. A session that starts with a reconnect's
+    /// full-state dump sets no tags one by one, so a hero whose place, Health
+    /// and tier never change after it has no seat: the last session of
+    /// Hearthstone_2026_11_22_03_22_48 (my win) wrote place 0.
+    fn fill_seats(&mut self, g: &Game) {
+        for id in g.created.iter().copied() {
+            let Some(e) = g.entities.get(&id) else { continue };
+            if e.text("CARDTYPE") != "HERO" || e.int("PLAYER_LEADERBOARD_PLACE") == 0 {
+                continue;
+            }
+            let pid = e.int("PLAYER_ID") as i32;
+            if pid != 0 && self.seats.get(&pid).is_none_or(|s| s.place == 0) {
+                self.update_seat(g, id);
+            }
+        }
+    }
+
+    /// [`Tracker::fill_seats`] for a log that ends in the middle of a game.
+    pub fn fill_missing_seats(&mut self) {
+        let log = mem::take(&mut self.log);
+        if let Some(g) = log.game() {
+            self.fill_seats(g);
+        }
+        self.log = log;
+    }
+
     fn update_seat(&mut self, g: &Game, hero: i32) {
         let Some(entity) = g.entities.get(&hero) else {
             return;
@@ -391,6 +418,7 @@ impl Handler for Tracker {
     /// a Battlegrounds game.
     fn end_game(&mut self, game: &Game) {
         if game.game_type.starts_with("GT_BATTLEGROUNDS") {
+            self.fill_seats(game);
             self.past.push((
                 mem::take(&mut self.seats),
                 mem::take(&mut self.fights),
@@ -440,6 +468,7 @@ impl Handler for Tracker {
             if self.live.is_some() {
                 self.end_fight();
             }
+            self.fill_seats(g);
         } else if tag == "BACON_CURRENT_COMBAT_PLAYER_ID" {
             let my_entity = me(g).and_then(|me| g.players.get(&me).copied());
             if my_entity == Some(entity) {
