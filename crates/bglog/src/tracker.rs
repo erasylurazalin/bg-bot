@@ -262,6 +262,8 @@ impl Tracker {
             board(g, &self.cards, me),
             board(g, &self.cards, Some(stand_pid)),
         );
+        fight.clock = g.clock.clone();
+        fight.days = g.days;
         fight.secrets = (secrets(g, me), secrets(g, Some(stand_pid)));
         fight.reanimates = (reanimates(g, me), reanimates(g, Some(stand_pid)));
         fight.upper_hands = (self.upper_hands[0], self.upper_hands[1]);

@@ -89,6 +89,9 @@ pub struct PowerLog {
     depth: usize,
     /// The entity the run of indented `tag=` lines belongs to.
     current: Option<i32>,
+    /// The last line's clock and the midnights passed (see [`Game::clock`]).
+    clock: String,
+    days: u32,
 }
 
 impl Handler for () {}
@@ -100,6 +103,20 @@ impl PowerLog {
 
     /// Read one line. Lines that are not `GameState.` lines are ignored.
     pub fn feed(&mut self, line: &str, handler: &mut dyn Handler) {
+        if let Some(clock) = clock_of(line) {
+            // The log prints the time of day only: a clock that runs back by
+            // more than an hour has passed midnight.
+            if seconds(clock) + 3600.0 < seconds(&self.clock) {
+                self.days += 1;
+            }
+            self.clock.clear();
+            self.clock.push_str(clock);
+            if let Some(game) = self.game.as_mut() {
+                game.clock.clear();
+                game.clock.push_str(clock);
+                game.days = self.days;
+            }
+        }
         match split_line(line) {
             Some((Kind::Power, body)) => self.power(body, handler),
             Some((Kind::Header, body)) => self.header(body),
@@ -154,7 +171,10 @@ impl PowerLog {
             if let Some(ended) = self.game.take() {
                 handler.end_game(&ended);
             }
-            self.game = Some(Game::new());
+            let mut game = Game::new();
+            game.clock.push_str(&self.clock);
+            game.days = self.days;
+            self.game = Some(game);
             self.current = None;
             self.depth = 0;
             if let Some(game) = self.game.as_mut() {
@@ -296,6 +316,23 @@ enum Kind<'a> {
     /// Any other call the client prints, by name: the options it offers, the
     /// pick I make, and the power lists and debug dumps around them.
     Call(&'a str),
+}
+
+/// The clock a log line starts with: `D 18:23:44.1234567 ...`.
+fn clock_of(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("D ")?;
+    let clock = &rest[..rest.find(' ')?];
+    let b = clock.as_bytes();
+    (b.len() >= 8 && b[2] == b':' && b[5] == b':').then_some(clock)
+}
+
+/// A clock as seconds since midnight; 0 for an empty or odd one.
+fn seconds(clock: &str) -> f64 {
+    let mut parts = clock.split(':');
+    let h: f64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
+    let m: f64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
+    let s: f64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
+    h * 3600.0 + m * 60.0 + s
 }
 
 /// `D <timestamp> GameState.<call>() - <body>`: the kind of line and its body.

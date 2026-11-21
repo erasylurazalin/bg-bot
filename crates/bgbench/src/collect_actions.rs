@@ -1963,6 +1963,11 @@ impl Collector {
         {
             ent = field(object, "id").and_then(Json::as_int).map(|n| n as i32);
         }
+        // When the step's line came, local time (bglog::local_time).
+        let time = game.time(&self.label);
+        if !time.is_empty() {
+            put(&mut step, "time", str_(&time));
+        }
         put(&mut step, "paid", Json::Null);
         let starts_health = if self.last.is_some() {
             self.last_health

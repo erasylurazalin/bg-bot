@@ -75,6 +75,10 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
 - `who` is `me` (my board, every turn of my game) or `opp` (the opponent I
   fought that turn: one random player per turn, good for volume).
 - The boards are as they went into the fight, before Start of Combat.
+- `time` is when the fight was staged, local time to the 10 millionth of a
+  second (`2026-11-17T18:35:01.5013680`): the log's clock on the date in the
+  log folder's name, plus a day each time the clock passes midnight
+  (`bglog::local_time`). Files written before 2026-11-21 have none.
 - `tier`, `health` and `armor` are the player's at the first attack.
 - `hero_card` can be a skin; `hero_base` is the hero's own card id.
 - `hero_power`, `trinkets` and `rewards` (quest rewards) are the side's at
@@ -432,7 +436,11 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   when it is there and from `tribes` when it is not (a file written before the
   key existed).
 
-Every step says what it was and, where there is one, on which card or slot:
+Every step says what it was and, where there is one, on which card or slot.
+Every step also has `time`: the local time of the log line that opened it,
+the same way as a board's `time` (files written before 2026-11-21 have none).
+A pick the turn timer made for me, or an End Turn the timer forced, looks
+the same in the log as my own click, so these steps can't say which it was.
 
 | `step` | fields |
 |---|---|

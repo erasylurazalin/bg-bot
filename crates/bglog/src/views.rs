@@ -108,6 +108,10 @@ pub struct Deity {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fight {
     pub turn: i64,
+    /// The log's clock and midnights passed when the fight was staged (see
+    /// [`crate::Game::time`]).
+    pub clock: String,
+    pub days: u32,
     /// Their PlayerID.
     pub opponent: i32,
     /// Both boards before start-of-combat effects: what the window shows.
@@ -172,6 +176,8 @@ impl Fight {
     pub fn new(turn: i64, opponent: i32, mine: Board, theirs: Board) -> Fight {
         Fight {
             turn,
+            clock: String::new(),
+            days: 0,
             opponent,
             mine,
             theirs,

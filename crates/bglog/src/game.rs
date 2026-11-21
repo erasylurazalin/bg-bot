@@ -36,11 +36,24 @@ pub struct Game {
     pub names: HashMap<String, i32>,
     /// Entity id to the name the log last used for it.
     pub last_name: HashMap<i32, String>,
+    /// The clock of the line being read, as the log prints it
+    /// (`18:23:44.1234567`, local time), and how many midnights the log has
+    /// passed since its first line: [`Game::time`] turns both into a date.
+    pub clock: String,
+    pub days: u32,
 }
 
 impl Game {
     pub fn new() -> Game {
         Game::default()
+    }
+
+    /// The line being read as a local date and time
+    /// (`2026-11-17T18:23:44.1234567`), from the date the log started on
+    /// (its folder's name, `Hearthstone_2026_11_17_18_04_17`). Empty while no
+    /// line has been read or when the name carries no date.
+    pub fn time(&self, log_name: &str) -> String {
+        local_time(log_name, &self.clock, self.days)
     }
 
     /// The entity with this id, created empty if the log has not named it yet.
@@ -128,4 +141,50 @@ impl Game {
         }
         Some(first)
     }
+}
+
+/// A clock and the midnights passed, as a local date and time from the date
+/// the log started on (see [`Game::time`]). Empty when either is missing.
+pub fn local_time(log_name: &str, clock: &str, days: u32) -> String {
+    match start_date(log_name) {
+        Some(date) if !clock.is_empty() => {
+            let (y, m, d) = add_days(date, days);
+            format!("{y:04}-{m:02}-{d:02}T{clock}")
+        }
+        _ => String::new(),
+    }
+}
+
+/// The date in a log folder's name: `Hearthstone_2026_11_17_18_04_17`, with
+/// any prefix before it (`laptop-`) and any suffix after (`-g2`).
+pub fn start_date(log_name: &str) -> Option<(u32, u32, u32)> {
+    let at = log_name.find("Hearthstone_")? + "Hearthstone_".len();
+    let mut parts = log_name[at..].split('_');
+    let y = parts.next()?.parse().ok()?;
+    let m = parts.next()?.parse().ok()?;
+    let d = parts.next()?.parse().ok()?;
+    ((1..=12).contains(&m) && (1..=31).contains(&d)).then_some((y, m, d))
+}
+
+/// A date plus some days, by the Gregorian calendar.
+fn add_days((mut y, mut m, mut d): (u32, u32, u32), days: u32) -> (u32, u32, u32) {
+    for _ in 0..days {
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let len = match m {
+            2 if leap => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        d += 1;
+        if d > len {
+            d = 1;
+            m += 1;
+            if m > 12 {
+                m = 1;
+                y += 1;
+            }
+        }
+    }
+    (y, m, d)
 }

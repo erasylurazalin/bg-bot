@@ -89,7 +89,7 @@ mod views;
 
 pub use cards::Cards;
 pub use entity::{Entity, TagValue};
-pub use game::Game;
+pub use game::{Game, local_time};
 pub use options::{Choice, Offer, Options, Ref, choice_start, pick_start, taken};
 pub use parser::{Block, Handler, PowerLog};
 pub use tracker::{Snapshot, Tracker};

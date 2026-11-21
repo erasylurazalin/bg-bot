@@ -326,3 +326,24 @@ fn carriage_returns_are_trimmed() {
     assert_eq!(game.entities[&7].card_id, "BG_1");
     assert_eq!(game.entities[&7].text("ZONE"), "PLAY");
 }
+
+/// The reader keeps the clock of the line being read, and counts a clock that
+/// runs back as a midnight passed, so a game that crosses it gets the next
+/// day's date from the log's folder name.
+#[test]
+fn the_clock_rolls_over_at_midnight() {
+    let mut log = bglog::PowerLog::new();
+    log.feed("D 23:59:58.5000000 GameState.DebugPrintPower() - CREATE_GAME", &mut ());
+    let g = log.game().unwrap();
+    assert_eq!(g.time("Hearthstone_2026_12_31_22_00_00"), "2026-12-31T23:59:58.5000000");
+    log.feed("D 00:00:01.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=TURN value=2 ", &mut ());
+    let g = log.game().unwrap();
+    assert_eq!(g.time("laptop-Hearthstone_2026_12_31_22_00_00"), "2027-01-01T00:00:01.0000000");
+    assert_eq!(g.time("test"), "", "no date in the name, no time");
+    assert_eq!(bglog::local_time("Hearthstone_2028_02_28_10_00_00", "01:00:00.0", 1), "2028-02-29T01:00:00.0");
+    // A line with no clock (the collectors' own CREATE_GAME around a
+    // spectated stretch) is read but leaves the clock alone.
+    log.feed("D synthetic GameState.DebugPrintPower() - CREATE_GAME", &mut ());
+    let g = log.game().unwrap();
+    assert_eq!(g.time("Hearthstone_2026_12_31_22_00_00"), "2027-01-01T00:00:01.0000000");
+}

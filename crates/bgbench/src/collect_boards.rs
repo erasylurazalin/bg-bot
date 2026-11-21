@@ -40,8 +40,10 @@ use bglog::{Cards, Fight, Minion, PLAYER_ENCHANTS, Seat, TagValue, Tracker};
 /// The `CREATE_GAME` line the collectors feed themselves when a spectator
 /// stretch starts or ends: it closes the game in hand without reading any of
 /// the spectated state, so the session numbers after it stay the log's own.
+/// It carries no clock, so the reader's clock (the files' `time`) stays the
+/// log's own too.
 pub(crate) const SYNTHETIC_CREATE_GAME: &str =
-    "D 00:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME";
+    "D synthetic GameState.DebugPrintPower() - CREATE_GAME";
 
 /// The line the client prints when a spectated game starts. It names the
 /// player watched ("1st player", and so on), so only the start is keyed on.
@@ -480,6 +482,11 @@ impl Game {
                     ("turn".to_string(), Json::Int(fight.turn)),
                     ("result".to_string(), Json::Str(result)),
                 ];
+                // When the fight was staged, local time (bglog::local_time).
+                let time = bglog::local_time(source, &fight.clock, fight.days);
+                if !time.is_empty() {
+                    fields.push(("time".to_string(), Json::Str(time)));
+                }
                 fields.extend(side(fight, index, seat));
                 boards.push(Json::Obj(fields));
             }
@@ -925,6 +932,20 @@ mod tests {
         let games = read_log_reader(&mut reader, &cards).unwrap();
         assert_eq!(games[0].fights.len(), 1, "the fight is there");
         assert!(!games[0].fights[0].0.mine.is_empty(), "with my board");
+    }
+
+    /// Each board carries the local time its fight was staged: the log's
+    /// clock on the date of the log's folder.
+    #[test]
+    fn a_board_carries_the_time_its_fight_was_staged() {
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(include_str!("../../bglog/tests/data/fight.log"));
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        let text = games[0].render("Hearthstone_2026_11_17_00_57_00", 1).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let time = json["boards"][0]["time"].as_str().unwrap();
+        assert!(time.starts_with("2026-11-17T00:59:12."), "{time}");
+        assert_eq!(json["boards"][1]["time"], json["boards"][0]["time"], "both sides of one fight");
     }
 
     /// A whole trimmed real game between the spectator markers is another
