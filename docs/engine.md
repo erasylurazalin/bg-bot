@@ -356,9 +356,15 @@ rules behind each are in docs/rules/design.md Part 2.
   that both summons and buffs Beetles (`Turquoise Skitterer`) summons first
   and buffs second, as its log shows (Power.log 2026_11_11 152571): the new
   Beetle stands at the old bonus and the buff lands after Banana Slamma.
-  Banana Slamma sets the Beast's base Attack to twice (golden: three times)
-  its current Attack and keeps the buffs on top, so the 65 Attack Beetle
-  with +63 of buffs goes to 193, not 130 (`fight.rs`, the summon step).
+  Banana Slamma sets the Beast's Attack to twice (golden: three times) its
+  current Attack, then re-applies only the auras (Beetle bonus, Goldrinn,
+  the "wherever they are" bonuses); non-aura buffs are multiplied. So the
+  65 Attack Beetle with +63 of Beetle and Goldrinn auras goes to 130 + 63 =
+  193, not 130 (`Hearthstone_2026_11_11_02_43_24` line 152685), while a
+  golden Sewer Rat at 165 (printed 6 plus Lurking Leviathan's +159) goes to
+  495, not 654 (`Hearthstone_2026_11_08_03_26_06` line 763025). With both,
+  595 goes to 595 * 3 + 11 = 1796 (`Hearthstone_2026_11_11_02_43_24` line
+  326222). `Side::aura_attack_of` lists the aura parts.
 - **One pick per type.** `cards::pick_one_per_type` is the pick Misplaced
   Tea Set and The Last One Standing share: one random minion per type, each
   minion at most once.

@@ -1576,6 +1576,34 @@ impl<'a> Side<'a> {
         }
     }
 
+    /// The Attack a minion gets from auras, the part Banana Slamma leaves in
+    /// place when it sets the Attack. It mirrors what
+    /// `summon_with` adds from the side's counters: the "wherever they are"
+    /// bonuses, the Knight count, the Beetle bonus and the combat Beast buff.
+    /// On-summon Beast buffs (Lurking Leviathan) and other `gain_at` buffs are
+    /// not auras and are multiplied instead.
+    fn aura_attack_of(&self, db: &CardDb, pos: usize) -> i32 {
+        let m = self.ms[pos].m;
+        let c = db.get(m.card);
+        let mut aura = 0;
+        if !c.fixed_stats {
+            aura += self.counters.aura_attack;
+            if db.tribes_of(&m).has(Tribe::Undead) {
+                aura += self.counters.undead_attack;
+                if let Some((attack, _)) = c.buff_per_kind_death {
+                    aura += attack * m.mul() * self.counters.knight_deaths as i32;
+                }
+            }
+        }
+        if c.is_beetle {
+            aura += self.counters.beetle_attack;
+        }
+        if db.tribes_of(&m).has(Tribe::Beast) {
+            aura += self.beast_buff.0;
+        }
+        aura
+    }
+
     /// A Deathrattle of this side triggered.
     fn note_deathrattle(&mut self, db: &CardDb) {
         self.out.deathrattles_triggered = self.out.deathrattles_triggered.saturating_add(1);
@@ -2108,13 +2136,15 @@ impl<'a> Side<'a> {
                 }
                 self.gain_at(db, pos, da_total, dh_total);
             }
-            // Banana Slamma sets the Beast's base Attack to twice (golden:
-            // three times) its current Attack and keeps every buff on top, so
-            // a 65 Attack Beetle with +63 of buffs goes to 130 + 63 = 193
-            // (Power.log 2026_11_11_02_43_24 around line 152571; an unbuffed
-            // 9/4 goes to 18/4). The base starts at the printed Attack and
-            // moves with each Slamma.
-            let mut base = db.make(self.ms[pos].m.card, self.ms[pos].m.golden).attack;
+            // Banana Slamma sets the Beast's Attack to twice (golden: three
+            // times) its current Attack, then re-applies only its auras, the
+            // same rule as Firestone's `setEntityStats`. Non-aura buffs are
+            // multiplied: in Power.log 2026_11_08_03_26_06 line 763025 a
+            // golden Sewer Rat at 165 (printed 6 plus Lurking Leviathan's
+            // +159) goes to 495, not 654. A 65 Attack Beetle with +63 of
+            // Beetle and Goldrinn auras goes to 130 + 63 = 193 (Power.log
+            // 2026_11_11_02_43_24 line 152685). With both, 595 goes to
+            // 595 * 3 + 11 = 1796 (same log, line 326222).
             for j in 0..self.ms.len() {
                 if j == pos || self.ms[j].m.health <= 0 {
                     continue;
@@ -2123,10 +2153,12 @@ impl<'a> Side<'a> {
                 for (card, golden) in mj.parts() {
                     if matches!(db.get(card).on_summon_beast, Some(OnSummonBeast::MultiplyAttackInCombat)) {
                         let factor = if golden { 3 } else { 2 };
-                        let attack = self.ms[pos].m.attack;
-                        let buffs = attack - base;
-                        base = attack * factor;
-                        self.ms[pos].m.attack = (base + buffs).max(0);
+                        let aura = self.aura_attack_of(db, pos);
+                        self.ms[pos].m.attack = self.ms[pos]
+                            .m
+                            .attack
+                            .saturating_mul(factor)
+                            .saturating_add(aura);
                     }
                 }
             }
@@ -5543,9 +5575,10 @@ mod tests {
 
     #[test]
     fn a_skitterer_summons_then_buffs_its_beetle() {
-        // Power.log 2026_11_11_02_43_24 line 152571: the new Beetle stands
+        // Power.log 2026_11_11_02_43_24 line 152685: the new Beetle stands
         // at the old bonus (2 + 56 + Goldrinn's 7 = 65/62), Banana Slamma
-        // makes it 193/62, and only then does the Skitterer's +5/+5 land.
+        // makes it 65 * 2 + 63 = 193/62, and only then does the Skitterer's
+        // +5/+5 land.
         let db = db();
         let mut uid = 0;
         let mut rng = Rng::new(1);
@@ -5561,8 +5594,8 @@ mod tests {
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
         let beetle = s.ms.iter().find(|f| db.get(f.m.card).is_beetle).expect("a Beetle");
-        // Summoned 7/7 (2 printed + 5 of bonus), base doubled to 14 with the
-        // +5 kept on top (19/7), then +5/+5 makes 24/12.
+        // Summoned 7/7 (2 printed + 5 of Beetle aura), doubled to 14 with
+        // the +5 aura re-applied (19/7), then +5/+5 makes 24/12.
         assert_eq!((beetle.m.attack, beetle.m.health), (24, 12));
     }
 

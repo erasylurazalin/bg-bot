@@ -95,17 +95,45 @@ fn beast_summon_scaling_leviathan_banana_slamma() {
     wall.attack = 10;
     wall.health = 100;
 
-    // Beetle (2/2) + Lurking Leviathan (+3 Attack) = 5/2, then Banana Slamma
-    // sets the base Attack to twice 5 and keeps the +3: 13/2 (Power.log
-    // 2026_11_11_02_43_24: a 65 Attack Beetle with +63 of buffs went to 193).
+    // Beetle (2/2) + Lurking Leviathan (+3 Attack) = 5/2. Leviathan's buff is
+    // not an aura, so Banana Slamma multiplies it: 5 * 2 = 10/2. Power.log
+    // 2026_11_08_03_26_06 line 763025 is the same rule with a bigger number:
+    // a golden Sewer Rat at 165 (printed 6 plus +159) went to 495.
     let mut log = Log { db: Some(db.clone()), ..Default::default() };
     fight_watched(&db, &[vermin, leviathan, slamma], &[wall], 500, &mut Rng::new(1), &mut log);
-    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (13, 2));
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (10, 2));
 
-    // A golden Banana Slamma sets it to three times 5, plus the +3: 18/2.
+    // A golden Banana Slamma multiplies it by three: 15/2.
     let mut log2 = Log { db: Some(db.clone()), ..Default::default() };
     fight_watched(&db, &[vermin, leviathan, gold_slamma], &[wall], 500, &mut Rng::new(1), &mut log2);
-    assert_eq!((log2.summons[0].2.attack, log2.summons[0].2.health), (18, 2));
+    assert_eq!((log2.summons[0].2.attack, log2.summons[0].2.health), (15, 2));
+}
+
+#[test]
+fn banana_slamma_multiplies_non_aura_buffs_and_keeps_auras() {
+    let db = s2_db();
+    let vermin = db.make(db.by_name("Buzzing Vermin").unwrap(), false);
+    let leviathan = db.make(db.by_name("Lurking Leviathan").unwrap(), false);
+    let humming = db.make(db.by_name("Humming Bird").unwrap(), false);
+    let slamma = db.make(db.by_name("Banana Slamma").unwrap(), false);
+    let mut wall = db.make(db.by_name("Microbot").unwrap(), false);
+    wall.attack = 10;
+    wall.health = 100;
+
+    // Start of Combat: Humming Bird gives friendly Beasts +1 Attack (an
+    // aura). The Beetle is summoned at 2 printed + 1 aura + 3 non-aura
+    // (Leviathan) = 6/2. Banana Slamma doubles the whole 6 and re-applies the
+    // +1 aura: 6 * 2 + 1 = 13/2, not the 16 an "all buffs on top" rule gives.
+    let mut log = Log { db: Some(db.clone()), ..Default::default() };
+    fight_watched(
+        &db,
+        &[vermin, humming, leviathan, slamma],
+        &[wall],
+        500,
+        &mut Rng::new(1),
+        &mut log,
+    );
+    assert_eq!((log.summons[0].2.attack, log.summons[0].2.health), (13, 2));
 }
 
 #[test]
