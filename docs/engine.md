@@ -225,7 +225,8 @@ rules behind each are in docs/rules/design.md Part 2.
   it, come after the spell is in hand (a Lockbox from a Gold-spent rule, log
   2026_11_02_00_10_22-g5 turn 11 step 12).
 - **Counters.** Per minion: `improvements` (Leviathan, Hopebringer,
-  Patient Scout, the "N left" cards, a Sacrificial Wrathguard's Activates);
+  Patient Scout, the "N left" cards, a Sacrificial Wrathguard's Activates,
+  and a Glambot seated from a log, whose numbers are the Satellite it makes);
   a triple keeps the highest of the three. Per player: `Player.improve` with `Counters.improve` inside a
   fight (Tasty Lobster), the Tavern spell bonus, the Beast bonus from a
   shop Goldrinn, the Fodder queue. Gains made inside a fight come back

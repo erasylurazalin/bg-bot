@@ -555,7 +555,9 @@ Triple Reward spell.
 
 - **Satellite.** The token is 4/4; an attacher passes its own stats
   (`stats = [..]` on `on_play_mech` and `on_cast_spell_on_mech`: Spark Snapper
-  2/2, Glambot 5/5, both patch 37.0.2's numbers).
+  2/2, Glambot 5/5, both patch 37.0.2's numbers). A Glambot loaded from a log
+  keeps the `{0}/{1}` the log shows (4/4 on patch 37.0) in `improvements`, and
+  its trigger uses that pair, so an old board keeps its Satellite size.
 - **Spell tiers.** A spell is tier 1 to 7, or 0 for a generated one (Lockbox). Tier 7
   spells are in the pool list but no draw reaches them (see the hook index).
 - **Fuzz never sees tier 7.** The Tavern stops at tier 6 (`MAX_TIER`), so tier 7 cards

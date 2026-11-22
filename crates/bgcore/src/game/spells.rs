@@ -184,6 +184,13 @@ impl Game {
                     health,
                 }) = self.data.cards.get(card).on_cast_spell_on_mech
                 {
+                    // The logged Glambot's own {0}/{1} (see `glambot_on_shop_mech`):
+                    // a board from an older patch keeps its Satellite size.
+                    let (attack, health) = if card == m.card && m.improvements > 0 {
+                        (m.improvements as i32, m.improvements as i32)
+                    } else {
+                        (attack, health)
+                    };
                     let count = if golden { 2 } else { 1 };
                     for _ in 0..count {
                         let mut sat = self.data.cards.make(sat_id, false);

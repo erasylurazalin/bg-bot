@@ -600,14 +600,15 @@ A minion's `numbers` become the engine state they stand for, for the cards
 whose scaling it models as `Minion.improvements` (`real_boards.rs`): Lurking
 Leviathan (growth / 3, / 6 golden), Spark Snapper (Satellite growth / 2, / 4
 golden), Ultraviolet Ascendant (the third number is its count), Patient
-Scout (its tier, minus 1) and Sacrificial Wrathguard (the third number, the
-part of its Tavern buff the Activates added, / 2, / 4 golden). A Tasty
+Scout (its tier, minus 1), Sacrificial Wrathguard (the third number, the
+part of its Tavern buff the Activates added, / 2, / 4 golden) and Glambot
+(the Satellite pair, 4/4 on patch 37.0 and 5/5 now). A Tasty
 Lobster's numbers are the player's
 `tasty_lobster` count instead (`attack / 2 - 1`, `/ 4 - 1` golden): every
 Lobster shares one, and the board keeps the best of its board and hand. Other
 cards keep 0 whatever numbers they carry, since their numbers are something
 else (a Scarlet Survivor's is its Attack threshold, a Forest Rover's are its
-own stats, a Glambot's are a fixed Satellite).
+own stats).
 
 Training: `ppo.py --lineup 4,2,0,0,0,2 --real-boards boards/real` seats two
 real seats (the lineup is learner,snapshot,standard,rush,random,real), and

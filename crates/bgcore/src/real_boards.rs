@@ -536,6 +536,10 @@ fn improvements(name: &str, golden: bool, numbers: &[i32]) -> u16 {
         // minion with a type!": {0} is the turns left, which the engine counts
         // down in `improvements` and opens at 0.
         "Lockbox" => n(0),
+        // Glambot's {0}/{1} are the Satellite it Magnetizes; the two are
+        // equal (4/4 on patch 37.0, 5/5 on 37.0.2), so one number holds the
+        // pair. A file from before the patch then plays its own size.
+        "Glambot" => n(0),
         _ => 0,
     };
     steps.clamp(0, u16::MAX as i32) as u16

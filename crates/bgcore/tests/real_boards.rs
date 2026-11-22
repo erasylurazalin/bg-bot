@@ -731,12 +731,15 @@ fn the_loaded_cards_carry_their_scaling_state() {
         // A Tasty Lobster's numbers are the player's count, not its own.
         with_numbers(spec(5, 3, &[("Tasty Lobster", 6, 3, false, &[])]), 0, &[10, 5, 0, 0]),
         with_numbers(spec(5, 3, &[("Tasty Lobster", 12, 6, true, &[])]), 0, &[20, 10, 0, 0]),
+        // Glambot's {0}/{1} are the Satellite it makes; this board is from
+        // patch 37.0, when they were 4/4 (the current pair is 5/5).
+        with_numbers(spec(5, 4, &[("Glambot", 4, 4, false, &[])]), 0, &[4, 4, 0, 0]),
     ];
     let (boards, unmatched) = RealBoards::build(&specs, &d.cards, &d.gifts);
     assert!(unmatched.is_empty());
     let imp = |turn: &[bgcore::real_boards::RealBoard]| turn[0].minions[0].improvements;
     let at5 = boards.boards_at(5);
-    assert_eq!(at5.len(), 8);
+    assert_eq!(at5.len(), 9);
     assert_eq!(imp(&at5[0..1]), 1, "Leviathan: 3 attack of growth / 3");
     assert_eq!(imp(&at5[1..2]), 2, "golden Leviathan: 12 / 6");
     assert_eq!(imp(&at5[2..3]), 4, "Snapper: 8 of growth / 2, a 10/15 Satellite");
@@ -747,6 +750,7 @@ fn the_loaded_cards_carry_their_scaling_state() {
     // Every Lobster shares one count; the better of the two is kept.
     assert_eq!(at5[6].counters.improve[Counter::TastyLobster.index()], 4, "10 / 2 - 1");
     assert_eq!(at5[7].counters.improve[Counter::TastyLobster.index()], 4, "20 / 4 - 1");
+    assert_eq!(imp(&at5[8..9]), 4, "Glambot: the 4/4 Satellite of patch 37.0");
 }
 
 /// How much the numbers change real boards: every board of a turn against a

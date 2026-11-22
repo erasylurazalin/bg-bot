@@ -309,6 +309,15 @@ impl Game {
                 if let Some(OnCastSpellOnMech::MagnetizeSatellite { card: sat, attack, health }) =
                     self.data.cards.get(card).on_cast_spell_on_mech
                 {
+                    // A Glambot seated from a log carries its own {0}/{1} in
+                    // `improvements` (4/4 on patch 37.0, 5/5 now), which is the
+                    // Satellite the game made at that time; a Glambot the
+                    // engine made reads the card's current pair instead.
+                    let (attack, health) = if card == m.card && m.improvements > 0 {
+                        (m.improvements as i32, m.improvements as i32)
+                    } else {
+                        (attack, health)
+                    };
                     for _ in 0..(if golden { 2 } else { 1 }) {
                         let _ = sats.try_push((sat, attack, health));
                     }

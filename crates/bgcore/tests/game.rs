@@ -1253,6 +1253,24 @@ fn glambot_balinda_banana_interpreter_snapper_and_utility_drone() {
 }
 
 #[test]
+fn a_log_seated_glambots_numbers_size_its_satellite() {
+    let mut g = game(206);
+    put_on_board(&mut g, 0, "Cord Puller"); // slot 0: 1/1 Mech
+    put_on_board(&mut g, 0, "Glambot"); // slot 1: current 5/5
+    // A Glambot built from a patch 37.0 log carries its own 4/4 in the numbers
+    // the loader keeps in `improvements`; the card data now says 5/5.
+    g.players[0].board[1].improvements = 4;
+    g.give(0, "Tavern Dish Banana").unwrap();
+    act(&mut g, 0, Action::Play { hand: 0, pos: 0 });
+    act(&mut g, 0, Action::Target(0));
+    // Banana +2/+2, then the logged Glambot's 4/4 Satellite, not the 5/5 one.
+    let host = g.players[0].board[0];
+    assert_eq!((host.attack, host.health), (1 + 2 + 4, 1 + 2 + 4));
+    assert_eq!(host.magnetizations, 1);
+    g.check_invariants().unwrap();
+}
+
+#[test]
 fn spell_stat_bonuses_botanist_humongozz_and_magnetized_enchanted_sentinel() {
     let mut g = game(205);
     put_on_board(&mut g, 0, "Cord Puller"); // slot 0: 1/1 Mech
