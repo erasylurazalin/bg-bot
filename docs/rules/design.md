@@ -211,14 +211,25 @@ board, except effects that say "permanently".
 
 ### Order of events
 
-1. **Start of Combat.** Illidan's Wingmen go first of all. Then hero powers,
-   the Lesser trinket, the Greater trinket, then minions left to right. Between
-   the two players it is interleaved: a coin flip picks who starts each step,
-   then they take turns. Medium confidence.
+1. **Start of Combat.** In phases: trinkets (the Lesser, then the Greater),
+   pre-combat hero powers (Al'Akir, Wax Warband, Deathwing, Y'Shaarj,
+   Tamsin, Bru'kan's Earth, Fire and Water, Teron, Ozumat), Illidan's
+   Wingmen, the other hero powers (Lightning Invocation, Lock and Load), the
+   spells (Boon of Beetles last), minions in hand (Flighty Scout), then
+   minions on the board. In each phase a coin flip picks which player goes
+   first. Deaths and summons-when-space resolve after the trinkets and after
+   the pre-combat powers. The board minions go one at a time, left to right,
+   alternating between the players, starting with the side that would attack
+   first at that point. (Era's logs, 2026-11-23: of 183 fights with effects
+   from two or more phases, 23 ruled out the old order and none ruled out
+   this one, which Firestone quotes from a Blizzard developer. Cases in
+   docs/notes/soc-order-2026-11-23.md.)
 2. **Attacks.** The side with more minions attacks first, a coin flip if
    equal, counted after Start of Combat: in Power.log `2026_11_11_02_43_24`
    (game 1, turn 9) a 6 minion side whose Herald Sticker made a Turquoise
-   Skitterer summon a Beetle met 7 with 7 and attacked first. The sides then alternate. Each side attacks with its minions left
+   Skitterer summon a Beetle met 7 with 7 and attacked first. When Wingmen
+   fired, the count is from the boards as they entered combat instead (3 of
+   Era's fights against 1, and Firestone cites the developer). The sides then alternate. Each side attacks with its minions left
    to right and wraps around to the left after the last one. A minion with 0
    Attack never attacks.
 3. **Targets.** The defender is picked at random among the enemies. Taunt
