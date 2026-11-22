@@ -4639,7 +4639,7 @@ fn highest_health_damage(
     let damage = att.ms[hi].m.attack * if golden { 2 } else { 1 };
     let (xf, yf) = (&mut att.ms[hi], &mut def.ms[vi]);
     let was_shielded = yf.m.keywords.has(Keywords::DIVINE_SHIELD);
-    let dealt = deal_damage(&mut yf.m, damage);
+    let dealt = hit(&mut yf.m, damage, &mut xf.m);
     yf.taken += dealt;
     if yf.m.health <= 0 && dealt > 0 {
         yf.killer = Some(xf.uid);
@@ -4681,7 +4681,9 @@ fn attack_triggers(
             let c = db.get(c);
             (!after && f.uid == me && c.rally.is_some())
                 || trigger(c).is_some_and(|t| {
-                    (!t.filter.exclude_self || f.uid != me) && filter_ok(db, t.filter, attacker)
+                    (!t.filter.exclude_self || f.uid != me)
+                        && (!t.filter.self_only || f.uid == me)
+                        && filter_ok(db, t.filter, attacker)
                 })
         });
         if relevant {
@@ -4772,6 +4774,7 @@ fn attack_triggers(
             }
             if let Some(t) = trigger(c)
                 && (!t.filter.exclude_self || host != me)
+                && (!t.filter.self_only || host == me)
                 && filter_ok(db, t.filter, attacker)
             {
                 if t.effect == Effect::DamageHighestHealth {

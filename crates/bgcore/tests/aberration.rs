@@ -917,6 +917,95 @@ fn a_golden_de_volitionist_deals_double() {
     assert_eq!(deaths.iter().filter(|&&c| c == id(&db, "Microbot") || c == id(&db, "Foraging Bat")).count(), 1);
 }
 
+#[test]
+fn de_volitionist_fires_only_after_its_own_attack() {
+    let db = db();
+    // Another friendly minion attacks first. The target survives that 1
+    // damage, but not the trigger's 4 if the trigger fires on the wrong
+    // minion.
+    let mut other = mk(&db, "Microbot", false);
+    other.attack = 1;
+    let (_, log) = run(
+        &db,
+        &[other, mk(&db, "De-volition-ist", false)],
+        &[sleeper(&db, "Sewer Rat", 5)],
+        [Counters::default(); 2],
+        1,
+        5,
+    );
+    let attackers: Vec<CardId> = log.0.iter()
+        .filter_map(|e| match e {
+            Ev::Attack { side: 0, card, .. } => Some(*card),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attackers, [id(&db, "Microbot")], "the other minion attacks");
+    assert!(
+        log.0.iter().all(|e| !matches!(e, Ev::Death { side: 1, .. })),
+        "another friendly minion's attack must not trigger De-volition-ist"
+    );
+
+    // The golden card has the same trigger and only doubles the damage.
+    let mut other = mk(&db, "Microbot", false);
+    other.attack = 1;
+    let (_, log) = run(
+        &db,
+        &[other, mk(&db, "De-volition-ist", true)],
+        &[sleeper(&db, "Sewer Rat", 9)],
+        [Counters::default(); 2],
+        1,
+        5,
+    );
+    assert!(
+        log.0.iter().all(|e| !matches!(e, Ev::Death { side: 1, .. })),
+        "a golden De-volition-ist also ignores another minion's attack"
+    );
+
+    // Its own attack does: 4 damage to the 5-Health target, then 4 more kills
+    // it.
+    let (_, log) = run(
+        &db,
+        &[mk(&db, "De-volition-ist", false)],
+        &[sleeper(&db, "Sewer Rat", 5)],
+        [Counters::default(); 2],
+        1,
+        5,
+    );
+    assert!(
+        log.0.iter().any(|e| matches!(e, Ev::Death { side: 1, card } if *card == id(&db, "Sewer Rat"))),
+        "its own attack triggers the damage"
+    );
+}
+
+#[test]
+fn a_venomous_de_volitionist_kills_with_its_after_attack_damage() {
+    let db = db();
+    let mut devo = mk(&db, "De-volition-ist", false);
+    devo.keywords.set(Keywords::VENOMOUS);
+    // The swing goes into a Taunt's Divine Shield, so it doesn't use the
+    // Venomous; the after-attack damage then hits the highest-Health enemy.
+    let mut shielded = mk(&db, "Sewer Rat", false);
+    shielded.attack = 0;
+    shielded.health = 4;
+    shielded.keywords.set(Keywords::TAUNT);
+    shielded.keywords.set(Keywords::DIVINE_SHIELD);
+    let mut high = mk(&db, "Microbot", false);
+    high.attack = 0;
+    high.health = 100;
+    let (_, log) = run(
+        &db,
+        &[devo],
+        &[shielded, high],
+        [Counters::default(); 2],
+        1,
+        5,
+    );
+    assert!(
+        log.0.iter().any(|e| matches!(e, Ev::Death { side: 1, card } if *card == id(&db, "Microbot"))),
+        "the trigger's Venomous kills the highest-Health enemy"
+    );
+}
+
 // ================= Tokens and the shop =================
 
 #[test]

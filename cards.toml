@@ -1875,7 +1875,7 @@ name = "De-volition-ist"
 tier = 5
 tribe = "aberration"
 stats = [4, 8]
-after_friendly_attack = { effect = { damage_highest_health = true } }
+after_friendly_attack = { attacker_self = true, effect = { damage_highest_health = true } }
 
 [[minion]]
 name = "Faceless Converter"

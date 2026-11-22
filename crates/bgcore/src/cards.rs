@@ -1486,6 +1486,9 @@ pub struct AttackFilter {
     /// Another minion: the minion with the trigger doesn't count (Roaring
     /// Recruiter).
     pub exclude_self: bool,
+    /// This minion only: another minion's attack doesn't count
+    /// (De-volition-ist).
+    pub self_only: bool,
 }
 
 /// "Whenever" or "after a friendly minion attacks" (of a kind): run the
@@ -3255,6 +3258,9 @@ struct RawAttackTrigger {
     /// Another minion: the minion with the trigger isn't counted.
     #[serde(default)]
     attacker_another: bool,
+    /// This minion only: another minion's attack isn't counted.
+    #[serde(default)]
+    attacker_self: bool,
     effect: RawEffect,
 }
 
@@ -4533,11 +4539,17 @@ impl CardDb {
             let rally = c.rally.as_ref().map(|e| fight_effect(e, "rally")).transpose()?;
 
             let attack_trigger = |t: &RawAttackTrigger, what: &str| -> Result<AttackTrigger, String> {
+                if t.attacker_self && t.attacker_another {
+                    return Err(err(format!(
+                        "this {what} can't be both attacker_self and attacker_another"
+                    )));
+                }
                 Ok(AttackTrigger {
                     filter: AttackFilter {
                         tribe: t.attacker_tribe.as_deref().map(tribe).transpose().map_err(&err)?,
                         rally: t.attacker_rally,
                         exclude_self: t.attacker_another,
+                        self_only: t.attacker_self,
                     },
                     effect: fight_effect(&t.effect, what)?,
                 })

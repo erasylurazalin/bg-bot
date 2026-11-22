@@ -60,7 +60,7 @@ legality in mod.rs.
 | End of turn | `end_of_turn = {..}` | `Game::run_end_of_turn` (Drakkari loops it), called by `finish_shop` | Surfing Sylvar |
 | Start of turn | `start_of_turn = { gold }` | `Game::start_turn` | (grep start_of_turn) |
 | Avenge (N) | `avenge = { every, effect }` | `Side::avenge_tick`, called by `resolve` | Relentless Deflector |
-| Before / after a friendly attack | `whenever_friendly_attack`, `after_friendly_attack` (`attacker_tribe`, `attacker_rally`, `attacker_another`) | `attack_triggers` (after=false/true) from `attack_swings` | Roaring Recruiter |
+| Before / after a friendly attack | `whenever_friendly_attack`, `after_friendly_attack` (`attacker_tribe`, `attacker_rally`, `attacker_another`, `attacker_self`) | `attack_triggers` (after=false/true) from `attack_swings`; `attacker_self` is only the minion's own attack (De-volition-ist), `attacker_another` is only another friendly minion's, and the two can't be combined | Roaring Recruiter |
 | Cleave | `cleave = true` | `attack_swings` + `cleave_targets` | Blade Collector |
 | Damage dealt milestone | `damage_milestone = { total, effect }` | `Side::count_damage` | Treasure Parrot |
 | Takes damage | `when_damaged = {..}` | `Side::when_damaged` | Very Hungry Winterfinner |
@@ -929,9 +929,10 @@ Triple Reward spell.
   the second play for a golden four, through `discard_card` (a real
   discard). The link lasts across turns and is recorded in `record.rs`.
 - **De-volition-ist.** `Effect::DamageHighestHealth`, intercepted in
-  `attack_triggers` after the minion's own swing (even when it died
-  attacking): damage equal to its Attack (golden double) to a random tied
-  highest-Health enemy, honouring Divine Shield and Venomous.
+  `attack_triggers` after the minion's own swing (`attacker_self`, even when
+  it died attacking): damage equal to its Attack (golden double) to a random
+  tied highest-Health enemy, through `hit`, so Divine Shield, Venomous and
+  Poisonous apply.
 - **Hidden numbers** (docs/rules/design.md): Mindbending Recruiter's Activate costs 0;
   Aph'lass +2/+1 improving +2/+1 per discard; Parasitic Fleshling +2/+2 per
   card discarded this game (`Player.discarded`); Faceless Converter +2/+1
