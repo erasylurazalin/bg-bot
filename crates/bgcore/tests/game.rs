@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bgcore::bots::random_action;
-use bgcore::{Tribe, Action, Data, Game, Keywords, Minion, N_ACTIONS, Opponent, Rng};
+use bgcore::{Tribe, Action, Data, Game, Keywords, Minion, N_ACTIONS, Opponent, PLAYERS, Rng};
 
 fn lobby(ts: &[Tribe]) -> bgcore::Tribes {
     ts.iter().copied().fold(bgcore::Tribes::NONE, |m, t| m.with(t))
@@ -118,10 +118,53 @@ fn legal(g: &Game) -> Vec<Action> {
 #[test]
 fn damage_cap_by_turn_and_players_left() {
     let r = Data::bundled().rules;
-    let cases = [(1, 8, Some(5)), (4, 8, Some(5)), (5, 8, Some(10)), (7, 5, Some(10)), (8, 8, Some(15)), (30, 5, Some(15)), (30, 4, None), (2, 4, None), (6, 3, None)];
+    let cases = [(1, 8, Some(5)), (3, 8, Some(5)), (4, 8, Some(10)), (5, 8, Some(10)), (7, 5, Some(10)), (8, 8, Some(15)), (30, 5, Some(15)), (30, 4, None), (2, 4, None), (6, 3, None)];
     for (turn, alive, cap) in cases {
         assert_eq!(r.damage_cap(turn, alive), cap, "turn {turn}, {alive} alive");
     }
+}
+
+#[test]
+fn a_turn_four_fight_caps_at_ten() {
+    // Turn 1 is the first shop turn. Turns 1 to 3 cap at 5 and turn 4 is the
+    // first at 10. Empty boards make every earlier fight a tie, so all eight
+    // players reach turn 4 and the cap is not lifted by the player count.
+    let mut g = game(108);
+    for _ in 0..3 {
+        next_turn(&mut g);
+    }
+    assert_eq!(g.turn, 4);
+
+    let camper = g.data.cards.by_name("Tusked Camper").expect("a Camper");
+    let bat = g.data.cards.by_name("Flittering Bat").expect("a Bat");
+    let mut camper = g.data.cards.make(camper, false);
+    camper.attack = 5;
+    camper.health = 5;
+    let mut bat = g.data.cards.make(bat, false);
+    bat.attack = 1;
+    bat.health = 1;
+    let Some(Opponent::Player(q)) = g.players[0].opponent else {
+        panic!("player 0 was not paired with a player");
+    };
+    let q = q as usize;
+    g.players[0].board.clear();
+    for _ in 0..7 {
+        g.players[0].board.push(camper);
+    }
+    // The winner's tier 6 plus seven surviving tier 1 Campers is 13 before
+    // the cap, so 5 and 10 are distinguishable.
+    g.players[0].tier = 6;
+    g.players[q].board.clear();
+    g.players[q].board.push(bat);
+    g.players[q].health = 30;
+    g.players[q].armor = 0;
+    let before = g.players[q].health;
+    g.record_fights(true);
+    for _ in 0..PLAYERS {
+        g.step(Action::EndTurn).expect("End Turn is legal");
+    }
+    assert_eq!(g.fight_dealt_uncapped[0], 13);
+    assert_eq!(before - g.players[q].health, 10, "the turn 4 cap, not 5");
 }
 
 #[test]

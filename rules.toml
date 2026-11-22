@@ -20,7 +20,7 @@ copies_per_tier = [16, 15, 13, 11, 9, 7, 7]
 # late_damage_cap, and with uncapped_at_players or fewer alive there is no
 # cap at all.
 damage_caps = [
-    { through_turn = 4, cap = 5 },
+    { through_turn = 3, cap = 5 },
     { through_turn = 7, cap = 10 },
 ]
 late_damage_cap = 15

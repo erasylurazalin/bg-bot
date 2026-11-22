@@ -272,9 +272,10 @@ board, except effects that say "permanently".
 
 The loser takes damage equal to the winner's tavern tier plus the tiers of
 the winner's surviving minions. Every minion has a tier, tokens too (usually
-tier 1). The damage is capped at 5 on turns 1 to 4, 10 on turns 5 to 7, and
+tier 1). The damage is capped at 5 on turns 1 to 3, 10 on turns 4 to 7, and
 15 from turn 8 on. Once 4 or fewer players are left there is no cap at all. A
-tie deals no damage.
+tie deals no damage. (Turn 4 was 5 until 2026-11-22: in Era's logs, 27 of 56
+turn 4 losses cost 6 to 10 and none more, and Firestone agrees.)
 
 ## What a player can see
 
