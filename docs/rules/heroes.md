@@ -321,6 +321,9 @@ so)
 
 - Later: Akazamzarak's Secrets (they are in the game), Denathrius' quests,
   Putricide's Build-An-Undead, E.T.C.'s buddies.
+- Build-An-Undead's parts are old Undead that left the pool, such as Moroes,
+  Steward of Death and Wintergrasp Ghoul. They never show up in a normal
+  shop; Putricide's crafting is the only way to get them (Era, 2026-11-23).
 - Wanted, not built yet: Tickatus' Darkmoon Prizes (a trinket gives them
   too).
 - Probably never: the StarCraft heroes (Raynor, Artanis, Kerrigan).
