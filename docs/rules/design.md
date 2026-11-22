@@ -227,10 +227,14 @@ board, except effects that say "permanently".
 4. **Damage.** Both minions deal their Attack to each other at once.
    Checked.
 5. **Deaths.** Once the attack is done, every minion at 0 Health or less
-   dies. They are handled in board order, the attacking side first. Then
-   Deathrattles run, then Reborn, and the whole step repeats until nothing
-   more dies. Deathrattles before Reborn is confirmed. The order within a batch
-   is an approximation.
+   dies. All of them leave the board first. Then each one, in board order,
+   runs its Deathrattles and then its Avenge, and only after the whole batch
+   do the Reborns run, in the same order. When both sides lost minions, a
+   coin flip picks which side goes first, for the whole batch. A Deathrattle
+   that kills starts a new batch at once, and the step repeats until nothing
+   more dies. (Era's 75 logs, 2026-11-23: all clean cases agree; the first
+   side was the attacker in 103 of 209 batches. The cases are in
+   docs/notes/death-order-2026-11-23.md.)
 6. **The end.** The fight ends when one side has no minions (or both). A side
    with minions left wins. Both empty, or neither side able to attack, is a
    tie.
@@ -1141,8 +1145,8 @@ player is left, or at turn 40 (the rest ranked by health).
 
 **Fight details** where Part 1 leaves room (they match the older private
 simulator's engine, so the two can be compared): dead minions are handled
-one at a time in board order, each one's Deathrattle and then its Reborn
-before the next; the next attacker is tracked with a pointer that shifts
+as in step 5 above (all off the board, then Deathrattle and Avenge per
+minion, then all Reborns); the next attacker is tracked with a pointer that shifts
 when minions left of it die or appear, and a minion summoned at the
 pointer's own slot is the next attacker (a Rally token summoned right of
 the attacker, a Reborn or Deathrattle summon in the attacker's slot: 25
