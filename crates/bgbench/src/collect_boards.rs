@@ -825,14 +825,10 @@ fn read_log_reader(reader: &mut impl BufRead, cards: &Cards) -> io::Result<Vec<G
             final_place,
         });
     }
-    // The Python reads `place` off the last game's lobby for every game of the
-    // log. Keep that when the log ends in a real game, and each game's own me
-    // when it ends in a spectated one, where there is no final real me.
-    if let Some(me) = tracker.me() {
-        for game in &mut games {
-            game.me = Some(me);
-        }
-    }
+    // Each game reads `place` off its own seat: my PlayerID changes from game
+    // to game in one log (6, 3 and 5 in Hearthstone_2026_11_20_15_06_37), so
+    // the last game's PlayerID read another player's place for the others.
+    // The Python did that, and so did this port until 2026-11-22.
     link_games_in_log(&mut games);
     Ok(games)
 }
@@ -1414,6 +1410,25 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&games[0].render("test", 1).unwrap()).unwrap();
         assert_eq!(json["place"], 1);
+    }
+
+    /// My PlayerID changes from game to game in one log, and each game reads
+    /// its place through its own: here 7 in the first game and 1 in the second
+    /// (Hearthstone_2026_11_20_15_06_37 had 6, 3 and 5, and the first game's
+    /// file wrote another player's place 1 for my 7th).
+    #[test]
+    fn each_game_reads_its_place_through_its_own_player_id() {
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        // The excerpt has no GameType line. The log ends inside game 2, as a
+        // log does while the next game is played: game 1 is the one written.
+        let bg = "D 18:00:39.2695330 GameState.DebugPrintGame() - GameType=GT_BATTLEGROUNDS\n";
+        let text = include_str!("../../bglog/tests/data/two_games.log")
+            .replace("PlayerName=Eve\n", &format!("PlayerName=Eve\n{bg}"))
+            .replace("PlayerName=Carol\n", &format!("PlayerName=Carol\n{bg}"));
+        let mut reader = std::io::Cursor::new(text);
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        let mes: Vec<Option<i32>> = games.iter().map(|g| g.me).collect();
+        assert_eq!(mes, [Some(7)], "game 1 keeps its own PlayerID, not game 2's 1");
     }
 
     /// A whole trimmed real game between the spectator markers is another
