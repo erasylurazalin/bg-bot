@@ -1050,7 +1050,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   length). A Deathrattle a trinket grants for the fight (Hoggy Bank, Sky
   Golem Portrait) is kept by uid in `Side.granted` and fires with the
   minion's own in `fire_deathrattles`; `first_deathrattle` (Deathly
-  Phylactery) adds one run in `deathrattle_fires`, combat only.
+  Phylactery) adds one run in `deathrattle_fires`, combat only, and only
+  when that minion actually has a Deathrattle to fire.
 - **What comes back.** `SideOutcome` carries the fight's trinket gains the way
   every other fight gain travels: `gem_gain` and `spell_bonus_gain` (Avenge
   rewards), `free_refresh_gain` (Herding Horn), `trinket_improve` by slot

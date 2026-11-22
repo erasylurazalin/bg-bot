@@ -1804,7 +1804,7 @@ impl<'a> Side<'a> {
                         continue;
                     }
                     let (m, host) = (self.ms[i].m, u);
-                    let runs = self.deathrattle_fires(db);
+                    let runs = self.deathrattle_fires(db, &m, host);
                     self.fire_deathrattles(
                         db, side, &m, m.health, host, None, i + 1, runs, uid, rng, w,
                     );
@@ -2505,7 +2505,7 @@ impl<'a> Side<'a> {
         }
     }
 
-    fn deathrattle_fires(&mut self, db: &CardDb) -> u32 {
+    fn deathrattle_fires(&mut self, db: &CardDb, dead: &Minion, host: u16) -> u32 {
         let n = {
             let parts = self.ms.iter().filter(|f| f.m.health > 0).flat_map(|f| f.m.parts());
             how_many_times(db, parts, |a| match a {
@@ -2516,8 +2516,25 @@ impl<'a> Side<'a> {
         };
         // Deathly Phylactery: the first Deathrattle of the fight fires once
         // more than it otherwise would ("each combat": a shop destroy is not
-        // one).
-        n + u32::from(!self.outside && self.counters.trinkets.take_first_deathrattle())
+        // one). It is spent only when this minion actually has one to fire,
+        // so a plain minion dying first cannot use it up.
+        let extra = !self.outside
+            && self.counters.trinkets.first_deathrattle()
+            && self.has_deathrattle(db, dead, host)
+            && self.counters.trinkets.take_first_deathrattle();
+        n + u32::from(extra)
+    }
+
+    /// Whether `fire_deathrattles` would run at least one Deathrattle for
+    /// `dead`: its own, a Magnetized or Dark Gift part, one gained from a
+    /// Fish of N'Zoth, or one a trinket or hero power granted it.
+    fn has_deathrattle(&self, db: &CardDb, dead: &Minion, host: u16) -> bool {
+        dead.parts().any(|(card, _)| db.get(card).deathrattle.is_some())
+            || self
+                .gained_dr
+                .iter()
+                .any(|&(u, a)| u == host && db.get(a.card).deathrattle.is_some())
+            || self.granted.iter().any(|&(u, _)| u == host)
     }
 
     /// How many Blood Gems a minion plays when one lands on it (Geomagus
@@ -2817,7 +2834,7 @@ impl<'a> Side<'a> {
                         break;
                     };
                     let (m, host) = (self.ms[idx].m, self.ms[idx].uid);
-                    let runs = self.deathrattle_fires(db);
+                    let runs = self.deathrattle_fires(db, &m, host);
                     let n = self.fire_deathrattles(
                         db, fx.side, &m, m.health, host, None, idx + 1, runs, uid, rng, w,
                     );
@@ -3754,7 +3771,7 @@ impl<'a> Side<'a> {
         // so every minion with that text gains its Deathrattle for the
         // rest of the fight.
         self.gain_deathrattles(db, fm.uid, &dead);
-        let runs = self.deathrattle_fires(db);
+        let runs = self.deathrattle_fires(db, &dead, fm.uid);
         let dead_max = dead.health + fm.taken;
         let mut added = self.fire_deathrattles(
             db, side, &dead, dead_max, fm.uid, fm.killer, i, runs, uid, rng, w,
@@ -4412,7 +4429,7 @@ fn run_start_of_combat(
                     // trinket's "trigger a friendly Deathrattle" does.
                     let Some(mi) = sides[turn].index_of(me) else { break };
                     let (m, host) = (sides[turn].ms[mi].m, me);
-                    let runs = sides[turn].deathrattle_fires(db);
+                    let runs = sides[turn].deathrattle_fires(db, &m, host);
                     sides[turn].fire_deathrattles(
                         db, turn, &m, m.health, host, None, mi + 1, runs, uid, rng, w,
                     );
@@ -4429,7 +4446,8 @@ fn run_start_of_combat(
                             continue;
                         }
                         let (m, host) = (sides[turn].ms[mi].m, u);
-                        let runs = sides[turn].deathrattle_fires(db).saturating_mul(reps);
+                        let runs =
+                            sides[turn].deathrattle_fires(db, &m, host).saturating_mul(reps);
                         sides[turn].fire_deathrattles(
                             db, turn, &m, m.health, host, None, mi + 1, runs, uid, rng, w,
                         );
@@ -5356,7 +5374,7 @@ pub fn shop_trigger_deathrattles(
     let mut w = DeadWatch(ArrayVec::new());
     let host = side.ms.get(at).map(|f| (f.m, f.uid));
     if let Some((m, host)) = host {
-        let runs = side.deathrattle_fires(db);
+        let runs = side.deathrattle_fires(db, &m, host);
         side.fire_deathrattles(db, 0, &m, m.health, host, None, at + 1, runs, &mut uid, rng, &mut w);
         // A Deathrattle can destroy a minion (or summon one that comes in
         // with no Health): resolve those deaths like a shop destroy does.

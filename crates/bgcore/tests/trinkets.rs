@@ -1955,6 +1955,40 @@ fn the_first_deathrattle_of_a_fight_fires_an_extra_time() {
     assert_eq!(seen.summoned_all(&g, "Beetle").len(), 2);
 }
 
+#[test]
+fn a_plain_minion_dying_first_does_not_spend_the_phylactery() {
+    // Deathly Phylactery: the first Deathrattle, not the first death, gets
+    // the extra run. The Geomancer has no Deathrattle, so the Vermin's is
+    // still the first one and fires twice.
+    let mut g = game(37);
+    equip(&mut g, 0, 0, "Deathly Phylactery");
+    put_on_board(&mut g, 0, "Razorfen Geomancer");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    assert_eq!(seen.dead_all(&g, "Razorfen Geomancer").len(), 1, "the plain one died first");
+    assert_eq!(seen.summoned_all(&g, "Beetle").len(), 2, "its Deathrattle still fired twice");
+}
+
+#[test]
+fn herald_sticker_does_not_spend_the_phylactery_on_a_plain_minion() {
+    // Herald Sticker triggers every friendly Deathrattle at Start of Combat.
+    // The plain Geomancer has none, so the Vermin's is the first Deathrattle
+    // and gets the extra run; its own death later fires once.
+    let mut g = game(38);
+    equip(&mut g, 0, 0, "Deathly Phylactery");
+    equip(&mut g, 0, 1, "Herald Sticker");
+    put_on_board(&mut g, 0, "Razorfen Geomancer");
+    put_on_board(&mut g, 0, "Buzzing Vermin");
+    let mut seen = Seen::default();
+    fight_wall_watched(&g, 1, 10, 500, 60, &mut seen);
+    assert_eq!(
+        seen.summoned_all(&g, "Beetle").len(),
+        3,
+        "twice through Herald Sticker, once when the Vermin dies"
+    );
+}
+
 /// The stats of player 0's minion with this card, the first time it attacked.
 fn attack_stats(seen: &Seen, g: &Game, name: &str) -> (i32, i32) {
     let m = seen.attacker(g, name).unwrap_or_else(|| panic!("{name} never attacked"));
