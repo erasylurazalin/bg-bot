@@ -54,6 +54,7 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
 
 ```json
 {"source": "Hearthstone_2026_10_24_15_25_26", "game": 2, "place": 3,
+ "match": "Hearthstone_2026_10_24_15_25_26-g2", "final_place": 3,
  "boards": [
   {"who": "me", "turn": 5, "result": "win", "hero": "...", "hero_card": "...",
    "hero_base": "BG34_HERO_001", "tier": 3, "health": 27, "armor": 9,
@@ -168,6 +169,13 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
   again with `--no-archive` to rewrite every file (the flag skips copying
   the client's logs into the archive, which is outside this project).
 - `place` is my final place (0 while the game is still going).
+- `match` is the file name stem of the game's first session (for example
+  `Hearthstone_2026_11_22_02_57_33-g1`), the same in every session of a game
+  that a reconnect or a client restart split over several sessions or log
+  folders; a game in one session gets its own stem.
+- `final_place` is my result in the game from its last session when that
+  session saw the game end (`STATE value=COMPLETE`, and `PLAYSTATE` WON for a
+  first), or 0 when the end was not logged.
 - No player names are stored.
 
 On 2026-10-26 it held 914 boards in 39 files, from 11 games of mine and the
@@ -202,6 +210,7 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
 
 ```json
 {"source": "Hearthstone_2026_10_24_04_08_00", "game": 1,
+ "match": "Hearthstone_2026_10_24_04_08_00-g1", "final_place": 5,
  "hero": {"card_id": "TB_BaconShop_HERO_57", "name": "Nozdormu"},
  "unread": {},
  "turns": [
@@ -239,7 +248,9 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   options: 86 turns open with a trinket offer and 27 with some other Discover.
   A turn a reconnect joined mid-shop carries `"joined_mid_turn": true`: it was
   opened from the reconnect's full-state dump, and the actions before the
-  reconnect are missing from it. A normal turn has no such key.
+  reconnect are missing from it. A normal turn has no such key. `match` and
+  `final_place` link the sessions of a split game and record its final result
+  the same way the board file does.
 - `start` and `end` hold my hand, my board and Bob's Tavern the way
   `boards/real/` writes a minion (card id, name, attack, health, golden,
   keywords, dark gifts, script `numbers`, and its own Blood Gem stats as

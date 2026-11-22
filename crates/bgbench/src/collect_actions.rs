@@ -46,8 +46,9 @@ use bglog::{
 };
 
 use crate::collect_boards::{
-    SYNTHETIC_CREATE_GAME, Json, State, begins_spectating, ends_spectating, flag, home,
-    is_create_game, log_files, minion_numbers, numbers_json, render, text,
+    SYNTHETIC_CREATE_GAME, Json, LogEntry, SessionInfo, State, begins_spectating, continues,
+    ends_spectating, flag, home, is_create_game, link_collected_files, log_files, minion_numbers,
+    numbers_json, render, session_info, text,
 };
 
 /// Where the client's logs are copied to, and the laptop's own archive.
@@ -267,21 +268,30 @@ fn collect(
     for path in log_files(laptop) {
         files.push(("laptop-".to_string(), path));
     }
+    let mut log_entries: Vec<LogEntry> = Vec::with_capacity(files.len());
     for (prefix, path) in files {
         let Some(folder) = path.parent().and_then(|p| p.file_name()) else {
             continue;
         };
         let name = format!("{prefix}{}", folder.to_string_lossy());
+        let is_laptop = !prefix.is_empty();
         let size = fs::metadata(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?
             .len();
         if !rewrite && state.get(&name) == Some(size) {
+            log_entries.push(LogEntry {
+                name,
+                is_laptop,
+                path,
+                sessions: None,
+            });
             continue;
         }
         let mut steps = Tally::new();
         let mut unread = Tally::new();
         let mut games = 0;
-        for (index, record) in read_log(&path, &cards, &name, &dbf)?.into_iter().enumerate() {
+        let (records, sessions) = read_log_with_sessions(&path, &cards, &name, &dbf)?;
+        for (index, record) in records.into_iter().enumerate() {
             let Some(record) = record else {
                 continue;
             };
@@ -298,7 +308,7 @@ fn collect(
                     unread.add(key, n.as_int().unwrap_or(0));
                 }
             }
-            let mut fields: Obj = Vec::with_capacity(6);
+            let mut fields: Obj = Vec::with_capacity(8);
             put(&mut fields, "source", str_(&name));
             put(&mut fields, "game", Json::Int(gi as i64));
             fields.extend(object.clone());
@@ -306,6 +316,12 @@ fn collect(
             fs::write(&file, render(&Json::Obj(fields)))
                 .map_err(|e| format!("{}: {e}", file.display()))?;
         }
+        log_entries.push(LogEntry {
+            name: name.clone(),
+            is_laptop,
+            path,
+            sessions: Some(sessions),
+        });
         println!(
             "{name}: {games} games, {}, unread {}",
             steps.render(),
@@ -315,6 +331,7 @@ fn collect(
         let text = state.render();
         fs::write(&state_path, text).map_err(|e| format!("{}: {e}", state_path.display()))?;
     }
+    link_collected_files(out, &mut log_entries)?;
     Ok(())
 }
 
@@ -553,6 +570,8 @@ struct Collector {
     /// The log folder this run's files are named after, for that warning.
     label: String,
     game_complete: bool,
+    init_turn: Option<i64>,
+    sessions: Vec<SessionInfo>,
     /// A `Begin Spectating` line was read and `End Spectator Mode` has not:
     /// every line between them is skipped. The number of games inside the
     /// stretch is kept so their session numbers can be left empty.
@@ -596,6 +615,8 @@ impl Collector {
             lobby: BTreeMap::new(),
             label: label.to_string(),
             game_complete: false,
+            init_turn: None,
+            sessions: Vec::new(),
             spectating: false,
             spectator_games: 0,
         };
@@ -618,6 +639,7 @@ impl Collector {
                 self.feed_line(SYNTHETIC_CREATE_GAME);
                 for _ in 0..self.spectator_games {
                     self.games.push(None);
+                    self.sessions.push(SessionInfo::default());
                 }
                 self.spectator_games = 0;
             } else if is_create_game(line) {
@@ -636,6 +658,9 @@ impl Collector {
     }
 
     fn feed_line(&mut self, line: &str) {
+        if self.init_turn.is_none() && line.contains("TAG_CHANGE") && line.contains("tag=TURN ") {
+            self.init_turn = Some(self.log.game().map_or(0, |g| g.game_tag("TURN")));
+        }
         self.tracker.feed(line);
         // The reader reports to this collector and the collector owns it: hand
         // it over for the call and take it back after, as `Tracker::feed` does.
@@ -652,6 +677,7 @@ impl Collector {
             self.feed_line(SYNTHETIC_CREATE_GAME);
             for _ in 0..self.spectator_games {
                 self.games.push(None);
+                self.sessions.push(SessionInfo::default());
             }
             self.spectator_games = 0;
         }
@@ -687,6 +713,7 @@ impl Collector {
         self.choice = None;
         self.ended = false;
         self.game_complete = false;
+        self.init_turn = None;
         self.last = None;
         self.last_gold = 0;
         self.last_health = 0;
@@ -711,6 +738,18 @@ impl Collector {
         if need_fight && self.tracker.fights().is_empty() {
             return;
         }
+        let gi = self.games.len() + 1;
+        let seats = if need_fight {
+            self.tracker.fill_missing_seats();
+            self.tracker.seats()
+        } else {
+            self.tracker
+                .past()
+                .last()
+                .map_or(self.tracker.seats(), |(s, _)| s)
+        };
+        let init_t = self.init_turn.unwrap_or_else(|| game.game_tag("TURN"));
+        let info = session_info(format!("{}-g{gi}", self.label), game, seats, init_t);
         let mut record = mem::take(&mut self.record);
         let has_turns = record
             .as_obj()
@@ -718,6 +757,7 @@ impl Collector {
             .unwrap_or(false);
         if !has_turns {
             self.games.push(None);
+            self.sessions.push(info);
             self.reset();
             return;
         }
@@ -749,7 +789,46 @@ impl Collector {
             put(object, "lobby", lobby);
         }
         self.games.push(Some(record));
+        self.sessions.push(info);
         self.reset();
+    }
+
+    fn link_games(&mut self) {
+        let collected: Vec<usize> = self
+            .games
+            .iter()
+            .enumerate()
+            .filter_map(|(i, g)| g.is_some().then_some(i))
+            .collect();
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for idx in collected {
+            if let Some(group) = groups.last_mut()
+                && let Some(&prev) = group.last()
+                && continues(&self.sessions[prev], &self.sessions[idx])
+            {
+                group.push(idx);
+                continue;
+            }
+            groups.push(vec![idx]);
+        }
+        for group in groups {
+            let match_stem = self.sessions[group[0]].stem.clone();
+            let final_place = group
+                .last()
+                .map_or(0, |&last| self.sessions[last].final_place);
+            for idx in group {
+                if let Some(Some(record)) = self.games.get_mut(idx)
+                    && let Some(object) = record.as_obj_mut()
+                {
+                    let mut head = vec![
+                        ("match".to_string(), str_(&match_stem)),
+                        ("final_place".to_string(), Json::Int(final_place)),
+                    ];
+                    head.append(object);
+                    *object = head;
+                }
+            }
+        }
     }
 
     fn my_hero(&self, game: &Game) -> Json {
@@ -3473,25 +3552,35 @@ fn load_dbf(path: &str) -> Result<HashMap<u32, String>, String> {
 /// Every Battlegrounds game of a log, in order, with `None` for a game that has
 /// no shop turn: the Python's `read_log`. `label` is the log folder's name, for
 /// the warning a game with more than five lobby types prints.
-fn read_log(
+fn read_log_with_sessions(
     path: &Path,
     cards: &Cards,
     label: &str,
     dbf: &HashMap<u32, String>,
-) -> Result<Vec<Option<Json>>, String> {
+) -> Result<(Vec<Option<Json>>, Vec<SessionInfo>), String> {
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = BufReader::with_capacity(1 << 20, file);
-    read_log_reader(&mut reader, cards, label, dbf)
+    read_log_reader_with_sessions(&mut reader, cards, label, dbf)
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The same reader over any stream, so a test can feed a trimmed log.
+#[cfg(test)]
 fn read_log_reader(
     reader: &mut impl BufRead,
     cards: &Cards,
     label: &str,
     dbf: &HashMap<u32, String>,
 ) -> Result<Vec<Option<Json>>, String> {
+    read_log_reader_with_sessions(reader, cards, label, dbf).map(|(games, _)| games)
+}
+
+/// The same reader over any stream, so a test can feed a trimmed log.
+fn read_log_reader_with_sessions(
+    reader: &mut impl BufRead,
+    cards: &Cards,
+    label: &str,
+    dbf: &HashMap<u32, String>,
+) -> Result<(Vec<Option<Json>>, Vec<SessionInfo>), String> {
     let mut collector = Collector::new_with_dbf(cards.clone(), label, dbf.clone());
     let mut bytes: Vec<u8> = Vec::new();
     loop {
@@ -3509,7 +3598,8 @@ fn read_log_reader(
     }
     collector.finish_log();
     collector.last_game();
-    Ok(collector.games)
+    collector.link_games();
+    Ok((collector.games, collector.sessions))
 }
 
 impl Collector {
@@ -4198,5 +4288,119 @@ mod tests {
         let games = read_log_reader(&mut reader, &cards, "test", &HashMap::new()).unwrap();
         assert_eq!(games.len(), 1, "the spectated session keeps its number");
         assert!(games[0].is_none(), "and has no action file: {games:?}");
+    }
+
+    fn turn_one_with_hero(id: i32, card_id: &str, place: i64) -> String {
+        let text = include_str!("../../bglog/tests/data/fight.log").replacen(
+            "D 00:58:25.1783940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=TURN value=1 \n",
+            "D 00:58:25.1783940 GameState.DebugPrintPower() -     TAG_CHANGE Entity=GameEntity tag=TURN value=1 \n\
+             D 00:58:25.1783940 GameState.DebugPrintOptions() - id=1\n\
+             D 00:58:25.1783940 GameState.DebugPrintOptions() -   option 0 type=END_TURN mainEntity= error=INVALID errorParam=\n\
+             D 00:58:25.1783940 GameState.SendOption() - selectedOption=0 selectedSubOption=-1 selectedTarget=0 selectedPosition=0\n",
+            1,
+        );
+        with_hero(&text, id, card_id, place)
+    }
+
+    fn with_hero(log: &str, id: i32, card_id: &str, place: i64) -> String {
+        let dump_end = "D 00:57:53.6478530 GameState.DebugPrintGame() - BuildNumber=254477\n";
+        let p = "D 00:57:53.6478530 GameState.DebugPrintPower() - ";
+        let hero = format!(
+            "{p}    FULL_ENTITY - Creating ID={id} CardID={card_id}\n\
+             {p}        tag=CONTROLLER value=1\n\
+             {p}        tag=CARDTYPE value=HERO\n\
+             {p}        tag=PLAYER_ID value=1\n\
+             {p}        tag=HEALTH value=30\n\
+             {p}        tag=PLAYER_LEADERBOARD_PLACE value={place}\n"
+        );
+        log.replacen(dump_end, &format!("{hero}{dump_end}"), 1)
+    }
+
+    #[test]
+    fn two_sessions_of_one_game_share_match_and_final_place() {
+        let s1 = turn_one_with_hero(118, "TB_BaconShop_HERO_15", 3);
+        let s2 = format!(
+            "{}D 01:00:00.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=Alice#1919 tag=PLAYSTATE value=WON \n\
+             D 01:00:00.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STATE value=COMPLETE \n",
+            with_hero(&reconnect_excerpt(), 118, "TB_BaconShop_HERO_15", 3)
+        );
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(format!("{s1}{s2}"));
+        let games =
+            read_log_reader(&mut reader, &cards, "Hearthstone_2026_11_22_02_57_33", &HashMap::new())
+                .unwrap();
+        assert_eq!(games.len(), 2);
+        let g1: serde_json::Value =
+            serde_json::from_str(&render(games[0].as_ref().unwrap())).unwrap();
+        let g2: serde_json::Value =
+            serde_json::from_str(&render(games[1].as_ref().unwrap())).unwrap();
+        assert_eq!(g1["match"], "Hearthstone_2026_11_22_02_57_33-g1");
+        assert_eq!(g2["match"], "Hearthstone_2026_11_22_02_57_33-g1");
+        assert_eq!(g1["final_place"], 1);
+        assert_eq!(g2["final_place"], 1);
+
+        let tmp =
+            std::env::temp_dir().join(format!("bgbench_action_links_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let archive = tmp.join("archive");
+        let laptop = tmp.join("laptop");
+        let out = tmp.join("out");
+        let cards_file = tmp.join("cards.json");
+        let f1 = archive.join("Hearthstone_2026_11_22_02_57_33");
+        let f2 = archive.join("Hearthstone_2026_11_22_03_22_48");
+        fs::create_dir_all(&f1).unwrap();
+        fs::write(&cards_file, "[]").unwrap();
+        fs::write(f1.join("Power.log"), &s1).unwrap();
+
+        collect(&out, &text(&cards_file), &archive, &laptop, false).unwrap();
+        let before: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(out.join("Hearthstone_2026_11_22_02_57_33-g1.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(before["match"], "Hearthstone_2026_11_22_02_57_33-g1");
+        assert_eq!(before["final_place"], 0);
+
+        fs::create_dir_all(&f2).unwrap();
+        fs::write(f2.join("Power.log"), &s2).unwrap();
+        collect(&out, &text(&cards_file), &archive, &laptop, false).unwrap();
+        let after1: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(out.join("Hearthstone_2026_11_22_02_57_33-g1.json")).unwrap(),
+        )
+        .unwrap();
+        let after2: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(out.join("Hearthstone_2026_11_22_03_22_48-g1.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(after1["match"], "Hearthstone_2026_11_22_02_57_33-g1");
+        assert_eq!(after1["final_place"], 1);
+        assert_eq!(after2["match"], "Hearthstone_2026_11_22_02_57_33-g1");
+        assert_eq!(after2["final_place"], 1);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn two_different_games_with_the_same_stand_in_name_are_not_joined() {
+        let g1 = format!(
+            "{}D 01:00:00.0000000 GameState.DebugPrintPower() - TAG_CHANGE Entity=GameEntity tag=STATE value=COMPLETE \n",
+            turn_one_with_hero(118, "TB_BaconShop_HERO_15", 4)
+        );
+        let g2 = turn_one_with_hero(118, "TB_BaconShop_HERO_15", 2);
+        let g3 = with_hero(&reconnect_excerpt(), 118, "TB_BaconShop_HERO_16", 5);
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let mut reader = std::io::Cursor::new(format!("{g1}{g2}{g3}"));
+        let games = read_log_reader(&mut reader, &cards, "test", &HashMap::new()).unwrap();
+        assert_eq!(games.len(), 3);
+        let j1: serde_json::Value =
+            serde_json::from_str(&render(games[0].as_ref().unwrap())).unwrap();
+        let j2: serde_json::Value =
+            serde_json::from_str(&render(games[1].as_ref().unwrap())).unwrap();
+        let j3: serde_json::Value =
+            serde_json::from_str(&render(games[2].as_ref().unwrap())).unwrap();
+        assert_eq!(j1["match"], "test-g1");
+        assert_eq!(j1["final_place"], 4);
+        assert_eq!(j2["match"], "test-g2");
+        assert_eq!(j2["final_place"], 0);
+        assert_eq!(j3["match"], "test-g3");
+        assert_eq!(j3["final_place"], 0);
     }
 }
