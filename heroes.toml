@@ -591,7 +591,7 @@ power = { name = "Choose Your Champion", card_id = "BG27_HERO_801p2", passive = 
 name = "Snake Eyes"
 card_id = "BG28_HERO_400"
 armor = 8
-power = { name = "Lucky Roll", card_id = "BG28_HERO_400p", cost = 1, effect = { lucky_roll = true } }
+power = { name = "Lucky Roll", card_id = "BG28_HERO_400p", alt_card_ids = ["BG28_HERO_400p2"], cost = 1, effect = { lucky_roll = true } }
 
 # Reliquary Research: every third Tavern spell bought costs 0.
 [[hero]]
@@ -727,7 +727,7 @@ power = { name = "See the Light", card_id = "BG20_HERO_101p", cost = 2, effect =
 name = "Vol'jin"
 card_id = "BG20_HERO_201"
 armor = 17
-power = { name = "Spirit Swap", card_id = "BG20_HERO_201p", effect = { spirit_swap = true } }
+power = { name = "Spirit Swap", card_id = "BG20_HERO_201p", alt_card_ids = ["BG20_HERO_201p2"], effect = { spirit_swap = true } }
 
 # Devour: sell a friendly minion and spit its stats onto another.
 [[hero]]

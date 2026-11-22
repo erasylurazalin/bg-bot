@@ -2415,6 +2415,17 @@ tier = 1
 cost = 1
 effect = { gold = 1 }
 
+# Gallywix's Smart Savings hands this out for a minion sold; in Era's logs
+# Rafaam's I'll Take That copies one to hand. It is a plain spell, not a
+# Tavern spell, so a cast sees no Tavern spell trigger.
+[[spell]]
+name = "Gold Coin"
+tier = 0
+cost = 0
+token = true
+tavern_spell = false
+effect = { gold = 1 }
+
 [[spell]]
 name = "Tavern Dish Banana"
 tier = 1

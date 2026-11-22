@@ -492,8 +492,10 @@ build hero-less games so old tests pass unchanged, and
   Invocations, Galewing's flightpaths, the King of X family). That is what
   lets one power turn into another without the engine knowing any hero by
   name. `HeroDb::power_by_card_id` finds one by the game data's
-  `hero_powers` id; `becomes`, `returns_to` and `choose` in heroes.toml name
-  powers by card_id and are resolved to indexes at load.
+  `hero_powers` id, and by the `alt_card_ids` another state of the same power
+  shows (Lucky Roll's wait, Spirit Swap's second pick); `becomes`,
+  `returns_to` and `choose` in heroes.toml name powers by card_id and are
+  resolved to indexes at load.
 - **The two powers**: `Player.power` is the MAIN `PowerState` (which power,
   uses left this turn, used this game, unlocked, one progress counter, the
   power it last completed into its chooser) and `Player.power2` the SECOND

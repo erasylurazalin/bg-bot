@@ -84,6 +84,83 @@ fn replay(file: &ShopFileSpec, kind: &str) -> StepResult {
     replay_step(&data(), &ids(), file, turn, i, &ReplayOptions { seeds: 4, seed: 1 })
 }
 
+/// Spirit Swap's second click is written as `BG20_HERO_201p2`, with the first
+/// minion's entity id in the number. The replay seats that first pick and
+/// answers only the step's target: it is not a second press.
+#[test]
+fn a_spirit_swap_second_click_answers_the_earlier_pick() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 2,
+       "start": {"board": [
+          {"id": 10, "card_id": "BGS_119", "name": "Crackling Cyclone", "attack": 2, "health": 1, "position": 1},
+          {"id": 11, "card_id": "BG25_001", "name": "Risen Rider", "attack": 5, "health": 1, "position": 2}],
+        "hand": [], "tavern": [], "hand_hidden": 0, "gold": 10, "tier": 1,
+        "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+        "frozen": false,
+        "hero_powers": [{"card_id": "BG20_HERO_201p2", "name": "Spirit Swap",
+          "numbers": [10, 1, 0, 0], "cost": 0, "used_this_turn": 1, "waiting": null}],
+        "trinkets": [], "secrets": []},
+       "actions": [{"step": "hero_power", "which": "main",
+         "target": {"id": 11, "card_id": "BG25_001", "name": "Risen Rider",
+           "kind": "board", "position": 2},
+         "after": {"board": [
+            {"id": 10, "card_id": "BGS_119", "name": "Crackling Cyclone", "attack": 5, "health": 1, "position": 1},
+            {"id": 11, "card_id": "BG25_001", "name": "Risen Rider", "attack": 2, "health": 1, "position": 2}],
+          "hand": [], "tavern": [], "hand_hidden": 0, "gold": 10, "tier": 1,
+          "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
+          "frozen": false,
+          "hero_powers": [{"card_id": "BG20_HERO_201p", "name": "Spirit Swap",
+            "numbers": [0, 0, 0, 0], "cost": 0, "used_this_turn": 1, "waiting": null}],
+          "trinkets": [], "secrets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("swap.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    assert!(r.action.contains("Target(1)"), "only the second pick: {:?}", r.action);
+    assert!(!r.action.contains("HeroPower"), "not a second press: {:?}", r.action);
+}
+
+/// Lucky Roll's wait is the same power with the turns left in its number. The
+/// replay seats that as the engine's cooldown and locks the button.
+#[test]
+fn a_lucky_roll_wait_seats_the_turns_left() {
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 10,
+       "start": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+        "gold": 10, "tier": 5, "upgrade_cost": 8, "health": 30, "armor": 0,
+        "free_refreshes": 0, "frozen": false,
+        "hero_powers": [{"card_id": "BG28_HERO_400p2", "name": "Lucky Roll",
+          "numbers": [4, 0, 0, 0], "cost": 0, "used_this_turn": 0, "waiting": null}],
+        "trinkets": [], "secrets": []},
+       "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("roll.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let data = data();
+    let loaded = load(
+        &data,
+        &turn.start,
+        file.hero(&data, &turn.start),
+        file.lobby(),
+        turn.turn,
+        1,
+        None,
+    );
+    assert!(loaded.missing.is_empty(), "loaded with: {:?}", loaded.missing);
+    let st = loaded.game.players[ME].power.expect("the power is seated");
+    assert_eq!(data.heroes.power(st.of).card_id, "BG28_HERO_400p");
+    assert_eq!(st.progress, 4, "the log's turns left");
+    assert_eq!(st.uses_left, 0, "the button is locked while it waits");
+}
+
 #[test]
 fn the_action_loader_reads_free_refreshes_over_255() {
     let text = r#"{"source": "seat", "game": 1, "turns": [

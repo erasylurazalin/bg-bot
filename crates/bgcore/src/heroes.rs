@@ -592,6 +592,10 @@ struct RawExtraPower {
     skip_turns: u8,
     #[serde(default)]
     choose: Vec<String>,
+    /// Card ids the game uses for this same power in another state: Lucky
+    /// Roll's wait and Spirit Swap's second pick.
+    #[serde(default)]
+    alt_card_ids: Vec<String>,
     /// The card_id of the power this one becomes at the start of every turn.
     #[serde(default)]
     swaps_each_turn: Option<String>,
@@ -626,6 +630,9 @@ struct RawPower {
     skip_turns: u8,
     #[serde(default)]
     choose: Vec<String>,
+    /// Card ids the game uses for this same power in another state.
+    #[serde(default)]
+    alt_card_ids: Vec<String>,
     /// The card_id of the power this one becomes at the start of every turn.
     #[serde(default)]
     swaps_each_turn: Option<String>,
@@ -1316,6 +1323,7 @@ struct Pending {
     family: Option<String>,
     returns_to: Option<String>,
     choose: Vec<String>,
+    alt_card_ids: Vec<String>,
     swaps_to: Option<String>,
 }
 
@@ -1368,6 +1376,7 @@ impl HeroDb {
                 family: h.power.family,
                 returns_to: None,
                 choose: h.power.choose,
+                alt_card_ids: h.power.alt_card_ids,
                 swaps_to: h.power.swaps_each_turn,
             });
             let mut tribes = Tribes::NONE;
@@ -1414,6 +1423,7 @@ impl HeroDb {
                 family: h.family,
                 returns_to: h.returns_to,
                 choose: h.choose,
+                alt_card_ids: h.alt_card_ids,
                 swaps_to: h.swaps_each_turn,
             });
         }
@@ -1423,6 +1433,18 @@ impl HeroDb {
         for (i, p) in pending.iter().enumerate() {
             if db.power_by_card_id.insert(p.power.card_id.clone(), i as u8).is_some() {
                 return Err(format!("heroes.toml: power {} twice", p.power.name));
+            }
+        }
+        // The game's own ids for the same power in another state (Lucky
+        // Roll's wait, Spirit Swap's second pick) lead to the one built power.
+        for (i, p) in pending.iter().enumerate() {
+            for card_id in &p.alt_card_ids {
+                if db.power_by_card_id.insert(card_id.clone(), i as u8).is_some() {
+                    return Err(format!(
+                        "heroes.toml: power {} has card id {card_id:?} twice",
+                        p.power.name
+                    ));
+                }
             }
         }
         let mut families: HashMap<&str, u8> = HashMap::new();

@@ -23,7 +23,7 @@ use crate::cards::{Effect, EventKind, Tribe};
 use crate::fight_check::{
     SeatMode, seat_power as fight_seat_power, seat_secrets, seat_trinkets,
 };
-use crate::game::{Opponent, Player};
+use crate::game::{Opponent, PendingTarget, Player, TargetKind};
 use crate::minion::Minion;
 use crate::real_boards::{
     CardIdMap, RealBoard, RealCounters, RealMinionSpec, RealPowerSpec, RealTrinketSpec,
@@ -2055,15 +2055,23 @@ fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPowerSpec]) {
             // "(3 left!)" is nothing bought yet, "(1 left!)" one bought.
             pl.counts.tavern_spells_bought = (2 - left) as u32;
         }
-        // The slot the file's power sits in, by its card id.
+        // The slot the file's power sits in: the alias card ids the game shows
+        // for the same power (Lucky Roll's wait, Spirit Swap's second pick)
+        // lead to the one built power.
         let slot = [false, true]
             .into_iter()
-            .find(|&second| {
-                pl.power_at(second)
-                    .is_some_and(|st| data.heroes.power(st.of).card_id == card_id)
-            });
+            .find(|&second| pl.power_at(second).is_some_and(|st| st.of == i));
         let Some(second) = slot else { continue };
         let Some(st) = pl.power_at_mut(second) else { continue };
+        if let crate::heroes::PowerEffect::LuckyRoll = effect {
+            // The wait is the number of turns left, which is the engine's
+            // progress; its progress locks the button, as a press does.
+            let left = power.numbers.first().copied().unwrap_or(0).max(0) as u32;
+            st.progress = left;
+            if left > 0 {
+                st.uses_left = 0;
+            }
+        }
         if let crate::heroes::PowerEffect::DigForGolden { digs } = effect {
             // The log counts the digs left, the engine the digs done.
             let done = power.numbers.first().copied().unwrap_or(0);
@@ -2096,6 +2104,54 @@ fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPowerSpec]) {
             let base = data.heroes.power(i).cost as i32;
             st.cost_delta = (cost - base).clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         }
+    }
+}
+
+/// The second click of a two-click power whose state carries only its second
+/// half: the game writes Spirit Swap as `BG20_HERO_201p2` with the first
+/// minion's entity id in `numbers[0]`, and the button reverts after the second
+/// pick. The engine keeps one power and remembers the first pick in
+/// `Player.two_step`, so seat the prompt the first click left open. The step
+/// itself is then only its target, not a fresh press.
+fn resume_two_step_power(
+    data: &Data,
+    pl: &mut Player,
+    powers: &[ShopPowerSpec],
+    board_ids: &[u64],
+    tavern_ids: &[u64],
+    step: &str,
+) {
+    if step != "hero_power" {
+        return;
+    }
+    for power in powers {
+        let Some(card_id) = power.card_id.as_deref() else { continue };
+        let Some(i) = data.heroes.power_by_card_id(card_id) else { continue };
+        let built = data.heroes.power(i);
+        if built.card_id == card_id
+            || !matches!(built.effect, crate::heroes::PowerEffect::SpiritSwap)
+        {
+            continue;
+        }
+        let Some(first_id) = power.numbers.first().copied().filter(|id| *id > 0) else {
+            continue;
+        };
+        let first = if let Some(at) = board_ids.iter().position(|&id| id == first_id as u64) {
+            (at as u8, false)
+        } else if let Some(at) = tavern_ids.iter().position(|&id| id == first_id as u64) {
+            (at as u8, true)
+        } else {
+            continue;
+        };
+        pl.two_step = Some(first);
+        pl.pending_target = Some(PendingTarget {
+            source: None,
+            kind: TargetKind::SpiritSwapSecond,
+            runs: 1,
+            tavern: false,
+            gem: false,
+            by_minion: false,
+        });
     }
 }
 
@@ -2564,10 +2620,15 @@ impl ShopSnapshot {
             listed.sort_by_key(|p| p.second);
         }
         for power in listed {
-            let card_id = power.card_id.clone().unwrap_or_default();
-            let uses_left = data
-                .heroes
-                .power_by_card_id(&card_id)
+            let logged_id = power.card_id.clone().unwrap_or_default();
+            let built = data.heroes.power_by_card_id(&logged_id);
+            // The comparison names a power by the id it is built under: the
+            // game's alias for another state of it (Lucky Roll's wait, Spirit
+            // Swap's second pick) is the same power.
+            let card_id = built
+                .map(|i| data.heroes.power(i).card_id.clone())
+                .unwrap_or_else(|| logged_id.clone());
+            let uses_left = built
                 .map(|i| {
                     data.heroes
                         .power(i)
@@ -2575,9 +2636,9 @@ impl ShopSnapshot {
                         .saturating_sub(power.used_this_turn)
                 })
                 .unwrap_or(0);
-            if data.heroes.power_by_card_id(&card_id).is_none() {
+            if built.is_none() {
                 missing.push(format!(
-                    "hero power not built: {} ({card_id})",
+                    "hero power not built: {} ({logged_id})",
                     power.name.clone().unwrap_or_default()
                 ));
             }
@@ -4322,11 +4383,18 @@ fn actions_for(
         "freeze" => out.push(Action::Freeze),
         "level" => out.push(Action::Level),
         "hero_power" => {
-            out.push(if step.which.as_deref() == Some("second") {
-                Action::HeroPower2
-            } else {
-                Action::HeroPower
-            });
+            // Spirit Swap's second click is the prompt its first click left
+            // open, not a fresh press: the state names its second half.
+            let resuming_second = loaded.game.players[ME]
+                .pending_target
+                .is_some_and(|pt| matches!(pt.kind, TargetKind::SpiritSwapSecond));
+            if !resuming_second {
+                out.push(if step.which.as_deref() == Some("second") {
+                    Action::HeroPower2
+                } else {
+                    Action::HeroPower
+                });
+            }
             if let Some(target) = &step.target {
                 // Drest'agath's Incubate: "Discard a card, then Discover".
                 let slot = if step.which.as_deref() == Some("second") {
@@ -4571,6 +4639,14 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
         data,
         ids,
         StepStateAt { file, before, turn, turn_index, index, seed, lobby },
+    );
+    resume_two_step_power(
+        data,
+        &mut loaded.game.players[ME],
+        &before.hero_powers,
+        &loaded.board_ids,
+        &loaded.tavern_ids,
+        step.step.as_str(),
     );
     // The state may hold three copies a summon left on the board before the
     // game's own triple check ran: the check runs as this step's action ends
@@ -5041,6 +5117,10 @@ fn take_open_discover(pool: &mut [u8], cards: &crate::cards::CardDb, pl: &mut Pl
 /// as they came out of the seated game's pool when `seat` forced them.
 fn take_step_prompts(data: &Data, pool: &mut [u8], from: &Player, to: &mut Player) {
     refund_open_discover(pool, &data.cards, to);
+    // A two-click power's second half is a prompt the state carries too
+    // (Spirit Swap's p2: the first minion, then the second prompt).
+    to.pending_target = from.pending_target;
+    to.two_step = from.two_step;
     to.discover = from.discover.clone();
     to.discover_minions = from.discover_minions.clone();
     to.discover_gifts = from.discover_gifts.clone();

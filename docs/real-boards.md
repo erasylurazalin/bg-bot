@@ -1034,12 +1034,11 @@ of a random step is run, since any of them may be the log's.
   the one target opened (Kelp Keeper triggering a Battlecry that Discovers,
   which gives a random card with no Discover offered, Trash for Treasure) is
   not a target prompt and does not change that. A pick of a
-  two-step effect (Spirit Swap's second minion) answers the prompt the game
-  opened in the step before, which one state cannot carry: that step is
-  incomplete. So is that power's second click when the log writes it as a
-  press of its own (`BG20_HERO_201p2`): the game counts each click as a use
-  and swaps the button to the power's second half, while the engine presses
-  once, so the file shows a power the engine does not build. The Warband Whistle's one-shot "your next Refresh holds copies of
+  two-step effect whose state carries only the second half answers the prompt
+  the game opened in the step before: Spirit Swap's second minion is written as
+  `BG20_HERO_201p2`, with the first minion's entity id in `numbers[0]`, and the
+  replay seats that first pick before answering the step's target, so the step
+  is the target alone rather than a second press. The Warband Whistle's one-shot "your next Refresh holds copies of
   your warband" is armed from the steps before it (the pick armed it, the first
   Refresh after that spent it), since no state says so.
 - **A Choose One the file does not mark.** The game writes the client's own
