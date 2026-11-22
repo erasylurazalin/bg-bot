@@ -4228,7 +4228,12 @@ fn run_start_of_combat(
             {
                 continue;
             }
-            let m = sides[s].hand_at(i);
+            let mut m = sides[s].hand_at(i);
+            // A golden Scout's copy keeps the Golden card and doubles the
+            // stats it has now, the hand buffs `hand_at` just added included.
+            let mul = m.mul();
+            m.attack = m.attack.saturating_mul(mul);
+            m.health = m.health.saturating_mul(mul);
             let at = sides[s].ms.len();
             sides[s].summon_baked(db, s, at, m, uid, rng, w);
         }

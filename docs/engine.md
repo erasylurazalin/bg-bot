@@ -302,7 +302,9 @@ rules behind each are in docs/rules/design.md Part 2.
   docs/real-boards.md "The file", at `counters`.
 - **The hand in combat.** `fight_with_hands` passes a side's hand only when
   something on that side reads it. Murlocs summoned from hand come back
-  unchanged; Winterfinner's hand buffs are kept. A real board file's `waits`
+  unchanged (a golden Flighty Scout's copy keeps the Golden card and doubles
+  the stats it has now, hand buffs included); Winterfinner's hand buffs are
+  kept. A real board file's `waits`
   is Diremuck Forager's summons still owed when its Start of Combat found the
   board full: it becomes `Counters.waits`, and `Side::spawn_when_space` takes
   the highest-Attack Murloc out of that side's hand through the same

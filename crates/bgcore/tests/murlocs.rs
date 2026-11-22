@@ -166,10 +166,15 @@ fn flighty_scout_in_hand_summons_a_copy_and_stays_in_hand() {
     assert_eq!((log.summons[0].1, log.summons[0].2), (3, 3));
     assert_eq!(out.sides[0].hand_stats[0], (0, 0));
 
-    // A golden hand card summons a golden copy with double the stats.
-    let hand = [mk(&db, "Flighty Scout", true)];
+    // A golden hand card summons a golden copy with double the stats it has
+    // now, the hand buffs it carries included: the Golden 6/6 plus +2/+4
+    // doubles to 16/20, not the 8/10 it holds.
+    let mut scout = mk(&db, "Flighty Scout", true);
+    scout.attack += 2;
+    scout.health += 4;
+    let hand = [scout];
     let (_, log) = run(&db, &[], &[wall(&db)], [&hand, &[]], 0, 1);
-    assert_eq!((log.summons[0].1, log.summons[0].2), (6, 6));
+    assert_eq!((log.summons[0].1, log.summons[0].2), (16, 20));
 }
 
 #[test]
