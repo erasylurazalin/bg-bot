@@ -3539,6 +3539,26 @@ impl<'a> Side<'a> {
                             pos = idx + 1;
                         }
                     }
+                    Deathrattle::SummonShapedMaxStats {
+                        card: tok,
+                        count,
+                        golden_doubles_count,
+                    } => {
+                        // Timewarped Icky Imp: Imps with the dead minion's
+                        // MAXIMUM stats. A golden one summons twice as many
+                        // plain Imps with the same stats, not bigger ones
+                        // (Firestone timewarped-icky-imp.ts: quantity
+                        // mult * 2, each at minion.maxAttack/maxHealth).
+                        let n = if golden_doubles_count { count * mul as u8 } else { count };
+                        for _ in 0..n {
+                            let mut m = db.make(tok, false);
+                            m.attack = dead.attack.max(0);
+                            m.health = dead_max.max(1);
+                            if let Some(idx) = self.summon(db, side, pos, m, uid, rng, w) {
+                                pos = idx + 1;
+                            }
+                        }
+                    }
                     Deathrattle::GiveOwnAttack => {
                         // Dark Gifts Offensive Sacrifice: the whole Attack to
                         // one other friendly minion, at random.
@@ -4773,6 +4793,47 @@ fn run_start_of_combat(
                     if let Some(mi) = sides[turn].index_of(me) {
                         sides[turn].gain_at(db, mi, la * mul, rh * mul);
                     }
+                }
+                Some(StartOfCombat::GainAdjacentStats) => {
+                    // Timewarped Immortal: the current stats of both
+                    // neighbours, as they stand before this lands. A golden
+                    // one gains double (Firestone timewarped-immortal.ts).
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let (mut da, mut dh) = (0, 0);
+                    for j in [mi.checked_sub(1), Some(mi + 1)].into_iter().flatten() {
+                        if let Some(f) = sides[turn].ms.get(j)
+                            && f.m.health > 0
+                        {
+                            da += f.m.attack;
+                            dh += f.m.health;
+                        }
+                    }
+                    sides[turn].gain_at(db, mi, da * mul, dh * mul);
+                }
+                Some(StartOfCombat::GainDifferentTypesStats { count }) => {
+                    // Timewarped Mythrax: up to `count` friendly minions of
+                    // different types, never another Mythrax. A golden one
+                    // gains twice their stats (the text says "gain twice",
+                    // not two separate picks).
+                    let Some(mi) = sides[turn].index_of(me) else { break };
+                    let mut tribes: ArrayVec<crate::cards::Tribes, BOARD> = ArrayVec::new();
+                    for f in &sides[turn].ms {
+                        let eligible = f.m.health > 0 && f.m.card != m.card;
+                        tribes.push(if eligible {
+                            db.tribes_of(&f.m)
+                        } else {
+                            crate::cards::Tribes::NONE
+                        });
+                    }
+                    let mut picks = pick_one_per_type(&tribes, rng);
+                    rng.shuffle(&mut picks);
+                    let n = (count as usize).min(picks.len());
+                    let (mut da, mut dh) = (0, 0);
+                    for &i in picks.iter().take(n) {
+                        da += sides[turn].ms[i].m.attack;
+                        dh += sides[turn].ms[i].m.health;
+                    }
+                    sides[turn].gain_at(db, mi, da * mul, dh * mul);
                 }
                 Some(StartOfCombat::Hopebringer { attack, health, improve }) => {
                     let Some(mi) = sides[turn].index_of(me) else { break };

@@ -150,6 +150,14 @@ impl Game {
             self.run_minion_end_of_turn(p, &mut pos, runs);
             pos += 1;
         }
+        // "Improves each turn!" (Timewarped Scout): one step per turn, no
+        // matter how many times Drakkari runs the other end of turn effects.
+        let cards = &self.data.cards;
+        for m in &mut self.players[p].board {
+            if m.parts().any(|(c, _)| cards.get(c).improves_each_turn) {
+                m.improvements = m.improvements.saturating_add(1);
+            }
+        }
         // The Dark Gift countdowns (Incubation, Replication, Affinity) tick
         // and fire after the board's own effects (Hearthstone_2026_10_26
         // _00_48_15-g2 turn 5: Trench Fighter's Gem Confiscation lands before
@@ -245,6 +253,35 @@ impl Game {
                                 if !self.give_named_minion(p, tok) {
                                     break;
                                 }
+                            }
+                        }
+                        Some(EndOfTurn::SummonStatCopy {
+                            card: tok,
+                            count,
+                            golden_doubles_count,
+                        }) => {
+                            // Timewarped Alleycat: Tabbycats with the host's
+                            // current stats. The golden one summons two
+                            // plain copies at the same stats, not one copy
+                            // with doubled stats.
+                            let n = if golden_doubles_count { count * mul as u8 } else { count };
+                            for _ in 0..n {
+                                if !self.end_of_turn_slot_holds(p, *pos, &m) {
+                                    break;
+                                }
+                                let Some(host) = self.players[p].board.get(*pos).copied() else {
+                                    break;
+                                };
+                                if self.players[p].board.is_full() {
+                                    break;
+                                }
+                                let mut copy = self.players[p]
+                                    .make_card(&self.data.cards, tok, false, 0);
+                                copy.attack = host.attack;
+                                copy.health = host.health;
+                                copy.uses_left = copy.turn_uses(&self.data.cards);
+                                self.players[p].board.insert(*pos + 1, copy);
+                                self.embalmer_on_summon(p, *pos + 1);
                             }
                         }
                         Some(EndOfTurn::Effect(e)) => {

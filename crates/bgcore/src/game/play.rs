@@ -84,6 +84,11 @@ impl Game {
         // again `extra` times after the triggers.
         let extra = self.players[p].board[pos].extra_magnetize;
         self.players[p].board[pos].magnetize(cards, m);
+        // Timewarped Wargear: after it Magnetizes, double the host's stats
+        // (triple when the Wargear is golden). Firestone
+        // timewarped-wargear.ts adds the target's stats once, twice when
+        // golden, after the merge.
+        self.multiply_magnetized_target(p, pos, m);
         {
             let pl = &mut self.players[p];
             pl.magnetizations = pl.magnetizations.saturating_add(1);
@@ -128,6 +133,7 @@ impl Game {
                 self.add_volumizer_bonus(p, da * mul, dh * mul);
             }
             self.players[p].board[pos].magnetize(&self.data.cards, m);
+            self.multiply_magnetized_target(p, pos, m);
             self.note_magnetized(p);
             // The same Magnetization again, so "whenever you play or
             // Magnetize a Mech" buffs land again, but the played-Mech hooks
@@ -137,6 +143,21 @@ impl Game {
             growth = add_growth(growth, self.beatboxers_copy(p, Some(pos), grown(m1, growth)));
         }
         let _ = self.beatboxers_copy(p, Some(pos), grown(m1, growth));
+    }
+
+    /// Timewarped Wargear: the Magnetic `m` just merged into the host in slot
+    /// `pos`, so multiply the host's stats (double normal, triple golden).
+    fn multiply_magnetized_target(&mut self, p: usize, pos: usize, m: Minion) {
+        let mult = self.data.cards.get(m.card).magnetize_target_multiply;
+        if mult < 2 {
+            return;
+        }
+        let times = mult + u8::from(m.golden);
+        let Some(host) = self.players[p].board.get_mut(pos) else { return };
+        let add_a = host.attack.saturating_mul(times as i32 - 1);
+        let add_h = host.health.saturating_mul(times as i32 - 1);
+        host.attack = host.attack.saturating_add(add_a);
+        host.health = host.health.saturating_add(add_h);
     }
 
     /// The Magnetizations that happen to a Magnetic minion played from hand

@@ -4302,3 +4302,118 @@ stats = [7, 5]
 timewarp = "major"
 whirl_o_tron = true
 start_of_combat = { copy_left_deathrattles = true }
+
+# --- Timewarped minions, Phase 5 (the logged cards) ---
+# These are 1-Chronum cards from the full Timewarped shop the logs show; the
+# Candelabra only draws `timewarp_cost = 2`. The two tokens these cards
+# summon are appended here so existing card ids stay put.
+
+[[token]]
+name = "Imp"
+tier = 1
+tribe = "demon"
+stats = [1, 1]
+
+[[token]]
+name = "Tabbycat"
+tier = 1
+tribe = "beast"
+stats = [1, 1]
+
+# Timewarped Icky Imp (BG34_Giant_674): "Deathrattle: Summon 2 Imps with this
+# minion's maximum stats", four when golden. The log
+# 11_04_15_53_32 shows the Imps at 37/27, the dead minion's maximum, not its
+# 12/12 printed stats or the Health it died at.
+[[token]]
+name = "Timewarped Icky Imp"
+tier = 5
+tribe = "demon"
+stats = [12, 12]
+timewarp = "major"
+timewarp_cost = 1
+deathrattle = { summon_shaped = "Imp", maximum_stats = true, count = 2, golden_doubles_count = true }
+
+# Timewarped Scout (BG34_Giant_333): "When you sell this, get 1 random minion
+# from Tier 7. (Improves each turn!)", two when golden. The log
+# 10_24_17_59_26-g2 sells one on turn 10 for three Tier 7 minions after two
+# end of turn improvements, so the count is the printed one plus one per end
+# of turn it spent on the board.
+[[token]]
+name = "Timewarped Scout"
+tier = 5
+tribe = "neutral"
+stats = [7, 7]
+timewarp = "major"
+timewarp_cost = 1
+on_sell = { random_tier_minion = 7, count = 1 }
+improves_each_turn = true
+
+# Timewarped Wargear (BG34_Giant_677): "Magnetic. After you Magnetize this,
+# double the target's stats", triple when golden.
+[[token]]
+name = "Timewarped Wargear"
+tier = 5
+tribe = "mech"
+stats = [5, 5]
+timewarp = "major"
+timewarp_cost = 1
+keywords = ["magnetic"]
+magnetize_double_target = true
+
+# Timewarped Mythrax (BG34_Giant_684): "Start of Combat: Gain the stats of 3
+# friendly minions of different types (except Timewarped Mythrax)", twice when
+# golden. The log 11_20_16_40_14-g3 has it at 58/59 before combat and 72/71
+# after, the +14/+12 of three different-type minions.
+[[token]]
+name = "Timewarped Mythrax"
+tier = 5
+tribe = "all"
+stats = [8, 9]
+timewarp = "major"
+timewarp_cost = 1
+start_of_combat = { different_types_stats = 3 }
+
+# Timewarped Kil'rek (BG34_Giant_584): "Taunt. Deathrattle: Get a random
+# Demon", two when golden. The log 11_03_13_59_12 never has it die.
+[[token]]
+name = "Timewarped Kil'rek"
+tier = 3
+tribe = "demon"
+stats = [4, 7]
+timewarp = "minor"
+timewarp_cost = 1
+keywords = ["taunt"]
+deathrattle = { effect = { random_minion = "demon" } }
+
+# Timewarped Immortal (BG34_Giant_597): "Start of Combat: Gain the stats of
+# adjacent minions", double when golden.
+[[token]]
+name = "Timewarped Immortal"
+tier = 5
+tribe = "mech"
+stats = [8, 8]
+timewarp = "major"
+timewarp_cost = 1
+start_of_combat = { gain_adjacent_stats = true }
+
+# Timewarped Nine Frogs (BG34_Giant_309): "After you buy a minion, get a random
+# Tavern spell from the same Tier. (9 left!)", two when golden.
+[[token]]
+name = "Timewarped Nine Frogs"
+tier = 5
+tribe = "beast"
+stats = [12, 12]
+timewarp = "major"
+timewarp_cost = 1
+after_buy_spell_same_tier = 9
+
+# Timewarped Alleycat (BG34_Giant_009): "At the end of your turn, summon a
+# Tabbycat with this minion's stats", two when golden.
+[[token]]
+name = "Timewarped Alleycat"
+tier = 3
+tribe = "beast"
+stats = [7, 7]
+timewarp = "minor"
+timewarp_cost = 1
+end_of_turn = { summon_stat_copy = "Tabbycat", count = 1, golden_doubles_count = true }

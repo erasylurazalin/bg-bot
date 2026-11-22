@@ -98,19 +98,30 @@ fn the_built_lists_are_the_marked_tokens_and_ignore_the_lobby() {
     let db = db();
     let mut minor = 0;
     let mut major = 0;
+    let mut minor_two = 0;
+    let mut major_two = 0;
     for c in 0..db.cards.len() {
         if db.cards[c].timewarp.is_some() {
             assert!(db.cards[c].token, "{} is a token", db.cards[c].name);
             assert!(!db.cards[c].lobby_ok(Tribes::ALL));
             assert!(c >= db.pool_cards);
             match db.cards[c].timewarp {
-                Some(Timewarp::Minor) => minor += 1,
-                Some(Timewarp::Major) => major += 1,
+                Some(Timewarp::Minor) => {
+                    minor += 1;
+                    minor_two += usize::from(db.cards[c].timewarp_cost == 2);
+                }
+                Some(Timewarp::Major) => {
+                    major += 1;
+                    major_two += usize::from(db.cards[c].timewarp_cost == 2);
+                }
                 None => {}
             }
         }
     }
-    assert_eq!((minor, major), (19, 39), "58 built cards");
+    assert_eq!((minor, major), (21, 45), "66 built cards");
+    // The Candelabra's own list is the 2-cost ones; the 1-cost cards belong
+    // to the full Timewarped shop the logs show.
+    assert_eq!((minor_two, major_two), (19, 39), "58 Candelabra cards");
 
     // The draw has no lobby argument at all. Hunt every card on both sides.
     let mut rng = Rng::new(600);
@@ -129,6 +140,7 @@ fn the_built_lists_are_the_marked_tokens_and_ignore_the_lobby() {
     for c in seen_minor.into_iter().chain(seen_major) {
         assert!(db.get(c).token);
         assert!(db.get(c).timewarp.is_some());
+        assert_eq!(db.get(c).timewarp_cost, 2, "the Candelabra list is 2-cost");
     }
 }
 

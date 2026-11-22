@@ -583,10 +583,11 @@ Triple Reward spell.
 - **Timewarp minions.** The 2-cost Timewarped minions are `[[token]]` entries
   with `timewarp = "minor"` or `"major"`. They take no pool slot, and
   `Card::lobby_ok` is false for them, so no normal Tavern, Discover or
-  random-minion draw can hand one out. The marker is what the Timeworn
-  Candelabra's own list reads (`CardDb::random_timewarp`, no lobby filter);
-  golden stats double the printed ones. There are 19 built Minor and 39
-  built Major tokens.
+  random-minion draw can hand one out. The marker and `timewarp_cost` are
+  what the Timeworn Candelabra's own list reads (`CardDb::random_timewarp`,
+  no lobby filter); golden stats double the printed ones. There are 21 built Minor and 45
+  built Major tokens, of which 19 Minor and 39 Major cost 2 Chronum and are
+  in the Candelabra list.
 - **Pool accounting is exact and checked after every fuzz action.** Drawn cards carry
   `pool_copies` (1, or up to 3 for a Golden minion); generated cards and tokens have 0
   and never touch the pool. Selling returns `pool_copies` (`give_back`). A Golden
@@ -1426,16 +1427,50 @@ hooks in.
   `CardDb::random_timewarp`, which filters only on the card's `timewarp`
   marker and the three already offered ids. It has no lobby argument, which
   is the logged rule: Chameleon was offered in a lobby without Beasts.
-- **The lists.** The built cards are 19 Minor and 39 Major. A card missing
-  from `cards.toml` is absent from its list, never a data error: Lei
-  (Buddies), the six Naga and Festergut (Build-An-Undead) are not built. The
-  seven logged Candelabra Discovers offer eighteen names; only Timewarped
-  Lei cannot be offered.
+- **The lists.** The built cards are 21 Minor and 45 Major; the
+  Candelabra itself draws `timewarp_cost = 2` only, which is 19 Minor and 39
+  Major. A card missing from `cards.toml` is absent from its list, never a
+  data error: Lei (Buddies), Summoner (its Spellcraft), the six Naga and
+  Festergut (Build-An-Undead) are not built. The seven logged Candelabra
+  Discovers offer eighteen names; only Timewarped Lei cannot be offered.
 - **Pool accounting.** A Timewarped minion is a token with no pool slot. A
   Timewarp Discover sets every offer's copies to 0 and the pick's
   `pool_copies` to 0, so the offers and the pick move no pool copy. The
   ordinary triple check still sees the card that joined the hand.
-- Tests: `crates/bgcore/tests/timewarp5.rs` covers both slots, the 19 and
-  39 counts, the no-lobby list, the seven logged offers, and the zero pool
-  copies. The whole-game lobby test allows a marked Timewarp card because
+- Tests: `crates/bgcore/tests/timewarp5.rs` covers both slots, the 21/45
+  marked counts, the 19/39 Candelabra counts, the no-lobby list, the seven
+  logged offers, and the zero pool copies. `timewarp_cost` keeps the 1-cost
+  cards of the full Timewarped shop out of the Candelabra. The whole-game lobby test allows a marked Timewarp card because
   the Candelabra is the one draw allowed to break the lobby filter.
+
+## 20. Systems the Timewarped log cards added (2026-11-23)
+
+- **Deathrattle with maximum stats.** `deathrattle = { summon_shaped = "Imp",
+  maximum_stats = true, count = 2, golden_doubles_count = true }` summons
+  plain tokens at the dead minion's maximum Attack and maximum Health
+  (Timewarped Icky Imp). The log `Hearthstone_2026_11_04_15_53_32` shows the
+  Imps at 37/27, the dead minion's maximum, not its 12/12 printed stats.
+- **After you Magnetize this.** `magnetize_double_target = true` multiplies
+  the host's stats after the merge (double normal, triple when golden,
+  Timewarped Wargear).
+- **Start of Combat neighbours.** `gain_adjacent_stats = true` gains the
+  current stats of both neighbours, doubled when golden (Timewarped
+  Immortal).
+- **Start of Combat, different types.** `different_types_stats = 3` gains
+  the stats of up to three friendly minions of different types, never
+  another copy of the card, doubled when golden (Timewarped Mythrax). It uses
+  `pick_one_per_type`.
+- **Improves each turn.** `improves_each_turn = true` raises the minion's
+  `improvements` by one at the end of each of its owner's turns on the board
+  (Timewarped Scout). `on_sell = { random_tier_minion = N, count = C }` gets
+  `C` plus that count random minions of Tier N, doubled when golden. The log
+  `Hearthstone_2026_10_24_17_59_26-g2` sells one for three Tier 7 minions
+  after two turns.
+- **After you buy, the bought Tier.** `after_buy_spell_same_tier = 9` starts
+  `improvements` at 9 and, after a minion is bought, gets a random Tavern
+  spell of that minion's Tier (two when golden) and spends one use
+  (Timewarped Nine Frogs).
+- **End of turn stat copies.** `end_of_turn = { summon_stat_copy = "Tabbycat",
+  count = 1, golden_doubles_count = true }` summons plain copies with the
+  host's current stats (Timewarped Alleycat).
+- Tests: `crates/bgcore/tests/timewarp6.rs`, one per card plus the marker.

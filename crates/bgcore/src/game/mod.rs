@@ -2971,6 +2971,7 @@ impl Game {
                         self.take_shop_damage(p, h as i32, None);
                     }
                     self.after_buy_effects(p);
+                    self.after_buy_spell_same_tier(p);
                     // Transcribing Typewriter: an exact copy of the minion
                     // bought (buffs included), so the bought one keeps the
                     // buffs it was bought with and gains any "after you buy"

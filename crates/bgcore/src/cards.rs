@@ -1323,6 +1323,14 @@ pub enum Deathrattle {
     /// Dark Gifts Golemancy: summon a `card` token with the dead minion's
     /// current stats, next to where it stood.
     SummonShaped { card: CardId },
+    /// Summon `count` `card` tokens with the dead minion's maximum stats
+    /// (Timewarped Icky Imp). A golden host summons twice as many plain
+    /// tokens, all with the same maximum stats.
+    SummonShapedMaxStats {
+        card: CardId,
+        count: u8,
+        golden_doubles_count: bool,
+    },
     /// Dark Gifts Offensive Sacrifice: give the dead minion's Attack to one
     /// other friendly minion picked at random. The gift never doubles, so a
     /// golden host gives the same.
@@ -1383,6 +1391,14 @@ pub enum EndOfTurn {
     Effect(Effect),
     /// Dark Gifts Echoing Voice: trigger this minion's own Battlecries now.
     TriggerOwnBattlecry,
+    /// Summon `count` plain copies of `card` with this minion's current stats
+    /// (Timewarped Alleycat). A golden host summons twice as many plain
+    /// copies, each with the same stats.
+    SummonStatCopy {
+        card: CardId,
+        count: u8,
+        golden_doubles_count: bool,
+    },
     /// Dark Gifts Polarization: Magnetize a random Mech from the pool to it.
     MagnetizeRandomMech,
     /// Dark Gifts Steady Growth: gain the +attack/+health fixed when the gift
@@ -1398,6 +1414,13 @@ pub enum StartOfCombat {
     /// Gain the Attack of your left-most minion and the Health of your
     /// right-most minion (All-Seeing Elder). Golden doubles both.
     GainEndsStats,
+    /// Gain the stats of the adjacent minions (Timewarped Immortal). Golden
+    /// doubles them.
+    GainAdjacentStats,
+    /// Gain the stats of up to `count` friendly minions of different types,
+    /// never another copy of this card (Timewarped Mythrax). Golden doubles
+    /// the stats gained.
+    GainDifferentTypesStats { count: u8 },
     DamageAllOthers(i32),
     /// Any effect a fight can run (Electric Synthesizer, Amber Guardian,
     /// Runic Arcanist).
@@ -1602,6 +1625,10 @@ pub enum OnSell {
     /// After you sell a minion of this tier, run the effect (Timewarped
     /// Skipper). Golden doubles the effect's count.
     AfterSellTier { tier: u8, effect: Effect },
+    /// Get `count` random minions of exactly `tier`, plus one for each time
+    /// this minion improved itself (Timewarped Scout). Golden doubles the
+    /// whole count.
+    RandomTierMinions { tier: u8, count: u8 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1750,6 +1777,9 @@ pub struct Card {
     /// The tribes a Magnetic card can Magnetize onto: Mech for all but the
     /// Mecha-Demons, which take Mechs and Demons.
     pub magnetize_tribes: Tribes,
+    /// After this card Magnetizes into a minion, multiply that minion's stats
+    /// by this (Timewarped Wargear: 2, one more when golden). 0 is none.
+    pub magnetize_target_multiply: u8,
     /// One of the four Magnetic Mecha-Demons the Mecha-Jaraxxus Sticker hands
     /// out (`CardDb.mecha_demons`).
     pub mecha_demon: bool,
@@ -1768,10 +1798,16 @@ pub struct Card {
     /// it keeps its id, its effects and its place in old boards and logs,
     /// but no draw may offer it again. See `Card::lobby_ok`.
     pub out_of_pool: bool,
-    /// A Timewarped minion from the Timeworn Candelabra, and which side's
-    /// 2-cost list it belongs to. These are tokens outside the pool table;
+    /// A Timewarped minion (from the Timeworn Candelabra or a full Timewarped
+    /// shop), and which side's list it belongs to. These are tokens outside
+    /// the pool table;
     /// `Card::lobby_ok` never offers one to a normal draw.
     pub timewarp: Option<Timewarp>,
+    /// Its Chronum cost in the Timewarped shop. The Candelabra only offers
+    /// the 2-cost cards; a 1-cost card belongs to the full Timewarped shop
+    /// that Era's logs show but the game does not model yet. 2 when the TOML
+    /// does not say (every Candelabra card).
+    pub timewarp_cost: u8,
     /// Index in `Game::pool` that holds copies of this card. Shared pool
     /// groups (such as the three Volumizers) all point to their first card's
     /// slot.
@@ -1932,6 +1968,13 @@ pub struct Card {
     pub play_shield: Option<Tribe>,
     /// After its owner buys a minion (Stone Age Slab).
     pub after_buy: Option<AfterBuy>,
+    /// After its owner buys a minion, get a random Tavern spell of the bought
+    /// minion's Tier, this many times in all (Timewarped Nine Frogs: 9). The
+    /// countdown lives in `improvements`.
+    pub after_buy_spell_same_tier: u8,
+    /// "Improves each turn!": raise `improvements` by one at the end of each
+    /// of its owner's turns while it is on the board (Timewarped Scout).
+    pub improves_each_turn: bool,
     /// Gets this much for every friendly minion with this same flag that died
     /// this game, wherever it is (Eternal Knight). Golden doubles it.
     pub buff_per_kind_death: Option<(i32, i32)>,
@@ -2275,9 +2318,11 @@ struct RawCard {
     /// for old logs and boards, never drawn or offered again.
     #[serde(default)]
     out_of_pool: bool,
-    /// "minor" or "major": a 2-cost Timewarped minion from the Timeworn
-    /// Candelabra. It is a token and no normal draw offers it.
+    /// "minor" or "major": a Timewarped minion. It is a token and no normal
+    /// draw offers it.
     timewarp: Option<String>,
+    /// Its Chronum cost; 2 (the Candelabra's own) when absent.
+    timewarp_cost: Option<u8>,
     volumizer_buff: Option<[i32; 2]>,
     spell_buff: Option<[i32; 2]>,
     battlecry: Option<RawEffect>,
@@ -2386,6 +2431,12 @@ struct RawCard {
     /// Tribe whose members get Divine Shield when played.
     play_shield: Option<String>,
     after_buy: Option<RawAfterBuy>,
+    /// After you buy a minion, get this many random Tavern spells of its
+    /// Tier in all (Timewarped Nine Frogs).
+    after_buy_spell_same_tier: Option<u8>,
+    /// "Improves each turn!" (Timewarped Scout).
+    #[serde(default)]
+    improves_each_turn: bool,
     buff_per_kind_death: Option<[i32; 2]>,
     on_reborn: Option<RawOnReborn>,
     /// A Magnetic minion that can Magnetize to an Undead as well as a Mech
@@ -2396,6 +2447,9 @@ struct RawCard {
     /// Mech (Mecha-Jaraxxus's Mecha-Demons).
     #[serde(default)]
     magnetize_to_tribes: Vec<String>,
+    /// After this Magnetizes, double the target's stats (triple when golden).
+    #[serde(default)]
+    magnetize_double_target: bool,
     /// A Darkmoon Prize's tier, 1 to 4 (All-Seeing Elder).
     prize: Option<u8>,
     /// One of the four Magnetic Mecha-Demons (Mecha-Jaraxxus Sticker).
@@ -3141,6 +3195,10 @@ struct RawDeathrattle {
     per_improvement: Option<[i32; 2]>,
     /// Dark Gifts Golemancy: a token summoned with the dead minion's stats.
     summon_shaped: Option<String>,
+    /// Summon the shaped token with the dead minion's maximum stats
+    /// (Timewarped Icky Imp). `count` and `golden_doubles_count` apply too.
+    #[serde(default)]
+    maximum_stats: bool,
     /// Dark Gifts Offensive Sacrifice, Defensive Sacrifice.
     #[serde(default)]
     give_own_attack: bool,
@@ -3165,6 +3223,11 @@ struct RawEndOfTurn {
     /// Get a named minion as a generated copy, with no pool copy.
     get_named_minion: Option<String>,
     count: Option<u8>,
+    /// Summon this many copies of a named token with this minion's current
+    /// stats (Timewarped Alleycat).
+    summon_stat_copy: Option<String>,
+    #[serde(default)]
+    golden_doubles_count: bool,
     copy_last_spell: Option<bool>,
     effect: Option<RawEffect>,
     #[serde(default)]
@@ -3191,6 +3254,12 @@ struct RawStartOfCombat {
     gain_hand_attack: bool,
     #[serde(default)]
     gain_hand_stats: bool,
+    /// Gain the stats of the adjacent minions (Timewarped Immortal).
+    #[serde(default)]
+    gain_adjacent_stats: bool,
+    /// Gain the stats of this many friendly minions of different types
+    /// (Timewarped Mythrax).
+    different_types_stats: Option<u8>,
     /// Dark Gifts.
     #[serde(default)]
     double_health: bool,
@@ -3363,6 +3432,9 @@ struct RawOnSell {
     /// A sold minion of this tier fires the effect (Timewarped Skipper).
     tier: Option<u8>,
     effect: Option<RawEffect>,
+    /// Get `count` random minions of exactly this tier when sold; the
+    /// minion's `improvements` add to the count (Timewarped Scout).
+    random_tier_minion: Option<u8>,
     /// Gain the stats of the sold minion when it is of this tribe (Arcane
     /// Behemoth); an empty string is any minion.
     gain_sold_stats: Option<String>,
@@ -4414,7 +4486,15 @@ impl CardDb {
                     Deathrattle::GetCard { card, count: d.count.unwrap_or(1) }
                 } else if let Some(name) = &d.summon_shaped {
                     let card = token_id(name).map_err(&err)?;
-                    Deathrattle::SummonShaped { card }
+                    if d.maximum_stats {
+                        Deathrattle::SummonShapedMaxStats {
+                            card,
+                            count: d.count.unwrap_or(1),
+                            golden_doubles_count: d.golden_doubles_count,
+                        }
+                    } else {
+                        Deathrattle::SummonShaped { card }
+                    }
                 } else if d.give_own_attack {
                     Deathrattle::GiveOwnAttack
                 } else if d.give_own_health {
@@ -4458,6 +4538,13 @@ impl CardDb {
                     EndOfTurn::CopyLastSpell
                 } else if e.trigger_own_battlecry {
                     EndOfTurn::TriggerOwnBattlecry
+                } else if let Some(name) = &e.summon_stat_copy {
+                    let card = token_id(name).map_err(&err)?;
+                    EndOfTurn::SummonStatCopy {
+                        card,
+                        count: e.count.unwrap_or(1),
+                        golden_doubles_count: e.golden_doubles_count,
+                    }
                 } else if e.magnetize_random_mech {
                     EndOfTurn::MagnetizeRandomMech
                 } else if e.gift_buff_self {
@@ -4493,6 +4580,10 @@ impl CardDb {
                     StartOfCombat::GainHighestHandAttack
                 } else if s.gain_hand_stats {
                     StartOfCombat::GainHandStats
+                } else if s.gain_adjacent_stats {
+                    StartOfCombat::GainAdjacentStats
+                } else if let Some(n) = s.different_types_stats {
+                    StartOfCombat::GainDifferentTypesStats { count: n }
                 } else if s.double_health {
                     StartOfCombat::DoubleHealth
                 } else if s.double_attack {
@@ -4712,6 +4803,8 @@ impl CardDb {
                 } else if let Some(tier) = s.tier {
                     let effect = s.effect.as_ref().ok_or("on_sell tier needs effect")?;
                     OnSell::AfterSellTier { tier, effect: parse_effect(effect).map_err(&err)? }
+                } else if let Some(tier) = s.random_tier_minion {
+                    OnSell::RandomTierMinions { tier, count: s.count.unwrap_or(1) }
                 } else if let Some(e) = &s.effect {
                     OnSell::Effect(parse_effect(e).map_err(&err)?)
                 } else if let Some(t) = &s.gain_sold_stats {
@@ -4795,6 +4888,7 @@ impl CardDb {
                 amalgam: c.amalgam,
                 amalgam_gain_copy: c.amalgam_gain_copy.unwrap_or(0),
                 magnetize_tribes,
+                magnetize_target_multiply: if c.magnetize_double_target { 2 } else { 0 },
                 mecha_demon: c.mecha_demon,
                 buddy: c.buddy,
                 token: *token,
@@ -4805,6 +4899,7 @@ impl CardDb {
                 is_volumizer,
                 out_of_pool: c.out_of_pool,
                 timewarp,
+                timewarp_cost: c.timewarp_cost.unwrap_or(2),
                 pool_slot,
                 volumizer_buff,
                 spell_buff,
@@ -4899,6 +4994,8 @@ impl CardDb {
                     .transpose()
                     .map_err(&err)?,
                 play_shield: c.play_shield.as_deref().map(tribe).transpose().map_err(&err)?,
+                after_buy_spell_same_tier: c.after_buy_spell_same_tier.unwrap_or(0),
+                improves_each_turn: c.improves_each_turn,
                 after_buy: match &c.after_buy {
                     None => None,
                     Some(a) => Some(AfterBuy {
@@ -5047,6 +5144,7 @@ impl CardDb {
                 amalgam: false,
                 amalgam_gain_copy: 0,
                 magnetize_tribes: Tribes::NONE.with(Tribe::Mech),
+                magnetize_target_multiply: 0,
                 mecha_demon: false,
                 buddy: false,
                 token: sp.token,
@@ -5057,6 +5155,7 @@ impl CardDb {
                 is_volumizer: false,
                 out_of_pool: false,
                 timewarp: None,
+                timewarp_cost: 2,
                 pool_slot: id,
                 volumizer_buff: None,
                 spell_buff: None,
@@ -5129,6 +5228,8 @@ impl CardDb {
                 overkill: false,
                 triple_wildcard: None,
                 play_shield: None,
+                after_buy_spell_same_tier: 0,
+                improves_each_turn: false,
                 after_buy: None,
                 buff_per_kind_death: None,
                 on_reborn: None,
@@ -5548,7 +5649,7 @@ impl CardDb {
     ) -> Option<CardId> {
         let ok = |id: CardId| {
             let c = &self.cards[id as usize];
-            c.timewarp == Some(side) && !exclude.contains(&id)
+            c.timewarp == Some(side) && c.timewarp_cost == 2 && !exclude.contains(&id)
         };
         let count = (0..self.cards.len() as CardId).filter(|&id| ok(id)).count() as u32;
         if count == 0 {

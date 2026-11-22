@@ -498,6 +498,10 @@ impl Player {
         if let Some(n) = cards.get(id).refresh_golden {
             m.improvements = n as u16;
         }
+        let after_buy_uses = cards.get(id).after_buy_spell_same_tier;
+        if after_buy_uses > 0 {
+            m.improvements = after_buy_uses as u16;
+        }
         // A portrait that gives this card more tribes (Bronzebeard
         // Portrait): every copy the player makes carries it.
         for (mod_card, kind) in self.tp.card_mods.iter().flatten() {

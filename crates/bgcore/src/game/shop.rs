@@ -1183,6 +1183,47 @@ impl Game {
         }
     }
 
+    /// Timewarped Nine Frogs: after a minion is bought, each copy on the board
+    /// with uses left gets a random Tavern spell of the bought minion's Tier
+    /// (two when golden). Its `improvements` holds the "(9 left!)" count.
+    pub(super) fn after_buy_spell_same_tier(&mut self, p: usize) {
+        let cards = &self.data.cards;
+        let Some(bought) = self.players[p].hand.last().copied() else { return };
+        if cards.get(bought.card).is_spell() {
+            return;
+        }
+        let tier = cards.get(bought.card).tier;
+        let mut hits: arrayvec::ArrayVec<(usize, bool), { crate::BOARD }> = arrayvec::ArrayVec::new();
+        for i in 0..self.players[p].board.len() {
+            if self.players[p].board[i].improvements == 0 {
+                continue;
+            }
+            let mut found = false;
+            let mut golden = false;
+            for (card, g) in self.players[p].board[i].parts() {
+                if cards.get(card).after_buy_spell_same_tier > 0 {
+                    found = true;
+                    golden |= g;
+                }
+            }
+            if found {
+                let _ = hits.try_push((i, golden));
+            }
+        }
+        for (i, golden) in hits {
+            let n = if golden { 2 } else { 1 };
+            for _ in 0..n {
+                if let Some(spell) =
+                    self.data.cards.random_tier_spell(tier, &[], self.lobby, &mut self.rng)
+                {
+                    self.give_generated(p, spell);
+                }
+            }
+            self.players[p].board[i].improvements =
+                self.players[p].board[i].improvements.saturating_sub(1);
+        }
+    }
+
     /// Sell the board minion in `slot`: Gold, the copy back to the pool and
     /// the sell triggers, exactly as the Sell action does (Channel the
     /// Devourer sells through here too).
@@ -1245,6 +1286,21 @@ impl Game {
                 Some(OnSell::DiscoverTier7IfGolden) => {
                     if golden {
                         self.discover_tier7_minion(p);
+                    }
+                }
+                Some(OnSell::RandomTierMinions { tier, count }) => {
+                    // Timewarped Scout: the printed count plus one for each
+                    // end of turn it improved on the board, doubled when
+                    // golden. The log's 10_24_17_59_26-g2 turn 10 sale gives
+                    // three Tier 7 minions after two improvements.
+                    let n = (count as u32 + m.improvements as u32)
+                        * if golden { 2 } else { 1 };
+                    for _ in 0..n {
+                        if let Some(c) =
+                            self.data.cards.random_tier_minion(tier, self.lobby, &mut self.rng)
+                        {
+                            self.give_generated(p, c);
+                        }
                     }
                 }
                 // Handled below: the minion with this text is on the board,
