@@ -359,7 +359,7 @@ The Great Akazamzarak's Prestidigitation costs 0 and can be used once each turn 
 - **Venomstrike Trap:** when one of your minions is attacked, summon a 2/3 Venomous Cobra (a Beast).
 - **Autodefense Matrix:** when one of your minions is attacked, give it Divine Shield before the hit, so the hit is blocked.
 - **Pack Tactics:** when one of your minions is attacked, summon an exact copy of it to its right (golden, Deathrattles, keywords, Dark Gifts, everything) whose stats are set to 3/3. "Set to 3/3" sets the base stats and drops ordinary buffs, but bonuses that apply wherever the card is go on top: an Eternal Knight copy is 7/5 if one Knight has died, Undead get their game-long Attack, and Goldrinn's "your Beasts have +7/+7 until next turn" reaches the copy (and the Cobra) too.
-- **Redemption:** when a friendly minion dies, return a fresh copy of it (base card, buffs gone) with 1 Health on the same spot. If its Deathrattle fills the board, it waits for room.
+- **Redemption:** when a friendly minion dies, return a fresh copy of it (base card, buffs gone) with 1 Health on the same spot. If its Deathrattle fills the board, it waits for room. Redemption fires before Reborn (Era, 2026-11-23, seen in one of Era's games; Firestone agrees, replay `fbf13f69`), so a minion with both comes back first as the Redemption copy and its Reborn then needs room of its own.
 - Opponents don't see your Secrets, and neither does the bot (only its own).
 - **Ice Block** (Safety Patch) is labelled a Secret but has nothing to do with these four. In the engine it lives in the same Secret zone, and it doesn't count toward Akazamzarak's offer.
 
@@ -370,6 +370,8 @@ Valdrakken Wind Chimes and Ancient Wishbone make every Start of Combat hero powe
 ## Exact copies in a fight (Era, 2026-11-01)
 
 Frostwolf Fervor, Stormpike Strength and Rapid Reanimation copy the minion's state right now: damage included (a 10/10 that took 6 damage gives a 10/4 copy), and a Divine Shield that already popped stays popped on the copy.
+
+Frostwolf Fervor and Stormpike Strength run after the other Start of Combat hero powers, not with the pre-combat ones: they fire "when you have space", so they act like a standing effect rather than a step in the order (Era, 2026-11-23; Firestone files them as pre-combat without a citation).
 
 
 ## Cookie the Cook (Era, 2026-11-13)

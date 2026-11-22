@@ -566,3 +566,35 @@ fn next_turn(g: &mut Game, p: usize) {
     }
     turn_of(g, p);
 }
+
+#[test]
+fn redemption_fires_before_reborn() {
+    let db = db();
+    // A full board of seven: a Half-Shell (Taunt) with Reborn and six 0
+    // Attack Microbots, so only the enemy attacks and the Shell dies. One
+    // slot opens, and the two copies want it. Era, 2026-11-23: Redemption
+    // comes before Reborn, so the Secret's copy takes the slot and fires.
+    let mut shell = mk(&db, "Half-Shell");
+    shell.keywords.set(Keywords::REBORN);
+    shell.attack = 0;
+    let mut board = vec![shell];
+    for _ in 0..6 {
+        let mut m = mk(&db, "Microbot");
+        m.attack = 0;
+        m.health = 50;
+        board.push(m);
+    }
+    let mut attacker = mk(&db, "Microbot");
+    attacker.attack = 10;
+    attacker.health = 200;
+    let c = with_secrets(&[REDEMPTION]);
+    let mut w = log();
+    let out = fight_with(&db, &board, &[attacker], [c, Counters::default()], 1,
+        &mut Rng::new(1), &mut w);
+    let ours = w.summons.iter().filter(|(s, _, _)| *s == 0).count();
+    assert_eq!(ours, 1, "one slot, one copy");
+    assert!(
+        out.sides[0].secrets_fired & (1 << REDEMPTION) != 0,
+        "Redemption took the slot before Reborn could"
+    );
+}

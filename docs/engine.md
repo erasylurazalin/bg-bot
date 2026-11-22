@@ -370,9 +370,9 @@ rules behind each are in docs/rules/design.md Part 2.
   106 of 209). It takes every dead minion off the board with
   `Side.collect_dead` first (`Side.held_dead` deaths in front, then the
   batch's dead left to right). Then each dead minion, in death order, runs
-  its Deathrattle and then its Avenge tick, a trinket's Avenge included.
-  Only after the whole batch runs every Reborn (`Side.reborn_dead`), in the
-  same order, and Redemption for each after its own Reborn. A Reborn lands
+  its Deathrattle, then its Avenge tick (a trinket's Avenge included), then
+  Redemption. Only after the whole batch runs every Reborn
+  (`Side.reborn_dead`), in the same order. A Reborn lands
   at the right end of the minions its Deathrattle inserted in its slot. A
   Deathrattle that kills starts another removal round, still before the
   batch's Reborns. `Side::resolve` is the same sequence for one side (a shop
@@ -864,10 +864,10 @@ Safety Patch gives.
   bonus, an Eternal Knight's deaths, Goldrinn's Beasts, a trinket's "your
   minions have". A Secret that would summon stays in the zone when the board
   is full.
-- **Redemption** runs `Side::redemption` in `Side::resolve_reborns` after the
-  whole batch's Deathrattles and, for its own dead minion, after its Reborn:
-  `CardDb::make` of its base card, 1
-  Health, summoned where it stood. With no room the copy waits in
+- **Redemption** runs `Side::redemption` at the end of `Side::resolve_dead`,
+  after its dead minion's Deathrattles and Avenge and before any Reborn
+  (Era, 2026-11-23): `CardDb::make` of its base card, 1
+  Health, summoned after that minion's Deathrattle summons. With no room the copy waits in
   `Side.secret_wait` and `spawn_when_space` puts it down as soon as a slot
   opens; the Secret is only spent when the copy lands, and a death that comes
   while a copy is owed does not replace it.

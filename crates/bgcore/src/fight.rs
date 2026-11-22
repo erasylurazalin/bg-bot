@@ -3862,8 +3862,8 @@ impl<'a> Side<'a> {
         changed
     }
 
-    /// Run every dead minion's Reborn copy, then its Redemption, in death
-    /// order. This is the whole batch's Reborn phase: it comes after every
+    /// Run every dead minion's Reborn copy in death order (Redemption ran
+    /// earlier, in `resolve_dead`). This is the whole batch's Reborn phase: it comes after every
     /// Deathrattle and Avenge above.
     fn resolve_reborns(
         &mut self,
@@ -3876,17 +3876,9 @@ impl<'a> Side<'a> {
         let mut changed = false;
         while !self.reborn_dead.is_empty() {
             let (i, fm) = self.reborn_dead.remove(0);
-            let dead = fm.m;
             let i = i.min(self.ms.len());
             let at = self.summon_reborn(db, side, i, fm, uid, rng, w);
             changed |= at.is_some();
-            // Redemption's place against Reborn is not settled by Era's
-            // logs, so it stays where it was: after this minion's Reborn
-            // (docs/rules/heroes.md "Secrets").
-            if !self.secrets.is_empty() {
-                let next = at.map_or(i, |at| at + 1);
-                self.redemption(db, side, &dead, next, uid, rng, w);
-            }
         }
         changed
     }
@@ -3930,7 +3922,7 @@ impl<'a> Side<'a> {
     }
 
     /// Handle one dead minion at slot `i`: its Deathrattle, then its Avenge
-    /// tick. Reborn and Redemption are not here: they run after the whole
+    /// tick, then Redemption. Reborn is not here: it runs after the whole
     /// batch, in `resolve_reborns`.
     #[allow(clippy::too_many_arguments)]
     fn resolve_dead(
@@ -3976,7 +3968,7 @@ impl<'a> Side<'a> {
         self.gain_deathrattles(db, fm.uid, &dead);
         let runs = self.deathrattle_fires(db, &dead, fm.uid);
         let dead_max = dead.health + fm.taken;
-        self.fire_deathrattles(
+        let added = self.fire_deathrattles(
             db, side, &dead, dead_max, fm.uid, fm.killer, i, runs, uid, rng, w,
         );
         self.note_deity_death(db, side, fm, uid, rng, w);
@@ -3987,6 +3979,13 @@ impl<'a> Side<'a> {
         if self.count_avenge {
             self.avenge_tick(db, side, uid, rng, w);
             self.broodmother_tick(db, side, uid, rng, w);
+        }
+        // Redemption fires before Reborn (Era, 2026-11-23, from one of
+        // Era's games; Firestone runs Secrets here, "at Avenge speed",
+        // citing replay fbf13f69). Its copy lands after this minion's
+        // Deathrattle summons, and the Reborn later lands right of it.
+        if !self.secrets.is_empty() {
+            self.redemption(db, side, &dead, i + added, uid, rng, w);
         }
     }
 
@@ -4236,8 +4235,7 @@ fn resolve_deaths(
             apply_killer_destroys(sides);
         }
         // All Reborns run after every Deathrattle and Avenge of the batch,
-        // in the same death order. Redemption stays after its minion's
-        // Reborn.
+        // in the same death order. Redemption already ran, before them.
         let (a, b) = pair(sides, first);
         a.resolve_reborns(db, first, uid, rng, w);
         b.resolve_reborns(db, first ^ 1, uid, rng, w);
