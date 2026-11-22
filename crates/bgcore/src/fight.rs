@@ -879,11 +879,11 @@ impl<'a> Side<'a> {
                 m.keywords.set(Keywords::DIVINE_SHIELD);
             }
             self.hand_taken |= 1 << i;
-            if !self.summon_baked(db, side, *at, m, uid, rng, w) {
+            let Some(idx) = self.summon_baked(db, side, *at, m, uid, rng, w) else {
                 self.hand_taken &= !(1 << i);
                 break;
-            }
-            *at += 1;
+            };
+            *at = idx + 1;
         }
     }
 
@@ -1534,8 +1534,8 @@ impl<'a> Side<'a> {
             let k = rng.below(pool_b.len() as u32) as usize;
             let mut m = pool_b[k];
             m.pool_copies = 0;
-            if self.summon(db, side, pos, m, uid, rng, w) {
-                pos += 1;
+            if let Some(idx) = self.summon(db, side, pos, m, uid, rng, w) {
+                pos = idx + 1;
             }
             self.out.push_card(m.card);
         }
@@ -1861,11 +1861,11 @@ impl<'a> Side<'a> {
                 // right end (docs/rules/design.md).
                 let mut at = self.ms.len();
                 for _ in 0..count {
-                    if !self.summon(db, side, at, db.make(card, false), uid, rng, w) {
+                    let Some(idx) = self.summon(db, side, at, db.make(card, false), uid, rng, w) else {
                         break;
-                    }
-                    self.ms[at].m.keywords.set(keywords);
-                    at += 1;
+                    };
+                    self.ms[idx].m.keywords.set(keywords);
+                    at = idx + 1;
                 }
             }
             FightAct::Bonus { gem, spell } => {
@@ -1951,11 +1951,16 @@ impl<'a> Side<'a> {
                 m.attack = ga.max(1);
                 m.health = gh.max(1);
                 let at = self.dead_at;
-                self.summon(db, side, at, m, uid, rng, w);
+                let _ = self.summon(db, side, at, m, uid, rng, w);
             }
         }
     }
 
+    /// Summon a minion at `pos` and return the slot it really went into.
+    /// None when the board is full and there is no dead minion to take out,
+    /// so the minion is lost. A dead minion left of `pos` shifts the board,
+    /// which is why every caller must use the returned slot, not `pos`, for
+    /// the new minion and for the next summon's position.
     #[allow(clippy::too_many_arguments)]
     fn summon(
         &mut self,
@@ -1966,12 +1971,13 @@ impl<'a> Side<'a> {
         uid: &mut u16,
         rng: &mut Rng,
         w: &mut impl Watch,
-    ) -> bool {
+    ) -> Option<usize> {
         self.summon_with(db, side, pos, m, uid, rng, w, true)
     }
 
     /// Summon a minion that already carries the player's bonuses (a hand
     /// minion, an exact copy): the Undead and Knight bonuses are not added.
+    /// Returns the slot it went into, like `summon`.
     #[allow(clippy::too_many_arguments)]
     fn summon_baked(
         &mut self,
@@ -1982,7 +1988,7 @@ impl<'a> Side<'a> {
         uid: &mut u16,
         rng: &mut Rng,
         w: &mut impl Watch,
-    ) -> bool {
+    ) -> Option<usize> {
         self.summon_with(db, side, pos, m, uid, rng, w, false)
     }
 
@@ -1997,7 +2003,7 @@ impl<'a> Side<'a> {
         rng: &mut Rng,
         w: &mut impl Watch,
         bonus: bool,
-    ) -> bool {
+    ) -> Option<usize> {
         if self.ms.is_full() {
             // A dead minion does not hold a board slot. The log of Era's
             // 2026-11-17 fight against Tickatus (Power.log 274478) shows a
@@ -2007,9 +2013,7 @@ impl<'a> Side<'a> {
             // the second was lost. Take the left-most dead minion out and let
             // `resolve` handle its death after this summon, so its own
             // Deathrattle and Reborn still run in their place.
-            let Some(j) = self.ms.iter().position(|f| f.m.health <= 0) else {
-                return false;
-            };
+            let j = self.ms.iter().position(|f| f.m.health <= 0)?;
             let fm = self.remove(j);
             let _ = self.held_dead.try_push((j, fm));
         }
@@ -2043,10 +2047,12 @@ impl<'a> Side<'a> {
             m.attack += self.counters.beetle_attack;
             m.health += self.counters.beetle_health;
         }
-        self.insert(
+        if !self.insert(
             pos,
             Fm { m, uid: *uid, start_slot: None, avenge: 0, damaged_fires: 0, triple_reward_used: false, killer: None, taken: 0, gifts: 0 },
-        );
+        ) {
+            return None;
+        }
         *uid += 1;
         self.embalmer_on_summon(db, pos);
         // Sprout It Out! (Greybough): minions summoned during combat gain
@@ -2167,7 +2173,7 @@ impl<'a> Side<'a> {
         let new = self.ms[pos].m;
         self.trinket_hook(db, side, When::Summon, Some((self.ms[pos].uid, new)), uid, rng, w);
         w.summon(side, pos, &self.ms[pos].m);
-        true
+        Some(pos)
     }
 
     /// A Secret fires: it leaves the zone for good, and the outcome says
@@ -2223,7 +2229,7 @@ impl<'a> Side<'a> {
                     copy.attack = 3;
                     copy.health = 3;
                     copy.pool_copies = 0;
-                    if self.summon(db, side, di + 1, copy, uid, rng, w) {
+                    if self.summon(db, side, di + 1, copy, uid, rng, w).is_some() {
                         self.fire_secret(kind);
                     }
                 }
@@ -2234,7 +2240,7 @@ impl<'a> Side<'a> {
                     }
                     let mut m = db.make(cobra, false);
                     m.pool_copies = 0;
-                    if self.summon(db, side, di + 1, m, uid, rng, w) {
+                    if self.summon(db, side, di + 1, m, uid, rng, w).is_some() {
                         self.fire_secret(kind);
                     }
                 }
@@ -2269,7 +2275,7 @@ impl<'a> Side<'a> {
         let mut m = db.make(dead.card, dead.golden);
         m.health = 1;
         let at = at.min(self.ms.len());
-        if self.summon(db, side, at, m, uid, rng, w) {
+        if self.summon(db, side, at, m, uid, rng, w).is_some() {
             self.fire_secret(crate::secrets::REDEMPTION);
         } else {
             self.secret_wait = Some((at, m));
@@ -2292,7 +2298,7 @@ impl<'a> Side<'a> {
             let mut m = db.make(tok, false);
             m.keywords.set(Keywords::TAUNT);
             let pos = self.ms.len();
-            if self.summon(db, side, pos, m, uid, rng, w) {
+            if self.summon(db, side, pos, m, uid, rng, w).is_some() {
                 self.counters.boon_of_beetles -= 1;
                 self.out.boon_of_beetles_used = self.out.boon_of_beetles_used.saturating_add(1);
             } else {
@@ -2341,12 +2347,9 @@ impl<'a> Side<'a> {
         rng: &mut Rng,
         w: &mut impl Watch,
     ) -> bool {
-        if !self.summon_baked(db, side, pos, copy, uid, rng, w) {
+        let Some(at) = self.summon_baked(db, side, pos, copy, uid, rng, w) else {
             return false;
-        }
-        // `summon_baked` clamps `pos` to the end of the board, which is where
-        // a copy from the last slot goes anyway.
-        let at = pos.min(self.ms.len() - 1);
+        };
         self.ms[at].taken = damage;
         true
     }
@@ -2384,8 +2387,8 @@ impl<'a> Side<'a> {
         while !self.ms.is_full() && !self.reanimate.is_empty() {
             let (slot, m, damage) = self.reanimate.remove(0);
             let at = slot.min(self.ms.len());
-            if self.summon_baked(db, side, at, m, uid, rng, w) {
-                self.ms[at].taken = damage;
+            if let Some(idx) = self.summon_baked(db, side, at, m, uid, rng, w) {
+                self.ms[idx].taken = damage;
                 changed = true;
             }
         }
@@ -2402,8 +2405,8 @@ impl<'a> Side<'a> {
                 m.health = health;
                 m.keywords = keywords;
                 let at = self.ms.len();
-                if self.summon_baked(db, side, at, m, uid, rng, w) {
-                    let u = self.ms[at].uid;
+                if let Some(idx) = self.summon_baked(db, side, at, m, uid, rng, w) {
+                    let u = self.ms[idx].uid;
                     let _ = self.immediate.try_push(u);
                     changed = true;
                 }
@@ -2418,7 +2421,7 @@ impl<'a> Side<'a> {
             && let Some((slot, m)) = self.secret_wait
         {
             let at = slot.min(self.ms.len());
-            if self.summon(db, side, at, m, uid, rng, w) {
+            if self.summon(db, side, at, m, uid, rng, w).is_some() {
                 self.secret_wait = None;
                 self.fire_secret(crate::secrets::REDEMPTION);
                 changed = true;
@@ -2446,7 +2449,7 @@ impl<'a> Side<'a> {
                 m.attack = m.attack.saturating_add(bonus);
                 m.health = m.health.saturating_add(bonus);
                 let at = self.ms.len();
-                if self.summon(db, side, at, m, uid, rng, w) {
+                if self.summon(db, side, at, m, uid, rng, w).is_some() {
                     changed = true;
                 }
             }
@@ -2700,8 +2703,8 @@ impl<'a> Side<'a> {
                     (count, golden)
                 };
                 for _ in 0..n {
-                    if self.summon(db, fx.side, *at, db.make(card, g), uid, rng, w) {
-                        *at += 1;
+                    if let Some(idx) = self.summon(db, fx.side, *at, db.make(card, g), uid, rng, w) {
+                        *at = idx + 1;
                     }
                 }
                 for i in 0..self.ms.len() {
@@ -2715,13 +2718,13 @@ impl<'a> Side<'a> {
                     .take((count as i32 * mul) as usize).copied().collect();
                 for dead in dead {
                     let (attack, health) = (dead.attack, dead.health);
-                    if !self.summon(db, fx.side, *at, dead, uid, rng, w) {
+                    let Some(idx) = self.summon(db, fx.side, *at, dead, uid, rng, w) else {
                         break;
-                    }
-                    self.ms[*at].m.attack = attack;
-                    self.ms[*at].m.health = health;
-                    self.ms[*at].taken = 0;
-                    *at += 1;
+                    };
+                    self.ms[idx].m.attack = attack;
+                    self.ms[idx].m.health = health;
+                    self.ms[idx].taken = 0;
+                    *at = idx + 1;
                 }
             }
             Effect::Summon { card, count, golden_doubles_count } => {
@@ -2732,8 +2735,8 @@ impl<'a> Side<'a> {
                 };
                 for _ in 0..n {
                     let m = db.make(card, g);
-                    if self.summon(db, fx.side, *at, m, uid, rng, w) {
-                        *at += 1;
+                    if let Some(idx) = self.summon(db, fx.side, *at, m, uid, rng, w) {
+                        *at = idx + 1;
                     }
                 }
             }
@@ -2836,8 +2839,8 @@ impl<'a> Side<'a> {
                 for _ in 0..count as i32 * mul {
                     let Some(c) = db.random_deathrattle_minion(self.counters.tier, self.counters.lobby, rng) else { break };
                     let m = db.make(c, false);
-                    if self.summon(db, fx.side, *at, m, uid, rng, w) {
-                        *at += 1;
+                    if let Some(idx) = self.summon(db, fx.side, *at, m, uid, rng, w) {
+                        *at = idx + 1;
                     }
                 }
             }
@@ -3150,10 +3153,10 @@ impl<'a> Side<'a> {
             }
             Effect::SummonAttacker { card } => {
                 let m = db.make(card, golden);
-                if self.summon(db, fx.side, *at, m, uid, rng, w) {
+                if let Some(idx) = self.summon(db, fx.side, *at, m, uid, rng, w) {
                     let new = *uid - 1;
                     let _ = self.immediate.try_push(new);
-                    *at += 1;
+                    *at = idx + 1;
                 }
             }
             Effect::GetPlainCopy => {
@@ -3178,12 +3181,12 @@ impl<'a> Side<'a> {
             Effect::SummonHeld => {
                 while let Some(&c) = self.held.first() {
                     let m = db.make(c, false);
-                    if !self.summon(db, fx.side, *at, m, uid, rng, w) {
+                    let Some(idx) = self.summon(db, fx.side, *at, m, uid, rng, w) else {
                         break;
-                    }
+                    };
                     self.held.remove(0);
                     self.out.remove_card(c);
-                    *at += 1;
+                    *at = idx + 1;
                 }
             }
             Effect::DestroyLeftNeighbor => {
@@ -3300,8 +3303,8 @@ impl<'a> Side<'a> {
                 let mut m = db.make(card, false);
                 m.attack = self.ms[hi].m.attack.saturating_mul(mul);
                 m.health = self.ms[hi].m.health.saturating_mul(mul);
-                if self.summon(db, fx.side, *at, m, uid, rng, w) {
-                    *at += 1;
+                if let Some(idx) = self.summon(db, fx.side, *at, m, uid, rng, w) {
+                    *at = idx + 1;
                 }
             }
             // Parsing keeps every other effect out of fights.
@@ -3362,8 +3365,8 @@ impl<'a> Side<'a> {
                         };
                         for _ in 0..n {
                             let m = db.make(tok, tok_golden);
-                            if self.summon(db, side, pos, m, uid, rng, w) {
-                                pos += 1;
+                            if let Some(idx) = self.summon(db, side, pos, m, uid, rng, w) {
+                                pos = idx + 1;
                             }
                         }
                         // Turquoise Skitterer summons its Beetle first, then
@@ -3395,8 +3398,8 @@ impl<'a> Side<'a> {
                         let mut overflow = 0u8;
                         for _ in 0..n {
                             let m = db.make(tok, tok_golden);
-                            if self.summon(db, side, pos, m, uid, rng, w) {
-                                pos += 1;
+                            if let Some(idx) = self.summon(db, side, pos, m, uid, rng, w) {
+                                pos = idx + 1;
                             } else {
                                 overflow += 1;
                             }
@@ -3409,8 +3412,8 @@ impl<'a> Side<'a> {
                         let n = dead.attack.max(0) as usize;
                         for _ in 0..n {
                             let m = db.make(tok, golden);
-                            if self.summon(db, side, pos, m, uid, rng, w) {
-                                pos += 1;
+                            if let Some(idx) = self.summon(db, side, pos, m, uid, rng, w) {
+                                pos = idx + 1;
                             }
                         }
                     }
@@ -3450,8 +3453,8 @@ impl<'a> Side<'a> {
                         // before the killing blow (the owner's reference
                         // engine reads the same).
                         m.health = dead_max.max(1) * mul;
-                        if self.summon(db, side, pos, m, uid, rng, w) {
-                            pos += 1;
+                        if let Some(idx) = self.summon(db, side, pos, m, uid, rng, w) {
+                            pos = idx + 1;
                         }
                     }
                     Deathrattle::GiveOwnAttack => {
@@ -3505,8 +3508,8 @@ impl<'a> Side<'a> {
                     GrantedDr::Summon { card: tok, count } => {
                         for _ in 0..count {
                             let m = db.make(tok, false);
-                            if self.summon(db, side, pos, m, uid, rng, w) {
-                                pos += 1;
+                            if let Some(idx) = self.summon(db, side, pos, m, uid, rng, w) {
+                                pos = idx + 1;
                             }
                         }
                     }
@@ -3584,8 +3587,8 @@ impl<'a> Side<'a> {
             m.attack += bonus;
             m.health += bonus;
             let at = self.ms.len();
-            if self.summon(db, side, at, m, uid, rng, w) && at < self.ms.len() {
-                let u = self.ms[at].uid;
+            if let Some(idx) = self.summon(db, side, at, m, uid, rng, w) {
+                let u = self.ms[idx].uid;
                 let _ = self.immediate.try_push(u);
             }
             self.out.broodmother_gain = self.out.broodmother_gain.saturating_add(1);
@@ -3647,9 +3650,9 @@ impl<'a> Side<'a> {
         god.attack = deity.attack;
         god.health = deity.health.max(1);
         let at = self.ms.len();
-        if !self.summon(db, side, at, god, uid, rng, w) {
+        let Some(at) = self.summon(db, side, at, god, uid, rng, w) else {
             return;
-        }
+        };
         self.deity_awakened = true;
         let god = self.ms[at].m;
         self.trinket_hook(db, side, When::Awaken, Some((self.ms[at].uid, god)), uid, rng, w);
@@ -3722,7 +3725,7 @@ impl<'a> Side<'a> {
         let mut changed = false;
         for (slot, m) in held {
             let at = slot.min(self.ms.len());
-            if self.summon_baked(db, side, at, m, uid, rng, w) {
+            if self.summon_baked(db, side, at, m, uid, rng, w).is_some() {
                 changed = true;
             }
         }
@@ -3868,13 +3871,13 @@ impl<'a> Side<'a> {
             self.no_summon_hooks = true;
             let reborn = self.summon(db, side, i, m, uid, rng, w);
             self.no_summon_hooks = false;
-            if reborn {
-                self.ms[i].taken = (full - 1).max(0);
-                self.note_reborn(db, i, fm.start_slot);
-                let plain = self.ms[i].m;
-                let u = self.ms[i].uid;
+            if let Some(at) = reborn {
+                self.ms[at].taken = (full - 1).max(0);
+                self.note_reborn(db, at, fm.start_slot);
+                let plain = self.ms[at].m;
+                let u = self.ms[at].uid;
                 self.trinket_hook(db, side, When::Reborn, Some((u, plain)), uid, rng, w);
-                i += 1;
+                i = at + 1;
                 added += 1;
             }
         }
@@ -4149,7 +4152,7 @@ fn run_start_of_combat(
                 sides[s].out.push_card(c);
                 let m = db.make(c, false);
                 let at = sides[s].ms.len();
-                sides[s].summon(db, s, at, m, uid, rng, w);
+                let _ = sides[s].summon(db, s, at, m, uid, rng, w);
             }
         }
         let kw = sides[s].counters.soc_leftmost;
@@ -4307,7 +4310,7 @@ fn run_start_of_combat(
             m.attack = m.attack.saturating_mul(mul);
             m.health = m.health.saturating_mul(mul);
             let at = sides[s].ms.len();
-            sides[s].summon_baked(db, s, at, m, uid, rng, w);
+            let _ = sides[s].summon_baked(db, s, at, m, uid, rng, w);
         }
     }
     for s in 0..2 {
@@ -4613,7 +4616,7 @@ fn run_start_of_combat(
                     let mut m = sides[turn].ms[mi].m;
                     // A summoned copy is generated: no pool copies travel.
                     m.pool_copies = 0;
-                    sides[turn].summon(db, turn, mi + 1, m, uid, rng, w);
+                    let _ = sides[turn].summon(db, turn, mi + 1, m, uid, rng, w);
                 }
                 None => {}
             }
@@ -4824,10 +4827,10 @@ fn attack_triggers(
                         golem.attack = a.saturating_mul(k);
                         golem.health = h.saturating_mul(k);
                         let at = hi + 1;
-                        if sides[turn].summon(db, turn, at, golem, uid, rng, w)
+                        if let Some(idx) = sides[turn].summon(db, turn, at, golem, uid, rng, w)
                             && let Some(&t) = target.as_ref()
                         {
-                            let golem_uid = sides[turn].ms[at].uid;
+                            let golem_uid = sides[turn].ms[idx].uid;
                             attack_swings_at(sides, turn, golem_uid, Some(t), db, uid, rng, w);
                         }
                     }
@@ -5610,6 +5613,70 @@ mod tests {
     }
 
     #[test]
+    fn a_summon_after_a_dead_minion_left_of_it_lands_in_the_shifted_slot() {
+        // Hearthstone_2026_11_08_03_26_06-g3 turn 12, the fight
+        // `bgbench fightcheck` panicked on: Deathstrider fired Y'Shaarj's
+        // Deathrattle a second time on a full board while the dead Bigwig
+        // Bandit was still the left-most minion. Trimming to that state, the
+        // first dead Aberration takes the slot left of where the second
+        // call names, and the second is lost (one fitted, as the log shows).
+        let db = db();
+        let (mut s, mut uid) = side(
+            &db,
+            &[
+                "Bigwig Bandit",
+                "Deathstrider",
+                "Titus Rivendare",
+                "Titus Rivendare",
+                "Y'Shaarj",
+                "Faceless Converter",
+                "Faceless Converter",
+            ],
+        );
+        s.ms[0].m.health = 0;
+        let mut first = db.make(db.by_name("Faceless Converter").unwrap(), false);
+        first.attack = 18;
+        first.health = 14;
+        let mut second = db.make(db.by_name("Gatekeeper Amalgam").unwrap(), false);
+        second.attack = 188;
+        second.health = 164;
+        s.dead_aberrations.push(first);
+        s.dead_aberrations.push(second);
+        let host = s.ms[4].uid;
+        let fx = Fx { side: 0, host, killer: None, attacker: None };
+        let mut at = s.ms.len();
+        let mut rng = Rng::new(1);
+        s.run_effect(
+            &db,
+            Effect::SummonDeadAberrations { count: 2 },
+            false,
+            fx,
+            &mut at,
+            &mut uid,
+            &mut rng,
+            &mut (),
+        );
+        // Removing the dead Bigwig shifts the insertion from 7 to 6, which
+        // is the slot the first Aberration must carry its stats into.
+        assert_eq!(
+            names(&db, &s),
+            [
+                "Deathstrider",
+                "Titus Rivendare",
+                "Titus Rivendare",
+                "Y'Shaarj",
+                "Faceless Converter",
+                "Faceless Converter",
+                "Faceless Converter",
+            ]
+        );
+        assert_eq!((s.ms[6].m.attack, s.ms[6].m.health), (18, 14));
+        assert_eq!(s.ms[6].taken, 0);
+        // The board is full again: the second dead Aberration is lost.
+        assert!(s.ms.iter().all(|f| db.get(f.m.card).name != "Gatekeeper Amalgam"));
+    }
+
+    #[test]
     fn golden_deathrattle_summons_golden_tokens() {
         let db = db();
         let mut uid = 0;
@@ -5656,7 +5723,7 @@ mod tests {
 
         // a second Lobster, made plain, now gives +4/+2
         let lobster = db.make(db.by_name("Tasty Lobster").unwrap(), false);
-        s.summon(&db, 0, 0, lobster, &mut uid, &mut rng, &mut ());
+        let _ = s.summon(&db, 0, 0, lobster, &mut uid, &mut rng, &mut ());
         assert_eq!((s.ms[0].m.attack, s.ms[0].m.health), (2, 1));
         s.ms[0].m.health = 0;
         s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
@@ -5738,7 +5805,7 @@ mod tests {
         assert!(!has_taunt(&db, &deflector(&s)));
         for k in 1..=3 {
             let m = db.make(db.by_name("Microbot").unwrap(), false);
-            s.summon(&db, 0, 1, m, &mut uid, &mut rng, &mut ());
+            let _ = s.summon(&db, 0, 1, m, &mut uid, &mut rng, &mut ());
             s.ms[1].m.health = 0;
             s.resolve(&db, 0, &mut uid, &mut rng, &mut ());
             assert_eq!(deflector(&s).keywords.has(Keywords::DIVINE_SHIELD), k == 3, "after death {}", k + 3);
@@ -6143,7 +6210,7 @@ mod tests {
         let mut rng = Rng::new(1);
         s.ptr = 2; // Deadly Spore is next
         let m = db.make(db.by_name("Foraging Bat").unwrap(), false);
-        assert!(s.summon(&db, 0, 0, m, &mut uid, &mut rng, &mut ()));
+        assert!(s.summon(&db, 0, 0, m, &mut uid, &mut rng, &mut ()).is_some());
         assert_eq!(db.get(s.ms[s.next_attacker().unwrap()].m.card).name, "Deadly Spore");
     }
 
