@@ -1194,10 +1194,13 @@ fn play_lullabot_on_hand0(g: &mut Game, pos: u8) {
 }
 
 #[test]
-fn kodo_reborn_counts_as_damaged_not_as_max_one() {
+fn kodo_reborn_waits_for_the_deathrattle_batch() {
     let db = db();
-    // A Reborn Kodo with 1 Health dies to Boom and comes back with 1 Health
-    // but a maximum of 30: the Beetle a Vermin leaves gets double that.
+    // A Reborn Kodo with 1 Health dies to Boom in the same batch as the
+    // Vermin. The whole batch's Reborns run after its Deathrattles, so the
+    // Vermin's Beetle arrives before the Reborn Kodo and gets only its own
+    // 2/2. (A Kodo already on the board still gives its double stats:
+    // kodo_gives_summons_its_attack_and_maximum_health.)
     let mut kodo = mk(&db, "Stalwart Kodo", false);
     kodo.health = 1;
     kodo.keywords.set(Keywords::REBORN);
@@ -1206,7 +1209,20 @@ fn kodo_reborn_counts_as_damaged_not_as_max_one() {
     let board = [kodo, mk(&db, "Boom-in-a-Box", false), vermin];
     let (_, log) = run(&db, &board, &walls(&db, 4), 1, 1);
     assert_eq!(log.deaths(0, "Stalwart Kodo"), 1);
-    assert_eq!(log.summons(0, "Beetle"), vec![(2 + 30, 2 + 60)]);
+    assert_eq!(log.summons(0, "Beetle"), vec![(2, 2)]);
+    let order: Vec<String> = log
+        .ev
+        .iter()
+        .filter_map(|e| match e {
+            Ev::Summon(0, name, _, _)
+                if name == "Beetle" || name == "Stalwart Kodo" =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(order, ["Beetle", "Stalwart Kodo"], "the Reborn is after the Deathrattle");
 
     // A Reborn minion that Kodo gives stats to is a recipient like any other.
     let mut board = kodo_board(&db, false, 1);

@@ -682,10 +682,15 @@ struct Side<'a> {
     /// they stood in, exactly as they were then. They come back when this
     /// side's last minion dies.
     fermenter: ArrayVec<(usize, Minion), 3>,
-    /// Dead minions taken out of `ms` so a summon could use their board slot
-    /// before the deaths were handled, with the slot each stood in. `resolve`
-    /// still runs their Deathrattles and Reborn.
-    held_dead: ArrayVec<(usize, Fm), BOARD>,
+    /// Dead minions waiting for their Deathrattle and Avenge, in the order
+    /// they died: the ones a summon took out of `ms` before the deaths were
+    /// handled, then each `DEATHS` batch's dead, left to right. Each holds
+    /// the slot its summons go in.
+    held_dead: ArrayVec<(usize, Fm), FISH_DR>,
+    /// Dead minions whose Deathrattle and Avenge have run, waiting for the
+    /// batch's Reborn and Redemption, in death order. Each holds its current
+    /// slot, which later summons shift right.
+    reborn_dead: ArrayVec<(usize, Fm), FISH_DR>,
     /// Minions Rapid Reanimation destroyed at Start of Combat, with the slot
     /// they stood in, waiting for a board slot.
     /// The minions Rapid Reanimation destroyed at Start of Combat, with the
@@ -788,6 +793,7 @@ impl<'a> Side<'a> {
             gained_dr: ArrayVec::new(),
             fermenter: ArrayVec::new(),
             held_dead: ArrayVec::new(),
+            reborn_dead: ArrayVec::new(),
             reanimate: ArrayVec::new(),
             self_destroyed: ArrayVec::new(),
             first_killed_by_enemy: None,
@@ -1505,6 +1511,18 @@ impl<'a> Side<'a> {
         if i < self.ptr {
             self.ptr -= 1;
         }
+        // A pending death's slot counts from the left of the current board,
+        // so a minion removed left of it pulls it one slot left.
+        for (slot, _) in &mut self.held_dead {
+            if *slot > i {
+                *slot -= 1;
+            }
+        }
+        for (slot, _) in &mut self.reborn_dead {
+            if *slot > i {
+                *slot -= 1;
+            }
+        }
         self.ms.remove(i)
     }
 
@@ -1544,6 +1562,18 @@ impl<'a> Side<'a> {
     fn insert(&mut self, i: usize, f: Fm) -> bool {
         if self.ms.is_full() {
             return false;
+        }
+        // A pending death summons at its stored slot. A minion inserted at
+        // or left of that slot pushes the slot one right.
+        for (slot, _) in &mut self.held_dead {
+            if *slot >= i {
+                *slot += 1;
+            }
+        }
+        for (slot, _) in &mut self.reborn_dead {
+            if *slot >= i {
+                *slot += 1;
+            }
         }
         self.ms.insert(i, f);
         if i < self.ptr {
@@ -3770,9 +3800,81 @@ impl<'a> Side<'a> {
         self.ms.iter().all(|f| f.m.health <= 0)
     }
 
-    /// Remove the dead in board order. Each one's Deathrattle runs, then
-    /// Avenge counts it, then its Reborn, before the next dead minion is
-    /// looked at.
+    /// Take every dead minion off the board, left to right, putting it after
+    /// the deaths a summon already set aside in `held_dead`. Nothing runs
+    /// yet: the whole `DEATHS` batch comes off first.
+    fn collect_dead(&mut self) -> bool {
+        let mut changed = false;
+        let mut i = 0;
+        while i < self.ms.len() {
+            if self.ms[i].m.health > 0 {
+                i += 1;
+                continue;
+            }
+            let fm = self.remove(i);
+            let _ = self.held_dead.try_push((i, fm));
+            changed = true;
+        }
+        changed
+    }
+
+    /// Run every dead minion's Deathrattle, then its Avenge tick, in death
+    /// order. Its Reborn waits in `reborn_dead` for the whole batch.
+    fn resolve_death_effects(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) -> bool {
+        let mut changed = false;
+        while !self.held_dead.is_empty() {
+            let (i, fm) = self.held_dead.remove(0);
+            let i = i.min(self.ms.len());
+            // Queue the Reborn before the Deathrattle runs: every summon it
+            // makes at `i` pushes the Reborn's slot right, so it lands at the
+            // right end of the dead minion's own tokens.
+            let _ = self.reborn_dead.try_push((i, fm));
+            self.resolve_dead(db, side, i, fm, uid, rng, w);
+            changed = true;
+        }
+        changed
+    }
+
+    /// Run every dead minion's Reborn copy, then its Redemption, in death
+    /// order. This is the whole batch's Reborn phase: it comes after every
+    /// Deathrattle and Avenge above.
+    fn resolve_reborns(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) -> bool {
+        let mut changed = false;
+        while !self.reborn_dead.is_empty() {
+            let (i, fm) = self.reborn_dead.remove(0);
+            let dead = fm.m;
+            let i = i.min(self.ms.len());
+            let at = self.summon_reborn(db, side, i, fm, uid, rng, w);
+            changed |= at.is_some();
+            // Redemption's place against Reborn is not settled by Era's
+            // logs, so it stays where it was: after this minion's Reborn
+            // (docs/rules/heroes.md "Secrets").
+            if !self.secrets.is_empty() {
+                let next = at.map_or(i, |at| at + 1);
+                self.redemption(db, side, &dead, next, uid, rng, w);
+            }
+        }
+        changed
+    }
+
+    /// Remove the dead, run their Deathrattles and Avenge, then their
+    /// Reborns. A Deathrattle that kills starts another round before the
+    /// Reborn phase. Used when only one side's deaths are resolved (a shop
+    /// destroy, a triggered Deathrattle).
     fn resolve(
         &mut self,
         db: &CardDb,
@@ -3782,60 +3884,45 @@ impl<'a> Side<'a> {
         w: &mut impl Watch,
     ) -> bool {
         let mut changed = false;
-        // Soul Fermenter sees the empty board before Deathrattles fill it,
-        // so its three come back first (docs/rules/trinkets.md).
-        if self.all_dead() {
-            changed |= self.resummon_fermenter(db, side, uid, rng, w);
-        }
-        // Dead minions that a summon took out of `ms` go first, where they
-        // stood, so their Deathrattles and Reborn still happen.
-        while !self.held_dead.is_empty() {
-            let (i, fm) = self.held_dead.remove(0);
-            changed = true;
-            let i = i.min(self.ms.len());
-            self.resolve_dead(db, side, i, fm, uid, rng, w);
-        }
-        let mut i = 0;
-        while i < self.ms.len() {
-            if self.ms[i].m.health > 0 {
-                i += 1;
+        loop {
+            // Soul Fermenter sees the empty board before Deathrattles fill
+            // it, so its three come back first (docs/rules/trinkets.md).
+            let all_dead = self.all_dead();
+            changed |= self.collect_dead();
+            if all_dead && self.resummon_fermenter(db, side, uid, rng, w) {
+                changed = true;
+            }
+            if !self.held_dead.is_empty() {
+                changed |= self.resolve_death_effects(db, side, uid, rng, w);
+            }
+            // A Deathrattle may have killed more: those Deathrattles run
+            // before any Reborn of this batch.
+            if self.ms.iter().any(|f| f.m.health <= 0) || !self.held_dead.is_empty() {
                 continue;
             }
-            // A Deathrattle in this batch may have killed the last living
-            // minion: bring the three back before its own Deathrattle runs.
-            let dead_uid = self.ms[i].uid;
-            if self.all_dead() {
-                changed |= self.resummon_fermenter(db, side, uid, rng, w);
-            }
-            let Some(j) = self.ms.iter().position(|f| f.uid == dead_uid) else {
-                // The resummon pushed it into `held_dead`; the next pass
-                // through `resolve` handles it.
-                continue;
-            };
-            i = j;
-            changed = true;
-            let fm = self.remove(i);
-            i += self.resolve_dead(db, side, i, fm, uid, rng, w);
+            break;
         }
+        changed |= self.resolve_reborns(db, side, uid, rng, w);
         if self.spawn_when_space(db, side, uid, rng, w) {
             changed = true;
         }
         changed
     }
 
-    /// Handle one dead minion at slot `i`: its Deathrattle, Avenge, Reborn
-    /// and Redemption. Returns how many minions this inserted at `i`.
+    /// Handle one dead minion at slot `i`: its Deathrattle, then its Avenge
+    /// tick. Reborn and Redemption are not here: they run after the whole
+    /// batch, in `resolve_reborns`.
     #[allow(clippy::too_many_arguments)]
     fn resolve_dead(
         &mut self,
         db: &CardDb,
         side: usize,
-        mut i: usize,
+        i: usize,
         fm: Fm,
         uid: &mut u16,
         rng: &mut Rng,
         w: &mut impl Watch,
-    ) -> usize {
+    ) {
         let dead = fm.m;
         w.death(side, i, &dead);
         self.out.note_dead_card(dead.card);
@@ -3860,7 +3947,6 @@ impl<'a> Side<'a> {
         self.last_dead = Some(dead);
         self.dead_at = i;
         self.trinket_hook(db, side, When::Death, Some((fm.uid, dead)), uid, rng, w);
-        self.trinket_hook(db, side, When::Avenge, Some((fm.uid, dead)), uid, rng, w);
         if db.get(dead.card).buff_per_kind_death.is_some() {
             self.note_knight_death(db);
         }
@@ -3870,57 +3956,68 @@ impl<'a> Side<'a> {
         self.gain_deathrattles(db, fm.uid, &dead);
         let runs = self.deathrattle_fires(db, &dead, fm.uid);
         let dead_max = dead.health + fm.taken;
-        let mut added = self.fire_deathrattles(
+        self.fire_deathrattles(
             db, side, &dead, dead_max, fm.uid, fm.killer, i, runs, uid, rng, w,
         );
-        i += added;
         self.note_deity_death(db, side, fm, uid, rng, w);
+        // A trinket's Avenge is Avenge: it counts this death after the
+        // minion's Deathrattle, as a minion's Avenge does (Power.log
+        // 2026_11_14_00_45_13:479005,479052,479231,479288).
+        self.trinket_hook(db, side, When::Avenge, Some((fm.uid, dead)), uid, rng, w);
         if self.count_avenge {
             self.avenge_tick(db, side, uid, rng, w);
             self.broodmother_tick(db, side, uid, rng, w);
         }
-        if dead.keywords.has(Keywords::REBORN) {
-            let mut m = db.make(dead.card, dead.golden);
-            // It counts as damaged down to 1 Health, so its maximum
-            // Health is the full value (Stalwart Kodo reads it).
-            let full = m.health;
-            m.health = 1;
-            m.keywords.clear(Keywords::REBORN);
-            // Dark Gifts Persisting Horror: it comes back with full
-            // stats and its Bonus Keywords, and with the gifts it had.
-            if dead.has_gift(db, |c| c.reborn_full) {
-                m.attack = dead.attack;
-                m.health = dead.health.max(1);
-                // Reborn itself is spent: the copy does not come back
-                // a second time.
-                let bonus = self.counters.bonus_keywords & !Keywords::REBORN;
-                m.keywords.0 |= dead.keywords.0 & bonus;
-                for &g in dead.gift_slice() {
-                    m.push_gift(g);
-                }
-                m.shield_hits = dead.shield_hits;
-            }
-            self.no_summon_hooks = true;
-            let reborn = self.summon(db, side, i, m, uid, rng, w);
-            self.no_summon_hooks = false;
-            if let Some(at) = reborn {
-                self.ms[at].taken = (full - 1).max(0);
-                self.note_reborn(db, at, fm.start_slot);
-                let plain = self.ms[at].m;
-                let u = self.ms[at].uid;
-                self.trinket_hook(db, side, When::Reborn, Some((u, plain)), uid, rng, w);
-                i = at + 1;
-                added += 1;
-            }
+    }
+
+    /// Summon the Reborn copy of the minion that died at `i`, with the full
+    /// Health it had, and run its Reborn triggers. Returns the slot it landed
+    /// in, or None when the minion had no Reborn or there was no room.
+    #[allow(clippy::too_many_arguments)]
+    fn summon_reborn(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        i: usize,
+        fm: Fm,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) -> Option<usize> {
+        let dead = fm.m;
+        if !dead.keywords.has(Keywords::REBORN) {
+            return None;
         }
-        // Redemption: a friendly minion died, so a fresh copy with 1
-        // Health comes back where it stood. It comes after this minion's
-        // own Deathrattles and its Reborn, so a board they filled makes
-        // it wait for room (docs/rules/heroes.md "Secrets").
-        if !self.secrets.is_empty() {
-            self.redemption(db, side, &dead, i, uid, rng, w);
+        let mut m = db.make(dead.card, dead.golden);
+        // It counts as damaged down to 1 Health, so its maximum
+        // Health is the full value (Stalwart Kodo reads it).
+        let full = m.health;
+        m.health = 1;
+        m.keywords.clear(Keywords::REBORN);
+        // Dark Gifts Persisting Horror: it comes back with full
+        // stats and its Bonus Keywords, and with the gifts it had.
+        if dead.has_gift(db, |c| c.reborn_full) {
+            m.attack = dead.attack;
+            m.health = dead.health.max(1);
+            // Reborn itself is spent: the copy does not come back
+            // a second time.
+            let bonus = self.counters.bonus_keywords & !Keywords::REBORN;
+            m.keywords.0 |= dead.keywords.0 & bonus;
+            for &g in dead.gift_slice() {
+                m.push_gift(g);
+            }
+            m.shield_hits = dead.shield_hits;
         }
-        added
+        self.no_summon_hooks = true;
+        let reborn = self.summon(db, side, i, m, uid, rng, w);
+        self.no_summon_hooks = false;
+        let at = reborn?;
+        self.ms[at].taken = (full - 1).max(0);
+        self.note_reborn(db, at, fm.start_slot);
+        let plain = self.ms[at].m;
+        let u = self.ms[at].uid;
+        self.trinket_hook(db, side, When::Reborn, Some((u, plain)), uid, rng, w);
+        Some(at)
     }
 }
 
@@ -4072,19 +4169,73 @@ fn resolve_deaths(
     rng: &mut Rng,
     w: &mut impl Watch,
 ) {
+    // One side goes first for the whole batch, Deathrattles through Reborns.
+    // Era's logs show the attacker first in 103 of 209 both-side batches and
+    // the defender in 106, so this is a coin flip, not attacker-first
+    // (Power.log 2026_11_14_00_45_13:161694, 790533, 1298888, 1749297).
+    // A call with nothing to resolve draws no coin.
+    let has_dead = sides.iter().any(|side| {
+        !side.held_dead.is_empty()
+            || !side.reborn_dead.is_empty()
+            || !side.killer_destroy.is_empty()
+            || side.ms.iter().any(|f| f.m.health <= 0)
+            || (!side.fermenter.is_empty() && side.all_dead())
+    });
+    let first = if has_dead && !rng.coin() { first_side ^ 1 } else { first_side };
     loop {
-        let (att, def) = pair(sides, first_side);
-        let c1 = att.resolve(db, first_side, uid, rng, w);
-        let c2 = def.resolve(db, first_side ^ 1, uid, rng, w);
-        give_killer_buffs(sides, db);
-        let c3 = apply_killer_destroys(sides);
-        if !(c1 || c2 || c3) {
+        // Remove the whole batch, both sides, before any effect runs. Then
+        // each dead minion, left to right, runs its Deathrattle and Avenge.
+        // A Deathrattle that kills starts another removal round, still
+        // before this batch's Reborns.
+        loop {
+            let (a, b) = pair(sides, first);
+            let all_a = a.all_dead();
+            let all_b = b.all_dead();
+            let had_a = a.collect_dead();
+            let had_b = b.collect_dead();
+            let mut any = had_a
+                || had_b
+                || !a.held_dead.is_empty()
+                || !b.held_dead.is_empty()
+                || !a.killer_destroy.is_empty()
+                || !b.killer_destroy.is_empty();
+            // Soul Fermenter sees the empty board before Deathrattles fill
+            // it, so its three come back first (docs/rules/trinkets.md).
+            if all_a && a.resummon_fermenter(db, first, uid, rng, w) {
+                any = true;
+            }
+            if all_b && b.resummon_fermenter(db, first ^ 1, uid, rng, w) {
+                any = true;
+            }
+            if !any {
+                break;
+            }
+            a.resolve_death_effects(db, first, uid, rng, w);
+            b.resolve_death_effects(db, first ^ 1, uid, rng, w);
+            give_killer_buffs(sides, db);
+            apply_killer_destroys(sides);
+        }
+        // All Reborns run after every Deathrattle and Avenge of the batch,
+        // in the same death order. Redemption stays after its minion's
+        // Reborn.
+        let (a, b) = pair(sides, first);
+        a.resolve_reborns(db, first, uid, rng, w);
+        b.resolve_reborns(db, first ^ 1, uid, rng, w);
+        // Whatever waits for a board slot goes after the batch. If a Reborn
+        // or a summon killed something, resolve that too.
+        a.spawn_when_space(db, first, uid, rng, w);
+        b.spawn_when_space(db, first ^ 1, uid, rng, w);
+        if !sides.iter().any(|side| {
+            !side.held_dead.is_empty()
+                || !side.reborn_dead.is_empty()
+                || side.ms.iter().any(|f| f.m.health <= 0)
+        }) {
             break;
         }
     }
-    let (att, def) = pair(sides, first_side);
-    att.spawn_boon_of_beetles(db, first_side, uid, rng, w);
-    def.spawn_boon_of_beetles(db, first_side ^ 1, uid, rng, w);
+    let (att, def) = pair(sides, first);
+    att.spawn_boon_of_beetles(db, first, uid, rng, w);
+    def.spawn_boon_of_beetles(db, first ^ 1, uid, rng, w);
     for s in 0..2 {
         let n = sides[s].take_first_killed_left;
         if n > 0
@@ -5537,6 +5688,144 @@ mod tests {
 
     fn names(db: &CardDb, s: &Side) -> Vec<String> {
         s.ms.iter().map(|f| db.get(f.m.card).name.clone()).collect()
+    }
+
+    /// What a fight did, in order: 0 is a death, 1 a summon.
+    #[derive(Default)]
+    struct DeathOrder {
+        events: Vec<(u8, usize, CardId)>,
+    }
+
+    impl Watch for DeathOrder {
+        fn death(&mut self, side: usize, _pos: usize, m: &Minion) {
+            self.events.push((0, side, m.card));
+        }
+        fn summon(&mut self, side: usize, _pos: usize, m: &Minion) {
+            self.events.push((1, side, m.card));
+        }
+    }
+
+    fn events(db: &CardDb, w: &DeathOrder) -> Vec<String> {
+        w.events
+            .iter()
+            .map(|&(kind, side, card)| {
+                let what = if kind == 0 { "death" } else { "summon" };
+                format!("{what} {side}:{}", db.get(card).name)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn all_reborns_wait_for_every_deathrattle_of_the_batch() {
+        // Q1 cases 1 and 2: the whole batch comes off the board first, then
+        // Scarlet Skull (Reborn) and Harmless Bonehead die together and
+        // Bonehead's two Skeletons land before Scarlet's Reborn, which waits
+        // for the whole batch and comes at the right end of its tokens.
+        let db = db();
+        let (mut s, mut uid) = side(&db, &["Scarlet Skull", "Harmless Bonehead"]);
+        s.ms[0].m.health = 0;
+        s.ms[1].m.health = 0;
+        let mut w = DeathOrder::default();
+        s.resolve(&db, 0, &mut uid, &mut Rng::new(1), &mut w);
+        assert_eq!(
+            events(&db, &w),
+            [
+                "death 0:Scarlet Skull",
+                "death 0:Harmless Bonehead",
+                "summon 0:Skeleton",
+                "summon 0:Skeleton",
+                "summon 0:Scarlet Skull",
+            ]
+        );
+        assert_eq!(names(&db, &s), ["Skeleton", "Skeleton", "Scarlet Skull"]);
+    }
+
+    #[test]
+    fn a_deaths_deathrattle_runs_before_its_avenge_tick() {
+        // Q1 case 3 and Q3: a Deathrattle runs before the Avenge it counts
+        // for, so a completed Avenge can land between two dead minions'
+        // Deathrattles. A trinket's Avenge follows the same order.
+        let db = db();
+        let (mut s, mut uid) = side(&db, &["Harmless Bonehead", "Harmless Bonehead"]);
+        let beetle = db.by_name("Beetle").unwrap();
+        let avenge = FightEntry::new(
+            When::Avenge,
+            FightAct::Summon { card: beetle, count: 1, keywords: 0 },
+        );
+        s.counters.trinkets.push(&avenge, 0, 0);
+        s.ms[0].m.health = 0;
+        s.ms[1].m.health = 0;
+        let mut w = DeathOrder::default();
+        s.resolve(&db, 0, &mut uid, &mut Rng::new(1), &mut w);
+        assert_eq!(
+            events(&db, &w),
+            [
+                "death 0:Harmless Bonehead",
+                "summon 0:Skeleton",
+                "summon 0:Skeleton",
+                "summon 0:Beetle",
+                "death 0:Harmless Bonehead",
+                "summon 0:Skeleton",
+                "summon 0:Skeleton",
+                "summon 0:Beetle",
+            ]
+        );
+    }
+
+    #[test]
+    fn one_coin_flip_orders_the_whole_both_sides_batch() {
+        // Q2: attacker first 103 and defender first 106 in 209 both-side
+        // batches, and the Deathrattle side is the Reborn side 209/209.
+        // Two minions with a Deathrattle and Reborn show both processes.
+        let db = db();
+        let mut saw_first = [false; 2];
+        for seed in 0..32 {
+            let (mut a, _) = side(&db, &["Harmless Bonehead"]);
+            let (mut b, _) = side(&db, &["Harmless Bonehead"]);
+            a.ms[0].m.keywords.set(Keywords::REBORN);
+            b.ms[0].m.keywords.set(Keywords::REBORN);
+            a.ms[0].m.health = 0;
+            b.ms[0].m.health = 0;
+            let mut sides = [a, b];
+            let mut uid = 100;
+            let mut w = DeathOrder::default();
+            resolve_deaths(
+                &mut sides,
+                0,
+                &db,
+                &mut uid,
+                &mut Rng::new(seed),
+                &mut w,
+            );
+            let summons: Vec<_> = w.events.iter().filter(|e| e.0 == 1).collect();
+            let seen = events(&db, &w);
+            assert_eq!(summons.len(), 6, "seed {seed}: {seen:?}");
+            assert_eq!(
+                db.get(summons[0].2).name, "Skeleton",
+                "seed {seed}: first summon is a Deathrattle: {seen:?}"
+            );
+            assert!(
+                summons[..4]
+                    .iter()
+                    .all(|e| db.get(e.2).name == "Skeleton"),
+                "seed {seed}: the Deathrattles run before any Reborn: {seen:?}"
+            );
+            assert!(
+                summons[4..]
+                    .iter()
+                    .all(|e| db.get(e.2).name == "Harmless Bonehead"),
+                "seed {seed}: the Reborns come last: {seen:?}"
+            );
+            assert_eq!(
+                summons[0].1, summons[4].1,
+                "seed {seed}: the whole batch has one side order: {seen:?}"
+            );
+            saw_first[summons[0].1] = true;
+        }
+        assert!(
+            saw_first[0] && saw_first[1],
+            "the coin makes each side first for some seed"
+        );
     }
 
     #[test]

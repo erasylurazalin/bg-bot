@@ -365,6 +365,19 @@ rules behind each are in docs/rules/design.md Part 2.
   495, not 654 (`Hearthstone_2026_11_08_03_26_06` line 763025). With both,
   595 goes to 595 * 3 + 11 = 1796 (`Hearthstone_2026_11_11_02_43_24` line
   326222). `Side::aura_attack_of` lists the aura parts.
+- **A `DEATHS` batch has one order.** `resolve_deaths` picks one side with
+  `rng.coin()` for the whole batch (Era's logs: attacker first 103, defender
+  106 of 209). It takes every dead minion off the board with
+  `Side.collect_dead` first (`Side.held_dead` deaths in front, then the
+  batch's dead left to right). Then each dead minion, in death order, runs
+  its Deathrattle and then its Avenge tick, a trinket's Avenge included.
+  Only after the whole batch runs every Reborn (`Side.reborn_dead`), in the
+  same order, and Redemption for each after its own Reborn. A Reborn lands
+  at the right end of the minions its Deathrattle inserted in its slot. A
+  Deathrattle that kills starts another removal round, still before the
+  batch's Reborns. `Side::resolve` is the same sequence for one side (a shop
+  destroy, a triggered Deathrattle); `spawn_when_space` runs after the
+  Reborn phase.
 - **One pick per type.** `cards::pick_one_per_type` is the pick Misplaced
   Tea Set and The Last One Standing share: one random minion per type, each
   minion at most once.
@@ -748,8 +761,9 @@ build hero-less games so old tests pass unchanged, and
     slot instead and uses `Player::armed_power_effect`, so it counts once per
     press. `PowerState.armed` is cleared at the start of every turn.
   - **Something waits for a board slot.** `Side::spawn_when_space` is the one
-    place that summons what a power holds back, and `Side::resolve` calls it
-    after every death: Rapid Reanimation's queued exact copies (`Side.reanimate`,
+    place that summons what a power holds back, and `resolve_deaths` calls it
+    after the batch's Deathrattles and Reborns (`Side::resolve` does the same
+    for one side's deaths): Rapid Reanimation's queued exact copies (`Side.reanimate`,
     in the slot the minion stood in), Lock and Load's stored minion (summoned
     then pushed on `Side.immediate`, so it attacks at once), Frostwolf
     Fervor's and Stormpike Strength's one copy of the highest Attack or
@@ -842,8 +856,9 @@ Safety Patch gives.
   bonus, an Eternal Knight's deaths, Goldrinn's Beasts, a trinket's "your
   minions have". A Secret that would summon stays in the zone when the board
   is full.
-- **Redemption** runs `Side::redemption` in `Side::resolve` after the dead
-  minion's Deathrattles and its Reborn: `CardDb::make` of its base card, 1
+- **Redemption** runs `Side::redemption` in `Side::resolve_reborns` after the
+  whole batch's Deathrattles and, for its own dead minion, after its Reborn:
+  `CardDb::make` of its base card, 1
   Health, summoned where it stood. With no room the copy waits in
   `Side.secret_wait` and `spawn_when_space` puts it down as soon as a slot
   opens; the Secret is only spent when the copy lands, and a death that comes
@@ -1052,8 +1067,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   Combat or Avenge effect reaches. `cap` is a per-fight use limit, `once`
   fires it once, `grow` adds the trinket's own "improve this" number, and
   `improve` raises that number for good. The hooks are `Side::trinket_hook`
-  at the fight's own points (`run_start_of_combat`, `Side::resolve` for
-  deaths/Avenge/Reborn, `summon_with`, `attack_triggers`, `try_awaken`), and
+  at the fight's own points (`run_start_of_combat`, `resolve_deaths` and
+  `Side::resolve` for deaths/Avenge/Reborn, `summon_with`, `attack_triggers`, `try_awaken`), and
   a side without trinkets answers each of them from one `u8` (the bundle's
   length). A Deathrattle a trinket grants for the fight (Hoggy Bank, Sky
   Golem Portrait) is kept by uid in `Side.granted` and fires with the
@@ -1472,7 +1487,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
 - **The fighter's leftovers (block 4).** `fight = [{ when = "soc", fermenter = 3 }]`
   destroys the left-most minions at Start of Combat and keeps them in
   `Side.fermenter`; their deaths resolve before the next Start of Combat
-  effect, and when the side's last minion dies `Side::resolve` brings them
+  effect, and when the side's last minion dies `resolve_deaths` (or
+  `Side::resolve` for one side) brings them
   back with `summon_baked`, exactly as they were, before their Deathrattles
   run. `gem_golem` summons a token with the Blood
   Gem stats of the minion that just died (`Side.last_dead`, `Side.dead_at`).

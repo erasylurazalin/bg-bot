@@ -969,7 +969,10 @@ fn salvager_victims_own_reborn_runs_and_the_copy_keeps_reborn() {
     rider.attack = 30;
     let salvager = taunt(with_health(mk(&db, "Stitched Salvager", false), 10));
     let enemies = [killer(&db), wall(&db), wall(&db)];
-    let (_, log) = run(&db, &[rider, salvager], &enemies, [Counters::default(); 2], 1, 1);
+    // Both the Reborn rider and the Salvager are taunts, and the death batch
+    // coin flip moves which one the first attack picks. Two attacks kill both
+    // whichever order they are chosen in.
+    let (_, log) = run(&db, &[rider, salvager], &enemies, [Counters::default(); 2], 2, 1);
     let rider_id = id(&db, "Risen Rider");
     let riders: Vec<Minion> =
         summons(&log, 0).into_iter().filter(|(c, _)| *c == rider_id).map(|(_, m)| m).collect();
