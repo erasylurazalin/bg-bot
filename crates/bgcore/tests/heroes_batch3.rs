@@ -1254,23 +1254,24 @@ fn an_exact_copy_takes_the_damage_the_minion_has_taken() {
 #[test]
 fn an_exact_copy_of_a_minion_whose_shield_popped_has_none() {
     let db = cards();
-    // Rapid Reanimation at Start of Combat, after the enemy's Lightning has
-    // already popped the marked minion's Divine Shield (its 3 damage goes on
-    // the shield, so the minion itself is untouched).
-    let mut marked = db.make(db.by_name("Microbot").unwrap(), false);
-    marked.reanimate = true;
-    marked.attack = 4;
-    marked.health = 5;
-    marked.keywords.set(Keywords::DIVINE_SHIELD);
+    // Frostwolf Fervor copies after the enemy's Lightning has already popped
+    // the minion's Divine Shield (its 3 damage goes on the shield, so the
+    // minion itself is untouched). Rapid Reanimation is a pre-combat power
+    // and would copy before Lightning now, so this case uses the power that
+    // still runs after it.
+    let mut mine = db.make(db.by_name("Microbot").unwrap(), false);
+    mine.attack = 4;
+    mine.health = 5;
+    mine.keywords.set(Keywords::DIVINE_SHIELD);
     let mut b = board(&db, &["Microbot"]);
     b[0].attack = 0;
     b[0].health = 300;
     let mut counters = [Counters::default(); 2];
-    counters[0].rapid_reanimation = 1;
+    counters[0].frostwolf_fervor = 1;
     counters[1].soc_lightning = 1;
     counters[1].soc_lightning_damage = 3;
     let mut log = Log::new(&db);
-    fight_with(&db, &[marked], &b, counters, 1, &mut Rng::new(41), &mut log);
+    fight_with(&db, &[mine], &b, counters, 1, &mut Rng::new(41), &mut log);
     let copy = log.summons.iter().find(|s| s.1 == "Microbot").cloned().expect("the copy");
     assert_eq!((copy.2, copy.3), (4, 5), "the shield took the damage, not the minion");
     assert!(!copy.5, "the shield had popped, so the copy has none");

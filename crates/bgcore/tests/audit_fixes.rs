@@ -537,7 +537,9 @@ fn blank(db: &CardDb, attack: i32, health: i32) -> Minion {
 #[test]
 fn sharing_is_caring_gives_the_left_most_the_nearest_enemys_stats_at_start_of_combat() {
     let db = db();
-    let a = [blank(&db, 2, 50), blank(&db, 1, 1)];
+    // Three minions against two: side 0 attacks first whatever the coin
+    // does, so the first side-0 attack is the buffed left-most one.
+    let a = [blank(&db, 2, 50), blank(&db, 1, 1), blank(&db, 0, 1)];
     let b = [blank(&db, 7, 40), blank(&db, 100, 1)];
     let one = Counters { sharing_is_caring: 1, ..Default::default() };
     let mut w = Attacks::default();

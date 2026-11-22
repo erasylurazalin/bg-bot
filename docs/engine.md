@@ -536,10 +536,10 @@ build hero-less games so old tests pass unchanged, and
 - **Passives hook into the existing triggers**: FreeRefreshPerTurn and
   Bananarama in `power_start_of_turn`, GoldAfterUpgrade in `Action::Level`,
   GoldAfterBuyTribe in `Action::Buy`, GoldNextTurnAfterSell in `sell_minion`,
-  and the four Start of Combat effects through `Counters` (`soc_leftmost`,
-  `soc_rightmost`, `soc_double_left`, `soc_earth` with its token card,
-  `soc_lightning`) at the top of `run_start_of_combat`, before any minion's.
-  `Player::counters` reads both held powers, and a power that triggers twice
+  and the Start of Combat effects through `Counters`: `soc_leftmost`,
+  `soc_rightmost`, `soc_double_left` and `soc_earth` with its token card in
+  the pre-combat hero-power phase before Wingmen, and `soc_lightning` in the
+  other hero-power phase after him. `Player::counters` reads both held powers, and a power that triggers twice
   (Valdrakken Wind Chimes, Ancient Wishbone: docs/rules/heroes.md "Start of Combat
   powers that trigger twice") doubles the three counts through
   `Player::tick_power_effect`; the two keyword masks keep the single grant,
@@ -752,9 +752,17 @@ build hero-less games so old tests pass unchanged, and
     fills `wingmen`, `wax_warband`, `all_will_burn`, `phylactery`, `glory_of_combat`,
     `sprout_it_out`, `frostwolf_fervor`, `stormpike_strength`, `tentacular`,
     `broodmother`, `minions_sold` and `count_damage` from the two power slots,
-    and the fight reads them: Wingmen before every other Start of Combat
-    effect (`run_start_of_combat`, a trinket's Boon of Beetles included),
-    then the rest in the hero-power step. `Player::power_effect` skips a power
+    and the fight reads them. `run_start_of_combat` runs Firestone's and
+    Era's log order: trinkets (lesser before greater on a side), then the
+    pre-combat powers (Al'Akir, Wax Warband, ALL Will Burn, Y'Shaarj,
+    Tamsin, Bru'kan's Earth, Fire and Water Invocations, Teron and
+    Tentacular), with
+    deaths and summons-when-space after each, then Wingmen, then the other
+    powers (Lightning Invocation and the rest), then spells with Boon of
+    Beetles last, then Flighty Scout from hand, then the board. Each phase
+    coin-flips which player goes first; Wingmen keeps its own coin. The
+    board phase starts on the first attacker counted after the hand phase,
+    and Wingmen locks the entry first attacker if it fired. `Player::power_effect` skips a power
     that has not unlocked (Frostwolf Fervor's turn 7). A passive power's tick runs
     `tp.power_triggers` times (`Player::tick_power_effect`); a press that
     fights (Embrace Your Rage, I'll Take That!, Rapid Reanimation) arms the
@@ -1059,7 +1067,8 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   into the shared table, built by `Player::counters` (`fight_trinkets`) from
   the three slots in order. `trinkets.toml` holds the vocabulary as data
   (`fight = [{ when = ..., ... }]`): `when` is `soc` (Start of Combat, the
-  trinket step, lesser before greater, before any minion's own), `avenge`
+  trinket phase before the pre-combat hero powers, lesser before greater),
+  `avenge`
   (`every = N` friendly deaths this fight), `summon`, `attack` (once per
   swing), `death`, `reborn` or `awaken` (the Deity). `tribe`/`neutral`/`rally`
   filter the minion a trigger is about; `pick` (`all`, `ends`, `random`,
@@ -2472,8 +2481,9 @@ seeded from the turn's seed (a repeat's).
   engine does not build, and the boards' turn. `missing()`/`complete()` say
   the same before a fight. `built_card_names()` lists what the card data
   builds, for the tracker's coverage report. The first attacker is the
-  engine's rule (more minions first after Start of Combat, a coin flip when
-  even): the tracker cannot pass the log's first attacker.
+  engine's rule (the last board count after Start of Combat, a coin flip
+  when even, or the entry count when Wingmen fired): the tracker cannot pass
+  the log's first attacker.
 - **bg's copy of the engine:** the tracker's venv is Python 3.14 (its GTK
   window needs the system PyGObject), so it needs its own build of bgpy.
   `tools/bg-rebuild.sh [COMMIT]` exports a commit with `git archive`, builds

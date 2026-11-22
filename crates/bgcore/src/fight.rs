@@ -318,6 +318,15 @@ impl FightTrinkets {
         self.n as usize
     }
 
+    /// Whether any of the bundle's Start of Combat effects can still fire.
+    /// Phases without one skip their coin, so a fight with no Start of
+    /// Combat effects keeps its old random stream.
+    pub fn has_soc(&self) -> bool {
+        self.acts[..self.n as usize]
+            .iter()
+            .any(|e| e.when == When::Soc && !e.done && e.uses > 0)
+    }
+
     /// Add one trinket effect, from `slot`, with the slot's own "improve
     /// this" number. Past `FIGHT_ACTS` the act is dropped; the table check in
     /// `check_invariants` keeps that from happening.
@@ -574,6 +583,13 @@ pub trait Watch {
     fn attack(&mut self, _side: usize, _attacker: &Minion, _defender: &Minion) {}
     fn death(&mut self, _side: usize, _pos: usize, _m: &Minion) {}
     fn summon(&mut self, _side: usize, _pos: usize, _m: &Minion) {}
+    /// A board minion's Start of Combat takes its turn. Hero powers, spells
+    /// and the hand have their own observable events (summons and attacks);
+    /// this one exists so a test can tell a board turn from a hand summon.
+    fn start_of_combat(&mut self, _side: usize, _card: CardId) {}
+    /// The fight recounted the first attacker after a Start of Combat effect
+    /// changed a board. It changes no fight behavior; a test reads it.
+    fn recount(&mut self, _attacker: usize) {}
 }
 
 impl Watch for () {}
@@ -703,6 +719,9 @@ struct Side<'a> {
     /// The card of the first minion on this side killed by the enemy side
     /// (for the enemy's I'll Take That!).
     first_killed_by_enemy: Option<CardId>,
+    /// Whether the Start of Combat spell phase has begun. Boon of Beetles
+    /// waits for that phase; a death before it does not arm the spell early.
+    boon_armed: bool,
     /// Friendly deaths counted toward Broodmother's Avenge (4).
     broodmother_avenge: u16,
     frostwolf_left: u8,
@@ -797,6 +816,7 @@ impl<'a> Side<'a> {
             reanimate: ArrayVec::new(),
             self_destroyed: ArrayVec::new(),
             first_killed_by_enemy: None,
+            boon_armed: false,
             broodmother_avenge: 0,
             frostwolf_left: counters.frostwolf_fervor,
             stormpike_left: counters.stormpike_strength,
@@ -2352,7 +2372,7 @@ impl<'a> Side<'a> {
         rng: &mut Rng,
         w: &mut impl Watch,
     ) {
-        if self.counters.boon_of_beetles == 0 || self.ms.is_full() {
+        if !self.boon_armed || self.counters.boon_of_beetles == 0 || self.ms.is_full() {
             return;
         }
         let Some(tok) = db.beetle_token else { return };
@@ -4249,18 +4269,280 @@ fn resolve_deaths(
     }
 }
 
+/// The side that attacks first from the boards as they stand now: the larger
+/// board, a coin on a tie. Start of Combat counts this after every phase that
+/// changes a board, and the fight starts from the last count unless Wingmen
+/// locks it.
+fn attacker_from_boards(sides: &[Side<'_>; 2], rng: &mut Rng) -> usize {
+    let (a, b) = (sides[0].ms.len(), sides[1].ms.len());
+    if a > b {
+        0
+    } else if b > a {
+        1
+    } else {
+        rng.coin() as usize
+    }
+}
+
+/// Which player goes first in one Start of Combat phase, by coin.
+fn phase_order(rng: &mut Rng) -> [usize; 2] {
+    if rng.coin() {
+        [0, 1]
+    } else {
+        [1, 0]
+    }
+}
+
+fn any_dead(sides: &[Side<'_>; 2]) -> bool {
+    sides
+        .iter()
+        .any(|side| !side.held_dead.is_empty() || side.ms.iter().any(|f| f.m.health <= 0))
+}
+
+fn pre_combat_active(c: &Counters) -> bool {
+    c.all_will_burn > 0
+        || c.wax_warband > 0
+        || c.phylactery > 0
+        || c.embrace_rage > 0
+        || c.soc_leftmost != 0
+        || c.soc_rightmost != 0
+        || c.soc_double_left > 0
+        || c.soc_earth > 0
+        || c.rapid_reanimation > 0
+        // Tentacular's summon waits for the pre-combat pass: Firestone
+        // soc-pre-combat-hero-power.ts / tentacular.ts cites a replay for
+        // "triggers before Illidan". Frostwolf Fervor and Stormpike Strength
+        // have no such citation, so they keep our post-hero-power pass.
+        || c.tentacular.is_some()
+}
+
+fn lightning_active(c: &Counters) -> bool {
+    c.soc_lightning > 0 && c.soc_lightning_damage != 0
+}
+
+fn spells_active(c: &Counters) -> bool {
+    c.boon_of_beetles > 0
+        || c.brood_of_nozdormu > 0
+        || c.upper_hand > 0
+        || c.sharing_is_caring > 0
+}
+
+/// Resolve the deaths a phase caused, then let anything waiting for a board
+/// slot (Rapid Reanimation, Lock and Load and the rest) come out, all before
+/// the next phase.
+fn settle_deaths(
+    sides: &mut [Side<'_>; 2],
+    first_side: usize,
+    db: &CardDb,
+    uid: &mut u16,
+    rng: &mut Rng,
+    w: &mut impl Watch,
+) {
+    if any_dead(sides) {
+        resolve_deaths(sides, first_side, db, uid, rng, w);
+    }
+    for s in 0..2 {
+        sides[s].spawn_when_space(db, s, uid, rng, w);
+    }
+    run_immediate(sides, db, uid, rng, w);
+}
+
+/// The pre-combat hero powers: Al'Akir, Wax Warband, ALL Will Burn, Y'Shaarj,
+/// Tamsin, the three Bru'kan Invocations and Teron. Firestone's
+/// soc-pre-combat-hero-power.ts runs these before Illidan; Lightning
+/// Invocation and the rest follow him.
+fn run_pre_combat_hero_powers(
+    sides: &mut [Side<'_>; 2],
+    s: usize,
+    db: &CardDb,
+    uid: &mut u16,
+    rng: &mut Rng,
+    w: &mut impl Watch,
+) {
+    for _ in 0..sides[s].counters.all_will_burn {
+        for t in 0..2 {
+            for i in 0..sides[t].ms.len() {
+                if sides[t].ms[i].m.health > 0 {
+                    sides[t].gain_permanent_at(db, i, 2, 0);
+                }
+            }
+        }
+    }
+    for _ in 0..sides[s].counters.wax_warband {
+        let amt = 1 + (sides[s].counters.gold_spent / 10) as i32;
+        let mut tribes: ArrayVec<Tribes, BOARD> = ArrayVec::new();
+        for f in &sides[s].ms {
+            let t = if f.m.health > 0 { db.tribes_of(&f.m) } else { Tribes::NONE };
+            tribes.push(t);
+        }
+        for i in pick_one_per_type(&tribes, rng) {
+            sides[s].gain_at(db, i, amt, amt);
+        }
+    }
+    for _ in 0..sides[s].counters.phylactery {
+        let picked = sides[s].pick(db, Pick::LowestAttack(1), None, rng);
+        for i in picked {
+            let u = sides[s].ms[i].uid;
+            let _ = sides[s].granted.try_push((u, GrantedDr::Phylactery));
+        }
+    }
+    for _ in 0..sides[s].counters.embrace_rage {
+        if let Some(c) =
+            db.random_tier_minion(sides[s].counters.tier, sides[s].counters.lobby, rng)
+        {
+            sides[s].out.push_card(c);
+            let m = db.make(c, false);
+            let at = sides[s].ms.len();
+            let _ = sides[s].summon(db, s, at, m, uid, rng, w);
+        }
+    }
+    let kw = sides[s].counters.soc_leftmost;
+    if kw != 0
+        && let Some(f) = sides[s].ms.first_mut()
+    {
+        f.m.keywords.0 |= kw;
+    }
+    let kw = sides[s].counters.soc_rightmost;
+    if kw != 0
+        && let Some(f) = sides[s].ms.last_mut()
+    {
+        f.m.keywords.0 |= kw;
+    }
+    // Fire Invocation: double the left-most minion's Attack, buffs included.
+    let n = sides[s].counters.soc_double_left;
+    if n > 0
+        && let Some(f) = sides[s].ms.first_mut()
+    {
+        for _ in 0..n {
+            f.m.attack *= 2;
+        }
+    }
+    // Earth Invocation: this many random friendly minions get a Deathrattle
+    // that summons the 1/1 Elemental, each of them once.
+    let n = sides[s].counters.soc_earth;
+    let token = sides[s].counters.soc_earth_card;
+    if n > 0 && token != 0 {
+        let mut slots: ArrayVec<u16, BOARD> = sides[s].ms.iter().map(|f| f.uid).collect();
+        for _ in 0..n {
+            if slots.is_empty() {
+                break;
+            }
+            let k = rng.below(slots.len() as u32) as usize;
+            let u = slots.remove(k);
+            if sides[s].granted.len() < sides[s].granted.capacity() {
+                let _ = sides[s].granted.try_push((u, GrantedDr::Summon { card: token, count: 1 }));
+            }
+        }
+    }
+    // Rapid Reanimation (Teron Gorefiend): destroy the marked friendly minion
+    // and queue an exact copy to summon once there is space.
+    let n = sides[s].counters.rapid_reanimation;
+    if n == 0 {
+        return;
+    }
+    for i in 0..sides[s].ms.len() {
+        if sides[s].ms[i].m.reanimate && sides[s].ms[i].m.health > 0 {
+            let (mut copy, damage) = sides[s].exact_copy(i);
+            copy.reanimate = false;
+            for _ in 0..n {
+                let _ = sides[s].reanimate.try_push((i, copy, damage));
+            }
+            let u = sides[s].ms[i].uid;
+            let _ = sides[s].self_destroyed.try_push(u);
+            sides[s].ms[i].m.health = 0;
+        }
+    }
+}
+
+/// Lightning Invocation: one damage to a different random enemy minion each
+/// time, applied at once so the other player's Invocation sees the board it
+/// made.
+fn run_lightning_invocation(
+    sides: &mut [Side<'_>; 2],
+    s: usize,
+    db: &CardDb,
+    uid: &mut u16,
+    rng: &mut Rng,
+    w: &mut impl Watch,
+) -> bool {
+    let n = sides[s].counters.soc_lightning;
+    let dmg = sides[s].counters.soc_lightning_damage;
+    if n == 0 || dmg == 0 {
+        return false;
+    }
+    let opp = s ^ 1;
+    let mut slots: ArrayVec<u16, BOARD> = sides[opp].ms.iter().map(|f| f.uid).collect();
+    let mut struck: ArrayVec<u16, 8> = ArrayVec::new();
+    for _ in 0..n {
+        if slots.is_empty() {
+            break;
+        }
+        let k = rng.below(slots.len() as u32) as usize;
+        let _ = struck.try_push(slots.remove(k));
+    }
+    for &u in &struck {
+        let Some(i) = sides[opp].ms.iter().position(|f| f.uid == u) else { continue };
+        let had = sides[opp].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD);
+        let dealt = deal_damage(&mut sides[opp].ms[i].m, dmg);
+        sides[opp].ms[i].taken += dealt;
+        if had && !sides[opp].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD) {
+            sides[opp].note_shield_lost(db);
+        }
+        if dealt > 0 && sides[opp].damage_trigger && i < sides[opp].ms.len() {
+            sides[opp].when_damaged(db, opp, i, uid, rng, w);
+        }
+    }
+    !struck.is_empty()
+}
+
 fn run_start_of_combat(
     sides: &mut [Side<'_>; 2],
     db: &CardDb,
     uid: &mut u16,
     rng: &mut Rng,
     w: &mut impl Watch,
-) {
-    // Wingmen (Illidan Stormrage) runs before all other Start of Combat
-    // effects (docs/rules/design.md "Order of events"), a trinket's included: the
-    // left-most and right-most minions gain +2/+1 and attack immediately,
-    // left then right.
-    if sides[0].counters.wingmen > 0 || sides[1].counters.wingmen > 0 {
+) -> usize {
+    // Who attacks first is read from the boards as they entered combat. If
+    // Wingmen fires, that side keeps the first attack whatever Start of
+    // Combat changes later (Firestone soc-illidan-hero-power.ts:114-123,
+    // which cites Mitchell and two replays).
+    let wingmen_fired = sides[0].counters.wingmen > 0 || sides[1].counters.wingmen > 0;
+    // Only Wingmen needs the entry count. Without it the first count is the
+    // one after the hand phase, as before.
+    let entry_attacker = if wingmen_fired { attacker_from_boards(sides, rng) } else { 0 };
+
+    // Trinkets first, then the pre-combat hero powers (Firestone
+    // start-of-combat.ts:47-79; Era's log 2026-11-13_02_12_34 line 448549
+    // has a trinket before Stormpike). Each phase coin-flips which player
+    // goes first; within a side the bundle keeps lesser before greater.
+    if sides.iter().any(|s| s.counters.trinkets.has_soc()) {
+        let order = phase_order(rng);
+        for s in order {
+            sides[s].trinket_hook(db, s, When::Soc, None, uid, rng, w);
+            run_immediate(sides, db, uid, rng, w);
+            if any_dead(sides) {
+                resolve_deaths(sides, s, db, uid, rng, w);
+                run_immediate(sides, db, uid, rng, w);
+            }
+        }
+        settle_deaths(sides, order[0], db, uid, rng, w);
+    }
+
+    if sides.iter().any(|s| pre_combat_active(&s.counters)) {
+        let order = phase_order(rng);
+        for s in order {
+            run_pre_combat_hero_powers(sides, s, db, uid, rng, w);
+            if any_dead(sides) {
+                resolve_deaths(sides, s, db, uid, rng, w);
+                run_immediate(sides, db, uid, rng, w);
+            }
+        }
+        settle_deaths(sides, order[0], db, uid, rng, w);
+    }
+
+    // Wingmen (Illidan Stormrage): the left-most and right-most minions gain
+    // +2/+1 and attack immediately, left then right.
+    if wingmen_fired {
         let first = if sides[0].counters.wingmen > 0 && sides[1].counters.wingmen > 0 {
             rng.coin() as usize
         } else if sides[1].counters.wingmen > 0 {
@@ -4292,238 +4574,68 @@ fn run_start_of_combat(
             }
         }
     }
-    // Boon of Beetles hands its Beetles over at Start of Combat, after
-    // Wingmen's attacks.
-    for s in 0..2 {
-        sides[s].spawn_boon_of_beetles(db, s, uid, rng, w);
+
+    // Other Start of Combat hero powers (Lightning Invocation and the rest)
+    // follow Wingmen. Lightning strikes one side at a time, so the second
+    // Invocation sees the holes the first made.
+    let mut hit = None;
+    if sides.iter().any(|s| lightning_active(&s.counters)) {
+        let order = phase_order(rng);
+        for s in order {
+            if run_lightning_invocation(sides, s, db, uid, rng, w) {
+                hit = Some(s ^ 1);
+            }
+        }
     }
-    // A hero power's Start of Combat goes before any minion's (docs/rules/design.md
-    // "Order of events"): Al'Akir's left-most minion gains its keywords,
-    // Bru'kan's Water Invocation the right-most one's.
-    for s in 0..2 {
-        for _ in 0..sides[s].counters.all_will_burn {
-            for t in 0..2 {
-                for i in 0..sides[t].ms.len() {
-                    if sides[t].ms[i].m.health > 0 {
-                        sides[t].gain_permanent_at(db, i, 2, 0);
-                    }
+    // The pass after the other hero powers is unconditional: it is where a
+    // Tentacular, Lock and Load or Frostwolf Fervor waiting for space comes
+    // out, even when Lightning Invocation did not fire.
+    settle_deaths(sides, hit.unwrap_or(0), db, uid, rng, w);
+
+    // Spells: Brood of Nozdormu, Upper Hand and Sharing is Caring, then Boon
+    // of Beetles after the other spells (log 2026-11-17_18_04_17 line
+    // 1116850 Upper Hand then 1116894 Boon). The side order is a coin.
+    if sides.iter().any(|s| spells_active(&s.counters)) {
+        let order = phase_order(rng);
+        for s in order {
+            for _ in 0..sides[s].counters.brood_of_nozdormu {
+                if let Some(f) = sides[s].ms.first_mut() {
+                    f.m.attack *= 2;
+                }
+            }
+            for _ in 0..sides[s].counters.upper_hand {
+                let opp = s ^ 1;
+                let n = sides[opp].ms.len();
+                if n > 0 {
+                    let k = rng.below(n as u32) as usize;
+                    sides[opp].ms[k].m.health = 1;
                 }
             }
         }
-        for _ in 0..sides[s].counters.wax_warband {
-            let amt = 1 + (sides[s].counters.gold_spent / 10) as i32;
-            let mut tribes: ArrayVec<Tribes, BOARD> = ArrayVec::new();
-            for f in &sides[s].ms {
-                let t = if f.m.health > 0 { db.tribes_of(&f.m) } else { Tribes::NONE };
-                tribes.push(t);
-            }
-            for i in pick_one_per_type(&tribes, rng) {
-                sides[s].gain_at(db, i, amt, amt);
-            }
-        }
-        for _ in 0..sides[s].counters.phylactery {
-            let picked = sides[s].pick(db, Pick::LowestAttack(1), None, rng);
-            for i in picked {
-                let u = sides[s].ms[i].uid;
-                let _ = sides[s].granted.try_push((u, GrantedDr::Phylactery));
-            }
-        }
-        for _ in 0..sides[s].counters.embrace_rage {
-            if let Some(c) =
-                db.random_tier_minion(sides[s].counters.tier, sides[s].counters.lobby, rng)
-            {
-                sides[s].out.push_card(c);
-                let m = db.make(c, false);
-                let at = sides[s].ms.len();
-                let _ = sides[s].summon(db, s, at, m, uid, rng, w);
-            }
-        }
-        let kw = sides[s].counters.soc_leftmost;
-        if kw != 0
-            && let Some(f) = sides[s].ms.first_mut()
-        {
-            f.m.keywords.0 |= kw;
-        }
-        let kw = sides[s].counters.soc_rightmost;
-        if kw != 0
-            && let Some(f) = sides[s].ms.last_mut()
-        {
-            f.m.keywords.0 |= kw;
-        }
-        // Fire Invocation: double the left-most minion's Attack, buffs
-        // included.
-        let n = sides[s].counters.soc_double_left;
-        if n > 0
-            && let Some(f) = sides[s].ms.first_mut()
-        {
-            for _ in 0..n {
-                f.m.attack *= 2;
-            }
-        }
-        // Earth Invocation: this many random friendly minions get a
-        // Deathrattle that summons the 1/1 Elemental, each of them once.
-        let n = sides[s].counters.soc_earth;
-        let token = sides[s].counters.soc_earth_card;
-        if n > 0 && token != 0 {
-            let mut slots: ArrayVec<u16, BOARD> = sides[s].ms.iter().map(|f| f.uid).collect();
-            for _ in 0..n {
-                if slots.is_empty() {
-                    break;
-                }
-                let k = rng.below(slots.len() as u32) as usize;
-                let u = slots.remove(k);
-                if sides[s].granted.len() < sides[s].granted.capacity() {
-                    let _ = sides[s].granted.try_push((u, GrantedDr::Summon { card: token, count: 1 }));
-                }
-            }
-        }
-    }
-    // Lightning Invocation: one damage to a different random enemy minion
-    // each time, so no minion takes it twice unless there are fewer than the
-    // hits. Both sides' hits are chosen first, then applied.
-    let mut struck: [ArrayVec<u16, 8>; 2] = [ArrayVec::new(), ArrayVec::new()];
-    for s in 0..2 {
-        let n = sides[s].counters.soc_lightning;
-        let dmg = sides[s].counters.soc_lightning_damage;
-        if n == 0 || dmg == 0 {
-            continue;
-        }
-        let opp = s ^ 1;
-        let mut slots: ArrayVec<u16, BOARD> = sides[opp].ms.iter().map(|f| f.uid).collect();
-        for _ in 0..n {
-            if slots.is_empty() {
-                break;
-            }
-            let k = rng.below(slots.len() as u32) as usize;
-            let _ = struck[s].try_push(slots.remove(k));
-        }
-    }
-    let mut hit: Option<usize> = None;
-    for s in 0..2 {
-        let opp = s ^ 1;
-        let dmg = sides[s].counters.soc_lightning_damage;
-        for &u in &struck[s] {
-            let Some(i) = sides[opp].ms.iter().position(|f| f.uid == u) else { continue };
-            // One point of damage each, Divine Shields and all, the way any
-            // other damage in a fight lands.
-            let had = sides[opp].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD);
-            let dealt = deal_damage(&mut sides[opp].ms[i].m, dmg);
-            sides[opp].ms[i].taken += dealt;
-            if had && !sides[opp].ms[i].m.keywords.has(Keywords::DIVINE_SHIELD) {
-                sides[opp].note_shield_lost(db);
-            }
-            if dealt > 0 && sides[opp].damage_trigger && i < sides[opp].ms.len() {
-                sides[opp].when_damaged(db, opp, i, uid, rng, w);
-            }
-            hit = Some(opp);
-        }
-    }
-    // Rapid Reanimation (Teron Gorefiend): destroy the marked friendly minion
-    // and queue an exact copy to summon once there is space.
-    for s in 0..2 {
-        let n = sides[s].counters.rapid_reanimation;
-        if n == 0 {
-            continue;
-        }
-        for i in 0..sides[s].ms.len() {
-            if sides[s].ms[i].m.reanimate && sides[s].ms[i].m.health > 0 {
-                let (mut copy, damage) = sides[s].exact_copy(i);
-                copy.reanimate = false;
-                for _ in 0..n {
-                    let _ = sides[s].reanimate.try_push((i, copy, damage));
-                }
-                let u = sides[s].ms[i].uid;
-                let _ = sides[s].self_destroyed.try_push(u);
-                sides[s].ms[i].m.health = 0;
-                if hit.is_none() {
-                    hit = Some(s);
-                }
-            }
-        }
-    }
-    // It kills at once, Deathrattles and all, like any other Start of Combat
-    // damage: a 1-Health minion is gone before the minions' own Start of
-    // Combat runs.
-    if let Some(opp) = hit
-        && sides.iter().any(|side| side.ms.iter().any(|f| f.m.health <= 0))
-    {
-        resolve_deaths(sides, opp, db, uid, rng, w);
-        run_immediate(sides, db, uid, rng, w);
-    }
-    for s in 0..2 {
-        sides[s].spawn_when_space(db, s, uid, rng, w);
-    }
-    run_immediate(sides, db, uid, rng, w);
-    // A trinket's Start of Combat comes at the same step as the hero power's
-    // (docs/rules/design.md: hero powers, then the lesser trinket, then the greater).
-    // The bundle holds the slots in order, so a lesser trinket's effect runs
-    // before a greater one's.
-    for s in 0..2 {
-        sides[s].trinket_hook(db, s, When::Soc, None, uid, rng, w);
-        // Soul Fermenter destroys minions, and Herald Sticker can run a
-        // Deathrattle that does. Their deaths resolve before the next
-        // Start of Combat effect, the way a minion's own do.
-        if sides
-            .iter()
-            .any(|side| !side.held_dead.is_empty() || side.ms.iter().any(|f| f.m.health <= 0))
-        {
-            resolve_deaths(sides, s, db, uid, rng, w);
-        }
-        run_immediate(sides, db, uid, rng, w);
-    }
-    // Flighty Scout triggers from the hand, so it comes before the board's
-    // Start of Combat effects. One copy each, in hand order, if there is
-    // board space; the card stays in hand.
-    for s in 0..2 {
-        for i in 0..sides[s].hand.len() {
-            if sides[s].hand_taken(i)
-                || sides[s].hand[i]
-                    .locked_in_hand(sides[s].counters.tier, sides[s].counters.gold_spent)
-                || !matches!(
-                    db.get(sides[s].hand[i].card).start_of_combat,
-                    Some(StartOfCombat::FlightyScout)
-                )
-            {
-                continue;
-            }
-            let mut m = sides[s].hand_at(i);
-            // A golden Scout's copy keeps the Golden card and doubles the
-            // stats it has now, the hand buffs `hand_at` just added included.
-            let mul = m.mul();
-            m.attack = m.attack.saturating_mul(mul);
-            m.health = m.health.saturating_mul(mul);
-            let at = sides[s].ms.len();
-            let _ = sides[s].summon_baked(db, s, at, m, uid, rng, w);
-        }
-    }
-    for s in 0..2 {
-        for _ in 0..sides[s].counters.brood_of_nozdormu {
+        // Sharing is Caring: the left-most minion gains the stats of the
+        // nearest enemy minion (its left-most), as they are now. Both sides
+        // read before either gains.
+        let shared: [(i32, i32); 2] = std::array::from_fn(|s| {
+            sides[s ^ 1].ms.first().map_or((0, 0), |f| (f.m.attack, f.m.health))
+        });
+        for s in order {
+            let n = sides[s].counters.sharing_is_caring as i32;
             if let Some(f) = sides[s].ms.first_mut() {
-                f.m.attack *= 2;
+                f.m.attack += shared[s].0 * n;
+                f.m.health += shared[s].1 * n;
             }
         }
-        for _ in 0..sides[s].counters.upper_hand {
-            let opp = s ^ 1;
-            let n = sides[opp].ms.len();
-            if n > 0 {
-                let k = rng.below(n as u32) as usize;
-                sides[opp].ms[k].m.health = 1;
-            }
+        for s in 0..2 {
+            sides[s].boon_armed = true;
+        }
+        for s in order {
+            sides[s].spawn_boon_of_beetles(db, s, uid, rng, w);
         }
     }
-    // Sharing is Caring: the left-most minion gains the stats of the
-    // nearest enemy minion (its left-most), as they are now. Both sides read
-    // before either gains.
-    let shared: [(i32, i32); 2] = std::array::from_fn(|s| {
-        sides[s ^ 1].ms.first().map_or((0, 0), |f| (f.m.attack, f.m.health))
-    });
-    for s in 0..2 {
-        let n = sides[s].counters.sharing_is_caring as i32;
-        if let Some(f) = sides[s].ms.first_mut() {
-            f.m.attack += shared[s].0 * n;
-            f.m.health += shared[s].1 * n;
-        }
-    }
+
+    // Snapshot the board queue before the hand phase, so a Flighty Scout
+    // summoned from hand does not also take a board turn (Firestone
+    // soc-minion.ts:44-50).
     let mut soc: [ArrayVec<u16, BOARD>; 2] = [ArrayVec::new(), ArrayVec::new()];
     for s in 0..2 {
         for f in &sides[s].ms {
@@ -4532,10 +4644,52 @@ fn run_start_of_combat(
             }
         }
     }
-    if soc[0].is_empty() && soc[1].is_empty() {
-        return;
+
+    // Flighty Scout from the hand comes after the spells and before the
+    // board. One copy each, in hand order, if there is board space; the card
+    // stays in hand.
+    let hand_active = sides.iter().any(|s| {
+        s.hand.iter().enumerate().any(|(i, m)| {
+            !s.hand_taken(i)
+                && !m.locked_in_hand(s.counters.tier, s.counters.gold_spent)
+                && matches!(db.get(m.card).start_of_combat, Some(StartOfCombat::FlightyScout))
+        })
+    });
+    if hand_active {
+        let order = phase_order(rng);
+        for s in order {
+            for i in 0..sides[s].hand.len() {
+                if sides[s].hand_taken(i)
+                    || sides[s].hand[i]
+                        .locked_in_hand(sides[s].counters.tier, sides[s].counters.gold_spent)
+                    || !matches!(
+                        db.get(sides[s].hand[i].card).start_of_combat,
+                        Some(StartOfCombat::FlightyScout)
+                    )
+                {
+                    continue;
+                }
+                let mut m = sides[s].hand_at(i);
+                // A golden Scout's copy keeps the Golden card and doubles the
+                // stats it has now, the hand buffs `hand_at` just added included.
+                let mul = m.mul();
+                m.attack = m.attack.saturating_mul(mul);
+                m.health = m.health.saturating_mul(mul);
+                let at = sides[s].ms.len();
+                let _ = sides[s].summon_baked(db, s, at, m, uid, rng, w);
+            }
+        }
     }
-    let mut turn = rng.coin() as usize;
+
+    // The board phase starts on the side that would attack first counted at
+    // that moment, not a fresh coin. Wingmen's lock overrides every later
+    // count.
+    let mut current =
+        if wingmen_fired { entry_attacker } else { attacker_from_boards(sides, rng) };
+    if soc[0].is_empty() && soc[1].is_empty() {
+        return current;
+    }
+    let mut turn = current;
     let mut idx = [0usize; 2];
     while idx[0] < soc[0].len() || idx[1] < soc[1].len() {
         if sides[0].ms.is_empty() || sides[1].ms.is_empty() {
@@ -4553,9 +4707,13 @@ fn run_start_of_combat(
             continue;
         };
         let m = sides[turn].ms[mi].m;
+        let before = [sides[0].ms.len(), sides[1].ms.len()];
         let mut shields_lost = [false; 2];
         for (card, golden) in m.parts() {
             let mul = if golden { 2 } else { 1 };
+            if db.get(card).start_of_combat.is_some() {
+                w.start_of_combat(turn, card);
+            }
             match db.get(card).start_of_combat {
                 Some(StartOfCombat::CombatBeastBuff { attack, health }) => {
                     sides[turn].add_combat_beast_buff(db, attack * mul, health * mul);
@@ -4811,10 +4969,17 @@ fn run_start_of_combat(
         }
         resolve_deaths(sides, turn, db, uid, rng, w);
         run_immediate(sides, db, uid, rng, w);
+        // A board effect that changes a count changes the fight's first
+        // attacker. The last recount wins unless Wingmen locked it.
+        if !wingmen_fired && [sides[0].ms.len(), sides[1].ms.len()] != before {
+            current = attacker_from_boards(sides, rng);
+            w.recount(current);
+        }
         if idx[turn ^ 1] < soc[turn ^ 1].len() {
             turn ^= 1;
         }
     }
+    current
 }
 
 /// Obsidian Ravager's Rally: the minion `host` of side `turn`, which is
@@ -5447,19 +5612,10 @@ pub fn fight_with_hands(
     ];
     sides[0].enemy = b;
     sides[1].enemy = a;
-    run_start_of_combat(&mut sides, db, &mut uid, rng, w);
-    // Who attacks first is counted after Start of Combat: in Power.log
-    // 2026_11_11_02_43_24 (game 1, turn 9) a 6 minion side whose Herald
-    // Sticker made a Turquoise Skitterer summon a Beetle met 7 with 7 and
-    // won the coin flip.
-    let (na, nb) = (sides[0].ms.len(), sides[1].ms.len());
-    let mut turn = if na > nb {
-        0
-    } else if nb > na {
-        1
-    } else {
-        rng.coin() as usize
-    };
+    // Start of Combat returns the first attacker: the last count after its
+    // effects, or the board as it entered combat when Wingmen fired (see
+    // `run_start_of_combat`).
+    let mut turn = run_start_of_combat(&mut sides, db, &mut uid, rng, w);
     // What the client shows during combat: the counters at the first attack,
     // after Start of Combat effects (the tracker snapshots them then).
     for s in &mut sides {
