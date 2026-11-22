@@ -1022,17 +1022,32 @@ impl<'a> Side<'a> {
         }
     }
 
-    /// Give the minion in slot `i` stats. A keeper keeps them; Scarlet
-    /// Survivor gains its keyword when the gain takes it to its threshold.
+    /// Give the minion in slot `i` stats. A keeper keeps them and doubles
+    /// them as they land; Scarlet Survivor gains its keyword when the gain
+    /// takes it to its threshold.
     fn gain_at(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
+        self.gain_at_inner(db, i, da, dh, false);
+    }
+
+    /// Give the minion in slot `i` the stats of a permanent Blood Gem
+    /// (Razorfen Vineweaver): an ordinary gain, except that the stats stay
+    /// on the board minion after the fight even with no keeper.
+    fn gain_permanent_gem_at(&mut self, db: &CardDb, i: usize, da: i32, dh: i32) {
+        self.gain_at_inner(db, i, da, dh, true);
+    }
+
+    fn gain_at_inner(&mut self, db: &CardDb, i: usize, da: i32, dh: i32, permanent: bool) {
         if db.get(self.ms[i].m.card).fixed_stats {
             return;
         }
         let keep = self.keep_mul(db, i);
+        let mul = keep.unwrap_or(1);
+        let gain_a = da.saturating_mul(mul);
+        let gain_h = dh.saturating_mul(mul);
         let mut threshold = 0u8;
         let f = &mut self.ms[i];
-        f.m.attack = f.m.attack.saturating_add(da);
-        f.m.health = f.m.health.saturating_add(dh);
+        f.m.attack = f.m.attack.saturating_add(gain_a);
+        f.m.health = f.m.health.saturating_add(gain_h);
         if let Some(t) = db.get(f.m.card).attack_threshold
             && f.m.improvements == 0
             && f.m.attack >= t.total as i32
@@ -1042,23 +1057,32 @@ impl<'a> Side<'a> {
             threshold = t.keyword;
         }
         let slot = f.start_slot;
-        if let Some(mul) = keep
-            && let Some(slot) = slot
-        {
+        if let Some(slot) = slot {
             let s = slot as usize;
-            if threshold != 0 {
+            if threshold != 0 && keep.is_some() {
                 self.out.permanent_keywords[s] |= threshold;
             }
-            self.out.permanent_stats[s].0 =
-                self.out.permanent_stats[s].0.saturating_add(da.saturating_mul(mul));
-            self.out.permanent_stats[s].1 =
-                self.out.permanent_stats[s].1.saturating_add(dh.saturating_mul(mul));
+            // A permanent Gem keeps its stats even with no keeper; a keeper
+            // doubles what it keeps, as it doubles the gain itself.
+            let kept = if permanent { mul } else { keep.unwrap_or(0) };
+            if kept != 0 {
+                self.out.permanent_stats[s].0 =
+                    self.out.permanent_stats[s].0.saturating_add(da.saturating_mul(kept));
+                self.out.permanent_stats[s].1 =
+                    self.out.permanent_stats[s].1.saturating_add(dh.saturating_mul(kept));
+                if permanent {
+                    self.out.permanent_gems[s].0 =
+                        self.out.permanent_gems[s].0.saturating_add(da.saturating_mul(kept));
+                    self.out.permanent_gems[s].1 =
+                        self.out.permanent_gems[s].1.saturating_add(dh.saturating_mul(kept));
+                }
+            }
         }
-        self.amalgam_gain_at(db, i, da, dh);
-        if da > 0 {
-            self.attack_gain_watchers(db, i, da);
+        self.amalgam_gain_at(db, i, gain_a, gain_h);
+        if gain_a > 0 {
+            self.attack_gain_watchers(db, i, gain_a);
         }
-        self.note_gain_to_hand(db, i, da, dh);
+        self.note_gain_to_hand(db, i, gain_a, gain_h);
     }
 
     /// Timewarped Expeditioner: this minion gained stats, so the two
@@ -2547,9 +2571,12 @@ impl<'a> Side<'a> {
             .unwrap_or(0)
     }
 
-    /// Play `times` Blood Gems on the minion in slot `i`: its stats for this
-    /// fight and, when `permanent` (Razorfen Vineweaver), stats and Blood Gem
-    /// stats the game gives the board minion after the fight. Every Gem
+    /// Play `times` Blood Gems on the minion in slot `i`, each one as its own
+    /// stat gain through `gain_at` (Firestone's per-Gem loop, replay
+    /// `4deaeb6c`; Era's logs show one Gem's enchantment and stat change at a
+    /// time). A Gem for this fight only is an ordinary gain. When `permanent`
+    /// (Razorfen Vineweaver), the stats and Blood Gem stats the game gives the
+    /// board minion after the fight are kept even with no keeper. Every Gem
     /// played on a Geomagus Roogug makes it play its own on a random
     /// different living friendly minion, the same as in the shop
     /// (`Game::gem_on_board`, docs/rules/design.md "Geomagus Roogug").
@@ -2565,25 +2592,23 @@ impl<'a> Side<'a> {
         from_roogug: bool,
         rng: &mut Rng,
     ) {
-        let da = self.counters.gem_attack.saturating_mul(times);
-        let dh = self.counters.gem_health.saturating_mul(times);
-        if db.get(self.ms[i].m.card).fixed_stats {
+        if times <= 0 || db.get(self.ms[i].m.card).fixed_stats {
             return;
         }
-        let f = &mut self.ms[i];
-        f.m.attack = f.m.attack.saturating_add(da);
-        f.m.health = f.m.health.saturating_add(dh);
-        if permanent
-            && let Some(slot) = f.start_slot
-        {
-            let s = slot as usize;
-            self.out.permanent_stats[s].0 = self.out.permanent_stats[s].0.saturating_add(da);
-            self.out.permanent_stats[s].1 = self.out.permanent_stats[s].1.saturating_add(dh);
-            self.out.permanent_gems[s].0 = self.out.permanent_gems[s].0.saturating_add(da);
-            self.out.permanent_gems[s].1 = self.out.permanent_gems[s].1.saturating_add(dh);
-        }
-        if !from_roogug {
-            self.roogug_on_gem(db, i, times, rng);
+        // One Gem at a time: a watcher or a threshold sees every Gem, not
+        // the sum of several (a golden Prodigious Tusker's two Gems are two
+        // gains). The Gem's value is fixed for this play, as in Firestone.
+        let da = self.counters.gem_attack;
+        let dh = self.counters.gem_health;
+        for _ in 0..times {
+            if permanent {
+                self.gain_permanent_gem_at(db, i, da, dh);
+            } else {
+                self.gain_at(db, i, da, dh);
+            }
+            if !from_roogug {
+                self.roogug_on_gem(db, i, 1, rng);
+            }
         }
     }
 
@@ -5936,6 +5961,98 @@ mod tests {
         let before = stats(&s);
         s.gem_at(&db, 0, 1, false, false, &mut rng);
         assert_eq!(gems_taken(&before, &s), [1, 1]);
+    }
+
+    #[test]
+    fn a_combat_gem_on_a_golden_tarecgosa_lands_and_keeps_doubled() {
+        // Golden Tarecgosa: "double stats gained in combat". A Gem of +2/+2
+        // is +4/+4 on the board during the fight and +4/+4 after it. The
+        // plain one doubles neither (card text, Firestone stats.ts:187-206).
+        let db = db();
+        let (mut s, mut uid) = gem_side(&db, &["Bonker", "Tarecgosa!"]);
+        s.counters.gem_attack = 2;
+        s.counters.gem_health = 2;
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        gem_others(&db, &mut s, 0, 1, &mut uid, &mut rng);
+        assert_eq!(gems_taken(&before, &s), [0, 4]);
+        assert_eq!(s.out.permanent_stats[1], (4, 4));
+
+        let (mut s, mut uid) = gem_side(&db, &["Bonker", "Tarecgosa"]);
+        s.counters.gem_attack = 2;
+        s.counters.gem_health = 2;
+        let before = stats(&s);
+        gem_others(&db, &mut s, 0, 1, &mut uid, &mut rng);
+        assert_eq!(gems_taken(&before, &s), [0, 2]);
+        assert_eq!(s.out.permanent_stats[1], (2, 2));
+    }
+
+    #[test]
+    fn a_combat_gem_on_a_dragon_next_to_a_golden_poet_lands_doubled() {
+        // Persistent Poet, golden: an adjacent Dragon doubles what it gains
+        // in combat. Scarlet Survivor is the Dragon, next to the Poet, and
+        // Bonker's Gem reaches both. The Poet's own Gem has no keeper.
+        let db = db();
+        let (mut s, mut uid) =
+            gem_side(&db, &["Bonker", "Scarlet Survivor", "Persistent Poet!"]);
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        gem_others(&db, &mut s, 0, 1, &mut uid, &mut rng);
+        let gems = gems_taken(&before, &s);
+        assert_eq!(gems[1], 2, "Scarlet doubles the +1/+1 Gem");
+        assert_eq!(s.out.permanent_stats[1], (2, 2));
+        assert_eq!(gems[2], 1, "the Poet keeps nothing alone");
+        assert_eq!(s.out.permanent_stats[2], (0, 0));
+    }
+
+    #[test]
+    fn combat_gems_take_scarlet_survivor_to_six_attack_one_at_a_time() {
+        // Three +1/+1 Gem gains from 3/3: the third one reaches 6 Attack and
+        // grants Divine Shield (Firestone blood-gems.ts:62-65, replay
+        // 4deaeb6c, one modifyStats per Gem).
+        let db = db();
+        let (mut s, mut uid) = gem_side(&db, &["Bonker", "Scarlet Survivor"]);
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        gem_others(&db, &mut s, 0, 3, &mut uid, &mut rng);
+        assert_eq!(stats(&s)[1], (before[1].0 + 3, before[1].1 + 3));
+        assert_eq!(stats(&s)[1].0, 6);
+        assert!(s.ms[1].m.keywords.has(Keywords::DIVINE_SHIELD));
+        assert_eq!(s.ms[1].m.improvements, 1);
+    }
+
+    #[test]
+    fn a_combat_gem_reaches_mishmash_through_an_amalgam() {
+        // Mishmash copies every stat gain a friendly Amalgam makes. Bonker's
+        // Gem lands on both: the Amalgam's own Gem copies to Mishmash, then
+        // Mishmash's own Gem arrives directly.
+        let db = db();
+        let (mut s, mut uid) = gem_side(&db, &["Bonker", "Amalgam", "Mishmash"]);
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        gem_others(&db, &mut s, 0, 1, &mut uid, &mut rng);
+        let gems = gems_taken(&before, &s);
+        assert_eq!(gems[1], 1, "the Amalgam's own Gem");
+        assert_eq!(gems[2], 2, "Mishmash's own Gem and the copied one");
+    }
+
+    #[test]
+    fn each_combat_gem_triggers_whelp_smugglers_health_gain() {
+        // Timewarped Whelp Smuggler gives +3 Health whenever a friendly
+        // minion gains Attack. Two Gems are two gains, so Scarlet Survivor
+        // gets +3 Health twice, not once for the summed +2 Attack.
+        let db = db();
+        let (mut s, mut uid) =
+            gem_side(&db, &["Bonker", "Timewarped Whelp Smuggler", "Scarlet Survivor"]);
+        let before = stats(&s);
+        let mut rng = Rng::new(1);
+        gem_others(&db, &mut s, 0, 2, &mut uid, &mut rng);
+        let after = stats(&s);
+        assert_eq!(
+            (after[2].0 - before[2].0, after[2].1 - before[2].1),
+            (2, 8),
+            "two +1/+1 Gems and +3 Health per Gem"
+        );
     }
 
     #[derive(Default)]

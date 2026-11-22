@@ -822,12 +822,15 @@ Triple Reward spell.
   in the private notes). The Gems it plays carry the from-Roogug mark
   (`from_roogug`), the one kind no Roogug reacts to, so two Roogugs never
   loop. The fight reacts the same way: every Gem a fight plays goes through
-  `Side::gem_at`, which adds the stats and then, for a Gem that is not from
-  a Roogug, lets a Roogug there play its own (`Side::roogug_on_gem`) on a
-  random different living friendly minion, one per Gem, through the fight's
-  own RNG. Its Gems carry the same mark. The fight adds a Gem's stats
-  straight to the minion and keeps no `Minion.gem_attack` (that field is the
-  board's, from the shop).
+  `Side::gem_at`, one Gem at a time, as its own stat gain through
+  `Side::gain_at` (so a keeper doubles it, Mishmash and the Attack-gain
+  watchers see it, and Scarlet Survivor checks its threshold on every Gem),
+  and then, for a Gem that is not from a Roogug, lets a Roogug there play its
+  own (`Side::roogug_on_gem`) on a random different living friendly minion,
+  one per Gem, through the fight's own RNG. A permanent Gem (Vineweaver)
+  goes through `Side::gain_permanent_gem_at`, which keeps the stats even with
+  no keeper. Its Gems carry the same mark. The fight keeps no
+  `Minion.gem_attack` (that field is the board's, from the shop).
   Blood Gem
   Barrage adds to `Player.barrage` per cast; every Refresh gives it to every
   Tavern minion (`apply_barrage`), the turn-start roll included when the
