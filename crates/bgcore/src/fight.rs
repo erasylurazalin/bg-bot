@@ -3679,6 +3679,37 @@ impl<'a> Side<'a> {
         self.try_awaken(db, side, uid, rng, w);
     }
 
+    /// Bring back the minions a Soul Fermenter destroyed at Start of Combat,
+    /// exactly as they were then: `summon_baked` so the fight's global
+    /// bonuses are not added a second time. Returns whether any came back.
+    fn resummon_fermenter(
+        &mut self,
+        db: &CardDb,
+        side: usize,
+        uid: &mut u16,
+        rng: &mut Rng,
+        w: &mut impl Watch,
+    ) -> bool {
+        if self.fermenter.is_empty() {
+            return false;
+        }
+        let held: ArrayVec<(usize, Minion), 3> = std::mem::take(&mut self.fermenter);
+        let mut changed = false;
+        for (slot, m) in held {
+            let at = slot.min(self.ms.len());
+            if self.summon_baked(db, side, at, m, uid, rng, w) {
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// Every minion still on the board is dead (or the board is empty):
+    /// this side's last living minion has just gone.
+    fn all_dead(&self) -> bool {
+        self.ms.iter().all(|f| f.m.health <= 0)
+    }
+
     /// Remove the dead in board order. Each one's Deathrattle runs, then
     /// Avenge counts it, then its Reborn, before the next dead minion is
     /// looked at.
@@ -3691,6 +3722,11 @@ impl<'a> Side<'a> {
         w: &mut impl Watch,
     ) -> bool {
         let mut changed = false;
+        // Soul Fermenter sees the empty board before Deathrattles fill it,
+        // so its three come back first (docs/rules/trinkets.md).
+        if self.all_dead() {
+            changed |= self.resummon_fermenter(db, side, uid, rng, w);
+        }
         // Dead minions that a summon took out of `ms` go first, where they
         // stood, so their Deathrattles and Reborn still happen.
         while !self.held_dead.is_empty() {
@@ -3705,20 +3741,21 @@ impl<'a> Side<'a> {
                 i += 1;
                 continue;
             }
+            // A Deathrattle in this batch may have killed the last living
+            // minion: bring the three back before its own Deathrattle runs.
+            let dead_uid = self.ms[i].uid;
+            if self.all_dead() {
+                changed |= self.resummon_fermenter(db, side, uid, rng, w);
+            }
+            let Some(j) = self.ms.iter().position(|f| f.uid == dead_uid) else {
+                // The resummon pushed it into `held_dead`; the next pass
+                // through `resolve` handles it.
+                continue;
+            };
+            i = j;
             changed = true;
             let fm = self.remove(i);
             i += self.resolve_dead(db, side, i, fm, uid, rng, w);
-        }
-        // Soul Fermenter: once this side's last minion is gone, the ones it
-        // destroyed at Start of Combat come back exactly as they were.
-        if self.ms.is_empty() && !self.fermenter.is_empty() {
-            let held: ArrayVec<(usize, Minion), 3> = std::mem::take(&mut self.fermenter);
-            for (slot, m) in held {
-                let at = slot.min(self.ms.len());
-                if self.summon(db, side, at, m, uid, rng, w) {
-                    changed = true;
-                }
-            }
         }
         if self.spawn_when_space(db, side, uid, rng, w) {
             changed = true;
@@ -4212,6 +4249,16 @@ fn run_start_of_combat(
     // before a greater one's.
     for s in 0..2 {
         sides[s].trinket_hook(db, s, When::Soc, None, uid, rng, w);
+        // Soul Fermenter destroys minions, and Herald Sticker can run a
+        // Deathrattle that does. Their deaths resolve before the next
+        // Start of Combat effect, the way a minion's own do.
+        if sides
+            .iter()
+            .any(|side| !side.held_dead.is_empty() || side.ms.iter().any(|f| f.m.health <= 0))
+        {
+            resolve_deaths(sides, s, db, uid, rng, w);
+        }
+        run_immediate(sides, db, uid, rng, w);
     }
     // Flighty Scout triggers from the hand, so it comes before the board's
     // Start of Combat effects. One copy each, in hand order, if there is

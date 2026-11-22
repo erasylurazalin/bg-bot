@@ -4757,6 +4757,132 @@ fn soul_fermenter_brings_its_three_back() {
 }
 
 #[test]
+fn soul_fermenter_deaths_resolve_at_start_of_combat() {
+    // The three left-most minions are dead before the first-attacker count
+    // and never swing. Three destroyed minions and one survivor against two
+    // walls count one against two, so the walls attack first; a board still
+    // holding the three at 0 Health counts four and attacks first itself.
+    let mut g = game(1701);
+    equip(&mut g, 0, 1, "Soul Fermenter");
+    for _ in 0..3 {
+        let i = put_on_board(&mut g, 0, "Lullabot");
+        g.players[0].board[i].attack = 0;
+    }
+    let survivor = put_on_board(&mut g, 0, "Southsea Busker");
+    g.players[0].board[survivor].attack = 5;
+    g.players[0].board[survivor].health = 100;
+    let board = g.players[0].board.clone();
+    let counters = [g.players[0].counters(&g.data, g.lobby), bgcore::Counters::default()];
+    let walls = [wall(&g, 1, 100), wall(&g, 1, 100)];
+    let mut seen = Seen::default();
+    fight_with(
+        &g.data.cards,
+        &board,
+        &walls,
+        counters,
+        4,
+        &mut Rng::new(1),
+        &mut seen,
+    );
+    assert_eq!(
+        seen.attacks.first().map(|(side, _)| *side),
+        Some(1),
+        "one survivor against two walls: the walls attack first"
+    );
+    assert!(
+        seen.attacks.iter().all(|(_, m)| m.health > 0),
+        "a minion at 0 Health attacked"
+    );
+}
+
+#[test]
+fn soul_fermenter_resummon_keeps_the_stats_from_start_of_combat() {
+    // A global +7/+7 (Counters.aura_attack/aura_health) already sits in the
+    // stored minions. A baked resummon brings them back at 4/4, not 11/11.
+    let mut g = game(1702);
+    equip(&mut g, 0, 1, "Soul Fermenter");
+    for _ in 0..3 {
+        let i = put_on_board(&mut g, 0, "Lullabot");
+        g.players[0].board[i].attack = 4;
+        g.players[0].board[i].health = 4;
+    }
+    let survivor = put_on_board(&mut g, 0, "Southsea Busker");
+    g.players[0].board[survivor].attack = 0;
+    g.players[0].board[survivor].health = 1;
+    let board = g.players[0].board.clone();
+    let mut counters = g.players[0].counters(&g.data, g.lobby);
+    counters.aura_attack = 7;
+    counters.aura_health = 7;
+    let walls = [wall(&g, 5, 100)];
+    let mut seen = Seen::default();
+    fight_with(
+        &g.data.cards,
+        &board,
+        &walls,
+        [counters, bgcore::Counters::default()],
+        6,
+        &mut Rng::new(2),
+        &mut seen,
+    );
+    let copies: Vec<(i32, i32)> = seen
+        .summons
+        .iter()
+        .filter(|(side, m)| *side == 0 && m.card == id(&g, "Lullabot"))
+        .map(|(_, m)| (m.attack, m.health))
+        .collect();
+    assert_eq!(
+        copies,
+        vec![(4, 4), (4, 4), (4, 4)],
+        "the copies keep the stats they had at Start of Combat"
+    );
+}
+
+#[test]
+fn soul_fermenter_resummons_before_the_last_deathrattle() {
+    // Buzzing Vermin dies last and its Deathrattle summons a Beetle. Soul
+    // Fermenter sees the empty board first, so its three come back before
+    // the Beetle; a token that lands first would keep the board non-empty
+    // and the three would never return.
+    let mut g = game(1703);
+    equip(&mut g, 0, 1, "Soul Fermenter");
+    for _ in 0..3 {
+        let i = put_on_board(&mut g, 0, "Lullabot");
+        g.players[0].board[i].attack = 0;
+        g.players[0].board[i].health = 10;
+    }
+    let last = put_on_board(&mut g, 0, "Buzzing Vermin");
+    g.players[0].board[last].attack = 0;
+    g.players[0].board[last].health = 1;
+    let board = g.players[0].board.clone();
+    let counters = [g.players[0].counters(&g.data, g.lobby), bgcore::Counters::default()];
+    let walls = [wall(&g, 1, 100)];
+    let mut seen = Seen::default();
+    fight_with(
+        &g.data.cards,
+        &board,
+        &walls,
+        counters,
+        6,
+        &mut Rng::new(3),
+        &mut seen,
+    );
+    let copy = seen
+        .summons
+        .iter()
+        .position(|(side, m)| *side == 0 && m.card == id(&g, "Lullabot"));
+    let beetle = seen
+        .summons
+        .iter()
+        .position(|(side, m)| *side == 0 && m.card == id(&g, "Beetle"));
+    assert!(copy.is_some(), "the three came back");
+    assert!(beetle.is_some(), "the Vermin's Deathrattle fired");
+    assert!(
+        copy.unwrap() < beetle.unwrap(),
+        "the three came back before the Deathrattle token"
+    );
+}
+
+#[test]
 fn blood_golem_sticker_summons_a_golem_with_the_gem_stats() {
     let mut g = game(344);
     equip(&mut g, 0, 1, "Blood Golem Sticker");

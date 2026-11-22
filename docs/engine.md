@@ -1465,8 +1465,10 @@ exactly what exists; a trinket's tribe must be in the lobby to be offered.
   copy the next Greater trinket picked (`pick_trinket`).
 - **The fighter's leftovers (block 4).** `fight = [{ when = "soc", fermenter = 3 }]`
   destroys the left-most minions at Start of Combat and keeps them in
-  `Side.fermenter`; when the side's last minion dies, `Side::resolve` summons
-  them back exactly as they were. `gem_golem` summons a token with the Blood
+  `Side.fermenter`; their deaths resolve before the next Start of Combat
+  effect, and when the side's last minion dies `Side::resolve` brings them
+  back with `summon_baked`, exactly as they were, before their Deathrattles
+  run. `gem_golem` summons a token with the Blood
   Gem stats of the minion that just died (`Side.last_dead`, `Side.dead_at`).
   `when = "cast"` fires on a spell cast in the fight, and `permanent = true`
   on a `buff` act means the minions keep it after the fight

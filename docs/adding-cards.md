@@ -177,7 +177,7 @@ legality in mod.rs.
 | Trinket that rewrites a card the player has | `card_of_mod = "X"` with `also_attack = n` / `also_neighbors = true` / `also_health = true` / `also_board = "tribe"` | `TrinketPowers.card_mods`, read by the card's own effect: `after_hero_damage_mods`, `trigger_on_cast_spell`, `consume`, the `Effect::TavernBuff` arm | the six portraits |
 | Trinket that always combines a Choose One | `choose_one_all = true` | `tp.choose_one_all` in `cast_spell_inner` and `battlecry_or_choose_one` | Trailblazer Sticker |
 | Trinket that becomes another one | `souvenir = true` (Souvenir Stand: copies the next Greater pick), `replace_with_random = ["greater", "dragon"]` (Dragonhead Staff, Ruby Tusk) | `pick_trinket`, `Game::replace_trinket_at` | Souvenir Stand |
-| Trinket effect inside a fight that outlives the minions | `fight = [{ when = "soc", fermenter = 3 }]`, `gem_golem = "X"` (the dead minion's Blood Gem stats) | `Side.fermenter` and `Side.last_dead`/`dead_at`, run by `Side::run_fight_act`; the resummon is at the end of `Side::resolve` | Soul Fermenter, Blood Golem Sticker |
+| Trinket effect inside a fight that outlives the minions | `fight = [{ when = "soc", fermenter = 3 }]`, `gem_golem = "X"` (the dead minion's Blood Gem stats) | `Side.fermenter` and `Side.last_dead`/`dead_at`, run by `Side::run_fight_act`; a Start of Combat trinket's deaths resolve at once, and the resummon is at the start of `Side::resolve` via `summon_baked`, before Deathrattles | Soul Fermenter, Blood Golem Sticker |
 | Trinket that fires on a spell cast in a fight | `fight = [{ when = "cast", pick = "all", buff = [2, 4] }]` | `Side::trinket_hook` from `Effect::CastSpell` | Bewitched Ribbon |
 | A Darkmoon Prize (block 5) | `prize = 1` to `4` on a `[[spell]]` or a `[[token]]`, `tier = 0`, `token = true`, `tavern_spell = false` | `CardDb.prizes` holds the four lists; `DiscoverRequest::Prize(tier)` deals three different ones (`CardDb::random_prize`), the pick lands with no pool copy. `SpellEffect::DiscoverPrize` / `DiscoverPrizesBelow` / `RandomPrize` and the trinket `Act`s of the same name open them | Banana Bunch |
 | A Prize's standing rule | `Player.prize` (`PrizePowers`): `extra_shop`, `free_rolls_per_turn`, `spell_discount_turn`, `minion_price`, `battlecry_extra_turn`, `return_each_turn` | read by `Player::shop_size`, `fill_shop`, `start_turn`, `spell_price`/`spell_cost`, `Game::minion_price`, `battlecry_or_choose_one` and `run_end_of_turn`. `extra_shop_minion = [2, 2]` sets the flag and adds to `Player.refresh_buff`, the after-Refresh buff Waveling and Easterly Winds share | New Recruit |
@@ -991,7 +991,9 @@ Triple Reward spell.
   minion summoned during the fight keeps nothing.
 - **Two fight leftovers.** `FightAct::Fermenter` (Soul Fermenter) keeps the
   destroyed minions in `Side.fermenter` and `Side::resolve` brings them back
-  when the side's last minion dies; `FightAct::GemGolem` summons a token with
+  with `summon_baked` before their Deathrattles when the side's last minion
+  dies; a Start of Combat trinket's deaths resolve before the next effect;
+  `FightAct::GemGolem` summons a token with
   the dead minion's Blood Gem stats (`Side.last_dead`, `Side.dead_at`). The
   Golem token is Neutral (its own card has no race), so its death is no
   Quilboar death and no Golem summons another for ever.
