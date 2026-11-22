@@ -1447,6 +1447,66 @@ fn devout_hellcaller_grows_when_another_demon_deals_damage() {
     assert!(out.sides[0].permanent_stats.iter().all(|&s| s == (0, 0)));
 }
 
+#[test]
+fn devout_hellcaller_grows_when_a_defending_demon_deals_damage() {
+    let db = db();
+    // Side 0 has the extra minions, so it swings first. Its first fighter
+    // deals 1, which the defending Wrath Weaver (2000 Health, Taunt) survives
+    // and then hits back for 1: the Hellcaller behind it gains +2/+2.
+    let a = [fighter(&db, 1), fighter(&db, 0), fighter(&db, 0)];
+    let mut demon = mk(&db, "Wrath Weaver", false);
+    demon.health = 2000;
+    demon.keywords.set(Keywords::TAUNT);
+    let b = [demon, mk(&db, "Devout Hellcaller", false)];
+    let out = fight_with(
+        &db,
+        &a,
+        &b,
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(1),
+        &mut (),
+    );
+    assert_eq!(out.sides[1].permanent_stats[1], (2, 2));
+
+    // the golden Hellcaller gains +4/+4 from the same defending Demon
+    let mut demon = mk(&db, "Wrath Weaver", false);
+    demon.health = 2000;
+    demon.keywords.set(Keywords::TAUNT);
+    let b = [demon, mk(&db, "Devout Hellcaller", true)];
+    let out = fight_with(
+        &db,
+        &a,
+        &b,
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(1),
+        &mut (),
+    );
+    assert_eq!(out.sides[1].permanent_stats[1], (4, 4));
+}
+
+#[test]
+fn a_defending_hellcaller_does_not_grow_from_its_own_damage() {
+    let db = db();
+    // The Hellcaller itself is the one attacked, so its return hit is its
+    // own damage and not "another friendly Demon".
+    let a = [fighter(&db, 1), fighter(&db, 0)];
+    let mut hellcaller = mk(&db, "Devout Hellcaller", false);
+    hellcaller.health = 2000;
+    hellcaller.keywords.set(Keywords::TAUNT);
+    let out = fight_with(
+        &db,
+        &a,
+        &[hellcaller],
+        [Counters::default(); 2],
+        1,
+        &mut Rng::new(1),
+        &mut (),
+    );
+    assert!(out.sides[1].permanent_stats.iter().all(|&s| s == (0, 0)));
+}
+
 // ---- The run 3 fix ----
 
 #[test]

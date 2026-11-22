@@ -1164,13 +1164,13 @@ impl<'a> Side<'a> {
         self.note_gain_to_hand(db, i, da, dh);
     }
 
-    /// A friendly Demon (`attacker_uid`) dealt damage: every other friendly
+    /// A friendly Demon (`source_uid`) dealt damage: every other friendly
     /// minion with "After another friendly Demon deals damage" gains its
     /// stats for good (Devout Hellcaller).
-    fn note_demon_damage(&mut self, db: &CardDb, attacker_uid: u16) {
+    fn note_demon_damage(&mut self, db: &CardDb, source_uid: u16) {
         let mut hits: ArrayVec<(u16, i32, i32), BOARD> = ArrayVec::new();
         for f in &self.ms {
-            if f.m.health <= 0 || f.uid == attacker_uid {
+            if f.m.health <= 0 || f.uid == source_uid {
                 continue;
             }
             for (card, golden) in f.m.parts() {
@@ -4322,6 +4322,9 @@ fn run_start_of_combat(
                                 if dealt > 0 && sides[s].damage_trigger {
                                     sides[s].when_damaged(db, s, i, uid, rng, w);
                                 }
+                                if dealt > 0 && db.tribes_of(&m).has(Tribe::Demon) {
+                                    sides[turn].note_demon_damage(db, me);
+                                }
                             }
                         }
                     }
@@ -4649,12 +4652,16 @@ fn highest_health_damage(
     if yf.m.health <= 0 && dealt > 0 {
         yf.killer = Some(xf.uid);
     }
+    let demon = db.tribes_of(&xf.m).has(Tribe::Demon);
     att.count_damage(db, turn, hi, dealt, uid, rng, w);
     if was_shielded && !def.ms[vi].m.keywords.has(Keywords::DIVINE_SHIELD) {
         def.note_shield_lost(db);
     }
     if dealt > 0 && def.damage_trigger {
         def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
+    }
+    if dealt > 0 && demon {
+        att.note_demon_damage(db, host);
     }
 }
 
@@ -4965,6 +4972,9 @@ fn attack_swings_at(
                 if dealt > 0 && def.damage_trigger {
                     def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
                 }
+                if dealt > 0 && db.tribes_of(&attacker).has(Tribe::Demon) {
+                    att.note_demon_damage(db, me);
+                }
                 if was_shielded && !def.ms[vi].m.keywords.has(Keywords::DIVINE_SHIELD) {
                     def.note_shield_lost(db);
                 }
@@ -5028,6 +5038,9 @@ fn attack_swings_at(
                     if dealt > 0 && def.damage_trigger {
                         def.when_damaged(db, turn ^ 1, vi, uid, rng, w);
                     }
+                    if dealt > 0 && db.tribes_of(&attacker).has(Tribe::Demon) {
+                        att.note_demon_damage(db, me);
+                    }
                     if was_shielded && !def.ms[vi].m.keywords.has(Keywords::DIVINE_SHIELD) {
                         def.note_shield_lost(db);
                     }
@@ -5090,10 +5103,14 @@ fn attack_swings_at(
         let Some(di) = def.index_of(def_uid) else { continue };
         def.count_damage(db, turn ^ 1, di, dealt_y, uid, rng, w);
         // Devout Hellcaller: another friendly Demon dealt damage. The
-        // attacker's tribe is a cheap check, so a side without Demons pays
-        // nothing extra here.
+        // source's tribe is a cheap check, so a side without Demons pays
+        // nothing extra here. A defending Demon's return hit counts for its
+        // own side; `note_demon_damage` leaves the source itself out.
         if dealt_x > 0 && db.tribes_of(&attacker).has(Tribe::Demon) {
-            sides[turn].note_demon_damage(db, me);
+            att.note_demon_damage(db, me);
+        }
+        if dealt_y > 0 && db.tribes_of(&def.ms[di].m).has(Tribe::Demon) {
+            def.note_demon_damage(db, def_uid);
         }
         // "Whenever this takes damage" (Very Hungry Winterfinner). It fires
         // even when the damage is lethal.
