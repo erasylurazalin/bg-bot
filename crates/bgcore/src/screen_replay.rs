@@ -795,6 +795,14 @@ fn hand_id_at(state: &ShopStateSpec, index: u8) -> Option<u64> {
         .map(|m| m.id)
 }
 
+/// Whether an exported card is the one a place names. The exported spell slot
+/// is the engine's own, after the minion slots, so a screen's slot numbering
+/// and the engine's can put different cards in the same slot number.
+fn export_card_is(m: &ShopMinionSpec, card_id: Option<&str>, name: Option<&str>) -> bool {
+    card_id.is_some_and(|id| m.card_id.as_deref() == Some(id))
+        || name.is_some_and(|name| m.name.as_deref() == Some(name))
+}
+
 fn zone_id_of(
     state: &ShopStateSpec,
     kind: Option<&str>,
@@ -926,6 +934,26 @@ fn step_to_spec(
                     && let Some(slot) = target.slot.or(screen.slot)
                 {
                     target.id = tavern_id_at(exported, slot).unwrap_or(0);
+                }
+                // The file's slot counts the spell where it stood, while the
+                // engine's exported spell slot comes after every minion. Name
+                // the card the screen bought, not the card in that engine slot.
+                if let Some(card) = out.card.as_ref() {
+                    let card_id = card.card_id.as_deref();
+                    let name = card.name.as_deref();
+                    let current = exported
+                        .tavern
+                        .iter()
+                        .find(|m| Some(m.id) == Some(target.id))
+                        .is_some_and(|m| export_card_is(m, card_id, name));
+                    if !current
+                        && let Some(m) = exported
+                            .tavern
+                            .iter()
+                            .find(|m| export_card_is(m, card_id, name))
+                    {
+                        target.id = m.id;
+                    }
                 }
                 if out.card.is_none()
                     && let Some(m) = exported
@@ -1969,6 +1997,23 @@ pub fn replay_screen_turn_from(
             }
             if let Some(tier) = seen.tier {
                 game.players[ME].tier = tier.clamp(1, MAX_TIER);
+            }
+            if let Some(spec) = seen_spec.as_ref() {
+                if seen.hero_power.is_some() || seen.hero_power_second.is_some() {
+                    shop_replay::seat_power_counters(
+                        data,
+                        &mut game.players[ME],
+                        &spec.hero_powers,
+                    );
+                    resync_power_uses(data, &mut game, spec);
+                }
+                if seen.trinkets.is_some() {
+                    shop_replay::seat_trinket_counters(
+                        data,
+                        &mut game.players[ME],
+                        &spec.trinkets,
+                    );
+                }
             }
         }
         states.push(ShopSnapshot::of_game(data, &game, ME));
@@ -3267,9 +3312,12 @@ fn step_of_spec(
     let mut seen = ScreenStateSpec::default();
     let mut has_seen = false;
     // The Gold digits and the Refresh button's price are always on screen, so
-    // every step carries them after it.
+    // every step carries them after it. An end-of-turn state is the next
+    // turn's quiet moment, not the shop-end Gold the replay still holds.
     if let Some(after) = after {
-        seen.gold = Some(after.gold);
+        if step.step != "end_turn" {
+            seen.gold = Some(after.gold);
+        }
         seen.free_refresh = Some(after.free_refreshes > 0);
         seen.board = Some(
             after
@@ -3367,10 +3415,10 @@ fn step_of_spec(
                 dark_gift: None,
                 dark_gifts: None,
             };
-            // A buy's price is on the card the screen showed. The action file
-            // writes it for a Tavern spell; for a discounted minion the step's
-            // own paid Gold is the next best evidence.
-            if step.step == "buy" && card.cost.is_none() {
+            // A buy's price is what the screen showed on the card, and the
+            // step's own paid Gold is that price when a discount made it
+            // differ from the card's list price.
+            if step.step == "buy" {
                 let from_tavern = before.and_then(|before| {
                     before.tavern.iter().find(|m| {
                         (c.card_id.is_some() && m.card_id == c.card_id)
@@ -3378,11 +3426,12 @@ fn step_of_spec(
                             || (c.slot.is_some() && m.slot == c.slot)
                     })
                 });
-                card.cost = step
-                    .paid
-                    .filter(|p| p.health <= 0 && p.gold >= 0)
-                    .map(|p| p.gold)
-                    .or_else(|| from_tavern.and_then(|m| visible_cost(data, m)));
+                if let Some(paid) = step.paid.filter(|p| p.health <= 0 && p.gold >= 0) {
+                    card.cost = Some(paid.gold);
+                }
+                if card.cost.is_none() {
+                    card.cost = from_tavern.and_then(|m| visible_cost(data, m));
+                }
                 card.costs_health = from_tavern.is_some_and(|m| m.costs_health).then_some(true);
             }
             (card.card_id.is_some() || card.name.is_some()).then_some(card)
@@ -3410,6 +3459,34 @@ fn step_of_spec(
             })
             .collect(),
         picked: step.picked.as_ref().map(|p| {
+            // A trinket's picked card can carry the list price while the
+            // offer showed the price actually paid. The paid Gold is what the
+            // screen showed on the button, so write that. A hero power's
+            // trinket Discover is free even when its list price is not.
+            let trinket = p
+                .card_id
+                .as_deref()
+                .is_some_and(|id| data.trinkets.by_card_id(id).is_some())
+                || p.name
+                    .as_deref()
+                    .is_some_and(|name| data.trinkets.by_name(name).is_some());
+            let cost = if step.step == "trinket_pick" || trinket {
+                step.paid
+                    .filter(|paid| paid.gold >= 0)
+                    .map(|paid| paid.gold)
+                    .or_else(|| {
+                        step.options
+                            .iter()
+                            .find(|o| {
+                                (p.card_id.is_some() && o.card_id == p.card_id)
+                                    || (p.name.is_some() && o.name == p.name)
+                            })
+                            .and_then(|o| o.cost)
+                    })
+                    .or(p.cost)
+            } else {
+                p.cost
+            };
             ScreenPick::Card(ScreenCard {
                 card_id: p.card_id.clone(),
                 name: p.name.clone(),
@@ -3421,7 +3498,7 @@ fn step_of_spec(
                 slot: p.slot,
                 kind: p.kind.clone(),
                 frozen: None,
-                cost: p.cost,
+                cost,
                 costs_health: None,
                 dark_gift: p.dark_gifts.first().map(screen_gift_of),
                 dark_gifts: None,
@@ -3468,10 +3545,15 @@ pub fn screen_from_action_file(
                 turn: turn.turn,
                 start: state_of_spec(data, ids, &turn.start, k_ranges),
                 steps,
-                end: turn
-                    .end
-                    .as_ref()
-                    .map(|e| state_of_spec(data, ids, e, k_ranges)),
+                end: turn.end.as_ref().map(|e| {
+                    let mut end = state_of_spec(data, ids, e, k_ranges);
+                    // The logged end after an end_turn step is the next turn's
+                    // quiet moment. Its Gold is not the shop-end Gold.
+                    if turn.actions.last().is_some_and(|s| s.step == "end_turn") {
+                        end.gold = None;
+                    }
+                    end
+                }),
             }
         })
         .collect();

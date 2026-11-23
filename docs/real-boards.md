@@ -1230,8 +1230,11 @@ game played from video needs no Power.log. One file holds one game,
   `kind` says the choice kind, and `source` names the card that opened it.
   `seen` is what the screen showed right after the step, in a state's shape:
   `screen-from-actions` writes the board, hand, Tavern, Gold, whether the next
-  Refresh is free, hero powers and trinkets after every step. `tavern_random` marks a step whose
-  Tavern is a random draw.
+  Refresh is free, hero powers and trinkets after every step. An `end_turn`
+  step writes no Gold: its logged state is the next turn's quiet moment, not
+  the shop-end Gold the replay still holds. A buy or a trinket pick writes the
+  price that was actually paid, not the card's list price when a discount made
+  them differ. `tavern_random` marks a step whose Tavern is a random draw.
 - No entity ids, counters, enchantment numbers, Blood Gem tags or script
   numbers are written. A Dark Gift shows only when the screen read its icon
   (the field above); its countdown is left to the engine unless the converter
@@ -1271,7 +1274,10 @@ one-decimal-of-thousands display gives (2,050 to 2,149 is "2.1k"). Without
   same prompt seating (`take_step_prompts`). Prices the screen showed are put
   on the carried game before a buy, a trinket pick pays the picked option's
   shown cost, and the last Tavern spell is read from the screen's own earlier
-  `play` steps. Every other field stays the engine's own result.
+  `play` steps. A buy names the card the screen bought, not the card in that
+  engine slot number, because the engine keeps its spell slot after the minion
+  slots. `place_tavern` also clears a Health-price charge the screen's Tavern no
+  longer carries. Every other field stays the engine's own result.
 - `--chain` seats only the first turn from its `start`. Each later turn starts
   from that seed's engine game at the end of the previous turn, moved into the
   next shop phase by the engine's own `Game::next_shop_turn_without_fight`

@@ -5013,12 +5013,22 @@ pub(crate) fn place_tavern(
         }
         minion.card
     });
+    // A health-priced Tavern minion is one buy's charge. When the screen's
+    // Tavern no longer holds one, the charge it left behind is gone too.
+    let health_minion = tavern_slots
+        .iter()
+        .zip(tavern.iter())
+        .any(|(spec, m)| spec.costs_health && !data.cards.get(m.card).is_spell());
     let pl = &mut game.players[ME];
     pl.shop.clear();
     for m in tavern {
         let _ = pl.shop.try_push(m);
     }
     pl.shop_spell = spell_card;
+    if !health_minion {
+        pl.tp.health_price_left = 0;
+        pl.tp.health_price_tribe = None;
+    }
     // The freeze is one state: the log's flag, or a frozen card, as `seat`
     // reads it, then off the cards so a Freeze click toggles the whole Tavern.
     pl.frozen = spec.frozen || pl.shop.iter().any(|m| m.frozen);

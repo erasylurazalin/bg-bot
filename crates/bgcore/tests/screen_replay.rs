@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use bgcore::Data;
 use bgcore::real_boards::CardIdMap;
-use bgcore::screen_replay::{self, ScreenTurnOutcome, ScreenVerdict};
+use bgcore::screen_replay::{self, ScreenPick, ScreenTurnOutcome, ScreenVerdict};
+use bgcore::shop_replay;
 
 fn run(json: &str, seeds: u64) -> ScreenTurnOutcome {
     let data = Arc::new(Data::bundled());
@@ -747,4 +748,198 @@ fn only_certain_uncertain_lines_make_the_uncertain_verdict() {
         "{:?}",
         second.uncertain_lines
     );
+}
+
+#[test]
+fn a_converted_end_turn_does_not_write_the_next_turns_gold() {
+    let data = Data::bundled();
+    let ids = CardIdMap::default();
+    let text = r#"{"source": "test", "game": 1, "turns": [
+        {"turn": 7,
+         "start": {"gold": 10, "tier": 1, "health": 30, "board": [], "hand": [],
+                   "tavern": []},
+         "actions": [{"step": "end_turn", "paid": {"gold": 0, "health": 0},
+                      "after": {"gold": 0}}],
+         "end": {"gold": 0}}]}"#;
+    let specs = shop_replay::parse_action_files(&[("test.json".to_string(), text.to_string())])
+        .expect("the action file parses");
+    let screen = screen_replay::screen_from_action_file(&data, &ids, &specs[0], false);
+    let seen = screen.turns[0].steps[0]
+        .seen
+        .as_ref()
+        .expect("the end-turn step has a seen state");
+    assert_eq!(seen.gold, None, "the post-turn Gold is not the shop-end Gold");
+    assert_eq!(
+        screen.turns[0].end.as_ref().and_then(|end| end.gold),
+        None,
+        "the end state's post-turn Gold is not compared either"
+    );
+}
+
+#[test]
+fn a_converted_trinket_pick_writes_the_paid_price() {
+    let data = Data::bundled();
+    let ids = CardIdMap::default();
+    let text = r#"{"source": "test", "game": 1, "turns": [
+        {"turn": 9,
+         "start": {"gold": 16, "tier": 4, "health": 30, "board": [], "hand": [],
+                   "tavern": []},
+         "actions": [{"step": "trinket_pick", "slot_kind": "greater",
+                      "options": [
+                        {"card_id": "BG35_MagicItem_755", "name": "Chillmere Mosaic", "cost": 3},
+                        {"card_id": "BG36_MagicItem_373", "name": "Multilayered Shield", "cost": 5}],
+                      "picked": {"card_id": "BG35_MagicItem_755", "name": "Chillmere Mosaic",
+                                 "cost": 5},
+                      "paid": {"gold": 3, "health": 0},
+                      "after": {"gold": 13}}],
+         "end": null}]}"#;
+    let specs = shop_replay::parse_action_files(&[("test.json".to_string(), text.to_string())])
+        .expect("the action file parses");
+    let screen = screen_replay::screen_from_action_file(&data, &ids, &specs[0], false);
+    let picked = screen.turns[0].steps[0]
+        .picked
+        .as_ref()
+        .expect("the step has a pick");
+    let ScreenPick::Card(card) = picked else {
+        panic!("a trinket pick writes a card");
+    };
+    assert_eq!(card.cost, Some(3), "the offer's paid price, not the list price");
+}
+
+#[test]
+fn buying_a_tavern_spell_uses_the_card_not_the_screens_slot_number() {
+    let json = r#"{
+      "source": "hand-written", "game": 35,
+      "turns": [{
+        "turn": 8,
+        "start": {"gold": 10, "tier": 1, "health": 30,
+                  "board": [], "hand": [],
+                  "tavern": [
+                    {"name": "Southsea Busker", "attack": 3, "health": 1, "slot": 1},
+                    {"name": "Southsea Busker", "attack": 3, "health": 1, "slot": 2},
+                    {"name": "Southsea Busker", "attack": 3, "health": 1, "slot": 3},
+                    {"name": "Alliance Flag", "attack": 0, "health": 0, "slot": 4,
+                     "kind": "spell"},
+                    {"name": "Southsea Busker", "attack": 3, "health": 1, "slot": 5},
+                    {"name": "Southsea Busker", "attack": 3, "health": 1, "slot": 6}
+                  ]},
+        "steps": [{"step": "buy", "slot": 4,
+                   "card": {"name": "Alliance Flag", "kind": "spell"}}],
+        "end": {"gold": 9, "tier": 1, "health": 30,
+                "board": [],
+                "hand": [{"name": "Alliance Flag", "kind": "spell",
+                          "attack": 0, "health": 0}],
+                "tavern": [
+                  {"name": "Southsea Busker", "attack": 3, "health": 1},
+                  {"name": "Southsea Busker", "attack": 3, "health": 1},
+                  {"name": "Southsea Busker", "attack": 3, "health": 1},
+                  {"name": "Southsea Busker", "attack": 3, "health": 1},
+                  {"name": "Southsea Busker", "attack": 3, "health": 1}
+                ]}
+      }]
+    }"#;
+    let outcome = run(json, 1);
+    assert_eq!(outcome.verdict, ScreenVerdict::Ok, "{:?}", outcome.differences);
+    let engine = outcome.seeds[0].engine.as_ref().expect("the turn finished");
+    assert!(
+        engine.hand.iter().any(|m| m.name == "Alliance Flag"),
+        "{:?}",
+        engine.hand
+    );
+    assert!(
+        !engine.tavern.iter().any(|m| m.name == "Alliance Flag"),
+        "{:?}",
+        engine.tavern
+    );
+}
+
+#[test]
+fn a_converted_buy_writes_the_discounted_paid_price() {
+    let data = Data::bundled();
+    let ids = CardIdMap::default();
+    let text = r#"{"source": "test", "game": 1, "turns": [
+        {"turn": 8,
+         "start": {"gold": 12, "tier": 5, "health": 30, "board": [], "hand": [],
+                   "tavern": [{"card_id": "BG26_ICC_901", "name": "Drakkari Enchanter",
+                               "attack": 1, "health": 5, "cost": 5}]},
+         "actions": [{"step": "buy", "slot": 1,
+                      "card": {"card_id": "BG26_ICC_901", "name": "Drakkari Enchanter",
+                               "attack": 1, "health": 5, "cost": 5},
+                      "paid": {"gold": 3, "health": 0},
+                      "after": {"gold": 9}}],
+         "end": null}]}"#;
+    let specs = shop_replay::parse_action_files(&[("test.json".to_string(), text.to_string())])
+        .expect("the action file parses");
+    let screen = screen_replay::screen_from_action_file(&data, &ids, &specs[0], false);
+    let card = screen.turns[0].steps[0]
+        .card
+        .as_ref()
+        .expect("the step names the bought card");
+    assert_eq!(card.cost, Some(3), "the screen shows the paid price, not the list price");
+}
+
+#[test]
+fn a_hero_power_trinket_discover_writes_the_free_paid_price() {
+    let data = Data::bundled();
+    let ids = CardIdMap::default();
+    let text = r#"{"source": "test", "game": 1, "turns": [
+        {"turn": 5,
+         "start": {"gold": 7, "tier": 3, "health": 30, "board": [], "hand": [],
+                   "tavern": []},
+         "actions": [{"step": "discover", "kind": "discover",
+                      "source": {"card_id": "BG30_HERO_304p", "name": "Fantastic Treasure"},
+                      "options": [{"card_id": "BG35_MagicItem_840", "name": "Chromatic Tear",
+                                   "cost": 2}],
+                      "picked": {"card_id": "BG35_MagicItem_840", "name": "Chromatic Tear",
+                                 "cost": 2},
+                      "paid": {"gold": 0, "health": 0},
+                      "after": {"gold": 7}}],
+         "end": null}]}"#;
+    let specs = shop_replay::parse_action_files(&[("test.json".to_string(), text.to_string())])
+        .expect("the action file parses");
+    let screen = screen_replay::screen_from_action_file(&data, &ids, &specs[0], false);
+    let picked = screen.turns[0].steps[0]
+        .picked
+        .as_ref()
+        .expect("the step has a pick");
+    let ScreenPick::Card(card) = picked else {
+        panic!("a trinket Discover writes a card");
+    };
+    assert_eq!(card.cost, Some(0), "the hero power gives the trinket for free");
+}
+
+#[test]
+fn a_health_price_charge_does_not_carry_into_the_next_turn() {
+    let json = r#"{
+      "source": "hand-written", "game": 36,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [], "hand": [],
+                   "tavern": [{"name": "Southsea Busker", "attack": 3, "health": 1,
+                               "slot": 1, "costs_health": true}]},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [], "hand": [],
+                   "tavern": [{"name": "Harmless Bonehead", "attack": 1, "health": 1,
+                               "slot": 1}]},
+         "steps": [{"step": "buy", "slot": 1}],
+         "end": {"gold": 7, "tier": 1, "health": 30,
+                 "board": [],
+                 "hand": [{"name": "Harmless Bonehead", "attack": 1, "health": 1,
+                           "golden": false}],
+                 "tavern": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Ok,
+        "{:?}",
+        second.differences
+    );
+    let engine = second.seeds[0].engine.as_ref().expect("the turn finished");
+    assert_eq!(engine.gold, 7, "the buy paid Gold, not a stale Health price");
 }
