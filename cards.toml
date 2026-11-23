@@ -1080,9 +1080,12 @@ name = "Ashen Corruptor"
 tier = 4
 tribe = "demon"
 stats = [4, 8]
+# The Tavern shows +1/+2 per trigger, but a bought minion keeps only +1/+1:
+# the extra Health stays in the Tavern (`Hearthstone_2026_11_09_21_02_00-g4`
+# turn 8, a 5/9 Devilish Distractor is 5/8 in hand).
 after_hero_damage = [
     { rewind = true },
-    { tavern_buff = [1, 2], this_turn = true },
+    { tavern_buff = [1, 2], this_turn = true, buy_keep = [1, 1] },
 ]
 
 [[minion]]

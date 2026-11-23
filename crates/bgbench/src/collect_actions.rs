@@ -191,7 +191,7 @@ const BOARD_BLOCKS: [&str; 2] = ["PLAY", "MOVE_MINION"];
 
 /// The player enchantments whose two script numbers are a pair of counters, in
 /// the order the Python writes them.
-const PLAYER_ENCHANTS: [(&str, (&str, Option<&str>)); 8] = [
+const PLAYER_ENCHANTS: [(&str, (&str, Option<&str>)); 9] = [
     ("BG31_808pe", ("beetle_attack", Some("beetle_health"))),
     ("BG25_011pe", ("undead_attack", None)),
     ("BG31_816pe", ("baller", None)),
@@ -205,13 +205,19 @@ const PLAYER_ENCHANTS: [(&str, (&str, Option<&str>)); 8] = [
     ),
     ("BG34_854pe", ("refresh_attack", Some("refresh_health"))),
     ("BG34_689e2", ("barrage_attack", Some("barrage_health"))),
+    // Goldrinn: the pair is the current shop bonus on Beasts, carried until
+    // the next turn starts (`Player::beast_bonus`).
+    ("BGS_018pe", ("beast_bonus_attack", Some("beast_bonus_health"))),
 ];
 
-/// The player enchantments whose two counters are one number.
-const SAME_NUMBER_ENCHANTS: [(&str, (&str, &str)); 1] = [(
-    "BG31_873pe2",
-    ("tavern_turn_attack", "tavern_turn_health"),
-)];
+/// Ashen Corruptor's player enchantment: its first number is the number of
+/// triggers this turn.
+const ASHEN_PLAYER_ENCHANT: &str = "BG31_873pe2";
+
+/// The `Ashen` enchantment on a Tavern minion: its first number is the same
+/// trigger count, and each trigger gives the Tavern minion +1 Health more
+/// than a bought one keeps.
+const ASHEN_TAVERN_ENCHANT: &str = "BG32_873e";
 
 pub fn run(args: &[String]) {
     let home = home();
@@ -903,6 +909,36 @@ fn undead_army_numbers(game: &Game) -> Option<[i64; 4]> {
                 x.int("TAG_SCRIPT_DATA_NUM_4"),
             ]
         })
+}
+
+/// Ashen Corruptor's two numbers this turn: how many triggers have fired, and
+/// the extra Health those triggers gave the Tavern minions beyond the +1/+1
+/// each keeps when bought. The player enchant (`BG31_873pe2`) carries the
+/// count. The minion `Ashen` enchant (`BG32_873e`) carries the same count for
+/// each Tavern minion, and it is what makes the Tavern show +1/+2 per trigger
+/// while a bought minion keeps +1/+1 (`Hearthstone_2026_11_09_21_02_00-g4`
+/// turn 8: 5/9 Devilish Distractor becomes 5/8 in hand, Sellemental 5/7 and
+/// Imposing Percussionist 6/8 become 5/5 and 6/6). No Tavern minion of mine
+/// left to carry it keeps the player count as the fallback, so a later
+/// Tavern minion still gets the whole buff.
+fn ashen_numbers(game: &Game) -> Option<(i64, i64)> {
+    let me = me(game)? as i64;
+    let player = my_player(game)?;
+    let count = enchant_numbers(game, player, ASHEN_PLAYER_ENCHANT)?[0];
+    if count == 0 {
+        return None;
+    }
+    let extra = game
+        .entities_in_order()
+        .filter(|x| {
+            x.card_id == ASHEN_TAVERN_ENCHANT
+                && x.text("ZONE") == "PLAY"
+                && x.int("CONTROLLER") == me
+        })
+        .map(|x| x.int("TAG_SCRIPT_DATA_NUM_1"))
+        .max()
+        .unwrap_or(count);
+    Some((count, extra.max(0)))
 }
 
 /// "Your Volumizers have +A/+H this game (wherever they are)": the Attack and
@@ -3340,15 +3376,15 @@ impl Collector {
                 Json::Int(player.int("TAVERN_SPELL_HEALTH_INCREASE")),
             );
         }
-        for (card_id, (attack, health)) in SAME_NUMBER_ENCHANTS {
-            let Some(sd) = enchant_numbers(game, player, card_id) else {
-                continue;
-            };
-            if sd[0] == 0 {
-                continue;
-            }
-            put(&mut out, attack, Json::Int(sd[0]));
-            put(&mut out, health, Json::Int(sd[0]));
+        // Ashen Corruptor: the player enchant counts the triggers, and each
+        // trigger gives the Tavern +1/+2 this turn; a bought minion keeps
+        // +1/+1 of it. The first pair is what the Tavern shows (the end of the
+        // turn takes it off); the second is what goes with the buy.
+        if let Some((count, extra)) = ashen_numbers(game) {
+            put(&mut out, "tavern_turn_attack", Json::Int(count));
+            put(&mut out, "tavern_turn_health", Json::Int(count + extra));
+            put(&mut out, "tavern_turn_bought_attack", Json::Int(count));
+            put(&mut out, "tavern_turn_bought_health", Json::Int(count));
         }
         for (card_id, (attack, health)) in PLAYER_ENCHANTS {
             let Some(sd) = enchant_numbers(game, player, card_id) else {
@@ -4175,6 +4211,47 @@ mod tests {
         theirs.push(("ATTACHED", number(200)));
         add(320, UNDEAD_ARMY, theirs);
         assert_eq!(undead_army_numbers(&g), None);
+    }
+
+    /// Goldrinn's shop bonus is the pair on the player enchant `BGS_018pe`
+    /// (`Hearthstone_2026_11_11_22_47_07-g1` turn 9, where two Goldrinn
+    /// Deathrattles set 28/28 and the 3/3 Nightmare Par-tea Guest is 31/31 on
+    /// play). The collector writes it as the Beast bonus counters the shop
+    /// replay seats.
+    #[test]
+    fn the_goldrinn_player_enchant_is_the_beast_bonus() {
+        fn tag(value: &str) -> TagValue {
+            TagValue::Text(value.to_string())
+        }
+        fn number(value: i64) -> TagValue {
+            TagValue::Int(value)
+        }
+        let mut g = bglog::Game::new();
+        g.real_players = [1].into_iter().collect();
+        g.players.insert(1, 8);
+        let player = g.entity(8);
+        player.set("CARDTYPE", tag("PLAYER"));
+        player.set("ZONE", tag("PLAY"));
+        player.set("ENTITY_ID", number(8));
+        let enchant = g.entity(900);
+        enchant.card_id = "BGS_018pe".to_string();
+        enchant.set("CARDTYPE", tag("ENCHANTMENT"));
+        enchant.set("ZONE", tag("PLAY"));
+        enchant.set("ATTACHED", number(8));
+        enchant.set("TAG_SCRIPT_DATA_NUM_1", number(28));
+        enchant.set("TAG_SCRIPT_DATA_NUM_2", number(28));
+        let cards = Cards::from_pairs([("BGS_018pe".to_string(), "Goldrinn".to_string())]);
+        let collector = Collector::new(cards, "test");
+        let counters = collector.counters(&g);
+        let object = counters.as_obj().unwrap();
+        assert_eq!(
+            field(object, "beast_bonus_attack").and_then(Json::as_int),
+            Some(28)
+        );
+        assert_eq!(
+            field(object, "beast_bonus_health").and_then(Json::as_int),
+            Some(28)
+        );
     }
 
     /// A minion's own Blood Gem stats are the log's `4270`/`4271` pair on the

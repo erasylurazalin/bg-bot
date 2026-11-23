@@ -346,6 +346,11 @@ pub struct TavernBuff {
     /// Tavern minion with a type, not a random tribe and not the tribeless
     /// ones.
     pub typed_only: bool,
+    /// What a bought minion keeps of this buff, when it is not all of it.
+    /// Ashen Corruptor's +1/+2 per trigger leaves its extra Health in the
+    /// Tavern, so a bought minion keeps +1/+1 (`Hearthstone_2026_11_09_21_02_00-g4`
+    /// turn 8: a 5/9 Devilish Distractor is 5/8 in hand). `None` keeps all.
+    pub buy_keep: Option<(i32, i32)>,
 }
 
 /// One buff per (tribe filter, duration): 10 tribes and no filter, times 2.
@@ -3006,7 +3011,12 @@ impl Game {
                         MinionPrice::Health(_) => 0,
                     };
                     self.note_minion_bought(p, price);
-                    let m = self.players[p].shop.remove(slot);
+                    let mut m = self.players[p].shop.remove(slot);
+                    // A "this turn" Tavern buff does not all go with the buy:
+                    // Ashen Corruptor's minion keeps +1/+1 per trigger and
+                    // leaves the extra Health behind (`Hearthstone_2026_11_09_21_02_00-g4`
+                    // turn 8: the 5/9 Devilish Distractor is 5/8 in hand).
+                    self.players[p].take_tavern_buff_on_buy(&self.data.cards, &mut m);
                     self.players[p].gold -= buy_cost;
                     self.add_to_hand(p, m);
                     // Come One, Come All!: the buy takes the card's Darkmoon

@@ -237,6 +237,7 @@ fn galakronds_greed_pick_lands_with_the_tavens_standing_buffs() {
         health: 40,
         this_turn: false,
         typed_only: false,
+        buy_keep: None,
     };
     g.players[0].add_tavern_buff(&g.data.cards, b);
     act(&mut g, 0, Action::HeroPower);

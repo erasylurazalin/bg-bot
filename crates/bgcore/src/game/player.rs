@@ -374,8 +374,15 @@ impl Player {
             .find(|o| o.tribe == b.tribe && o.this_turn == b.this_turn && o.typed_only == b.typed_only)
         {
             Some(o) => {
+                let old = (o.attack, o.health);
                 o.attack += b.attack;
                 o.health += b.health;
+                o.buy_keep = match (o.buy_keep, b.buy_keep) {
+                    (Some(a), Some(c)) => Some((a.0 + c.0, a.1 + c.1)),
+                    (Some(a), None) => Some((a.0 + b.attack, a.1 + b.health)),
+                    (None, Some(c)) => Some((old.0 + c.0, old.1 + c.1)),
+                    (None, None) => None,
+                };
             }
             None => self.tavern_buffs.push(b),
         }
@@ -425,6 +432,21 @@ impl Player {
         for b in &self.tavern_buffs {
             if tavern_buff_hits(cards, m, b) {
                 buff(m, b.attack, b.health);
+            }
+        }
+    }
+
+    /// Take off the part of a "this turn" Tavern buff that does not go with a
+    /// bought minion: Ashen Corruptor's Tavern minions show +1/+2 per trigger,
+    /// but a bought one keeps only +1/+1 (`Hearthstone_2026_11_09_21_02_00-g4`
+    /// turn 8). A buff with no `buy_keep` keeps all of itself.
+    pub fn take_tavern_buff_on_buy(&self, cards: &CardDb, m: &mut Minion) {
+        for b in self.tavern_buffs.iter().filter(|b| b.this_turn) {
+            let Some((keep_attack, keep_health)) = b.buy_keep else {
+                continue;
+            };
+            if tavern_buff_hits(cards, m, b) {
+                buff(m, keep_attack - b.attack, keep_health - b.health);
             }
         }
     }
@@ -824,18 +846,24 @@ impl Player {
                 health: c.tavern_health,
                 this_turn: false,
                 typed_only: false,
+                buy_keep: None,
             });
         }
         // The Tavern's "this turn" buff: the logged minions already carry it
         // in their stats, so it is remembered without being put on them
-        // again, and the end of the turn takes it off (Ashen Corruptor).
+        // again, and the end of the turn takes it off (Ashen Corruptor). A
+        // bought minion keeps only the part the file marks as bought.
         if c.tavern_turn_attack != 0 || c.tavern_turn_health != 0 {
+            let bought = (c.tavern_turn_bought_attack != 0
+                || c.tavern_turn_bought_health != 0)
+                .then_some((c.tavern_turn_bought_attack, c.tavern_turn_bought_health));
             self.tavern_buffs.push(TavernBuff {
                 tribe: None,
                 attack: c.tavern_turn_attack,
                 health: c.tavern_turn_health,
                 this_turn: true,
                 typed_only: false,
+                buy_keep: bought,
             });
         }
         if c.tavern_elemental_attack != 0 || c.tavern_elemental_health != 0 {
@@ -845,6 +873,7 @@ impl Player {
                 health: c.tavern_elemental_health,
                 this_turn: false,
                 typed_only: false,
+                buy_keep: None,
             });
         }
         // Upper Hand: the pending Start of Combat triggers this side cast.
@@ -853,7 +882,7 @@ impl Player {
         self.brood_of_nozdormu = c.brood_of_nozdormu.min(u8::MAX as u32) as u8;
         // A fight's outcome can move these too; they start from the base
         // again. None of them is read without a shop phase.
-        self.beast_bonus = (0, 0);
+        self.beast_bonus = (c.beast_bonus_attack, c.beast_bonus_health);
         self.boon_of_beetles = 0;
         self.sharing_is_caring = 0;
     }

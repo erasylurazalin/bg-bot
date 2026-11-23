@@ -101,6 +101,7 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
   | `beetle_attack`, `beetle_health` | `BG31_808pe` (Beetle Army player enchant) numbers 1 and 2 |
   | `undead_attack` | `BG25_011pe` (Undead Bonus Attack player enchant) number 1 |
   | `undead_health` | the `Undead Army` enchant (`BG25_011e2`) on any Undead of mine, number 2: the game has no player-level enchant for the Health half, and every Undead on my board carries the whole pair (number 1 is the Attack). A board with no Undead of mine shows no pair, and the Attack then comes from the player enchant above. The shop replay's collector writes it; the board files do not yet |
+  | `beast_bonus_attack`, `beast_bonus_health` | `BGS_018pe` (Goldrinn player enchant) numbers 1 and 2: the current "your Beasts have +A/+H until next turn" bonus. The board's Beasts already carry it in their stats; a Beast played from hand or summoned still gets this pair |
   | `spell_attack`, `spell_health` | `TAVERN_SPELL_ATTACK_INCREASE` / `TAVERN_SPELL_HEALTH_INCREASE` on the player. This is the total the game gives every Tavern spell, so it already holds a minion's aura (Humon'gozz's +1/+2: the tag drops by exactly that pair when the Humon'gozz is sold, `Hearthstone_2026_10_27_17_42_08-g1` turn 9) and a trinket's standing rule (Honeycomb Ring's +1/+1 on the pick). It also holds what this turn's spells on a minion improved, which the start of a turn drops: `Hearthstone_2026_11_03_15_22_36-g4` turn 10 starts at 2/3 and its last step is 38/39. The replay's loader takes the engine's own part back out, and seats the part the turn added as the bonus that is this turn's only (`Player.tp.spell_bonus_turn`) |
   | `spells_cast` | tag `3088` on the player (the log prints no name for it): Tavern spells cast this game, triggers' casts included, for both sides. Files written before 2026-11-21 read `NUM_SPELLS_PLAYED_THIS_GAME`, which counts spells played from hand on my side only and ran low (33 against Faceless Converter's 90 in `2026_10_28_22_11_50` game 6) |
   | `knight_deaths` | `BG25_008pe` (Eternal Knight player enchant) number 1 |
@@ -306,7 +307,12 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
     the ones only a shop step reads: `gold_spent` (`NUM_RESOURCES_SPENT_THIS_GAME`); the Tavern's
     "this game" buffs, `tavern_attack`/`tavern_health` (`BG_ShopBuff`, Staff of
     Enrichment and its kin) and `tavern_elemental_attack`/
-    `tavern_elemental_health` (`BG_ShopBuff_Elemental`, Obsidian Ravager);
+    `tavern_elemental_health` (`BG_ShopBuff_Elemental`, Obsidian Ravager); the
+    "this turn" buff `tavern_turn_attack`/`tavern_turn_health` (Ashen
+    Corruptor's player enchant `BG31_873pe2` and its minion enchant
+    `BG32_873e`, +1/+2 per trigger) and the part a buy keeps,
+    `tavern_turn_bought_attack`/`tavern_turn_bought_health` (+1/+1 per
+    trigger);
     `refresh_attack`/`refresh_health` (`BG34_854pe`, "after the Tavern is
     Refreshed this game": Waveling, En-Djinn Blazer, Easterly Winds);
     `barrage_attack`/`barrage_health` (`BG34_689e2`, Blood Gem Barrage casts);
@@ -705,7 +711,7 @@ its `game_build`, as `--real-boards` does. Every core is used: 558 fights x
 What the check cannot see, because the file does not carry it, and so cannot
 blame on the engine: the game's lobby (a card that draws a random card inside
 the fight draws from every tribe), the shop-phase numbers a fight reads
-(Goldrinn's Beast bonus, Boon of Beetles, Gold spent, minions sold), a trinket
+(Boon of Beetles, Gold spent, minions sold), a trinket
 aura's per-card steps (Hammer of Twilight's discards), and the Ice Block a
 Safety Patch gives (it moves Health between turns, not a fight's result).
 

@@ -333,8 +333,15 @@ pub enum Effect {
     /// their Bonus Keywords when `keywords` is set.
     Consume { by: ConsumeBy, pick: ConsumePick, keywords: bool, count: u8 },
     /// Buff the Tavern minions (of a tribe, if given), now and, unless
-    /// `this_turn`, for the rest of the game.
-    TavernBuff { tribe: Option<Tribe>, attack: i32, health: i32, this_turn: bool },
+    /// `this_turn`, for the rest of the game. `buy_keep` is what a bought
+    /// minion keeps of it when that is less than the whole buff.
+    TavernBuff {
+        tribe: Option<Tribe>,
+        attack: i32,
+        health: i32,
+        this_turn: bool,
+        buy_keep: Option<(i32, i32)>,
+    },
     /// Deal damage to your own hero (never below the self damage floor).
     DamageHero(i32),
     /// Undo the damage your hero just took.
@@ -768,12 +775,13 @@ impl Effect {
                     health: health + bh,
                 }
             }
-            Effect::TavernBuff { tribe, attack, health, this_turn } => {
+            Effect::TavernBuff { tribe, attack, health, this_turn, buy_keep } => {
                 Effect::TavernBuff {
                     tribe,
                     attack: attack + ba,
                     health: health + bh,
                     this_turn,
+                    buy_keep: buy_keep.map(|(a, h)| (a + ba, h + bh)),
                 }
             }
             Effect::SummonAndBuffAll { card, count, attack, golden_doubles_count } => {
@@ -2939,6 +2947,10 @@ struct RawEffect {
     tavern_buff: Option<[i32; 2]>,
     #[serde(default)]
     this_turn: bool,
+    /// What a bought Tavern minion keeps of `tavern_buff`, when it is less
+    /// than all of it (Ashen Corruptor: +1/+2 per trigger in the Tavern,
+    /// +1/+1 kept on the buy).
+    buy_keep: Option<[i32; 2]>,
     damage_hero: Option<i32>,
     #[serde(default)]
     rewind: bool,
@@ -4207,7 +4219,13 @@ impl CardDb {
                     count: b.count.unwrap_or(1),
                 }
             } else if let Some([attack, health]) = b.tavern_buff {
-                Effect::TavernBuff { tribe: t, attack, health, this_turn: b.this_turn }
+                Effect::TavernBuff {
+                    tribe: t,
+                    attack,
+                    health,
+                    this_turn: b.this_turn,
+                    buy_keep: b.buy_keep.map(|[a, h]| (a, h)),
+                }
             } else if let Some([attack, health]) = b.tavern_buff_random_keyword {
                 let mut mask = 0u8;
                 for k in b.keywords.as_deref().unwrap_or(&[]) {

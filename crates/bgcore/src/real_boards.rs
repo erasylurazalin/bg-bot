@@ -153,6 +153,12 @@ pub struct RealCounters {
     pub beetle_health: i32,
     pub undead_attack: i32,
     pub undead_health: i32,
+    /// Goldrinn's "your Beasts have +A/+H until next turn", carried into the
+    /// shop (`Player::beast_bonus`). The log keeps it on the player
+    /// enchantment `BGS_018pe`; a board's Beasts already carry it in their
+    /// stats, but a Beast played from hand or summoned still gets it.
+    pub beast_bonus_attack: i32,
+    pub beast_bonus_health: i32,
     pub spell_attack: i32,
     pub spell_health: i32,
     pub spells_cast: u32,
@@ -173,12 +179,17 @@ pub struct RealCounters {
     /// kin). Only a shop step reads it.
     pub tavern_attack: i32,
     pub tavern_health: i32,
-    /// The Tavern's "this turn" buff (Ashen Corruptor's +2/+2 after the hero
-    /// takes damage): it comes off every minion still in the Tavern at the
-    /// end of the turn. The log keeps it apart from the "this game" buff, in
-    /// the Ashen Corruptor player enchantment.
+    /// The Tavern's "this turn" buff (Ashen Corruptor's +1/+2 per trigger
+    /// after the hero takes damage): it comes off every minion still in the
+    /// Tavern at the end of the turn. The log keeps it apart from the "this
+    /// game" buff, in the Ashen Corruptor player and minion enchantments.
     pub tavern_turn_attack: i32,
     pub tavern_turn_health: i32,
+    /// The part of the "this turn" buff a bought Tavern minion keeps: +1/+1
+    /// per trigger. The Tavern's extra Health (`tavern_turn_health` less this
+    /// one) stays behind.
+    pub tavern_turn_bought_attack: i32,
+    pub tavern_turn_bought_health: i32,
     /// The same for Elementals only (Obsidian Ravager and its kin).
     pub tavern_elemental_attack: i32,
     pub tavern_elemental_health: i32,
@@ -219,6 +230,8 @@ impl Default for RealCounters {
             beetle_health: 0,
             undead_attack: 0,
             undead_health: 0,
+            beast_bonus_attack: 0,
+            beast_bonus_health: 0,
             spell_attack: 0,
             spell_health: 0,
             spells_cast: 0,
@@ -230,6 +243,8 @@ impl Default for RealCounters {
             tavern_health: 0,
             tavern_turn_attack: 0,
             tavern_turn_health: 0,
+            tavern_turn_bought_attack: 0,
+            tavern_turn_bought_health: 0,
             tavern_elemental_attack: 0,
             tavern_elemental_health: 0,
             upper_hand: 0,
@@ -247,11 +262,14 @@ impl Default for RealCounters {
 impl RealCounters {
     /// Take one of the numbers a file holds, by its key: `gem_attack`,
     /// `gem_health`, `beetle_attack`, `beetle_health`, `undead_attack`,
-    /// `undead_health`, `spell_attack`, `spell_health`, `spells_cast`,
+    /// `undead_health`, `beast_bonus_attack`, `beast_bonus_health`,
+    /// `spell_attack`, `spell_health`, `spells_cast`,
     /// `knight_deaths`, `tasty_lobster`, `baller`, `upper_hand`,
     /// `brood_of_nozdormu`, and the numbers only a shop
     /// step reads: `golden_played`, `gold_spent`, `tavern_attack`, `tavern_health`,
-    /// `tavern_elemental_attack`, `tavern_elemental_health`, `refresh_attack`,
+    /// `tavern_turn_attack`, `tavern_turn_health`, `tavern_turn_bought_attack`,
+    /// `tavern_turn_bought_health`, `tavern_elemental_attack`,
+    /// `tavern_elemental_health`, `refresh_attack`,
     /// `refresh_health`, `barrage_attack`, `barrage_health`,
     /// `volumizer_attack`, `volumizer_health`. A key that is not
     /// in the file leaves its field at the base value; a key no engine number
@@ -266,6 +284,8 @@ impl RealCounters {
             "beetle_health" => self.beetle_health = value,
             "undead_attack" => self.undead_attack = value,
             "undead_health" => self.undead_health = value,
+            "beast_bonus_attack" => self.beast_bonus_attack = value,
+            "beast_bonus_health" => self.beast_bonus_health = value,
             "spell_attack" => self.spell_attack = value,
             "spell_health" => self.spell_health = value,
             "spells_cast" => self.spells_cast = count(value),
@@ -278,6 +298,8 @@ impl RealCounters {
             "tavern_health" => self.tavern_health = value,
             "tavern_turn_attack" => self.tavern_turn_attack = value,
             "tavern_turn_health" => self.tavern_turn_health = value,
+            "tavern_turn_bought_attack" => self.tavern_turn_bought_attack = value,
+            "tavern_turn_bought_health" => self.tavern_turn_bought_health = value,
             "upper_hand" => self.upper_hand = count(value),
             "brood_of_nozdormu" => self.brood_of_nozdormu = count(value),
             "tavern_elemental_attack" => self.tavern_elemental_attack = value,

@@ -158,6 +158,7 @@ fn once_this_reaches_attack_applies_in_the_tavern_and_in_hand() {
         health: 0,
         this_turn: false,
         typed_only: false,
+        buy_keep: None,
     };
     g.players[0].add_tavern_buff(&g.data.cards, b);
     assert_eq!(g.players[0].shop[0].attack, 6);

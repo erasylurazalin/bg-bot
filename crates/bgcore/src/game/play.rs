@@ -595,6 +595,7 @@ impl Game {
                             health: t.health,
                             this_turn: false,
                             typed_only: false,
+                            buy_keep: None,
                         },
                     );
                 }

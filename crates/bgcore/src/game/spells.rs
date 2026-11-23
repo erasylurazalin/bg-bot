@@ -1380,6 +1380,7 @@ impl Game {
                     health: health + dh,
                     this_turn: false,
                     typed_only: false,
+                    buy_keep: None,
                 };
                 self.players[p].add_tavern_buff_late(&self.data.cards, b);
             }

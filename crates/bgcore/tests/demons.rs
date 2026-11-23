@@ -1662,10 +1662,12 @@ fn a_bought_minion_keeps_a_this_turn_tavern_buff_which_the_tavern_loses() {
         let c = g.data.cards.get(m.card);
         assert_eq!((m.attack, m.health), (c.attack + 1, c.health + 2), "{}", c.name);
     }
-    // the bought minion keeps the buff
+    // The bought minion keeps +1/+1 of the +1/+2, not the extra Health:
+    // `Hearthstone_2026_11_09_21_02_00-g4` turn 8, the 5/9 Devilish
+    // Distractor is 5/8 in hand.
     g.players[0].gold = 3;
     act(&mut g, 0, Action::Buy(0));
-    assert_eq!(stats(&g.players[0].hand[0]), (ba + 1, bh + 2));
+    assert_eq!(stats(&g.players[0].hand[0]), (ba + 1, bh + 1));
     act(&mut g, 0, Action::EndTurn);
     // the Tavern is plain again, the bought minion is not
     turn_of(&mut g, 0);
@@ -1673,7 +1675,33 @@ fn a_bought_minion_keeps_a_this_turn_tavern_buff_which_the_tavern_loses() {
         let c = g.data.cards.get(m.card);
         assert_eq!((m.attack, m.health), (c.attack, c.health), "{}", c.name);
     }
-    assert_eq!(stats(&g.players[0].hand[0]), (ba + 1, bh + 2));
+    assert_eq!(stats(&g.players[0].hand[0]), (ba + 1, bh + 1));
+    g.check_invariants().unwrap();
+}
+
+/// The same log's second trigger: two Health payments make the Tavern show
+/// +2/+4 while a bought minion keeps +2/+2 (Sellemental 5/7 is 5/5 in hand,
+/// Imposing Percussionist 6/8 is 6/6, `Hearthstone_2026_11_09_21_02_00-g4`
+/// turn 8 steps 15 and 20).
+#[test]
+fn two_ashen_triggers_leave_the_extra_health_in_the_tavern() {
+    let mut g = game(48);
+    put_on_board(&mut g, 0, "Wrath Weaver");
+    put_on_board(&mut g, 0, "Ashen Corruptor");
+    set_shop(&mut g, 0, &["Devilish Distractor"]);
+    let base = g.data.cards.get(g.players[0].shop[0].card);
+    let (ba, bh) = (base.attack, base.health);
+    g.players[0].health = 30;
+    // Two Demons played: each Wrath Weaver hit is rewound and gives the
+    // Tavern +1/+2 this turn.
+    for name in ["Flaming Enforcer", "Deft Deserter"] {
+        g.give(0, name).unwrap();
+        act(&mut g, 0, Action::Play { hand: 0, pos: 2 });
+    }
+    assert_eq!(stats(&g.players[0].shop[0]), (ba + 2, bh + 4));
+    g.players[0].gold = 3;
+    act(&mut g, 0, Action::Buy(0));
+    assert_eq!(stats(&g.players[0].hand[0]), (ba + 2, bh + 2));
     g.check_invariants().unwrap();
 }
 

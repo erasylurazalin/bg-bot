@@ -646,10 +646,14 @@ pub const UPPER_HAND: &str = "BG28_573";
 /// enchantment does not have, attack first and health second). The log attaches
 /// them to the player of both seats (the opponent's to the stand-in player) and
 /// only while the number is nonzero, so a missing one means the base value.
-pub const PLAYER_ENCHANTS: [(&str, Option<&str>, Option<&str>); 3] = [
+pub const PLAYER_ENCHANTS: [(&str, Option<&str>, Option<&str>); 4] = [
     // Beetle Army: "Your Beetles have +{0}/+{1} this game" (Forest Rover,
     // Runed Progenitor, Turquoise Skitterer).
     ("BG31_808pe", Some("beetle_attack"), Some("beetle_health")),
+    // Goldrinn's "your Beasts have +{0}/+{1} until next turn": the pair is the
+    // current bonus, and the shop replay seats it so a Beast played from hand
+    // gets it (`Player::beast_bonus`).
+    ("BGS_018pe", Some("beast_bonus_attack"), Some("beast_bonus_health")),
     // Undead Bonus Attack: "Your Undead have +{0} Attack this game, wherever
     // they are" (Nerubian Deathswarmer, Plaguerunner, Forsaken Weaver,
     // Butchering). There is no health one on the player: the health half rides

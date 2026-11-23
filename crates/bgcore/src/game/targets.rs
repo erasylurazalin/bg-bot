@@ -51,7 +51,14 @@ impl Game {
         } else {
             Some(tribes.random_type(&mut self.rng)?)
         };
-        Some(TavernBuff { tribe, attack, health, this_turn: false, typed_only: tribe.is_none() })
+        Some(TavernBuff {
+            tribe,
+            attack,
+            health,
+            this_turn: false,
+            typed_only: tribe.is_none(),
+            buy_keep: None,
+        })
     }
 
     /// Set a Tavern minion's stats to `attack`/`health`, keeping the bonuses

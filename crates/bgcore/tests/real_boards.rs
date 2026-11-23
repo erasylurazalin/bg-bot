@@ -12,7 +12,7 @@ use bgcore::real_boards::{
     CardIdMap, MIN_FILTERED_BOARDS, RealBoardSpec, RealBoards, RealCounters, RealDeitySpec,
     RealMinionSpec, parse_board_files, LATE_TURN,
 };
-use bgcore::{Data, Game, Keywords, Minion, PLAYERS, Rng, Tribe, Tribes};
+use bgcore::{Action, Data, Game, Keywords, Minion, PLAYERS, Rng, Tribe, Tribes};
 
 fn data() -> Arc<Data> {
     Arc::new(Data::bundled())
@@ -479,6 +479,15 @@ fn first_turn(g: &mut Game) {
     }
 }
 
+/// Answer the other seats until player 0's shop turn starts.
+fn to_my_turn(g: &mut Game) {
+    let mut rng = Rng::new(11);
+    while g.current_player() != Some(0) && !g.over {
+        let a = random_action(g, &mut rng);
+        g.step(a).unwrap();
+    }
+}
+
 #[test]
 fn a_real_seat_takes_the_boards_numbers() {
     let d = data();
@@ -906,6 +915,83 @@ fn a_this_turn_tavern_buff_comes_off_at_the_end_of_the_turn() {
         (base_a + 10, base_h + 10),
         "the this turn half comes off, the this game half stays"
     );
+}
+
+/// Ashen Corruptor's loaded "this turn" buff is asymmetric: the Tavern shows
+/// +2/+4 after two triggers (`tavern_turn_*`) while a bought minion keeps
+/// +2/+2 (`tavern_turn_bought_*`). `Hearthstone_2026_11_09_21_02_00-g4` turn
+/// 8: Sellemental 5/7 becomes 5/5 in hand, Imposing Percussionist 6/8 becomes
+/// 6/6.
+#[test]
+fn a_loaded_ashen_buff_keeps_only_its_bought_part() {
+    let data = Data::bundled();
+    let cards = &data.cards;
+    let mut g = Game::new_with_lobby(
+        Arc::new(Data::bundled()),
+        4,
+        bgcore::Tribe::EVERY.into_iter().fold(bgcore::Tribes::NONE, |m: bgcore::Tribes, t| m.with(t)),
+    );
+    first_turn(&mut g);
+    to_my_turn(&mut g);
+    for old in g.players[0].shop.drain(..) {
+        let card = cards.get(old.card);
+        if !card.token {
+            g.pool[card.pool_slot as usize] += old.pool_copies;
+        }
+    }
+    let c = cards.by_name("Devilish Distractor").unwrap();
+    let slot = cards.get(c).pool_slot as usize;
+    g.pool[slot] -= 1;
+    let mut m = g.players[0].make_card(cards, c, false, 1);
+    let (base_a, base_h) = (m.attack, m.health);
+    m.attack += 2;
+    m.health += 4;
+    g.players[0].shop.push(m);
+    let counters = RealCounters {
+        tavern_turn_attack: 2,
+        tavern_turn_health: 4,
+        tavern_turn_bought_attack: 2,
+        tavern_turn_bought_health: 2,
+        ..RealCounters::default()
+    };
+    g.players[0].take_real_counters_public(&counters);
+    g.players[0].gold = 3;
+    g.step(Action::Buy(0)).unwrap();
+    let bought = g.players[0].hand.last().unwrap();
+    assert_eq!(
+        (bought.attack, bought.health),
+        (base_a + 2, base_h + 2),
+        "the extra Health stays in the Tavern"
+    );
+}
+
+/// The Beast bonus the log keeps on `BGS_018pe` is seated on the player, so a
+/// Beast played from hand gets it (`Hearthstone_2026_11_11_22_47_07-g1` turn
+/// 9: the 3/3 Nightmare Par-tea Guest is 31/31 on play after the +28/+28
+/// Goldrinn shop deathrattle).
+#[test]
+fn a_seated_beast_bonus_reaches_a_beast_played_from_hand() {
+    let data = Data::bundled();
+    let mut g = Game::new_with_lobby(
+        Arc::new(Data::bundled()),
+        2,
+        bgcore::Tribe::EVERY.into_iter().fold(bgcore::Tribes::NONE, |m: bgcore::Tribes, t| m.with(t)),
+    );
+    first_turn(&mut g);
+    to_my_turn(&mut g);
+    let mut counters = RealCounters::default();
+    counters.set("beast_bonus_attack", 28);
+    counters.set("beast_bonus_health", 28);
+    g.players[0].take_real_counters_public(&counters);
+    assert_eq!(g.players[0].beast_bonus, (28, 28));
+    let c = data.cards.by_name("Nightmare Par-tea Guest").unwrap();
+    let m = g.players[0].make_card(&data.cards, c, false, 0);
+    let (base_a, base_h) = (m.attack, m.health);
+    g.players[0].hand.push(m);
+    let hand = g.players[0].hand.len() as u8 - 1;
+    g.step(Action::Play { hand, pos: g.players[0].board.len() as u8 }).unwrap();
+    let played = g.players[0].board.last().unwrap();
+    assert_eq!((played.attack, played.health), (base_a + 28, base_h + 28));
 }
 
 /// bg-overlay sends a side's pending Brood of Nozdormu casts as

@@ -1130,7 +1130,7 @@ impl Game {
             Act::TavernBuff { tribe, attack, health, this_turn } => self.run_effect(
                 p,
                 &mut pos,
-                Effect::TavernBuff { tribe, attack, health, this_turn },
+                Effect::TavernBuff { tribe, attack, health, this_turn, buy_keep: None },
                 false,
                 1,
             ),

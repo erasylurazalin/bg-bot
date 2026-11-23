@@ -303,7 +303,7 @@ impl Game {
                     }
                 }
             }
-            Effect::TavernBuff { tribe, attack, health, this_turn } => {
+            Effect::TavernBuff { tribe, attack, health, this_turn, buy_keep } => {
                 let n = mul * runs as i32;
                 let b = TavernBuff {
                     tribe,
@@ -311,6 +311,7 @@ impl Game {
                     health: health * n,
                     this_turn,
                     typed_only: false,
+                    buy_keep: buy_keep.map(|(a, h)| (a * n, h * n)),
                 };
                 self.players[p].add_tavern_buff(&self.data.cards, b);
                 // Azerite Portrait: the Living Azerites also give the stats
