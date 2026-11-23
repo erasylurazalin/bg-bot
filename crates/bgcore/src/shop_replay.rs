@@ -4981,7 +4981,7 @@ impl TurnRun {
 /// state, not the log's: this is what lets a whole turn's actions be played
 /// one after the other without re-seating, while every Buy and Activate still
 /// names the card the log shows in that slot.
-fn place_tavern(
+pub(crate) fn place_tavern(
     data: &Data,
     game: &mut Game,
     spec: &ShopStateSpec,
@@ -5277,7 +5277,12 @@ fn take_step_prompts(data: &Data, pool: &mut [u8], from: &Player, to: &mut Playe
 /// log's, and its pool copy moves with it: the old card gives its copy back
 /// and the new one takes its own. A slot the engine already has right is left
 /// alone, and a hand longer than the log's gives the extra cards' copies back.
-fn force_hand(data: &Data, game: &mut Game, step: &ShopStepSpec, missing: &mut Vec<String>) {
+pub(crate) fn force_hand(
+    data: &Data,
+    game: &mut Game,
+    step: &ShopStepSpec,
+    missing: &mut Vec<String>,
+) {
     let Some(after) = step.after.as_ref() else { return };
     let target = after.hand.len();
     for i in 0..target {
@@ -5317,6 +5322,71 @@ fn force_hand(data: &Data, game: &mut Game, step: &ShopStepSpec, missing: &mut V
     }
     while game.players[ME].hand.len() > target {
         let old = game.players[ME].hand.pop().expect("the hand holds a card");
+        give_back_copies(&mut game.pool, &data.cards, &[old]);
+    }
+}
+
+/// Put the screen's board on the carried game after a step. A screen shows the
+/// minions, their places, stats, golden flags and keywords; it does not show
+/// the hidden counters, so those take the engine's built-in defaults. Pool
+/// copies move with the cards, as they do for a hand.
+pub(crate) fn force_board(
+    data: &Data,
+    game: &mut Game,
+    step: &ShopStepSpec,
+    missing: &mut Vec<String>,
+) {
+    let Some(after) = step.after.as_ref() else { return };
+    let mut specs: Vec<&ShopMinionSpec> = after.board.iter().collect();
+    specs.sort_by_key(|m| (m.position.unwrap_or(0), m.id));
+    let target = specs.len();
+    for i in 0..target {
+        let (mut minion, bad) = build_minion(data, specs[i], game.turn);
+        if let Some(name) = bad {
+            missing.push(format!("minion not built: {name} (a Stand-in with its stats)"));
+        }
+        minion.frozen = false;
+        minion.pool_copies = 0;
+        let same = game.players[ME].board.get(i).is_some_and(|m| {
+            m.card == minion.card
+                && m.attack == minion.attack
+                && m.health == minion.health
+                && m.golden == minion.golden
+                && m.keywords == minion.keywords
+                && m.gifts[..m.n_gifts as usize] == minion.gifts[..minion.n_gifts as usize]
+        });
+        if same {
+            continue;
+        }
+        // The same card with other stats keeps the engine's minion, with the
+        // screen's stats: rebuilding it would drop the gifts and numbers the
+        // engine carries and the screen cannot show.
+        if let Some(m) = game.players[ME].board.get_mut(i)
+            && m.card == minion.card
+            && m.golden == minion.golden
+        {
+            m.attack = minion.attack;
+            m.health = minion.health;
+            continue;
+        }
+        take_pool_copy(&mut game.pool, &data.cards, &mut minion);
+        let board = &mut game.players[ME].board;
+        if i < board.len() {
+            let old = board[i];
+            give_back_copies(&mut game.pool, &data.cards, &[old]);
+            board[i] = minion;
+        } else if i == board.len() {
+            let _ = board.try_push(minion);
+        } else {
+            give_back_copies(&mut game.pool, &data.cards, &[minion]);
+            missing.push(format!(
+                "a generated card at board slot {} with no slot before it",
+                i + 1
+            ));
+        }
+    }
+    while game.players[ME].board.len() > target {
+        let old = game.players[ME].board.pop().expect("the board holds a minion");
         give_back_copies(&mut game.pool, &data.cards, &[old]);
     }
 }

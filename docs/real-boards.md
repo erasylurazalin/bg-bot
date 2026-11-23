@@ -1156,6 +1156,143 @@ before).
 Measures for the two checks on one machine are comparable: `fightcheck` reads
 a fight, `shopreplay` a step.
 
+## The screen file
+
+`bgbench screen-from-actions` writes a screen file from an action file, and a
+video converter (`~/projects/bg-vision/tools/to_bgbot.py`) writes one from
+what bg-vision read on a stream. It holds only what a screen can show, so a
+game played from video needs no Power.log. One file holds one game,
+`boards/screens/<source>-g<N>.json` by default.
+
+```json
+{"source": "streamer_2026_11_23", "game": 1,
+ "hero": {"card_id": "BG28_HERO_400", "name": "Snake Eyes"},
+ "lobby": ["pirate", "undead"],
+ "turns": [
+  {"turn": 3,
+   "start": {"gold": 10, "gold_max": 10, "tier": 1, "upgrade_cost": 5,
+             "health": 30, "armor": 8, "frozen": false,
+             "hero_power": {"card_id": "BG28_HERO_400p", "name": "Lucky Roll",
+                            "cost": 1},
+             "trinkets": [],
+             "board": [], "hand": [],
+             "tavern": [{"card_id": "BG26_135", "name": "Southsea Busker",
+                         "attack": 3, "health": 1, "golden": false,
+                         "slot": 1, "kind": "minion", "frozen": false}]},
+   "steps": [
+     {"step": "roll",
+      "seen": {"tavern": [{"name": "Wrath Weaver", "attack": 1, "health": 3,
+                           "slot": 1, "kind": "minion"}]}},
+     {"step": "buy", "slot": 1},
+     {"step": "end_turn"}],
+   "end": {"gold": 6, "tier": 1, "health": 30, "board": [], "hand": []}}]}
+```
+
+- Every field but the ones that name a card or a step is optional, and a
+  missing field means "not seen", not empty. `"hand": []` is an empty hand;
+  no `hand` at all is a hand the screen did not read, and it is not compared.
+  `hand_count` carries what the screen could count without naming the cards.
+- A state is a turn's `start`, a step's `seen` (the state the screen showed
+  right after the step), or a turn's `end`. It has `board`, `hand`, `tavern`,
+  `gold`, `gold_max`, `free_refreshes` (the Refresh button's price of 0),
+  `tier`, `upgrade_cost`, `health`, `armor`, `frozen`, `hero_power` (and
+  `hero_power_second` for a second slot), `trinkets` and `hand_count`.
+- A card has `card_id` or `name`, which the replay resolves through
+  `ref/bg-cards.json` and the card data, and optional `attack`/`health`
+  (missing is the card's printed stats, doubled when golden), `golden`,
+  `keywords` (missing is the card's printed keywords), `slot` in the Tavern,
+  `kind` (`minion` or `spell`), `frozen`, `cost` (the Gold the card shows,
+  including a spell's price or a minion's discount) and `costs_health` when
+  the price is paid in Health. The board and the hand are in screen order;
+  only the Tavern uses `slot`.
+- A hero power has its `card_id` or `name`, `cost`, `used_this_turn` (the
+  button greys out at the limit), `numbers` (a counter the button shows) and
+  `waiting` with `waiting_seen` for the minion Lock and Load holds. A trinket
+  has its card id or name, `greater`, `slot` and `numbers` (its counter).
+- A step has the action file's kinds (`buy`, `sell`, `play`, `move`, `roll`,
+  `freeze`, `level`, `hero_power`, `discover`, `trinket_pick`, `activate`,
+  `end_turn`) and the same place fields where they apply: `slot`, `index`,
+  `position`, `to`, `which`, `target` (its `kind` is the zone, or `zone` is
+  accepted, with `position`/`index`/`slot`), and for a choice `options` and the
+  `picked` one (by index or by card). `card` names the card a step acted on,
+  `kind` says the choice kind, and `source` names the card that opened it.
+  `seen` is what the screen showed right after the step, in a state's shape:
+  `screen-from-actions` writes the board, hand, Tavern, Gold, free Refreshes,
+  hero powers and trinkets after every step. `tavern_random` marks a step whose
+  Tavern is a random draw.
+- No entity ids, counters, enchantment numbers, Blood Gem tags, Dark Gift
+  states or script numbers are written. The replay seats every unseen number
+  at the engine's default for the turn (Gold from the turn number, counters at
+  zero, no gifts), so the screen file cannot prove those hidden numbers. It
+  uses the visible numbers it does have: free Refreshes, card prices, hero
+  power uses and counters, and trinket counters.
+
+## The screen replay
+
+`bgbench screenreplay` plays a screen file's turns on the engine and compares
+the engine's end of turn with what the screen showed just before the fight.
+It is the video-side bug finder: a game seen from a stream has no log, so a
+disagreement is a turn for Era to review, not automatically an engine bug.
+
+```
+./target/release/bgbench screenreplay --in DIR --out DIR [--seeds N]
+./target/release/bgbench screen-from-actions --actions DIR --out DIR [--current-patch]
+```
+
+Defaults: `boards/screens`, `boards/checks` and 8 seeds. It needs
+`ref/bg-cards.json` for a game's card ids. `screen-from-actions` writes a
+screen file from every action file in `--actions`; `--current-patch` keeps
+only files whose `build` equals the card data's `game_build`.
+
+- The turn's `start` is seated once, with the loader the shop replay uses
+  (`bgcore::screen_replay::replay_screen_turn`). Each step is then mapped from
+  the carried game's own zones, by exporting that game as a synthetic
+  `ShopStateSpec` and passing it through the shop replay's `actions_for` and
+  `seat` path. A `seen` Tavern goes in with `place_tavern`'s pool accounting,
+  a `seen` hand with `force_hand`'s, a `seen` board with the same pool
+  accounting, and a choice's `options` replace the engine's offer through the
+  same prompt seating (`take_step_prompts`). Prices the screen showed are put
+  on the carried game before a buy, a trinket pick pays the picked option's
+  shown cost, and the last Tavern spell is read from the screen's own earlier
+  `play` steps. Every other field stays the engine's own result.
+- After a step the engine's result is compared with the step's `seen` state
+  before that state is put on the game: board in order (card, Attack, Health,
+  golden), hand, Tavern, Gold, free Refreshes and tier. Each difference is a
+  step line ("after step 4 (play): board 2 engine Wrath Weaver 5/7, screen
+  7/9", "after step 3 (buy): engine Gold 7, screen 5"). The first one is the
+  first line in the report. A Tavern drawn by a Roll or another refresh is
+  random: it is applied without being compared. `screen-from-actions` marks a
+  Roll, and a non-Roll step whose Tavern changed by more than the one card the
+  step acted on, as `tavern_random`; a hand-written file can set it too. Gold,
+  free Refreshes and tier are compared first and then put on the carried game,
+  so one drift makes one line and does not repeat on every later step. The
+  replay carries on after a step line, so one difference does not hide the
+  turn.
+- The replay stops at the first step the engine refuses or cannot map, with
+  the step index, kind and reason. The seed results are kept.
+- At the end it compares only the fields `end` has: board cards in order with
+  stats and golden flags; hand cards, or `hand_count` when the cards were not
+  read; the Tavern as a multiset; Gold, tier and Health. Each difference is one
+  line ("board 3: engine Wrath Weaver 5/7, screen 7/9", "Gold: engine 0,
+  screen 2"). Armor, upgrade cost, hero powers, trinkets, keywords and the
+  per-card freeze are not compared.
+- Verdicts: `ok` when every seed has no step line and no end line,
+  `ok-random` when some seeds do (the first step whose engine state differs
+  between seeds names the split), `flagged` when no completed seed matches,
+  and `stopped` when no seed could follow every step. A random turn with one
+  seed unable to follow and another matching is `ok-random`, not `stopped`.
+- Outputs: `screen-report.md` (totals, the random splits, each flagged and
+  stopped turn with its differences), `turns.tsv` (file, game, turn, verdict,
+  steps played, first difference) and `turns.json` (per turn: verdict, stop,
+  differences, and the engine's end state per seed).
+- The check on Era's own logs is a comparison, not a test of the engine:
+  `screen-from-actions` drops the hidden state the log carries, then
+  `screenreplay` shows which turns a screen could not reproduce. The causes
+  now are mostly the hidden Gold triggers and counters a screen cannot show
+  (the Gold digits are visible, the reason they moved is not), plus cards and
+  hero powers the engine does not build and a few two-step target mappings.
+  They are reported, not fixed.
+
 ## Recording
 
 `bgbench record` turns the same steps into training data: my own decisions, in

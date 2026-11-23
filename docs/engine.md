@@ -2573,6 +2573,8 @@ cargo build --release -p bgbench
 ./target/release/bgbench shopreplay      # replay Era's real shop steps, write boards/checks/
 ./target/release/turn_replay             # whole-turn replay, train/runs/engine-pays/
 ./target/release/turn_replay --trace     # ... and the first diverging step of each stop
+./target/release/bgbench screenreplay    # replay screen files, boards/checks/
+./target/release/bgbench screen-from-actions  # write screen files from action files
 ./target/release/bgbench collect-boards  # write Era's board files, boards/real/
 ./target/release/bgbench collect-actions # write Era's action files, boards/actions/
 ./target/release/bgbench check-actions   # add up the turns of boards/actions/
@@ -2606,6 +2608,20 @@ every step of Era's real shop phases from the logged state before it and writes
 "The shop replay"). It only reads the engine, and it needs no
 `ref/bg-cards.json`: the action files name every card they hold. A step that
 draws a random number is run `--seeds` times and judged by shape.
+
+`screenreplay [--in DIR] [--out DIR] [--seeds N]` plays the turns of a screen
+file (`bgcore::screen_replay`, docs/real-boards.md "The screen file" and "The
+screen replay"): the turn's start is seated once, each step is carried forward
+from the engine's own zones, and the engine's end of turn is compared with the
+fields the screen's `end` holds. After every step the engine is compared with
+the step's `seen` state before that state is applied; a difference is a step
+line, then Gold, free Refreshes, tier and the zones are resynced and the turn
+carries on. A turn is
+`ok`, `ok-random`, `flagged` or `stopped`; it writes `screen-report.md`,
+`turns.tsv` and `turns.json`. It needs `ref/bg-cards.json` for a card id. `screen-from-actions [--actions DIR]
+[--out DIR] [--current-patch]` writes a screen file from each action file with
+only what a screen shows, which is the check on Era's logs: the turns the
+screen replay cannot reproduce name the hidden state a stream does not carry.
 
 `games 10` on this machine (release, 32 threads, five-tribe lobbies with
 heroes) was about 13,300 games a second after hero batch 3: one core 1.04 ms

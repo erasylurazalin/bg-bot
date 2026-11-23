@@ -26,6 +26,7 @@ pub mod record;
 pub mod rng;
 pub mod rules;
 pub mod scenario;
+pub mod screen_replay;
 pub mod search;
 pub mod secrets;
 pub mod shop_replay;

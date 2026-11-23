@@ -51,6 +51,7 @@ mod collect_boards;
 mod era_seat;
 mod powerlog;
 mod record_examples;
+mod screen_commands;
 mod tracker;
 
 /// The boards real seats play, and how many seats of a game are real.
@@ -1355,6 +1356,8 @@ fn main() {
             let all_builds = args.iter().any(|a| a == "--all-builds");
             shop_replay(&actions, seeds, &out, card.as_deref(), all_builds);
         }
+        Some("screenreplay") => screen_commands::screenreplay(&args),
+        Some("screen-from-actions") => screen_commands::screen_from_actions(&args),
         Some("eraseat") => era_seat::run(&args),
         Some("record") => record_examples::run(&args),
         Some("powerlog") => powerlog::run(&args),
@@ -1404,6 +1407,8 @@ fn main() {
                 "usage: bgbench fight [n] | games [secs] | fuzz [games] | match [games] | peak [n]\n\
                  \x20      bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT] [--all-builds]\n\
                  \x20      bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME] [--all-builds]\n\
+                 \x20      bgbench screenreplay [--in DIR] [--out DIR] [--seeds N]\n\
+                 \x20      bgbench screen-from-actions [--actions DIR] [--out DIR] [--current-patch]\n\
                  \x20      bgbench powerlog FILE [--out FILE] [--time]\n\
                  \x20      bgbench tracker FILE [--out FILE] [--cards FILE] [--time]\n\
                  \x20      bgbench collect-boards [--out DIR] [--cards FILE] [--no-archive]\n\
