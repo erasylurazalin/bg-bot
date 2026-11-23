@@ -263,7 +263,7 @@ impl Game {
             }
             TargetKind::SpiritSwapSecond => {
                 if let Some(first) = self.players[p].two_step.take() {
-                    self.swap_attacks(p, first, (slot as u8, true));
+                    self.gain_each_others_attack(p, first, (slot as u8, true));
                 }
             }
             TargetKind::Spell(st) => {
@@ -784,7 +784,7 @@ impl Game {
             }
             TargetKind::SpiritSwapSecond => {
                 if let Some(first) = self.players[p].two_step.take() {
-                    self.swap_attacks(p, first, (s as u8, false));
+                    self.gain_each_others_attack(p, first, (s as u8, false));
                 }
             }
             // Rune of Damnation: a real death in the shop (Deathrattles fire)
@@ -1502,10 +1502,11 @@ impl Game {
     }
 
     /// Spirit Swap: the two minions gain each other's Attack until the next
-    /// turn. The swap is read from the Attack both had at the same moment, and
-    /// the change is kept as a `temp_attack` so a later buff still stands and
-    /// the swap comes off cleanly at the start of the next turn.
-    fn swap_attacks(&mut self, p: usize, first: (u8, bool), second: (u8, bool)) {
+    /// turn, so both leave with the sum of the two. Each gain is read from the
+    /// Attack both had at the same moment, and the change is kept as a
+    /// `temp_attack` so a later buff still stands and the gain comes off
+    /// cleanly at the start of the next turn.
+    fn gain_each_others_attack(&mut self, p: usize, first: (u8, bool), second: (u8, bool)) {
         let atk = |g: &Game, at: (u8, bool)| -> Option<i32> {
             if at.1 {
                 g.players[p].shop.get(at.0 as usize).map(|m| m.attack)
@@ -1514,19 +1515,19 @@ impl Game {
             }
         };
         let (Some(a), Some(b)) = (atk(self, first), atk(self, second)) else { return };
-        let set = |g: &mut Game, at: (u8, bool), to: i32| {
+        let gain = |g: &mut Game, at: (u8, bool), by: i32| {
             let m = if at.1 {
                 g.players[p].shop.get_mut(at.0 as usize)
             } else {
                 g.players[p].board.get_mut(at.0 as usize)
             };
             if let Some(m) = m {
-                m.temp_attack += to - m.attack;
-                m.attack = to;
+                m.temp_attack += by;
+                m.attack += by;
             }
         };
-        set(self, first, b);
-        set(self, second, a);
+        gain(self, first, b);
+        gain(self, second, a);
     }
 
     /// Makeshift Master: watch the minion at `at`, in the Tavern (`tavern`)

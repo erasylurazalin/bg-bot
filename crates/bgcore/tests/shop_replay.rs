@@ -93,7 +93,7 @@ fn a_spirit_swap_second_click_answers_the_earlier_pick() {
       {"turn": 2,
        "start": {"board": [
           {"id": 10, "card_id": "BGS_119", "name": "Crackling Cyclone", "attack": 2, "health": 1, "position": 1},
-          {"id": 11, "card_id": "BG25_001", "name": "Risen Rider", "attack": 5, "health": 1, "position": 2}],
+          {"id": 11, "card_id": "BG25_001", "name": "Risen Rider", "attack": 3, "health": 1, "position": 2}],
         "hand": [], "tavern": [], "hand_hidden": 0, "gold": 10, "tier": 1,
         "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
         "frozen": false,
@@ -105,7 +105,7 @@ fn a_spirit_swap_second_click_answers_the_earlier_pick() {
            "kind": "board", "position": 2},
          "after": {"board": [
             {"id": 10, "card_id": "BGS_119", "name": "Crackling Cyclone", "attack": 5, "health": 1, "position": 1},
-            {"id": 11, "card_id": "BG25_001", "name": "Risen Rider", "attack": 2, "health": 1, "position": 2}],
+            {"id": 11, "card_id": "BG25_001", "name": "Risen Rider", "attack": 5, "health": 1, "position": 2}],
           "hand": [], "tavern": [], "hand_hidden": 0, "gold": 10, "tier": 1,
           "upgrade_cost": 5, "health": 30, "armor": 0, "free_refreshes": 0,
           "frozen": false,

@@ -254,7 +254,7 @@ pub enum PowerEffect {
     DarkmoonTickets { percent: u8, count: u8 },
     /// Steal a Tavern minion into hand as `attack`/`health` (See the Light).
     StealShopAsStats { attack: i32, health: i32 },
-    /// Two minions swap Attack until the next turn (Spirit Swap).
+    /// Two minions gain each other's Attack until the next turn (Spirit Swap).
     SpiritSwap,
     /// Sell a friendly minion and give its stats to another (Devour).
     Devour,

@@ -232,8 +232,8 @@ pub enum TargetKind {
     ImprisonShop { turns: u8 },
     /// Spirit Swap, the first of the two minions (any minion).
     SpiritSwapFirst,
-    /// Spirit Swap, the second one: it swaps Attack with the one the first
-    /// pick remembered.
+    /// Spirit Swap, the second one: it gains the Attack of the minion the
+    /// first pick remembered.
     SpiritSwapSecond,
     /// Devour, the friendly minion to sell.
     DevourFirst,

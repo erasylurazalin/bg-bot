@@ -170,7 +170,7 @@ struct FileMinion {
     /// Its Reborn comes off at the start of the next turn (Reborn Rites).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     temp_reborn: Option<bool>,
-    /// Attack a temporary swap added (Spirit Swap), undone next turn.
+    /// Attack a temporary gain added (Spirit Swap), undone next turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     temp_attack: Option<i32>,
     /// Marked by Rapid Reanimation (Teron Gorefiend) for the next combat.

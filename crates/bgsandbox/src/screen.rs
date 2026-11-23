@@ -591,8 +591,8 @@ fn describe_target(pt: &PendingTarget) -> String {
         TargetKind::ImprisonShop { turns } => {
             format!("a Tavern card to hand, locked {turns} turns")
         }
-        TargetKind::SpiritSwapFirst => "the first minion to swap Attack with".into(),
-        TargetKind::SpiritSwapSecond => "the second minion to swap Attack with".into(),
+        TargetKind::SpiritSwapFirst => "the first minion to gain Attack from".into(),
+        TargetKind::SpiritSwapSecond => "the second minion to gain Attack from".into(),
         TargetKind::DevourFirst => "the minion to sell".into(),
         TargetKind::DevourSecond => "the minion that takes its stats".into(),
         TargetKind::DestroyGetTribe { tribe } => {

@@ -229,8 +229,8 @@ pub struct Minion {
     /// Its Reborn came from Reborn Rites and comes off at the start of the
     /// next turn. A Reborn printed on the card stays.
     pub temp_reborn: bool,
-    /// The Attack a temporary swap added or took off (Spirit Swap): undone at
-    /// the start of the next turn, so a later buff stays.
+    /// The Attack a temporary gain added (Spirit Swap): undone at the start
+    /// of the next turn, so a later buff stays.
     pub temp_attack: i32,
     /// Frozen on its own in the Tavern (Twice as Nice freezes the two cards
     /// it names, not the whole Tavern): it stays one more turn on its own.

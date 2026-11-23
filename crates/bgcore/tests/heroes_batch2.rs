@@ -595,39 +595,41 @@ fn spirit_swap_takes_a_tavern_minion_for_either_pick() {
     act(&mut g, 0, Action::HeroPower);
     act(&mut g, 0, Action::Target(0));
     act(&mut g, 0, Action::TargetShop(0));
-    assert_eq!(g.players[0].board[0].attack, 9, "the Tavern minion's Attack");
-    assert_eq!(g.players[0].shop[0].attack, 3, "and it took the board one's");
-    // The Tavern first, the board second: the same swap, the other way round.
+    assert_eq!(g.players[0].board[0].attack, 12, "3 plus the Tavern minion's 9");
+    assert_eq!(g.players[0].shop[0].attack, 12, "9 plus the board minion's 3");
+    // The Tavern first, the board second: the same gain, the other way round.
     again(&mut g, 0);
     act(&mut g, 0, Action::HeroPower);
     act(&mut g, 0, Action::TargetShop(1));
     act(&mut g, 0, Action::Target(1));
-    assert_eq!(g.players[0].shop[1].attack, 5, "the board minion's Attack");
-    assert_eq!(g.players[0].board[1].attack, 7, "and the Tavern card's");
+    assert_eq!(g.players[0].shop[1].attack, 12, "7 plus the board minion's 5");
+    assert_eq!(g.players[0].board[1].attack, 12, "5 plus the Tavern card's 7");
     g.check_invariants().unwrap();
 }
 
 #[test]
-fn spirit_swap_swaps_two_attacks_until_the_next_turn() {
+fn spirit_swap_gains_each_others_attack_until_the_next_turn() {
+    // Log 10_24_15_25_26 line 11005: 3 and 2 Attack became 5 and 5, and
+    // next turn they went back to 3 and 2. A swap would have left 2 and 3.
     let mut g = hero_game(14, "Vol'jin");
     assert_eq!(power(&g, 0).cost, 0);
     put_on_board(&mut g, 0, "Buzzing Vermin");
     put_on_board(&mut g, 0, "Buzzing Vermin");
-    g.players[0].board[0].attack = 1;
-    g.players[0].board[1].attack = 7;
+    g.players[0].board[0].attack = 3;
+    g.players[0].board[1].attack = 2;
     act(&mut g, 0, Action::HeroPower);
     act(&mut g, 0, Action::Target(0));
     act(&mut g, 0, Action::Target(1));
-    assert_eq!(g.players[0].board[0].attack, 7);
-    assert_eq!(g.players[0].board[1].attack, 1);
-    // A buff after the swap stays after the swap comes off.
+    assert_eq!(g.players[0].board[0].attack, 5, "3 plus the other's 2");
+    assert_eq!(g.players[0].board[1].attack, 5, "2 plus the other's 3");
+    // A buff after the gain stays after the gain comes off.
     g.players[0].board[0].attack += 3;
     duel(&mut g);
     g.players[0].board[0].health = 60;
     g.players[0].board[1].health = 60;
     end_all_turns(&mut g);
-    assert_eq!(g.players[0].board[0].attack, 4, "the swap's +6 goes, the +3 stays");
-    assert_eq!(g.players[0].board[1].attack, 7, "its own Attack again");
+    assert_eq!(g.players[0].board[0].attack, 6, "the gain's +2 goes, the +3 stays");
+    assert_eq!(g.players[0].board[1].attack, 2, "its own Attack again");
     g.check_invariants().unwrap();
 }
 
