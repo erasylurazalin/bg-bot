@@ -2423,6 +2423,49 @@ fn a_loaded_compass_makes_the_next_buy_of_its_type_golden_once() {
     );
 }
 
+/// Bloodbound Earrings' log number is the spells still needed, not the ones
+/// cast: 2 left, then one Blood Gem cast twice by a Hot-Air Surveyor, fires
+/// the fourth spell and plays a Gem on every minion
+/// (`Hearthstone_2026_11_20_16_40_14-g3` turn 8 step 18).
+#[test]
+fn loaded_earrings_count_the_spells_still_needed() {
+    let text = r#"{"source": "earrings", "game": 1, "turns": [
+        {"turn": 8,
+          "start": {"board": [
+              {"id": 700, "position": 1, "card_id": "BG30_121", "name": "Hot-Air Surveyor",
+                "attack": 3, "health": 7, "golden": false, "keywords": []}],
+            "hand": [
+              {"id": 701, "index": 1, "card_id": "BG20_GEM", "name": "Blood Gem",
+                "attack": 0, "health": 0, "golden": false, "keywords": [],
+                "kind": "spell"}],
+            "tavern": [], "hand_hidden": 0, "gold": 10, "gold_max": 10, "tier": 6,
+            "upgrade_cost": null, "health": 30, "armor": 0, "free_refreshes": 0,
+            "frozen": false, "hero_powers": [],
+            "trinkets": [{"card_id": "BG32_MagicItem_808", "name": "Bloodbound Earrings",
+                          "greater": false, "numbers": [2, 0, 0, 0]}],
+            "counters": {}, "secrets": [], "won_last_combat": null},
+          "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("earrings.json".to_string(), text.to_string())]).unwrap();
+    let turn = &files[0].turns[0];
+    let loaded = load(&data(), &turn.start, None, None, turn.turn, 7, None);
+    let mut game = loaded.game;
+    assert_eq!(game.players[ME].trinkets[0].count, 2, "the log's two spells left");
+    let gem = game.players[ME]
+        .hand
+        .iter()
+        .position(|m| game.data.cards.get(m.card).name == "Blood Gem")
+        .expect("the logged Blood Gem");
+    game.step(Action::Play { hand: gem as u8, pos: 0 }).expect("playing the Gem is legal");
+    game.step(Action::Target(0)).expect("the Surveyor is a legal target");
+    let surveyor = game.players[ME].board[0];
+    assert_eq!(
+        (surveyor.attack, surveyor.health),
+        (6, 10),
+        "two Gems from the cast and one from the Earrings"
+    );
+    assert_eq!(game.players[ME].trinkets[0].count, 0, "the fourth spell fired it");
+}
+
 /// Gone Fishing's button counts the sells left ("5" is none since the last
 /// Murloc, then 4, 3, 2, 1 and a Murloc at 0), and the engine counts the sells
 /// done: the loader turns one into the other. Without it every step would

@@ -908,6 +908,7 @@ impl Game {
                 let owe_after = !pt.by_minion
                     && !self.players[p].tp.locket_copy
                     && self.players[p].cast_after_choice.is_some_and(|w| w.at_play);
+                let cast_card = self.players[p].cast_after_choice.map(|w| w.card);
                 for k in 0..pt.runs {
                     if target_pos >= self.players[p].board.len() {
                         break;
@@ -920,6 +921,14 @@ impl Game {
                     // below (`fire_cast_after_choice`).
                     if k > 0 && !pt.by_minion {
                         self.run_event_triggers(p, EventKind::AllSpellsCast, 1, None, TriggerWhen::Now);
+                        if let Some(card) = cast_card {
+                            // "After you cast a spell" trinkets count every
+                            // cast, as the cards do: Bloodbound Earrings
+                            // counts both Gems a Hot-Air Surveyor casts
+                            // (`Hearthstone_2026_11_20_16_40_14-g3` turn 8
+                            // step 18).
+                            self.trinket_event(p, Event::SpellCast, Some(card), 1);
+                        }
                         if pt.tavern {
                             self.run_event_triggers(p, EventKind::SpellsCast, 1, None, TriggerWhen::Now);
                         }

@@ -1982,19 +1982,22 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
 
 /// The counters a trinket's own numbers hold: what is left of a per-turn use
 /// (Warcry Totem's free Battlecry minions, Transcribing Typewriter's copies,
-/// Magicfin Sticker's uses) or how far an "every N" rule has come (Wand of
-/// Divination's three spells on minions). Only the cards whose number the log
-/// shows with that meaning are here: every other trinket's numbers are
-/// something else (a stat, an improvement count, the card Portable Factory
-/// remembers) and are left alone. Per-card mapping, as for the Tavern's
-/// prices: the same number means a different thing on each trinket.
+/// Magicfin Sticker's uses) or how many events an "every N" rule still wants
+/// (Wand of Divination's spells on minions, Bloodbound Earrings' spells). Only
+/// the cards whose number the log shows with that meaning are here: every
+/// other trinket's numbers are something else (a stat, an improvement count,
+/// the card Portable Factory remembers) and are left alone. Per-card mapping,
+/// as for the Tavern's prices: the same number means a different thing on each
+/// trinket.
 fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]) {
     for slot in 0..pl.trinkets.len() {
         let of = pl.trinkets[slot].of;
         if of == 0 {
             continue;
         }
-        let card_id = data.trinkets.get(of - 1).card_id.clone();
+        let t = data.trinkets.get(of - 1);
+        let card_id = t.card_id.clone();
+        let every = t.rule.as_ref().map_or(0, |r| r.every);
         let Some(spec) = specs.iter().find(|t| t.card_id.as_deref() == Some(&card_id)) else {
             continue;
         };
@@ -2016,6 +2019,14 @@ fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]
             // "After you cast 3 spells on minions, gain 1 Gold." The number is
             // what is left of the three.
             "BG36_MagicItem_307" => pl.trinkets[slot].count = (3 - n(0)).min(3) as u16,
+            // Bloodbound Earrings: "After you cast 4 (5, greater) spells, play
+            // a Blood Gem on all your minions." The log's first number is the
+            // spells left. Hearthstone_2026_11_20_16_40_14-g3 turn 8 step 18
+            // has 2 left, casts the Gem twice (a Hot-Air Surveyor), and the
+            // fourth cast fires it.
+            "BG32_MagicItem_808" | "BG32_MagicItem_808t" => {
+                pl.trinkets[slot].count = every.saturating_sub(n(0)) as u16;
+            }
             // Snarky Portrait: "give your Beasts +4/+4 and improve this". The
             // log's first number is the buff the next Fishbait death gives: 4
             // at the pick, then 4 more per death (4, 8, 12, and 20 after four
