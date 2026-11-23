@@ -75,6 +75,12 @@ pub struct ShopMinionSpec {
     pub keywords: Vec<String>,
     #[serde(default)]
     pub numbers: Vec<i32>,
+    /// Whether `numbers` was read rather than merely empty. The screen replay
+    /// keeps a same-card minion's hidden state, so it must take the visible
+    /// numbers (a Lockbox countdown, "N left!") without clearing an unread
+    /// one.
+    #[serde(skip)]
+    pub numbers_known: bool,
     #[serde(default)]
     pub dark_gifts: Vec<ShopGiftSpec>,
     /// Whether `dark_gifts` is known rather than merely empty. A screen shows
@@ -5417,6 +5423,10 @@ fn force_hand_with(
                 && m.golden == minion.golden
                 && m.keywords == minion.keywords
                 && m.gifts[..m.n_gifts as usize] == minion.gifts[..minion.n_gifts as usize]
+                && (!spec.numbers_known
+                    || (m.improvements == minion.improvements
+                        && m.uses_left == minion.uses_left
+                        && m.activated == minion.activated))
         });
         if same {
             continue;
@@ -5428,6 +5438,11 @@ fn force_hand_with(
         {
             m.attack = minion.attack;
             m.health = minion.health;
+            if spec.numbers_known {
+                m.improvements = minion.improvements;
+                m.uses_left = minion.uses_left;
+                m.activated = minion.activated;
+            }
             if spec.gifts_known {
                 m.gifts = minion.gifts;
                 m.n_gifts = minion.n_gifts;
@@ -5484,6 +5499,10 @@ pub(crate) fn force_board(
                 && m.golden == minion.golden
                 && m.keywords == minion.keywords
                 && m.gifts[..m.n_gifts as usize] == minion.gifts[..minion.n_gifts as usize]
+                && (!specs[i].numbers_known
+                    || (m.improvements == minion.improvements
+                        && m.uses_left == minion.uses_left
+                        && m.activated == minion.activated))
         });
         if same {
             continue;
@@ -5497,6 +5516,11 @@ pub(crate) fn force_board(
         {
             m.attack = minion.attack;
             m.health = minion.health;
+            if specs[i].numbers_known {
+                m.improvements = minion.improvements;
+                m.uses_left = minion.uses_left;
+                m.activated = minion.activated;
+            }
             if specs[i].gifts_known {
                 m.gifts = minion.gifts;
                 m.n_gifts = minion.n_gifts;

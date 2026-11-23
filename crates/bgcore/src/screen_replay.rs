@@ -19,6 +19,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::cards::{
+    Card, ChooseOption, Deathrattle, Effect, EndOfTurn, OnCastSpell, OnSummonBeast, SpellEffect,
+    StartOfCombat, Tribe,
+};
 use crate::minion::Keywords;
 use crate::real_boards::{self, CardIdMap};
 use crate::shop_replay::{
@@ -199,6 +203,11 @@ pub struct ScreenCard {
     /// means it showed the keyword was absent. A keyword not named is unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keyword_reads: Option<BTreeMap<String, bool>>,
+    /// The card's current numbers, the {0}..{3} its text shows (a Lockbox's
+    /// countdown, a "left!" count). `None` means the screen did not read
+    /// them, which keeps the engine's value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numbers: Option<Vec<i32>>,
     /// 1-based slot in the Tavern.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<u8>,
@@ -497,6 +506,8 @@ fn minion_spec_of(
             health: card.health.map_or(0, |v| v.concrete(0)),
             golden: card.golden.unwrap_or(false),
             keywords: screen_keywords(card, None),
+            numbers: card.numbers.clone().unwrap_or_default(),
+            numbers_known: card.numbers.is_some(),
             slot: card.slot,
             kind: card.kind.clone(),
             frozen: card.frozen.unwrap_or(false),
@@ -518,6 +529,8 @@ fn minion_spec_of(
         health: card.health.map_or(made.health, |v| v.concrete(made.health)),
         golden,
         keywords,
+        numbers: card.numbers.clone().unwrap_or_default(),
+        numbers_known: card.numbers.is_some(),
         slot: card.slot,
         kind: card
             .kind
@@ -1086,11 +1099,13 @@ pub struct ScreenTurnRun {
     /// These are between-turn lines: they are reported, not flagged.
     pub between_turns: Vec<String>,
     pub between_checks: Option<ScreenCheckGroup>,
-    /// The cards whose visible stats changed between turns, and whether any
-    /// player counter is uncertain after the fight. Step lines about them say
+    /// The cards whose visible stats changed between turns, the ones whose
+    /// hidden numbers can affect a compared value, and the player counters
+    /// the fight could have written. Step lines they can explain say
     /// "(uncertain after the fight)".
     pub uncertain_cards: Vec<String>,
-    pub uncertain_counters: bool,
+    pub hidden_cards: Vec<String>,
+    pub uncertain_counters: FightCounters,
     /// The engine state after every played step, for finding the step whose
     /// randomness splits the seeds.
     pub states: Vec<ShopSnapshot>,
@@ -1362,15 +1377,421 @@ fn last_screen_spell(
     last
 }
 
+/// The hidden player counters a fight can write for good.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FightCounters {
+    blood_gem: bool,
+    beetle: bool,
+    undead: bool,
+    knight: bool,
+    beast: bool,
+    improve: bool,
+    spell: bool,
+    deathrattle: bool,
+}
+
+impl FightCounters {
+    fn merge(&mut self, other: FightCounters) {
+        self.blood_gem |= other.blood_gem;
+        self.beetle |= other.beetle;
+        self.undead |= other.undead;
+        self.knight |= other.knight;
+        self.beast |= other.beast;
+        self.improve |= other.improve;
+        self.spell |= other.spell;
+        self.deathrattle |= other.deathrattle;
+    }
+
+    fn any(self) -> bool {
+        self != FightCounters::default()
+    }
+
+    fn names(self) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut add = |on: bool, name: &str| {
+            if on {
+                out.push(name.to_string());
+            }
+        };
+        add(self.blood_gem, "Blood Gem value");
+        add(self.beetle, "Beetle bonus");
+        add(self.undead, "Undead bonus");
+        add(self.knight, "Eternal Knight deaths");
+        add(self.beast, "Beast bonus");
+        add(self.improve, "improve counters");
+        add(self.spell, "Tavern spell bonus");
+        add(self.deathrattle, "Deathrattle count");
+        out
+    }
+}
+
+/// The effect kinds that write each player counter in a fight. Only the card
+/// data is read: no card name decides a counter.
+fn effect_counters(counters: &mut FightCounters, effect: Effect) {
+    match effect {
+        Effect::BeetleBuff { .. } | Effect::BeetleBuffAndSummon { .. } => counters.beetle = true,
+        Effect::GemBonus { .. } | Effect::GetGemAndBonus { .. } => counters.blood_gem = true,
+        Effect::UndeadBonus { .. } => counters.undead = true,
+        Effect::SpellBonus { .. } => counters.spell = true,
+        Effect::BuffRandomFriendly { improve: Some(_), .. } | Effect::BuffAllImproving { .. } => {
+            counters.improve = true;
+        }
+        _ => {}
+    }
+}
+
+fn start_of_combat_counters(counters: &mut FightCounters, start: StartOfCombat) {
+    match start {
+        StartOfCombat::CombatBeastBuff { .. } => counters.beast = true,
+        StartOfCombat::Effect(effect) => effect_counters(counters, effect),
+        _ => {}
+    }
+}
+
+fn deathrattle_counters(counters: &mut FightCounters, deathrattle: Deathrattle) {
+    match deathrattle {
+        Deathrattle::CombatBeastBuff { .. } => counters.beast = true,
+        Deathrattle::Summon {
+            beetle_buff: Some(_),
+            ..
+        } => counters.beetle = true,
+        Deathrattle::SummonOverflowUndeadAttack { .. } => counters.undead = true,
+        Deathrattle::Effect(effect) => effect_counters(counters, effect),
+        _ => {}
+    }
+}
+
+fn on_cast_counters(counters: &mut FightCounters, cast: OnCastSpell) {
+    if let OnCastSpell::UndeadBonus { .. } = cast {
+        counters.undead = true;
+    }
+}
+
+/// Every counter a card's combat-time effects can write. The trigger fields a
+/// fight runs are deathrattles, Avenge, Start of Combat, Rally, attack
+/// triggers, damage milestones, "when damaged" and spell-cast triggers.
+fn card_combat_counters(data: &Data, card: CardId) -> FightCounters {
+    let c = data.cards.get(card);
+    let mut out = FightCounters::default();
+    if c.deathrattle.is_some() {
+        out.deathrattle = true;
+    }
+    if let Some(d) = c.deathrattle {
+        deathrattle_counters(&mut out, d);
+    }
+    if let Some(s) = c.start_of_combat {
+        start_of_combat_counters(&mut out, s);
+    }
+    if let Some(a) = c.avenge {
+        effect_counters(&mut out, a.effect);
+    }
+    if let Some(e) = c.rally {
+        effect_counters(&mut out, e);
+    }
+    if let Some(t) = c.whenever_friendly_attacks {
+        effect_counters(&mut out, t.effect);
+    }
+    if let Some(t) = c.after_friendly_attacks {
+        effect_counters(&mut out, t.effect);
+    }
+    if let Some(e) = c.when_damaged {
+        effect_counters(&mut out, e);
+    }
+    if let Some(m) = c.damage_milestone {
+        effect_counters(&mut out, m.effect);
+    }
+    if let Some(e) = c.on_cast_spell_on_self {
+        effect_counters(&mut out, e);
+    }
+    if let Some((_, e)) = c.on_cast_spell_on_tribe {
+        effect_counters(&mut out, e);
+    }
+    if let Some(t) = c.on_cast_spell {
+        on_cast_counters(&mut out, t);
+    }
+    if let Some(t) = c.on_cast_spell_after {
+        on_cast_counters(&mut out, t);
+    }
+    if c.buff_per_kind_death.is_some() {
+        out.knight = true;
+    }
+    out
+}
+
+fn board_combat_counters(data: &Data, board: &[Minion]) -> FightCounters {
+    let mut out = FightCounters::default();
+    for m in board {
+        for (card, _) in m.parts() {
+            out.merge(card_combat_counters(data, card));
+        }
+    }
+    out
+}
+
+/// Whether an effect reads a minion's hidden numbers (its `improvements` or
+/// its per-minion counters). A stat line about such a card can depend on the
+/// numbers the screen did not show.
+fn effect_reads_hidden(effect: Effect) -> bool {
+    matches!(
+        effect,
+        Effect::BuffAllPerImprovement { .. }
+            | Effect::BuffOthersPerImprovement { .. }
+            | Effect::BuffAdjacentPerImprovement { .. }
+            | Effect::ArmNextBuy
+            | Effect::ImproveSelf(_)
+    )
+}
+
+fn effect_writes_hidden(effect: Effect) -> bool {
+    matches!(
+        effect,
+        Effect::BuffEachType {
+            improves_self: true,
+            ..
+        } | Effect::GemSelf { permanent: true, .. }
+            | Effect::GemOthersPermanent(_)
+    )
+}
+
+fn card_any_effect(c: &Card, mut f: impl FnMut(Effect) -> bool) -> bool {
+    if c.battlecry.is_some_and(&mut f) {
+        return true;
+    }
+    if c.deathrattle.is_some_and(|d| match d {
+        Deathrattle::Effect(e) => f(e),
+        _ => false,
+    }) {
+        return true;
+    }
+    if c.start_of_combat.is_some_and(|s| match s {
+        StartOfCombat::Effect(e) => f(e),
+        _ => false,
+    }) {
+        return true;
+    }
+    if c.end_of_turn.is_some_and(|e| match e {
+        EndOfTurn::Effect(e) => f(e),
+        _ => false,
+    }) {
+        return true;
+    }
+    if c.rally.is_some_and(&mut f) {
+        return true;
+    }
+    if c.when_damaged.is_some_and(&mut f) {
+        return true;
+    }
+    if c.avenge.is_some_and(|a| f(a.effect)) {
+        return true;
+    }
+    if c.damage_milestone.is_some_and(|m| f(m.effect)) {
+        return true;
+    }
+    if c.whenever_friendly_attacks.is_some_and(|t| f(t.effect)) {
+        return true;
+    }
+    if c.after_friendly_attacks.is_some_and(|t| f(t.effect)) {
+        return true;
+    }
+    if c.on_cast_spell_on_self.is_some_and(&mut f) {
+        return true;
+    }
+    if c.on_cast_spell_on_tribe.is_some_and(|(_, e)| f(e)) {
+        return true;
+    }
+    if c.after_hero_damage.iter().any(|&e| f(e)) {
+        return true;
+    }
+    false
+}
+
+/// Whether a card's data reads or writes a hidden number of its own minion.
+fn card_hidden_dependence(data: &Data, card: CardId) -> bool {
+    let c = data.cards.get(card);
+    if c.buff_per_magnetize.is_some()
+        || matches!(
+            c.end_of_turn,
+            Some(EndOfTurn::BuffPerMagnetization { .. })
+        )
+        || matches!(
+            c.on_summon_beast,
+            Some(OnSummonBeast::Buff {
+                improve_permanently: true,
+                ..
+            })
+        )
+    {
+        return true;
+    }
+    card_any_effect(c, |e| effect_reads_hidden(e) || effect_writes_hidden(e))
+}
+
+fn minion_hidden(data: &Data, m: &Minion) -> bool {
+    if m.n_gifts > 0
+        || m.improvements > 0
+        || m.gem_attack != 0
+        || m.gem_health != 0
+        || m.magnetizations > 0
+        || m.extra_magnetize > 0
+        || m.uses_left > 0
+        || m.activated
+    {
+        return true;
+    }
+    m.parts().any(|(card, _)| card_hidden_dependence(data, card))
+}
+
+/// Whether that step's card is a Blood Gem or an effect that plays or raises
+/// one. A stat line in such a turn can depend on the player's Gem value.
+fn card_may_use_gems(data: &Data, card: CardId) -> bool {
+    let c = data.cards.get(card);
+    if c.blood_gem {
+        return true;
+    }
+    if matches!(
+        c.spell_effect,
+        Some(
+            SpellEffect::GemBonus { .. }
+                | SpellEffect::GemsOnBoard(_)
+                | SpellEffect::Barrage { .. }
+        )
+    ) {
+        return true;
+    }
+    if c.choose_one.is_some_and(|options| {
+        options.iter().any(|o| {
+            matches!(
+                o,
+                ChooseOption::SpellEffect(
+                    SpellEffect::GemBonus { .. }
+                        | SpellEffect::GemsOnBoard(_)
+                        | SpellEffect::Barrage { .. }
+                )
+            )
+        })
+    }) {
+        return true;
+    }
+    card_any_effect(c, |e| {
+        matches!(
+            e,
+            Effect::GemBonus { .. }
+                | Effect::GetGemAndBonus { .. }
+                | Effect::GemSelf { .. }
+                | Effect::GemTribe { .. }
+                | Effect::GemOthers(_)
+                | Effect::GemOthersPermanent(_)
+                | Effect::GemAttacker(_)
+        )
+    })
+}
+
+fn turn_may_use_gems(data: &Data, ids: &CardIdMap, turn: &ScreenTurnSpec) -> bool {
+    turn.steps.iter().any(|step| {
+        step.card
+            .as_ref()
+            .and_then(|c| resolve_card(data, ids, c))
+            .is_some_and(|card| card_may_use_gems(data, card))
+    })
+}
+
+fn card_may_cast_spell(data: &Data, card: CardId) -> bool {
+    let c = data.cards.get(card);
+    c.tavern_spell
+        || matches!(
+            c.spell_effect,
+            Some(SpellEffect::CastSpell { .. })
+        )
+        || card_any_effect(c, |e| {
+            matches!(
+                e,
+                Effect::CastSpell { .. } | Effect::CastTaughtSpell
+            )
+        })
+}
+
+fn turn_may_cast_spell(data: &Data, ids: &CardIdMap, turn: &ScreenTurnSpec) -> bool {
+    turn.steps.iter().any(|step| {
+        step.card
+            .as_ref()
+            .and_then(|c| resolve_card(data, ids, c))
+            .is_some_and(|card| card_may_cast_spell(data, card))
+    })
+}
+
+/// Whether a line compares a board, hand or Tavern card's stats.
+fn stat_line(line: &str) -> bool {
+    let text = line.strip_prefix("after step ").map_or(line, |rest| {
+        rest.split_once(": ").map_or(rest, |(_, text)| text)
+    });
+    let text = text.strip_prefix("before turn ").map_or(text, |rest| {
+        rest.split_once(": ").map_or(rest, |(_, text)| text)
+    });
+    if text.contains("keyword") || text.contains("no such card") || text.contains("nothing") {
+        return false;
+    }
+    text.starts_with("board ")
+        || text.starts_with("hand ")
+        || text.starts_with("Tavern ")
+        || text.contains(": engine ")
+}
+
+fn hidden_or_keyword_line(line: &str) -> bool {
+    if line.contains("no such card") || line.contains("nothing") {
+        return false;
+    }
+    stat_line(line) || line.contains("keyword")
+}
+
+fn counter_affects_line(
+    data: &Data,
+    line: &str,
+    counters: FightCounters,
+    gems_used: bool,
+    spells_used: bool,
+) -> bool {
+    if !counters.any() {
+        return false;
+    }
+    if !stat_line(line) {
+        return false;
+    }
+    if (counters.blood_gem && gems_used) || (counters.spell && spells_used) {
+        return true;
+    }
+    data.cards.cards.iter().any(|c| {
+        if !line.contains(&c.name) {
+            return false;
+        }
+        (counters.beetle && c.is_beetle)
+            || (counters.undead && (c.tribes.has(Tribe::Undead) || c.all_types))
+            || (counters.beast && (c.tribes.has(Tribe::Beast) || c.all_types))
+            || (counters.knight && c.buff_per_kind_death.is_some())
+            || (counters.deathrattle && c.buff_per_deathrattle.is_some())
+            || (counters.improve
+                && card_any_effect(c, |e| {
+                    matches!(
+                        e,
+                        Effect::BuffRandomFriendly {
+                            improve: Some(_),
+                            ..
+                        } | Effect::BuffAllImproving { .. }
+                    )
+                }))
+    })
+}
+
 /// What the carried game differed on before a turn's screen start went on.
 #[derive(Clone, Debug, Default)]
 struct BetweenTurn {
     lines: Vec<String>,
     checks: Vec<ScreenCheck>,
     uncertain_cards: Vec<String>,
-    /// A player counter a fight could have changed: the start differed from
-    /// the carry, so the counter is not proved.
-    uncertain_counters: bool,
+    /// The uncertain cards whose hidden numbers can affect a compared value.
+    hidden_cards: Vec<String>,
+    /// A player counter the fight could have written, from the card data of
+    /// the board that went into it.
+    uncertain_counters: FightCounters,
 }
 
 /// Compare the carried game with the screen's turn start. The Tavern is not
@@ -1382,6 +1803,7 @@ fn between_turn_diff(
     ids: &CardIdMap,
     start_screen: &ScreenStateSpec,
     game: &Game,
+    prior_board: &[Minion],
     turn: u32,
 ) -> BetweenTurn {
     let ours = ShopSnapshot::of_game(data, game, ME);
@@ -1408,6 +1830,12 @@ fn between_turn_diff(
                     == ScreenCheckStatus::Disagree
             {
                 out.uncertain_cards.push(a.name.clone());
+                if prior_board
+                    .get(i)
+                    .is_some_and(|m| minion_hidden(data, m))
+                {
+                    out.hidden_cards.push(a.name.clone());
+                }
             }
         }
     }
@@ -1422,16 +1850,27 @@ fn between_turn_diff(
         for b in hand {
             let name = screen_card_name(data, ids, b);
             let golden = screen_card_golden(data, ids, b);
-            if let Some(a) = ours
+            let Some(k) = ours
                 .hand
                 .iter()
-                .find(|a| a.name == name && a.golden == golden)
-                && (number_status(a.attack, screen_stat(data, ids, b, true))
+                .position(|a| a.name == name && a.golden == golden)
+            else {
+                continue;
+            };
+            let a = &ours.hand[k];
+            if number_status(a.attack, screen_stat(data, ids, b, true))
+                == ScreenCheckStatus::Disagree
+                || number_status(a.health, screen_stat(data, ids, b, false))
                     == ScreenCheckStatus::Disagree
-                    || number_status(a.health, screen_stat(data, ids, b, false))
-                        == ScreenCheckStatus::Disagree)
             {
                 out.uncertain_cards.push(a.name.clone());
+                if game.players[ME]
+                    .hand
+                    .get(k)
+                    .is_some_and(|m| minion_hidden(data, m))
+                {
+                    out.hidden_cards.push(a.name.clone());
+                }
             }
         }
     }
@@ -1507,10 +1946,48 @@ fn between_turn_diff(
     }
     out.uncertain_cards.sort();
     out.uncertain_cards.dedup();
-    out.uncertain_counters = !lines.is_empty();
+    out.hidden_cards.sort();
+    out.hidden_cards.dedup();
+    out.uncertain_counters = board_combat_counters(data, prior_board);
     out.lines = lines;
     out.checks = checks;
     out
+}
+
+fn keyword_bit(name: &str) -> Option<u8> {
+    let key = keyword_key(name);
+    Keywords::ALL
+        .iter()
+        .find(|(bit, known)| *bit != Keywords::MAGNETIC && keyword_key(known) == key)
+        .map(|(bit, _)| *bit)
+}
+
+/// Take the keywords the screen read on a same-card resync. A full list is
+/// the whole keyword set; `keyword_reads` changes only the names it carries,
+/// so a keyword the screen did not read keeps the engine's value.
+fn resync_keywords(minion: &mut Minion, card: &ScreenCard) {
+    if let Some(list) = card.keywords.as_ref() {
+        for (bit, _) in Keywords::ALL {
+            if bit != Keywords::MAGNETIC {
+                minion.keywords.clear(bit);
+            }
+        }
+        for name in list {
+            if let Some(bit) = keyword_bit(name) {
+                minion.keywords.set(bit);
+            }
+        }
+    }
+    if let Some(reads) = card.keyword_reads.as_ref() {
+        for (name, on) in reads {
+            let Some(bit) = keyword_bit(name) else { continue };
+            if *on {
+                minion.keywords.set(bit);
+            } else {
+                minion.keywords.clear(bit);
+            }
+        }
+    }
 }
 
 /// Put the screen's stat values on a resynced board: a number is taken, a
@@ -1534,6 +2011,7 @@ fn resync_board_targets(
         if let Some(m) = game.players[ME].board.get_mut(i) {
             m.attack = number_target(old.attack, screen_stat(data, ids, card, true));
             m.health = number_target(old.health, screen_stat(data, ids, card, false));
+            resync_keywords(m, card);
         }
     }
 }
@@ -1556,6 +2034,7 @@ fn resync_hand_targets(
         if let Some(m) = game.players[ME].hand.get_mut(i) {
             m.attack = number_target(old.attack, screen_stat(data, ids, card, true));
             m.health = number_target(old.health, screen_stat(data, ids, card, false));
+            resync_keywords(m, card);
         }
     }
 }
@@ -1631,18 +2110,28 @@ fn resync_start(
     }
 }
 
-/// Append "(uncertain after the fight)" to the step lines a fight's hidden
-/// change could explain: a line about a card whose visible stats changed
-/// between turns, or a stat line while the player's counters are unproved.
-fn mark_uncertain(lines: Vec<String>, cards: &[String], counters: bool) -> Vec<String> {
+/// Append "(uncertain after the fight)" only where a fight's hidden state
+/// could explain the line: the hidden numbers of a card whose visible stats
+/// changed between turns, or a stat line a counter the board's combat effects
+/// can write could reach.
+fn mark_uncertain(
+    data: &Data,
+    lines: Vec<String>,
+    hidden_cards: &[String],
+    counters: FightCounters,
+    gems_used: bool,
+    spells_used: bool,
+) -> Vec<String> {
     lines
         .into_iter()
         .map(|line| {
-            let card = cards
+            if line.contains("(uncertain after the fight)") {
+                return line;
+            }
+            let hidden_card = hidden_cards
                 .iter()
-                .any(|name| !name.is_empty() && line.contains(name));
-            let stats = line.contains("board ") || line.contains("hand ");
-            if (card || (counters && stats)) && !line.contains("(uncertain after the fight)") {
+                .any(|name| !name.is_empty() && line.contains(name) && hidden_or_keyword_line(&line));
+            if hidden_card || counter_affects_line(data, &line, counters, gems_used, spells_used) {
                 format!("{line} (uncertain after the fight)")
             } else {
                 line
@@ -1698,9 +2187,11 @@ pub fn replay_screen_turn_from(
     let mut between_turns = Vec::new();
     let mut between_checks = None;
     let mut uncertain_cards = Vec::new();
-    let mut uncertain_counters = false;
+    let mut hidden_cards = Vec::new();
+    let mut uncertain_counters = FightCounters::default();
     let (mut game, loaded_missing): (Box<Game>, Vec<String>) = match carry {
         Some(game) => {
+            let prior_board = game.players[ME].board.clone();
             let mut game = Box::new(game.clone());
             // The engine's own shop-side turn transition: end the shop turn
             // that is still open, then start the next one (Gold, start-of-turn
@@ -1708,7 +2199,8 @@ pub fn replay_screen_turn_from(
             // `Game::next_shop_turn_without_fight`, the lobster search's own
             // step, so no rule is copied into the replay.
             game.next_shop_turn_without_fight();
-            let between = between_turn_diff(data, ids, &turn.start, &game, turn.turn);
+            let between =
+                between_turn_diff(data, ids, &turn.start, &game, &prior_board, turn.turn);
             between_turns = between.lines;
             between_checks = Some(ScreenCheckGroup {
                 when: "before turn".to_string(),
@@ -1717,6 +2209,7 @@ pub fn replay_screen_turn_from(
                 checks: between.checks,
             });
             uncertain_cards = between.uncertain_cards;
+            hidden_cards = between.hidden_cards;
             uncertain_counters = between.uncertain_counters;
             resync_start(
                 data,
@@ -1745,6 +2238,8 @@ pub fn replay_screen_turn_from(
     };
     missing.extend(loaded_missing);
     drop_waiting_missing(&mut missing, waiting_known_empty);
+    let gems_used = turn_may_use_gems(data, ids, turn);
+    let spells_used = turn_may_cast_spell(data, ids, turn);
     let steps = turn.steps.len();
     let mut states = Vec::new();
     let mut step_differences = Vec::new();
@@ -1788,6 +2283,7 @@ pub fn replay_screen_turn_from(
                     step_checks,
                     between_checks,
                     uncertain_cards,
+                    hidden_cards,
                     uncertain_counters,
                     states,
                 });
@@ -1832,6 +2328,7 @@ pub fn replay_screen_turn_from(
                         step_checks,
                         between_checks,
                         uncertain_cards,
+                        hidden_cards,
                         uncertain_counters,
                         states,
                     });
@@ -1890,6 +2387,7 @@ pub fn replay_screen_turn_from(
                 step_checks,
                 between_checks,
                 uncertain_cards,
+                hidden_cards,
                 uncertain_counters,
                 states,
             });
@@ -1917,6 +2415,7 @@ pub fn replay_screen_turn_from(
                     step_checks,
                     between_checks,
                     uncertain_cards,
+                    hidden_cards,
                     uncertain_counters,
                     states,
                 });
@@ -1943,7 +2442,14 @@ pub fn replay_screen_turn_from(
                 lines.retain(|l| !l.contains("next Refresh"));
                 checks.retain(|c| c.field != "free_refresh");
             }
-            step_differences.extend(mark_uncertain(lines, &uncertain_cards, uncertain_counters));
+            step_differences.extend(mark_uncertain(
+                data,
+                lines,
+                &hidden_cards,
+                uncertain_counters,
+                gems_used,
+                spells_used,
+            ));
             step_checks.push(ScreenCheckGroup {
                 when: "after step".to_string(),
                 step: Some(i + 1),
@@ -2039,6 +2545,7 @@ pub fn replay_screen_turn_from(
                 step_checks,
                 between_checks,
                 uncertain_cards,
+                hidden_cards,
                 uncertain_counters,
                 states,
             });
@@ -2056,6 +2563,7 @@ pub fn replay_screen_turn_from(
         step_checks,
         between_checks,
         uncertain_cards,
+        hidden_cards,
         uncertain_counters,
         states,
     })
@@ -2772,7 +3280,7 @@ struct ComputedSeed {
     between_checks: Option<ScreenCheckGroup>,
     end_checks: Option<ScreenCheckGroup>,
     uncertain_cards: Vec<String>,
-    uncertain_counters: bool,
+    uncertain_counters: FightCounters,
     states: Vec<ShopSnapshot>,
     complete: bool,
 }
@@ -2784,6 +3292,8 @@ fn outcome_from_runs(
     turn: &ScreenTurnSpec,
     runs: Vec<Result<ScreenTurnRun, ScreenStop>>,
 ) -> ScreenTurnOutcome {
+    let gems_used = turn_may_use_gems(data, ids, turn);
+    let spells_used = turn_may_cast_spell(data, ids, turn);
     let mut computed = Vec::new();
     for (k, run) in runs.into_iter().enumerate() {
         let seed = k as u64 + 1;
@@ -2794,7 +3304,14 @@ fn outcome_from_runs(
                     match &turn.end {
                         Some(end) => {
                             let (d, c, m) = compare_end(data, ids, &run.game, end, turn.turn);
-                            let d = mark_uncertain(d, &run.uncertain_cards, run.uncertain_counters);
+                            let d = mark_uncertain(
+                                data,
+                                d,
+                                &run.hidden_cards,
+                                run.uncertain_counters,
+                                gems_used,
+                                spells_used,
+                            );
                             (
                                 d,
                                 Some(ScreenCheckGroup {
@@ -2844,7 +3361,7 @@ fn outcome_from_runs(
                 between_checks: None,
                 end_checks: None,
                 uncertain_cards: Vec::new(),
-                uncertain_counters: false,
+                uncertain_counters: FightCounters::default(),
                 states: Vec::new(),
                 complete: false,
             }),
@@ -2990,8 +3507,8 @@ fn outcome_from_runs(
     let mut uncertain = source
         .map(|c| c.uncertain_cards.clone())
         .unwrap_or_default();
-    if source.is_some_and(|c| c.uncertain_counters) {
-        uncertain.push("player counters".to_string());
+    if let Some(c) = source {
+        uncertain.extend(c.uncertain_counters.names());
     }
     let mut checks = Vec::new();
     if let Some(c) = source {
@@ -3157,6 +3674,11 @@ fn card_of_spec(
         golden: Some(m.golden),
         keywords: (!m.keywords.is_empty()).then(|| m.keywords.clone()),
         keyword_reads: None,
+        // A card's script numbers mostly never show on screen (a Lockbox
+        // countdown does only when read off the card text), so the test bench
+        // leaves them unseen; a video converter fills `numbers` where it reads
+        // one.
+        numbers: None,
         slot: m.slot,
         kind: m.kind.clone(),
         frozen: Some(m.frozen),
@@ -3407,6 +3929,7 @@ fn step_of_spec(
                 golden: Some(c.golden),
                 keywords: c.keywords.clone(),
                 keyword_reads: None,
+                numbers: c.numbers.clone(),
                 slot: c.slot,
                 kind: c.kind.clone(),
                 frozen: None,
@@ -3449,6 +3972,7 @@ fn step_of_spec(
                 golden: Some(o.golden),
                 keywords: o.keywords.clone(),
                 keyword_reads: None,
+                numbers: o.numbers.clone(),
                 slot: o.slot,
                 kind: o.kind.clone(),
                 frozen: None,
@@ -3495,6 +4019,7 @@ fn step_of_spec(
                 golden: Some(p.golden),
                 keywords: p.keywords.clone(),
                 keyword_reads: None,
+                numbers: p.numbers.clone(),
                 slot: p.slot,
                 kind: p.kind.clone(),
                 frozen: None,
