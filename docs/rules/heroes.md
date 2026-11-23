@@ -348,7 +348,23 @@ so)
   turn 8 (`Hearthstone_2026_10_24_17_59_26-g2`).
 - Timeworn Candelabra only Discovers: a 2-cost minion from the Minor
   Timewarp (lesser) or the Major Timewarp (greater), no visit.
-- Morchie and Murozond are skipped for now (Era, 2026-11-12); the
+- The visit, from Era's logs (2026-11-23; current patch: 2026_11_04,
+  2026_11_14, 2026_11_17): it opens at the start of the hero's turn, before
+  the normal Tavern is rolled, gives exactly 2 Chronum (the log keeps them as
+  the player's resources) and offers five different cards from that side's
+  Timewarp list, one pick at a time (a GENERAL choice, not a Discover). Each
+  costs 1 or 2 Chronum; after a pick only cards the remaining Chronum can pay
+  for are offered. While it is open there is no Tavern and no Refresh, Freeze
+  or Sell. At 0 Chronum it ends and the turn's normal Gold and Tavern return.
+  The power's number is the turns left, never below 1 (7 to 1 for Murozond,
+  4 to 1 for Morchie). Power of Teron casts when bought: Rapid Reanimation
+  becomes a second hero power. Not settled by the logs: leaving with Chronum
+  left (every logged visit spent it all), whether the five can repeat, a
+  frozen Tavern across the visit.
+- The 2026-11-17 visit offered Timewarped Summoner, a Naga card, so the game
+  still offers at least that one. It loads as data only and is kept out of
+  the visit's offers, per "no nagas" (question to Era, 2026-11-23).
+- Morchie and Murozond were skipped until 2026-11-23 (built then, see above); the
   Candelabras get built, with every 2-cost Timewarped minion except the
   Naga ones (Era: "no nagas"). The open rules are guesses in
   docs/notes/UNSURE.md.
