@@ -1142,7 +1142,11 @@ impl Game {
                         health: h,
                         keyword: 0,
                         random_keyword: false,
-                        shop: false,
+                        // "A minion": the Tavern's included. The log shows
+                        // Major Hymn raising a Southsea Busker there
+                        // (`Hearthstone_2026_11_11_17_00_58-g2` turn 1
+                        // steps 1 and 2, 3/1 to 4/1 then 5/1).
+                        shop: true,
                     },
                     runs,
                     tavern: false,

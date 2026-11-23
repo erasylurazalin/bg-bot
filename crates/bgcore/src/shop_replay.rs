@@ -2016,6 +2016,14 @@ pub(crate) fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopT
             "BG36_MagicItem_202" => pl.tp.free_buys = n(0),
             // "Get an extra copy of the next 2 (4, greater) minions you buy."
             "BG35_MagicItem_931" | "BG35_MagicItem_931t" => pl.tp.copy_buys = n(0),
+            // Grifter Portrait: "The first Pirate you buy each turn is free."
+            // The first number is the free buys left (1 at the start of a
+            // turn, 0 after the buy: `Hearthstone_2026_11_12_01_40_25-g4`
+            // turn 8 steps 0 and 1).
+            "BG32_MagicItem_957" => {
+                pl.tp.free_tribe = Some(Tribe::Pirate);
+                pl.tp.free_tribe_left = n(0);
+            }
             // "Your first two Refreshes each turn contain only Tier 6 cards."
             // The base is what the next turn starts over from.
             "BG32_MagicItem_366" => {
@@ -6808,5 +6816,106 @@ mod lobby_tests {
             > 0.0);
         let at = obs::OWN_END + 3 * obs::OPP_BLOCK;
         assert_eq!(seen[at + obs::OPP_TRINKET], 1.0);
+    }
+}
+
+#[cfg(test)]
+mod gap_tests {
+    use super::*;
+
+    fn busker(attack: i32, health: i32) -> ShopMinionSpec {
+        ShopMinionSpec {
+            card_id: Some("BG26_135".to_string()),
+            name: Some("Southsea Busker".to_string()),
+            attack,
+            health,
+            slot: Some(1),
+            kind: Some("minion".to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// `Hearthstone_2026_11_11_17_00_58-g2` turn 1 steps 1 and 2: Major Hymn
+    /// presses on a Southsea Busker in the Tavern and takes it from 3/1 to
+    /// 4/1, then 5/1.
+    #[test]
+    fn hymn_buffs_a_tavern_minion() {
+        let data = Arc::new(Data::bundled());
+        let state = ShopStateSpec {
+            gold: 3,
+            tier: 1,
+            health: 30,
+            hero_powers: vec![ShopPowerSpec {
+                card_id: Some("BG26_HERO_102p".to_string()),
+                cost: Some(0),
+                ..Default::default()
+            }],
+            tavern: vec![busker(3, 1)],
+            ..Default::default()
+        };
+        let hero = data.heroes.by_card_id("BG26_HERO_102");
+        let mut game = load(&data, &state, hero, None, 1, 1, None).game;
+        game.step(Action::HeroPower).expect("the Hymn press");
+        // The one legal target (the board is empty) is taken at once.
+        assert_eq!(game.players[ME].shop[0].attack, 4);
+        assert_eq!(game.players[ME].shop[0].health, 1);
+    }
+
+    /// `Hearthstone_2026_11_12_01_40_25-g4` turn 2 step 4: a ready-made
+    /// Discover offer holds an always-Golden Aureate Laureate, and playing it
+    /// gives no Triple Reward.
+    #[test]
+    fn an_always_golden_discover_pick_gives_no_reward() {
+        let data = Arc::new(Data::bundled());
+        let mut game = Game::new_sandbox(data.clone(), 1, None, 0);
+        let card = data.cards.by_name("Aureate Laureate").expect("the card");
+        let m = game.players[ME].make_card(&data.cards, card, true, 0);
+        game.players[ME].discover.push(card);
+        game.players[ME].discover_minions.push(m);
+        game.step(Action::Choose(0)).expect("the pick");
+        assert!(game.players[ME].hand[0].no_reward, "the pick keeps its mark");
+        game.step(Action::Play { hand: 0, pos: 0 }).expect("the play");
+        assert!(
+            !game.players[ME]
+                .hand
+                .iter()
+                .any(|m| data.cards.get(m.card).name == "Triple Reward"),
+            "no Triple Reward from an always-Golden card"
+        );
+    }
+
+    /// `Hearthstone_2026_11_12_01_40_25-g4` turn 8 step 0: Grifter Portrait's
+    /// first Pirate buy of the turn is free. Its log number says one buy is
+    /// left, and the bought Locked-up Mutineer costs no Gold.
+    #[test]
+    fn grifter_portrait_makes_the_first_pirate_free() {
+        let data = Arc::new(Data::bundled());
+        let state = ShopStateSpec {
+            gold: 3,
+            tier: 5,
+            health: 30,
+            trinkets: vec![ShopTrinketSpec {
+                card_id: Some("BG32_MagicItem_957".to_string()),
+                numbers: vec![1, 0, 0, 23],
+                ..Default::default()
+            }],
+            tavern: vec![ShopMinionSpec {
+                card_id: Some("BG36_521".to_string()),
+                name: Some("Locked-up Mutineer".to_string()),
+                attack: 6,
+                health: 3,
+                slot: Some(1),
+                kind: Some("minion".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut game = load(&data, &state, None, None, 8, 1, None).game;
+        game.step(Action::Buy(0)).expect("the free buy");
+        assert_eq!(game.players[ME].gold, 3);
+        assert_eq!(
+            game.players[ME].hand.last().map(|m| m.card),
+            data.cards.by_name("Locked-up Mutineer")
+        );
     }
 }

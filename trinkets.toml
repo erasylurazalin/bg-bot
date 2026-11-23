@@ -574,7 +574,10 @@ name = "Stuffed Coin Purse"
 cube = false
 card_id = "BG35_MagicItem_814"
 slot = "lesser"
-on_pick = [{ gold_on_tier6 = 14 }]
+# The log's own level to 6 at turn 9 in `Hearthstone_2026_11_09_03_05_42-g1`
+# ends at 12 Gold from 10: the trinket pays the level's cost back and 2 more
+# (TEMP_RESOURCES 2, RESOURCES_USED 0), not the 14 the current card text says.
+on_pick = [{ gold_on_tier6 = 12 }]
 
 [[trinket]]
 name = "Glowing Crystal"
@@ -1058,6 +1061,10 @@ slot = "lesser"
 cost = 2
 tribes = ["pirate"]
 on_pick = [{ get = "Doubloon Grifter" }, { free_tribe_buys = ["pirate", "1"] }]
+# "The first Pirate you buy each turn is free": the pick's own count starts
+# over every turn (`Hearthstone_2026_11_12_01_40_25-g4` turn 8 step 0, where
+# the log buys a Pirate at 0 Gold).
+start_of_turn = [{ free_tribe_buys = ["pirate", "1"] }]
 
 [[trinket]]
 name = "Bassgill Portrait"

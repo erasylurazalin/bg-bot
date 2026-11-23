@@ -558,7 +558,10 @@ impl Game {
                 .map(|source| (source, self.data.cards.get(m.card).tier as i32));
             if !self.players[p].hand.is_full() {
                 m.pool_copies = 0;
-                m.no_reward = false;
+                // The card's own mark stays: an always-Golden Aureate
+                // Laureate still gives no Triple Reward when it is the pick
+                // (`Hearthstone_2026_11_12_01_40_25-g4` turn 2 step 4: the
+                // log's hand has no reward after it is played).
                 let card = m.card;
                 self.add_to_hand(p, m);
                 // The check waits for the end of the action, as for any

@@ -1613,11 +1613,11 @@ fn resync_start(
         game.players[ME].armor = armor;
     }
     if let Some(free) = screen.free_refresh {
-        match free {
-            true if game.players[ME].free_rolls == 0 => game.players[ME].free_rolls = 1,
-            false => game.players[ME].free_rolls = 0,
-            _ => {}
-        }
+        // The screen shows only whether the next Refresh is free, not how
+        // many are left. Cap the carried count at one: keeping a larger one
+        // leaves the engine free after a Roll the screen paid for
+        // (`Hearthstone_2026_11_12_01_40_25-g1` turns 9 and 10).
+        game.players[ME].free_rolls = if free { 1 } else { 0 };
     }
     if let Some(frozen) = screen.frozen {
         game.players[ME].frozen = frozen;
@@ -1985,12 +1985,12 @@ pub fn replay_screen_turn_from(
             }
             // The step's visible numbers are put on the carried game after
             // they have been compared, so one drift makes one line.
-            // A free next Refresh keeps the engine's own count when it has
-            // one; the screen cannot say how many are left.
-            match seen.free_refresh {
-                Some(true) if game.players[ME].free_rolls == 0 => game.players[ME].free_rolls = 1,
-                Some(false) => game.players[ME].free_rolls = 0,
-                _ => {}
+            // The screen shows only whether the next Refresh is free, not
+            // how many are left: cap the count at one. A larger carried
+            // count leaves the engine free at the Roll the screen paid for
+            // (`Hearthstone_2026_11_12_01_40_25-g1` turns 9 and 10).
+            if let Some(free) = seen.free_refresh {
+                game.players[ME].free_rolls = if free { 1 } else { 0 };
             }
             if let Some(gold) = seen.gold {
                 game.players[ME].gold = gold.clamp(0, u8::MAX as i32) as u8;
