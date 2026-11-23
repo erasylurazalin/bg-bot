@@ -51,6 +51,7 @@ pub fn screenreplay(args: &[String]) {
         eprintln!("--seeds needs a number");
         std::process::exit(2);
     });
+    let chain = args.iter().any(|a| a == "--chain");
     let files = json_files(&in_dir);
     if files.is_empty() {
         eprintln!("{in_dir}: no screen files");
@@ -62,10 +63,16 @@ pub fn screenreplay(args: &[String]) {
         screen_replay::parse_screen_files(&files).unwrap_or_else(|e| panic!("{in_dir}: {e}"));
     let mut outcomes: Vec<ScreenTurnOutcome> = Vec::new();
     for file in &specs {
-        for turn in &file.turns {
-            outcomes.push(screen_replay::replay_screen_turn_seeds(
-                &data, &ids, file, turn, seeds,
+        if chain {
+            outcomes.extend(screen_replay::replay_screen_file_chain(
+                &data, &ids, file, seeds,
             ));
+        } else {
+            for turn in &file.turns {
+                outcomes.push(screen_replay::replay_screen_turn_seeds(
+                    &data, &ids, file, turn, seeds,
+                ));
+            }
         }
     }
     let mut totals: BTreeMap<&'static str, usize> = BTreeMap::new();
@@ -76,10 +83,11 @@ pub fn screenreplay(args: &[String]) {
     let mut report = String::new();
     report.push_str("# Screen replay\n\n");
     report.push_str(&format!(
-        "{} screen files, {} turns, {} seeds each.\n\n",
+        "{} screen files, {} turns, {} seeds each{}.\n\n",
         specs.len(),
         outcomes.len(),
-        seeds.max(1)
+        seeds.max(1),
+        if chain { ", chained" } else { "" }
     ));
     report.push_str("| verdict | turns |\n|---|---:|\n");
     for verdict in [
@@ -94,22 +102,38 @@ pub fn screenreplay(args: &[String]) {
             totals.get(verdict.as_str()).copied().unwrap_or(0)
         ));
     }
+    let between_turns = outcomes
+        .iter()
+        .filter(|o| !o.between_turns.is_empty())
+        .count();
+    let between_lines: usize = outcomes.iter().map(|o| o.between_turns.len()).sum();
+    let reseated = outcomes.iter().filter(|o| o.reseated).count();
+    if chain {
+        report.push_str(&format!(
+            "\n{between_turns} turns had a between-turn difference ({between_lines} lines); \
+             {reseated} turns were reseated from their `start`.\n"
+        ));
+    }
     let mut tsv = String::from("file\tgame\tturn\tverdict\tsteps_played\tfirst_difference\n");
     for o in &outcomes {
         let played = o.seeds.first().map_or(0, |s| s.played);
-        let first = match o.verdict {
-            ScreenVerdict::Flagged => o.differences.first().cloned().unwrap_or_default(),
-            ScreenVerdict::Stopped => o
-                .stop
-                .as_ref()
-                .map(|s| format!("step {} {}: {}", s.step + 1, s.kind, s.reason))
-                .unwrap_or_default(),
-            ScreenVerdict::OkRandom => o
-                .randomness_at
-                .as_ref()
-                .map(|s| format!("random at step {} ({})", s.step + 1, s.kind))
-                .unwrap_or_default(),
-            ScreenVerdict::Ok => String::new(),
+        let first = if let Some(first) = o.between_turns.first() {
+            first.clone()
+        } else {
+            match o.verdict {
+                ScreenVerdict::Flagged => o.differences.first().cloned().unwrap_or_default(),
+                ScreenVerdict::Stopped => o
+                    .stop
+                    .as_ref()
+                    .map(|s| format!("step {} {}: {}", s.step + 1, s.kind, s.reason))
+                    .unwrap_or_default(),
+                ScreenVerdict::OkRandom => o
+                    .randomness_at
+                    .as_ref()
+                    .map(|s| format!("random at step {} ({})", s.step + 1, s.kind))
+                    .unwrap_or_default(),
+                ScreenVerdict::Ok => String::new(),
+            }
         };
         tsv.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\t{}\n",
@@ -142,6 +166,20 @@ pub fn screenreplay(args: &[String]) {
                 .map(|s| format!("step {} ({})", s.step + 1, s.kind))
                 .unwrap_or_else(|| "an unknown step".to_string());
             report.push_str(&format!("- {} turn {}: split at {at}\n", o.file, o.turn));
+        }
+    }
+    let between: Vec<&ScreenTurnOutcome> = outcomes
+        .iter()
+        .filter(|o| !o.between_turns.is_empty())
+        .collect();
+    if !between.is_empty() {
+        report.push_str("\n## Between turns\n\n");
+        for o in &between {
+            report.push_str(&format!("### {} turn {}\n\n", o.file, o.turn));
+            for d in &o.between_turns {
+                report.push_str(&format!("- {d}\n"));
+            }
+            report.push('\n');
         }
     }
     if !flagged.is_empty() {

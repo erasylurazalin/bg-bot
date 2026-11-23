@@ -22,8 +22,8 @@ use serde_json::Value;
 use crate::minion::Keywords;
 use crate::real_boards::{self, CardIdMap};
 use crate::shop_replay::{
-    self, HeroRef, ME, ShopFileSpec, ShopMinionSpec, ShopPlace, ShopPowerSpec, ShopSnapshot,
-    ShopStateSpec, ShopStepSpec, ShopTrinketSpec, ShopTurnSpec,
+    self, HeroRef, ME, ShopFileSpec, ShopGiftSpec, ShopMinionSpec, ShopPlace, ShopPowerSpec,
+    ShopSnapshot, ShopStateSpec, ShopStepSpec, ShopTrinketSpec, ShopTurnSpec,
 };
 use crate::{Action, CardId, Data, Game, MAX_TIER, Minion};
 
@@ -102,6 +102,37 @@ pub struct ScreenStateSpec {
     pub hand_count: Option<u32>,
 }
 
+/// A Dark Gift the screen showed on a card: its card id or its name, and the
+/// countdown when the icon showed one. A plain string is accepted as the id or
+/// the name, which is what a video converter reads most easily.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ScreenGift {
+    Read(String),
+    At {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        card_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state: Option<i32>,
+    },
+}
+
+impl ScreenGift {
+    fn read(&self) -> (Option<&str>, Option<&str>, Option<i32>) {
+        match self {
+            // A plain string may be the gift's card id or its name.
+            ScreenGift::Read(s) => (Some(s.as_str()), Some(s.as_str()), None),
+            ScreenGift::At {
+                card_id,
+                name,
+                state,
+            } => (card_id.as_deref(), name.as_deref(), *state),
+        }
+    }
+}
+
 /// One card as the screen showed it. A missing `attack`/`health` means the
 /// card's printed stats, doubled when golden; a missing `keywords` means the
 /// card's printed keywords.
@@ -134,6 +165,14 @@ pub struct ScreenCard {
     /// The card's price is paid in Health rather than Gold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub costs_health: Option<bool>,
+    /// The gift a Dark Gift Discover's option or pick carries, as the video
+    /// converter reads it. A plain card id or name is enough.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dark_gift: Option<ScreenGift>,
+    /// Every gift icon the screen showed on a card. `None` means the icons
+    /// were not read; an empty list means the screen showed none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dark_gifts: Option<Vec<ScreenGift>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -314,6 +353,42 @@ fn card_label(card: &ScreenCard) -> String {
         .unwrap_or_else(|| "an unnamed card".to_string())
 }
 
+/// The gift icons a screen card carries. The bool says the icons were read at
+/// all: an unseen list is unknown, which never takes a gift off the engine's
+/// card.
+fn gift_specs(data: &Data, card: &ScreenCard) -> (Vec<ShopGiftSpec>, bool, Vec<String>) {
+    let known = card.dark_gift.is_some() || card.dark_gifts.is_some();
+    let mut out = Vec::new();
+    let mut unknown = Vec::new();
+    let gifts = card
+        .dark_gift
+        .iter()
+        .chain(card.dark_gifts.iter().flatten());
+    for gift in gifts {
+        let (id, name, state) = gift.read();
+        let found = data.gifts.gifts.iter().find(|g| {
+            id.is_some_and(|id| g.id == id)
+                || name.is_some_and(|name| g.name == name)
+                || id.is_some_and(|id| {
+                    data.cards
+                        .by_name(&real_boards::resolved_name(id, id))
+                        .is_some_and(|c| c == g.card)
+                })
+                || name.is_some_and(|name| data.cards.by_name(name) == Some(g.card))
+        });
+        match found {
+            Some(g) => out.push(ShopGiftSpec {
+                card_id: Some(g.id.clone()),
+                name: Some(g.name.clone()),
+                state,
+                landed: None,
+            }),
+            None => unknown.push(id.or(name).unwrap_or("an unnamed Dark Gift").to_string()),
+        }
+    }
+    (out, known, unknown)
+}
+
 /// One screen card as the shop loader reads a file card. Missing stats are the
 /// card's printed ones (doubled when golden), and missing keywords are its
 /// printed ones.
@@ -323,6 +398,10 @@ fn minion_spec_of(
     card: &ScreenCard,
     missing: &mut Vec<String>,
 ) -> ShopMinionSpec {
+    let (gifts, gifts_known, unknown) = gift_specs(data, card);
+    for gift in unknown {
+        missing.push(format!("Dark Gift not built: {gift}"));
+    }
     let Some(id) = resolve_card(data, ids, card) else {
         missing.push(format!("card not built: {}", card_label(card)));
         return ShopMinionSpec {
@@ -337,6 +416,8 @@ fn minion_spec_of(
             frozen: card.frozen.unwrap_or(false),
             cost: card.cost,
             costs_health: card.costs_health.unwrap_or(false),
+            dark_gifts: gifts,
+            gifts_known,
             ..Default::default()
         };
     };
@@ -361,6 +442,8 @@ fn minion_spec_of(
             .or_else(|| Some(if c.is_spell() { "spell" } else { "minion" }.to_string())),
         frozen: card.frozen.unwrap_or(false),
         costs_health: card.costs_health.unwrap_or(false),
+        dark_gifts: gifts,
+        gifts_known,
         ..Default::default()
     };
     if let Some(cost) = card.cost {
@@ -551,7 +634,11 @@ fn shop_place_of_card(
     let spec = minion_spec_of(data, ids, card, missing);
     ShopPlace {
         id,
-        card_id: spec.card_id,
+        // A screen card may name only a name. The shop loader resolves a
+        // place by its card id first and its name second, so a name in the id
+        // slot lets a hand-written screen file's offer build (the card set's
+        // own name is what `name` already holds).
+        card_id: spec.card_id.clone().or_else(|| spec.name.clone()),
         name: spec.name,
         kind: Some(if spec.kind.as_deref() == Some("spell") {
             "spell".to_string()
@@ -562,6 +649,7 @@ fn shop_place_of_card(
         attack: spec.attack,
         health: spec.health,
         golden: spec.golden,
+        dark_gifts: spec.dark_gifts,
         ..Default::default()
     }
 }
@@ -572,17 +660,21 @@ fn shop_place_of_option(data: &Data, ids: &CardIdMap, card: &ScreenCard, id: u64
             let mut ignored = Vec::new();
             shop_place_of_card(data, ids, card, id, &mut ignored)
         }
-        None => ShopPlace {
-            id,
-            card_id: card.card_id.clone(),
-            name: card.name.clone(),
-            kind: Some(card.kind.clone().unwrap_or_else(|| "minion".to_string())),
-            keywords: card.keywords.clone(),
-            attack: card.attack.unwrap_or(0),
-            health: card.health.unwrap_or(0),
-            golden: card.golden.unwrap_or(false),
-            ..Default::default()
-        },
+        None => {
+            let (gifts, _, _) = gift_specs(data, card);
+            ShopPlace {
+                id,
+                card_id: card.card_id.clone().or_else(|| card.name.clone()),
+                name: card.name.clone(),
+                kind: Some(card.kind.clone().unwrap_or_else(|| "minion".to_string())),
+                keywords: card.keywords.clone(),
+                attack: card.attack.unwrap_or(0),
+                health: card.health.unwrap_or(0),
+                golden: card.golden.unwrap_or(false),
+                dark_gifts: gifts,
+                ..Default::default()
+            }
+        }
     }
 }
 
@@ -866,7 +958,9 @@ pub struct ScreenStop {
 /// One turn played forward from its screen start on one seed.
 #[derive(Clone, Debug)]
 pub struct ScreenTurnRun {
-    pub game: Game,
+    /// Boxed: a `Game` is about 160 KB, and a chained run keeps one per seed
+    /// while it builds the next turn.
+    pub game: Box<Game>,
     pub steps: usize,
     pub played: usize,
     pub stop: Option<ScreenStop>,
@@ -875,6 +969,14 @@ pub struct ScreenTurnRun {
     /// What the engine did differently from the step's own `seen` state. The
     /// replay carries on; these lines flag the turn.
     pub step_differences: Vec<String>,
+    /// What the carried game differed on before the screen's `start` went on.
+    /// These are between-turn lines: they are reported, not flagged.
+    pub between_turns: Vec<String>,
+    /// The cards whose visible stats changed between turns, and whether any
+    /// player counter is uncertain after the fight. Step lines about them say
+    /// "(uncertain after the fight)".
+    pub uncertain_cards: Vec<String>,
+    pub uncertain_counters: bool,
     /// The engine state after every played step, for finding the step whose
     /// randomness splits the seeds.
     pub states: Vec<ShopSnapshot>,
@@ -1146,6 +1248,180 @@ fn last_screen_spell(
     last
 }
 
+/// What the carried game differed on before a turn's screen start went on.
+#[derive(Clone, Debug, Default)]
+struct BetweenTurn {
+    lines: Vec<String>,
+    uncertain_cards: Vec<String>,
+    /// A player counter a fight could have changed: the start differed from
+    /// the carry, so the counter is not proved.
+    uncertain_counters: bool,
+}
+
+fn same_snap_card(a: &shop_replay::SnapMinion, b: &shop_replay::SnapMinion) -> bool {
+    a.name == b.name && a.golden == b.golden
+}
+
+/// Compare the carried game with the screen's turn start. The Tavern is not
+/// compared: the engine's start of turn draws a fresh random one, and the
+/// screen's draw is put on without being read as a fight result. Everything a
+/// fight could have changed is compared as a between-turn line.
+fn between_turn_diff(
+    data: &Data,
+    start_screen: &ScreenStateSpec,
+    start: &ShopStateSpec,
+    game: &Game,
+    turn: u32,
+) -> BetweenTurn {
+    let ours = ShopSnapshot::of_game(data, game, ME);
+    let mut ignored = Vec::new();
+    let theirs = ShopSnapshot::of_state(data, start, turn, &mut ignored);
+    let prefix = format!("before turn {turn}: ");
+    let mut out = BetweenTurn::default();
+    let mut lines: Vec<String> = Vec::new();
+    let mut push = |line: String| lines.push(format!("{prefix}{}", without_colon(line)));
+    if start_screen.board.is_some() {
+        for line in compare_ordered("board", &ours.board, &theirs.board) {
+            push(line);
+        }
+        for (a, b) in ours.board.iter().zip(theirs.board.iter()) {
+            if same_snap_card(a, b) && (a.attack != b.attack || a.health != b.health) {
+                out.uncertain_cards.push(a.name.clone());
+            }
+        }
+    }
+    if start_screen.hand.is_some() {
+        for line in compare_multiset("hand", &ours.hand, &theirs.hand) {
+            push(line);
+        }
+        for b in &theirs.hand {
+            if let Some(a) = ours.hand.iter().find(|a| same_snap_card(a, b))
+                && (a.attack != b.attack || a.health != b.health)
+            {
+                out.uncertain_cards.push(a.name.clone());
+            }
+        }
+    }
+    if let Some(gold) = start_screen.gold
+        && ours.gold != gold
+    {
+        push(format!("Gold engine {}, screen {gold}", ours.gold));
+    }
+    if let Some(tier) = start_screen.tier
+        && ours.tier != tier
+    {
+        push(format!("tier engine {}, screen {tier}", ours.tier));
+    }
+    if let Some(health) = start_screen.health
+        && ours.health != health
+    {
+        push(format!("Health engine {}, screen {health}", ours.health));
+    }
+    if let Some(armor) = start_screen.armor
+        && ours.armor != armor
+    {
+        push(format!("armor engine {}, screen {armor}", ours.armor));
+    }
+    if let Some(free) = start_screen.free_refresh
+        && (ours.free_refreshes > 0) != free
+    {
+        let says = |f: bool| if f { "free" } else { "paid" };
+        push(format!(
+            "next Refresh engine {}, screen {}",
+            says(ours.free_refreshes > 0),
+            says(free)
+        ));
+    }
+    out.uncertain_cards.sort();
+    out.uncertain_cards.dedup();
+    out.uncertain_counters = !lines.is_empty();
+    out.lines = lines;
+    out
+}
+
+/// Put the visible parts of a screen start onto a carried game after the
+/// between-turn comparison. A zone or number the screen did not show is left
+/// alone: unseen is unknown.
+fn resync_start(
+    data: &Data,
+    game: &mut Game,
+    screen: &ScreenStateSpec,
+    start: &ShopStateSpec,
+    missing: &mut Vec<String>,
+    keep: bool,
+) {
+    if screen.board.is_some() {
+        let fake = ShopStepSpec {
+            after: Some(start.clone()),
+            ..Default::default()
+        };
+        shop_replay::force_board(data, game, &fake, missing);
+    }
+    if screen.hand.is_some() {
+        let fake = ShopStepSpec {
+            after: Some(start.clone()),
+            ..Default::default()
+        };
+        if keep {
+            shop_replay::force_hand_keep(data, game, &fake, missing);
+        } else {
+            shop_replay::force_hand(data, game, &fake, missing);
+        }
+    }
+    if screen.tavern.is_some() {
+        shop_replay::place_tavern(data, game, start, missing);
+    }
+    if let Some(gold) = screen.gold {
+        game.players[ME].gold = gold.clamp(0, u8::MAX as i32) as u8;
+    }
+    if let Some(tier) = screen.tier {
+        game.players[ME].tier = tier.clamp(1, MAX_TIER);
+    }
+    if let Some(health) = screen.health {
+        game.players[ME].health = health;
+    }
+    if let Some(armor) = screen.armor {
+        game.players[ME].armor = armor;
+    }
+    if let Some(free) = screen.free_refresh {
+        match free {
+            true if game.players[ME].free_rolls == 0 => game.players[ME].free_rolls = 1,
+            false => game.players[ME].free_rolls = 0,
+            _ => {}
+        }
+    }
+    if let Some(frozen) = screen.frozen {
+        game.players[ME].frozen = frozen;
+    }
+    if screen.hero_power.is_some() || screen.hero_power_second.is_some() {
+        shop_replay::seat_power_counters(data, &mut game.players[ME], &start.hero_powers);
+        resync_power_uses(data, game, start);
+    }
+    if screen.trinkets.is_some() {
+        shop_replay::seat_trinket_counters(data, &mut game.players[ME], &start.trinkets);
+    }
+}
+
+/// Append "(uncertain after the fight)" to the step lines a fight's hidden
+/// change could explain: a line about a card whose visible stats changed
+/// between turns, or a stat line while the player's counters are unproved.
+fn mark_uncertain(lines: Vec<String>, cards: &[String], counters: bool) -> Vec<String> {
+    lines
+        .into_iter()
+        .map(|line| {
+            let card = cards
+                .iter()
+                .any(|name| !name.is_empty() && line.contains(name));
+            let stats = line.contains("board ") || line.contains("hand ");
+            if (card || (counters && stats)) && !line.contains("(uncertain after the fight)") {
+                format!("{line} (uncertain after the fight)")
+            } else {
+                line
+            }
+        })
+        .collect()
+}
+
 /// Seat the turn's start once, then play each step on the carried game. The
 /// error is only the start that cannot be seated; a later step stops the run
 /// with its own `ScreenStop`.
@@ -1156,7 +1432,24 @@ pub fn replay_screen_turn(
     turn: &ScreenTurnSpec,
     seed: u64,
 ) -> Result<ScreenTurnRun, ScreenStop> {
+    replay_screen_turn_from(data, ids, file, turn, seed, None)
+}
+
+/// `replay_screen_turn` with an optional carried game. `Some` is chained mode:
+/// the previous turn's engine game is moved into this shop phase with the
+/// engine's own turn transition, compared with the screen's `start`, and then
+/// has the visible start put on. `None` is the non-chained replay and the
+/// first turn of a chain.
+pub fn replay_screen_turn_from(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ScreenFileSpec,
+    turn: &ScreenTurnSpec,
+    seed: u64,
+    carry: Option<&Game>,
+) -> Result<ScreenTurnRun, ScreenStop> {
     let mut missing = Vec::new();
+    let chained = carry.is_some();
     let mut next_id = 1u64;
     let start = state_to_spec(
         data,
@@ -1173,22 +1466,41 @@ pub fn replay_screen_turn(
     .into_iter()
     .flatten()
     .any(|p| p.waiting_seen == Some(true) && p.waiting.is_none());
-    let base = screen_file_spec(file);
-    let hero = base.hero(data, &start);
-    let lobby = base.lobby();
-    let loaded = shop_replay::load(data, &start, hero, lobby, turn.turn, seed, None);
-    let mut missing = {
-        let mut m = missing;
-        m.extend(loaded.missing);
-        drop_waiting_missing(&mut m, waiting_known_empty);
-        m
+    let mut between_turns = Vec::new();
+    let mut uncertain_cards = Vec::new();
+    let mut uncertain_counters = false;
+    let (mut game, loaded_missing): (Box<Game>, Vec<String>) = match carry {
+        Some(game) => {
+            let mut game = Box::new(game.clone());
+            // The engine's own shop-side turn transition: end the shop turn
+            // that is still open, then start the next one (Gold, start-of-turn
+            // triggers, tier price, the turn number) without a fight. This is
+            // `Game::next_shop_turn_without_fight`, the lobster search's own
+            // step, so no rule is copied into the replay.
+            game.next_shop_turn_without_fight();
+            let between = between_turn_diff(data, &turn.start, &start, &game, turn.turn);
+            between_turns = between.lines;
+            uncertain_cards = between.uncertain_cards;
+            uncertain_counters = between.uncertain_counters;
+            resync_start(data, &mut game, &turn.start, &start, &mut missing, true);
+            (game, Vec::new())
+        }
+        None => {
+            let base = screen_file_spec(file);
+            let hero = base.hero(data, &start);
+            let lobby = base.lobby();
+            let loaded = shop_replay::load(data, &start, hero, lobby, turn.turn, seed, None);
+            let mut game = Box::new(loaded.game);
+            // A passive power seated after `clear_choices` can queue its
+            // start-of-turn Discovers again. The screen's `start` is past them:
+            // the turns that have one show it as a step of its own.
+            game.players[ME].discover_queue.clear();
+            resync_power_uses(data, &mut game, &start);
+            (game, loaded.missing)
+        }
     };
-    let mut game = loaded.game;
-    // A passive power seated after `clear_choices` can queue its start-of-turn
-    // Discovers again. The screen's `start` is past them: the turns that have
-    // one show it as a step of its own.
-    game.players[ME].discover_queue.clear();
-    resync_power_uses(data, &mut game, &start);
+    missing.extend(loaded_missing);
+    drop_waiting_missing(&mut missing, waiting_known_empty);
     let steps = turn.steps.len();
     let mut states = Vec::new();
     let mut step_differences = Vec::new();
@@ -1227,6 +1539,9 @@ pub fn replay_screen_turn(
                     missing,
                     seed,
                     step_differences,
+                    between_turns,
+                    uncertain_cards,
+                    uncertain_counters,
                     states,
                 });
             }
@@ -1266,6 +1581,9 @@ pub fn replay_screen_turn(
                         missing,
                         seed,
                         step_differences,
+                        between_turns,
+                        uncertain_cards,
+                        uncertain_counters,
                         states,
                     });
                 }
@@ -1319,12 +1637,15 @@ pub fn replay_screen_turn(
                 missing,
                 seed,
                 step_differences,
+                between_turns,
+                uncertain_cards,
+                uncertain_counters,
                 states,
             });
         }
         apply_step_price(data, ids, &mut game, screen);
         let free_before = game.players[ME].free_rolls;
-        let (next, miss, _text) = match seated.play_on(data, ids, game.clone()) {
+        let (next, miss, _text) = match seated.play_on(data, ids, game.as_ref().clone()) {
             Ok(next) => next,
             Err((reason, miss)) => {
                 missing.extend(miss);
@@ -1341,12 +1662,15 @@ pub fn replay_screen_turn(
                     missing,
                     seed,
                     step_differences,
+                    between_turns,
+                    uncertain_cards,
+                    uncertain_counters,
                     states,
                 });
             }
         };
         missing.extend(miss);
-        game = next;
+        game = Box::new(next);
         // Compare the engine's result with what the screen showed before
         // putting that state on the game. The zones are the checker's useful
         // output; the resync below only stops one difference cascading into a
@@ -1365,7 +1689,7 @@ pub fn replay_screen_turn(
             {
                 lines.retain(|l| !l.contains("next Refresh"));
             }
-            step_differences.extend(lines);
+            step_differences.extend(mark_uncertain(lines, &uncertain_cards, uncertain_counters));
         }
         // The screen's own seen state goes on only where it saw one.
         if let Some(seen) = &screen.seen {
@@ -1390,7 +1714,11 @@ pub fn replay_screen_turn(
                     after: Some(spec.clone()),
                     ..Default::default()
                 };
-                shop_replay::force_hand(data, &mut game, &fake, &mut missing);
+                if chained {
+                    shop_replay::force_hand_keep(data, &mut game, &fake, &mut missing);
+                } else {
+                    shop_replay::force_hand(data, &mut game, &fake, &mut missing);
+                }
             }
             // The step's visible numbers are put on the carried game after
             // they have been compared, so one drift makes one line.
@@ -1427,6 +1755,9 @@ pub fn replay_screen_turn(
                 missing,
                 seed,
                 step_differences,
+                between_turns,
+                uncertain_cards,
+                uncertain_counters,
                 states,
             });
         }
@@ -1439,6 +1770,9 @@ pub fn replay_screen_turn(
         missing,
         seed,
         step_differences,
+        between_turns,
+        uncertain_cards,
+        uncertain_counters,
         states,
     })
 }
@@ -1671,6 +2005,18 @@ pub struct ScreenTurnOutcome {
     pub verdict: ScreenVerdict,
     pub stop: Option<ScreenStop>,
     pub differences: Vec<String>,
+    /// Chained mode: differences between the carried game and the screen's
+    /// `start`, before that start was put on. They do not flag the turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub between_turns: Vec<String>,
+    /// Chained mode: the cards and counters a fight could have changed that
+    /// turn. Step lines that involve them are marked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncertain: Vec<String>,
+    /// Chained mode: this turn was seated fresh because the file skipped one
+    /// or the turn before it stopped.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reseated: bool,
     pub randomness_at: Option<ScreenSplit>,
     pub seeds: Vec<ScreenSeedResult>,
 }
@@ -1686,13 +2032,39 @@ pub fn replay_screen_turn_seeds(
     seeds: u64,
 ) -> ScreenTurnOutcome {
     let n = seeds.max(1);
+    let runs = (0..n)
+        .map(|k| replay_screen_turn(data, ids, file, turn, k + 1))
+        .collect();
+    outcome_from_runs(data, ids, file, turn, runs)
+}
+
+/// Judge one turn from the runs of its seeds. This is the shared tail of the
+/// non-chained and the chained replay: the chained one carries each seed's
+/// game between turns before it gets here.
+fn outcome_from_runs(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ScreenFileSpec,
+    turn: &ScreenTurnSpec,
+    runs: Vec<Result<ScreenTurnRun, ScreenStop>>,
+) -> ScreenTurnOutcome {
     let mut results = Vec::new();
     let mut state_sets: Vec<Option<Vec<ShopSnapshot>>> = Vec::new();
     let mut plays = Vec::new();
-    for k in 0..n {
-        let seed = k + 1;
-        match replay_screen_turn(data, ids, file, turn, seed) {
+    let mut between_turns: Vec<String> = Vec::new();
+    let mut uncertain_cards: Vec<String> = Vec::new();
+    let mut uncertain_counters = false;
+    for (k, run) in runs.into_iter().enumerate() {
+        let seed = k as u64 + 1;
+        match run {
             Ok(run) => {
+                if between_turns.is_empty() {
+                    between_turns = run.between_turns.clone();
+                }
+                if uncertain_cards.is_empty() {
+                    uncertain_cards = run.uncertain_cards.clone();
+                }
+                uncertain_counters |= run.uncertain_counters;
                 let mut differences = run.step_differences.clone();
                 let compare_missing = if run.stop.is_none() {
                     match &turn.end {
@@ -1792,6 +2164,10 @@ pub fn replay_screen_turn_seeds(
             }
         }
     }
+    let mut uncertain = uncertain_cards;
+    if uncertain_counters {
+        uncertain.push("player counters".to_string());
+    }
     ScreenTurnOutcome {
         file: file.file(),
         game: file.game,
@@ -1800,9 +2176,70 @@ pub fn replay_screen_turn_seeds(
         verdict,
         stop,
         differences,
+        between_turns,
+        uncertain,
+        reseated: false,
         randomness_at,
         seeds: results,
     }
+}
+
+/// Replay a whole file in chained mode. Each seed carries its own game from
+/// turn to turn; a turn starts from the engine's end of the previous turn
+/// unless the file skipped one or that turn stopped, in which case it is
+/// seated fresh from its `start` and marked `reseated`.
+pub fn replay_screen_file_chain(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ScreenFileSpec,
+    seeds: u64,
+) -> Vec<ScreenTurnOutcome> {
+    let n = seeds.max(1);
+    let turns = file.turns.len();
+    let mut per_turn: Vec<Vec<Result<ScreenTurnRun, ScreenStop>>> =
+        (0..turns).map(|_| Vec::new()).collect();
+    let mut reseated = vec![false; turns];
+    for k in 0..n {
+        let seed = k + 1;
+        let mut carry: Option<Box<Game>> = None;
+        let mut previous_turn: Option<u32> = None;
+        let mut previous_stopped = false;
+        for (i, turn) in file.turns.iter().enumerate() {
+            let fresh = i == 0
+                || previous_stopped
+                || previous_turn.is_some_and(|t| turn.turn != t + 1)
+                || carry.as_ref().is_none_or(|g| g.turn + 1 != turn.turn);
+            if i > 0 && fresh {
+                reseated[i] = true;
+            }
+            let run = if fresh {
+                replay_screen_turn_from(data, ids, file, turn, seed, None)
+            } else {
+                replay_screen_turn_from(data, ids, file, turn, seed, carry.as_deref())
+            };
+            match &run {
+                Ok(run) if run.stop.is_none() => {
+                    carry = Some(run.game.clone());
+                    previous_stopped = false;
+                }
+                _ => {
+                    carry = None;
+                    previous_stopped = true;
+                }
+            }
+            per_turn[i].push(run);
+            previous_turn = Some(turn.turn);
+        }
+    }
+    per_turn
+        .into_iter()
+        .enumerate()
+        .map(|(i, runs)| {
+            let mut outcome = outcome_from_runs(data, ids, file, &file.turns[i], runs);
+            outcome.reseated = reseated[i];
+            outcome
+        })
+        .collect()
 }
 
 /// Parse every screen file of a folder: `files` are the (name, text) pairs,
@@ -1848,6 +2285,8 @@ fn card_of_spec(data: &Data, ids: &CardIdMap, m: &ShopMinionSpec) -> Option<Scre
         frozen: Some(m.frozen),
         cost,
         costs_health: m.costs_health.then_some(true),
+        dark_gift: None,
+        dark_gifts: None,
     })
 }
 
@@ -1937,6 +2376,16 @@ fn place_of_spec(data: &Data, ids: &CardIdMap, place: &ShopPlace) -> ScreenPlace
         slot: place.slot,
         card_id: place.card_id.clone(),
         name: place.name.clone(),
+    }
+}
+
+/// A logged gift as the screen file writes the one a Discover showed: its card
+/// id and name, and its countdown when the log has one.
+fn screen_gift_of(g: &ShopGiftSpec) -> ScreenGift {
+    ScreenGift::At {
+        card_id: g.card_id.clone(),
+        name: g.name.clone(),
+        state: g.state,
     }
 }
 
@@ -2070,6 +2519,8 @@ fn step_of_spec(
                 frozen: None,
                 cost: c.cost,
                 costs_health: None,
+                dark_gift: None,
+                dark_gifts: None,
             };
             // A buy's price is on the card the screen showed. The action file
             // writes it for a Tavern spell; for a discounted minion the step's
@@ -2108,6 +2559,8 @@ fn step_of_spec(
                 frozen: None,
                 cost: o.cost,
                 costs_health: None,
+                dark_gift: o.dark_gifts.first().map(screen_gift_of),
+                dark_gifts: None,
             })
             .collect(),
         picked: step.picked.as_ref().map(|p| {
@@ -2123,6 +2576,8 @@ fn step_of_spec(
                 frozen: None,
                 cost: p.cost,
                 costs_health: None,
+                dark_gift: p.dark_gifts.first().map(screen_gift_of),
+                dark_gifts: None,
             })
         }),
         tavern_random: step.step == "roll" || tavern_refreshed(before, after),

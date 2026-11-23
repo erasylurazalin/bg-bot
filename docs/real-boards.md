@@ -1205,7 +1205,12 @@ game played from video needs no Power.log. One file holds one game,
   `kind` (`minion` or `spell`), `frozen`, `cost` (the Gold the card shows,
   including a spell's price or a minion's discount) and `costs_health` when
   the price is paid in Health. The board and the hand are in screen order;
-  only the Tavern uses `slot`.
+  only the Tavern uses `slot`. A card may also carry `dark_gift` (one gift, as
+  a card id, a name, or `{"card_id", "name", "state"}`) and `dark_gifts` (a
+  list, when the gift icons were read). A Dark Gift Discover writes its gifts
+  on `options` and `picked`; `screen-from-actions` does that from the action
+  file. An absent list is unknown, an empty list is "the screen showed none",
+  and unknown never takes a gift off a card the engine carries.
 - A hero power has its `card_id` or `name`, `cost`, `used_this_turn` (the
   button greys out at the limit), `numbers` (a counter the button shows) and
   `waiting` with `waiting_seen` for the minion Lock and Load holds. A trinket
@@ -1221,12 +1226,14 @@ game played from video needs no Power.log. One file holds one game,
   `screen-from-actions` writes the board, hand, Tavern, Gold, whether the next
   Refresh is free, hero powers and trinkets after every step. `tavern_random` marks a step whose
   Tavern is a random draw.
-- No entity ids, counters, enchantment numbers, Blood Gem tags, Dark Gift
-  states or script numbers are written. The replay seats every unseen number
-  at the engine's default for the turn (Gold from the turn number, counters at
-  zero, no gifts), so the screen file cannot prove those hidden numbers. It
-  uses the visible numbers it does have: a free next Refresh, card prices, hero
-  power uses and counters, and trinket counters.
+- No entity ids, counters, enchantment numbers, Blood Gem tags or script
+  numbers are written. A Dark Gift shows only when the screen read its icon
+  (the field above); its countdown is left to the engine unless the converter
+  saw it. The replay seats every unseen number at the engine's default for the
+  turn (Gold from the turn number, counters at zero, no gifts), so the screen
+  file cannot prove those hidden numbers. It uses the visible numbers it does
+  have: a free next Refresh, card prices, hero power uses and counters, and
+  trinket counters.
 
 ## The screen replay
 
@@ -1236,7 +1243,7 @@ It is the video-side bug finder: a game seen from a stream has no log, so a
 disagreement is a turn for Era to review, not automatically an engine bug.
 
 ```
-./target/release/bgbench screenreplay --in DIR --out DIR [--seeds N]
+./target/release/bgbench screenreplay --in DIR --out DIR [--seeds N] [--chain]
 ./target/release/bgbench screen-from-actions --actions DIR --out DIR [--current-patch]
 ```
 
@@ -1256,6 +1263,29 @@ only files whose `build` equals the card data's `game_build`.
   on the carried game before a buy, a trinket pick pays the picked option's
   shown cost, and the last Tavern spell is read from the screen's own earlier
   `play` steps. Every other field stays the engine's own result.
+- `--chain` seats only the first turn from its `start`. Each later turn starts
+  from that seed's engine game at the end of the previous turn, moved into the
+  next shop phase by the engine's own `Game::next_shop_turn_without_fight`
+  (the end-of-turn effects, Gold, start-of-turn triggers, tier price and the
+  turn number), with no fight. Before the screen's `start` goes on, the carried
+  game is compared with it: each difference is a between-turn line ("before
+  turn 8: board 3 engine Wrath Weaver 5/7, screen Wrath Weaver 7/9",
+  "before turn 8: Gold engine 12, screen 16"). The Tavern is not compared: the
+  start of a turn draws a fresh random one, and the screen's draw is put on
+  without being read as a fight result. Then the visible parts go on: board,
+  hand, Tavern, Gold, tier, Health, armor, the free next Refresh, the frozen
+  flag, and the hero power and trinket counters the screen shows. A minion that
+  is the same card keeps the engine's own state and takes only the screen's
+  stats, as `force_board` already does; a Dark Gift the screen did not read is
+  never removed.
+- A hidden value a fight could have changed stays the engine's guess. The cards
+  whose visible stats changed between turns and every player counter of a turn
+  whose start differed from the carry are `uncertain` for that turn. Step lines
+  that involve them end with `(uncertain after the fight)`. Between-turn lines
+  do not flag a turn; they are counted and listed separately in the report.
+- If the file skips a turn, or the turn before it stopped, the next turn is
+  seated fresh from its `start` as without `--chain`, and is marked `reseated`.
+  Seed k's game is carried into seed k's next turn.
 - After a step the engine's result is compared with the step's `seen` state
   before that state is put on the game: board in order (card, Attack, Health,
   golden), hand, Tavern, Gold, whether the next Refresh is free, and tier. Each difference is a
@@ -1284,10 +1314,13 @@ only files whose `build` equals the card data's `game_build`.
   between seeds names the split), `flagged` when no completed seed matches,
   and `stopped` when no seed could follow every step. A random turn with one
   seed unable to follow and another matching is `ok-random`, not `stopped`.
-- Outputs: `screen-report.md` (totals, the random splits, each flagged and
-  stopped turn with its differences), `turns.tsv` (file, game, turn, verdict,
-  steps played, first difference) and `turns.json` (per turn: verdict, stop,
-  differences, and the engine's end state per seed).
+  Chained between-turn lines do not change the verdict.
+- Outputs: `screen-report.md` (totals, between-turn counts and lines, the
+  random splits, each flagged and stopped turn with its differences),
+  `turns.tsv` (file, game, turn, verdict, steps played, first difference,
+  which is the first between-turn line in chained mode) and `turns.json` (per
+  turn: verdict, stop, differences, `between_turns`, `uncertain`, `reseated`,
+  and the engine's end state per seed).
 - The check on Era's own logs is a comparison, not a test of the engine:
   `screen-from-actions` drops the hidden state the log carries, then
   `screenreplay` shows which turns a screen could not reproduce. The causes

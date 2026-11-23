@@ -77,6 +77,11 @@ pub struct ShopMinionSpec {
     pub numbers: Vec<i32>,
     #[serde(default)]
     pub dark_gifts: Vec<ShopGiftSpec>,
+    /// Whether `dark_gifts` is known rather than merely empty. A screen shows
+    /// a card's gift icons only sometimes: an unread list must not take a gift
+    /// off a carried minion (docs/real-boards.md "The screen replay").
+    #[serde(skip)]
+    pub gifts_known: bool,
     #[serde(default)]
     pub reanimate: bool,
     /// The Attack and Health this minion's Blood Gems have given it, from the
@@ -1993,7 +1998,7 @@ fn build_minion(data: &Data, m: &ShopMinionSpec, turn: u32) -> (Minion, Option<S
 /// the card Portable Factory remembers) and are left alone. Per-card mapping,
 /// as for the Tavern's prices: the same number means a different thing on each
 /// trinket.
-fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]) {
+pub(crate) fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]) {
     for slot in 0..pl.trinkets.len() {
         let of = pl.trinkets[slot].of;
         if of == 0 {
@@ -2060,7 +2065,7 @@ fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopTrinketSpec]
 /// carries (`PowerState.cost_delta`, Lead Explorer's +1, Pirate Parrrrty!'s
 /// -1 a Pirate bought, The Galaxy's Lens's -1 a turn waited) to the card's own
 /// cost, and the log's price is the two together as the game shows them.
-fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPowerSpec]) {
+pub(crate) fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPowerSpec]) {
     for power in powers {
         let Some(card_id) = power.card_id.as_deref() else { continue };
         let Some(i) = data.heroes.power_by_card_id(card_id) else { continue };
@@ -5283,6 +5288,30 @@ pub(crate) fn force_hand(
     step: &ShopStepSpec,
     missing: &mut Vec<String>,
 ) {
+    force_hand_with(data, game, step, missing, false);
+}
+
+/// `force_hand`, but a card that is the same keeps the engine's own state (its
+/// hidden numbers and gifts) and takes only the screen's stats. The chained
+/// screen replay re-syncs a hand carried over from the turn before with this,
+/// so a gift the engine knows about is not dropped by a screen that cannot see
+/// it.
+pub(crate) fn force_hand_keep(
+    data: &Data,
+    game: &mut Game,
+    step: &ShopStepSpec,
+    missing: &mut Vec<String>,
+) {
+    force_hand_with(data, game, step, missing, true);
+}
+
+fn force_hand_with(
+    data: &Data,
+    game: &mut Game,
+    step: &ShopStepSpec,
+    missing: &mut Vec<String>,
+    keep: bool,
+) {
     let Some(after) = step.after.as_ref() else { return };
     let target = after.hand.len();
     for i in 0..target {
@@ -5302,6 +5331,19 @@ pub(crate) fn force_hand(
                 && m.gifts[..m.n_gifts as usize] == minion.gifts[..minion.n_gifts as usize]
         });
         if same {
+            continue;
+        }
+        if keep
+            && let Some(m) = game.players[ME].hand.get_mut(i)
+            && m.card == minion.card
+            && m.golden == minion.golden
+        {
+            m.attack = minion.attack;
+            m.health = minion.health;
+            if spec.gifts_known {
+                m.gifts = minion.gifts;
+                m.n_gifts = minion.n_gifts;
+            }
             continue;
         }
         take_pool_copy(&mut game.pool, &data.cards, &mut minion);
@@ -5367,6 +5409,10 @@ pub(crate) fn force_board(
         {
             m.attack = minion.attack;
             m.health = minion.health;
+            if specs[i].gifts_known {
+                m.gifts = minion.gifts;
+                m.n_gifts = minion.n_gifts;
+            }
             continue;
         }
         take_pool_copy(&mut game.pool, &data.cards, &mut minion);
