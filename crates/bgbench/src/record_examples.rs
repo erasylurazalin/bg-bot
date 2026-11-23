@@ -248,6 +248,7 @@ fn reason(result: &StepResult) -> &'static str {
         Verdict::Flagged => "flagged",
         Verdict::Illegal => "illegal",
         Verdict::Incomplete => seat_reason(&result.first()),
+        Verdict::OldPatch => "old-patch",
         _ => "kept",
     }
 }

@@ -338,6 +338,8 @@ impl<'de> serde::de::Visitor<'de> for StateVisitor {
 pub(crate) struct SessionInfo {
     pub(crate) stem: String,
     pub(crate) is_laptop: bool,
+    /// The game's `BuildNumber` line, 0 when the session had none.
+    pub(crate) build: i64,
     pub(crate) stand_in: Option<(i32, String)>,
     pub(crate) my_hero: Option<(i32, String)>,
     pub(crate) lobby: BTreeMap<i32, String>,
@@ -415,6 +417,7 @@ pub(crate) fn session_info(
     SessionInfo {
         stem,
         is_laptop,
+        build: game.build,
         stand_in,
         my_hero,
         lobby,
@@ -910,6 +913,7 @@ impl Game {
         Some(render(&Json::Obj(vec![
             ("source".to_string(), Json::Str(source.to_string())),
             ("game".to_string(), Json::Int(gi as i64)),
+            ("build".to_string(), Json::Int(self.session.build)),
             ("place".to_string(), Json::Int(place)),
             ("match".to_string(), Json::Str(match_stem)),
             ("final_place".to_string(), Json::Int(self.final_place)),
@@ -1360,6 +1364,30 @@ mod tests {
         let time = json["boards"][0]["time"].as_str().unwrap();
         assert!(time.starts_with("2026-11-17T00:59:12."), "{time}");
         assert_eq!(json["boards"][1]["time"], json["boards"][0]["time"], "both sides of one fight");
+    }
+
+    /// Every board file carries its game's own `BuildNumber`: 254477 in the
+    /// trimmed log, and 0 when the session has no such line.
+    #[test]
+    fn a_board_file_carries_the_games_build() {
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let text = include_str!("../../bglog/tests/data/fight.log");
+        let mut reader = std::io::Cursor::new(text);
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&games[0].render("test", 1).unwrap()).unwrap();
+        assert_eq!(json["build"], 254477);
+
+        let no_build = text.replacen(
+            "D 00:57:53.6478530 GameState.DebugPrintGame() - BuildNumber=254477\n",
+            "",
+            1,
+        );
+        let mut reader = std::io::Cursor::new(no_build);
+        let games = read_log_reader(&mut reader, &cards).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&games[0].render("test", 1).unwrap()).unwrap();
+        assert_eq!(json["build"], 0);
     }
 
     /// The side-wide numbers are read as the fight is staged, before Start

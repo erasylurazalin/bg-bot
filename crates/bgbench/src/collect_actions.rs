@@ -783,6 +783,7 @@ impl Collector {
             );
         }
         if let Some(object) = record.as_obj_mut() {
+            put(object, "build", Json::Int(game.build));
             set(object, "hero", hero);
             put(object, "unread", unread);
             put(object, "tribes", tribes);
@@ -4271,6 +4272,30 @@ mod tests {
         assert_eq!(turns[0]["joined_mid_turn"], true);
         assert_eq!(turns[0]["actions"].as_array().unwrap().len(), 1);
         assert_eq!(turns[0]["actions"][0]["step"], "end_turn");
+    }
+
+    /// Every action file carries its game's own `BuildNumber`: 254477 in the
+    /// trimmed log, and 0 when the session has no such line.
+    #[test]
+    fn an_action_file_carries_the_games_build() {
+        let cards = Cards::from_pairs(Vec::<(String, String)>::new());
+        let text = reconnect_excerpt();
+        let mut reader = std::io::Cursor::new(&text);
+        let games = read_log_reader(&mut reader, &cards, "test", &HashMap::new()).unwrap();
+        let game = games[0].as_ref().expect("the game has a file");
+        let got: serde_json::Value = serde_json::from_str(&render(game)).unwrap();
+        assert_eq!(got["build"], 254477);
+
+        let no_build = text.replacen(
+            "D 00:57:53.6478530 GameState.DebugPrintGame() - BuildNumber=254477\n",
+            "",
+            1,
+        );
+        let mut reader = std::io::Cursor::new(no_build);
+        let games = read_log_reader(&mut reader, &cards, "test", &HashMap::new()).unwrap();
+        let game = games[0].as_ref().expect("the game has a file");
+        let got: serde_json::Value = serde_json::from_str(&render(game)).unwrap();
+        assert_eq!(got["build"], 0);
     }
 
     /// A whole trimmed real game between the spectator markers is another

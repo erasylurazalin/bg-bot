@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use bgcore::shop_replay::{
     LoadedShop, ME, ReplayOptions, ShopFileSpec, ShopShape, ShopSnapshot, ShopStepSpec, SnapMinion,
-    StepResult, Verdict, load, parse_action_files, replay_step, replay_turn, seat_spell_bonus_turn,
-    seat_step, seat_taught_spells,
+    StepResult, Verdict, load, parse_action_files, replay_step, replay_step_with_builds,
+    replay_turn, seat_spell_bonus_turn, seat_step, seat_taught_spells,
 };
 use bgcore::real_boards::CardIdMap;
 use bgcore::trinkets::CardMod;
@@ -26,7 +26,7 @@ fn data() -> Arc<Data> {
 /// loader falls back to the name in the file).
 fn ids() -> CardIdMap {
     CardIdMap::parse(
-        r#"{"cards": [
+        r#"{"game_build": 255790, "cards": [
             {"card_id": "TB_BaconShop_HERO_57", "name": "Nozdormu"},
             {"card_id": "TB_BaconShop_HP_063", "name": "Clairvoyance"},
             {"card_id": "BG26_135", "name": "Southsea Busker"},
@@ -82,6 +82,67 @@ fn replay(file: &ShopFileSpec, kind: &str) -> StepResult {
     let turn = &file.turns[0];
     let i = step_named(turn, kind);
     replay_step(&data(), &ids(), file, turn, i, &ReplayOptions { seeds: 4, seed: 1 })
+}
+
+/// A game is judged against the card data's own build. A file without the
+/// `build` key is judged as before; a game of another build is `old-patch`,
+/// and `--all-builds` judges it anyway.
+#[test]
+fn a_game_from_another_build_is_old_patch() {
+    let data = data();
+    let ids = ids();
+    let mut file = fixture();
+    let turn = &file.turns[0];
+    let i = step_named(turn, "buy");
+
+    // No key: the file cannot say its build, so it is judged as today.
+    assert_eq!(file.build, None);
+    let r = replay_step(&data, &ids, &file, turn, i, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_ne!(r.verdict, Verdict::OldPatch, "{:?}", r.diffs);
+    assert_eq!(r.build, None);
+
+    // The card data's build: judged.
+    file.build = Some(255790);
+    let r = replay_step(&data, &ids, &file, turn, i, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_ne!(r.verdict, Verdict::OldPatch, "{:?}", r.diffs);
+    assert_eq!(r.build, Some(255790));
+
+    // Another build: not judged, and the report says which.
+    file.build = Some(254477);
+    let r = replay_step(&data, &ids, &file, turn, i, &ReplayOptions { seeds: 1, seed: 1 });
+    assert_eq!(r.verdict, Verdict::OldPatch);
+    assert!(r.missing.is_empty() && r.diffs.is_empty(), "{:?} {:?}", r.missing, r.diffs);
+    let r = replay_step_with_builds(
+        &data,
+        &ids,
+        &file,
+        turn,
+        i,
+        &ReplayOptions { seeds: 1, seed: 1 },
+        true,
+    );
+    assert_ne!(r.verdict, Verdict::OldPatch, "--all-builds judges it");
+
+    let mut report = bgcore::shop_replay::ShopReplayReport {
+        files: 1,
+        turns: 1,
+        game_build: Some(255790),
+        ..Default::default()
+    };
+    report.entries = replay_turn(
+        &data,
+        &ids,
+        &file,
+        turn,
+        &ReplayOptions { seeds: 1, seed: 1 },
+        None,
+    );
+    assert_eq!(report.count(Verdict::OldPatch), report.steps());
+    assert_eq!(report.old_patch_builds(), vec![(254477, report.steps())]);
+    let text = report.report_md(&data);
+    assert!(text.contains("old-patch"), "{text}");
+    assert!(text.contains("build 254477"), "{text}");
+    assert!(text.contains("no `build` key"), "{text}");
 }
 
 /// Spirit Swap's second click is written as `BG20_HERO_201p2`, with the first

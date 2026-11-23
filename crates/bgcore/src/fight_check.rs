@@ -20,6 +20,7 @@ use crate::heroes::PowerEffect;
 use crate::minion::Minion;
 use crate::real_boards::{
     RealBoard, RealBoardSpec, RealFightSpec, RealPowerSpec, RealResult, RealTrinketSpec, STAND_IN,
+    is_other_build,
 };
 use crate::rng::Rng;
 use crate::trinkets::{FightAct, Trinket};
@@ -37,17 +38,28 @@ pub struct CheckOptions {
     pub runs: u32,
     pub flag_below: f64,
     pub seed: u64,
+    /// The card data's `game_build`. A fight from a file whose `build` differs
+    /// is `old-patch` and not judged.
+    pub game_build: Option<i64>,
+    /// Judge every build too (`bgbench fightcheck --all-builds`).
+    pub all_builds: bool,
 }
 
 impl Default for CheckOptions {
     fn default() -> CheckOptions {
-        CheckOptions { runs: 1000, flag_below: FLAG_BELOW, seed: 0x7265_616c_6669_6768 }
+        CheckOptions {
+            runs: 1000,
+            flag_below: FLAG_BELOW,
+            seed: 0x7265_616c_6669_6768,
+            game_build: None,
+            all_builds: false,
+        }
     }
 }
 
 /// One side of a real fight, ready to fight: everything `fight_with_hands`
 /// reads off a side.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PreparedSide {
     pub board: ArrayVec<Minion, BOARD>,
     pub hand: ArrayVec<Minion, HAND>,
@@ -57,7 +69,7 @@ pub struct PreparedSide {
 /// A real fight seated in the engine, before it is played. Built once and
 /// fought `runs` times: `fight_with_hands` copies both sides, so one
 /// preparation is enough for every run.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PreparedFight {
     /// Era's side is 0 (the file's `me`), the opponent's is 1.
     pub sides: [PreparedSide; 2],
@@ -416,6 +428,9 @@ pub struct FightCheck {
     /// attack cap and not the boards.
     pub capped: u32,
     pub complete: bool,
+    /// The game was played on another client build than the card data models:
+    /// the fight is not judged.
+    pub old_patch: bool,
     pub missing: Vec<String>,
 }
 
@@ -445,7 +460,9 @@ impl FightCheck {
 
     /// A complete fight with a real result the engine barely ever produces.
     pub fn flagged(&self, result: RealResult, below: f64) -> bool {
-        self.complete && self.real_result_pct(result).is_some_and(|p| p < below)
+        !self.old_patch
+            && self.complete
+            && self.real_result_pct(result).is_some_and(|p| p < below)
     }
 }
 
@@ -457,9 +474,37 @@ pub struct FightEntry {
     pub check: FightCheck,
 }
 
-/// Play one real fight `runs` times on one core. `seed` seeds the runs: the
-/// same fight and seed give the same numbers.
+impl FightEntry {
+    /// A fight from another client build: not prepared, not played, not judged.
+    pub fn old_patch(fight: RealFightSpec) -> FightEntry {
+        FightEntry {
+            fight,
+            prepared: PreparedFight::default(),
+            check: FightCheck { old_patch: true, ..FightCheck::default() },
+        }
+    }
+}
+
+/// Play one real fight `runs` times on one core, when the build is not judged
+/// against a card data build. `seed` seeds the runs: the same fight and seed
+/// give the same numbers.
 pub fn check_fight(data: &Data, fight: &RealFightSpec, runs: u32, seed: u64) -> FightEntry {
+    let opts = CheckOptions { runs, ..CheckOptions::default() };
+    check_fight_with(data, fight, &opts, seed)
+}
+
+/// The same with the build check: a fight from another build than the card
+/// data's `game_build` is `old-patch`, not played, unless `all_builds` is set.
+pub fn check_fight_with(
+    data: &Data,
+    fight: &RealFightSpec,
+    opts: &CheckOptions,
+    seed: u64,
+) -> FightEntry {
+    if !opts.all_builds && is_other_build(fight.build(), opts.game_build) {
+        return FightEntry::old_patch(fight.clone());
+    }
+    let runs = opts.runs;
     let prepared = prepare(data, fight);
     let [me, opp] = &prepared.sides;
     let mut rng = Rng::new(seed);
@@ -511,7 +556,7 @@ pub fn check_all(data: &Data, fights: &[RealFightSpec], opts: &CheckOptions) -> 
     let entries = fights
         .iter()
         .enumerate()
-        .map(|(i, f)| check_fight(data, f, opts.runs, opts.seed.wrapping_add(i as u64)))
+        .map(|(i, f)| check_fight_with(data, f, opts, opts.seed.wrapping_add(i as u64)))
         .collect();
     CheckReport::new(data, entries, *opts)
 }
@@ -605,11 +650,37 @@ impl CheckReport {
     }
 
     pub fn complete(&self) -> usize {
-        self.entries.iter().filter(|e| e.check.complete).count()
+        self.entries.iter().filter(|e| !e.check.old_patch && e.check.complete).count()
+    }
+
+    pub fn old_patch(&self) -> usize {
+        self.entries.iter().filter(|e| e.check.old_patch).count()
+    }
+
+    pub fn incomplete(&self) -> usize {
+        self.entries.iter().filter(|e| !e.check.old_patch && !e.check.complete).count()
     }
 
     pub fn flagged(&self) -> usize {
         self.entries.iter().filter(|e| e.check.flagged(e.fight.result(), self.options.flag_below)).count()
+    }
+
+    /// The old-patch fights by their game's build (`0` for a session that had
+    /// no `BuildNumber` line).
+    pub fn old_patch_builds(&self) -> Vec<(i64, usize)> {
+        let mut out: Vec<(i64, usize)> = Vec::new();
+        for e in &self.entries {
+            if !e.check.old_patch {
+                continue;
+            }
+            let build = e.fight.build().unwrap_or(0);
+            match out.iter_mut().find(|(b, _)| *b == build) {
+                Some((_, n)) => *n += 1,
+                None => out.push((build, 1)),
+            }
+        }
+        out.sort_by_key(|(build, _)| *build);
+        out
     }
 
     /// Every name a fight holds, once each, with what kind of thing it is.
@@ -656,6 +727,9 @@ impl CheckReport {
         let below = self.options.flag_below;
         let mut tallies: Vec<PieceTally> = Vec::new();
         for e in &self.entries {
+            if e.check.old_patch {
+                continue;
+            }
             let flagged = e.check.flagged(e.fight.result(), below);
             for (kind, name) in Self::fight_pieces(data, e) {
                 let i = match tallies.iter().position(|t| t.kind == Some(kind) && t.name == name) {
@@ -795,11 +869,15 @@ impl CheckReport {
         let mut out = String::from(
             "file\tgame\tturn\treal\tour_win\tour_tie\tour_loss\treal_result_pct\t\
              complete\tmissing\tdamage_mean\tdamage_p10\tdamage_p50\tdamage_p90\treal_damage\t\
-             attack_cap_pct\n",
+             attack_cap_pct\tverdict\n",
         );
         for e in &self.entries {
             let c = &e.check;
-            let pct = c.real_result_pct(e.fight.result()).map_or("-".to_string(), |p| format!("{p:.1}"));
+            let pct = if c.old_patch {
+                "-".to_string()
+            } else {
+                c.real_result_pct(e.fight.result()).map_or("-".to_string(), |p| format!("{p:.1}"))
+            };
             let real_damage = e
                 .fight
                 .real_damage()
@@ -809,8 +887,17 @@ impl CheckReport {
             } else {
                 c.missing.join("; ")
             };
+            let verdict = if c.old_patch {
+                "old-patch"
+            } else if !c.complete {
+                "incomplete"
+            } else if c.flagged(e.fight.result(), self.options.flag_below) {
+                "flagged"
+            } else {
+                "ok"
+            };
             out.push_str(&format!(
-                "{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t{}\t{:.1}\n",
+                "{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t{}\t{:.1}\t{}\n",
                 e.fight.file(),
                 e.fight.me.game,
                 e.fight.turn(),
@@ -827,6 +914,7 @@ impl CheckReport {
                 c.damage_p90,
                 real_damage,
                 100.0 * c.capped as f64 / c.runs.max(1) as f64,
+                verdict,
             ));
         }
         out
@@ -857,6 +945,8 @@ impl CheckReport {
         let n = self.entries.len();
         let complete = self.complete();
         let flagged = self.flagged();
+        let old = self.old_patch();
+        let judged = n - old;
         out.push_str("# The fight check\n\n");
         out.push_str(&format!(
             "Every paired fight of Era's real games (a `me` and an `opp` board of the same \
@@ -865,14 +955,41 @@ impl CheckReport {
             self.options.runs, self.options.flag_below
         ));
         out.push_str(&format!(
-            "- fights: **{n}** (complete **{complete}**, incomplete **{}**)\n\
+            "- fights: **{n}** (complete **{complete}**, incomplete **{}**, old-patch **{old}**)\n\
              - flagged: **{flagged}** ({:.1}% of the complete fights)\n",
-            n - complete,
+            self.incomplete(),
             if complete == 0 { 0.0 } else { 100.0 * flagged as f64 / complete as f64 },
         ));
+        out.push_str(
+            "\nA file with no `build` key (collected before the key existed) is judged \
+             as today: it cannot say which build its game was played on.\n\n",
+        );
+        let current = self
+            .options
+            .game_build
+            .map_or("not in the card data".to_string(), |b| format!("build {b}"));
+        if old == 0 {
+            out.push_str(&format!(
+                "The card data's `game_build` is {current}; no fight came from another build.\n\n"
+            ));
+        } else {
+            let builds: Vec<String> = self
+                .old_patch_builds()
+                .into_iter()
+                .map(|(build, n)| format!("build {build} ({n} fights)"))
+                .collect();
+            out.push_str(&format!(
+                "The card data's `game_build` is {current}. **{old} fights are `old-patch`** \
+                 (another build, not judged): {}.\n\n",
+                builds.join(", ")
+            ));
+        }
         let mut real = [0u32; 3];
         let mut ours = [0f64; 3];
         for e in &self.entries {
+            if e.check.old_patch {
+                continue;
+            }
             match e.fight.result() {
                 RealResult::Win => real[0] += 1,
                 RealResult::Tie => real[1] += 1,
@@ -887,12 +1004,12 @@ impl CheckReport {
             "- the real results: {} win, {} tie, {} lose\n",
             real[0], real[1], real[2]
         ));
-        if n > 0 {
+        if judged > 0 {
             out.push_str(&format!(
                 "- the engine's mean per fight: {:.1}% win, {:.1}% tie, {:.1}% lose\n",
-                ours[0] / n as f64,
-                ours[1] / n as f64,
-                ours[2] / n as f64
+                ours[0] / judged as f64,
+                ours[1] / judged as f64,
+                ours[2] / judged as f64
             ));
         }
         // A fight that reaches the attack cap has no winner to trust.

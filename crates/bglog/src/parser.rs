@@ -160,6 +160,9 @@ impl PowerLog {
         };
         if let Some(rest) = body.strip_prefix("GameType=") {
             game.game_type = rest.to_string();
+        } else if let Some(rest) = body.strip_prefix("BuildNumber=") {
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            game.build = digits.parse().unwrap_or(0);
         } else if let Some((player_id, name)) = player_name(body) {
             game.set_player_name(player_id, name.to_string());
         }

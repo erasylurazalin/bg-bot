@@ -322,6 +322,10 @@ pub struct RealBoardSpec {
     pub game: u32,
     /// Era's final place in the game (0 while it is still going).
     pub place: u8,
+    /// The game's `BuildNumber`, or None in a file written before the key
+    /// existed. A game of another build than the card data's `game_build` is
+    /// `old-patch` to the replays.
+    pub build: Option<i64>,
     pub side: RealSide,
     pub result: RealResult,
     /// The player's Health and armor at the first attack.
@@ -362,6 +366,11 @@ impl RealFightSpec {
 
     pub fn turn(&self) -> u32 {
         self.me.turn
+    }
+
+    /// The game's `BuildNumber`, None in a file written before the key existed.
+    pub fn build(&self) -> Option<i64> {
+        self.me.build
     }
 
     /// The result the game recorded, from Era's side.
@@ -1178,6 +1187,10 @@ struct RawFile {
     /// Era's final place, 0 while the game is still going.
     #[serde(default)]
     place: u8,
+    /// The game's own `BuildNumber`. None in a file written before the key
+    /// existed, and then the replay judges it as it always did.
+    #[serde(default)]
+    build: Option<i64>,
     boards: Vec<RawBoard>,
 }
 
@@ -1325,6 +1338,10 @@ struct RawMinion {
 
 #[derive(Deserialize)]
 struct RawRefFile {
+    /// The client build the card data was exported from (`game_build`): the
+    /// replays compare a game's own build with it.
+    #[serde(default)]
+    game_build: Option<i64>,
     cards: Vec<RawRefCard>,
 }
 
@@ -1355,6 +1372,9 @@ pub struct CardIdMap {
     /// (`bgpy`) needs a card id for a name it only has from the engine.
     by_name: HashMap<String, String>,
     by_golden_name: HashMap<String, String>,
+    /// The card data's own `game_build`, the patch the engine models. None for
+    /// a ref file written before the key existed.
+    game_build: Option<i64>,
 }
 
 /// Dark Paradox: the game's five versions are all named "Dark Paradox" in the
@@ -1403,6 +1423,7 @@ impl CardIdMap {
     pub fn parse(json: &str) -> Result<CardIdMap, String> {
         let raw: RawRefFile =
             serde_json::from_str(json).map_err(|e| format!("ref card file: {e}"))?;
+        let game_build = raw.game_build;
         let mut names: HashMap<String, String> = HashMap::new();
         for c in &raw.cards {
             if !c.is_golden {
@@ -1446,7 +1467,12 @@ impl CardIdMap {
             names_for_kind.entry(name.clone()).or_insert_with(|| c.card_id.clone());
             by_id.insert(c.card_id, (name, c.is_golden));
         }
-        Ok(CardIdMap { by_id, by_dbf, by_name, by_golden_name })
+        Ok(CardIdMap { by_id, by_dbf, by_name, by_golden_name, game_build })
+    }
+
+    /// The card data's `game_build`: the client build the engine models.
+    pub fn game_build(&self) -> Option<i64> {
+        self.game_build
     }
 
     /// The card a file minion's id stands for: its name, and whether the id
@@ -1545,6 +1571,7 @@ pub fn parse_board_files(
                 source: raw.source.clone(),
                 game: raw.game,
                 place: raw.place,
+                build: raw.build,
                 side: if b.who.eq_ignore_ascii_case("opp") { RealSide::Opp } else { RealSide::Me },
                 result: parse_result(&b.result),
                 health: b.health.unwrap_or(0),
@@ -1608,6 +1635,13 @@ fn real_minion(m: RawMinion, ids: &CardIdMap, unknown: &mut Vec<String>) -> Real
         // no aura, and its stats keep whatever the log counted in them.
         vanguard_aura: m.vanguard_aura,
     }
+}
+
+/// Whether a game was played on another client build than the card data
+/// models. A file without a `build` key (None) is judged as before, and so is
+/// one whose ref data has no `game_build`: neither can say the build differs.
+pub fn is_other_build(build: Option<i64>, game_build: Option<i64>) -> bool {
+    matches!((build, game_build), (Some(game), Some(data)) if game != data)
 }
 
 fn parse_result(s: &str) -> RealResult {

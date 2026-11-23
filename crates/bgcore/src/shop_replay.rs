@@ -616,6 +616,10 @@ pub struct ShopFileSpec {
     pub source: String,
     #[serde(default)]
     pub game: u32,
+    /// The game's own `BuildNumber`. None in a file written before the key
+    /// existed, and then the replay judges it as it always did.
+    #[serde(default)]
+    pub build: Option<i64>,
     /// The hero Era played, by card id (a skin); None when the log shows none.
     #[serde(default)]
     pub hero: Option<HeroRef>,
@@ -3230,6 +3234,9 @@ pub enum Verdict {
     Incomplete,
     /// The engine does not allow the step.
     Illegal,
+    /// The game was played on another client build than the card data models:
+    /// the step is not judged.
+    OldPatch,
 }
 
 impl Verdict {
@@ -3241,6 +3248,7 @@ impl Verdict {
             Verdict::Flagged => "flagged",
             Verdict::Incomplete => "incomplete",
             Verdict::Illegal => "illegal",
+            Verdict::OldPatch => "old-patch",
         }
     }
 }
@@ -3270,6 +3278,8 @@ pub struct StepResult {
     /// The step's place in its turn, 0 first.
     pub index: usize,
     pub kind: String,
+    /// The game's `BuildNumber`, None in a file written before the key existed.
+    pub build: Option<i64>,
     /// The card the step acted on, as a card id (or the hero power's, or the
     /// trinket's), for the per-card tally, and the name the file gave it.
     pub card: Option<String>,
@@ -5781,7 +5791,9 @@ fn recent_buys_of_turn(
     out
 }
 
-/// Replay one step of one logged turn and judge it.
+/// Replay one step of one logged turn and judge it. A step from another client
+/// build than the card data's is `old-patch` and not judged; `--all-builds`
+/// calls [`replay_step_with_builds`] with `true` instead.
 pub fn replay_step(
     data: &Arc<Data>,
     ids: &CardIdMap,
@@ -5790,6 +5802,20 @@ pub fn replay_step(
     i: usize,
     opts: &ReplayOptions,
 ) -> StepResult {
+    replay_step_with_builds(data, ids, file, turn, i, opts, false)
+}
+
+/// Replay one step, judging games of another build too when `all_builds` is
+/// set.
+pub fn replay_step_with_builds(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    i: usize,
+    opts: &ReplayOptions,
+    all_builds: bool,
+) -> StepResult {
     let step = &turn.actions[i];
     let mut missing = Vec::new();
     let mut result = StepResult {
@@ -5797,6 +5823,7 @@ pub fn replay_step(
         turn: turn.turn,
         index: i,
         kind: step.step.clone(),
+        build: file.build,
         card: step.card.as_ref().and_then(|c| c.card_id.clone()),
         card_name: step.card.as_ref().and_then(|c| c.name.clone()),
         cards: Vec::new(),
@@ -5823,6 +5850,11 @@ pub fn replay_step(
         cards.push(t);
     }
     result.cards = cards;
+    if !all_builds && crate::real_boards::is_other_build(file.build, ids.game_build()) {
+        result.verdict = Verdict::OldPatch;
+        result.deterministic = false;
+        return result;
+    }
     let Some(before) = state_before(turn, i) else {
         result.missing.push("no state before the step (the file has no step before it to load)".to_string());
         return result;
@@ -5944,6 +5976,9 @@ pub struct ShopReplayReport {
     pub entries: Vec<StepResult>,
     pub files: usize,
     pub turns: usize,
+    /// The card data's `game_build`, the patch the engine models. None when the
+    /// ref file has none.
+    pub game_build: Option<i64>,
     /// Games whose log could not tell something (the file's `unread`).
     pub unread: Vec<String>,
     /// The cards no source knows, by name.
@@ -5959,8 +5994,34 @@ impl ShopReplayReport {
         self.entries.iter().filter(|e| e.verdict == v).count()
     }
 
+    /// The steps that were judged: every step but the ones from another build.
+    pub fn judged(&self) -> usize {
+        self.entries.iter().filter(|e| e.verdict != Verdict::OldPatch).count()
+    }
+
+    /// The old-patch steps by their game's build (`0` for a session that had no
+    /// `BuildNumber` line).
+    pub fn old_patch_builds(&self) -> Vec<(i64, usize)> {
+        let mut out: Vec<(i64, usize)> = Vec::new();
+        for e in &self.entries {
+            if e.verdict != Verdict::OldPatch {
+                continue;
+            }
+            let build = e.build.unwrap_or(0);
+            match out.iter_mut().find(|(b, _)| *b == build) {
+                Some((_, n)) => *n += 1,
+                None => out.push((build, 1)),
+            }
+        }
+        out.sort_by_key(|(build, _)| *build);
+        out
+    }
+
     pub fn deterministic(&self) -> usize {
-        self.entries.iter().filter(|e| e.deterministic).count()
+        self.entries
+            .iter()
+            .filter(|e| e.deterministic && e.verdict != Verdict::OldPatch)
+            .count()
     }
 
     /// The verdicts, most common first, for the summary line.
@@ -5971,6 +6032,7 @@ impl ShopReplayReport {
             Verdict::OkRandom,
             Verdict::OkShape,
             Verdict::Incomplete,
+            Verdict::OldPatch,
             Verdict::Flagged,
             Verdict::Illegal,
         ] {
@@ -6067,6 +6129,9 @@ impl ShopReplayReport {
         }
         let mut out: Vec<PieceTally> = Vec::new();
         for e in &self.entries {
+            if e.verdict == Verdict::OldPatch {
+                continue;
+            }
             let mut seen: Vec<&String> = Vec::new();
             for card in &e.cards {
                 if seen.contains(&card) {
@@ -6157,18 +6222,42 @@ impl ShopReplayReport {
         for (name, n) in self.verdict_counts() {
             out.push_str(&format!("| {name} | {n} |\n"));
         }
+        out.push_str(
+            "\nA file with no `build` key (collected before the key existed) is judged \
+             as today: it cannot say which build its game was played on.\n\n",
+        );
+        let old = self.count(Verdict::OldPatch);
+        let current = self
+            .game_build
+            .map_or("not in the card data".to_string(), |b| format!("build {b}"));
+        if old == 0 {
+            out.push_str(&format!(
+                "The card data's `game_build` is {current}; no step came from another build.\n\n"
+            ));
+        } else {
+            let builds: Vec<String> = self
+                .old_patch_builds()
+                .into_iter()
+                .map(|(build, n)| format!("build {build} ({n} steps)"))
+                .collect();
+            out.push_str(&format!(
+                "The card data's `game_build` is {current}. **{old} steps are `old-patch`** \
+                 (another build, not judged): {}.\n\n",
+                builds.join(", ")
+            ));
+        }
         out.push_str(&format!(
             "\n{} steps were deterministic (every seed gave the same state) and {} \
              random (the seeds differ).\n\n",
             self.deterministic(),
-            self.steps() - self.deterministic()
+            self.judged() - self.deterministic()
         ));
         let flagged = self.entries.iter().filter(|e| e.verdict == Verdict::Flagged).count();
         let illegal = self.entries.iter().filter(|e| e.verdict == Verdict::Illegal).count();
         out.push_str(&format!(
             "**{flagged} steps flagged** and {illegal} the engine does not allow, of \
              {} judged.\n\n",
-            self.steps() - self.count(Verdict::Incomplete)
+            self.judged() - self.count(Verdict::Incomplete)
         ));
 
         out.push_str("## By step kind\n\n| step | steps | flagged | incomplete |\n|---|---|---|---|\n");
@@ -6405,7 +6494,8 @@ fn clean(text: &str) -> String {
 }
 
 /// Replay every step of one logged turn (the driver in `bgbench shopreplay`
-/// runs a turn per core).
+/// runs a turn per core). A step from another client build is `old-patch` and
+/// not judged; `--all-builds` calls [`replay_turn_with_builds`] with `true`.
 pub fn replay_turn(
     data: &Arc<Data>,
     ids: &CardIdMap,
@@ -6413,6 +6503,20 @@ pub fn replay_turn(
     turn: &ShopTurnSpec,
     opts: &ReplayOptions,
     card_filter: Option<&str>,
+) -> Vec<StepResult> {
+    replay_turn_with_builds(data, ids, file, turn, opts, card_filter, false)
+}
+
+/// Replay every step of one logged turn, judging games of another build too
+/// when `all_builds` is set (`bgbench shopreplay --all-builds`).
+pub fn replay_turn_with_builds(
+    data: &Arc<Data>,
+    ids: &CardIdMap,
+    file: &ShopFileSpec,
+    turn: &ShopTurnSpec,
+    opts: &ReplayOptions,
+    card_filter: Option<&str>,
+    all_builds: bool,
 ) -> Vec<StepResult> {
     let mut out = Vec::new();
     for i in 0..turn.actions.len() {
@@ -6422,7 +6526,7 @@ pub fn replay_turn(
         {
             continue;
         }
-        out.push(replay_step(data, ids, file, turn, i, opts));
+        out.push(replay_step_with_builds(data, ids, file, turn, i, opts, all_builds));
     }
     out
 }

@@ -87,6 +87,68 @@ fn prepared_fight() -> (Arc<Data>, Vec<bgcore::RealFightSpec>) {
     (data(), fights)
 }
 
+/// The same two fights with the file's own `build`, or without the key.
+fn fights_with_build(build: Option<i64>) -> Vec<bgcore::RealFightSpec> {
+    let text = match build {
+        Some(build) => TWO_FIGHTS.replacen(
+            "\"game\": 1, \"place\": 2",
+            &format!("\"game\": 1, \"build\": {build}, \"place\": 2"),
+            1,
+        ),
+        None => TWO_FIGHTS.to_string(),
+    };
+    let files = vec![("fight-check-test-g1.json".to_string(), text)];
+    let (specs, _) = parse_board_files(&files, &ids()).unwrap();
+    let (fights, unpaired) = pair_fights(specs);
+    assert!(unpaired.is_empty(), "{unpaired:?}");
+    fights
+}
+
+/// A fight is judged against the card data's own build. A file without the
+/// `build` key is judged as before; a game of another build is `old-patch`,
+/// and `--all-builds` judges it anyway.
+#[test]
+fn a_fight_from_another_build_is_old_patch() {
+    let d = data();
+    let opts = CheckOptions { runs: 20, game_build: Some(255790), ..CheckOptions::default() };
+
+    // No key and the card data's build: judged and played.
+    for build in [None, Some(255790)] {
+        let report = check_all(&d, &fights_with_build(build), &opts);
+        assert_eq!(report.old_patch(), 0, "build {build:?}");
+        assert_eq!(report.complete() + report.incomplete(), 2);
+        for e in &report.entries {
+            assert_eq!(e.check.wins + e.check.ties + e.check.losses, 20);
+        }
+    }
+
+    // Another build: neither prepared nor played, and the report says which.
+    let report = check_all(&d, &fights_with_build(Some(254477)), &opts);
+    assert_eq!(report.old_patch(), 2);
+    assert_eq!(report.old_patch_builds(), vec![(254477, 2)]);
+    for e in &report.entries {
+        assert!(e.check.old_patch);
+        assert_eq!(e.check.runs, 0);
+    }
+    let md = report.report_md(&d);
+    assert!(md.contains("old-patch"), "{md}");
+    assert!(md.contains("build 254477"), "{md}");
+    assert!(md.contains("no `build` key"), "{md}");
+    let tsv = report.fights_tsv();
+    assert!(
+        tsv.lines().skip(1).all(|row| row.ends_with("\told-patch")),
+        "{tsv}"
+    );
+
+    // --all-builds judges it as before.
+    let all = CheckOptions { all_builds: true, ..opts };
+    let report = check_all(&d, &fights_with_build(Some(254477)), &all);
+    assert_eq!(report.old_patch(), 0);
+    for e in &report.entries {
+        assert_eq!(e.check.wins + e.check.ties + e.check.losses, 20);
+    }
+}
+
 /// A fight set up from a board file matches the board: stats, keywords, the
 /// Dark Gift, the hand, the side-wide numbers, the hero power and the
 /// trinkets, and the damage the fight did can be read off the next board.
@@ -204,16 +266,17 @@ fn the_checker_runs_on_the_fixture_folder() {
     let tsv = report.fights_tsv();
     let mut lines = tsv.lines();
     let header = lines.next().unwrap();
-    assert_eq!(header.split('\t').count(), 16, "{header}");
+    assert_eq!(header.split('\t').count(), 17, "{header}");
     assert!(header.starts_with("file\tgame\tturn\treal\t"));
     let rows: Vec<&str> = lines.collect();
     assert_eq!(rows.len(), 6);
     for row in &rows {
-        assert_eq!(row.split('\t').count(), 16, "{row}");
+        assert_eq!(row.split('\t').count(), 17, "{row}");
         let f: Vec<&str> = row.split('\t').collect();
         assert!(f[0].ends_with(".json"));
         assert!(matches!(f[3], "win" | "lose" | "tie"));
         assert!(matches!(f[8], "yes" | "no"));
+        assert!(matches!(f[16], "ok" | "flagged" | "incomplete" | "old-patch"));
         // A percentage for the real result, or a dash when it never happened.
         assert!(f[7] == "-" || f[7].parse::<f64>().is_ok(), "{row}");
     }

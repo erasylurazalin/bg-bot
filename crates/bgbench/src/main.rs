@@ -6,7 +6,9 @@
 //!   bgbench match [games]   curve bots against random bots, average placement
 //!   bgbench peak [n]        peak board balance matrix (n fights each way per pair)
 //!   bgbench fightcheck      play Era's real fights N times each, write boards/checks/
-//!                           [--boards DIR] [--runs N] [--out DIR] [--flag PCT]
+//!                           [--boards DIR] [--runs N] [--out DIR] [--flag PCT] [--all-builds]
+//!   bgbench shopreplay      replay Era's shop steps, write boards/checks/
+//!                           [--actions DIR] [--seeds N] [--out DIR] [--card NAME] [--all-builds]
 //!   bgbench powerlog FILE   every game of a Power.log as its entities and tags stood
 //!                           [--out FILE] [--time]
 //!   bgbench tracker FILE    the Battlegrounds seats and fights of a Power.log
@@ -32,7 +34,7 @@ use bgcore::bots::{random_action, rush_action, standard_action};
 use bgcore::comps::Comps;
 use bgcore::era_start::{EraSplit, EraStartConfig, EraStarts};
 use bgcore::planner::Planner;
-use bgcore::fight_check::{CheckOptions, CheckReport, check_fight};
+use bgcore::fight_check::{CheckOptions, CheckReport, check_fight_with};
 use bgcore::real_boards::{CardIdMap, RealBoards, pair_fights, parse_board_files};
 use bgcore::scenario::ScenarioConfig;
 use bgcore::shop_replay;
@@ -975,7 +977,7 @@ fn bench_peak(n: usize) {
 /// times, on every core, and write `fights.tsv`, `cards.tsv` and `report.md`
 /// to the output folder (docs/real-boards.md "The fight check"). Nothing is
 /// fixed here: the output says which real results the engine finds unlikely.
-fn fight_check(boards: &str, runs: u32, out: &str, flag_below: f64) {
+fn fight_check(boards: &str, runs: u32, out: &str, flag_below: f64, all_builds: bool) {
     let t = Instant::now();
     let files = read_board_files(boards).unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -1003,11 +1005,17 @@ fn fight_check(boards: &str, runs: u32, out: &str, flag_below: f64) {
         unpaired.len()
     );
     let data = Data::bundled();
-    let opts = CheckOptions { runs, flag_below, ..CheckOptions::default() };
+    let opts = CheckOptions {
+        runs,
+        flag_below,
+        game_build: ids.game_build(),
+        all_builds,
+        ..CheckOptions::default()
+    };
     let entries: Vec<_> = fights
         .par_iter()
         .enumerate()
-        .map(|(i, f)| check_fight(&data, f, opts.runs, opts.seed.wrapping_add(i as u64)))
+        .map(|(i, f)| check_fight_with(&data, f, &opts, opts.seed.wrapping_add(i as u64)))
         .collect();
     let mut report = CheckReport::new(&data, entries, opts);
     report.unpaired = unpaired;
@@ -1026,10 +1034,20 @@ fn fight_check(boards: &str, runs: u32, out: &str, flag_below: f64) {
 
     let total = report.entries.len();
     let complete = report.complete();
+    let old = report.old_patch();
     println!(
-        "{total} fights, {complete} complete, {} flagged (complete, real result under {flag_below:.1}%)",
+        "{total} fights, {complete} complete, {} incomplete, {old} old-patch, {} flagged (complete, real result under {flag_below:.1}%)",
+        report.incomplete(),
         report.flagged()
     );
+    if old > 0 {
+        let builds: Vec<String> = report
+            .old_patch_builds()
+            .into_iter()
+            .map(|(build, n)| format!("build {build}: {n}"))
+            .collect();
+        println!("old-patch fights by build: {}", builds.join(", "));
+    }
     let mut reasons: Vec<(String, u32)> = Vec::new();
     for e in &report.entries {
         for line in &e.check.missing {
@@ -1071,7 +1089,7 @@ fn fight_check(boards: &str, runs: u32, out: &str, flag_below: f64) {
 /// `shop-cards.tsv` and `shop-report.md` (docs/real-boards.md "The shop
 /// replay"). Nothing is fixed here: the output says which steps the engine
 /// does not reproduce.
-fn shop_replay(dir: &str, seeds: u32, out: &str, card: Option<&str>) {
+fn shop_replay(dir: &str, seeds: u32, out: &str, card: Option<&str>, all_builds: bool) {
     let t = Instant::now();
     let files = read_board_files(dir).unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -1098,11 +1116,16 @@ fn shop_replay(dir: &str, seeds: u32, out: &str, card: Option<&str>) {
         specs.iter().flat_map(|f| f.turns.iter().map(move |t| (f, t))).collect();
     let mut results: Vec<Vec<bgcore::shop_replay::StepResult>> = turns
         .par_iter()
-        .map(|(f, turn)| bgcore::shop_replay::replay_turn(&data, &ids, f, turn, &opts, card))
+        .map(|(f, turn)| {
+            bgcore::shop_replay::replay_turn_with_builds(
+                &data, &ids, f, turn, &opts, card, all_builds,
+            )
+        })
         .collect();
     let mut report = bgcore::shop_replay::ShopReplayReport {
         files: specs.len(),
         turns: turns.len(),
+        game_build: ids.game_build(),
         ..Default::default()
     };
     for mut steps in results.drain(..) {
@@ -1307,7 +1330,8 @@ fn main() {
                 eprintln!("--flag needs a percent, like 2 or 0.5");
                 std::process::exit(2);
             });
-            fight_check(&boards, runs.max(1), &out, flag_below);
+            let all_builds = args.iter().any(|a| a == "--all-builds");
+            fight_check(&boards, runs.max(1), &out, flag_below, all_builds);
         }
         Some("shopreplay") => {
             let opt = |name: &str, default: &str| {
@@ -1328,7 +1352,8 @@ fn main() {
                 .position(|a| a == "--card")
                 .and_then(|k| args.get(k + 1))
                 .cloned();
-            shop_replay(&actions, seeds, &out, card.as_deref());
+            let all_builds = args.iter().any(|a| a == "--all-builds");
+            shop_replay(&actions, seeds, &out, card.as_deref(), all_builds);
         }
         Some("eraseat") => era_seat::run(&args),
         Some("record") => record_examples::run(&args),
@@ -1377,8 +1402,8 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: bgbench fight [n] | games [secs] | fuzz [games] | match [games] | peak [n]\n\
-                 \x20      bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]\n\
-                 \x20      bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME]\n\
+                 \x20      bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT] [--all-builds]\n\
+                 \x20      bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME] [--all-builds]\n\
                  \x20      bgbench powerlog FILE [--out FILE] [--time]\n\
                  \x20      bgbench tracker FILE [--out FILE] [--cards FILE] [--time]\n\
                  \x20      bgbench collect-boards [--out DIR] [--cards FILE] [--no-archive]\n\

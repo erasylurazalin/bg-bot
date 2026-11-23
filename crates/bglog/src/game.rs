@@ -22,6 +22,10 @@ pub struct Game {
     /// The `GameType=` from the game header (`GT_BATTLEGROUNDS`), or empty
     /// while no header has been read.
     pub game_type: String,
+    /// The `BuildNumber=` from the game header: the client build the game was
+    /// played on (254477 is patch 37.0, 255790 is 37.0.2). 0 while no header
+    /// has been read.
+    pub build: i64,
     /// PlayerID to player name from the game header, in the order the header
     /// lists them. A `Vec` rather than a map because the order is what decides
     /// which player a repeated header name belongs to.

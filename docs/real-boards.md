@@ -53,8 +53,8 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
 ## The file
 
 ```json
-{"source": "Hearthstone_2026_10_24_15_25_26", "game": 2, "place": 3,
- "match": "Hearthstone_2026_10_24_15_25_26-g2", "final_place": 3,
+{"source": "Hearthstone_2026_10_24_15_25_26", "game": 2, "build": 255790,
+ "place": 3, "match": "Hearthstone_2026_10_24_15_25_26-g2", "final_place": 3,
  "boards": [
   {"who": "me", "turn": 5, "result": "win", "hero": "...", "hero_card": "...",
    "hero_base": "BG34_HERO_001", "tier": 3, "health": 27, "armor": 9,
@@ -169,6 +169,10 @@ too; those games are named `boards/real/laptop-<log folder>-g<N>.json`.
   again with `--no-archive` to rewrite every file (the flag skips copying
   the client's logs into the archive, which is outside this project).
 - `place` is my final place (0 while the game is still going).
+- `build` is the game's own client build from its `Power.log` line
+  `GameState.DebugPrintGame() - BuildNumber=N`: 254477 is patch 37.0 and
+  255790 is 37.0.2. It is 0 when the session had no such line. A file written
+  before the key existed has none, and the replays then judge it as before.
 - `match` is the file name stem of the game's first session (for example
   `Hearthstone_2026_11_22_02_57_33-g1`), the same in every session of a game
   that a reconnect or a client restart split over several sessions or log
@@ -209,7 +213,7 @@ listed one id per gift (`gifts_by_minion`). On 2026-11-03 every file was
 rewritten with it: 62 games, 717 turns, 15,674 steps.
 
 ```json
-{"source": "Hearthstone_2026_10_24_04_08_00", "game": 1,
+{"source": "Hearthstone_2026_10_24_04_08_00", "game": 1, "build": 255790,
  "match": "Hearthstone_2026_10_24_04_08_00-g1", "final_place": 5,
  "hero": {"card_id": "TB_BaconShop_HERO_57", "name": "Nozdormu"},
  "unread": {},
@@ -250,7 +254,8 @@ rewritten with it: 62 games, 717 turns, 15,674 steps.
   opened from the reconnect's full-state dump, and the actions before the
   reconnect are missing from it. A normal turn has no such key. `match` and
   `final_place` link the sessions of a split game and record its final result
-  the same way the board file does.
+  the same way the board file does. `build` is the same top-level key, from
+  the game's own `BuildNumber` line (0 when the session had none).
 - `start` and `end` hold my hand, my board and Bob's Tavern the way
   `boards/real/` writes a minion (card id, name, attack, health, golden,
   keywords, dark gifts, script `numbers`, and its own Blood Gem stats as
@@ -624,13 +629,13 @@ says which real results the engine finds unlikely, and which cards those
 fights share. It is a bug finder: it fixes nothing.
 
 ```
-./target/release/bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT]
+./target/release/bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT] [--all-builds]
 ```
 
 Defaults: `boards/real`, 1000 runs, `boards/checks` (git-ignored, under
-`boards/`), a 2% flag cut. Needs `ref/bg-cards.json` for the card id map, as
-`--real-boards` does. Every core is used: 558 fights x 1000 runs takes about
-0.2 s on 32 cores.
+`boards/`), a 2% flag cut. Needs `ref/bg-cards.json` for the card id map and
+its `game_build`, as `--real-boards` does. Every core is used: 558 fights x
+1000 runs takes about 0.2 s on 32 cores.
 
 - **The fights:** a board is paired with the other side's board of the same
   turn of the same game (`pair_fights`). The result is the one the game
@@ -672,6 +677,12 @@ Defaults: `boards/real`, 1000 runs, `boards/checks` (git-ignored, under
   cannot tell what was missing: Lock and Load without `hero_power.waiting`,
   Prestidigitation without `secrets`, Ozumat without the power's numbers. An
   incomplete fight is never flagged.
+- **Old patch:** the file's `build` is compared with the card data's
+  `game_build` (255790 now). A fight from another build is `old-patch`: not
+  prepared, not played and not flagged, and the report counts its fights and
+  names their builds on a line of its own. A file with no `build` key
+  (collected before the key existed) cannot say its build, so it is judged as
+  before. `--all-builds` judges every build too.
 - **Flags and calibration:** a complete fight is **flagged** when the engine
   gives the recorded result less than `--flag` percent. Complete fights are
   also grouped by the engine's predicted win % in ten buckets with the real
@@ -681,14 +692,15 @@ Defaults: `boards/real`, 1000 runs, `boards/checks` (git-ignored, under
   - `fights.tsv`: one row per fight: the file, game and turn, the real
     result, our win, tie and loss %, the chance we give the real result,
     complete or not and why, our damage when Era loses (mean, p10, p50, p90),
-    the damage the file shows Era took, and the share of runs that hit the
-    attack cap;
+    the damage the file shows Era took, the share of runs that hit the attack
+    cap, and the verdict (`ok`, `flagged`, `incomplete` or `old-patch`);
   - `cards.tsv`: per minion, hero power, trinket, Dark Gift and quest reward:
     the fights it was in, how many of those were complete, how many were
-    flagged, and the ratio, most suspicious first;
-  - `report.md`: the summary, why fights were incomplete, the calibration
-    table, the damage comparison, and the 30 most surprising complete fights
-    with both boards written out.
+    flagged, and the ratio, most suspicious first; an old-patch fight is in no
+    tally, because it was not judged;
+  - `report.md`: the summary, why fights were incomplete, the old-patch fights
+    and their builds, the calibration table, the damage comparison, and the 30
+    most surprising complete fights with both boards written out.
 
 What the check cannot see, because the file does not carry it, and so cannot
 blame on the engine: the game's lobby (a card that draws a random card inside
@@ -705,14 +717,15 @@ with what the real game did. It is a bug finder like the fight check: it
 fixes nothing.
 
 ```
-./target/release/bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME]
+./target/release/bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME] [--all-builds]
 ```
 
 Defaults: `boards/actions`, 64 seeds, `boards/checks` (git-ignored), no card
-filter. It needs no `ref/bg-cards.json`: the file names every card it writes.
-Every step in the folder (62 games, 717 turns, 15,674 steps in
-`boards/actions` on 2026-11-03) takes about two seconds on 32 cores: every seed
-of a random step is run, since any of them may be the log's.
+filter. It needs `ref/bg-cards.json` for a Magicfin token's taught spell and
+for its `game_build`; the card names themselves come from the file. Every step
+in the folder (62 games, 717 turns, 15,674 steps in `boards/actions` on
+2026-11-03) takes about two seconds on 32 cores: every seed of a random step
+is run, since any of them may be the log's.
 
 - **Reset before every step.** Replaying a whole turn would let one early
   mismatch spoil every later step, and forcing the log's randomness into the
@@ -1100,15 +1113,22 @@ of a random step is run, since any of them may be the log's.
   trinket, a Dark Gift, an option no card set has) or something the log does
   not say. That is the same rule as the fight check's, and an incomplete step
   is never flagged.
+- **Old patch, not judged.** The file's `build` is compared with the card
+  data's `game_build` (255790 now). A step from another build gets the verdict
+  `old-patch` and is not replayed or judged; the report counts its steps and
+  names their builds on a line of its own. A file with no `build` key
+  (collected before the key existed) cannot say its build, so it is judged as
+  before. `--all-builds` judges every build too.
 - **Outputs** (`boards/checks/`):
   - `steps.tsv`: one row per step (game, turn, step, kind, card, verdict,
-    deterministic, the first difference);
+    deterministic, the first difference); `old-patch` is one of the verdicts;
   - `shop-cards.tsv`: per card, hero power, trinket and Dark Gift: the steps it
-    was in, the flagged ones and the ratio, most suspicious first;
+    was in, the flagged ones and the ratio, most suspicious first; an
+    old-patch step is in no tally, because it was not judged;
   - `shop-report.md`: the summary, the steps by kind, why steps were
-    incomplete, the most common differences grouped by cause, the 30 most
-    suspicious cards, and 30 flagged steps with the state before, the action,
-    the log's result and the engine's.
+    incomplete, the old-patch steps and their builds, the most common
+    differences grouped by cause, the 30 most suspicious cards, and 30 flagged
+    steps with the state before, the action, the log's result and the engine's.
 - `--card NAME` limits a run to the steps that involve that card (by name or
   card id), so a later build run can check the cards it touched.
 
