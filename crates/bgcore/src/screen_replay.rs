@@ -102,6 +102,42 @@ pub struct ScreenStateSpec {
     pub hand_count: Option<u32>,
 }
 
+/// A stat the screen read: an exact number, the range a "2.1k" display
+/// stands for, or `null` when the reader could not tell. A missing field is
+/// not the same: it means the card's printed stat.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ScreenNumber {
+    Number(i64),
+    Range { min: i64, max: i64 },
+    Null,
+}
+
+impl ScreenNumber {
+    fn concrete(self, default: i32) -> i32 {
+        match self {
+            ScreenNumber::Number(n) => n.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+            ScreenNumber::Range { min, .. } => min.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+            ScreenNumber::Null => default,
+        }
+    }
+
+    fn text(self) -> String {
+        match self {
+            ScreenNumber::Number(n) => n.to_string(),
+            ScreenNumber::Range { min, max } => format!("{min}..{max}"),
+            ScreenNumber::Null => "null".to_string(),
+        }
+    }
+}
+
+fn deserialize_some_number<'de, D>(d: D) -> Result<Option<ScreenNumber>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    ScreenNumber::deserialize(d).map(Some)
+}
+
 /// A Dark Gift the screen showed on a card: its card id or its name, and the
 /// countdown when the icon showed one. A plain string is accepted as the id or
 /// the name, which is what a video converter reads most easily.
@@ -135,21 +171,34 @@ impl ScreenGift {
 
 /// One card as the screen showed it. A missing `attack`/`health` means the
 /// card's printed stats, doubled when golden; a missing `keywords` means the
-/// card's printed keywords.
+/// card's printed keywords. A stat may instead be a number, a range
+/// (`{"min": 2050, "max": 2149}`) or `null` for "cannot tell".
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ScreenCard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attack: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub health: Option<i32>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_some_number",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub attack: Option<ScreenNumber>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_some_number",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub health: Option<ScreenNumber>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub golden: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keywords: Option<Vec<String>>,
+    /// Only these keywords were read: true means the screen showed it, false
+    /// means it showed the keyword was absent. A keyword not named is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyword_reads: Option<BTreeMap<String, bool>>,
     /// 1-based slot in the Tavern.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<u8>,
@@ -244,6 +293,7 @@ pub struct ScreenPlace {
 /// showed picked.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)] // one card is much larger than an index
 pub enum ScreenPick {
     Index(usize),
     At { index: usize },
@@ -346,6 +396,42 @@ fn keyword_names(keywords: Keywords) -> Vec<String> {
         .collect()
 }
 
+/// The spelling a keyword read uses: `DIVINE_SHIELD`, `divine shield` and
+/// `divine-shield` are the same field.
+fn keyword_key(name: &str) -> String {
+    name.trim().to_ascii_uppercase().replace([' ', '-'], "_")
+}
+
+/// A card's keyword list as the screen read it. A full `keywords` list stands
+/// on its own; `keyword_reads` then adds or removes only the keywords it
+/// names, and leaves every other one unknown (the printed list on a fresh
+/// seat).
+fn screen_keywords(card: &ScreenCard, made: Option<&Minion>) -> Vec<String> {
+    let mut list = card
+        .keywords
+        .clone()
+        .unwrap_or_else(|| made.map_or_else(Vec::new, |m| keyword_names(m.keywords)));
+    if let Some(reads) = &card.keyword_reads {
+        list.retain(|name| reads.get(&keyword_key(name)).copied().unwrap_or(true));
+        for (name, on) in reads {
+            if !*on {
+                continue;
+            }
+            let key = keyword_key(name);
+            if list.iter().any(|k| keyword_key(k) == key) {
+                continue;
+            }
+            let canonical = Keywords::ALL
+                .iter()
+                .find(|(_, known)| keyword_key(known) == key)
+                .map(|(_, known)| known.to_string())
+                .unwrap_or_else(|| name.clone());
+            list.push(canonical);
+        }
+    }
+    list
+}
+
 fn card_label(card: &ScreenCard) -> String {
     card.name
         .clone()
@@ -407,10 +493,10 @@ fn minion_spec_of(
         return ShopMinionSpec {
             card_id: card.card_id.clone(),
             name: card.name.clone(),
-            attack: card.attack.unwrap_or(0),
-            health: card.health.unwrap_or(0),
+            attack: card.attack.map_or(0, |v| v.concrete(0)),
+            health: card.health.map_or(0, |v| v.concrete(0)),
             golden: card.golden.unwrap_or(false),
-            keywords: card.keywords.clone().unwrap_or_default(),
+            keywords: screen_keywords(card, None),
             slot: card.slot,
             kind: card.kind.clone(),
             frozen: card.frozen.unwrap_or(false),
@@ -424,15 +510,12 @@ fn minion_spec_of(
     let c = data.cards.get(id);
     let golden = card.golden.unwrap_or(false) || c.always_golden;
     let made = data.cards.make(id, golden);
-    let keywords = card
-        .keywords
-        .clone()
-        .unwrap_or_else(|| keyword_names(made.keywords));
+    let keywords = screen_keywords(card, Some(&made));
     let mut spec = ShopMinionSpec {
         card_id: card.card_id.clone(),
         name: Some(c.name.clone()),
-        attack: card.attack.unwrap_or(made.attack),
-        health: card.health.unwrap_or(made.health),
+        attack: card.attack.map_or(made.attack, |v| v.concrete(made.attack)),
+        health: card.health.map_or(made.health, |v| v.concrete(made.health)),
         golden,
         keywords,
         slot: card.slot,
@@ -668,8 +751,8 @@ fn shop_place_of_option(data: &Data, ids: &CardIdMap, card: &ScreenCard, id: u64
                 name: card.name.clone(),
                 kind: Some(card.kind.clone().unwrap_or_else(|| "minion".to_string())),
                 keywords: card.keywords.clone(),
-                attack: card.attack.unwrap_or(0),
-                health: card.health.unwrap_or(0),
+                attack: card.attack.map_or(0, |v| v.concrete(0)),
+                health: card.health.map_or(0, |v| v.concrete(0)),
                 golden: card.golden.unwrap_or(false),
                 dark_gifts: gifts,
                 ..Default::default()
@@ -969,9 +1052,12 @@ pub struct ScreenTurnRun {
     /// What the engine did differently from the step's own `seen` state. The
     /// replay carries on; these lines flag the turn.
     pub step_differences: Vec<String>,
+    /// The per-value checks of every step this seed played.
+    pub step_checks: Vec<ScreenCheckGroup>,
     /// What the carried game differed on before the screen's `start` went on.
     /// These are between-turn lines: they are reported, not flagged.
     pub between_turns: Vec<String>,
+    pub between_checks: Option<ScreenCheckGroup>,
     /// The cards whose visible stats changed between turns, and whether any
     /// player counter is uncertain after the fight. Step lines about them say
     /// "(uncertain after the fight)".
@@ -1252,14 +1338,11 @@ fn last_screen_spell(
 #[derive(Clone, Debug, Default)]
 struct BetweenTurn {
     lines: Vec<String>,
+    checks: Vec<ScreenCheck>,
     uncertain_cards: Vec<String>,
     /// A player counter a fight could have changed: the start differed from
     /// the carry, so the counter is not proved.
     uncertain_counters: bool,
-}
-
-fn same_snap_card(a: &shop_replay::SnapMinion, b: &shop_replay::SnapMinion) -> bool {
-    a.name == b.name && a.golden == b.golden
 }
 
 /// Compare the carried game with the screen's turn start. The Tavern is not
@@ -1268,75 +1351,185 @@ fn same_snap_card(a: &shop_replay::SnapMinion, b: &shop_replay::SnapMinion) -> b
 /// fight could have changed is compared as a between-turn line.
 fn between_turn_diff(
     data: &Data,
+    ids: &CardIdMap,
     start_screen: &ScreenStateSpec,
-    start: &ShopStateSpec,
     game: &Game,
     turn: u32,
 ) -> BetweenTurn {
     let ours = ShopSnapshot::of_game(data, game, ME);
-    let mut ignored = Vec::new();
-    let theirs = ShopSnapshot::of_state(data, start, turn, &mut ignored);
     let prefix = format!("before turn {turn}: ");
     let mut out = BetweenTurn::default();
     let mut lines: Vec<String> = Vec::new();
-    let mut push = |line: String| lines.push(format!("{prefix}{}", without_colon(line)));
-    if start_screen.board.is_some() {
-        for line in compare_ordered("board", &ours.board, &theirs.board) {
-            push(line);
-        }
-        for (a, b) in ours.board.iter().zip(theirs.board.iter()) {
-            if same_snap_card(a, b) && (a.attack != b.attack || a.health != b.health) {
-                out.uncertain_cards.push(a.name.clone());
+    if let Some(board) = start_screen.board.as_ref() {
+        let (mut found, mut checks) = compare_board(data, ids, &ours.board, board);
+        lines.extend(
+            found
+                .drain(..)
+                .map(|l| format!("{prefix}{}", without_colon(l))),
+        );
+        out.checks.append(&mut checks);
+        for (i, card) in board.iter().enumerate() {
+            let Some(a) = ours.board.get(i) else { continue };
+            let name = screen_card_name(data, ids, card);
+            if a.name != name || a.golden != screen_card_golden(data, ids, card) {
+                continue;
             }
-        }
-    }
-    if start_screen.hand.is_some() {
-        for line in compare_multiset("hand", &ours.hand, &theirs.hand) {
-            push(line);
-        }
-        for b in &theirs.hand {
-            if let Some(a) = ours.hand.iter().find(|a| same_snap_card(a, b))
-                && (a.attack != b.attack || a.health != b.health)
+            if number_status(a.attack, screen_stat(data, ids, card, true))
+                == ScreenCheckStatus::Disagree
+                || number_status(a.health, screen_stat(data, ids, card, false))
+                    == ScreenCheckStatus::Disagree
             {
                 out.uncertain_cards.push(a.name.clone());
             }
         }
     }
-    if let Some(gold) = start_screen.gold
-        && ours.gold != gold
-    {
-        push(format!("Gold engine {}, screen {gold}", ours.gold));
+    if let Some(hand) = start_screen.hand.as_ref() {
+        let (mut found, mut checks) = compare_group(data, ids, "hand", &ours.hand, hand);
+        lines.extend(
+            found
+                .drain(..)
+                .map(|l| format!("{prefix}{}", without_colon(l))),
+        );
+        out.checks.append(&mut checks);
+        for b in hand {
+            let name = screen_card_name(data, ids, b);
+            let golden = screen_card_golden(data, ids, b);
+            if let Some(a) = ours
+                .hand
+                .iter()
+                .find(|a| a.name == name && a.golden == golden)
+                && (number_status(a.attack, screen_stat(data, ids, b, true))
+                    == ScreenCheckStatus::Disagree
+                    || number_status(a.health, screen_stat(data, ids, b, false))
+                        == ScreenCheckStatus::Disagree)
+            {
+                out.uncertain_cards.push(a.name.clone());
+            }
+        }
     }
-    if let Some(tier) = start_screen.tier
-        && ours.tier != tier
-    {
-        push(format!("tier engine {}, screen {tier}", ours.tier));
+    let mut checks = std::mem::take(&mut out.checks);
+    let mut player = |field: &str, engine: i64, screen: i64| {
+        checks.push(ScreenCheck {
+            zone: "player".to_string(),
+            index: None,
+            card: None,
+            field: field.to_string(),
+            engine: ScreenCheckValue::Number(engine),
+            screen: ScreenCheckValue::Number(screen),
+            status: if engine == screen {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            },
+        });
+    };
+    if let Some(gold) = start_screen.gold {
+        player("gold", ours.gold as i64, gold as i64);
+        if ours.gold != gold {
+            lines.push(format!("{prefix}Gold engine {}, screen {gold}", ours.gold));
+        }
     }
-    if let Some(health) = start_screen.health
-        && ours.health != health
-    {
-        push(format!("Health engine {}, screen {health}", ours.health));
+    if let Some(tier) = start_screen.tier {
+        player("tier", ours.tier as i64, tier as i64);
+        if ours.tier != tier {
+            lines.push(format!("{prefix}tier engine {}, screen {tier}", ours.tier));
+        }
     }
-    if let Some(armor) = start_screen.armor
-        && ours.armor != armor
-    {
-        push(format!("armor engine {}, screen {armor}", ours.armor));
+    if let Some(health) = start_screen.health {
+        player("health", ours.health as i64, health as i64);
+        if ours.health != health {
+            lines.push(format!(
+                "{prefix}Health engine {}, screen {health}",
+                ours.health
+            ));
+        }
     }
-    if let Some(free) = start_screen.free_refresh
-        && (ours.free_refreshes > 0) != free
-    {
-        let says = |f: bool| if f { "free" } else { "paid" };
-        push(format!(
-            "next Refresh engine {}, screen {}",
-            says(ours.free_refreshes > 0),
-            says(free)
-        ));
+    if let Some(armor) = start_screen.armor {
+        player("armor", ours.armor as i64, armor as i64);
+        if ours.armor != armor {
+            lines.push(format!(
+                "{prefix}armor engine {}, screen {armor}",
+                ours.armor
+            ));
+        }
+    }
+    if let Some(free) = start_screen.free_refresh {
+        let engine = ours.free_refreshes > 0;
+        checks.push(ScreenCheck {
+            zone: "player".to_string(),
+            index: None,
+            card: None,
+            field: "free_refresh".to_string(),
+            engine: ScreenCheckValue::Bool(engine),
+            screen: ScreenCheckValue::Bool(free),
+            status: if engine == free {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            },
+        });
+        if engine != free {
+            let says = |f: bool| if f { "free" } else { "paid" };
+            lines.push(format!(
+                "{prefix}next Refresh engine {}, screen {}",
+                says(engine),
+                says(free)
+            ));
+        }
     }
     out.uncertain_cards.sort();
     out.uncertain_cards.dedup();
     out.uncertain_counters = !lines.is_empty();
     out.lines = lines;
+    out.checks = checks;
     out
+}
+
+/// Put the screen's stat values on a resynced board: a number is taken, a
+/// range keeps the engine's value when it holds it and otherwise takes the
+/// nearest bound, and `null` keeps the engine's value. `before` is the board
+/// as it stood before the screen's cards went on.
+fn resync_board_targets(
+    data: &Data,
+    ids: &CardIdMap,
+    game: &mut Game,
+    screen: &[ScreenCard],
+    before: &[shop_replay::SnapMinion],
+) {
+    for (i, card) in screen.iter().enumerate() {
+        let Some(old) = before.get(i) else { continue };
+        if old.name != screen_card_name(data, ids, card)
+            || old.golden != screen_card_golden(data, ids, card)
+        {
+            continue;
+        }
+        if let Some(m) = game.players[ME].board.get_mut(i) {
+            m.attack = number_target(old.attack, screen_stat(data, ids, card, true));
+            m.health = number_target(old.health, screen_stat(data, ids, card, false));
+        }
+    }
+}
+
+/// The hand's side of `resync_board_targets`.
+fn resync_hand_targets(
+    data: &Data,
+    ids: &CardIdMap,
+    game: &mut Game,
+    screen: &[ScreenCard],
+    before: &[shop_replay::SnapMinion],
+) {
+    for (i, card) in screen.iter().enumerate() {
+        let Some(old) = before.get(i) else { continue };
+        if old.name != screen_card_name(data, ids, card)
+            || old.golden != screen_card_golden(data, ids, card)
+        {
+            continue;
+        }
+        if let Some(m) = game.players[ME].hand.get_mut(i) {
+            m.attack = number_target(old.attack, screen_stat(data, ids, card, true));
+            m.health = number_target(old.health, screen_stat(data, ids, card, false));
+        }
+    }
 }
 
 /// Put the visible parts of a screen start onto a carried game after the
@@ -1344,18 +1537,23 @@ fn between_turn_diff(
 /// alone: unseen is unknown.
 fn resync_start(
     data: &Data,
+    ids: &CardIdMap,
     game: &mut Game,
     screen: &ScreenStateSpec,
     start: &ShopStateSpec,
     missing: &mut Vec<String>,
     keep: bool,
 ) {
+    let before = ShopSnapshot::of_game(data, game, ME);
     if screen.board.is_some() {
         let fake = ShopStepSpec {
             after: Some(start.clone()),
             ..Default::default()
         };
         shop_replay::force_board(data, game, &fake, missing);
+        if let Some(board) = screen.board.as_ref() {
+            resync_board_targets(data, ids, game, board, &before.board);
+        }
     }
     if screen.hand.is_some() {
         let fake = ShopStepSpec {
@@ -1366,6 +1564,9 @@ fn resync_start(
             shop_replay::force_hand_keep(data, game, &fake, missing);
         } else {
             shop_replay::force_hand(data, game, &fake, missing);
+        }
+        if let Some(hand) = screen.hand.as_ref() {
+            resync_hand_targets(data, ids, game, hand, &before.hand);
         }
     }
     if screen.tavern.is_some() {
@@ -1467,6 +1668,7 @@ pub fn replay_screen_turn_from(
     .flatten()
     .any(|p| p.waiting_seen == Some(true) && p.waiting.is_none());
     let mut between_turns = Vec::new();
+    let mut between_checks = None;
     let mut uncertain_cards = Vec::new();
     let mut uncertain_counters = false;
     let (mut game, loaded_missing): (Box<Game>, Vec<String>) = match carry {
@@ -1478,11 +1680,25 @@ pub fn replay_screen_turn_from(
             // `Game::next_shop_turn_without_fight`, the lobster search's own
             // step, so no rule is copied into the replay.
             game.next_shop_turn_without_fight();
-            let between = between_turn_diff(data, &turn.start, &start, &game, turn.turn);
+            let between = between_turn_diff(data, ids, &turn.start, &game, turn.turn);
             between_turns = between.lines;
+            between_checks = Some(ScreenCheckGroup {
+                when: "before turn".to_string(),
+                step: None,
+                kind: None,
+                checks: between.checks,
+            });
             uncertain_cards = between.uncertain_cards;
             uncertain_counters = between.uncertain_counters;
-            resync_start(data, &mut game, &turn.start, &start, &mut missing, true);
+            resync_start(
+                data,
+                ids,
+                &mut game,
+                &turn.start,
+                &start,
+                &mut missing,
+                true,
+            );
             (game, Vec::new())
         }
         None => {
@@ -1504,6 +1720,7 @@ pub fn replay_screen_turn_from(
     let steps = turn.steps.len();
     let mut states = Vec::new();
     let mut step_differences = Vec::new();
+    let mut step_checks: Vec<ScreenCheckGroup> = Vec::new();
     for i in 0..steps {
         let screen = &turn.steps[i];
         let last_spell = last_screen_spell(data, ids, file, turn, i);
@@ -1540,6 +1757,8 @@ pub fn replay_screen_turn_from(
                     seed,
                     step_differences,
                     between_turns,
+                    step_checks,
+                    between_checks,
                     uncertain_cards,
                     uncertain_counters,
                     states,
@@ -1582,6 +1801,8 @@ pub fn replay_screen_turn_from(
                         seed,
                         step_differences,
                         between_turns,
+                        step_checks,
+                        between_checks,
                         uncertain_cards,
                         uncertain_counters,
                         states,
@@ -1638,6 +1859,8 @@ pub fn replay_screen_turn_from(
                 seed,
                 step_differences,
                 between_turns,
+                step_checks,
+                between_checks,
                 uncertain_cards,
                 uncertain_counters,
                 states,
@@ -1663,6 +1886,8 @@ pub fn replay_screen_turn_from(
                     seed,
                     step_differences,
                     between_turns,
+                    step_checks,
+                    between_checks,
                     uncertain_cards,
                     uncertain_counters,
                     states,
@@ -1675,9 +1900,9 @@ pub fn replay_screen_turn_from(
         // putting that state on the game. The zones are the checker's useful
         // output; the resync below only stops one difference cascading into a
         // stop.
+        let ours = ShopSnapshot::of_game(data, &game, ME);
         if let Some(spec) = seen_spec.as_ref() {
-            let ours = ShopSnapshot::of_game(data, &game, ME);
-            let mut lines = step_seen_differences(data, turn.turn, screen, spec, &ours, i);
+            let (mut lines, mut checks) = step_seen_differences(data, ids, screen, &ours, i);
             // The screen shows whether the next Refresh is free, not how many
             // free ones are left, so the engine holds one at most. A Roll that
             // spent it while the screen still shows a free one only means the
@@ -1688,8 +1913,16 @@ pub fn replay_screen_turn_from(
                 && screen.seen.as_ref().and_then(|s| s.free_refresh) == Some(true)
             {
                 lines.retain(|l| !l.contains("next Refresh"));
+                checks.retain(|c| c.field != "free_refresh");
             }
             step_differences.extend(mark_uncertain(lines, &uncertain_cards, uncertain_counters));
+            step_checks.push(ScreenCheckGroup {
+                when: "after step".to_string(),
+                step: Some(i + 1),
+                kind: Some(screen.step.clone()),
+                checks,
+            });
+            let _ = spec;
         }
         // The screen's own seen state goes on only where it saw one.
         if let Some(seen) = &screen.seen {
@@ -1698,7 +1931,7 @@ pub fn replay_screen_turn_from(
             {
                 shop_replay::place_tavern(data, &mut game, spec, &mut missing);
             }
-            if seen.board.is_some()
+            if let Some(board) = seen.board.as_ref()
                 && let Some(spec) = seen_spec.as_ref()
             {
                 let fake = ShopStepSpec {
@@ -1706,8 +1939,9 @@ pub fn replay_screen_turn_from(
                     ..Default::default()
                 };
                 shop_replay::force_board(data, &mut game, &fake, &mut missing);
+                resync_board_targets(data, ids, &mut game, board, &ours.board);
             }
-            if seen.hand.is_some()
+            if let Some(hand) = seen.hand.as_ref()
                 && let Some(spec) = seen_spec.as_ref()
             {
                 let fake = ShopStepSpec {
@@ -1719,6 +1953,7 @@ pub fn replay_screen_turn_from(
                 } else {
                     shop_replay::force_hand(data, &mut game, &fake, &mut missing);
                 }
+                resync_hand_targets(data, ids, &mut game, hand, &ours.hand);
             }
             // The step's visible numbers are put on the carried game after
             // they have been compared, so one drift makes one line.
@@ -1756,6 +1991,8 @@ pub fn replay_screen_turn_from(
                 seed,
                 step_differences,
                 between_turns,
+                step_checks,
+                between_checks,
                 uncertain_cards,
                 uncertain_counters,
                 states,
@@ -1771,6 +2008,8 @@ pub fn replay_screen_turn_from(
         seed,
         step_differences,
         between_turns,
+        step_checks,
+        between_checks,
         uncertain_cards,
         uncertain_counters,
         states,
@@ -1784,68 +2023,315 @@ fn card_text(m: &shop_replay::SnapMinion) -> String {
     format!("{}{golden} {}/{}", m.name, m.attack, m.health)
 }
 
-fn compare_ordered(
-    label: &str,
-    ours: &[shop_replay::SnapMinion],
-    screen: &[shop_replay::SnapMinion],
-) -> Vec<String> {
-    let mut out = Vec::new();
-    for i in 0..ours.len().max(screen.len()) {
-        let a = ours.get(i);
-        let b = screen.get(i);
-        if a.map(card_text) == b.map(card_text) {
-            continue;
+fn screen_card_name(data: &Data, ids: &CardIdMap, card: &ScreenCard) -> String {
+    resolve_card(data, ids, card)
+        .map(|id| data.cards.get(id).name.clone())
+        .or_else(|| card.name.clone())
+        .or_else(|| card.card_id.clone())
+        .unwrap_or_else(|| "an unnamed card".to_string())
+}
+
+fn screen_card_golden(data: &Data, ids: &CardIdMap, card: &ScreenCard) -> bool {
+    card.golden.unwrap_or(false)
+        || resolve_card(data, ids, card).is_some_and(|id| data.cards.get(id).always_golden)
+}
+
+fn screen_stat(data: &Data, ids: &CardIdMap, card: &ScreenCard, attack: bool) -> ScreenNumber {
+    let given = if attack { card.attack } else { card.health };
+    if let Some(value) = given {
+        return value;
+    }
+    let Some(id) = resolve_card(data, ids, card) else {
+        return ScreenNumber::Number(0);
+    };
+    let made = data.cards.make(id, screen_card_golden(data, ids, card));
+    ScreenNumber::Number(if attack { made.attack } else { made.health } as i64)
+}
+
+fn screen_card_text(data: &Data, ids: &CardIdMap, card: &ScreenCard) -> String {
+    let golden = if screen_card_golden(data, ids, card) {
+        " (golden)"
+    } else {
+        ""
+    };
+    format!(
+        "{}{golden} {}/{}",
+        screen_card_name(data, ids, card),
+        screen_stat(data, ids, card, true).text(),
+        screen_stat(data, ids, card, false).text()
+    )
+}
+
+fn number_check_value(value: ScreenNumber) -> ScreenCheckValue {
+    match value {
+        ScreenNumber::Number(n) => ScreenCheckValue::Number(n),
+        ScreenNumber::Range { min, max } => ScreenCheckValue::Range { min, max },
+        ScreenNumber::Null => ScreenCheckValue::Null,
+    }
+}
+
+fn number_status(engine: i32, screen: ScreenNumber) -> ScreenCheckStatus {
+    match screen {
+        ScreenNumber::Number(n) => {
+            if engine as i64 == n {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            }
         }
-        let a = a.map(card_text).unwrap_or_else(|| "nothing".to_string());
-        let b = b.map(card_text).unwrap_or_else(|| "nothing".to_string());
-        out.push(format!("{label} {}: engine {a}, screen {b}", i + 1));
+        ScreenNumber::Range { min, max } => {
+            if (min..=max).contains(&(engine as i64)) {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            }
+        }
+        ScreenNumber::Null => ScreenCheckStatus::CannotTell,
+    }
+}
+
+/// The value a re-sync puts on the engine: the number the screen read, the
+/// nearest bound of a range that does not hold the engine's value, or the
+/// engine's own value for a range that agrees and for `null`.
+fn number_target(engine: i32, screen: ScreenNumber) -> i32 {
+    match screen {
+        ScreenNumber::Number(n) => n.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+        ScreenNumber::Range { min, max } => {
+            if (engine as i64) < min {
+                min.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+            } else if (engine as i64) > max {
+                max.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+            } else {
+                engine
+            }
+        }
+        ScreenNumber::Null => engine,
+    }
+}
+
+fn number_check(
+    zone: &str,
+    index: usize,
+    card: &str,
+    field: &str,
+    engine: i32,
+    screen: ScreenNumber,
+) -> ScreenCheck {
+    ScreenCheck {
+        zone: zone.to_string(),
+        index: Some(index as u32),
+        card: Some(card.to_string()),
+        field: field.to_string(),
+        engine: ScreenCheckValue::Number(engine as i64),
+        screen: number_check_value(screen),
+        status: number_status(engine, screen),
+    }
+}
+
+fn keyword_check(
+    zone: &str,
+    index: usize,
+    card: &str,
+    keyword: &str,
+    engine: bool,
+    screen: bool,
+) -> ScreenCheck {
+    ScreenCheck {
+        zone: zone.to_string(),
+        index: Some(index as u32),
+        card: Some(card.to_string()),
+        field: keyword_key(keyword),
+        engine: ScreenCheckValue::Bool(engine),
+        screen: ScreenCheckValue::Bool(screen),
+        status: if engine == screen {
+            ScreenCheckStatus::Agree
+        } else {
+            ScreenCheckStatus::Disagree
+        },
+    }
+}
+
+/// The keywords the screen read: a full `keywords` list reads every known
+/// keyword, and `keyword_reads` then overrides the ones it names.
+fn screen_keyword_reads(card: &ScreenCard) -> BTreeMap<String, bool> {
+    let mut out = BTreeMap::new();
+    if let Some(list) = &card.keywords {
+        for (_, name) in Keywords::ALL {
+            out.insert(keyword_key(name), false);
+        }
+        for name in list {
+            out.insert(keyword_key(name), true);
+        }
+    }
+    if let Some(reads) = &card.keyword_reads {
+        for (name, on) in reads {
+            out.insert(keyword_key(name), *on);
+        }
     }
     out
 }
 
-fn compare_multiset(
-    label: &str,
+/// Compare the stats and keywords of one engine card with the screen card it
+/// matches. `zone` and `index` are only for the line and the checks.
+fn compare_card_values(
+    data: &Data,
+    ids: &CardIdMap,
+    zone: &str,
+    index: usize,
+    ours: &shop_replay::SnapMinion,
+    card: &ScreenCard,
+) -> (Vec<String>, Vec<ScreenCheck>) {
+    let mut lines = Vec::new();
+    let mut checks = Vec::new();
+    let name = screen_card_name(data, ids, card);
+    let attack = screen_stat(data, ids, card, true);
+    let health = screen_stat(data, ids, card, false);
+    let attack_status = number_status(ours.attack, attack);
+    let health_status = number_status(ours.health, health);
+    checks.push(number_check(
+        zone,
+        index,
+        &name,
+        "attack",
+        ours.attack,
+        attack,
+    ));
+    checks.push(number_check(
+        zone,
+        index,
+        &name,
+        "health",
+        ours.health,
+        health,
+    ));
+    if attack_status == ScreenCheckStatus::Disagree || health_status == ScreenCheckStatus::Disagree
+    {
+        lines.push(format!(
+            "{zone} {index}: engine {}, screen {}",
+            card_text(ours),
+            screen_card_text(data, ids, card)
+        ));
+    }
+    let engine_keywords: Vec<String> = ours.keywords.iter().map(|k| keyword_key(k)).collect();
+    for (keyword, read) in screen_keyword_reads(card) {
+        let engine = engine_keywords.iter().any(|k| k == &keyword);
+        checks.push(keyword_check(zone, index, &name, &keyword, engine, read));
+        if engine != read {
+            let says = |on: bool| if on { "yes" } else { "no" };
+            lines.push(format!(
+                "{zone} {index}: {name} keyword {keyword} engine {}, screen {}",
+                says(engine),
+                says(read)
+            ));
+        }
+    }
+    (lines, checks)
+}
+
+/// Compare a board in order: the screen's first card is the first minion.
+fn compare_board(
+    data: &Data,
+    ids: &CardIdMap,
     ours: &[shop_replay::SnapMinion],
-    screen: &[shop_replay::SnapMinion],
-) -> Vec<String> {
-    let mut a: BTreeMap<String, usize> = BTreeMap::new();
-    let mut b: BTreeMap<String, usize> = BTreeMap::new();
-    for m in ours {
-        *a.entry(card_text(m)).or_default() += 1;
-    }
-    for m in screen {
-        *b.entry(card_text(m)).or_default() += 1;
-    }
-    let mut out = Vec::new();
-    for (text, n) in &a {
-        let m = b.get(text).copied().unwrap_or(0);
-        if *n > m {
-            out.push(format!(
-                "{label}: engine {text} x{}, screen {}",
-                n - m,
-                if m == 0 {
-                    "no such card".to_string()
-                } else {
-                    format!("x{m}")
+    screen: &[ScreenCard],
+) -> (Vec<String>, Vec<ScreenCheck>) {
+    let mut lines = Vec::new();
+    let mut checks = Vec::new();
+    for i in 0..ours.len().max(screen.len()) {
+        match (ours.get(i), screen.get(i)) {
+            (Some(a), Some(b)) => {
+                let name = screen_card_name(data, ids, b);
+                let golden = screen_card_golden(data, ids, b);
+                if a.name != name || a.golden != golden {
+                    lines.push(format!(
+                        "board {}: engine {}, screen {}",
+                        i + 1,
+                        card_text(a),
+                        screen_card_text(data, ids, b)
+                    ));
+                    checks.push(ScreenCheck {
+                        zone: "board".to_string(),
+                        index: Some((i + 1) as u32),
+                        card: Some(a.name.clone()),
+                        field: "card".to_string(),
+                        engine: ScreenCheckValue::Text(a.name.clone()),
+                        screen: ScreenCheckValue::Text(name),
+                        status: ScreenCheckStatus::Disagree,
+                    });
+                    continue;
                 }
-            ));
+                let (mut value_lines, mut value_checks) =
+                    compare_card_values(data, ids, "board", i + 1, a, b);
+                lines.append(&mut value_lines);
+                checks.append(&mut value_checks);
+            }
+            (Some(a), None) => lines.push(format!(
+                "board {}: engine {}, screen nothing",
+                i + 1,
+                card_text(a)
+            )),
+            (None, Some(b)) => lines.push(format!(
+                "board {}: engine nothing, screen {}",
+                i + 1,
+                screen_card_text(data, ids, b)
+            )),
+            (None, None) => {}
         }
     }
-    for (text, n) in &b {
-        let m = a.get(text).copied().unwrap_or(0);
-        if *n > m {
-            out.push(format!(
-                "{label}: screen {text} x{}, engine {}",
-                n - m,
-                if m == 0 {
-                    "no such card".to_string()
+    (lines, checks)
+}
+
+/// Compare a hand or Tavern as a multiset: match cards by name and golden
+/// flag, then compare each matched card's stats and the keywords read.
+fn compare_group(
+    data: &Data,
+    ids: &CardIdMap,
+    zone: &str,
+    ours: &[shop_replay::SnapMinion],
+    screen: &[ScreenCard],
+) -> (Vec<String>, Vec<ScreenCheck>) {
+    let mut lines = Vec::new();
+    let mut checks = Vec::new();
+    let mut used = vec![false; ours.len()];
+    let mut unmatched_screen: Vec<(String, usize)> = Vec::new();
+    for (si, b) in screen.iter().enumerate() {
+        let name = screen_card_name(data, ids, b);
+        let golden = screen_card_golden(data, ids, b);
+        let at = ours
+            .iter()
+            .enumerate()
+            .position(|(k, a)| !used[k] && a.name == name && a.golden == golden);
+        match at {
+            Some(k) => {
+                used[k] = true;
+                let (mut value_lines, mut value_checks) =
+                    compare_card_values(data, ids, zone, si + 1, &ours[k], b);
+                lines.append(&mut value_lines);
+                checks.append(&mut value_checks);
+            }
+            None => {
+                let text = screen_card_text(data, ids, b);
+                if let Some((_, n)) = unmatched_screen.iter_mut().find(|(t, _)| *t == text) {
+                    *n += 1;
                 } else {
-                    format!("x{m}")
+                    unmatched_screen.push((text, 1));
                 }
-            ));
+            }
         }
     }
-    out
+    let mut unmatched_engine: BTreeMap<String, usize> = BTreeMap::new();
+    for (k, a) in ours.iter().enumerate() {
+        if !used[k] {
+            *unmatched_engine.entry(card_text(a)).or_default() += 1;
+        }
+    }
+    for (text, n) in unmatched_engine {
+        lines.push(format!("{zone}: engine {text} x{n}, screen no such card"));
+    }
+    for (text, n) in unmatched_screen {
+        lines.push(format!("{zone}: screen {text} x{n}, engine no such card"));
+    }
+    (lines, checks)
 }
 
 fn without_colon(line: String) -> String {
@@ -1854,81 +2340,136 @@ fn without_colon(line: String) -> String {
 }
 
 /// What the engine did differently from a step's `seen` state, before that
-/// state is put onto it. A random Tavern is skipped: its cards are the draw's,
-/// not the engine's.
+/// state is put onto it, and the per-value checks the same comparison made. A
+/// random Tavern is skipped: its cards are the draw's, not the engine's.
 fn step_seen_differences(
     data: &Data,
-    turn: u32,
+    ids: &CardIdMap,
     screen: &ScreenStepSpec,
-    seen_spec: &ShopStateSpec,
     ours: &ShopSnapshot,
     step: usize,
-) -> Vec<String> {
+) -> (Vec<String>, Vec<ScreenCheck>) {
     let Some(seen) = screen.seen.as_ref() else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
-    let mut log_missing = Vec::new();
-    let theirs = ShopSnapshot::of_state(data, seen_spec, turn, &mut log_missing);
     let prefix = format!("after step {} ({}): ", step + 1, screen.step);
     let mut out = Vec::new();
-    if seen.board.is_some() {
-        for line in compare_ordered("board", &ours.board, &theirs.board) {
-            out.push(format!("{prefix}{}", without_colon(line)));
+    let mut checks = Vec::new();
+    if let Some(board) = seen.board.as_ref() {
+        let (lines, mut c) = compare_board(data, ids, &ours.board, board);
+        out.extend(
+            lines
+                .into_iter()
+                .map(|l| format!("{prefix}{}", without_colon(l))),
+        );
+        checks.append(&mut c);
+    }
+    if let Some(hand) = seen.hand.as_ref() {
+        let (lines, mut c) = compare_group(data, ids, "hand", &ours.hand, hand);
+        out.extend(
+            lines
+                .into_iter()
+                .map(|l| format!("{prefix}{}", without_colon(l))),
+        );
+        checks.append(&mut c);
+    }
+    if let Some(tavern) = seen.tavern.as_ref()
+        && !screen.tavern_random
+        && screen.step != "roll"
+    {
+        let (lines, mut c) = compare_group(data, ids, "Tavern", &ours.tavern, tavern);
+        out.extend(
+            lines
+                .into_iter()
+                .map(|l| format!("{prefix}{}", without_colon(l))),
+        );
+        checks.append(&mut c);
+    }
+    if let Some(gold) = seen.gold {
+        checks.push(ScreenCheck {
+            zone: "player".to_string(),
+            index: None,
+            card: None,
+            field: "gold".to_string(),
+            engine: ScreenCheckValue::Number(ours.gold as i64),
+            screen: ScreenCheckValue::Number(gold as i64),
+            status: if ours.gold == gold {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            },
+        });
+        if ours.gold != gold {
+            out.push(format!("{prefix}engine Gold {}, screen {gold}", ours.gold));
         }
     }
-    if seen.hand.is_some() {
-        for line in compare_multiset("hand", &ours.hand, &theirs.hand) {
-            out.push(format!("{prefix}{}", without_colon(line)));
+    if let Some(free) = seen.free_refresh {
+        let engine = ours.free_refreshes > 0;
+        checks.push(ScreenCheck {
+            zone: "player".to_string(),
+            index: None,
+            card: None,
+            field: "free_refresh".to_string(),
+            engine: ScreenCheckValue::Bool(engine),
+            screen: ScreenCheckValue::Bool(free),
+            status: if engine == free {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            },
+        });
+        if engine != free {
+            let says = |f: bool| if f { "free" } else { "paid" };
+            out.push(format!(
+                "{prefix}next Refresh engine {}, screen {}",
+                says(engine),
+                says(free)
+            ));
         }
     }
-    if seen.tavern.is_some() && !screen.tavern_random && screen.step != "roll" {
-        for line in compare_multiset("Tavern", &ours.tavern, &theirs.tavern) {
-            out.push(format!("{prefix}{}", without_colon(line)));
+    if let Some(tier) = seen.tier {
+        checks.push(ScreenCheck {
+            zone: "player".to_string(),
+            index: None,
+            card: None,
+            field: "tier".to_string(),
+            engine: ScreenCheckValue::Number(ours.tier as i64),
+            screen: ScreenCheckValue::Number(tier as i64),
+            status: if ours.tier == tier {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            },
+        });
+        if ours.tier != tier {
+            out.push(format!("{prefix}engine tier {}, screen {tier}", ours.tier));
         }
     }
-    if let Some(gold) = seen.gold
-        && ours.gold != gold
-    {
-        out.push(format!("{prefix}engine Gold {}, screen {gold}", ours.gold));
-    }
-    if let Some(free) = seen.free_refresh
-        && (ours.free_refreshes > 0) != free
-    {
-        let says = |f: bool| if f { "free" } else { "paid" };
-        out.push(format!(
-            "{prefix}next Refresh engine {}, screen {}",
-            says(ours.free_refreshes > 0),
-            says(free)
-        ));
-    }
-    if let Some(tier) = seen.tier
-        && ours.tier != tier
-    {
-        out.push(format!("{prefix}engine tier {}, screen {tier}", ours.tier));
-    }
-    out
+    (out, checks)
 }
 
 /// Compare only the fields the turn's `end` has. The board keeps its order;
-/// the hand and Tavern are compared as multisets, as the shop replay does.
+/// the hand and Tavern are compared by matching cards, as the shop replay does.
 pub fn compare_end(
     data: &Data,
     ids: &CardIdMap,
     game: &Game,
     end: &ScreenStateSpec,
-    turn: u32,
-) -> (Vec<String>, Vec<String>) {
+    _turn: u32,
+) -> (Vec<String>, Vec<ScreenCheck>, Vec<String>) {
     let ours = ShopSnapshot::of_game(data, game, ME);
-    let mut missing = Vec::new();
-    let mut next_id = 1u64;
-    let spec = state_to_spec(data, ids, end, turn, &mut next_id, &mut missing);
-    let screen = ShopSnapshot::of_state(data, &spec, turn, &mut missing);
+    let missing = Vec::new();
     let mut diffs = Vec::new();
-    if end.board.is_some() {
-        diffs.extend(compare_ordered("board", &ours.board, &screen.board));
+    let mut checks = Vec::new();
+    if let Some(board) = end.board.as_ref() {
+        let (lines, mut c) = compare_board(data, ids, &ours.board, board);
+        diffs.extend(lines);
+        checks.append(&mut c);
     }
-    if end.hand.is_some() {
-        diffs.extend(compare_multiset("hand", &ours.hand, &screen.hand));
+    if let Some(hand) = end.hand.as_ref() {
+        let (lines, mut c) = compare_group(data, ids, "hand", &ours.hand, hand);
+        diffs.extend(lines);
+        checks.append(&mut c);
     } else if let Some(count) = end.hand_count
         && ours.hand.len() != count as usize
     {
@@ -1937,34 +2478,140 @@ pub fn compare_end(
             ours.hand.len()
         ));
     }
-    if end.tavern.is_some() {
-        diffs.extend(compare_multiset("Tavern", &ours.tavern, &screen.tavern));
+    if let Some(tavern) = end.tavern.as_ref() {
+        let (lines, mut c) = compare_group(data, ids, "Tavern", &ours.tavern, tavern);
+        diffs.extend(lines);
+        checks.append(&mut c);
     }
-    if let Some(gold) = end.gold
-        && ours.gold != gold
-    {
-        diffs.push(format!("Gold: engine {}, screen {gold}", ours.gold));
+    if let Some(gold) = end.gold {
+        checks.push(ScreenCheck {
+            zone: "player".to_string(),
+            index: None,
+            card: None,
+            field: "gold".to_string(),
+            engine: ScreenCheckValue::Number(ours.gold as i64),
+            screen: ScreenCheckValue::Number(gold as i64),
+            status: if ours.gold == gold {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            },
+        });
+        if ours.gold != gold {
+            diffs.push(format!("Gold: engine {}, screen {gold}", ours.gold));
+        }
     }
-    if let Some(tier) = end.tier
-        && ours.tier != tier
-    {
-        diffs.push(format!("tier: engine {}, screen {tier}", ours.tier));
+    if let Some(tier) = end.tier {
+        checks.push(ScreenCheck {
+            zone: "player".to_string(),
+            index: None,
+            card: None,
+            field: "tier".to_string(),
+            engine: ScreenCheckValue::Number(ours.tier as i64),
+            screen: ScreenCheckValue::Number(tier as i64),
+            status: if ours.tier == tier {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            },
+        });
+        if ours.tier != tier {
+            diffs.push(format!("tier: engine {}, screen {tier}", ours.tier));
+        }
     }
-    if let Some(health) = end.health
-        && ours.health != health
-    {
-        diffs.push(format!("Health: engine {}, screen {health}", ours.health));
+    if let Some(health) = end.health {
+        checks.push(ScreenCheck {
+            zone: "player".to_string(),
+            index: None,
+            card: None,
+            field: "health".to_string(),
+            engine: ScreenCheckValue::Number(ours.health as i64),
+            screen: ScreenCheckValue::Number(health as i64),
+            status: if ours.health == health {
+                ScreenCheckStatus::Agree
+            } else {
+                ScreenCheckStatus::Disagree
+            },
+        });
+        if ours.health != health {
+            diffs.push(format!("Health: engine {}, screen {health}", ours.health));
+        }
     }
-    (diffs, missing)
+    (diffs, checks, missing)
 }
 
 // ---- verdicts over several seeds ----
+
+/// One value a comparison checked: a number, a range, `null`, a keyword's
+/// presence, or a card name.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum ScreenCheckValue {
+    Number(i64),
+    Range { min: i64, max: i64 },
+    Bool(bool),
+    Text(String),
+    Null,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenCheckStatus {
+    Agree,
+    Disagree,
+    CannotTell,
+}
+
+/// One per-value check: where the card is, which field, both values and what
+/// the comparison said. This is what bg-vision's check mode reads.
+#[derive(Clone, Debug, Serialize)]
+pub struct ScreenCheck {
+    pub zone: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub card: Option<String>,
+    pub field: String,
+    pub engine: ScreenCheckValue,
+    pub screen: ScreenCheckValue,
+    pub status: ScreenCheckStatus,
+}
+
+/// The checks made at one point in a turn: before it, after a step, or at its
+/// end.
+#[derive(Clone, Debug, Serialize)]
+pub struct ScreenCheckGroup {
+    /// `before turn`, `after step` or `end`.
+    pub when: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub checks: Vec<ScreenCheck>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenLineClass {
+    Certain,
+    Random,
+}
+
+/// One difference line with the class the seeds gave it.
+#[derive(Clone, Debug, Serialize)]
+pub struct ScreenLine {
+    pub text: String,
+    pub class: ScreenLineClass,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub uncertain: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ScreenVerdict {
     Ok,
     OkRandom,
+    Uncertain,
     Flagged,
     Stopped,
 }
@@ -1974,6 +2621,7 @@ impl ScreenVerdict {
         match self {
             ScreenVerdict::Ok => "ok",
             ScreenVerdict::OkRandom => "ok-random",
+            ScreenVerdict::Uncertain => "uncertain",
             ScreenVerdict::Flagged => "flagged",
             ScreenVerdict::Stopped => "stopped",
         }
@@ -2004,11 +2652,35 @@ pub struct ScreenTurnOutcome {
     pub steps: usize,
     pub verdict: ScreenVerdict,
     pub stop: Option<ScreenStop>,
+    /// Certain step and end lines that are not uncertain: the lines that flag
+    /// the turn.
     pub differences: Vec<String>,
-    /// Chained mode: differences between the carried game and the screen's
-    /// `start`, before that start was put on. They do not flag the turn.
+    /// Certain step and end lines that involve a value a fight could have
+    /// changed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncertain_lines: Vec<String>,
+    /// Step and end lines that differ between seeds, or that only some seeds
+    /// produce. They do not flag the turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub random_lines: Vec<String>,
+    /// Chained mode: certain differences between the carried game and the
+    /// screen's `start`, before that start was put on. They do not flag the
+    /// turn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub between_turns: Vec<String>,
+    /// Chained mode: between-turn lines the seeds did not agree on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub random_between_turns: Vec<String>,
+    /// Every step and end line with its class.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<ScreenLine>,
+    /// Every between-turn line with its class.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub between_turn_lines: Vec<ScreenLine>,
+    /// The per-value checks of the first completed seed, grouped by where
+    /// they were made.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<ScreenCheckGroup>,
     /// Chained mode: the cards and counters a fight could have changed that
     /// turn. Step lines that involve them are marked.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2041,6 +2713,25 @@ pub fn replay_screen_turn_seeds(
 /// Judge one turn from the runs of its seeds. This is the shared tail of the
 /// non-chained and the chained replay: the chained one carries each seed's
 /// game between turns before it gets here.
+#[derive(Clone, Debug)]
+struct ComputedSeed {
+    seed: u64,
+    played: usize,
+    stop: Option<ScreenStop>,
+    missing: Vec<String>,
+    engine: Option<ScreenEndState>,
+    step_lines: Vec<String>,
+    end_lines: Vec<String>,
+    between_lines: Vec<String>,
+    step_checks: Vec<ScreenCheckGroup>,
+    between_checks: Option<ScreenCheckGroup>,
+    end_checks: Option<ScreenCheckGroup>,
+    uncertain_cards: Vec<String>,
+    uncertain_counters: bool,
+    states: Vec<ShopSnapshot>,
+    complete: bool,
+}
+
 fn outcome_from_runs(
     data: &Arc<Data>,
     ids: &CardIdMap,
@@ -2048,87 +2739,169 @@ fn outcome_from_runs(
     turn: &ScreenTurnSpec,
     runs: Vec<Result<ScreenTurnRun, ScreenStop>>,
 ) -> ScreenTurnOutcome {
-    let mut results = Vec::new();
-    let mut state_sets: Vec<Option<Vec<ShopSnapshot>>> = Vec::new();
-    let mut plays = Vec::new();
-    let mut between_turns: Vec<String> = Vec::new();
-    let mut uncertain_cards: Vec<String> = Vec::new();
-    let mut uncertain_counters = false;
+    let mut computed = Vec::new();
     for (k, run) in runs.into_iter().enumerate() {
         let seed = k as u64 + 1;
         match run {
             Ok(run) => {
-                if between_turns.is_empty() {
-                    between_turns = run.between_turns.clone();
-                }
-                if uncertain_cards.is_empty() {
-                    uncertain_cards = run.uncertain_cards.clone();
-                }
-                uncertain_counters |= run.uncertain_counters;
-                let mut differences = run.step_differences.clone();
-                let compare_missing = if run.stop.is_none() {
+                let complete = run.stop.is_none();
+                let (end_lines, end_checks, compare_missing) = if complete {
                     match &turn.end {
                         Some(end) => {
-                            let (d, m) = compare_end(data, ids, &run.game, end, turn.turn);
-                            differences.extend(d);
-                            m
+                            let (d, c, m) = compare_end(data, ids, &run.game, end, turn.turn);
+                            let d = mark_uncertain(d, &run.uncertain_cards, run.uncertain_counters);
+                            (
+                                d,
+                                Some(ScreenCheckGroup {
+                                    when: "end".to_string(),
+                                    step: None,
+                                    kind: None,
+                                    checks: c,
+                                }),
+                                m,
+                            )
                         }
-                        None => Vec::new(),
+                        None => (Vec::new(), None, Vec::new()),
                     }
                 } else {
-                    Vec::new()
+                    (Vec::new(), None, Vec::new())
                 };
                 let mut missing = run.missing.clone();
                 missing.extend(compare_missing);
-                let engine = Some(ScreenEndState::of(data, &run.game));
-                plays.push((run.played, run.stop.clone()));
-                state_sets.push(Some(run.states));
-                results.push(ScreenSeedResult {
+                computed.push(ComputedSeed {
                     seed,
                     played: run.played,
                     stop: run.stop,
-                    differences,
                     missing,
-                    engine,
+                    engine: Some(ScreenEndState::of(data, &run.game)),
+                    step_lines: run.step_differences,
+                    end_lines,
+                    between_lines: run.between_turns,
+                    step_checks: run.step_checks,
+                    between_checks: run.between_checks,
+                    end_checks,
+                    uncertain_cards: run.uncertain_cards,
+                    uncertain_counters: run.uncertain_counters,
+                    states: run.states,
+                    complete,
                 });
             }
-            Err(stop) => {
-                plays.push((0, Some(stop.clone())));
-                state_sets.push(None);
-                results.push(ScreenSeedResult {
-                    seed,
-                    played: 0,
-                    stop: Some(stop),
-                    differences: Vec::new(),
-                    missing: Vec::new(),
-                    engine: None,
-                });
+            Err(stop) => computed.push(ComputedSeed {
+                seed,
+                played: 0,
+                stop: Some(stop),
+                missing: Vec::new(),
+                engine: None,
+                step_lines: Vec::new(),
+                end_lines: Vec::new(),
+                between_lines: Vec::new(),
+                step_checks: Vec::new(),
+                between_checks: None,
+                end_checks: None,
+                uncertain_cards: Vec::new(),
+                uncertain_counters: false,
+                states: Vec::new(),
+                complete: false,
+            }),
+        }
+    }
+
+    let completed = computed.iter().filter(|c| c.complete).count();
+    let mut line_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut between_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for c in computed.iter().filter(|c| c.complete) {
+        let mut seen = std::collections::BTreeSet::new();
+        for text in c.step_lines.iter().chain(c.end_lines.iter()) {
+            if seen.insert(text.clone()) {
+                *line_counts.entry(text.clone()).or_default() += 1;
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for text in &c.between_lines {
+            if seen.insert(text.clone()) {
+                *between_counts.entry(text.clone()).or_default() += 1;
             }
         }
     }
-    let completed = results.iter().filter(|r| r.stop.is_none()).count();
-    let matches = results
-        .iter()
-        .filter(|r| r.stop.is_none() && r.differences.is_empty())
-        .count();
-    let stop = results
+
+    let mut lines = Vec::new();
+    let mut between_turn_lines = Vec::new();
+    let mut differences = Vec::new();
+    let mut uncertain_lines = Vec::new();
+    let mut random_lines = Vec::new();
+    let mut between_turns = Vec::new();
+    let mut random_between_turns = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for c in &computed {
+        for text in c.step_lines.iter().chain(c.end_lines.iter()) {
+            if !seen.insert(text.clone()) {
+                continue;
+            }
+            let class = if completed > 0 && line_counts.get(text).copied().unwrap_or(0) == completed
+            {
+                ScreenLineClass::Certain
+            } else {
+                ScreenLineClass::Random
+            };
+            let uncertain = text.contains("(uncertain after the fight)");
+            lines.push(ScreenLine {
+                text: text.clone(),
+                class,
+                uncertain,
+            });
+            match (class, uncertain) {
+                (ScreenLineClass::Certain, true) => uncertain_lines.push(text.clone()),
+                (ScreenLineClass::Certain, false) => differences.push(text.clone()),
+                (ScreenLineClass::Random, _) => random_lines.push(text.clone()),
+            }
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for c in &computed {
+        for text in &c.between_lines {
+            if !seen.insert(text.clone()) {
+                continue;
+            }
+            let class =
+                if completed > 0 && between_counts.get(text).copied().unwrap_or(0) == completed {
+                    ScreenLineClass::Certain
+                } else {
+                    ScreenLineClass::Random
+                };
+            between_turn_lines.push(ScreenLine {
+                text: text.clone(),
+                class,
+                uncertain: false,
+            });
+            match class {
+                ScreenLineClass::Certain => between_turns.push(text.clone()),
+                ScreenLineClass::Random => random_between_turns.push(text.clone()),
+            }
+        }
+    }
+
+    let stop = computed
         .first()
-        .and_then(|r| r.stop.clone())
-        .or_else(|| results.iter().find_map(|r| r.stop.clone()));
+        .and_then(|c| c.stop.clone())
+        .or_else(|| computed.iter().find_map(|c| c.stop.clone()));
     let verdict = if completed == 0 {
         ScreenVerdict::Stopped
-    } else if matches == results.len() {
-        ScreenVerdict::Ok
-    } else if matches > 0 {
+    } else if !differences.is_empty() {
+        ScreenVerdict::Flagged
+    } else if !uncertain_lines.is_empty() {
+        ScreenVerdict::Uncertain
+    } else if !random_lines.is_empty() || !random_between_turns.is_empty() {
         ScreenVerdict::OkRandom
     } else {
-        ScreenVerdict::Flagged
+        ScreenVerdict::Ok
     };
-    let differences = results
-        .iter()
-        .find(|r| r.stop.is_none() && !r.differences.is_empty())
-        .map(|r| r.differences.clone())
-        .unwrap_or_default();
+
+    let mut state_sets: Vec<Option<Vec<ShopSnapshot>>> = Vec::new();
+    let mut plays = Vec::new();
+    for c in &computed {
+        state_sets.push(c.complete.then(|| c.states.clone()));
+        plays.push((c.played, c.stop.clone()));
+    }
     let mut randomness_at = None;
     if verdict == ScreenVerdict::OkRandom {
         let done: Vec<&Vec<ShopSnapshot>> = state_sets.iter().filter_map(|s| s.as_ref()).collect();
@@ -2164,10 +2937,42 @@ fn outcome_from_runs(
             }
         }
     }
-    let mut uncertain = uncertain_cards;
-    if uncertain_counters {
+
+    let source = computed
+        .iter()
+        .find(|c| c.complete)
+        .or_else(|| computed.first());
+    let mut uncertain = source
+        .map(|c| c.uncertain_cards.clone())
+        .unwrap_or_default();
+    if source.is_some_and(|c| c.uncertain_counters) {
         uncertain.push("player counters".to_string());
     }
+    let mut checks = Vec::new();
+    if let Some(c) = source {
+        if let Some(group) = c.between_checks.clone() {
+            checks.push(group);
+        }
+        checks.extend(c.step_checks.clone());
+        if let Some(group) = c.end_checks.clone() {
+            checks.push(group);
+        }
+    }
+    let results = computed
+        .iter()
+        .map(|c| {
+            let mut all = c.step_lines.clone();
+            all.extend(c.end_lines.clone());
+            ScreenSeedResult {
+                seed: c.seed,
+                played: c.played,
+                stop: c.stop.clone(),
+                differences: all,
+                missing: c.missing.clone(),
+                engine: c.engine.clone(),
+            }
+        })
+        .collect();
     ScreenTurnOutcome {
         file: file.file(),
         game: file.game,
@@ -2176,7 +2981,13 @@ fn outcome_from_runs(
         verdict,
         stop,
         differences,
+        uncertain_lines,
+        random_lines,
         between_turns,
+        random_between_turns,
+        lines,
+        between_turn_lines,
+        checks,
         uncertain,
         reseated: false,
         randomness_at,
@@ -2256,7 +3067,27 @@ pub fn parse_screen_files(files: &[(String, String)]) -> Result<Vec<ScreenFileSp
 
 // ---- a screen file from an action file (the check on Era's logs) ----
 
-fn card_of_spec(data: &Data, ids: &CardIdMap, m: &ShopMinionSpec) -> Option<ScreenCard> {
+/// A stat as `--k-ranges` writes it: 1,000 or more becomes the range the
+/// game's one-decimal-of-thousands display gives, and everything else stays
+/// exact. 2,050 to 2,149 is "2.1k".
+fn written_stat(value: i32, k_ranges: bool) -> ScreenNumber {
+    if k_ranges && value >= 1000 {
+        let center = ((value as i64 + 50) / 100) * 100;
+        ScreenNumber::Range {
+            min: center - 50,
+            max: center + 49,
+        }
+    } else {
+        ScreenNumber::Number(value as i64)
+    }
+}
+
+fn card_of_spec(
+    data: &Data,
+    ids: &CardIdMap,
+    m: &ShopMinionSpec,
+    k_ranges: bool,
+) -> Option<ScreenCard> {
     let name = m
         .name
         .clone()
@@ -2276,10 +3107,11 @@ fn card_of_spec(data: &Data, ids: &CardIdMap, m: &ShopMinionSpec) -> Option<Scre
     Some(ScreenCard {
         card_id: m.card_id.clone(),
         name: Some(name),
-        attack: Some(m.attack),
-        health: Some(m.health),
+        attack: Some(written_stat(m.attack, k_ranges)),
+        health: Some(written_stat(m.health, k_ranges)),
         golden: Some(m.golden),
         keywords: (!m.keywords.is_empty()).then(|| m.keywords.clone()),
+        keyword_reads: None,
         slot: m.slot,
         kind: m.kind.clone(),
         frozen: Some(m.frozen),
@@ -2296,11 +3128,16 @@ fn visible_cost(data: &Data, m: &ShopMinionSpec) -> Option<i32> {
         .or_else(|| m.cost_reduce.map(|r| data.rules.buy_cost as i32 - r))
 }
 
-fn state_of_spec(data: &Data, ids: &CardIdMap, state: &ShopStateSpec) -> ScreenStateSpec {
+fn state_of_spec(
+    data: &Data,
+    ids: &CardIdMap,
+    state: &ShopStateSpec,
+    k_ranges: bool,
+) -> ScreenStateSpec {
     let hand: Vec<ScreenCard> = state
         .hand
         .iter()
-        .filter_map(|m| card_of_spec(data, ids, m))
+        .filter_map(|m| card_of_spec(data, ids, m, k_ranges))
         .collect();
     let hand_count = if state.hand_hidden > 0 {
         Some(state.hand.len() as u32 + state.hand_hidden)
@@ -2316,7 +3153,10 @@ fn state_of_spec(data: &Data, ids: &CardIdMap, state: &ShopStateSpec) -> ScreenS
             cost: p.cost,
             used_this_turn: Some(p.used_this_turn),
             numbers: Some(p.numbers.clone()),
-            waiting: p.waiting.as_ref().and_then(|w| card_of_spec(data, ids, w)),
+            waiting: p
+                .waiting
+                .as_ref()
+                .and_then(|w| card_of_spec(data, ids, w, k_ranges)),
             waiting_seen: Some(true),
             second: p.second,
         })
@@ -2329,7 +3169,7 @@ fn state_of_spec(data: &Data, ids: &CardIdMap, state: &ShopStateSpec) -> ScreenS
             state
                 .board
                 .iter()
-                .filter_map(|m| card_of_spec(data, ids, m))
+                .filter_map(|m| card_of_spec(data, ids, m, k_ranges))
                 .collect(),
         ),
         hand: Some(hand),
@@ -2337,7 +3177,7 @@ fn state_of_spec(data: &Data, ids: &CardIdMap, state: &ShopStateSpec) -> ScreenS
             state
                 .tavern
                 .iter()
-                .filter_map(|m| card_of_spec(data, ids, m))
+                .filter_map(|m| card_of_spec(data, ids, m, k_ranges))
                 .collect(),
         ),
         gold: Some(state.gold),
@@ -2422,6 +3262,7 @@ fn step_of_spec(
     step: &ShopStepSpec,
     before: Option<&ShopStateSpec>,
     after: Option<&ShopStateSpec>,
+    k_ranges: bool,
 ) -> ScreenStepSpec {
     let mut seen = ScreenStateSpec::default();
     let mut has_seen = false;
@@ -2434,21 +3275,21 @@ fn step_of_spec(
             after
                 .board
                 .iter()
-                .filter_map(|m| card_of_spec(data, ids, m))
+                .filter_map(|m| card_of_spec(data, ids, m, k_ranges))
                 .collect(),
         );
         seen.hand = Some(
             after
                 .hand
                 .iter()
-                .filter_map(|m| card_of_spec(data, ids, m))
+                .filter_map(|m| card_of_spec(data, ids, m, k_ranges))
                 .collect(),
         );
         seen.tavern = Some(
             after
                 .tavern
                 .iter()
-                .filter_map(|m| card_of_spec(data, ids, m))
+                .filter_map(|m| card_of_spec(data, ids, m, k_ranges))
                 .collect(),
         );
         seen.frozen = Some(after.frozen);
@@ -2474,7 +3315,10 @@ fn step_of_spec(
                 cost: p.cost,
                 used_this_turn: Some(p.used_this_turn),
                 numbers: Some(p.numbers.clone()),
-                waiting: p.waiting.as_ref().and_then(|w| card_of_spec(data, ids, w)),
+                waiting: p
+                    .waiting
+                    .as_ref()
+                    .and_then(|w| card_of_spec(data, ids, w, k_ranges)),
                 waiting_seen: Some(true),
                 second: p.second,
             })
@@ -2510,10 +3354,11 @@ fn step_of_spec(
             let mut card = ScreenCard {
                 card_id: c.card_id.clone(),
                 name: c.name.clone(),
-                attack: Some(c.attack),
-                health: Some(c.health),
+                attack: Some(written_stat(c.attack, k_ranges)),
+                health: Some(written_stat(c.health, k_ranges)),
                 golden: Some(c.golden),
                 keywords: c.keywords.clone(),
+                keyword_reads: None,
                 slot: c.slot,
                 kind: c.kind.clone(),
                 frozen: None,
@@ -2550,10 +3395,11 @@ fn step_of_spec(
             .map(|o| ScreenCard {
                 card_id: o.card_id.clone(),
                 name: o.name.clone(),
-                attack: Some(o.attack),
-                health: Some(o.health),
+                attack: Some(written_stat(o.attack, k_ranges)),
+                health: Some(written_stat(o.health, k_ranges)),
                 golden: Some(o.golden),
                 keywords: o.keywords.clone(),
+                keyword_reads: None,
                 slot: o.slot,
                 kind: o.kind.clone(),
                 frozen: None,
@@ -2567,10 +3413,11 @@ fn step_of_spec(
             ScreenPick::Card(ScreenCard {
                 card_id: p.card_id.clone(),
                 name: p.name.clone(),
-                attack: Some(p.attack),
-                health: Some(p.health),
+                attack: Some(written_stat(p.attack, k_ranges)),
+                health: Some(written_stat(p.health, k_ranges)),
                 golden: Some(p.golden),
                 keywords: p.keywords.clone(),
+                keyword_reads: None,
                 slot: p.slot,
                 kind: p.kind.clone(),
                 frozen: None,
@@ -2594,6 +3441,7 @@ pub fn screen_from_action_file(
     data: &Data,
     ids: &CardIdMap,
     file: &ShopFileSpec,
+    k_ranges: bool,
 ) -> ScreenFileSpec {
     let turns = file
         .turns
@@ -2604,16 +3452,26 @@ pub fn screen_from_action_file(
                 .actions
                 .iter()
                 .map(|step| {
-                    let out = step_of_spec(data, ids, step, before, step.after.as_ref().or(before));
+                    let out = step_of_spec(
+                        data,
+                        ids,
+                        step,
+                        before,
+                        step.after.as_ref().or(before),
+                        k_ranges,
+                    );
                     before = step.after.as_ref().or(before);
                     out
                 })
                 .collect();
             ScreenTurnSpec {
                 turn: turn.turn,
-                start: state_of_spec(data, ids, &turn.start),
+                start: state_of_spec(data, ids, &turn.start, k_ranges),
                 steps,
-                end: turn.end.as_ref().map(|e| state_of_spec(data, ids, e)),
+                end: turn
+                    .end
+                    .as_ref()
+                    .map(|e| state_of_spec(data, ids, e, k_ranges)),
             }
         })
         .collect();

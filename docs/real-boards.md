@@ -1205,12 +1205,18 @@ game played from video needs no Power.log. One file holds one game,
   `kind` (`minion` or `spell`), `frozen`, `cost` (the Gold the card shows,
   including a spell's price or a minion's discount) and `costs_health` when
   the price is paid in Health. The board and the hand are in screen order;
-  only the Tavern uses `slot`. A card may also carry `dark_gift` (one gift, as
-  a card id, a name, or `{"card_id", "name", "state"}`) and `dark_gifts` (a
-  list, when the gift icons were read). A Dark Gift Discover writes its gifts
-  on `options` and `picked`; `screen-from-actions` does that from the action
-  file. An absent list is unknown, an empty list is "the screen showed none",
-  and unknown never takes a gift off a card the engine carries.
+  only the Tavern uses `slot`. A stat may be a number, a range
+  (`{"min": 2050, "max": 2149}`) or `null` for "cannot tell". A number must
+  equal the engine's value, a range agrees when the engine is inside it, and
+  `null` is not compared. `keyword_reads` carries only the keywords the screen
+  read, as `{"divine_shield": true, "venomous": false}`; a keyword not named is
+  unknown, while a full `keywords` list still means what it always did. A card
+  may also carry `dark_gift` (one gift, as a card id, a name, or
+  `{"card_id", "name", "state"}`) and `dark_gifts` (a list, when the gift icons
+  were read). A Dark Gift Discover writes its gifts on `options` and `picked`;
+  `screen-from-actions` does that from the action file. An absent list is
+  unknown, an empty list is "the screen showed none", and unknown never takes a
+  gift off a card the engine carries.
 - A hero power has its `card_id` or `name`, `cost`, `used_this_turn` (the
   button greys out at the limit), `numbers` (a counter the button shows) and
   `waiting` with `waiting_seen` for the minion Lock and Load holds. A trinket
@@ -1244,13 +1250,16 @@ disagreement is a turn for Era to review, not automatically an engine bug.
 
 ```
 ./target/release/bgbench screenreplay --in DIR --out DIR [--seeds N] [--chain]
-./target/release/bgbench screen-from-actions --actions DIR --out DIR [--current-patch]
+./target/release/bgbench screen-from-actions --actions DIR --out DIR [--current-patch] [--k-ranges]
 ```
 
 Defaults: `boards/screens`, `boards/checks` and 8 seeds. It needs
 `ref/bg-cards.json` for a game's card ids. `screen-from-actions` writes a
 screen file from every action file in `--actions`; `--current-patch` keeps
-only files whose `build` equals the card data's `game_build`.
+only files whose `build` equals the card data's `game_build`, and
+`--k-ranges` writes every stat of 1,000 or more as the range the game's
+one-decimal-of-thousands display gives (2,050 to 2,149 is "2.1k"). Without
+`--k-ranges` the stats are exact numbers.
 
 - The turn's `start` is seated once, with the loader the shop replay uses
   (`bgcore::screen_replay::replay_screen_turn`). Each step is then mapped from
@@ -1277,50 +1286,64 @@ only files whose `build` equals the card data's `game_build`.
   flag, and the hero power and trinket counters the screen shows. A minion that
   is the same card keeps the engine's own state and takes only the screen's
   stats, as `force_board` already does; a Dark Gift the screen did not read is
-  never removed.
+  never removed. A stat number is taken, an agreeing range keeps the engine's
+  value, a disagreeing range takes its nearest bound, and `null` keeps the
+  engine's value.
 - A hidden value a fight could have changed stays the engine's guess. The cards
   whose visible stats changed between turns and every player counter of a turn
-  whose start differed from the carry are `uncertain` for that turn. Step lines
-  that involve them end with `(uncertain after the fight)`. Between-turn lines
-  do not flag a turn; they are counted and listed separately in the report.
+  whose start differed from the carry are `uncertain` for that turn. Step and
+  end lines that involve them end with `(uncertain after the fight)`.
+- Every step, end and between-turn line is classified by the seeds. A line
+  every completed seed produces with the same engine value is `certain`; a
+  line that differs between seeds, or that only some seeds produce, is
+  `random`. Random lines do not flag the turn; they stay in `turns.json` with
+  their class. Every comparison also writes its per-value `checks` (zone,
+  index, card, field, engine value, screen value and `agree`, `disagree` or
+  `cannot_tell`), grouped before the turn, after each step and at the end.
+  `cannot_tell` is written for `null` and for a keyword the screen did not
+  read; it is omitted when the screen file had no such field at all.
 - If the file skips a turn, or the turn before it stopped, the next turn is
   seated fresh from its `start` as without `--chain`, and is marked `reseated`.
   Seed k's game is carried into seed k's next turn.
 - After a step the engine's result is compared with the step's `seen` state
   before that state is put on the game: board in order (card, Attack, Health,
-  golden), hand, Tavern, Gold, whether the next Refresh is free, and tier. Each difference is a
-  step line ("after step 4 (play): board 2 engine Wrath Weaver 5/7, screen
-  7/9", "after step 3 (buy): engine Gold 7, screen 5"). The first one is the
-  first line in the report. A Tavern drawn by a Roll or another refresh is
-  random: it is applied without being compared. `screen-from-actions` marks a
-  Roll, and a non-Roll step whose Tavern changed by more than the one card the
-  step acted on, as `tavern_random`; a hand-written file can set it too. Gold,
-  the free next Refresh and tier are compared first and then put on the carried game
-  (a free next Refresh keeps the engine's own count when it has one, and
-  gives it one when it has none),
-  so one drift makes one line and does not repeat on every later step. The
-  replay carries on after a step line, so one difference does not hide the
-  turn.
+  golden), hand, Tavern, Gold, whether the next Refresh is free, tier, and the
+  keywords the screen read. Each difference is a step line ("after step 4
+  (play): board 2 engine Wrath Weaver 5/7, screen 7/9", "after step 3 (buy):
+  engine Gold 7, screen 5"). The first certain one is the first line in the
+  report. A Tavern drawn by a Roll or another refresh is random: it is applied
+  without being compared. `screen-from-actions` marks a Roll, and a non-Roll
+  step whose Tavern changed by more than the one card the step acted on, as
+  `tavern_random`; a hand-written file can set it too. Gold, the free next
+  Refresh and tier are compared first and then put on the carried game (a free
+  next Refresh keeps the engine's own count when it has one, and gives it one
+  when it has none), so one drift makes one line and does not repeat on every
+  later step. The replay carries on after a step line, so one difference does
+  not hide the turn.
 - The replay stops at the first step the engine refuses or cannot map, with
   the step index, kind and reason. The seed results are kept.
 - At the end it compares only the fields `end` has: board cards in order with
-  stats and golden flags; hand cards, or `hand_count` when the cards were not
-  read; the Tavern as a multiset; Gold, tier and Health. Each difference is one
-  line ("board 3: engine Wrath Weaver 5/7, screen 7/9", "Gold: engine 0,
-  screen 2"). Armor, upgrade cost, hero powers, trinkets, keywords and the
-  per-card freeze are not compared.
-- Verdicts: `ok` when every seed has no step line and no end line,
-  `ok-random` when some seeds do (the first step whose engine state differs
-  between seeds names the split), `flagged` when no completed seed matches,
-  and `stopped` when no seed could follow every step. A random turn with one
+  stats, golden flags and the keywords read; hand cards, or `hand_count` when
+  the cards were not read; the Tavern as a multiset; Gold, tier and Health.
+  Each difference is one line ("board 3: engine Wrath Weaver 5/7, screen 7/9",
+  "Gold: engine 0, screen 2"). Armor, upgrade cost, hero powers, trinkets and
+  the per-card freeze are not compared.
+- Verdicts: `ok` when no completed seed has a certain step or end line;
+  `ok-random` when the step and end lines are all random (a between-turn line
+  can also make a turn `ok-random`); `uncertain` when the only certain step and
+  end lines are marked `(uncertain after the fight)`; `flagged` when a certain
+  step or end line is not marked uncertain; and `stopped` when no seed could
+  follow every step. Random lines never flag a turn. A random turn with one
   seed unable to follow and another matching is `ok-random`, not `stopped`.
-  Chained between-turn lines do not change the verdict.
+  Certain between-turn lines do not decide the verdict.
 - Outputs: `screen-report.md` (totals, between-turn counts and lines, the
-  random splits, each flagged and stopped turn with its differences),
-  `turns.tsv` (file, game, turn, verdict, steps played, first difference,
-  which is the first between-turn line in chained mode) and `turns.json` (per
-  turn: verdict, stop, differences, `between_turns`, `uncertain`, `reseated`,
-  and the engine's end state per seed).
+  random splits, flagged turns first, then uncertain ones and stopped turns),
+  `turns.tsv` (file, game, turn, verdict, steps played, first difference) and
+  `turns.json` (per turn: verdict, stop, the certain `differences`, the
+  `uncertain_lines`, `random_lines`, `lines` with their class, the
+  `between_turns` and `between_turn_lines`, the `uncertain` names, `reseated`,
+  `checks` grouped before the turn, after each step and at the end, and the
+  engine's end state per seed).
 - The check on Era's own logs is a comparison, not a test of the engine:
   `screen-from-actions` drops the hidden state the log carries, then
   `screenreplay` shows which turns a screen could not reproduce. The causes

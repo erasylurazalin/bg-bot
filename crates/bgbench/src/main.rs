@@ -1408,7 +1408,7 @@ fn main() {
                  \x20      bgbench fightcheck [--boards DIR] [--runs N] [--out DIR] [--flag PCT] [--all-builds]\n\
                  \x20      bgbench shopreplay [--actions DIR] [--seeds N] [--out DIR] [--card NAME] [--all-builds]\n\
                  \x20      bgbench screenreplay [--in DIR] [--out DIR] [--seeds N] [--chain]\n\
-                 \x20      bgbench screen-from-actions [--actions DIR] [--out DIR] [--current-patch]\n\
+                 \x20      bgbench screen-from-actions [--actions DIR] [--out DIR] [--current-patch] [--k-ranges]\n\
                  \x20      bgbench powerlog FILE [--out FILE] [--time]\n\
                  \x20      bgbench tracker FILE [--out FILE] [--cards FILE] [--time]\n\
                  \x20      bgbench collect-boards [--out DIR] [--cards FILE] [--no-archive]\n\

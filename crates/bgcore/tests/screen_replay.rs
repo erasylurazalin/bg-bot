@@ -521,3 +521,230 @@ fn a_skipped_turn_reseats_from_its_start() {
     );
     assert_eq!(third.verdict, ScreenVerdict::Ok, "{:?}", third.differences);
 }
+
+#[test]
+fn a_random_step_line_does_not_flag_the_turn() {
+    let json = r#"{
+      "source": "hand-written", "game": 30,
+      "turns": [{
+        "turn": 3,
+        "start": {"gold": 10, "tier": 1, "health": 30,
+                  "board": [], "hand": [], "tavern": []},
+        "steps": [
+          {"step": "roll"},
+          {"step": "buy", "slot": 1,
+           "seen": {"tavern": [{"name": "Southsea Busker", "attack": 3,
+                                "health": 1, "golden": false, "slot": 1,
+                                "kind": "minion"}]}}
+        ]
+      }]
+    }"#;
+    let outcome = run(json, 8);
+    assert_eq!(
+        outcome.verdict,
+        ScreenVerdict::OkRandom,
+        "diffs {:?} random {:?}",
+        outcome.differences,
+        outcome.random_lines
+    );
+    assert!(outcome.differences.is_empty(), "{:?}", outcome.differences);
+    assert!(!outcome.random_lines.is_empty(), "a random line is kept");
+    assert!(
+        outcome
+            .lines
+            .iter()
+            .any(|l| l.class == screen_replay::ScreenLineClass::Random),
+        "{:?}",
+        outcome.lines
+    );
+}
+
+#[test]
+fn a_range_agrees_or_takes_the_nearest_bound() {
+    let json = r#"{
+      "source": "hand-written", "game": 31,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Deadly Spore", "attack": 100, "health": 100,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 4, "tier": 1, "health": 30,
+                   "board": [{"name": "Deadly Spore",
+                              "attack": {"min": 95, "max": 105},
+                              "health": {"min": 110, "max": 120},
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": [],
+         "end": {"gold": 4, "tier": 1, "health": 30,
+                 "board": [{"name": "Deadly Spore", "attack": 100, "health": 110,
+                            "golden": false}],
+                 "hand": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Ok,
+        "{:?}",
+        second.differences
+    );
+    assert_eq!(
+        second.between_turns,
+        vec![
+            "before turn 2: board 1 engine Deadly Spore 100/100, screen Deadly Spore 95..105/110..120"
+                .to_string()
+        ]
+    );
+    let engine = second.seeds[0].engine.as_ref().expect("the turn finished");
+    assert_eq!(
+        (engine.board[0].attack, engine.board[0].health),
+        (100, 110),
+        "the agreeing range stays and the disagreeing one takes its bound"
+    );
+    let group = second
+        .checks
+        .iter()
+        .find(|g| g.when == "before turn")
+        .expect("the between-turn checks");
+    assert!(
+        group.checks.iter().any(|c| {
+            c.field == "attack" && c.status == screen_replay::ScreenCheckStatus::Agree
+        })
+    );
+    assert!(group.checks.iter().any(|c| {
+        c.field == "health" && c.status == screen_replay::ScreenCheckStatus::Disagree
+    }));
+}
+
+#[test]
+fn a_null_stat_is_not_compared_and_keeps_the_engine_value() {
+    let json = r#"{
+      "source": "hand-written", "game": 32,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Deadly Spore", "attack": 100, "health": 100,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 4, "tier": 1, "health": 30,
+                   "board": [{"name": "Deadly Spore", "attack": null, "health": 100,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": [],
+         "end": {"gold": 4, "tier": 1, "health": 30,
+                 "board": [{"name": "Deadly Spore", "attack": 100, "health": 100,
+                            "golden": false}],
+                 "hand": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Ok,
+        "{:?}",
+        second.differences
+    );
+    assert!(
+        second.between_turns.is_empty(),
+        "{:?}",
+        second.between_turns
+    );
+    let group = second
+        .checks
+        .iter()
+        .find(|g| g.when == "before turn")
+        .expect("the between-turn checks");
+    assert!(group.checks.iter().any(|c| {
+        c.field == "attack" && c.status == screen_replay::ScreenCheckStatus::CannotTell
+    }));
+}
+
+#[test]
+fn a_read_keyword_that_disagrees_flags_the_end() {
+    let json = r#"{
+      "source": "hand-written", "game": 33,
+      "turns": [{
+        "turn": 3,
+        "start": {"gold": 10, "tier": 1, "health": 30,
+                  "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                             "golden": false}],
+                  "hand": [], "tavern": []},
+        "steps": [],
+        "end": {"gold": 10, "tier": 1, "health": 30,
+                "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                           "golden": false,
+                           "keyword_reads": {"divine_shield": true}}],
+                "hand": []}
+      }]
+    }"#;
+    let outcome = run(json, 1);
+    assert_eq!(outcome.verdict, ScreenVerdict::Flagged);
+    assert!(
+        outcome
+            .differences
+            .iter()
+            .any(|d| d.contains("keyword DIVINE_SHIELD")),
+        "{:?}",
+        outcome.differences
+    );
+    let end = outcome
+        .checks
+        .iter()
+        .find(|g| g.when == "end")
+        .expect("the end checks");
+    assert!(end.checks.iter().any(|c| {
+        c.field == "DIVINE_SHIELD" && c.status == screen_replay::ScreenCheckStatus::Disagree
+    }));
+}
+
+#[test]
+fn only_certain_uncertain_lines_make_the_uncertain_verdict() {
+    let json = r#"{
+      "source": "hand-written", "game": 34,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 4, "tier": 1, "health": 30,
+                   "board": [{"name": "Deadly Spore", "attack": 2, "health": 2,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": [{"step": "roll",
+                    "seen": {"board": [{"name": "Deadly Spore", "attack": 5,
+                                        "health": 5, "golden": false}]}}],
+         "end": {"gold": 3, "tier": 1, "health": 30,
+                 "board": [{"name": "Deadly Spore", "attack": 5, "health": 5,
+                            "golden": false}],
+                 "hand": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Uncertain,
+        "diffs {:?} uncertain {:?}",
+        second.differences,
+        second.uncertain_lines
+    );
+    assert!(second.differences.is_empty(), "{:?}", second.differences);
+    assert!(
+        second
+            .uncertain_lines
+            .iter()
+            .any(|d| d.contains("(uncertain after the fight)")),
+        "{:?}",
+        second.uncertain_lines
+    );
+}

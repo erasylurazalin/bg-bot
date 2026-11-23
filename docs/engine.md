@@ -2576,6 +2576,7 @@ cargo build --release -p bgbench
 ./target/release/bgbench screenreplay    # replay screen files, boards/checks/
 ./target/release/bgbench screenreplay --chain  # carry each seed's game between turns
 ./target/release/bgbench screen-from-actions  # write screen files from action files
+./target/release/bgbench screen-from-actions --k-ranges  # ... with 1,000+ stats as ranges
 ./target/release/bgbench collect-boards  # write Era's board files, boards/real/
 ./target/release/bgbench collect-actions # write Era's action files, boards/actions/
 ./target/release/bgbench check-actions   # add up the turns of boards/actions/
@@ -2622,11 +2623,15 @@ from turn to turn through the engine's own
 `Game::next_shop_turn_without_fight`; the screen's start is compared with the
 carry as a between-turn line before its visible parts go on, hidden values a
 fight could have changed are marked `uncertain`, and a skipped or stopped turn
-reseats the next one. A turn is `ok`, `ok-random`, `flagged` or `stopped`; it
-writes `screen-report.md`, `turns.tsv` and `turns.json`. It needs
+reseats the next one. Every line is `certain` or `random` by the seeds; random
+lines do not flag a turn. Stats may be a number, a range or `null`, keyword
+reads are compared, and every comparison writes per-value `checks`. A turn is
+`ok`, `ok-random`, `uncertain`, `flagged` or `stopped`; it writes
+`screen-report.md`, `turns.tsv` and `turns.json`. It needs
 `ref/bg-cards.json` for a card id. `screen-from-actions [--actions DIR]
-[--out DIR] [--current-patch]` writes a screen file from each action file with
-only what a screen shows, which is the check on Era's logs: the turns the
+[--out DIR] [--current-patch] [--k-ranges]` writes a screen file from each
+action file with only what a screen shows (`--k-ranges` writes 1,000+ stats
+as the game's "2.1k" range), which is the check on Era's logs: the turns the
 screen replay cannot reproduce name the hidden state a stream does not carry.
 
 `games 10` on this machine (release, 32 threads, five-tribe lobbies with

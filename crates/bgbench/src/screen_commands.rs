@@ -93,6 +93,7 @@ pub fn screenreplay(args: &[String]) {
     for verdict in [
         ScreenVerdict::Ok,
         ScreenVerdict::OkRandom,
+        ScreenVerdict::Uncertain,
         ScreenVerdict::Flagged,
         ScreenVerdict::Stopped,
     ] {
@@ -107,33 +108,35 @@ pub fn screenreplay(args: &[String]) {
         .filter(|o| !o.between_turns.is_empty())
         .count();
     let between_lines: usize = outcomes.iter().map(|o| o.between_turns.len()).sum();
+    let random_between_lines: usize = outcomes.iter().map(|o| o.random_between_turns.len()).sum();
+    let random_lines: usize = outcomes.iter().map(|o| o.random_lines.len()).sum();
     let reseated = outcomes.iter().filter(|o| o.reseated).count();
     if chain {
         report.push_str(&format!(
-            "\n{between_turns} turns had a between-turn difference ({between_lines} lines); \
+            "\n{between_turns} turns had a certain between-turn difference ({between_lines} lines); \
+             {random_between_lines} between-turn lines were random; \
+             {random_lines} step or end lines were random; \
              {reseated} turns were reseated from their `start`.\n"
         ));
     }
     let mut tsv = String::from("file\tgame\tturn\tverdict\tsteps_played\tfirst_difference\n");
     for o in &outcomes {
         let played = o.seeds.first().map_or(0, |s| s.played);
-        let first = if let Some(first) = o.between_turns.first() {
-            first.clone()
-        } else {
-            match o.verdict {
-                ScreenVerdict::Flagged => o.differences.first().cloned().unwrap_or_default(),
-                ScreenVerdict::Stopped => o
-                    .stop
-                    .as_ref()
-                    .map(|s| format!("step {} {}: {}", s.step + 1, s.kind, s.reason))
-                    .unwrap_or_default(),
-                ScreenVerdict::OkRandom => o
-                    .randomness_at
-                    .as_ref()
-                    .map(|s| format!("random at step {} ({})", s.step + 1, s.kind))
-                    .unwrap_or_default(),
-                ScreenVerdict::Ok => String::new(),
-            }
+        let first = match o.verdict {
+            ScreenVerdict::Flagged => o.differences.first().cloned().unwrap_or_default(),
+            ScreenVerdict::Uncertain => o.uncertain_lines.first().cloned().unwrap_or_default(),
+            ScreenVerdict::Stopped => o
+                .stop
+                .as_ref()
+                .map(|s| format!("step {} {}: {}", s.step + 1, s.kind, s.reason))
+                .unwrap_or_default(),
+            ScreenVerdict::OkRandom => o
+                .random_lines
+                .first()
+                .or_else(|| o.random_between_turns.first())
+                .cloned()
+                .unwrap_or_default(),
+            ScreenVerdict::Ok => String::new(),
         };
         tsv.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\t{}\n",
@@ -149,6 +152,10 @@ pub fn screenreplay(args: &[String]) {
         .iter()
         .filter(|o| o.verdict == ScreenVerdict::Flagged)
         .collect();
+    let uncertain: Vec<&ScreenTurnOutcome> = outcomes
+        .iter()
+        .filter(|o| o.verdict == ScreenVerdict::Uncertain)
+        .collect();
     let stopped: Vec<&ScreenTurnOutcome> = outcomes
         .iter()
         .filter(|o| o.verdict == ScreenVerdict::Stopped)
@@ -157,6 +164,29 @@ pub fn screenreplay(args: &[String]) {
         .iter()
         .filter(|o| o.verdict == ScreenVerdict::OkRandom)
         .collect();
+    if !flagged.is_empty() {
+        report.push_str("\n## Flagged\n\n");
+        for o in &flagged {
+            report.push_str(&format!("### {} turn {}\n\n", o.file, o.turn));
+            for d in &o.differences {
+                report.push_str(&format!("- {d}\n"));
+            }
+            for d in &o.uncertain_lines {
+                report.push_str(&format!("- (uncertain) {d}\n"));
+            }
+            report.push('\n');
+        }
+    }
+    if !uncertain.is_empty() {
+        report.push_str("\n## Uncertain after the fight\n\n");
+        for o in &uncertain {
+            report.push_str(&format!("### {} turn {}\n\n", o.file, o.turn));
+            for d in &o.uncertain_lines {
+                report.push_str(&format!("- {d}\n"));
+            }
+            report.push('\n');
+        }
+    }
     if !random.is_empty() {
         report.push_str("\n## Random splits\n\n");
         for o in &random {
@@ -170,24 +200,18 @@ pub fn screenreplay(args: &[String]) {
     }
     let between: Vec<&ScreenTurnOutcome> = outcomes
         .iter()
-        .filter(|o| !o.between_turns.is_empty())
+        .filter(|o| !o.between_turn_lines.is_empty())
         .collect();
     if !between.is_empty() {
         report.push_str("\n## Between turns\n\n");
         for o in &between {
             report.push_str(&format!("### {} turn {}\n\n", o.file, o.turn));
-            for d in &o.between_turns {
-                report.push_str(&format!("- {d}\n"));
-            }
-            report.push('\n');
-        }
-    }
-    if !flagged.is_empty() {
-        report.push_str("\n## Flagged\n\n");
-        for o in &flagged {
-            report.push_str(&format!("### {} turn {}\n\n", o.file, o.turn));
-            for d in &o.differences {
-                report.push_str(&format!("- {d}\n"));
+            for d in &o.between_turn_lines {
+                let class = match d.class {
+                    screen_replay::ScreenLineClass::Certain => "certain",
+                    screen_replay::ScreenLineClass::Random => "random",
+                };
+                report.push_str(&format!("- ({class}) {}\n", d.text));
             }
             report.push('\n');
         }
@@ -221,11 +245,12 @@ pub fn screenreplay(args: &[String]) {
     let text = serde_json::to_string_pretty(&outcomes).expect("the outcomes serialize");
     std::fs::write(&json_path, text).unwrap_or_else(|e| panic!("{json_path}: {e}"));
     println!(
-        "{} screen files, {} turns: {} ok, {} ok-random, {} flagged, {} stopped",
+        "{} screen files, {} turns: {} ok, {} ok-random, {} uncertain, {} flagged, {} stopped",
         specs.len(),
         outcomes.len(),
         totals.get("ok").copied().unwrap_or(0),
         totals.get("ok-random").copied().unwrap_or(0),
+        totals.get("uncertain").copied().unwrap_or(0),
         totals.get("flagged").copied().unwrap_or(0),
         totals.get("stopped").copied().unwrap_or(0)
     );
@@ -236,6 +261,7 @@ pub fn screen_from_actions(args: &[String]) {
     let actions = opt(args, "--actions", "boards/actions");
     let out = opt(args, "--out", "boards/screens");
     let current_patch = args.iter().any(|a| a == "--current-patch");
+    let k_ranges = args.iter().any(|a| a == "--k-ranges");
     let files = json_files(&actions);
     let ids = read_ids();
     let game_build = ids.game_build();
@@ -254,7 +280,7 @@ pub fn screen_from_actions(args: &[String]) {
             skipped += 1;
             continue;
         }
-        let screen = screen_replay::screen_from_action_file(&data, &ids, file);
+        let screen = screen_replay::screen_from_action_file(&data, &ids, file, k_ranges);
         let path = format!("{out}/{}", screen.file());
         let text = serde_json::to_string_pretty(&screen).expect("a screen file serializes");
         std::fs::write(&path, text).unwrap_or_else(|e| panic!("{path}: {e}"));
