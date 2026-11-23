@@ -213,8 +213,10 @@ so)
 - Major and Minor Hymn: the stat switches each turn (Attack, then Health);
   the bonus is your tier at the press.
 - Reborn Rites, Spirit Swap: any minion, the Tavern's included, until next
-  turn. Spirit Swap: choose one minion, then a different one; they swap
-  Attack at once.
+  turn. Spirit Swap: choose one minion, then a different one; each gains
+  the other's Attack at once, so both end at the sum (3 and 2 become 5 and
+  5). It was written as a swap until 2026-11-23, when all 22 Spirit Swaps in
+  Era's logs showed the gain; it comes off at the start of the next turn.
 - Rune of Damnation: a real death (Deathrattles fire), any friendly
   Undead.
 - Hat Trick: a minion can wear several hats; each stays +1/+1. A sold
