@@ -75,9 +75,10 @@ pub struct ScreenStateSpec {
     pub gold: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gold_max: Option<i32>,
-    /// Free Refreshes left this turn: the Refresh button's price is 0.
+    /// Whether the next Refresh is free: the Refresh button shows a price of
+    /// 0. The screen does not show how many free Refreshes are left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub free_refreshes: Option<u16>,
+    pub free_refresh: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tier: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -502,7 +503,7 @@ fn state_to_spec(
         upgrade_cost: state.upgrade_cost,
         health: state.health.unwrap_or(data.rules.starting_health),
         armor: state.armor.unwrap_or(0),
-        free_refreshes: state.free_refreshes.unwrap_or(0),
+        free_refreshes: u16::from(state.free_refresh.unwrap_or(false)),
         fodder_refreshes: Some(Vec::new()),
         frozen: state.frozen.unwrap_or(false),
         hero_powers,
@@ -1322,6 +1323,7 @@ pub fn replay_screen_turn(
             });
         }
         apply_step_price(data, ids, &mut game, screen);
+        let free_before = game.players[ME].free_rolls;
         let (next, miss, _text) = match seated.play_on(data, ids, game.clone()) {
             Ok(next) => next,
             Err((reason, miss)) => {
@@ -1351,9 +1353,19 @@ pub fn replay_screen_turn(
         // stop.
         if let Some(spec) = seen_spec.as_ref() {
             let ours = ShopSnapshot::of_game(data, &game, ME);
-            step_differences.extend(step_seen_differences(
-                data, turn.turn, screen, spec, &ours, i,
-            ));
+            let mut lines = step_seen_differences(data, turn.turn, screen, spec, &ours, i);
+            // The screen shows whether the next Refresh is free, not how many
+            // free ones are left, so the engine holds one at most. A Roll that
+            // spent it while the screen still shows a free one only means the
+            // screen had more: that is no difference.
+            if screen.step == "roll"
+                && free_before > 0
+                && game.players[ME].free_rolls == 0
+                && screen.seen.as_ref().and_then(|s| s.free_refresh) == Some(true)
+            {
+                lines.retain(|l| !l.contains("next Refresh"));
+            }
+            step_differences.extend(lines);
         }
         // The screen's own seen state goes on only where it saw one.
         if let Some(seen) = &screen.seen {
@@ -1382,8 +1394,12 @@ pub fn replay_screen_turn(
             }
             // The step's visible numbers are put on the carried game after
             // they have been compared, so one drift makes one line.
-            if let Some(free) = seen.free_refreshes {
-                game.players[ME].free_rolls = free;
+            // A free next Refresh keeps the engine's own count when it has
+            // one; the screen cannot say how many are left.
+            match seen.free_refresh {
+                Some(true) if game.players[ME].free_rolls == 0 => game.players[ME].free_rolls = 1,
+                Some(false) => game.players[ME].free_rolls = 0,
+                _ => {}
             }
             if let Some(gold) = seen.gold {
                 game.players[ME].gold = gold.clamp(0, u8::MAX as i32) as u8;
@@ -1541,12 +1557,14 @@ fn step_seen_differences(
     {
         out.push(format!("{prefix}engine Gold {}, screen {gold}", ours.gold));
     }
-    if let Some(free) = seen.free_refreshes
-        && ours.free_refreshes != free
+    if let Some(free) = seen.free_refresh
+        && (ours.free_refreshes > 0) != free
     {
+        let says = |f: bool| if f { "free" } else { "paid" };
         out.push(format!(
-            "{prefix}engine free Refreshes {}, screen {free}",
-            ours.free_refreshes
+            "{prefix}next Refresh engine {}, screen {}",
+            says(ours.free_refreshes > 0),
+            says(free)
         ));
     }
     if let Some(tier) = seen.tier
@@ -1885,7 +1903,7 @@ fn state_of_spec(data: &Data, ids: &CardIdMap, state: &ShopStateSpec) -> ScreenS
         ),
         gold: Some(state.gold),
         gold_max: Some(state.gold_max),
-        free_refreshes: Some(state.free_refreshes),
+        free_refresh: Some(state.free_refreshes > 0),
         tier: Some(state.tier),
         upgrade_cost: state.upgrade_cost,
         health: Some(state.health),
@@ -1962,7 +1980,7 @@ fn step_of_spec(
     // every step carries them after it.
     if let Some(after) = after {
         seen.gold = Some(after.gold);
-        seen.free_refreshes = Some(after.free_refreshes);
+        seen.free_refresh = Some(after.free_refreshes > 0);
         seen.board = Some(
             after
                 .board

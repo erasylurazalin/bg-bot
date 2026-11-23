@@ -1194,7 +1194,8 @@ game played from video needs no Power.log. One file holds one game,
   `hand_count` carries what the screen could count without naming the cards.
 - A state is a turn's `start`, a step's `seen` (the state the screen showed
   right after the step), or a turn's `end`. It has `board`, `hand`, `tavern`,
-  `gold`, `gold_max`, `free_refreshes` (the Refresh button's price of 0),
+  `gold`, `gold_max`, `free_refresh` (true when the Refresh button shows a
+  price of 0: the screen says the next Refresh is free, not how many are left),
   `tier`, `upgrade_cost`, `health`, `armor`, `frozen`, `hero_power` (and
   `hero_power_second` for a second slot), `trinkets` and `hand_count`.
 - A card has `card_id` or `name`, which the replay resolves through
@@ -1217,14 +1218,14 @@ game played from video needs no Power.log. One file holds one game,
   `picked` one (by index or by card). `card` names the card a step acted on,
   `kind` says the choice kind, and `source` names the card that opened it.
   `seen` is what the screen showed right after the step, in a state's shape:
-  `screen-from-actions` writes the board, hand, Tavern, Gold, free Refreshes,
-  hero powers and trinkets after every step. `tavern_random` marks a step whose
+  `screen-from-actions` writes the board, hand, Tavern, Gold, whether the next
+  Refresh is free, hero powers and trinkets after every step. `tavern_random` marks a step whose
   Tavern is a random draw.
 - No entity ids, counters, enchantment numbers, Blood Gem tags, Dark Gift
   states or script numbers are written. The replay seats every unseen number
   at the engine's default for the turn (Gold from the turn number, counters at
   zero, no gifts), so the screen file cannot prove those hidden numbers. It
-  uses the visible numbers it does have: free Refreshes, card prices, hero
+  uses the visible numbers it does have: a free next Refresh, card prices, hero
   power uses and counters, and trinket counters.
 
 ## The screen replay
@@ -1257,14 +1258,16 @@ only files whose `build` equals the card data's `game_build`.
   `play` steps. Every other field stays the engine's own result.
 - After a step the engine's result is compared with the step's `seen` state
   before that state is put on the game: board in order (card, Attack, Health,
-  golden), hand, Tavern, Gold, free Refreshes and tier. Each difference is a
+  golden), hand, Tavern, Gold, whether the next Refresh is free, and tier. Each difference is a
   step line ("after step 4 (play): board 2 engine Wrath Weaver 5/7, screen
   7/9", "after step 3 (buy): engine Gold 7, screen 5"). The first one is the
   first line in the report. A Tavern drawn by a Roll or another refresh is
   random: it is applied without being compared. `screen-from-actions` marks a
   Roll, and a non-Roll step whose Tavern changed by more than the one card the
   step acted on, as `tavern_random`; a hand-written file can set it too. Gold,
-  free Refreshes and tier are compared first and then put on the carried game,
+  the free next Refresh and tier are compared first and then put on the carried game
+  (a free next Refresh keeps the engine's own count when it has one, and
+  gives it one when it has none),
   so one drift makes one line and does not repeat on every later step. The
   replay carries on after a step line, so one difference does not hide the
   turn.
