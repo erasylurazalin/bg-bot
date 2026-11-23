@@ -769,8 +769,13 @@ impl Game {
                 self.players[p].pending_battlecries.saturating_add(runs);
         } else {
             self.count_battlecries(p, runs);
+            // "After you trigger a Battlecry" waits for the Battlecry to have
+            // resolved: a Discover's pick comes first
+            // (`Hearthstone_2026_11_17_00_28_04-g1` turn 10 step 24: playing
+            // Rodeo Performer leaves Kalecgos where it stood, and the pick's
+            // step is where the Dragons get their +2/+2).
+            self.fire_after_battlecry(p, runs);
         }
-        self.fire_after_battlecry(p, runs);
         // Dragon Skull: once per Battlecry trigger, so a Brann double fires it
         // twice.
         for _ in 0..runs {
@@ -802,6 +807,8 @@ impl Game {
     pub fn pay_pending_battlecries(&mut self, p: usize) -> u8 {
         let owed = std::mem::take(&mut self.players[p].pending_battlecries);
         self.count_battlecries(p, owed);
+        // The Battlecry has resolved now, so its "after" triggers run.
+        self.fire_after_battlecry(p, owed);
         owed
     }
 

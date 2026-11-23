@@ -157,6 +157,39 @@ fn kalecgos_buffs_dragons_after_a_battlecry_and_brann_doubles_it() {
     g.check_invariants().unwrap();
 }
 
+#[test]
+fn kalecgos_waits_for_a_discover_battlecries_pick() {
+    // `Hearthstone_2026_11_17_00_28_04-g1` turn 10 step 24: playing Rodeo
+    // Performer leaves Kalecgos where it stood; the Dragons gain their
+    // +2/+2 at the pick, not on the play. Two Kalecgos here, each fired
+    // twice by Brann, so a Dragon gets +8/+8 at the pick.
+    let mut g = game(52);
+    put_on_board(&mut g, 0, "Kalecgos, Arcane Aspect");
+    put_on_board(&mut g, 0, "Kalecgos, Arcane Aspect");
+    put_on_board(&mut g, 0, "Brann Bronzebeard");
+    g.give(0, "Rodeo Performer").unwrap();
+    g.players[0].gold = 10;
+    let hand = g.players[0].hand.len() as u8 - 1;
+    let at = g.players[0].board.len() as u8;
+    let before = stats(&g.players[0].board[0]);
+    act(&mut g, 0, Action::Play { hand, pos: at });
+    assert_eq!(stats(&g.players[0].board[0]), before, "the play buffs nothing");
+    let mut picks = 0;
+    while (!g.players[0].discover.is_empty() || !g.players[0].discover_queue.is_empty())
+        && picks < 4
+    {
+        act(&mut g, 0, Action::Choose(0));
+        picks += 1;
+    }
+    assert!(picks >= 2, "Brann's two Discover picks");
+    assert_eq!(
+        stats(&g.players[0].board[0]),
+        (before.0 + 8, before.1 + 8),
+        "two Kalecgos, each fired twice by Brann"
+    );
+    g.check_invariants().unwrap();
+}
+
 // ---- Tarecgosa and Persistent Poet ----
 
 #[test]
