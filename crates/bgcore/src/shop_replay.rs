@@ -2036,6 +2036,10 @@ pub(crate) fn seat_trinket_counters(data: &Data, pl: &mut Player, specs: &[ShopT
             "BG32_MagicItem_808" | "BG32_MagicItem_808t" => {
                 pl.trinkets[slot].count = every.saturating_sub(n(0)) as u16;
             }
+            // Splinter of Aurum: "When you have 15 Gold, get a random Golden
+            // Tier 5 minion. (Once per game.)" The log's first number is 1
+            // once it has fired, 0 before.
+            "BG32_MagicItem_350" => pl.trinkets[slot].done = n(0) != 0,
             // Snarky Portrait: "give your Beasts +4/+4 and improve this". The
             // log's first number is the buff the next Fishbait death gives: 4
             // at the pick, then 4 more per death (4, 8, 12, and 20 after four
@@ -2107,6 +2111,17 @@ pub(crate) fn seat_power_counters(data: &Data, pl: &mut Player, powers: &[ShopPo
             let left = power.numbers.first().copied().unwrap_or(0);
             let left = left.clamp(1, every as i32) as u32;
             st.progress = every as u32 - left;
+        }
+        if let crate::heroes::PowerEffect::TripleRewardAfterTiers { every } = effect {
+            // Natural Balance counts the Tiers still to buy ("(12 left!)"),
+            // the engine the Tiers bought, so the two turn around. A buy is
+            // what changes it, and every step loads a fresh state, so without
+            // this the count would start again at 0 each step and the reward
+            // could never come inside one (`Hearthstone_2026_11_11_02_43_24-g5`
+            // turn 15 step 20: 3 left, a Tier 6 buy, and the Triple Reward).
+            let left = power.numbers.first().copied().unwrap_or(0);
+            let left = left.clamp(0, every as i32) as u32;
+            st.progress = every - left;
         }
         if let crate::heroes::PowerEffect::CopyBuyAfterMinions { every } = effect {
             // Glaive Ricochet counts the minions still to buy ("(3 left!)" is
@@ -4034,18 +4049,31 @@ fn install_offer(
             None => (0, "", None),
         };
         // The state the pick left says which slot it filled. A trinket pick
-        // carries its own `slot_kind`; a power's offer does not, and after
-        // the pick the state's list places it (the loader reads that list the
-        // same way).
-        let slot = match step.slot_kind.as_deref() {
+        // carries its own `slot_kind`, but the kind is not the slot: a player
+        // already holding a lesser trinket can buy a second one into the
+        // third slot (`Hearthstone_2026_11_09_03_05_42-g1` turn 6 step 0:
+        // Chromatic Tear and then Stuffed Coin Purse), and the pick must not
+        // overwrite the first. The state places the card, except when the
+        // same card sits in two slots (Souvenir Stand turns into a copy of the
+        // Greater pick, so both slots name Colorful Compass and only the kind
+        // says which one was bought).
+        let unique_slot = step.after.as_ref().and_then(|after| {
+            let hits = after
+                .trinkets
+                .iter()
+                .filter(|t| t.card_id.as_deref() == Some(picked_id))
+                .count();
+            if hits == 1 {
+                trinket_slot_of(after, picked_id)
+            } else {
+                None
+            }
+        });
+        let slot = unique_slot.unwrap_or_else(|| match step.slot_kind.as_deref() {
             Some("greater") => 2,
             Some("lesser") => 1,
             // A Discover a power deals from trinkets carries no kind: the
-            // state the pick left places it. A trinket pick's own kind comes
-            // first because the state can hold the same card in two slots
-            // (Souvenir Stand turns into a copy of the Greater pick, so both
-            // slots name Colorful Compass and only the kind says which one
-            // was bought).
+            // state the pick left places it.
             _ => step
                 .after
                 .as_ref()
@@ -4058,7 +4086,7 @@ fn install_offer(
                         3
                     }
                 }),
-        };
+        });
         let mut offers = Vec::new();
         for (k, option) in step.options.iter().enumerate() {
             let index = resolve_trinket(data, option).ok_or_else(|| {
@@ -4753,6 +4781,36 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
         ids,
         StepStateAt { file, before, turn, turn_index, index, seed, lobby },
     );
+    // Master Nguyen's Power of the Storm puts a new power up at the start of
+    // every turn. The state before that turn's first step still shows the
+    // power picked last turn, so a trinket pick that comes before the choice
+    // would run with it; the log's own next state shows the base power
+    // (`Hearthstone_2026_11_13_02_12_34-g4` turn 6 step 0). A turn whose first
+    // step already leaves the new power picked (`Hearthstone_2026_11_14_00_45_13-g7`
+    // turn 9 step 0) keeps it.
+    if index == 0
+        && let Some(h) = loaded.game.players[ME].hero
+    {
+        let base = data.heroes.get(h).power;
+        let base_id = data.heroes.power(base).card_id.as_str();
+        let after_has_base = step.after.as_ref().is_some_and(|after| {
+            after
+                .hero_powers
+                .iter()
+                .any(|p| p.card_id.as_deref() == Some(base_id))
+        });
+        if after_has_base
+            && matches!(
+                data.heroes.power(base).effect,
+                crate::heroes::PowerEffect::PowerOfTheStorm
+            )
+            && loaded.game.players[ME]
+                .power
+                .is_some_and(|st| st.of != base)
+        {
+            loaded.game.players[ME].hold_power(data, base, 0, turn);
+        }
+    }
     resume_two_step_power(
         data,
         &mut loaded.game.players[ME],
@@ -4771,6 +4829,18 @@ fn seat(data: &Arc<Data>, ids: &CardIdMap, one: &OneStep, seed: u64) -> Result<S
     }
     loaded.game.players[ME].tp.whistle = armed;
     loaded.game.players[ME].last_spell = last_spell;
+    // Whether I won the last combat is not always in the log, but a sell of a
+    // card that sells for more after a loss says it: Tortollan Blue Shell's
+    // 5 Gold against the base 1 (`Hearthstone_2026_11_09_22_42_40-g1` turn 10
+    // step 29, where the state has no `won_last_combat` at all).
+    if step.step == "sell"
+        && before.won_last_combat.is_none()
+        && let Some(paid) = step.paid
+        && paid.gold < -(data.rules.sell_gold as i32)
+    {
+        loaded.game.players[ME].lost_last_combat = true;
+        loaded.game.players[ME].won_last_combat = false;
+    }
     // What the play behind this pick still owed it, and no state carries: the
     // played minion's "after you play an X" triggers (an Imposing
     // Percussionist's Wrath Weavers) and a Turbo Hogrider's Gems for a Choose

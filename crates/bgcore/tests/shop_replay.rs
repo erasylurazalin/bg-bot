@@ -223,6 +223,186 @@ fn a_lucky_roll_wait_seats_the_turns_left() {
 }
 
 #[test]
+fn natural_balance_seats_the_tiers_still_to_buy() {
+    // `Hearthstone_2026_11_11_02_43_24-g5` turn 15 step 20: Guff's power shows
+    // 3 Tiers left before a Tier 6 buy, gives the Triple Reward, and shows 17
+    // left after it. The log counts what is left of the 20, the engine what
+    // has been bought.
+    let text = r#"{"source": "seat", "game": 1,
+      "hero": {"card_id": "BG20_HERO_242", "name": "Guff Runetotem"},
+      "turns": [
+      {"turn": 15,
+       "start": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+        "gold": 4, "tier": 6, "upgrade_cost": 0, "health": 22, "armor": 5,
+        "free_refreshes": 0, "frozen": false,
+        "hero_powers": [{"card_id": "BG20_HERO_242p", "name": "Natural Balance",
+          "numbers": [3, 0, 0, 0], "cost": 0, "used_this_turn": 0, "waiting": null}],
+        "trinkets": [], "secrets": []},
+       "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("balance.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let data = data();
+    let loaded = load(
+        &data,
+        &turn.start,
+        file.hero(&data, &turn.start),
+        file.lobby(),
+        turn.turn,
+        1,
+        None,
+    );
+    let st = loaded.game.players[ME].power.expect("the power is seated");
+    assert_eq!(data.heroes.power(st.of).card_id, "BG20_HERO_242p");
+    assert_eq!(st.progress, 17, "20 Tiers minus the 3 the log shows left");
+}
+
+#[test]
+fn power_of_the_storm_seats_the_base_power_before_the_turns_choice() {
+    // `Hearthstone_2026_11_13_02_12_34-g4` turn 6 step 0: the trinket pick
+    // comes before Master Nguyen's power choice, and the state the step leaves
+    // shows the base Power of the Storm, not the Three Wishes picked last turn.
+    let text = r#"{"source": "seat", "game": 1,
+      "hero": {"card_id": "BG20_HERO_202", "name": "Master Nguyen"},
+      "turns": [
+      {"turn": 6,
+       "start": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+        "gold": 10, "tier": 3, "upgrade_cost": 7, "health": 30, "armor": 10,
+        "free_refreshes": 0, "frozen": false,
+        "hero_powers": [{"card_id": "TB_BaconShop_HP_102", "name": "Three Wishes",
+          "numbers": [2, 0, 0, 0], "cost": 3, "used_this_turn": 0, "waiting": null}],
+        "trinkets": [], "secrets": []},
+       "actions": [{"step": "freeze", "paid": {"gold": 0, "health": 0},
+         "after": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+          "gold": 10, "tier": 3, "upgrade_cost": 7, "health": 30, "armor": 10,
+          "free_refreshes": 0, "frozen": true,
+          "hero_powers": [{"card_id": "BG20_HERO_202p", "name": "Power of the Storm",
+            "numbers": [0, 0, 0, 0], "cost": 0, "used_this_turn": 0, "waiting": null}],
+          "trinkets": [], "secrets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("storm.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+}
+
+#[test]
+fn a_second_lesser_trinket_takes_the_third_slot() {
+    // `Hearthstone_2026_11_09_03_05_42-g1` turn 6 step 0: the player already
+    // holds Chromatic Tear and the pick buys Stuffed Coin Purse, a second
+    // lesser trinket, into the third slot. The step's kind says lesser; only
+    // the state after the pick says which slot.
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 6,
+       "start": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+        "gold": 8, "tier": 3, "upgrade_cost": 7, "health": 30, "armor": 7,
+        "free_refreshes": 0, "frozen": false, "hero_powers": [],
+        "trinkets": [{"card_id": "BG35_MagicItem_840", "name": "Chromatic Tear", "greater": false}],
+        "secrets": []},
+       "actions": [{"step": "trinket_pick", "slot_kind": "lesser",
+         "paid": {"gold": 2, "health": 0},
+         "options": [{"id": 1, "card_id": "BG35_MagicItem_814", "name": "Stuffed Coin Purse", "cost": 2}],
+         "picked": {"id": 1, "card_id": "BG35_MagicItem_814", "name": "Stuffed Coin Purse", "cost": 2},
+         "after": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+          "gold": 6, "tier": 3, "upgrade_cost": 7, "health": 30, "armor": 7,
+          "free_refreshes": 0, "frozen": false, "hero_powers": [],
+          "trinkets": [
+            {"card_id": "BG35_MagicItem_840", "name": "Chromatic Tear", "greater": false},
+            {"card_id": "BG35_MagicItem_814", "name": "Stuffed Coin Purse", "greater": false}],
+          "secrets": []}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("slots.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let data = data();
+    let r = replay_step(
+        &data,
+        &ids(),
+        file,
+        &file.turns[0],
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+    let names: Vec<&str> = r.ours.trinkets.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, ["BG35_MagicItem_840", "BG35_MagicItem_814"]);
+}
+
+#[test]
+fn a_spent_splinter_of_aurum_is_done() {
+    // `Hearthstone_2026_11_21_02_14_56-g10` turn 13: the log's Splinter of
+    // Aurum shows 1 in its first number, so its "once per game" Golden Tier 5
+    // minion has already come. The loader must not let it fire again.
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 13,
+       "start": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+        "gold": 15, "tier": 6, "upgrade_cost": 0, "health": 1, "armor": 0,
+        "free_refreshes": 0, "frozen": false, "hero_powers": [],
+        "trinkets": [{"card_id": "BG32_MagicItem_350", "name": "Splinter of Aurum",
+          "greater": false, "numbers": [1, 15, 0, 23]}],
+        "secrets": []},
+       "actions": [], "end": null}]}"#;
+    let files = parse_action_files(&[("splinter.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let turn = &file.turns[0];
+    let data = data();
+    let loaded = load(
+        &data,
+        &turn.start,
+        file.hero(&data, &turn.start),
+        file.lobby(),
+        turn.turn,
+        1,
+        None,
+    );
+    assert!(loaded.game.players[ME].trinkets[0].done, "the once-per-game reward is spent");
+}
+
+#[test]
+fn a_lost_combat_is_read_from_a_tortollan_sale() {
+    // `Hearthstone_2026_11_09_22_42_40-g1` turn 10 step 29: the state has no
+    // `won_last_combat`, but the sale paid 5 Gold instead of 1, so the player
+    // lost the last combat and the Tortollan Blue Shell sold for 5.
+    let text = r#"{"source": "seat", "game": 1, "turns": [
+      {"turn": 10,
+       "start": {"board": [
+          {"id": 1, "card_id": "BG24_018", "name": "Tortollan Blue Shell",
+           "attack": 8, "health": 13, "position": 1}],
+        "hand": [], "tavern": [], "hand_hidden": 0, "gold": 3, "tier": 5,
+        "upgrade_cost": 3, "health": 5, "armor": 0, "free_refreshes": 0,
+        "frozen": false, "hero_powers": [], "trinkets": [], "secrets": [],
+        "won_last_combat": null},
+       "actions": [{"step": "sell",
+         "target": {"id": 1, "card_id": "BG24_018", "name": "Tortollan Blue Shell",
+           "kind": "board", "position": 1},
+         "card": {"id": 1, "card_id": "BG24_018", "name": "Tortollan Blue Shell",
+           "attack": 8, "health": 13, "golden": false},
+         "paid": {"gold": -5, "health": 0},
+         "after": {"board": [], "hand": [], "tavern": [], "hand_hidden": 0,
+          "gold": 8, "tier": 5, "upgrade_cost": 3, "health": 5, "armor": 0,
+          "free_refreshes": 0, "frozen": false, "hero_powers": [],
+          "trinkets": [], "secrets": [], "won_last_combat": null}}],
+       "end": null}]}"#;
+    let files = parse_action_files(&[("tortollan.json".to_string(), text.to_string())]).unwrap();
+    let file = &files[0];
+    let r = replay_step(
+        &data(),
+        &ids(),
+        file,
+        &file.turns[0],
+        0,
+        &ReplayOptions { seeds: 1, seed: 1 },
+    );
+    assert_eq!(r.verdict, Verdict::Ok, "{:?} {:?}", r.diffs, r.missing);
+}
+
+#[test]
 fn the_action_loader_reads_free_refreshes_over_255() {
     let text = r#"{"source": "seat", "game": 1, "turns": [
       {"turn": 8,
