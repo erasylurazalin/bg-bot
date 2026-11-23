@@ -4417,3 +4417,96 @@ stats = [7, 7]
 timewarp = "minor"
 timewarp_cost = 1
 end_of_turn = { summon_stat_copy = "Tabbycat", count = 1, golden_doubles_count = true }
+
+# --- Timewarp visits (Morchie, Murozond) ---
+# Cards only the visits use. The Naga Timewarped Summoner is data only: it
+# carries no Timewarp marker, so it never enters a visit's pool (Era: "no
+# nagas"), and it is here only so the logged 11_17 offer loads.
+
+[[token]]
+name = "Timewarped Summoner"
+tier = 5
+tribe = "neutral"
+stats = [6, 9]
+
+[[spell]]
+name = "Power of Teron"
+tier = 3
+cost = 1
+token = true
+tavern_spell = false
+timewarp = "minor"
+casts_when_bought = true
+effect = { second_rapid_reanimation = true }
+
+[[spell]]
+name = "Timewarped Cloning Device"
+tier = 5
+cost = 2
+token = true
+tavern_spell = false
+timewarp = "major"
+effect = { target = "chosen", summon_exact_copy = true }
+
+[[spell]]
+name = "Timewarped Evolving Tavern"
+tier = 3
+cost = 1
+token = true
+tavern_spell = false
+timewarp = "minor"
+effect = { get_card_each_turn = "Evolving Tavern" }
+
+[[spell]]
+name = "Timewarped Rat in a Cage"
+tier = 5
+cost = 1
+token = true
+tavern_spell = false
+timewarp = "major"
+effect = { target = "chosen", buff = [2, 2], then_double = "both" }
+
+[[spell]]
+name = "Timewarped Strike Oil"
+tier = 5
+cost = 2
+token = true
+tavern_spell = false
+timewarp = "major"
+effect = { max_gold_and_gain = 4 }
+
+[[spell]]
+name = "Timewarped Goldenizer"
+tier = 5
+cost = 2
+token = true
+tavern_spell = false
+timewarp = "major"
+effect = { target = "chosen", make_golden_max_tier = 7 }
+
+[[spell]]
+name = "Timewarped Evolution"
+tier = 5
+cost = 1
+token = true
+tavern_spell = false
+timewarp = "major"
+effect = { no_effect = true }
+
+[[spell]]
+name = "Timewarped Revelation"
+tier = 5
+cost = 1
+token = true
+tavern_spell = false
+timewarp = "major"
+effect = { no_effect = true }
+
+[[spell]]
+name = "Timewarped Thief"
+tier = 5
+cost = 1
+token = true
+tavern_spell = false
+timewarp = "major"
+effect = { no_effect = true }

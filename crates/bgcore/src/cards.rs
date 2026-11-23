@@ -978,6 +978,8 @@ pub enum DiscoverKind {
 pub enum DoubleStat {
     Attack,
     Health,
+    /// Timewarped Rat in a Cage: double both after the +2/+2.
+    Both,
 }
 
 /// A Tavern spell (or Choose One spell option) that targets a friendly minion.
@@ -1080,6 +1082,9 @@ pub enum SpellTarget {
     /// Give the minion "At the end of your turn, gain this much" for the
     /// rest of the game (Gruul Rules).
     GrantEndOfTurn { attack: i32, health: i32 },
+    /// Summon an exact copy of the chosen friendly minion (Timewarped
+    /// Cloning Device).
+    SummonExactCopy,
 }
 
 impl SpellTarget {
@@ -1257,6 +1262,18 @@ pub enum SpellEffect {
     /// Your Battlecries trigger this many extra times this turn (Big Brann
     /// Play).
     BattlecryExtraThisTurn(u8),
+    // ---- Timewarp visit spells ----
+    /// Raise the maximum Gold by this much and gain the same now
+    /// (Timewarped Strike Oil).
+    MaxGoldAndGain(u8),
+    /// Get a named card now, and again at the start of every turn
+    /// (Timewarped Evolving Tavern).
+    GetCardEachTurn { card: CardId },
+    /// Make Rapid Reanimation the second Hero Power (Power of Teron).
+    SecondRapidReanimation,
+    /// A Timewarped card whose effect is not modelled yet. It is here so the
+    /// logged offer loads; the effect is not exercised by Era's logs.
+    NoEffect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1798,16 +1815,17 @@ pub struct Card {
     /// it keeps its id, its effects and its place in old boards and logs,
     /// but no draw may offer it again. See `Card::lobby_ok`.
     pub out_of_pool: bool,
-    /// A Timewarped minion (from the Timeworn Candelabra or a full Timewarped
-    /// shop), and which side's list it belongs to. These are tokens outside
-    /// the pool table;
-    /// `Card::lobby_ok` never offers one to a normal draw.
+    /// A Timewarped card (from the Timeworn Candelabra or a hero's visit),
+    /// and which side's list it belongs to. These are tokens outside the
+    /// pool table; `Card::lobby_ok` never offers one to a normal draw.
     pub timewarp: Option<Timewarp>,
-    /// Its Chronum cost in the Timewarped shop. The Candelabra only offers
-    /// the 2-cost cards; a 1-cost card belongs to the full Timewarped shop
-    /// that Era's logs show but the game does not model yet. 2 when the TOML
-    /// does not say (every Candelabra card).
+    /// Its Chronum cost. The Candelabra only offers the 2-cost cards; a
+    /// hero's visit offers the 1- and 2-cost cards. 2 when the TOML does not
+    /// say (every card main built).
     pub timewarp_cost: u8,
+    /// "Casts When Bought": it runs its effect as it is taken and never sits
+    /// in the hand (Power of Teron).
+    pub casts_when_bought: bool,
     /// Index in `Game::pool` that holds copies of this card. Shared pool
     /// groups (such as the three Volumizers) all point to their first card's
     /// slot.
@@ -2318,8 +2336,9 @@ struct RawCard {
     /// for old logs and boards, never drawn or offered again.
     #[serde(default)]
     out_of_pool: bool,
-    /// "minor" or "major": a Timewarped minion. It is a token and no normal
-    /// draw offers it.
+    /// "minor" or "major": a Timewarped card. It is a token and no normal
+    /// draw offers it. The Candelabra draws the 2-cost minions; a hero's
+    /// Timewarp visit draws every 1- and 2-cost card.
     timewarp: Option<String>,
     /// Its Chronum cost; 2 (the Candelabra's own) when absent.
     timewarp_cost: Option<u8>,
@@ -2627,6 +2646,13 @@ struct RawSpell {
     /// `battlegroundsDarkmoonPrizeTurn`). A Prize is a plain spell that is
     /// never in the pool: only a Prize Discover offers it.
     prize: Option<u8>,
+    /// "minor" or "major": a Timewarped spell. Its `cost` is its Chronum
+    /// price, and no normal draw offers it.
+    timewarp: Option<String>,
+    /// "Casts When Bought": it runs its effect as it is taken, and never
+    /// sits in the hand (Power of Teron).
+    #[serde(default)]
+    casts_when_bought: bool,
     on_discard: Option<String>,
     effect: Option<RawSpellEffect>,
     choose_one: Option<[RawSpellEffect; 2]>,
@@ -2865,6 +2891,23 @@ struct RawSpellEffect {
     /// Give the chosen minion "At the end of your turn, gain this" (Gruul
     /// Rules).
     grant_end_of_turn: Option<[i32; 2]>,
+    // ---- Timewarp visit spells ----
+    /// Raise the maximum Gold by this much and gain the same now (Timewarped
+    /// Strike Oil).
+    max_gold_and_gain: Option<u8>,
+    /// Get a named card now, and again at the start of every turn
+    /// (Timewarped Evolving Tavern).
+    get_card_each_turn: Option<String>,
+    /// Make Rapid Reanimation the second Hero Power (Power of Teron).
+    #[serde(default)]
+    second_rapid_reanimation: bool,
+    /// Summon an exact copy of the chosen friendly minion (Timewarped
+    /// Cloning Device).
+    #[serde(default)]
+    summon_exact_copy: bool,
+    /// A Timewarped card whose effect is not modelled yet.
+    #[serde(default)]
+    no_effect: bool,
 }
 
 #[derive(Deserialize)]
@@ -3536,7 +3579,15 @@ fn parse_discover(s: &str) -> Result<DiscoverKind, String> {
 
 fn parse_spell_effect(
     e: &RawSpellEffect,
+    names: &[String],
 ) -> Result<(Option<SpellTarget>, Option<SpellEffect>), String> {
+    let named = |name: &str| -> Result<CardId, String> {
+        names
+            .iter()
+            .position(|n| n == name)
+            .map(|i| i as CardId)
+            .ok_or_else(|| format!("unknown card {name:?}"))
+    };
     let kw = match &e.keyword {
         Some(k) => keyword_bit(k)?,
         None => 0,
@@ -3619,6 +3670,7 @@ fn parse_spell_effect(
                 let stat = match how.as_str() {
                     "attack" => DoubleStat::Attack,
                     "health" => DoubleStat::Health,
+                    "both" => DoubleStat::Both,
                     other => return Err(format!("unknown then_double {other:?}")),
                 };
                 let [attack, health] = e.buff.unwrap_or([0, 0]);
@@ -3697,6 +3749,9 @@ fn parse_spell_effect(
             if let Some([attack, health]) = e.grant_end_of_turn {
                 return Ok((Some(SpellTarget::GrantEndOfTurn { attack, health }), None));
             }
+            if e.summon_exact_copy {
+                return Ok((Some(SpellTarget::SummonExactCopy), None));
+            }
             Err("invalid chosen spell effect".into())
         }
         Some("chosen_tribe") => {
@@ -3726,7 +3781,15 @@ fn parse_spell_effect(
         }
         Some(other) => Err(format!("unknown spell target {other:?}")),
         None => {
-            let eff = if let Some(g) = e.gold {
+            let eff = if let Some(g) = e.max_gold_and_gain {
+                SpellEffect::MaxGoldAndGain(g)
+            } else if let Some(name) = &e.get_card_each_turn {
+                SpellEffect::GetCardEachTurn { card: named(name)? }
+            } else if e.second_rapid_reanimation {
+                SpellEffect::SecondRapidReanimation
+            } else if e.no_effect {
+                SpellEffect::NoEffect
+            } else if let Some(g) = e.gold {
                 SpellEffect::GainGold(g)
             } else if let Some(g) = e.gold_next_turn {
                 SpellEffect::GoldNextTurn(g)
@@ -4441,7 +4504,7 @@ impl CardDb {
                                         times: o.count.unwrap_or(1),
                                     }));
                                 }
-                                match parse_spell_effect(o)? {
+                                match parse_spell_effect(o, &names)? {
                                     (Some(st), None) => Ok(ChooseOption::SpellTarget(st)),
                                     (None, Some(se)) => Ok(ChooseOption::SpellEffect(se)),
                                     _ => Err("invalid spell choose_one".into()),
@@ -4900,6 +4963,7 @@ impl CardDb {
                 out_of_pool: c.out_of_pool,
                 timewarp,
                 timewarp_cost: c.timewarp_cost.unwrap_or(2),
+                casts_when_bought: false,
                 pool_slot,
                 volumizer_buff,
                 spell_buff,
@@ -5102,14 +5166,14 @@ impl CardDb {
                 Some(e) if e.return_each_turn => {
                     (None, Some(SpellEffect::ReturnEachTurn { card: id }))
                 }
-                Some(e) => parse_spell_effect(e).map_err(&err)?,
+                Some(e) => parse_spell_effect(e, &names).map_err(&err)?,
                 None => (None, None),
             };
             let choose_one = match &sp.choose_one {
                 None => None,
                 Some([o1, o2]) => {
                     let to_opt = |o: &RawSpellEffect| -> Result<ChooseOption, String> {
-                        match parse_spell_effect(o)? {
+                        match parse_spell_effect(o, &names)? {
                             (Some(st), None) => Ok(ChooseOption::SpellTarget(st)),
                             (None, Some(se)) => Ok(ChooseOption::SpellEffect(se)),
                             _ => Err("invalid spell choose_one option".into()),
@@ -5131,6 +5195,14 @@ impl CardDb {
             } else if !sp.token {
                 spells.push(id);
             }
+            let timewarp = match sp.timewarp.as_deref() {
+                None => None,
+                Some("minor") => Some(Timewarp::Minor),
+                Some("major") => Some(Timewarp::Major),
+                Some(other) => {
+                    return Err(err(format!("timewarp must be minor or major, got {other:?}")));
+                }
+            };
             cards.push(Card {
                 name: sp.name.clone(),
                 tier: sp.tier,
@@ -5154,8 +5226,9 @@ impl CardDb {
                 is_beetle: false,
                 is_volumizer: false,
                 out_of_pool: false,
-                timewarp: None,
-                timewarp_cost: 2,
+                timewarp,
+                timewarp_cost: if timewarp.is_some() { sp.cost } else { 0 },
+                casts_when_bought: sp.casts_when_bought,
                 pool_slot: id,
                 volumizer_buff: None,
                 spell_buff: None,
@@ -5638,9 +5711,9 @@ impl CardDb {
         Some(self.resolve_bounty(id, &[], rng))
     }
 
-    /// A random built Timewarped minion from one side, ignoring the lobby
-    /// (the Timeworn Candelabra). The marker is the whole list: every built
-    /// `timewarp` token is in it, and an unbuilt export card is not.
+    /// A random built 2-cost Timewarped minion from one side, ignoring the
+    /// lobby (the Timeworn Candelabra). The marker is the whole list: every
+    /// built `timewarp` token is in it, and an unbuilt export card is not.
     pub fn random_timewarp(
         &self,
         side: Timewarp,
@@ -5649,7 +5722,33 @@ impl CardDb {
     ) -> Option<CardId> {
         let ok = |id: CardId| {
             let c = &self.cards[id as usize];
-            c.timewarp == Some(side) && c.timewarp_cost == 2 && !exclude.contains(&id)
+            c.timewarp == Some(side)
+                && c.timewarp_cost == 2
+                && !c.spell
+                && !exclude.contains(&id)
+        };
+        let count = (0..self.cards.len() as CardId).filter(|&id| ok(id)).count() as u32;
+        if count == 0 {
+            return None;
+        }
+        let k = rng.below(count) as usize;
+        (0..self.cards.len() as CardId).filter(|&id| ok(id)).nth(k)
+    }
+
+    /// A random built 1- or 2-cost Timewarped card from one side for a
+    /// hero's visit, ignoring the lobby. Naga cards carry no marker (Era:
+    /// "no nagas"), and a 3-cost past-patch card is never built.
+    pub fn random_timewarp_visit(
+        &self,
+        side: Timewarp,
+        exclude: &[CardId],
+        rng: &mut Rng,
+    ) -> Option<CardId> {
+        let ok = |id: CardId| {
+            let c = &self.cards[id as usize];
+            c.timewarp == Some(side)
+                && (1..=2).contains(&c.timewarp_cost)
+                && !exclude.contains(&id)
         };
         let count = (0..self.cards.len() as CardId).filter(|&id| ok(id)).count() as u32;
         if count == 0 {

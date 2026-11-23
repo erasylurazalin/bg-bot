@@ -108,19 +108,19 @@ fn the_built_lists_are_the_marked_tokens_and_ignore_the_lobby() {
             match db.cards[c].timewarp {
                 Some(Timewarp::Minor) => {
                     minor += 1;
-                    minor_two += usize::from(db.cards[c].timewarp_cost == 2);
+                    minor_two += usize::from(db.cards[c].timewarp_cost == 2 && !db.cards[c].spell);
                 }
                 Some(Timewarp::Major) => {
                     major += 1;
-                    major_two += usize::from(db.cards[c].timewarp_cost == 2);
+                    major_two += usize::from(db.cards[c].timewarp_cost == 2 && !db.cards[c].spell);
                 }
                 None => {}
             }
         }
     }
-    assert_eq!((minor, major), (21, 45), "66 built cards");
-    // The Candelabra's own list is the 2-cost ones; the 1-cost cards belong
-    // to the full Timewarped shop the logs show.
+    assert_eq!((minor, major), (23, 52), "75 built cards");
+    // The Candelabra's own list is the 2-cost minions; the 1-cost cards and
+    // the visit's spells belong to the full Timewarped shop the logs show.
     assert_eq!((minor_two, major_two), (19, 39), "58 Candelabra cards");
 
     // The draw has no lobby argument at all. Hunt every card on both sides.

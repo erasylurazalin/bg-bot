@@ -28,7 +28,7 @@ use crate::minion::Minion;
 use crate::real_boards::{
     CardIdMap, RealBoard, RealCounters, RealMinionSpec, RealPowerSpec, RealTrinketSpec,
 };
-use crate::{Action, BOARD, CardId, Data, Game, HAND, Keywords, MAX_TIER, PLAYERS};
+use crate::{Action, BOARD, CardId, Data, Game, HAND, Keywords, MAX_TIER, PLAYERS, SHOP};
 
 // ---- the action file (docs/real-boards.md "The action file") ----
 
@@ -2575,12 +2575,19 @@ impl ShopSnapshot {
         // engine freezes the whole Tavern with one flag on the player, and a
         // card on its own only through Twice as Nice; the game freezes each
         // card, so a card is frozen when either says so.
-        let mut tavern: Vec<SnapMinion> = pl
-            .shop
-            .iter()
-            .map(|m| SnapMinion::of(data, m, m.frozen || pl.frozen))
-            .collect();
-        if let Some(spell) = pl.shop_spell {
+        // A Timewarp visit shows its own offers, and the normal Tavern in
+        // `Player.shop` is not on screen until the visit ends.
+        let mut tavern: Vec<SnapMinion> = if pl.timewarp_visit.is_some() {
+            Vec::new()
+        } else {
+            pl.shop
+                .iter()
+                .map(|m| SnapMinion::of(data, m, m.frozen || pl.frozen))
+                .collect()
+        };
+        if pl.timewarp_visit.is_none()
+            && let Some(spell) = pl.shop_spell
+        {
             let m = data.cards.make(spell, false);
             // The spell slot freezes and unfreezes with the rest of the
             // Tavern, which the engine keeps on the player.
@@ -3820,6 +3827,18 @@ fn resolve_power(data: &Data, place: &ShopPlace) -> Option<u8> {
         .map(|i| i as u8)
 }
 
+/// The Timewarp side a step's `source` hero power opens, for the visit steps
+/// Morchie and Murozond write as `discover` (source Alternate Timeline or
+/// Warped Conflux).
+fn timewarp_visit_side(data: &Data, step: &ShopStepSpec) -> Option<crate::cards::Timewarp> {
+    let source = step.source.as_ref()?;
+    let power = resolve_power(data, source)?;
+    match data.heroes.power(power).effect {
+        crate::heroes::PowerEffect::TimewarpVisit { side, .. } => Some(side),
+        _ => None,
+    }
+}
+
 /// The table the log's options come from. A step is a whole offer of one kind:
 /// the game never mixes a trinket with a minion in one Discover. A
 /// `trinket_pick` can still deal cards: Book of Medivh's pick opens a choice
@@ -3915,6 +3934,67 @@ struct OfferContext<'a> {
     picked: Option<(&'a ShopPlace, usize)>,
 }
 
+/// Seat a logged Timewarp visit offer. The offers live apart from the Tavern,
+/// and the normal Tavern and Gold the step's `after` state shows are stashed
+/// for the end of the visit (a visit that continues has no normal Tavern in
+/// its state, so the stash stays empty).
+fn install_timewarp_offer(
+    data: &Data,
+    ids: &CardIdMap,
+    game: &mut Game,
+    step: &ShopStepSpec,
+    side: crate::cards::Timewarp,
+    turn: u32,
+) -> Result<(), String> {
+    let mut offers = Vec::new();
+    for option in &step.options {
+        let card = resolve_card(data, ids, option).ok_or_else(|| {
+            format!(
+                "an option the card set does not build: {}",
+                option
+                    .name
+                    .clone()
+                    .or_else(|| option.card_id.clone())
+                    .unwrap_or_default()
+            )
+        })?;
+        offers.push(card);
+    }
+    let mut shop: arrayvec::ArrayVec<Minion, SHOP> = arrayvec::ArrayVec::new();
+    let mut shop_spell = None;
+    let mut saved_gold = game.players[ME].gold;
+    if let Some(after) = step.after.as_ref() {
+        let (slots, spell) = tavern_split(after);
+        if !slots.is_empty() || spell.is_some() {
+            for m in slots {
+                let (m, _) = build_minion(data, m, turn);
+                let _ = shop.try_push(m);
+            }
+            if let Some(sp) = spell {
+                shop_spell = sp
+                    .card_id
+                    .as_deref()
+                    .and_then(|cid| ids.get(cid))
+                    .and_then(|(name, _)| data.cards.by_name(name))
+                    .or_else(|| sp.name.as_deref().and_then(|n| data.cards.by_name(n)));
+            }
+            saved_gold = after.gold.clamp(0, u8::MAX as i32) as u8;
+        }
+    }
+    let pl = &mut game.players[ME];
+    // The normal Tavern the step's after state shows (the visit's last pick)
+    // is already there; a visit still running has no normal Tavern in its
+    // state.
+    pl.shop = shop;
+    pl.shop_spell = shop_spell;
+    pl.timewarp_offers.clear();
+    for card in offers {
+        let _ = pl.timewarp_offers.try_push(card);
+    }
+    pl.timewarp_visit = Some(crate::game::TimewarpVisit { side, saved_gold });
+    Ok(())
+}
+
 fn install_offer(
     data: &Data,
     ids: &CardIdMap,
@@ -3924,6 +4004,9 @@ fn install_offer(
     missing: &mut Vec<String>,
 ) -> Result<(), String> {
     let OfferContext { turn, turned, picked } = ctx;
+    if let Some(side) = timewarp_visit_side(data, step) {
+        return install_timewarp_offer(data, ids, game, step, side, turn);
+    }
     let kind = offer_kind(data, step);
     if kind == OfferKind::Trinket {
         // A trinket offer, whether the log writes it as a pick or as the
@@ -4433,10 +4516,14 @@ fn actions_for(
                 owe_pick_damage(loaded, data, ids, step);
             }
             seat_cast_after_pick(data, ids, &mut loaded.game, step);
+            let visit = timewarp_visit_side(data, step).is_some();
             let at = force_offer(data, ids, &mut loaded.game, step, turn, landing, missing)?;
-            // A trinket offer is answered with its own action; a Discover
-            // (and a Hero Power Discover) with `Choose`.
-            if offer_kind(data, step) == OfferKind::Trinket {
+            // A Timewarp offer is taken with Buy (the Chronum price is the
+            // card's); a trinket offer with its own action; a Discover (and a
+            // Hero Power Discover) with `Choose`.
+            if visit {
+                out.push(Action::Buy(at as u8));
+            } else if offer_kind(data, step) == OfferKind::Trinket {
                 out.push(Action::ChooseTrinket(at as u8));
             } else {
                 out.push(Action::Choose(at as u8));

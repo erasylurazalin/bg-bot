@@ -171,7 +171,11 @@ fn the_phase_5_cards_are_timewarped_tokens_with_double_golden_stats() {
         );
     }
     assert!(db.by_name("Timewarped Lei").is_none(), "Lei needs Buddies");
-    assert!(db.by_name("Timewarped Summoner").is_none(), "Summoner needs its Spellcraft");
+    // Summoner's Spellcraft is not built, but the card is here so the logged
+    // 11_17 visit offer loads. It carries no Timewarp marker, so it never
+    // enters a Candelabra or visit pool.
+    let summoner = db.by_name("Timewarped Summoner").expect("the logged offer loads");
+    assert_eq!(db.get(summoner).timewarp, None, "Naga cards carry no marker");
 }
 
 #[test]

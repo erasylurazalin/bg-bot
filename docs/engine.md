@@ -443,13 +443,21 @@ fight without a game behind it uses). Nothing outside the lobby can appear, and
 a draw with no in-lobby candidate returns None (the effect fizzles). The Deity
 exists only when Aberration is in the lobby. A draw filter is just a `Tribes`
 mask, so a future trinket or hero effect can pass a wider one for its own draw.
-A Timewarped minion (`cards.toml timewarp = "minor"` or `"major"`, the 2-cost
-Timeworn Candelabra lists) is a token outside the pool table, and
-`Card::lobby_ok` is false for it, so no normal Tavern, Discover or random-minion
-draw can hand one out. The Candelabra's own Discover is
-`DiscoverRequest::Timewarp(side)` and `CardDb::random_timewarp`, which reads
-the marker and has no lobby argument: 21 built Minor and 45 built Major cards,
-of which the Candelabra itself offers only the 2-cost ones (19 and 39).
+A Timewarped card (`cards.toml timewarp = "minor"` or `"major"`) is a token
+outside the pool table, and `Card::lobby_ok` is false for it, so no normal
+Tavern, Discover or random-minion draw can hand one out. `timewarp_cost` is
+its Chronum price (a marked minion without one costs 2). The Candelabra's own
+Discover is `DiscoverRequest::Timewarp(side)` and `CardDb::random_timewarp`,
+which reads the marker, keeps only the 2-cost minions and has no lobby
+argument: 23 built Minor and 52 built Major cards, of which the Candelabra
+offers 19 and 39. Morchie and Murozond open a visit instead:
+`CardDb::random_timewarp_visit` draws five different 1- or 2-cost cards, the
+offers live in `Player.timewarp_offers` (the Tavern's slots in the
+observation), the player's Gold holds the 2 Chronum, and a pick is
+`Action::Buy`, whose Chronum price is the card's `timewarp_cost`. The normal
+Tavern waits in `Player.shop`, hidden from the observation, and comes back
+with the turn's Gold when the visit ends. Naga cards carry no marker (Era:
+"no nagas").
 
 Tests and the sandbox can fix the lobby: `Game::new_with_lobby(data, seed,
 lobby)` (a test may pass more than 5 to reach its cards) and

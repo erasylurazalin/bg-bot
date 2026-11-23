@@ -521,6 +521,7 @@ impl Game {
                         // reach a Tavern minion (`can_target_shop` says so).
                         SpellTarget::ReturnToHand { .. }
                         | SpellTarget::MakeGoldenReturn
+                        | SpellTarget::SummonExactCopy
                         | SpellTarget::GrantEndOfTurn { .. } => {}
                     }
                     // A spell a minion casts for the player is not the
@@ -1288,6 +1289,10 @@ impl Game {
                             match stat {
                                 DoubleStat::Attack => m.attack = m.attack.saturating_mul(2),
                                 DoubleStat::Health => m.health = m.health.saturating_mul(2),
+                                DoubleStat::Both => {
+                                    m.attack = m.attack.saturating_mul(2);
+                                    m.health = m.health.saturating_mul(2);
+                                }
                             }
                         }
                         SpellTarget::ReturnToHand { attack, health } => {
@@ -1309,6 +1314,20 @@ impl Game {
                             self.add_to_hand(p, m);
                             stop_after = true;
                             target_removed = true;
+                        }
+                        SpellTarget::SummonExactCopy => {
+                            // Timewarped Cloning Device: an exact copy,
+                            // summoned beside the minion, taking no pool
+                            // copy; it counts toward a triple.
+                            if !self.players[p].board.is_full() {
+                                let mut copy = self.players[p].board[target_pos];
+                                copy.pool_copies = 0;
+                                copy.no_reward = true;
+                                let card = copy.card;
+                                self.players[p].board.insert(target_pos + 1, copy);
+                                self.check_triple(p, card);
+                            }
+                            stop_after = true;
                         }
                         SpellTarget::GrantEndOfTurn { attack, health } => {
                             // Gruul Rules: "At the end of your turn, gain

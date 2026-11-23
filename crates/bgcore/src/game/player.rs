@@ -157,6 +157,8 @@ impl Player {
             last_spell: None,
             shop_spell: None,
             shop: ArrayVec::new(),
+            timewarp_visit: None,
+            timewarp_offers: ArrayVec::new(),
             hand: ArrayVec::new(),
             hand_queue: ArrayVec::new(),
             hand_queue_on: false,

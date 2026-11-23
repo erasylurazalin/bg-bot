@@ -1109,6 +1109,8 @@ impl Game {
     pub(super) fn execute_spell_effect(&mut self, p: usize, se: SpellEffect, tavern: bool) {
         let (da, dh) = if tavern { self.total_spell_bonus(p) } else { (0, 0) };
         match se {
+            // A Timewarped card whose effect is not modelled yet.
+            SpellEffect::NoEffect => {}
             SpellEffect::BuffDeity { attack, health } => {
                 if let Some(deity) = &mut self.players[p].deity {
                     deity.attack += attack + da;
@@ -1123,6 +1125,30 @@ impl Game {
             }
             SpellEffect::MaxGold(g) => {
                 self.players[p].extra_max_gold = self.players[p].extra_max_gold.saturating_add(g);
+            }
+            // Timewarped Strike Oil: both at once.
+            SpellEffect::MaxGoldAndGain(g) => {
+                let pl = &mut self.players[p];
+                pl.extra_max_gold = pl.extra_max_gold.saturating_add(g);
+                pl.gold = pl.gold.saturating_add(g);
+            }
+            // Timewarped Evolving Tavern: one now, then one every turn.
+            SpellEffect::GetCardEachTurn { card } => {
+                self.give_generated(p, card);
+                let _ = self.players[p].prize.start_cards.try_push(card);
+            }
+            // Power of Teron: Teron Gorefiend's Rapid Reanimation is now the
+            // second Hero Power. Find the power by its effect, not its name.
+            SpellEffect::SecondRapidReanimation => {
+                if let Some(idx) = self
+                    .data
+                    .heroes
+                    .powers
+                    .iter()
+                    .position(|p| matches!(p.effect, crate::heroes::PowerEffect::RapidReanimation))
+                {
+                    self.set_power(p, true, Some(idx as u8));
+                }
             }
             SpellEffect::FreeRolls(n) => {
                 self.players[p].free_rolls = self.players[p].free_rolls.saturating_add(n);

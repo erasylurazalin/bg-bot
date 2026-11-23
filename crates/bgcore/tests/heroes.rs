@@ -144,9 +144,9 @@ fn power(g: &Game, p: usize) -> &bgcore::heroes::HeroPower {
 // ---- the data ----
 
 #[test]
-fn heroes_toml_parses_with_the_hundred_and_eight_heroes() {
+fn heroes_toml_parses_with_the_hundred_and_ten_heroes() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 108);
+    assert_eq!(d.heroes.heroes.len(), 110);
     // Armor and card_ids from ref/bg-meta.json (matched by card_id).
     for (name, card_id, armor, extra_health) in [
         ("Nozdormu", "TB_BaconShop_HERO_57", 13, 0),

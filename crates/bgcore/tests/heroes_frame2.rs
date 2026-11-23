@@ -160,7 +160,7 @@ fn power_name(g: &Game, p: usize) -> String {
 #[test]
 fn heroes_toml_parses_with_every_hero_and_the_later_powers() {
     let d = Data::bundled();
-    assert_eq!(d.heroes.heroes.len(), 108);
+    assert_eq!(d.heroes.heroes.len(), 110);
     // Every power is its own entry, and a hero's starting power is its own
     // index, so a hero and its starting power are the same number.
     for (i, h) in d.heroes.heroes.iter().enumerate() {

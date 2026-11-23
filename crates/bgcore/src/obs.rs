@@ -230,6 +230,8 @@
 //!   90 reanimate (1 when marked by Rapid Reanimation for Start of Combat)
 //! An empty slot is all zeros.
 
+use arrayvec::ArrayVec;
+
 use crate::cards::{CardDb, ChooseOption, Counter, DeityKind, SpellEffect, SpellTarget, Tribe};
 use crate::fight::Deity;
 use crate::game::{Game, Opponent, Player, PowerState, ShopTargetKind, TargetKind};
@@ -1278,7 +1280,17 @@ fn write_with_layout(
         gold_spent: pl.counts.gold_spent,
     };
     let mut i = scalars;
-    i += write_slots(game, &mut out[i..], SHOP, pl.shop.iter(), off_board);
+    if pl.timewarp_visit.is_some() {
+        // A Timewarp visit: its offers sit in the Tavern's slots, and the
+        // Gold scalar holds the Chronum. The normal Tavern waits in the visit.
+        let mut offers: ArrayVec<Minion, SHOP> = ArrayVec::new();
+        for &c in &pl.timewarp_offers {
+            let _ = offers.try_push(pl.make_card(db, c, false, 0));
+        }
+        i += write_slots(game, &mut out[i..], SHOP, offers.iter(), off_board);
+    } else {
+        i += write_slots(game, &mut out[i..], SHOP, pl.shop.iter(), off_board);
+    }
     out[i..i + SHOP_SPELL * SLOT_FEATURES].fill(0.0);
     if let Some(sp) = pl.shop_spell {
         let m = pl.make_card(db, sp, false, 0);

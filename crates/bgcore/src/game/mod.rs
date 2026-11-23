@@ -807,7 +807,7 @@ pub struct TrinketPowers {
 /// what outlasts the cast needs somewhere to live: one small block, like
 /// `TrinketPowers`, so a shop path reads a field and never the card. The
 /// per-turn fields are cleared in `start_turn`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PrizePowers {
     /// The Tavern holds one more minion for good (New Recruit). The +2/+2 it
     /// comes with is not its own: it goes into `Player.refresh_buff`, the same
@@ -828,6 +828,19 @@ pub struct PrizePowers {
     /// The card that comes back to hand at the end of every turn (The
     /// Unlimited Coin).
     pub returns_each_turn: Option<CardId>,
+    /// Cards got at the start of every turn (Timewarped Evolving Tavern).
+    pub start_cards: ArrayVec<CardId, 4>,
+}
+
+/// An open Timewarp visit (Morchie, Murozond). The offers live in
+/// `Player.timewarp_offers`, the player's Gold holds the Chronum, and the
+/// normal Tavern waits in `Player.shop` (hidden from the observation while
+/// the visit runs).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TimewarpVisit {
+    pub side: crate::cards::Timewarp,
+    /// The Gold the turn had before the visit, given back when it ends.
+    pub saved_gold: u8,
 }
 
 /// One held trinket: which one, its "every N" counter, the uses its hooks
@@ -1097,6 +1110,10 @@ pub struct Player {
     pub last_spell: Option<CardId>,
     pub shop_spell: Option<CardId>,
     pub shop: ArrayVec<Minion, SHOP>,
+    /// The open Timewarp visit, if any, and the cards it offers. The normal
+    /// Tavern waits in `shop`, hidden from the observation while it runs.
+    pub timewarp_visit: Option<TimewarpVisit>,
+    pub timewarp_offers: ArrayVec<CardId, SHOP>,
     pub hand: ArrayVec<Minion, HAND>,
     /// Cards that arrived at the start of the turn with a full hand: the game
     /// queues them and they join the hand as soon as there is room, while a
@@ -2139,6 +2156,24 @@ impl Game {
         if !pl.discover.is_empty() {
             return matches!(a, Action::Choose(k) if (k as usize) < pl.discover.len());
         }
+        // A Timewarp visit: only the offer the Chronum can still pay for.
+        // When nothing is affordable, End Turn is the way out (the visit
+        // cannot spend the last Chronum on anything).
+        if pl.timewarp_visit.is_some() {
+            let affordable = pl
+                .timewarp_offers
+                .iter()
+                .any(|&c| self.data.cards.get(c).timewarp_cost <= pl.gold);
+            return if affordable {
+                matches!(a, Action::Buy(s) if {
+                    let s = s as usize;
+                    s < pl.timewarp_offers.len()
+                        && self.data.cards.get(pl.timewarp_offers[s]).timewarp_cost <= pl.gold
+                })
+            } else {
+                matches!(a, Action::EndTurn)
+            };
+        }
         // A skipped turn (Procrastinate, Expedition Plans): Freeze and End
         // Turn (already answered above) and the answers to whatever choice the
         // turn opened, nothing else; the fight still happens.
@@ -2380,6 +2415,17 @@ impl Game {
             for k in 0..pl.discover.len() as u8 {
                 ask!(Action::Choose(k));
             }
+        } else if open && pl.timewarp_visit.is_some() {
+            for s in 0..pl.timewarp_offers.len() as u8 {
+                ask!(Action::Buy(s));
+            }
+            let affordable = pl
+                .timewarp_offers
+                .iter()
+                .any(|&c| self.data.cards.get(c).timewarp_cost <= pl.gold);
+            if !affordable {
+                ask!(Action::EndTurn);
+            }
         } else if open && self.turn_skipped(p) {
             // A skipped turn: Freeze and End Turn only.
             ask!(Action::Freeze);
@@ -2544,6 +2590,7 @@ impl Game {
             SpellTarget::ReturnToHand { .. } => !m.golden && !self.players[p].hand.is_full(),
             SpellTarget::MakeGoldenReturn => !self.players[p].hand.is_full(),
             SpellTarget::GrantEndOfTurn { .. } => true,
+            SpellTarget::SummonExactCopy => !self.players[p].board.is_full(),
         }
     }
 
@@ -2911,6 +2958,10 @@ impl Game {
         match a {
             Action::Buy(s) => {
                 let slot = s as usize;
+                if self.players[p].timewarp_visit.is_some() {
+                    self.buy_timewarp_offer(p, slot);
+                    return;
+                }
                 let id = self.players[p].shop[slot].card;
                 let c = self.data.cards.get(id);
                 if c.is_spell() {
@@ -3353,7 +3404,11 @@ impl Game {
             Action::HeroPower2 => self.press_power(p, true),
             Action::ChooseTrinket(k) => self.pick_trinket(p, k as usize),
             Action::DarkGift => self.press_dark_gift(p),
-            Action::EndTurn => {}
+            Action::EndTurn => {
+                if self.players[p].timewarp_visit.is_some() {
+                    self.end_timewarp_visit(p);
+                }
+            }
         }
     }
 

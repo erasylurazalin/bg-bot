@@ -1052,3 +1052,21 @@ name = "The Great Akazamzarak"
 card_id = "TB_BaconShop_HERO_21"
 armor = 12
 power = { name = "Prestidigitation", card_id = "TB_BaconShop_HP_020", cost = 0, effect = { discover_secret = true } }
+
+# ---- Timewarp (docs/rules/heroes.md "Timewarp", Era 2026-11-23) ----
+
+# Alternate Timeline: on turn 8, visit the Major Timewarp. The power's number
+# is the turns left, never below 1. Armor 12 from ref/bg-meta.json.
+[[hero]]
+name = "Murozond, Unbounded"
+card_id = "BG34_HERO_000"
+armor = 12
+power = { name = "Alternate Timeline", card_id = "BG34_HERO_000p", passive = true, effect = { timewarp_visit = "major", visit_turn = 8 } }
+
+# Warped Conflux: on turn 5, visit the Minor Timewarp. Armor 8 from
+# ref/bg-meta.json.
+[[hero]]
+name = "Morchie"
+card_id = "BG34_HERO_004"
+armor = 8
+power = { name = "Warped Conflux", card_id = "BG34_HERO_004p", passive = true, effect = { timewarp_visit = "minor", visit_turn = 5 } }

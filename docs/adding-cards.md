@@ -580,14 +580,18 @@ Triple Reward spell.
   `[pool]` also has `require_common_type_after` and `require_common_type`
   (patch 37.0.3: after turn 9, named minions are offered only when one of
   their tribes matches the board's most common minion type).
-- **Timewarp minions.** The 2-cost Timewarped minions are `[[token]]` entries
-  with `timewarp = "minor"` or `"major"`. They take no pool slot, and
+- **Timewarp cards.** `[[token]]` minions and `[[spell]]` entries carry
+  `timewarp = "minor"` or `"major"`; a minion also carries `timewarp_cost`
+  (the Chronum price, 2 when it does not say). They take no pool slot, and
   `Card::lobby_ok` is false for them, so no normal Tavern, Discover or
   random-minion draw can hand one out. The marker and `timewarp_cost` are
   what the Timeworn Candelabra's own list reads (`CardDb::random_timewarp`,
-  no lobby filter); golden stats double the printed ones. There are 21 built Minor and 45
-  built Major tokens, of which 19 Minor and 39 Major cost 2 Chronum and are
-  in the Candelabra list.
+  no lobby filter, 2-cost minions only); golden stats double the printed
+  ones. There are 23 built Minor and 52 built Major cards, of which 19 Minor
+  and 39 Major cost 2 Chronum and are in the Candelabra list.
+  `CardDb::random_timewarp_visit` is the hero visit's list: marked 1- and
+  2-cost cards, no lobby filter. The Naga cards carry no marker (Era: "no
+  nagas").
 - **Pool accounting is exact and checked after every fuzz action.** Drawn cards carry
   `pool_copies` (1, or up to 3 for a Golden minion); generated cards and tokens have 0
   and never touch the pool. Selling returns `pool_copies` (`give_back`). A Golden
@@ -1296,10 +1300,12 @@ hooks in.
 ## 17. Systems the Timewarp run added (2026-11-12)
 
 - **The Timewarp marker.** `cards.toml timewarp = "minor"` or `"major"` on a
-  `[[token]]`; `Card.timewarp` holds the side, and `Card::lobby_ok` is false
-  for it, so no normal Tavern, Discover or random-minion draw reaches one.
-  The Timeworn Candelabra's own list reads the marker with no lobby filter.
-  See the Gotchas note.
+  `[[token]]` or `[[spell]]`; `Card.timewarp` holds the side,
+  `Card.timewarp_cost` its Chronum price, and `Card::lobby_ok` is false for
+  it, so no normal Tavern, Discover or random-minion draw reaches one. The
+  Timeworn Candelabra's own list reads the marker and keeps the 2-cost
+  minions; a hero's visit reads the 1- and 2-cost cards. Both have no lobby
+  filter. See the Gotchas note.
 - **Whenever a friendly minion is attacked.** `when_friendly_attacked = [a, h]`
   on a card (Timewarped Arm). `Side::when_friendly_attacked` runs from
   `attack_swings_at` before the hit and gives the defender the stats through
@@ -1427,21 +1433,36 @@ hooks in.
   `CardDb::random_timewarp`, which filters only on the card's `timewarp`
   marker and the three already offered ids. It has no lobby argument, which
   is the logged rule: Chameleon was offered in a lobby without Beasts.
-- **The lists.** The built cards are 21 Minor and 45 Major; the
-  Candelabra itself draws `timewarp_cost = 2` only, which is 19 Minor and 39
-  Major. A card missing from `cards.toml` is absent from its list, never a
-  data error: Lei (Buddies), Summoner (its Spellcraft), the six Naga and
-  Festergut (Build-An-Undead) are not built. The seven logged Candelabra
-  Discovers offer eighteen names; only Timewarped Lei cannot be offered.
+- **The visit.** Morchie's and Murozond's power effect is
+  `PowerEffect::TimewarpVisit { turn, side }` (`timewarp_visit` and
+  `visit_turn` in `heroes.toml`). At that turn's start
+  `Game::start_timewarp_visit` draws five different marked 1- or 2-cost cards
+  with `CardDb::random_timewarp_visit`, hides the normal Tavern in
+  `Player.shop`, and sets Gold to the 2 Chronum. `Action::Buy` takes an offer
+  at its `timewarp_cost`; the next offer keeps only what the Chronum left can
+  pay, and the normal Tavern and the turn's Gold come back when it runs out.
+  A `casts_when_bought` spell (Power of Teron) runs instead of joining the
+  hand. Naga cards carry no marker.
+- **The lists.** The built cards are 23 Minor and 52 Major; the
+  Candelabra itself draws `timewarp_cost = 2` minions only, which is 19 Minor
+  and 39 Major. A card missing from `cards.toml` is absent from its list,
+  never a data error: Lei (Buddies), the Naga and Festergut
+  (Build-An-Undead) are not built. Timewarped Summoner is present as data
+  only, with no marker, so the logged 11_17 offer loads. The seven logged
+  Candelabra Discovers offer eighteen names; only Timewarped Lei cannot be
+  offered.
 - **Pool accounting.** A Timewarped minion is a token with no pool slot. A
   Timewarp Discover sets every offer's copies to 0 and the pick's
   `pool_copies` to 0, so the offers and the pick move no pool copy. The
   ordinary triple check still sees the card that joined the hand.
-- Tests: `crates/bgcore/tests/timewarp5.rs` covers both slots, the 21/45
+- Tests: `crates/bgcore/tests/timewarp5.rs` covers both slots, the 23/52
   marked counts, the 19/39 Candelabra counts, the no-lobby list, the seven
   logged offers, and the zero pool copies. `timewarp_cost` keeps the 1-cost
-  cards of the full Timewarped shop out of the Candelabra. The whole-game lobby test allows a marked Timewarp card because
-  the Candelabra is the one draw allowed to break the lobby filter.
+  cards and the visit's spells out of the Candelabra.
+  `crates/bgcore/tests/heroes_timewarp.rs` covers the two heroes, the turn
+  counter and both visits. The whole-game lobby test allows a marked Timewarp
+  card because the Candelabra is the one draw allowed to break the lobby
+  filter.
 
 ## 20. Systems the Timewarped log cards added (2026-11-23)
 

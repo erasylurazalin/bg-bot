@@ -95,6 +95,7 @@ impl Game {
             && pl.board.is_empty()
             && pl.discover.is_empty()
             && pl.shop_spell.is_none()
+            && pl.timewarp_visit.is_none()
             && pl.discover_queue.is_empty()
             && pl.pending_target.is_none()
             && pl.pending_shop_target.is_none()
@@ -107,6 +108,8 @@ impl Game {
             return;
         }
         pl.shop_spell = None;
+        pl.timewarp_visit = None;
+        pl.timewarp_offers.clear();
         for m in pl
             .shop
             .drain(..)
@@ -555,6 +558,14 @@ impl Game {
                 continue;
             }
             let (da, dh) = self.total_spell_bonus(p);
+            // Timewarped Evolving Tavern: another copy at the start of every
+            // turn, for as long as it lasts.
+            if !self.players[p].real {
+                let repeats = self.players[p].prize.start_cards.clone();
+                for &card in &repeats {
+                    self.give_generated(p, card);
+                }
+            }
             if self.era_seat == Some(p)
                 && let Some((source, game)) = &self.era_game
                 && let Some(last) = self
@@ -855,6 +866,21 @@ impl Game {
         // comparison a player when nothing crossed 15).
         for p in 0..PLAYERS {
             self.sync_vanguard(p);
+        }
+        // A Timewarp visit opens after the turn's own start effects, with the
+        // normal Tavern already rolled and put away for its end.
+        for p in 0..PLAYERS {
+            if !self.players[p].alive || self.players[p].real || self.era_start_arrival(p) {
+                continue;
+            }
+            let visit = self.players[p].power_at(false).map(|st| {
+                self.data.heroes.power(st.of).effect
+            });
+            if let Some(crate::heroes::PowerEffect::TimewarpVisit { turn: at, side }) = visit
+                && turn == at as u32
+            {
+                self.start_timewarp_visit(p, side);
+            }
         }
         self.pair();
         self.order = (0..PLAYERS as u8).filter(|&p| self.players[p as usize].alive).collect();
@@ -1499,6 +1525,8 @@ impl Game {
                 });
             }
             pl.shop_spell = None;
+            pl.timewarp_visit = None;
+            pl.timewarp_offers.clear();
             for m in pl.shop.drain(..).chain(pl.hand.drain(..)).chain(pl.board.drain(..)) {
                 give_back(pool, &data.cards, &m);
             }

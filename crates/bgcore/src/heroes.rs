@@ -14,7 +14,7 @@ use arrayvec::ArrayVec;
 
 use serde::Deserialize;
 
-use crate::cards::{CardDb, Tribe, Tribes};
+use crate::cards::{CardDb, Timewarp, Tribe, Tribes};
 use crate::minion::{CardId, Keywords};
 use crate::trinkets::Slot;
 
@@ -360,6 +360,9 @@ pub enum PowerEffect {
     /// (one to four cards) and put the pick in the Secret zone. With all four
     /// up the power cannot be pressed (docs/rules/heroes.md "Secrets").
     DiscoverSecret,
+    /// On `turn`, open the Minor or Major Timewarp: five Chronum-priced
+    /// cards, picked until the 2 Chronum run out (Morchie, Murozond).
+    TimewarpVisit { turn: u8, side: Timewarp },
 }
 
 /// What a power's buy counter counts.
@@ -921,6 +924,10 @@ struct RawPowerEffect {
     /// (Prestidigitation).
     #[serde(default)]
     discover_secret: bool,
+    // ---- Timewarp (2026-11-23) ----
+    /// "minor" or "major": the Timewarp this power opens on `visit_turn`.
+    timewarp_visit: Option<String>,
+    visit_turn: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -1229,6 +1236,14 @@ fn parse_effect(e: &RawPowerEffect) -> Result<PowerEffect, String> {
         PowerEffect::PrizeWall { every: n.max(1) }
     } else if e.discover_secret {
         PowerEffect::DiscoverSecret
+    } else if let Some(side) = &e.timewarp_visit {
+        let side = match side.as_str() {
+            "minor" => Timewarp::Minor,
+            "major" => Timewarp::Major,
+            other => return Err(format!("timewarp_visit must be minor or major, got {other:?}")),
+        };
+        let turn = e.visit_turn.ok_or("timewarp_visit needs visit_turn")?;
+        PowerEffect::TimewarpVisit { turn, side }
     } else {
         PowerEffect::None
     })

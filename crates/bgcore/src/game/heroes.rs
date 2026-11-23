@@ -5,6 +5,7 @@ use crate::cards::{
     Effect,
     EventKind,
     SpellEffect,
+    Timewarp,
     Tribe,
 };
 use crate::heroes::PowerEffect;
@@ -1245,6 +1246,80 @@ impl Game {
         self.fire_event(p, EventKind::GoldSpent, cost as u32);
     }
 
+    /// Open a Timewarp visit: five distinct 1- or 2-cost cards go on offer,
+    /// the player's Gold becomes the 2 Chronum, and the normal Tavern waits
+    /// in `Player.shop` until the Chronum is spent.
+    pub(super) fn start_timewarp_visit(&mut self, p: usize, side: Timewarp) {
+        if self.players[p].timewarp_visit.is_some() {
+            return;
+        }
+        let saved_gold = self.players[p].gold;
+        let mut offers: ArrayVec<CardId, SHOP> = ArrayVec::new();
+        for _ in 0..5 {
+            let Some(card) =
+                self.data.cards.random_timewarp_visit(side, offers.as_slice(), &mut self.rng)
+            else {
+                break;
+            };
+            let _ = offers.try_push(card);
+        }
+        if offers.is_empty() {
+            return;
+        }
+        let pl = &mut self.players[p];
+        pl.timewarp_offers = offers;
+        pl.timewarp_visit = Some(super::TimewarpVisit { side, saved_gold });
+        // A visit gives 2 Chronum, which the game keeps where Gold lives.
+        pl.gold = 2;
+    }
+
+    /// Take the Timewarp offer in `slot`: pay its Chronum price, then either
+    /// keep the visit open (the cards still affordable) or put the normal
+    /// Tavern and Gold back.
+    pub(super) fn buy_timewarp_offer(&mut self, p: usize, slot: usize) {
+        if self.players[p].timewarp_visit.is_none() {
+            return;
+        }
+        let Some(card) = self.players[p].timewarp_offers.get(slot).copied() else { return };
+        let cost = self.data.cards.get(card).timewarp_cost;
+        if cost == 0 || cost > self.players[p].gold {
+            return;
+        }
+        self.players[p].timewarp_offers.remove(slot);
+        self.players[p].gold -= cost;
+        let casts_when_bought = self.data.cards.get(card).casts_when_bought;
+        if casts_when_bought {
+            if let Some(effect) = self.data.cards.get(card).spell_effect {
+                self.execute_spell_effect(p, effect, true);
+            }
+        } else {
+            let mut m = self.players[p].make_card(&self.data.cards, card, false, 0);
+            m.uses_left = m.turn_uses(&self.data.cards);
+            self.add_to_hand(p, m);
+            self.check_triple_later(card);
+        }
+        // The next offer shows only the cards the Chronum left can pay for.
+        let mut kept: ArrayVec<CardId, SHOP> = ArrayVec::new();
+        for &c in &self.players[p].timewarp_offers {
+            if self.data.cards.get(c).timewarp_cost <= self.players[p].gold {
+                let _ = kept.try_push(c);
+            }
+        }
+        self.players[p].timewarp_offers = kept;
+        if self.players[p].gold == 0 || self.players[p].timewarp_offers.is_empty() {
+            self.end_timewarp_visit(p);
+        }
+    }
+
+    /// Close a Timewarp visit: the normal Tavern and the turn's Gold come
+    /// back, and the offers left standing are dropped.
+    pub(super) fn end_timewarp_visit(&mut self, p: usize) {
+        let Some(visit) = self.players[p].timewarp_visit.take() else { return };
+        let pl = &mut self.players[p];
+        pl.timewarp_offers.clear();
+        pl.gold = visit.saved_gold;
+    }
+
     /// Everything a player's two powers do at the start of their turn: the
     /// uses come back, an unlock condition may be met, a start-of-turn passive
     /// runs, a rotating power turns to another tribe, a chosen power counts
@@ -1504,6 +1579,14 @@ impl Game {
             PowerEffect::FreeFirstMinion => {
                 self.players[p].free_minion_left =
                     self.players[p].free_minion_left.max(runs);
+            }
+            // Alternate Timeline and Warped Conflux: the counter the button
+            // shows is the turns left, never below 1 (the log keeps 1 on the
+            // visit turn and after it).
+            PowerEffect::TimewarpVisit { turn: at, .. } => {
+                if let Some(sl) = self.players[p].power_at_mut(second) {
+                    sl.progress = (at as u32).saturating_sub(turn).max(1);
+                }
             }
             // Conviction: after each fight, choose one of the three stances
             // (United Stance is omitted once the 7-minion cap is reached).
