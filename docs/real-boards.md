@@ -1201,10 +1201,12 @@ game played from video needs no Power.log. One file holds one game,
 - A card has `card_id` or `name`, which the replay resolves through
   `ref/bg-cards.json` and the card data, and optional `attack`/`health`
   (missing is the card's printed stats, doubled when golden), `golden`,
-  `keywords` (missing is the card's printed keywords), `slot` in the Tavern,
-  `kind` (`minion` or `spell`), `frozen`, `cost` (the Gold the card shows,
-  including a spell's price or a minion's discount) and `costs_health` when
-  the price is paid in Health. The board and the hand are in screen order;
+  `keywords` (missing is the card's printed keywords), `numbers` (the card's
+  current `{0}..{3}` text counters, such as a Lockbox's countdown or an
+  "N left!" use), `slot` in the Tavern, `kind` (`minion` or `spell`), `frozen`,
+  `cost` (the Gold the card shows, including a spell's price or a minion's
+  discount) and `costs_health` when the price is paid in Health. The board and
+  the hand are in screen order;
   only the Tavern uses `slot`. A stat may be a number, a range
   (`{"min": 2050, "max": 2149}`) or `null` for "cannot tell". A number must
   equal the engine's value, a range agrees when the engine is inside it, and
@@ -1235,14 +1237,16 @@ game played from video needs no Power.log. One file holds one game,
   the shop-end Gold the replay still holds. A buy or a trinket pick writes the
   price that was actually paid, not the card's list price when a discount made
   them differ. `tavern_random` marks a step whose Tavern is a random draw.
-- No entity ids, counters, enchantment numbers, Blood Gem tags or script
-  numbers are written. A Dark Gift shows only when the screen read its icon
-  (the field above); its countdown is left to the engine unless the converter
-  saw it. The replay seats every unseen number at the engine's default for the
-  turn (Gold from the turn number, counters at zero, no gifts), so the screen
-  file cannot prove those hidden numbers. It uses the visible numbers it does
-  have: a free next Refresh, card prices, hero power uses and counters, and
-  trinket counters.
+- No entity ids, hidden player counters, enchantment numbers or Blood Gem tags
+  are written. `screen-from-actions` writes no card `numbers` (a script
+  number is on screen only where a video converter reads it off the card
+  text, such as a Lockbox countdown), and a Dark Gift shows only when the screen read its icon (the
+  field above); its countdown is left to the engine unless the converter saw
+  it. The replay seats every unseen number at the engine's default for the turn
+  (Gold from the turn number, counters at zero, no gifts), so the screen file
+  cannot prove those hidden numbers. It uses the visible numbers it does have:
+  a free next Refresh, card prices, card text counters, hero power uses and
+  counters, and trinket counters.
 
 ## The screen replay
 
@@ -1290,15 +1294,34 @@ one-decimal-of-thousands display gives (2,050 to 2,149 is "2.1k"). Without
   without being read as a fight result. Then the visible parts go on: board,
   hand, Tavern, Gold, tier, Health, armor, the free next Refresh, the frozen
   flag, and the hero power and trinket counters the screen shows. A minion that
-  is the same card keeps the engine's own state and takes only the screen's
-  stats, as `force_board` already does; a Dark Gift the screen did not read is
-  never removed. A stat number is taken, an agreeing range keeps the engine's
-  value, a disagreeing range takes its nearest bound, and `null` keeps the
-  engine's value.
-- A hidden value a fight could have changed stays the engine's guess. The cards
-  whose visible stats changed between turns and every player counter of a turn
-  whose start differed from the carry are `uncertain` for that turn. Step and
-  end lines that involve them end with `(uncertain after the fight)`.
+  is the same card keeps the engine's own state and takes the screen's stats,
+  keywords and card text numbers it read, as `force_board` already does; a
+  full `keywords` list replaces the set, `keyword_reads` sets or clears only
+  the names it carries, and a keyword the screen did not read keeps the
+  engine's value. A Dark Gift the screen did not read is never removed. A stat
+  number is taken, an agreeing range keeps the engine's value, a disagreeing
+  range takes its nearest bound, and `null` keeps the engine's value.
+- A hidden value a fight could have changed stays the engine's guess, but only
+  hidden state makes a line uncertain. Health, armor, Gold, tier and the
+  Tavern's own between-turn draw never make anything else uncertain. A board
+  or hand card whose visible stats differ between turns takes the screen's
+  stats on resync, so those stats are known;
+  only its hidden numbers (gifts, card numbers, gem pair, magnetizations) stay
+  the engine's guess, and a step or end line about that card is marked only
+  when its data reads or writes one of those numbers.
+- A player counter is unproved after a fight only when a minion on the board
+  that went into it (the engine's board at the end of the previous turn) has a
+  combat-time effect in `cards.toml` that writes it. The replay reads the
+  effect kinds, never card names: deathrattles, Avenge, Start of Combat, Rally
+  and attack or damage triggers. The table covers the Blood Gem value
+  (`gem_bonus`, `get_gem_and_bonus`), the Beetle bonus, the Undead bonus,
+  Eternal Knight deaths (`buff_per_kind_death`), the Beast bonus
+  (`combat_beast_buff`), improve counters, the Tavern spell bonus and the
+  Deathrattle count. A step or end line is marked only when the value it
+  compares depends on an unproved counter or a card's hidden numbers: a Beast's
+  stats after a Beast bonus, a Blood Gem's buff in a turn that played a Gem, a
+  card that scales by an improve counter, a Beast on play after a Goldrinn
+  fight, and so on. Everything else is certain and counts toward `flagged`.
 - Every step, end and between-turn line is classified by the seeds. A line
   every completed seed produces with the same engine value is `certain`; a
   line that differs between seeds, or that only some seeds produce, is
@@ -1347,7 +1370,8 @@ one-decimal-of-thousands display gives (2,050 to 2,149 is "2.1k"). Without
   `turns.tsv` (file, game, turn, verdict, steps played, first difference) and
   `turns.json` (per turn: verdict, stop, the certain `differences`, the
   `uncertain_lines`, `random_lines`, `lines` with their class, the
-  `between_turns` and `between_turn_lines`, the `uncertain` names, `reseated`,
+  `between_turns` and `between_turn_lines`, the `uncertain` card and counter
+  names, `reseated`,
   `checks` grouped before the turn, after each step and at the end, and the
   engine's end state per seed).
 - The check on Era's own logs is a comparison, not a test of the engine:

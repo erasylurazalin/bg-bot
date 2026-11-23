@@ -486,7 +486,134 @@ fn a_between_turn_difference_is_written_and_does_not_flag_the_turn() {
         second.between_turns,
         vec!["before turn 2: board 1 engine Deadly Spore 1/1, screen Deadly Spore 2/2".to_string()]
     );
-    assert_eq!(second.uncertain, vec!["Deadly Spore", "player counters"]);
+    assert_eq!(second.uncertain, vec!["Deadly Spore"]);
+}
+
+#[test]
+fn a_fight_only_health_change_marks_nothing() {
+    let json = r#"{
+      "source": "hand-written", "game": 24,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Southsea Busker", "attack": 3, "health": 1,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 10, "tier": 1, "health": 25,
+                   "board": [{"name": "Southsea Busker", "attack": 3, "health": 1,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": [],
+         "end": {"gold": 10, "tier": 1, "health": 25,
+                 "board": [{"name": "Southsea Busker", "attack": 3, "health": 1,
+                            "golden": false}],
+                 "hand": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert!(
+        second
+            .between_turns
+            .iter()
+            .any(|l| l.contains("Health engine 30, screen 25")),
+        "{:?}",
+        second.between_turns
+    );
+    assert!(second.uncertain_lines.is_empty(), "{:?}", second.uncertain_lines);
+    assert!(second.uncertain.is_empty(), "{:?}", second.uncertain);
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Ok,
+        "{:?}",
+        second.differences
+    );
+}
+
+#[test]
+fn a_board_minion_with_a_combat_counter_effect_marks_its_counter() {
+    let json = r#"{
+      "source": "hand-written", "game": 25,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Turquoise Skitterer", "attack": 5, "health": 5,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Turquoise Skitterer", "attack": 5, "health": 5,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": [],
+         "end": {"gold": 10, "tier": 1, "health": 30,
+                 "board": [{"name": "Turquoise Skitterer", "attack": 5, "health": 5,
+                            "golden": false}],
+                 "hand": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert!(
+        second.uncertain.iter().any(|c| c == "Beetle bonus"),
+        "{:?}",
+        second.uncertain
+    );
+    assert!(second.uncertain_lines.is_empty(), "{:?}", second.uncertain_lines);
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Ok,
+        "{:?}",
+        second.differences
+    );
+}
+
+#[test]
+fn a_stat_line_on_a_card_with_no_hidden_dependence_is_certain() {
+    let json = r#"{
+      "source": "hand-written", "game": 26,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Southsea Busker", "attack": 3, "health": 1,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Southsea Busker", "attack": 3, "health": 1,
+                              "golden": false}],
+                   "hand": [], "tavern": []},
+         "steps": [{"step": "roll",
+                    "seen": {"board": [{"name": "Southsea Busker", "attack": 7,
+                                        "health": 7, "golden": false}]}}],
+         "end": {"gold": 9, "tier": 1, "health": 30,
+                 "board": [{"name": "Southsea Busker", "attack": 7, "health": 7,
+                            "golden": false}],
+                 "hand": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert!(
+        second
+            .differences
+            .iter()
+            .any(|d| d.contains("Southsea Busker 3/1")),
+        "{:?}",
+        second.differences
+    );
+    assert!(second.uncertain_lines.is_empty(), "{:?}", second.uncertain_lines);
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Flagged,
+        "diffs {:?} uncertain {:?}",
+        second.differences,
+        second.uncertain_lines
+    );
 }
 
 #[test]
@@ -668,6 +795,141 @@ fn a_null_stat_is_not_compared_and_keeps_the_engine_value() {
 }
 
 #[test]
+fn a_keyword_read_between_turns_is_one_line_and_resynced() {
+    let json = r#"{
+      "source": "hand-written", "game": 35,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                              "golden": false, "keywords": []}],
+                   "hand": [], "tavern": []},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 4, "tier": 1, "health": 30,
+                   "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                              "golden": false,
+                              "keyword_reads": {"divine_shield": true}}],
+                   "hand": [], "tavern": []},
+         "steps": [],
+         "end": {"gold": 4, "tier": 1, "health": 30,
+                 "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                            "golden": false,
+                            "keyword_reads": {"divine_shield": true}}],
+                 "hand": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert!(
+        second
+            .between_turns
+            .iter()
+            .any(|l| l.contains("keyword DIVINE_SHIELD engine no, screen yes")),
+        "{:?}",
+        second.between_turns
+    );
+    assert!(
+        second.differences.is_empty(),
+        "the keyword is resynced, so the end does not repeat it: {:?}",
+        second.differences
+    );
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Ok,
+        "{:?}",
+        second.differences
+    );
+}
+
+#[test]
+fn a_full_keyword_list_between_turns_replaces_the_old_set() {
+    let json = r#"{
+      "source": "hand-written", "game": 36,
+      "turns": [
+        {"turn": 1,
+         "start": {"gold": 10, "tier": 1, "health": 30,
+                   "board": [{"name": "Buzzing Vermin", "attack": 1, "health": 1,
+                              "golden": false, "keywords": ["taunt"]}],
+                   "hand": [], "tavern": []},
+         "steps": []},
+        {"turn": 2,
+         "start": {"gold": 4, "tier": 1, "health": 30,
+                   "board": [{"name": "Buzzing Vermin", "attack": 1, "health": 1,
+                              "golden": false, "keywords": []}],
+                   "hand": [], "tavern": []},
+         "steps": [],
+         "end": {"gold": 4, "tier": 1, "health": 30,
+                 "board": [{"name": "Buzzing Vermin", "attack": 1, "health": 1,
+                            "golden": false, "keywords": []}],
+                 "hand": []}}
+      ]
+    }"#;
+    let chained = run_chain(json, 1);
+    let second = &chained[1];
+    assert!(
+        second
+            .between_turns
+            .iter()
+            .any(|l| l.contains("keyword TAUNT engine yes, screen no")),
+        "{:?}",
+        second.between_turns
+    );
+    assert!(
+        second.differences.is_empty(),
+        "the full list clears TAUNT, so the end does not repeat it: {:?}",
+        second.differences
+    );
+    assert_eq!(
+        second.verdict,
+        ScreenVerdict::Ok,
+        "{:?}",
+        second.differences
+    );
+}
+
+#[test]
+fn a_step_keyword_drift_gives_one_line_then_resyncs() {
+    let json = r#"{
+      "source": "hand-written", "game": 37,
+      "turns": [{
+        "turn": 3,
+        "start": {"gold": 10, "tier": 1, "health": 30,
+                  "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                             "golden": false, "keywords": []}],
+                  "hand": [], "tavern": []},
+        "steps": [{"step": "roll",
+                   "seen": {"board": [{"name": "Deadly Spore", "attack": 1,
+                                       "health": 1, "golden": false,
+                                       "keyword_reads": {"divine_shield": true}}]}}],
+        "end": {"gold": 9, "tier": 1, "health": 30,
+                "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                           "golden": false,
+                           "keyword_reads": {"divine_shield": true}}],
+                "hand": []}
+      }]
+    }"#;
+    let outcome = run(json, 1);
+    assert_eq!(
+        outcome.differences.len(),
+        1,
+        "one line at the step, none at the end: {:?}",
+        outcome.differences
+    );
+    assert!(
+        outcome.differences[0].contains("keyword DIVINE_SHIELD engine no, screen yes"),
+        "{:?}",
+        outcome.differences
+    );
+    assert_eq!(
+        outcome.verdict,
+        ScreenVerdict::Flagged,
+        "{:?}",
+        outcome.differences
+    );
+}
+
+#[test]
 fn a_read_keyword_that_disagrees_flags_the_end() {
     let json = r#"{
       "source": "hand-written", "game": 33,
@@ -712,20 +974,20 @@ fn only_certain_uncertain_lines_make_the_uncertain_verdict() {
       "turns": [
         {"turn": 1,
          "start": {"gold": 10, "tier": 1, "health": 30,
-                   "board": [{"name": "Deadly Spore", "attack": 1, "health": 1,
+                   "board": [{"name": "Utility Drone", "attack": 4, "health": 5,
                               "golden": false}],
                    "hand": [], "tavern": []},
          "steps": []},
         {"turn": 2,
          "start": {"gold": 4, "tier": 1, "health": 30,
-                   "board": [{"name": "Deadly Spore", "attack": 2, "health": 2,
+                   "board": [{"name": "Utility Drone", "attack": 6, "health": 6,
                               "golden": false}],
                    "hand": [], "tavern": []},
          "steps": [{"step": "roll",
-                    "seen": {"board": [{"name": "Deadly Spore", "attack": 5,
-                                        "health": 5, "golden": false}]}}],
+                    "seen": {"board": [{"name": "Utility Drone", "attack": 9,
+                                        "health": 9, "golden": false}]}}],
          "end": {"gold": 3, "tier": 1, "health": 30,
-                 "board": [{"name": "Deadly Spore", "attack": 5, "health": 5,
+                 "board": [{"name": "Utility Drone", "attack": 9, "health": 9,
                             "golden": false}],
                  "hand": []}}
       ]
@@ -747,6 +1009,27 @@ fn only_certain_uncertain_lines_make_the_uncertain_verdict() {
             .any(|d| d.contains("(uncertain after the fight)")),
         "{:?}",
         second.uncertain_lines
+    );
+}
+
+#[test]
+fn a_converted_card_leaves_its_script_numbers_unseen() {
+    let data = Data::bundled();
+    let ids = CardIdMap::default();
+    let text = r#"{"source": "test", "game": 1, "turns": [
+        {"turn": 6,
+         "start": {"gold": 10, "tier": 1, "health": 30, "board": [],
+                   "hand": [{"name": "Lockbox", "kind": "spell",
+                             "numbers": [2, 0, 0, 0]}],
+                   "tavern": []},
+         "actions": []}]}"#;
+    let specs = shop_replay::parse_action_files(&[("test.json".to_string(), text.to_string())])
+        .expect("the action file parses");
+    let screen = screen_replay::screen_from_action_file(&data, &ids, &specs[0], false);
+    assert_eq!(
+        screen.turns[0].start.hand.as_ref().expect("the hand")[0].numbers,
+        None,
+        "script numbers are hidden unless a video converter reads them"
     );
 }
 
