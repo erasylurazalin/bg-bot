@@ -34,3 +34,7 @@ The rules are in `docs/rules/design.md`, and `docs/engine.md` maps the code.
 
 Timewarp content and a few heroes are not built yet. `TODO.md` has the rest
 of the plan.
+
+This is a fan project, not affiliated with or endorsed by Blizzard.
+Hearthstone and its card names belong to Blizzard Entertainment. The MIT
+license covers my code only.
