@@ -1,7 +1,6 @@
 # The comp library the planner bot plays (docs/briefs/comp-planner-1.md).
 #
-# The 26 comps are JeefHS's current-patch HSReplay guides
-# (docs/notes/comps/hsreplay-2026-11-09.json), chosen by Era on 2026-11-09:
+# The 26 comps were chosen by Era on 2026-11-09:
 # every comp with a card-based commit, except the seven APM or economy comps
 # (Quilboar - APM Shop Buff, Undead - APM Undead, Mechs - APM Magnetic,
 # Aberrations - APM Deity, Pirates - APM Golden, Elementals - Living Azerite,

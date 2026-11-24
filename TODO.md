@@ -49,7 +49,7 @@ night runs stayed low with mixed boards). So I show it the comps instead
 of waiting for it to stumble on them:
 
 1. **Scripted comp bots**, one per known build (Snazzy Undead, Blood Gem
-   Quilboar...; `ref/hsreplay-comps-2026-10-22.md` is a start). They play
+   Quilboar...). They play
    toward their comp on purpose, as opponents and as a source of
    demonstration games.
 2. **Learning from demonstrations** (imitation learning / behaviour
